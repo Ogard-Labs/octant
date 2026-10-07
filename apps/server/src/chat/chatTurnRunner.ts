@@ -40,7 +40,11 @@ import { decodeSpendCeilingReservationId, type SpendCeilingService } from "../sp
 import { usageFromRuntimeEvent } from "../providers/providerContextFacts";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import { subscribeThenSend } from "../providers/providerEventDelivery";
-import { countsTowardTurnEventBudget, makeIdleTimeout } from "../providers/turnBudget";
+import {
+  countsTowardTurnEventBudget,
+  endsHarnessRetryWait,
+  makeIdleTimeout,
+} from "../providers/turnBudget";
 import type { ResearchRouteDecision, ResearchRouter } from "./research/researchRouter";
 
 const decodeTimestamp = Schema.decodeUnknownSync(UtcTimestamp);
@@ -834,7 +838,7 @@ export class ChatTurnRunner {
                   yield* input.persistAttempt(currentAttempt);
                   input.onHarnessRetry?.(notice);
                 } else if (
-                  (event.kind === "text-delta" || event.kind === "reasoning-delta") &&
+                  endsHarnessRetryWait(event) &&
                   currentAttempt.harnessRetry !== undefined
                 ) {
                   const { harnessRetry: _cleared, ...withoutRetry } = currentAttempt;

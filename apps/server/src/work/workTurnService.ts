@@ -1220,6 +1220,7 @@ export class WorkTurnService {
         },
         onRetryCleared: () => {
           if (harnessScope !== undefined) this.#nativeHarness?.clearRetry?.(harnessScope);
+          this.#liveUpdates.clearRetry(input.command.threadId, input.command.requestId);
         },
         ...(this.#onRequestSettled === undefined
           ? {}

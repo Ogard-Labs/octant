@@ -44,7 +44,7 @@ export interface CodeTurnActivity {
    * tool and reasoning steps, so a reopened thread offers nothing here.
    */
   readonly writtenPaths?: ReadonlyArray<string>;
-  /** The endpoint retry in progress, cleared by the next content or the turn settling. */
+  /** The endpoint retry in progress, cleared by the next content or tool call, or the turn settling. */
   readonly retrying?: HarnessRetryNotice;
 }
 
@@ -127,8 +127,11 @@ export function applyActivityEvent(
 ): CodeTurnActivity {
   if (event.kind === "tool-activity") {
     const id = String(event.toolCallId);
+    // A tool call ends a retry wait as content does: a retried response that
+    // only calls a tool streams no content.
+    const { retrying: _cleared, ...rest } = activity;
     return {
-      ...activity,
+      ...rest,
       rows: upsert(activity.rows, foldToolEvent(previousTool(activity.rows, id), event)),
     };
   }
