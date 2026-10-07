@@ -254,21 +254,22 @@ describe("sendResponsesTurn", () => {
     });
   });
 
-  it("rejects invalid event envelopes and unknown event types without leaking payloads", async () => {
+  it("ignores an unknown event type without leaking its payload and still completes", async () => {
     const fetch = vi.fn(async () =>
-      sse({
-        type: "response.future_private_event",
-        sequence_number: 1,
-        secret: "provider-private-payload",
-      }),
+      sse(
+        {
+          type: "response.future_private_event",
+          sequence_number: 1,
+          secret: "provider-private-payload",
+        },
+        created(2),
+        completed(3, { input_tokens: 3, output_tokens: 2, total_tokens: 5 }),
+      ),
     );
 
-    const failure = await failureOf(sendResponsesTurn(input(fetch)));
-    expect(failure).toEqual({
-      category: "protocol",
-      message: "The provider stream contained an unsupported event.",
-    });
-    expect(JSON.stringify(failure)).not.toContain("provider-private-payload");
+    const result = await Effect.runPromise(sendResponsesTurn(input(fetch)));
+    expect(result.terminal).toBe("completed");
+    expect(JSON.stringify(result)).not.toContain("provider-private-payload");
   });
 
   it.each([

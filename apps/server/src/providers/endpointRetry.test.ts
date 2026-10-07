@@ -3,8 +3,10 @@ import { describe, expect, it } from "vitest";
 import type { NativeHarnessResponse } from "../harness/nativeHarnessTransport";
 import {
   DEFAULT_ENDPOINT_RETRY_POLICY,
+  contextOverflowFromBody,
   endpointRetryDelayMs,
   endpointRetryReason,
+  isContextOverflowFailure,
   isEndpointRetriesExhausted,
   sendWithEndpointRetry,
 } from "./endpointRetry";
@@ -56,6 +58,41 @@ describe("which endpoint failures are worth retrying", () => {
     expect(
       endpointRetryReason({ ...failure("rate-limited"), usageLimit: { kind: "temporary" } }),
     ).toBe("rate-limited");
+  });
+});
+
+describe("recognising a filled context window", () => {
+  it.each([
+    "This model's maximum context length is 8192 tokens. However, you requested 9000 tokens (context_length_exceeded).",
+    "prompt is too long: 250000 tokens > 200000 maximum",
+    "The provider rejected the request because it exceeded the model's context length.",
+    "Request too large: the context window is full.",
+  ])("treats %j as context overflow that a retry cannot fix", (message) => {
+    const input = { category: "provider-failed" as const, message };
+    expect(isContextOverflowFailure(input)).toBe(true);
+    // The retry policy sends the same bytes again, so overflow is never a retry reason.
+    expect(endpointRetryReason(input)).toBeUndefined();
+  });
+
+  it("never reads a retryable or spent failure as context overflow", () => {
+    expect(isContextOverflowFailure(failure("unavailable"))).toBe(false);
+    expect(isContextOverflowFailure(failure("unauthenticated"))).toBe(false);
+    expect(
+      isContextOverflowFailure({
+        category: "provider-failed",
+        message: "The provider refused the request.",
+      }),
+    ).toBe(false);
+  });
+
+  it("reads a rejected body that names a full window and leaves any other body alone", () => {
+    expect(
+      contextOverflowFromBody('{"error":{"code":"context_length_exceeded","message":"too long"}}'),
+    ).toEqual({
+      category: "provider-failed",
+      message: "The provider rejected the request because it exceeded the model's context length.",
+    });
+    expect(contextOverflowFromBody('{"error":{"code":"invalid_api_key"}}')).toBeUndefined();
   });
 });
 
