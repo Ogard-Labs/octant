@@ -10,6 +10,7 @@ import {
   ComposerContextMeterGate,
   ComposerContextMeterProvider,
   useComposerContextMeterScope,
+  type ComposerContextUsageFallback,
 } from "./composerContextMeterScope";
 import { contextFixture } from "./contextFixtures";
 import type { ContextControllerStatus } from "./useContextController";
@@ -112,6 +113,39 @@ describe("ComposerContextMeter", () => {
     expect(
       screen.getByText(/Fixture thread\. Last sent 104 \/ 1K \(10%\)\. Provider reported\./),
     ).toBeInTheDocument();
+  });
+
+  it("shows the fill without a fraction, share, or full ring when no window was named", async () => {
+    const fixture = contextFixture();
+    if (fixture.latestUsage === undefined) throw new Error("Fixture has no usage");
+    const user = userEvent.setup();
+    render(
+      <Harness
+        snapshot={{
+          ...fixture,
+          modelLimits: {
+            ...fixture.modelLimits,
+            contextWindow: 4_096,
+            source: "conservative-fallback",
+            confidence: "low",
+          },
+          latestUsage: { ...fixture.latestUsage, actualInputTokens: 34_300, contextTokens: 34_300 },
+        }}
+      />,
+    );
+    const button = screen.getByRole("button", { name: /Show context usage/i });
+    expect(button).toHaveAccessibleName(/34\.3K used, context window maximum unavailable/);
+    expect(button).not.toHaveAccessibleName(/4\.1K|%\)/);
+    // An empty ring says nothing about a window; a red one would say it is full.
+    expect(button.querySelector(".composer-context-meter__used")).toBeNull();
+    expect(document.querySelector(".composer-context-meter")).not.toHaveAttribute("data-fill");
+
+    await user.click(button);
+    const popover = screen.getByRole("dialog", { name: "Context used" });
+    expect(popover).toHaveTextContent("Context used34.3K");
+    expect(popover).toHaveTextContent("no share of a window to show");
+    expect(popover).not.toHaveTextContent("4.1K");
+    expect(within(popover).queryByRole("meter", { name: /Context window/ })).toBeNull();
   });
 
   it("opens the popover from pointer, Enter, and Space without a further inspect call", async () => {
@@ -300,6 +334,212 @@ describe("ComposerContextMeter", () => {
     expect(popover).not.toHaveTextContent("Reported by the provider with its last turn.");
     await user.click(within(popover).getByRole("button", { name: "Context breakdown" }));
     expect(popover).toHaveTextContent("Reported by the provider with its last turn.");
+  });
+
+  it("says how much room is left before the runtime compacts the session by itself", async () => {
+    const user = userEvent.setup();
+    render(
+      <ComposerContextMeterProvider
+        fallback={{
+          inputTokens: 25_500,
+          outputTokens: 38,
+          contextWindow: 200_000,
+          contextTokens: 120_000,
+          autoCompactThreshold: 167_000,
+          limits: [],
+        }}
+        status="not-planned"
+        subjectKey="code-thread:a"
+      >
+        <ComposerContextMeterGate enabled>
+          <ComposerContextMeter />
+        </ComposerContextMeterGate>
+      </ComposerContextMeterProvider>,
+    );
+
+    await user.click(screen.getByRole("button", { name: /Context window 120K of 200K/i }));
+    const popover = screen.getByRole("dialog", { name: "Context window" });
+    expect(popover).toHaveTextContent("47K until auto-compact");
+  });
+
+  describe("a provider-run thread's breakdown", () => {
+    async function openBreakdown(fallback: ComposerContextUsageFallback) {
+      const user = userEvent.setup();
+      render(
+        <ComposerContextMeterProvider
+          fallback={fallback}
+          status="not-planned"
+          subjectKey="code-thread:a"
+        >
+          <ComposerContextMeterGate enabled>
+            <ComposerContextMeter />
+          </ComposerContextMeterGate>
+        </ComposerContextMeterProvider>,
+      );
+      await user.click(screen.getByRole("button", { name: /Context window/i }));
+      const popover = screen.getByRole("dialog", { name: "Context window" });
+      await user.click(within(popover).getByRole("button", { name: "Context breakdown" }));
+      return popover;
+    }
+
+    function rowOf(popover: HTMLElement, label: string) {
+      const row = within(popover).getByRole("row", { name: new RegExp(`^${label}`) });
+      return row;
+    }
+
+    it("lists what the runtime reported, with coloured parts and a neutral Free space and Reserved", async () => {
+      const popover = await openBreakdown({
+        contextWindow: 1_000_000,
+        contextTokens: 38_000,
+        limits: [],
+        contextBreakdown: {
+          parts: [
+            { kind: "system-prompt", tokens: 142, accuracy: "provider-reported" },
+            { kind: "system-tools", tokens: 17_946, accuracy: "provider-reported" },
+            { kind: "memory-files", tokens: 16_270, accuracy: "provider-reported", count: 4 },
+            { kind: "messages", tokens: 10, accuracy: "provider-reported" },
+            { kind: "reserved", tokens: 33_000, accuracy: "provider-reported" },
+          ],
+          deferred: [{ kind: "mcp-tools", count: 30 }],
+        },
+      });
+
+      for (const label of ["System prompt", "System tools", "Memory files", "Messages"]) {
+        expect(rowOf(popover, label)).toHaveAttribute("data-tone");
+      }
+      expect(rowOf(popover, "Other \\(provider\\)")).toHaveAttribute("data-tone");
+      expect(rowOf(popover, "Reserved")).not.toHaveAttribute("data-tone");
+      expect(rowOf(popover, "Free space")).not.toHaveAttribute("data-tone");
+      expect(rowOf(popover, "System tools")).toHaveTextContent("17.9K");
+      expect(popover).toHaveTextContent("Reported by the provider with its last turn.");
+      expect(popover).not.toHaveTextContent("Estimated");
+      // Counts sit in the harness breakdown's row style; deferred tools are
+      // counted and take no share.
+      expect(popover).toHaveTextContent("Memory files4 loaded");
+      expect(popover).toHaveTextContent("MCP30 deferred");
+      expect(
+        within(popover)
+          .getAllByRole("row")
+          .map((row) => row.textContent)
+          .join(" "),
+      ).not.toContain("deferred");
+      // Each painted segment is a part; free space is the unpainted track.
+      const meter = within(popover).getByRole("meter");
+      expect(meter.querySelectorAll("[data-kind='free']")).toHaveLength(0);
+      // Four reported parts and the remainder carry a tone; reserved room does not.
+      expect(meter.querySelectorAll("[data-tone]")).toHaveLength(5);
+      expect(meter.querySelector("[data-kind='reserved']")).not.toHaveAttribute("data-tone");
+    });
+
+    it("marks what Octant counted as an estimate, says how, and keeps the rest as Other (provider)", async () => {
+      const popover = await openBreakdown({
+        contextWindow: 200_000,
+        contextTokens: 20_000,
+        limits: [],
+        contextBreakdown: {
+          parts: [
+            { kind: "octant-tools", tokens: 1_200, accuracy: "conservative-heuristic", count: 9 },
+          ],
+        },
+      });
+
+      const tools = rowOf(popover, "Octant tools");
+      expect(tools).toHaveTextContent("Estimated");
+      expect(within(tools).getByText("Estimated")).toHaveAttribute(
+        "title",
+        "Conservative estimate",
+      );
+      expect(rowOf(popover, "Other \\(provider\\)")).toHaveTextContent("Estimated");
+      expect(rowOf(popover, "Other \\(provider\\)")).toHaveTextContent("18.8K");
+      expect(popover).toHaveTextContent(
+        "Parts marked Estimated are Octant's own count (conservative estimate). The provider reported the total, and Other (provider) is the rest of it.",
+      );
+      expect(popover).not.toHaveTextContent("Reported by the provider with its last turn.");
+      expect(popover).toHaveTextContent("Tools9 loaded");
+    });
+
+    it("raises the ring and the figure to what the parts add up to when they outrun the occupancy", async () => {
+      render(
+        <ComposerContextMeterProvider
+          fallback={{
+            contextWindow: 100_000,
+            contextTokens: 4_800,
+            limits: [],
+            contextBreakdown: {
+              parts: [{ kind: "messages", tokens: 5_000, accuracy: "provider-reported" }],
+            },
+          }}
+          status="not-planned"
+          subjectKey="code-thread:a"
+        >
+          <ComposerContextMeterGate enabled>
+            <ComposerContextMeter />
+          </ComposerContextMeterGate>
+        </ComposerContextMeterProvider>,
+      );
+
+      const button = screen.getByRole("button", { name: /Context window 5K of 100K \(5%\)/i });
+      expect(button.querySelector(".composer-context-meter__used")).toHaveAttribute(
+        "stroke-dasharray",
+        "5 100",
+      );
+    });
+
+    it("keeps the single Used segment for a runtime that reports no parts", async () => {
+      const popover = await openBreakdown({
+        contextWindow: 200_000,
+        contextTokens: 12_000,
+        limits: [],
+      });
+
+      expect(rowOf(popover, "Used")).toHaveAttribute("data-tone", "1");
+      expect(rowOf(popover, "Free space")).not.toHaveAttribute("data-tone");
+    });
+  });
+
+  it("says the session is at the compaction point rather than a negative room", async () => {
+    const user = userEvent.setup();
+    render(
+      <ComposerContextMeterProvider
+        fallback={{
+          contextWindow: 200_000,
+          contextTokens: 170_000,
+          autoCompactThreshold: 167_000,
+          limits: [],
+        }}
+        status="not-planned"
+        subjectKey="code-thread:a"
+      >
+        <ComposerContextMeterGate enabled>
+          <ComposerContextMeter />
+        </ComposerContextMeterGate>
+      </ComposerContextMeterProvider>,
+    );
+
+    await user.click(screen.getByRole("button", { name: /Context window 170K of 200K/i }));
+    expect(screen.getByRole("dialog", { name: "Context window" })).toHaveTextContent(
+      "At the auto-compact threshold",
+    );
+  });
+
+  it("shows no compaction line when the provider reported no threshold", async () => {
+    const user = userEvent.setup();
+    render(
+      <ComposerContextMeterProvider
+        fallback={{ contextWindow: 200_000, contextTokens: 120_000, limits: [] }}
+        status="not-planned"
+        subjectKey="code-thread:a"
+      >
+        <ComposerContextMeterGate enabled>
+          <ComposerContextMeter />
+        </ComposerContextMeterGate>
+      </ComposerContextMeterProvider>,
+    );
+
+    await user.click(screen.getByRole("button", { name: /Context window 120K of 200K/i }));
+    expect(screen.getByRole("dialog", { name: "Context window" })).not.toHaveTextContent(
+      /auto-compact/i,
+    );
   });
 
   it("fills the ring from the model's declared limit when the provider reported occupancy without a window", async () => {

@@ -6,6 +6,7 @@ import type {
   ProviderSessionId,
   UtcTimestamp,
 } from "@octant/contracts";
+import { summarizeStepArgument } from "@octant/domain/live-turn-policy";
 import { createHash } from "node:crypto";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import {
@@ -273,10 +274,33 @@ function mapToolStart(
   item: ToolItem,
 ): ReadonlyArray<CodexMappedMessage> {
   const id = toolCallId(context, item.id);
+  const argument = toolArgument(context, item);
   return [
-    event(context, { kind: "tool-start", toolCallId: id, toolName: toolName(item) }),
+    event(context, {
+      kind: "tool-start",
+      toolCallId: id,
+      toolName: toolName(item),
+      ...(argument === undefined ? {} : { argument }),
+    }),
     event(context, { kind: "tool-progress", toolCallId: id, message: "Tool is running." }),
   ];
+}
+
+/**
+ * What a started tool was asked to do, for display: the command a shell item
+ * runs and the Project-relative path a file change names. The command is
+ * reduced to one redacted, bounded line here, at the adapter, so the provider's
+ * raw command text never crosses into the normalized event; a file change names
+ * its path and never its contents.
+ */
+function toolArgument(context: CodexEventContext, item: ToolItem): string | undefined {
+  if (item.type === "commandExecution") return summarizeStepArgument(item.command);
+
+  if (item.type === "fileChange") {
+    const first = item.changes[0];
+    return first === undefined ? undefined : confinedRelativePath(context, first.path);
+  }
+  return undefined;
 }
 
 function confinedRelativePath(context: CodexEventContext, value: string): string | undefined {

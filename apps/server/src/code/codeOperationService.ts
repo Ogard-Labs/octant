@@ -13,6 +13,7 @@ import {
   type CodeApprovalEffect,
   type CodeAttachmentId,
   type CodeAttachmentReference,
+  type CodeApprovalId,
   type CodeCheckoutId,
   type CodeCheckpoint,
   type CodeCheckoutIdentity,
@@ -36,10 +37,12 @@ import {
   type AgentRun,
   type AgentRunId,
   type MentionableThreadId,
+  type PendingRequest,
   type ScaffoldEntry,
   type ScaffoldRun,
   type ProviderAttachmentInput,
   type ProviderContextBlock,
+  type UtcTimestamp,
   type WindowId,
 } from "@octant/contracts";
 import type { FramedExternalContent } from "../context/externalContentFraming";
@@ -654,7 +657,28 @@ export interface CodeOperationTurnPort {
     readonly thread: CodeThread;
     readonly checkoutRoot: string;
   }) => Promise<CodeOperationTurnResult>;
+  /** What running turns are waiting on, before any window's authority is applied. */
+  readonly pendingRequests?: () => ReadonlyArray<CodeTurnPendingRequest>;
 }
+
+/** One approval or question a running turn is parked on, as its stream journaled it. */
+export type CodeTurnPendingRequest = {
+  readonly threadId: CodeThreadId;
+  readonly checkoutId: CodeCheckoutId;
+  readonly requestedAt: UtcTimestamp;
+} & (
+  | {
+      readonly kind: "approval";
+      readonly approvalId: CodeApprovalId;
+      readonly summary: string;
+    }
+  | {
+      readonly kind: "question";
+      readonly requestId: string;
+      readonly prompt: string;
+      readonly options: ReadonlyArray<string>;
+    }
+);
 
 type CodeOperationTurnResult = {
   readonly state: "running" | "waiting" | "completed" | "interrupted" | "failed";
@@ -1345,6 +1369,54 @@ export class CodeOperationService {
     }
   }
 
+  /**
+   * The pending requests this window could answer with `answer-provider-approval`
+   * or `answer-provider-input`. Each passes the same scope those commands pass
+   * before anything else runs — thread and checkout identity, the window's Code
+   * Project access, an available checkout, an active thread — so a request is
+   * offered only where its answer would be admitted. Both answers classify as
+   * reads, which every posture allows.
+   */
+  async listPendingForWindow(windowId: WindowId): Promise<ReadonlyArray<PendingRequest>> {
+    const pending: PendingRequest[] = [];
+    for (const request of this.#options.turns.pendingRequests?.() ?? []) {
+      const scope = await this.#scope(windowId, request);
+      if ("failure" in scope) continue;
+      const shared = {
+        mode: "code",
+        projectId: scope.thread.projectId,
+        threadId: scope.thread.id,
+        threadTitle: scope.thread.title,
+        requestedAt: request.requestedAt,
+      } as const;
+      pending.push(
+        request.kind === "approval"
+          ? {
+              ...shared,
+              kind: "approval",
+              text: request.summary,
+              answer: {
+                threadId: scope.thread.id,
+                checkoutId: scope.checkout.id,
+                approvalId: request.approvalId,
+              },
+            }
+          : {
+              ...shared,
+              kind: "question",
+              text: request.prompt,
+              options: request.options.map((label) => ({ label })),
+              answer: {
+                threadId: scope.thread.id,
+                checkoutId: scope.checkout.id,
+                requestId: request.requestId,
+              },
+            },
+      );
+    }
+    return pending;
+  }
+
   async subscribe(
     windowId: WindowId,
     threadId: CodeThreadId,
@@ -1523,7 +1595,7 @@ export class CodeOperationService {
 
   async #scope(
     windowId: WindowId,
-    command: CodeOperationCommand,
+    command: Pick<CodeOperationCommand, "threadId" | "checkoutId">,
   ): Promise<
     | { readonly thread: CodeThread; readonly checkout: CodeCheckoutIdentity }
     | { readonly failure: "invalid" | "unauthorized" | "waiting"; readonly message: string }

@@ -213,6 +213,7 @@ import {
   clearLaunchTokenFragment,
   isProjectWindowCapability,
   launchFromLocation,
+  tabLaunchMemory,
   type ShellLaunch,
 } from "./shell/shellLaunch";
 import {
@@ -285,6 +286,7 @@ import { OctantToast } from "./ui/base/OctantToast";
 import { useProjectController } from "./projects/useProjectController";
 import { ProjectThreadsProvider } from "./projects/ProjectThreadsSection";
 import { useProviderController } from "./providers/useProviderController";
+import { ModelToolVerificationContext } from "./providers/ModelToolVerificationContext";
 import { useDiscoveryController } from "./providers/useDiscoveryController";
 import { useProviderBootstrap } from "./providers/useProviderBootstrap";
 import { hasSelectableProviderModels } from "./providers/providerBootstrapPolicy";
@@ -427,17 +429,28 @@ import type {
   SidebarNavigationDescriptorId,
   ThreadProviderIdentity,
 } from "./shell/navigationModel";
+import { reviewWaitingCount, runningThreadCount } from "./shell/runningNow";
+import { createWorkingNowCard } from "./home/WorkingNowCard";
+import { createPullRequestsCard } from "./home/PullRequestsCard";
 import {
-  reviewWaitingCount,
-  runningCardsFromBoard,
-  runningCardsFromNavigation,
-  runningThreadCount,
-} from "./shell/runningNow";
+  pullRequestCardAvailable,
+  pullRequestCardCapability,
+  type PullRequestCardCapability,
+  type PullRequestCardRow,
+} from "./home/pullRequests";
+import { boardFactsByThread, remoteHostLabel, type WorkingNowThread } from "./home/workingNow";
 import { ComputerUseActivitySurface } from "./computerUse/ComputerUseActivitySurface";
 import { useHostFederationLifecycle } from "./host/useHostFederationLifecycle";
 import { FederatedHostsLifecycleStrip } from "./host/FederatedHostsLifecyclePanel";
-import { OctantCommandProvider } from "./palette/CommandRegistry";
-import { buildOctantCommands, type CommandProject } from "./palette/buildOctantCommands";
+import { NeedsYouProvider, OctantCommandProvider } from "./palette/CommandRegistry";
+import {
+  buildOctantCommands,
+  type CommandProject,
+  type CommandThread,
+} from "./palette/buildOctantCommands";
+import { answerPendingApproval } from "./palette/answerPendingApproval";
+import type { ApprovalDecision, ApprovalPendingRequest } from "./palette/needsYouCommands";
+import { usePendingRequests } from "./palette/usePendingRequests";
 import { useCommandExtensions } from "./palette/useCommandSkills";
 import { OctantAlert } from "./ui/base/OctantAlert";
 
@@ -492,7 +505,9 @@ const NO_PROVIDER_INSTANCES: ReadonlyArray<ProviderInstance> = [];
 const NO_VOICE_SETTINGS: VoiceSettings = {};
 
 export function App(props: AppProps) {
-  const [locationLaunch] = useState(() => launchFromLocation(window.location.href));
+  const [locationLaunch] = useState(() =>
+    launchFromLocation(window.location.href, tabLaunchMemory()),
+  );
   const launch =
     props.launch ?? (locationLaunch.status === "accepted" ? locationLaunch.launch : undefined);
   const initialInjectedCapability =
@@ -908,6 +923,8 @@ function LaunchedShell(
   // in, and the person sends it like any new thread.
   const [pendingDraftPrompt, setPendingDraftPrompt] = useState<string>();
   const [githubIssuesReadAvailable, setGithubIssuesReadAvailable] = useState(false);
+  const [githubPullRequestCapability, setGithubPullRequestCapability] =
+    useState<PullRequestCardCapability>({ readable: false });
   const [linearIssuesOpen, setLinearIssuesOpen] = useState(false);
   const [linearIssuesRead, setLinearIssuesRead] = useState(false);
   const linearAvailabilityGenerationRef = useRef(0);
@@ -1377,6 +1394,7 @@ function LaunchedShell(
     goalClient,
     goalLoopClient,
     hostClient,
+    pendingRequestClient,
     projectBrowserClient,
     projectTerminalClient,
     followUpSuggestionClient,
@@ -1450,6 +1468,66 @@ function LaunchedShell(
   // The row menu closes before this operation finishes. Keep its progress or
   // result available until the user dismisses it or a later operation replaces it.
   const [threadExportNotice, setThreadExportNotice] = useState<string>();
+  // The palette opens on what is waiting for the person. It reads the host's
+  // list each time it opens, and only where the host lists it at all.
+  const pendingRequests = usePendingRequests(pendingRequestClient);
+  const openCommandThread = (thread: CommandThread): void => {
+    // Picking a waiting thread means "show me this thread", the same as a
+    // sidebar row: a Board or Inbox that was open would otherwise keep the
+    // pane and hide the thread the person just chose.
+    closeWorkspaceReaders();
+    // The entry keeps its thread's own Project so a cross-Project open
+    // dispatches the Project switch, exactly like the sidebar's open
+    // handlers, instead of a plain open-tab the server-authoritative
+    // workspace policy rejects.
+    const threadProjectId =
+      thread.projectId === undefined ? undefined : decodeProjectId(thread.projectId);
+    if (thread.mode === "chat") {
+      void controller.openChatThread(
+        decodeChatThreadId(thread.threadId),
+        thread.title,
+        threadProjectId,
+      );
+      return;
+    }
+    if (thread.mode === "work") {
+      void controller.openWorkThread(
+        decodeWorkThreadId(thread.threadId),
+        thread.title,
+        undefined,
+        threadProjectId,
+      );
+      return;
+    }
+    void controller.openCodeThread(
+      decodeCodeThreadId(thread.threadId),
+      thread.title,
+      undefined,
+      threadProjectId,
+    );
+  };
+  const answerNeedsYouApproval = (
+    request: ApprovalPendingRequest,
+    decision: ApprovalDecision,
+  ): void => {
+    void answerPendingApproval({ request, decision, workRequestClient, codeClient }).then(
+      (outcome) =>
+        setThreadExportNotice(
+          outcome.status === "refused"
+            ? outcome.message
+            : `${decision === "approved" ? "Approved" : "Denied"}: ${request.threadTitle}`,
+        ),
+    );
+  };
+  const needsYouSource =
+    pendingRequestClient === undefined
+      ? undefined
+      : {
+          requests: pendingRequests.requests,
+          refresh: pendingRequests.refresh,
+          onOpenThread: openCommandThread,
+          onAnswerApproval: answerNeedsYouApproval,
+        };
   const [updateReadyNotice, dismissUpdateReadyNotice] = useAppUpdateReadyNotice(
     props.hostBridge?.subscribeAppUpdateState,
   );
@@ -1473,10 +1551,19 @@ function LaunchedShell(
     navigationRefreshMs: 0,
     changeRevision: machineChanges.workNavigation,
   });
-  const githubClient = useMemo(
-    () => withGithubIssuesReadSync(githubTransport, setGithubIssuesReadAvailable),
-    [githubTransport],
-  );
+  const githubClient = useMemo(() => {
+    const synced = withGithubIssuesReadSync(githubTransport, setGithubIssuesReadAvailable);
+    return {
+      ...synced,
+      executeAuthenticationCommand: async (
+        command: Parameters<typeof synced.executeAuthenticationCommand>[0],
+      ) => {
+        const snapshot = await synced.executeAuthenticationCommand(command);
+        setGithubPullRequestCapability(pullRequestCardCapability(snapshot));
+        return snapshot;
+      },
+    };
+  }, [githubTransport]);
   const linearClient = useMemo(
     () =>
       withLinearIssuesReadSync(linearTransport, (available) => {
@@ -1502,6 +1589,11 @@ function LaunchedShell(
     (query: CodeBoardQuery) => codeClient.queryBoard(query),
     [codeClient],
   );
+  const loadHomePullRequests = useCallback(
+    (query: Parameters<typeof codeClient.queryProjectPullRequests>[0]) =>
+      codeClient.queryProjectPullRequests(query),
+    [codeClient],
+  );
   // Continue names the window's own threads, so the window reads them. The
   // draft screen that shows them is remounted whenever a new task starts, and
   // a read held down there began again — and emptied the section — on every
@@ -1518,9 +1610,13 @@ function LaunchedShell(
       .then((snapshot) => {
         if (cancelled) return;
         setGithubIssuesReadAvailable(snapshotAllowsGithubIssuesRead(snapshot));
+        setGithubPullRequestCapability(pullRequestCardCapability(snapshot));
       })
       .catch(() => {
-        if (!cancelled) setGithubIssuesReadAvailable(false);
+        if (!cancelled) {
+          setGithubIssuesReadAvailable(false);
+          setGithubPullRequestCapability({ readable: false });
+        }
       });
     return () => {
       cancelled = true;
@@ -2555,9 +2651,8 @@ function LaunchedShell(
   );
   const firstRunDiscoveryNotice = describeDiscoveryNotice(firstRunDiscovery);
   const recordFirstRunOutcome = useCallback(
-    async (outcome: FirstRunOnboardingOutcome) => {
-      await controller.updateSettings({ firstRunOnboarding: outcome });
-    },
+    (outcome: FirstRunOnboardingOutcome) =>
+      controller.updateSettings({ firstRunOnboarding: outcome }),
     [controller],
   );
   const saveUserProfile = useCallback(
@@ -3522,6 +3617,8 @@ function LaunchedShell(
             // said "active" beside almost every thread and told the reader
             // nothing. The status dot carries it instead.
             activity: codeThreadActivity(thread),
+            ...(thread.turnStartedAt === undefined ? {} : { turnStartedAt: thread.turnStartedAt }),
+            ...(thread.liveStep === undefined ? {} : { liveStep: thread.liveStep }),
             ...(thread.checkoutChip === undefined ? {} : { checkoutChip: thread.checkoutChip }),
             ...(thread.pullRequestSummaries === undefined
               ? {}
@@ -3645,6 +3742,55 @@ function LaunchedShell(
     [activeMode, chatController.status, minuteNow, navigationModel],
   );
 
+  // The start-screen cards read these, so they are held here with the other
+  // memoized models, above the status early returns that follow: a hook below
+  // them would change the hook order once the shell finishes loading.
+  const workingNowThreads = useMemo<ReadonlyArray<WorkingNowThread>>(
+    () =>
+      activeMode === "code"
+        ? navigationModel.codeProjectThreads.map((thread) => ({
+            mode: "code" as const,
+            thread: navigationModel.withProviderMark(thread),
+          }))
+        : [
+            ...(chatController.status === "ready"
+              ? navigationModel.markedChatNavigation.map((thread) => ({
+                  mode: "chat" as const,
+                  thread,
+                }))
+              : []),
+            ...navigationModel.workProjectThreads.map((thread) => ({
+              mode: "work" as const,
+              thread: navigationModel.withProviderMark(thread),
+            })),
+          ],
+    [activeMode, chatController.status, navigationModel],
+  );
+  const workingNowModes = useMemo(
+    () => (activeMode === "code" ? (["code"] as const) : (["chat", "work"] as const)),
+    [activeMode],
+  );
+  const workingNowProjectNames = useMemo(
+    () => new Map(projectController.projects.map((project) => [String(project.id), project.name])),
+    [projectController.projects],
+  );
+  const workingNowProviders = useMemo(
+    () =>
+      new Map(
+        providerController.instances.map((instance) => [
+          String(instance.id),
+          { displayName: instance.displayName, driverKind: instance.driverKind },
+        ]),
+      ),
+    [providerController.instances],
+  );
+  const workingNowBoardFacts = useMemo(
+    () =>
+      continueCards.kind === "ready" && activeMode === "code"
+        ? boardFactsByThread(continueCards.running)
+        : new Map(),
+    [activeMode, continueCards],
+  );
   const workKindChoice: WorkKindChoice | undefined =
     activeMode === "code" || controller.settings === undefined
       ? undefined
@@ -3916,53 +4062,99 @@ function LaunchedShell(
     workProjectThreads,
   } = navigationModel;
 
-  // Work and Code start screens share one shape: tiles and the threads running
-  // now. Code reads its running cards off the board, which carries the branch
-  // and the host's activity line; Work has no board card to read, so its cards
-  // come from the navigation rows that already say a turn is executing.
-  const homeStart: DraftThreadWorkspaceProps["homeStart"] =
-    activeMode === "code" || activeMode === "work"
-      ? {
-          reviewCount: reviewWaitingCount(
-            activeMode === "code" ? codeProjectThreads : workProjectThreads,
-          ),
-          runningCount:
-            activeMode === "code"
-              ? continueCards.kind === "ready"
-                ? continueCards.runningTotal
-                : 0
-              : runningThreadCount(workProjectThreads),
-          onReview: openInbox,
-          running:
-            activeMode === "code"
-              ? continueCards.kind === "ready"
-                ? runningCardsFromBoard(continueCards.running, {
-                    projectNames: new Map(
-                      codeBoardProjects.map((project) => [String(project.id), project.name]),
-                    ),
-                    providers: new Map(
-                      providerController.instances.map((instance) => [
-                        String(instance.id),
-                        { displayName: instance.displayName, driverKind: instance.driverKind },
-                      ]),
-                    ),
-                  })
-                : []
-              : runningCardsFromNavigation(
-                  workProjectThreads.map(withProviderMark),
-                  new Map(workBoardProjects.map((project) => [String(project.id), project.name])),
-                ),
-          onOpenRunning: (card) =>
-            activeMode === "code"
-              ? selectCodeThread(card.threadId)
-              : selectWorkThread(card.threadId),
-          onOpenBoard: () => {
-            pluginSidebarDestinationActionContext.closeOverlays();
-            pluginSidebarDestinationActionContext.openThreadBoard();
-          },
-          ...(activeMode === "code" ? { onOpenTerminal: openHomeTerminal } : {}),
-        }
+  // Work and Code start screens share one shape: tiles, then the card area.
+  // Code reads the host's activity line off the board; Work has no board card to
+  // read, so its rows come from the navigation rows that already say a turn is
+  // executing. Work counts its Chat and Work threads together, as its list does.
+  const workingNowHost =
+    props.hostBridge === undefined
+      ? remoteHostLabel(props.launch.serverUrl, localHost?.displayName)
       : undefined;
+  // The card list is rebuilt each render and is cheap: each card's own rows are
+  // memoized from the inputs above, which keep their identity between renders.
+  const homeCards = [
+    createWorkingNowCard({
+      agentRunClient,
+      boardFacts: workingNowBoardFacts,
+      ...(workingNowHost === undefined ? {} : { host: workingNowHost }),
+      modes: workingNowModes,
+      now: minuteNow.getTime(),
+      onOpenRow: (row) => {
+        pluginSidebarDestinationActionContext.closeOverlays();
+        if (row.mode === "chat") selectChatThread(row.threadId);
+        else if (row.mode === "work") selectWorkThread(row.threadId);
+        else selectCodeThread(row.threadId);
+      },
+      // The same place the sidebar's Running tile goes: Chat has no board, so
+      // its running threads lead the Activity feed instead.
+      onOpenRunning: () => {
+        if (activeMode === "chat") {
+          openSidebarList("activity");
+          return;
+        }
+        pluginSidebarDestinationActionContext.closeOverlays();
+        pluginSidebarDestinationActionContext.openThreadBoard();
+      },
+      projectNames: workingNowProjectNames,
+      providers: workingNowProviders,
+      runRevision:
+        machineChanges.chatNavigation +
+        machineChanges.workNavigation +
+        machineChanges.codeNavigation,
+      threads: workingNowThreads,
+    }),
+    createPullRequestsCard({
+      available: pullRequestCardAvailable({
+        mode: activeMode,
+        pluginEffective: FIRST_PARTY_PLUGINS_EFFECTIVE.get("github-integration") === true,
+        capability: githubPullRequestCapability,
+      }),
+      viewerLogin: githubPullRequestCapability.login ?? "",
+      load: loadHomePullRequests,
+      onOpenRow: (row: PullRequestCardRow) => {
+        closeWorkspaceReaders();
+        selectProjectPullRequestIdentity({
+          projectId: row.projectId,
+          repositoryOwner: row.repositoryOwner,
+          repositoryName: row.repositoryName,
+          number: row.number,
+        });
+      },
+      onOpenAll: () => {
+        closeWorkspaceReaders();
+        setCodePullRequestsOpen(true);
+      },
+    }),
+  ];
+  const homeStart: DraftThreadWorkspaceProps["homeStart"] =
+    activeMode === "chat"
+      ? {
+          reviewCount: 0,
+          runningCount: 0,
+          cards: homeCards,
+          cardCustomization: controller.settings.homeCards,
+          onCardCustomizationChange: (homeCardChoice) =>
+            void controller.updateSettings({ homeCards: homeCardChoice }),
+        }
+      : activeMode === "code" || activeMode === "work"
+        ? {
+            reviewCount: reviewWaitingCount(
+              activeMode === "code" ? codeProjectThreads : workProjectThreads,
+            ),
+            runningCount:
+              activeMode === "code"
+                ? continueCards.kind === "ready"
+                  ? continueCards.runningTotal
+                  : 0
+                : runningThreadCount(workProjectThreads),
+            onReview: openInbox,
+            cards: homeCards,
+            cardCustomization: controller.settings.homeCards,
+            onCardCustomizationChange: (homeCardChoice) =>
+              void controller.updateSettings({ homeCards: homeCardChoice }),
+            ...(activeMode === "code" ? { onOpenTerminal: openHomeTerminal } : {}),
+          }
+        : undefined;
 
   // What a Code thread row offers on right-click. Each one carries the row's
   // navigation id, which for a Project-backed thread is its Code thread id;
@@ -5605,37 +5797,7 @@ function LaunchedShell(
         mode: thread.mode,
         ...(thread.projectId === undefined ? {} : { projectId: thread.projectId }),
       })),
-    onOpenThread: (thread) => {
-      // The entry keeps its thread's own Project so a cross-Project open
-      // dispatches the Project switch, exactly like the sidebar's open
-      // handlers, instead of a plain open-tab the server-authoritative
-      // workspace policy rejects.
-      const threadProjectId =
-        thread.projectId === undefined ? undefined : decodeProjectId(thread.projectId);
-      if (thread.mode === "chat") {
-        void controller.openChatThread(
-          decodeChatThreadId(thread.threadId),
-          thread.title,
-          threadProjectId,
-        );
-        return;
-      }
-      if (thread.mode === "work") {
-        void controller.openWorkThread(
-          decodeWorkThreadId(thread.threadId),
-          thread.title,
-          undefined,
-          threadProjectId,
-        );
-        return;
-      }
-      void controller.openCodeThread(
-        decodeCodeThreadId(thread.threadId),
-        thread.title,
-        undefined,
-        threadProjectId,
-      );
-    },
+    onOpenThread: openCommandThread,
     projects: projectController.projects
       .filter((project) => project.lifecycle === "active" && enabledProjectTypes.has(project.type))
       .map((project) => ({
@@ -5701,6 +5863,7 @@ function LaunchedShell(
         isNarrow={isNarrow}
         onBack={() => setUsageOpen(false)}
         {...(pendingUsageFilter === undefined ? {} : { initialFilter: pendingUsageFilter })}
+        usageQuery={usageClient}
       />
     </Suspense>
   );
@@ -7398,36 +7561,42 @@ function LaunchedShell(
         settings={controller.settings?.voice ?? NO_VOICE_SETTINGS}
       >
         <OctantCommandProvider commands={octantCommands}>
-          {/* Held here rather than with any Code pane: a thread's controller has to
+          <NeedsYouProvider source={needsYouSource}>
+            {/* Held here rather than with any Code pane: a thread's controller has to
         outlive the surfaces reading it, so closing a diff tab never tears down
         the turn that thread is running. */}
-          <CodeThreadControllerSlots
-            client={codeClient}
-            readCursorStore={codeReadCursorStore}
-            registry={codeThreadControllers}
-            threadIds={openCodeThreadIds}
-          />
-          <TrackerReferenceProvider ports={trackerReferencePorts}>
-            <SidebarThreadDragContext.Provider value={sidebarThreadDrag}>
-              <ProjectThreadsProvider value={projectThreadsAccess}>
-                <NewTaskDraftsContext.Provider value={newTaskDrafts}>
-                  <StreamRepliesContext.Provider
-                    value={controller.settings?.streamReplies !== false}
-                  >
-                    {/* The floor for every rendered link: panes that can host a
+            <CodeThreadControllerSlots
+              client={codeClient}
+              readCursorStore={codeReadCursorStore}
+              registry={codeThreadControllers}
+              threadIds={openCodeThreadIds}
+            />
+            <TrackerReferenceProvider ports={trackerReferencePorts}>
+              <SidebarThreadDragContext.Provider value={sidebarThreadDrag}>
+                <ProjectThreadsProvider value={projectThreadsAccess}>
+                  <NewTaskDraftsContext.Provider value={newTaskDrafts}>
+                    <StreamRepliesContext.Provider
+                      value={controller.settings?.streamReplies !== false}
+                    >
+                      {/* The floor for every rendered link: panes that can host a
                     Browser layer their in-app open over this, and surfaces that
                     never can — dock tools, dialogs, Chat — still get the
                     external open and copy rather than a dead anchor. */}
-                    <MarkdownLinkActionsContext.Provider value={rootLinkActions}>
-                      <WorkKindChoiceContext.Provider value={workKindChoice}>
-                        {shell}
-                      </WorkKindChoiceContext.Provider>
-                    </MarkdownLinkActionsContext.Provider>
-                  </StreamRepliesContext.Provider>
-                </NewTaskDraftsContext.Provider>
-              </ProjectThreadsProvider>
-            </SidebarThreadDragContext.Provider>
-          </TrackerReferenceProvider>
+                      <MarkdownLinkActionsContext.Provider value={rootLinkActions}>
+                        <WorkKindChoiceContext.Provider value={workKindChoice}>
+                          <ModelToolVerificationContext.Provider
+                            value={providerController.verifyModelTools}
+                          >
+                            {shell}
+                          </ModelToolVerificationContext.Provider>
+                        </WorkKindChoiceContext.Provider>
+                      </MarkdownLinkActionsContext.Provider>
+                    </StreamRepliesContext.Provider>
+                  </NewTaskDraftsContext.Provider>
+                </ProjectThreadsProvider>
+              </SidebarThreadDragContext.Provider>
+            </TrackerReferenceProvider>
+          </NeedsYouProvider>
         </OctantCommandProvider>
       </SpeechCapabilityProvider>
     </ComputerUseEnabledContext.Provider>

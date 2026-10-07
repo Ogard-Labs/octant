@@ -529,6 +529,14 @@
     flex-wrap: nowrap;
   }
 
+  /* On one row the shrinking falls to the leading chips, which can wrap.
+     The trailing cell keeps its widest chip: at min-width 0 it gave up its
+     width to the leading chips, and "Create from…" in Work ran 28px past
+     the right edge of a 390px card. */
+  .composer-tray--inside .composer-tray__trailing {
+    min-width: auto;
+  }
+
   /* The two labels name the choice on their own; their icons cost about 40px,
      which is what pushed "This computer" off the end of a 390px card. */
   .composer-tray--inside .work-kind-switch svg {
