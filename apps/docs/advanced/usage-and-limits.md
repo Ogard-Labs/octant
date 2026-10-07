@@ -128,6 +128,50 @@ A failed refresh retains the previous reading with a stale label. Limits are
 available to the local authenticated host interface, not automatically to a
 remote client merely because it can read a Project.
 
+## Spend ceilings
+
+A spend ceiling stops new provider turns once a thread or Project has used its
+budget. Set one for a thread under **Usage** in the thread's Environment panel,
+and for a Project in its overview. A thread ceiling covers the thread's whole
+life; a Project ceiling covers a calendar day, week, or month in your time zone.
+A turn must fit both ceilings when both exist. Setting, raising, and clearing a
+ceiling is a host owner command: open the host locally to change one.
+
+Each ceiling can combine four budgets, and a turn must fit every one you set:
+
+- **Tokens** reserve room for a turn before it starts, so two turns cannot both
+  take the last of the budget.
+- **Turns** count every provider turn started in the window.
+- **Hours** count total agent run time, including turns still running.
+- **US dollars** count what the window's turns cost, in whole cents. Type
+  `25`, `25.4`, or `$25.40`; an amount finer than a cent is not accepted.
+
+When a budget runs out, the composer and the Environment panel name the
+ceiling and the budget that refused, and offer to raise or clear the ceiling,
+open Usage, or pause work. Raising takes a higher amount for a budget the
+ceiling already has; to add a budget, clear the ceiling and set it again.
+
+### How money is counted
+
+Money is checked between turns. A provider reports a turn's cost only when the
+turn ends, so a turn that starts with money left always finishes and can end
+over the budget, and turns that run at the same time can each add their cost.
+The next turn is then refused.
+
+Each request's cost is the provider's own figure when it reports one: Claude
+Code, OpenCode, Pi, and OpenRouter do. Otherwise, for a model with a standard
+API rate, Octant uses the same estimate as the **est.** cost under the
+composer. For a subscription such as a ChatGPT or Claude plan, that estimate is
+what the tokens would cost at API rates, not what you are billed.
+
+Usage with no price is never counted as free. If any usage in the window has
+no price — a model without a known rate (including local models), a provider
+that reports neither cost nor usage, or usage recorded before Octant recorded
+costs — the money budget cannot be checked, the Usage panel says **Cannot be
+measured**, and the next turn is refused until that usage leaves a Project's
+calendar window or you clear the ceiling and set it again without a money
+budget.
+
 ## Restart-safe local history
 
 Octant saves its bounded local accounting index and import checkpoints in its
