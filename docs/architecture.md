@@ -571,10 +571,14 @@ starts on demand (the native helper's first connection starts it), raises the
 guest notification `com.apple.coredevice.dtuhidd.active` to `1`, and from then
 on `serve-sim` exits successfully while the device drops every tap, swipe, and
 Home. Before each tap, swipe, button, or finger-down on that stream the desktop
-reads the notification; at `1` it sends nothing and refuses with the reason
-`input-disconnected` ("Simulator input is disconnected. Repair input restarts
-the Simulator's home screen."). When the guest does not answer within 1.5
-seconds the input is sent as before. **Repair input** is a fifth input kind,
+reads the notification; at `1` it sends nothing through `serve-sim` and hands
+the input to the native device helper, which speaks to Device Hub's daemon and
+proves it answers before sending (a finger that went down that way stays on
+it until it lifts). When the helper cannot deliver either, the input is
+refused with the reason `input-disconnected` ("Simulator input is
+disconnected. Repair input restarts the Simulator's home screen."). When the
+guest does not answer the question within 1.5 seconds the input is sent
+through `serve-sim` as before. **Repair input** is a fifth input kind,
 offered by the device pane only after that refusal: it runs
 `serve-sim repair-input` (which restarts the guest's `backboardd`, so the home
 screen restarts and running apps close) and drops the stream so the next input

@@ -151,8 +151,41 @@ describe("managed simulator streams", () => {
     }
   });
 
-  it("refuses a tap as disconnected when Device Hub has taken the Simulator's input", async () => {
+  it("sends input Device Hub took through the native helper instead of serve-sim", async () => {
     const native = nativeHelpers();
+    const managed = tools();
+    const helpers = createManagedSimulatorHelpers(native, managed, {
+      fetch: fetchStream,
+      inputConnection: async () => "disconnected",
+    });
+    try {
+      await expect(helpers.send(udid, { op: "tap", x: 0.5, y: 0.25 }, 2_000)).resolves.toEqual({
+        status: "delivered",
+      });
+      await helpers.send(udid, { op: "touch", phase: "down", x: 0.2, y: 0.3 }, 2_000);
+      await helpers.send(udid, { op: "touch", phase: "move", x: 0.4, y: 0.5 }, 2_000);
+      await helpers.send(udid, { op: "touch", phase: "up", x: 0.4, y: 0.5 }, 2_000);
+      expect(native.send.mock.calls.map(([, request]) => request)).toEqual([
+        { op: "tap", x: 0.5, y: 0.25 },
+        { op: "touch", phase: "down", x: 0.2, y: 0.3 },
+        { op: "touch", phase: "move", x: 0.4, y: 0.5 },
+        { op: "touch", phase: "up", x: 0.4, y: 0.5 },
+      ]);
+      expect(managed.commands.some((args) => args[0] === "tap" || args[0] === "gesture")).toBe(
+        false,
+      );
+    } finally {
+      helpers.dispose();
+    }
+  });
+
+  it("refuses input as disconnected when neither serve-sim nor the native helper can deliver it", async () => {
+    const native = nativeHelpers();
+    native.send.mockResolvedValue({
+      status: "refused",
+      code: "daemon-unresponsive",
+      message: "no reply within 4 seconds",
+    });
     const managed = tools();
     const helpers = createManagedSimulatorHelpers(native, managed, {
       fetch: fetchStream,
@@ -171,7 +204,6 @@ describe("managed simulator streams", () => {
       expect(managed.commands.some((args) => args[0] === "tap" || args[0] === "button")).toBe(
         false,
       );
-      expect(native.send).not.toHaveBeenCalled();
     } finally {
       helpers.dispose();
     }

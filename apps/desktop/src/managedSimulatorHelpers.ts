@@ -138,6 +138,8 @@ export function createManagedSimulatorHelpers(
   const inputConnection = options.inputConnection ?? simctlInputConnection;
   const sessions = new Map<string, Promise<StreamSession | undefined>>();
   const live = new Set<ChildProcess>();
+  /** Simulators whose finger went down through the native helper. */
+  const nativeFingers = new Set<string>();
   let disposed = false;
   let inflight = 0;
 
@@ -253,7 +255,7 @@ export function createManagedSimulatorHelpers(
     request: DeviceHelperRequest,
     timeoutMs: number,
     cancelled: AbortSignal | undefined,
-  ): Promise<DeviceHelperReply | "native"> {
+  ): Promise<DeviceHelperReply | "native" | "disconnected"> {
     if (request.op === "hello") {
       return { status: "delivered", screen: session.screen };
     }
@@ -266,7 +268,10 @@ export function createManagedSimulatorHelpers(
     // serve-sim's command line answers once its socket took the message, not
     // once the guest acted on it, so a Simulator whose input Device Hub took
     // would hear every touch reported as delivered. A finger already down
-    // was checked when it went down.
+    // was checked when it went down, and stays on the path it went down on.
+    if (request.op === "touch" && request.phase !== "down" && nativeFingers.has(session.udid)) {
+      return "disconnected";
+    }
     if (!(request.op === "touch" && request.phase !== "down")) {
       const connection = await inputConnection(
         session.udid,
@@ -278,13 +283,7 @@ export function createManagedSimulatorHelpers(
       if (actionWasCancelled(cancelled)) {
         return { status: "unavailable", message: "The action was cancelled." };
       }
-      if (connection === "disconnected") {
-        return {
-          status: "refused",
-          code: "input-disconnected",
-          message: INPUT_DISCONNECTED_MESSAGE,
-        };
-      }
+      if (connection === "disconnected") return "disconnected";
     }
     let sent = false;
     let gestureOpen = false;
@@ -362,6 +361,28 @@ export function createManagedSimulatorHelpers(
   }
 
   /**
+   * Device Hub's input daemon is what took the input, and the native helper
+   * speaks to that daemon, proving it answers before it sends (observed
+   * 2026-10-08 on Xcode 27.0: the helper opened Settings on a Simulator whose
+   * serve-sim taps were being dropped). When the helper cannot deliver either,
+   * the input is refused as disconnected so Repair input can be offered.
+   */
+  async function disconnectedInput(
+    udid: string,
+    request: DeviceHelperRequest,
+    timeoutMs: number,
+    cancelled: AbortSignal | undefined,
+  ): Promise<DeviceHelperReply> {
+    if (request.op === "touch" && request.phase === "down") nativeFingers.add(udid);
+    if (request.op === "touch" && request.phase === "up") nativeFingers.delete(udid);
+    const reply = await native.send(udid, request, timeoutMs, cancelled);
+    if (reply.status === "delivered") return reply;
+    if (request.op === "touch") nativeFingers.delete(udid);
+    if (actionWasCancelled(cancelled)) return reply;
+    return { status: "refused", code: "input-disconnected", message: INPUT_DISCONNECTED_MESSAGE };
+  }
+
+  /**
    * Gives touch and buttons back to the legacy services serve-sim drives, then
    * drops the stream: serve-sim reconnects to them only when it starts again.
    */
@@ -381,6 +402,7 @@ export function createManagedSimulatorHelpers(
     if (outcome !== "ok") {
       return { status: "unavailable", message: "The Simulator's input could not be repaired." };
     }
+    nativeFingers.delete(udid);
     const session = await sessions.get(udid);
     if (session !== undefined) retire(session);
     return { status: "delivered" };
@@ -470,6 +492,9 @@ export function createManagedSimulatorHelpers(
       }
       const delivered = await deliver(session, request, timeoutMs, cancelled);
       if (delivered === "native") return native.send(simulatorId, request, timeoutMs, cancelled);
+      if (delivered === "disconnected") {
+        return disconnectedInput(simulatorId, request, timeoutMs, cancelled);
+      }
       return delivered;
     },
 
