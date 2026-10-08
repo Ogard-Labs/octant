@@ -2566,7 +2566,10 @@ root the server discovered. The broker accepts only an absolute, normalized
 root that holds `platform-tools/adb`, and runs `serve-avd` with that root as
 `ANDROID_HOME` and with `ADB_MDNS=0`, so the tool uses the server's `adb` and
 any shared `adb` server it starts stays up. `serve-avd` prints its ready state
-as indented JSON over several lines, and the broker reads the whole object.
+as indented JSON over several lines, and the broker reads the whole object. Its
+`stream.mjpeg` carries JPEG parts, or PNG parts when the emulator image cannot
+encode `screencap -j`; the server cuts parts by `Content-Length` and passes
+either image type to the pane.
 When the tool is missing, exits, or does not attach in time, the broker
 answers with that reason. Every Android screen stream names its transport in
 `x-octant-android-transport`: `stream`, or `screencap` with the reason the

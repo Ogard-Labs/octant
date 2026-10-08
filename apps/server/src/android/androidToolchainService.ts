@@ -33,7 +33,7 @@ import type {
   AndroidScreenFallbackReason,
   AndroidScreenTransport,
 } from "@octant/contracts/android-toolchain-rpc";
-import { takeJpegFrames } from "@octant/domain/managed-device-stream";
+import { takeMultipartImageFrames } from "@octant/domain/managed-device-stream";
 import type { ServeAvdAttachment, ServeAvdOpening, ServeAvdPort } from "./serveAvdBrokerClient";
 
 export interface AndroidProcessResult {
@@ -805,7 +805,7 @@ export class AndroidToolchainService {
       return noFrames;
     }
     const reader = response.body.getReader();
-    const first = await firstJpeg(reader, signal, 5_000);
+    const first = await readFirstFrames(reader, signal, 5_000);
     if (first === undefined) {
       await reader.cancel().catch(() => undefined);
       return noFrames;
@@ -824,7 +824,7 @@ export class AndroidToolchainService {
               }
               const chunk = await reader.read();
               if (chunk.done) break;
-              const taken = takeJpegFrames(concatBytes(rest, chunk.value));
+              const taken = takeMultipartImageFrames(concatBytes(rest, chunk.value));
               rest = taken.rest;
               pending.push(...taken.frames);
             }
@@ -1586,7 +1586,7 @@ async function readServeAvdScreen(
 
 type ReadChunk = { readonly done: false; readonly value: Uint8Array } | { readonly done: true };
 
-async function firstJpeg(
+async function readFirstFrames(
   reader: ReadableStreamDefaultReader<Uint8Array>,
   signal: AbortSignal,
   timeoutMs: number,
@@ -1596,7 +1596,7 @@ async function firstJpeg(
   while (!signal.aborted && Date.now() < deadline) {
     const chunk = await readChunk(reader, deadline - Date.now(), signal);
     if (chunk === undefined || chunk.done) return undefined;
-    const taken = takeJpegFrames(concatBytes(rest, chunk.value));
+    const taken = takeMultipartImageFrames(concatBytes(rest, chunk.value));
     rest = taken.rest;
     if (taken.frames.length > 0) return { frames: taken.frames, rest };
   }

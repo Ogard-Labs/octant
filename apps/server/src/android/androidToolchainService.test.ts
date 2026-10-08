@@ -797,9 +797,14 @@ describe("AndroidToolchainService", () => {
     }
   });
 
-  it("shows a managed JPEG stream for a booted emulator and does not screencap", async () => {
+  it("shows serve-avd's stream for a booted emulator, PNG parts included, and does not screencap", async () => {
     const execute = discoveryExecutor();
-    const jpeg = Uint8Array.of(0xff, 0xd8, 0x11, 0xff, 0xd9);
+    // An emulator image without `screencap -j` makes serve-avd send PNG parts.
+    const png = Uint8Array.of(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0xff, 0xd9);
+    const header = new TextEncoder().encode(
+      `--frame\r\nContent-Type: image/png\r\nContent-Length: ${png.length}\r\n\r\n`,
+    );
+    const multipart = new Uint8Array([...header, ...png, 0x0d, 0x0a]);
     const sdkRoots: Array<string | undefined> = [];
     const service = new AndroidToolchainService({
       execute,
@@ -827,7 +832,7 @@ describe("AndroidToolchainService", () => {
         if (url.endsWith("/config")) {
           return new Response(JSON.stringify({ width: 1080, height: 1920 }));
         }
-        if (url.endsWith("/stream.mjpeg")) return new Response(jpeg);
+        if (url.endsWith("/stream.mjpeg")) return new Response(multipart);
         return new Response("no", { status: 404 });
       },
     });
@@ -848,7 +853,7 @@ describe("AndroidToolchainService", () => {
     expect(chunk.done).toBe(false);
     if (chunk.done) return;
     const length = new DataView(chunk.value.buffer, chunk.value.byteOffset, 4).getUint32(0);
-    expect(chunk.value.slice(4, 4 + length)).toEqual(jpeg);
+    expect(chunk.value.slice(4, 4 + length)).toEqual(png);
     expect(execute).not.toHaveBeenCalled();
     await reader.cancel();
     await service.close();
