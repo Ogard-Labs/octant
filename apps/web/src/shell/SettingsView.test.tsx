@@ -379,6 +379,71 @@ describe("SettingsView", () => {
     );
   });
 
+  it("saves a model's context window from Octant Harness › Model endpoints", async () => {
+    const user = userEvent.setup();
+    const instanceId = "80000000-0000-4000-8000-000000000092";
+    const setModelContextWindow = vi.fn(async () => true);
+    const fixture = providerControllerFixture();
+    const instances = [
+      {
+        id: instanceId,
+        displayName: "Foundry relay",
+        driverKind: "azure-foundry",
+        configuration: {
+          kind: "azure-foundry-openai-http",
+          baseUrl: "https://foundry.example.openai.azure.com/openai/v1/",
+          authentication: "api-key",
+          protocol: "auto",
+          manualModelIds: ["deployment-a"],
+        },
+        enabled: true,
+        environmentPolicy: "inherit-host",
+        version: 1,
+        createdAt: now,
+        updatedAt: now,
+      },
+    ];
+    const providerController = {
+      ...fixture,
+      instances,
+      readInstances: () => instances,
+      observedByInstance: new Map([
+        [
+          instanceId,
+          {
+            instanceId,
+            readiness: "ready",
+            processState: "running",
+            models: [
+              {
+                id: "deployment-a",
+                displayName: "deployment-a",
+                source: "manual",
+                verification: "verified",
+                reasoning: "unsupported",
+                inputModalities: ["text"],
+                options: [],
+              },
+            ],
+            capabilities: {},
+            observedAt: now,
+          },
+        ],
+      ]),
+      setModelContextWindow,
+    } as unknown as ProviderController;
+    renderSettings({
+      providerController,
+      discoveryController: discoveryControllerFixture(),
+      initialDeepLink: { section: "harness" },
+    });
+
+    await user.click(screen.getByRole("button", { name: "Details for Foundry relay" }));
+    await user.type(screen.getByLabelText("Context window for deployment-a"), "131072{Enter}");
+
+    expect(setModelContextWindow).toHaveBeenCalledWith(instanceId, "deployment-a", 131_072);
+  });
+
   it("scans once when the Providers section opens", async () => {
     const providerController = providerControllerFixture();
     const discoveryController = discoveryControllerFixture();

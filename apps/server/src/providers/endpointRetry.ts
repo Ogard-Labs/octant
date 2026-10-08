@@ -72,10 +72,54 @@ export function isContextOverflowFailure(failure: ProviderFailure): boolean {
   );
 }
 
+/**
+ * How refusals name the window they enforce. OpenAI, Azure and vLLM say "maximum
+ * context length is N tokens", Anthropic "prompt is too long: X tokens > N
+ * maximum", Mistral "model with N maximum context length", llama.cpp "available
+ * context size (N tokens)"; the last pattern reads the sentence a driver
+ * substitutes below, so the number survives a driver that keeps no raw text.
+ */
+const CONTEXT_WINDOW_IN_REFUSAL = [
+  /maximum context length (?:is|of) ([\d,]+) tokens/i,
+  /prompt is too long: [\d,]+ tokens? > ([\d,]+) maximum/i,
+  /model with ([\d,]+) maximum context length/i,
+  /available context size \(([\d,]+) tokens?\)/i,
+  /context (?:length|window|limit) (?:is|of) ([\d,]+) tokens/i,
+] as const;
+
+// A figure outside these bounds is a misread (a request size, a status code),
+// never a window worth learning.
+const MIN_LEARNED_CONTEXT_WINDOW = 1_024;
+const MAX_LEARNED_CONTEXT_WINDOW = 100_000_000;
+
+/** The context window an overflow refusal names, or undefined when it names none Octant can read. */
+export function contextWindowFromRefusal(text: string): number | undefined {
+  for (const pattern of CONTEXT_WINDOW_IN_REFUSAL) {
+    const digits = pattern.exec(text)?.[1]?.replaceAll(",", "");
+    if (digits === undefined) continue;
+    const value = Number(digits);
+    if (
+      Number.isSafeInteger(value) &&
+      value >= MIN_LEARNED_CONTEXT_WINDOW &&
+      value <= MAX_LEARNED_CONTEXT_WINDOW
+    ) {
+      return value;
+    }
+  }
+  return undefined;
+}
+
 /** The overflow failure a rejection body that names a filled window becomes, or undefined if it is another error. */
 export function contextOverflowFromBody(text: string): ProviderFailure | undefined {
   if (!CONTEXT_OVERFLOW_MESSAGE.test(text)) return undefined;
-  return { category: "provider-failed", message: CONTEXT_OVERFLOW_FAILURE_MESSAGE };
+  const contextWindow = contextWindowFromRefusal(text);
+  return {
+    category: "provider-failed",
+    message:
+      contextWindow === undefined
+        ? CONTEXT_OVERFLOW_FAILURE_MESSAGE
+        : `The provider rejected the request because it exceeded the model's context length of ${contextWindow} tokens.`,
+  };
 }
 
 // The stream parsers report a stream that closed before its terminal event as

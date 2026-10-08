@@ -71,6 +71,8 @@ export interface ProtocolTurnResult {
   readonly events: readonly ProtocolTurnEvent[];
   readonly toolCalls: readonly ProtocolToolCall[];
   readonly verifiedManualModelId?: string;
+  /** The `model` the endpoint said answered, which a deployment's own name can hide. */
+  readonly servedModelId?: string;
   /** Quota buckets from the response headers. Absent when the endpoint sent none. */
   readonly rateLimitBuckets?: ReadonlyArray<ObservedRateLimitBucket>;
   /** Present when the endpoint said this reply stopped on a known limit or filter. */
@@ -151,6 +153,7 @@ interface NormalizationState {
   text: string;
   reasoning: string;
   usage?: ProtocolUsage;
+  servedModelId?: string;
   completed: boolean;
   /** Whether the turn runs under the ChatGPT plan request profile. */
   planProfile: boolean;
@@ -347,6 +350,7 @@ async function runResponsesTurn(
     ...(input.endpoint.configuration.manualModelIds.includes(input.modelId as never)
       ? { verifiedManualModelId: input.modelId }
       : {}),
+    ...(state.servedModelId === undefined ? {} : { servedModelId: state.servedModelId }),
     ...(rateLimitBuckets.length === 0 ? {} : { rateLimitBuckets }),
     ...(state.outputStopReason === undefined ? {} : { outputStopReason: state.outputStopReason }),
   };
@@ -411,6 +415,10 @@ function normalizeEvent(
       state.accepted = true;
       validateResponseState(event.response, "completed", state);
       validateTerminalItems(event.response, state);
+      if (isRecord(event.response) && typeof event.response.model === "string") {
+        const served = event.response.model.trim();
+        if (served.length > 0 && served.length <= 256) state.servedModelId = served;
+      }
       const usage = readUsage(event.response);
       if (usage !== undefined) {
         state.usage = usage;

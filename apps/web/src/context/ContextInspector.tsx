@@ -3,6 +3,7 @@ import type { ContextInspectorSnapshot } from "@octant/contracts/context-rpc";
 import { hasKnownContextWindow } from "@octant/domain/context-policy";
 import type { RefObject } from "react";
 import {
+  contextWindowSourceLabel,
   contextCategoryLabel,
   contextCategoryTone,
   contextCompositionEntries,
@@ -85,16 +86,7 @@ export function ContextInspector(props: ContextInspectorProps) {
             <Fact label="Model" value={snapshot.modelLimits.modelId} />
             <Fact
               label="Limit source"
-              value={
-                {
-                  "conservative-fallback": "Conservative estimate",
-                  "runtime-reported": "Provider runtime",
-                  "provider-discovery": "Provider discovery",
-                  "reviewed-catalog": "Reviewed catalog",
-                  "user-supplied": "User supplied",
-                  "observed-evidence": "Observed evidence",
-                }[snapshot.modelLimits.source]
-              }
+              value={contextWindowSourceLabel(snapshot.modelLimits.source)}
             />
             <Fact
               label="Context window"

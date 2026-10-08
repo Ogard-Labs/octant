@@ -197,7 +197,12 @@ import {
 } from "../persistence/chatProjection";
 import { readUsageResumeState } from "../persistence/usageResumeProjection";
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
-import { modelEvidenceFromObservedState } from "../providers/providerContextFacts";
+import { carryModelContextWindowFacts } from "../providers/modelContextWindowFacts";
+import {
+  modelEvidenceFromObservedState,
+  modelWindowConfidence,
+} from "../providers/providerContextFacts";
+import { resolveModelContextWindow } from "@octant/domain/model-context-window";
 import type { ReviewedModelManifest } from "../providers/reviewedModelManifest";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import { createDiagnosticsFailureIncidentEvent } from "../diagnosticsExportService";
@@ -4118,7 +4123,7 @@ export class ChatService {
     providerInstanceId: ProviderInstanceId,
   ): Promise<ProviderProbeResult> {
     try {
-      const probe = await Effect.runPromise(
+      let probe = await Effect.runPromise(
         Effect.scoped(driver.probe({ instanceId: providerInstanceId })),
       );
       // The driver probe carries verifiedToolModelIds forward from the
@@ -4128,6 +4133,18 @@ export class ChatService {
       // Chat turn/research preflight. Skip invalidated catalogs: a config
       // change invalidates prior verification evidence.
       const persistedCatalog = this.#persistence.readProviderCatalog?.(providerInstanceId);
+      // A window a person set for a model, or one its endpoint taught, is
+      // kept with the catalogue; after a restart the probe knows neither.
+      const withFacts = carryModelContextWindowFacts(probe.models, persistedCatalog?.models);
+      if (withFacts !== probe.models) {
+        probe = this.#providerRuntimeRegistry?.setObservedState({
+          ...probe,
+          models: withFacts,
+        }) ?? {
+          ...probe,
+          models: withFacts,
+        };
+      }
       const persistedVerified =
         persistedCatalog?.invalidated === false ? persistedCatalog.verifiedToolModelIds : undefined;
       if (persistedVerified === undefined || persistedVerified.length === 0) {
@@ -4204,12 +4221,15 @@ export class ChatService {
     readonly modelLimitObservations: ReadonlyArray<ModelContextLimits>;
     readonly serviceLimits: ProviderServiceLimits;
   }> {
-    let modelEvidence = await this.#observeModelLimitEvidence(driver, probe, modelId);
-    if (modelEvidence.length === 0) {
-      const fromProbe = this.#modelLimitEvidenceFromProbeModel(probe, modelId);
-      if (fromProbe !== undefined) {
-        modelEvidence = [fromProbe];
-      }
+    const fromProbe = this.#modelLimitEvidenceFromProbeModel(probe, modelId);
+    // A window the person set wins over every automatic source, including a
+    // driver's own report, so it replaces that evidence rather than joining it.
+    let modelEvidence =
+      fromProbe?.source === "user-supplied"
+        ? [fromProbe]
+        : await this.#observeModelLimitEvidence(driver, probe, modelId);
+    if (modelEvidence.length === 0 && fromProbe !== undefined) {
+      modelEvidence = [fromProbe];
     }
     const modelLimitObservations = modelEvidence
       .map((evidence) => normalizeModelLimitEvidence(evidence))
@@ -4265,14 +4285,16 @@ export class ChatService {
     modelId: ProviderModelId,
   ): ProviderModelLimitEvidence | undefined {
     const model = probe.models.find((candidate) => String(candidate.id) === String(modelId));
-    if (model?.contextLimit === undefined) return undefined;
+    const resolved = model === undefined ? undefined : resolveModelContextWindow(model);
+    if (model === undefined || resolved === undefined) return undefined;
     return {
       providerInstanceId: probe.instanceId,
       modelId: model.id,
-      contextWindow: model.contextLimit,
+      contextWindow: resolved.contextWindow,
+      ...(resolved.maxOutput === undefined ? {} : { maxOutput: resolved.maxOutput }),
       reasoning: model.reasoning === "supported" ? "included" : "unknown",
-      source: model.source === "discovered" ? "provider-discovery" : "user-supplied",
-      confidence: model.verification === "verified" ? "medium" : "low",
+      source: resolved.source,
+      confidence: modelWindowConfidence(resolved.source, false),
       observedAt: probe.observedAt,
     };
   }
