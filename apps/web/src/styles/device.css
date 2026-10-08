@@ -261,7 +261,7 @@
 .device-body {
   position: relative;
   padding: var(--device-bezel);
-  border-radius: calc(var(--device-bezel) + var(--oct-radius-sheet));
+  border-radius: var(--oct-radius-device);
   background: var(--device-body);
   box-shadow:
     0 0 0 1px var(--device-edge),
