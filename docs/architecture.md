@@ -1258,7 +1258,7 @@ flowchart LR
   sync client's conflict copies and lost updates cannot happen. An entry is a
   readable JSON bundle in the
   [0029](decisions/0029-artifact-storage-mirror.md) format, with a detached
-  signature from the writing host's own identity key. The storage provider can
+  signature from the writing instance's device signing key. The storage provider can
   read those files; they are not encrypted. Before an entry is written, and
   before an imported entry is accepted, the host applies the same refusal and
   redaction as a shared bundle: credentials, secret-shaped values, and absolute
@@ -2771,8 +2771,10 @@ mechanisms are:
   replica instance, in a credential namespace of its own that provider
   credentials cannot reach — not a paired client's device key. There is no
   replica key. The entry names that key, and the instance id is derived from
-  it, so a record that fails verification under its own key, or names an id
-  that is not its key's, is not valid and is journaled as unreadable.
+  it, so a record that fails verification under its own key, names an id
+  that is not its key's, or is not the canonical encoding of its entry with
+  the canonical base64 text of its signature, is not valid and is journaled as
+  unreadable.
   Membership is derived from the valid records a host holds and the founder it
   pinned; an entry counts only when its writer is admitted through a chain of
   signed approvals and acceptances from that founder and the entry sits at or
@@ -2780,10 +2782,13 @@ mechanisms are:
   the store, signed over the time it was written; a request older than a day
   is not offered for approval. A member in good standing approves it by name,
   and only the store's own copy of the request can be approved, not a copy a
-  caller hands over. A short matching code, compared on both screens, shows
-  the person that the request, the approving computer's key, and the founder
-  are the ones the joining computer means; it is not a secret, and the
-  signatures, not the code, make the records authoritative. The joining
+  caller hands over. A short matching code, compared on both screens, is a
+  consistency check that the request, the approving computer's key, and the
+  founder are the ones the joining computer means. It is not a secret and not
+  a tamper proof: six digits leave room for someone who can write the store
+  to search offline for a substituted join request that yields the same
+  code. The signatures and the verified approval chain, not the code, make
+  the records authoritative. The joining
   computer then signs its acceptance of that one approval, which makes the
   approver its only parent. Revoke writes a signed revocation, and only a
   computer that brought the revoked one in, directly or through others, can
@@ -2797,8 +2802,8 @@ mechanisms are:
   (`apps/docs/guide/sync-artifacts.md`) say so before sync is turned on.
   Opt-in encryption of replicas is not this rule. A replica import appends
   versions to this journal and adopts nothing else. Membership accepts an
-  entry from an admitted host identity key, within its cut, as authentic. It
-  does not delegate host authority between hosts.
+  entry signed by an admitted instance's device signing key, within its cut,
+  as authentic. It does not delegate host authority between hosts.
 - **Hosts never trust each other.** Multi-host views merge read models
   client-side; credentials and mutable authority never cross hosts. Completing
   all-hosts honesty, pairing at scale, and conflict presentation is client

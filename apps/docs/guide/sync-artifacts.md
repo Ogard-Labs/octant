@@ -64,9 +64,12 @@ this. The new computer writes a request into the store, signed with a key
 kept in its own Keychain or Secret Service. A computer that already shares
 the store shows that the new one wants to join, and both screens show the
 same six-digit code. You approve only if the codes match, then confirm on the
-new computer. The code is a check that both screens mean the same two
-computers, the same key on the approving one, and the same computer that set
-up the store, so a store someone tampered with shows a different code. It is
+new computer. The code is a quick consistency check that both screens mean
+the same two computers, the same key on the approving one, and the same
+computer that set up the store. A store someone tampered with usually shows a
+different code, but six digits are short: someone who can write to the store
+could search offline for a substituted request that shows the same code. The
+signatures on every record, not the code, are what Octant trusts. The code is
 not a password, and nothing secret passes through the store.
 
 The new computer then confirms. It signs a record saying which approval it
