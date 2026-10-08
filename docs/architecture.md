@@ -285,12 +285,27 @@ definition across modes. Canvas's `describe` operation lists the closed block
 catalogue and a creation example, or returns canonical schemas for up to three
 requested block kinds. Unscoped describe also lists document recipes: an id, a
 title, when to use one, and a skeleton of block kinds that already exist. The
-host offers an implementation plan, an audit or test report, a code review, a
-research brief, and a postmortem. A trusted, enabled, unscoped skill may add
-recipes through its Canvas contribution; a skill that is not enabled contributes
-none, and a contributed recipe cannot replace an in-tree id. A recipe is a
-starting shape, not a document and not authority. Describe reads no Project
-data and creates no artifact.
+host offers an implementation plan, a design spec, an architecture review (its
+options in a comparison matrix), a code review, an audit or test report, a
+postmortem, a research brief, a dashboard, a repository map, a design
+prototype, a slide deck, and a data model. A trusted, enabled, unscoped skill
+may add recipes through its Canvas contribution; a skill that is not enabled
+contributes none, and a contributed recipe cannot replace an in-tree id. A
+recipe is a starting shape, not a document and not authority. Describe reads no
+Project data and creates no artifact.
+A person starts a Canvas from the same list. `GET /api/canvas/recipes` returns
+it to any authenticated window (a recipe carries no Project data), with an
+optional one-line `summary` per recipe for the chooser. `create` with intent
+`template` names a recipe as `templateId`; the host resolves it against what it
+offers at that moment, refuses an id it does not offer as `invalid-template`,
+and opens the Canvas with the pure `canvasRecipeStarterBlocks` document: each
+heading role as a heading and every other role as an info callout naming the
+block kind it waits for, never a data block with invented values. The create
+request keeps its ordinary scope and authority checks. When the Create Canvas
+panel belongs to a thread, the person may also ask that thread's agent to fill
+it in: after the Canvas exists, the renderer sends an ordinary turn on the
+thread with the new Canvas attached as whole-canvas context, so the agent
+revises it with its own tools under the thread's existing authority.
 `create` and `revise` take an optional thread `presentation`: `inline` or
 `sidebar` (the default). The value is part of the definition and needs Canvas
 schema version 4. An older runtime refuses a version-4 document as a future

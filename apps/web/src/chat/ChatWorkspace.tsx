@@ -73,6 +73,7 @@ import { ThreadCanvases } from "../canvas/InlineThreadCanvas";
 import { placeThreadCanvases, threadTurnSpans } from "../canvas/threadCanvasPlacement";
 import { useThreadCanvasCards } from "../canvas/useThreadCanvasCards";
 import { buildCanvasCreationContext } from "../canvas/buildCanvasCreationContext";
+import { canvasRecipeFillTurn } from "../canvas/canvasRecipeFill";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantApprovalCard } from "../ui/base/OctantApprovalCard";
 import { ExtensionToolApprovalPrompt } from "../extensions/ExtensionToolApprovalPrompt";
@@ -861,6 +862,33 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
                   originThreadId: thread.id,
                   projectId: thread.projectId ?? null,
                 })}
+                onAskAgentToFill={async (request) => {
+                  const turn = canvasRecipeFillTurn(request);
+                  // The ordinary send, behind the same queue as the composer's
+                  // own sends, so the ask runs on the thread's current model
+                  // and authority like any message the person types.
+                  const asked = await enqueueThreadCommand(async (previous) => ({
+                    value: await props.controller.sendTurn(
+                      turn.message,
+                      [],
+                      [],
+                      [turn.selection],
+                      [],
+                      [],
+                      ...(previous !== undefined && previous.threadId === String(thread.id)
+                        ? ([previous.version] as const)
+                        : ([] as const)),
+                    ),
+                  }));
+                  // The panel closes on creation, so a refused ask is said
+                  // beside the composer, where the person can ask by hand.
+                  if (!asked) {
+                    setSendNotice(
+                      `“${request.receipt.title}” is ready, but its agent could not be asked to fill it. Ask in this thread.`,
+                    );
+                  }
+                  return asked;
+                }}
                 onCreated={() => {
                   setCanvasRefreshKey((current) => current + 1);
                   setCanvasPanelOpen(false);

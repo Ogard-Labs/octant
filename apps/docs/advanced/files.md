@@ -95,6 +95,23 @@ last observed version sequence; creation starts at sequence 1. JavaScript and
 invented file or artifact references are not Canvas content, and HTML and CSS
 appear only in a design's frames.
 
+### Start a Canvas from a recipe
+
+In a Chat thread, choose **Show canvas** from the **Thread actions** menu. Under
+**Start from**, pick **Blank** or a recipe: an implementation plan, a design
+spec, an architecture review, a code review, an audit or test report, a
+postmortem, a research brief, a dashboard, and the others the host offers,
+including any an enabled skill adds. Each shows one line about what it holds
+and a small outline of its sections. Use the arrow keys to move between them.
+
+A Canvas started from a recipe opens with the recipe's sections: its headings,
+and a "To fill" note for every other block saying what belongs there. With
+**Ask this thread's agent to fill it in** ticked, Octant also sends a message on
+the thread asking its agent to fill the new Canvas, with the Canvas attached.
+The message appears in the thread like one you typed, and the agent works with
+the thread's usual model and access. Untick it to get only the outline. Add
+what the Canvas should cover in the box beneath, if you like.
+
 A created Canvas appears in its thread at the end of the turn that made it, as
 a row you can click to open it. The row shows a live miniature of the Canvas
 and one line about what it holds, such as a plan's next task and how many
