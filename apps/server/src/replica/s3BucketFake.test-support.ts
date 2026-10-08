@@ -72,4 +72,3 @@ export function bucketFake(bucket: string): BucketFake {
     transport,
   };
 }
-
