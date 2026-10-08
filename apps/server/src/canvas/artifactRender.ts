@@ -1016,7 +1016,15 @@ function comparisonMatrix(
   palette: ArtifactThumbnailPalette,
 ): string {
   const layout = layoutCanvasComparisonMatrix(block);
-  const options = layout.options.slice(0, MATRIX_VISIBLE_OPTIONS);
+  // The recommendation is the point of the picture, so a recommended option
+  // past the visible columns takes the last column rather than vanishing.
+  const shown = layout.options.slice(0, MATRIX_VISIBLE_OPTIONS);
+  const recommendedIndex = layout.options.findIndex((option) => option.recommended);
+  const columnIndexes =
+    recommendedIndex >= MATRIX_VISIBLE_OPTIONS
+      ? [...shown.slice(0, -1).map((option) => option.index), recommendedIndex]
+      : shown.map((option) => option.index);
+  const options = columnIndexes.flatMap((index) => layout.options[index] ?? []);
   const rows = layout.rows.slice(0, MATRIX_VISIBLE_CRITERIA);
   const labelWidth = Math.round(width * 0.34);
   const column = (width - labelWidth) / Math.max(1, options.length);
@@ -1052,31 +1060,33 @@ function comparisonMatrix(
         palette.ink,
       ),
     );
-    row.cells.slice(0, options.length).forEach((cell, index) => {
-      const x = round(columnX(index) + 3);
-      const mid = top + MATRIX_ROW_HEIGHT / 2;
-      const reading = cell.reading;
-      if (reading === undefined) {
-        parts.push(
-          `<rect x="${String(x)}" y="${String(round(mid))}" width="5" height="1" fill="${palette.muted}"/>`,
-        );
-      } else if (reading.kind === "text") {
-        parts.push(
-          `<rect x="${String(x)}" y="${String(round(mid - 1))}" width="${String(Math.max(4, round(column * 0.5)))}" height="2" rx="1" fill="${palette.muted}" opacity="0.7"/>`,
-        );
-      } else if (reading.kind === "glyph") {
-        const fill = reading.glyph === "no" ? "none" : palette.accent;
-        const opacity = reading.glyph === "partial" ? "0.5" : "0.9";
-        parts.push(
-          `<circle cx="${String(x + 3)}" cy="${String(round(mid))}" r="3" fill="${fill}" fill-opacity="${opacity}" stroke="${palette.accent}" stroke-width="1"/>`,
-        );
-      } else {
-        const track = Math.max(6, round(column - 8));
-        parts.push(
-          `<rect x="${String(x)}" y="${String(round(mid - 1.5))}" width="${String(Math.max(1, round(track * (cell.fraction ?? 0))))}" height="3" rx="${String(CHART_BAR_RADIUS)}" fill="${palette.accent}" opacity="${opacityFor(0.35 + 0.55 * (cell.fraction ?? 0))}"/>`,
-        );
-      }
-    });
+    columnIndexes
+      .flatMap((optionIndex) => row.cells[optionIndex] ?? [])
+      .forEach((cell, index) => {
+        const x = round(columnX(index) + 3);
+        const mid = top + MATRIX_ROW_HEIGHT / 2;
+        const reading = cell.reading;
+        if (reading === undefined) {
+          parts.push(
+            `<rect x="${String(x)}" y="${String(round(mid))}" width="5" height="1" fill="${palette.muted}"/>`,
+          );
+        } else if (reading.kind === "text") {
+          parts.push(
+            `<rect x="${String(x)}" y="${String(round(mid - 1))}" width="${String(Math.max(4, round(column * 0.5)))}" height="2" rx="1" fill="${palette.muted}" opacity="0.7"/>`,
+          );
+        } else if (reading.kind === "glyph") {
+          const fill = reading.glyph === "no" ? "none" : palette.accent;
+          const opacity = reading.glyph === "partial" ? "0.5" : "0.9";
+          parts.push(
+            `<circle cx="${String(x + 3)}" cy="${String(round(mid))}" r="3" fill="${fill}" fill-opacity="${opacity}" stroke="${palette.accent}" stroke-width="1"/>`,
+          );
+        } else {
+          const track = Math.max(6, round(column - 8));
+          parts.push(
+            `<rect x="${String(x)}" y="${String(round(mid - 1.5))}" width="${String(Math.max(1, round(track * (cell.fraction ?? 0))))}" height="3" rx="${String(CHART_BAR_RADIUS)}" fill="${palette.accent}" opacity="${opacityFor(0.35 + 0.55 * (cell.fraction ?? 0))}"/>`,
+          );
+        }
+      });
   });
   if (hasTotals) {
     const top = y + (rows.length + 1) * MATRIX_ROW_HEIGHT;

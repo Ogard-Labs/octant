@@ -273,7 +273,9 @@ describe("rendering a canvas as a document", () => {
     expect(markdown.body).toContain("| Works offline | 1 | Partial | Not assessed |");
     // Postgres: 3 × 1 + 1 × 0 + 1 × 0.5 = 3.5 of 5 → 1 + 0.7 × 4 = 3.8.
     // SQLite:   3 × 1 + 1 × 1 + 0 (missing)  = 4 of 5   → 1 + 0.8 × 4 = 4.2.
-    expect(markdown.body).toContain("| Weighted score |  | 3.8 of 5 | 4.2 of 5 (1 not scored) |");
+    expect(markdown.body).toContain(
+      "| Weighted score |  | 3.8 of 5 | 4.2 of 5 (highest, 1 not scored) |",
+    );
     expect(markdown.body).toContain("1. Crash safety · SQLite: WAL with full sync");
     expect(markdown.body).toContain("Recommended: SQLite. No server to run.");
 

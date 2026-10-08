@@ -124,10 +124,16 @@ function comparisonMatrixPieces(
       ...(weighted ? [""] : []),
       ...layout.options.map((option) => {
         if (option.total === undefined) return "";
+        // The screen marks the highest score unless every option ties; the
+        // export keeps that distinction rather than leaving the reader to scan.
+        const leads =
+          layout.leaders.includes(option.optionId) && layout.leaders.length < layout.options.length;
+        const remarks = [
+          ...(leads ? ["highest"] : []),
+          ...(option.total.missing === 0 ? [] : [`${String(option.total.missing)} not scored`]),
+        ];
         const total = formatComparisonMatrixTotal(option.total, layout.scoreRange);
-        return option.total.missing === 0
-          ? total
-          : `${total} (${String(option.total.missing)} not scored)`;
+        return remarks.length === 0 ? total : `${total} (${remarks.join(", ")})`;
       }),
     ]);
   }

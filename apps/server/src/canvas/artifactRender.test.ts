@@ -433,6 +433,32 @@ describe("drawing a preview of an artifact", () => {
     expect(markup).toContain('data-recommended="true"');
   });
 
+  it("keeps a recommended option past the visible columns in the comparison matrix thumbnail", () => {
+    const options = Array.from({ length: 7 }, (_value, index) => ({
+      optionId: `option-${String(index)}`,
+      label: `Choice${String(index)}`,
+    }));
+    const matrix = decodeCanvasBlock({
+      blockId: "wide-decision",
+      schemaVersion: CANVAS_SCHEMA_VERSION,
+      kind: "comparison-matrix",
+      options,
+      criteria: [{ criterionId: "fit", label: "Fit" }],
+      cells: options.map((option, index) => ({
+        criterionId: "fit",
+        optionId: option.optionId,
+        score: index,
+      })),
+      recommendedOptionId: "option-6",
+    });
+
+    const markup = renderArtifactThumbnail(definition([matrix], "Wide"));
+
+    expect(markup).toContain("Choice6");
+    expect(markup).toContain('data-recommended="true"');
+    expect(markup).not.toContain("Choice4");
+  });
+
   it("draws a metric sparkline as a polyline when the block carries one", () => {
     const withSpark = {
       blockId: "metric-1",
