@@ -1403,6 +1403,10 @@ async function classifyPlanOrStoreRejection(
   response: Response,
   profile: ResponsesTurnInput["profile"],
 ): Promise<ProviderFailure | undefined> {
+  // Only the plan classifier and the store classifier's 400/413/422 read the
+  // body; any other rejection skips an unbounded read of a body nobody uses.
+  const storeStatus = response.status === 400 || response.status === 413 || response.status === 422;
+  if (profile !== "chatgpt-plan" && !storeStatus) return undefined;
   let body: string;
   try {
     body = await response.text();

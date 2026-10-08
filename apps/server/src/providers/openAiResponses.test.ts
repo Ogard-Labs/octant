@@ -677,6 +677,24 @@ describe("sendResponsesTurn", () => {
     expect(bodyCancelled).toBe(true);
   });
 
+  it("fails a rejection no classifier reads without waiting for its body to end", async () => {
+    // The body never ends; reading it would hold the turn until the caller
+    // gave up, though no classifier looks at a 503's body.
+    const fetch = vi.fn(
+      async () =>
+        new Response(
+          new ReadableStream<Uint8Array>({
+            pull: () => new Promise<void>(() => undefined),
+          }),
+          { status: 503 },
+        ),
+    );
+
+    const failure = await failureOf(sendResponsesTurn(input(fetch)));
+
+    expect(failure.category).not.toBe("interrupted");
+  });
+
   it("sanitizes callback failures that carry extra raw payload", async () => {
     const fetch = vi.fn(async () =>
       sse(
