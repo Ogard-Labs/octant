@@ -20,7 +20,7 @@ import { IMAGE_LIBRARY_SCOPE_ID } from "@octant/contracts";
 import { createHash, randomUUID } from "node:crypto";
 import { lstatSync, mkdirSync, realpathSync } from "node:fs";
 import { lstat, realpath } from "node:fs/promises";
-import { homedir } from "node:os";
+import { homedir, hostname } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -841,7 +841,11 @@ import {
   createHostControlRouteHandler,
   type HostControlServicePolicyPort,
 } from "./hostControlRoutes";
-import { createReplicaMembershipRouteHandler } from "./replica/replicaMembershipRoutes";
+import {
+  createReplicaMembershipRouteHandler,
+  createReplicaSyncStatusRouteHandler,
+} from "./replica/replicaMembershipRoutes";
+import { replicaComputerName, replicaMembershipView } from "./replica/replicaMembershipView";
 import { createReplicaStoreSettingsRouteHandler } from "./replica/replicaStoreSettingsRoutes";
 import { ReplicaStoreSettingsService } from "./replica/replicaStoreSettingsService";
 import { ReplicaMembershipService } from "./replica/replicaMembershipService";
@@ -9631,6 +9635,7 @@ export function startOctantServer(
     // resolve the bound context through principalRouteContext before effects.
     const dispatchProductRoutes = async (request: Request): Promise<Response | undefined> =>
       (await hostResourceRoutes(request)) ??
+      (await replicaSyncStatusRoutes(request)) ??
       (await projectBindingRoutes(request)) ??
       (await launchSessionRoutes(request)) ??
       (await machineChangeRoutes(request)) ??
@@ -9896,6 +9901,22 @@ export function startOctantServer(
       dataDirectory: persistence.dataDirectory,
       hostId: () => readHostIdentity(persistence.connection)?.host_id,
     });
+    // Settings › Sync reads membership from the journal alone: no store call,
+    // so opening the page never reaches the store.
+    const readReplicaMembershipView = () =>
+      replicaMembershipView({
+        state: persistence.replicaMembershipProjection.state(),
+        now: Date.now(),
+        computerName: replicaComputerName(hostname(), localHostDisplayName()),
+      });
+    const replicaSyncStatusRoutes = createReplicaSyncStatusRouteHandler({
+      windowAuthorityStore,
+      hostId: () => readHostIdentity(persistence.connection)?.host_id,
+      view: readReplicaMembershipView,
+      ...(options.allowedRendererHttpOrigin === undefined
+        ? {}
+        : { allowedRendererHttpOrigin: options.allowedRendererHttpOrigin }),
+    });
     const hostControlRoutes = createHostControlRouteHandler({
       windowAuthorityStore,
       diagnostics: composeHostDiagnostics,
@@ -10039,7 +10060,11 @@ export function startOctantServer(
     });
     const replicaMembershipRoutes = createReplicaMembershipRouteHandler({
       service: replicaMembershipService,
+      view: readReplicaMembershipView,
       windowAuthorityStore,
+      ...(options.allowedRendererHttpOrigin === undefined
+        ? {}
+        : { allowedRendererHttpOrigin: options.allowedRendererHttpOrigin }),
     });
     return yield* Effect.acquireRelease(
       Effect.tryPromise({

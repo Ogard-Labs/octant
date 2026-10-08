@@ -18,6 +18,9 @@ const LOCAL_ONLY_PROBES = [
   { path: "/api/host-control/lifecycle", method: "POST" },
   { path: "/api/extensions/lifecycle", method: "POST" },
   { path: "/api/desktop/window-authorities", method: "GET" },
+  { path: "/api/replica-store/commands", method: "POST" },
+  { path: "/api/replica-membership/commands", method: "POST" },
+  { path: "/api/replica-membership/state", method: "GET" },
 ] as const;
 
 /**
@@ -53,6 +56,7 @@ const PRODUCT_PROBES = [
   { path: "/api/automations/commands", method: "POST" },
   { path: "/api/canvas/share-access", method: "POST" },
   { path: "/api/agent-profiles", method: "GET" },
+  { path: "/api/replica-sync/status", method: "GET" },
 ] as const;
 
 export interface ForwardListClassifierMismatch {

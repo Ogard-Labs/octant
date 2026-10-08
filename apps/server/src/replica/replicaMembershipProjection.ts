@@ -227,6 +227,14 @@ export interface ReplicaMembershipState {
   readonly localFinished: boolean;
   /** Whether this unreadable file was already journaled, so a later pull does not repeat it. */
   readonly unreadableRecorded: (refusal: typeof ReplicaEntryUnreadable.Type) => boolean;
+  /** The last store failure journaled, with when it happened. */
+  readonly lastStoreFailure: ReplicaLastStoreFailure | undefined;
+}
+
+export interface ReplicaLastStoreFailure {
+  readonly at: EventEnvelope["occurredAt"];
+  readonly phase: typeof ReplicaMembershipStoreFailure.Type.phase;
+  readonly reason: typeof ReplicaMembershipStoreFailure.Type.reason;
 }
 
 function same(left: ReplicaInstanceId, right: ReplicaInstanceId): boolean {
@@ -251,6 +259,7 @@ export class ReplicaMembershipProjection implements Projection {
   #skipped = 0;
   #pending: ReplicaMembershipEntry | undefined;
   readonly #unreadable = new Set<string>();
+  #lastStoreFailure: ReplicaLastStoreFailure | undefined;
   #state: ReplicaMembershipState | undefined;
 
   reset(_connection: SqliteConnection): void {
@@ -260,6 +269,7 @@ export class ReplicaMembershipProjection implements Projection {
     this.#skipped = 0;
     this.#pending = undefined;
     this.#unreadable.clear();
+    this.#lastStoreFailure = undefined;
     this.#state = undefined;
   }
 
@@ -314,6 +324,11 @@ export class ReplicaMembershipProjection implements Projection {
         break;
       case names.storeFailure: {
         const failure = decodeStoreFailure(event.payload);
+        this.#lastStoreFailure = {
+          at: event.occurredAt,
+          phase: failure.phase,
+          reason: failure.reason,
+        };
         // A squatted slot of this identity is skipped: the next publish goes
         // one past it.
         if (
@@ -395,6 +410,7 @@ export class ReplicaMembershipProjection implements Projection {
       localAccepted,
       localFinished,
       unreadableRecorded: (refusal) => unreadable.has(unreadableKey(refusal)),
+      lastStoreFailure: this.#lastStoreFailure,
     };
   }
 }

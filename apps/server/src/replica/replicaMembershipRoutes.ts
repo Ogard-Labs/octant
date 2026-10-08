@@ -1,30 +1,43 @@
 /**
- * Host-only replica membership routes.
+ * Host-only replica membership routes, and the read-only sync status a paired
+ * device may see.
  *
  * Store setup, join approval, and revocation are host authority: a paired
- * phone must be refused even if transport policy regressed. These routes are
- * registered only on the loopback chain, outside the shared product dispatch
- * the remote gateway uses, and the principal check refuses anything that is
- * not a local window.
+ * phone must be refused even if transport policy regressed. The commands and
+ * the full membership view (matching codes, join requests, what this computer
+ * may revoke) are registered only on the loopback chain, outside the shared
+ * product dispatch the remote gateway uses, and the principal check refuses
+ * anything that is not a local window. The status route rides the shared
+ * dispatch and carries nothing a caller could act on.
  */
 
 import {
   decodeReplicaMembershipCommand,
   type ReplicaMembershipCommand,
+  type ReplicaMembershipView,
 } from "@octant/contracts/replica-entry";
-import { authenticateRoutePrincipal } from "../principalRouteContext";
+import type { ClientPrincipal } from "../clientPrincipal";
+import { authenticateRoutePrincipal, readPrincipalRouteContext } from "../principalRouteContext";
+import { isAllowedRendererOrigin, isLoopbackHostname } from "../shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "../windowAuthorityStore";
 import type {
   ReplicaMembershipOutcome,
   ReplicaMembershipService,
 } from "./replicaMembershipService";
+import { replicaSyncStatusView } from "./replicaMembershipView";
 
 const JSON_BODY_LIMIT = 262_144;
 const COMMANDS_PATH = "/api/replica-membership/commands";
+const STATE_PATH = "/api/replica-membership/state";
+export const REPLICA_SYNC_STATUS_PATH = "/api/replica-sync/status";
 
 export interface ReplicaMembershipRouteDependencies {
   readonly service: ReplicaMembershipService;
+  /** Membership as Settings › Sync shows it on this host. */
+  readonly view: () => ReplicaMembershipView;
   readonly windowAuthorityStore: WindowAuthorityStore;
+  /** The development renderer origin, or null when the packaged file renderer is in use. */
+  readonly allowedRendererHttpOrigin?: string | null;
   readonly maxJsonBodySize?: number;
   readonly now?: () => number;
 }
@@ -37,8 +50,24 @@ export function createReplicaMembershipRouteHandler(
 
   return async (request: Request): Promise<Response | undefined> => {
     const url = new URL(request.url);
-    if (url.pathname !== COMMANDS_PATH) return undefined;
+    if (url.pathname !== STATE_PATH && url.pathname !== COMMANDS_PATH) return undefined;
     const origin = request.headers.get("origin");
+    // The Settings renderer calls these from its own origin: the development
+    // server, or the packaged app's opaque one. Any other origin, and any
+    // host name that is not loopback, is refused before authentication.
+    if (!isLoopbackHostname(url.hostname)) {
+      return failure("Replica membership requests must use loopback.", 400, null);
+    }
+    if (
+      origin !== null &&
+      !isAllowedRendererOrigin(origin, dependencies.allowedRendererHttpOrigin)
+    ) {
+      return failure("Renderer origin is not allowed.", 400, null);
+    }
+    if (request.method === "OPTIONS") {
+      return new Response(null, { status: 204, headers: corsHeaders(origin) });
+    }
+    if (url.pathname === STATE_PATH) return readState(request, url);
     if (request.method !== "POST" || url.search !== "") {
       return failure("Replica membership request is invalid.", 400, origin);
     }
@@ -90,29 +119,118 @@ export function createReplicaMembershipRouteHandler(
     }
     return Response.json(outcome, { status: 200, headers: corsHeaders(origin) });
   };
+
+  function readState(request: Request, url: URL): Response {
+    const origin = request.headers.get("origin");
+    if (request.method !== "GET" || url.search !== "") {
+      return failure("Replica membership request is invalid.", 400, origin);
+    }
+    let principal;
+    try {
+      principal = authenticateRoutePrincipal({
+        request,
+        store: dependencies.windowAuthorityStore,
+        now: now(),
+      });
+    } catch {
+      return failure("Replica membership request is unauthorized.", 401, origin);
+    }
+    if (principal.principal.kind !== "local-window") {
+      return failure("Replica membership is host-only.", 403, origin);
+    }
+    try {
+      return Response.json(dependencies.view(), {
+        status: 200,
+        headers: corsHeaders(origin, true),
+      });
+    } catch {
+      return failure("Replica membership could not be read.", 500, origin);
+    }
+  }
+}
+
+export interface ReplicaSyncStatusRouteDependencies {
+  readonly windowAuthorityStore: WindowAuthorityStore;
+  /** This host's stable identity. Absent until one has been projected. */
+  readonly hostId: () => string | undefined;
+  readonly view: () => ReplicaMembershipView;
+  /** The development renderer origin, or null when the packaged file renderer is in use. */
+  readonly allowedRendererHttpOrigin?: string | null;
+  readonly now?: () => number;
+}
+
+/**
+ * Read-only sync status for the shared product dispatch: a local window, and
+ * a paired device of this host under `project.overview.read`. It answers with
+ * the status view only - no codes, join requests, ids, or revocability.
+ */
+export function createReplicaSyncStatusRouteHandler(
+  dependencies: ReplicaSyncStatusRouteDependencies,
+) {
+  const now = dependencies.now ?? Date.now;
+  return async (request: Request): Promise<Response | undefined> => {
+    const url = new URL(request.url);
+    if (url.pathname !== REPLICA_SYNC_STATUS_PATH) return undefined;
+    const origin = request.headers.get("origin");
+    if (
+      origin !== null &&
+      !isAllowedRendererOrigin(origin, dependencies.allowedRendererHttpOrigin)
+    ) {
+      return failure("Renderer origin is not allowed.", 400, null);
+    }
+    if (request.method === "OPTIONS") {
+      return new Response(null, { status: 204, headers: corsHeaders(origin) });
+    }
+    if (request.method !== "GET" || url.search !== "") {
+      return failure("Sync status request is invalid.", 400, origin);
+    }
+    let principal: ClientPrincipal;
+    try {
+      principal =
+        readPrincipalRouteContext(request)?.principal ??
+        authenticateRoutePrincipal({
+          request,
+          store: dependencies.windowAuthorityStore,
+          now: now(),
+        }).principal;
+    } catch {
+      return failure("Sync status request is unauthorized.", 401, origin);
+    }
+    if (!statusReader(principal, dependencies.hostId())) {
+      return failure("Sync status is not available to this client.", 403, origin);
+    }
+    try {
+      return Response.json(replicaSyncStatusView(dependencies.view()), {
+        status: 200,
+        headers: corsHeaders(origin, true),
+      });
+    } catch {
+      return failure("Sync status could not be read.", 500, origin);
+    }
+  };
+}
+
+// The same reach as reading this host's load or its Projects: the local owner,
+// or a paired device bound to this host's own identity.
+function statusReader(principal: ClientPrincipal, hostId: string | undefined): boolean {
+  if (principal.kind === "local-window") return true;
+  if (principal.kind !== "remote-device") return false;
+  if (hostId === undefined || hostId.length === 0) return false;
+  return String(principal.hostId) === hostId;
 }
 
 function failure(message: string, status: number, origin: string | null): Response {
   return Response.json({ message }, { status, headers: corsHeaders(origin) });
 }
 
-function corsHeaders(origin: string | null): Headers {
-  const headers = new Headers({ vary: "Origin" });
-  if (origin !== null && isLoopbackHttpOrigin(origin)) {
-    headers.set("access-control-allow-origin", origin);
-  }
+function corsHeaders(origin: string | null, noStore = false): Headers {
+  const headers = new Headers({
+    "access-control-allow-methods": "GET, POST, OPTIONS",
+    "access-control-allow-headers": "content-type, x-octant-window-capability",
+    vary: "Origin",
+  });
+  if (noStore) headers.set("cache-control", "no-store");
+  // Only an origin the caller already admitted reaches here.
+  if (origin !== null) headers.set("access-control-allow-origin", origin);
   return headers;
-}
-
-function isLoopbackHttpOrigin(origin: string): boolean {
-  try {
-    const parsed = new URL(origin);
-    return (
-      origin === parsed.origin &&
-      parsed.protocol === "http:" &&
-      (parsed.hostname === "127.0.0.1" || parsed.hostname === "localhost")
-    );
-  } catch {
-    return false;
-  }
 }
