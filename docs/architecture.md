@@ -1384,13 +1384,17 @@ flowchart LR
     holds no record in, from any instance, member or not, and keeps every
     valid membership record it reads. It refuses nothing on the way in and
     does not stop at a gap, so a record from a computer that is not a member
-    yet still counts once the approval admitting it arrives. A slot already
-    held is not read again. A file that is not a valid record is reported
+    yet still counts once the approval admitting it arrives. A pull never
+    reads a slot again once it holds a record there, so a computer keeps the
+    first version of a slot it read; it detects a rewrite of that slot (two
+    records in one slot) only if it also came to hold the other version, as
+    the limits below say. A file that is not a valid record is reported
     and journaled once. Artifact entries are not imported yet: one that is
     valid and counts is reported held and read again by a later pull, and
     one that does not count is reported refused.
   - **Journal.** The `replica.*@2` events are inputs only: this computer's
-    identity and role, the founder it pinned, each valid record it holds
+    identity and role, the founder it pinned (a founding identity pins
+    itself, so a host that stops right after creating it is still pinned), each valid record it holds
     (bytes and signature, keyed by slot and hash), a signed local entry
     whose publish has not landed, and diagnostics - unreadable files,
     refused commands, and store failures. Members, keys, the tree, cuts, and
@@ -1416,14 +1420,19 @@ flowchart LR
     subject this computer brought in, directly or through others; a sibling
     or cousin is revoked from a shared ancestor, the founder at worst.
     Revoke reads the store first, then cuts at the highest sequence of the
-    subject this computer holds, so approvals the subject already made keep
-    counting; a store that cannot be read leaves that cut at what this
-    computer already holds, and the result says so. A revoke preview returns
-    that cut and the computers the subject brought in that are not revoked
-    yet, each with its parent and the parent's sequence of its approval; a
-    revoke can name some of them to revoke in the same step, and can move the
-    subject's cut earlier but never later. Pull is allowed to any computer
-    with an identity.
+    subject's valid signed entries this computer holds or just read,
+    artifact entries included, so what the subject already signed keeps
+    counting; a store that cannot be read leaves that cut at the membership
+    records this computer already holds, and the result says so. A revoke
+    preview returns that cut, the computers the subject brought in that are
+    not revoked yet, each with its parent and the parent's sequence of its
+    approval, and the revocations the subject itself already wrote, each at
+    its sequence. A revoke can name some of the computers it brought in to
+    revoke in the same step, and can move the subject's cut earlier - before
+    one of its revocations, say - but never later. Each revocation is its own
+    publish; when the subject's lands and a later one stops, the result is
+    revoked-in-part and names the computers that were not revoked. Pull is
+    allowed to any computer with an identity.
   - **Writing.** A command that publishes journals the signed entry before
     either file is written, writes the signature and then the entry, and
     journals the record as held once both landed. If a publish stops
@@ -1439,7 +1448,10 @@ flowchart LR
     can show a computer fewer files, and a computer that has not read a
     revocation keeps counting the revoked computer's later entries until it
     does; records it already holds are never lost. A rewrite of a slot is
-    detected only by a computer that holds both versions. Anyone who can
+    detected only by a computer that holds both versions; since a pull never
+    re-reads a held slot, a computer that read only the later version keeps
+    it, and computers that read different versions may differ until one of
+    them holds the other's. Anyone who can
     write the store can mint valid records under fresh keys; they are inert
     and cost only disk and time, within the listing bounds. A pull whose
     listing does not end inside its bound is refused rather than read in
@@ -1458,7 +1470,8 @@ flowchart LR
     answers a typed `not-configured` refusal and makes no store call; there
     is no Settings surface for sync; and artifact versions are neither
     published nor imported. A person cannot turn sync on or join another
-    computer yet.
+    computer yet. The artifact reconcile policy's `sequence-gap` refusal has
+    no caller yet; the import slice owns the gap rule.
 - **Unsent composer drafts.** Each Chat, Work, and Code thread keeps one unsent
   composer draft in ordinary renderer storage on the client that typed it.
   Drafts are not journaled, not included in diagnostics, and not sent to a

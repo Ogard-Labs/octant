@@ -80,13 +80,16 @@ To revoke a computer another one of yours brought in, revoke it from that
 computer, or from the one that set up the store. A computer you revoke cannot
 remove the computer that brought it in.
 
-Before it revokes, your computer reads the store, so approvals the revoked
-computer already made keep counting and the computers it brought in stay. The
-revoke screen lists those computers, so you can revoke them in the same step,
-for example when the computer was stolen. You can also move the point
-earlier; computers it approved after that point then join again. After your
-other computers read the record, they ignore anything the revoked computer
-wrote after that point.
+Before it revokes, your computer reads the store, so what the revoked
+computer already signed - artifact versions and approvals alike - keeps
+counting and the computers it brought in stay. The revoke screen lists those
+computers, so you can revoke them in the same step, for example when the
+computer was stolen, and it lists the revocations the computer already wrote.
+You can also move the point earlier, before one of those revocations, say;
+computers it approved after that point then join again. If one of the
+revocations in a step cannot be written, the screen says which computers were
+not revoked, so you can try them again. After your other computers read the
+record, they ignore anything the revoked computer wrote after that point.
 
 A revoked computer, or one that lost its place because the computer that
 approved it was revoked before that approval, joins again as a new computer,
