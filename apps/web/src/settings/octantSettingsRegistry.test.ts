@@ -164,7 +164,14 @@ describe("octantSettingsRegistry", () => {
 
   it("finds API model endpoints under Octant Harness rather than Providers & Models", () => {
     const sections = listAvailableSections(octantSettingsRegistry, capabilities);
-    for (const query of ["openai-compatible", "sign in with chatgpt", "azure ai foundry"]) {
+    for (const query of [
+      "openai-compatible",
+      "sign in with chatgpt",
+      "azure ai foundry",
+      "zero data retention",
+      "key refused",
+      "verify tools",
+    ]) {
       const results = searchSettings(sections, capabilities, query);
       expect(results).toContainEqual(
         expect.objectContaining({ sectionId: "harness", settingId: "model-endpoints" }),
