@@ -29,14 +29,25 @@ browser cannot change it. Choose one store:
   folder.
 - **S3-compatible bucket.** Enter the connection details described
   [below](#an-s3-compatible-bucket), then **Save**. Entering a new access key
-  and secret later replaces the saved ones. A bucket needs your computer's
+  and secret later replaces the saved ones. Changing the endpoint, bucket, or
+  addressing needs the access key and secret again, so a key you entered for
+  one provider is never sent to another. A bucket needs your computer's
   Keychain or Secret Service; where Octant cannot reach one, Settings says so
   and refuses to save the bucket.
-- **None.** No store, and nothing is reachable.
+- **None.** No store, and nothing is reachable. Settings asks you to confirm
+  first: sync stops, and a bucket's access key and secret are removed from
+  this computer. Cancel leaves everything as it was.
 
 Changing the store turns sync off, so you read the fact above the switch again
-for the new store before you turn it back on. Choosing a different store also
-removes a bucket's access key and secret from your Keychain or Secret Service.
+for the new store before you turn it back on. Saving a bucket with the same
+settings, such as only a new access key and secret, keeps sync as it was.
+Choosing a different store also removes a bucket's access key and secret from
+your Keychain or Secret Service.
+
+Once this computer belongs to a replica — it set one up or asked to join one —
+its store can't be changed until leaving a replica is supported. Settings ›
+Sync says so and turns off the store controls. You can still turn sync off and
+on, and enter a new access key and secret for the same bucket.
 
 ## What leaves this computer
 
@@ -82,7 +93,9 @@ delete them. The bucket's other settings are kept in Octant's journal. Octant
 never writes the access key or secret to a store entry, to your journal, or to
 a log. It contacts only the endpoint you configured, and only while sync
 is on. The endpoint must be an `https` address; a plain one is refused, and no
-credential is sent on it.
+credential is sent on it. A link-local address, such as `169.254.169.254`
+where cloud servers answer metadata requests, is refused too. A bucket server
+on this computer or your local network, such as MinIO, is allowed.
 
 Once sync is on, **Test connection** proves the setup by writing one small
 probe file: under `.octant-probe/` in the bucket, or in the folder's

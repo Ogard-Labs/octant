@@ -1482,7 +1482,10 @@ flowchart LR
     artifact versions are neither published nor imported. A person can choose
     a store and turn sync on, but cannot yet join another computer or copy a
     version. The artifact reconcile policy's `sequence-gap` refusal has no
-    caller yet; the import slice owns the gap rule.
+    caller yet; the import slice owns the gap rule. Leaving a replica is not
+    supported yet, so a computer with a membership identity cannot change its
+    store; leaving a replica, and changing the store after it, are a
+    follow-up.
 - **Artifact replica store selection.** Settings › Sync chooses this host's
   store: a synced folder, an S3-compatible bucket, or none, with a sync switch
   that starts off. It is served on the host-only `/api/replica-store` routes,
@@ -1501,16 +1504,41 @@ flowchart LR
   provider credential routes nor the device-key routes reach it, so a provider
   instance or device key with the same UUID cannot read, replace, or delete a
   key pair. Unlike a device key, a key pair is replaced when the person enters
-  a new one. A host with no credential broker cannot keep one, so saving a
+  a new one: the new pair is written to a fresh entry, the settings are
+  journaled to point at it, and only then is the old entry deleted; if the
+  journal write fails, the new entry is deleted and the old one stays in use.
+  A saved key pair is reused only for the same endpoint, bucket, and
+  addressing, the three that decide which server receives the signed
+  requests; changing any of them without a new key pair is refused as
+  `credentials-required`, so a key pair is never sent to a server it was not
+  entered for. A host with no credential broker cannot keep one, so saving a
   bucket there is refused as `credential-store-unavailable` and only a folder
   can be chosen. The choice is journaled whole as one host settings
   aggregate, rebuilt on every start, and versioned, so two windows cannot
-  overwrite each other. Choosing or changing the store turns sync off, so the
+  overwrite each other. Replay keeps the journal's head version even when the
+  newest frame does not decode: the last choice that does decode is kept with
+  sync off, so the next change is accepted and no store is called until the
+  person turns sync on again. Choosing or changing the store turns sync off, so the
   person reads Settings' statement that the provider can read the files again
-  before turning it back on. With sync off or no store, the selection is
+  before turning it back on; saving a bucket with identical settings, such as
+  a new key pair alone, keeps sync as it was. Choosing no store asks for
+  confirmation in the page first, naming that sync stops and that a bucket's
+  key pair is removed from this computer. With sync off or no store, the selection is
   `not-configured` and no store is opened or called; with sync on, the in-tree
   folder or bucket store is opened as installed and enabled by the switch.
-  Test connection writes one probe file only while sync is on.
+  The store handed to a membership command re-reads the settings before every
+  store call and answers `not-connected` once sync is off or the settings it
+  was opened under have changed, so turning sync off mid-command stops further
+  calls. Test connection writes one probe file only while sync is on; with
+  sync on and a store that cannot be opened, it answers
+  `credential-store-unavailable` or `not-connected`.
+  While this computer belongs to a replica — it has a founder or joiner
+  identity in the membership projection — every command that would change the
+  store's kind or location (choosing a folder, a bucket's endpoint, bucket,
+  addressing, or prefix, or no store) is refused on the server as
+  `member-of-replica` before any side effect, and Settings › Sync says so and
+  disables those controls. Turning sync on or off, and a new key pair for the
+  same bucket, stay allowed.
 - **Unsent composer drafts.** Each Chat, Work, and Code thread keeps one unsent
   composer draft in ordinary renderer storage on the client that typed it.
   Drafts are not journaled, not included in diagnostics, and not sent to a
@@ -2912,6 +2940,14 @@ mechanisms are:
   versions to this journal and adopts nothing else. Membership accepts an
   entry signed by an admitted instance's device signing key, within its cut,
   as authentic. It does not delegate host authority between hosts.
+- **Replica store endpoints.** A bucket endpoint must be `https` with no path,
+  query, or user info, and must not be link-local — IPv4 `169.254.0.0/16` or
+  IPv6 `fe80::/10`, literal or IPv4-mapped — where cloud instance metadata
+  answers; the contract refuses it before any request is signed. Loopback and
+  private ranges stay allowed, because a self-hosted bucket server such as
+  MinIO on the same machine or LAN is a legitimate store. A host name is not
+  resolved to check where it points; the endpoint is whatever the person on
+  the host typed, and only that person can set it.
 - **Hosts never trust each other.** Multi-host views merge read models
   client-side; credentials and mutable authority never cross hosts. Completing
   all-hosts honesty, pairing at scale, and conflict presentation is client
