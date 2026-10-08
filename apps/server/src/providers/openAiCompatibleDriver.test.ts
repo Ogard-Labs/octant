@@ -790,14 +790,91 @@ describe("makeOpenAiCompatibleDriver under the ChatGPT plan profile", () => {
   const planNotListedMessage =
     "Models can't be listed on the ChatGPT plan. Add the model IDs your plan offers under Manual model IDs, then check the connection again.";
 
-  it("reports in words that the plan cannot list models when its models route answers without a model list", async () => {
+  it("reports the plan's models from its own models listing, with display names and context windows", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const { either, decoded, calls } = await checkPlanConnection(
-      Response.json({ models: [{ slug: "plan-model" }] }),
+      Response.json({
+        models: [
+          {
+            slug: "gpt-plan-pro",
+            display_name: "GPT Plan Pro",
+            description: "Plan model",
+            context_window: 272_000,
+            default_reasoning_level: "medium",
+            supported_reasoning_levels: [{ effort: "low" }, { effort: "high" }],
+            visibility: "list",
+            priority: 1,
+          },
+          { slug: "gpt-plan-mini", display_name: "GPT Plan Mini", context_window: "large" },
+          { id: "gpt-plan-legacy", displayName: "Legacy", contextWindow: 128_000 },
+          { name: "gpt-plan-named" },
+          { display_name: "No identifier" },
+          "not-an-item",
+          { slug: " padded " },
+          { slug: "gpt-plan-pro", display_name: "Duplicate" },
+        ],
+      }),
     );
-    // Before the plan profile read this answer, the probe failed with a
+    // Before the plan profile read this shape, the probe failed with a
     // protocol category and the renderer said "Provider returned an invalid
     // response."
+    expect(Either.isRight(either)).toBe(true);
+    expect(decoded).toMatchObject({
+      readiness: "ready",
+      credentialStatus: "stored",
+      lastSuccessfulProbeAt: "2026-10-06T18:00:00.000Z",
+    });
+    expect(decoded?.message).toBeUndefined();
+    expect(
+      decoded?.models.map(({ id, displayName, contextLimit, source, verification }) => ({
+        id,
+        displayName,
+        contextLimit,
+        source,
+        verification,
+      })),
+    ).toEqual([
+      {
+        id: "gpt-plan-pro",
+        displayName: "GPT Plan Pro",
+        contextLimit: 272_000,
+        source: "discovered",
+        verification: "verified",
+      },
+      {
+        id: "gpt-plan-mini",
+        displayName: "GPT Plan Mini",
+        contextLimit: undefined,
+        source: "discovered",
+        verification: "verified",
+      },
+      {
+        id: "gpt-plan-legacy",
+        displayName: "Legacy",
+        contextLimit: 128_000,
+        source: "discovered",
+        verification: "verified",
+      },
+      {
+        id: "gpt-plan-named",
+        displayName: "gpt-plan-named",
+        contextLimit: undefined,
+        source: "discovered",
+        verification: "verified",
+      },
+    ]);
+    expect(calls).toEqual([
+      { url: "https://api.openai.com/v1/models", authorization: "Bearer plan-access-token" },
+    ]);
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it("stays degraded in words when none of the plan's listed items can be mapped, logging only their key names", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const { either, decoded } = await checkPlanConnection(
+      Response.json({ models: [{ label: "secret-label", tier: "secret-tier" }, { label: "x" }] }),
+    );
     expect(Either.isRight(either)).toBe(true);
     expect(decoded).toMatchObject({
       readiness: "degraded",
@@ -806,17 +883,16 @@ describe("makeOpenAiCompatibleDriver under the ChatGPT plan profile", () => {
       message: planNotListedMessage,
       lastSuccessfulProbeAt: "2026-10-06T18:00:00.000Z",
     });
-    expect(calls).toEqual([
-      { url: "https://api.openai.com/v1/models", authorization: "Bearer plan-access-token" },
-    ]);
-    // The diagnostic names the answer's shape and never its values or the bearer.
+    // The diagnostic names the answer's shape and the first item's key
+    // names, and never a value or the bearer.
     expect(warn).toHaveBeenCalledWith("[provider] models route did not list models", {
       instanceId,
       httpStatus: 200,
       contentType: "application/json",
       shape: "{models}",
+      firstItemKeys: ["label", "tier"],
     });
-    expect(JSON.stringify(warn.mock.calls)).not.toContain("plan-model");
+    expect(JSON.stringify(warn.mock.calls)).not.toContain("secret-");
     expect(JSON.stringify(warn.mock.calls)).not.toContain("plan-access-token");
     warn.mockRestore();
   });
@@ -938,7 +1014,7 @@ describe("makeOpenAiCompatibleDriver under the ChatGPT plan profile", () => {
     const fetch = vi.fn(async (url: string | URL | Request) => {
       calls.push(String(url));
       return String(url).endsWith("/models")
-        ? Response.json({ models: [] })
+        ? Response.json({ models: [{ label: "unmappable" }] })
         : responsesTextStream("plan answer");
     });
     const driver = planDriver({ fetch, protocol: "responses" });

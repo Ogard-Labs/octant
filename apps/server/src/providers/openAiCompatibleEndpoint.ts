@@ -130,8 +130,25 @@ export interface CompatibleModelsListing {
     status: number,
     body: string,
   ) => ProviderFailure | "unlisted" | undefined;
+  /**
+   * Read a 2xx body that is not the standard `{data:[{id}]}` list but is the
+   * route's own listing shape. Items it cannot map are skipped; undefined
+   * means the body is not a listing this profile knows.
+   */
+  readonly readListedModels?: (value: unknown) => CompatibleListedModels | undefined;
   /** What the person is told when the route answered but listed no models. */
   readonly unlistedMessage: (answer: "unlisted" | "empty", hasManualModels: boolean) => string;
+}
+
+/** Models a profile read from its route's own listing shape. */
+export interface CompatibleListedModels {
+  readonly models: ReadonlyArray<{
+    readonly id: string;
+    readonly displayName?: string;
+    readonly contextLimit?: number;
+  }>;
+  /** The first listed item's key names, sorted, for the diagnostic; never its values. */
+  readonly firstItemKeys?: ReadonlyArray<string>;
 }
 
 export async function probeModels(
@@ -189,15 +206,19 @@ async function readOptionalModelListing(
   } catch (error) {
     throw sanitizeCompatibleFailure(error);
   }
-  const unlisted = (answer: "unlisted" | "empty"): CompatibleProbeResult => {
-    // Names what the route answered (status, content type, and the JSON
-    // shape's key names) so a live check shows why models were not listed
-    // without logging any value the body carried.
+  const unlisted = (
+    answer: "unlisted" | "empty",
+    firstItemKeys?: ReadonlyArray<string>,
+  ): CompatibleProbeResult => {
+    // Names what the route answered (status, content type, the JSON shape's
+    // key names, and an unmappable item's key names) so a live check shows
+    // why models were not listed without logging any value the body carried.
     console.warn("[provider] models route did not list models", {
       instanceId: endpoint.instanceId,
       httpStatus: response.status,
       contentType: response.headers.get("content-type") ?? "none",
       shape: jsonShape(body),
+      ...(firstItemKeys === undefined ? {} : { firstItemKeys }),
     });
     return {
       readiness: "degraded",
@@ -221,9 +242,32 @@ async function readOptionalModelListing(
   } catch {
     return unlisted("unlisted");
   }
-  if (!isStrictModelList(value)) return unlisted("unlisted");
-  const discoveredIds = new Set(value.data.map(({ id }) => id));
-  const models: ProviderModel[] = [...discoveredIds].map(discoveredModel);
+  let listed: CompatibleListedModels["models"];
+  if (isStrictModelList(value)) {
+    listed = value.data.map(({ id }) => ({ id }));
+  } else {
+    const own = listing.readListedModels?.(value);
+    if (own === undefined) return unlisted("unlisted");
+    if (own.models.length === 0) {
+      // Items were listed but none could be mapped: report it honestly and
+      // log the first item's key names so the live shape can be confirmed.
+      return own.firstItemKeys === undefined
+        ? unlisted("empty")
+        : unlisted("unlisted", own.firstItemKeys);
+    }
+    listed = own.models;
+  }
+  const models: ProviderModel[] = [];
+  const discoveredIds = new Set<string>();
+  for (const entry of listed) {
+    if (discoveredIds.has(entry.id)) continue;
+    discoveredIds.add(entry.id);
+    models.push({
+      ...discoveredModel(entry.id),
+      ...(entry.displayName === undefined ? {} : { displayName: entry.displayName }),
+      ...(entry.contextLimit === undefined ? {} : { contextLimit: entry.contextLimit }),
+    });
+  }
   for (const id of endpoint.configuration.manualModelIds) {
     if (!discoveredIds.has(id)) models.push(manualModel(id));
   }

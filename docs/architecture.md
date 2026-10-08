@@ -3056,7 +3056,10 @@ mechanisms are:
   backoff on unavailability, unauthenticated on 401/403). The plan contract
   covers Responses turns, not model enumeration, so Check connection reads
   the route's `/models` answer through the profile: a model list is reported
-  as discovered; a body that is not a model list, a route-not-served status, a
+  as discovered, whether the OpenAI `{data:[{id}]}` shape or the plan's own
+  `{models:[…]}` listing (id from `slug`, then `id`, then `name`; display
+  name and a positive integer context window kept when present; unmappable
+  items skipped); a body that is not a model list, no mappable item, a route-not-served status, a
   403, a missing model-read scope, or an empty list is a degraded, worded
   "models can't be listed" state carrying the manual model IDs, never a
   protocol failure. Credential, usage-limit, and availability answers keep

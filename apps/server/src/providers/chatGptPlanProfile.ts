@@ -1,5 +1,5 @@
 import type { ProviderFailure } from "@octant/contracts";
-import type { CompatibleModelsListing } from "./openAiCompatibleEndpoint";
+import type { CompatibleListedModels, CompatibleModelsListing } from "./openAiCompatibleEndpoint";
 
 /**
  * The ChatGPT plan (Sign in with ChatGPT) request profile.
@@ -280,6 +280,7 @@ export const chatGptPlanModelsListing: CompatibleModelsListing = {
     }
     return undefined;
   },
+  readListedModels: readChatGptPlanModels,
   unlistedMessage(answer, hasManualModels) {
     if (hasManualModels) {
       return "Models can't be listed on the ChatGPT plan; Octant uses your manual model IDs.";
@@ -289,6 +290,52 @@ export const chatGptPlanModelsListing: CompatibleModelsListing = {
       : "Models can't be listed on the ChatGPT plan. Add the model IDs your plan offers under Manual model IDs, then check the connection again.";
   },
 };
+
+/**
+ * The plan route lists models as `{models:[…]}` (observed live: a 200 JSON
+ * body whose only top-level key is `models`), in the Codex backend's item
+ * style rather than the OpenAI `{data:[{id}]}` list. Each item's id is the
+ * most specific field present (`slug`, then `id`, then `name`); its display
+ * name and reported context window are kept when well-formed. An item that
+ * cannot be mapped is skipped, never thrown on.
+ */
+function readChatGptPlanModels(value: unknown): CompatibleListedModels | undefined {
+  if (!isRecord(value) || !Array.isArray(value.models)) return undefined;
+  const models: Array<CompatibleListedModels["models"][number]> = [];
+  for (const item of value.models) {
+    if (!isRecord(item)) continue;
+    const id = [item.slug, item.id, item.name].find(isModelIdentifier);
+    if (id === undefined) continue;
+    const displayName = [item.display_name, item.displayName].find(isDisplayText);
+    const contextLimit = [item.context_window, item.contextWindow].find(isPositiveInteger);
+    models.push({
+      id,
+      ...(displayName === undefined ? {} : { displayName: displayName.trim() }),
+      ...(contextLimit === undefined ? {} : { contextLimit }),
+    });
+  }
+  const first: unknown = value.models[0];
+  return {
+    models,
+    ...(first === undefined
+      ? {}
+      : { firstItemKeys: isRecord(first) ? Object.keys(first).sort().slice(0, 24) : [] }),
+  };
+}
+
+function isModelIdentifier(value: unknown): value is string {
+  return (
+    typeof value === "string" && value.length > 0 && value.length <= 512 && value === value.trim()
+  );
+}
+
+function isDisplayText(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+function isPositiveInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
