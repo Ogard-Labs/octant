@@ -864,22 +864,45 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
                 })}
                 onAskAgentToFill={async (request) => {
                   const turn = canvasRecipeFillTurn(request);
-                  // The ordinary send, behind the same queue as the composer's
-                  // own sends, so the ask runs on the thread's current model
-                  // and authority like any message the person types.
-                  const asked = await enqueueThreadCommand(async (previous) => ({
-                    value: await props.controller.sendTurn(
-                      turn.message,
-                      [],
-                      [],
-                      [turn.selection],
-                      [],
-                      [],
-                      ...(previous !== undefined && previous.threadId === String(thread.id)
-                        ? ([previous.version] as const)
-                        : ([] as const)),
-                    ),
-                  }));
+                  let asked: boolean;
+                  if (queueFollowUp) {
+                    // A response is running or messages are already waiting:
+                    // the ask joins the durable queue behind them, as a typed
+                    // follow-up would, rather than being refused or jumping it.
+                    // It passes no draft, so the person's composer is untouched.
+                    asked =
+                      messageQueue.available &&
+                      !messageQueue.busy &&
+                      !messageQueue.uncertain &&
+                      (await messageQueue.enqueue({
+                        mode: "chat",
+                        prompt: turn.message,
+                        attachmentIds: [],
+                        previewSelections: [],
+                        canvasSelections: [turn.selection],
+                        extensionSelections: [],
+                        threadMentionIds: [],
+                      })) === "accepted";
+                  } else {
+                    // The ordinary send, behind the same command queue as the
+                    // composer's, so it runs on the thread's current model and
+                    // authority. It keeps the composer's draft: this turn is
+                    // not the text the person was writing.
+                    asked = await enqueueThreadCommand(async (previous) => ({
+                      value: await props.controller.sendTurn(
+                        turn.message,
+                        [],
+                        [],
+                        [turn.selection],
+                        [],
+                        [],
+                        previous !== undefined && previous.threadId === String(thread.id)
+                          ? previous.version
+                          : undefined,
+                        { composerDraft: "keep" },
+                      ),
+                    }));
+                  }
                   // The panel closes on creation, so a refused ask is said
                   // beside the composer, where the person can ask by hand.
                   if (!asked) {
