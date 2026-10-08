@@ -5,8 +5,21 @@ description: Add and manage provider instances, choose models, and change provid
 # Providers and Models
 
 Octant is provider-neutral. The shared model works with many AI providers,
-and no core capability depends on any single provider. Providers are managed
-in **Settings → Providers & Models**.
+and no core capability depends on any single provider. Settings lists each
+kind where it is used:
+
+- **Settings → Providers & Models** holds the agent runtimes Octant drives:
+  ACP agents, coding CLIs such as OpenCode, Codex, and Kimi Code, and the
+  Claude Agent SDK.
+- **Settings → Octant Harness → Model endpoints** holds the model endpoints
+  Octant calls over an API itself: OpenAI-compatible, Anthropic-compatible,
+  Ollama, and Azure AI Foundry, including the ones you sign in to with a
+  subscription.
+- **Settings → Image generation** holds the image profiles and custom image
+  sources.
+
+All three are the same kind of provider instance, with the same credentials
+and permissions; only the page that lists them differs.
 
 ## Provider instances
 
@@ -37,7 +50,8 @@ preference; it does not grant or change provider permissions.
 Provider instances and individual models can carry user-maintained **EU** and
 **ZDR** labels. These labels are local policy metadata, not a claim that
 Octant independently verified a provider's residency or retention guarantees.
-Use the labels in **Settings → Providers & Models** when a Project needs a
+Use the labels on a provider's details, in **Settings → Providers & Models** or
+**Settings → Octant Harness → Model endpoints**, when a Project needs a
 data-handling boundary.
 
 On a Work or Code Project page, **Provider access** offers three policies:
@@ -76,7 +90,9 @@ local provider runtimes. Opening **Providers & Models** auto-registers at most
 one instance per driver family for the preferred safe candidate. On first run,
 a detected Claude Code or Codex CLI instance is created enabled; every other
 detected runtime is created disabled. After first run, auto-registration
-always creates a disabled instance. Auto-registration never toggles an
+always creates a disabled instance. A detected local Ollama server is listed
+under **Settings → Octant Harness → Model endpoints** rather than with the
+agent runtimes. Auto-registration never toggles an
 existing instance, never stores credentials, never logs in, and never installs
 or automatically updates CLIs. Explicit **Update CLI** actions are separate
 and only invoke a verified provider-owned updater. Disabled rows whose binary
@@ -205,8 +221,9 @@ session or treats the 2.x version as the legacy runtime.
 
 ### API endpoints
 
-Direct API endpoints use the short **Add API endpoint** flow. Supported
-profiles:
+Direct API endpoints are added in **Settings → Octant Harness → Model
+endpoints → Add endpoint**, which asks for the base URL and, where the
+endpoint needs one, an API key. Supported profiles:
 
 - **OpenAI-compatible** HTTP (`auto`, `responses`, or `chat-completions`)
 - **Anthropic-compatible** HTTP (`auto` or `messages`)
@@ -224,8 +241,8 @@ an Azure AI Foundry provider offers only its configured deployments.
 
 Image generation profiles are also provider instances. Open **Settings → Image
 generation → Add image provider** to choose a provider, enter its API key, and
-set its model allowlist. The same profiles are available from the manual form
-in **Providers & Models**:
+set its model allowlist. Image generation is where these profiles are added
+and listed:
 
 - **OpenAI Image** (`gpt-image-2` and related GPT Image models as suggestions)
 - **Gemini Image** (Gemini 3.1 image models as suggestions, with
@@ -273,15 +290,23 @@ never silently replaced by API-key modes.
 ### Signing in with a subscription
 
 An **OpenAI-compatible** endpoint can sign in with a subscription instead of
-an API key. Two offers are available, and the one shown is chosen by the
-instance's base URL:
+an API key. **Settings → Octant Harness → Model endpoints** offers each one as
+its own way to add an endpoint:
 
-- **OpenRouter** — signs in with an OpenRouter account and stores the issued
-  API key.
-- **ChatGPT plan** — signs in with a ChatGPT account ("Sign in with
-  ChatGPT") and uses the plan's Responses route at `https://api.openai.com/v1`.
-  To use it, add an OpenAI-compatible endpoint whose base URL is
-  `https://api.openai.com/v1` and choose **Sign in with ChatGPT**.
+- **Sign in with ChatGPT** — adds an endpoint named **ChatGPT plan** at
+  `https://api.openai.com/v1` and starts the sign-in with your ChatGPT
+  account. It uses the plan's Responses route.
+- **Sign in with OpenRouter** — adds an endpoint at
+  `https://openrouter.ai/api/v1` and signs in with your OpenRouter account,
+  storing the issued API key.
+
+Neither asks for a base URL or an API key: the endpoint is fixed by the
+sign-in, and the host refuses the sign-in, and any use of its token, on any
+other endpoint. The endpoint's row then shows who is signed in, with **Sign
+out** and **Sign in** again. An endpoint you added yourself whose base URL is
+one of these offers the same sign-in beside its API key. The host refuses a
+sign-in started from a paired device; sign in from the Octant app or a browser
+on the host.
 
 The sign-in opens the provider's authorization page in the system browser and
 completes on a loopback callback; Octant never sees or types your credentials.
