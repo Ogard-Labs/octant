@@ -1293,6 +1293,7 @@ function ProvidersSection(props: {
         onSetEnabled={props.providerController.setEnabled}
         onDataTagsChange={props.providerController.setDataTags}
         onModelDataTagsChange={props.providerController.setModelDataTags}
+        onModelContextWindowChange={props.providerController.setModelContextWindow}
         probingIds={props.providerController.probingIds}
         updatingIds={props.providerController.updatingIds}
         status={props.providerController.status}

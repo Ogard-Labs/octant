@@ -45,6 +45,37 @@ provider that has not spoken yet says so, and a runtime that never will —
 OpenCode, Pi, the ACP agents, or a local Ollama — says that instead, so you
 are not left waiting for a number that cannot come.
 
+## How Octant knows a model's window
+
+Octant finds each model's context window on its own. You are never asked for
+one, and there is nothing to test. It uses the first of these that names a
+window:
+
+1. **Set by you.** The optional **Context window** box in the model's details
+   (shown for OpenAI-compatible, Azure AI Foundry, and Anthropic-compatible
+   endpoints). It starts empty, and its placeholder shows the window Octant
+   found and where it came from, for example **1,000,000 · Profile**. A number
+   you type there wins over everything below. Clear the box to go back to
+   automatic.
+2. **Reported.** The provider's own model listing, or its usage report.
+3. **Learned.** When an endpoint refuses a request as too long and says its
+   limit ("maximum context length is 131072 tokens"), Octant keeps that limit
+   for the model, sends a smaller request once, and carries on. You see at most
+   the usual compaction notice, not an error. A later request that fits more
+   than the learned window raises it again. A learned limit below the reported
+   one wins, since the endpoint itself refused above it.
+4. **Profile.** A small catalogue of well-known model families that ships with
+   Octant and is never downloaded. Names are matched loosely
+   (`DeepSeek-V4.1-Flash`, `deepseek_v4.1_flash`, and
+   `deepseek-ai/DeepSeek-V4.1-Flash` are one model). A deployment you gave a
+   name of its own, such as an Azure AI Foundry deployment, is matched by the
+   model the endpoint says it served, so its window is known after its first
+   reply.
+5. **Estimate.** When nothing above names the window, the meter shows the
+   fill alone (see below).
+
+The context inspector's **Limit source** says which one was used.
+
 ## Overrides
 
 Per-turn overrides let you **pin** or **exclude** content, disable tools,
@@ -88,13 +119,14 @@ the window. It appears only while the runtime says compaction is on and has
 given a point, so a thread whose runtime says nothing, such as one on Codex CLI,
 shows no line rather than a guess. The popover does not compact the session;
 Claude Code does that itself when the session reaches the point.
-When no provider, catalog, or setting has named the model's context window,
+When no setting, provider, refusal, or profile has named the model's context window,
 the meter shows what the window holds and nothing to divide it by: the figure
 has no maximum and no percentage, the ring stays empty rather than full, and the
 popover says no window was reported. Octant plans a Chat turn on such a model
 against a 256,000-token estimate so that an ordinary thread is sent whole; the
 context inspector lists that limit as an estimate and the number is never shown
-as the model's window. The first window a provider reports replaces it.
+as the model's window. The first window any of those sources names replaces
+it, from the next turn on.
 Opening the popover does not make a further provider or network call.
 
 ### What fills the window

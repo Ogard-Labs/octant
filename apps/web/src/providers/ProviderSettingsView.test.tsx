@@ -1272,6 +1272,70 @@ describe("ProviderSettingsView", () => {
     expect(document.body.textContent).not.toContain("anthropic-secret");
   });
 
+  it("offers an optional context window per endpoint model that shows what Octant found", async () => {
+    const user = userEvent.setup();
+    const onModelContextWindowChange = vi.fn(async () => true);
+    const deployment = {
+      id: "deployment-a" as never,
+      displayName: "deployment-a",
+      source: "manual" as const,
+      verification: "verified" as const,
+      reasoning: "unsupported" as const,
+      inputModalities: ["text" as const],
+      options: [],
+    };
+    renderExpanded(
+      <ProviderSettingsView
+        {...fixture({
+          instance: foundryProvider(),
+          observed: observation({
+            models: [
+              { ...deployment, servedModelId: "DeepSeek-V4.1-Flash" },
+              { ...deployment, id: "deployment-b" as never, displayName: "deployment-b" },
+              {
+                ...deployment,
+                id: "deployment-c" as never,
+                displayName: "deployment-c",
+                contextWindowOverride: 64_000,
+              },
+            ],
+          }),
+        })}
+        onModelContextWindowChange={onModelContextWindowChange}
+      />,
+    );
+
+    // Empty by default: the placeholder names the window found and where from.
+    const found = screen.getByLabelText("Context window for deployment-a");
+    expect(found).toHaveValue("");
+    expect(found).toHaveAttribute("placeholder", "1,000,000 · Profile");
+    expect(screen.getByLabelText("Context window for deployment-b")).toHaveAttribute(
+      "placeholder",
+      "Automatic · Estimate",
+    );
+    expect(screen.getByLabelText("Context window for deployment-c")).toHaveValue("64000");
+
+    await user.type(found, "131,072{Enter}");
+    expect(onModelContextWindowChange).toHaveBeenCalledWith(id, "deployment-a", 131_072);
+    await user.tab();
+    expect(onModelContextWindowChange).toHaveBeenCalledTimes(1);
+
+    const set = screen.getByLabelText("Context window for deployment-c");
+    await user.clear(set);
+    await user.tab();
+    expect(onModelContextWindowChange).toHaveBeenLastCalledWith(id, "deployment-c", undefined);
+  });
+
+  it("asks for no context window on a provider that runs its own model", () => {
+    renderExpanded(
+      <ProviderSettingsView
+        {...fixture({ observed: observation() })}
+        onModelContextWindowChange={vi.fn(async () => true)}
+      />,
+    );
+    expect(screen.queryByLabelText("Context window for Model One")).not.toBeInTheDocument();
+  });
+
   it("says before the form that a browser cannot add a provider that needs an API key", async () => {
     const user = userEvent.setup();
     renderExpanded(

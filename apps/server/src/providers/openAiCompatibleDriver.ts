@@ -21,6 +21,7 @@ import {
   validateChatTurnInput,
 } from "@octant/provider-sdk/chat-conformance";
 import { Cause, Effect, Exit, Option } from "effect";
+import { resolveModelContextWindow } from "@octant/domain/model-context-window";
 import type { NativeHarnessEndpointHooks } from "../harness/nativeHarnessEndpointRegistry";
 import { createNativeHarnessConnection } from "../harness/nativeHarnessLoop";
 import type {
@@ -62,6 +63,11 @@ import {
   type ProtocolTurnResult,
 } from "./openAiResponses";
 import { capabilityEchoToolDefinition, isCapabilityEchoToolCall } from "./openAiToolEncoding";
+import {
+  carryModelContextWindowFacts,
+  learnFromEndpointRequest,
+  type EndpointRequestOutcome,
+} from "./modelContextWindowFacts";
 import type { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
 import type { SubscriptionOAuthHost } from "@octant/provider-sdk/subscription-oauth";
 
@@ -185,14 +191,16 @@ export function makeOpenAiCompatibleDriver(options: OpenAiCompatibleDriverOption
               // verifiedToolModelIds, which outlives this probe. The
               // provider-level flag stays "unsupported" so one verified model
               // never unlocks tools for the other models of the profile.
-              const priorVerified =
-                options.runtimeRegistry.observedState(instanceId)?.verifiedToolModelIds;
+              const prior = options.runtimeRegistry.observedState(instanceId);
+              const priorVerified = prior?.verifiedToolModelIds;
               const probe = decodeProviderObservedState({
                 instanceId,
                 readiness: result.readiness,
                 processState: "stopped",
                 ...(profile.authStrategy !== "none" ? { credentialStatus: "stored" } : {}),
-                models: result.models,
+                // What requests taught about each model's window, and a
+                // person's override, outlive the probe a Chat turn runs first.
+                models: carryModelContextWindowFacts(result.models, prior?.models),
                 capabilities: initialCapabilities,
                 ...(priorVerified === undefined ? {} : { verifiedToolModelIds: priorVerified }),
                 ...(result.failure === undefined ? {} : { message: result.failure.message }),
@@ -353,13 +361,37 @@ function openAiCompatibleTransport(
         send: async (request, stream) => {
           const active = endpoint;
           if (active === undefined) throw failure("protocol", "Provider session is not active.");
+          const learn = (outcome: EndpointRequestOutcome) =>
+            learnFromEndpointRequest({
+              runtimeRegistry: options.runtimeRegistry,
+              instanceId: options.instanceId,
+              modelId: request.modelId,
+              outcome,
+              memory: options.harness?.contextWindows,
+            });
           return sendWithEndpointRetry({
             signal: stream.signal,
             onEvent: stream.onEvent,
             options: options.harness?.retry,
             attempt: async (attempt) => {
-              const result = await sendCompatibleRequest(options, active, request, attempt);
+              let result: CompatibleTurnResult;
+              try {
+                result = await sendCompatibleRequest(options, active, request, attempt);
+              } catch (error) {
+                // Learned before the harness shrinks and resends, so the
+                // shrink is measured against the window the endpoint named.
+                learn({ kind: "refused", failure: sanitizeFailure(error) });
+                throw error;
+              }
               recordObservedTurn(options, result, clock);
+              learn({
+                kind: "completed",
+                servedModelId: result.servedModelId,
+                usedTokens:
+                  result.usage === undefined
+                    ? undefined
+                    : result.usage.inputTokens + result.usage.outputTokens,
+              });
               if (result.usage !== undefined && result.usage.inputTokens > 0) {
                 calibration[result.protocol] = {
                   measured: JSON.stringify(estimateBody(request, result.protocol)).length,
@@ -709,9 +741,11 @@ function requestFits(
   if (Buffer.byteLength(JSON.stringify(body), "utf8") > endpoint.limits.requestBodyBytes) {
     return false;
   }
-  const contextLimit = options.runtimeRegistry
+  const model = options.runtimeRegistry
     .observedState(options.instanceId)
-    ?.models.find((model) => String(model.id) === String(request.modelId))?.contextLimit;
+    ?.models.find((candidate) => String(candidate.id) === String(request.modelId));
+  const contextLimit =
+    model === undefined ? undefined : resolveModelContextWindow(model)?.contextWindow;
   if (contextLimit === undefined) return true;
   return contextProtocols(options).every((protocol) =>
     contextEstimateFits(request, protocol, calibration[protocol], contextLimit),

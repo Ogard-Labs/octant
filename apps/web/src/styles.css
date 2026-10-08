@@ -2476,6 +2476,13 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   flex: 0 0 auto;
 }
 
+.provider-model-visibility li > .provider-model-visibility__context-window {
+  flex: 0 0 13rem;
+  width: 13rem;
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+}
+
 .provider-details__section--capabilities dl div {
   display: flex;
   justify-content: space-between;

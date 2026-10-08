@@ -4171,6 +4171,12 @@ export function startOctantServer(
     const nativeHarnessEndpoints = new NativeHarnessEndpointRegistry();
     const nativeHarnessEndpointHooks: NativeHarnessEndpointHooks = {
       endpoints: nativeHarnessEndpoints,
+      // What a request teaches about its model's window is kept with the
+      // provider's model catalogue; requests only run once the service exists.
+      contextWindows: {
+        remember: (instanceId, modelId, lesson) =>
+          providerService.rememberModelContextWindow(instanceId, modelId, lesson),
+      },
       leadFallback: {
         next: async (input) =>
           (await nativeHarnessLeadFallback?.next(input)) ?? {

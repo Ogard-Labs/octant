@@ -1816,6 +1816,35 @@ ring; the context inspector names the number as an estimate; and the native
 harness's `context-remaining` tool refuses rather than hand the model an
 estimate of its own room. A window the provider's own usage report names still
 takes precedence.
+
+A model's window is found without asking the person
+(`resolveModelContextWindow` in `@octant/domain/model-context-window`). The
+first source that names one wins: a window the person typed into the model's
+details (`user-supplied`, "Set by you"); the provider's own model metadata
+(`provider-discovery`, "Reported"); a window learned from the endpoint's own
+refusals (`observed-evidence`, "Learned"), which also wins over a larger
+reported figure because the endpoint refused above it; and the built-in model
+profile catalogue (`reviewed-catalog`, "Profile"). Nothing naming one leaves the
+labelled estimate above ("Estimate"). The labels appear only as the inspector's
+limit source and as the placeholder of the optional override; nothing prompts
+for a window. The profile catalogue ships with the app, is never fetched, and
+lists only families whose windows their providers publish, each with its
+reference. Profiles match on a normalized name (case, separators, a routing
+prefix, a `:` tag, a release date, and `-latest` are ignored; a version is
+not), and also on the `model` a direct endpoint names in its responses, so an
+Azure AI Foundry or OpenAI-compatible deployment with a name of its own takes
+its model's profile from its first completed request. A direct endpoint
+(OpenAI-compatible, Azure AI Foundry, Anthropic-compatible) learns from each
+request: an overflow refusal that names the limit ("maximum context length is
+N tokens", "prompt is too long: X tokens > N maximum", and similar) lowers the
+learned window before the harness's shrink-once recovery resends a smaller
+request, and a completed request that used more than the learned window raises
+it. A refusal that names no limit teaches nothing; the shrink-once recovery
+still runs and the person sees at most the normal compaction notice. The
+override, the learned window, and the served model are kept per provider
+instance and model on the provider's model catalogue, so they survive probes
+and restarts; setting the override takes effect on the next request and wins
+over a runtime report, and clearing it returns to automatic resolution.
 Provider-managed Code turns also contribute their journaled token reports to the
 usage ledger. A runtime that compacts its own session may report where, as
 `autoCompactThreshold` on the usage report (tokens of the window the last request

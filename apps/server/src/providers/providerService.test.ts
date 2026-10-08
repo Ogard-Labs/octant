@@ -469,6 +469,75 @@ describe("ProviderService", () => {
     });
   });
 
+  it("keeps a person's context window override with the model and lets clearing it return to automatic", async () => {
+    const fixture = serviceFixture({
+      instances: [provider()],
+      withCatalogPersistence: true,
+      initialCatalog: persistedCatalog(),
+    });
+    await fixture.service.probe(windowId, instanceId);
+
+    await expect(
+      fixture.service.execute(windowId, {
+        kind: "set-provider-model-context-window",
+        instanceId,
+        expectedVersion: 1,
+        modelId: "model-1",
+        contextWindow: 96_000,
+      }),
+    ).resolves.toMatchObject({
+      kind: "provider-model-updated",
+      snapshot: { models: [{ id: "model-1", contextWindowOverride: 96_000 }] },
+    });
+    // The next request reads the live observation, not only the catalogue.
+    expect(fixture.runtime.observedState(instanceId)?.models[0]?.contextWindowOverride).toBe(
+      96_000,
+    );
+    // A later probe rebuilds the model from the provider and keeps what the person set.
+    await fixture.service.probe(windowId, instanceId);
+    expect(fixture.runtime.observedState(instanceId)?.models[0]?.contextWindowOverride).toBe(
+      96_000,
+    );
+
+    await fixture.service.execute(windowId, {
+      kind: "set-provider-model-context-window",
+      instanceId,
+      expectedVersion: 1,
+      modelId: "model-1",
+    });
+    expect(fixture.catalogs()[0]).toMatchObject({ models: [{ id: "model-1" }] });
+    expect(
+      (fixture.catalogs()[0] as ProviderCatalogSnapshot).models[0]?.contextWindowOverride,
+    ).toBeUndefined();
+    expect(
+      fixture.runtime.observedState(instanceId)?.models[0]?.contextWindowOverride,
+    ).toBeUndefined();
+  });
+
+  it("keeps what a request taught about a model's window past a restart", async () => {
+    const fixture = serviceFixture({
+      instances: [provider()],
+      withCatalogPersistence: true,
+      initialCatalog: persistedCatalog(),
+    });
+    fixture.service.rememberModelContextWindow(instanceId, decodeProviderModelId("model-1"), {
+      learnedContextWindow: 131_072,
+      servedModelId: "DeepSeek-V4.1-Flash",
+    });
+    expect(fixture.catalogs()[0]).toMatchObject({
+      models: [
+        { id: "model-1", learnedContextWindow: 131_072, servedModelId: "DeepSeek-V4.1-Flash" },
+      ],
+    });
+
+    // A restarted host has no live observation; the first probe restores the lesson.
+    await fixture.service.probe(windowId, instanceId);
+    expect(fixture.runtime.observedState(instanceId)?.models[0]).toMatchObject({
+      learnedContextWindow: 131_072,
+      servedModelId: "DeepSeek-V4.1-Flash",
+    });
+  });
+
   it("rejects ambiguous duplicate normalized smoke requests", async () => {
     const sessionId = "80000000-0000-4000-8000-000000000021";
     const answerApproval = vi.fn(() => Effect.void);

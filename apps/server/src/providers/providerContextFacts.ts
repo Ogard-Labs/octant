@@ -8,6 +8,10 @@ import {
   type UtcTimestamp,
 } from "@octant/contracts";
 import {
+  resolveModelContextWindow,
+  type ModelContextWindowSource,
+} from "@octant/domain/model-context-window";
+import {
   ProviderContextFactsRejected,
   type ProviderModelLimitEvidence,
   type ProviderUsageObservation,
@@ -19,18 +23,48 @@ function assertNonNegativeSafeInteger(value: number, label: string): void {
   }
 }
 
+/**
+ * Each observed model's window as `resolveModelContextWindow` settles it: what a
+ * person set, what the provider reported, what refusals taught, or the
+ * built-in profile, labelled with that source. A model none of them names
+ * carries no window, so the caller plans with its labelled estimate.
+ */
 export function modelEvidenceFromObservedState(
   state: ProviderObservedState,
 ): ReadonlyArray<ProviderModelLimitEvidence> {
-  return state.models.map((model) => ({
-    providerInstanceId: state.instanceId,
-    modelId: model.id,
-    ...(model.contextLimit === undefined ? {} : { contextWindow: model.contextLimit }),
-    reasoning: model.reasoning === "supported" ? "included" : "unknown",
-    source: model.source === "discovered" ? "provider-discovery" : "user-supplied",
-    confidence: model.verification === "verified" ? "high" : "low",
-    observedAt: state.observedAt,
-  }));
+  return state.models.map((model) => {
+    const resolved = resolveModelContextWindow(model);
+    return {
+      providerInstanceId: state.instanceId,
+      modelId: model.id,
+      ...(resolved === undefined
+        ? {}
+        : {
+            contextWindow: resolved.contextWindow,
+            ...(resolved.maxOutput === undefined ? {} : { maxOutput: resolved.maxOutput }),
+          }),
+      reasoning: model.reasoning === "supported" ? "included" : "unknown",
+      source:
+        resolved?.source ??
+        (model.source === "discovered" ? "provider-discovery" : "user-supplied"),
+      confidence: modelWindowConfidence(resolved?.source, model.verification === "verified"),
+      observedAt: state.observedAt,
+    };
+  });
+}
+
+/**
+ * How far a resolved window is trusted. A person's figure and a verified
+ * provider's report are firm; a learned or profile window is the best
+ * available evidence but may still move.
+ */
+export function modelWindowConfidence(
+  source: ModelContextWindowSource | undefined,
+  verified: boolean,
+): "high" | "medium" | "low" {
+  if (source === "user-supplied") return "high";
+  if (source === "observed-evidence" || source === "reviewed-catalog") return "medium";
+  return verified ? "high" : "low";
 }
 
 export function usageFromRuntimeEvent(

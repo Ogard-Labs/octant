@@ -295,6 +295,12 @@ export interface ProviderSettingsViewProps {
     modelId: ProviderModelId,
     dataTags: ProviderDataTags,
   ) => Promise<boolean>;
+  /** Sets or, with `undefined`, clears a model's context window override. */
+  readonly onModelContextWindowChange?: (
+    instanceId: ProviderInstanceId,
+    modelId: ProviderModelId,
+    contextWindow: number | undefined,
+  ) => Promise<boolean>;
   readonly onRemove: (instanceId: ProviderInstanceId) => Promise<boolean>;
   readonly onProbe: (
     instanceId: ProviderInstanceId,
@@ -475,6 +481,9 @@ export function ProviderSettingsView(props: ProviderSettingsViewProps) {
         onSetEnabled={props.onSetEnabled}
         onDataTagsChange={props.onDataTagsChange}
         onModelDataTagsChange={props.onModelDataTagsChange}
+        {...(props.onModelContextWindowChange === undefined
+          ? {}
+          : { onModelContextWindowChange: props.onModelContextWindowChange })}
         onVerifyModelTools={props.onVerifyModelTools}
       />
       <SettingsSection title="Defaults">
