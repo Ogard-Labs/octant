@@ -276,9 +276,6 @@ export function NativeHarnessRoutingPanel(props: NativeHarnessRoutingPanelProps)
 
   const modelsOf = (group: PickerGroup) => group.sections.flatMap((section) => section.models);
   const hasModels = props.groups.some((group) => modelsOf(group).length > 0);
-  const hasSavedRouting =
-    configuration.slots.some((slot) => slot.candidates.length > 0) ||
-    configuration.jobSlots.length > 0;
   const waitingProviders = props.providers.filter((option) => option.modelCount === 0);
   // Octant never picks a model by itself. With exactly one endpoint ready and
   // no main model, it offers one, and the person decides.
@@ -301,6 +298,10 @@ export function NativeHarnessRoutingPanel(props: NativeHarnessRoutingPanelProps)
     return explicit === undefined ? standardSlot(job) : String(explicit);
   };
   const standardJobs = EDITABLE_JOBS.every((job) => boundSlot(job) === standardSlot(job));
+  // A fresh host stores the standard bindings, so only a chosen model or a
+  // changed binding counts as routing someone saved.
+  const hasSavedRouting =
+    configuration.slots.some((slot) => slot.candidates.length > 0) || !standardJobs;
 
   const chooser = (input: {
     readonly id: string;
@@ -355,6 +356,13 @@ export function NativeHarnessRoutingPanel(props: NativeHarnessRoutingPanelProps)
           />
         ) : (
           <div className="setgroup native-harness-roles">
+            {/* The outcome of the last change sits above the roles, where it is
+                seen whichever row was changed. */}
+            {message === undefined ? null : (
+              <p className="native-harness-panel__message" role="status">
+                {message}
+              </p>
+            )}
             {hasModels ? null : (
               <div className="native-harness-roles__notice">
                 <span className="oct-meta">
@@ -637,11 +645,6 @@ export function NativeHarnessRoutingPanel(props: NativeHarnessRoutingPanelProps)
                 </div>
               );
             })}
-            {message === undefined ? null : (
-              <p className="native-harness-panel__message" role="status">
-                {message}
-              </p>
-            )}
             <SettingsDisclosure
               className="native-harness-jobs"
               title={`Which job uses which role · ${standardJobs ? "standard" : "changed"}`}

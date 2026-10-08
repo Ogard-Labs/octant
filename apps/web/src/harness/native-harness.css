@@ -15,18 +15,8 @@
 }
 
 /* Model roles: each role is a setting row, optionally followed by its notes
-   and its open list of backups; the wrapper draws the divider so a role's
-   editor reads as part of its row. */
-.native-harness-role + .native-harness-role,
-.native-harness-roles__notice + .native-harness-role,
-.native-harness-suggestion + .native-harness-role,
-.native-harness-roles__notice + .native-harness-suggestion,
-.native-harness-role + .native-harness-panel__message,
-.native-harness-role + .native-harness-jobs,
-.native-harness-panel__message + .native-harness-jobs {
-  border-top: 1px solid var(--oct-hairline);
-}
-
+   and its open list of backups. The Settings kit draws the inset hairline
+   between the group's children, so a role's editor reads as part of its row. */
 .native-harness-role .setrow-control {
   display: flex;
   flex-direction: column;
@@ -68,9 +58,13 @@
 
 .native-harness-role__notes,
 .native-harness-backups,
-.native-harness-roles__notice,
-.native-harness-panel__message {
+.native-harness-roles__notice {
   padding: 0 var(--oct-space-4) var(--oct-space-3);
+}
+
+.native-harness-roles > .native-harness-panel__message {
+  margin: 0;
+  padding: var(--oct-space-3) var(--oct-space-4);
 }
 
 .native-harness-roles__notice {
@@ -98,6 +92,13 @@
 
 .native-harness-backups__actions {
   justify-content: flex-end;
+}
+
+/* Settings pushes a chooser to the control column's right edge with an auto
+   margin. Here the role's own control and the backup rows place it, so a
+   wrapped row on a phone does not strand the chooser at the far edge. */
+.native-harness-panel .native-harness-roles .composer-model-picker {
+  margin-inline-start: 0;
 }
 
 /* One endpoint and no main model: the offer sits where the person looks first. */
@@ -149,11 +150,15 @@
   }
 
   .native-harness-backups__row {
-    grid-template-columns: minmax(0, 1fr) auto;
+    display: flex;
   }
 
   .native-harness-backups__rank {
-    grid-column: 1 / -1;
+    flex-basis: 100%;
+  }
+
+  .native-harness-backups__actions {
+    margin-inline-start: auto;
   }
 }
 

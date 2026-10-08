@@ -1,11 +1,12 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import type {
-  NativeHarnessRoutingConfiguration,
-  NativeHarnessRoutingSettings,
-  ProviderInstance,
-  ProviderObservedState,
+import {
+  DEFAULT_NATIVE_HARNESS_ROUTING_SETTINGS,
+  type NativeHarnessRoutingConfiguration,
+  type NativeHarnessRoutingSettings,
+  type ProviderInstance,
+  type ProviderObservedState,
 } from "@octant/contracts";
 import { buildModelPickerGroups } from "@octant/domain";
 import { chooseSelectFieldOption } from "../test/chooseSelectFieldOption.test-support";
@@ -177,7 +178,11 @@ describe("NativeHarnessRoutingPanel without endpoints", () => {
   it("explains how to add an endpoint instead of showing empty roles", async () => {
     const user = userEvent.setup();
     const onOpenModelEndpoints = vi.fn();
-    renderPanel({ routing: async () => settings(), onOpenModelEndpoints });
+    // A fresh host stores the standard job bindings, which are not a choice.
+    renderPanel({
+      routing: async () => settings(DEFAULT_NATIVE_HARNESS_ROUTING_SETTINGS.configuration),
+      onOpenModelEndpoints,
+    });
 
     expect(await screen.findByText("No model endpoint yet")).toBeVisible();
     expect(screen.getByRole("heading", { name: "Model roles" })).toBeVisible();
