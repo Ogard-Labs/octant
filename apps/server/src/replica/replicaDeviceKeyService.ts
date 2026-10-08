@@ -50,17 +50,29 @@ export interface ReplicaDeviceSigningKey {
   readonly fingerprint: string;
 }
 
+/**
+ * Signing either produces a signature or says why it could not: the request
+ * was invalid, no key is stored for the instance, the credential store could
+ * not be reached, or the stored key did not sign.
+ */
+export type ReplicaDeviceSignOutcome =
+  | { readonly status: "signed"; readonly signature: string }
+  | { readonly status: "refused"; readonly reason: ReplicaDeviceKeyFailureCategory };
+
 export interface ReplicaDeviceSigner {
   /** Sign the canonical entry bytes another computer will verify. */
-  readonly sign: (payload: Uint8Array) => Promise<{ readonly signature: string }>;
+  readonly sign: (payload: Uint8Array) => Promise<ReplicaDeviceSignOutcome>;
+}
+
+function deviceKeyId(instanceId: string): string | undefined {
+  const normalized = instanceId.toLowerCase();
+  return REPLICA_DEVICE_KEY_CREDENTIAL_ID_PATTERN.test(normalized) ? normalized : undefined;
 }
 
 function credentialId(instanceId: string): string {
-  const normalized = instanceId.toLowerCase();
-  if (!REPLICA_DEVICE_KEY_CREDENTIAL_ID_PATTERN.test(normalized)) {
-    throw new ReplicaDeviceKeyFailure("invalid");
-  }
-  return normalized;
+  const id = deviceKeyId(instanceId);
+  if (id === undefined) throw new ReplicaDeviceKeyFailure("invalid");
+  return id;
 }
 
 /**
@@ -103,22 +115,42 @@ export function makeReplicaDeviceSigner(
   instanceId: string,
 ): ReplicaDeviceSigner {
   return {
-    sign: async (payload: Uint8Array) => {
-      if (payload.byteLength === 0) throw new ReplicaDeviceKeyFailure("invalid");
+    sign: async (payload: Uint8Array): Promise<ReplicaDeviceSignOutcome> => {
+      const id = deviceKeyId(instanceId);
+      if (id === undefined || payload.byteLength === 0) {
+        return { status: "refused", reason: "invalid" };
+      }
       let privateKeyPem: string;
       try {
-        privateKeyPem = await store.resolve(credentialId(instanceId));
+        privateKeyPem = await store.resolve(id);
       } catch {
-        throw new ReplicaDeviceKeyFailure("missing");
+        return {
+          status: "refused",
+          reason: (await keyIsAbsent(store, id)) ? "missing" : "unavailable",
+        };
       }
       try {
         const signature = cryptoSign(null, Buffer.from(payload), createPrivateKey(privateKeyPem));
-        return { signature: signature.toString("base64") };
+        return { status: "signed", signature: signature.toString("base64") };
       } catch {
-        throw new ReplicaDeviceKeyFailure("failed");
+        return { status: "refused", reason: "failed" };
       }
     },
   };
+}
+
+/**
+ * Whether a failed lookup means the key is not there. The local stores and the
+ * broker client report an absent key in different shapes, so this asks the
+ * store rather than reading the error; a store that cannot answer is
+ * unavailable, not empty, and a locked Keychain is never reported as a lost key.
+ */
+async function keyIsAbsent(store: CredentialStore, id: string): Promise<boolean> {
+  try {
+    return !(await store.has(id));
+  } catch {
+    return false;
+  }
 }
 
 /** Verify a detached signature against a member's published public key. */

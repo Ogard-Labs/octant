@@ -328,14 +328,19 @@ class LaggedStore {
       const match = /^([^/]+)\/(\d+)\.json$/.exec(key);
       const signature = this.files.get(key.replace(/\.json$/, ".sig"));
       if (match === null || signature === undefined) continue;
+      const text = new TextDecoder().decode(bytes);
+      const signatureText = new TextDecoder().decode(signature);
       let entry;
       try {
-        entry = decodeReplicaEntryText(new TextDecoder().decode(bytes));
+        entry = decodeReplicaEntryText(text);
       } catch {
         continue;
       }
       if (entry.kind === "artifact-version" || entry.kind === "artifact-tombstone") continue;
       if (
+        text !== encodeReplicaEntry(entry) ||
+        Buffer.from(signatureText, "base64").toString("base64") !== signatureText ||
+        Buffer.from(signatureText, "base64").byteLength !== 64 ||
         String(entry.origin.instanceId) !== match[1] ||
         entry.origin.sequence !== Number(match[2]) ||
         replicaInstanceIdOf(entry.origin.publicKey) !== match[1] ||
@@ -344,7 +349,7 @@ class LaggedStore {
         !verifyReplicaEntrySignature({
           publicKeyBase64: entry.origin.publicKey,
           payload: bytes,
-          signatureBase64: new TextDecoder().decode(signature),
+          signatureBase64: signatureText,
         })
       ) {
         continue;
@@ -583,7 +588,9 @@ async function runCurrent(seed: number): Promise<CurrentRun> {
     signer: string = entry.origin.instanceId,
   ): Promise<string> {
     const bytes = new TextEncoder().encode(encodeReplicaEntry(entry));
-    const { signature } = await makeReplicaDeviceSigner(credentials, signer).sign(bytes);
+    const signed = await makeReplicaDeviceSigner(credentials, signer).sign(bytes);
+    if (signed.status !== "signed") throw new Error(`Signing was refused: ${signed.reason}`);
+    const { signature } = signed;
     const path = `${entry.origin.instanceId}/${entry.origin.sequence}`;
     store.write("thief", `${path}.sig`, new TextEncoder().encode(signature));
     store.write("thief", `${path}.json`, bytes);

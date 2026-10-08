@@ -9972,7 +9972,7 @@ export function startOctantServer(
           return createReplicaDeviceKey(replicaDeviceKeys);
         },
         sign: async (instanceId, payload) => {
-          if (replicaDeviceKeys === undefined) throw new Error("credential store unavailable");
+          if (replicaDeviceKeys === undefined) return { status: "refused", reason: "unavailable" };
           return makeReplicaDeviceSigner(replicaDeviceKeys, instanceId).sign(payload);
         },
       },

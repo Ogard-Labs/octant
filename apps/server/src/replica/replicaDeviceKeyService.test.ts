@@ -7,7 +7,13 @@ import {
   replicaInstanceIdOf,
   verifyReplicaEntrySignature,
   ReplicaDeviceKeyFailure,
+  type ReplicaDeviceSignOutcome,
 } from "./replicaDeviceKeyService";
+
+function signedText(outcome: ReplicaDeviceSignOutcome): string {
+  if (outcome.status !== "signed") throw new Error(`Signing was refused: ${outcome.reason}`);
+  return outcome.signature;
+}
 
 function memoryStore(): CredentialStore & { readonly values: Map<string, string> } {
   const values = new Map<string, string>();
@@ -60,7 +66,7 @@ describe("replica device key service", () => {
     const key = await createReplicaDeviceKey(store);
     const signer = makeReplicaDeviceSigner(store, key.instanceId);
     const payload = new TextEncoder().encode("octant.replica-entry/2\nbody\n");
-    const { signature } = await signer.sign(payload);
+    const signature = signedText(await signer.sign(payload));
     expect(
       verifyReplicaEntrySignature({
         publicKeyBase64: key.publicKey,
@@ -74,7 +80,7 @@ describe("replica device key service", () => {
     const store = memoryStore();
     const key = await createReplicaDeviceKey(store);
     const signer = makeReplicaDeviceSigner(store, key.instanceId);
-    const { signature } = await signer.sign(new TextEncoder().encode("original"));
+    const signature = signedText(await signer.sign(new TextEncoder().encode("original")));
     expect(
       verifyReplicaEntrySignature({
         publicKeyBase64: key.publicKey,
@@ -84,12 +90,49 @@ describe("replica device key service", () => {
     ).toBe(false);
   });
 
-  it("refuses to sign before a key exists", async () => {
+  it("refuses to sign before a key exists, and says the key is missing", async () => {
     const store = memoryStore();
     const signer = makeReplicaDeviceSigner(store, "11111111-1111-8111-8111-111111111111");
-    await expect(signer.sign(new TextEncoder().encode("bytes"))).rejects.toBeInstanceOf(
-      ReplicaDeviceKeyFailure,
-    );
+    expect(await signer.sign(new TextEncoder().encode("bytes"))).toEqual({
+      status: "refused",
+      reason: "missing",
+    });
+  });
+
+  it("says the store is unavailable, not that the key is missing, when the store cannot answer", async () => {
+    const store = memoryStore();
+    const key = await createReplicaDeviceKey(store);
+    const locked: CredentialStore = {
+      ...store,
+      async resolve() {
+        throw new Error("keychain locked");
+      },
+      async has() {
+        throw new Error("keychain locked");
+      },
+    };
+    const signer = makeReplicaDeviceSigner(locked, key.instanceId);
+    expect(await signer.sign(new TextEncoder().encode("bytes"))).toEqual({
+      status: "refused",
+      reason: "unavailable",
+    });
+  });
+
+  it("refuses an instance id that is not a device-key id as invalid, without asking the store", async () => {
+    let asked = false;
+    const store: CredentialStore = {
+      ...memoryStore(),
+      async resolve() {
+        asked = true;
+        throw new Error("unexpected");
+      },
+    };
+    const signer = makeReplicaDeviceSigner(store, "not-an-instance");
+    expect(await signer.sign(new TextEncoder().encode("bytes"))).toEqual({
+      status: "refused",
+      reason: "invalid",
+    });
+    expect(asked).toBe(false);
   });
 
   it("reports an unavailable credential store instead of returning a key it did not keep", async () => {
@@ -110,7 +153,7 @@ describe("replica device key service", () => {
     const other = generateKeyPairSync("ed25519");
     const otherPublic = other.publicKey.export({ format: "der", type: "spki" });
     const signer = makeReplicaDeviceSigner(store, key.instanceId);
-    const { signature } = await signer.sign(new TextEncoder().encode("bytes"));
+    const signature = signedText(await signer.sign(new TextEncoder().encode("bytes")));
     expect(
       verifyReplicaEntrySignature({
         publicKeyBase64: Buffer.from(otherPublic).toString("base64"),

@@ -50,7 +50,11 @@ import {
 } from "@octant/domain/replica-membership-policy";
 import type { ReplicaStore } from "@octant/plugin-api/replica-store";
 import { Schema } from "effect";
-import { replicaInstanceIdOf, verifyReplicaEntrySignature } from "./replicaDeviceKeyService";
+import {
+  replicaInstanceIdOf,
+  verifyReplicaEntrySignature,
+  type ReplicaDeviceSignOutcome,
+} from "./replicaDeviceKeyService";
 import {
   REPLICA_MEMBERSHIP_EVENT_NAMES,
   type ReplicaLocalIdentity,
@@ -70,10 +74,7 @@ export interface ReplicaMembershipPorts {
   readonly credentials: {
     /** A new device key, stored under the instance id it certifies. */
     readonly create: () => Promise<{ readonly instanceId: string; readonly publicKey: string }>;
-    readonly sign: (
-      instanceId: string,
-      payload: Uint8Array,
-    ) => Promise<{ readonly signature: string }>;
+    readonly sign: (instanceId: string, payload: Uint8Array) => Promise<ReplicaDeviceSignOutcome>;
   };
   readonly journal: ReplicaMembershipJournal;
   /** Membership facts, rebuilt from the journal. */
@@ -790,7 +791,15 @@ export class ReplicaMembershipService {
           artifacts.push({ instanceId, sequence });
           continue;
         }
-        this.#hold(read);
+        try {
+          this.#hold(read);
+        } catch {
+          // A record the journal will not take is unreadable here, not a
+          // failed pull: otherwise its slot stays unheld and every later
+          // read stops on it again.
+          refused.push(this.#unreadable({ instanceId, sequence, reason: "unreadable" }));
+          continue;
+        }
         applied += 1;
       }
     }
@@ -843,10 +852,11 @@ export class ReplicaMembershipService {
 
   /**
    * Read one slot and decide whether its file is a valid record on its own:
-   * the body decodes, its origin is the path, its id is its key's id, an
-   * approval's subject is its subject key's id, and the signature verifies
-   * under the key the body names. Nothing else is consulted, so every reader
-   * reaches the same verdict on the same file.
+   * the body decodes and is its entry's canonical encoding, its origin is the
+   * path, its id is its key's id, an approval's subject is its subject key's
+   * id, and the signature is canonical base64 that verifies under the key the
+   * body names. Nothing else is consulted, so every reader reaches the same
+   * verdict on the same file.
    */
   async #readSigned(
     store: ReplicaStore,
@@ -867,6 +877,10 @@ export class ReplicaMembershipService {
     } catch {
       return { status: "unreadable" };
     }
+    // Only the canonical encoding is a record. A padded copy still verifies
+    // under its writer's key, but it is a second byte form of one entry and can
+    // exceed the bounds a held record is journaled under.
+    if (text !== encodeReplicaEntry(entry)) return { status: "unreadable" };
     if (
       String(entry.origin.instanceId) !== String(instanceId) ||
       entry.origin.sequence !== sequence
@@ -881,6 +895,7 @@ export class ReplicaMembershipService {
     const signatureText = signature.status === "ready" ? decoder.decode(signature.bytes) : "";
     if (
       signature.status !== "ready" ||
+      !isCanonicalSignatureText(signatureText) ||
       replicaInstanceIdOf(entry.origin.publicKey) !== String(instanceId) ||
       (entry.kind === "join-approved" &&
         replicaInstanceIdOf(entry.subjectKey) !== String(entry.subject)) ||
@@ -1011,7 +1026,8 @@ export class ReplicaMembershipService {
 
   async #sign(entry: ReplicaMembershipEntry, encoded: Uint8Array): Promise<string | undefined> {
     try {
-      return (await this.#ports.credentials.sign(entry.origin.instanceId, encoded)).signature;
+      const signed = await this.#ports.credentials.sign(entry.origin.instanceId, encoded);
+      return signed.status === "signed" ? signed.signature : undefined;
     } catch {
       return undefined;
     }
@@ -1179,6 +1195,16 @@ function same(left: ReplicaInstanceId, right: ReplicaInstanceId): boolean {
 
 function sha256Hex(bytes: Uint8Array): string {
   return createHash("sha256").update(bytes).digest("hex");
+}
+
+/**
+ * An Ed25519 signature is 64 bytes, and only its padded standard base64 is a
+ * signature file. Node's decoder skips whitespace and stray characters, so a
+ * looser check would accept many texts for one signature.
+ */
+function isCanonicalSignatureText(text: string): boolean {
+  const bytes = Buffer.from(text, "base64");
+  return bytes.byteLength === 64 && bytes.toString("base64") === text;
 }
 
 async function readStore(store: ReplicaStore, key: string): Promise<ReadResult> {

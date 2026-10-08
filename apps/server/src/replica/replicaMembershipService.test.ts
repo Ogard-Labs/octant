@@ -31,6 +31,7 @@ import {
   makeReplicaDeviceSigner,
   replicaInstanceIdOf,
   verifyReplicaEntrySignature,
+  type ReplicaDeviceSignOutcome,
 } from "./replicaDeviceKeyService";
 import {
   createReplicaMembershipJournal,
@@ -275,6 +276,11 @@ function cutOf(host: Computer, id: ReplicaInstanceId): number | undefined {
     ?.lastAcceptedSequence;
 }
 
+function signedText(outcome: ReplicaDeviceSignOutcome): string {
+  if (outcome.status !== "signed") throw new Error(`Signing was refused: ${outcome.reason}`);
+  return outcome.signature;
+}
+
 /** Signs and writes a record with a key the caller holds, outside any service. */
 async function writeRecord(
   store: MemoryStore,
@@ -282,8 +288,8 @@ async function writeRecord(
   entry: ReplicaEntry,
 ): Promise<string> {
   const bytes = new TextEncoder().encode(encodeReplicaEntry(entry));
-  const { signature } = await makeReplicaDeviceSigner(credentials, entry.origin.instanceId).sign(
-    bytes,
+  const signature = signedText(
+    await makeReplicaDeviceSigner(credentials, entry.origin.instanceId).sign(bytes),
   );
   const path = `${entry.origin.instanceId}/${entry.origin.sequence}`;
   store.files.set(`${path}.json`, bytes);
@@ -808,7 +814,9 @@ describe("replica membership service", () => {
       origin: { ...request.entry.origin, instanceId: otherId },
     });
     const bytes = new TextEncoder().encode(encodeReplicaEntry(forged));
-    const { signature } = await makeReplicaDeviceSigner(south.credentials, south.id()).sign(bytes);
+    const signature = signedText(
+      await makeReplicaDeviceSigner(south.credentials, south.id()).sign(bytes),
+    );
     store.files.set(`${otherId}/1.json`, bytes);
     store.files.set(`${otherId}/1.sig`, new TextEncoder().encode(signature));
     const pulled = expectKind(await north.service.execute({ kind: "pull" }), "pulled");
@@ -967,6 +975,43 @@ describe("replica membership service", () => {
     expect(
       north.events().filter((e) => e.eventName === REPLICA_MEMBERSHIP_EVENT_NAMES.entryUnreadable),
     ).toHaveLength(1);
+  });
+
+  it("refuses a validly signed record in a non-canonical form, and keeps reading the store", async () => {
+    const store = memoryStore();
+    const north = computer({ store: selected(store) });
+    const south = computer({ store: selected(store) });
+    const east = computer({ store: selected(store) });
+    const west = computer({ store: selected(store) });
+    await north.service.execute({ kind: "create-replica", displayName: "MacBook" });
+    await south.service.execute({ kind: "write-join-request", displayName: "Mac mini" });
+    await east.service.execute({ kind: "write-join-request", displayName: "Studio" });
+    await west.service.execute({ kind: "write-join-request", displayName: "Laptop" });
+    // South re-signs its request padded past the size a held record may have.
+    const southPath = `${south.id()}/1`;
+    const padded = new TextEncoder().encode(
+      `${new TextDecoder().decode(store.files.get(`${southPath}.json`))}${" ".repeat(70_000)}`,
+    );
+    const paddedSignature = signedText(
+      await makeReplicaDeviceSigner(south.credentials, south.id()).sign(padded),
+    );
+    store.files.set(`${southPath}.json`, padded);
+    store.files.set(`${southPath}.sig`, new TextEncoder().encode(paddedSignature));
+    // West's signature still decodes to the same 64 bytes, but not as their canonical text.
+    const westSignature = `${new TextDecoder().decode(store.files.get(`${west.id()}/1.sig`))}\n`;
+    store.files.set(`${west.id()}/1.sig`, new TextEncoder().encode(westSignature));
+
+    const pulled = expectKind(await north.service.execute({ kind: "pull" }), "pulled");
+    expect(pulled.refused).toEqual(
+      expect.arrayContaining([
+        { instanceId: south.id(), sequence: 1, reason: "unreadable" },
+        { instanceId: west.id(), sequence: 1, reason: "bad-signature" },
+      ]),
+    );
+    expect(north.projection.state().holds(south.id(), 1)).toBe(false);
+    expect(north.projection.state().holds(west.id(), 1)).toBe(false);
+    expect(north.projection.state().holds(east.id(), 1)).toBe(true);
+    expectKind(await north.service.execute({ kind: "pull" }), "pulled");
   });
 
   it("refuses a file filed under a path its body does not name", async () => {
