@@ -10,9 +10,10 @@ import {
   type ReplicaStoreSettingsView,
 } from "@octant/contracts/replica-store-settings";
 import { Schema } from "effect";
-import { useCallback, useEffect, useId, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { FolderPicker } from "../projects/FolderPicker";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
@@ -29,11 +30,20 @@ const isHttpsEndpoint = Schema.is(ReplicaStoreS3Endpoint);
 export const SYNC_PROVIDER_FACT =
   "Your storage provider can read the synced files: they are signed but not encrypted.";
 
+/** Why the store controls are off on a computer that belongs to a replica. */
+export const REPLICA_MEMBER_LOCK =
+  "This computer belongs to a replica in this store. The store can't be changed until leaving a replica is supported.";
+
 const STORE_OPTIONS: ReadonlyArray<{ readonly id: StoreKind; readonly label: string }> = [
   { id: "none", label: "None" },
   { id: "synced-folder", label: "Synced folder" },
   { id: "s3", label: "S3-compatible bucket" },
 ];
+
+/** A command's answer as the page needs it: taken, or the host's reason why not. */
+type CommandOutcome =
+  | { readonly status: "accepted" }
+  | { readonly status: "refused"; readonly message: string };
 
 export interface SyncSettingsSectionProps {
   /** Absent off this host: store setup is host authority. */
@@ -54,6 +64,7 @@ export interface SyncSettingsSectionProps {
 export function SyncSettingsSection(props: SyncSettingsSectionProps) {
   const { client } = props;
   const factId = useId();
+  const testReasonId = useId();
   const [view, setView] = useState<ReplicaStoreSettingsView>();
   const [loadFailed, setLoadFailed] = useState(false);
   const [draftKind, setDraftKind] = useState<StoreKind>("none");
@@ -63,6 +74,10 @@ export function SyncSettingsSection(props: SyncSettingsSectionProps) {
     Extract<ReplicaStoreSettingsResult, { kind: "replica-store-connection-tested" }> | undefined
   >();
   const [pickingFolder, setPickingFolder] = useState(false);
+  const [confirmingNone, setConfirmingNone] = useState(false);
+  // Kept here, not in the bucket form: the form is rebuilt from the host's
+  // view after a reload, and the reason a save was refused must outlive that.
+  const [bucketProblem, setBucketProblem] = useState<string>();
 
   const load = useCallback(async () => {
     if (client === undefined) return;
@@ -80,34 +95,48 @@ export function SyncSettingsSection(props: SyncSettingsSectionProps) {
     void load();
   }, [load]);
 
-  /** Runs one command; answers whether the host took it. */
+  /**
+   * Runs one command. A refusal is shown in the section's feedback slot
+   * unless the caller shows it where the person acted.
+   */
   const run = useCallback(
-    async (command: ReplicaStoreSettingsCommand): Promise<boolean> => {
-      if (client === undefined) return false;
+    async (
+      command: ReplicaStoreSettingsCommand,
+      report: (message: string) => void = setProblem,
+    ): Promise<CommandOutcome> => {
+      if (client === undefined)
+        return { status: "refused", message: "Sync settings are host-only." };
       setBusy(true);
       setProblem(undefined);
+      let outcome: CommandOutcome;
       try {
         const result = await client.execute(command);
         if (result.kind === "replica-store-refused") {
-          setProblem(result.message);
-          // A stale version means another window moved the settings on.
-          if (result.reason === "stale-version") await load();
-          return false;
-        }
-        if (result.kind === "replica-store-connection-tested") {
+          outcome = { status: "refused", message: result.message };
+          // A stale version means another window moved the settings on; a
+          // member lock means this page's view is out of date too.
+          if (result.reason === "stale-version" || result.reason === "member-of-replica") {
+            await load();
+          }
+        } else if (result.kind === "replica-store-connection-tested") {
           setConnection(result);
-          return true;
+          outcome = { status: "accepted" };
+        } else {
+          setView(result);
+          setDraftKind(result.store.kind);
+          setConnection(undefined);
+          outcome = { status: "accepted" };
         }
-        setView(result);
-        setDraftKind(result.store.kind);
-        setConnection(undefined);
-        return true;
       } catch (error) {
-        setProblem(error instanceof Error ? error.message : "Sync settings are unavailable.");
-        return false;
+        outcome = {
+          status: "refused",
+          message: error instanceof Error ? error.message : "Sync settings are unavailable.",
+        };
       } finally {
         setBusy(false);
       }
+      if (outcome.status === "refused") report(outcome.message);
+      return outcome;
     },
     [client, load],
   );
@@ -137,6 +166,8 @@ export function SyncSettingsSection(props: SyncSettingsSectionProps) {
   const canTurnOn =
     store.kind === "synced-folder" || (store.kind === "s3" && store.credentials === "saved");
   const switchDisabled = busy || (!view.syncOn && !canTurnOn);
+  const locked = view.replicaMember;
+  const testDisabledReason = view.syncOn ? undefined : "Turn sync on to test the connection.";
 
   return (
     <div className="settings-section-stack" id="settings-sync">
@@ -146,7 +177,7 @@ export function SyncSettingsSection(props: SyncSettingsSectionProps) {
       >
         <div className="setgroup">
           <SettingRow
-            description="Changing the store turns sync off."
+            description={locked ? REPLICA_MEMBER_LOCK : "Changing the store turns sync off."}
             focused={props.focusedSetting === "sync-store"}
             label="Store"
             labelledBySection
@@ -155,22 +186,20 @@ export function SyncSettingsSection(props: SyncSettingsSectionProps) {
           >
             <OctantSelectField
               aria-label="Store"
-              disabled={busy}
+              disabled={busy || locked}
               onValueChange={(value) => {
                 const kind = STORE_OPTIONS.find((option) => option.id === value)?.id;
                 if (kind === undefined) return;
                 setProblem(undefined);
-                setDraftKind(kind);
+                setBucketProblem(undefined);
+                // Choosing no store stops sync and forgets a bucket's key
+                // pair, so it waits for a confirmation; until then the
+                // current store stays selected.
                 if (kind === "none" && view.store.kind !== "none") {
-                  const current = view.store.kind;
-                  void run({
-                    schemaVersion: 1,
-                    kind: "clear-store",
-                    expectedVersion: view.version,
-                  }).then((accepted) => {
-                    if (!accepted) setDraftKind(current);
-                  });
+                  setConfirmingNone(true);
+                  return;
                 }
+                setDraftKind(kind);
               }}
               options={STORE_OPTIONS}
               value={draftKind}
@@ -192,7 +221,7 @@ export function SyncSettingsSection(props: SyncSettingsSectionProps) {
                   <span className="sync-settings__path">No folder chosen</span>
                 )}
                 <OctantButton
-                  disabled={busy || props.folderBrowse === undefined}
+                  disabled={busy || locked || props.folderBrowse === undefined}
                   onClick={() => setPickingFolder(true)}
                   size="sm"
                   type="button"
@@ -213,16 +242,26 @@ export function SyncSettingsSection(props: SyncSettingsSectionProps) {
               <BucketForm
                 busy={busy}
                 credentialStoreAvailable={view.credentialStore === "available"}
-                onSave={(settings, credentials) =>
-                  run({
-                    schemaVersion: 1,
-                    kind: "configure-s3",
-                    settings,
-                    ...(credentials === undefined ? {} : { credentials }),
-                    expectedVersion: view.version,
-                  })
-                }
+                hostProblem={bucketProblem}
+                // Rebuilt from the host's view whenever it moves, so a reload
+                // after a refusal shows what the host holds, not a stale draft.
+                key={view.version}
+                locked={locked}
+                onSave={async (settings, credentials) => {
+                  setBucketProblem(undefined);
+                  await run(
+                    {
+                      schemaVersion: 1,
+                      kind: "configure-s3",
+                      settings,
+                      ...(credentials === undefined ? {} : { credentials }),
+                      expectedVersion: view.version,
+                    },
+                    setBucketProblem,
+                  );
+                }}
                 saved={store.kind === "s3" ? store : undefined}
+                syncOn={view.syncOn}
               />
             </SettingRow>
           ) : null}
@@ -267,16 +306,26 @@ export function SyncSettingsSection(props: SyncSettingsSectionProps) {
             scope="host"
             settingId="sync-test-connection"
           >
+            {/* Focusable while off, so its reason reaches keyboard and screen
+                reader users the way the switch's does. */}
             <OctantButton
+              aria-describedby={testDisabledReason === undefined ? undefined : testReasonId}
+              className="aria-disabled:cursor-not-allowed aria-disabled:opacity-50"
               disabled={busy || !view.syncOn}
+              focusableWhenDisabled
               onClick={() => void run({ schemaVersion: 1, kind: "test-connection" })}
               size="sm"
-              title={view.syncOn ? undefined : "Turn sync on to test the connection."}
+              title={testDisabledReason}
               type="button"
               variant="secondary"
             >
               Test connection
             </OctantButton>
+            {testDisabledReason === undefined ? null : (
+              <span className="sr-only" id={testReasonId}>
+                {testDisabledReason}
+              </span>
+            )}
           </SettingRow>
         </div>
         <div aria-live="polite" className="settings-feedback-slot">
@@ -288,6 +337,32 @@ export function SyncSettingsSection(props: SyncSettingsSectionProps) {
           {problem === undefined ? null : <SettingsState kind="error">{problem}</SettingsState>}
         </div>
       </SettingsSection>
+
+      {confirmingNone ? (
+        <OctantConfirmDialog
+          confirmLabel="Stop syncing"
+          destructive
+          onCancel={() => setConfirmingNone(false)}
+          onConfirm={() => {
+            setConfirmingNone(false);
+            const current = view.store.kind;
+            setDraftKind("none");
+            void run({
+              schemaVersion: 1,
+              kind: "clear-store",
+              expectedVersion: view.version,
+            }).then((outcome) => {
+              if (outcome.status === "refused") setDraftKind(current);
+            });
+          }}
+          pending={busy}
+          title="Choose no store?"
+        >
+          {view.store.kind === "s3"
+            ? "Sync stops, and this bucket's saved access key and secret are removed from this computer. Nothing in the bucket is deleted."
+            : "Sync stops, and Octant stops using this folder. Nothing in the folder is deleted."}
+        </OctantConfirmDialog>
+      ) : null}
 
       {pickingFolder && props.folderBrowse !== undefined ? (
         <FolderPicker
@@ -307,6 +382,7 @@ export function SyncSettingsSection(props: SyncSettingsSectionProps) {
             });
           }}
           showGitInit={false}
+          showMode={false}
           title="Sync folder"
         />
       ) : null}
@@ -317,11 +393,16 @@ export function SyncSettingsSection(props: SyncSettingsSectionProps) {
 function BucketForm(props: {
   readonly busy: boolean;
   readonly credentialStoreAvailable: boolean;
+  /** The host's reason the last save was refused. */
+  readonly hostProblem: string | undefined;
+  /** This computer belongs to a replica: only the key pair and region can change. */
+  readonly locked: boolean;
   readonly saved: Extract<ReplicaStoreSettingsView["store"], { readonly kind: "s3" }> | undefined;
+  readonly syncOn: boolean;
   readonly onSave: (
     settings: ReplicaStoreS3Settings,
     credentials: { readonly accessKeyId: string; readonly secretAccessKey: string } | undefined,
-  ) => Promise<boolean>;
+  ) => Promise<void>;
 }) {
   const saved = props.saved?.settings;
   const [endpoint, setEndpoint] = useState(saved?.endpoint ?? "");
@@ -334,7 +415,24 @@ function BucketForm(props: {
   const [accessKeyId, setAccessKeyId] = useState("");
   const [secretAccessKey, setSecretAccessKey] = useState("");
   const [problem, setProblem] = useState<string>();
-  const keySaved = props.saved?.credentials === "saved";
+  const problemRef = useRef<HTMLParagraphElement>(null);
+  const shownProblem = problem ?? props.hostProblem;
+  // The saved key pair belongs to one server: a different endpoint, bucket,
+  // or addressing is a different server, and the host asks for a new pair.
+  const sameServer =
+    saved !== undefined &&
+    endpoint.trim() === saved.endpoint &&
+    bucket.trim() === saved.bucket &&
+    addressing === saved.addressing;
+  const keyKept = props.saved?.credentials === "saved" && sameServer;
+  const unchanged =
+    sameServer && region.trim() === saved.region && (prefix.trim() || undefined) === saved.prefix;
+  const fieldsOff = !props.credentialStoreAvailable;
+  const locationOff = fieldsOff || props.locked;
+
+  useEffect(() => {
+    if (shownProblem !== undefined) problemRef.current?.focus();
+  }, [shownProblem]);
 
   const submit = async () => {
     if (!isHttpsEndpoint(endpoint.trim())) {
@@ -361,8 +459,12 @@ function BucketForm(props: {
       setProblem("Enter both the access key and the secret.");
       return;
     }
-    if (!typedKey && !keySaved) {
-      setProblem("Enter the access key and secret for this bucket.");
+    if (!typedKey && !keyKept) {
+      setProblem(
+        props.saved === undefined
+          ? "Enter the access key and secret for this bucket."
+          : "A different endpoint, bucket, or addressing needs its own access key and secret.",
+      );
       return;
     }
     setProblem(undefined);
@@ -379,19 +481,26 @@ function BucketForm(props: {
   return (
     <form
       aria-label="Bucket connection"
-      className="voice-settings__form"
+      className="sync-settings__bucket-form"
       noValidate
       onSubmit={(event) => {
         event.preventDefault();
         void submit();
       }}
     >
+      {props.credentialStoreAvailable ? null : (
+        <p className="provider-settings__field-guidance">
+          Octant cannot reach a Keychain or Secret Service on this computer to keep a bucket&apos;s
+          access key in, so a bucket cannot be saved here. A synced folder still works.
+        </p>
+      )}
       <label>
         <span>Endpoint</span>
         <OctantInput
           aria-label="Endpoint"
           autoComplete="off"
           className="settings-view__text-input"
+          disabled={locationOff}
           onChange={(event) => setEndpoint(event.currentTarget.value)}
           placeholder="https://s3.eu-north-1.amazonaws.com"
           spellCheck={false}
@@ -404,6 +513,7 @@ function BucketForm(props: {
           aria-label="Region"
           autoComplete="off"
           className="settings-view__text-input"
+          disabled={fieldsOff}
           onChange={(event) => setRegion(event.currentTarget.value)}
           placeholder="eu-north-1"
           spellCheck={false}
@@ -416,6 +526,7 @@ function BucketForm(props: {
           aria-label="Bucket"
           autoComplete="off"
           className="settings-view__text-input"
+          disabled={locationOff}
           onChange={(event) => setBucket(event.currentTarget.value)}
           spellCheck={false}
           value={bucket}
@@ -427,6 +538,7 @@ function BucketForm(props: {
           aria-label="Prefix"
           autoComplete="off"
           className="settings-view__text-input"
+          disabled={locationOff}
           onChange={(event) => setPrefix(event.currentTarget.value)}
           placeholder="octant"
           spellCheck={false}
@@ -438,6 +550,7 @@ function BucketForm(props: {
         <OctantSelectField
           aria-label="Addressing"
           className="settings-view__select"
+          disabled={locationOff}
           onValueChange={(value) => {
             if (value === "path" || value === "virtual-host") setAddressing(value);
           }}
@@ -454,9 +567,9 @@ function BucketForm(props: {
           aria-label="Access key ID"
           autoComplete="off"
           className="settings-view__text-input"
-          disabled={!props.credentialStoreAvailable}
+          disabled={fieldsOff}
           onChange={(event) => setAccessKeyId(event.currentTarget.value)}
-          placeholder={keySaved ? "Saved — leave blank to keep" : undefined}
+          placeholder={keyKept ? "Saved — leave blank to keep" : undefined}
           spellCheck={false}
           value={accessKeyId}
         />
@@ -467,29 +580,36 @@ function BucketForm(props: {
           aria-label="Secret access key"
           autoComplete="new-password"
           className="settings-view__text-input"
-          disabled={!props.credentialStoreAvailable}
+          disabled={fieldsOff}
           onChange={(event) => setSecretAccessKey(event.currentTarget.value)}
-          placeholder={keySaved ? "Saved — leave blank to keep" : undefined}
+          placeholder={keyKept ? "Saved — leave blank to keep" : undefined}
           spellCheck={false}
           type="password"
           value={secretAccessKey}
         />
       </label>
-      {props.credentialStoreAvailable ? null : (
+      {props.saved?.credentials === "saved" && !sameServer ? (
         <p className="provider-settings__field-guidance">
-          Octant cannot reach a Keychain or Secret Service on this computer to keep a bucket&apos;s
-          access key in, so a bucket cannot be saved here. A synced folder still works.
+          A different endpoint, bucket, or addressing needs its own access key and secret.
         </p>
-      )}
-      {problem === undefined ? null : (
+      ) : null}
+      {props.syncOn && !unchanged ? (
+        <p className="provider-settings__field-guidance">Saving turns sync off.</p>
+      ) : null}
+      {shownProblem === undefined ? null : (
         /* ui-boundary-exception: inline-field-error */
-        <p className="provider-settings__field-guidance" role="alert">
-          {problem}
+        <p
+          className="provider-settings__field-guidance"
+          ref={problemRef}
+          role="alert"
+          tabIndex={-1}
+        >
+          {shownProblem}
         </p>
       )}
       <div className="settings-view__actions">
         <OctantButton
-          disabled={props.busy || !props.credentialStoreAvailable}
+          disabled={props.busy || fieldsOff}
           size="sm"
           type="submit"
           variant="secondary"

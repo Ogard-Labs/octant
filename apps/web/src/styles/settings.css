@@ -2387,6 +2387,28 @@ textarea.settings-view__text-input {
   min-width: 0;
 }
 
+/* A bucket is a compound editor stacked under the row's hint, like the
+   other compound rows: one field per line, then its Save action. */
+.sync-settings__bucket-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--oct-space-3);
+  width: 100%;
+  max-width: 620px;
+}
+
+.sync-settings__bucket-form > label {
+  display: grid;
+  gap: var(--oct-space-1);
+}
+
+.sync-settings__bucket-form .settings-view__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--oct-space-2);
+}
+
 .sync-settings__path {
   max-width: 28ch;
   overflow: hidden;
