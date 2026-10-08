@@ -1,4 +1,5 @@
 import type { ProviderFailure } from "@octant/contracts";
+import type { CompatibleModelsListing } from "./openAiCompatibleEndpoint";
 
 /**
  * The ChatGPT plan (Sign in with ChatGPT) request profile.
@@ -234,6 +235,60 @@ export function chatGptPlanErrorFailure(state: ChatGptPlanErrorState): ProviderF
       };
   }
 }
+
+/**
+ * How Check connection reads the plan route's `/models` answer. The plan
+ * preview's contract covers Responses turns, not model enumeration, and the
+ * sign-in grants no model-read scope, so the route may answer with a body
+ * that is not a model list, a refusal, or no models at all. Each of those is
+ * reported in words with the person's manual model IDs instead of failing
+ * the check as an invalid response. Credential, usage, and availability codes
+ * keep their typed plan states.
+ */
+export const chatGptPlanModelsListing: CompatibleModelsListing = {
+  classifyRejection(status, body) {
+    let value: unknown;
+    try {
+      value = JSON.parse(body) as unknown;
+    } catch {
+      return undefined;
+    }
+    const error = isRecord(value) && isRecord(value.error) ? value.error : undefined;
+    const code = typeof error?.code === "string" ? error.code : undefined;
+    if (
+      code === "subscription_sharing_route_not_supported" ||
+      code === "subscription_sharing_unsupported_capability"
+    ) {
+      return "unlisted";
+    }
+    if (
+      code !== undefined &&
+      (code.startsWith("subscription_sharing_") || code.startsWith("chatpass_v2_"))
+    ) {
+      return chatGptPlanErrorFailure(chatGptPlanErrorState(code, status));
+    }
+    // OpenAI answers a token without the model-read scope with a 401 whose
+    // message names the missing scope. The sign-in is valid for Responses
+    // turns; it only cannot enumerate models, so asking the person to sign
+    // in again would loop.
+    if (
+      status === 401 &&
+      typeof error?.message === "string" &&
+      error.message.includes("Missing scopes: api.model.read")
+    ) {
+      return "unlisted";
+    }
+    return undefined;
+  },
+  unlistedMessage(answer, hasManualModels) {
+    if (hasManualModels) {
+      return "Models can't be listed on the ChatGPT plan; Octant uses your manual model IDs.";
+    }
+    return answer === "empty"
+      ? "The ChatGPT plan listed no models. Add the model IDs your plan offers under Manual model IDs, then check the connection again."
+      : "Models can't be listed on the ChatGPT plan. Add the model IDs your plan offers under Manual model IDs, then check the connection again.";
+  },
+};
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);

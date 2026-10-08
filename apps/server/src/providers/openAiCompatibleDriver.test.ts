@@ -1,5 +1,6 @@
 import {
   decodeProviderInstanceId,
+  decodeProviderProbeResult,
   decodeProviderSessionId,
   type OpenAiCompatibleProviderConfiguration,
   type ProviderFailure,
@@ -728,12 +729,14 @@ describe("makeOpenAiCompatibleDriver under the ChatGPT plan profile", () => {
   function planDriver(options: {
     readonly fetch: CompatibleFetch;
     readonly protocol?: OpenAiCompatibleProviderConfiguration["protocol"];
+    readonly manualModelIds?: ReadonlyArray<ProviderModelId>;
   }) {
     return makeOpenAiCompatibleDriver({
       instanceId,
       configuration: {
         ...planConfiguration,
         ...(options.protocol === undefined ? {} : { protocol: options.protocol }),
+        ...(options.manualModelIds === undefined ? {} : { manualModelIds: options.manualModelIds }),
       },
       runtimeRegistry: new ProviderRuntimeRegistry(),
       credentialResolver: {
@@ -758,6 +761,209 @@ describe("makeOpenAiCompatibleDriver under the ChatGPT plan profile", () => {
       clock: () => "2026-10-06T18:00:00.000Z",
     });
   }
+
+  /**
+   * Check connection exactly as the renderer sees it: the driver's probe
+   * result, sent as JSON and decoded with the client's contract decoder.
+   */
+  async function checkPlanConnection(
+    answer: Response,
+    manualModelIds: ReadonlyArray<ProviderModelId> = [],
+  ) {
+    const calls: Array<{ url: string; authorization: string | null }> = [];
+    const fetch = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      calls.push({
+        url: String(url),
+        authorization: new Headers(init?.headers).get("authorization"),
+      });
+      return answer;
+    });
+    const either = await Effect.runPromise(
+      Effect.either(Effect.scoped(planDriver({ fetch, manualModelIds }).probe({ instanceId }))),
+    );
+    const decoded = Either.isRight(either)
+      ? decodeProviderProbeResult(JSON.parse(JSON.stringify(either.right)))
+      : undefined;
+    return { either, decoded, calls };
+  }
+
+  const planNotListedMessage =
+    "Models can't be listed on the ChatGPT plan. Add the model IDs your plan offers under Manual model IDs, then check the connection again.";
+
+  it("reports in words that the plan cannot list models when its models route answers without a model list", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const { either, decoded, calls } = await checkPlanConnection(
+      Response.json({ models: [{ slug: "plan-model" }] }),
+    );
+    // Before the plan profile read this answer, the probe failed with a
+    // protocol category and the renderer said "Provider returned an invalid
+    // response."
+    expect(Either.isRight(either)).toBe(true);
+    expect(decoded).toMatchObject({
+      readiness: "degraded",
+      credentialStatus: "stored",
+      models: [],
+      message: planNotListedMessage,
+      lastSuccessfulProbeAt: "2026-10-06T18:00:00.000Z",
+    });
+    expect(calls).toEqual([
+      { url: "https://api.openai.com/v1/models", authorization: "Bearer plan-access-token" },
+    ]);
+    // The diagnostic names the answer's shape and never its values or the bearer.
+    expect(warn).toHaveBeenCalledWith("[provider] models route did not list models", {
+      instanceId,
+      httpStatus: 200,
+      contentType: "application/json",
+      shape: "{models}",
+    });
+    expect(JSON.stringify(warn.mock.calls)).not.toContain("plan-model");
+    expect(JSON.stringify(warn.mock.calls)).not.toContain("plan-access-token");
+    warn.mockRestore();
+  });
+
+  it("reports the same honest state for a non-JSON answer, an OpenAI-shaped 404, a route refusal, and a missing model-read scope", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const answers = [
+      new Response("<html>ChatGPT</html>", { headers: { "content-type": "text/html" } }),
+      Response.json(
+        {
+          error: {
+            message: "Invalid URL (GET /v1/models)",
+            type: "invalid_request_error",
+            param: null,
+            code: null,
+          },
+        },
+        { status: 404 },
+      ),
+      Response.json(
+        { error: { code: "subscription_sharing_route_not_supported", message: "no" } },
+        { status: 400 },
+      ),
+      Response.json(
+        {
+          error: {
+            message:
+              "You have insufficient permissions for this operation. Missing scopes: api.model.read.",
+            type: "invalid_request_error",
+            param: null,
+            code: null,
+          },
+        },
+        { status: 401 },
+      ),
+    ];
+    for (const answer of answers) {
+      const { decoded } = await checkPlanConnection(answer);
+      expect(decoded).toMatchObject({
+        readiness: "degraded",
+        models: [],
+        message: planNotListedMessage,
+      });
+    }
+    warn.mockRestore();
+  });
+
+  it("keeps the person's manual model IDs usable when the plan cannot list models", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const { decoded } = await checkPlanConnection(
+      Response.json(
+        { error: { message: "Forbidden", type: "invalid_request_error" } },
+        { status: 403 },
+      ),
+      ["plan-model" as ProviderModelId],
+    );
+    expect(decoded).toMatchObject({
+      readiness: "degraded",
+      models: [{ id: "plan-model", source: "manual", verification: "unverified" }],
+      message: "Models can't be listed on the ChatGPT plan; Octant uses your manual model IDs.",
+    });
+    warn.mockRestore();
+  });
+
+  it("reports the plan's listed models, and says so when it lists none", async () => {
+    const listed = await checkPlanConnection(
+      Response.json({ object: "list", data: [{ id: "plan-model", object: "model" }] }),
+    );
+    expect(listed.decoded).toMatchObject({
+      readiness: "ready",
+      models: [{ id: "plan-model", source: "discovered", verification: "verified" }],
+    });
+    expect(listed.decoded?.message).toBeUndefined();
+
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const empty = await checkPlanConnection(Response.json({ object: "list", data: [] }));
+    expect(empty.decoded).toMatchObject({
+      readiness: "degraded",
+      models: [],
+      message:
+        "The ChatGPT plan listed no models. Add the model IDs your plan offers under Manual model IDs, then check the connection again.",
+    });
+    warn.mockRestore();
+  });
+
+  it("still fails Check connection with the typed state for a rejected sign-in or a reached usage limit", async () => {
+    const rejected = await checkPlanConnection(
+      Response.json(
+        {
+          error: {
+            message: "Incorrect API key provided.",
+            type: "invalid_request_error",
+            param: null,
+            code: "invalid_api_key",
+          },
+        },
+        { status: 401 },
+      ),
+    );
+    expect(Either.isLeft(rejected.either)).toBe(true);
+    if (Either.isRight(rejected.either)) throw new Error("expected a typed failure");
+    expect(rejected.either.left.category).toBe("unauthenticated");
+
+    const limited = await checkPlanConnection(
+      Response.json(
+        { error: { code: "subscription_sharing_usage_limit_exceeded", message: "limit" } },
+        { status: 429 },
+      ),
+    );
+    expect(Either.isLeft(limited.either)).toBe(true);
+    if (Either.isRight(limited.either)) throw new Error("expected a typed failure");
+    expect(limited.either.left.category).toBe("rate-limited");
+    expect(limited.either.left.message).toContain("https://chatgpt.com/settings/usage");
+  });
+
+  it("runs a Responses turn on a manual model after the plan could not list models", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const calls: string[] = [];
+    const fetch = vi.fn(async (url: string | URL | Request) => {
+      calls.push(String(url));
+      return String(url).endsWith("/models")
+        ? Response.json({ models: [] })
+        : responsesTextStream("plan answer");
+    });
+    const driver = planDriver({ fetch, protocol: "responses" });
+    const events = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const probe = yield* driver.probe({ instanceId });
+          expect(probe.models.map((model) => model.id)).toEqual([modelId]);
+          const connection = yield* driver.acquire({ instanceId, projectRoot: "/tmp/project" });
+          yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+          const collected = yield* Effect.fork(
+            collectSessionEvents(yield* connection.subscribe, sessionId),
+          );
+          yield* connection.send({ sessionId, prompt: "first", attachments: [], tools: [] });
+          return Array.from(yield* Fiber.join(collected));
+        }),
+      ),
+    );
+    expect(events.at(-1)?.kind).toBe("completed");
+    expect(calls).toEqual([
+      "https://api.openai.com/v1/models",
+      "https://api.openai.com/v1/responses",
+    ]);
+    warn.mockRestore();
+  });
 
   it("refuses a turn before any request when the plan profile is bound to chat-completions", async () => {
     const fetch = vi.fn(async () => modelsResponse("x"));

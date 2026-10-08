@@ -40,7 +40,7 @@ import {
   honestDirectEndpointCapabilities,
   inspectDirectEndpointCredential,
 } from "./directEndpointSubscriptionOAuth";
-import { isChatGptPlanDescriptor } from "./chatGptPlanProfile";
+import { chatGptPlanModelsListing, isChatGptPlanDescriptor } from "./chatGptPlanProfile";
 import { sendChatCompletionsTurn, type ChatCompletionsTurnResult } from "./openAiChatCompletions";
 import {
   makeOpenAiCompatibleEndpoint,
@@ -199,7 +199,13 @@ export function makeOpenAiCompatibleDriver(options: OpenAiCompatibleDriverOption
                     : options.credentialResolver,
                 profile,
               );
-              const result = await probeModels(endpoint);
+              // The plan route may not enumerate models; its profile reads that
+              // answer as an honest "cannot list" state instead of a failure.
+              const result = await probeModels(
+                endpoint,
+                undefined,
+                planProfileOf(options) === "chatgpt-plan" ? chatGptPlanModelsListing : undefined,
+              );
               // Do NOT run a generating tool-echo turn during routine probes:
               // ChatService.#prepareTurnExecution calls driver.probe() before
               // every Chat turn, so a probe-time tool echo would add an

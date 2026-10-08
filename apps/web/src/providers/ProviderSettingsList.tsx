@@ -1906,7 +1906,11 @@ function guidance(
         {driverKind === "openai-compatible" ||
         driverKind === "anthropic-compatible" ||
         driverKind === "azure-foundry"
-          ? "The provider remains usable with degraded discovery or streaming. Review capabilities before use."
+          ? // An endpoint that answered but could not list models says why in
+            // its message (the ChatGPT plan route, for one); the generic line
+            // would leave the person guessing what to fix.
+            (message ??
+            "The provider remains usable with degraded discovery or streaming. Review capabilities before use.")
           : driverKind === "ollama"
             ? "Ollama is reachable but no compatible installed models were reported. Manage models outside Octant, then retry."
             : "Review unavailable capabilities before starting work."}

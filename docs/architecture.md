@@ -3053,7 +3053,14 @@ mechanisms are:
   hosted tools are refused. A request that cannot be expressed is refused
   with a typed reason, and the route's `subscription_sharing_*` error codes
   map to user-facing states (usage limit with a manage-usage link, bounded
-  backoff on unavailability, unauthenticated on 401/403).
+  backoff on unavailability, unauthenticated on 401/403). The plan contract
+  covers Responses turns, not model enumeration, so Check connection reads
+  the route's `/models` answer through the profile: a model list is reported
+  as discovered; a body that is not a model list, a route-not-served status, a
+  403, a missing model-read scope, or an empty list is a degraded, worded
+  "models can't be listed" state carrying the manual model IDs, never a
+  protocol failure. Credential, usage-limit, and availability answers keep
+  failing the check with their typed states.
 
 ## Package map
 

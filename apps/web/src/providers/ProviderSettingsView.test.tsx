@@ -2124,6 +2124,49 @@ describe("ProviderSettingsView", () => {
     ).toBeVisible();
   });
 
+  it("says in words that the ChatGPT plan cannot list models instead of the generic degraded line", () => {
+    const planMessage =
+      "Models can't be listed on the ChatGPT plan. Add the model IDs your plan offers under Manual model IDs, then check the connection again.";
+    renderExpanded(
+      <ModelEndpointSettingsView
+        {...fixture({
+          instance: {
+            id,
+            displayName: "ChatGPT plan",
+            driverKind: "openai-compatible",
+            enabled: true,
+            environmentPolicy: "inherit-host",
+            version: 1 as never,
+            createdAt: "2026-10-08T18:36:14.976Z" as never,
+            updatedAt: "2026-10-08T18:36:14.976Z" as never,
+            configuration: {
+              kind: "openai-compatible-http",
+              baseUrl: "https://api.openai.com/v1/",
+              authentication: "bearer",
+              protocol: "responses",
+              manualModelIds: [],
+              oauthDescriptorId: "chatgpt-plan",
+            },
+          },
+          observed: observation({
+            readiness: "degraded",
+            processState: "stopped",
+            credentialStatus: "stored",
+            models: [],
+            message: planMessage,
+            lastSuccessfulProbeAt: "2026-10-08T19:30:00.000Z" as never,
+          }),
+        })}
+      />,
+    );
+    const card = screen.getByRole("article", { name: "ChatGPT plan" });
+
+    expect(within(card).getByText(planMessage)).toBeVisible();
+    expect(
+      within(card).queryByText(/remains usable with degraded discovery or streaming/i),
+    ).not.toBeInTheDocument();
+  });
+
   it("does not infer an observed protocol from a successful connection check", async () => {
     const user = userEvent.setup();
     renderExpanded(

@@ -331,6 +331,14 @@ turns are refused until you sign in again and allow plan access. When the
 plan's usage limit is reached, the failure links to ChatGPT's usage settings
 (`https://chatgpt.com/settings/usage`).
 
+The plan route may not list its models. When **Check connection** cannot get
+a model list from it, the row says so in words instead of reporting an
+invalid response: add the model IDs your plan offers under **Manual model
+IDs**, then check the connection again. Those IDs are shown as manual and
+unverified until a turn succeeds with them. A rejected sign-in, a reached
+usage limit, or an unavailable route still fails the check with its own
+message.
+
 ## Choosing a model
 
 The **provider-first model picker** groups models by provider instance in the

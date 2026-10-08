@@ -115,14 +115,35 @@ export function makeOpenAiCompatibleEndpoint(
   });
 }
 
+/**
+ * How a request profile reads a `/models` answer when the route it serves
+ * does not promise a model list. Without one, the standard OpenAI listing is
+ * required and a body that is not one is a protocol failure.
+ */
+export interface CompatibleModelsListing {
+  /**
+   * A structured rejection the profile recognizes: a typed failure to report,
+   * "unlisted" when the rejection only means this route does not list models,
+   * or undefined to fall back to the generic HTTP classification.
+   */
+  readonly classifyRejection: (
+    status: number,
+    body: string,
+  ) => ProviderFailure | "unlisted" | undefined;
+  /** What the person is told when the route answered but listed no models. */
+  readonly unlistedMessage: (answer: "unlisted" | "empty", hasManualModels: boolean) => string;
+}
+
 export async function probeModels(
   endpoint: OpenAiCompatibleEndpoint,
   signal?: AbortSignal,
+  listing?: CompatibleModelsListing,
 ): Promise<CompatibleProbeResult> {
   const response = await performRequest(endpoint, endpoint.url("models"), {
     method: "GET",
     ...(signal === undefined ? {} : { signal }),
   });
+  if (listing !== undefined) return readOptionalModelListing(endpoint, response, listing);
   if (!response.ok) {
     const failure = classifyCompatibleHttpFailure(response);
     await cancelResponseBody(response);
@@ -147,6 +168,80 @@ export async function probeModels(
     if (!discoveredIds.has(id)) models.push(manualModel(id));
   }
   return { readiness: "ready", models };
+}
+
+/**
+ * Read a `/models` answer from a route that may not list models. A 2xx that
+ * is not a model list, a 403, or a route-not-served status is an honest
+ * "cannot list" state with the configured model IDs, never a protocol
+ * failure: the route answered, it just does not enumerate what it serves.
+ * Credential, rate-limit, and availability failures still fail the probe.
+ */
+async function readOptionalModelListing(
+  endpoint: OpenAiCompatibleEndpoint,
+  response: Response,
+  listing: CompatibleModelsListing,
+): Promise<CompatibleProbeResult> {
+  const manual = manualModels(endpoint.configuration.manualModelIds);
+  let body: string;
+  try {
+    body = await response.text();
+  } catch (error) {
+    throw sanitizeCompatibleFailure(error);
+  }
+  const unlisted = (answer: "unlisted" | "empty"): CompatibleProbeResult => {
+    // Names what the route answered (status, content type, and the JSON
+    // shape's key names) so a live check shows why models were not listed
+    // without logging any value the body carried.
+    console.warn("[provider] models route did not list models", {
+      instanceId: endpoint.instanceId,
+      httpStatus: response.status,
+      contentType: response.headers.get("content-type") ?? "none",
+      shape: jsonShape(body),
+    });
+    return {
+      readiness: "degraded",
+      models: manual,
+      failure: fail("unsupported", listing.unlistedMessage(answer, manual.length > 0)),
+    };
+  };
+  if (!response.ok) {
+    const recognized = listing.classifyRejection(response.status, body);
+    if (recognized === "unlisted") return unlisted("unlisted");
+    if (recognized !== undefined) throw sanitizeCompatibleFailure(recognized);
+    const failure = classifyCompatibleHttpFailure(response);
+    if (failure.category === "unsupported" || failure.category === "unauthorized") {
+      return unlisted("unlisted");
+    }
+    throw failure;
+  }
+  let value: unknown;
+  try {
+    value = JSON.parse(body) as unknown;
+  } catch {
+    return unlisted("unlisted");
+  }
+  if (!isStrictModelList(value)) return unlisted("unlisted");
+  const discoveredIds = new Set(value.data.map(({ id }) => id));
+  const models: ProviderModel[] = [...discoveredIds].map(discoveredModel);
+  for (const id of endpoint.configuration.manualModelIds) {
+    if (!discoveredIds.has(id)) models.push(manualModel(id));
+  }
+  if (models.length === 0) return unlisted("empty");
+  return { readiness: "ready", models };
+}
+
+/** The top-level key names of a JSON body, or its kind, and never its values. */
+function jsonShape(body: string): string {
+  let value: unknown;
+  try {
+    value = JSON.parse(body) as unknown;
+  } catch {
+    return body.length === 0 ? "empty" : "non-json";
+  }
+  if (Array.isArray(value)) return "array";
+  if (typeof value !== "object" || value === null) return typeof value;
+  return `{${Object.keys(value).slice(0, 12).join(",")}}`;
 }
 
 export async function requestGeneration(
