@@ -1607,11 +1607,16 @@ The provider layer is defined by `@octant/provider-sdk` and implemented in
   free-form driver or provider text does not cross to clients, and Settings
   maps the reason to copy and next-step guidance. A version check may show
   its structured minimum version in provider readiness; free-form probe text
-  remains redacted. Probe readiness follows the driver's failure category, so
-  an unreachable endpoint is `unavailable`, and so is an OpenAI-compatible,
-  Anthropic-compatible, or Ollama endpoint answering a timeout, overload, or
-  gateway status (HTTP 408, 500, 502, 503, 504, 529); the failure the probe
-  returns names only the status code, never the response body. A connection
+  remains redacted. HTTP endpoint drivers (OpenAI-compatible,
+  Anthropic-compatible, Azure AI Foundry, Ollama) fail only with fixed
+  Octant-authored sentences that carry no response body or credential, so a
+  failed probe keeps that sentence on the observation and it survives a
+  reload. An answer that is not the expected protocol (an HTML page, a body
+  that is not a model list) is `incompatible`, not `degraded`. Readiness
+  otherwise follows the driver's failure category, so an unreachable
+  endpoint is `unavailable`, and so is an OpenAI-compatible,
+  Anthropic-compatible, or Ollama endpoint answering a timeout, overload or
+  gateway status (HTTP 408, 500, 502, 503, 504, 529). A connection
   offers `subscribe` — a
   scoped subscription to its normalized events, established before a caller
   sends so a provider that answers immediately is not missed (0082) — plus
