@@ -253,9 +253,11 @@ export function createManagedSimulatorHelpers(
   async function deliver(
     session: StreamSession,
     request: DeviceHelperRequest,
-    timeoutMs: number,
+    budgetMs: number,
     cancelled: AbortSignal | undefined,
-  ): Promise<DeviceHelperReply | "native" | "disconnected"> {
+  ): Promise<
+    DeviceHelperReply | "native" | { readonly kind: "disconnected"; readonly remainingMs: number }
+  > {
     if (request.op === "hello") {
       return { status: "delivered", screen: session.screen };
     }
@@ -270,20 +272,29 @@ export function createManagedSimulatorHelpers(
     // would hear every touch reported as delivered. A finger already down
     // was checked when it went down, and stays on the path it went down on.
     if (request.op === "touch" && request.phase !== "down" && nativeFingers.has(session.udid)) {
-      return "disconnected";
+      return { kind: "disconnected", remainingMs: budgetMs };
     }
+    // The question comes out of the input's own deadline: the broker keeps a
+    // margin to answer the server inside it, and a send that started late
+    // could land after the server gave the action up and a retry sent it again.
+    let timeoutMs = budgetMs;
     if (!(request.op === "touch" && request.phase !== "down")) {
+      const askedAt = Date.now();
       const connection = await inputConnection(
         session.udid,
         AbortSignal.any([
-          AbortSignal.timeout(Math.min(INPUT_CONNECTION_MS, timeoutMs)),
+          AbortSignal.timeout(Math.min(INPUT_CONNECTION_MS, budgetMs)),
           ...(cancelled === undefined ? [] : [cancelled]),
         ]),
       );
       if (actionWasCancelled(cancelled)) {
         return { status: "unavailable", message: "The action was cancelled." };
       }
-      if (connection === "disconnected") return "disconnected";
+      timeoutMs = budgetMs - (Date.now() - askedAt);
+      if (timeoutMs <= 0) {
+        return { status: "unavailable", message: "Checking the Simulator's input used the time." };
+      }
+      if (connection === "disconnected") return { kind: "disconnected", remainingMs: timeoutMs };
     }
     let sent = false;
     let gestureOpen = false;
@@ -492,8 +503,8 @@ export function createManagedSimulatorHelpers(
       }
       const delivered = await deliver(session, request, timeoutMs, cancelled);
       if (delivered === "native") return native.send(simulatorId, request, timeoutMs, cancelled);
-      if (delivered === "disconnected") {
-        return disconnectedInput(simulatorId, request, timeoutMs, cancelled);
+      if ("kind" in delivered) {
+        return disconnectedInput(simulatorId, request, delivered.remainingMs, cancelled);
       }
       return delivered;
     },
@@ -736,7 +747,9 @@ function simctlInputConnection(
       output += Buffer.from(chunk).toString("utf8");
     });
     child.once("error", () => resolve("unknown"));
-    child.once("exit", (code) => resolve(code === 0 ? readInputConnection(output) : "unknown"));
+    // `close`, not `exit`: the process can end before its stdout has drained,
+    // and a half-read answer would read as unknown and let serve-sim send.
+    child.once("close", (code) => resolve(code === 0 ? readInputConnection(output) : "unknown"));
   });
 }
 

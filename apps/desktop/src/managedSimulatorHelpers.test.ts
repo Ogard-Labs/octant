@@ -179,6 +179,26 @@ describe("managed simulator streams", () => {
     }
   });
 
+  it("takes the time spent asking about the input out of what the native helper is given", async () => {
+    const native = nativeHelpers();
+    const helpers = createManagedSimulatorHelpers(native, tools(), {
+      fetch: fetchStream,
+      inputConnection: async () => {
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        return "disconnected";
+      },
+    });
+    try {
+      await helpers.send(udid, { op: "hello" }, 2_000);
+      await helpers.send(udid, { op: "tap", x: 0.5, y: 0.25 }, 1_000);
+      const given = native.send.mock.calls[0]?.[2];
+      expect(given).toBeLessThanOrEqual(710);
+      expect(given).toBeGreaterThan(0);
+    } finally {
+      helpers.dispose();
+    }
+  });
+
   it("refuses input as disconnected when neither serve-sim nor the native helper can deliver it", async () => {
     const native = nativeHelpers();
     native.send.mockResolvedValue({
