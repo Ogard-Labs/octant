@@ -18,6 +18,7 @@ import { describe, expect, it, vi } from "vitest";
 import { ProviderCreateForm } from "./ProviderSettingsConfiguration";
 import { ProviderSettingsList } from "./ProviderSettingsList";
 import { ProviderSettingsView, type ProviderSettingsViewProps } from "./ProviderSettingsView";
+import { ModelEndpointSettingsView } from "../settings/ModelEndpointSettingsView";
 import { useProviderController } from "./useProviderController";
 import type { OctantHostBridge } from "../shell/hostBridge";
 import { chooseSelectFieldOption } from "../test/chooseSelectFieldOption.test-support";
@@ -28,7 +29,9 @@ const renderProviderSettings = render;
 
 function renderExpanded(ui: ReactElement) {
   const result = renderProviderSettings(ui);
-  const manual = screen.queryByRole("button", { name: "Add provider manually" });
+  const manual =
+    screen.queryByRole("button", { name: "Add provider manually" }) ??
+    screen.queryByRole("button", { name: "Add endpoint" });
   if (manual?.getAttribute("aria-expanded") === "false") fireEvent.click(manual);
   for (const details of screen.queryAllByRole("button", { name: /^Details for / })) {
     if (details.getAttribute("aria-expanded") === "false") fireEvent.click(details);
@@ -171,10 +174,20 @@ describe("ProviderSettingsView", () => {
     expect(screen.queryByLabelText("Display name for Existing CLI")).not.toBeInTheDocument();
     await user.click(disclosure);
     expect(disclosure).toHaveAttribute("aria-expanded", "true");
-    expect(screen.getByRole("heading", { name: "Custom endpoint or binary" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Agent runtime" })).toBeVisible();
     await user.click(screen.getByRole("combobox", { name: "Provider type" }));
-    expect(screen.queryByRole("option", { name: "OpenAI Image" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("option", { name: "Gemini Image" })).not.toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Codex CLI" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Qwen Code ACP" })).toBeInTheDocument();
+    for (const elsewhere of [
+      "OpenAI-compatible HTTP",
+      "Anthropic-compatible HTTP",
+      "Azure AI Foundry",
+      "Ollama native HTTP",
+      "OpenAI Image",
+      "Gemini Image",
+    ]) {
+      expect(screen.queryByRole("option", { name: elsewhere })).not.toBeInTheDocument();
+    }
     await user.keyboard("{Escape}");
     await user.click(screen.getByRole("button", { name: "Details for Existing CLI" }));
     const configure = screen.getByRole("button", { name: "Configure Existing CLI" });
@@ -442,7 +455,7 @@ describe("ProviderSettingsView", () => {
   it("creates and edits Ollama as a loopback-only native API without credentials or binary controls", async () => {
     const user = userEvent.setup();
     const props = fixture({ instance: ollamaProvider() });
-    renderExpanded(<ProviderSettingsView {...props} />);
+    renderExpanded(<ModelEndpointSettingsView {...props} />);
 
     await chooseSelectFieldOption(
       user,
@@ -476,7 +489,7 @@ describe("ProviderSettingsView", () => {
 
   it("gives Ollama service guidance instead of CLI binary guidance", () => {
     renderExpanded(
-      <ProviderSettingsView
+      <ModelEndpointSettingsView
         {...fixture({
           instance: ollamaProvider(),
           observed: observation({ readiness: "unavailable" }),
@@ -1181,7 +1194,7 @@ describe("ProviderSettingsView", () => {
   });
 
   it("renders OpenAI-compatible providers as read-only HTTP summaries", async () => {
-    renderExpanded(<ProviderSettingsView {...fixture({ instance: httpProvider() })} />);
+    renderExpanded(<ModelEndpointSettingsView {...fixture({ instance: httpProvider() })} />);
     const card = screen.getByRole("article", { name: "Private gateway" });
 
     expect(within(card).getByText("OpenAI-compatible HTTP")).toBeVisible();
@@ -1194,7 +1207,7 @@ describe("ProviderSettingsView", () => {
   it("creates an HTTP provider with a write-only credential and clears it after settlement", async () => {
     const user = userEvent.setup();
     const props = fixture({ instance: httpProvider() });
-    renderExpanded(<ProviderSettingsView {...props} />);
+    renderExpanded(<ModelEndpointSettingsView {...props} />);
 
     await chooseSelectFieldOption(
       user,
@@ -1232,7 +1245,7 @@ describe("ProviderSettingsView", () => {
   it("creates an Anthropic-compatible provider with an API key credential", async () => {
     const user = userEvent.setup();
     const props = fixture({ instance: anthropicProvider() });
-    renderExpanded(<ProviderSettingsView {...props} />);
+    renderExpanded(<ModelEndpointSettingsView {...props} />);
 
     await chooseSelectFieldOption(
       user,
@@ -1275,7 +1288,7 @@ describe("ProviderSettingsView", () => {
   it("says before the form that a browser cannot add a provider that needs an API key", async () => {
     const user = userEvent.setup();
     renderExpanded(
-      <ProviderSettingsView
+      <ModelEndpointSettingsView
         {...fixture({ instance: foundryProvider(), credentialManagementAvailable: false })}
       />,
     );
@@ -1294,7 +1307,7 @@ describe("ProviderSettingsView", () => {
   it("offers a keyless endpoint in a browser and leaves the notice out for providers that need no key", async () => {
     const user = userEvent.setup();
     renderExpanded(
-      <ProviderSettingsView
+      <ModelEndpointSettingsView
         {...fixture({ instance: foundryProvider(), credentialManagementAvailable: false })}
       />,
     );
@@ -1318,7 +1331,7 @@ describe("ProviderSettingsView", () => {
 
   it("shows no desktop-only notice where keys can be stored", async () => {
     const user = userEvent.setup();
-    renderExpanded(<ProviderSettingsView {...fixture({ instance: foundryProvider() })} />);
+    renderExpanded(<ModelEndpointSettingsView {...fixture({ instance: foundryProvider() })} />);
 
     await chooseSelectFieldOption(user, screen.getByLabelText("Provider type"), "Azure AI Foundry");
 
@@ -1328,7 +1341,7 @@ describe("ProviderSettingsView", () => {
   it("creates an Azure AI Foundry provider with an api-key credential", async () => {
     const user = userEvent.setup();
     const props = fixture({ instance: foundryProvider() });
-    renderExpanded(<ProviderSettingsView {...props} />);
+    renderExpanded(<ModelEndpointSettingsView {...props} />);
 
     await chooseSelectFieldOption(user, screen.getByLabelText("Provider type"), "Azure AI Foundry");
     const create = screen.getByRole("form", { name: "Add Azure AI Foundry provider" });
@@ -1371,7 +1384,7 @@ describe("ProviderSettingsView", () => {
     async (_label, instance, modelId) => {
       const user = userEvent.setup();
       const props = fixture({ instance, observed: observation() });
-      renderExpanded(<ProviderSettingsView {...props} />);
+      renderExpanded(<ModelEndpointSettingsView {...props} />);
 
       const card = screen.getByLabelText(instance.displayName);
       await user.click(within(card).getByRole("button", { name: "Connection details" }));
@@ -1388,7 +1401,7 @@ describe("ProviderSettingsView", () => {
       instance: httpProvider(),
       observed: observation({ verifiedToolModelIds: ["model-a" as never] }),
     });
-    renderExpanded(<ProviderSettingsView {...props} />);
+    renderExpanded(<ModelEndpointSettingsView {...props} />);
 
     const card = screen.getByLabelText("Private gateway");
     await user.click(within(card).getByRole("button", { name: "Connection details" }));
@@ -1401,7 +1414,7 @@ describe("ProviderSettingsView", () => {
   it("saves Azure AI Foundry configuration changes for an existing provider", async () => {
     const user = userEvent.setup();
     const props = fixture({ instance: foundryProvider() });
-    renderExpanded(<ProviderSettingsView {...props} />);
+    renderExpanded(<ModelEndpointSettingsView {...props} />);
 
     const card = screen.getByLabelText("Foundry relay");
     await user.clear(within(card).getByLabelText("Foundry OpenAI v1 base URL for Foundry relay"));
@@ -1743,7 +1756,7 @@ describe("ProviderSettingsView", () => {
   it("resets stale api-key auth back to bearer when switching from Anthropic to OpenAI-compatible", async () => {
     const user = userEvent.setup();
     const props = fixture({ instance: anthropicProvider() });
-    renderExpanded(<ProviderSettingsView {...props} />);
+    renderExpanded(<ModelEndpointSettingsView {...props} />);
 
     await chooseSelectFieldOption(
       user,
@@ -1769,7 +1782,7 @@ describe("ProviderSettingsView", () => {
 
   it("clears and disables the create credential when authentication changes to none", async () => {
     const user = userEvent.setup();
-    renderExpanded(<ProviderSettingsView {...fixture({ instance: httpProvider() })} />);
+    renderExpanded(<ModelEndpointSettingsView {...fixture({ instance: httpProvider() })} />);
 
     await chooseSelectFieldOption(
       user,
@@ -1799,7 +1812,7 @@ describe("ProviderSettingsView", () => {
       instance: httpProvider(),
       observed: observation({ credentialStatus: "missing" }),
     });
-    renderExpanded(<ProviderSettingsView {...props} />);
+    renderExpanded(<ModelEndpointSettingsView {...props} />);
 
     await chooseSelectFieldOption(
       user,
@@ -1847,7 +1860,7 @@ describe("ProviderSettingsView", () => {
   it("shows endpoint and authentication guidance without credential controls remotely", async () => {
     const user = userEvent.setup();
     renderExpanded(
-      <ProviderSettingsView
+      <ModelEndpointSettingsView
         {...fixture({ instance: httpProvider(), credentialManagementAvailable: false })}
       />,
     );
@@ -1879,7 +1892,7 @@ describe("ProviderSettingsView", () => {
   it("edits HTTP configuration, preserves a blank key, and supports explicit clearing", async () => {
     const user = userEvent.setup();
     const props = fixture({ instance: httpProvider() });
-    renderExpanded(<ProviderSettingsView {...props} />);
+    renderExpanded(<ModelEndpointSettingsView {...props} />);
     const card = screen.getByRole("article", { name: "Private gateway" });
 
     expect(await within(card).findByText("Stored in Keychain")).toBeVisible();
@@ -1910,7 +1923,7 @@ describe("ProviderSettingsView", () => {
       ...fixture({ instance: httpProvider() }),
       onProviderCredentialStatus: vi.fn(() => pending.promise),
     };
-    renderExpanded(<ProviderSettingsView {...props} />);
+    renderExpanded(<ModelEndpointSettingsView {...props} />);
     const card = screen.getByRole("article", { name: "Private gateway" });
 
     expect(within(card).getByText("Checking Keychain…")).toBeVisible();
@@ -1929,12 +1942,12 @@ describe("ProviderSettingsView", () => {
       ...fixture({ instance: httpProvider() }),
       onProviderCredentialStatus,
     };
-    const { rerender } = renderExpanded(<ProviderSettingsView {...props} />);
+    const { rerender } = renderExpanded(<ModelEndpointSettingsView {...props} />);
     const card = screen.getByRole("article", { name: "Private gateway" });
     expect(within(card).getByText("Checking Keychain…")).toBeVisible();
 
     rerender(
-      <ProviderSettingsView
+      <ModelEndpointSettingsView
         {...props}
         observedByInstance={new Map([[id, observation({ credentialStatus: "stored" })]])}
       />,
@@ -1955,7 +1968,7 @@ describe("ProviderSettingsView", () => {
       }),
       onProviderCredentialStatus: vi.fn(() => pending.promise),
     };
-    renderExpanded(<ProviderSettingsView {...props} />);
+    renderExpanded(<ModelEndpointSettingsView {...props} />);
     const card = screen.getByRole("article", { name: "Private gateway" });
 
     await user.click(
@@ -1977,7 +1990,7 @@ describe("ProviderSettingsView", () => {
       }),
       onProviderCredentialStatus: vi.fn(() => pending.promise),
     };
-    renderExpanded(<ProviderSettingsView {...props} />);
+    renderExpanded(<ModelEndpointSettingsView {...props} />);
     const card = screen.getByRole("article", { name: "Private gateway" });
 
     await user.type(within(card).getByLabelText("API key for Private gateway"), "replacement");
@@ -2003,7 +2016,7 @@ describe("ProviderSettingsView", () => {
         return update.promise;
       }),
     };
-    const { rerender } = renderExpanded(<ProviderSettingsView {...props} />);
+    const { rerender } = renderExpanded(<ModelEndpointSettingsView {...props} />);
     let card = screen.getByRole("article", { name: "Private gateway" });
 
     await user.type(within(card).getByLabelText("API key for Private gateway"), "replacement");
@@ -2013,7 +2026,10 @@ describe("ProviderSettingsView", () => {
     expect(within(card).getByText("Checking Keychain…")).toBeVisible();
 
     rerender(
-      <ProviderSettingsView {...props} instances={[{ ...httpProvider(), version: 2 as never }]} />,
+      <ModelEndpointSettingsView
+        {...props}
+        instances={[{ ...httpProvider(), version: 2 as never }]}
+      />,
     );
     card = screen.getByRole("article", { name: "Private gateway" });
     expect(within(card).getByText("Checking Keychain…")).toBeVisible();
@@ -2028,7 +2044,7 @@ describe("ProviderSettingsView", () => {
       instance: httpProvider(),
       observed: observation({ credentialStatus: "missing" }),
     });
-    renderExpanded(<ProviderSettingsView {...props} />);
+    renderExpanded(<ModelEndpointSettingsView {...props} />);
     const card = screen.getByRole("article", { name: "Private gateway" });
     const authentication = within(card).getByLabelText("Authentication for Private gateway");
     const key = within(card).getByLabelText("API key for Private gateway");
@@ -2069,7 +2085,7 @@ describe("ProviderSettingsView", () => {
 
   it("separates configured and observed protocol and labels model provenance", () => {
     renderExpanded(
-      <ProviderSettingsView
+      <ModelEndpointSettingsView
         {...fixture({
           instance: httpProvider(),
           observed: observation({
@@ -2108,10 +2124,55 @@ describe("ProviderSettingsView", () => {
     ).toBeVisible();
   });
 
+  it("says in words that the ChatGPT plan cannot list models instead of the generic degraded line", () => {
+    const planMessage =
+      "Models can't be listed on the ChatGPT plan. Add the model IDs your plan offers under Manual model IDs, then check the connection again.";
+    renderExpanded(
+      <ModelEndpointSettingsView
+        {...fixture({
+          instance: {
+            id,
+            displayName: "ChatGPT plan",
+            driverKind: "openai-compatible",
+            enabled: true,
+            environmentPolicy: "inherit-host",
+            version: 1 as never,
+            createdAt: "2026-10-08T18:36:14.976Z" as never,
+            updatedAt: "2026-10-08T18:36:14.976Z" as never,
+            configuration: {
+              kind: "openai-compatible-http",
+              baseUrl: "https://api.openai.com/v1/",
+              authentication: "bearer",
+              protocol: "responses",
+              manualModelIds: [],
+              oauthDescriptorId: "chatgpt-plan",
+            },
+          },
+          observed: observation({
+            readiness: "degraded",
+            processState: "stopped",
+            credentialStatus: "stored",
+            models: [],
+            message: planMessage,
+            lastSuccessfulProbeAt: "2026-10-08T19:30:00.000Z" as never,
+          }),
+        })}
+      />,
+    );
+    const card = screen.getByRole("article", { name: "ChatGPT plan" });
+
+    expect(within(card).getByText(planMessage)).toBeVisible();
+    expect(
+      within(card).queryByText(/remains usable with degraded discovery or streaming/i),
+    ).not.toBeInTheDocument();
+  });
+
   it("does not infer an observed protocol from a successful connection check", async () => {
     const user = userEvent.setup();
     renderExpanded(
-      <ProviderSettingsView {...fixture({ instance: httpProvider(), observed: observation() })} />,
+      <ModelEndpointSettingsView
+        {...fixture({ instance: httpProvider(), observed: observation() })}
+      />,
     );
     const card = screen.getByRole("article", { name: "Private gateway" });
     await user.click(within(card).getByRole("button", { name: "Connection details" }));
@@ -2494,9 +2555,9 @@ describe("ProviderSettingsView", () => {
     expect(control).toHaveAccessibleDescription(/has not been scanned/i);
   });
 
-  it("keeps a manual endpoint provider enable-able and out of the not-detected group", () => {
+  it("keeps a manual endpoint enable-able and out of any detection group", () => {
     renderProviderSettings(
-      <ProviderSettingsView
+      <ModelEndpointSettingsView
         {...fixture({
           instance: { ...httpProvider(), enabled: false },
           discoverySnapshot: discoverySnapshot({ candidates: [] }),
@@ -2509,7 +2570,7 @@ describe("ProviderSettingsView", () => {
     const control = within(card).getByRole("switch", { name: "Enable Private gateway" });
     expect(control).not.toHaveAttribute("aria-disabled", "true");
     expect(screen.queryByRole("heading", { name: "Supported, not detected" })).toBeNull();
-    expect(screen.getByRole("heading", { name: "Other providers" })).toBeVisible();
+    expect(screen.queryByRole("heading", { name: "Other providers" })).toBeNull();
   });
 
   it("sets each detection group in its own Settings section, in cards two to a row", () => {
@@ -2723,7 +2784,7 @@ describe("ProviderSettingsView", () => {
 
   it("keeps detected Ollama enablement visible after a repeated scan", () => {
     renderProviderSettings(
-      <ProviderSettingsView
+      <ModelEndpointSettingsView
         {...fixture({
           instance: decodeProviderInstance({ ...ollamaProvider(), enabled: false }),
           discoverySnapshot: discoverySnapshot({
@@ -2791,7 +2852,12 @@ describe("ProviderSettingsView", () => {
 
   it("renders the Bedrock Mantle setup guide only for an OpenAI-compatible endpoint", async () => {
     const user = userEvent.setup();
-    renderExpanded(<ProviderSettingsView {...fixture()} />);
+    renderExpanded(<ModelEndpointSettingsView {...fixture()} />);
+    await chooseSelectFieldOption(
+      user,
+      screen.getByLabelText("Provider type"),
+      "Anthropic-compatible HTTP",
+    );
     expect(
       screen.queryByRole("heading", { name: "Amazon Bedrock Mantle setup" }),
     ).not.toBeInTheDocument();
@@ -2805,6 +2871,212 @@ describe("ProviderSettingsView", () => {
     expect(
       screen.getByText(/does not currently expose the full Bedrock Converse API/i),
     ).toBeVisible();
+  });
+});
+
+describe("where Settings lists each provider kind", () => {
+  const endpointId = decodeProviderInstanceId("80000000-0000-4000-8000-0000000000b1");
+  const ollamaId = decodeProviderInstanceId("80000000-0000-4000-8000-0000000000b2");
+  const imageId = decodeProviderInstanceId("80000000-0000-4000-8000-0000000000b3");
+  const planId = decodeProviderInstanceId("80000000-0000-4000-8000-0000000000b4");
+
+  function mixedInstances(): ReadonlyArray<ProviderInstance> {
+    return [
+      provider(),
+      { ...httpProvider(), id: endpointId },
+      { ...ollamaProvider(), id: ollamaId },
+      { ...openAiImageProvider(), id: imageId },
+    ];
+  }
+
+  function chatGptPlanEndpoint(): ProviderInstance {
+    return {
+      id: planId,
+      displayName: "ChatGPT plan",
+      driverKind: "openai-compatible",
+      enabled: true,
+      environmentPolicy: "inherit-host",
+      version: 1 as never,
+      createdAt: "2026-07-15T10:00:00.000Z" as never,
+      updatedAt: "2026-07-15T10:00:00.000Z" as never,
+      configuration: {
+        kind: "openai-compatible-http",
+        baseUrl: "https://api.openai.com/v1",
+        authentication: "bearer",
+        protocol: "responses",
+        manualModelIds: [],
+        oauthDescriptorId: "chatgpt-plan" as never,
+      },
+    };
+  }
+
+  it("lists only agent runtimes under Providers & Models", () => {
+    renderProviderSettings(<ProviderSettingsView {...fixture()} instances={mixedInstances()} />);
+
+    expect(screen.getByRole("article", { name: "Existing CLI" })).toBeVisible();
+    expect(screen.queryByRole("article", { name: "Private gateway" })).toBeNull();
+    expect(screen.queryByRole("article", { name: "Ollama local" })).toBeNull();
+    expect(screen.queryByRole("article", { name: "GPT Image" })).toBeNull();
+  });
+
+  it("lists existing API endpoints under Model endpoints and keeps them editable and removable", async () => {
+    const user = userEvent.setup();
+    const props = fixture();
+    renderProviderSettings(<ModelEndpointSettingsView {...props} instances={mixedInstances()} />);
+
+    expect(screen.getByRole("heading", { name: "Model endpoints" })).toBeVisible();
+    expect(screen.getByRole("article", { name: "Private gateway" })).toBeVisible();
+    expect(screen.getByRole("article", { name: "Ollama local" })).toBeVisible();
+    expect(screen.queryByRole("article", { name: "Existing CLI" })).toBeNull();
+    expect(screen.queryByRole("article", { name: "GPT Image" })).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Details for Private gateway" }));
+    await user.click(screen.getByRole("button", { name: "Configure Private gateway" }));
+    const baseUrl = screen.getByLabelText("API base URL for Private gateway");
+    await user.clear(baseUrl);
+    await user.type(baseUrl, "https://gateway.example/v2");
+    await user.click(
+      screen.getByRole("button", { name: "Save HTTP settings for Private gateway" }),
+    );
+    expect(props.onChangeOpenAiCompatibleConfiguration).toHaveBeenCalledWith(
+      endpointId,
+      expect.objectContaining({ baseUrl: "https://gateway.example/v2" }),
+      expect.anything(),
+    );
+
+    await user.click(screen.getByRole("button", { name: "Remove Private gateway" }));
+    expect(props.onRemove).toHaveBeenCalledWith(endpointId);
+  });
+
+  it("offers only model endpoint kinds when adding an endpoint by its base URL", async () => {
+    const user = userEvent.setup();
+    renderProviderSettings(<ModelEndpointSettingsView {...fixture()} />);
+
+    await user.click(screen.getByRole("button", { name: "Add endpoint" }));
+    await user.click(screen.getByRole("combobox", { name: "Provider type" }));
+    expect(await screen.findByRole("option", { name: "Azure AI Foundry" })).toBeInTheDocument();
+    for (const kind of [
+      "OpenAI-compatible HTTP",
+      "Anthropic-compatible HTTP",
+      "Azure AI Foundry",
+      "Ollama native HTTP",
+    ]) {
+      expect(screen.getByRole("option", { name: kind })).toBeInTheDocument();
+    }
+    expect(screen.queryByRole("option", { name: "Codex CLI" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "OpenAI Image" })).not.toBeInTheDocument();
+  });
+
+  it("creates the ChatGPT plan endpoint at its fixed URL with no key and starts its sign-in", async () => {
+    const user = userEvent.setup();
+    const openUrl = vi.fn();
+    const onProviderOAuth = vi.fn(async (command: { readonly kind: string }) =>
+      command.kind === "begin"
+        ? {
+            kind: "awaiting-consent" as const,
+            attemptId: "attempt-1",
+            authorizationUrl: "https://auth.openai.com/api/accounts/authorize?x=1",
+          }
+        : { kind: "signed-out" as const, termsRequired: false },
+    );
+    const props = { ...fixture({ onOpenExternalUrl: openUrl }), onProviderOAuth };
+    const { rerender } = renderProviderSettings(
+      <ModelEndpointSettingsView {...props} instances={[]} />,
+    );
+
+    expect(screen.getByText("No model endpoints yet.")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Sign in with ChatGPT" }));
+
+    expect(props.onCreateOpenAiCompatible).toHaveBeenCalledOnce();
+    const [name, configuration, credential, instanceId] = vi.mocked(props.onCreateOpenAiCompatible)
+      .mock.calls[0]!;
+    expect(name).toBe("ChatGPT plan");
+    expect(configuration).toEqual({
+      kind: "openai-compatible-http",
+      baseUrl: "https://api.openai.com/v1",
+      authentication: "bearer",
+      protocol: "responses",
+      manualModelIds: [],
+      oauthDescriptorId: "chatgpt-plan",
+    });
+    expect(credential.value).toBe("");
+    expect(screen.queryByLabelText("API base URL")).toBeNull();
+    expect(screen.queryByLabelText("API key")).toBeNull();
+    expect(instanceId).toBeDefined();
+
+    rerender(
+      <ModelEndpointSettingsView
+        {...props}
+        instances={[{ ...chatGptPlanEndpoint(), id: instanceId ?? planId }]}
+      />,
+    );
+
+    await waitFor(() =>
+      expect(onProviderOAuth).toHaveBeenCalledWith(
+        expect.objectContaining({ kind: "begin", descriptorId: "chatgpt-plan", instanceId }),
+      ),
+    );
+    expect(openUrl).toHaveBeenCalledWith("https://auth.openai.com/api/accounts/authorize?x=1");
+    expect(await screen.findByText("Continue in the browser to finish signing in.")).toBeVisible();
+  });
+
+  it("asks for the sign-in terms before starting a new ChatGPT plan sign-in", async () => {
+    const user = userEvent.setup();
+    const onProviderOAuth = vi.fn(async (_command: { readonly kind: string }) => ({
+      kind: "signed-out" as const,
+      termsRequired: true,
+    }));
+    const props = { ...fixture(), onProviderOAuth };
+    const { rerender } = renderProviderSettings(
+      <ModelEndpointSettingsView {...props} instances={[]} />,
+    );
+    await user.click(screen.getByRole("button", { name: "Sign in with ChatGPT" }));
+    const instanceId = vi.mocked(props.onCreateOpenAiCompatible).mock.calls[0]?.[3];
+    rerender(
+      <ModelEndpointSettingsView
+        {...props}
+        instances={[{ ...chatGptPlanEndpoint(), id: instanceId ?? planId }]}
+      />,
+    );
+
+    expect(await screen.findByRole("button", { name: "Acknowledge and continue" })).toBeVisible();
+    expect(onProviderOAuth).not.toHaveBeenCalledWith(expect.objectContaining({ kind: "begin" }));
+  });
+
+  it("shows who is signed in on a ChatGPT plan row and keeps its URL and key out of its configuration", async () => {
+    const user = userEvent.setup();
+    const onProviderOAuth = vi.fn(async (command: { readonly kind: string }) =>
+      command.kind === "sign-out"
+        ? { kind: "signed-out" as const, termsRequired: false }
+        : { kind: "signed-in" as const, accountLabel: "ChatGPT plan" },
+    );
+    renderProviderSettings(
+      <ModelEndpointSettingsView
+        {...fixture()}
+        instances={[chatGptPlanEndpoint()]}
+        onProviderOAuth={onProviderOAuth}
+      />,
+    );
+
+    const signIn = screen.getByRole("group", { name: "Sign-in for ChatGPT plan" });
+    expect(await within(signIn).findByText(/Signed in as/)).toBeVisible();
+    expect(within(signIn).queryByRole("button", { name: "Use an API key" })).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Details for ChatGPT plan" }));
+    await user.click(screen.getByRole("button", { name: "Configure ChatGPT plan" }));
+    expect(screen.queryByLabelText("API base URL for ChatGPT plan")).toBeNull();
+    expect(screen.queryByLabelText("API key for ChatGPT plan")).toBeNull();
+    expect(screen.getByText(/The endpoint is fixed for this sign-in/)).toBeVisible();
+
+    await user.click(within(signIn).getByRole("button", { name: "Sign out" }));
+    expect(onProviderOAuth).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "sign-out",
+        descriptorId: "chatgpt-plan",
+        instanceId: planId,
+      }),
+    );
+    expect(await within(signIn).findByRole("button", { name: "Sign in" })).toBeVisible();
   });
 });
 

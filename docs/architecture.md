@@ -1784,7 +1784,15 @@ modelId }`, and the model picker is provider-first. Discovery can find
   renderer-visible. The raw credential resolve path refuses that material, so
   a refresh token is not handed out as an API key. Refresh runs in the broker.
   A revoked, expired, or reused refresh token becomes a typed sign-in-again
-  state. An API-key path stays available beside every sign-in. The effective
+  state. An API-key path stays available beside every sign-in. The host-driven
+  runner speaks vendor dialects: OpenRouter exchanges the code for an API key;
+  the ChatGPT plan dialect registers the host as a user-defined agent on first
+  sign-in (placeholder client id, agent name hint, stable `ext_agent_host_id`
+  bound by the server), stores the issued `oaiapp_…` client id from the
+  callback, validates the identity token against the issuer's JWKS, and
+  revokes the refresh token at the issuer on sign-out. The plan route's
+  request profile is enforced before send and its `subscription_sharing_*`
+  error codes map to user-facing states. The effective
   authority rule is in [security and authority](#security-and-authority); the
   historical record remains Proposed. Secrets
   Octant holds for an integration use the same host credential path: the host
@@ -3007,6 +3015,64 @@ mechanisms are:
   stored grant. The API-key path remains available beside that sign-in.
   [0111](decisions/0111-host-driven-provider-oauth.md) stays a Proposed
   historical record; this section is the effective rule.
+- **Subscription sign-in dialects.** The host OAuth runner speaks vendor wire
+  dialects beside the standard PKCE path. The OpenRouter dialect exchanges the
+  code for a user-controlled API key (no refresh token, no expiry). The
+  ChatGPT plan dialect ("Sign in with ChatGPT") registers the host as a
+  user-defined agent on first sign-in: the authorize request carries the
+  placeholder client id `dynamic_agent_client`, an `agent_name_hint`, and the
+  host's stable id as `ext_agent_host_id` (derived once from the host's data
+  directory and bound by the server before the first sign-in — never invented
+  by the catalog). The loopback callback returns the issued `oaiapp_…` client
+  id, which is stored and used for the exchange and every refresh — never the
+  placeholder. The exchange and refresh send `resource=https://api.openai.com/v1`
+  and no client secret. The identity token from the authorization-code exchange
+  is validated against the issuer's JWKS (RS256 signature, issuer, audience,
+  expiry, and the per-attempt OIDC nonce) before the grant is stored; the
+  verified `sub`/`email`, the issued client id, the retained identity token
+  (for `id_token_hint` on reauthorization), and the stable host id live on the
+  stored grant. Reauthorization is addressed by the instance's stored
+  credential ref — the host does not scan the credential store, because
+  production stores cannot list their entries. It reuses the issued client id,
+  sends `id_token_hint`, and omits the agent name hint. The reauthorization
+  callback may omit `client_id`; the issued id used in the authorize request
+  is retained, and a different `client_id` is refused. A refresh that returns
+  no identity token keeps the prior identity. A refresh that returns one is
+  checked for signature, issuer, audience, expiry, and subject equal to the
+  stored subject — not for a nonce, because refresh does not send one.
+  When the granted scopes omit `chatgpt.tokens.use.direct`, the sign-in is
+  still valid as identity-only and the access result reports
+  `subscriptionUsageGranted: false`, the provider-neutral seam field drivers
+  use to refuse subscription-billed turns. A refresh answered with
+  `invalid_client` means the issued client is gone, so the grant is dropped
+  and the person signs in again. Sign-out revokes the refresh token at the
+  issuer's discovery `revocation_endpoint` before the local grant is dropped;
+  the endpoint must share the issuer's origin, and only a 2xx answer counts
+  as revoked. When the issuer does not confirm, the grant is kept and the
+  person is told the sign-in is still active; they can retry or sign out on
+  this computer only, which deletes the local grant and says the issuer was
+  not told. A re-sign-in that replaces a grant always deletes the replaced
+  grant's local material, revoking it first when the issuer answers, so no
+  refresh token is left in the credential store without a pointer. The plan
+  route's request profile is enforced before send: `store:false` and
+  `stream:true` are mandatory, `input` is an array carrying the full
+  history, system text travels as
+  `instructions` (an explicit system-role message item is rejected), a fixed
+  parameter set is omitted entirely, and only function tools are allowed —
+  hosted tools are refused. A request that cannot be expressed is refused
+  with a typed reason, and the route's `subscription_sharing_*` error codes
+  map to user-facing states (usage limit with a manage-usage link, bounded
+  backoff on unavailability, unauthenticated on 401/403). The plan contract
+  covers Responses turns, not model enumeration, so Check connection reads
+  the route's `/models` answer through the profile: a model list is reported
+  as discovered, whether the OpenAI `{data:[{id}]}` shape or the plan's own
+  `{models:[…]}` listing (id from `slug`, then `id`, then `name`; display
+  name and a positive integer context window kept when present; unmappable
+  items skipped); a body that is not a model list, no mappable item, a route-not-served status, a
+  403, a missing model-read scope, or an empty list is a degraded, worded
+  "models can't be listed" state carrying the manual model IDs, never a
+  protocol failure. Credential, usage-limit, and availability answers keep
+  failing the check with their typed states.
 
 ## Package map
 

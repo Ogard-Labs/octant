@@ -1,31 +1,48 @@
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
+export interface HostOAuthBrokerDescriptor {
+  readonly descriptorId: string;
+  readonly clientId?: string;
+  readonly dialect?: "openrouter-pkce" | "chatgpt-plan-siwc";
+  readonly flow: "authorization-code-pkce" | "device-code";
+  readonly authorizationEndpoint?: string;
+  readonly tokenEndpoint: string;
+  readonly deviceAuthorizationEndpoint?: string;
+  readonly scopes: readonly string[];
+  readonly termsId: string;
+  /** ChatGPT plan dialect: the stable host id sent as `ext_agent_host_id`. */
+  readonly extAgentHostId?: string;
+  /** ChatGPT plan dialect: the app name sent as `agent_name_hint` on registration. */
+  readonly agentNameHint?: string;
+}
+
 export interface HostOAuthBrokerPort {
   readonly begin: (input: {
-    readonly descriptor: {
-      readonly descriptorId: string;
-      readonly clientId?: string;
-      readonly dialect?: "openrouter-pkce";
-      readonly flow: "authorization-code-pkce" | "device-code";
-      readonly authorizationEndpoint?: string;
-      readonly tokenEndpoint: string;
-      readonly deviceAuthorizationEndpoint?: string;
-      readonly scopes: readonly string[];
-      readonly termsId: string;
-    };
+    readonly descriptor: HostOAuthBrokerDescriptor;
     readonly actorId: string;
     readonly termsAcknowledgedAt: string;
+    /** ChatGPT plan reauthorization: the instance's stored grant. Optional. */
+    readonly credentialRef?: string;
   }) => Promise<unknown>;
   readonly status: (attemptId: string) => Promise<unknown>;
   readonly refresh: (credentialRef: string) => Promise<unknown>;
   readonly access: (credentialRef: string) => Promise<unknown>;
+  /**
+   * Revoke a grant: the ChatGPT plan dialect revokes the refresh token at
+   * the issuer's revocation endpoint before the local grant is dropped.
+   */
+  readonly revoke: (credentialRef: string) => Promise<unknown>;
   readonly forget: (credentialRef: string) => Promise<void>;
 }
 
 export function makeHostOAuthBrokerClient(options: {
   readonly url: string;
   readonly token: string;
-  readonly fetch?: typeof fetch;
+  /**
+   * Injectable fetch. A call signature, not `typeof fetch`: Bun's fetch
+   * carries extra methods a test double does not, and the client only calls it.
+   */
+  readonly fetch?: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 }): HostOAuthBrokerPort {
   const fetchImpl = options.fetch ?? globalThis.fetch;
   const post = async (path: string, body: unknown): Promise<unknown> => {
@@ -48,9 +65,13 @@ export function makeHostOAuthBrokerClient(options: {
       if (!UUID_PATTERN.test(input.actorId)) {
         return Promise.reject(new Error("Octant host OAuth broker refused the request."));
       }
+      if (input.credentialRef !== undefined && !UUID_PATTERN.test(input.credentialRef)) {
+        return Promise.reject(new Error("Octant host OAuth broker refused the request."));
+      }
       return post("/v1/oauth/begin", {
         actorId: input.actorId,
         termsAcknowledgedAt: input.termsAcknowledgedAt,
+        ...(input.credentialRef === undefined ? {} : { credentialRef: input.credentialRef }),
         descriptor: {
           descriptorId: input.descriptor.descriptorId,
           ...(input.descriptor.clientId === undefined
@@ -67,6 +88,12 @@ export function makeHostOAuthBrokerClient(options: {
           ...(input.descriptor.deviceAuthorizationEndpoint === undefined
             ? {}
             : { deviceAuthorizationEndpoint: input.descriptor.deviceAuthorizationEndpoint }),
+          ...(input.descriptor.extAgentHostId === undefined
+            ? {}
+            : { extAgentHostId: input.descriptor.extAgentHostId }),
+          ...(input.descriptor.agentNameHint === undefined
+            ? {}
+            : { agentNameHint: input.descriptor.agentNameHint }),
         },
       });
     },
@@ -87,6 +114,12 @@ export function makeHostOAuthBrokerClient(options: {
         return Promise.reject(new Error("Octant host OAuth broker refused the request."));
       }
       return post("/v1/oauth/access", { credentialRef });
+    },
+    revoke: (credentialRef) => {
+      if (!UUID_PATTERN.test(credentialRef)) {
+        return Promise.reject(new Error("Octant host OAuth broker refused the request."));
+      }
+      return post("/v1/oauth/revoke", { credentialRef });
     },
     forget: async (credentialRef) => {
       if (!UUID_PATTERN.test(credentialRef)) {
