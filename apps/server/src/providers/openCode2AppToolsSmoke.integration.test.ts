@@ -1,4 +1,9 @@
-import { decodeProviderInstanceId } from "@octant/contracts";
+import {
+  decodeProviderInstanceId,
+  decodeProviderSessionId,
+  type ProviderModelId,
+  type ProviderRuntimeEvent,
+} from "@octant/contracts";
 import {
   accessSync,
   constants,
@@ -12,14 +17,9 @@ import {
 import { createServer, type Server } from "node:http";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import { Effect } from "effect";
+import { Deferred, Effect, Fiber, Stream } from "effect";
 import { describe, expect, it } from "vitest";
-import {
-  betaSessionPermissionRules,
-  makeOfficialOpenCodeClient,
-  makeOpenCodeDriver,
-} from "./openCodeDriver";
-import { createOpenCodeManagedToolsBridge } from "./openCodeManagedTools";
+import { makeOpenCodeDriver } from "./openCodeDriver";
 import { makeOpenCodeProcessLive } from "./openCodeProcess";
 import { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
 
@@ -213,7 +213,7 @@ describe("OpenCode 2.x app-managed tools", () => {
   );
 
   it.skipIf(!enabled)(
-    "hands an app-managed tool to a confined 2.x turn and returns Octant's answer to the model",
+    "runs a confined 2.x turn through the driver that calls an app tool and completes",
     async (context) => {
       if (process.platform !== "darwin") context.skip("app tools need Seatbelt loopback rules");
       accessSync(binaryPath, constants.X_OK);
@@ -257,7 +257,16 @@ describe("OpenCode 2.x app-managed tools", () => {
         const driver = makeOpenCodeDriver({
           instanceId,
           binaryPath,
-          process: processPort,
+          // The jail reaches loopback only on listed ports; the fake model
+          // stands in for a remote provider endpoint, so its port is added to
+          // the bridge ports the driver asks for.
+          process: {
+            start: (input) =>
+              processPort.start({
+                ...input,
+                loopbackPorts: [...(input.loopbackPorts ?? []), model.port],
+              }),
+          },
           runtimeRegistry: registry,
           idleLeaseMs: 0,
           permissionPersistence: () => "current-session",
@@ -265,108 +274,109 @@ describe("OpenCode 2.x app-managed tools", () => {
         process.chdir(projectRoot);
         const probe = await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
         process.chdir(previousDirectory);
-        await registry.closeAll();
         expect(probe.readiness, probe.message).toBe("ready");
         expect(probe.detectedVersion).toMatch(/^opencode v2\./);
         expect(probe.capabilities.appManagedTools).toBe("supported");
 
-        // The turn: the launch, posture, bridge, and client a Chat session
-        // with app tools uses, with this test answering as Octant's host.
-        const calls: Array<{
-          readonly name: string;
-          readonly inputJson: string;
-          readonly caller: unknown;
-        }> = [];
-        const bridge = await createOpenCodeManagedToolsBridge(
-          [
-            {
-              name: "octant_echo",
-              description: "Echoes text back.",
-              inputSchema: { type: "object", properties: { text: { type: "string" } } },
-            },
-          ],
-          async (name, inputJson, _signal, callContext) => {
-            calls.push({
-              name,
-              inputJson,
-              caller: callContext?.metadata["ai.opencode/sessionID"],
-            });
-            return { resultJson: JSON.stringify({ echoed: "pong-from-octant" }), isError: false };
+        // The turn runs through the driver's own send, as a Chat thread with
+        // app tools does, with this test answering as Octant's host.
+        const sessionId = decodeProviderSessionId("80000000-0000-4000-8000-000000000459");
+        const tools = [
+          {
+            name: "octant_echo",
+            description: "Echoes text back.",
+            inputSchema: { type: "object", properties: { text: { type: "string" } } },
           },
-        );
-        const serverName = "octant-0123456789abcdef";
-        const observed = await Effect.runPromise(
+        ];
+        const events = await Effect.runPromise(
           Effect.scoped(
-            Effect.gen(function* () {
-              const server = yield* processPort.start({
-                binaryPath,
-                cwd: projectRoot,
-                mode: "chat",
-                executionPolicy: "approval-gated",
-                // The jail reaches loopback only on listed ports; the fake
-                // model stands in for a remote provider endpoint.
-                loopbackPorts: [bridge.port, model.port],
-                betaPermissions: betaSessionPermissionRules("approval-gated", "chat", serverName),
-              });
-              expect(server.isolatedConfiguration).toBe(true);
-              const client = makeOfficialOpenCodeClient(server, projectRoot);
-              const abort = new AbortController();
-              yield* Effect.addFinalizer(() => Effect.sync(() => abort.abort()));
-              const events = yield* Effect.promise(() => client.subscribe(abort.signal));
-              const permissionsAsked: string[] = [];
-              void (async () => {
-                for await (const event of events) {
-                  if (event.type === "permission.v2.asked") permissionsAsked.push(event.type);
-                }
-              })().catch(() => undefined);
-              yield* Effect.promise(() =>
-                client.addMcpServer({ name: serverName, url: bridge.url }),
-              );
-              const session = yield* Effect.promise(() =>
-                client.createSession({
-                  permission: [],
-                  model: { providerId: "fake", modelId: "fake-model" },
+            driver.acquire({ instanceId, projectRoot, mode: "chat" }).pipe(
+              Effect.flatMap((connection) =>
+                Effect.gen(function* () {
+                  const stream = yield* connection.subscribe;
+                  const toolRequest =
+                    yield* Deferred.make<
+                      Extract<ProviderRuntimeEvent, { readonly kind: "tool-request" }>
+                    >();
+                  const collector = yield* Effect.fork(
+                    stream.pipe(
+                      Stream.filter((event) => event.sessionId === sessionId),
+                      Stream.tap((event) =>
+                        event.kind === "tool-request"
+                          ? Deferred.succeed(toolRequest, event)
+                          : Effect.void,
+                      ),
+                      Stream.takeUntil((event) =>
+                        ["completed", "failed", "interrupted"].includes(event.kind),
+                      ),
+                      Stream.runCollect,
+                    ),
+                  );
+                  yield* connection.start({
+                    sessionId,
+                    modelId: "fake/fake-model" as ProviderModelId,
+                    executionPolicy: "approval-gated",
+                    tools,
+                  });
+                  yield* connection.send({
+                    sessionId,
+                    prompt: "Call the echo tool.",
+                    attachments: [],
+                    tools,
+                  });
+                  // The call waits on Octant: the model sees no tool result
+                  // until the host answers the request it was handed.
+                  const request = yield* Effect.race(
+                    Deferred.await(toolRequest),
+                    Fiber.join(collector).pipe(
+                      Effect.flatMap((early) =>
+                        Effect.dieMessage(
+                          `turn ended before the tool request: ${JSON.stringify(Array.from(early).at(-1))}`,
+                        ),
+                      ),
+                    ),
+                  );
+                  expect(request.toolName).toBe("octant_echo");
+                  expect(JSON.parse(request.inputJson)).toEqual({ text: "ping" });
+                  expect(model.requests.some((entry) => entry.lastRole === "tool")).toBe(false);
+                  yield* connection.answerTool({
+                    sessionId,
+                    requestId: request.requestId,
+                    resultJson: JSON.stringify({ echoed: "pong-from-octant" }),
+                    isError: false,
+                  });
+                  return Array.from(yield* Fiber.join(collector));
                 }),
-              );
-              yield* Effect.promise(() =>
-                client.prompt({
-                  sessionId: session.id,
-                  providerId: "fake",
-                  modelId: "fake-model",
-                  prompt: "Call the echo tool.",
-                  permission: [],
-                }),
-              );
-              const deadline = Date.now() + 30_000;
-              while (
-                !model.requests.some((entry) => entry.lastRole === "tool") &&
-                Date.now() < deadline
-              ) {
-                yield* Effect.promise(() => new Promise((resolve) => setTimeout(resolve, 100)));
-              }
-              yield* Effect.promise(() => client.disconnectMcpServer(serverName));
-              return { sessionId: session.id, permissionsAsked };
-            }),
+              ),
+            ),
           ),
         );
-        await bridge.close();
+
         // Code Mode is off for the bridge, so the tool is offered by its own
         // name, which only this connection's posture allows.
-        const offered = model.requests.find((entry) =>
-          entry.toolNames.includes(`${serverName}_octant_echo`),
-        );
-        expect(offered).toBeDefined();
-        expect(calls).toEqual([
-          { name: "octant_echo", inputJson: '{"text":"ping"}', caller: observed.sessionId },
-        ]);
+        const offered = model.requests
+          .flatMap((entry) => entry.toolNames)
+          .find((name) => name.endsWith("_octant_echo"));
+        expect(offered).toMatch(/^octant-[0-9a-f]{16}_octant_echo$/);
         expect(
           model.requests.some(
             (entry) => entry.lastRole === "tool" && entry.lastContent.includes("pong-from-octant"),
           ),
         ).toBe(true);
-        // OpenCode itself asks nothing: the call is gated by Octant's own
-        // tool request, which the driver raises before answering the bridge.
-        expect(observed.permissionsAsked).toEqual([]);
+        const kinds = events.map((event) => event.kind);
+        expect(kinds).toContain("tool-start");
+        expect(kinds).toContain("tool-request");
+        expect(kinds).toContain("tool-success");
+        expect(kinds).toContain("text-delta");
+        expect(kinds.filter((kind) => kind === "usage").length).toBeGreaterThanOrEqual(2);
+        // OpenCode itself asks nothing: the bridge allow is its only grant,
+        // and Octant gates the call through its own tool request.
+        expect(kinds).not.toContain("approval-request");
+        // An ordinary stop carries no stop reason; only truncation or a filter does.
+        expect(events.at(-1)).toMatchObject({ kind: "completed" });
+        expect(events.at(-1)).not.toHaveProperty("stopReason");
+        const text = events.flatMap((event) => (event.kind === "text-delta" ? [event.text] : []));
+        expect(text.join("")).toContain("pong-from-octant");
       } finally {
         process.chdir(previousDirectory);
         await registry.closeAll();

@@ -196,7 +196,8 @@ repository in OpenCode itself by choosing to always allow it, OpenCode
 applies it and Octant does not ask. Octant's own refusals still apply, and
 Octant never saves such a permission for you. Clear the saved permissions in
 OpenCode to get the prompts back. Questions from the agent are not supported
-yet and end the turn. OpenCode 2 resolves a project inside a Git work tree by
+yet and end the turn, and so does any OpenCode event Octant does not
+recognise; the error names the event. OpenCode 2 resolves a project inside a Git work tree by
 starting Git, which the Chat, Plan, and Work jail does not allow. On macOS
 Octant gives those launches a stand-in `git` that always fails, so OpenCode
 serves the folder without Git and every mode runs. Linux has no such stand-in

@@ -8,6 +8,7 @@ import {
 import type { Event } from "@opencode-ai/sdk/v2/types";
 import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
+import { adaptBetaOpenCodeEvent } from "./openCodeDriver";
 import { mapOpenCodeEvent, type OpenCodeEventContext } from "./openCodeEventMapper";
 
 const instanceId = decodeProviderInstanceId("80000000-0000-4000-8000-000000000071");
@@ -715,5 +716,146 @@ describe("mapOpenCodeEvent", () => {
       }),
     );
     expect(ordinary[0]).not.toHaveProperty("stopReason");
+  });
+});
+
+describe("OpenCode 2.0.22 events", () => {
+  const sessionID = "ses_2022";
+  const assistantMessageID = "msg_2022";
+  const tokens = { input: 5, output: 7, reasoning: 1, cache: { read: 2, write: 0 } };
+
+  /** Adapts one event as the 2.0.22 stream sends it, then maps it. */
+  function adaptAndMap(
+    type: string,
+    data: Record<string, unknown>,
+    calls = new Map<string, string>(),
+  ): ReturnType<typeof mapped> | "ignored" {
+    const adapted = adaptBetaOpenCodeEvent({ type, data: { sessionID, ...data } }, calls);
+    return adapted === undefined ? "ignored" : mapped(adapted);
+  }
+
+  it("streams text and reasoning deltas", () => {
+    expect(adaptAndMap("session.text.delta", { assistantMessageID, ordinal: 0, delta: "hi" }))
+      .toMatchObject([{ kind: "text-delta", text: "hi" }]);
+    expect(
+      adaptAndMap("session.reasoning.delta", { assistantMessageID, ordinal: 0, delta: "think" }),
+    ).toMatchObject([{ kind: "reasoning-delta", text: "think" }]);
+  });
+
+  it("reports a tool call by the name its input announced, then its outcome", () => {
+    const calls = new Map<string, string>();
+    const call = { assistantMessageID, id: "call_1" };
+    expect(
+      adaptAndMap("session.tool.input.started", { ...call, name: "octant-x_octant_echo" }, calls),
+    ).toBe("ignored");
+    expect(adaptAndMap("session.tool.input.ended", { ...call, text: "{}" }, calls)).toBe(
+      "ignored",
+    );
+    expect(
+      adaptAndMap("session.tool.called", { ...call, input: {}, executed: false }, calls),
+    ).toMatchObject([{ kind: "tool-start", toolCallId: "call_1", toolName: "octant-x_octant_echo" }]);
+    expect(adaptAndMap("session.tool.progress", { ...call, metadata: {} }, calls)).toMatchObject([
+      { kind: "tool-progress", toolCallId: "call_1" },
+    ]);
+    expect(
+      adaptAndMap(
+        "session.tool.success",
+        { ...call, content: [{ type: "text", text: "ok" }], executed: false },
+        calls,
+      ),
+    ).toMatchObject([{ kind: "tool-success", toolCallId: "call_1" }]);
+    expect(
+      adaptAndMap(
+        "session.tool.failed",
+        { ...call, error: { message: "no" }, executed: false },
+        calls,
+      ),
+    ).toMatchObject([{ kind: "tool-failure", toolCallId: "call_1" }]);
+  });
+
+  it("refuses a tool call whose name was never announced", () => {
+    expect(() =>
+      adaptAndMap("session.tool.called", { assistantMessageID, id: "call_2", input: {} }),
+    ).toThrow("Unsupported provider event.");
+  });
+
+  it("reports step usage and a failed step", () => {
+    expect(
+      adaptAndMap("session.step.ended", {
+        assistantMessageID,
+        finish: "tool-calls",
+        rawFinish: "tool_calls",
+        cost: 0.5,
+        tokens,
+      }),
+    ).toMatchObject([
+      {
+        kind: "usage",
+        inputTokens: 7,
+        outputTokens: 7,
+        reasoningTokens: 1,
+        cacheReadInputTokens: 2,
+        costUsd: 0.5,
+      },
+    ]);
+    expect(
+      adaptAndMap("session.step.failed", { assistantMessageID, error: { message: "boom" } }),
+    ).toMatchObject([{ kind: "failed", failure: { category: "provider-failed" } }]);
+  });
+
+  it("ends the turn from the execution outcome", () => {
+    expect(adaptAndMap("session.execution.succeeded", {})).toMatchObject([
+      { kind: "completed", resumeCursor: { driverKind: "opencode", value: sessionID } },
+    ]);
+    expect(adaptAndMap("session.execution.failed", { error: { message: "x" } })).toMatchObject([
+      { kind: "failed", failure: { category: "provider-failed" } },
+    ]);
+    expect(adaptAndMap("session.execution.interrupted", { reason: "user" })).toMatchObject([
+      { kind: "interrupted" },
+    ]);
+  });
+
+  it("reports a scheduled retry as waiting", () => {
+    expect(
+      adaptAndMap("session.retry.scheduled", {
+        assistantMessageID,
+        attempt: 1,
+        at: 1,
+        error: { message: "rate limited" },
+      }),
+    ).toMatchObject([{ kind: "waiting" }]);
+  });
+
+  it.each([
+    ["session.inbox.enqueued", { inboxID: "m", item: {} }],
+    ["session.inbox.delivered", { inboxID: "m" }],
+    ["session.inbox.cancelled", { inboxID: "m" }],
+    ["session.inbox.delivery.changed", { inboxID: "m", delivery: "steer" }],
+    ["session.execution.started", {}],
+    ["session.instructions.updated", { delta: {} }],
+    ["session.usage.updated", { cost: 0, tokens }],
+    ["session.usage.recorded", { cost: 0, tokens }],
+    ["session.renamed", { title: "t" }],
+    ["session.agent.selected", { agent: "build" }],
+    ["session.model.selected", { model: { id: "m", providerID: "p" } }],
+    ["session.step.started", { assistantMessageID, started: 1 }],
+    ["session.step.streamed", { assistantMessageID }],
+    ["session.text.started", { assistantMessageID, ordinal: 0 }],
+    ["session.text.ended", { assistantMessageID, ordinal: 0, text: "hi" }],
+    ["session.reasoning.started", { assistantMessageID, ordinal: 0 }],
+    ["session.reasoning.ended", { assistantMessageID, ordinal: 0, text: "t" }],
+    ["session.tool.input.delta", { assistantMessageID, id: "call_1", delta: "{" }],
+    ["session.compaction.started", { reason: "auto", recent: "" }],
+    ["session.compaction.delta", { text: "" }],
+    ["session.compaction.ended", { reason: "auto" }],
+  ] as const)("records %s as bookkeeping with no runtime event", (type, data) => {
+    expect(adaptAndMap(type, data)).toBe("ignored");
+  });
+
+  it("fails closed on an event this mapping does not know", () => {
+    expect(() => adaptAndMap("session.skill.activated", { skill: "x" })).toThrow(
+      "Unsupported provider event.",
+    );
+    expect(() => adaptAndMap("session.future.event", {})).toThrow("Unsupported provider event.");
   });
 });

@@ -2081,6 +2081,46 @@ describe("OpenCode driver", () => {
     expect(outcome.owned._tag).toBe("Some");
   });
 
+  it("fails a 2.x turn closed on an event it cannot map, naming the event", async () => {
+    const fixture = betaDriver({
+      events: [
+        {
+          type: "session.future.event",
+          properties: { sessionID: "provider-session" },
+        } as unknown as Event,
+      ],
+    });
+    const output = await Effect.runPromise(
+      Effect.scoped(
+        fixture.driver.acquire({ instanceId, projectRoot: "/tmp/project", mode: "code" }).pipe(
+          Effect.flatMap((connection) =>
+            Effect.gen(function* () {
+              const stream = yield* connection.subscribe;
+              const collector = yield* Effect.fork(
+                Stream.runCollect(
+                  stream.pipe(
+                    Stream.takeUntil((event) =>
+                      ["completed", "failed", "interrupted"].includes(event.kind),
+                    ),
+                  ),
+                ),
+              );
+              yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+              return yield* Fiber.join(collector);
+            }),
+          ),
+        ),
+      ),
+    );
+    expect(Array.from(output).at(-1)).toMatchObject({
+      kind: "failed",
+      failure: {
+        category: "unsupported",
+        message: "OpenCode 2 sent an event Octant does not map: session.future.event.",
+      },
+    });
+  });
+
   it("fails a 2.x file-change event closed in Code mode", async () => {
     const fixture = betaDriver({
       events: [
