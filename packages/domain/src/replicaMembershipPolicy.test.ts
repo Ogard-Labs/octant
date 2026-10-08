@@ -266,6 +266,24 @@ describe("replica membership derivation", () => {
     expect(standing(membership, ids.west)).toBe("member");
   });
 
+  it("places nobody through two different accepts a joiner signed into one slot, whatever order they arrive in", () => {
+    const { records } = tree();
+    const southOther = approval(ids.south, 4, ids.other);
+    const eastOther = approval(ids.east, 3, ids.other);
+    const accepts = [accept(ids.other, 2, southOther), accept(ids.other, 2, eastOther)];
+    for (const ordered of [accepts, [...accepts].reverse()]) {
+      const membership = deriveReplicaMembership(ids.founder, [
+        ...records,
+        southOther,
+        eastOther,
+        ...ordered,
+      ]);
+      // Either accept alone would give Other a parent; holding both is the
+      // key holder's own equivocation, so neither edge exists.
+      expect(standing(membership, ids.other)).toBe("absent");
+    }
+  });
+
   it("ignores a ghost's approval of a real member, and its revocations", () => {
     const ghostApproval = approval(ids.east, 4, ids.ghost);
     const membership = deriveReplicaMembership(ids.founder, [
