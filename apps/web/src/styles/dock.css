@@ -599,11 +599,27 @@
   display: none;
 }
 
+/* An implicit grid column is sized to its content, so a Canvas whose title
+   would not wrap made the column, and the tab in it, wider than the dock. */
 .dock-canvas-tool {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   min-width: 0;
   min-height: 0;
   gap: 8px;
+}
+
+/* An open Canvas takes the tool's full height and scrolls inside it. Sized to
+   its content instead, a long document ran past the dock, whose content box
+   clips, so it could not be scrolled and the comments drawer's Comment button
+   sat below the visible edge. */
+.dock-canvas-tool:has(> .canvas-workspace-tab) {
+  height: 100%;
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.dock-canvas-tool:has(> .canvas-workspace-tab):has(> :nth-child(2)) {
+  grid-template-rows: auto minmax(0, 1fr);
 }
 
 .dock-document-tool {
@@ -893,6 +909,10 @@
   padding: 0;
 }
 
+/* A dialog shares the layer menus, popovers and pickers float on (`z-50`),
+   so whichever opened last paints on top. At 51 the dialog outranked every
+   popup opened from inside it: in the narrow dock sheet the Canvas version
+   history and More menu opened behind the sheet, out of reach. */
 .octant-dialog__backdrop {
   position: fixed;
   z-index: 50;
@@ -902,7 +922,7 @@
 
 .octant-dialog__viewport {
   position: fixed;
-  z-index: 51;
+  z-index: 50;
   inset: 0;
   display: flex;
   align-items: center;
@@ -960,6 +980,14 @@ html[data-octant-reduced-motion="true"] :is(.octant-dialog__popup, .octant-dialo
 
 .octant-confirmation__details {
   margin-bottom: var(--oct-space-3);
+}
+
+/* With a Canvas open, the narrow dock sheet stands at its full height, as the
+   docked column does, so the document scrolls inside itself. Sized to its
+   content instead, the sheet scrolled as a whole: the comments drawer
+   scrolled away with the document and its Comment button with it. */
+.octant-dialog__popup:has(> .right-utility-dock__surface .canvas-workspace-tab) {
+  height: min(var(--octant-dialog-height, 640px), calc(100vh - 48px));
 }
 
 .octant-dialog__popup > .right-utility-dock__surface {

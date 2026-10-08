@@ -2,12 +2,17 @@ import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import { CANVAS_SCHEMA_VERSION } from "@octant/contracts/canvas";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 import {
   canvasInventoryProjectId,
   quarterlyCanvasId,
   quarterlyInventoryEntry,
 } from "../projects/canvasInventoryFixtures";
+import { RIGHT_UTILITY_DOCK_SURFACES } from "../shell/rightUtilityDockModel";
+import { RightUtilityDock } from "../shell/RightUtilityDock";
 import { CanvasWorkspaceTab } from "./CanvasWorkspaceTab";
 import { canvasFixture } from "./test-fixtures";
 
@@ -911,4 +916,324 @@ describe("CanvasWorkspaceTab", () => {
     expect(await screen.findByRole("button", { name: "Review export" })).toBeInTheDocument();
     expect(screen.queryByText("Export to Reading copy")).toBeNull();
   });
+
+  it("keeps a sticky table header inside the document, under the comments drawer", async () => {
+    const client = createCanvasClient(readyVersion, undefined, {
+      comments: vi.fn(async () => ({
+        kind: "ready" as const,
+        canvasId: quarterlyCanvasId,
+        sequence: 0,
+        threads: [],
+      })),
+      comment: vi.fn(),
+    } as unknown as Partial<CanvasClient>);
+    const { container } = render(<CanvasWorkspaceTab tab={canvasTab} client={client} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Comments" }));
+    const drawer = screen.getByRole("complementary", { name: "Comments" });
+    const header = container.querySelector(".canvas-block__table-grid th");
+    const document = container.querySelector(".canvas-workspace-tab__document");
+    expect(header).not.toBeNull();
+    expect(document).not.toBeNull();
+
+    // A sticky header raises itself above its scrolling rows. It may only do
+    // that inside the document's own stacking context; the drawer is outside
+    // it and above it, so its Comment button is the topmost thing it covers.
+    expect(document?.contains(header ?? null)).toBe(true);
+    expect(document?.contains(drawer)).toBe(false);
+    expect(cssDeclarations(".canvas-workspace-tab__document")).toMatchObject({
+      isolation: "isolate",
+      overflow: "auto",
+    });
+    expect(Number(cssDeclarations(".canvas-workspace-tab__drawer")["z-index"])).toBeGreaterThan(0);
+    // The drawer is laid over the body, not over the scrolled document, so
+    // scrolling a long Canvas no longer carries the drawer away with it.
+    expect(cssDeclarations(".canvas-workspace-tab__body").overflow).not.toBe("auto");
+    // In the dock and its narrow sheet the tab is given a bounded height, so
+    // it is the document that scrolls under a drawer that stays in view.
+    expect(cssDeclarations(".dock-canvas-tool:has(> .canvas-workspace-tab)", dockCss).height).toBe(
+      "100%",
+    );
+    expect(
+      cssDeclarations(
+        ".octant-dialog__popup:has(> .right-utility-dock__surface .canvas-workspace-tab)",
+        dockCss,
+      ).height,
+    ).toMatch(/^min\(/);
+  });
+
+  it("never lets a long unbreakable title widen the tab past its column", () => {
+    // jsdom has no layout, so this holds the three rules that measured the
+    // 446px Canvas tab in a 411px dock column back to 411px: the dock's grid
+    // track and the tab may shrink below their content, and a heading breaks
+    // inside a word rather than set that content width.
+    expect(cssDeclarations(".dock-canvas-tool", dockCss)["grid-template-columns"]).toBe(
+      "minmax(0, 1fr)",
+    );
+    expect(cssDeclarations(".canvas-workspace-tab")["min-width"]).toBe("0");
+    // The same holds inside the tab: the drawer's anchor picker and the
+    // version history name blocks and versions by those titles.
+    for (const grid of [
+      ".canvas-comments",
+      ".canvas-comments__compose",
+      ".canvas-comments__field",
+      ".canvas-workspace-tab__versions",
+    ]) {
+      expect(cssDeclarations(grid)["grid-template-columns"], grid).toBe("minmax(0, 1fr)");
+    }
+    expect(cssDeclarations(".canvas-version-history__item")).toMatchObject({
+      "white-space": "normal",
+      "overflow-wrap": "anywhere",
+    });
+    for (const heading of [".canvas-view__header h1", ".canvas-block__heading"]) {
+      expect(cssDeclarations(heading)["overflow-wrap"], heading).toBe("anywhere");
+    }
+  });
+
+  it("says why an older version cannot be refined", async () => {
+    const olderVersionId = "45454545-4545-4545-8545-454545454545";
+    const client = createCanvasClient(readyVersion, twoVersionHistory(olderVersionId), {
+      get: vi.fn(async (_canvasId, versionId) =>
+        versionId === olderVersionId ? versionOf(olderVersionId, 1) : readyVersion,
+      ),
+    } as unknown as Partial<CanvasClient>);
+    render(<CanvasWorkspaceTab tab={canvasTab} client={client} />);
+    await screen.findByRole("heading", { name: "Signed Q3 report" });
+
+    await openVersionHistory();
+    fireEvent.click(await screen.findByTestId("canvas-version-1"));
+    await screen.findByText("older");
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "More Canvas actions" }));
+    const refine = await screen.findByRole("menuitem", { name: "Refine…" });
+    expect(refine).toHaveAttribute("aria-disabled", "true");
+    expect(refine).toHaveAccessibleDescription("Older versions can't be refined.");
+  });
+
+  it("holds Compare until a version just picked has loaded, then compares that version", async () => {
+    type GetOutcome = Awaited<ReturnType<CanvasClient["get"]>>;
+    const firstVersionId = "45454545-4545-4545-8545-454545454541";
+    const secondVersionId = "45454545-4545-4545-8545-454545454542";
+    let finishSecond: ((outcome: GetOutcome) => void) | undefined;
+    const tipVersionId = String(quarterlyInventoryEntry.currentVersionId);
+    const tip = versionOf(tipVersionId, 3);
+    const second = versionOf(secondVersionId, 2, { ...canvasFixture, title: "Second draft" });
+    const get = vi.fn((_canvasId: unknown, versionId?: string) => {
+      if (versionId === secondVersionId && finishSecond === undefined) {
+        return new Promise<GetOutcome>((resolve) => {
+          finishSecond = resolve;
+        });
+      }
+      if (versionId === secondVersionId) return Promise.resolve(second);
+      if (versionId === firstVersionId) {
+        return Promise.resolve(
+          versionOf(firstVersionId, 1, { ...canvasFixture, title: "First draft" }),
+        );
+      }
+      return Promise.resolve(tip);
+    });
+    const client = createCanvasClient(
+      tip,
+      historyOf([
+        [firstVersionId, 1],
+        [secondVersionId, 2],
+        [tipVersionId, 3],
+      ]),
+      { get } as unknown as Partial<CanvasClient>,
+    );
+    render(<CanvasWorkspaceTab tab={canvasTab} client={client} />);
+    await screen.findByRole("heading", { name: "Signed Q3 report" });
+
+    await openVersionHistory();
+    fireEvent.click(await screen.findByTestId("canvas-version-2"));
+    // Reopened at once, the popover still describes the head, whose
+    // neighbour is v2; comparing now would pair v2 with the v2 arriving.
+    await openVersionHistory();
+    expect(await screen.findByRole("button", { name: "Compare with v2" })).toBeDisabled();
+
+    // The popover stays open and catches up with the version that arrived.
+    await act(async () => {
+      finishSecond?.(second);
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "Compare with v1" }));
+    const changes = await screen.findByRole("region", { name: "Changes from v1 to v2" });
+    expect(changes).toHaveTextContent("Title changed from “First draft”.");
+  });
 });
+
+describe("CanvasWorkspaceTab in the narrow dock sheet", () => {
+  const canvasSurface = dockCanvasSurface();
+
+  function renderInSheet(client: CanvasClient, onClose = vi.fn()) {
+    render(
+      <RightUtilityDock
+        canvas={<CanvasWorkspaceTab tab={canvasTab} client={client} />}
+        isNarrow
+        launchableSurfaces={[canvasSurface]}
+        onClose={onClose}
+        onCloseTab={vi.fn()}
+        onCommitWidth={vi.fn()}
+        onOpenTab={vi.fn()}
+        onPreviewWidth={vi.fn()}
+        onSelectSurface={vi.fn()}
+        open
+        resolution={{ kind: "surface", surface: canvasSurface }}
+        tabs={[canvasSurface]}
+        width={360}
+      />,
+    );
+    return onClose;
+  }
+
+  /** The stacking order the root context gives a fixed or positioned box. */
+  function rootLayer(element: Element): { readonly node: Element; readonly z: number } {
+    for (let node: Element | null = element; node !== null; node = node.parentElement) {
+      const tailwind = /(?:^|\s)z-(\d+)(?:\s|$)/.exec(node.getAttribute("class") ?? "");
+      if (tailwind !== null) return { node, z: Number(tailwind[1]) };
+      const declared = (node.getAttribute("class") ?? "")
+        .split(/\s+/)
+        .map((name) => cssDeclarations(`.${name}`, dockCss, false)["z-index"])
+        .find((value) => value !== undefined);
+      if (declared !== undefined) return { node, z: Number(declared) };
+    }
+    throw new Error("No stacking layer above the element.");
+  }
+
+  function paintsAbove(upper: Element, lower: Element): boolean {
+    const top = rootLayer(upper);
+    const bottom = rootLayer(lower);
+    if (top.z !== bottom.z) return top.z > bottom.z;
+    // Equal layers paint in document order.
+    return Boolean(
+      bottom.node.compareDocumentPosition(top.node) & Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+  }
+
+  it("raises the version history and the More menu above the sheet", async () => {
+    renderInSheet(createCanvasClient(readyVersion, twoVersionHistory()));
+    const sheet = await screen.findByRole("dialog", { name: canvasSurface.label });
+    await screen.findByRole("heading", { name: "Signed Q3 report" });
+
+    await openVersionHistory();
+    const history = await screen.findByRole("dialog", { name: "Version history" });
+    expect(paintsAbove(history, sheet)).toBe(true);
+    fireEvent.keyDown(history, { key: "Escape" });
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: "Version history" })).toBeNull(),
+    );
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "More Canvas actions" }));
+    const menu = await screen.findByRole("menu");
+    expect(paintsAbove(menu, sheet)).toBe(true);
+  });
+
+  it("closes the comments drawer on the first Escape and the sheet on the next", async () => {
+    const client = createCanvasClient(readyVersion, undefined, {
+      comments: vi.fn(async () => ({
+        kind: "ready" as const,
+        canvasId: quarterlyCanvasId,
+        sequence: 0,
+        threads: [],
+      })),
+      comment: vi.fn(),
+    } as unknown as Partial<CanvasClient>);
+    const onClose = renderInSheet(client);
+    await screen.findByRole("heading", { name: "Signed Q3 report" });
+
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "Comments" }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Close comments" })).toHaveFocus(),
+    );
+
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("complementary", { name: "Comments" })).toBeNull();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog", { name: canvasSurface.label })).toBeInTheDocument();
+
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+  });
+});
+
+const webRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
+const canvasCss = readFileSync(join(webRoot, "styles/canvas.css"), "utf8").replace(
+  /\/\*[\s\S]*?\*\//g,
+  "",
+);
+const dockCss = readFileSync(join(webRoot, "styles/dock.css"), "utf8").replace(
+  /\/\*[\s\S]*?\*\//g,
+  "",
+);
+
+/** The declarations of every top-level rule naming `selector`, later rules winning. */
+function cssDeclarations(
+  selector: string,
+  css = canvasCss,
+  required = true,
+): Readonly<Record<string, string>> {
+  const declarations: Record<string, string> = {};
+  let found = false;
+  for (const rule of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+    const selectors = (rule[1] ?? "").split(",").map((value) => value.trim().replace(/\s+/g, " "));
+    if (!selectors.includes(selector)) continue;
+    found = true;
+    for (const declaration of (rule[2] ?? "").split(";")) {
+      const colon = declaration.indexOf(":");
+      if (colon < 0) continue;
+      declarations[declaration.slice(0, colon).trim()] = declaration.slice(colon + 1).trim();
+    }
+  }
+  if (required) expect(found, `missing CSS rule for ${selector}`).toBe(true);
+  return declarations;
+}
+
+function dockCanvasSurface(): (typeof RIGHT_UTILITY_DOCK_SURFACES)[number] {
+  const surface = RIGHT_UTILITY_DOCK_SURFACES.find((candidate) => candidate.id === "canvas");
+  if (surface === undefined) throw new Error("Missing canvas dock surface.");
+  return surface;
+}
+
+function versionOf(
+  versionId: string,
+  sequence: number,
+  definition: typeof canvasFixture = canvasFixture,
+): Awaited<ReturnType<CanvasClient["get"]>> {
+  return {
+    ...readyVersion,
+    version: { ...readyVersion.version, versionId: versionId as never, sequence, definition },
+  } as Awaited<ReturnType<CanvasClient["get"]>>;
+}
+
+function historyOf(
+  entries: ReadonlyArray<readonly [string, number]>,
+): Awaited<ReturnType<CanvasClient["history"]>> {
+  return {
+    kind: "ready",
+    history: {
+      canvasId: quarterlyCanvasId,
+      currentVersionId: quarterlyInventoryEntry.currentVersionId,
+      entries: entries.map(([versionId, sequence]) => ({
+        versionId: versionId as never,
+        sequence,
+        schemaVersion: 1,
+        title: quarterlyInventoryEntry.title,
+        createdAt: "2026-08-01T21:00:00.000Z" as never,
+        createdBy: readyVersion.version.createdBy,
+        providerInstanceId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" as never,
+        modelId: "octant-test-model" as never,
+      })),
+    },
+  } as unknown as Awaited<ReturnType<CanvasClient["history"]>>;
+}
+
+function twoVersionHistory(
+  olderVersionId = "45454545-4545-4545-8545-454545454545",
+): Awaited<ReturnType<CanvasClient["history"]>> {
+  return historyOf([
+    [olderVersionId, 1],
+    [String(quarterlyInventoryEntry.currentVersionId), quarterlyInventoryEntry.currentSequence],
+  ]);
+}

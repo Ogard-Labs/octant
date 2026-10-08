@@ -196,7 +196,9 @@ export function OctantSelectField(props: OctantSelectFieldProps) {
         >
           {/* The recipe encodes "" as a real value, so Base UI never sees an empty
               selection; show the placeholder whenever no option matches. */}
-          <SelectValue placeholder={props.placeholder}>
+          {/* One line that ellipsizes: a long label otherwise ran out of the
+              trigger and pushed its chevron past a narrow drawer's edge. */}
+          <SelectValue className="min-w-0 truncate" placeholder={props.placeholder}>
             {selectedOption?.label ?? props.placeholder}
           </SelectValue>
         </SelectTrigger>
