@@ -24,7 +24,7 @@ import type { UtcTimestamp } from "@octant/contracts/events";
 import type { ProviderInstanceId, ProviderModelId } from "@octant/contracts/providers";
 import { CanvasCardsPolicyRejected, clampCanvasAuthority } from "./canvasCardsPolicy";
 import { assertCanvasVersionAppend } from "./canvasLifecyclePolicy";
-import { validateCanvasDefinition } from "./canvasPolicy";
+import { CanvasPolicyRejected, validateCanvasDefinition } from "./canvasPolicy";
 
 export class CanvasRevisionPolicyRejected extends Error {
   override readonly name = "CanvasRevisionPolicyRejected";
@@ -126,7 +126,13 @@ export function applyAuthoredRevision(
   definition: CanvasDefinition,
   blocks: ReadonlyArray<CanvasDefinition["blocks"][number]>,
 ): CanvasDefinition {
-  return validateCanvasDefinition({ ...definition, blocks: [...blocks] });
+  // The author wrote these blocks against this runtime's catalogue, so the
+  // new version declares it; an older document can then gain a newer block.
+  return validateCanvasDefinition({
+    ...definition,
+    schemaVersion: CANVAS_SCHEMA_VERSION,
+    blocks: [...blocks],
+  });
 }
 
 /**
@@ -172,6 +178,19 @@ export interface BuildRevisionVersionInput {
   readonly providerInstanceId: ProviderInstanceId;
   readonly modelId: ProviderModelId;
   readonly createdAt: UtcTimestamp;
+}
+
+/**
+ * A revision whose blocks break a Canvas rule is the author's to fix, so the
+ * refusal carries the rule's own reason rather than escaping as a fault.
+ */
+function revisionOrReject(input: BuildRevisionVersionInput): CanvasVersion {
+  try {
+    return buildRevisionVersion(input);
+  } catch (error) {
+    if (error instanceof CanvasPolicyRejected) return reject("malformed-request", error.message);
+    throw error;
+  }
 }
 
 export function buildRevisionVersion(input: BuildRevisionVersionInput): CanvasVersion {
@@ -316,7 +335,7 @@ export function admitCanvasRevise(input: AdmitCanvasReviseInput): {
     "malformed-request",
     "Canvas revise receipt identity is invalid.",
   );
-  const next = buildRevisionVersion({
+  const next = revisionOrReject({
     canvasId: decodeCanvasId(request.canvasId),
     current: input.current,
     nextVersionId,

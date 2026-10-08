@@ -554,6 +554,61 @@ describe("ContextHarnessService integration", () => {
     restarted.connection.close();
   });
 
+  it("records the provider's cost on the reconciled request and leaves an unpriced one without", () => {
+    const fixture = createFixture();
+    const plan = () =>
+      fixture.service.planTurn({
+        subject,
+        displayLabel: "Code Project",
+        requestShape: "code-turn",
+        modelLimitObservations: [modelLimits()],
+        serviceLimits: serviceLimits(),
+        entries: [requiredEntry(100)],
+        reserves: { response: 200, reasoning: 50, framing: 50, variance: 20, safety: 50 },
+        watchHeadroomTokens: 100,
+        capabilityCatalog: catalog([]),
+        capabilityRequest: {
+          providerInstanceId,
+          activeScope,
+          nativeToolSearch: "supported",
+          taskKeywords: [],
+          explicitSelections: [],
+        },
+      });
+    const reconcile = (planId: ReturnType<typeof plan>["next"]["plan"]["id"], costUsd?: number) =>
+      fixture.service.reconcileUsage({
+        subject,
+        planId,
+        requestShape: "code-turn",
+        actualInputTokens: 100,
+        actualOutputTokens: 25,
+        currentVarianceReserve: 20,
+        maxAdjustmentTokens: 50,
+        ...(costUsd === undefined ? {} : { costUsd }),
+      });
+
+    const priced = reconcile(plan().next.plan.id, 0.0421);
+    expect(priced.snapshot.latestUsage?.cost).toEqual({
+      kind: "provider-recorded",
+      usdMicros: 42_100,
+    });
+    // "model-a" has no standard rate, so without the provider's figure the
+    // request is unpriced rather than free.
+    const unpriced = reconcile(plan().next.plan.id);
+    expect(unpriced.snapshot.latestUsage?.cost).toBeUndefined();
+    expect(
+      fixture.connection
+        .prepare(
+          "SELECT cost_usd_micros, cost_kind FROM usage_record_projection ORDER BY last_sequence",
+        )
+        .all(),
+    ).toEqual([
+      { cost_usd_micros: 42_100, cost_kind: "provider-recorded" },
+      { cost_usd_micros: null, cost_kind: null },
+    ]);
+    fixture.connection.close();
+  });
+
   it("restores the durable manifest, plan, overrides, and usage projection after restart", () => {
     const directory = mkdtempSync(join(tmpdir(), "octant-context-harness-restart-"));
     directories.push(directory);

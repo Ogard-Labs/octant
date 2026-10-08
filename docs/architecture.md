@@ -20,7 +20,7 @@ snapshots. Input totals include uncached, cache-read, and cache-write tokens; co
 occupancy describes the latest model call. Totals reset for each turn, including
 retained native processes. If a completed assistant message omits valid usage,
 the turn remains unknown rather than presenting a partial total. Only provider-reported
-costs are recorded, and historical turns are not rewritten.
+costs are carried on its usage events, and historical turns are not rewritten.
 
 On host restart, orphaned running Code turns become Waiting in both runtime
 and conversation state. Recovery appends a status event without replacing prompts,
@@ -213,8 +213,9 @@ unauthenticated caller is refused, with no figures in the refusal. The route
 also compares the device's host identity with this host's, but every paired
 device row on a host carries that host's own identity, so the comparison does
 not separate one paired device from another. The Computers card
-reads the route only while the card is on screen and the window is in front,
-about every ten seconds, and does not poll in the background.
+reads the route only while the card is on screen and the window is visible,
+about every ten seconds, at most one read per host at a time and each abandoned
+after five seconds, and does not poll in the background.
 
 **Renderer (`apps/web`).** One React application served to the desktop window
 and to authenticated remote browsers alike. It talks to the server through
@@ -294,8 +295,16 @@ data and creates no artifact.
 `sidebar` (the default). The value is part of the definition and needs Canvas
 schema version 4. An older runtime refuses a version-4 document as a future
 version and does not report it corrupt.
+A treemap block is gated the same way at Canvas schema version 5 and a heatmap
+block at version 6, so a document that declares an earlier version and carries
+one is refused as a declared future version. The optional table column
+`display` and the chart, table, and metric `format` fields are the one ungated
+exception: they only change how a value is drawn, so they carry no schema
+version, but the strict definition schema refuses an unknown field, so a
+runtime rolled back past them refuses a document that uses them rather than
+drawing it as plain text.
 The pure `canvasInlineRefusal` policy admits `inline` only for at most 12 blocks
-with no `diagram`, `plan` or `mockup`. When an author asks for `inline` over
+with no `diagram`, `plan`, `mockup` or `design`. When an author asks for `inline` over
 that bound, the host records `sidebar` and returns the reason as
 `presentationNote`.
 A revise without a choice keeps the current presentation.
@@ -341,7 +350,7 @@ labeled non-negative slices. Stacked, grouped, and bar-and-line charts share
 categories across series; a bar-and-line series names itself as a bar or a line.
 The accessible table lists every reading. A pie or donut legend toggles at most
 24 slices; the rest stay in the picture and the table. A shared snapshot keeps
-the chart and drops no series mark.
+the chart, its number format, and every series mark.
 A treemap is a hierarchy drawn as squarified rectangles: nodes name a parent,
 one root, values sit on leaves, and a group's reading is the sum of its
 children. A leaf carries a value for every declared measure and may name a
@@ -355,7 +364,8 @@ journaled. The domain policy refuses a second root, a cycle, a dangling parent,
 a group that carries its own value or a leaf that does not, a value that is
 negative, a measure that is not declared, and a hierarchy past the depth, node,
 measure, or label budget. The accessible fallback is a hierarchical table
-sortable by each measure.
+sortable by each measure. A shared snapshot keeps the hierarchy, its measures,
+and every reading, and drops each leaf's source id.
 A heatmap is a grid coloured by value. A matrix names its rows and columns and
 carries a cell per coordinate with a value and an optional short note; a cell on
 a coordinate the block does not hold, a repeated row, column, or coordinate, and
@@ -368,7 +378,7 @@ preview SVG, and the Markdown and HTML export all draw the same cells. The perso
 can sort a matrix's rows by their total and walk the cells with the arrow keys;
 these are view state and are never journaled. The accessible fallback is a table
 of every coordinate and its total for a matrix, or of every dated reading for a
-calendar.
+calendar. A shared snapshot keeps the grid, its readings, and their notes.
 A bar list is a ranking of magnitudes (`packages/domain/src/canvasBarListLayout.ts`):
 each row is a label, a value, an optional second value, and an optional manifest
 source. Rows sort largest first with a stable tie-break by the author's order,
@@ -382,13 +392,21 @@ which the host reauthorizes. The pure, deterministic layout is shared by the
 screen, the artifact preview SVG, and the Markdown and HTML export. The domain
 policy refuses a repeated label, a negative or non-finite value, a list past the
 row budget, and a source the manifest does not hold; the accessible fallback is a
-table of every row. A metric block may carry a `format`, a `delta`, a
+table of every row. A shared snapshot keeps every row and reading and drops each
+row's source id. A metric block may carry a `format`, a `delta`, a
 `goodDirection` of `up`, `down`, or `neutral` so a delta's tone is never guessed,
 a `sparkline` of at most 256 readings, and a short `caption`; consecutive metric
 blocks are gathered into one responsive row of two to four tiles. The bar list
 and the metric's direction, sparkline, and caption arrive with Canvas schema
 version 7, so a document declaring an older version that carries any of them is
 refused as a future version; a static export carries the same metric fields.
+A share carries every block kind and field a Canvas holds except source ids
+and the design and action blocks it refuses (see the `design` block). A table
+column keeps its number format and display, and a board keeps its own layout.
+Share documents version independently of Canvas documents: a treemap, a
+heatmap, a bar list, a chart's or a table column's number format, a table
+column's display, and a board's layout arrive with share version 3, so a share
+that declares an older version and carries one is refused as a future version.
 The catalogue includes a `plan` block: phases, and one list of tasks that each
 name their phase, carry a status (todo, doing, blocked, done), and may carry an
 owner, estimate, acceptance notes, dates, dependencies on other tasks in the
@@ -456,6 +474,37 @@ stamps that author (and a resolve's or delete's actor) itself and ignores the
 actor the request names, so a renderer can never author a comment as an agent. Shared
 snapshots serialise the definition and so never carry comments
 ([decisions/0052-canvas-boards.md](decisions/0052-canvas-boards.md)).
+
+A `design` block (Canvas schema version 9) is the one block whose content is
+markup: the frames of one design at one size, `phone` (390×844), `tablet`
+(820×1180), `desktop` (1440×900), or `slide` (1920×1080), each a page of
+static HTML, plus one shared stylesheet. The renderer draws each frame in an
+`iframe` with an empty `sandbox` and a `srcdoc` page whose policy loads nothing
+but inline styles and `data:` images and fonts, on top of the app policy the
+page inherits. No script runs, nothing submits, and the page has no access to
+Octant. Frames link by fragment; Play draws every frame in one page so a link
+shows its frame through `:target`, and the renderer writes each fragment
+against the page's own address because a `srcdoc` page resolves a bare one
+against its parent. The pure `canvasDesignMarkupRefusal` policy refuses a
+script, an event handler, an embedded document, a remote image, stylesheet,
+or font (in a `url()`, an `@import`, or an `image-set()` candidate, however a
+character reference or CSS escape spells it), and any link that is not a
+fragment, naming the frame and the
+construct; the event store and revise policy return that reason to the
+author rather than a generic failure. The sandbox is the boundary and the
+link rule is part of it, because a link is the one way a page with no script
+can leave. A share refuses a design, and Markdown or HTML export writes
+frame titles, not markup. A share also refuses an action block, whose command
+runs only on this host. Both refusals, and any block or field the share
+contract does not carry, are checked before the snapshot is journaled and
+reach the owner as an `unsafe-payload` denial: the Canvas cannot be shared, not
+a malformed request. A design is always a sidebar Canvas. An authored
+revision declares the current schema version on the version and its
+definition, so a Canvas written under an earlier version moves forward and can
+gain a design; a version append never moves a Canvas back. Agents writing
+a design can be silent for minutes while composing the tool call, so Chat and Work
+wait five minutes for a provider event before cutting a turn off, as Code does
+([decisions/0164-canvas-designs-are-html-in-a-frame-that-runs-nothing.md](decisions/0164-canvas-designs-are-html-in-a-frame-that-runs-nothing.md)).
 
 The local-server provider adapter owns a separate process for each acquired
 connection and allows one live session per connection. Its MCP protocol does
@@ -1157,6 +1206,9 @@ flowchart LR
   not erased: their token and cost aggregates stay for host accounting, the
   thread's identity leaves them (`subject_id` becomes NULL, modelled as a
   `deLinked` usage subject), and replay never re-links a purged thread.
+  The thread's child runs are erased with it, so their `agent-run` rows
+  are de-linked the same way; replay treats a run whose
+  `agent.run-requested@1` event is gone as purged.
   A de-linked row belongs to no Project, so it reads as unfiled usage and
   as an "Erased threads" line in the dashboard and the host export; no
   thread or Project spend ceiling counts it. Project memory is Project
@@ -1211,7 +1263,7 @@ flowchart LR
   sync client's conflict copies and lost updates cannot happen. An entry is a
   readable JSON bundle in the
   [0029](decisions/0029-artifact-storage-mirror.md) format, with a detached
-  signature from the writing host's own identity key. The storage provider can
+  signature from the writing instance's device signing key. The storage provider can
   read those files; they are not encrypted. Before an entry is written, and
   before an imported entry is accepted, the host applies the same refusal and
   redaction as a shared bundle: credentials, secret-shaped values, and absolute
@@ -1250,40 +1302,23 @@ flowchart LR
   `<instanceId>/<sequence>.json`, with a detached signature beside it at
   `<instanceId>/<sequence>.sig`. The payload is the artifact bundle from
   [0029](decisions/0029-artifact-storage-mirror.md) (`octant.artifact-bundle/1`),
-  not a second document. Reconciling an entry appends a version, keeps both
+  not a second document. Reconciling an artifact entry appends a version, keeps both
   heads when two computers revise the same parent, or records a tombstone. It
   cannot overwrite. A gap in an instance's sequence, an unknown or revoked
   instance, a bad or missing signature, a content-hash mismatch, or an entry
-  that names a local artifact as foreign is refused. An unknown entry format
-  fails closed. A later version after a tombstone appends; the tombstone stays
-  in the history.
+  that names a local artifact as foreign is refused. Membership records allow
+  gaps, because a writer skips a slot someone else's file took; whether such
+  a gap holds back an artifact import is decided with the import. An unknown
+  entry format fails closed. A later version after a tombstone appends; the
+  tombstone stays in the history.
   The detached signature covers an entry's encoded bytes whole - origin, kind,
   parents, the claimed content hash, and the bundle - so a rewrite of any of
   those is a different signature, not the same one the log recorded. The log
-  also carries membership: a computer that is not yet a member writes a join
-  request at its own next sequence and names itself, and a member returns that
-  request for approval instead of refusing it. Approving journals the new
-  instance on the member. Confirming the approval on the joining computer
-  imports a chain: the founder's sequence-1 self-approval, then each approval
-  from the founder to the approver, each verified with the key the previous
-  link named, then the approver's approval of the joining computer. The
-  founder becomes that computer's only root and everyone on the chain is
-  admitted by the approval that names them, which is how a computer that was
-  never part of the store learns who the members are and later applies the
-  founder's revocations. A founding self-approval counts only as the start of
-  such a chain; if the store holds a second founder that also reaches the
-  approver, joining is refused. The matching code covers the approver's device
-  key and the founder's id and key as well as the join request: the approver
-  computes it from what it holds and the joining computer from the chain it
-  read, so a chain that someone with write access to the store forged for the
-  approver, or one that starts at a founder they substituted, gives a different
-  code and the confirmation is refused. A confirmation through an approval
-  that a revocation already in the store cuts is refused too, rather than
-  reported as confirmed until the first pull. A pull walks each instance's
-  entries in sequence order from the start, because the sequence is per
-  instance and a host that joins in the middle cannot have seen anything
-  earlier. A member's revocation is an entry the member writes; re-joining is
-  a new identity, never the revoked one back.
+  also carries membership records, in entry format `octant.replica-entry/2`:
+  every entry's origin carries its writer's public key, and an instance id is
+  derived from that key, so whether a record is valid depends on its own file
+  alone. Who counts as a member is described under artifact replica
+  membership below.
 - **Artifact replica store.** A replica-store contribution offers list, get, and
   put-if-absent. put-if-absent returns already-exists and leaves the existing
   bytes unchanged. The store's status is ready, not-connected, or refused. A
@@ -1315,81 +1350,139 @@ flowchart LR
   connection action writes one probe object in a reserved key namespace and
   deletes nothing; `list` skips that namespace. Publish and pull are not this
   store; they call it.
-- **Artifact replica membership, as wired today.** The host serves the
-  membership commands — create a replica, write a join request, approve a
-  join, confirm a join on the joining computer, revoke, and pull — on the
-  host-only `/api/replica-membership/commands` route. Membership facts —
-  this computer's own instance, the members and their device keys,
-  revocations, the entries already applied from each instance, and this
-  computer's next sequence — are a projection of `replica.*` journal events,
-  held in memory and rebuilt from the journal on every start; replaying it
-  twice gives the same facts. A command that publishes journals the signed
-  entry before either file is written, writes the signature and then the
-  entry, and journals what the entry means once both landed. If a publish
-  stops part-way, the next command finishes it first with the same bytes and
-  the same deterministic Ed25519 signature, so that sequence slot is not lost.
-  A pull walks every other instance from the first entry it has not applied.
-  Each entry is verified against the device key the journal holds for its
-  origin; only a join request, the one record a computer that is not yet a
-  member may write, is verified against the key it names. A bad or missing
-  signature, an unknown origin, an artifact entry past a cut on its origin, a
-  join request from a new identity carrying a revoked computer's key, a body
-  whose origin is not its path, an unreadable file, or a gap is refused before
-  anything from that entry is applied, and the walk for that instance stops
-  there. A pull walks the logs again while a walk still applies something, so
-  an origin it learns about from a log it reads later is not refused for the
-  order the store listed the logs in; only what is still refused at the end is
-  journaled, and a refusal is journaled once, not on every pull. A sequence a computer has already applied is not read again,
-  so a file rewritten in that slot later is ignored, not detected. Anyone who
-  can write to the store can also put a file into a member's next free slot
-  first: that member's next publish then fails as slot-occupied, and nothing
-  it writes later can land, because the store is write-once and Octant never
-  deletes from it. A person recovers by deleting that file with the storage
-  provider's own tools, revoking the store credentials that wrote it, or
-  moving to a new store. A revoked identity's stopped publish is dropped, not
-  finished. A revocation is a cut: it names the last sequence of the revoked
-  instance that the revoker holds - what it applied from it, and any approval
-  it holds through the chain it joined by - so the cut never falls before the
-  approval that admitted the revoker. A person still pulls before revoking to
-  keep approvals the revoked computer made that this computer has not read.
-  Every entry the revoked instance signed after the cut stops counting on
-  every computer, and approvals it made at or before the cut stay valid. A
-  pull keeps every approval and revocation that verifies against its origin's
-  key - one past a cut, and an approval of a computer revoked later, included -
-  so the walk of an honest member's log never stops on them. Membership is
-  then worked out from everything a computer holds rather than in the order a
-  pull read it: a member is one admitted by an approval its approver signed
-  within every counted cut on that approver, and when two approvals name the
-  same instance with different keys, the one nearer the founder wins, then the
-  lower approver id and sequence. A revocation never counts when its cut
-  removes its own revoker's admission, or when it answers a revocation by one
-  of its revoker's ancestors - the computer that approved it, up to the
-  founder, along the approvals that admitted each one - by revoking that
-  ancestor: whoever brought a computer in can take it out, and that computer
-  cannot remove it in return. The remaining revocations can cut each other's
-  revokers, and every one that could be valid is honoured, so two computers
-  that are not each other's ancestors and revoked each other without seeing
-  the other's record both stay revoked. An entry applied past a cut is
-  reported refused once, and a computer admitted only through it is not a
-  member. When two members cut the same instance, the earlier cut wins. A
-  revoked computer, or one whose admitting approval a cut removed, joins again
-  as a new instance with its own sequence; a join request from a new identity
-  carrying a revoked computer's key is refused on read and on approve. An
-  approval of such a request that a member wrote before it read the
-  revocation is kept, like any approval. Device signing
-  keys live per replica instance in their own namespace of the host credential
-  store — a separate macOS Keychain service, `app.octant.replica-device-keys.v1`,
-  or a separate Secret Service attribute — reached through the credential
-  broker's device-key routes. The provider credential routes reach a different
-  namespace, so a provider instance created with the same UUID cannot read,
-  replace, or delete a device key; a key is written once and never replaced,
-  and the private half never leaves the host.
-  The membership service asks Settings › Sync's store selection for its store
-  on every command. Two things are not wired: artifact
-  versions are neither published nor imported — a pull stops at a verified
-  artifact entry and reads it again later, rather than marking it applied — and
-  no surface creates a replica, joins, or revokes. A person can choose a store
-  and turn sync on, but cannot yet join another computer or copy a version.
+- **Artifact replica membership, as wired today.** Membership is a pure
+  function of two inputs: the founder this computer pinned, and the set of
+  valid membership records it holds. Two computers that hold the same records
+  derive the same members, keys, parents, and cuts, whatever order they read
+  them in.
+  - **Records.** Every record is a write-once file at
+    `<instanceId>/<sequence>.json` with a detached Ed25519 signature beside it,
+    and its origin names the writer's id, name, sequence, and public key. The
+    instance id is the first 16 bytes of SHA-256 over the key's SPKI bytes,
+    written as a UUIDv8. A record is valid when its body decodes, its origin is
+    the path it is filed under, its id is its key's id, and the signature
+    verifies under that key; an approval is valid only when its subject is
+    its subject key's id. Nothing else is consulted, so every reader reaches
+    the same verdict, a key once admitted cannot be replaced, and an old key
+    is always the old identity. The kinds are `replica-founded` (the
+    founder's sequence 1), `join-request` (a joiner's sequence 1, with the
+    time it was written), `join-approved` (subject, key, and name),
+    `join-accepted` (signed by the joiner, naming the one approval it
+    accepted by writer, sequence, and SHA-256 of the approval file's bytes,
+    and the founder it pinned), and `revocation` (subject and cut, the last of
+    the subject's sequences that still counts; 0 means none). Version 1
+    entries fail closed.
+  - **Derivation.** Two different records in one slot can only both be signed
+    by the key holder, so a second one is evidence the key was stolen: that
+    computer is capped just before the slot, and records at or after it do
+    not count. Each computer's parent comes from its own lowest-sequence
+    `join-accepted`, and only when the approval it names is held, approves
+    that computer, and is not past such a cap. The parents form a tree from
+    the founder; nothing reaches a computer that is not in it. Standing is
+    then weighed top-down in one pass: a computer is admitted when its parent
+    is admitted and signed the approval at or before the parent's cut, and
+    its cut is the lowest cut named by a revocation that a strict ancestor
+    signed while admitted and at or before its own cut. An entry counts when
+    its writer is admitted and it sits at or before the writer's cut, so a
+    computer approved after its approver's cut is not admitted, and nothing
+    below it is either. Records the pass does not use - an approval nobody
+    accepted, a descendant's revocation of an ancestor, a ghost's records -
+    are inert. The founder cannot be revoked; losing its key means moving to
+    a new store.
+  - **Reading.** A pull lists the store and reads every slot this computer
+    holds no record in, from any instance, member or not, and keeps every
+    valid membership record it reads. It refuses nothing on the way in and
+    does not stop at a gap, so a record from a computer that is not a member
+    yet still counts once the approval admitting it arrives. A pull never
+    reads a slot again once it holds a record there, so a computer keeps the
+    first version of a slot it read; it detects a rewrite of that slot (two
+    records in one slot) only if it also came to hold the other version, as
+    the limits below say. A file that is not a valid record is reported
+    and journaled once. Artifact entries are not imported yet: one that is
+    valid and counts is reported held and read again by a later pull, and
+    one that does not count is reported refused.
+  - **Journal.** The `replica.*@2` events are inputs only: this computer's
+    identity and role, the founder it pinned (a founding identity pins
+    itself, so a host that stops right after creating it is still pinned), each valid record it holds
+    (bytes and signature, keyed by slot and hash), a signed local entry
+    whose publish has not landed, and diagnostics - unreadable files,
+    refused commands, and store failures. Members, keys, the tree, cuts, and
+    which entries count are derived on every read and never journaled as
+    facts. The projection is held in memory and rebuilt from the journal on
+    every start. Earlier `replica.*@1` membership names decode to nothing, so a journal
+    that holds them starts with no replica identity.
+  - **Commands.** The host serves create a replica, write a join request,
+    approve a join, confirm a join, preview a revoke, revoke, and pull on the
+    host-only `/api/replica-membership/commands` route. Creating a replica or
+    asking to join creates a new device key, and the id comes from it, so
+    asking again - after a request went stale, a revocation, or a cut that
+    removed this computer's approval - is always a new identity. Approving
+    needs a member in good standing - admitted with no cut - and only the
+    store's own signed copy of a fresh request from a computer that is not
+    in the tree can be approved. Confirming reads the store, finds the
+    approver's approval of this computer, and walks parent edges up from the
+    approver to the one founder they reach; each edge is a record its child
+    signed, so the walk is unique. It checks the matching code against the
+    approver's key and that founder, checks that an acceptance would admit
+    this computer, and only then pins the founder and signs `join-accepted`;
+    an identity has one parent forever. Revoking needs good standing and a
+    subject this computer brought in, directly or through others; a sibling
+    or cousin is revoked from a shared ancestor, the founder at worst.
+    Revoke reads the store first, then cuts at the highest sequence of the
+    subject's valid signed entries this computer holds or just read,
+    artifact entries included, so what the subject already signed keeps
+    counting; a store that cannot be read leaves that cut at the membership
+    records this computer already holds, and the result says so. A revoke
+    preview returns that cut, the computers the subject brought in that are
+    not revoked yet, each with its parent and the parent's sequence of its
+    approval, and the revocations the subject itself already wrote, each at
+    its sequence. A revoke can name some of the computers it brought in to
+    revoke in the same step, and can move the subject's cut earlier - before
+    one of its revocations, say - but never later. Each revocation is its own
+    publish; when the subject's lands and a later one stops, the result is
+    revoked-in-part and names the computers that were not revoked. Pull is
+    allowed to any computer with an identity.
+  - **Writing.** A command that publishes journals the signed entry before
+    either file is written, writes the signature and then the entry, and
+    journals the record as held once both landed. If a publish stops
+    part-way, the next command finishes it first with the same bytes and the
+    same deterministic Ed25519 signature; a finished identity's stopped
+    publish is dropped. A slot that already holds bytes this computer did
+    not write is journaled as slot-occupied and skipped, up to 32 slots in a
+    row; then the publish stops with a visible error. A person recovers from
+    that flood by deleting the files with the storage provider's own tools,
+    rotating the store credentials, or moving to a new store.
+  - **Limits.** A stolen founder key can revoke anyone and cannot itself be
+    revoked; recovery is a new store. A store, or a sync client that lags,
+    can show a computer fewer files, and a computer that has not read a
+    revocation keeps counting the revoked computer's later entries until it
+    does; records it already holds are never lost. A rewrite of a slot is
+    detected only by a computer that holds both versions; since a pull never
+    re-reads a held slot, a computer that read only the later version keeps
+    it, and computers that read different versions may differ until one of
+    them holds the other's. Anyone who can
+    write the store can mint valid records under fresh keys; they are inert
+    and cost only disk and time, within the listing bounds. A pull whose
+    listing does not end inside its bound is refused rather than read in
+    part. Approvals a stolen key made before the revoker read the store
+    still count under the default cut, which is why the revoke preview lists
+    them.
+  - **Keys.** Device signing keys live per instance in their own namespace of
+    the host credential store - a separate macOS Keychain service,
+    `app.octant.replica-device-keys.v1`, or a separate Secret Service
+    attribute - keyed by the derived id and reached through the credential
+    broker's device-key routes. The provider credential routes reach a
+    different namespace, so a provider instance created with the same UUID
+    cannot read, replace, or delete a device key. The private half never
+    leaves the host.
+  - **Not wired yet.** The membership service asks Settings › Sync's store
+    selection for its store on every command; with sync off or no store
+    chosen, every command answers a typed `not-configured` refusal and makes
+    no store call. No surface creates a replica, joins, or revokes yet, and
+    artifact versions are neither published nor imported. A person can choose
+    a store and turn sync on, but cannot yet join another computer or copy a
+    version. The artifact reconcile policy's `sequence-gap` refusal has no
+    caller yet; the import slice owns the gap rule.
 - **Artifact replica store selection.** Settings › Sync chooses this host's
   store: a synced folder, an S3-compatible bucket, or none, with a sync switch
   that starts off. It is served on the host-only `/api/replica-store` routes,
@@ -1569,8 +1662,11 @@ modelId }`, and the model picker is provider-first. Discovery can find
   unsupported: 2.0.22 serves no question routes and asks through forms, which
   are not mapped, so the written posture denies `question` and a form that
   still arrives fails the turn. Resume,
-  interruption, and tool activity are reported; a file change that no allowed
-  or approved edit preceded fails the turn; and anything not mapped fails
+  interruption, and tool activity are reported; each allowed or approved edit
+  request admits one reported change to each file it names (resolved against
+  the project root; `*` admits one change to any file), rejecting one request
+  never withdraws another's grant, and a change to a file no remaining grant
+  names fails the turn; and anything not mapped fails
   closed. The probe also asks the confined 2.x server to answer for a
   directory carrying a Git marker, made in the launch's own scratch directory
   because every launch profile denies the host temporary directory beneath
@@ -1634,7 +1730,10 @@ modelId }`, and the model picker is provider-first. Discovery can find
   Provider OAuth has two postures ([0111](decisions/0111-host-driven-provider-oauth.md)).
   **Delegated** (`delegated-oauth`, including CLI `subscription`): login stays
   on the provider's own runtime; Octant never stores, refreshes, or journals
-  those tokens. **Host-driven** (`subscription-oauth`, direct HTTP drivers):
+  those tokens, except the opt-in Claude for helpers token that a confined
+  Claude launch signs in with, which the credential broker holds as the Sandbox
+  paragraph of [security and authority](#security-and-authority) states.
+  **Host-driven** (`subscription-oauth`, direct HTTP drivers):
   the host runs a generic authorization-code PKCE runner and a device-code
   runner from a provider descriptor (endpoints, scopes, and a public client
   id). Direct endpoint drivers accept a `subscription-oauth` credential
@@ -1771,6 +1870,21 @@ those recorded when the turn started, including after a later handoff. These
 turns have no Octant planning estimate or variance: APIs omit those fields and
 the request-detail table labels them unavailable.
 
+**Child runs.** A managed child run records each turn it sends in the usage
+ledger under its own `agent-run` subject. The context planner is not on the
+child path, so the turn is journaled as a planless `context.usage-reconciled@1`
+(request shape `agent-run-turn`) on a per-run `agent-run-usage` aggregate; the
+`agent-run` aggregate's versions belong to its lifecycle commands. The row has
+no planning estimate or variance, its usage is accumulated and priced exactly
+as a Chat or Work turn's is, and a child turn that reached the provider and
+reported nothing is recorded as unreported. A child run belongs to its parent
+thread's Project: every Project-scoped usage read (the Usage dashboard, the
+Project overview, and Project spend ceilings) resolves it through the parent
+and mode on its `agent.run-requested@1` event and the parent thread's current
+Project, the same records that place the thread's own rows. The same event
+gives the run its parent's mode, so a mode filter or breakdown counts child
+usage with its parent thread's.
+
 **Turn speed and full usage, for every provider.** Every runner that watches a
 provider's events (Chat, Work, Code) feeds each normalized runtime event to one
 pure policy in `@octant/domain` (`turnMetricsPolicy`); no driver measures
@@ -1878,18 +1992,72 @@ Work also refuses when the previous driver is unavailable and its conversation
 ownership cannot be established.
 
 Optional Project and
-thread spend ceilings (0060) are host owner policy over three dimensions:
-tokens, turns, and total agent run time per window (for example two hours a
-day for a Project). The server refuses a provider-consuming turn at admission
-when remaining reserved token capacity cannot cover a declared per-turn bound,
-when the turn count is used up, or when settled plus in-flight run time has
-reached the budget, and the composer and Environment name the exhausted
-dimension and a recovery. Token spend is the existing `UsageRecord` ledger,
-never imported provider history. Turns and run time come from journaled
+thread spend ceilings (0060) are host owner policy over four dimensions:
+tokens, turns, total agent run time, and money per window (for example two
+hours a day, or $25 a month, for a Project). The server refuses a
+provider-consuming turn at admission when remaining reserved token capacity
+cannot cover a declared per-turn bound, when the turn count is used up, when
+settled plus in-flight run time has reached the budget, or when settled money
+spend has reached the budget, and the composer and Environment name the
+exhausted dimension and a recovery. Token spend is the existing `UsageRecord`
+ledger, never imported provider history. Token and money spend include child
+runs: a thread ceiling counts its own runs, and a Project ceiling counts every
+run whose parent thread belongs to the Project now, whichever thread started
+it, at admission and in the Project overview. The Project a run's routing
+receipt named at delegation does not count, so a thread moved to another
+Project takes its children's spend with it. A child run is admitted against
+its parent thread's ceiling and that thread's Project ceiling; a Chat child's
+workspace names no Project, so its route's Project is used. Turns and run time come from journaled
 `spend.turn-recorded@1` facts, one per admitted turn or child run, charged its
 actual admitted-to-settled time; a turn still in flight counts its elapsed time,
-and a turn a host exit interrupted records nothing. Monetary ceilings stay
-unenforced until pricing metadata exists.
+and a turn a host exit interrupted records nothing.
+
+A money budget is whole US cents (`costBudgetUsdCents`); a raise must be
+strictly above the current budget and cannot add money to a ceiling that has
+none, as for the other dimensions. Spend is the sum of the window's
+`UsageRecord` costs in integer micro-dollars, floored to whole cents. Each
+reconciled request records its cost from the provider runtime's own figure
+(`costUsd` on the normalized `usage` event) as `provider-recorded`: Claude Code
+(`total_cost_usd`), OpenCode, Pi, and an OpenAI-compatible endpoint that reports
+`usage.cost` (OpenRouter; a BYOK `cost` is only OpenRouter's fee and is not
+used). Without a provider figure, a model in the checked-in standard-rate price
+table (`packages/domain/src/localUsagePricing.ts`, the same table and rule the
+composer's cost line uses) is recorded as an `api-estimate`. On a subscription
+plan both are API-rate equivalents, not the bill: Claude Code reports
+`total_cost_usd` at API rates on a Claude plan too. The cost is fixed when the
+usage is journaled: Chat, Work, and child runs carry it in the usage
+reconciliation, and Code carries it in the turn's `usage` operation frame
+(`cost`). Projections read the journaled cost and never price, so a rebuild
+reproduces the ledger exactly: a later price-table revision does not re-price
+history, and usage journaled before it carried a cost stays unpriced.
+
+A turn's usage is accumulated as the runtime contract defines it
+(`accumulateTurnUsage`): reports that name their request add up, a whole-turn
+report replaces them, and the sum has a cost only when every request in it
+reported one. The Claude mapper reports the turn so far after each model call,
+summed by message id. Every turn that reached the provider leaves exactly one
+ledger row however it ended — completed, failed, cancelled, or interrupted —
+and Work keeps usage the provider reports after a cancel. A turn that reached
+the provider and reported nothing (an ACP agent in Code reports no usage) is
+recorded as unreported and unpriced, so token and money ceilings refuse after
+it; a turn refused or failed before the provider leaves no row. A Code turn
+reaches the provider once its `provider-session-ready` frame is journaled,
+just before the prompt is sent, or when it completes. Any unpriced row in the
+window — a model with no price, a provider that reports no cost or no usage,
+and usage recorded before the ledger carried cost — makes the money ceiling
+refuse `unknown-spend` rather than count that usage as free. That refusal
+offers clearing the ceiling, waiting out a Project's calendar window, Usage,
+or pausing; a raise cannot price the usage, so it is not offered. Turns from
+before this behaviour that left no ledger row at all, including every child
+run's, are not counted.
+
+Money is checked between turns, like turns and run time, not reserved like
+tokens. A provider reports cost only when a turn settles and no per-turn price
+bound exists for every provider, so reserving would need a second, invented
+bound; instead admission refuses once settled spend reaches the budget, a turn
+already running finishes and may end over it, and concurrent turns admitted
+while money remained can each add their cost. The Usage panel and Project
+overview say so wherever a money budget is in force.
 
 ### Native harness
 
@@ -1962,7 +2130,13 @@ native harness in `apps/server/src/harness`:
   state or access.
 - **Tools.** `createNativeHarnessTools` composes the nine working tools and
   the harness reads as one `AppManagedToolSet`, trimmed by mode through the
-  closed tool catalog (`harness-*` capability ids). Every call decodes its
+  closed tool catalog (`harness-*` capability ids). `web-fetch` and
+  `web-search` are offered only where the host has them (`web-search` needs a
+  configured SearXNG endpoint). A Chat thread gets them only while its
+  research is on, because research is its grant to reach the web; Work and
+  Code need no such grant, and a child gets them only with network authority.
+  A tool that was not offered refuses as `tool-unavailable` if the model calls
+  it anyway. Every call decodes its
   arguments, wraps a `ToolActionRequest` under the thread's current authority,
   and passes `ToolCallAuthorityService.authorize` before any port runs. The
   thread's authority comes from the same resolver the browser tools use, in
@@ -1977,27 +2151,28 @@ native harness in `apps/server/src/harness`:
   every address the name resolves to at the moment the socket opens, so a
   name cannot pass the check and then resolve somewhere private.
 - **Tool verification.** A routine Check connection runs no generating
-  request, so an OpenAI-compatible or Azure AI Foundry endpoint offers a model
-  Octant's tools only after a person proved that model calls one. The
-  `verify-model-tools` command sends one forced `octant_capability_echo`
-  request through the same sender a turn uses, for one model; an
-  Anthropic-compatible endpoint takes the same command and request in its own
-  wire shape. A model that calls the tool joins `verifiedToolModelIds` on the
-  observed state, which the journal persists with the catalog and a
-  configuration change clears; a model that answers in text leaves it out, and
-  a transport failure (authentication, timeout) is reported rather than
-  recorded as "unsupported". Admission, the AgentRun transport check, and the
-  Chat preflight read that set per model, so verifying one model never offers
-  tools to its siblings. A tool call in a real turn widens nothing either: the
-  provider-level `appManagedTools` flag of an OpenAI-compatible or Foundry
-  profile stays "unsupported", because a tool call proves only the model that
-  made it. The command accepts only the models the endpoint
-  lists or the profile configures, and only a Foundry profile's configured
-  deployments, because its catalogue lists base models that are not
+  request, so an OpenAI-compatible, Anthropic-compatible, or Azure AI Foundry
+  endpoint offers a model Octant's tools only after a person proved that model
+  calls one. The `verify-model-tools` command sends one forced
+  `octant_capability_echo` request through the same sender a turn uses, for one
+  model; an Anthropic-compatible endpoint sends it in its own wire shape, with
+  `tool_choice` `any`. A model that calls the tool joins
+  `verifiedToolModelIds` on the observed state, which the journal persists with
+  the catalog and a configuration change clears; a model that answers in text
+  leaves it out, and a transport failure (authentication, timeout) is reported
+  rather than recorded as "unsupported". Admission, the AgentRun transport
+  check, and the Chat preflight read that set per model, so verifying one model
+  never offers tools to its siblings; the only tool an unverified model is
+  admitted with is that echo. A tool call in a real turn widens nothing either:
+  the provider-level `appManagedTools` flag of an OpenAI-compatible,
+  Anthropic-compatible, or Foundry profile stays "unsupported", because a tool
+  call proves only the model that made it. The command accepts only the models
+  the endpoint lists or the profile configures, and only a Foundry profile's
+  configured deployments, because its catalogue lists base models that are not
   deployments. Ollama has no verify action until its driver runs the tool
   loop. The model picker marks an unverified model "Chat only" with a "Verify
-  tools" action, and Settings → Octant Harness says the same for a slot's
-  chosen model.
+  tools" action (in Chat, on the selected model), and Settings → Octant
+  Harness says the same for a slot's chosen model.
 - **Goals.** A thread goal may carry up to twelve acceptance criteria
   (`ThreadGoalCriterion`), each with an optional check command; one without a
   command is confirmed by a person. `NativeHarnessTurnObserver` puts an open
@@ -2035,8 +2210,8 @@ native harness in `apps/server/src/harness`:
   Each retry is a `retrying` runtime event emitted before its wait. The thread's
   working indicator, the terminal footer, and the phone session panel show
   "Provider busy, retrying 2/5 in 4 s" and count the wait down, in ordinary
-  text rather than a warning, until the next content arrives or the turn
-  settles; a failed or cancelled attempt keeps no retry line. The turn's
+  text rather than a warning, until the next text, reasoning, or tool call
+  arrives or the turn settles; a failed or cancelled attempt keeps no retry line. The turn's
   detail counts those same events. What a
   failed attempt billed is added to the usage of the attempts after it. A
   cancel ends a wait at once and stays `interrupted`. The stream idle limit is
@@ -2261,8 +2436,11 @@ frame rebuilt on restart. A folder must be inside the person's home unless the
 standing access-outside-project approval exists, the same rule the artifact
 mirror's global folder follows. Writes are confined to the chosen folder and are
 atomic: a temporary file is renamed into place, so a reader never sees a
-half-written export. The user guide's exporting page
-(`apps/docs/guide/export.md`) states the same rules for a person.
+half-written export. The folder is stored by its real path, and a write whose
+folder no longer resolves to that path — because it or a folder above it was
+replaced by a link after it was chosen — is refused rather than followed. The
+user guide's exporting page (`apps/docs/guide/export.md`) states the same rules
+for a person.
 
 The GitHub Gist destination ships in-tree on the same port. It reuses the GitHub
 connection Octant already resolved through the `gh` command — the host-managed
@@ -2515,14 +2693,20 @@ mechanisms are:
   The host runs that command on a host-owned pseudo-terminal outside any
   sandbox, reads the printed token from memory, and keeps it in the credential
   broker under the Claude Code instance, wrapped so it never reads as that
-  instance's API key. A confined launch receives it as `CLAUDE_CODE_OAUTH_TOKEN`
+  instance's API key. Removing the provider stops a connect still waiting for
+  that approval, and a token that arrives after the instance was removed or
+  switched to an API key is discarded, never kept.
+  A confined launch receives it as `CLAUDE_CODE_OAUTH_TOKEN`
   and no keychain lookup; unconfined launches keep the runtime's own sign-in.
   Without a connected token the launch refuses with "Connect Claude for helpers
   in Settings › Claude Code.", which a parent's `wait` and `status` carry. The
   runtime never refreshes a handed-in token, so one it refuses is marked
   expired and the same reconnect step is reported. Only a local window may
-  connect or disconnect. A bound root a launch may not write is denied in
-  the profile, so a checkout under that launch's own temporary directory is not
+  connect or disconnect. Disconnecting deletes the token from the broker and
+  reports a broker it cannot reach. Removing the Claude Code provider clears
+  it best-effort: the removal completes even when the broker is unreachable and
+  the token can remain. Octant has no call that revokes it with Anthropic. A
+  bound root a launch may not write is denied in the profile, so a checkout under that launch's own temporary directory is not
   writable through it. The `--version` read every family and the discovery
   scan perform before a runtime starts is wrapped too, with no root, no home, no network and one
   throwaway scratch directory it may write, per
@@ -2693,29 +2877,40 @@ mechanisms are:
 - **Artifact replica membership.** Each replica entry carries a detached
   Ed25519 signature from the device signing key the writing host holds for its
   replica instance, in a credential namespace of its own that provider
-  credentials cannot reach — not a paired client's device key. There is no replica key. An entry from an
-  unknown or revoked host, or one that fails verification, is refused and
-  journaled. A new computer joins by writing a join request into the store,
-  signed over the time it was written; a request older than a day is not
-  offered for approval. A computer that is already a member approves it by
-  name, and only the store's own copy of the request — verified against the
-  joiner's device key — can be approved, not a copy a caller hands over. Only a
-  member approves. A short matching code, compared on both screens, shows the
-  person that the request the member is approving, and the member approving
-  it, are the ones the joining computer means; it is not a secret, and the
-  signatures, not the code, make the records authoritative. The joining
-  computer confirms the approval after the codes agree and imports the verified
-  chain of approvals from the founder to its approver. Revoke writes a signed revocation. Store setup, joining, and
-  revoking happen on the host, never from a paired phone. Store credentials
-  live in the host credential store — macOS Keychain or freedesktop Secret
-  Service — and are not written into the replica. An S3-compatible store is
-  contacted only over authenticated TLS. A plaintext endpoint is refused, and
-  store credentials are not sent on it. The storage provider can read the
-  synced content: the artifact versions and tombstones are plain files.
-  Settings and the user guide (`apps/docs/guide/sync-artifacts.md`) say so
-  before sync is turned on. Opt-in encryption of replicas is not this rule. A
-  replica import appends versions to this journal and adopts nothing else.
-  Membership accepts an entry signed by a known, non-revoked host identity key
+  credentials cannot reach — not a paired client's device key. There is no
+  replica key. The entry names that key, and the instance id is derived from
+  it, so a record that fails verification under its own key, names an id
+  that is not its key's, or is not the canonical encoding of its entry with
+  the canonical base64 text of its signature, is not valid and is journaled as
+  unreadable.
+  Membership is derived from the valid records a host holds and the founder it
+  pinned; an entry counts only when its writer is admitted through a chain of
+  signed approvals and acceptances from that founder and the entry sits at or
+  before any cut on it. A new computer joins by writing a join request into
+  the store, signed over the time it was written; a request older than a day
+  is not offered for approval. A member in good standing approves it by name,
+  and only the store's own copy of the request can be approved, not a copy a
+  caller hands over. A short matching code, compared on both screens, is a
+  consistency check that the request, the approving computer's key, and the
+  founder are the ones the joining computer means. It is not a secret and not
+  a tamper proof: six digits leave room for someone who can write the store
+  to search offline for a substituted join request that yields the same
+  code. The signatures and the verified approval chain, not the code, make
+  the records authoritative. The joining
+  computer then signs its acceptance of that one approval, which makes the
+  approver its only parent. Revoke writes a signed revocation, and only a
+  computer that brought the revoked one in, directly or through others, can
+  revoke it. Store setup, joining, and revoking happen on the host, never from
+  a paired phone. Store credentials live in the host credential store — macOS
+  Keychain or freedesktop Secret Service — and are not written into the
+  replica. An S3-compatible store is contacted only over authenticated TLS. A
+  plaintext endpoint is refused, and store credentials are not sent on it.
+  The storage provider can read the synced content: the artifact versions and
+  tombstones are plain files. Settings and the user guide
+  (`apps/docs/guide/sync-artifacts.md`) say so before sync is turned on.
+  Opt-in encryption of replicas is not this rule. A replica import appends
+  versions to this journal and adopts nothing else. Membership accepts an
+  entry signed by an admitted instance's device signing key, within its cut,
   as authentic. It does not delegate host authority between hosts.
 - **Hosts never trust each other.** Multi-host views merge read models
   client-side; credentials and mutable authority never cross hosts. Completing

@@ -111,6 +111,12 @@ describe("provider context fact adapter", () => {
         inputTokens: Number.MAX_SAFE_INTEGER + 1,
       } as ProviderRuntimeEvent),
     ).toThrow(/safe integer/i);
+    expect(
+      usageFromRuntimeEvent({ ...usage, costUsd: 0.0421 } as ProviderRuntimeEvent),
+    ).toMatchObject({ costUsd: 0.0421 });
+    expect(() => usageFromRuntimeEvent({ ...usage, costUsd: -1 } as ProviderRuntimeEvent)).toThrow(
+      /cost/i,
+    );
   });
 
   it("maps bounded retry timing while keeping unknown buckets unavailable", () => {

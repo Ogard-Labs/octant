@@ -446,6 +446,34 @@ describe("DraftThreadWorkspace", () => {
     },
   );
 
+  it("keeps a half-written chat when the person looks at the Running tab of the screen that lists recent threads", async () => {
+    const user = userEvent.setup();
+    render(
+      <DraftThreadWorkspace
+        {...baseProps}
+        homeStart={{
+          reviewCount: 0,
+          runningCount: 0,
+          cardCustomization: { order: [], visibility: [] },
+          onCardCustomizationChange: vi.fn(),
+          composerTabs: { runningCount: 2, running: <p>Two things are running.</p> },
+        }}
+        recentThreads={[{ id: "thread-a", title: "Latency telemetry", onOpen: vi.fn() }]}
+      />,
+    );
+
+    const composer = screen.getByRole("textbox", { name: "First message" });
+    await user.type(composer, "Tidy the release notes");
+    await user.click(screen.getByRole("tab", { name: "Running 2" }));
+    expect(screen.getByText("Two things are running.")).toBeVisible();
+    expect(composer).not.toBeVisible();
+
+    await user.click(screen.getByRole("tab", { name: "New task" }));
+    expect(screen.getByRole("textbox", { name: "First message" })).toHaveValue(
+      "Tidy the release notes",
+    );
+  });
+
   it("renders intent cards for the active mode", () => {
     const { container } = render(<DraftThreadWorkspace {...baseProps} />);
     expect(screen.getByRole("group", { name: "Suggested actions" })).toBeVisible();

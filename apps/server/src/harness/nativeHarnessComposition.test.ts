@@ -249,6 +249,27 @@ describe("native harness composition", () => {
       expect(webFetch).toHaveBeenCalledOnce();
     });
 
+    it("offers and runs web-fetch in a Chat thread only while its research is on", async () => {
+      const { composition, webFetch } = harness();
+      const researchOff = composition.forChat({
+        thread: { ...chatThread(), researchEnabled: false },
+        windowId: "window-1",
+      });
+      expect(researchOff?.definitions.map((definition) => definition.name)).not.toContain(
+        "web-fetch",
+      );
+      expect(await fetchYr(researchOff)).toMatchObject({
+        isError: true,
+        result: { error: "tool-unavailable" },
+      });
+      expect(webFetch).not.toHaveBeenCalled();
+
+      const researchOn = composition.forChat({ thread: chatThread(), windowId: "window-1" });
+      expect(researchOn?.definitions.map((definition) => definition.name)).toContain("web-fetch");
+      expect(await fetchYr(researchOn)).toMatchObject({ isError: false });
+      expect(webFetch).toHaveBeenCalledOnce();
+    });
+
     it("fetches a page from a Work thread in a folder", async () => {
       const { composition, webFetch } = harness();
       const tools = composition.forWork({

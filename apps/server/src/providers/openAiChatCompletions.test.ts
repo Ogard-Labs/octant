@@ -514,6 +514,38 @@ describe("sendChatCompletionsTurn", () => {
     expect(observed.mock.calls.map(([event]) => event)).toEqual(result.events);
   });
 
+  it("carries the charge an endpoint reports beside its usage, but not a BYOK fee", async () => {
+    const reply = (extra: Record<string, unknown>) =>
+      vi.fn(async () =>
+        stream(
+          chunk({ role: "assistant", content: "Hi" }),
+          chunk({}, "stop"),
+          {
+            id: "chatcmpl_private",
+            object: "chat.completion.chunk",
+            choices: [],
+            usage: { prompt_tokens: 9, completion_tokens: 1, total_tokens: 10, ...extra },
+          },
+          "[DONE]",
+        ),
+      );
+
+    const charged = await Effect.runPromise(
+      sendChatCompletionsTurn(input(reply({ cost: 0.00042, is_byok: false }))),
+    );
+    const ownKey = await Effect.runPromise(
+      sendChatCompletionsTurn(input(reply({ cost: 0.00002, is_byok: true }))),
+    );
+    const malformed = await Effect.runPromise(
+      sendChatCompletionsTurn(input(reply({ cost: "0.1" }))),
+    );
+
+    expect(charged.usage).toEqual({ inputTokens: 9, outputTokens: 1, costUsd: 0.00042 });
+    expect(charged.events.at(-1)).toMatchObject({ kind: "usage", costUsd: 0.00042 });
+    expect(ownKey.usage).toEqual({ inputTokens: 9, outputTokens: 1 });
+    expect(malformed.usage).toEqual({ inputTokens: 9, outputTokens: 1 });
+  });
+
   it("reports zero cache reads for an uncached response and nothing when the endpoint reports none", async () => {
     const uncached = vi.fn(async () =>
       stream(

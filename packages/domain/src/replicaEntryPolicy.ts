@@ -1,6 +1,5 @@
 /**
- * Whether one replica entry may join the local library, or change who shares
- * the store it came from.
+ * Whether one artifact entry from a replica store may join the local library.
  *
  * The host has already read the file and reached a signature verdict. This
  * function decides what that entry means. It does not write, and it does not
@@ -10,18 +9,17 @@
  * talked into it. A sequence gap is refused so a later entry is never applied
  * while an earlier one is missing. A tombstone stays in the history the caller
  * already holds; a later version from another computer appends beside it.
- * A join request from a computer that is not yet a member is not a refusal:
- * it returns the one outcome that can make it one, and the approval that
- * follows is the caller's to journal.
+ *
+ * Membership records are not reconciled here: who counts is derived from the
+ * whole set of membership records a host holds, by the membership policy, and
+ * this function takes that standing as an input.
  */
 
 import {
   replicaEntryBundleAgrees,
   type ReplicaArtifactEntry,
   type ReplicaContentHash,
-  type ReplicaEntry,
   type ReplicaInstanceId,
-  type ReplicaMembershipEntry,
   type ReplicaSignatureVerdict,
 } from "@octant/contracts/replica-entry";
 import type { CanvasId, CanvasVersionId } from "@octant/contracts/canvas";
@@ -32,9 +30,6 @@ export const REPLICA_RECONCILE_OUTCOMES = [
   "already-present",
   "concurrent-head",
   "tombstone",
-  "request-approval",
-  "member-added",
-  "member-revoked",
   "refused",
 ] as const;
 
@@ -44,7 +39,6 @@ export const REPLICA_REFUSAL_REASONS = [
   "sequence-gap",
   "names-local-artifact-as-foreign",
   "hash-mismatch",
-  "membership-conflict",
   "bad-signature",
 ] as const;
 
@@ -74,11 +68,9 @@ export type ReplicaInstanceMembership =
 export interface ReplicaAppliedEntry {
   readonly instanceId: ReplicaInstanceId;
   readonly sequence: number;
-  readonly kind: ReplicaEntry["kind"];
-  /** Artifact entries record the hash they were applied with. */
-  readonly contentHash?: ReplicaContentHash;
-  /** Membership entries record the instance they are about. */
-  readonly subject?: ReplicaInstanceId;
+  readonly kind: ReplicaArtifactEntry["kind"];
+  /** The hash the entry was applied with. */
+  readonly contentHash: ReplicaContentHash;
 }
 
 export interface ReplicaKnownVersion {
@@ -165,7 +157,7 @@ function artifactRecord(
   return state.artifacts.find((artifact) => String(artifact.canvasId) === String(canvasId));
 }
 
-function atSequence(state: ReplicaLocalState, entry: ReplicaEntry) {
+function atSequence(state: ReplicaLocalState, entry: ReplicaArtifactEntry) {
   return state.applied.find(
     (applied) =>
       String(applied.instanceId) === String(entry.origin.instanceId) &&
@@ -175,7 +167,7 @@ function atSequence(state: ReplicaLocalState, entry: ReplicaEntry) {
 
 // Sequence 3 is refused while 2 is missing. Applying it would invent the gap
 // and make the missing entry impossible to insert later.
-function behindSequence(state: ReplicaLocalState, entry: ReplicaEntry): boolean {
+function behindSequence(state: ReplicaLocalState, entry: ReplicaArtifactEntry): boolean {
   return entry.origin.sequence !== highestApplied(state, entry.origin.instanceId) + 1;
 }
 
@@ -207,16 +199,16 @@ function concurrentWithExisting(state: ReplicaLocalState, entry: ReplicaArtifact
 }
 
 /**
- * Decide what one pulled entry does to the local library.
+ * Decide what one pulled artifact entry does to the local library.
  *
  * Signature is checked first, so a bad copy is refused even when the instance
  * would otherwise be welcome. An already-applied entry is idempotent: pulling
- * it again changes nothing, whichever kind it was. A sequence other than the
- * next one for its own origin is a gap and is not applied.
+ * it again changes nothing. A sequence other than the next one for its own
+ * origin is a gap and is not applied.
  */
 export function reconcileReplicaEntry(
   localState: ReplicaLocalState,
-  entry: ReplicaEntry,
+  entry: ReplicaArtifactEntry,
 ): ReplicaReconcileOutcome {
   switch (localState.signature) {
     case "verified":
@@ -229,11 +221,8 @@ export function reconcileReplicaEntry(
       throw new Error("Unexpected signature verdict: " + String(unexpected));
     }
   }
-  return entry.kind === "artifact-version" || entry.kind === "artifact-tombstone"
-    ? artifactOutcome(localState, entry)
-    : membershipOutcome(localState, entry);
+  return artifactOutcome(localState, entry);
 }
-
 function artifactOutcome(
   state: ReplicaLocalState,
   entry: ReplicaArtifactEntry,
@@ -267,55 +256,4 @@ function artifactOutcome(
   if (entry.kind === "artifact-tombstone") return { outcome: "tombstone" };
   if (concurrentWithExisting(state, entry)) return { outcome: "concurrent-head" };
   return { outcome: "append-version" };
-}
-
-/**
- * What one membership record does to the local membership list.
- *
- * A join request is the one record a computer that is not yet a member may
- * write, so its origin is not checked against membership. An approval and a
- * revocation must come from an instance the host knows a key for, but a cut
- * on that instance does not refuse them here: the host keeps every verified
- * approval and revocation and works out membership from all of them at once,
- * so a record past a cut is kept and does not count. Refusing it would stop
- * the walk of that log, and what a host holds would then depend on which log
- * it happened to read first. For the same reason an approval of a revoked
- * instance is kept: an honest member may have written it before the
- * revocation, and the records after it in that member's log still count.
- */
-function membershipOutcome(
-  state: ReplicaLocalState,
-  entry: ReplicaMembershipEntry,
-): ReplicaReconcileOutcome {
-  const recorded = atSequence(state, entry);
-  if (recorded !== undefined) {
-    if (
-      recorded.kind === entry.kind &&
-      recorded.contentHash === undefined &&
-      recorded.subject !== undefined &&
-      String(recorded.subject) === String(entry.subject)
-    ) {
-      return { outcome: "already-present" };
-    }
-    // The sequence was written once. A different record cannot take its place.
-    return refuse("membership-conflict");
-  }
-  // A sequence-1 self-approval proves only that its writer holds the key the
-  // record names, and any computer that can write to the store can mint one,
-  // so it cannot bootstrap trust by what it is. A computer holds the store
-  // creator as a member because it journaled that record itself - its own
-  // create, or a chain the person confirmed - and that journal is the anchor
-  // an approval's writer is checked against.
-  if (entry.kind !== "join-request" && membership(state, entry.origin.instanceId) === "unknown") {
-    return refuse("unknown-instance");
-  }
-  if (behindSequence(state, entry)) return refuse("sequence-gap");
-  const subject = membership(state, entry.subject);
-  if (entry.kind === "join-request" || entry.kind === "join-approved") {
-    if (subject !== "unknown") return { outcome: "already-present" };
-    return entry.kind === "join-request"
-      ? { outcome: "request-approval" }
-      : { outcome: "member-added" };
-  }
-  return subject === "revoked" ? { outcome: "already-present" } : { outcome: "member-revoked" };
 }

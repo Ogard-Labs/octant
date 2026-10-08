@@ -4,13 +4,7 @@ import { join } from "node:path";
 import { Schema } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
 import { startCredentialBroker, type CredentialStore } from "@octant/host-runtime";
-import {
-  EventActor,
-  LOCAL_HOST_ID,
-  ReplayCursor,
-  type ReplicaInstanceId,
-  type UtcTimestamp,
-} from "@octant/contracts";
+import { EventActor, LOCAL_HOST_ID, ReplayCursor, type UtcTimestamp } from "@octant/contracts";
 import type { ReplicaStoreSettingsResult } from "@octant/contracts/replica-store-settings";
 import { AggregateHeadsProjection } from "../persistence/aggregateHeadsProjection";
 import { makeReplicaStoreCredentialBrokerClient } from "../providers/credentialBrokerClient";
@@ -19,7 +13,7 @@ import { Journal } from "../persistence/journal";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { ProjectionRegistry } from "../persistence/projection";
 import { openSqlite, type SqliteConnection } from "../persistence/sqlitePort";
-import { ensureReplicaDeviceKey, makeReplicaDeviceSigner } from "./replicaDeviceKeyService";
+import { createReplicaDeviceKey, makeReplicaDeviceSigner } from "./replicaDeviceKeyService";
 import {
   createReplicaMembershipJournal,
   registerReplicaMembershipEvents,
@@ -133,7 +127,7 @@ function host(
   const membership = new ReplicaMembershipService({
     store: () => settings.selection(),
     credentials: {
-      ensure: (instanceId) => ensureReplicaDeviceKey(deviceKeys, instanceId),
+      create: () => createReplicaDeviceKey(deviceKeys),
       sign: (instanceId, payload) => makeReplicaDeviceSigner(deviceKeys, instanceId).sign(payload),
     },
     journal: createReplicaMembershipJournal({
@@ -145,7 +139,6 @@ function host(
     state: () => membershipProjection.state(),
     localHostId: LOCAL_HOST_ID,
     clock: () => Date.parse(NOW),
-    newInstanceId: () => "11111111-1111-4111-8111-111111111111" as ReplicaInstanceId,
   });
   const journalText = () =>
     JSON.stringify(
@@ -241,13 +234,12 @@ describe("replica store settings", () => {
     expect(existsSync(join(folder, SYNCED_FOLDER_REPLICA_DIRECTORY))).toBe(false);
 
     await settings.setSync({ syncOn: true, expectedVersion: chosen.version });
+    const created = await membership.execute({ kind: "create-replica", displayName: "MacBook" });
+    if (created.kind !== "replica-created") {
+      throw new Error(`expected a replica, got ${JSON.stringify(created)}`);
+    }
     expect(
-      await membership.execute({ kind: "create-replica", displayName: "MacBook" }),
-    ).toMatchObject({ kind: "replica-created" });
-    expect(
-      readdirSync(
-        join(folder, SYNCED_FOLDER_REPLICA_DIRECTORY, "11111111-1111-4111-8111-111111111111"),
-      ).sort(),
+      readdirSync(join(folder, SYNCED_FOLDER_REPLICA_DIRECTORY, String(created.instanceId))).sort(),
     ).toEqual(["1.json", "1.sig"]);
   });
 

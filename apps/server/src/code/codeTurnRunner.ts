@@ -10,8 +10,9 @@ import {
   type ProviderResumeCursor,
   type ProviderUsageLimit,
   type TurnStopReason,
+  type UsageCost,
 } from "@octant/contracts";
-import { observeTurnMetrics, startTurnMetrics } from "@octant/domain";
+import { ledgerUsageCost, observeTurnMetrics, startTurnMetrics } from "@octant/domain";
 import { Effect, Fiber, Scope, Stream } from "effect";
 import type {
   ProviderAcquireInput,
@@ -116,6 +117,8 @@ export interface CodeTurnEvent {
 
   readonly outputTokens?: number;
   readonly costUsd?: number;
+  /** The ledger's price for the turn, fixed with the report it came from. */
+  readonly cost?: UsageCost;
   readonly contextWindow?: number;
   readonly contextTokens?: number;
   readonly autoCompactThreshold?: number;
@@ -749,12 +752,27 @@ function normalizeProviderEvent(
       // a runtime that reported none, so a part is never counted twice.
       const contextBreakdown =
         event.contextBreakdown ?? estimateOctantToolsPart(input.appManagedTools?.definitions ?? []);
+      // Priced here, once, and journaled with the report. A ledger that priced
+      // the turn on rebuild would re-price Code history after any revision of
+      // the standard-rate table, and could change what a money ceiling saw.
+      const cost = ledgerUsageCost(String(input.thread.modelId), {
+        inputTokens: event.inputTokens,
+        outputTokens: event.outputTokens,
+        ...(event.cacheReadInputTokens === undefined
+          ? {}
+          : { cacheReadInputTokens: event.cacheReadInputTokens }),
+        ...(event.cacheWriteInputTokens === undefined
+          ? {}
+          : { cacheWriteInputTokens: event.cacheWriteInputTokens }),
+        ...(event.costUsd === undefined ? {} : { costUsd: event.costUsd }),
+      });
       return Effect.succeed({
         ...base,
         category: "usage",
         inputTokens: event.inputTokens,
         outputTokens: event.outputTokens,
         ...(event.costUsd === undefined ? {} : { costUsd: event.costUsd }),
+        ...(cost === undefined ? {} : { cost }),
         ...(event.cacheReadInputTokens === undefined
           ? {}
           : { cacheReadInputTokens: event.cacheReadInputTokens }),

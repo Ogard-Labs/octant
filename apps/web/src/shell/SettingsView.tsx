@@ -127,7 +127,7 @@ import {
   type NativeHarnessProviderOption,
 } from "../harness/NativeHarnessRoutingPanel";
 import type { NativeHarnessClient } from "@octant/client-runtime/native-harness-client";
-import { LOCAL_HOST_ID, type ProviderInstanceId, type ProviderModelId } from "@octant/contracts";
+import { LOCAL_HOST_ID } from "@octant/contracts";
 import { isNativeHarnessDriverKind, modelCarriesAppManagedTools } from "@octant/domain";
 import type { AutomationNotificationClient } from "@octant/client-runtime/automation-notification-client";
 import { ThemeAppearanceEditor } from "../theme/ThemeAppearanceEditor";
@@ -969,13 +969,7 @@ function ActiveSectionContent({
                 providers={nativeHarnessProviderOptions(props.providerController)}
                 {...(props.providerController === undefined
                   ? {}
-                  : {
-                      onVerifyTools: (providerInstanceId: string, modelId: string) =>
-                        props.providerController!.verifyModelTools(
-                          providerInstanceId as ProviderInstanceId,
-                          modelId as ProviderModelId,
-                        ),
-                    })}
+                  : { onVerifyTools: props.providerController.verifyModelTools })}
               />
             </>
           )}

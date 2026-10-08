@@ -1,9 +1,11 @@
 import {
   decodeProviderInstanceId,
   decodeProviderSessionId,
+  decodeProviderToolDefinition,
   type AnthropicCompatibleProtocol,
   type ProviderModelId,
   type ProviderRuntimeEvent,
+  type ProviderToolDefinition,
 } from "@octant/contracts";
 import { runProviderConformance } from "@octant/provider-sdk/conformance";
 import { runProviderChatConformance } from "@octant/provider-sdk/chat-conformance";
@@ -15,6 +17,7 @@ import {
   recordProviderChatConformanceEvidence,
   recordProviderConformanceEvidence,
 } from "./chatProviderMatrixEvidence.test-support";
+import { capabilityEchoToolDefinition } from "./openAiToolEncoding";
 import { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
 
 const instanceId = decodeProviderInstanceId("80000000-0000-4000-8000-000000000611");
@@ -319,7 +322,140 @@ describe("Anthropic-compatible provider conformance", () => {
   });
 });
 
-function toolUseStream(): Response {
+describe("Anthropic-compatible per-model tool verification", () => {
+  const octantTool = decodeProviderToolDefinition({
+    name: "octant_agents",
+    inputSchema: { type: "object", properties: {} },
+  });
+  const siblingModelId = "sibling-model" as ProviderModelId;
+
+  function makeDriver(turn: () => Response) {
+    const runtimeRegistry = new ProviderRuntimeRegistry();
+    const driver = makeAnthropicCompatibleDriver({
+      instanceId,
+      configuration: configuration("messages"),
+      runtimeRegistry,
+      credentialResolver: { has: async () => true, resolve: async () => "fixture-secret" },
+      fetch: async (url) =>
+        String(url).endsWith("/models")
+          ? Response.json({ data: [{ id: modelId }, { id: siblingModelId }] })
+          : turn(),
+      clock: () => "2026-07-15T12:00:00.000Z",
+    });
+    return { driver, runtimeRegistry };
+  }
+
+  function verify(runtimeRegistry: ProviderRuntimeRegistry, verified: ProviderModelId) {
+    const observed = runtimeRegistry.observedState(instanceId);
+    if (observed === undefined) throw new Error("The driver was not probed.");
+    runtimeRegistry.setObservedState({ ...observed, verifiedToolModelIds: [verified] });
+  }
+
+  async function sendWithTools(
+    driver: ReturnType<typeof makeDriver>["driver"],
+    model: ProviderModelId,
+    tools: ReadonlyArray<ProviderToolDefinition>,
+  ) {
+    return Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* driver.acquire({
+            instanceId,
+            projectRoot: "/tmp/octant-anthropic-conformance",
+          });
+          yield* connection.start({
+            sessionId: successfulSessionId,
+            modelId: model,
+            executionPolicy: "approval-gated",
+          });
+          const outcome = yield* Effect.either(
+            connection.send({
+              sessionId: successfulSessionId,
+              prompt: "list agents",
+              attachments: [],
+              tools,
+            }),
+          );
+          yield* connection.stop(successfulSessionId);
+          return outcome;
+        }),
+      ),
+    );
+  }
+
+  it("refuses Octant tools for an unverified model and sends them for a verified one on the same endpoint", async () => {
+    const { driver, runtimeRegistry } = makeDriver(() => messagesStream("ok"));
+    await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
+
+    expect((await sendWithTools(driver, modelId, [octantTool]))._tag).toBe("Left");
+    // A routine probe reports tools unsupported and runs no generating request.
+    expect(runtimeRegistry.observedState(instanceId)?.capabilities.appManagedTools).toBe(
+      "unsupported",
+    );
+    // The capability echo that Verify tools sends is the one tool an
+    // unverified model may be offered.
+    expect((await sendWithTools(driver, modelId, [capabilityEchoToolDefinition()]))._tag).toBe(
+      "Right",
+    );
+
+    verify(runtimeRegistry, modelId);
+
+    expect((await sendWithTools(driver, modelId, [octantTool]))._tag).toBe("Right");
+    expect((await sendWithTools(driver, siblingModelId, [octantTool]))._tag).toBe("Left");
+  });
+
+  it("keeps Octant tools to the verified model after it calls a tool in a real turn", async () => {
+    const { driver, runtimeRegistry } = makeDriver(() => toolUseStream("octant_agents", "{}"));
+    await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
+    verify(runtimeRegistry, modelId);
+
+    const events = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* driver.acquire({
+            instanceId,
+            projectRoot: "/tmp/octant-anthropic-conformance",
+          });
+          yield* connection.start({
+            sessionId: successfulSessionId,
+            modelId,
+            executionPolicy: "approval-gated",
+          });
+          const collected = yield* Effect.fork(
+            Stream.runCollect(
+              (yield* connection.subscribe).pipe(
+                Stream.takeUntil((event: ProviderRuntimeEvent) => event.kind === "tool-request"),
+              ),
+            ),
+          );
+          yield* connection.send({
+            sessionId: successfulSessionId,
+            prompt: "list agents",
+            attachments: [],
+            tools: [octantTool],
+          });
+          const seen = Array.from(yield* Fiber.join(collected));
+          yield* connection.stop(successfulSessionId);
+          return seen;
+        }),
+      ),
+    );
+
+    expect(events.at(-1)).toMatchObject({ kind: "tool-request", toolName: "octant_agents" });
+    expect(runtimeRegistry.observedState(instanceId)?.capabilities.appManagedTools).toBe(
+      "unsupported",
+    );
+    expect((await sendWithTools(driver, siblingModelId, [octantTool]))._tag).toBe("Left");
+    await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
+    expect((await sendWithTools(driver, siblingModelId, [octantTool]))._tag).toBe("Left");
+    expect((await sendWithTools(driver, modelId, [octantTool]))._tag).toBe("Right");
+  });
+});
+
+function toolUseStream(
+  toolName = "octant_capability_echo",
+  inputJson = '{"echo":"ready"}',
+): Response {
   const events = [
     {
       type: "message_start",
@@ -336,12 +472,12 @@ function toolUseStream(): Response {
     {
       type: "content_block_start",
       index: 0,
-      content_block: { type: "tool_use", id: "toolu_1", name: "octant_capability_echo", input: {} },
+      content_block: { type: "tool_use", id: "toolu_1", name: toolName, input: {} },
     },
     {
       type: "content_block_delta",
       index: 0,
-      delta: { type: "input_json_delta", partial_json: '{"echo":"ready"}' },
+      delta: { type: "input_json_delta", partial_json: inputJson },
     },
     { type: "content_block_stop", index: 0 },
     { type: "message_delta", delta: { stop_reason: "tool_use" }, usage: { output_tokens: 2 } },

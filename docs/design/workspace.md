@@ -84,7 +84,9 @@ never count toward To review and never list here; the page's Work wiring
 mode's existing commands and show the host's refusal in one line; mark-seen
 moves the read cursor. Its single-key commands are page-scoped keybindings: they
 may be a bare key because only the focused page dispatches them, and the
-window-level listeners never run them. The page holds no pull-request action
+window-level listeners never run them. Focus left on the window's body is not
+the page; when the control holding focus leaves with its thread, the page takes
+focus back so its keys keep working. The page holds no pull-request action
 and no destructive one. The To review tile, Code's **Review N changes** tile and
 the command palette open it.
 
@@ -165,7 +167,8 @@ nothing.
 The cards come from a small renderer registry (`apps/web/src/home`). A card is a
 value: `id`, `title`, `icon`, `defaultOn`, `available`, an optional
 `hideWhenEmpty`, one `emptyLabel`, and a `useContent` hook returning `loading`
-or `ready` with a count and a body. The shell builds the list and hands it to the
+or `ready` with a count and a body. A `ready` result may replace the empty line
+for a card that could not look, and may add one link after it. The shell builds the list and hands it to the
 frame, which knows nothing about any card: a new card is a new definition, with
 no change to the frame, Customize, or the stored setting. `available: false`
 (no GitHub connection, insecure token storage, no client in this window) hides
@@ -204,7 +207,10 @@ thread is resting. At most five rows show, then **+N more**, which opens the
 Running view (the Board; Chat's Running tile opens Activity). A row opens its
 thread. The card reads what the window's controllers already hold; the run list
 is one read when the card mounts and again when the thread lists change, so it
-adds no timer, and a window sees only what its own authority returns. The turn
+adds no timer, and a window sees only what its own authority returns. Working
+now, the Running tab, and the Computers card share that one read: at most one is
+in flight, and the changes that arrive meanwhile (a streaming Chat reply moves
+the thread lists on every delta) become one more read once it lands. The turn
 start and step ride on the same navigation rows as the executing flag (see
 [Architecture: persistence](../architecture.md#persistence), fast thread
 reads), so a remote window sees them for exactly the threads it can already
@@ -243,8 +249,9 @@ the host cannot scan, the card says it could not check rather than that nothing
 is running, and a refused refresh keeps the last listing. A window with no Code
 Project sees an empty card.
 
-Above the composer the same screens carry two tabs on its top-left edge,
-**New task** and **Running**. New task is selected first and is the composer as
+Above the composer the same screens, the Chat screen that lists the threads to
+continue among them, carry two tabs on its top-left edge, **New task** and
+**Running**. New task is selected first and is the composer as
 it was: the Running tab never takes the focus the composer takes on arrival. The
 Running label carries the sidebar's own Running count for the current mode, read
 from the same place as the tile (nothing is added at zero), so the two cannot
@@ -295,14 +302,19 @@ it, such as one in Plan mode, an unreachable host) shows one quiet line in the
 row saying why, and then the card re-reads; a row the host no longer lists stays
 until the next read or the next minute so the line can be seen. A Code answer
 counts as refused when the host says `operation-failed` or reports the turn
-`failed` or `interrupted`; the command palette reads Code answers the same way.
-The card reads the list when it mounts, on the navigation topics named below,
-and when the shell settings or the window workspace change (neither has a feed
-topic). Signals that arrive while a read is in flight become one more read once
-it lands, so a streaming reply does not start a host read per delta.
+`failed`, or `interrupted` with a reason. A bare `interrupted` is the third
+denial in one turn: the provider received that Deny and the host then stopped
+the turn, so it counts as answered. The command palette and the open Code
+thread read Code answers the same way, and the open thread keeps a refused
+request and adds the host's reason to its waiting line.
+The card reads the list when it mounts, on the Machine change feed's Chat,
+Work, and Code navigation topics, and when the shell settings or the window
+workspace change (neither has a feed topic). Signals that arrive while a read
+is in flight become one more read once it lands, so a streaming reply does not
+start a host read per delta.
 
-**Pull requests** is the next card, on by default, and only on a Code start
-screen. It is hidden — and left out of Customize — unless the Pull requests
+**Pull requests** follows Running services, on by default, and only on a Code
+start screen. It is hidden — and left out of Customize — unless the Pull requests
 destination is offered and its read is allowed: no connection, insecure token
 storage, or a missing pull-request capability hides it, the same gate that
 refuses that destination's read. It lists open pull requests across every Code
@@ -320,13 +332,28 @@ more**, which opens Pull requests. A row opens that pull request's existing
 review for its Project. The read is one query of the window's authorized
 snapshot, so a remote window sees only the Projects it was granted.
 
-**CI failures** is the next card, on by default, and only on a Code start
+The card says "Nothing is waiting on you." only when the read succeeded and a
+refresh has reached every connected Project. The snapshot moves only on an
+explicit refresh or a Project's opt-in cadence, which is off by default, so a
+host that has never refreshed has not looked. A read that fails or is refused
+says "Octant could not read pull requests." A snapshot no refresh has reached
+says "Pull requests have not been checked yet.", and one where some connected
+Project was never refreshed says "Some Projects have not been checked yet.";
+both offer **Open Pull requests**, where the refresh is. When the latest
+refresh failed, the snapshot is as old as the last one that succeeded, and the
+card says so from the snapshot's own freshness: "Last checked 3h ago." under
+the rows, or "Nothing was waiting on you when checked 3h ago." Pull requests
+and CI failures share one read of the snapshot when they mount together.
+
+**CI failures** follows Pull requests, on by default, and only on a Code start
 screen. It uses the same gate as Pull requests: no connection, insecure token
 storage, or a missing pull-request capability hides it and leaves it out of
 Customize. It lists failing checks the pull-request refresh already recorded,
 on the signed-in person's open pull requests and on the current branches of
 Code Projects. A current branch is the branch of an active thread's available
-checkout; the card does not observe checkouts itself. A failing check that is
+checkout; the card does not observe checkouts itself. A pull request from a fork
+(the list read's `isCrossRepository`) never matches a current branch: its head
+branch is a branch of the fork, whatever its name. A failing check that is
 neither is left out. A row shows the check name, the repository and number
 when the pull request is the person's (`repo#12`) or the branch when it is
 only a current checkout, and how long ago the check finished failing. The
@@ -339,11 +366,14 @@ its workspace, since the current checkout may be on another branch; the
 checkout's head does not replace that branch. The pull request, check, branch,
 and repository are already written in; the rollup carries no failure text, so
 the draft quotes none. Sending, switching the draft's Project, or starting a
-new draft lets go of that branch. It does not start a turn; the person sends
+new draft lets go of that branch, wherever the new draft is started: the
+sidebar's New task, the command palette, thread search, or the menu bar's Start
+new agent all start the same clean draft. A pull request from a fork offers no
+Start a fix, since its branch is not in the Project. It does not start a turn; the person sends
 it. Opening the card reads the same cached snapshot
 Pull requests reads and adds no poll.
 
-**Computers** is the next card, on by default, on Work and Code. It lists every
+**Computers** follows CI failures, on by default, on Chat, Work, and Code. It lists every
 host this window is connected to: this computer, paired remote hosts, devboxes,
 and servers. A row names the host and says whether it is connected,
 reconnecting, or offline — the word, not colour alone. A connected or
@@ -357,20 +387,22 @@ figures as current. The host this window was opened from reports how many
 agents run there, and that count opens Running with the environment filter set
 to the host; any other host does not report one, so its row shows no count.
 At most four hosts show, then **+N more**. The card reads each host's load only
-while it is visible and the window is in front, about every ten seconds, and
-stops when the window is hidden. It never polls in the background.
+while it is mounted and the window is visible (not minimised, on another space,
+or behind another tab), about every ten seconds, and stops when the window is
+hidden; a window that is visible but not focused still reads. It never polls in
+the background. A host whose last read has not answered is not asked again, a
+read that takes longer than five seconds is abandoned and leaves that host
+without figures, and leaving the start screen cancels the reads in flight.
 
 **Needs you** surfaces (a start-screen card, answering from Board cards, the
-command palette) read one host list of the approvals and
-questions this window can answer, across Chat, Work, and Code and across
-Projects, oldest waiting first. Each item names its mode, Project, thread and
-title, kind, text, options where the mode has them, and when it was asked, and
-carries the handle that mode's own answer command takes, so a surface answers
-in place through the commands the open thread already uses. The list is re-read
-on the Machine change feed's Chat, Work, and Code navigation topics and never
-on a timer; an answered or ended request is gone from the next read. It is read
-at a local window only, so a remote window has no Needs you source. What it
-includes and leaves out is in
+command palette) each read the same host list described with the Needs you
+card above (the `pendingRequests` read); each surface's own paragraph says when
+it reads. Each item names its mode, Project, thread and title, kind, text,
+options where the mode has them, and when it was asked, and carries the handle
+that mode's own answer command takes, so a surface answers in place through the
+commands the open thread already uses. An answered or ended request is gone
+from the host's next list. The list is read at a local window only, so a
+remote window has no Needs you source. What it includes and leaves out is in
 [Architecture: pending requests across modes](../architecture.md#security-and-authority).
 
 The command palette opens on a **Needs you** group when this window can read
@@ -548,8 +580,9 @@ the open request (Work) rather than from the turn's running record. Those are
 the requests the `pendingRequests` read lists, so the board read that follows an
 answer already files the thread back under In progress. Other work still running beside a parked turn (a
 terminal, a child run) keeps the thread In progress. A card with no listed
-request is drawn as before. A thread with several requests shows the oldest and **+N more
-waiting**, which opens the thread. Answers use each mode's existing command
+request is drawn as before. A thread with several requests shows the oldest
+the host still lists (a refused one it has dropped shows only while nothing
+newer waits) and **+N more waiting**, which opens the thread. Answers use each mode's existing command
 through the listed handle and hold no new authority. A refused answer shows one
 line on the card, and the card does not move: it changes column only when the
 host's next board read says so, and the board re-reads when the set of waiting

@@ -23,10 +23,17 @@ import { HostId } from "./host";
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const PositiveInt = Schema.Int.pipe(Schema.positive());
 
-export const REPLICA_ENTRY_FORMAT = "octant.replica-entry/1" as const;
+export const REPLICA_ENTRY_FORMAT = "octant.replica-entry/2" as const;
 
 const brandedUuid = <B extends string>(brand: B) => Schema.UUID.pipe(Schema.brand(brand));
 
+/**
+ * An instance id is derived from the device key it signs with: the first 16
+ * bytes of SHA-256 over the key's SPKI bytes, written as a UUIDv8. A record
+ * whose id is not its key's is not valid, so no approval can name another key
+ * for an id and no rewrite can change a member's key. The host checks that
+ * binding; this schema only reads the shape.
+ */
 export const ReplicaInstanceId = brandedUuid("ReplicaInstanceId");
 export type ReplicaInstanceId = typeof ReplicaInstanceId.Type;
 
@@ -49,10 +56,24 @@ export const ReplicaDisplayName = Schema.NonEmptyTrimmedString.pipe(
 );
 export type ReplicaDisplayName = typeof ReplicaDisplayName.Type;
 
+/**
+ * Base64 SPKI bytes of the Ed25519 device key an instance signs entries with.
+ * Ed25519 SPKI is 44 DER bytes, which base64 encodes to 60 characters with
+ * one padding character; a different-length string is not an Ed25519 SPKI.
+ */
+export const ReplicaDevicePublicKey = Schema.String.pipe(Schema.pattern(/^[A-Za-z0-9+/]{59}=$/));
+export type ReplicaDevicePublicKey = typeof ReplicaDevicePublicKey.Type;
+
+/**
+ * Who wrote an entry. Every entry carries its writer's public key, so whether
+ * a record is valid depends on that one file alone: its signature checks
+ * against this key, and its instance id is this key's id.
+ */
 export const ReplicaOrigin = Schema.Struct({
   instanceId: ReplicaInstanceId,
   displayName: ReplicaDisplayName,
   sequence: PositiveInt,
+  publicKey: ReplicaDevicePublicKey,
 }).annotations(strict);
 export type ReplicaOrigin = typeof ReplicaOrigin.Type;
 
@@ -119,86 +140,117 @@ export type ReplicaArtifactEntry = typeof ReplicaArtifactEntry.Type;
 /**
  * Membership lifecycle, carried in the same log so a computer that is not yet
  * a member can be discovered and approved by name instead of being invisible.
+ * None of these carries an artifact, a parent chain, or a content hash: the
+ * body is the record, and the signature covers it whole.
  *
- * `join-request` is written by the joining computer as its own next sequence
- * and names itself, and it says when it was written so an approver can hold
- * it to a freshness window. `join-approved` and `revocation` are written by a
- * member as that member's next sequence and name the instance they act on.
- * None of the three carries an artifact, a parent chain, or a content hash:
- * their body is the record, and the signature covers it whole.
+ * - `replica-founded` is the founder's own record at its sequence 1. It means
+ *   something only to a computer that pinned this founder.
+ * - `join-request` is a joining computer's sequence 1. It says when it was
+ *   written, so an approver can hold it to a freshness window.
+ * - `join-approved` names the approved computer and its key; it is valid only
+ *   when that id is the key's id.
+ * - `join-accepted` is signed by the joiner after the person compared codes.
+ *   It names the one approval it accepted, by its writer, sequence, and the
+ *   SHA-256 of the approval file's bytes, so each computer has one parent.
+ * - `revocation` names a computer and the last of its sequences that still
+ *   counts; 0 means none.
  */
 export const ReplicaMembershipEntryKind = Schema.Literal(
+  "replica-founded",
   "join-request",
   "join-approved",
+  "join-accepted",
   "revocation",
 );
 export type ReplicaMembershipEntryKind = typeof ReplicaMembershipEntryKind.Type;
 
-/**
- * Base64 SPKI bytes of the Ed25519 device key an instance signs entries with.
- * Ed25519 SPKI is 44 DER bytes, which base64 encodes to 60 characters with
- * one padding character; a different-length string is not an Ed25519 SPKI.
- */
-export const ReplicaDevicePublicKey = Schema.String.pipe(Schema.pattern(/^[A-Za-z0-9+/]{59}=$/));
-export type ReplicaDevicePublicKey = typeof ReplicaDevicePublicKey.Type;
+const membershipFormat = Schema.Literal(REPLICA_ENTRY_FORMAT);
 
-const ReplicaMembershipEntryFields = {
-  format: Schema.Literal(REPLICA_ENTRY_FORMAT),
-  kind: ReplicaMembershipEntryKind,
+/** Lowercase hex SHA-256 of the exact bytes of an approval file. */
+export const ReplicaRecordHash = Schema.String.pipe(Schema.pattern(/^[a-f0-9]{64}$/));
+export type ReplicaRecordHash = typeof ReplicaRecordHash.Type;
+
+export const ReplicaFoundedEntry = Schema.Struct({
+  format: membershipFormat,
+  kind: Schema.Literal("replica-founded"),
   origin: ReplicaOrigin,
-  /** The instance this record is about. A join request names itself. */
-  subject: ReplicaInstanceId,
-  subjectDisplayName: ReplicaDisplayName,
-  /** The device key that instance signs entries with. A revocation has none. */
-  subjectDeviceKey: Schema.optional(ReplicaDevicePublicKey),
-  /**
-   * When the joining computer wrote its request, in epoch milliseconds. The
-   * signature covers it like every other field, so the approver can hold the
-   * request to a freshness window measured against its own clock. Only a
-   * join request carries it.
-   */
-  requestedAt: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
-  /**
-   * The last sequence of the revoked instance that the revoker accepts; 0 when
-   * it accepted none. Every entry that instance signed after it is refused on
-   * every computer, whatever order a pull reads the logs in. Only a revocation
-   * carries it, and the signature covers it.
-   */
-  lastAcceptedSequence: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
-} as const;
-
-export const ReplicaMembershipEntry = Schema.Struct(ReplicaMembershipEntryFields)
+})
   .annotations(strict)
   .pipe(
-    Schema.filter(
-      (entry) => {
-        if (entry.kind === "join-request") {
-          return (
-            String(entry.subject) === String(entry.origin.instanceId) &&
-            entry.subjectDeviceKey !== undefined &&
-            entry.requestedAt !== undefined &&
-            entry.lastAcceptedSequence === undefined
-          );
-        }
-        if (entry.kind === "join-approved") {
-          return (
-            entry.subjectDeviceKey !== undefined &&
-            entry.requestedAt === undefined &&
-            entry.lastAcceptedSequence === undefined
-          );
-        }
-        return (
-          entry.subjectDeviceKey === undefined &&
-          entry.requestedAt === undefined &&
-          entry.lastAcceptedSequence !== undefined
-        );
-      },
-      {
-        message: () =>
-          "A join request names the instance that wrote it, carries its device key, and says when it was written; an approval carries the approved device key; a revocation carries the last accepted sequence and neither key nor time.",
-      },
-    ),
+    Schema.filter((entry) => entry.origin.sequence === 1, {
+      message: () => "A founding record is its writer's sequence 1.",
+    }),
   );
+export type ReplicaFoundedEntry = typeof ReplicaFoundedEntry.Type;
+
+export const ReplicaJoinRequestEntry = Schema.Struct({
+  format: membershipFormat,
+  kind: Schema.Literal("join-request"),
+  origin: ReplicaOrigin,
+  /**
+   * When the joining computer wrote its request, in epoch milliseconds. The
+   * signature covers it, so the approver can hold the request to a freshness
+   * window measured against its own clock.
+   */
+  requestedAt: Schema.Int.pipe(Schema.nonNegative()),
+})
+  .annotations(strict)
+  .pipe(
+    Schema.filter((entry) => entry.origin.sequence === 1, {
+      message: () => "A join request is its writer's sequence 1.",
+    }),
+  );
+export type ReplicaJoinRequestEntry = typeof ReplicaJoinRequestEntry.Type;
+
+export const ReplicaJoinApprovedEntry = Schema.Struct({
+  format: membershipFormat,
+  kind: Schema.Literal("join-approved"),
+  origin: ReplicaOrigin,
+  subject: ReplicaInstanceId,
+  /** The approved computer's device key; the record is valid only when `subject` is its id. */
+  subjectKey: ReplicaDevicePublicKey,
+  subjectName: ReplicaDisplayName,
+}).annotations(strict);
+export type ReplicaJoinApprovedEntry = typeof ReplicaJoinApprovedEntry.Type;
+
+export const ReplicaJoinAcceptedEntry = Schema.Struct({
+  format: membershipFormat,
+  kind: Schema.Literal("join-accepted"),
+  origin: ReplicaOrigin,
+  approver: ReplicaInstanceId,
+  approvalSequence: PositiveInt,
+  approvalHash: ReplicaRecordHash,
+  /** The founder the joiner pinned when it confirmed. */
+  founder: ReplicaInstanceId,
+})
+  .annotations(strict)
+  .pipe(
+    Schema.filter((entry) => entry.origin.sequence >= 2, {
+      message: () => "A join acceptance follows its writer's join request.",
+    }),
+  );
+export type ReplicaJoinAcceptedEntry = typeof ReplicaJoinAcceptedEntry.Type;
+
+export const ReplicaRevocationEntry = Schema.Struct({
+  format: membershipFormat,
+  kind: Schema.Literal("revocation"),
+  origin: ReplicaOrigin,
+  subject: ReplicaInstanceId,
+  /**
+   * The last sequence of the revoked instance that still counts; 0 when none
+   * does. Every entry it signed after this stops counting on every computer.
+   */
+  cut: Schema.Int.pipe(Schema.nonNegative()),
+}).annotations(strict);
+export type ReplicaRevocationEntry = typeof ReplicaRevocationEntry.Type;
+
+export const ReplicaMembershipEntry = Schema.Union(
+  ReplicaFoundedEntry,
+  ReplicaJoinRequestEntry,
+  ReplicaJoinApprovedEntry,
+  ReplicaJoinAcceptedEntry,
+  ReplicaRevocationEntry,
+);
 export type ReplicaMembershipEntry = typeof ReplicaMembershipEntry.Type;
 
 export const ReplicaEntry = Schema.Union(ReplicaArtifactEntry, ReplicaMembershipEntry);
@@ -278,33 +330,45 @@ export function replicaEntryRelativePaths(
  * sentence shows one changed line.
  */
 export function encodeReplicaEntry(entry: ReplicaEntry): string {
-  const body = isMembershipEntry(entry)
-    ? {
-        format: entry.format,
-        kind: entry.kind,
-        origin: {
-          instanceId: entry.origin.instanceId,
-          displayName: entry.origin.displayName,
-          sequence: entry.origin.sequence,
-        },
+  const origin = {
+    instanceId: entry.origin.instanceId,
+    displayName: entry.origin.displayName,
+    sequence: entry.origin.sequence,
+    publicKey: entry.origin.publicKey,
+  };
+  const head = { format: entry.format, kind: entry.kind, origin };
+  let body: object;
+  switch (entry.kind) {
+    case "replica-founded":
+      body = head;
+      break;
+    case "join-request":
+      body = { ...head, requestedAt: entry.requestedAt };
+      break;
+    case "join-approved":
+      body = {
+        ...head,
         subject: entry.subject,
-        subjectDisplayName: entry.subjectDisplayName,
-        ...(entry.subjectDeviceKey === undefined
-          ? {}
-          : { subjectDeviceKey: entry.subjectDeviceKey }),
-        ...(entry.requestedAt === undefined ? {} : { requestedAt: entry.requestedAt }),
-        ...(entry.lastAcceptedSequence === undefined
-          ? {}
-          : { lastAcceptedSequence: entry.lastAcceptedSequence }),
-      }
-    : {
-        format: entry.format,
-        kind: entry.kind,
-        origin: {
-          instanceId: entry.origin.instanceId,
-          displayName: entry.origin.displayName,
-          sequence: entry.origin.sequence,
-        },
+        subjectKey: entry.subjectKey,
+        subjectName: entry.subjectName,
+      };
+      break;
+    case "join-accepted":
+      body = {
+        ...head,
+        approver: entry.approver,
+        approvalSequence: entry.approvalSequence,
+        approvalHash: entry.approvalHash,
+        founder: entry.founder,
+      };
+      break;
+    case "revocation":
+      body = { ...head, subject: entry.subject, cut: entry.cut };
+      break;
+    case "artifact-version":
+    case "artifact-tombstone":
+      body = {
+        ...head,
         artifact: {
           canvasId: entry.artifact.canvasId,
           hostId: entry.artifact.hostId,
@@ -313,6 +377,8 @@ export function encodeReplicaEntry(entry: ReplicaEntry): string {
         contentHash: entry.contentHash,
         bundle: decodeArtifactBundle(JSON.parse(encodeArtifactBundle(entry.bundle))),
       };
+      break;
+  }
   return `${JSON.stringify(body, null, 2)}\n`;
 }
 
@@ -331,7 +397,7 @@ export const ReplicaMembershipCommand = Schema.Union(
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("approve-join"),
-    joinRequest: ReplicaMembershipEntry,
+    joinRequest: ReplicaJoinRequestEntry,
     confirmationCode: Schema.String.pipe(Schema.pattern(/^\d{6}$/)),
   }).annotations(strict),
   Schema.Struct({
@@ -340,9 +406,26 @@ export const ReplicaMembershipCommand = Schema.Union(
     approver: ReplicaInstanceId,
     confirmationCode: Schema.String.pipe(Schema.pattern(/^\d{6}$/)),
   }).annotations(strict),
+  /**
+   * What revoking a computer would keep: the cut the host would take after
+   * reading the store, and the computers the revoked one brought in, so the
+   * person can revoke them in the same step or move the cut earlier.
+   */
+  Schema.Struct({
+    kind: Schema.Literal("revoke-preview"),
+    subject: ReplicaInstanceId,
+  }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("revoke"),
     subject: ReplicaInstanceId,
+    /**
+     * The last of the subject's sequences that still counts. Without it the
+     * host cuts at the highest sequence of the subject it holds after reading
+     * the store; a value may only move the cut earlier than that.
+     */
+    cut: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
+    /** Computers the subject brought in, revoked in the same step. */
+    alsoRevoke: Schema.optional(Schema.Array(ReplicaInstanceId).pipe(Schema.maxItems(64))),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("pull"),
@@ -351,10 +434,12 @@ export const ReplicaMembershipCommand = Schema.Union(
 export type ReplicaMembershipCommand = typeof ReplicaMembershipCommand.Type;
 
 /**
- * Why an entry read from the store was not applied. The first seven are the
- * reconcile policy's reasons; `path-mismatch` is a body whose origin is not
- * the instance and sequence its path names, and `unreadable` is a file that
- * does not decode as an entry this format defines.
+ * Why an entry read from the store does not count. `bad-signature`,
+ * `path-mismatch`, and `unreadable` describe the file alone: a signature that
+ * does not verify under the key the entry names, an id that is not that key's
+ * id, a body whose origin is not the instance and sequence its path names, or
+ * a file that does not decode as an entry this format defines. The rest are
+ * the artifact reconcile policy's reasons.
  */
 export const ReplicaReadRefusalReason = Schema.Literal(
   "unknown-instance",
@@ -362,7 +447,6 @@ export const ReplicaReadRefusalReason = Schema.Literal(
   "sequence-gap",
   "names-local-artifact-as-foreign",
   "hash-mismatch",
-  "membership-conflict",
   "bad-signature",
   "path-mismatch",
   "unreadable",
@@ -376,47 +460,103 @@ export const ReplicaReadRefusal = Schema.Struct({
 }).annotations(strict);
 export type ReplicaReadRefusal = typeof ReplicaReadRefusal.Type;
 
+/** A computer the revoked one brought in, directly or through others. */
+export const ReplicaBroughtIn = Schema.Struct({
+  instanceId: ReplicaInstanceId,
+  displayName: ReplicaDisplayName,
+  /** The computer that approved it. */
+  parent: ReplicaInstanceId,
+  /** The parent's sequence that approval sits at: a cut below it removes this computer. */
+  approvalSequence: PositiveInt,
+}).annotations(strict);
+export type ReplicaBroughtIn = typeof ReplicaBroughtIn.Type;
+
+/** A revocation the subject of a revoke preview wrote, at its own sequence. */
+export const ReplicaSubjectRevocation = Schema.Struct({
+  sequence: PositiveInt,
+  subject: ReplicaInstanceId,
+  cut: Schema.Int.pipe(Schema.nonNegative()),
+}).annotations(strict);
+export type ReplicaSubjectRevocation = typeof ReplicaSubjectRevocation.Type;
+
 export const ReplicaMembershipResult = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("replica-created"),
     instanceId: ReplicaInstanceId,
-    entry: ReplicaMembershipEntry,
+    entry: ReplicaFoundedEntry,
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("join-requested"),
     instanceId: ReplicaInstanceId,
-    entry: ReplicaMembershipEntry,
+    entry: ReplicaJoinRequestEntry,
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("join-approved"),
     subject: ReplicaInstanceId,
-    entry: ReplicaMembershipEntry,
+    entry: ReplicaJoinApprovedEntry,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("revoke-preview"),
+    subject: ReplicaInstanceId,
+    /**
+     * The cut a revoke without one would take now: the highest sequence of
+     * the subject's valid signed entries this host read, artifact entries
+     * included.
+     */
+    cut: Schema.Int.pipe(Schema.nonNegative()),
+    broughtIn: Schema.Array(ReplicaBroughtIn),
+    /**
+     * Revocations the subject itself already wrote, each at its sequence, so
+     * the person can move the cut before one of them.
+     */
+    subjectRevocations: Schema.Array(ReplicaSubjectRevocation),
+    /** False when the store could not be read first, so the cut is what this computer already holds. */
+    readStore: Schema.Boolean,
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("revoked"),
     subject: ReplicaInstanceId,
-    entry: ReplicaMembershipEntry,
+    entry: ReplicaRevocationEntry,
+    alsoRevoked: Schema.Array(ReplicaRevocationEntry),
+    /** False when the store could not be read first, so the cut is what this computer already holds. */
+    readStore: Schema.Boolean,
+  }).annotations(strict),
+  /**
+   * The subject's revocation was published but a later one in the same step
+   * stopped: `alsoRevoked` landed, `notRevoked` did not and needs another
+   * revoke.
+   */
+  Schema.Struct({
+    kind: Schema.Literal("revoked-in-part"),
+    subject: ReplicaInstanceId,
+    entry: ReplicaRevocationEntry,
+    alsoRevoked: Schema.Array(ReplicaRevocationEntry),
+    notRevoked: Schema.Array(ReplicaInstanceId).pipe(Schema.minItems(1)),
+    /** Why the publish stopped. */
+    message: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512)),
+    readStore: Schema.Boolean,
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("join-confirmed"),
     approver: ReplicaInstanceId,
+    founder: ReplicaInstanceId,
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("pulled"),
-    /** Entries verified and applied by this pull. */
+    /** Membership records this pull read and now holds. */
     applied: Schema.Int.pipe(Schema.nonNegative()),
-    /** Entries refused by this pull, each journaled. */
+    /** Files this pull read that are not valid records, and artifact entries that do not count. */
     refused: Schema.Array(ReplicaReadRefusal),
     /**
-     * Artifact entries that verified but were not applied: importing an
-     * artifact version is not built yet, so the walk for that instance stops
-     * there and the entry is read again by a later pull.
+     * Artifact entries that are valid and count but were not imported:
+     * importing an artifact version is not built yet, so a later pull reads
+     * them again.
      */
     held: Schema.Array(
       Schema.Struct({ instanceId: ReplicaInstanceId, sequence: PositiveInt }).annotations(strict),
     ),
     /** Fresh join requests from computers that are not members yet. */
-    joinRequests: Schema.Array(ReplicaMembershipEntry),
+    joinRequests: Schema.Array(ReplicaJoinRequestEntry),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("refused"),
@@ -428,6 +568,8 @@ export const ReplicaMembershipResult = Schema.Union(
       "expired-join-request",
       "unknown-instance",
       "not-a-member",
+      "not-a-descendant",
+      "invalid-cut",
       "store-unavailable",
       "key-unavailable",
     ),
@@ -442,9 +584,3 @@ export type ReplicaMembershipResult = typeof ReplicaMembershipResult.Type;
 
 export const decodeReplicaMembershipCommand = Schema.decodeUnknownSync(ReplicaMembershipCommand);
 export const decodeReplicaMembershipResult = Schema.decodeUnknownSync(ReplicaMembershipResult);
-
-function isMembershipEntry(entry: ReplicaEntry): entry is ReplicaMembershipEntry {
-  return (
-    entry.kind === "join-request" || entry.kind === "join-approved" || entry.kind === "revocation"
-  );
-}

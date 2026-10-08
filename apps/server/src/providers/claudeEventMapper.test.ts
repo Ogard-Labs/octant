@@ -46,6 +46,7 @@ function context(overrides: Partial<ClaudeEventContext> = {}): ClaudeEventContex
     claudeSessionId,
     sequence: 41,
     terminal: false,
+    callUsage: new Map(),
     requestIds: new Map(),
     taskIds: new Map(),
     toolStates: new Map(),
@@ -1299,6 +1300,48 @@ describe("mapClaudeMessage", () => {
     ]);
     expect(ctx.sequence).toBe(sequenceBefore);
     expect(ctx.taskIds.get("sdk-task-unsafe-usage")).toEqual(stateBefore);
+  });
+
+  it("reports the turn's usage so far after each model call, counting a split call once", () => {
+    const ctx = context();
+    const assistant = (messageId: string, callUsage: ClaudeUsage) =>
+      mapped(ctx, {
+        kind: "assistant",
+        sessionId: claudeSessionId,
+        messageId,
+        content: [],
+        usage: callUsage,
+      });
+    const first: ClaudeUsage = {
+      inputTokens: 90,
+      outputTokens: 4,
+      cacheCreationInputTokens: 6,
+      cacheReadInputTokens: 4,
+    };
+    const second: ClaudeUsage = {
+      inputTokens: 20,
+      outputTokens: 8,
+      cacheCreationInputTokens: 0,
+      cacheReadInputTokens: 160,
+    };
+
+    expect(eventValues(assistant("call-1", first)).at(-1)).toMatchObject({
+      kind: "usage",
+      inputTokens: 100,
+      outputTokens: 4,
+    });
+    // The second call's message arrives in two parts with the same id.
+    assistant("call-2", second);
+    const total = eventValues(assistant("call-2", second)).at(-1);
+    expect(total).toMatchObject({
+      kind: "usage",
+      inputTokens: 280,
+      outputTokens: 12,
+      cacheReadInputTokens: 164,
+      cacheWriteInputTokens: 6,
+      contextTokens: 180,
+    });
+    expect(total).not.toHaveProperty("requestStartedAt");
   });
 
   it("carries Claude's own turn cost onto the usage event", () => {

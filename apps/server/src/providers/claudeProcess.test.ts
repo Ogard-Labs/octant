@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import {
   accessSync,
   chmodSync,
+  copyFileSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -706,12 +707,19 @@ describe("Claude runtime confinement", () => {
       const readable = join(target.root, "readable.txt");
       const escapeTarget = join(target.root, "plan-must-not-exist.txt");
       writeFileSync(readable, "in-the-checkout\n");
+      // The probe runs from inside the project root the profile grants. Run
+      // from the checkout it is unreadable whenever the checkout sits under
+      // `/private`, which the profile denies, and the turn then fails to start
+      // rather than proving anything about its writes.
+      const probe = join(target.root, "confinedPlanProbe.sh");
+      copyFileSync(planProbePath, probe);
+      chmodSync(probe, 0o755);
 
       const child = makeClaudeProcessLive({ shutdownTimeoutMs: 500 }).spawn({
         projectRoot: target.root,
         executionPolicy: "plan",
       })({
-        command: planProbePath,
+        command: probe,
         args: [],
         cwd: target.root,
         env: {

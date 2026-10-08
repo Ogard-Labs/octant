@@ -452,6 +452,7 @@ import { currentCodeProjectBranches } from "./home/ciFailures";
 import {
   pullRequestCardAvailable,
   pullRequestCardCapability,
+  sharePullRequestRead,
   type PullRequestCardCapability,
   type PullRequestCardRow,
 } from "./home/pullRequests";
@@ -1646,9 +1647,10 @@ function LaunchedShell(
     (query: CodeBoardQuery) => codeClient.queryBoard(query),
     [codeClient],
   );
-  const loadHomePullRequests = useCallback(
-    (query: Parameters<typeof codeClient.queryProjectPullRequests>[0]) =>
-      codeClient.queryProjectPullRequests(query),
+  // Pull requests and CI failures mount together and read the same snapshot;
+  // sharing the read in flight makes that one host query, not two.
+  const loadHomePullRequests = useMemo(
+    () => sharePullRequestRead((query) => codeClient.queryProjectPullRequests(query)),
     [codeClient],
   );
   // Continue names the window's own threads, so the window reads them. The
@@ -2116,13 +2118,13 @@ function LaunchedShell(
       .map((project) => project.id),
   });
   const latestShellActions = useRef({
-    openDraftThread: controller.openDraftThread,
+    startNewThreadDraft,
     openSettings: controller.openSettings,
     status: controller.status,
     workspace: controller.workspace,
   });
   latestShellActions.current = {
-    openDraftThread: controller.openDraftThread,
+    startNewThreadDraft,
     openSettings: controller.openSettings,
     status: controller.status,
     workspace: controller.workspace,
@@ -2138,7 +2140,7 @@ function LaunchedShell(
     return subscribe(() => {
       const latest = latestShellActions.current;
       if (latest.status !== "ready") return;
-      void latest.openDraftThread(latest.workspace?.activeMode ?? "chat");
+      latest.startNewThreadDraft(latest.workspace?.activeMode ?? "chat");
     });
   }, [props.hostBridge?.subscribeStartNewAgent]);
   useEffect(() => {
@@ -4244,14 +4246,15 @@ function LaunchedShell(
             ...(snapshot.lastReadyAt === undefined ? {} : { lastSeenAt: snapshot.lastReadyAt }),
           };
         });
-  const readComputerResources = async (hostId: string) => {
-    if (hostId === computerLaunchHostId) return hostResourceClient.read();
+  const readComputerResources = async (hostId: string, signal: AbortSignal) => {
+    if (hostId === computerLaunchHostId) return hostResourceClient.read(signal);
     const transport = hostFederationTransports?.remoteTransportFor(hostId);
     if (transport === undefined) return { status: "refused" as const };
     try {
       const response = await transport.authenticatedFetch({
         method: "GET",
         path: "/api/host/resources",
+        signal,
       });
       if (response.status === 401 || response.status === 403) return { status: "refused" as const };
       if (!response.ok) return { status: "unavailable" as const };
@@ -4333,6 +4336,7 @@ function LaunchedShell(
       }),
       viewerLogin: githubPullRequestCapability.login ?? "",
       load: loadHomePullRequests,
+      now: minuteNow.getTime(),
       onOpenRow: (row: PullRequestCardRow) => {
         closeWorkspaceReaders();
         selectProjectPullRequestIdentity({
@@ -5131,6 +5135,15 @@ function LaunchedShell(
     resetNewTaskDraft(mode);
     setDraftProjectSelection(({ [mode]: _previous, ...rest }) => rest);
     void controller.openDraftThread(mode);
+  }
+
+  // Every other way to ask for a new thread (the command palette, thread
+  // search, the menu bar's Start new agent) starts the same clean draft as the
+  // sidebar's New task. Opening the draft alone kept the last draft's text and
+  // a branch a Start a fix had handed it.
+  function startNewThreadDraft(mode: OctantMode) {
+    if (mode === "chat") createChat();
+    else openDraftInActiveProject(mode);
   }
 
   function createChat(
@@ -6183,7 +6196,7 @@ function LaunchedShell(
     activeMode,
     modes: enabledModes(controller.settings),
     onSelectMode: handleSelectMode,
-    onNewThread: () => void controller.openDraftThread(activeMode),
+    onNewThread: () => startNewThreadDraft(activeMode),
     onOpenSearch: openThreadSearch,
     onOpenSettings: () => void controller.openSettings(),
     onOpenReview: openReview,
@@ -7855,7 +7868,7 @@ function LaunchedShell(
           onCloseSearch={closeThreadSearch}
           onNewSearchThread={() => {
             closeThreadSearch();
-            void controller.openDraftThread(activeMode);
+            startNewThreadDraft(activeMode);
           }}
           onNewSearchProject={() => {
             closeThreadSearch();

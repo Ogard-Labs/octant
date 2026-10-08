@@ -9,13 +9,14 @@ export const CANVAS_INLINE_MAX_BLOCKS = 12;
 
 /**
  * Blocks a person works in rather than reads. Inline, a board's wheel zoom
- * would fight the thread's own scrolling, and a plan or mockup asks for the
- * room and the editing controls only the sidebar gives it.
+ * would fight the thread's own scrolling, and a plan, mockup, or design asks
+ * for the room and the controls only the sidebar gives it.
  */
 const SIDEBAR_ONLY_BLOCK_KINDS: ReadonlySet<CanvasDefinition["blocks"][number]["kind"]> = new Set([
   "diagram",
   "plan",
   "mockup",
+  "design",
 ]);
 
 /**

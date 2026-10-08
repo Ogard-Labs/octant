@@ -2062,6 +2062,14 @@ ALTER TABLE code_runtime_projection
         ON agent_run_content_store(subject_type, subject_id);
     `,
   },
+  {
+    version: 73,
+    name: "record_usage_cost",
+    sql: `ALTER TABLE usage_record_projection
+      ADD COLUMN cost_usd_micros INTEGER CHECK(cost_usd_micros IS NULL OR cost_usd_micros >= 0);
+      ALTER TABLE usage_record_projection
+      ADD COLUMN cost_kind TEXT CHECK(cost_kind IS NULL OR cost_kind IN ('provider-recorded', 'api-estimate'));`,
+  },
 ];
 
 interface AppliedMigrationRow {

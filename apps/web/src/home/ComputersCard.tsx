@@ -3,6 +3,7 @@ import type { HostResourceSnapshot } from "@octant/contracts/host-resources";
 import { Monitor } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { absoluteTimeFormatter, relativeTimeLabel } from "../lib/relativeTime";
+import { scheduleVisibleInterval } from "../polling/documentVisibility";
 import { OctantButton } from "../ui/base/OctantButton";
 import {
   agentCountLabel,
@@ -17,6 +18,11 @@ import { useActiveAgentRuns } from "./useActiveAgentRuns";
 
 export const COMPUTERS_CARD_ID = "computers";
 const RESOURCE_POLL_MS = 10_000;
+/**
+ * Shorter than the poll, so a host that stopped answering loses its figures
+ * before the next read is due.
+ */
+const RESOURCE_READ_TIMEOUT_MS = 5_000;
 
 export type HostResourceRead =
   | { readonly status: "ready"; readonly snapshot: HostResourceSnapshot }
@@ -36,9 +42,11 @@ export interface ComputersCardSource {
   readonly now: number;
   /**
    * Read one host's load snapshot. Called only for a visible card, about
-   * every 10 seconds, and never while the window is hidden.
+   * every 10 seconds, never while the window is hidden, and never while that
+   * host's last read is outstanding. `signal` aborts when the card gives up on
+   * the read (after five seconds) or unmounts.
    */
-  readonly readResources: (hostId: string) => Promise<HostResourceRead>;
+  readonly readResources: (hostId: string, signal: AbortSignal) => Promise<HostResourceRead>;
   /** Opens Running with the environment filter set to this host. */
   readonly onOpenRunning: (hostId: string) => void;
   /** Test seam. Production waits ten seconds between reads. */
@@ -90,12 +98,18 @@ function useComputersContent(source: ComputersCardSource): HomeCardContent {
 }
 
 /**
- * Reads while the card is mounted and the window is in front. Hiding the
+ * Reads while the card is mounted and the window is visible. Hiding the
  * window clears the timer; it does not keep sampling in the background.
+ *
+ * A host that has not answered its last read is not asked again, so a slow
+ * computer never collects a queue of reads. A read that takes longer than
+ * `RESOURCE_READ_TIMEOUT_MS` is given up on (its request is aborted) and
+ * leaves that host without figures until the next read answers. Unmounting
+ * aborts every read still in flight.
  */
 function useVisibleResourceReads(
   hosts: ReadonlyArray<ComputersCardHost>,
-  readResources: (hostId: string) => Promise<HostResourceRead>,
+  readResources: (hostId: string, signal: AbortSignal) => Promise<HostResourceRead>,
   pollMs: number,
 ): ReadonlyMap<string, HostResourceSnapshot> {
   const [snapshots, setSnapshots] = useState<ReadonlyMap<string, HostResourceSnapshot>>(
@@ -111,8 +125,11 @@ function useVisibleResourceReads(
   useEffect(() => {
     const ids = allowedKey.length === 0 ? [] : allowedKey.split("\0");
     const allowed = new Set(ids);
+    const inFlight = new Map<
+      string,
+      { readonly controller: AbortController; readonly timer: ReturnType<typeof setTimeout> }
+    >();
     let stopped = false;
-    let timer: ReturnType<typeof setInterval> | undefined;
 
     const apply = (hostId: string, result: HostResourceRead) => {
       if (stopped) return;
@@ -126,24 +143,24 @@ function useVisibleResourceReads(
       });
     };
 
-    const readAll = () => {
-      if (document.hidden) return;
-      for (const hostId of ids) {
-        void readRef.current(hostId).then(
-          (result) => apply(hostId, result),
-          () => apply(hostId, { status: "unavailable" }),
-        );
-      }
-    };
-
-    const stopTimer = () => {
-      if (timer !== undefined) clearInterval(timer);
-      timer = undefined;
-    };
-
-    const start = () => {
-      readAll();
-      timer = setInterval(readAll, pollMs);
+    const readOne = (hostId: string) => {
+      if (inFlight.has(hostId)) return;
+      const controller = new AbortController();
+      const settle = (result: HostResourceRead) => {
+        const pending = inFlight.get(hostId);
+        if (pending?.controller !== controller) return;
+        clearTimeout(pending.timer);
+        inFlight.delete(hostId);
+        apply(hostId, result);
+      };
+      const timer = setTimeout(() => {
+        controller.abort();
+        settle({ status: "unavailable" });
+      }, RESOURCE_READ_TIMEOUT_MS);
+      inFlight.set(hostId, { controller, timer });
+      void readRef
+        .current(hostId, controller.signal)
+        .then(settle, () => settle({ status: "unavailable" }));
     };
 
     setSnapshots((current) => {
@@ -154,19 +171,18 @@ function useVisibleResourceReads(
       return next;
     });
 
-    if (!document.hidden) start();
-    const onVisibility = () => {
-      if (document.hidden) {
-        stopTimer();
-        return;
-      }
-      if (timer === undefined) start();
+    const readAll = () => {
+      for (const hostId of ids) readOne(hostId);
     };
-    document.addEventListener("visibilitychange", onVisibility);
+    const stopTimer = scheduleVisibleInterval(readAll, pollMs, { runImmediately: true });
     return () => {
       stopped = true;
       stopTimer();
-      document.removeEventListener("visibilitychange", onVisibility);
+      for (const pending of inFlight.values()) {
+        clearTimeout(pending.timer);
+        pending.controller.abort();
+      }
+      inFlight.clear();
     };
   }, [allowedKey, pollMs]);
 

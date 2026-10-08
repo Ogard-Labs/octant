@@ -399,6 +399,7 @@ import {
   createRecordedAgentRunContextSnapshotPort,
 } from "./agentRun/agentRunSessionRuntime";
 import { AgentRunSessionSupervisor } from "./agentRun/agentRunSessionSupervisor";
+import { recordAgentRunTurnUsage } from "./agentRun/agentRunUsageLedger";
 import { AgentRunSessionStore } from "./agentRun/agentRunSessionStore";
 import { createAgentRunClaudeResumeIdentityPort } from "./agentRun/agentRunClaudeResumeIdentity";
 import { AgentRunLiveConversationStore } from "./agentRun/agentRunLiveConversationStore";
@@ -845,7 +846,7 @@ import { createReplicaStoreSettingsRouteHandler } from "./replica/replicaStoreSe
 import { ReplicaStoreSettingsService } from "./replica/replicaStoreSettingsService";
 import { ReplicaMembershipService } from "./replica/replicaMembershipService";
 import { createReplicaMembershipJournal } from "./replica/replicaMembershipProjection";
-import { ensureReplicaDeviceKey, makeReplicaDeviceSigner } from "./replica/replicaDeviceKeyService";
+import { createReplicaDeviceKey, makeReplicaDeviceSigner } from "./replica/replicaDeviceKeyService";
 import { createHostResourceRouteHandler } from "./hostResourceRoutes";
 import { desktopCredentialStore } from "./hostDataMap";
 import { ThreadRetentionService } from "./threadRetentionService";
@@ -2103,6 +2104,21 @@ export function startOctantServer(
         },
         capacityScheduler,
         spendCeiling,
+        recordUsage: (input) =>
+          recordAgentRunTurnUsage(
+            {
+              connection: persistence.connection,
+              journal: persistence.journal,
+              clock: () => new Date().toISOString(),
+              uuid: randomUUID,
+            },
+            {
+              runId: input.run.id,
+              providerInstanceId: input.providerInstanceId,
+              modelId: input.modelId,
+              ...(input.usage === undefined ? {} : { usage: input.usage }),
+            },
+          ),
         sessionStore: agentRunSessionStore.sessions,
         verifyCodeWorkspace: async ({ run, signal }) => {
           const workspace = run.workspaceReceipt;
@@ -4175,6 +4191,14 @@ export function startOctantServer(
       credentialResolver === undefined
         ? undefined
         : claudeHelperSignInFromBroker(credentialResolver);
+    const claudeHelperSignInService =
+      claudeHelperSignIn === undefined
+        ? undefined
+        : createClaudeHelperSignInService({
+            store: claudeHelperSignIn,
+            readInstance: (instanceId) => persistence.readProviderInstance(instanceId),
+            runSetupToken: runInstalledClaudeSetupToken,
+          });
     const oauthBroker =
       options.credentialBrokerUrl === undefined || options.credentialBrokerToken === undefined
         ? undefined
@@ -4221,7 +4245,7 @@ export function startOctantServer(
       // The provider is already gone; a store that cannot be reached leaves the
       // token behind rather than reporting the removal as failed.
       clearClaudeHelperSignIn: async (instanceId) => {
-        await claudeHelperSignIn?.disconnect(String(instanceId)).catch(() => undefined);
+        await claudeHelperSignInService?.forgetRemovedProvider(instanceId).catch(() => undefined);
       },
       clearRuntimeUsageLimits: (instanceId) => providerRuntimeUsageLimitsStore.clear(instanceId),
       driver: (instance) =>
@@ -4278,14 +4302,11 @@ export function startOctantServer(
         reason: "Claude for helpers needs Octant's credential store, which this host does not run.",
       }) as const;
     const claudeHelperSignInRoutes = createClaudeHelperSignInRouteHandler({
-      service:
-        claudeHelperSignIn === undefined
-          ? { status: brokerMissing, connect: brokerMissing, disconnect: brokerMissing }
-          : createClaudeHelperSignInService({
-              store: claudeHelperSignIn,
-              readInstance: (instanceId) => persistence.readProviderInstance(instanceId),
-              runSetupToken: runInstalledClaudeSetupToken,
-            }),
+      service: claudeHelperSignInService ?? {
+        status: brokerMissing,
+        connect: brokerMissing,
+        disconnect: brokerMissing,
+      },
       windowAuthorityStore,
       ...(options.allowedRendererHttpOrigin === undefined
         ? {}
@@ -9992,12 +10013,12 @@ export function startOctantServer(
     const replicaMembershipService = new ReplicaMembershipService({
       store: () => replicaStoreSettingsService.selection(),
       credentials: {
-        ensure: async (instanceId) => {
+        create: async () => {
           if (replicaDeviceKeys === undefined) throw new Error("credential store unavailable");
-          return ensureReplicaDeviceKey(replicaDeviceKeys, instanceId);
+          return createReplicaDeviceKey(replicaDeviceKeys);
         },
         sign: async (instanceId, payload) => {
-          if (replicaDeviceKeys === undefined) throw new Error("credential store unavailable");
+          if (replicaDeviceKeys === undefined) return { status: "refused", reason: "unavailable" };
           return makeReplicaDeviceSigner(replicaDeviceKeys, instanceId).sign(payload);
         },
       },

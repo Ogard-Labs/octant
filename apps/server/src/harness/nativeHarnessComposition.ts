@@ -136,12 +136,14 @@ export function createNativeHarnessComposition(
             return undefined;
           }
         };
-  const webSearchPort = (): Pick<NativeHarnessToolPorts, "webSearch"> => {
+  const webPorts = (): Pick<NativeHarnessToolPorts, "webFetch" | "webSearch"> => {
     const webSearch = options.resolveWebSearch?.();
-    return webSearch === undefined ? {} : { webSearch };
+    return {
+      ...(options.webFetch === undefined ? {} : { webFetch: options.webFetch }),
+      ...(webSearch === undefined ? {} : { webSearch }),
+    };
   };
   const shared = (threadId: string): NativeHarnessToolPorts => ({
-    ...(options.webFetch === undefined ? {} : { webFetch: options.webFetch }),
     ...(options.plans === undefined
       ? {}
       : {
@@ -251,8 +253,9 @@ export function createNativeHarnessComposition(
             projectId: thread.projectId,
             lead: leadOf(thread),
           }),
-          // Research is the user's grant for a Chat thread to reach the web.
-          ...(thread.researchEnabled ? webSearchPort() : {}),
+          // Research is the user's grant for a Chat thread to reach the web,
+          // whether by fetching a page or by searching.
+          ...(thread.researchEnabled ? webPorts() : {}),
           ...(contextRemaining === undefined
             ? {}
             : {
@@ -286,7 +289,7 @@ export function createNativeHarnessComposition(
             lead: leadOf(thread),
           }),
           filesystem: new NativeHarnessFileSystem({ root: projectRoot }),
-          ...webSearchPort(),
+          ...webPorts(),
         },
       });
     },
@@ -313,7 +316,7 @@ export function createNativeHarnessComposition(
           }),
           filesystem: new NativeHarnessFileSystem({ root: checkoutRoot }),
           ...(options.shell === undefined ? {} : { shell: options.shell }),
-          ...webSearchPort(),
+          ...webPorts(),
         },
       });
     },
@@ -358,10 +361,7 @@ export function createNativeHarnessComposition(
           ...(authority.shell && mode === "code" && options.shell !== undefined
             ? { shell: options.shell }
             : {}),
-          ...(authority.network && options.webFetch !== undefined
-            ? { webFetch: options.webFetch }
-            : {}),
-          ...(authority.network ? webSearchPort() : {}),
+          ...(authority.network ? webPorts() : {}),
         },
         uuid: options.uuid,
       });

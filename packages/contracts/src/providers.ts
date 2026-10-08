@@ -1933,9 +1933,10 @@ export const ProviderRuntimeEvent = Schema.Union(
     requestStartedAt: Schema.optional(UtcTimestamp),
     /**
      * What the provider says this turn cost, in US dollars. Only ever the
-     * provider's own figure: Octant holds no price list and never multiplies
-     * tokens by a rate it guessed, so a provider that reports no cost leaves
-     * this absent rather than showing an invented number.
+     * provider's own figure: an adapter never multiplies tokens by a rate, so
+     * a provider that reports no cost leaves this absent rather than an
+     * invented number. The host's standard-rate estimate is recorded apart
+     * from it, as an `api-estimate`, never in this field.
      */
     costUsd: Schema.optional(Schema.Number.pipe(Schema.nonNegative(), Schema.finite())),
     /**

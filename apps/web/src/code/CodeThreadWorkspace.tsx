@@ -1106,7 +1106,9 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
               {props.controller.providerRequests.length === 0 &&
               props.controller.turnError !== undefined
                 ? `Waiting · ${props.controller.turnError}`
-                : waitingTurnLabel(props.controller.providerRequests)}
+                : props.controller.providerAnswerRefusal === undefined
+                  ? waitingTurnLabel(props.controller.providerRequests)
+                  : `${waitingTurnLabel(props.controller.providerRequests)} · ${props.controller.providerAnswerRefusal}`}
             </span>
           </div>
         ) : (

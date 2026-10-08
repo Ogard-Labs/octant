@@ -11,6 +11,7 @@ import {
   StateDiagram,
   SwimlaneDiagram,
 } from "./KindDiagrams";
+import { DesignBlock } from "./DesignBlock";
 import { MockupBlock } from "./MockupBlock";
 import { StructuredBlocks } from "./StructuredBlocks";
 import { TextBlocks } from "./TextBlocks";
@@ -77,6 +78,8 @@ export function CanvasBlockRenderer({
       );
     case "heatmap":
       return <HeatmapBlock block={block} />;
+    case "design":
+      return <DesignBlock block={block} />;
     case "bar-list":
       return (
         <BarListBlock block={block} {...(actionRuntime === undefined ? {} : { actionRuntime })} />

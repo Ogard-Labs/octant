@@ -14,8 +14,9 @@ import {
 
 /**
  * What a mounted board needs to show a waiting thread's question where its
- * card is: the one read this window shares, and the clients each thread view
- * already answers through. A board without a source looks as it always did.
+ * card is: the window's pending-request reader, which the board reads on its
+ * own, and the clients each thread view already answers through. A board
+ * without a source looks as it always did.
  */
 export interface BoardPendingRequestSource extends Omit<PendingRequestRowsSource, "modes"> {
   /** The clock the waits read, advanced once a minute by the shell. */
@@ -116,11 +117,14 @@ export function useBoardPendingRequests(
   return {
     forCard: (card) => {
       const entries = byThread.get(String(card.threadId));
-      const first = entries?.[0];
-      if (entries === undefined || first === undefined) return undefined;
+      // A refused row the host no longer lists is kept for one read so its
+      // line can be seen, and it sorts first by age; a request the thread
+      // raised since is what the card can still answer, so it wins.
+      const shown = entries?.find((entry) => !entry.unlisted) ?? entries?.[0];
+      if (entries === undefined || shown === undefined) return undefined;
       return {
-        entry: first,
-        moreWaiting: entries.slice(1).filter((entry) => !entry.unlisted).length,
+        entry: shown,
+        moreWaiting: entries.filter((entry) => entry !== shown && !entry.unlisted).length,
         now,
         onAnswer: answer,
       };

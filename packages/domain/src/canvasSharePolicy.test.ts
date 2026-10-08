@@ -1,7 +1,24 @@
-import { decodeCanvasVersion } from "@octant/contracts/canvas";
+import { CANVAS_SCHEMA_VERSION, decodeCanvasVersion } from "@octant/contracts/canvas";
 import { decodeCanvasComment } from "@octant/contracts/canvas-board";
-import { decodeCanvasStaticExportRequest } from "@octant/contracts/canvas-share";
+import {
+  decodeCanvasStaticExportDocument,
+  decodeCanvasStaticExportRequest,
+} from "@octant/contracts/canvas-share";
 import { describe, expect, it } from "vitest";
+import { barListExamples } from "./canvasBarListExamples";
+import { chartExamples } from "./canvasChartExamples";
+import { launchDeckExample, onboardingFlowExample } from "./canvasDesignExamples";
+import {
+  loginSequenceExample,
+  orderSchemaExample,
+  orderStateExample,
+  releaseMindmapExample,
+  supportFlowExample,
+} from "./canvasDiagramExamples";
+import { heatmapExamples } from "./canvasHeatmapExamples";
+import { metricExamples } from "./canvasMetricExamples";
+import { settingsScreenExample } from "./canvasMockupExamples";
+import { treemapExamples } from "./canvasTreemapExamples";
 import {
   buildCanvasStaticExportDocument,
   buildCanvasStaticExportReceipt,
@@ -95,6 +112,17 @@ const context = {
   nowIso: "2026-08-04T12:00:01.000Z",
   actor: { kind: "local-user" as const, actorId: ids.actor },
 } as const;
+
+/** The denial a share policy refused with, or undefined when it admitted the share. */
+function shareDenial(share: () => unknown): string | undefined {
+  try {
+    share();
+  } catch (error) {
+    if (error instanceof CanvasSharePolicyRejected) return error.denialCode;
+    throw error;
+  }
+  return undefined;
+}
 
 describe("Canvas share policy", () => {
   it("builds a sanitized static export when consent and scope match", () => {
@@ -223,6 +251,43 @@ describe("Canvas share policy", () => {
       context,
     });
     expect(receipt.document.blocks).toEqual(blocks);
+  });
+
+  it("shares every block an agent is shown as an example, and refuses a design", () => {
+    const atCurrentVersion = (blocks: ReadonlyArray<unknown>) => ({
+      ...current,
+      schemaVersion: CANVAS_SCHEMA_VERSION,
+      definition: { ...current.definition, schemaVersion: CANVAS_SCHEMA_VERSION, blocks },
+    });
+    const examples = [
+      ...chartExamples,
+      ...metricExamples,
+      ...treemapExamples,
+      ...heatmapExamples,
+      ...barListExamples,
+      loginSequenceExample,
+      orderStateExample,
+      orderSchemaExample,
+      supportFlowExample,
+      releaseMindmapExample,
+      settingsScreenExample,
+    ];
+    const receipt = buildCanvasStaticExportReceipt({
+      request,
+      current: atCurrentVersion(examples),
+      context,
+    });
+    // The snapshot record and the share panel both read a shared document
+    // through this decode, so an example it refuses is one nobody can share.
+    expect(decodeCanvasStaticExportDocument(receipt.document).blocks).toEqual(examples);
+
+    for (const design of [onboardingFlowExample, launchDeckExample]) {
+      expect(
+        shareDenial(() =>
+          buildCanvasStaticExportReceipt({ request, current: atCurrentVersion([design]), context }),
+        ),
+      ).toBe("unsafe-payload");
+    }
   });
 
   it("excludes board comments from a static export by default", () => {

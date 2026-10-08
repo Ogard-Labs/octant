@@ -5,8 +5,10 @@
  * the host credential store (a separate macOS Keychain service, or a separate
  * Secret Service attribute), which the provider credential routes cannot
  * reach, and it is read into this process only to sign. Only the public key,
- * its fingerprint, and signatures go anywhere else. Entries a computer publishes are signed here, and a membership
- * record binds the instance to the public key other computers verify against.
+ * its fingerprint, and signatures go anywhere else. Entries a computer
+ * publishes are signed here. Every entry carries the public key, and the
+ * instance id is derived from it, so other computers verify an entry against
+ * the key it names and check that the id is that key's.
  */
 
 import {
@@ -48,74 +50,64 @@ export interface ReplicaDeviceSigningKey {
   readonly fingerprint: string;
 }
 
+/**
+ * Signing either produces a signature or says why it could not: the request
+ * was invalid, no key is stored for the instance, the credential store could
+ * not be reached, or the stored key did not sign.
+ */
+export type ReplicaDeviceSignOutcome =
+  | { readonly status: "signed"; readonly signature: string }
+  | { readonly status: "refused"; readonly reason: ReplicaDeviceKeyFailureCategory };
+
 export interface ReplicaDeviceSigner {
   /** Sign the canonical entry bytes another computer will verify. */
-  readonly sign: (payload: Uint8Array) => Promise<{ readonly signature: string }>;
+  readonly sign: (payload: Uint8Array) => Promise<ReplicaDeviceSignOutcome>;
+}
+
+function deviceKeyId(instanceId: string): string | undefined {
+  const normalized = instanceId.toLowerCase();
+  return REPLICA_DEVICE_KEY_CREDENTIAL_ID_PATTERN.test(normalized) ? normalized : undefined;
 }
 
 function credentialId(instanceId: string): string {
-  const normalized = instanceId.toLowerCase();
-  if (!REPLICA_DEVICE_KEY_CREDENTIAL_ID_PATTERN.test(normalized)) {
-    throw new ReplicaDeviceKeyFailure("invalid");
-  }
-  return normalized;
+  const id = deviceKeyId(instanceId);
+  if (id === undefined) throw new ReplicaDeviceKeyFailure("invalid");
+  return id;
 }
 
-/** Load or create the device signing key for one replica instance. */
-export async function ensureReplicaDeviceKey(
+/**
+ * The instance id a device key certifies: the first 16 bytes of SHA-256 over
+ * the key's SPKI bytes, written as a lowercase UUIDv8. Anyone can recompute
+ * it from the key an entry carries, so no record can name another key for an
+ * id, and a rewrite cannot change a member's key.
+ */
+export function replicaInstanceIdOf(publicKeyBase64: string): string {
+  const digest = createHash("sha256").update(Buffer.from(publicKeyBase64, "base64")).digest();
+  const bytes = Buffer.from(digest.subarray(0, 16));
+  bytes[6] = ((bytes[6] ?? 0) & 0x0f) | 0x80;
+  bytes[8] = ((bytes[8] ?? 0) & 0x3f) | 0x80;
+  const hex = bytes.toString("hex");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+/**
+ * Create a new device signing key and store it under the instance id it
+ * certifies. Every identity starts here: the id comes from the key, so a new
+ * identity is always a new key, and an old key is always the old id.
+ */
+export async function createReplicaDeviceKey(
   store: CredentialStore,
-  instanceId: string,
-): Promise<ReplicaDeviceSigningKey> {
-  const id = credentialId(instanceId);
-  let stored: string | undefined;
+): Promise<ReplicaDeviceSigningKey & { readonly instanceId: string }> {
+  const generated = generateKeyPairSync(REPLICA_DEVICE_KEY_TYPE);
+  const privateKeyPem = String(generated.privateKey.export({ format: "pem", type: "pkcs8" }));
+  const publicKey = publicKeyBase64(privateKeyPem);
+  const instanceId = credentialId(replicaInstanceIdOf(publicKey));
   try {
-    stored = await store.resolve(id);
+    await store.set(instanceId, privateKeyPem);
   } catch {
-    // A resolve that throws is not "no key": the public half of an existing
-    // key is already bound in published membership entries, and regenerating
-    // the private half would strand every signature made before. Only a
-    // resolve that reports absence may create one, so ask the store directly.
-    let present: boolean;
-    try {
-      present = await store.has(id);
-    } catch {
-      throw new ReplicaDeviceKeyFailure("unavailable");
-    }
-    if (present) throw new ReplicaDeviceKeyFailure("unavailable");
-    stored = undefined;
+    throw new ReplicaDeviceKeyFailure("unavailable");
   }
-  let privateKeyPem: string;
-  let created = false;
-  if (stored === undefined || stored.length === 0) {
-    const generated = generateKeyPairSync(REPLICA_DEVICE_KEY_TYPE);
-    privateKeyPem = String(generated.privateKey.export({ format: "pem", type: "pkcs8" }));
-    try {
-      await store.set(id, privateKeyPem);
-    } catch {
-      throw new ReplicaDeviceKeyFailure("unavailable");
-    }
-    created = true;
-  } else {
-    privateKeyPem = stored;
-  }
-  let publicKey: string;
-  try {
-    publicKey = publicKeyBase64(privateKeyPem);
-  } catch {
-    throw new ReplicaDeviceKeyFailure("failed");
-  }
-  if (!created) {
-    try {
-      if (!(await store.has(id))) throw new ReplicaDeviceKeyFailure("missing");
-    } catch (error) {
-      if (error instanceof ReplicaDeviceKeyFailure) throw error;
-      throw new ReplicaDeviceKeyFailure("unavailable");
-    }
-  }
-  return {
-    publicKey,
-    fingerprint: fingerprintOf(publicKey),
-  };
+  return { instanceId, publicKey, fingerprint: fingerprintOf(publicKey) };
 }
 
 export function makeReplicaDeviceSigner(
@@ -123,22 +115,42 @@ export function makeReplicaDeviceSigner(
   instanceId: string,
 ): ReplicaDeviceSigner {
   return {
-    sign: async (payload: Uint8Array) => {
-      if (payload.byteLength === 0) throw new ReplicaDeviceKeyFailure("invalid");
+    sign: async (payload: Uint8Array): Promise<ReplicaDeviceSignOutcome> => {
+      const id = deviceKeyId(instanceId);
+      if (id === undefined || payload.byteLength === 0) {
+        return { status: "refused", reason: "invalid" };
+      }
       let privateKeyPem: string;
       try {
-        privateKeyPem = await store.resolve(credentialId(instanceId));
+        privateKeyPem = await store.resolve(id);
       } catch {
-        throw new ReplicaDeviceKeyFailure("missing");
+        return {
+          status: "refused",
+          reason: (await keyIsAbsent(store, id)) ? "missing" : "unavailable",
+        };
       }
       try {
         const signature = cryptoSign(null, Buffer.from(payload), createPrivateKey(privateKeyPem));
-        return { signature: signature.toString("base64") };
+        return { status: "signed", signature: signature.toString("base64") };
       } catch {
-        throw new ReplicaDeviceKeyFailure("failed");
+        return { status: "refused", reason: "failed" };
       }
     },
   };
+}
+
+/**
+ * Whether a failed lookup means the key is not there. The local stores and the
+ * broker client report an absent key in different shapes, so this asks the
+ * store rather than reading the error; a store that cannot answer is
+ * unavailable, not empty, and a locked Keychain is never reported as a lost key.
+ */
+async function keyIsAbsent(store: CredentialStore, id: string): Promise<boolean> {
+  try {
+    return !(await store.has(id));
+  } catch {
+    return false;
+  }
 }
 
 /** Verify a detached signature against a member's published public key. */

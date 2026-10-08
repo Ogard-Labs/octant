@@ -438,7 +438,11 @@ ago" only for a host that reports none; a fact the host does not report is left
 out rather than invented. **Pull requests** lists up to six rows on a Code
 start screen, in Waiting on your review and Yours. Each row is the title, a
 short repository and number, and the words for checks and review — never
-colour alone. It is absent when that read is not allowed. **CI failures**
+colour alone. It is absent when that read is not allowed. It never says
+"Nothing is waiting on you." for a list it has not seen: a failed read says it
+could not read, and until a refresh has reached every connected Project the
+quiet line says so, with an **Open Pull requests** link under it. A snapshot
+whose latest refresh failed carries its age as meta text. **CI failures**
 lists up to five failing checks from that same read, the check name, the
 repository or branch, and how long ago it failed. It is absent when nothing is
 failing, and absent when that read is not allowed. **Start a fix** opens a
@@ -937,7 +941,10 @@ wireframe of one screen, in a desktop, tablet, or phone frame. It draws only
 the closed catalog — window, header, sidebar, list, list row, form field,
 button, toggle, tabs, card, image placeholder, and text — and those controls
 are inert. In the Default style the wireframe uses neutral ink, hairline, and
-surface, never a hue.
+surface, never a hue. A design is the author's own screens or slides: Octant draws
+only the frame around them (a hairline, the surface behind, and a numbered
+caption) and never restyles what is inside. Its player is a near-full-window
+dialog that scales the screen to fit with the stage padding around it.
 
 ## Spacing, shapes, and depth
 
@@ -1389,7 +1396,8 @@ default only when this checkout is serving something; Subagents, one row with
 its working / to review / done counts that opens the Agents tool — reading and
 steering a subagent belongs there; Computer use) and Delivery (Pull requests,
 Sources, Delivers, Working folder, and Usage, closed by default; totals, the
-one-line token ceiling form, and Open Usage dashboard inside). A card with no
+spend ceiling form for tokens, turns, hours, and US dollars, whose fields wrap
+two by two in a narrow rail, and Open Usage dashboard inside). A card with no
 rows to show is omitted with its caption. Every row has one grammar: a 26px
 glyph tile, the name, the row's state as a small neutral pill, and a trailing
 chevron where the row opens (a row's own action, such as All pull requests,

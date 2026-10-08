@@ -152,6 +152,11 @@ export interface GhActivePullRequestRow {
     readonly name: string;
     readonly completedAt?: string;
   }>;
+  /**
+   * The head branch lives in a fork, so `headBranch` names a branch of another
+   * repository, not of this one.
+   */
+  readonly crossRepository: boolean;
 }
 
 export type GhActivePullRequestListResult =
@@ -176,6 +181,7 @@ const ACTIVE_PR_LIST_FIELDS = [
   "url",
   "baseRefName",
   "headRefName",
+  "isCrossRepository",
   "statusCheckRollup",
   "reviewDecision",
   "reviewRequests",
@@ -916,6 +922,7 @@ function decodeActivePullRequests(
       review: summarizeReview(item.reviewDecision),
       reviewRequestedFrom: reviewRequestLogins(item.reviewRequests),
       failingChecks: decodeFailingChecks(item.statusCheckRollup),
+      crossRepository: item.isCrossRepository === true,
     });
   }
   return rows;

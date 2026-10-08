@@ -41,6 +41,7 @@ import {
   reduceContextToBudget,
   resolveEffectiveModelLimits,
 } from "@octant/domain/context-policy";
+import { ledgerUsageCost } from "@octant/domain/turn-metrics-display";
 import type { Journal } from "../persistence/journal";
 import type { SqliteConnection } from "../persistence/sqlitePort";
 import {
@@ -114,6 +115,8 @@ export interface ReconcileContextUsageInput {
   readonly currentVarianceReserve: number;
   readonly maxAdjustmentTokens: number;
   readonly providerReported?: boolean;
+  /** The provider's own figure for the request, in US dollars. */
+  readonly costUsd?: number;
 }
 
 export interface RestoreContextSubjectInput {
@@ -393,6 +396,25 @@ export class ContextHarnessService {
       throw harnessPolicyError(error);
     }
     const timestamp = decodeTimestamp(this.#clock());
+    // A request that reported no usage has no cost either: it stays unpriced,
+    // so a money ceiling refuses instead of counting it as free.
+    const cost =
+      input.providerReported === false
+        ? undefined
+        : ledgerUsageCost(String(current.modelLimits.modelId), {
+            inputTokens: input.actualInputTokens,
+            outputTokens: input.actualOutputTokens,
+            ...(input.reasoningTokens === undefined
+              ? {}
+              : { reasoningTokens: input.reasoningTokens }),
+            ...(input.cacheReadInputTokens === undefined
+              ? {}
+              : { cacheReadInputTokens: input.cacheReadInputTokens }),
+            ...(input.cacheWriteInputTokens === undefined
+              ? {}
+              : { cacheWriteInputTokens: input.cacheWriteInputTokens }),
+            ...(input.costUsd === undefined ? {} : { costUsd: input.costUsd }),
+          });
     const reconciliation = decodeUsageReconciliation({
       id: this.#uuid(),
       planId: current.next.plan.id,
@@ -415,6 +437,7 @@ export class ContextHarnessService {
         ? {}
         : { providerExecutionDurationMs: input.providerExecutionDurationMs }),
       ...(input.providerReported === false ? { providerReported: false } : {}),
+      ...(cost === undefined ? {} : { cost }),
       varianceTokens: variance.varianceTokens,
       nextVarianceReserve: variance.nextVarianceReserve,
       observedAt: timestamp,

@@ -633,13 +633,28 @@ function readUsage(value: unknown): ProtocolUsage {
   ) {
     throw invalidUsage();
   }
+  const costUsd = readReportedCost(value);
   return {
     inputTokens: value.prompt_tokens,
     outputTokens: value.completion_tokens,
     ...(cacheRead === undefined ? {} : { cacheReadInputTokens: cacheRead }),
     ...(cacheWrite === undefined ? {} : { cacheWriteInputTokens: cacheWrite }),
     ...(reasoning === undefined ? {} : { reasoningTokens: reasoning }),
+    ...(costUsd === undefined ? {} : { costUsd }),
   };
+}
+
+/**
+ * The charge an endpoint reports beside its token counts, as OpenRouter does
+ * with `usage.cost` in US-dollar credits. With a person's own upstream key
+ * (`is_byok`) that figure is only OpenRouter's fee, not what the request cost,
+ * so it is not reported. Any other shape is no cost rather than invalid usage:
+ * the request stays unpriced instead of failing.
+ */
+function readReportedCost(usage: Record<string, unknown>): number | undefined {
+  if (usage.is_byok === true) return undefined;
+  const cost = usage.cost;
+  return typeof cost === "number" && Number.isFinite(cost) && cost >= 0 ? cost : undefined;
 }
 
 /** A detail object the endpoint may leave out or null; any other type is invalid usage. */

@@ -2,11 +2,18 @@ import { generateKeyPairSync } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import type { CredentialStore } from "@octant/host-runtime";
 import {
-  ensureReplicaDeviceKey,
+  createReplicaDeviceKey,
   makeReplicaDeviceSigner,
+  replicaInstanceIdOf,
   verifyReplicaEntrySignature,
   ReplicaDeviceKeyFailure,
+  type ReplicaDeviceSignOutcome,
 } from "./replicaDeviceKeyService";
+
+function signedText(outcome: ReplicaDeviceSignOutcome): string {
+  if (outcome.status !== "signed") throw new Error(`Signing was refused: ${outcome.reason}`);
+  return outcome.signature;
+}
 
 function memoryStore(): CredentialStore & { readonly values: Map<string, string> } {
   const values = new Map<string, string>();
@@ -29,24 +36,37 @@ function memoryStore(): CredentialStore & { readonly values: Map<string, string>
   };
 }
 
-const instanceId = "11111111-1111-4111-8111-111111111111";
-
 describe("replica device key service", () => {
-  it("creates a key once and returns the same public key afterwards", async () => {
+  it("stores each new key under the UUIDv8 id its public key certifies", async () => {
     const store = memoryStore();
-    const first = await ensureReplicaDeviceKey(store, instanceId);
-    const second = await ensureReplicaDeviceKey(store, instanceId);
-    expect(second.publicKey).toBe(first.publicKey);
+    const first = await createReplicaDeviceKey(store);
+    const second = await createReplicaDeviceKey(store);
+    expect(first.instanceId).toBe(replicaInstanceIdOf(first.publicKey));
+    expect(first.instanceId).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-8[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+    );
+    expect(second.instanceId).not.toBe(first.instanceId);
     expect(first.fingerprint).toMatch(/^[0-9a-f]{64}$/);
-    expect(store.values.size).toBe(1);
+    expect([...store.values.keys()].sort()).toEqual([first.instanceId, second.instanceId].sort());
+  });
+
+  it("derives the same id from the same key, and another id from another key", () => {
+    const key = Buffer.from(
+      generateKeyPairSync("ed25519").publicKey.export({ format: "der", type: "spki" }),
+    ).toString("base64");
+    const other = Buffer.from(
+      generateKeyPairSync("ed25519").publicKey.export({ format: "der", type: "spki" }),
+    ).toString("base64");
+    expect(replicaInstanceIdOf(key)).toBe(replicaInstanceIdOf(key));
+    expect(replicaInstanceIdOf(other)).not.toBe(replicaInstanceIdOf(key));
   });
 
   it("signs with the stored key and verifies against the public key", async () => {
     const store = memoryStore();
-    const key = await ensureReplicaDeviceKey(store, instanceId);
-    const signer = makeReplicaDeviceSigner(store, instanceId);
-    const payload = new TextEncoder().encode("octant.replica-entry/1\nbody\n");
-    const { signature } = await signer.sign(payload);
+    const key = await createReplicaDeviceKey(store);
+    const signer = makeReplicaDeviceSigner(store, key.instanceId);
+    const payload = new TextEncoder().encode("octant.replica-entry/2\nbody\n");
+    const signature = signedText(await signer.sign(payload));
     expect(
       verifyReplicaEntrySignature({
         publicKeyBase64: key.publicKey,
@@ -58,10 +78,9 @@ describe("replica device key service", () => {
 
   it("refuses a signature made over different bytes", async () => {
     const store = memoryStore();
-    const key = await ensureReplicaDeviceKey(store, instanceId);
-    const signer = makeReplicaDeviceSigner(store, instanceId);
-    const payload = new TextEncoder().encode("original");
-    const { signature } = await signer.sign(payload);
+    const key = await createReplicaDeviceKey(store);
+    const signer = makeReplicaDeviceSigner(store, key.instanceId);
+    const signature = signedText(await signer.sign(new TextEncoder().encode("original")));
     expect(
       verifyReplicaEntrySignature({
         publicKeyBase64: key.publicKey,
@@ -71,56 +90,70 @@ describe("replica device key service", () => {
     ).toBe(false);
   });
 
-  it("refuses to sign before a key exists", async () => {
+  it("refuses to sign before a key exists, and says the key is missing", async () => {
     const store = memoryStore();
-    const signer = makeReplicaDeviceSigner(store, instanceId);
-    await expect(signer.sign(new TextEncoder().encode("bytes"))).rejects.toBeInstanceOf(
-      ReplicaDeviceKeyFailure,
-    );
+    const signer = makeReplicaDeviceSigner(store, "11111111-1111-8111-8111-111111111111");
+    expect(await signer.sign(new TextEncoder().encode("bytes"))).toEqual({
+      status: "refused",
+      reason: "missing",
+    });
   });
 
-  it("does not replace a stored key when resolve fails for a transient reason", async () => {
+  it("says the store is unavailable, not that the key is missing, when the store cannot answer", async () => {
     const store = memoryStore();
-    const first = await ensureReplicaDeviceKey(store, instanceId);
-    // A locked Keychain or a helper timeout surfaces as a rejected resolve,
-    // not as absence; regenerating would strand every signature already bound
-    // to the published public key.
-    const flaky: CredentialStore = {
+    const key = await createReplicaDeviceKey(store);
+    const locked: CredentialStore = {
       ...store,
       async resolve() {
         throw new Error("keychain locked");
       },
-    };
-    const failure = await ensureReplicaDeviceKey(flaky, instanceId).catch(
-      (error: unknown) => error,
-    );
-    expect(failure).toBeInstanceOf(ReplicaDeviceKeyFailure);
-    expect((failure as ReplicaDeviceKeyFailure).category).toBe("unavailable");
-    const unchanged = await ensureReplicaDeviceKey(store, instanceId);
-    expect(unchanged.publicKey).toBe(first.publicKey);
-    expect(store.values.size).toBe(1);
-  });
-
-  it("creates a key when resolve fails and none is stored", async () => {
-    const store = memoryStore();
-    const flaky: CredentialStore = {
-      ...store,
-      async resolve() {
-        throw new Error("not found");
+      async has() {
+        throw new Error("keychain locked");
       },
     };
-    const key = await ensureReplicaDeviceKey(flaky, instanceId);
-    expect(key.publicKey).toMatch(/^[A-Za-z0-9+/]{59}=$/);
-    expect(store.values.size).toBe(1);
+    const signer = makeReplicaDeviceSigner(locked, key.instanceId);
+    expect(await signer.sign(new TextEncoder().encode("bytes"))).toEqual({
+      status: "refused",
+      reason: "unavailable",
+    });
+  });
+
+  it("refuses an instance id that is not a device-key id as invalid, without asking the store", async () => {
+    let asked = false;
+    const store: CredentialStore = {
+      ...memoryStore(),
+      async resolve() {
+        asked = true;
+        throw new Error("unexpected");
+      },
+    };
+    const signer = makeReplicaDeviceSigner(store, "not-an-instance");
+    expect(await signer.sign(new TextEncoder().encode("bytes"))).toEqual({
+      status: "refused",
+      reason: "invalid",
+    });
+    expect(asked).toBe(false);
+  });
+
+  it("reports an unavailable credential store instead of returning a key it did not keep", async () => {
+    const store: CredentialStore = {
+      ...memoryStore(),
+      async set() {
+        throw new Error("keychain locked");
+      },
+    };
+    const failure = await createReplicaDeviceKey(store).catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(ReplicaDeviceKeyFailure);
+    expect((failure as ReplicaDeviceKeyFailure).category).toBe("unavailable");
   });
 
   it("refuses a signature from a different key", async () => {
     const store = memoryStore();
-    await ensureReplicaDeviceKey(store, instanceId);
+    const key = await createReplicaDeviceKey(store);
     const other = generateKeyPairSync("ed25519");
     const otherPublic = other.publicKey.export({ format: "der", type: "spki" });
-    const signer = makeReplicaDeviceSigner(store, instanceId);
-    const { signature } = await signer.sign(new TextEncoder().encode("bytes"));
+    const signer = makeReplicaDeviceSigner(store, key.instanceId);
+    const signature = signedText(await signer.sign(new TextEncoder().encode("bytes")));
     expect(
       verifyReplicaEntrySignature({
         publicKeyBase64: Buffer.from(otherPublic).toString("base64"),

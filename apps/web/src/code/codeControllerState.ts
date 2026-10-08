@@ -295,10 +295,12 @@ export type ProviderAnswerOutcome =
  * The runtime refuses some answers as a turn state rather than as
  * `operation-failed`: `failed` when the turn cannot take the answer (Plan
  * posture, permission persistence changed since it asked, no provider
- * connection), and `interrupted` when the turn that asked has ended (its
- * session died with a restart, or a third denial stopped it). Neither leaves a
- * turn waiting on this answer, so a surface that called it answered would
- * hold a busy row for a request the provider will never act on.
+ * connection), and `interrupted` with the host's reason when the turn that
+ * asked has ended (its session died with a restart, or it was already
+ * stopped). Neither leaves a turn waiting on this answer, so a surface that
+ * called it answered would hold a busy row for a request the provider will
+ * never act on. A bare `interrupted` is the third denial in one turn: the
+ * provider received that Deny and the host stopped the turn, so it is answered.
  */
 export function providerAnswerOutcome(result: CodeOperationResult): ProviderAnswerOutcome {
   if (result.kind === "operation-failed") {
@@ -311,12 +313,12 @@ export function providerAnswerOutcome(result: CodeOperationResult): ProviderAnsw
         result.failure?.message ?? "The answer was not delivered. The turn changed since it asked.",
     };
   }
-  if (result.kind === "provider-turn-state" && result.state === "interrupted") {
-    return {
-      status: "refused",
-      message:
-        result.failure?.message ?? "The turn that asked has ended. Send a new message to continue.",
-    };
+  if (
+    result.kind === "provider-turn-state" &&
+    result.state === "interrupted" &&
+    result.failure !== undefined
+  ) {
+    return { status: "refused", message: result.failure.message };
   }
   return { status: "answered" };
 }

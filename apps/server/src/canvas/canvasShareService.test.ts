@@ -15,6 +15,13 @@ import {
   type CanvasVersion,
 } from "@octant/contracts";
 import { EventActor } from "@octant/contracts/events";
+import {
+  commitsByHourExample,
+  hottestFilesExample,
+  onboardingFlowExample,
+  repositoryMapExample,
+  testFailuresCalendarExample,
+} from "@octant/domain";
 import { AggregateHeadsProjection } from "../persistence/aggregateHeadsProjection";
 import { EventRegistry } from "../persistence/eventRegistry";
 import { Journal } from "../persistence/journal";
@@ -58,6 +65,7 @@ const ids = {
   export: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
   quietCanvas: "16161616-1616-4161-8161-161616161616",
   quietVersion: "17171717-1717-4171-8171-171717171717",
+  source: "18181818-1818-4181-8181-181818181818",
 } as const;
 
 const canvasId = decodeCanvasId(ids.canvas);
@@ -77,7 +85,12 @@ const provenance = {
 } as const;
 
 function currentVersion(
-  overrides: { readonly canvasId?: string; readonly versionId?: string } = {},
+  overrides: {
+    readonly canvasId?: string;
+    readonly versionId?: string;
+    readonly sourceManifest?: ReadonlyArray<unknown>;
+    readonly blocks?: ReadonlyArray<unknown>;
+  } = {},
 ): CanvasVersion {
   return decodeCanvasVersion({
     schemaVersion: CANVAS_SCHEMA_VERSION,
@@ -88,8 +101,8 @@ function currentVersion(
       schemaVersion: CANVAS_SCHEMA_VERSION,
       title: "Shared canvas",
       provenance,
-      sourceManifest: [],
-      blocks: [
+      sourceManifest: overrides.sourceManifest ?? [],
+      blocks: overrides.blocks ?? [
         {
           blockId: "block-1",
           schemaVersion: CANVAS_SCHEMA_VERSION,
@@ -226,7 +239,12 @@ interface Harness {
 }
 
 function harness(
-  options: { readonly authorized?: boolean; readonly sharingEnabled?: boolean } = {},
+  options: {
+    readonly authorized?: boolean;
+    readonly sharingEnabled?: boolean;
+    /** The Canvas the owner shares; a single heading when absent. */
+    readonly version?: CanvasVersion;
+  } = {},
 ): Harness {
   const directory = mkdtempSync(join(tmpdir(), "octant-canvas-share-"));
   directories.push(directory);
@@ -247,7 +265,7 @@ function harness(
     projections,
     clock: () => createdAt as never,
   });
-  projection.applyCreated({ canvasId, version: currentVersion() });
+  projection.applyCreated({ canvasId, version: options.version ?? currentVersion() });
   const clock = { value: "2026-08-01T21:05:01.000Z" };
   const actor = Schema.decodeUnknownSync(EventActor)({
     kind: "local-user",
@@ -841,5 +859,101 @@ describe("CanvasShareService", () => {
     );
 
     expect(result).toMatchObject({ kind: "denied", denialCode: "stale-version" });
+  });
+
+  it("shares a treemap, a heatmap, a bar list, a formatted chart, and a table with column displays", () => {
+    const blocks = [
+      {
+        ...repositoryMapExample,
+        nodes: repositoryMapExample.nodes.map((node) =>
+          node.nodeId === "contracts" ? { ...node, sourceId: ids.source } : node,
+        ),
+      },
+      commitsByHourExample,
+      testFailuresCalendarExample,
+      {
+        ...hottestFilesExample,
+        rows: hottestFilesExample.rows.map((row, index) =>
+          index === 0 ? { ...row, sourceId: ids.source } : row,
+        ),
+      },
+      {
+        blockId: "revenue",
+        schemaVersion: CANVAS_SCHEMA_VERSION,
+        kind: "chart",
+        chartType: "line",
+        format: "compact",
+        series: [{ seriesId: "revenue", label: "Revenue", points: [{ x: "Q1", y: 1_200_000 }] }],
+      },
+      {
+        blockId: "coverage",
+        schemaVersion: CANVAS_SCHEMA_VERSION,
+        kind: "table",
+        columns: [
+          { id: "file", label: "File", type: "text" },
+          { id: "covered", label: "Covered", type: "number", format: "percent", display: "bar" },
+        ],
+        rows: [["canvas.ts", 0.82]],
+      },
+    ];
+    const { service } = harness({
+      version: currentVersion({
+        sourceManifest: [
+          {
+            sourceId: ids.source,
+            kind: "file",
+            hostId: "local",
+            projectId: ids.project,
+            opaqueRef: "source:contracts",
+            displayName: "contracts",
+          },
+        ],
+        blocks,
+      }),
+    });
+
+    const result = service.share(shareRequest(), context, project, localPrincipal);
+
+    expect(result.kind).toBe("accepted");
+    const opened = service.access({ request: accessRequest(), principal: localPrincipal });
+    expect(opened.kind).toBe("allowed");
+    if (opened.kind !== "allowed") return;
+    expect(opened.document.blocks.map((block) => block.blockId)).toEqual(
+      blocks.map((block) => block.blockId),
+    );
+    // A leaf's or a row's source opens only on this host, so the snapshot drops it.
+    expect(JSON.stringify(opened.document.blocks)).not.toContain(ids.source);
+  });
+
+  it("refuses to share a design as content a snapshot cannot carry, journaling nothing", () => {
+    const { service, shareEventNames } = harness({
+      version: currentVersion({ blocks: [onboardingFlowExample] }),
+    });
+
+    const result = service.share(shareRequest(), context, project, localPrincipal);
+
+    expect(result).toMatchObject({ kind: "denied", denialCode: "unsafe-payload" });
+    expect(shareEventNames()).toHaveLength(0);
+  });
+
+  it("answers a Canvas holding a block the snapshot format does not carry with a denial instead of throwing", () => {
+    const { service, shareEventNames } = harness({
+      version: currentVersion({
+        blocks: [
+          {
+            blockId: "refresh",
+            schemaVersion: CANVAS_SCHEMA_VERSION,
+            kind: "action",
+            label: "Refresh",
+            command: { command: "canvas.request-refresh" },
+          },
+        ],
+      }),
+    });
+
+    const result = service.share(shareRequest(), context, project, localPrincipal);
+
+    expect(result).toMatchObject({ kind: "denied", denialCode: "unsafe-payload" });
+    expect(shareEventNames()).toHaveLength(0);
   });
 });
