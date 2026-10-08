@@ -403,6 +403,36 @@ describe("drawing a preview of an artifact", () => {
     expect((markup.match(/<rect/g) ?? []).length).toBeGreaterThanOrEqual(3);
   });
 
+  it("draws a comparison matrix as a grid with the recommended column framed, with no script", () => {
+    const matrix = decodeCanvasBlock({
+      blockId: "state-store",
+      schemaVersion: CANVAS_SCHEMA_VERSION,
+      kind: "comparison-matrix",
+      options: [
+        { optionId: "postgres", label: "Postgres" },
+        { optionId: "sqlite", label: "SQLite" },
+      ],
+      criteria: [
+        { criterionId: "durability", label: "Crash safety" },
+        { criterionId: "offline", label: "Works offline" },
+      ],
+      cells: [
+        { criterionId: "durability", optionId: "postgres", score: 4 },
+        { criterionId: "durability", optionId: "sqlite", score: 5 },
+        { criterionId: "offline", optionId: "sqlite", glyph: "yes" },
+      ],
+      recommendedOptionId: "sqlite",
+    });
+
+    const markup = renderArtifactThumbnail(definition([matrix], "State store"));
+
+    expect(markup.startsWith("<svg")).toBe(true);
+    expect(markup).not.toMatch(/<\s*script/i);
+    expect(markup).toContain("SQLite");
+    expect(markup).toContain("Crash safety");
+    expect(markup).toContain('data-recommended="true"');
+  });
+
   it("draws a metric sparkline as a polyline when the block carries one", () => {
     const withSpark = {
       blockId: "metric-1",

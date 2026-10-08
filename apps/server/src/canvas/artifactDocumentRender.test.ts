@@ -237,6 +237,53 @@ describe("rendering a canvas as a document", () => {
     expect(rendered.body.indexOf(largest)).toBeLessThan(rendered.body.indexOf(smaller));
   });
 
+  it("writes a comparison matrix as a table with each option's weighted score, its notes, and the recommendation", () => {
+    const matrix = decodeCanvasBlock({
+      blockId: "state-store",
+      schemaVersion: CANVAS_SCHEMA_VERSION,
+      kind: "comparison-matrix",
+      options: [
+        { optionId: "postgres", label: "Postgres" },
+        { optionId: "sqlite", label: "SQLite" },
+      ],
+      criteria: [
+        { criterionId: "durability", label: "Crash safety", weight: 3 },
+        { criterionId: "ops", label: "Operational cost", prefer: "lower" },
+        { criterionId: "offline", label: "Works offline" },
+      ],
+      cells: [
+        { criterionId: "durability", optionId: "postgres", score: 5 },
+        { criterionId: "durability", optionId: "sqlite", score: 5, note: "WAL with full sync" },
+        { criterionId: "ops", optionId: "postgres", score: 5 },
+        { criterionId: "ops", optionId: "sqlite", score: 1 },
+        { criterionId: "offline", optionId: "postgres", glyph: "partial" },
+      ],
+      scoreRange: { min: 1, max: 5 },
+      recommendedOptionId: "sqlite",
+      recommendation: "No server to run.",
+    });
+
+    const markdown = renderArtifactMarkdown(definition([matrix]));
+    expect(markdown.kind).toBe("rendered");
+    if (markdown.kind !== "rendered") return;
+    expect(markdown.body).toContain("| Criterion | Weight | Postgres | SQLite (recommended) |");
+    expect(markdown.body).toContain("| Crash safety | 3 | 5 | 5 [1] |");
+    expect(markdown.body).toContain("| Operational cost (lower is better) | 1 | 5 | 1 |");
+    // An empty coordinate reads as not assessed, never as a zero or a no.
+    expect(markdown.body).toContain("| Works offline | 1 | Partial | Not assessed |");
+    // Postgres: 3 × 1 + 1 × 0 + 1 × 0.5 = 3.5 of 5 → 1 + 0.7 × 4 = 3.8.
+    // SQLite:   3 × 1 + 1 × 1 + 0 (missing)  = 4 of 5   → 1 + 0.8 × 4 = 4.2.
+    expect(markdown.body).toContain("| Weighted score |  | 3.8 of 5 | 4.2 of 5 (1 not scored) |");
+    expect(markdown.body).toContain("1. Crash safety · SQLite: WAL with full sync");
+    expect(markdown.body).toContain("Recommended: SQLite. No server to run.");
+
+    const html = renderArtifactHtml(definition([matrix]));
+    expect(html.kind).toBe("rendered");
+    if (html.kind !== "rendered") return;
+    expect(html.body).toContain("<th>SQLite (recommended)</th>");
+    expect(html.body).not.toMatch(/<\s*script/i);
+  });
+
   it("carries a metric caption into its reading", () => {
     const captioned = {
       blockId: "metric-caption",
