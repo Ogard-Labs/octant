@@ -76,6 +76,17 @@ describe("managed device streams", () => {
     expect(second.rest).toEqual(new Uint8Array());
   });
 
+  it("keeps a boundary split after its first dash for the next chunk", () => {
+    const jpeg = Uint8Array.from([0xff, 0xd8, 0x04, 0xff, 0xd9]);
+    const stream = joined(part("image/jpeg", jpeg), part("image/jpeg", jpeg));
+    const cut = part("image/jpeg", jpeg).length + 1;
+    const first = takeMultipartImageFrames(stream.subarray(0, cut));
+    expect(first.frames).toEqual([jpeg]);
+    expect(takeMultipartImageFrames(joined(first.rest, stream.subarray(cut))).frames).toEqual([
+      jpeg,
+    ]);
+  });
+
   it("drops a part that is not an image or is larger than a frame may be", () => {
     const text = new TextEncoder().encode("not an image");
     const jpeg = Uint8Array.from([0xff, 0xd8, 0x03, 0xff, 0xd9]);

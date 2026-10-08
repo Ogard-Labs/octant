@@ -153,7 +153,8 @@ describe("serve-avd broker", () => {
       },
     });
     openBrokers.push(broker);
-    const response = await post(broker, { serial: "emulator-5554", sdkRoot });
+    // ANDROID_HOME often carries a trailing slash; the server sends it as it is.
+    const response = await post(broker, { serial: "emulator-5554", sdkRoot: `${sdkRoot}/` });
     expect(response.status).toBe(200);
     expect(environments[0]).toMatchObject({
       ADB_MDNS: "0",

@@ -69,7 +69,14 @@ export function takeMultipartImageFrames(input: Uint8Array): {
   let offset = 0;
   for (;;) {
     const boundary = indexOfMarker(input, offset, 0x2d, 0x2d);
-    if (boundary === -1) return { frames, rest: new Uint8Array() };
+    if (boundary === -1) {
+      // A chunk can end between the boundary's two dashes.
+      const last = input.byteLength - 1;
+      return {
+        frames,
+        rest: last >= offset && input[last] === 0x2d ? Uint8Array.of(0x2d) : new Uint8Array(),
+      };
+    }
     const headerEnd = indexOfHeaderEnd(input, boundary);
     if (headerEnd === -1) {
       return input.byteLength - boundary > MAXIMUM_PART_HEADER_BYTES

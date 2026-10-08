@@ -2562,8 +2562,8 @@ otherwise. Boot still uses the emulator binary. The tools run in Electron
 main. The server reaches Android streaming through a loopback broker
 (`OCTANT_SERVE_AVD_BROKER_URL`, `OCTANT_SERVE_AVD_BROKER_TOKEN`) the same way
 it reaches the Simulator device helper. Each attach request carries the SDK
-root the server discovered. The broker accepts only an absolute, normalized
-root that holds `platform-tools/adb`, and runs `serve-avd` with that root as
+root the server discovered. The broker accepts only an absolute root that,
+once normalized, holds `platform-tools/adb`, and runs `serve-avd` with that root as
 `ANDROID_HOME` and with `ADB_MDNS=0`, so the tool uses the server's `adb` and
 any shared `adb` server it starts stays up. `serve-avd` prints its ready state
 as indented JSON over several lines, and the broker reads the whole object. Its

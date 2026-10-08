@@ -2,7 +2,7 @@ import { spawn as spawnProcess, type ChildProcess } from "node:child_process";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { stat } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { isAbsolute, join, normalize } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 import { readManagedDeviceEndpoint } from "@octant/domain/managed-device-stream";
 import type { ManagedSimulatorTools } from "./managedSimulatorHelpers";
 
@@ -204,11 +204,11 @@ async function handle(
  */
 async function sdkRootWithAdb(sdkRoot: unknown): Promise<string | undefined> {
   if (typeof sdkRoot !== "string" || sdkRoot.length > MAX_SDK_ROOT_LENGTH) return undefined;
-  if (sdkRoot.includes("\0") || !isAbsolute(sdkRoot) || normalize(sdkRoot) !== sdkRoot) {
-    return undefined;
-  }
+  if (sdkRoot.includes("\0") || !isAbsolute(sdkRoot)) return undefined;
+  // `ANDROID_HOME` often ends in a slash; the server sends the value as it found it.
+  const root = resolve(sdkRoot);
   try {
-    return (await stat(join(sdkRoot, "platform-tools", "adb"))).isFile() ? sdkRoot : undefined;
+    return (await stat(join(root, "platform-tools", "adb"))).isFile() ? root : undefined;
   } catch {
     return undefined;
   }
