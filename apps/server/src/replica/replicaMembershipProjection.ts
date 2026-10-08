@@ -81,8 +81,9 @@ export const ReplicaIdentityCreated = Schema.Struct({
 }).annotations(strict);
 
 /**
- * The founder this host's membership is derived from: itself when it founded
- * the replica, or the root the person confirmed by matching code.
+ * The founder a joining host's membership is derived from: the root the
+ * person confirmed by matching code. A founding host is pinned by its
+ * founder-role identity instead, so it never depends on a second event.
  */
 export const ReplicaFounderPinned = Schema.Struct({
   instanceId: ReplicaInstanceId,
@@ -270,9 +271,14 @@ export class ReplicaMembershipProjection implements Projection {
     switch (event.eventName) {
       case names.identityCreated: {
         const created = decodeIdentity(event.payload);
-        // A new identity starts its own sequence and pins its own founder.
+        // A new identity starts its own sequence and pins its own founder. A
+        // founding identity is its own founder, so the pin comes with the
+        // identity: a host that stopped after this event is still pinned.
         this.#local = created;
-        this.#founder = undefined;
+        this.#founder =
+          created.role === "founder"
+            ? { instanceId: created.instanceId, publicKey: created.publicKey }
+            : undefined;
         this.#skipped = 0;
         this.#pending = undefined;
         break;

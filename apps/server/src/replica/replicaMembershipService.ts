@@ -262,11 +262,8 @@ export class ReplicaMembershipService {
     if (entry.kind !== "replica-founded")
       throw new Error("A founding record decoded as another kind.");
     const published = await this.#publishFirst(store, "create-replica", entry, "founder");
+    // The founder-role identity pins itself, so no separate pin can be lost.
     if (published !== undefined) return published;
-    this.#journal(REPLICA_MEMBERSHIP_EVENT_NAMES.founderPinned, {
-      instanceId: key.instanceId,
-      publicKey: key.publicKey,
-    });
     return { kind: "replica-created", instanceId: key.instanceId, entry };
   }
 

@@ -35,6 +35,7 @@ import {
   REPLICA_MEMBERSHIP_EVENT_NAMES,
   registerReplicaMembershipEvents,
   ReplicaMembershipProjection,
+  type ReplicaMembershipJournal,
 } from "./replicaMembershipProjection";
 import {
   deriveReplicaJoinMatchingCode,
@@ -122,7 +123,12 @@ function memoryStore(): MemoryStore {
 }
 
 /** One simulated computer: its own journal, keychain, and identity, sharing a store. */
-function computer(options: { readonly store: ReplicaStoreSelection; readonly now?: () => number }) {
+function computer(options: {
+  readonly store: ReplicaStoreSelection;
+  readonly now?: () => number;
+  /** The host stops (every later journal append throws) right after this event. */
+  readonly stopAfter?: string;
+}) {
   const directory = realpathSync(mkdtempSync(join(tmpdir(), "octant-replica-membership-")));
   directories.push(directory);
   const connection = openSqlite(join(directory, "events.sqlite3"));
@@ -135,21 +141,25 @@ function computer(options: { readonly store: ReplicaStoreSelection; readonly now
   const journal = new Journal({ connection, registry, projections, clock: () => NOW_ISO });
   const credentials = memoryCredentialStore();
   let uuid = 0;
+  const power = { stopAfter: options.stopAfter, stopped: false };
   const service = new ReplicaMembershipService({
     store: () => options.store,
     credentials: {
       create: () => createReplicaDeviceKey(credentials),
       sign: (instanceId, payload) => makeReplicaDeviceSigner(credentials, instanceId).sign(payload),
     },
-    journal: createReplicaMembershipJournal({
-      journal,
-      uuid: () => {
-        uuid += 1;
-        return `00000000-0000-4000-8000-${String(uuid).padStart(12, "0")}`;
-      },
-      clock: () => NOW_ISO,
-      actor: { kind: "local-user", actorId: "77777777-7777-4777-8777-777777777777" },
-    }),
+    journal: stoppable(
+      createReplicaMembershipJournal({
+        journal,
+        uuid: () => {
+          uuid += 1;
+          return `00000000-0000-4000-8000-${String(uuid).padStart(12, "0")}`;
+        },
+        clock: () => NOW_ISO,
+        actor: { kind: "local-user", actorId: "77777777-7777-4777-8777-777777777777" },
+      }),
+      power,
+    ),
     state: () => projection.state(),
     localHostId: LOCAL_HOST_ID,
     clock: options.now ?? (() => NOW),
@@ -163,7 +173,26 @@ function computer(options: { readonly store: ReplicaStoreSelection; readonly now
     if (local === undefined) throw new Error("The computer has no identity.");
     return local.instanceId;
   };
-  return { service, projection, journal, connection, credentials, events, id };
+  /** The host starts again on the same journal after it stopped. */
+  const restart = () => {
+    power.stopAfter = undefined;
+    power.stopped = false;
+  };
+  return { service, projection, journal, connection, credentials, events, id, restart };
+}
+
+/** A journal that refuses every append after the named event, as a host that stopped would. */
+function stoppable(
+  inner: ReplicaMembershipJournal,
+  power: { stopAfter: string | undefined; stopped: boolean },
+): ReplicaMembershipJournal {
+  return {
+    append: (input) => {
+      if (power.stopped) throw new Error("The host stopped.");
+      inner.append(input);
+      if (input.eventName === power.stopAfter) power.stopped = true;
+    },
+  };
 }
 
 function selected(store: ReplicaStore): ReplicaStoreSelection {
@@ -324,6 +353,33 @@ describe("replica membership service", () => {
     expect(state.members.map((m) => m.instanceId)).toEqual([created.instanceId]);
     expect(state.localSequence).toBe(1);
     expect(verifiesAt(store, `${created.instanceId}/1`, created.entry.origin.publicKey)).toBe(true);
+  });
+
+  it("stays the founder of its replica when the host stops right after taking its identity", async () => {
+    const store = memoryStore();
+    const north = computer({
+      store: selected(store),
+      stopAfter: REPLICA_MEMBERSHIP_EVENT_NAMES.identityCreated,
+    });
+    await expect(
+      north.service.execute({ kind: "create-replica", displayName: "MacBook" }),
+    ).rejects.toThrow("The host stopped.");
+    north.restart();
+    const rebuilt = new ReplicaMembershipProjection();
+    catchUpProjection({
+      connection: north.connection,
+      journal: north.journal,
+      projection: rebuilt,
+      clock: () => NOW_ISO,
+    });
+    expect(rebuilt.state().founder?.instanceId).toBe(north.id());
+    // The founding record landed before the stop; a pull holds it, and the
+    // founder can bring a computer in.
+    expectKind(await north.service.execute({ kind: "pull" }), "pulled");
+    expect(memberIds(north)).toEqual([String(north.id())]);
+    const south = computer({ store: selected(store) });
+    await joinThrough(south, north, "Mac mini");
+    expect(memberIds(south)).toContain(String(south.id()));
   });
 
   it("joins only once the joiner signs its acceptance, and records the approver as its parent", async () => {
