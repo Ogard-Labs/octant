@@ -1,12 +1,14 @@
 /**
  * Who shares this host's replica store, rebuilt from the journal.
  *
- * The membership service and the store-read path both decide from these
- * facts, and they reach them only through journaled events, so a restart
- * replays the same members, keys, revocations, applied sequences, and next
- * local sequence the host had before. Every apply is idempotent: replaying an
- * event twice, or replaying the whole journal into a fresh projection, ends in
- * the same state.
+ * The journal holds only inputs: this host's own identity, the founder it
+ * pinned, and every valid membership record it read or published, as bytes
+ * plus signature. Members, keys, the parent tree, cuts, and which entries
+ * count are derived from those on every read and never journaled as facts,
+ * so two hosts holding the same records derive the same membership, and a
+ * restart derives what the host had before. Every apply is idempotent:
+ * replaying an event twice, or replaying the whole journal into a fresh
+ * projection, ends in the same state.
  *
  * The state is small and lives in memory, so the projection holds no table and
  * replays from the start of the journal on every host start, like the managed
@@ -14,22 +16,23 @@
  */
 
 import {
+  decodeReplicaEntryText,
   ReplicaDevicePublicKey,
   ReplicaDisplayName,
   ReplicaInstanceId,
   ReplicaMembershipEntry,
-  ReplicaReadRefusal,
   type EventEnvelope,
+  type ReplicaJoinRequestEntry,
 } from "@octant/contracts";
 import {
   deriveReplicaMembership,
-  type ReplicaAdmissionRecord,
-  type ReplicaJoinRequestKey,
-  type ReplicaMembershipMember,
-  type ReplicaRevocationCut,
-  type ReplicaRevocationRecord,
+  replicaInGoodStanding,
+  replicaMembers,
+  replicaMembershipNode,
+  type ReplicaDerivedMembership,
+  type ReplicaHeldRecord,
+  type ReplicaMembershipNode,
 } from "@octant/domain/replica-membership-policy";
-import type { ReplicaAppliedEntry } from "@octant/domain/replica-entry-policy";
 import { Schema } from "effect";
 import type { EventRegistry } from "../persistence/eventRegistry";
 import type { Projection } from "../persistence/projection";
@@ -37,82 +40,66 @@ import type { SqliteConnection } from "../persistence/sqlitePort";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const Sequence = Schema.Int.pipe(Schema.positive());
+const Sha256Hex = Schema.String.pipe(Schema.pattern(/^[a-f0-9]{64}$/));
 
 export const REPLICA_MEMBERSHIP_AGGREGATE_TYPE = "replica-membership";
 export const REPLICA_MEMBERSHIP_EVENT_NAMES = {
-  replicaCreated: "replica.membership-created@1",
-  joinRequested: "replica.join-requested@1",
-  joinApproved: "replica.join-approved@1",
-  joinConfirmed: "replica.join-confirmed@1",
-  revoked: "replica.membership-revoked@1",
-  entrySigned: "replica.entry-signed@1",
-  entryApplied: "replica.entry-applied@1",
-  entryRefused: "replica.entry-refused@1",
-  commandRefused: "replica.membership-command-refused@1",
-  storeFailure: "replica.membership-store-failure@1",
+  identityCreated: "replica.identity-created@2",
+  founderPinned: "replica.founder-pinned@2",
+  recordHeld: "replica.record-held@2",
+  entrySigned: "replica.entry-signed@2",
+  entryUnreadable: "replica.entry-unreadable@2",
+  commandRefused: "replica.command-refused@2",
+  storeFailure: "replica.store-failure@2",
 } as const;
 
-/** This host founded the replica: its own self-approval is sequence 1. */
-export const ReplicaMembershipCreated = Schema.Struct({
-  instanceId: ReplicaInstanceId,
-  displayName: ReplicaDisplayName,
-  publicKey: ReplicaDevicePublicKey,
-  sequence: Sequence,
-}).annotations(strict);
+/**
+ * Names an earlier draft of this protocol wrote. Nothing on a release wrote
+ * them, but a developer journal may hold them: they decode to nothing and the
+ * projection ignores them, so such a journal starts with no replica identity
+ * instead of failing to replay.
+ */
+const RETIRED_REPLICA_EVENT_NAMES = [
+  "replica.membership-created@1",
+  "replica.join-requested@1",
+  "replica.join-approved@1",
+  "replica.join-confirmed@1",
+  "replica.membership-revoked@1",
+  "replica.entry-signed@1",
+  "replica.entry-applied@1",
+  "replica.entry-refused@1",
+  "replica.membership-command-refused@1",
+  "replica.membership-store-failure@1",
+] as const;
 
-/** This host wrote a join request naming itself. It is not a member yet. */
-export const ReplicaJoinRequested = Schema.Struct({
+/** This host took a new identity: it founded a replica, or asked to join one. */
+export const ReplicaIdentityCreated = Schema.Struct({
   instanceId: ReplicaInstanceId,
-  displayName: ReplicaDisplayName,
   publicKey: ReplicaDevicePublicKey,
-  sequence: Sequence,
-  requestedAt: Schema.Int.pipe(Schema.nonNegative()),
-}).annotations(strict);
-
-/** This host, a member, published an approval of another computer. */
-export const ReplicaJoinApproved = Schema.Struct({
-  approver: ReplicaInstanceId,
-  sequence: Sequence,
-  subject: ReplicaInstanceId,
-  subjectDisplayName: ReplicaDisplayName,
-  subjectDeviceKey: ReplicaDevicePublicKey,
+  displayName: ReplicaDisplayName,
+  role: Schema.Literal("founder", "joiner"),
 }).annotations(strict);
 
 /**
- * The person on this joining computer confirmed a member's signed approval of
- * this computer's request. The approver becomes a member here, and so does
- * this computer, with the key its own request carried.
+ * The founder this host's membership is derived from: itself when it founded
+ * the replica, or the root the person confirmed by matching code.
  */
-const ReplicaChainLink = Schema.Struct({
-  approver: ReplicaInstanceId,
-  sequence: Sequence,
-  subject: ReplicaInstanceId,
-  subjectDisplayName: ReplicaDisplayName,
-  subjectDeviceKey: ReplicaDevicePublicKey,
+export const ReplicaFounderPinned = Schema.Struct({
+  instanceId: ReplicaInstanceId,
+  publicKey: ReplicaDevicePublicKey,
 }).annotations(strict);
 
-export const ReplicaJoinConfirmed = Schema.Struct({
-  approver: ReplicaInstanceId,
-  approverDisplayName: ReplicaDisplayName,
-  approverDeviceKey: ReplicaDevicePublicKey,
-  approvalSequence: Sequence,
-  /** The founding self-approval the chain starts from: this host's only root. */
-  founder: Schema.Struct({
-    instanceId: ReplicaInstanceId,
-    displayName: ReplicaDisplayName,
-    publicKey: ReplicaDevicePublicKey,
-  }).annotations(strict),
-  /** Each approval from the founder to the approver, then the approver's of this host. */
-  links: Schema.NonEmptyArray(ReplicaChainLink),
-}).annotations(strict);
-
-/** This host, a member, published a revocation of another computer. */
-export const ReplicaMembershipRevoked = Schema.Struct({
-  revoker: ReplicaInstanceId,
+/**
+ * A valid membership record this host read or published, kept as the exact
+ * bytes and signature it verified. Keyed by slot and hash, so holding it
+ * again changes nothing.
+ */
+export const ReplicaRecordHeld = Schema.Struct({
+  instanceId: ReplicaInstanceId,
   sequence: Sequence,
-  subject: ReplicaInstanceId,
-  /** The cut the published revocation names. */
-  lastAcceptedSequence: Schema.Int.pipe(Schema.nonNegative()),
+  hash: Sha256Hex,
+  text: Schema.String.pipe(Schema.maxLength(65_536)),
+  signature: Schema.String.pipe(Schema.maxLength(256)),
 }).annotations(strict);
 
 /**
@@ -125,13 +112,12 @@ export const ReplicaEntrySigned = Schema.Struct({
   entry: ReplicaMembershipEntry,
 }).annotations(strict);
 
-/** A membership entry read from the store verified and was applied. */
-export const ReplicaEntryApplied = Schema.Struct({
-  entry: ReplicaMembershipEntry,
-  outcome: Schema.Literal("request-approval", "member-added", "member-revoked", "already-present"),
+/** A file in the store that is not a valid record. Diagnostic only. */
+export const ReplicaEntryUnreadable = Schema.Struct({
+  instanceId: ReplicaInstanceId,
+  sequence: Sequence,
+  reason: Schema.Literal("bad-signature", "path-mismatch", "unreadable"),
 }).annotations(strict);
-
-export const ReplicaEntryRefused = ReplicaReadRefusal;
 
 export const ReplicaMembershipCommandRefused = Schema.Struct({
   command: Schema.Literal(
@@ -139,6 +125,7 @@ export const ReplicaMembershipCommandRefused = Schema.Struct({
     "write-join-request",
     "approve-join",
     "confirm-join",
+    "revoke-preview",
     "revoke",
     "pull",
   ),
@@ -150,6 +137,8 @@ export const ReplicaMembershipCommandRefused = Schema.Struct({
     "expired-join-request",
     "unknown-instance",
     "not-a-member",
+    "not-a-descendant",
+    "invalid-cut",
     "store-unavailable",
     "key-unavailable",
   ),
@@ -165,68 +154,90 @@ export const ReplicaMembershipStoreFailure = Schema.Struct({
 
 export function registerReplicaMembershipEvents(registry: EventRegistry): EventRegistry {
   const names = REPLICA_MEMBERSHIP_EVENT_NAMES;
-  return registry
-    .register(names.replicaCreated, 1, ReplicaMembershipCreated)
-    .register(names.joinRequested, 1, ReplicaJoinRequested)
-    .register(names.joinApproved, 1, ReplicaJoinApproved)
-    .register(names.joinConfirmed, 1, ReplicaJoinConfirmed)
-    .register(names.revoked, 1, ReplicaMembershipRevoked)
+  let registered = registry
+    .register(names.identityCreated, 1, ReplicaIdentityCreated)
+    .register(names.founderPinned, 1, ReplicaFounderPinned)
+    .register(names.recordHeld, 1, ReplicaRecordHeld)
     .register(names.entrySigned, 1, ReplicaEntrySigned)
-    .register(names.entryApplied, 1, ReplicaEntryApplied)
-    .register(names.entryRefused, 1, ReplicaEntryRefused)
+    .register(names.entryUnreadable, 1, ReplicaEntryUnreadable)
     .register(names.commandRefused, 1, ReplicaMembershipCommandRefused)
     .register(names.storeFailure, 1, ReplicaMembershipStoreFailure);
+  for (const name of RETIRED_REPLICA_EVENT_NAMES) {
+    registered = registered.register(name, 1, Schema.Unknown);
+  }
+  return registered;
 }
 
-const decodeCreated = Schema.decodeUnknownSync(ReplicaMembershipCreated);
-const decodeRequested = Schema.decodeUnknownSync(ReplicaJoinRequested);
-const decodeApproved = Schema.decodeUnknownSync(ReplicaJoinApproved);
-const decodeConfirmed = Schema.decodeUnknownSync(ReplicaJoinConfirmed);
-const decodeRevoked = Schema.decodeUnknownSync(ReplicaMembershipRevoked);
+const decodeIdentity = Schema.decodeUnknownSync(ReplicaIdentityCreated);
+const decodePinned = Schema.decodeUnknownSync(ReplicaFounderPinned);
+const decodeHeld = Schema.decodeUnknownSync(ReplicaRecordHeld);
 const decodeSigned = Schema.decodeUnknownSync(ReplicaEntrySigned);
-const decodeApplied = Schema.decodeUnknownSync(ReplicaEntryApplied);
-const decodeRefused = Schema.decodeUnknownSync(ReplicaEntryRefused);
+const decodeUnreadable = Schema.decodeUnknownSync(ReplicaEntryUnreadable);
+const decodeStoreFailure = Schema.decodeUnknownSync(ReplicaMembershipStoreFailure);
 
 /** This host's own identity in the store, once it founded one or asked to join. */
 export interface ReplicaLocalIdentity {
   readonly instanceId: ReplicaInstanceId;
   readonly displayName: ReplicaDisplayName;
   readonly publicKey: ReplicaDevicePublicKey;
+  readonly role: "founder" | "joiner";
+}
+
+/** A record this host holds, with the bytes and signature it verified. */
+export interface ReplicaHeldFile extends ReplicaHeldRecord {
+  readonly text: string;
+  readonly signature: string;
+}
+
+export interface ReplicaRevocationCut {
+  readonly instanceId: ReplicaInstanceId;
+  readonly lastAcceptedSequence: number;
 }
 
 export interface ReplicaMembershipState {
   readonly local: ReplicaLocalIdentity | undefined;
-  /** Whether a record this host holds ever admitted its current identity. */
-  readonly localAdmitted: boolean;
-  /** The founder this host's membership chains back to: itself, or the one it confirmed. */
-  readonly founder: ReplicaMembershipMember | undefined;
-  readonly members: ReadonlyArray<ReplicaMembershipMember>;
-  /** Applied revocations, each a cut on the revoked instance's sequence. */
+  /** The founder this host pinned, with the key its founding record carries. */
+  readonly founder:
+    | { readonly instanceId: ReplicaInstanceId; readonly publicKey: string }
+    | undefined;
+  readonly membership: ReplicaDerivedMembership;
+  /** Admitted computers, revoked ones included: their entries up to a cut still count. */
+  readonly members: ReadonlyArray<ReplicaMembershipNode>;
+  /** Admitted computers with a cut. */
   readonly revocations: ReadonlyArray<ReplicaRevocationCut>;
-  /** Highest sequence this host published under its own instance; 0 before any. */
+  /** Highest sequence this identity published or skipped; 0 before any. */
   readonly localSequence: number;
   /** A signed local entry whose publish has not been confirmed yet. */
   readonly pending: ReplicaMembershipEntry | undefined;
-  /** Entries from other instances this host verified and applied. */
-  readonly applied: ReadonlyArray<ReplicaAppliedEntry>;
-  /** The latest join request read from each computer that is not a member. */
-  readonly joinRequests: ReadonlyArray<ReplicaMembershipEntry>;
-  /** Whether this refusal was already journaled, so a later pull does not repeat it. */
-  readonly refusalRecorded: (refusal: ReplicaReadRefusal) => boolean;
-  /**
-   * The highest sequence of an instance this host holds a signed record of:
-   * an entry it applied, or an approval or revocation that instance signed,
-   * including the links of a chain it imported when it joined.
-   */
+  readonly records: ReadonlyArray<ReplicaHeldFile>;
+  /** Whether this host holds any record in that slot. */
+  readonly holds: (instanceId: ReplicaInstanceId, sequence: number) => boolean;
+  /** The highest sequence of an instance among the records this host holds. */
   readonly heldSequence: (instanceId: ReplicaInstanceId) => number;
-}
-
-function refusalKey(refusal: ReplicaReadRefusal): string {
-  return `${String(refusal.instanceId)}/${String(refusal.sequence)}/${refusal.reason}`;
+  /** Join requests held from computers that are not in the tree. */
+  readonly joinRequests: ReadonlyArray<ReplicaJoinRequestEntry>;
+  /** Whether this host published an accept for its own identity. */
+  readonly localAccepted: boolean;
+  /**
+   * This identity is over: it accepted an approval and is no longer a member
+   * in good standing - revoked, or cut out above it. Coming back is a new
+   * identity. The founder never finishes; losing it means a new store.
+   */
+  readonly localFinished: boolean;
+  /** Whether this unreadable file was already journaled, so a later pull does not repeat it. */
+  readonly unreadableRecorded: (refusal: typeof ReplicaEntryUnreadable.Type) => boolean;
 }
 
 function same(left: ReplicaInstanceId, right: ReplicaInstanceId): boolean {
   return String(left) === String(right);
+}
+
+function slotKey(instanceId: ReplicaInstanceId, sequence: number): string {
+  return `${String(instanceId)}/${String(sequence)}`;
+}
+
+function unreadableKey(refusal: typeof ReplicaEntryUnreadable.Type): string {
+  return `${slotKey(refusal.instanceId, refusal.sequence)}/${refusal.reason}`;
 }
 
 export class ReplicaMembershipProjection implements Projection {
@@ -234,33 +245,21 @@ export class ReplicaMembershipProjection implements Projection {
   readonly dependencies: ReadonlyArray<string> = [];
   readonly holdsStateInMemory = true as const;
   #local: ReplicaLocalIdentity | undefined;
-  /** Members trusted by this host's own act: its founding, or a confirmed approver. */
-  readonly #roots = new Map<string, ReplicaMembershipMember>();
-  #founder: ReplicaMembershipMember | undefined;
-  readonly #admissions: ReplicaAdmissionRecord[] = [];
-  /** The key each instance's own first join request names, from every source that verified one. */
-  readonly #requests: ReplicaJoinRequestKey[] = [];
-  readonly #revocations: ReplicaRevocationRecord[] = [];
-  readonly #recorded = new Set<string>();
-  #localSequence = 0;
+  #founder: { readonly instanceId: ReplicaInstanceId; readonly publicKey: string } | undefined;
+  readonly #records = new Map<string, ReplicaHeldFile>();
+  #skipped = 0;
   #pending: ReplicaMembershipEntry | undefined;
-  readonly #applied = new Map<string, ReplicaAppliedEntry>();
-  readonly #joinRequests = new Map<string, ReplicaMembershipEntry>();
-  readonly #refusals = new Set<string>();
+  readonly #unreadable = new Set<string>();
+  #state: ReplicaMembershipState | undefined;
 
   reset(_connection: SqliteConnection): void {
     this.#local = undefined;
-    this.#roots.clear();
     this.#founder = undefined;
-    this.#admissions.length = 0;
-    this.#requests.length = 0;
-    this.#revocations.length = 0;
-    this.#recorded.clear();
-    this.#localSequence = 0;
+    this.#records.clear();
+    this.#skipped = 0;
     this.#pending = undefined;
-    this.#applied.clear();
-    this.#joinRequests.clear();
-    this.#refusals.clear();
+    this.#unreadable.clear();
+    this.#state = undefined;
   }
 
   apply(_connection: SqliteConnection, event: EventEnvelope): void {
@@ -269,234 +268,128 @@ export class ReplicaMembershipProjection implements Projection {
     }
     const names = REPLICA_MEMBERSHIP_EVENT_NAMES;
     switch (event.eventName) {
-      case names.replicaCreated: {
-        const created = decodeCreated(event.payload);
-        this.#startIdentity(created.instanceId);
-        this.#local = {
-          instanceId: created.instanceId,
-          displayName: created.displayName,
-          publicKey: created.publicKey,
-        };
-        this.#founder = {
-          instanceId: created.instanceId,
-          displayName: created.displayName,
-          publicKey: created.publicKey,
-        };
-        this.#roots.set(String(created.instanceId), this.#founder);
-        this.#published(created.sequence);
-        return;
+      case names.identityCreated: {
+        const created = decodeIdentity(event.payload);
+        // A new identity starts its own sequence and pins its own founder.
+        this.#local = created;
+        this.#founder = undefined;
+        this.#skipped = 0;
+        this.#pending = undefined;
+        break;
       }
-      case names.joinRequested: {
-        const requested = decodeRequested(event.payload);
-        this.#startIdentity(requested.instanceId);
-        this.#local = {
-          instanceId: requested.instanceId,
-          displayName: requested.displayName,
-          publicKey: requested.publicKey,
-        };
-        if (requested.sequence === 1) this.#request(requested.instanceId, requested.publicKey);
-        this.#published(requested.sequence);
-        return;
-      }
-      case names.joinApproved: {
-        const approved = decodeApproved(event.payload);
-        this.#admit(approved.approver, approved.sequence, {
-          instanceId: approved.subject,
-          displayName: approved.subjectDisplayName,
-          publicKey: approved.subjectDeviceKey,
+      case names.founderPinned:
+        this.#founder = decodePinned(event.payload);
+        break;
+      case names.recordHeld: {
+        const held = decodeHeld(event.payload);
+        const key = `${slotKey(held.instanceId, held.sequence)}#${held.hash}`;
+        if (this.#records.has(key)) return;
+        const entry = decodeReplicaEntryText(held.text);
+        // Only membership records are held; the service never journals others.
+        if (entry.kind === "artifact-version" || entry.kind === "artifact-tombstone") return;
+        this.#records.set(key, {
+          entry,
+          hash: held.hash,
+          text: held.text,
+          signature: held.signature,
         });
-        this.#published(approved.sequence);
-        return;
-      }
-      case names.joinConfirmed: {
-        const confirmed = decodeConfirmed(event.payload);
-        // The founder is the only root; everyone else on the chain, this host
-        // included, is admitted by the approval that names them, so a later
-        // revocation cuts them the same way it cuts anyone.
-        this.#founder = confirmed.founder;
-        this.#roots.set(String(confirmed.founder.instanceId), confirmed.founder);
-        for (const link of confirmed.links) {
-          // Confirming checked each link's key against its subject's own
-          // first join request in the store.
-          this.#request(link.subject, link.subjectDeviceKey);
-          this.#admit(link.approver, link.sequence, {
-            instanceId: link.subject,
-            displayName: link.subjectDisplayName,
-            publicKey: link.subjectDeviceKey,
-          });
-        }
-        return;
-      }
-      case names.revoked: {
-        const revoked = decodeRevoked(event.payload);
-        this.#recordRevocation(revoked.revoker, revoked.sequence, {
-          instanceId: revoked.subject,
-          lastAcceptedSequence: revoked.lastAcceptedSequence,
-        });
-        this.#published(revoked.sequence);
-        return;
+        break;
       }
       case names.entrySigned: {
         const { entry } = decodeSigned(event.payload);
-        // Only this host's established identity has a slot worth finishing. A
-        // first entry for a fresh identity is not journaled as pending: if it
-        // fails, nobody can accept that identity, and the next attempt starts
-        // a new one.
-        if (
-          this.#local !== undefined &&
-          same(entry.origin.instanceId, this.#local.instanceId) &&
-          entry.origin.sequence > this.#localSequence
-        ) {
+        // Only this host's current identity has a slot worth finishing.
+        if (this.#local !== undefined && same(entry.origin.instanceId, this.#local.instanceId)) {
           this.#pending = entry;
         }
-        return;
+        break;
       }
-      case names.entryApplied: {
-        this.#applyRead(decodeApplied(event.payload));
-        return;
-      }
-      case names.entryRefused: {
-        this.#refusals.add(refusalKey(decodeRefused(event.payload)));
-        return;
+      case names.entryUnreadable:
+        this.#unreadable.add(unreadableKey(decodeUnreadable(event.payload)));
+        break;
+      case names.storeFailure: {
+        const failure = decodeStoreFailure(event.payload);
+        // A squatted slot of this identity is skipped: the next publish goes
+        // one past it.
+        if (
+          failure.reason === "slot-occupied" &&
+          failure.instanceId !== undefined &&
+          failure.sequence !== undefined &&
+          this.#local !== undefined &&
+          same(failure.instanceId, this.#local.instanceId)
+        ) {
+          this.#skipped = Math.max(this.#skipped, failure.sequence);
+        }
+        break;
       }
       default:
         return;
     }
+    this.#state = undefined;
   }
 
   state(): ReplicaMembershipState {
-    const refusals = new Set(this.#refusals);
-    const { members, cuts } = deriveReplicaMembership({
-      roots: [...this.#roots.values()],
-      requests: this.#requests,
-      admissions: this.#admissions,
-      revocations: this.#revocations,
-    });
+    this.#state ??= this.#derive();
+    return this.#state;
+  }
+
+  #derive(): ReplicaMembershipState {
+    const records = [...this.#records.values()];
     const local = this.#local;
-    const pending =
-      this.#pending !== undefined &&
-      local !== undefined &&
-      cuts.some((cut) => same(cut.instanceId, local.instanceId))
-        ? undefined
-        : this.#pending;
+    const founder = this.#founder;
+    const membership = deriveReplicaMembership(founder?.instanceId, records);
     const held = new Map<string, number>();
-    const hold = (instanceId: ReplicaInstanceId, sequence: number) => {
-      const key = String(instanceId);
-      held.set(key, Math.max(held.get(key) ?? 0, sequence));
-    };
-    for (const applied of this.#applied.values()) hold(applied.instanceId, applied.sequence);
-    for (const admission of this.#admissions) hold(admission.approver, admission.approverSequence);
-    for (const revocation of this.#revocations) {
-      hold(revocation.revoker, revocation.revokerSequence);
+    const slots = new Set<string>();
+    for (const { entry } of records) {
+      const id = String(entry.origin.instanceId);
+      held.set(id, Math.max(held.get(id) ?? 0, entry.origin.sequence));
+      slots.add(slotKey(entry.origin.instanceId, entry.origin.sequence));
     }
+    const localSequence =
+      local === undefined ? 0 : Math.max(held.get(String(local.instanceId)) ?? 0, this.#skipped);
+    const localAccepted =
+      local !== undefined &&
+      records.some(
+        ({ entry }) =>
+          entry.kind === "join-accepted" && same(entry.origin.instanceId, local.instanceId),
+      );
+    const localFinished =
+      local !== undefined &&
+      local.role === "joiner" &&
+      localAccepted &&
+      !replicaInGoodStanding(membership, local.instanceId);
+    // A finished identity's stopped publish is never finished: the slot
+    // belongs to an identity this host no longer writes as.
+    const pending =
+      !localFinished && this.#pending !== undefined && this.#pending.origin.sequence > localSequence
+        ? this.#pending
+        : undefined;
+    const members = replicaMembers(membership);
+    const unreadable = new Set(this.#unreadable);
     return {
       local,
-      localAdmitted:
-        local !== undefined &&
-        (this.#roots.has(String(local.instanceId)) ||
-          // An approval naming another key never admitted this computer, so a
-          // member cannot end a joiner's identity by approving it with one.
-          this.#admissions.some(
-            (admission) =>
-              same(admission.member.instanceId, local.instanceId) &&
-              admission.member.publicKey === local.publicKey,
-          )),
-      founder: this.#founder,
+      founder,
+      membership,
       members,
-      revocations: cuts,
-      localSequence: this.#localSequence,
-      // A revoked identity's stopped publish is never finished.
-      pending,
-      applied: [...this.#applied.values()],
-      joinRequests: [...this.#joinRequests.values()].filter(
-        (entry) =>
-          !members.some((member) => same(member.instanceId, entry.subject)) &&
-          !cuts.some((cut) => same(cut.instanceId, entry.subject)),
+      revocations: members.flatMap((node) =>
+        node.cut === undefined
+          ? []
+          : [{ instanceId: node.instanceId, lastAcceptedSequence: node.cut }],
       ),
-      refusalRecorded: (refusal) => refusals.has(refusalKey(refusal)),
+      localSequence,
+      pending,
+      records,
+      holds: (instanceId, sequence) => slots.has(slotKey(instanceId, sequence)),
       heldSequence: (instanceId) => held.get(String(instanceId)) ?? 0,
+      joinRequests: records.flatMap(({ entry }) =>
+        entry.kind === "join-request" &&
+        replicaMembershipNode(membership, entry.origin.instanceId) === undefined
+          ? [entry]
+          : [],
+      ),
+      localAccepted,
+      localFinished,
+      unreadableRecorded: (refusal) => unreadable.has(unreadableKey(refusal)),
     };
-  }
-
-  #applyRead(applied: typeof ReplicaEntryApplied.Type): void {
-    const { entry, outcome } = applied;
-    this.#applied.set(`${String(entry.origin.instanceId)}/${String(entry.origin.sequence)}`, {
-      instanceId: entry.origin.instanceId,
-      sequence: entry.origin.sequence,
-      kind: entry.kind,
-      subject: entry.subject,
-    });
-    if (entry.kind === "join-request") {
-      if (entry.origin.sequence === 1 && entry.subjectDeviceKey !== undefined) {
-        this.#request(entry.subject, entry.subjectDeviceKey);
-      }
-      if (outcome === "request-approval") this.#joinRequests.set(String(entry.subject), entry);
-      return;
-    }
-    if (entry.kind === "join-approved") {
-      // A self-approval proves nothing by itself; only an approval of another
-      // computer admits anyone.
-      if (same(entry.subject, entry.origin.instanceId) || entry.subjectDeviceKey === undefined) {
-        return;
-      }
-      this.#admit(entry.origin.instanceId, entry.origin.sequence, {
-        instanceId: entry.subject,
-        displayName: entry.subjectDisplayName,
-        publicKey: entry.subjectDeviceKey,
-      });
-      return;
-    }
-    this.#recordRevocation(entry.origin.instanceId, entry.origin.sequence, {
-      instanceId: entry.subject,
-      lastAcceptedSequence: entry.lastAcceptedSequence ?? 0,
-    });
-  }
-
-  #admit(
-    approver: ReplicaInstanceId,
-    approverSequence: number,
-    member: ReplicaMembershipMember,
-  ): void {
-    const key = `admit/${String(approver)}/${String(approverSequence)}`;
-    if (this.#recorded.has(key)) return;
-    this.#recorded.add(key);
-    this.#admissions.push({ approver, approverSequence, member });
-  }
-
-  #request(instanceId: ReplicaInstanceId, publicKey: string): void {
-    const key = `request/${String(instanceId)}/${publicKey}`;
-    if (this.#recorded.has(key)) return;
-    this.#recorded.add(key);
-    this.#requests.push({ instanceId, publicKey });
-  }
-
-  #recordRevocation(
-    revoker: ReplicaInstanceId,
-    revokerSequence: number,
-    cut: ReplicaRevocationCut,
-  ): void {
-    const key = `revoke/${String(revoker)}/${String(revokerSequence)}`;
-    if (this.#recorded.has(key)) return;
-    this.#recorded.add(key);
-    this.#revocations.push({ revoker, revokerSequence, cut });
-  }
-
-  /**
-   * A new local identity - after a revocation, re-joining is one - starts its
-   * own sequence. Carrying the old identity's sequence over would open a gap
-   * every reader refuses.
-   */
-  #startIdentity(instanceId: ReplicaInstanceId): void {
-    if (this.#local !== undefined && same(this.#local.instanceId, instanceId)) return;
-    this.#localSequence = 0;
-    this.#pending = undefined;
-  }
-
-  #published(sequence: number): void {
-    if (sequence > this.#localSequence) this.#localSequence = sequence;
-    if (this.#pending !== undefined && this.#pending.origin.sequence <= this.#localSequence) {
-      this.#pending = undefined;
-    }
   }
 }
 

@@ -29,6 +29,13 @@ const ids = {
 } as const;
 
 const hash = "a".repeat(64);
+const key = "MCowBQYDK2VwAyEAsI3Vx6E5C70zWN51mv4VIXZxVQC4M1DBS7XoBYp5/R4=";
+const origin = (sequence: number) => ({
+  instanceId: ids.instance,
+  displayName: "North",
+  sequence,
+  publicKey: key,
+});
 const now = "2026-08-18T09:00:00.000Z";
 
 function definition(text = "Ship the preview first.") {
@@ -80,6 +87,7 @@ function entry(
       instanceId: ids.instance,
       displayName: "North",
       sequence: 1,
+      publicKey: key,
     },
     artifact: {
       canvasId: ids.canvas,
@@ -115,17 +123,45 @@ describe("artifact bundle contract", () => {
     ).toThrow();
   });
 
-  it("refuses a join request that does not carry the joiner's device key", () => {
+  it("refuses an entry whose origin does not carry its writer's key", () => {
     expect(() =>
       decodeReplicaMembershipEntry({
         format: REPLICA_ENTRY_FORMAT,
         kind: "join-request",
         origin: { instanceId: ids.instance, displayName: "North", sequence: 1 },
-        subject: ids.instance,
-        subjectDisplayName: "North",
         requestedAt: 1,
       }),
     ).toThrow();
+  });
+
+  it("holds a founding record and a join request to sequence 1, and an accept to a later one", () => {
+    expect(() =>
+      decodeReplicaMembershipEntry({
+        format: REPLICA_ENTRY_FORMAT,
+        kind: "replica-founded",
+        origin: origin(2),
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeReplicaMembershipEntry({
+        format: REPLICA_ENTRY_FORMAT,
+        kind: "join-request",
+        origin: origin(2),
+        requestedAt: 1,
+      }),
+    ).toThrow();
+    const accept = {
+      format: REPLICA_ENTRY_FORMAT,
+      kind: "join-accepted",
+      approver: ids.otherVersion,
+      approvalSequence: 2,
+      approvalHash: hash,
+      founder: ids.otherVersion,
+    } as const;
+    expect(() => decodeReplicaMembershipEntry({ ...accept, origin: origin(1) })).toThrow();
+    expect(decodeReplicaMembershipEntry({ ...accept, origin: origin(2) }).kind).toBe(
+      "join-accepted",
+    );
   });
 
   it("refuses a join request that does not say when it was written", () => {
@@ -133,10 +169,7 @@ describe("artifact bundle contract", () => {
       decodeReplicaMembershipEntry({
         format: REPLICA_ENTRY_FORMAT,
         kind: "join-request",
-        origin: { instanceId: ids.instance, displayName: "North", sequence: 1 },
-        subject: ids.instance,
-        subjectDisplayName: "North",
-        subjectDeviceKey: "MCowBQYDK2VwAyEAsI3Vx6E5C70zWN51mv4VIXZxVQC4M1DBS7XoBYp5/R4=",
+        origin: origin(1),
       }),
     ).toThrow();
   });
@@ -146,69 +179,49 @@ describe("artifact bundle contract", () => {
       decodeReplicaMembershipEntry({
         format: REPLICA_ENTRY_FORMAT,
         kind: "join-approved",
-        origin: { instanceId: ids.instance, displayName: "North", sequence: 2 },
+        origin: origin(2),
         subject: ids.otherVersion,
-        subjectDisplayName: "South",
+        subjectName: "South",
       }),
     ).toThrow();
   });
 
-  it("refuses an approval or revocation that claims a request time", () => {
-    const subjectDeviceKey = "MCowBQYDK2VwAyEAsI3Vx6E5C70zWN51mv4VIXZxVQC4M1DBS7XoBYp5/R4=";
-    for (const kind of ["join-approved", "revocation"] as const) {
-      expect(() =>
-        decodeReplicaMembershipEntry({
-          format: REPLICA_ENTRY_FORMAT,
-          kind,
-          origin: { instanceId: ids.instance, displayName: "North", sequence: 3 },
-          subject: ids.otherVersion,
-          subjectDisplayName: "South",
-          ...(kind === "join-approved" ? { subjectDeviceKey } : {}),
-          requestedAt: 1,
-        }),
-      ).toThrow();
-    }
-  });
-
-  it("refuses a revocation that carries a device key", () => {
+  it("refuses a field another kind defines", () => {
     expect(() =>
       decodeReplicaMembershipEntry({
         format: REPLICA_ENTRY_FORMAT,
         kind: "revocation",
-        origin: { instanceId: ids.instance, displayName: "North", sequence: 3 },
+        origin: origin(3),
         subject: ids.otherVersion,
-        subjectDisplayName: "South",
-        subjectDeviceKey: "MCowBQYDK2VwAyEAsI3Vx6E5C70zWN51mv4VIXZxVQC4M1DBS7XoBYp5/R4=",
-        lastAcceptedSequence: 1,
+        cut: 1,
+        requestedAt: 1,
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeReplicaMembershipEntry({
+        format: REPLICA_ENTRY_FORMAT,
+        kind: "join-approved",
+        origin: origin(3),
+        subject: ids.otherVersion,
+        subjectKey: key,
+        subjectName: "South",
+        cut: 1,
       }),
     ).toThrow();
   });
 
-  it("requires a revocation to name the last sequence it accepts, and signs it", () => {
+  it("requires a revocation to name its cut, and signs it", () => {
     const fields = {
       format: REPLICA_ENTRY_FORMAT,
       kind: "revocation",
-      origin: { instanceId: ids.instance, displayName: "North", sequence: 3 },
+      origin: origin(3),
       subject: ids.otherVersion,
-      subjectDisplayName: "South",
     } as const;
     expect(() => decodeReplicaMembershipEntry(fields)).toThrow();
-    const revocation = decodeReplicaMembershipEntry({ ...fields, lastAcceptedSequence: 4 });
+    const revocation = decodeReplicaMembershipEntry({ ...fields, cut: 4 });
     const encoded = JSON.parse(encodeReplicaEntry(revocation)) as Record<string, unknown>;
-    expect(encoded.lastAcceptedSequence).toBe(4);
-    expect(Object.keys(encoded).at(-1)).toBe("lastAcceptedSequence");
-    for (const kind of ["join-request", "join-approved"] as const) {
-      expect(() =>
-        decodeReplicaMembershipEntry({
-          ...fields,
-          kind,
-          subject: ids.instance,
-          subjectDeviceKey: "MCowBQYDK2VwAyEAsI3Vx6E5C70zWN51mv4VIXZxVQC4M1DBS7XoBYp5/R4=",
-          requestedAt: 1,
-          lastAcceptedSequence: 4,
-        }),
-      ).toThrow();
-    }
+    expect(encoded.cut).toBe(4);
+    expect(Object.keys(encoded)).toEqual(["format", "kind", "origin", "subject", "cut"]);
   });
 });
 
@@ -231,7 +244,12 @@ describe("replica entry contract", () => {
       "contentHash",
       "bundle",
     ]);
-    expect(Object.keys(parsed.origin)).toEqual(["instanceId", "displayName", "sequence"]);
+    expect(Object.keys(parsed.origin)).toEqual([
+      "instanceId",
+      "displayName",
+      "sequence",
+      "publicKey",
+    ]);
     expect(Object.keys(parsed.artifact)).toEqual(["canvasId", "hostId"]);
     expect(Object.keys(parsed.bundle.octant)).toEqual([
       "format",
@@ -294,33 +312,48 @@ describe("replica entry contract", () => {
     expect(encodeReplicaEntry(grafted)).not.toBe(base);
   });
 
-  it("round-trips a membership record the same way", () => {
-    const request = decodeReplicaMembershipEntry({
-      format: REPLICA_ENTRY_FORMAT,
-      kind: "join-request",
-      origin: { instanceId: ids.instance, displayName: "North", sequence: 1 },
-      subject: ids.instance,
-      subjectDisplayName: "North",
-      subjectDeviceKey: "MCowBQYDK2VwAyEAsI3Vx6E5C70zWN51mv4VIXZxVQC4M1DBS7XoBYp5/R4=",
-      requestedAt: 1_800_000_000_000,
-    });
-    const encoded = encodeReplicaEntry(request);
-    expect(Object.keys(JSON.parse(encoded) as Record<string, unknown>)).toEqual([
-      "format",
-      "kind",
-      "origin",
-      "subject",
-      "subjectDisplayName",
-      "subjectDeviceKey",
-      "requestedAt",
-    ]);
-    expect(decodeReplicaEntryText(encoded)).toEqual(request);
-    expect(() =>
-      decodeReplicaEntry({
-        ...JSON.parse(encoded),
-        kind: "join-request",
+  it("round-trips every membership record the same way, with the writer's key in its origin", () => {
+    const records = [
+      { format: REPLICA_ENTRY_FORMAT, kind: "replica-founded", origin: origin(1) },
+      { format: REPLICA_ENTRY_FORMAT, kind: "join-request", origin: origin(1), requestedAt: 1 },
+      {
+        format: REPLICA_ENTRY_FORMAT,
+        kind: "join-approved",
+        origin: origin(2),
         subject: ids.otherVersion,
-      }),
+        subjectKey: key,
+        subjectName: "South",
+      },
+      {
+        format: REPLICA_ENTRY_FORMAT,
+        kind: "join-accepted",
+        origin: origin(2),
+        approver: ids.otherVersion,
+        approvalSequence: 3,
+        approvalHash: hash,
+        founder: ids.otherVersion,
+      },
+    ];
+    for (const record of records) {
+      const decoded = decodeReplicaMembershipEntry(record);
+      const encoded = encodeReplicaEntry(decoded);
+      expect(Object.keys(JSON.parse(encoded) as Record<string, unknown>)).toEqual(
+        Object.keys(record),
+      );
+      expect(Object.keys((JSON.parse(encoded) as { origin: object }).origin)).toEqual([
+        "instanceId",
+        "displayName",
+        "sequence",
+        "publicKey",
+      ]);
+      expect(decodeReplicaEntryText(encoded)).toEqual(decoded);
+    }
+  });
+
+  it("refuses an entry written in the first format", () => {
+    const encoded = JSON.parse(encodeReplicaEntry(entry())) as Record<string, unknown>;
+    expect(() =>
+      decodeReplicaEntryText(JSON.stringify({ ...encoded, format: "octant.replica-entry/1" })),
     ).toThrow();
   });
 });

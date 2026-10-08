@@ -842,7 +842,7 @@ import {
 import { createReplicaMembershipRouteHandler } from "./replica/replicaMembershipRoutes";
 import { ReplicaMembershipService } from "./replica/replicaMembershipService";
 import { createReplicaMembershipJournal } from "./replica/replicaMembershipProjection";
-import { ensureReplicaDeviceKey, makeReplicaDeviceSigner } from "./replica/replicaDeviceKeyService";
+import { createReplicaDeviceKey, makeReplicaDeviceSigner } from "./replica/replicaDeviceKeyService";
 import { createHostResourceRouteHandler } from "./hostResourceRoutes";
 import { desktopCredentialStore } from "./hostDataMap";
 import { ThreadRetentionService } from "./threadRetentionService";
@@ -9967,9 +9967,9 @@ export function startOctantServer(
     const replicaMembershipService = new ReplicaMembershipService({
       store: () => ({ status: "not-configured" }),
       credentials: {
-        ensure: async (instanceId) => {
+        create: async () => {
           if (replicaDeviceKeys === undefined) throw new Error("credential store unavailable");
-          return ensureReplicaDeviceKey(replicaDeviceKeys, instanceId);
+          return createReplicaDeviceKey(replicaDeviceKeys);
         },
         sign: async (instanceId, payload) => {
           if (replicaDeviceKeys === undefined) throw new Error("credential store unavailable");

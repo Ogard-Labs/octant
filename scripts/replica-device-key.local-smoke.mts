@@ -5,8 +5,9 @@
 import { generateKeyPairSync } from "node:crypto";
 import { makeKeychainCredentialStore } from "../apps/desktop/src/keychainCredentialStore";
 import {
-  ensureReplicaDeviceKey,
+  createReplicaDeviceKey,
   makeReplicaDeviceSigner,
+  replicaInstanceIdOf,
   verifyReplicaEntrySignature,
 } from "../apps/server/src/replica/replicaDeviceKeyService";
 
@@ -18,14 +19,15 @@ if (helper === undefined || storeScope === undefined) {
 }
 const store = makeKeychainCredentialStore(helper, { storeScope, namespace: "replica-device-key" });
 const providers = makeKeychainCredentialStore(helper, { storeScope });
-const instanceId = "99999999-9999-4999-8999-999999999999";
-
-const key = await ensureReplicaDeviceKey(store, instanceId);
-console.log("ensure.publicKey:", key.publicKey.slice(0, 24) + "...");
-console.log("ensure.fingerprint:", key.fingerprint);
+const key = await createReplicaDeviceKey(store);
+const instanceId = key.instanceId;
+const idCertified = replicaInstanceIdOf(key.publicKey) === instanceId;
+console.log("create.publicKey:", key.publicKey.slice(0, 24) + "...");
+console.log("create.fingerprint:", key.fingerprint);
+console.log("create.instanceId is the key's id:", idCertified);
 
 const signer = makeReplicaDeviceSigner(store, instanceId);
-const payload = new TextEncoder().encode("octant.replica-entry/1 smoke\n");
+const payload = new TextEncoder().encode("octant.replica-entry/2 smoke\n");
 const { signature } = await signer.sign(payload);
 console.log("sign.signature bytes:", signature.length);
 
@@ -49,8 +51,12 @@ const providerSeesKey = await providers.has(instanceId);
 console.log("provider.has(same id):", providerSeesKey);
 await providers.set(instanceId, "provider-secret");
 await providers.delete(instanceId);
-const keyAfterProvider = await ensureReplicaDeviceKey(store, instanceId);
-const keyUntouched = keyAfterProvider.publicKey === key.publicKey;
+const afterProvider = await makeReplicaDeviceSigner(store, instanceId).sign(payload);
+const keyUntouched = verifyReplicaEntrySignature({
+  publicKeyBase64: key.publicKey,
+  payload,
+  signatureBase64: afterProvider.signature,
+});
 console.log("device key unchanged after provider set+delete:", keyUntouched);
 
 const other = generateKeyPairSync("ed25519");
@@ -66,5 +72,7 @@ console.log("cleanup: deleted");
 const gone = !(await store.has(instanceId));
 console.log("cleanup: device key absent:", gone);
 process.exit(
-  verified && !tampered && !wrongKey && !providerSeesKey && keyUntouched && gone ? 0 : 1,
+  idCertified && verified && !tampered && !wrongKey && !providerSeesKey && keyUntouched && gone
+    ? 0
+    : 1,
 );

@@ -101,6 +101,10 @@ export const KNOWN_ISLANDS: ReadonlyMap<string, string> = new Map([
     "Conformance evidence a driver test runs against contextFacts; test scaffolding by intent, and reachable only from tests is its correct state. Remove once a product runner imports it or the last driver test that uses the kit is retired.",
   ],
   [
+    "packages/domain/src/replicaEntryPolicy.ts",
+    "Pure reconcile policy for artifact replica entries. Membership is derived from the records a host holds, not reconciled entry by entry, and a pull holds verified artifact entries without importing them. Remove once the artifact import imports reconcileReplicaEntry.",
+  ],
+  [
     "apps/server/src/replica/syncedFolderReplicaStore.ts",
     "Synced-folder replica store. The membership service reads and writes through the store port, but no host setting selects a store yet, so nothing opens this one. Remove once the store selection opens it.",
   ],

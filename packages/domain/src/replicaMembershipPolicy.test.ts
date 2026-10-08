@@ -1,59 +1,127 @@
 import { describe, expect, it } from "vitest";
-import type { ReplicaInstanceId } from "@octant/contracts/replica-entry";
+import {
+  REPLICA_ENTRY_FORMAT,
+  type ReplicaInstanceId,
+  type ReplicaMembershipEntry,
+} from "@octant/contracts/replica-entry";
 import {
   buildReplicaJoinMatchingPreimage,
   decideReplicaJoinApproval,
   decideReplicaRevocation,
   deriveReplicaMembership,
+  replicaApprovalOf,
+  replicaDescendants,
+  replicaEntryCounts,
+  replicaFounderReachedFrom,
   replicaJoinRequestIsFresh,
-  revocationCut,
+  replicaMembershipNode,
   REPLICA_JOIN_REQUEST_TTL_MS,
-  type ReplicaAdmissionRecord,
-  type ReplicaJoinRequestKey,
-  type ReplicaMembershipFacts,
-  type ReplicaMembershipMember,
-  type ReplicaRevocationRecord,
+  type ReplicaDerivedMembership,
+  type ReplicaHeldRecord,
 } from "./replicaMembershipPolicy";
 
 const ids = {
-  local: "11111111-1111-4111-8111-111111111111" as ReplicaInstanceId,
-  joiner: "22222222-2222-4222-8222-222222222222" as ReplicaInstanceId,
-  approver: "33333333-3333-4333-8333-333333333333" as ReplicaInstanceId,
-  revoked: "44444444-4444-4444-8444-444444444444" as ReplicaInstanceId,
-  fresh: "55555555-5555-4555-8555-555555555555" as ReplicaInstanceId,
-  unknown: "66666666-6666-4666-8666-666666666666" as ReplicaInstanceId,
+  founder: "11111111-1111-8111-8111-111111111111" as ReplicaInstanceId,
+  south: "22222222-2222-8222-8222-222222222222" as ReplicaInstanceId,
+  east: "33333333-3333-8333-8333-333333333333" as ReplicaInstanceId,
+  west: "44444444-4444-8444-8444-444444444444" as ReplicaInstanceId,
+  ghost: "55555555-5555-8555-8555-555555555555" as ReplicaInstanceId,
+  other: "66666666-6666-8666-8666-666666666666" as ReplicaInstanceId,
 } as const;
 
-function membership(overrides: Partial<ReplicaMembershipFacts> = {}): ReplicaMembershipFacts {
+const keyOf = (id: ReplicaInstanceId) => `key-${String(id).slice(0, 8)}`;
+const origin = (id: ReplicaInstanceId, sequence: number) => ({
+  instanceId: id,
+  displayName: `Computer ${String(id).slice(0, 2)}`,
+  sequence,
+  publicKey: keyOf(id),
+});
+let hashes = 0;
+function held(entry: ReplicaMembershipEntry): ReplicaHeldRecord {
+  hashes += 1;
+  return { entry, hash: String(hashes).padStart(64, "0") };
+}
+
+const founded = (id: ReplicaInstanceId) =>
+  held({ format: REPLICA_ENTRY_FORMAT, kind: "replica-founded", origin: origin(id, 1) });
+const approval = (by: ReplicaInstanceId, sequence: number, subject: ReplicaInstanceId) =>
+  held({
+    format: REPLICA_ENTRY_FORMAT,
+    kind: "join-approved",
+    origin: origin(by, sequence),
+    subject,
+    subjectKey: keyOf(subject),
+    subjectName: "Joiner",
+  });
+function accept(
+  child: ReplicaInstanceId,
+  sequence: number,
+  of: ReplicaHeldRecord,
+  approvalHash = of.hash,
+): ReplicaHeldRecord {
+  return held({
+    format: REPLICA_ENTRY_FORMAT,
+    kind: "join-accepted",
+    origin: origin(child, sequence),
+    approver: of.entry.origin.instanceId,
+    approvalSequence: of.entry.origin.sequence,
+    approvalHash,
+    founder: ids.founder,
+  });
+}
+const revocation = (
+  by: ReplicaInstanceId,
+  sequence: number,
+  subject: ReplicaInstanceId,
+  cut: number,
+) =>
+  held({
+    format: REPLICA_ENTRY_FORMAT,
+    kind: "revocation",
+    origin: origin(by, sequence),
+    subject,
+    cut,
+  });
+
+/** The founder approves South at 2 and East at 3; South approves West at 3. */
+function tree() {
+  const southApproval = approval(ids.founder, 2, ids.south);
+  const eastApproval = approval(ids.founder, 3, ids.east);
+  const westApproval = approval(ids.south, 3, ids.west);
   return {
-    localInstanceId: ids.local,
-    members: [
-      {
-        instanceId: ids.local,
-        displayName: "MacBook",
-        publicKey: "pub-macbook",
-      },
+    westApproval,
+    records: [
+      founded(ids.founder),
+      southApproval,
+      accept(ids.south, 2, southApproval),
+      eastApproval,
+      accept(ids.east, 2, eastApproval),
+      westApproval,
+      accept(ids.west, 2, westApproval),
     ],
-    revocations: [],
-    ...overrides,
   };
+}
+
+function standing(membership: ReplicaDerivedMembership, id: ReplicaInstanceId): string {
+  const node = replicaMembershipNode(membership, id);
+  if (node === undefined) return "absent";
+  if (!node.admitted) return "not admitted";
+  return node.cut === undefined ? "member" : `cut@${node.cut}`;
 }
 
 describe("replica membership policy", () => {
   it("derives the same matching preimage from the same join facts on both computers", () => {
     const joinRequest = {
-      origin: { instanceId: ids.joiner, displayName: "Mac mini" },
-      subject: ids.joiner,
+      origin: { instanceId: ids.south, displayName: "Mac mini" },
+      subject: ids.south,
       publicKey: "pub-mac-mini",
     };
-    const approver = { instanceId: ids.approver, publicKey: "pub-approver" };
-    const founder = { instanceId: ids.local, publicKey: "pub-macbook" };
+    const approver = { instanceId: ids.east, publicKey: "pub-approver" };
+    const founder = { instanceId: ids.founder, publicKey: "pub-macbook" };
     const first = buildReplicaJoinMatchingPreimage({ joinRequest, approver, founder });
-    const second = buildReplicaJoinMatchingPreimage({ joinRequest, approver, founder });
-    expect(first).toBe(second);
+    expect(buildReplicaJoinMatchingPreimage({ joinRequest, approver, founder })).toBe(first);
     expect(first).toContain("octant.replica-join.v2");
-    // A chain that names another key for the approver, or another founder,
-    // describes a different join.
+    // Another key for the approver, or another founder, describes a different join.
     expect(
       buildReplicaJoinMatchingPreimage({
         joinRequest,
@@ -65,73 +133,9 @@ describe("replica membership policy", () => {
       buildReplicaJoinMatchingPreimage({
         joinRequest,
         approver,
-        founder: { instanceId: ids.fresh, publicKey: "pub-forged" },
+        founder: { instanceId: ids.other, publicKey: "pub-forged" },
       }),
     ).not.toBe(first);
-  });
-
-  it("refuses to approve a join request from an instance that is already a member", () => {
-    const decision = decideReplicaJoinApproval({
-      facts: membership(),
-      joinRequest: {
-        origin: { instanceId: ids.local, displayName: "MacBook" },
-        subject: ids.local,
-        publicKey: "pub-macbook",
-      },
-    });
-    expect(decision).toEqual({ status: "refused", reason: "already-member" });
-  });
-
-  it("refuses to approve a join request from a revoked identity", () => {
-    const decision = decideReplicaJoinApproval({
-      facts: membership({ revocations: [{ instanceId: ids.revoked, lastAcceptedSequence: 0 }] }),
-      joinRequest: {
-        origin: { instanceId: ids.revoked, displayName: "Old PC" },
-        subject: ids.revoked,
-        publicKey: "pub-old-pc",
-      },
-    });
-    expect(decision).toEqual({ status: "refused", reason: "revoked-instance" });
-  });
-
-  it("approves a fresh join request from an unknown instance", () => {
-    const decision = decideReplicaJoinApproval({
-      facts: membership(),
-      joinRequest: {
-        origin: { instanceId: ids.fresh, displayName: "New PC" },
-        subject: ids.fresh,
-        publicKey: "pub-new-pc",
-      },
-    });
-    expect(decision).toEqual({ status: "approved" });
-  });
-
-  it("refuses to revoke an unknown instance", () => {
-    const decision = decideReplicaRevocation(membership(), ids.unknown);
-    expect(decision).toEqual({ status: "refused", reason: "unknown-instance" });
-  });
-
-  it("revokes a member and keeps it revoked", () => {
-    expect(decideReplicaRevocation(membership(), ids.local)).toEqual({ status: "revoked" });
-    expect(
-      decideReplicaRevocation(
-        membership({ revocations: [{ instanceId: ids.local, lastAcceptedSequence: 0 }] }),
-        ids.local,
-      ),
-    ).toEqual({
-      status: "refused",
-      reason: "revoked-instance",
-    });
-  });
-
-  it("takes the earliest cut when two members revoke the same instance", () => {
-    const facts = membership({
-      revocations: [
-        { instanceId: ids.local, lastAcceptedSequence: 5 },
-        { instanceId: ids.local, lastAcceptedSequence: 2 },
-      ],
-    });
-    expect(revocationCut(facts, ids.local)).toBe(2);
   });
 
   it("does not offer a join request past its freshness window", () => {
@@ -153,251 +157,212 @@ describe("replica membership policy", () => {
 });
 
 describe("replica membership derivation", () => {
-  const founder = member(ids.local, "pub-founder");
-  const taken = member(ids.joiner, "pub-taken");
-  const kept = member(ids.approver, "pub-kept");
-
-  function member(instanceId: ReplicaInstanceId, publicKey: string): ReplicaMembershipMember {
-    return { instanceId, displayName: String(instanceId).slice(0, 4), publicKey };
-  }
-
-  function admission(
-    approver: ReplicaInstanceId,
-    approverSequence: number,
-    admitted: ReplicaMembershipMember,
-  ): ReplicaAdmissionRecord {
-    return { approver, approverSequence, member: admitted };
-  }
-
-  function revocation(
-    revoker: ReplicaInstanceId,
-    revokerSequence: number,
-    subject: ReplicaInstanceId,
-    lastAcceptedSequence: number,
-  ): ReplicaRevocationRecord {
-    return { revoker, revokerSequence, cut: { instanceId: subject, lastAcceptedSequence } };
-  }
-
-  // Each computer's own first join request, naming the key it signs with.
-  const requests: ReadonlyArray<ReplicaJoinRequestKey> = [
-    { instanceId: ids.joiner, publicKey: "pub-taken" },
-    { instanceId: ids.approver, publicKey: "pub-kept" },
-    { instanceId: ids.fresh, publicKey: "pub-fresh" },
-    { instanceId: ids.unknown, publicKey: "pub-unknown" },
-  ];
-
-  function derive(
-    admissions: ReadonlyArray<ReplicaAdmissionRecord>,
-    revocations: ReadonlyArray<ReplicaRevocationRecord>,
-    held: ReadonlyArray<ReplicaJoinRequestKey> = requests,
-  ) {
-    const derived = deriveReplicaMembership({
-      roots: [founder],
-      requests: held,
-      admissions,
-      revocations,
-    });
-    return {
-      members: derived.members.map((m) => `${String(m.instanceId)}:${m.publicKey}`).sort(),
-      cuts: derived.cuts
-        .map((cut) => `${String(cut.instanceId)}@${cut.lastAcceptedSequence}`)
-        .sort(),
-    };
-  }
-
-  // The founder approves Taken (its 2) and Kept (its 3), then revokes Taken
-  // (its 4) with a cut after Taken's join request. Taken answers by revoking
-  // the founder (its 2).
-  const admissions = [admission(ids.local, 2, taken), admission(ids.local, 3, kept)];
-  const founderRevokesTaken = revocation(ids.local, 4, ids.joiner, 1);
-
-  it("ignores a revocation whose cut removes its own revoker's admission, in either order", () => {
-    const answer = revocation(ids.joiner, 2, ids.local, 0);
-    for (const revocations of [
-      [founderRevokesTaken, answer],
-      [answer, founderRevokesTaken],
-    ]) {
-      expect(derive(admissions, revocations)).toEqual({
-        members: ["11111111-1111-4111-8111-111111111111:pub-founder", ...keptAndTaken()],
-        cuts: [`${ids.joiner}@1`],
-      });
-    }
-  });
-
-  it("lets the computer that approved another revoke it without being revoked back", () => {
-    const answer = revocation(ids.joiner, 2, ids.local, 2);
-    for (const revocations of [
-      [founderRevokesTaken, answer],
-      [answer, founderRevokesTaken],
-    ]) {
-      expect(derive(admissions, revocations)).toEqual({
-        members: ["11111111-1111-4111-8111-111111111111:pub-founder", ...keptAndTaken()],
-        cuts: [`${ids.joiner}@1`],
-      });
-    }
-  });
-
-  it("keeps both revoked when two computers, neither the other's approver, revoke each other", () => {
-    const peers = [admission(ids.local, 2, taken), admission(ids.local, 3, kept)];
-    const first = revocation(ids.joiner, 2, ids.approver, 1);
-    const second = revocation(ids.approver, 2, ids.joiner, 1);
-    for (const revocations of [
-      [first, second],
-      [second, first],
-    ]) {
-      expect(derive(peers, revocations).cuts).toEqual([`${ids.joiner}@1`, `${ids.approver}@1`]);
-    }
-  });
-
-  // Kept approves Fresh with the key Fresh's own request names. Taken, a peer
-  // of Kept with a lower id, also writes an approval of Fresh.
-  const peers = [admission(ids.local, 2, taken), admission(ids.local, 3, kept)];
-  const keptApprovesFresh = admission(ids.approver, 2, member(ids.fresh, "pub-fresh"));
-
-  it("keeps a member's own key when another member approves it again with its own key", () => {
-    const takeover = admission(ids.joiner, 2, member(ids.fresh, "pub-taken"));
-    for (const records of [
-      [...peers, keptApprovesFresh, takeover],
-      [...peers, takeover, keptApprovesFresh],
-    ]) {
-      const { members } = derive(records, []);
-      expect(members).toContain(`${ids.fresh}:pub-fresh`);
-      expect(members).not.toContain(`${ids.fresh}:pub-taken`);
-    }
-  });
-
-  it("does not make the writer of a second approval with the right key an ancestor", () => {
-    const second = admission(ids.joiner, 2, member(ids.fresh, "pub-fresh"));
-    const takenRevokesFresh = revocation(ids.joiner, 3, ids.fresh, 0);
-    const freshRevokesTaken = revocation(ids.fresh, 1, ids.joiner, 2);
-    for (const records of [
-      [...peers, keptApprovesFresh, second],
-      [...peers, second, keptApprovesFresh],
-    ]) {
-      const derived = derive(records, [takenRevokesFresh, freshRevokesTaken]);
-      expect(derived.members).toContain(`${ids.fresh}:pub-fresh`);
-      // Neither is the other's approver, so both stay revoked: Taken cannot
-      // remove Fresh and refuse Fresh's answer.
-      expect(derived.cuts).toEqual([`${ids.joiner}@2`, `${ids.fresh}@0`].sort());
-    }
-  });
-
-  it("admits a joiner only through an approval naming its own request's key", () => {
-    const forged = admission(ids.joiner, 2, member(ids.fresh, "pub-taken"));
-    expect(
-      derive([...peers, forged], []).members.some((m) => m.startsWith(String(ids.fresh))),
-    ).toBe(false);
-    for (const records of [
-      [...peers, forged, keptApprovesFresh],
-      [...peers, keptApprovesFresh, forged],
-    ]) {
-      expect(derive(records, []).members).toContain(`${ids.fresh}:pub-fresh`);
-    }
-  });
-
-  it("admits nobody whose join requests name different keys, or who has none", () => {
-    const records = [...peers, keptApprovesFresh];
-    const conflicting = [...requests, { instanceId: ids.fresh, publicKey: "pub-taken" }];
-    const without = requests.filter((request) => request.instanceId !== ids.fresh);
-    for (const held of [conflicting, [...conflicting].reverse(), without]) {
-      expect(derive(records, [], held).members.some((m) => m.startsWith(String(ids.fresh)))).toBe(
-        false,
-      );
-    }
-  });
-
-  // A chain three deep - the founder approves Taken, Taken approves Kept, Kept
-  // approves Fresh - and Unknown, approved by the founder directly.
-  const deepChain = [
-    admission(ids.local, 2, taken),
-    admission(ids.joiner, 2, kept),
-    admission(ids.approver, 2, member(ids.fresh, "pub-fresh")),
-    admission(ids.local, 3, member(ids.unknown, "pub-unknown")),
-  ];
-  const nearerApprovesFresh = admission(ids.unknown, 2, member(ids.fresh, "pub-fresh"));
-
-  it("does not let a computer nearer the founder become a deeper one's ancestor by approving it again", () => {
-    // Fresh revokes Unknown first. Past that cut, Unknown approves Fresh with
-    // its real key, which admits Fresh a round earlier, and revokes Fresh.
-    const freshRevokesUnknown = revocation(ids.fresh, 2, ids.unknown, 1);
-    const unknownRevokesFresh = revocation(ids.unknown, 3, ids.fresh, 1);
-    const records = [...deepChain, nearerApprovesFresh, freshRevokesUnknown, unknownRevokesFresh];
-    const results = new Set<string>();
-    for (let seed = 1; seed <= 30; seed += 1) {
-      const shuffled = shuffle(records, seed);
-      const derived = derive(
-        shuffled.filter((record): record is ReplicaAdmissionRecord => "member" in record),
-        shuffled.filter((record): record is ReplicaRevocationRecord => "cut" in record),
-      );
-      expect(derived.cuts).toEqual([`${ids.fresh}@1`, `${ids.unknown}@1`]);
-      results.add(JSON.stringify(derived));
-    }
-    expect(results.size).toBe(1);
-  });
-
-  it("revokes both computers that revoke each other, with or without another approval of one", () => {
-    const freshRevokesUnknown = revocation(ids.fresh, 2, ids.unknown, 1);
-    const unknownRevokesFresh = revocation(ids.unknown, 3, ids.fresh, 1);
-    for (const records of [deepChain, [...deepChain, nearerApprovesFresh]]) {
-      for (const revocations of [
-        [freshRevokesUnknown, unknownRevokesFresh],
-        [unknownRevokesFresh, freshRevokesUnknown],
-      ]) {
-        expect(derive(records, revocations).cuts).toEqual([`${ids.fresh}@1`, `${ids.unknown}@1`]);
-      }
-    }
-    // Kept approved Fresh, so alone it wins their exchange. Once Unknown has
-    // approved Fresh too, Kept is no longer an ancestor every approval
-    // shares, and the exchange ends with both revoked.
-    const keptRevokesFresh = revocation(ids.approver, 3, ids.fresh, 1);
-    const freshRevokesKept = revocation(ids.fresh, 2, ids.approver, 2);
-    expect(derive(deepChain, [keptRevokesFresh, freshRevokesKept]).cuts).toEqual([
-      `${ids.fresh}@1`,
+  it("admits each computer through the one approval it accepted, with that computer's key", () => {
+    const membership = deriveReplicaMembership(ids.founder, tree().records);
+    expect(membership.nodes.map((node) => [String(node.instanceId), String(node.parent)])).toEqual([
+      [ids.founder, "undefined"],
+      [ids.south, ids.founder],
+      [ids.east, ids.founder],
+      [ids.west, ids.south],
     ]);
-    expect(
-      derive([...deepChain, nearerApprovesFresh], [keptRevokesFresh, freshRevokesKept]).cuts,
-    ).toEqual([`${ids.approver}@2`, `${ids.fresh}@1`]);
+    expect(replicaMembershipNode(membership, ids.west)?.publicKey).toBe(keyOf(ids.west));
   });
 
-  it("derives the same members and cuts for every order of the same records", () => {
-    const records = [
-      ...admissions,
-      admission(ids.joiner, 2, member(ids.fresh, "pub-fresh")),
-      admission(ids.approver, 2, member(ids.fresh, "pub-kept")),
-      admission(ids.approver, 3, member(ids.joiner, "pub-kept")),
-      admission(ids.joiner, 4, member(ids.unknown, "pub-taken")),
-      founderRevokesTaken,
-      revocation(ids.approver, 2, ids.joiner, 3),
-      revocation(ids.joiner, 3, ids.approver, 1),
+  it("admits nobody without the pinned founder's own record, or with no founder pinned", () => {
+    const { records } = tree();
+    expect(deriveReplicaMembership(ids.other, records).nodes).toEqual([]);
+    expect(deriveReplicaMembership(undefined, records).nodes).toEqual([]);
+  });
+
+  it("does not admit a computer an approval names until that computer accepts it", () => {
+    const records = [founded(ids.founder), approval(ids.founder, 2, ids.south)];
+    expect(standing(deriveReplicaMembership(ids.founder, records), ids.south)).toBe("absent");
+  });
+
+  it("does not let another approval or a later accept change a computer's parent", () => {
+    const { records, westApproval } = tree();
+    // East approves West too, and someone holding West's key accepts it later:
+    // the lowest accept still names South.
+    const eastAgain = approval(ids.east, 3, ids.west);
+    const membership = deriveReplicaMembership(ids.founder, [
+      ...records,
+      eastAgain,
+      accept(ids.west, 3, eastAgain),
+    ]);
+    expect(String(replicaMembershipNode(membership, ids.west)?.parent)).toBe(ids.south);
+    expect(replicaMembershipNode(membership, ids.west)?.approvalSequence).toBe(
+      westApproval.entry.origin.sequence,
+    );
+  });
+
+  it("does not admit through an accept whose approval hash names other bytes", () => {
+    const southApproval = approval(ids.founder, 2, ids.south);
+    const membership = deriveReplicaMembership(ids.founder, [
+      founded(ids.founder),
+      southApproval,
+      accept(ids.south, 2, southApproval, "e".repeat(64)),
+    ]);
+    expect(standing(membership, ids.south)).toBe("absent");
+  });
+
+  it("lets only a strict ancestor revoke, so a computer cannot revoke the one that approved it", () => {
+    const membership = deriveReplicaMembership(ids.founder, [
+      ...tree().records,
+      // West revokes its approver and the founder; East revokes its sibling.
+      revocation(ids.west, 3, ids.south, 0),
+      revocation(ids.west, 4, ids.founder, 0),
+      revocation(ids.east, 3, ids.south, 0),
+      // The founder revokes West through South.
+      revocation(ids.founder, 4, ids.west, 2),
+    ]);
+    expect(standing(membership, ids.founder)).toBe("member");
+    expect(standing(membership, ids.south)).toBe("member");
+    expect(standing(membership, ids.east)).toBe("member");
+    expect(standing(membership, ids.west)).toBe("cut@2");
+  });
+
+  it("takes the earliest cut when two ancestors revoke the same computer", () => {
+    const membership = deriveReplicaMembership(ids.founder, [
+      ...tree().records,
+      revocation(ids.founder, 4, ids.west, 3),
+      revocation(ids.south, 4, ids.west, 2),
+    ]);
+    expect(standing(membership, ids.west)).toBe("cut@2");
+  });
+
+  it("stops counting what a computer signed after its cut, approvals and revocations included", () => {
+    const { records } = tree();
+    const westBelow = approval(ids.west, 3, ids.other);
+    const below = [westBelow, accept(ids.other, 2, westBelow)];
+    // South is cut at 3, so its revocation of West at 5 no longer counts.
+    const southCut = deriveReplicaMembership(ids.founder, [
+      ...records,
+      ...below,
+      revocation(ids.south, 5, ids.west, 2),
+      revocation(ids.founder, 4, ids.south, 3),
+    ]);
+    expect(standing(southCut, ids.south)).toBe("cut@3");
+    expect(standing(southCut, ids.west)).toBe("member");
+    // West cut at 2: its approval at 3 stops counting, and so does Other.
+    const westCut = deriveReplicaMembership(ids.founder, [
+      ...records,
+      ...below,
+      revocation(ids.founder, 4, ids.west, 2),
+    ]);
+    expect(standing(westCut, ids.other)).toBe("not admitted");
+    expect(replicaEntryCounts(westCut, ids.west, 2)).toBe(true);
+    expect(replicaEntryCounts(westCut, ids.west, 3)).toBe(false);
+    expect(replicaEntryCounts(westCut, ids.other, 1)).toBe(false);
+  });
+
+  it("caps a computer just before a slot it signed two different records into", () => {
+    const membership = deriveReplicaMembership(ids.founder, [
+      ...tree().records,
+      revocation(ids.south, 4, ids.west, 2),
+      approval(ids.south, 4, ids.other),
+    ]);
+    expect(standing(membership, ids.south)).toBe("cut@3");
+    // Neither record in the slot counts, so West keeps its standing.
+    expect(standing(membership, ids.west)).toBe("member");
+  });
+
+  it("ignores a ghost's approval of a real member, and its revocations", () => {
+    const ghostApproval = approval(ids.east, 4, ids.ghost);
+    const membership = deriveReplicaMembership(ids.founder, [
+      ...tree().records,
+      ghostApproval,
+      accept(ids.ghost, 2, ghostApproval),
+      approval(ids.ghost, 3, ids.west),
+      revocation(ids.ghost, 4, ids.south, 0),
+      revocation(ids.ghost, 5, ids.west, 0),
+    ]);
+    expect(standing(membership, ids.ghost)).toBe("member");
+    expect(standing(membership, ids.south)).toBe("member");
+    expect(standing(membership, ids.west)).toBe("member");
+    expect(String(replicaMembershipNode(membership, ids.west)?.parent)).toBe(ids.south);
+  });
+
+  it("derives the same members and cuts for every order and duplicate of the same records", () => {
+    const all = [
+      ...tree().records,
+      revocation(ids.founder, 4, ids.west, 2),
+      revocation(ids.west, 3, ids.south, 0),
     ];
-    const results = new Set<string>();
-    for (let seed = 1; seed <= 50; seed += 1) {
-      const shuffled = shuffle(records, seed);
-      const derived = derive(
-        shuffled.filter((record): record is ReplicaAdmissionRecord => "member" in record),
-        shuffled.filter((record): record is ReplicaRevocationRecord => "cut" in record),
-      );
-      results.add(JSON.stringify(derived));
+    const expected = deriveReplicaMembership(ids.founder, all);
+    for (let shift = 0; shift < all.length; shift += 1) {
+      const rotated = [...all.slice(shift), ...all.slice(0, shift)].reverse();
+      const again = deriveReplicaMembership(ids.founder, [...rotated, ...rotated.slice(0, shift)]);
+      expect(again).toEqual(expected);
     }
-    expect(results.size).toBe(1);
   });
 
-  function keptAndTaken(): ReadonlyArray<string> {
-    return [`${ids.joiner}:pub-taken`, `${ids.approver}:pub-kept`].sort();
-  }
+  it("walks parent edges up from an approver to exactly one founder", () => {
+    const { records, westApproval } = tree();
+    expect(replicaFounderReachedFrom(records, ids.west)?.origin.instanceId).toBe(ids.founder);
+    expect(replicaFounderReachedFrom(records, ids.ghost)).toBeUndefined();
+    expect(replicaApprovalOf(records, ids.south, ids.west)).toEqual(westApproval);
+    // A second founding record elsewhere does not reach a member whose edges lead home.
+    expect(
+      replicaFounderReachedFrom([...records, founded(ids.other)], ids.west)?.origin.instanceId,
+    ).toBe(ids.founder);
+  });
 });
 
-function shuffle<T>(items: ReadonlyArray<T>, seed: number): ReadonlyArray<T> {
-  const copy = [...items];
-  let state = seed;
-  for (let index = copy.length - 1; index > 0; index -= 1) {
-    state = (state * 1_103_515_245 + 12_345) % 2_147_483_648;
-    const other = state % (index + 1);
-    const held = copy[index];
-    const swapped = copy[other];
-    if (held === undefined || swapped === undefined) continue;
-    copy[index] = swapped;
-    copy[other] = held;
-  }
-  return copy;
-}
+describe("replica membership decisions", () => {
+  it("lets a member in good standing approve a computer that is not in the tree", () => {
+    const membership = deriveReplicaMembership(ids.founder, tree().records);
+    expect(decideReplicaJoinApproval({ membership, local: ids.south, subject: ids.other })).toEqual(
+      { status: "approved" },
+    );
+    expect(decideReplicaJoinApproval({ membership, local: ids.south, subject: ids.east })).toEqual({
+      status: "refused",
+      reason: "already-member",
+    });
+    expect(decideReplicaJoinApproval({ membership, local: ids.other, subject: ids.ghost })).toEqual(
+      { status: "refused", reason: "not-a-member" },
+    );
+  });
+
+  it("refuses to approve a revoked identity again", () => {
+    const membership = deriveReplicaMembership(ids.founder, [
+      ...tree().records,
+      revocation(ids.founder, 4, ids.east, 2),
+    ]);
+    expect(
+      decideReplicaJoinApproval({ membership, local: ids.founder, subject: ids.east }),
+    ).toEqual({ status: "refused", reason: "revoked-instance" });
+  });
+
+  it("lets a computer revoke only the computers it brought in", () => {
+    const membership = deriveReplicaMembership(ids.founder, tree().records);
+    expect(decideReplicaRevocation({ membership, local: ids.south, subject: ids.west })).toEqual({
+      status: "revoked",
+    });
+    expect(decideReplicaRevocation({ membership, local: ids.east, subject: ids.west })).toEqual({
+      status: "refused",
+      reason: "not-a-descendant",
+    });
+    expect(decideReplicaRevocation({ membership, local: ids.west, subject: ids.south })).toEqual({
+      status: "refused",
+      reason: "not-a-descendant",
+    });
+    expect(decideReplicaRevocation({ membership, local: ids.founder, subject: ids.other })).toEqual(
+      { status: "refused", reason: "unknown-instance" },
+    );
+    expect(replicaDescendants(membership, ids.founder).map((node) => node.instanceId)).toEqual([
+      ids.south,
+      ids.east,
+      ids.west,
+    ]);
+  });
+
+  it("keeps an ancestor able to revoke after a descendant revoked it", () => {
+    const membership = deriveReplicaMembership(ids.founder, [
+      ...tree().records,
+      revocation(ids.west, 3, ids.south, 0),
+    ]);
+    expect(decideReplicaRevocation({ membership, local: ids.south, subject: ids.west })).toEqual({
+      status: "revoked",
+    });
+  });
+});

@@ -135,7 +135,7 @@ describe("replica membership routes", () => {
       service: new ReplicaMembershipService({
         store: () => ({ status: "not-configured" }),
         credentials: {
-          ensure: async () => {
+          create: async () => {
             throw new Error("no store, no key");
           },
           sign: async () => {
