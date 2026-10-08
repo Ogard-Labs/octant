@@ -597,16 +597,28 @@ async function runCurrent(seed: number): Promise<CurrentRun> {
     publicKey: truth.key.get(id),
   });
 
-  async function attack(): Promise<void> {
-    const [thiefId, credentials] = pick(rng, [...stolenKeys.entries()]) ?? [];
+  async function attack(stolen?: string): Promise<void> {
+    const [thiefId, credentials] = (stolen === undefined
+      ? pick(rng, [...stolenKeys.entries()])
+      : undefined) ?? [stolen, stolen === undefined ? undefined : stolenKeys.get(stolen)];
     if (thiefId === undefined || credentials === undefined) return;
     const others = [...truth.key.keys()].filter((id) => id !== thiefId);
     const roll = rng();
     const next = (id: string) => store.highestSequence(id) + 1;
     if (roll < 0.3) {
-      // Revoke an ancestor (its approver, or the founder) or anyone else.
+      // Revoke an ancestor (its approver, or the founder), a sibling or
+      // cousin - neither above nor below it, so only a shared ancestor may
+      // revoke it - or anyone else.
+      const aim = rng();
+      const cousins = others.filter(
+        (id) => !isTrueDescendant(truth, id, thiefId) && !isTrueDescendant(truth, thiefId, id),
+      );
       const target =
-        rng() < 0.7 ? (truth.parent.get(thiefId) ?? founderId) : (pick(rng, others) ?? founderId);
+        aim < 0.4
+          ? (truth.parent.get(thiefId) ?? founderId)
+          : aim < 0.8
+            ? (pick(rng, cousins) ?? founderId)
+            : (pick(rng, others) ?? founderId);
       const cut = Math.floor(rng() * (store.highestSequence(target) + 1));
       await writeAs(
         credentials,
@@ -829,6 +841,9 @@ async function runCurrent(seed: number): Promise<CurrentRun> {
       victim.stolen = true;
       stolenKeys.set(id, victim.credentials);
       trace.push(`${store.step} ${victim.name}(${id.slice(0, 8)}) stolen`);
+      // The thief acts before the owner notices, so what it signs now falls
+      // inside the cut an ancestor later takes.
+      for (let burst = 1 + Math.floor(rng() * 3); burst > 0; burst -= 1) await attack(id);
     } else if (stolenKeys.size > 0) {
       await attack();
     }
