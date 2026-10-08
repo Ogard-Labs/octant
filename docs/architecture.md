@@ -828,7 +828,7 @@ that the running child received it.
 Delegation resolves explicit provider/model selections against the parent's
 current eligible catalog, including Project policy and supported reasoning
 values. With no explicit target, both harnesses use the same role-to-slot
-mapping and host/Project Model slots. An unconfigured route can inherit the
+mapping and host/Project model slots (Settings names them model roles). An unconfigured route can inherit the
 authorized parent target; a configured but unavailable or disallowed route does
 not bypass its settings. The selected target and routing decisions remain
 visible. Off, paused, tainted, and unauthorized parents cannot start helpers.
@@ -2314,7 +2314,10 @@ native harness in `apps/server/src/harness`:
   or the Code thread's own inline question path), or until it expires or the
   turn is interrupted. `NativeHarnessTurnObserver` puts the stable
   instructions block in front of every harness turn, records the completed
-  reply, and asks the `advisor` slot for a review. The session view still
+  reply, and asks the `advisor` slot for a review. An advisor with no model of
+  its own is off: unlike other jobs, its unconfigured slot does not fall back
+  to `default`, because the review costs a request on every turn and runs only
+  once someone chooses it. The session view still
   carries the thread's follow-up suggestions for the surfaces that read it,
   joined in from their own store (below).
 - **Terminal.** `octant agent` in `packages/cli` is the same thread on a

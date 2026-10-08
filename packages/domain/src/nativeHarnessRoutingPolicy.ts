@@ -57,8 +57,10 @@ export function nativeHarnessJobForRole(role: AgentRunRole): NativeHarnessJob {
  * job's binding names a slot, the slot's primary is used when it is ready and
  * not cooling down, and otherwise the first ready fallback is used and the
  * decision says so. A binding to a slot nobody configured routes to `default`
- * with a visible warning. No decision ever falls back to a vendor list the
- * user did not write.
+ * with a visible warning, except the advisor's: it costs an extra request on
+ * every turn and the guide promises it runs only once configured, so an
+ * advisor with no model of its own is off. No decision ever falls back to a
+ * vendor list the user did not write.
  */
 export function resolveNativeHarnessRoute(
   input: ResolveNativeHarnessRouteInput,
@@ -70,6 +72,15 @@ export function resolveNativeHarnessRoute(
   const base = { job: input.job, decidedAt: input.now } as const;
   let slot = requestedSlotId === undefined ? undefined : slotFor(requestedSlotId, input);
   let unconfigured = false;
+  if (slot === undefined && input.job === "advisor") {
+    return {
+      ...base,
+      kind: "unroutable",
+      slotId: requestedSlotId ?? NATIVE_HARNESS_BUILT_IN_SLOTS.advisor,
+      reason: "slot-empty",
+      rejected: [],
+    };
+  }
   if (slot === undefined) {
     unconfigured = true;
     slot = slotFor(NATIVE_HARNESS_BUILT_IN_SLOTS.default, input);
