@@ -9,15 +9,20 @@
  * approvals (including a ghost identity), and revoked computers rejoin as new
  * identities. When the scenario ends, every file reaches every computer,
  * each honest computer pulls until nothing changes, and a late computer
- * joins and pulls everything. The properties are then checked against the
- * ground truth the harness recorded: who confirmed which approver, and which
- * key belongs to which identity.
+ * joins and pulls everything; every honest computer that is not a member
+ * by then joins again through the founder. The properties are then checked
+ * against the ground truth the harness recorded - who confirmed which
+ * approver, and which key belongs to which identity - and against the valid
+ * records in the store, checked here independently of the host's read path.
+ * Progress is a property too: an honest join through an approver in good
+ * standing succeeds, and every honest computer ends up reading as a member.
  *
  * Part two runs the same properties, plus a blast-radius check, directly
  * against the domain derivation over many more abstract worlds: folder-store
- * rewrites (two records in one slot), ghosts, forged keys, and second
- * accepts, with each reader holding a random subset, the same subset
- * shuffled with duplicates, and the full set.
+ * rewrites (two records in one slot), ghosts, records filed under another
+ * computer's id with the attacker's own key, approvals naming the wrong key,
+ * and second accepts, with each reader holding a random subset, the same
+ * subset shuffled with duplicates, and the full set.
  *
  * Seeds are reproducible: ids, keys, steps, and lag all come from the seed.
  * OCTANT_REPLICA_FUZZ_SEEDS sets how many seeds run (default 40).
@@ -41,6 +46,7 @@ import {
 } from "@octant/contracts";
 import {
   deriveReplicaMembership,
+  replicaInGoodStanding,
   type ReplicaHeldRecord,
 } from "@octant/domain/replica-membership-policy";
 import type { ReplicaStore, ReplicaStorePutResult } from "@octant/plugin-api/replica-store";
@@ -50,7 +56,11 @@ import { Journal } from "../persistence/journal";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { ProjectionRegistry } from "../persistence/projection";
 import { openSqlite } from "../persistence/sqlitePort";
-import { makeReplicaDeviceSigner, replicaInstanceIdOf } from "./replicaDeviceKeyService";
+import {
+  makeReplicaDeviceSigner,
+  replicaInstanceIdOf,
+  verifyReplicaEntrySignature,
+} from "./replicaDeviceKeyService";
 import {
   createReplicaMembershipJournal,
   registerReplicaMembershipEvents,
@@ -129,14 +139,21 @@ interface Violation {
   readonly detail: string;
 }
 
-type Property = "P1 convergence" | "P2 precedence" | "P3 key binding" | "P4 no new ancestors";
+type Property =
+  | "P1 convergence"
+  | "P2 precedence"
+  | "P3 key binding"
+  | "P4 no new ancestors"
+  | "P5 progress";
 
-const PROPERTIES: ReadonlyArray<Property> = [
+const DERIVATION_PROPERTIES: ReadonlyArray<Property> = [
   "P1 convergence",
   "P2 precedence",
   "P3 key binding",
   "P4 no new ancestors",
 ];
+/** Progress needs real commands, so only the service half checks it. */
+const SERVICE_PROPERTIES: ReadonlyArray<Property> = [...DERIVATION_PROPERTIES, "P5 progress"];
 
 /** Ground truth the harness records as the scenario runs. */
 interface Truth {
@@ -157,7 +174,7 @@ function isTrueDescendant(truth: Truth, node: string, ancestor: string): boolean
   return false;
 }
 
-function summarize(violations: ReadonlyArray<Violation>, property: Property): string {
+function summarize(violations: ReadonlyArray<Violation>, property: Property, runs: number): string {
   const mine = violations.filter((violation) => violation.property === property);
   const seeds = [...new Set(mine.map((violation) => violation.seed))].sort((a, b) => a - b);
   const kinds = new Map<string, Set<number>>();
@@ -175,7 +192,7 @@ function summarize(violations: ReadonlyArray<Violation>, property: Property): st
     .slice(0, 4)
     .map((violation) => `  seed ${violation.seed}: ${violation.detail}`)
     .join("\n");
-  return `${property}: ${seeds.length}/${SEEDS} seeds fail\n${byKind}\n${examples}`;
+  return `${property}: ${seeds.length}/${runs} seeds fail\n${byKind}\n${examples}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -299,6 +316,44 @@ class LaggedStore {
     return result;
   }
 
+  /**
+   * The valid membership records in the store, checked here on their own
+   * rather than through the host's read path: the body decodes, its origin
+   * is its path, its id is its key's id, an approval's subject is its subject
+   * key's id, and the signature verifies under the key the body names.
+   */
+  validRecords(): ReadonlyArray<ReplicaHeldRecord> {
+    const result: ReplicaHeldRecord[] = [];
+    for (const [key, bytes] of this.files) {
+      const match = /^([^/]+)\/(\d+)\.json$/.exec(key);
+      const signature = this.files.get(key.replace(/\.json$/, ".sig"));
+      if (match === null || signature === undefined) continue;
+      let entry;
+      try {
+        entry = decodeReplicaEntryText(new TextDecoder().decode(bytes));
+      } catch {
+        continue;
+      }
+      if (entry.kind === "artifact-version" || entry.kind === "artifact-tombstone") continue;
+      if (
+        String(entry.origin.instanceId) !== match[1] ||
+        entry.origin.sequence !== Number(match[2]) ||
+        replicaInstanceIdOf(entry.origin.publicKey) !== match[1] ||
+        (entry.kind === "join-approved" &&
+          replicaInstanceIdOf(entry.subjectKey) !== String(entry.subject)) ||
+        !verifyReplicaEntrySignature({
+          publicKeyBase64: entry.origin.publicKey,
+          payload: bytes,
+          signatureBase64: new TextDecoder().decode(signature),
+        })
+      ) {
+        continue;
+      }
+      result.push({ entry, hash: createHash("sha256").update(bytes).digest("hex") });
+    }
+    return result;
+  }
+
   highestSequence(instanceId: string): number {
     let highest = 0;
     for (const key of this.files.keys()) {
@@ -380,6 +435,10 @@ function believesMember(host: Computer): boolean {
   );
 }
 
+function heldKey(record: ReplicaHeldRecord): string {
+  return `${String(record.entry.origin.instanceId)}/${record.entry.origin.sequence}#${record.hash}`;
+}
+
 function reasonOf(outcome: ReplicaMembershipResult): string {
   return outcome.kind === "refused" ? `refused:${outcome.reason}` : outcome.kind;
 }
@@ -433,13 +492,29 @@ async function runCurrent(seed: number): Promise<CurrentRun> {
   const stolenKeys = new Map<string, CredentialStore>();
   const ghosts = new Set<string>();
   const ghostKeys = memoryCredentialStore();
+  let impersonations = 0;
   const honestRevocations: Array<{ by: string; subject: string; outcome: string }> = [];
 
   const honest = () => computers.filter((host) => !host.stolen);
   const membersOf = (host: Computer) =>
     host.projection.state().members.map((member) => String(member.instanceId));
 
-  async function join(joiner: Computer, approver: Computer): Promise<void> {
+  const stall = (kind: string, detail: string) =>
+    violations.push({ property: "P5 progress", seed, detail: `[${kind}] ${detail}` });
+  /** Whether a reader holding every valid record in the store now sees `id` in good standing. */
+  const standsInStore = (id: string) =>
+    replicaInGoodStanding(
+      deriveReplicaMembership(founderId as ReplicaInstanceId, store.validRecords()),
+      id as ReplicaInstanceId,
+    );
+
+  /**
+   * An honest join. The approver believes it is a member; after it pulls,
+   * its approval must succeed unless the pull showed it otherwise, and the
+   * joiner's confirmation must succeed whenever the approver is in good
+   * standing over everything the store holds.
+   */
+  async function join(joiner: Computer, approver: Computer, phase: string): Promise<void> {
     const approverId = localId(approver);
     if (approverId === undefined) return;
     const request = await joiner.service.execute({
@@ -448,6 +523,7 @@ async function runCurrent(seed: number): Promise<CurrentRun> {
     });
     if (request.kind !== "join-requested") {
       trace.push(`${store.step} ${joiner.name} request ${reasonOf(request)}`);
+      stall(`${phase} request`, `${joiner.name} cannot ask to join: ${reasonOf(request)}`);
       return;
     }
     const joinerId = String(request.instanceId);
@@ -469,26 +545,45 @@ async function runCurrent(seed: number): Promise<CurrentRun> {
     trace.push(
       `${store.step} ${approver.name} approves ${joiner.name}(${joinerId.slice(0, 8)}) ${reasonOf(approved)}`,
     );
-    if (approved.kind !== "join-approved") return;
+    if (approved.kind !== "join-approved") {
+      if (believesMember(approver)) {
+        stall(
+          `${phase} approve`,
+          `${approver.name} believes it is a member but cannot approve ${joiner.name}: ${reasonOf(approved)}`,
+        );
+      }
+      return;
+    }
     store.revealAll(joiner.name);
+    const approverStands = standsInStore(approverId);
     const confirmed = await joiner.service.execute({
       kind: "confirm-join",
       approver: approverId as ReplicaInstanceId,
       confirmationCode: code,
     });
     trace.push(`${store.step} ${joiner.name} confirms ${reasonOf(confirmed)}`);
-    if (confirmed.kind === "join-confirmed") truth.parent.set(joinerId, approverId);
+    if (confirmed.kind === "join-confirmed") {
+      truth.parent.set(joinerId, approverId);
+    } else if (approverStands) {
+      stall(
+        `${phase} confirm`,
+        `${joiner.name} cannot confirm ${approver.name}'s approval, which stands over the whole store: ${reasonOf(confirmed)}`,
+      );
+    }
   }
 
-  /** Signs and writes a record with a key the thief holds; returns the file's hash. */
+  /**
+   * Signs and writes a record with a key the thief holds - the key of the id
+   * the record is filed under unless `signer` names another; returns the
+   * file's hash.
+   */
   async function writeAs(
     credentials: CredentialStore,
     entry: ReplicaMembershipEntry,
+    signer: string = entry.origin.instanceId,
   ): Promise<string> {
     const bytes = new TextEncoder().encode(encodeReplicaEntry(entry));
-    const { signature } = await makeReplicaDeviceSigner(credentials, entry.origin.instanceId).sign(
-      bytes,
-    );
+    const { signature } = await makeReplicaDeviceSigner(credentials, signer).sign(bytes);
     const path = `${entry.origin.instanceId}/${entry.origin.sequence}`;
     store.write("thief", `${path}.sig`, new TextEncoder().encode(signature));
     store.write("thief", `${path}.json`, bytes);
@@ -508,7 +603,7 @@ async function runCurrent(seed: number): Promise<CurrentRun> {
     const others = [...truth.key.keys()].filter((id) => id !== thiefId);
     const roll = rng();
     const next = (id: string) => store.highestSequence(id) + 1;
-    if (roll < 0.4) {
+    if (roll < 0.3) {
       // Revoke an ancestor (its approver, or the founder) or anyone else.
       const target =
         rng() < 0.7 ? (truth.parent.get(thiefId) ?? founderId) : (pick(rng, others) ?? founderId);
@@ -525,7 +620,7 @@ async function runCurrent(seed: number): Promise<CurrentRun> {
       trace.push(`${store.step} thief ${thiefId.slice(0, 8)} revokes ${target.slice(0, 8)}@${cut}`);
       return;
     }
-    if (roll < 0.65) {
+    if (roll < 0.5) {
       // A ghost: the stolen key admits a fresh identity, which accepts, then
       // approves a real member again with its real key and may revoke someone.
       const ghost = await seededKey(rng, ghostKeys);
@@ -595,6 +690,40 @@ async function runCurrent(seed: number): Promise<CurrentRun> {
       );
       return;
     }
+    if (roll < 0.65) {
+      // A revocation filed under another computer's id - the founder's most
+      // often - carrying and signed with the thief's own key. Its id is not
+      // its key's id, so no reader may hold it. Bounded, so the slots it
+      // takes never flood one computer past what a publish may skip.
+      if (impersonations >= 8) return;
+      impersonations += 1;
+      const victim = rng() < 0.6 ? founderId : (pick(rng, others) ?? founderId);
+      const subject = pick(
+        rng,
+        others.filter((id) => id !== victim),
+      );
+      const thiefKey = truth.key.get(thiefId);
+      if (subject === undefined || thiefKey === undefined) return;
+      await writeAs(
+        credentials,
+        membershipEntry({
+          kind: "revocation",
+          origin: {
+            instanceId: victim,
+            displayName: "Thief",
+            sequence: next(victim),
+            publicKey: thiefKey,
+          },
+          subject,
+          cut: 0,
+        }),
+        thiefId,
+      );
+      trace.push(
+        `${store.step} thief ${thiefId.slice(0, 8)} files a revocation of ${subject.slice(0, 8)} under ${victim.slice(0, 8)}`,
+      );
+      return;
+    }
     if (roll < 0.85) {
       // Approve a real member again: with its real key, or naming the thief's own key.
       const victim = pick(rng, others);
@@ -649,7 +778,7 @@ async function runCurrent(seed: number): Promise<CurrentRun> {
         live.filter((host) => !believesMember(host)),
       );
       const approver = pick(rng, live.filter(believesMember));
-      if (joiner !== undefined && approver !== undefined) await join(joiner, approver);
+      if (joiner !== undefined && approver !== undefined) await join(joiner, approver, "scenario");
     } else if (roll < 0.62) {
       const puller = pick(
         rng,
@@ -727,8 +856,13 @@ async function runCurrent(seed: number): Promise<CurrentRun> {
           subject: thiefId as ReplicaInstanceId,
           ...(alsoRevoke.length > 0 ? { alsoRevoke } : {}),
         });
-        honestRevocations.push({ by: parentId, subject: thiefId, outcome: reasonOf(outcome) });
-        if (outcome.kind === "revoked") {
+        const landed = outcome.kind === "revoked" || outcome.kind === "revoked-in-part";
+        honestRevocations.push({
+          by: parentId,
+          subject: thiefId,
+          outcome: landed ? "revoked" : reasonOf(outcome),
+        });
+        if (landed) {
           for (const also of outcome.alsoRevoked) {
             honestRevocations.push({
               by: parentId,
@@ -760,15 +894,19 @@ async function runCurrent(seed: number): Promise<CurrentRun> {
     }
   }
 
-  // Settle: every file reaches every computer, a late computer joins, and
+  // Settle: every file reaches every computer, every honest computer that is
+  // not a member joins again through the founder, a late computer joins, and
   // every honest computer pulls until a round of pulls holds nothing new.
   store.settled = true;
+  for (const host of honest()) {
+    if (localId(host) !== undefined) await host.service.execute({ kind: "pull" });
+  }
+  for (const host of honest()) {
+    if (host !== founder && !believesMember(host)) await join(host, founder, "settle");
+  }
   const late = makeComputer(store, "Late", rng);
-  const entry =
-    honest().find((host) => localId(host) === founderId && believesMember(host)) ??
-    pick(rng, honest().filter(believesMember));
-  if (entry !== undefined) await join(late, entry);
-  const readers = [...honest(), late].filter((host) => localId(host) !== undefined);
+  await join(late, founder, "late");
+  const readers = [...honest(), late];
   const lastPull = new Map<string, ReplicaMembershipResult>();
   for (let round = 0; round < 6; round += 1) {
     let applied = 0;
@@ -779,8 +917,23 @@ async function runCurrent(seed: number): Promise<CurrentRun> {
     }
     if (applied === 0) break;
   }
-  // Every computer that pinned the founder and read the whole store, revoked
-  // ones included: they hold the same records, so they must agree.
+  // Every honest computer read the whole store as a member of the founder's
+  // replica; the checks below run over all of them.
+  for (const host of readers) {
+    const pulled = lastPull.get(host.name);
+    const pinned = host.projection.state().founder;
+    if (
+      pulled?.kind !== "pulled" ||
+      pinned === undefined ||
+      String(pinned.instanceId) !== founderId ||
+      !believesMember(host)
+    ) {
+      stall(
+        "observer",
+        `${host.name} ends without reading the store as a member: pull ${pulled === undefined ? "never ran" : reasonOf(pulled)}, founder ${String(pinned?.instanceId).slice(0, 8)}, member ${String(believesMember(host))}`,
+      );
+    }
+  }
   const observers = readers.filter(
     (host) =>
       lastPull.get(host.name)?.kind === "pulled" && host.projection.state().founder !== undefined,
@@ -802,9 +955,43 @@ async function runCurrent(seed: number): Promise<CurrentRun> {
     });
   }
 
-  const records = store.records();
-  const revocations = records.filter((entry) => entry.kind === "revocation");
+  const valid = store.validRecords();
+  const validKeys = new Set(valid.map(heldKey));
+  /**
+   * A finite cut is explained by a valid record in the store: two different
+   * records in the slot just after it, or a revocation naming that cut from
+   * one of the computer's true ancestors.
+   */
+  const cutExplained = (node: string, cut: number) => {
+    const inSlot = new Set(
+      valid
+        .filter(
+          ({ entry }) =>
+            String(entry.origin.instanceId) === node && entry.origin.sequence === cut + 1,
+        )
+        .map(({ hash }) => hash),
+    );
+    if (inSlot.size > 1) return true;
+    return valid.some(
+      ({ entry }) =>
+        entry.kind === "revocation" &&
+        String(entry.subject) === node &&
+        entry.cut === cut &&
+        isTrueDescendant(truth, node, String(entry.origin.instanceId)),
+    );
+  };
   for (const observer of observers) {
+    // P1: every computer that read the whole store holds exactly its valid records.
+    const holds = new Set(observer.projection.state().records.map(heldKey));
+    const missing = [...validKeys].filter((key) => !holds.has(key));
+    const extra = [...holds].filter((key) => !validKeys.has(key));
+    if (missing.length > 0 || extra.length > 0) {
+      violations.push({
+        property: "P1 convergence",
+        seed,
+        detail: `[holds] ${observer.name} misses ${missing.length} valid records and holds ${extra.length} invalid ones (${[...missing, ...extra].slice(0, 2).join(", ")})`,
+      });
+    }
     const state = observer.projection.state();
     const member = new Map(state.members.map((m) => [String(m.instanceId), m] as const));
     const cut = new Map<string, number>();
@@ -823,19 +1010,13 @@ async function runCurrent(seed: number): Promise<CurrentRun> {
         });
       }
     }
-    // P2: no computer stays revoked only by computers it brought in.
-    for (const id of cut.keys()) {
-      const revokers = revocations
-        .filter((entry) => String(entry.subject) === id)
-        .map((entry) => String(entry.origin.instanceId));
-      if (
-        revokers.length > 0 &&
-        revokers.every((revoker) => isTrueDescendant(truth, revoker, id))
-      ) {
+    // P2: every cut comes from a true ancestor's revocation, or a second record in its slot.
+    for (const [id, at] of cut) {
+      if (!cutExplained(id, at)) {
         violations.push({
           property: "P2 precedence",
           seed,
-          detail: `[from below] ${observer.name} keeps ${id === founderId ? "the founder" : id.slice(0, 8)} revoked only by its own descendants ${revokers.map((r) => r.slice(0, 8)).join(",")}`,
+          detail: `[unexplained] ${observer.name} cuts ${id === founderId ? "the founder" : id.slice(0, 8)} at ${at} by nothing an ancestor or a second record in its slot explains`,
         });
       }
     }
@@ -878,16 +1059,25 @@ async function runCurrent(seed: number): Promise<CurrentRun> {
 // ---------------------------------------------------------------------------
 
 /**
- * Abstract records. An id stands for its key (ids are self-certifying), so a
- * record is valid exactly when the harness let the key holder write it, and
- * an approval is valid only when the key it names is the subject's id - the
- * host drops any other approval before it is held.
+ * Abstract records. Each carries the id it is filed under and, apart from
+ * it, the key it carries and was signed with. Ids are self-certifying, so
+ * `keyOf(id)` is the one key an id belongs to: a record is valid only when
+ * its key is its id's key, and an approval only when the key it names is its
+ * subject's - the host drops any other record before it is held. An attacker
+ * holds only its own keys, so it can file a record under someone else's id
+ * only with a key that is not that id's.
  */
 type ModelRecord =
-  | { readonly kind: "founded"; readonly origin: string; readonly seq: number }
+  | {
+      readonly kind: "founded";
+      readonly origin: string;
+      readonly key: string;
+      readonly seq: number;
+    }
   | {
       readonly kind: "approve";
       readonly origin: string;
+      readonly key: string;
       readonly seq: number;
       readonly subject: string;
       readonly subjectKey: string;
@@ -895,6 +1085,7 @@ type ModelRecord =
   | {
       readonly kind: "accept";
       readonly origin: string;
+      readonly key: string;
       readonly seq: number;
       readonly approver: string;
       readonly approvalSeq: number;
@@ -903,15 +1094,28 @@ type ModelRecord =
   | {
       readonly kind: "revoke";
       readonly origin: string;
+      readonly key: string;
       readonly seq: number;
       readonly subject: string;
       readonly cut: number;
     };
 
+const keyOf = (id: string) => `k:${id}`;
+
+/** What the host's read path keeps: a key that is its id's, and an approval naming its subject's key. */
+function modelValid(record: ModelRecord): boolean {
+  return (
+    record.key === keyOf(record.origin) &&
+    (record.kind !== "approve" || record.subjectKey === keyOf(record.subject))
+  );
+}
+
 const hashOf = (record: ModelRecord) => JSON.stringify(record);
 
 interface ModelMembership {
   readonly parent: ReadonlyMap<string, string>;
+  /** The key each computer in the tree carries. */
+  readonly key: ReadonlyMap<string, string>;
   readonly admitted: ReadonlySet<string>;
   readonly cut: ReadonlyMap<string, number>;
 }
@@ -935,7 +1139,7 @@ function heldRecord(founder: string, record: ModelRecord): ReplicaHeldRecord {
     instanceId: uuidOf(record.origin),
     displayName: record.origin,
     sequence: record.seq,
-    publicKey: `key-${record.origin}`,
+    publicKey: record.key,
   };
   const head = { format: REPLICA_ENTRY_FORMAT, origin } as const;
   const hash = hashOf(record);
@@ -949,7 +1153,7 @@ function heldRecord(founder: string, record: ModelRecord): ReplicaHeldRecord {
           ...head,
           kind: "join-approved",
           subject: uuidOf(record.subject),
-          subjectKey: `key-${record.subjectKey}`,
+          subjectKey: record.subjectKey,
           subjectName: record.subject,
         },
       };
@@ -975,20 +1179,20 @@ function heldRecord(founder: string, record: ModelRecord): ReplicaHeldRecord {
 
 /** The domain derivation over the records a reader holds. */
 function deriveReal(founder: string, input: ReadonlyArray<ModelRecord>): ModelMembership {
-  const held = input
-    .filter((record) => record.kind !== "approve" || record.subject === record.subjectKey)
-    .map((record) => heldRecord(founder, record));
+  const held = input.filter(modelValid).map((record) => heldRecord(founder, record));
   const membership = deriveReplicaMembership(uuidOf(founder), held);
   const parent = new Map<string, string>();
+  const key = new Map<string, string>();
   const admitted = new Set<string>();
   const cut = new Map<string, number>();
   for (const node of membership.nodes) {
     const name = nameOf(node.instanceId);
+    key.set(name, node.publicKey);
     if (node.parent !== undefined) parent.set(name, nameOf(node.parent));
     if (node.admitted) admitted.add(name);
     cut.set(name, node.cut ?? Infinity);
   }
-  return { parent, admitted, cut };
+  return { parent, key, admitted, cut };
 }
 
 /**
@@ -1002,9 +1206,7 @@ function cutExplained(
   node: string,
   cut: number,
 ): boolean {
-  const valid = holding.filter(
-    (record) => record.kind !== "approve" || record.subject === record.subjectKey,
-  );
+  const valid = holding.filter(modelValid);
   const inSlot = new Set(
     valid
       .filter((record) => record.origin === node && record.seq === cut + 1)
@@ -1034,9 +1236,11 @@ interface ModelWorld {
 function modelWorld(seed: number): ModelWorld {
   const rng = rngFor(seed + 100_000);
   const founder = "F";
-  const records: ModelRecord[] = [{ kind: "founded", origin: founder, seq: 1 }];
+  const records: ModelRecord[] = [
+    { kind: "founded", origin: founder, key: keyOf(founder), seq: 1 },
+  ];
   const attacker = new Set<string>();
-  const truth: Truth = { key: new Map([[founder, founder]]), parent: new Map() };
+  const truth: Truth = { key: new Map([[founder, keyOf(founder)]]), parent: new Map() };
   const compromised = new Set<string>();
   const sequence = new Map<string, number>([[founder, 1]]);
   const next = (id: string) => {
@@ -1069,20 +1273,22 @@ function modelWorld(seed: number): ModelWorld {
       if (approver === undefined) continue;
       made += 1;
       const joiner = `N${made}`;
-      truth.key.set(joiner, joiner);
+      truth.key.set(joiner, keyOf(joiner));
       sequence.set(joiner, 1);
       const approval: ModelRecord = {
         kind: "approve",
         origin: approver,
+        key: keyOf(approver),
         seq: next(approver),
         subject: joiner,
-        subjectKey: joiner,
+        subjectKey: keyOf(joiner),
       };
       add(approval, false);
       add(
         {
           kind: "accept",
           origin: joiner,
+          key: keyOf(joiner),
           seq: next(joiner),
           approver,
           approvalSeq: approval.seq,
@@ -1111,6 +1317,7 @@ function modelWorld(seed: number): ModelWorld {
       const record: Extract<ModelRecord, { kind: "revoke" }> = {
         kind: "revoke",
         origin: revoker,
+        key: keyOf(revoker),
         seq: next(revoker),
         subject,
         cut: sequence.get(subject) ?? 0,
@@ -1135,36 +1342,39 @@ function modelWorld(seed: number): ModelWorld {
       // A folder-store rewrite: the thief signs a second record into a slot it already used.
       const seq =
         rng() < 0.1 ? Math.max(2, Math.floor(rng() * (sequence.get(thief) ?? 2)) + 1) : next(thief);
-      if (kind < 0.35) {
+      if (kind < 0.3) {
         add(
           {
             kind: "revoke",
             origin: thief,
+            key: keyOf(thief),
             seq,
             subject: rng() < 0.6 ? (truth.parent.get(thief) ?? founder) : target,
             cut: Math.floor(rng() * ((sequence.get(target) ?? 1) + 1)),
           },
           true,
         );
-      } else if (kind < 0.6) {
+      } else if (kind < 0.5) {
         made += 1;
         const ghost = `G${made}`;
-        truth.key.set(ghost, ghost);
+        truth.key.set(ghost, keyOf(ghost));
         truth.parent.set(ghost, thief);
         compromised.add(ghost);
         sequence.set(ghost, 1);
         const approval: ModelRecord = {
           kind: "approve",
           origin: thief,
+          key: keyOf(thief),
           seq,
           subject: ghost,
-          subjectKey: ghost,
+          subjectKey: keyOf(ghost),
         };
         add(approval, true);
         add(
           {
             kind: "accept",
             origin: ghost,
+            key: keyOf(ghost),
             seq: next(ghost),
             approver: thief,
             approvalSeq: seq,
@@ -1173,21 +1383,69 @@ function modelWorld(seed: number): ModelWorld {
           true,
         );
         add(
-          { kind: "approve", origin: ghost, seq: next(ghost), subject: target, subjectKey: target },
+          {
+            kind: "approve",
+            origin: ghost,
+            key: keyOf(ghost),
+            seq: next(ghost),
+            subject: target,
+            subjectKey: keyOf(target),
+          },
           true,
         );
-      } else if (kind < 0.8) {
+      } else if (kind < 0.65) {
         // Re-approve a real member, with its key or naming the thief's own.
         add(
           {
             kind: "approve",
             origin: thief,
+            key: keyOf(thief),
             seq,
             subject: target,
-            subjectKey: rng() < 0.5 ? target : thief,
+            subjectKey: keyOf(rng() < 0.5 ? target : thief),
           },
           true,
         );
+      } else if (kind < 0.8) {
+        // A record filed under someone else's id with the thief's own key: an
+        // accept that would give the target the thief's key, or a revocation
+        // in an ancestor's name - the founder's most often.
+        const approval = records.find(
+          (record) =>
+            record.kind === "approve" && record.subject === target && !attacker.has(hashOf(record)),
+        );
+        if (approval !== undefined && rng() < 0.5) {
+          add(
+            {
+              kind: "accept",
+              origin: target,
+              key: keyOf(thief),
+              seq: 1,
+              approver: approval.origin,
+              approvalSeq: approval.seq,
+              approvalHash: hashOf(approval),
+            },
+            true,
+          );
+        } else {
+          const victim = rng() < 0.6 ? founder : target;
+          const subject = pick(
+            rng,
+            nodes.filter((id) => id !== victim),
+          );
+          if (subject === undefined) continue;
+          add(
+            {
+              kind: "revoke",
+              origin: victim,
+              key: keyOf(thief),
+              seq: next(victim),
+              subject,
+              cut: 0,
+            },
+            true,
+          );
+        }
       } else {
         // The thief signs a second accept for itself, naming a different approver.
         const other = pick(
@@ -1199,6 +1457,7 @@ function modelWorld(seed: number): ModelWorld {
           {
             kind: "accept",
             origin: thief,
+            key: keyOf(thief),
             seq,
             approver: other,
             approvalSeq: 1,
@@ -1273,13 +1532,13 @@ function checkModel(seed: number): ReadonlyArray<Violation> {
         });
       }
     }
-    // P3: every admitted member was admitted for its own key.
+    // P3: every admitted member carries its own id's key.
     for (const node of derived.admitted) {
-      if (world.truth.key.get(node) !== node) {
+      if (derived.key.get(node) !== world.truth.key.get(node)) {
         violations.push({
           property: "P3 key binding",
           seed,
-          detail: `${node} admitted without its own key`,
+          detail: `${node} admitted with key ${String(derived.key.get(node))}`,
         });
       }
     }
@@ -1334,16 +1593,16 @@ describe("replica membership convergence (service and projection)", () => {
         writeFileSync(tracePath, `${run.trace.join("\n")}\n`);
       }
     }
-    const report = PROPERTIES.map((property) => summarize(all, property)).join("\n");
+    const report = SERVICE_PROPERTIES.map((property) => summarize(all, property, SEEDS)).join("\n");
     const reportPath = process.env.OCTANT_REPLICA_FUZZ_REPORT;
     if (reportPath !== undefined) writeFileSync(reportPath, `${report}\n`);
   };
-  for (const property of PROPERTIES) {
+  for (const property of SERVICE_PROPERTIES) {
     it(`holds ${property} on every seed`, { timeout: 600_000 }, async () => {
       await runAll();
       expect(
         all.filter((v) => v.property === property),
-        summarize(all, property),
+        summarize(all, property, SEEDS),
       ).toEqual([]);
     });
   }
@@ -1351,12 +1610,13 @@ describe("replica membership convergence (service and projection)", () => {
 
 describe("replica membership convergence (domain derivation)", () => {
   const all: Violation[] = [];
-  for (let seed = 1; seed <= SEEDS * 25; seed += 1) all.push(...checkModel(seed));
-  for (const property of PROPERTIES) {
+  const worlds = SEEDS * 25;
+  for (let seed = 1; seed <= worlds; seed += 1) all.push(...checkModel(seed));
+  for (const property of DERIVATION_PROPERTIES) {
     it(`holds ${property} on every seed`, () => {
       expect(
         all.filter((v) => v.property === property),
-        summarize(all, property),
+        summarize(all, property, worlds),
       ).toEqual([]);
     });
   }
