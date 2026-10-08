@@ -32,9 +32,10 @@ that is already running.
   stays the repository shell.
 
 Octant finds the SDK through `ANDROID_HOME` or `ANDROID_SDK_ROOT`. Without
-either, it looks in `~/Library/Android/sdk` (Android Studio) and then in the
-Homebrew `android-commandlinetools` location under `/opt/homebrew/share` or
-`/usr/local/share`. A host without `adb` or `emulator` says the destination is
+either, macOS hosts look in `~/Library/Android/sdk` (Android Studio) and then in
+the Homebrew `android-commandlinetools` location under `/opt/homebrew/share` or
+`/usr/local/share`, using the first that has both `adb` and `emulator`. Other
+hosts look in `~/Android/Sdk`. A host without `adb` or `emulator` says the destination is
 unavailable instead of inventing a picture.
 
 When no `adb` server is running, the first `adb` command Octant sends starts

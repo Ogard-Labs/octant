@@ -1109,13 +1109,14 @@ describe("AndroidToolchainService", () => {
   });
 
   it.runIf(process.platform === "darwin")(
-    "finds a Homebrew command-line-tools SDK when no SDK variable is set",
+    "finds a Homebrew command-line-tools SDK when no SDK variable is set, past a partial Android Studio one",
     async () => {
       const sdk = "/opt/homebrew/share/android-commandlinetools";
+      const partial = join(homedir(), "Library", "Android", "sdk", "platform-tools", "adb");
       const service = new AndroidToolchainService({
         execute: discoveryExecutor(),
         access: async (path: string) => {
-          if (!path.startsWith(`${sdk}/`)) throw new Error("ENOENT");
+          if (path !== partial && !path.startsWith(`${sdk}/`)) throw new Error("ENOENT");
         },
         environment: () => ({}),
         writeArtifact: async () => undefined,

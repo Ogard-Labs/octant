@@ -548,12 +548,13 @@ client forks puts itself in its own session, so Octant's group cleanup of a
 finished command never reaches it, and Octant never stops a server. Each
 client runs with `ADB_MDNS=0`: a server started with mDNS discovery on aborts
 within seconds on macOS 27, and every later command then restarts it while the
-emulator reconnects as `offline`. An input whose client exits non-zero with
+emulator reconnects as `offline`. An input whose client exits 255 with
 neither a client nor a device message lost its server after handing the
 command over. It is reported `interrupted` (delivery unknown), not `failed`,
 so a retry cannot type the same text twice. With no `ANDROID_HOME` or
 `ANDROID_SDK_ROOT`, SDK discovery tries the Android Studio home location and
-then the Homebrew `android-commandlinetools` prefixes.
+then the Homebrew `android-commandlinetools` prefixes, taking the first that
+has both `adb` and `emulator`.
 Tap, typed text,
 and hardware-key input ride the same Apple workbench control channel as boot
 and screenshot, with XCTest-less host injection behind that channel only,

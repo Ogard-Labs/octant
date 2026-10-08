@@ -687,7 +687,14 @@ export class AndroidToolchainService {
   async #installedSdkHome(): Promise<string | undefined> {
     const candidates = defaultSdkHomes();
     for (const candidate of candidates) {
-      if (await this.#exists(join(candidate, "platform-tools", "adb"))) return candidate;
+      // A partial install (adb without the emulator) must not hide a complete
+      // SDK further down the list.
+      if (
+        (await this.#exists(join(candidate, "platform-tools", "adb"))) &&
+        (await this.#exists(join(candidate, "emulator", "emulator")))
+      ) {
+        return candidate;
+      }
     }
     return candidates[0];
   }
@@ -1286,9 +1293,9 @@ function succeeded(result: AndroidProcessResult): boolean {
  * own `* daemon …` start notices on stderr.
  */
 function lostServerMidCommand(result: AndroidProcessResult): boolean {
-  if (result.termination !== "exited" || result.exitCode === 0 || result.exitCode === null) {
-    return false;
-  }
+  // 255 is what the client returned when its server was aborted mid-command;
+  // any other code is the device's own exit status and stays a failure.
+  if (result.termination !== "exited" || result.exitCode !== 255) return false;
   if (result.cleanupUncertain) return false;
   return text(result.stderr)
     .split(/\r?\n/)
