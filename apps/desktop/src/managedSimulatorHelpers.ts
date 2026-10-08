@@ -19,6 +19,28 @@ const CONFIG_POLL_MS = 200;
 const KEY_TYPED_TEXT = /^[A-Za-z0-9 \n]+$/;
 /** HID usage of V, and of the left Command modifier. */
 const PASTE_KEY = { usage: 25, modifiers: [227] } as const;
+/**
+ * How long asking the guest whether its input is connected may take. A busy
+ * CoreSimulator was observed taking minutes to answer `simctl spawn`; input
+ * does not wait that long for a question it can do without.
+ */
+const INPUT_CONNECTION_MS = 1_500;
+/**
+ * The guest notification Xcode 27's Device Hub raises when its input daemon
+ * takes over touch and buttons. serve-sim's touch and buttons still go to the
+ * legacy services then, which accept them and drop them (observed 2026-10-08
+ * on Xcode 27.0, 27A266a: taps, swipes and Home exited 0 and moved nothing).
+ */
+const DEVICE_HUB_INPUT_NOTIFICATION = "com.apple.coredevice.dtuhidd.active";
+
+export const INPUT_DISCONNECTED_MESSAGE =
+  "Simulator input is disconnected. Repair input restarts the Simulator's home screen.";
+
+/**
+ * Whether the guest's legacy touch and button services still receive what
+ * serve-sim sends. `unknown` means the guest did not answer in time.
+ */
+export type SimulatorInputConnection = "connected" | "disconnected" | "unknown";
 
 /** `aborted` can flip during an await, so this read stays outside control-flow narrowing. */
 function actionWasCancelled(signal: AbortSignal | undefined): boolean {
@@ -58,6 +80,11 @@ export interface ManagedSimulatorHelpersOptions {
   readonly firstFrameMs?: number;
   /** Puts text on the Simulator's pasteboard; resolves whether it did. */
   readonly copyToPasteboard?: (udid: string, text: string, signal: AbortSignal) => Promise<boolean>;
+  /** Asks the guest whether Device Hub has taken its touch and buttons. */
+  readonly inputConnection?: (
+    udid: string,
+    signal: AbortSignal,
+  ) => Promise<SimulatorInputConnection>;
 }
 
 interface StreamSession {
@@ -108,6 +135,7 @@ export function createManagedSimulatorHelpers(
   const readyMs = options.readyMs ?? READY_MS;
   const firstFrameMs = options.firstFrameMs ?? FIRST_FRAME_MS;
   const copyToPasteboard = options.copyToPasteboard ?? simctlPasteboardCopy;
+  const inputConnection = options.inputConnection ?? simctlInputConnection;
   const sessions = new Map<string, Promise<StreamSession | undefined>>();
   const live = new Set<ChildProcess>();
   let disposed = false;
@@ -235,6 +263,29 @@ export function createManagedSimulatorHelpers(
     if (request.op === "key") return "native";
     const commands = controlCommands(session.udid, request);
     if (commands === undefined) return "native";
+    // serve-sim's command line answers once its socket took the message, not
+    // once the guest acted on it, so a Simulator whose input Device Hub took
+    // would hear every touch reported as delivered. A finger already down
+    // was checked when it went down.
+    if (!(request.op === "touch" && request.phase !== "down")) {
+      const connection = await inputConnection(
+        session.udid,
+        AbortSignal.any([
+          AbortSignal.timeout(Math.min(INPUT_CONNECTION_MS, timeoutMs)),
+          ...(cancelled === undefined ? [] : [cancelled]),
+        ]),
+      );
+      if (actionWasCancelled(cancelled)) {
+        return { status: "unavailable", message: "The action was cancelled." };
+      }
+      if (connection === "disconnected") {
+        return {
+          status: "refused",
+          code: "input-disconnected",
+          message: INPUT_DISCONNECTED_MESSAGE,
+        };
+      }
+    }
     let sent = false;
     let gestureOpen = false;
     const releaseGesture = async () => {
@@ -308,6 +359,31 @@ export function createManagedSimulatorHelpers(
       return { status: "unavailable", message: "Setting the Simulator pasteboard used the time." };
     }
     return native.send(udid, { op: "key", ...PASTE_KEY }, remainingMs, cancelled);
+  }
+
+  /**
+   * Gives touch and buttons back to the legacy services serve-sim drives, then
+   * drops the stream: serve-sim reconnects to them only when it starts again.
+   */
+  async function repairInput(
+    udid: string,
+    timeoutMs: number,
+    cancelled: AbortSignal | undefined,
+  ): Promise<DeviceHelperReply> {
+    const outcome = await runControl(["repair-input", "-d", udid], timeoutMs, cancelled);
+    if (outcome === "missing") {
+      return {
+        status: "refused",
+        code: "repair-unavailable",
+        message: "Repair input needs the managed serve-sim tool, and it is not installed.",
+      };
+    }
+    if (outcome !== "ok") {
+      return { status: "unavailable", message: "The Simulator's input could not be repaired." };
+    }
+    const session = await sessions.get(udid);
+    if (session !== undefined) retire(session);
+    return { status: "delivered" };
   }
 
   async function ensureFrames(session: StreamSession): Promise<void> {
@@ -384,6 +460,7 @@ export function createManagedSimulatorHelpers(
       }
       if (request.op === "key") return native.send(simulatorId, request, timeoutMs, cancelled);
       if (request.op === "text") return typeText(simulatorId, request.text, timeoutMs, cancelled);
+      if (request.op === "repair-input") return repairInput(simulatorId, timeoutMs, cancelled);
       const session = await sessionFor(simulatorId);
       if (actionWasCancelled(cancelled)) {
         return { status: "unavailable", message: "The action was cancelled." };
@@ -606,6 +683,44 @@ function simctlPasteboardCopy(udid: string, text: string, signal: AbortSignal): 
     child.stdin?.once("error", () => undefined);
     child.stdin?.end(text);
   });
+}
+
+/**
+ * Reads Device Hub's input notification inside the guest. An answer that is
+ * neither state, or none in time, is `unknown`: the question went unanswered,
+ * which says nothing about the input itself.
+ */
+function simctlInputConnection(
+  udid: string,
+  signal: AbortSignal,
+): Promise<SimulatorInputConnection> {
+  return new Promise((resolve) => {
+    let child: ChildProcess;
+    try {
+      child = spawnProcess(
+        "xcrun",
+        ["simctl", "spawn", udid, "notifyutil", "-g", DEVICE_HUB_INPUT_NOTIFICATION],
+        { stdio: ["ignore", "pipe", "ignore"], signal },
+      );
+    } catch {
+      resolve("unknown");
+      return;
+    }
+    let output = "";
+    child.stdout?.on("data", (chunk: Uint8Array) => {
+      output += Buffer.from(chunk).toString("utf8");
+    });
+    child.once("error", () => resolve("unknown"));
+    child.once("exit", (code) => resolve(code === 0 ? readInputConnection(output) : "unknown"));
+  });
+}
+
+/** `notifyutil -g` prints the notification's name and its state. */
+export function readInputConnection(output: string): SimulatorInputConnection {
+  const state = output.trim();
+  if (state === `${DEVICE_HUB_INPUT_NOTIFICATION} 1`) return "disconnected";
+  if (state === `${DEVICE_HUB_INPUT_NOTIFICATION} 0`) return "connected";
+  return "unknown";
 }
 
 function readEndpoint(

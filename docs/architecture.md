@@ -564,6 +564,23 @@ drag is one swipe sent when it ends, keys typed on the focused screen go to
 the device as one text per pause, Home and Lock are buttons, and what a person
 does while an action runs is kept and sent in order (see
 [decisions/0140-the-live-simulator-screen-is-driven-directly.md](decisions/0140-the-live-simulator-screen-is-driven-directly.md)).
+Touch and buttons sent through the managed `serve-sim` stream are reported
+delivered only while the Simulator's legacy input services still receive them.
+Xcode 27's Device Hub can take those services over: its guest input daemon
+starts on demand (the native helper's first connection starts it), raises the
+guest notification `com.apple.coredevice.dtuhidd.active` to `1`, and from then
+on `serve-sim` exits successfully while the device drops every tap, swipe, and
+Home. Before each tap, swipe, button, or finger-down on that stream the desktop
+reads the notification; at `1` it sends nothing and refuses with the reason
+`input-disconnected` ("Simulator input is disconnected. Repair input restarts
+the Simulator's home screen."). When the guest does not answer within 1.5
+seconds the input is sent as before. **Repair input** is a fifth input kind,
+offered by the device pane only after that refusal: it runs
+`serve-sim repair-input` (which restarts the guest's `backboardd`, so the home
+screen restarts and running apps close) and drops the stream so the next input
+reconnects it. It rides the same Allow input grant as a tap, never runs
+automatically, and is refused unless a person (`local-user` or
+`remote-device`) requested it; `octant_apple` does not offer it.
 
 ## Modes: Chat, Work, and Code
 

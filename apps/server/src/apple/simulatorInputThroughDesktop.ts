@@ -45,6 +45,9 @@ export function simulatorDeviceInput(
   if (request.kind === "type-text" && request.text !== undefined) {
     return { kind: "input", input: { kind: "type-text", ...destination, text: request.text } };
   }
+  if (request.kind === "repair-input") {
+    return { kind: "input", input: { kind: "repair-input", ...destination } };
+  }
   if (request.kind === "key-press" && request.key !== undefined) {
     return { kind: "input", input: { kind: "key-press", ...destination, key: request.key } };
   }

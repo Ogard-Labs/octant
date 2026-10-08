@@ -31,7 +31,9 @@ export interface AppleExecutionScope {
   readonly inputGranted?: boolean;
 }
 
-const SIMULATOR_INPUT_KINDS = new Set(["tap", "swipe", "type-text", "key-press"]);
+// Repair input rides the same grant as a tap: it is input to the device a
+// person already allowed, sent only when that person asks for it.
+const SIMULATOR_INPUT_KINDS = new Set(["tap", "swipe", "type-text", "key-press", "repair-input"]);
 
 /**
  * How long one approved Allow input keeps a Simulator open to further input
@@ -123,6 +125,15 @@ export function evaluateAppleSimulatorRequest(
     request.requestedBy === undefined
   ) {
     return { kind: "denied", reason: "actor-required" };
+  }
+  // Repairing input restarts the Simulator's home screen and closes its apps.
+  // Only a person may ask for that; an agent or the host never does it for them.
+  if (
+    request.kind === "repair-input" &&
+    request.requestedBy?.kind !== "local-user" &&
+    request.requestedBy?.kind !== "remote-device"
+  ) {
+    return { kind: "denied", reason: "person-required" };
   }
   const simulator = simulators.find((candidate) => candidate.simulatorId === request.simulatorId);
   if (simulator === undefined) return { kind: "denied", reason: "invalid-destination" };

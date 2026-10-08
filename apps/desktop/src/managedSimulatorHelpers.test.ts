@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { createManagedSimulatorHelpers } from "./managedSimulatorHelpers";
+import { createManagedSimulatorHelpers, readInputConnection } from "./managedSimulatorHelpers";
 import type { DeviceHelperReply, SimulatorDeviceHelpers } from "./simulatorDeviceHelper";
 
 const udid = "7E29846E-F920-438E-8AB2-930C1A0F7FB7";
@@ -73,6 +73,8 @@ function tools(
   };
 }
 
+const connected = async () => "connected" as const;
+
 const fetchStream: typeof fetch = async (input) => {
   const url = String(input);
   if (url.endsWith("/config")) {
@@ -85,10 +87,14 @@ const fetchStream: typeof fetch = async (input) => {
 describe("managed simulator streams", () => {
   it("uses the native helper when serve-sim cannot be launched", async () => {
     const native = nativeHelpers();
-    const helpers = createManagedSimulatorHelpers(native, {
-      launchSpec: async () => undefined,
-      trackProcess: vi.fn(),
-    });
+    const helpers = createManagedSimulatorHelpers(
+      native,
+      {
+        launchSpec: async () => undefined,
+        trackProcess: vi.fn(),
+      },
+      { inputConnection: connected },
+    );
     await expect(helpers.send(udid, { op: "hello" }, 1_000)).resolves.toEqual({
       status: "delivered",
     });
@@ -99,7 +105,10 @@ describe("managed simulator streams", () => {
   it("reports the stream screen and shows a JPEG without the native helper", async () => {
     const native = nativeHelpers();
     const managed = tools();
-    const helpers = createManagedSimulatorHelpers(native, managed, { fetch: fetchStream });
+    const helpers = createManagedSimulatorHelpers(native, managed, {
+      fetch: fetchStream,
+      inputConnection: connected,
+    });
     try {
       await expect(helpers.send(udid, { op: "hello" }, 2_000)).resolves.toEqual({
         status: "delivered",
@@ -127,7 +136,10 @@ describe("managed simulator streams", () => {
   it("taps through serve-sim and does not also tap through the native helper", async () => {
     const native = nativeHelpers();
     const managed = tools();
-    const helpers = createManagedSimulatorHelpers(native, managed, { fetch: fetchStream });
+    const helpers = createManagedSimulatorHelpers(native, managed, {
+      fetch: fetchStream,
+      inputConnection: connected,
+    });
     try {
       await expect(helpers.send(udid, { op: "tap", x: 0.5, y: 0.25 }, 2_000)).resolves.toEqual({
         status: "delivered",
@@ -139,10 +151,92 @@ describe("managed simulator streams", () => {
     }
   });
 
+  it("refuses a tap as disconnected when Device Hub has taken the Simulator's input", async () => {
+    const native = nativeHelpers();
+    const managed = tools();
+    const helpers = createManagedSimulatorHelpers(native, managed, {
+      fetch: fetchStream,
+      inputConnection: async () => "disconnected",
+    });
+    try {
+      await expect(helpers.send(udid, { op: "tap", x: 0.5, y: 0.25 }, 2_000)).resolves.toEqual({
+        status: "refused",
+        code: "input-disconnected",
+        message:
+          "Simulator input is disconnected. Repair input restarts the Simulator's home screen.",
+      });
+      await expect(helpers.send(udid, { op: "button", button: "home" }, 2_000)).resolves.toEqual(
+        expect.objectContaining({ status: "refused", code: "input-disconnected" }),
+      );
+      expect(managed.commands.some((args) => args[0] === "tap" || args[0] === "button")).toBe(
+        false,
+      );
+      expect(native.send).not.toHaveBeenCalled();
+    } finally {
+      helpers.dispose();
+    }
+  });
+
+  it("still taps when the guest cannot say whether its input is connected", async () => {
+    const native = nativeHelpers();
+    const managed = tools();
+    const helpers = createManagedSimulatorHelpers(native, managed, {
+      fetch: fetchStream,
+      inputConnection: async () => "unknown",
+    });
+    try {
+      await expect(helpers.send(udid, { op: "tap", x: 0.5, y: 0.25 }, 2_000)).resolves.toEqual({
+        status: "delivered",
+      });
+      expect(managed.commands).toContainEqual(["tap", "0.5", "0.25", "-d", udid]);
+    } finally {
+      helpers.dispose();
+    }
+  });
+
+  it("repairs input through serve-sim and starts a fresh stream for the next tap", async () => {
+    const native = nativeHelpers();
+    const managed = tools();
+    const helpers = createManagedSimulatorHelpers(native, managed, {
+      fetch: fetchStream,
+      inputConnection: connected,
+    });
+    try {
+      await helpers.send(udid, { op: "hello" }, 2_000);
+      await expect(helpers.send(udid, { op: "repair-input" }, 2_000)).resolves.toEqual({
+        status: "delivered",
+      });
+      expect(managed.commands).toContainEqual(["repair-input", "-d", udid]);
+      await helpers.send(udid, { op: "tap", x: 0.5, y: 0.25 }, 2_000);
+      expect(managed.commands.filter((args) => args.includes("--no-preview"))).toHaveLength(2);
+      expect(native.send).not.toHaveBeenCalled();
+    } finally {
+      helpers.dispose();
+    }
+  });
+
+  it("refuses to repair input without the managed serve-sim tool", async () => {
+    const native = nativeHelpers();
+    const helpers = createManagedSimulatorHelpers(
+      native,
+      { launchSpec: async () => undefined, trackProcess: vi.fn() },
+      { inputConnection: connected },
+    );
+    try {
+      await expect(helpers.send(udid, { op: "repair-input" }, 1_000)).resolves.toEqual(
+        expect.objectContaining({ status: "refused", code: "repair-unavailable" }),
+      );
+      expect(native.send).not.toHaveBeenCalled();
+    } finally {
+      helpers.dispose();
+    }
+  });
+
   it("does not repeat a refused tap on the native helper", async () => {
     const native = nativeHelpers();
     const helpers = createManagedSimulatorHelpers(native, tools({ failTap: true }), {
       fetch: fetchStream,
+      inputConnection: connected,
     });
     try {
       await expect(helpers.send(udid, { op: "tap", x: 0.5, y: 0.25 }, 2_000)).resolves.toEqual({
@@ -158,7 +252,10 @@ describe("managed simulator streams", () => {
   it("lifts the finger when a swipe move does not reach the stream", async () => {
     const native = nativeHelpers();
     const managed = tools({ failGestureMove: true });
-    const helpers = createManagedSimulatorHelpers(native, managed, { fetch: fetchStream });
+    const helpers = createManagedSimulatorHelpers(native, managed, {
+      fetch: fetchStream,
+      inputConnection: connected,
+    });
     try {
       await expect(
         helpers.send(
@@ -186,7 +283,10 @@ describe("managed simulator streams", () => {
 
   it("sends a key through the native helper while the stream is up", async () => {
     const native = nativeHelpers();
-    const helpers = createManagedSimulatorHelpers(native, tools(), { fetch: fetchStream });
+    const helpers = createManagedSimulatorHelpers(native, tools(), {
+      fetch: fetchStream,
+      inputConnection: connected,
+    });
     try {
       await helpers.send(udid, { op: "hello" }, 2_000);
       native.send.mockClear();
@@ -208,6 +308,7 @@ describe("managed simulator streams", () => {
     };
     const helpers = createManagedSimulatorHelpers(native, managed, {
       fetch: fetchNoFrame,
+      inputConnection: connected,
       firstFrameMs: 200,
     });
     try {
@@ -231,6 +332,7 @@ describe("managed simulator streams", () => {
     const native = nativeHelpers();
     const helpers = createManagedSimulatorHelpers(native, tools({ badHost: true }), {
       fetch: fetchStream,
+      inputConnection: connected,
     });
     try {
       await helpers.send(udid, { op: "hello" }, 2_000);
@@ -252,7 +354,10 @@ describe("managed simulator streams", () => {
       }
       return fetchStream(input);
     };
-    const helpers = createManagedSimulatorHelpers(native, tools(), { fetch: fetchLate });
+    const helpers = createManagedSimulatorHelpers(native, tools(), {
+      fetch: fetchLate,
+      inputConnection: connected,
+    });
     try {
       await expect(helpers.send(udid, { op: "hello" }, 4_000)).resolves.toEqual({
         status: "delivered",
@@ -270,6 +375,7 @@ describe("managed simulator streams", () => {
     const copyToPasteboard = vi.fn(async () => true);
     const helpers = createManagedSimulatorHelpers(native, managed, {
       fetch: fetchStream,
+      inputConnection: connected,
       copyToPasteboard,
     });
     try {
@@ -294,6 +400,7 @@ describe("managed simulator streams", () => {
     const copyToPasteboard = vi.fn(async () => true);
     const helpers = createManagedSimulatorHelpers(native, tools(), {
       fetch: fetchStream,
+      inputConnection: connected,
       copyToPasteboard,
     });
     try {
@@ -312,6 +419,7 @@ describe("managed simulator streams", () => {
     const native = nativeHelpers();
     const helpers = createManagedSimulatorHelpers(native, tools(), {
       fetch: fetchStream,
+      inputConnection: connected,
       copyToPasteboard: async () => false,
     });
     try {
@@ -321,5 +429,14 @@ describe("managed simulator streams", () => {
     } finally {
       helpers.dispose();
     }
+  });
+});
+
+describe("Device Hub input notification", () => {
+  it("reads Device Hub's takeover as disconnected and anything unexpected as unknown", () => {
+    expect(readInputConnection("com.apple.coredevice.dtuhidd.active 1\n")).toBe("disconnected");
+    expect(readInputConnection("com.apple.coredevice.dtuhidd.active 0\n")).toBe("connected");
+    expect(readInputConnection("")).toBe("unknown");
+    expect(readInputConnection("com.apple.coredevice.dtuhidd.active 17")).toBe("unknown");
   });
 });

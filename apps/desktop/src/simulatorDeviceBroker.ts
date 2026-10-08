@@ -102,6 +102,9 @@ export function createSimulatorInputDelivery(
         await helpers.send(command.udid, { op: "text", text: command.text }, budgetMs, cancelled),
       );
     }
+    if (command.kind === "repair-input") {
+      return result(await helpers.send(command.udid, { op: "repair-input" }, budgetMs, cancelled));
+    }
     if (command.kind === "key-press") {
       const key = command.key.toLowerCase();
       return result(
