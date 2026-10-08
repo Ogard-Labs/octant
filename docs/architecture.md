@@ -1662,11 +1662,22 @@ modelId }`, and the model picker is provider-first. Discovery can find
   connection's app-managed tool bridge allowed — into the private
   configuration, where OpenCode appends it after every agent's built-in rules
   (its default agent otherwise allows everything); a launch that names no
-  posture denies all. The bridge allow has nothing to admit yet: Octant
-  registers app-managed tools through the 1.x MCP route, which 2.0.22 does
-  not serve (it lists `/api/experimental/mcp/{server}` instead), so the probe
-  reports app-managed tools unsupported and 2.x runs turns without Octant's
-  app tools until registration supports the 2.x MCP API. Project resolution
+  posture denies all. 2.0.22 answers the 1.x `POST /mcp` registration with
+  405 and has no per-launch MCP flag; it registers runtime MCP servers through
+  `PUT /api/experimental/mcp/{server}` (removed with `DELETE`), which Octant
+  uses for the bridge. A config-file `mcp` entry also works but connects
+  lazily after the first turn has started, so it is not used. Registration
+  turns Code Mode off for the bridge, so each tool is offered by name as
+  `<server>_<tool>` and matches the bridge allow rather than OpenCode's own
+  `execute` tool, and it waits until `GET /api/mcp` reports the server
+  `connected`, because the add answers while the server is pending and its
+  tools join a session only once connected; any other status fails the
+  registration closed. 2.0.22 names the calling session in the call's
+  `ai.opencode/sessionID` metadata, and the bridge refuses a call that names
+  another session. App-managed tools are reported only for 2.0.22 exactly,
+  the 2.x release the hostile-configuration check was repeated against, and
+  only on macOS, where the probe registers an empty bridge and OpenCode lists
+  its tools. Project resolution
   starts Git, which the Chat, Plan, and Work jail refuses; on macOS those
   launches get the failing `git` stand-in described under
   [Security and authority](#security-and-authority), so 2.x offers turns in

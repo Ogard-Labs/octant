@@ -308,6 +308,7 @@ function resultData<A>(result: { readonly data: A | undefined }): A {
 const BETA_API_TIMEOUT_MS = 5_000;
 const BETA_MUTATION_TIMEOUT_MS = 10_000;
 const MCP_PROBE_TIMEOUT_MS = 5_000;
+const BETA_MCP_POLL_MS = 100;
 const BETA_WRITE_REFUSAL_MESSAGE =
   "OpenCode 2 reported a file change that no approval or setting allowed, so the turn was stopped.";
 
@@ -472,6 +473,15 @@ function missingHealthRoute(error: unknown): boolean {
   return typeof cause === "object" && cause !== null && "status" in cause && cause.status === 404;
 }
 
+/**
+ * The OpenCode session a bridge call names: 1.x sends `sessionID` and 2.0.22
+ * sends `ai.opencode/sessionID` in the MCP request metadata. A call naming
+ * another session is refused rather than answered for the owner.
+ */
+function managedToolCallerSession(context: ManagedToolCallContext | undefined): unknown {
+  return context?.metadata.sessionID ?? context?.metadata["ai.opencode/sessionID"];
+}
+
 function awaitOpenCodeMcpAttestation(bridge: OpenCodeManagedToolsBridge): Promise<boolean> {
   return new Promise((resolve) => {
     const timeout = setTimeout(() => resolve(false), MCP_PROBE_TIMEOUT_MS);
@@ -580,6 +590,81 @@ function openCodeBetaPromptFiles(attachments: ProviderTurnInput["attachments"]) 
     uri: `data:${attachment.mediaType};base64,${Buffer.from(attachment.bytes).toString("base64")}`,
     name: attachment.displayName,
   }));
+}
+
+function betaMcpHeaders(server: OpenCodeServerConnection, projectRoot: string) {
+  return {
+    authorization: server.authorization,
+    "x-opencode-directory": encodeURIComponent(projectRoot),
+  };
+}
+
+function betaMcpRoute(
+  server: OpenCodeServerConnection,
+  projectRoot: string,
+  name?: string,
+): string {
+  // OpenCode's own routes, not Octant endpoints: the list is `/api/mcp` and
+  // each server is managed under `/api/experimental/mcp/{server}`.
+  const route = name === undefined ? "mcp" : `experimental/mcp/${encodeURIComponent(name)}`;
+  const url = new URL(`/api/${route}`, server.url);
+  url.searchParams.set("location[directory]", projectRoot);
+  return url.toString();
+}
+
+/**
+ * 2.0.22 answers the 1.x `POST /mcp` with 405 and registers runtime MCP
+ * servers through `PUT /api/experimental/mcp/{server}` instead. The add
+ * answers 204 while the server is still pending, and its tools join a
+ * session only once OpenCode reports it connected, so registration waits for
+ * that status and fails closed on any other outcome.
+ */
+async function addBetaMcpServer(
+  server: OpenCodeServerConnection,
+  projectRoot: string,
+  name: string,
+  url: string,
+): Promise<void> {
+  const added = await fetch(betaMcpRoute(server, projectRoot, name), {
+    method: "PUT",
+    headers: { ...betaMcpHeaders(server, projectRoot), "content-type": "application/json" },
+    // Code Mode (the 2.x default) would expose the bridge only through
+    // OpenCode's own `execute` tool; direct tools keep each call an action
+    // named for this bridge, which the written posture allows by name.
+    body: JSON.stringify({ config: { type: "remote", url, oauth: false, codemode: false } }),
+    signal: AbortSignal.timeout(BETA_MUTATION_TIMEOUT_MS),
+  });
+  if (!added.ok) {
+    throw new Error(`OpenCode 2 MCP registration failed with status ${added.status}.`);
+  }
+  const deadline = Date.now() + BETA_MUTATION_TIMEOUT_MS;
+  for (;;) {
+    const listed = await fetch(betaMcpRoute(server, projectRoot), {
+      headers: betaMcpHeaders(server, projectRoot),
+      signal: AbortSignal.timeout(BETA_API_TIMEOUT_MS),
+    });
+    if (!listed.ok) {
+      throw new Error(`OpenCode 2 MCP listing failed with status ${listed.status}.`);
+    }
+    const status = betaMcpStatus(await listed.json(), name);
+    if (status === "connected") return;
+    if (status !== "pending" || Date.now() >= deadline) {
+      throw new Error("OpenCode 2 app-managed tool server did not connect.");
+    }
+    await new Promise((resolve) => setTimeout(resolve, BETA_MCP_POLL_MS));
+  }
+}
+
+function betaMcpStatus(body: unknown, name: string): string | undefined {
+  const servers = asRecord(body)?.data;
+  if (!Array.isArray(servers)) return undefined;
+  for (const entry of servers) {
+    const record = asRecord(entry);
+    if (record === undefined || record.name !== name) continue;
+    const status = asRecord(record.status)?.status;
+    return typeof status === "string" ? status : undefined;
+  }
+  return undefined;
 }
 
 export function makeOfficialOpenCodeClient(
@@ -723,6 +808,10 @@ export function makeOfficialOpenCodeClient(
       );
     },
     addMcpServer: async ({ name, url }) => {
+      if (beta) {
+        await addBetaMcpServer(server, projectRoot, name, url);
+        return;
+      }
       await client.mcp.add(
         {
           directory: projectRoot,
@@ -733,6 +822,17 @@ export function makeOfficialOpenCodeClient(
       );
     },
     disconnectMcpServer: async (name) => {
+      if (beta) {
+        const response = await fetch(betaMcpRoute(server, projectRoot, name), {
+          method: "DELETE",
+          headers: betaMcpHeaders(server, projectRoot),
+          signal: AbortSignal.timeout(BETA_MUTATION_TIMEOUT_MS),
+        });
+        if (!response.ok) {
+          throw new Error(`OpenCode 2 MCP removal failed with status ${response.status}.`);
+        }
+        return;
+      }
       await client.mcp.disconnect(
         { name, directory: projectRoot },
         { throwOnError: true, signal: AbortSignal.timeout(10_000) },
@@ -1379,11 +1479,12 @@ function makeConnection(
       signal: AbortSignal,
       context?: ManagedToolCallContext,
     ): Promise<{ readonly resultJson: string; readonly isError: boolean }> => {
+      const callerSession = managedToolCallerSession(context);
       if (
         !state.toolNames.has(name) ||
         state.terminal ||
         state.sourceId === undefined ||
-        (context?.metadata.sessionID !== undefined && context.metadata.sessionID !== state.sourceId)
+        (callerSession !== undefined && callerSession !== state.sourceId)
       ) {
         return { resultJson: '{"error":"tool-unavailable"}', isError: true };
       }
