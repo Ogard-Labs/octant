@@ -5825,6 +5825,7 @@ export function startOctantServer(
     const harnessProcessPort = new RepositoryTestProcessPort({
       receiptDirectory: join(providerDataDirectory, "harness", "receipts"),
       temporaryDirectory: harnessWorkDirectory,
+      harnessShellScripts: true,
     });
     // A child admitted without network authority runs its commands here. Its
     // writable temporary root is its own: a shared one would let it rewrite a
@@ -5835,6 +5836,7 @@ export function startOctantServer(
       receiptDirectory: join(providerDataDirectory, "harness", "receipts"),
       temporaryDirectory: harnessOfflineWorkDirectory,
       networkEgress: "none",
+      harnessShellScripts: true,
     });
     const nativeHarnessRoutingStore = new NativeHarnessRoutingStore({
       journal: persistence.journal,

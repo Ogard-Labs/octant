@@ -898,6 +898,72 @@ describe("RepositoryTestProcessPort", () => {
     expect(spawn).not.toHaveBeenCalled();
   });
 
+  it("runs a harness shell script only as /bin/sh with that one script from its own work directory", async () => {
+    const child = fakeChild(95);
+    const spawn = vi.fn(() => child);
+    const options = confinedOptions({ spawn, harnessShellScripts: true });
+    const port = new RepositoryTestProcessPort(options);
+    const script = join(options.temporaryDirectory, "octant-harness-1", "command.sh");
+    mkdirSync(join(options.temporaryDirectory, "octant-harness-1"));
+    writeFileSync(script, "echo ran\n");
+
+    const execution = port.executeShellScript({
+      script,
+      cwd: temporaryDirectory(),
+      environment: {},
+      timeoutMs: 1_000,
+    });
+    await vi.waitFor(() => expect(spawn).toHaveBeenCalled());
+    const [, args] = spawn.mock.calls[0] as unknown as [string, string[]];
+    expect(args.slice(-2)).toEqual(["/bin/sh", realpathSync(script)]);
+    child.close(0, null);
+    await expect(execution).resolves.toMatchObject({ termination: "exited", exitCode: 0 });
+  });
+
+  it("refuses a harness shell script from a port that did not opt in, or from outside its work directory", async () => {
+    const spawn = vi.fn();
+    const options = confinedOptions({ spawn, harnessShellScripts: true });
+    const outside = temporaryDirectory();
+    const outsideScript = join(outside, "command.sh");
+    writeFileSync(outsideScript, "echo escaped\n");
+    const linked = join(options.temporaryDirectory, "linked.sh");
+    symlinkSync(outsideScript, linked);
+    const inside = join(options.temporaryDirectory, "command.sh");
+    writeFileSync(inside, "echo ran\n");
+    const cwd = temporaryDirectory();
+
+    const port = new RepositoryTestProcessPort(options);
+    for (const script of [
+      outsideScript,
+      linked,
+      join(options.temporaryDirectory, "..", "command.sh"),
+      options.temporaryDirectory,
+      "command.sh",
+    ]) {
+      await expect(
+        port.executeShellScript({ script, cwd, environment: {}, timeoutMs: 1_000 }),
+      ).resolves.toMatchObject({ termination: "unavailable" });
+    }
+    const notOptedIn = new RepositoryTestProcessPort({ ...options, harnessShellScripts: false });
+    await expect(
+      notOptedIn.executeShellScript({ script: inside, cwd, environment: {}, timeoutMs: 1_000 }),
+    ).resolves.toMatchObject({ termination: "unavailable" });
+    // Opting in does not let the ordinary entry point launch a shell.
+    await expect(
+      port.execute({ argv: ["/bin/sh", inside], cwd, environment: {}, timeoutMs: 1_000 }),
+    ).resolves.toMatchObject({ termination: "unavailable" });
+    // The script entry point keeps every other launch check.
+    await expect(
+      port.executeShellScript({
+        script: inside,
+        cwd,
+        environment: { NODE_OPTIONS: "--require=attacker.js" },
+        timeoutMs: 1_000,
+      }),
+    ).resolves.toMatchObject({ termination: "unavailable" });
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
   it("rejects environment entries that can redirect executable loading or credential prompts", async () => {
     for (const name of [
       "PATH",

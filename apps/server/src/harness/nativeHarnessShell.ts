@@ -1,25 +1,20 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { HarnessShellScriptInput } from "../code/repositoryTestProcessPort";
 import type { RepositoryTestProcessResult } from "../code/repositoryTestRunner";
 import type { NativeHarnessShellPort, NativeHarnessShellRun } from "./nativeHarnessTools";
 
 export interface SandboxedProcessPort {
-  execute(
-    input: {
-      readonly argv: readonly string[];
-      readonly cwd: string;
-      readonly environment: Readonly<Record<string, string>>;
-      readonly timeoutMs: number;
-    },
+  executeShellScript(
+    input: HarnessShellScriptInput,
     signal?: AbortSignal,
   ): Promise<RepositoryTestProcessResult>;
 }
 
 export interface NativeHarnessShellOptions {
   readonly process: SandboxedProcessPort;
-  readonly scriptDirectory?: string;
-  readonly shell?: string;
+  /** The process port's own temporary directory: it runs only scripts inside it. */
+  readonly scriptDirectory: string;
 }
 
 /**
@@ -31,16 +26,15 @@ export interface NativeHarnessShellOptions {
 export function createNativeHarnessShell(
   options: NativeHarnessShellOptions,
 ): NativeHarnessShellPort {
-  const shell = options.shell ?? "/bin/sh";
   return {
     run: async (input): Promise<NativeHarnessShellRun> => {
-      const directory = await mkdtemp(join(options.scriptDirectory ?? tmpdir(), "octant-harness-"));
+      const directory = await mkdtemp(join(options.scriptDirectory, "octant-harness-"));
       const script = join(directory, "command.sh");
       try {
         await writeFile(script, `${input.command}\n`, { mode: 0o600 });
-        const result = await options.process.execute(
+        const result = await options.process.executeShellScript(
           {
-            argv: [shell, script],
+            script,
             cwd: input.cwd,
             environment: { NO_COLOR: "1", TERM: "dumb" },
             timeoutMs: input.timeoutMs,

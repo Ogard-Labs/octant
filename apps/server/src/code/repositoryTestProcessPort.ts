@@ -95,6 +95,23 @@ interface RepositoryTestProcessPortOptions {
    * toolchain port turns this on; the repository-test runner does not need it.
    */
   readonly allowSimulatorControl?: boolean;
+  /**
+   * Whether `executeShellScript` may run a script from this port's temporary
+   * directory with `/bin/sh`. Only the harness `bash` ports turn this on: a
+   * repository test, Apple, or Android launch never needs a shell.
+   */
+  readonly harnessShellScripts?: boolean;
+}
+
+/**
+ * One harness shell command: a script file the harness wrote inside the
+ * port's temporary directory, run as `/bin/sh <script>` and nothing else.
+ */
+export interface HarnessShellScriptInput {
+  readonly script: string;
+  readonly cwd: string;
+  readonly environment: Readonly<Record<string, string>>;
+  readonly timeoutMs: number;
 }
 
 export interface RepositoryTestProcessInput {
@@ -191,6 +208,7 @@ const SAFE_INHERITED_ENVIRONMENT = [
 const MAX_ARGUMENTS = 64;
 const MAX_ARGUMENT_BYTES = 1_024;
 const MAX_TIMEOUT_MS = 60 * 60 * 1_000;
+const HARNESS_SHELL = "/bin/sh";
 
 export class RepositoryTestProcessPort {
   readonly #platform: NodeJS.Platform;
@@ -207,6 +225,7 @@ export class RepositoryTestProcessPort {
   readonly #literalReadPaths: ReadonlyArray<string>;
   readonly #additionalWritePaths: ReadonlyArray<string>;
   readonly #allowSimulatorControl: boolean;
+  readonly #harnessShellScripts: boolean;
 
   constructor(options: RepositoryTestProcessPortOptions = {}) {
     this.#platform = options.platform ?? process.platform;
@@ -226,6 +245,7 @@ export class RepositoryTestProcessPort {
     this.#literalReadPaths = options.literalReadPaths ?? [];
     this.#additionalWritePaths = options.additionalWritePaths ?? [];
     this.#allowSimulatorControl = options.allowSimulatorControl === true;
+    this.#harnessShellScripts = options.harnessShellScripts === true;
     this.#confinement =
       options.confinement ??
       makeSeatbeltConfinementLive({
@@ -252,7 +272,46 @@ export class RepositoryTestProcessPort {
     } catch {
       return unavailable(false);
     }
+    return this.#launch(input, validated, signal);
+  }
 
+  /**
+   * The harness `bash` entry point. `execute` refuses a shell as argv[0] so a
+   * test command stays one structured argv nothing reinterprets; this is the
+   * one place a shell runs, and only what the harness shell needs: the fixed
+   * `/bin/sh`, one script that is a regular file inside this port's own
+   * temporary directory, no other argument, and every other check `execute`
+   * makes. A port that did not opt in refuses it.
+   */
+  async executeShellScript(
+    input: HarnessShellScriptInput,
+    signal?: AbortSignal,
+  ): Promise<RepositoryTestProcessResult> {
+    if (!this.#harnessShellScripts || !supportsOwnedProcessGroups(this.#platform))
+      return unavailable(false);
+    if (signal?.aborted) return cancelledBeforeSpawn();
+    let launchInput: RepositoryTestProcessInput;
+    try {
+      validateLaunchInput({ ...input, argv: [HARNESS_SHELL, input.script] }, this.#maxOutputBytes);
+      const script = await resolveScriptInside(this.#temporaryDirectory, input.script);
+      launchInput = { ...input, argv: [HARNESS_SHELL, script] };
+      validateLaunchInput(launchInput, this.#maxOutputBytes);
+    } catch {
+      return unavailable(false);
+    }
+    if (signal?.aborted) return cancelledBeforeSpawn();
+    return this.#launch(
+      launchInput,
+      { executable: HARNESS_SHELL, args: launchInput.argv.slice(1) },
+      signal,
+    );
+  }
+
+  async #launch(
+    input: RepositoryTestProcessInput,
+    validated: { readonly executable: string; readonly args: readonly string[] },
+    signal: AbortSignal | undefined,
+  ): Promise<RepositoryTestProcessResult> {
     let launch: { readonly command: string; readonly args: readonly string[] };
     try {
       const executable = isAbsolute(validated.executable)
@@ -654,6 +713,22 @@ function validateProcessInput(
   input: RepositoryTestProcessInput,
   maximumOutputBytes: number,
 ): { readonly executable: string; readonly args: readonly string[] } {
+  validateLaunchInput(input, maximumOutputBytes);
+  // A test command is one structured argv run without a shell, so an argument
+  // such as `; touch x` stays a literal. A shell or `-c` here would turn that
+  // argv back into a string something reinterprets.
+  const executableName = basename(input.argv[0]!).toLowerCase();
+  if (
+    ["sh", "bash", "zsh", "fish", "cmd", "cmd.exe", "powershell", "powershell.exe"].includes(
+      executableName,
+    ) ||
+    input.argv.slice(1).includes("-c")
+  )
+    throw new Error("Repository test shell argv is unavailable.");
+  return { executable: input.argv[0]!, args: input.argv.slice(1) };
+}
+
+function validateLaunchInput(input: RepositoryTestProcessInput, maximumOutputBytes: number): void {
   if (
     input.argv.length === 0 ||
     input.argv.length > MAX_ARGUMENTS ||
@@ -674,14 +749,6 @@ function validateProcessInput(
     )
       throw new Error("Repository test argv is invalid.");
   }
-  const executableName = basename(input.argv[0]!).toLowerCase();
-  if (
-    ["sh", "bash", "zsh", "fish", "cmd", "cmd.exe", "powershell", "powershell.exe"].includes(
-      executableName,
-    ) ||
-    input.argv.slice(1).includes("-c")
-  )
-    throw new Error("Repository test shell argv is unavailable.");
   for (const [name, value] of Object.entries(input.environment)) {
     if (
       !/^[A-Z_][A-Z0-9_]{0,127}$/.test(name) ||
@@ -690,7 +757,22 @@ function validateProcessInput(
     )
       throw new Error("Repository test environment is invalid.");
   }
-  return { executable: input.argv[0]!, args: input.argv.slice(1) };
+}
+
+/**
+ * The script must be a regular file the harness wrote beneath the port's
+ * temporary directory, judged by its resolved path so neither a symlink nor
+ * `..` can point the shell at a file elsewhere.
+ */
+async function resolveScriptInside(directory: string, script: string): Promise<string> {
+  if (!isAbsolute(script)) throw new Error("Harness shell script is not absolute.");
+  const root = await realpath(directory);
+  const metadata = await lstat(script);
+  if (!metadata.isFile()) throw new Error("Harness shell script is not a regular file.");
+  const resolved = await realpath(script);
+  if (resolved === root || !contained(root, resolved))
+    throw new Error("Harness shell script is outside the work directory.");
+  return resolved;
 }
 
 function unsafeEnvironmentName(name: string): boolean {
