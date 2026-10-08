@@ -108,6 +108,9 @@ export function SyncSettingsSection(props: SyncSettingsSectionProps) {
         return { status: "refused", message: "Sync settings are host-only." };
       setBusy(true);
       setProblem(undefined);
+      // A bucket refusal belongs to the save that caused it, not to whatever
+      // the person does next.
+      setBucketProblem(undefined);
       let outcome: CommandOutcome;
       try {
         const result = await client.execute(command);
@@ -248,7 +251,6 @@ export function SyncSettingsSection(props: SyncSettingsSectionProps) {
                 key={view.version}
                 locked={locked}
                 onSave={async (settings, credentials) => {
-                  setBucketProblem(undefined);
                   await run(
                     {
                       schemaVersion: 1,
