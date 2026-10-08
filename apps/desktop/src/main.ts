@@ -1437,7 +1437,12 @@ async function startDesktopCredentialBroker(): Promise<CredentialBroker | undefi
   if (credentialBroker !== undefined) return credentialBroker;
   const backend = await getCredentialBackend();
   if (backend.store === undefined) return undefined;
-  return await startCredentialBroker(backend.store, backend.purgeStore);
+  return await startCredentialBroker(
+    backend.store,
+    backend.purgeStore,
+    undefined,
+    backend.replicaDeviceKeys,
+  );
 }
 
 async function resolveExistingHostAttachment() {

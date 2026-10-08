@@ -431,4 +431,65 @@ describe("startCredentialBroker", () => {
       }
     });
   });
+
+  it("keeps replica device keys out of reach of a provider instance with the same id", async () => {
+    const instanceId = randomUUID();
+    const providers = memoryStore();
+    const deviceKeys = memoryStore();
+    const broker = await startCredentialBroker(providers, undefined, undefined, deviceKeys);
+    try {
+      const call = async (path: string, body: Record<string, string>) =>
+        broker.fetchForTest(
+          brokerRequest(broker.url, broker.token, path, { body: JSON.stringify(body) }),
+        );
+      expect(
+        (await call("/v1/replica-device-keys/set", { instanceId, credential: "device-private" }))
+          .status,
+      ).toBe(200);
+
+      // The provider routes name the same UUID and reach a different store.
+      expect(
+        (await call("/v1/credentials/resolve", { providerInstanceId: instanceId })).status,
+      ).toBe(404);
+      expect(
+        await (await call("/v1/credentials/has", { providerInstanceId: instanceId })).json(),
+      ).toEqual({ present: false });
+      expect(
+        (
+          await call("/v1/credentials/set", {
+            providerInstanceId: instanceId,
+            credential: "provider-overwrite",
+          })
+        ).status,
+      ).toBe(200);
+      expect(
+        (await call("/v1/credentials/delete", { providerInstanceId: instanceId })).status,
+      ).toBe(200);
+
+      expect(await deviceKeys.resolve(instanceId)).toBe("device-private");
+      expect(await (await call("/v1/replica-device-keys/resolve", { instanceId })).json()).toEqual({
+        credential: "device-private",
+      });
+      // A provider-shaped body is not a device-key request.
+      expect(
+        (await call("/v1/replica-device-keys/resolve", { providerInstanceId: instanceId })).status,
+      ).toBe(400);
+    } finally {
+      await broker.close();
+    }
+  });
+
+  it("does not serve device-key routes when the host gave the broker no device-key store", async () => {
+    const broker = await startCredentialBroker(memoryStore());
+    try {
+      const response = await broker.fetchForTest(
+        brokerRequest(broker.url, broker.token, "/v1/replica-device-keys/has", {
+          body: JSON.stringify({ instanceId: randomUUID() }),
+        }),
+      );
+      expect(response.status).toBe(404);
+    } finally {
+      await broker.close();
+    }
+  });
 });

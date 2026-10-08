@@ -83,6 +83,7 @@
     "./canvas-share-access-log-policy": "./src/canvasShareAccessLogPolicy.ts",
     "./audit-policy": "./src/auditPolicy.ts",
     "./replica-entry-policy": "./src/replicaEntryPolicy.ts",
+    "./replica-membership-policy": "./src/replicaMembershipPolicy.ts",
     "./turn-metrics-policy": "./src/turnMetricsPolicy.ts",
     "./live-turn-policy": "./src/liveTurnPolicy.ts",
     "./turn-metrics-display": "./src/turnMetricsDisplay.ts",

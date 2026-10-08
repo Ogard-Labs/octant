@@ -469,6 +469,7 @@ import { makeAnthropicCompatibleDriver } from "./providers/anthropicCompatibleDr
 import { makeAzureFoundryDriver } from "./providers/azureFoundryDriver";
 import {
   makeCredentialBrokerClient,
+  makeReplicaDeviceKeyBrokerClient,
   type ProviderCredentialResolver,
 } from "./providers/credentialBrokerClient";
 import { createHostOAuthService } from "./providers/oauth/hostOAuthService";
@@ -839,6 +840,10 @@ import {
   createHostControlRouteHandler,
   type HostControlServicePolicyPort,
 } from "./hostControlRoutes";
+import { createReplicaMembershipRouteHandler } from "./replica/replicaMembershipRoutes";
+import { ReplicaMembershipService } from "./replica/replicaMembershipService";
+import { createReplicaMembershipJournal } from "./replica/replicaMembershipProjection";
+import { createReplicaDeviceKey, makeReplicaDeviceSigner } from "./replica/replicaDeviceKeyService";
 import { createHostResourceRouteHandler } from "./hostResourceRoutes";
 import { desktopCredentialStore } from "./hostDataMap";
 import { ThreadRetentionService } from "./threadRetentionService";
@@ -9962,6 +9967,45 @@ export function startOctantServer(
         },
       }),
     });
+    // Replica membership reads its facts from the journal and keeps device
+    // signing keys in their own namespace of the host credential store
+    // (Keychain on macOS, Secret Service on Linux), reached through the
+    // credential broker's device-key routes, never its provider routes. Which store a host
+    // writes to is not configurable yet, so every command answers
+    // `not-configured` and makes no store call until that setting exists.
+    const replicaDeviceKeys =
+      options.credentialBrokerUrl === undefined || options.credentialBrokerToken === undefined
+        ? undefined
+        : makeReplicaDeviceKeyBrokerClient({
+            url: options.credentialBrokerUrl,
+            token: options.credentialBrokerToken,
+          });
+    const replicaMembershipService = new ReplicaMembershipService({
+      store: () => ({ status: "not-configured" }),
+      credentials: {
+        create: async () => {
+          if (replicaDeviceKeys === undefined) throw new Error("credential store unavailable");
+          return createReplicaDeviceKey(replicaDeviceKeys);
+        },
+        sign: async (instanceId, payload) => {
+          if (replicaDeviceKeys === undefined) return { status: "refused", reason: "unavailable" };
+          return makeReplicaDeviceSigner(replicaDeviceKeys, instanceId).sign(payload);
+        },
+      },
+      journal: createReplicaMembershipJournal({
+        journal: persistence.journal,
+        uuid: randomUUID,
+        clock: () => new Date().toISOString(),
+        actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+      }),
+      state: () => persistence.replicaMembershipProjection.state(),
+      localHostId: LOCAL_HOST_ID,
+      clock: () => Date.now(),
+    });
+    const replicaMembershipRoutes = createReplicaMembershipRouteHandler({
+      service: replicaMembershipService,
+      windowAuthorityStore,
+    });
     return yield* Effect.acquireRelease(
       Effect.tryPromise({
         try: async () => {
@@ -9994,6 +10038,7 @@ export function startOctantServer(
                 (await privateListenerAdministrationRoutes(request)) ??
                 (await localDeviceAdministrationRoutes(request)) ??
                 (await hostControlRoutes(request)) ??
+                (await replicaMembershipRoutes(request)) ??
                 (await dispatchMeasuredProductRoutes(request)) ??
                 (await webAssets(request)) ??
                 new Response("Not Found", { status: 404 })

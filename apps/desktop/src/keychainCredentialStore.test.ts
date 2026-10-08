@@ -31,6 +31,22 @@ function purgeInput(dryRun: boolean) {
 }
 
 describe("keychainHelperSpec", () => {
+  it("sends replica device keys to their own namespace, never the provider service", () => {
+    const spec = keychainHelperSpec(
+      helperPath,
+      { operation: "resolve", providerInstanceId },
+      storeScope,
+      "replica-device-key",
+    );
+    expect(JSON.parse(spec.stdin)).toEqual({
+      version: 1,
+      storeScope,
+      namespace: "replica-device-key",
+      instanceId: providerInstanceId,
+      operation: "resolve",
+    });
+  });
+
   it("passes set credentials through stdin and never process arguments", () => {
     const spec = keychainHelperSpec(
       helperPath,
