@@ -1,5 +1,5 @@
 import { ChevronRight } from "lucide-react";
-import type { ReactNode } from "react";
+import { useId, type ReactNode } from "react";
 import { ProviderGlyph } from "../../providers/ProviderGlyph";
 import { PROVIDER_LOGOS } from "../../providers/providerLogoPaths";
 import { signInConsent } from "../../providers/ProviderOAuthSignIn";
@@ -73,6 +73,8 @@ export function ModelEndpointRow(props: ModelEndpointRowProps) {
   const accessibleName = [name, props.status.label.toLowerCase(), props.meta]
     .filter((part) => part !== undefined)
     .join(", ");
+  const consentId = useId();
+  const showConsent = fix?.kind === "sign-in" && props.signInTerms !== undefined;
   let fixArea: ReactNode = null;
   if (props.status.sentence !== undefined || fix !== undefined) {
     fixArea = (
@@ -82,6 +84,7 @@ export function ModelEndpointRow(props: ModelEndpointRowProps) {
         )}
         {fix === undefined ? null : (
           <OctantButton
+            {...(showConsent ? { "aria-describedby": consentId } : {})}
             aria-label={`${fix.label} for ${name}`}
             disabled={props.disabled}
             onClick={() => props.onFix(fix.kind)}
@@ -92,8 +95,10 @@ export function ModelEndpointRow(props: ModelEndpointRowProps) {
             {fix.label}
           </OctantButton>
         )}
-        {fix?.kind === "sign-in" && props.signInTerms !== undefined ? (
-          <p className="endpoint-row__consent">{signInConsent(props.signInTerms)}</p>
+        {showConsent && props.signInTerms !== undefined ? (
+          <p className="endpoint-row__consent" id={consentId}>
+            {signInConsent(props.signInTerms)}
+          </p>
         ) : null}
       </div>
     );

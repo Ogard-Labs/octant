@@ -169,10 +169,15 @@ export function ProviderOAuthSignInPanel(props: {
   /**
    * Begin the sign-in once, as soon as the host reports the person signed
    * out. Set when the person already chose to sign in elsewhere, such as the
-   * first-run choice or a row's Sign in button, beside the same consent line;
-   * the acknowledgment is recorded first when the terms still need it.
+   * first-run choice or a row's Sign in button.
    */
   readonly startSignIn?: boolean;
+  /**
+   * The click that set `startSignIn` sat beside the terms' consent line, so
+   * it may record the acknowledgment. Without it, a sign-in that still needs
+   * the terms waits for a click on this panel's own button and consent line.
+   */
+  readonly consentShown?: boolean;
   /** Told each state the panel settles on, so the page around it can follow. */
   readonly onStateChange?: (state: ProviderOAuthSignInState) => void;
   readonly run?: (command: ProviderOAuthCommand) => Promise<ProviderOAuthCommandResult | undefined>;
@@ -261,7 +266,11 @@ export function ProviderOAuthSignInPanel(props: {
 
   useEffect(() => {
     if (props.startSignIn !== true || started.current || !statusKnown) return;
-    if (state.kind !== "signed-out" && state.kind !== "expired") return;
+    // An expired sign-in never restarts by itself: the host's expired answer
+    // does not say whether the terms changed since, so the person signs in
+    // again from the button that carries the consent line.
+    if (state.kind !== "signed-out") return;
+    if (termsRequired && props.consentShown !== true) return;
     started.current = true;
     signIn();
   });

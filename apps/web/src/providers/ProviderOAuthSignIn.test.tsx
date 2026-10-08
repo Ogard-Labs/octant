@@ -119,6 +119,7 @@ describe("provider sign-in panel", () => {
         accountLabel="ChatGPT plan"
         descriptorId="chatgpt-plan"
         instanceId="00000000-0000-4000-8000-000000000902"
+        consentShown
         run={run}
         startSignIn
         termsSummary="Terms"
@@ -131,6 +132,7 @@ describe("provider sign-in panel", () => {
         accountLabel="ChatGPT plan"
         descriptorId="chatgpt-plan"
         instanceId="00000000-0000-4000-8000-000000000902"
+        consentShown
         run={run}
         startSignIn
         termsSummary="Terms"
@@ -138,6 +140,25 @@ describe("provider sign-in panel", () => {
     );
     expect(run.mock.calls.map((call) => call[0].kind)).toEqual(["status", "acknowledge", "begin"]);
     expect(screen.queryByRole("button", { name: "Use an API key" })).toBeNull();
+  });
+
+  it.each([
+    ["an expired sign-in", { kind: "expired" as const }],
+    ["terms the person has not been shown", { kind: "signed-out" as const, termsRequired: true }],
+  ])("waits for a click beside the consent line instead of starting %s", async (_case, status) => {
+    const run = vi.fn(async (_command: { readonly kind: string }) => status);
+    render(
+      <ProviderOAuthSignInPanel
+        accountLabel="ChatGPT plan"
+        descriptorId="chatgpt-plan"
+        instanceId="00000000-0000-4000-8000-000000000904"
+        run={run}
+        startSignIn
+        termsSummary="The plan terms apply."
+      />,
+    );
+    expect(await screen.findByText(/Signing in accepts these terms/)).toBeInTheDocument();
+    expect(run.mock.calls.map((call) => call[0].kind)).toEqual(["status"]);
   });
 
   it("does not begin a sign-in when the host does not record the acknowledgment", async () => {

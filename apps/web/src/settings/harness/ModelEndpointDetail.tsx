@@ -83,6 +83,8 @@ export type ModelEndpointDetailProps = Pick<
   readonly busy: boolean;
   readonly checking: boolean;
   readonly startSignIn: boolean;
+  /** The click that opened this page to sign in sat beside the terms' consent line. */
+  readonly signInConsentShown: boolean;
   readonly focusOnOpen: EndpointDetailFocus | undefined;
   readonly onBack: () => void;
   readonly onSignInState: (state: ProviderOAuthSignInState) => void;
@@ -293,6 +295,7 @@ function AccessSection(
               disabled={props.disabled}
               instance={instance}
               onStateChange={props.onSignInState}
+              consentShown={props.signInConsentShown}
               startSignIn={props.startSignIn}
               {...(props.signInOffer === undefined
                 ? {}
