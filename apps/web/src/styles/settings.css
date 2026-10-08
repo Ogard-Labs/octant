@@ -2418,6 +2418,77 @@ textarea.settings-view__text-input {
   color: var(--oct-muted);
 }
 
+/* A member or a join request keeps its code and its action together at the
+   control edge, and wraps under the label on a narrow window. */
+.sync-settings__member-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--oct-space-2);
+  min-width: 0;
+}
+
+/* The matching code is compared between two screens, so its digits keep one
+   width and its two halves sit apart. */
+.sync-settings__code {
+  font-size: var(--oct-text-sm);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+}
+
+.sync-settings__code--large {
+  display: block;
+  font-size: var(--oct-text-lg);
+  text-align: center;
+}
+
+.sync-settings__muted {
+  font-size: var(--oct-text-detail);
+  color: var(--oct-muted);
+  text-align: right;
+}
+
+/* An empty list inside a card takes the card's inset like a row would. */
+.sync-settings__note {
+  padding: var(--oct-space-3) var(--oct-space-4);
+}
+
+.sync-settings__note > .settings-state {
+  margin: 0;
+}
+
+.sync-settings__revoke {
+  display: grid;
+  gap: var(--oct-space-3);
+}
+
+.sync-settings__choices {
+  display: grid;
+  gap: var(--oct-space-2);
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.sync-settings__choices > legend {
+  padding: 0;
+  font-weight: 500;
+}
+
+.sync-settings__choices > p,
+.sync-settings__choices > ul {
+  margin: 0;
+  font-size: var(--oct-text-detail);
+  color: var(--oct-muted);
+}
+
+.sync-settings__choices > ul {
+  padding-left: var(--oct-space-4);
+}
+
 /* The reorder arrows ride next to the enable switch at the control edge and
    stay quiet: an enabled row's order matters, a disabled row's does not. */
 .open-in-settings__controls {

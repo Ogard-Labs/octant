@@ -79,7 +79,9 @@ import {
 import { RemoteAccessSettingsSection } from "../host/RemoteAccessSettingsSection";
 import { SyncSettingsSection } from "../settings/SyncSettingsSection";
 import type { FolderBrowseClient } from "@octant/client-runtime/folder-browse-client";
+import type { ReplicaMembershipClient } from "@octant/client-runtime/replica-membership-client";
 import type { ReplicaStoreSettingsClient } from "@octant/client-runtime/replica-store-settings-client";
+import type { ReplicaSyncStatusClient } from "@octant/client-runtime/replica-sync-status-client";
 import { FederatedHostsLifecyclePanel } from "../host/FederatedHostsLifecyclePanel";
 import {
   type SettingsNativeCapabilities,
@@ -178,6 +180,10 @@ export interface SettingsViewProps {
   readonly hostControlClient?: HostControlClient;
   /** Settings › Sync on this host; absent off it, where store setup is not offered. */
   readonly replicaStoreSettingsClient?: ReplicaStoreSettingsClient;
+  /** Creating, joining, and revoking on this host; absent off it. */
+  readonly replicaMembershipClient?: ReplicaMembershipClient;
+  /** Read-only sync status, used when this client is not on the host. */
+  readonly replicaSyncStatusClient?: ReplicaSyncStatusClient;
   /** The host's folder browser, for choosing a synced folder. */
   readonly folderBrowseClient?: Pick<FolderBrowseClient, "browse">;
   readonly workThreads?: ReadonlyArray<{ readonly id: string; readonly title: string }>;
@@ -1054,6 +1060,8 @@ function ActiveSectionContent({
           client={props.replicaStoreSettingsClient}
           focusedSetting={focusedSetting}
           folderBrowse={props.folderBrowseClient}
+          membership={props.replicaMembershipClient}
+          status={props.replicaSyncStatusClient}
         />
       );
     case "data":

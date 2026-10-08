@@ -9,7 +9,9 @@ import type { GithubClient } from "@octant/client-runtime/github-client";
 import type { IntegrationClient } from "@octant/client-runtime/integration-client";
 import type { HostControlClient } from "@octant/client-runtime/host-control-client";
 import type { FolderBrowseClient } from "@octant/client-runtime/folder-browse-client";
+import type { ReplicaMembershipClient } from "@octant/client-runtime/replica-membership-client";
 import type { ReplicaStoreSettingsClient } from "@octant/client-runtime/replica-store-settings-client";
+import type { ReplicaSyncStatusClient } from "@octant/client-runtime/replica-sync-status-client";
 import type { HostFederationLifecycle } from "@octant/client-runtime/host-federation-lifecycle";
 import type { UsageClient } from "@octant/client-runtime/usage-client";
 import type { ProviderUsageLimitsClient } from "@octant/client-runtime/provider-usage-limits-client";
@@ -66,6 +68,8 @@ export interface ShellSettingsSurfaceProps {
   readonly diagnosticsExportClient: DiagnosticsExportClient;
   readonly hostControlClient: HostControlClient;
   readonly replicaStoreSettingsClient?: ReplicaStoreSettingsClient;
+  readonly replicaMembershipClient?: ReplicaMembershipClient;
+  readonly replicaSyncStatusClient?: ReplicaSyncStatusClient;
   readonly folderBrowseClient?: Pick<FolderBrowseClient, "browse">;
   readonly workThreads?: ReadonlyArray<{ readonly id: string; readonly title: string }>;
   readonly hostFederationLifecycle?: HostFederationLifecycle;
@@ -140,6 +144,12 @@ export function ShellSettingsSurface(props: ShellSettingsSurfaceProps) {
             {...(props.replicaStoreSettingsClient === undefined
               ? {}
               : { replicaStoreSettingsClient: props.replicaStoreSettingsClient })}
+            {...(props.replicaMembershipClient === undefined
+              ? {}
+              : { replicaMembershipClient: props.replicaMembershipClient })}
+            {...(props.replicaSyncStatusClient === undefined
+              ? {}
+              : { replicaSyncStatusClient: props.replicaSyncStatusClient })}
             {...(props.folderBrowseClient === undefined
               ? {}
               : { folderBrowseClient: props.folderBrowseClient })}

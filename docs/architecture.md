@@ -1441,7 +1441,16 @@ flowchart LR
     one of its revocations, say - but never later. Each revocation is its own
     publish; when the subject's lands and a later one stops, the result is
     revoked-in-part and names the computers that were not revoked. Pull is
-    allowed to any computer with an identity.
+    allowed to any computer with an identity. Settings › Sync reads a
+    membership view from the journal alone, on the same host-only route
+    family (`/api/replica-membership/state`): this computer's standing, the
+    admitted computers with their approver, whether each is revoked and
+    whether this computer may revoke it, fresh join requests with their
+    matching codes, and, on a joining computer, each member in good standing
+    of a replica it read with the code that member will show. A read-only
+    status view without codes, requests, ids, or revocability
+    (`/api/replica-sync/status`) is on the shared product dispatch, so a
+    paired device of this host can read it under `project.overview.read`.
   - **Writing.** A command that publishes journals the signed entry before
     either file is written, writes the signature and then the entry, and
     journals the record as held once both landed. If a publish stops
