@@ -36,10 +36,22 @@ export function makeReplicaDeviceKeyBrokerClient(
   return makeBrokerCredentialClient(options, "/v1/replica-device-keys/", "instanceId");
 }
 
+/**
+ * Sync buckets' access key pairs, through the broker's own routes for them,
+ * keyed by the settings' credential reference. Those routes reach a separate
+ * credential namespace, so neither a provider instance nor a replica device
+ * key with the same UUID can read, replace, or delete a key pair.
+ */
+export function makeReplicaStoreCredentialBrokerClient(
+  options: CredentialBrokerClientOptions,
+): ProviderCredentialStore {
+  return makeBrokerCredentialClient(options, "/v1/replica-store-credentials/", "credentialRef");
+}
+
 function makeBrokerCredentialClient(
   options: CredentialBrokerClientOptions,
-  routePrefix: "/v1/credentials/" | "/v1/replica-device-keys/",
-  field: "providerInstanceId" | "instanceId",
+  routePrefix: "/v1/credentials/" | "/v1/replica-device-keys/" | "/v1/replica-store-credentials/",
+  field: "providerInstanceId" | "instanceId" | "credentialRef",
 ): ProviderCredentialStore {
   const fetch = options.fetch ?? globalThis.fetch;
   const request = async (

@@ -17,6 +17,8 @@ export type DesktopCredentialBackend =
       readonly purgeStore: CredentialPurgeStore;
       /** Replica device signing keys, in their own Keychain service. */
       readonly replicaDeviceKeys: CredentialStore;
+      /** Sync buckets' key pairs, in their own Keychain service. */
+      readonly replicaStoreCredentials: CredentialStore;
     }
   | {
       readonly kind: "secret-service";
@@ -24,18 +26,22 @@ export type DesktopCredentialBackend =
       readonly purgeStore?: undefined;
       /** Replica device signing keys, under their own Secret Service attribute. */
       readonly replicaDeviceKeys: CredentialStore;
+      /** Sync buckets' key pairs, under their own Secret Service attribute. */
+      readonly replicaStoreCredentials: CredentialStore;
     }
   | {
       readonly kind: "credential-manager";
       readonly store: CredentialStore;
       readonly purgeStore?: undefined;
       readonly replicaDeviceKeys?: undefined;
+      readonly replicaStoreCredentials?: undefined;
     }
   | {
       readonly kind: "unavailable";
       readonly store?: undefined;
       readonly purgeStore?: undefined;
       readonly replicaDeviceKeys?: undefined;
+      readonly replicaStoreCredentials?: undefined;
     };
 
 /**
@@ -64,6 +70,10 @@ export async function resolveDesktopCredentialBackend(options: {
         storeScope: options.storeScope,
         namespace: "replica-device-key",
       }),
+      replicaStoreCredentials: makeKeychainCredentialStore(options.keychainHelperPath, {
+        storeScope: options.storeScope,
+        namespace: "replica-store-credential",
+      }),
     };
   }
   if (options.platform === "linux") {
@@ -73,6 +83,9 @@ export async function resolveDesktopCredentialBackend(options: {
       kind: "secret-service",
       store: makeSecretServiceCredentialStore(),
       replicaDeviceKeys: makeSecretServiceCredentialStore({ namespace: "replica-device-key" }),
+      replicaStoreCredentials: makeSecretServiceCredentialStore({
+        namespace: "replica-store-credential",
+      }),
     };
   }
   if (options.platform === "win32") {

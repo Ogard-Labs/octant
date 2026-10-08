@@ -7,6 +7,7 @@ import {
   Database,
   FolderGit2,
   FolderOpen,
+  FolderSync,
   Hexagon,
   Image as ImageIcon,
   Keyboard,
@@ -77,6 +78,7 @@ const SETTINGS_NAVIGATION_META: Readonly<
   linear: { group: "Integrations", icon: ListTodo },
   host: { group: "System", icon: Server },
   data: { group: "System", icon: Database },
+  sync: { group: "System", icon: FolderSync },
   "remote-access": { group: "System", icon: Radio },
   usage: { group: "System", icon: ChartNoAxesColumnIncreasing },
 };

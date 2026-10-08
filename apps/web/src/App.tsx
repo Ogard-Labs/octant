@@ -1452,6 +1452,7 @@ function LaunchedShell(
     planClient,
     previewClient,
     providerUsageLimitsClient,
+    replicaStoreSettingsClient,
     shipClient,
     usageClient,
     usageDashboardClient,
@@ -6325,6 +6326,8 @@ function LaunchedShell(
       themeController={themeController}
       diagnosticsExportClient={diagnosticsExportClient}
       hostControlClient={hostControlClient}
+      {...(replicaStoreSettingsClient === undefined ? {} : { replicaStoreSettingsClient })}
+      folderBrowseClient={folderBrowseClient}
       workThreads={(workNavigation.bootstrap?.threads ?? []).map((thread) => ({
         id: String(thread.id),
         title: thread.title,

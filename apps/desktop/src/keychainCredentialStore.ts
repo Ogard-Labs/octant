@@ -48,11 +48,20 @@ export type KeychainHelperExecutor = (
 ) => Promise<KeychainHelperResult>;
 
 /**
- * Which Keychain service an item lives in. Replica device signing keys have
- * their own, so a provider credential request naming the same instance UUID
- * can never read, replace, or delete one.
+ * Which Keychain service an item lives in. Replica device signing keys and
+ * sync buckets' key pairs each have their own, so a provider credential
+ * request naming the same UUID can never read, replace, or delete one.
  */
-export type KeychainCredentialNamespace = "provider" | "replica-device-key";
+export type KeychainCredentialNamespace =
+  | "provider"
+  | "replica-device-key"
+  | "replica-store-credential";
+
+/** The request field that names an item in a namespace of its own. */
+const NAMESPACE_ID_FIELD = {
+  "replica-device-key": "instanceId",
+  "replica-store-credential": "credentialRef",
+} as const;
 
 export function keychainHelperSpec(
   helperPath: string,
@@ -71,7 +80,7 @@ export function keychainHelperSpec(
   return {
     command: helperPath,
     args: [],
-    stdin: `${JSON.stringify({ version: 1, storeScope, namespace, instanceId: providerInstanceId, ...rest })}\n`,
+    stdin: `${JSON.stringify({ version: 1, storeScope, namespace, [NAMESPACE_ID_FIELD[namespace]]: providerInstanceId, ...rest })}\n`,
   };
 }
 

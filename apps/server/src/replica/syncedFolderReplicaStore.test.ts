@@ -15,6 +15,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { isInsideHomeDirectory } from "../canvas/artifactMirrorFilePort";
 import {
   DATALESS_FLAG,
+  SYNCED_FOLDER_PROBE_DIRECTORY,
   SYNCED_FOLDER_REPLICA_DIRECTORY,
   isSyncedFolderWriteTempName,
   openSyncedFolderReplicaStore,
@@ -308,6 +309,38 @@ describe("synced folder replica store", () => {
       { status: "refused", reason: "key-refused" },
     );
     expect(existsSync(join(outside, "nested"))).toBe(false);
+  });
+
+  it("proves the folder with one probe file that a listing then skips", async () => {
+    const folder = temporaryDirectory(homedir());
+    const store = await offeredStore(folder);
+    const key = "11111111-1111-4111-8111-111111111111/1.json";
+    expect(await store.putIfAbsent(key, new TextEncoder().encode("entry"))).toEqual({
+      status: "stored",
+    });
+
+    expect(await store.testConnection()).toEqual({ status: "reachable" });
+
+    const probes = readdirSync(
+      join(folder, SYNCED_FOLDER_REPLICA_DIRECTORY, SYNCED_FOLDER_PROBE_DIRECTORY),
+    );
+    expect(probes).toHaveLength(1);
+    expect(await store.list()).toEqual({ status: "ready", entries: [{ key }], reports: [] });
+  });
+
+  it("refuses a Test connection for a folder outside home and writes nothing", async () => {
+    const folder = temporaryDirectory(tmpdir());
+    const store = await offeredStore(folder);
+    expect(await store.testConnection()).toEqual({ status: "refused" });
+    expect(existsSync(join(folder, SYNCED_FOLDER_REPLICA_DIRECTORY))).toBe(false);
+  });
+
+  it("reports a missing folder as not connected rather than creating it", async () => {
+    const parent = temporaryDirectory(homedir());
+    const folder = join(parent, "gone");
+    const store = await offeredStore(folder);
+    expect(await store.testConnection()).toEqual({ status: "not-connected" });
+    expect(existsSync(folder)).toBe(false);
   });
 
   it("does not offer or call a disabled or uninstalled store", async () => {

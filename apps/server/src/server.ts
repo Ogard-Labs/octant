@@ -470,6 +470,7 @@ import { makeAzureFoundryDriver } from "./providers/azureFoundryDriver";
 import {
   makeCredentialBrokerClient,
   makeReplicaDeviceKeyBrokerClient,
+  makeReplicaStoreCredentialBrokerClient,
   type ProviderCredentialResolver,
 } from "./providers/credentialBrokerClient";
 import { createHostOAuthService } from "./providers/oauth/hostOAuthService";
@@ -841,6 +842,8 @@ import {
   type HostControlServicePolicyPort,
 } from "./hostControlRoutes";
 import { createReplicaMembershipRouteHandler } from "./replica/replicaMembershipRoutes";
+import { createReplicaStoreSettingsRouteHandler } from "./replica/replicaStoreSettingsRoutes";
+import { ReplicaStoreSettingsService } from "./replica/replicaStoreSettingsService";
 import { ReplicaMembershipService } from "./replica/replicaMembershipService";
 import { createReplicaMembershipJournal } from "./replica/replicaMembershipProjection";
 import { createReplicaDeviceKey, makeReplicaDeviceSigner } from "./replica/replicaDeviceKeyService";
@@ -9970,9 +9973,9 @@ export function startOctantServer(
     // Replica membership reads its facts from the journal and keeps device
     // signing keys in their own namespace of the host credential store
     // (Keychain on macOS, Secret Service on Linux), reached through the
-    // credential broker's device-key routes, never its provider routes. Which store a host
-    // writes to is not configurable yet, so every command answers
-    // `not-configured` and makes no store call until that setting exists.
+    // credential broker's device-key routes, never its provider routes.
+    // Settings › Sync chooses the store; with sync off or no store chosen,
+    // every command answers `not-configured` and makes no store call.
     const replicaDeviceKeys =
       options.credentialBrokerUrl === undefined || options.credentialBrokerToken === undefined
         ? undefined
@@ -9980,8 +9983,40 @@ export function startOctantServer(
             url: options.credentialBrokerUrl,
             token: options.credentialBrokerToken,
           });
+    const replicaStoreSettingsService = new ReplicaStoreSettingsService({
+      journal: persistence.journal,
+      uuid: randomUUID,
+      actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+      clock: () => new Date().toISOString() as never,
+      home: homedir(),
+      // The access-outside-project grant has no surface yet, so a sync folder
+      // outside home fails closed, the same as the artifact mirror's folder.
+      standingOutsideApproval: false,
+      // A computer with a founder or joiner identity keeps its replica's store.
+      memberOfReplica: () => persistence.replicaMembershipProjection.state().local !== undefined,
+      // A bucket's key pair lives in a credential namespace of its own,
+      // reached through the broker's bucket-key routes, so no provider
+      // instance or device key with the same UUID can reach it. A host with no
+      // broker cannot save one, and a bucket is refused there.
+      credentials:
+        options.credentialBrokerUrl === undefined || options.credentialBrokerToken === undefined
+          ? undefined
+          : makeReplicaStoreCredentialBrokerClient({
+              url: options.credentialBrokerUrl,
+              token: options.credentialBrokerToken,
+            }),
+    });
+    const replicaStoreSettingsRoutes = createReplicaStoreSettingsRouteHandler({
+      service: replicaStoreSettingsService,
+      windowAuthorityStore,
+      resolveFolderCandidate: (windowId, input) =>
+        folderBrowseService.resolveCandidate(windowId, input),
+      ...(options.allowedRendererHttpOrigin === undefined
+        ? {}
+        : { allowedRendererHttpOrigin: options.allowedRendererHttpOrigin }),
+    });
     const replicaMembershipService = new ReplicaMembershipService({
-      store: () => ({ status: "not-configured" }),
+      store: () => replicaStoreSettingsService.selection(),
       credentials: {
         create: async () => {
           if (replicaDeviceKeys === undefined) throw new Error("credential store unavailable");
@@ -10038,6 +10073,7 @@ export function startOctantServer(
                 (await privateListenerAdministrationRoutes(request)) ??
                 (await localDeviceAdministrationRoutes(request)) ??
                 (await hostControlRoutes(request)) ??
+                (await replicaStoreSettingsRoutes(request)) ??
                 (await replicaMembershipRoutes(request)) ??
                 (await dispatchMeasuredProductRoutes(request)) ??
                 (await webAssets(request)) ??

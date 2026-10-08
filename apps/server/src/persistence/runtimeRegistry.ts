@@ -243,6 +243,7 @@ import {
   registerReplicaMembershipEvents,
   ReplicaMembershipProjection,
 } from "../replica/replicaMembershipProjection";
+import { registerReplicaStoreSettingsEvents } from "../replica/replicaStoreSettingsEvents";
 
 const fixtureRecordedPayload = Schema.Struct({ value: Schema.String });
 
@@ -434,6 +435,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
   registerShipEvents(events);
   registerThreadMessageQueueEvents(events);
   registerReplicaMembershipEvents(events);
+  registerReplicaStoreSettingsEvents(events);
 
   const hostIdentityMigrations = createRuntimeHostIdentityMigrationRegistry(events);
   const agentRunProjection = new AgentRunProjection();

@@ -47,6 +47,24 @@ describe("keychainHelperSpec", () => {
     });
   });
 
+  it("sends a sync bucket's key pair to its own namespace, named by its credential reference", () => {
+    const spec = keychainHelperSpec(
+      helperPath,
+      { operation: "set", providerInstanceId, credential: "bucket-key-pair" },
+      storeScope,
+      "replica-store-credential",
+    );
+    expect(spec.args).toEqual([]);
+    expect(JSON.parse(spec.stdin)).toEqual({
+      version: 1,
+      storeScope,
+      namespace: "replica-store-credential",
+      credentialRef: providerInstanceId,
+      operation: "set",
+      credential: "bucket-key-pair",
+    });
+  });
+
   it("passes set credentials through stdin and never process arguments", () => {
     const spec = keychainHelperSpec(
       helperPath,

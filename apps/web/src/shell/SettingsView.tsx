@@ -77,6 +77,9 @@ import {
   type PrivacyTarget,
 } from "../host/HostSettingsSection";
 import { RemoteAccessSettingsSection } from "../host/RemoteAccessSettingsSection";
+import { SyncSettingsSection } from "../settings/SyncSettingsSection";
+import type { FolderBrowseClient } from "@octant/client-runtime/folder-browse-client";
+import type { ReplicaStoreSettingsClient } from "@octant/client-runtime/replica-store-settings-client";
 import { FederatedHostsLifecyclePanel } from "../host/FederatedHostsLifecyclePanel";
 import {
   type SettingsNativeCapabilities,
@@ -173,6 +176,10 @@ export interface SettingsViewProps {
   readonly localUsageHistoryClient?: LocalUsageHistoryClient;
   readonly diagnosticsExportClient?: DiagnosticsExportClient;
   readonly hostControlClient?: HostControlClient;
+  /** Settings › Sync on this host; absent off it, where store setup is not offered. */
+  readonly replicaStoreSettingsClient?: ReplicaStoreSettingsClient;
+  /** The host's folder browser, for choosing a synced folder. */
+  readonly folderBrowseClient?: Pick<FolderBrowseClient, "browse">;
   readonly workThreads?: ReadonlyArray<{ readonly id: string; readonly title: string }>;
   readonly hostFederationLifecycle?: HostFederationLifecycle;
   readonly githubClient?: GithubClient;
@@ -228,6 +235,7 @@ const SECTION_DESCRIPTIONS: Readonly<Partial<Record<SettingsSectionId, string>>>
   github: "Connection and repository access on the selected host.",
   host: "The host process: its status, startup, notifications, and maintenance.",
   data: "What this host stores, how long it keeps threads, and how to back it up.",
+  sync: "Where artifact versions go when sync is on, in a store you own.",
   usage: "Activity and usage across providers.",
 };
 
@@ -1040,6 +1048,14 @@ function ActiveSectionContent({
         </section>
       );
     }
+    case "sync":
+      return (
+        <SyncSettingsSection
+          client={props.replicaStoreSettingsClient}
+          focusedSetting={focusedSetting}
+          folderBrowse={props.folderBrowseClient}
+        />
+      );
     case "data":
       return (
         <div className="settings-section-stack" id="settings-data">

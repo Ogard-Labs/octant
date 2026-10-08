@@ -142,6 +142,7 @@ async function defaultCredentialBrokerFactory(): Promise<CredentialBroker | unde
     undefined,
     undefined,
     makeSecretServiceCredentialStore({ namespace: "replica-device-key" }),
+    makeSecretServiceCredentialStore({ namespace: "replica-store-credential" }),
   );
 }
 

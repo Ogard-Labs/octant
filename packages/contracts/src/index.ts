@@ -106,6 +106,7 @@ export * from "./artifactLibrary";
 export * from "./artifactMirror";
 export * from "./artifactBundle";
 export * from "./replicaEntry";
+export * from "./replicaStoreSettings";
 export * from "./appUpdates";
 export * from "./scaffolds";
 export * from "./workspacePresets";

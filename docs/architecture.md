@@ -92,7 +92,9 @@ The design rests on a small set of invariants that every package obeys:
 
 - **Local-first.** No Octant cloud account, relay, or telemetry is required.
   Artifact sync, when the person turns it on, uses a store that person owns.
-  Octant operates none of it. Remote access is host-to-device over the user's
+  Octant operates none of it; an S3-compatible store is contacted only at the
+  endpoint the person configured and only while the Settings › Sync switch is
+  on. Remote access is host-to-device over the user's
   own network. Three host-initiated
   HTTPS calls exist in code: desktop update checks against a signed feed, managed
   device-tool update checks against the npm registry, and server marketplace
@@ -1328,12 +1330,16 @@ flowchart LR
   file the sync client has not downloaded, and a conflict copy the sync client
   left behind, are reported instead of being treated as entries. A folder
   outside the user's home is refused unless the standing access-outside-project
-  approval exists — the same rule as the artifact mirror's global folder. The
+  approval exists — the same rule as the artifact mirror's global folder. Its
+  Test connection writes one empty probe under `Octant Sync/.octant-probe/`
+  through the same confined write-once path, deletes nothing, and `list` skips
+  that directory. The
   in-tree S3-compatible store sends every request to the configured endpoint and
   only while sync is on. Its settings are the endpoint URL, region, bucket,
   optional key prefix, and path-style or virtual-host addressing. The access key
   and secret live in the host credential store — macOS Keychain or freedesktop
-  Secret Service — and are never journaled. A plaintext endpoint is refused and
+  Secret Service — in the bucket-key namespace described under replica store
+  selection, and are never journaled. A plaintext endpoint is refused and
   no credential is sent on it. A publish uses a conditional create
   (`If-None-Match: *`); a provider that does not enforce it is configured to
   fall back to HEAD-then-PUT, where a key is already unique to one host's
@@ -1403,7 +1409,7 @@ flowchart LR
     refused commands, and store failures. Members, keys, the tree, cuts, and
     which entries count are derived on every read and never journaled as
     facts. The projection is held in memory and rebuilt from the journal on
-    every start. Earlier `replica.*@1` names decode to nothing, so a journal
+    every start. Earlier `replica.*@1` membership names decode to nothing, so a journal
     that holds them starts with no replica identity.
   - **Commands.** The host serves create a replica, write a join request,
     approve a join, confirm a join, preview a revoke, revoke, and pull on the
@@ -1469,12 +1475,70 @@ flowchart LR
     different namespace, so a provider instance created with the same UUID
     cannot read, replace, or delete a device key. The private half never
     leaves the host.
-  - **Not wired yet.** No host setting selects a store, so every command
-    answers a typed `not-configured` refusal and makes no store call; there
-    is no Settings surface for sync; and artifact versions are neither
-    published nor imported. A person cannot turn sync on or join another
-    computer yet. The artifact reconcile policy's `sequence-gap` refusal has
-    no caller yet; the import slice owns the gap rule.
+  - **Not wired yet.** The membership service asks Settings › Sync's store
+    selection for its store on every command; with sync off or no store
+    chosen, every command answers a typed `not-configured` refusal and makes
+    no store call. No surface creates a replica, joins, or revokes yet, and
+    artifact versions are neither published nor imported. A person can choose
+    a store and turn sync on, but cannot yet join another computer or copy a
+    version. The artifact reconcile policy's `sequence-gap` refusal has no
+    caller yet; the import slice owns the gap rule. Leaving a replica is not
+    supported yet, so a computer with a membership identity cannot change its
+    store; leaving a replica, and changing the store after it, are a
+    follow-up.
+- **Artifact replica store selection.** Settings › Sync chooses this host's
+  store: a synced folder, an S3-compatible bucket, or none, with a sync switch
+  that starts off. It is served on the host-only `/api/replica-store` routes,
+  which answer only a loopback host name and a local window, sit on the
+  loopback chain outside the shared product dispatch, and are a remote
+  local-only prefix, so a paired client can neither read nor change them. A
+  folder arrives as a candidate from the host's folder browser, which the host
+  resolves and judges inside home, never as a path. A bucket's settings carry
+  no secret: the access key and secret travel once, in the command that saves
+  them, into the host credential store, and the settings hold only an opaque
+  reference to that entry, which is removed when another store is chosen. The
+  key pair lives in a namespace of its own, keyed by that reference — a
+  separate macOS Keychain service, `app.octant.replica-store-credentials.v1`,
+  or a separate Secret Service attribute, `octant.replica-store-credentials.v1`
+  — reached only through the credential broker's bucket-key routes. Neither the
+  provider credential routes nor the device-key routes reach it, so a provider
+  instance or device key with the same UUID cannot read, replace, or delete a
+  key pair. Unlike a device key, a key pair is replaced when the person enters
+  a new one: the new pair is written to a fresh entry, the settings are
+  journaled to point at it, and only then is the old entry deleted; if the
+  journal write fails, the new entry is deleted and the old one stays in use.
+  A saved key pair is reused only for the same endpoint, bucket, and
+  addressing, the three that decide which server receives the signed
+  requests; changing any of them without a new key pair is refused as
+  `credentials-required`, so a key pair is never sent to a server it was not
+  entered for. A host with no credential broker cannot keep one, so saving a
+  bucket there is refused as `credential-store-unavailable` and only a folder
+  can be chosen. The choice is journaled whole as one host settings
+  aggregate, rebuilt on every start, and versioned, so two windows cannot
+  overwrite each other. Replay keeps the journal's head version even when the
+  newest frame does not decode: the last choice that does decode is kept with
+  sync off, so the next change is accepted and no store is called until the
+  person turns sync on again. Choosing or changing the store turns sync off, so the
+  person reads Settings' statement that the provider can read the files again
+  before turning it back on; saving a bucket with identical settings, such as
+  a new key pair alone, keeps sync as it was. Choosing no store asks for
+  confirmation in the page first, naming that sync stops and that a bucket's
+  key pair is removed from this computer. With sync off or no store, the selection is
+  `not-configured` and no store is opened or called; with sync on, the in-tree
+  folder or bucket store is opened as installed and enabled by the switch.
+  The store handed to a membership command re-reads the settings before every
+  store call and answers `not-connected` once sync is off or the settings it
+  was opened under have changed, so turning sync off mid-command stops further
+  calls. Test connection writes one probe file only while sync is on; with
+  sync on and a store that cannot be opened, it answers
+  `credential-store-unavailable` or `not-connected`.
+  While this computer belongs to a replica — it has a founder or joiner
+  identity in the membership projection — every command that would change the
+  store's kind or location (choosing a folder, a bucket's endpoint, bucket,
+  addressing, or prefix, or no store) is refused on the server as
+  `member-of-replica` before any side effect, and Settings › Sync says so and
+  disables those controls. Turning sync on or off, and a new key pair for the
+  same bucket, stay allowed.
 - **Unsent composer drafts.** Each Chat, Work, and Code thread keeps one unsent
   composer draft in ordinary renderer storage on the client that typed it.
   Drafts are not journaled, not included in diagnostics, and not sent to a
@@ -2876,6 +2940,14 @@ mechanisms are:
   versions to this journal and adopts nothing else. Membership accepts an
   entry signed by an admitted instance's device signing key, within its cut,
   as authentic. It does not delegate host authority between hosts.
+- **Replica store endpoints.** A bucket endpoint must be `https` with no path,
+  query, or user info, and must not be link-local — IPv4 `169.254.0.0/16` or
+  IPv6 `fe80::/10`, literal or IPv4-mapped — where cloud instance metadata
+  answers; the contract refuses it before any request is signed. Loopback and
+  private ranges stay allowed, because a self-hosted bucket server such as
+  MinIO on the same machine or LAN is a legitimate store. A host name is not
+  resolved to check where it points; the endpoint is whatever the person on
+  the host typed, and only that person can set it.
 - **Hosts never trust each other.** Multi-host views merge read models
   client-side; credentials and mutable authority never cross hosts. Completing
   all-hosts honesty, pairing at scale, and conflict presentation is client

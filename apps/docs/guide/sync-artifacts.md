@@ -6,10 +6,48 @@ description: What leaves this computer when artifact sync is on, where those cop
 
 Read this before you turn sync on. Sync copies artifact versions to a store
 you own, so another computer running Octant can import them. It stays off
-until you turn it on. This preview does not yet offer that control, so
-nothing is copied until it does. When the control is offered, Settings states
-the same fact this page does — the storage provider can read the files —
-before the switch can be turned on.
+until you turn it on in **Settings › Sync**. Above the switch, Settings states
+the same fact this page does: the storage provider can read the files, which
+are signed but not encrypted.
+
+## What turning sync on does in this preview
+
+You can choose a store and turn sync on, and **Test connection** writes its
+probe file there. Artifact versions are not copied yet, and nothing is
+imported from the store yet. Turning sync on lets Octant reach the store you
+chose; it does not start copying. This page describes what is copied once
+that ships.
+
+## Set up a store
+
+Open **Settings › Sync** on the computer that runs Octant. A paired phone or
+browser cannot change it. Choose one store:
+
+- **Synced folder.** Choose a folder with Octant's folder browser, such as one
+  your Dropbox, iCloud Drive, or OneDrive client already watches. Octant writes
+  only inside an `Octant Sync` folder in it. The folder must be inside your home
+  folder.
+- **S3-compatible bucket.** Enter the connection details described
+  [below](#an-s3-compatible-bucket), then **Save**. Entering a new access key
+  and secret later replaces the saved ones. Changing the endpoint, bucket, or
+  addressing needs the access key and secret again, so a key you entered for
+  one provider is never sent to another. A bucket needs your computer's
+  Keychain or Secret Service; where Octant cannot reach one, Settings says so
+  and refuses to save the bucket.
+- **None.** No store, and nothing is reachable. Settings asks you to confirm
+  first: sync stops, and a bucket's access key and secret are removed from
+  this computer. Cancel leaves everything as it was.
+
+Changing the store turns sync off, so you read the fact above the switch again
+for the new store before you turn it back on. Saving a bucket with the same
+settings, such as only a new access key and secret, keeps sync as it was.
+Choosing a different store also removes a bucket's access key and secret from
+your Keychain or Secret Service.
+
+Once this computer belongs to a replica — it set one up or asked to join one —
+its store can't be changed until leaving a replica is supported. Settings ›
+Sync says so and turns off the store controls. You can still turn sync off and
+on, and enter a new access key and secret for the same bucket.
 
 ## What leaves this computer
 
@@ -46,16 +84,26 @@ the mirror folder is not this sync.
 
 An S3-compatible bucket needs its endpoint address, region, bucket name, an
 optional folder prefix, and whether the provider uses path-style or
-virtual-host addressing. The access key and secret are kept in your computer's
-Keychain (macOS) or Secret Service (Linux) — the same place your model provider
-credentials live. Octant never writes them to a store entry, to your journal,
-or to a log. It contacts only the endpoint you configured, and only while sync
+virtual-host addressing. Virtual-host addressing needs an endpoint with a DNS
+name; use path-style for an endpoint written as an IP address. The access key and secret are kept in your computer's
+Keychain (macOS, under the service `app.octant.replica-store-credentials.v1`)
+or Secret Service (Linux, under the service attribute
+`octant.replica-store-credentials.v1`). Your model provider credentials and
+this computer's signing key live in other entries and cannot read, replace, or
+delete them. The bucket's other settings are kept in Octant's journal. Octant
+never writes the access key or secret to a store entry, to your journal, or to
+a log. It contacts only the endpoint you configured, and only while sync
 is on. The endpoint must be an `https` address; a plain one is refused, and no
-credential is sent on it.
+credential is sent on it. A link-local address, such as `169.254.169.254`
+where cloud servers answer metadata requests, is refused too. A bucket server
+on this computer or your local network, such as MinIO, is allowed.
 
-A **Test connection** button proves the setup by writing one small probe file
-in the bucket. It deletes nothing, and the app ignores that file when it reads
-the store. Octant does not delete objects from your bucket on your behalf.
+Once sync is on, **Test connection** proves the setup by writing one small
+probe file: under `.octant-probe/` in the bucket, or in the folder's
+`Octant Sync/.octant-probe/`. It deletes nothing, and the app ignores that file
+when it reads the store. Octant does not delete objects from your bucket or
+files from your folder on your behalf. With sync off, Test connection calls
+nothing.
 
 ## Joining another computer
 
@@ -106,7 +154,7 @@ keys, or move to a new store.
 
 ## Turning sync off
 
-Turning sync off stops this computer writing to the store and reading from
-it. Copies already in the store stay there. Versions already imported stay
-in the library. A copy that fails does not undo a version you already
-committed on this computer.
+Turn off **Sync artifacts** in **Settings › Sync**. Turning sync off stops
+this computer writing to the store and reading from it. Copies already in the
+store stay there. Versions already imported stay in the library. A copy that
+fails does not undo a version you already committed on this computer.

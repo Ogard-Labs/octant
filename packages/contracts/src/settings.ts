@@ -30,6 +30,7 @@ export const SETTINGS_SECTION_IDS = [
   "linear",
   "host",
   "data",
+  "sync",
   "remote-access",
   "usage",
 ] as const;
