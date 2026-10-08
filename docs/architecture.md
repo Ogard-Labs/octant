@@ -2193,8 +2193,9 @@ native harness in `apps/server/src/harness`:
   again, and a scheme other than `http`/`https`, credentials in the URL, or a
   sixth redirect refuses. A harness child without network authority is offered
   no web tool, and its `bash` runs on a shell whose Seatbelt profile has no
-  network rule; the lead and a child with network authority use the ordinary
-  one. The tool process environment carries only `PATH`, `HOME`, the temporary
+  network rule and its own writable work directory, so it cannot rewrite a
+  networked shell's pending script; the lead and a child with network
+  authority use the ordinary one. The tool process environment carries only `PATH`, `HOME`, the temporary
   and locale variables, and what the harness sets, never a provider
   credential. Every successful harness tool result taints the thread, so after
   the first one `bash`, `edit`, `write`, and `goal-check` need a person's
