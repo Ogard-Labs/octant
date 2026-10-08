@@ -189,7 +189,8 @@ describe("ProviderSettingsView", () => {
     expect(disclosure).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByRole("heading", { name: "Agent runtime" })).toBeVisible();
     await user.click(screen.getByRole("combobox", { name: "Provider type" }));
-    expect(screen.getByRole("option", { name: "Codex CLI" })).toBeInTheDocument();
+    // The list opens on the next frame; asking at once failed about half the runs.
+    expect(await screen.findByRole("option", { name: "Codex CLI" })).toBeInTheDocument();
     expect(screen.getByRole("option", { name: "Qwen Code ACP" })).toBeInTheDocument();
     for (const elsewhere of [
       "OpenAI-compatible HTTP",
