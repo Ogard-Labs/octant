@@ -69,17 +69,34 @@ computers, the same key on the approving one, and the same computer that set
 up the store, so a store someone tampered with shows a different code. It is
 not a password, and nothing secret passes through the store.
 
+The new computer then confirms. It signs a record saying which approval it
+accepted, so the computer that approved it is the one that brought it in,
+and nobody else can claim that place later.
+
 Revoking a computer writes a signed record that marks the last of its entries
-you accept. After your other computers read it, they refuse anything that
-computer wrote after that point, including computers it approved afterwards.
-Approvals it made before that point still stand, so read the store before you
-revoke if you want to keep a computer it already brought in. That point never
-falls before the approval that brought your own computer in. A computer you
-revoke cannot remove the computer that approved it in return, and if two
-computers that did not approve each other revoke each other before either
-reads the other's record, both end up revoked. A revoked computer, or one
-that lost its place because the computer that approved it was revoked before
-that approval, joins again as a new computer, with a new key.
+you accept. You can revoke a computer that yours brought in, directly or
+through others; the computer that set up the store can revoke any of them.
+To revoke a computer another one of yours brought in, revoke it from that
+computer, or from the one that set up the store. A computer you revoke cannot
+remove the computer that brought it in.
+
+Before it revokes, your computer reads the store, so approvals the revoked
+computer already made keep counting and the computers it brought in stay. The
+revoke screen lists those computers, so you can revoke them in the same step,
+for example when the computer was stolen. You can also move the point
+earlier; computers it approved after that point then join again. After your
+other computers read the record, they ignore anything the revoked computer
+wrote after that point.
+
+A revoked computer, or one that lost its place because the computer that
+approved it was revoked before that approval, joins again as a new computer,
+with a new key. If the computer that set up the store is lost, set up a new
+store and join your computers to it.
+
+If someone with write access to the store fills the places where one of your
+computers writes next, that computer stops publishing and says so. Remove
+those files with your storage provider's own tools, change the store's access
+keys, or move to a new store.
 
 ## Turning sync off
 

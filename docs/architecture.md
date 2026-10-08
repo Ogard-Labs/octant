@@ -1297,40 +1297,23 @@ flowchart LR
   `<instanceId>/<sequence>.json`, with a detached signature beside it at
   `<instanceId>/<sequence>.sig`. The payload is the artifact bundle from
   [0029](decisions/0029-artifact-storage-mirror.md) (`octant.artifact-bundle/1`),
-  not a second document. Reconciling an entry appends a version, keeps both
+  not a second document. Reconciling an artifact entry appends a version, keeps both
   heads when two computers revise the same parent, or records a tombstone. It
   cannot overwrite. A gap in an instance's sequence, an unknown or revoked
   instance, a bad or missing signature, a content-hash mismatch, or an entry
-  that names a local artifact as foreign is refused. An unknown entry format
-  fails closed. A later version after a tombstone appends; the tombstone stays
-  in the history.
+  that names a local artifact as foreign is refused. Membership records allow
+  gaps, because a writer skips a slot someone else's file took; whether such
+  a gap holds back an artifact import is decided with the import. An unknown
+  entry format fails closed. A later version after a tombstone appends; the
+  tombstone stays in the history.
   The detached signature covers an entry's encoded bytes whole - origin, kind,
   parents, the claimed content hash, and the bundle - so a rewrite of any of
   those is a different signature, not the same one the log recorded. The log
-  also carries membership: a computer that is not yet a member writes a join
-  request at its own next sequence and names itself, and a member returns that
-  request for approval instead of refusing it. Approving journals the new
-  instance on the member. Confirming the approval on the joining computer
-  imports a chain: the founder's sequence-1 self-approval, then each approval
-  from the founder to the approver, each verified with the key the previous
-  link named, then the approver's approval of the joining computer. The
-  founder becomes that computer's only root and everyone on the chain is
-  admitted by the approval that names them, which is how a computer that was
-  never part of the store learns who the members are and later applies the
-  founder's revocations. A founding self-approval counts only as the start of
-  such a chain; if the store holds a second founder that also reaches the
-  approver, joining is refused. The matching code covers the approver's device
-  key and the founder's id and key as well as the join request: the approver
-  computes it from what it holds and the joining computer from the chain it
-  read, so a chain that someone with write access to the store forged for the
-  approver, or one that starts at a founder they substituted, gives a different
-  code and the confirmation is refused. A confirmation through an approval
-  that a revocation already in the store cuts is refused too, rather than
-  reported as confirmed until the first pull. A pull walks each instance's
-  entries in sequence order from the start, because the sequence is per
-  instance and a host that joins in the middle cannot have seen anything
-  earlier. A member's revocation is an entry the member writes; re-joining is
-  a new identity, never the revoked one back.
+  also carries membership records, in entry format `octant.replica-entry/2`:
+  every entry's origin carries its writer's public key, and an instance id is
+  derived from that key, so whether a record is valid depends on its own file
+  alone. Who counts as a member is described under artifact replica
+  membership below.
 - **Artifact replica store.** A replica-store contribution offers list, get, and
   put-if-absent. put-if-absent returns already-exists and leaves the existing
   bytes unchanged. The store's status is ready, not-connected, or refused. A
@@ -1358,99 +1341,124 @@ flowchart LR
   connection action writes one probe object in a reserved key namespace and
   deletes nothing; `list` skips that namespace. Publish and pull are not this
   store; they call it.
-- **Artifact replica membership, as wired today.** The host serves the
-  membership commands — create a replica, write a join request, approve a
-  join, confirm a join on the joining computer, revoke, and pull — on the
-  host-only `/api/replica-membership/commands` route. Membership facts —
-  this computer's own instance, the members and their device keys,
-  revocations, the entries already applied from each instance, and this
-  computer's next sequence — are a projection of `replica.*` journal events,
-  held in memory and rebuilt from the journal on every start; replaying it
-  twice gives the same facts. A command that publishes journals the signed
-  entry before either file is written, writes the signature and then the
-  entry, and journals what the entry means once both landed. If a publish
-  stops part-way, the next command finishes it first with the same bytes and
-  the same deterministic Ed25519 signature, so that sequence slot is not lost.
-  A pull walks every other instance from the first entry it has not applied.
-  Each entry is verified against the device key the journal holds for its
-  origin; only a join request, the one record a computer that is not yet a
-  member may write, is verified against the key it names. A bad or missing
-  signature, an unknown origin, an artifact entry past a cut on its origin, a
-  join request from a new identity carrying a revoked computer's key, a body
-  whose origin is not its path, an unreadable file, or a gap is refused before
-  anything from that entry is applied, and the walk for that instance stops
-  there. A pull walks the logs again while a walk still applies something, so
-  an origin it learns about from a log it reads later is not refused for the
-  order the store listed the logs in; only what is still refused at the end is
-  journaled, and a refusal is journaled once, not on every pull. A sequence a computer has already applied is not read again,
-  so a file rewritten in that slot later is ignored, not detected. Anyone who
-  can write to the store can also put a file into a member's next free slot
-  first: that member's next publish then fails as slot-occupied, and nothing
-  it writes later can land, because the store is write-once and Octant never
-  deletes from it. A person recovers by deleting that file with the storage
-  provider's own tools, revoking the store credentials that wrote it, or
-  moving to a new store. A revoked identity's stopped publish is dropped, not
-  finished. A revocation is a cut: it names the last sequence of the revoked
-  instance that the revoker holds - what it applied from it, and any approval
-  it holds through the chain it joined by - so the cut never falls before the
-  approval that admitted the revoker. A person still pulls before revoking to
-  keep approvals the revoked computer made that this computer has not read.
-  Every entry the revoked instance signed after the cut stops counting on
-  every computer, and approvals it made at or before the cut stay valid. A
-  pull keeps every approval and revocation that verifies against its origin's
-  key - one past a cut, and an approval of a computer revoked later, included -
-  so the walk of an honest member's log never stops on them. Membership is
-  then worked out from everything a computer holds rather than in the order a
-  pull read it: a member is one admitted by an approval its approver signed
-  within every counted cut on that approver. An approval counts only when the
-  key it names is the key of its subject's own first join request - the
-  sequence-1 record, signed with the key it names - because any member can
-  sign an approval of any computer, and one naming the writer's own key would
-  otherwise let it sign as that computer. Like any slot, that record can be
-  rewritten by whoever can write to the store: a computer that already holds
-  the member keeps it, but one that reads the store fresh finds a join request
-  for the writer's key, counts no approval of the member, and so drops the
-  member and every computer admitted only through it. The recovery is the
-  same as for slot squatting. Approvals that name another
-  key are refused rather than weighed, no approval ever picks a key by depth
-  or approver id, and a later approval never changes the key of a computer
-  already admitted. A computer with no first join request held, or two naming
-  different keys, is admitted by nobody. Joining checks every link of the
-  founder's chain against these join requests too, and a joining computer
-  records the keys it checked. A revocation never counts when its cut
-  removes its own revoker's admission, or when it answers a revocation by one
-  of its revoker's ancestors - the computer that approved it, up to the
-  founder, along the approvals that admitted each one - by revoking that
-  ancestor: whoever brought a computer in can take it out, and that computer
-  cannot remove it in return. A computer's ancestors are the ones every
-  approval of it with the right key shares, at any distance from the founder
-  and whatever cut it falls past, so a second approval - from anyone, even
-  one signed after its writer was revoked - can narrow a computer's ancestry
-  but never make its writer an ancestor. Narrowing also costs the computer's
-  real approver that standing: if they then revoke each other, both stay
-  revoked. The remaining revocations can cut each other's
-  revokers, and every one that could be valid is honoured, so two computers
-  that are not each other's ancestors and revoked each other without seeing
-  the other's record both stay revoked. An entry applied past a cut is
-  reported refused once, and a computer admitted only through it is not a
-  member. When two members cut the same instance, the earlier cut wins. A
-  revoked computer, or one whose admitting approval a cut removed, joins again
-  as a new instance with its own sequence; a join request from a new identity
-  carrying a revoked computer's key is refused on read and on approve. An
-  approval of such a request that a member wrote before it read the
-  revocation is kept, like any approval. Device signing
-  keys live per replica instance in their own namespace of the host credential
-  store — a separate macOS Keychain service, `app.octant.replica-device-keys.v1`,
-  or a separate Secret Service attribute — reached through the credential
-  broker's device-key routes. The provider credential routes reach a different
-  namespace, so a provider instance created with the same UUID cannot read,
-  replace, or delete a device key; a key is written once and never replaced,
-  and the private half never leaves the host. Three things are not wired: no host setting selects a
-  store yet, so every command answers a typed `not-configured` refusal and
-  makes no store call; there is no Settings surface for sync; and artifact
-  versions are neither published nor imported — a pull stops at a verified
-  artifact entry and reads it again later, rather than marking it applied. A
-  person cannot turn sync on or join another computer yet.
+- **Artifact replica membership, as wired today.** Membership is a pure
+  function of two inputs: the founder this computer pinned, and the set of
+  valid membership records it holds. Two computers that hold the same records
+  derive the same members, keys, parents, and cuts, whatever order they read
+  them in.
+  - **Records.** Every record is a write-once file at
+    `<instanceId>/<sequence>.json` with a detached Ed25519 signature beside it,
+    and its origin names the writer's id, name, sequence, and public key. The
+    instance id is the first 16 bytes of SHA-256 over the key's SPKI bytes,
+    written as a UUIDv8. A record is valid when its body decodes, its origin is
+    the path it is filed under, its id is its key's id, and the signature
+    verifies under that key; an approval is valid only when its subject is
+    its subject key's id. Nothing else is consulted, so every reader reaches
+    the same verdict, a key once admitted cannot be replaced, and an old key
+    is always the old identity. The kinds are `replica-founded` (the
+    founder's sequence 1), `join-request` (a joiner's sequence 1, with the
+    time it was written), `join-approved` (subject, key, and name),
+    `join-accepted` (signed by the joiner, naming the one approval it
+    accepted by writer, sequence, and SHA-256 of the approval file's bytes,
+    and the founder it pinned), and `revocation` (subject and cut, the last of
+    the subject's sequences that still counts; 0 means none). Version 1
+    entries fail closed.
+  - **Derivation.** Two different records in one slot can only both be signed
+    by the key holder, so a second one is evidence the key was stolen: that
+    computer is capped just before the slot, and records at or after it do
+    not count. Each computer's parent comes from its own lowest-sequence
+    `join-accepted`, and only when the approval it names is held, approves
+    that computer, and is not past such a cap. The parents form a tree from
+    the founder; nothing reaches a computer that is not in it. Standing is
+    then weighed top-down in one pass: a computer is admitted when its parent
+    is admitted and signed the approval at or before the parent's cut, and
+    its cut is the lowest cut named by a revocation that a strict ancestor
+    signed while admitted and at or before its own cut. An entry counts when
+    its writer is admitted and it sits at or before the writer's cut, so a
+    computer approved after its approver's cut is not admitted, and nothing
+    below it is either. Records the pass does not use - an approval nobody
+    accepted, a descendant's revocation of an ancestor, a ghost's records -
+    are inert. The founder cannot be revoked; losing its key means moving to
+    a new store.
+  - **Reading.** A pull lists the store and reads every slot this computer
+    holds no record in, from any instance, member or not, and keeps every
+    valid membership record it reads. It refuses nothing on the way in and
+    does not stop at a gap, so a record from a computer that is not a member
+    yet still counts once the approval admitting it arrives. A slot already
+    held is not read again. A file that is not a valid record is reported
+    and journaled once. Artifact entries are not imported yet: one that is
+    valid and counts is reported held and read again by a later pull, and
+    one that does not count is reported refused.
+  - **Journal.** The `replica.*@2` events are inputs only: this computer's
+    identity and role, the founder it pinned, each valid record it holds
+    (bytes and signature, keyed by slot and hash), a signed local entry
+    whose publish has not landed, and diagnostics - unreadable files,
+    refused commands, and store failures. Members, keys, the tree, cuts, and
+    which entries count are derived on every read and never journaled as
+    facts. The projection is held in memory and rebuilt from the journal on
+    every start. Earlier `replica.*@1` names decode to nothing, so a journal
+    that holds them starts with no replica identity.
+  - **Commands.** The host serves create a replica, write a join request,
+    approve a join, confirm a join, preview a revoke, revoke, and pull on the
+    host-only `/api/replica-membership/commands` route. Creating a replica or
+    asking to join creates a new device key, and the id comes from it, so
+    asking again - after a request went stale, a revocation, or a cut that
+    removed this computer's approval - is always a new identity. Approving
+    needs a member in good standing - admitted with no cut - and only the
+    store's own signed copy of a fresh request from a computer that is not
+    in the tree can be approved. Confirming reads the store, finds the
+    approver's approval of this computer, and walks parent edges up from the
+    approver to the one founder they reach; each edge is a record its child
+    signed, so the walk is unique. It checks the matching code against the
+    approver's key and that founder, checks that an acceptance would admit
+    this computer, and only then pins the founder and signs `join-accepted`;
+    an identity has one parent forever. Revoking needs good standing and a
+    subject this computer brought in, directly or through others; a sibling
+    or cousin is revoked from a shared ancestor, the founder at worst.
+    Revoke reads the store first, then cuts at the highest sequence of the
+    subject this computer holds, so approvals the subject already made keep
+    counting; a store that cannot be read leaves that cut at what this
+    computer already holds, and the result says so. A revoke preview returns
+    that cut and the computers the subject brought in that are not revoked
+    yet, each with its parent and the parent's sequence of its approval; a
+    revoke can name some of them to revoke in the same step, and can move the
+    subject's cut earlier but never later. Pull is allowed to any computer
+    with an identity.
+  - **Writing.** A command that publishes journals the signed entry before
+    either file is written, writes the signature and then the entry, and
+    journals the record as held once both landed. If a publish stops
+    part-way, the next command finishes it first with the same bytes and the
+    same deterministic Ed25519 signature; a finished identity's stopped
+    publish is dropped. A slot that already holds bytes this computer did
+    not write is journaled as slot-occupied and skipped, up to 32 slots in a
+    row; then the publish stops with a visible error. A person recovers from
+    that flood by deleting the files with the storage provider's own tools,
+    rotating the store credentials, or moving to a new store.
+  - **Limits.** A stolen founder key can revoke anyone and cannot itself be
+    revoked; recovery is a new store. A store, or a sync client that lags,
+    can show a computer fewer files, and a computer that has not read a
+    revocation keeps counting the revoked computer's later entries until it
+    does; records it already holds are never lost. A rewrite of a slot is
+    detected only by a computer that holds both versions. Anyone who can
+    write the store can mint valid records under fresh keys; they are inert
+    and cost only disk and time, within the listing bounds. A pull whose
+    listing does not end inside its bound is refused rather than read in
+    part. Approvals a stolen key made before the revoker read the store
+    still count under the default cut, which is why the revoke preview lists
+    them.
+  - **Keys.** Device signing keys live per instance in their own namespace of
+    the host credential store - a separate macOS Keychain service,
+    `app.octant.replica-device-keys.v1`, or a separate Secret Service
+    attribute - keyed by the derived id and reached through the credential
+    broker's device-key routes. The provider credential routes reach a
+    different namespace, so a provider instance created with the same UUID
+    cannot read, replace, or delete a device key. The private half never
+    leaves the host.
+  - **Not wired yet.** No host setting selects a store, so every command
+    answers a typed `not-configured` refusal and makes no store call; there
+    is no Settings surface for sync; and artifact versions are neither
+    published nor imported. A person cannot turn sync on or join another
+    computer yet.
 - **Unsent composer drafts.** Each Chat, Work, and Code thread keeps one unsent
   composer draft in ordinary renderer storage on the client that typed it.
   Drafts are not journaled, not included in diagnostics, and not sent to a
@@ -2748,30 +2756,36 @@ mechanisms are:
 - **Artifact replica membership.** Each replica entry carries a detached
   Ed25519 signature from the device signing key the writing host holds for its
   replica instance, in a credential namespace of its own that provider
-  credentials cannot reach — not a paired client's device key. There is no replica key. An entry from an
-  unknown or revoked host, or one that fails verification, is refused and
-  journaled. A new computer joins by writing a join request into the store,
-  signed over the time it was written; a request older than a day is not
-  offered for approval. A computer that is already a member approves it by
-  name, and only the store's own copy of the request — verified against the
-  joiner's device key — can be approved, not a copy a caller hands over. Only a
-  member approves. A short matching code, compared on both screens, shows the
-  person that the request the member is approving, and the member approving
-  it, are the ones the joining computer means; it is not a secret, and the
+  credentials cannot reach — not a paired client's device key. There is no
+  replica key. The entry names that key, and the instance id is derived from
+  it, so a record that fails verification under its own key, or names an id
+  that is not its key's, is not valid and is journaled as unreadable.
+  Membership is derived from the valid records a host holds and the founder it
+  pinned; an entry counts only when its writer is admitted through a chain of
+  signed approvals and acceptances from that founder and the entry sits at or
+  before any cut on it. A new computer joins by writing a join request into
+  the store, signed over the time it was written; a request older than a day
+  is not offered for approval. A member in good standing approves it by name,
+  and only the store's own copy of the request can be approved, not a copy a
+  caller hands over. A short matching code, compared on both screens, shows
+  the person that the request, the approving computer's key, and the founder
+  are the ones the joining computer means; it is not a secret, and the
   signatures, not the code, make the records authoritative. The joining
-  computer confirms the approval after the codes agree and imports the verified
-  chain of approvals from the founder to its approver. Revoke writes a signed revocation. Store setup, joining, and
-  revoking happen on the host, never from a paired phone. Store credentials
-  live in the host credential store — macOS Keychain or freedesktop Secret
-  Service — and are not written into the replica. An S3-compatible store is
-  contacted only over authenticated TLS. A plaintext endpoint is refused, and
-  store credentials are not sent on it. The storage provider can read the
-  synced content: the artifact versions and tombstones are plain files.
-  Settings and the user guide (`apps/docs/guide/sync-artifacts.md`) say so
-  before sync is turned on. Opt-in encryption of replicas is not this rule. A
-  replica import appends versions to this journal and adopts nothing else.
-  Membership accepts an entry signed by a known, non-revoked host identity key
-  as authentic. It does not delegate host authority between hosts.
+  computer then signs its acceptance of that one approval, which makes the
+  approver its only parent. Revoke writes a signed revocation, and only a
+  computer that brought the revoked one in, directly or through others, can
+  revoke it. Store setup, joining, and revoking happen on the host, never from
+  a paired phone. Store credentials live in the host credential store — macOS
+  Keychain or freedesktop Secret Service — and are not written into the
+  replica. An S3-compatible store is contacted only over authenticated TLS. A
+  plaintext endpoint is refused, and store credentials are not sent on it.
+  The storage provider can read the synced content: the artifact versions and
+  tombstones are plain files. Settings and the user guide
+  (`apps/docs/guide/sync-artifacts.md`) say so before sync is turned on.
+  Opt-in encryption of replicas is not this rule. A replica import appends
+  versions to this journal and adopts nothing else. Membership accepts an
+  entry from an admitted host identity key, within its cut, as authentic. It
+  does not delegate host authority between hosts.
 - **Hosts never trust each other.** Multi-host views merge read models
   client-side; credentials and mutable authority never cross hosts. Completing
   all-hosts honesty, pairing at scale, and conflict presentation is client
