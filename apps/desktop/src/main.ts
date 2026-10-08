@@ -132,6 +132,7 @@ import {
   formatDesktopStartupFailure,
   probeHostInfoReceipt,
   probeLocalHost,
+  createStderrTail,
   reserveLoopbackPort,
   resolveManagedServerUrl,
   resolveStableHostAttachment,
@@ -1497,6 +1498,7 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
   // The reservation only selects a collision-free port. Release the listener
   // before spawning the managed server, which must bind that same port.
   await portReservation.close();
+  const serverStderr = createStderrTail();
   let startingBrowserBroker: BrowserRuntimeBroker | undefined;
   let startingComputerBroker: ComputerUseBroker | undefined;
   let startingDeviceBroker: SimulatorDeviceBroker | undefined;
@@ -1599,10 +1601,15 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
           execPath: process.execPath,
           env: { ...process.env, OCTANT_DATA_DIR: desktopDataDirectory },
         });
-        return spawn(spec.command, spec.args, {
+        const child = spawn(spec.command, spec.args, {
           env: spec.env,
-          stdio: [...spec.stdio] as ["pipe", "inherit", "inherit"],
+          stdio: [...spec.stdio] as ["pipe", "inherit", "pipe"],
         });
+        child.stderr.on("data", (chunk: Buffer) => {
+          process.stderr.write(chunk);
+          serverStderr.append(chunk);
+        });
+        return child;
       },
     });
     credentialBroker = resources.broker;
@@ -1618,6 +1625,7 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
     const attached = await waitForStorageReady({
       serverUrl,
       instanceId,
+      ...(server === undefined ? {} : { child: server, lastOutput: serverStderr.text }),
       resolveAttachedHost: async () => {
         return (await resolveExistingHostAttachment())?.probe;
       },

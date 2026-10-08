@@ -510,6 +510,36 @@ describe("PersistenceLive", () => {
       expect(String(result.left)).not.toContain("private database detail");
     }
   });
+
+  it.each([
+    ["SQLITE_CANTOPEN", "database file cannot be opened"],
+    ["SQLITE_READONLY", "database is read-only"],
+    ["EACCES", "not writable"],
+    ["ENOSPC", "disk is full"],
+  ] as const)("names the %s cause when storage is unavailable", async (code, phrase) => {
+    const result = await Effect.runPromise(
+      Effect.either(
+        Effect.scoped(
+          Effect.provide(
+            Persistence,
+            makePersistenceLive({
+              dataDirectory: temporaryDirectory(),
+              openConnection: () => {
+                throw Object.assign(new Error("private database detail /secret/path"), { code });
+              },
+            }),
+          ),
+        ),
+      ),
+    );
+
+    expect(Either.isLeft(result)).toBe(true);
+    if (Either.isLeft(result)) {
+      expect(result.left).toMatchObject({ category: "storage-unavailable" });
+      expect(result.left.message).toContain(phrase);
+      expect(result.left.message).not.toContain("secret");
+    }
+  });
 });
 
 function startupResult(directory: string) {

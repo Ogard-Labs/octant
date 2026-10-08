@@ -1,6 +1,7 @@
 import { createServer, type AddressInfo } from "node:net";
 import {
   HostRuntimePathError,
+  redactHostRuntimeText,
   type HostInfoReceipt,
   type ServicePolicyStore,
 } from "@octant/host-runtime";
@@ -122,7 +123,7 @@ export function serverSpawnSpec(options: ServerSpawnSpecOptions) {
       command: "bun",
       args: ["run", "--cwd", `${options.root}/apps/server`, "start"],
       env,
-      stdio: ["pipe", "inherit", "inherit"],
+      stdio: ["pipe", "inherit", "pipe"],
     } as const;
   }
   const packagedPath = resolvePackagedServerPath(options.env.PATH);
@@ -135,7 +136,7 @@ export function serverSpawnSpec(options: ServerSpawnSpecOptions) {
       ELECTRON_RUN_AS_NODE: "1",
       OCTANT_PACKAGED_RUNTIME: "1",
     },
-    stdio: ["pipe", "inherit", "inherit"],
+    stdio: ["pipe", "inherit", "pipe"],
   } as const;
 }
 
@@ -152,6 +153,54 @@ export class ServerReadyTimeout extends Error {
         `(last probe: ${lastProbeOutcome}; attempts: ${attemptCount}).`,
     );
     this.name = "ServerReadyTimeout";
+  }
+}
+
+const STDERR_TAIL_MAX_LINES = 5;
+const STDERR_TAIL_MAX_CHARS = 1_000;
+
+/**
+ * The managed server's stderr is the only place its own startup diagnosis
+ * appears. Keep a bounded tail so a start that dies before listening can say
+ * why instead of timing out with a bare probe outcome.
+ */
+export interface StderrTail {
+  readonly append: (chunk: string | Uint8Array) => void;
+  readonly text: () => string;
+}
+
+export function createStderrTail(): StderrTail {
+  let buffered = "";
+  return {
+    append: (chunk) => {
+      buffered = (buffered + Buffer.from(chunk).toString("utf8")).slice(-4 * STDERR_TAIL_MAX_CHARS);
+    },
+    text: () => {
+      const lines = buffered
+        .split("\n")
+        .map((line) => line.trim())
+        .filter((line) => line !== "")
+        .slice(-STDERR_TAIL_MAX_LINES);
+      return redactHostRuntimeText(lines.join("\n")).slice(-STDERR_TAIL_MAX_CHARS);
+    },
+  };
+}
+
+/** The managed child ended before it answered, so waiting longer cannot help. */
+export class ServerExitedBeforeReady extends Error {
+  readonly category = "server-unavailable";
+
+  constructor(
+    readonly exitCode: number | null,
+    readonly signalCode: NodeJS.Signals | null,
+    lastOutput: string,
+  ) {
+    super(
+      `Octant's local server exited before it was ready (${
+        signalCode !== null ? `signal ${signalCode}` : `exit code ${exitCode}`
+      }).` + (lastOutput === "" ? " It printed no error output." : ` Last output:\n${lastOutput}`),
+    );
+    this.name = "ServerExitedBeforeReady";
   }
 }
 
@@ -202,6 +251,9 @@ interface WaitForStorageReadyOptions {
   readonly now?: () => number;
   readonly sleep?: (milliseconds: number) => Promise<void>;
   readonly resolveAttachedHost?: () => Promise<LocalHostProbe | undefined>;
+  /** When set, a child that has exited ends the wait instead of the timeout. */
+  readonly child?: ManagedChildProcess;
+  readonly lastOutput?: () => string;
 }
 
 export interface LoopbackPortReservation {
@@ -409,6 +461,13 @@ export async function waitForStorageReady(
     }
     const attached = await options.resolveAttachedHost?.();
     if (attached !== undefined && attached.instanceId !== options.instanceId) return attached;
+    if (options.child !== undefined && hasExited(options.child)) {
+      throw new ServerExitedBeforeReady(
+        options.child.exitCode,
+        options.child.signalCode,
+        options.lastOutput?.() ?? "",
+      );
+    }
     const remaining = deadline - now();
     if (remaining <= 0) break;
     await sleep(Math.min(pollIntervalMs, remaining));

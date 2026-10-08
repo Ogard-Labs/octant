@@ -9,7 +9,9 @@ import {
 } from "@octant/host-runtime";
 import {
   AutomaticHostStartupDisabled,
+  ServerExitedBeforeReady,
   ServerReadyTimeout,
+  createStderrTail,
   assertAutomaticHostStartupEnabled,
   formatDesktopStartupFailure,
   ManagedServerCleanupFailed,
@@ -363,7 +365,7 @@ describe("serverSpawnSpec", () => {
         OCTANT_DESKTOP_PARENT_WATCH: "1",
         OCTANT_HOST_SERVICE_MODE: "desktop",
       },
-      stdio: ["pipe", "inherit", "inherit"],
+      stdio: ["pipe", "inherit", "pipe"],
     });
   });
 
@@ -407,7 +409,7 @@ describe("serverSpawnSpec", () => {
         OCTANT_HOST_SERVICE_MODE: "desktop",
         OCTANT_PACKAGED_RUNTIME: "1",
       },
-      stdio: ["pipe", "inherit", "inherit"],
+      stdio: ["pipe", "inherit", "pipe"],
     });
   });
 
@@ -472,6 +474,59 @@ describe("reserveLoopbackPort", () => {
 });
 
 describe("waitForStorageReady", () => {
+  it("stops waiting as soon as the managed child has exited and reports why", async () => {
+    let now = 0;
+    const tail = createStderrTail();
+    tail.append("noise\nOctant refused to start: unsafe-mode\n");
+    const sleep = vi.fn(async (milliseconds: number) => {
+      now += milliseconds;
+    });
+
+    const failure = await waitForStorageReady({
+      serverUrl: "http://127.0.0.1:43123/",
+      instanceId: "desktop-child",
+      fetch: vi.fn().mockRejectedValue(new Error("connection refused")),
+      child: { exitCode: 1, signalCode: null, kill: vi.fn() },
+      lastOutput: tail.text,
+      timeoutMs: 15_000,
+      pollIntervalMs: 100,
+      now: () => now,
+      sleep,
+    }).catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(ServerExitedBeforeReady);
+    expect((failure as Error).message).toContain("exit code 1");
+    expect((failure as Error).message).toContain("Octant refused to start: unsafe-mode");
+    expect(now).toBeLessThan(1_000);
+  });
+
+  it("names the terminating signal when the child was killed", async () => {
+    const failure = await waitForStorageReady({
+      serverUrl: "http://127.0.0.1:43123/",
+      instanceId: "desktop-child",
+      fetch: vi.fn().mockRejectedValue(new Error("connection refused")),
+      child: { exitCode: null, signalCode: "SIGKILL", kill: vi.fn() },
+      lastOutput: () => "",
+    }).catch((error: unknown) => error);
+
+    expect((failure as Error).message).toContain("signal SIGKILL");
+    expect((failure as Error).message).toContain("no error output");
+  });
+
+  it("still returns the attached winner when the losing child already exited", async () => {
+    const attached = { url: "http://127.0.0.1:43124/", instanceId: "foreground-winner" };
+
+    await expect(
+      waitForStorageReady({
+        serverUrl: "http://127.0.0.1:43123/",
+        instanceId: "desktop-loser",
+        fetch: vi.fn().mockRejectedValue(new Error("refused")),
+        child: { exitCode: 0, signalCode: null, kill: vi.fn() },
+        resolveAttachedHost: async () => attached,
+      }),
+    ).resolves.toEqual(attached);
+  });
+
   it("returns a separately managed winner when the desktop child loses the owner race", async () => {
     const attached = {
       url: "http://127.0.0.1:43124/",
@@ -832,6 +887,25 @@ describe("desktop startup failure copy", () => {
     expect(formatDesktopStartupFailure(new ServerReadyTimeout(15_000, "request-failed", 147))).toBe(
       "Octant storage did not become ready within 15000ms (last probe: request-failed; attempts: 147).",
     );
+  });
+});
+
+describe("createStderrTail", () => {
+  it("keeps a bounded, redacted tail of the last lines", () => {
+    const tail = createStderrTail();
+    for (let line = 0; line < 50; line += 1) tail.append(`line ${line}\n`);
+    tail.append("token=supersecretvalue123 failed\nAuthorization: Bearer abcdefghijklmnop\n");
+    tail.append("x".repeat(5_000));
+
+    const text = tail.text();
+
+    expect(text.length).toBeLessThanOrEqual(1_000);
+    expect(text).not.toContain("line 0");
+    const secrets = createStderrTail();
+    secrets.append("token=supersecretvalue123 failed\nAuthorization: Bearer abcdefghijklmnop\n");
+    expect(secrets.text()).not.toContain("supersecretvalue123");
+    expect(secrets.text()).not.toContain("abcdefghijklmnop");
+    expect(secrets.text()).toContain("failed");
   });
 });
 

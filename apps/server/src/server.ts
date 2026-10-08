@@ -1,4 +1,5 @@
 import { observedChildren } from "./agentRun/agentObservedChildren";
+import { withStartupFailureReason } from "./startupFailureReason";
 import { createLocalUsageHistoryCheckpointStore } from "./persistence/localUsageHistoryCheckpointStore";
 import { createLocalUsageHistoryLastReadStore } from "./persistence/localUsageHistoryLastReadStore";
 import { createSelectedExtensionResolver } from "./extensions/selectedExtensions";
@@ -10733,7 +10734,7 @@ export function fatalStartupOutput(error: unknown): string {
       ? error
       : {
           category: "startup-failed",
-          message: "Octant could not start the local server.",
+          message: withStartupFailureReason("Octant could not start the local server.", error),
         };
   return JSON.stringify({
     product: "Octant",
