@@ -459,7 +459,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       label: "Image generation",
       scope: "app",
       keywords:
-        "image generation image providers profiles openai image gpt-image gemini image black forest labs flux ideogram custom image sources provider api key recraft openai-compatible bring your own endpoint",
+        "image generation image provider profiles openai image gpt-image gemini image black forest labs flux ideogram custom image sources provider api key recraft openai-compatible bring your own endpoint",
       settings: [],
     },
     {

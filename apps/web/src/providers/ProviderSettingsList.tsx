@@ -1781,6 +1781,15 @@ function providerBinaryPath(instance: ProviderInstance): string | undefined {
 }
 
 function authenticationGuidance(instance: ProviderInstance): string {
+  // An endpoint a sign-in created takes no key: telling its owner to add one
+  // pointed at a field its configuration does not show.
+  if (
+    (instance.driverKind === "openai-compatible" ||
+      instance.driverKind === "anthropic-compatible") &&
+    instance.configuration.oauthDescriptorId !== undefined
+  ) {
+    return "Sign in above, then check the connection again.";
+  }
   switch (instance.driverKind) {
     case "codex":
       return "Run codex login in your terminal, then check the connection again.";
