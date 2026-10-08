@@ -36,6 +36,24 @@ describe.skipIf(process.platform !== "darwin")("native harness shell under Seatb
     expect(run.output).toBe(`${checkout}|absent|1`);
   });
 
+  it("cannot rewrite a pending command script, its own or another call's", async () => {
+    const { shell, checkout } = harnessShell("allow");
+
+    // `$0` is the script path; a sibling call's script sits beside it, so a
+    // command that could write here could swap what another thread runs.
+    const run = await shell.run({
+      command: `printf 'echo hijacked\\n' > "$0" && echo did-rewrite
+printf 'echo hijacked\\n' > "$(dirname "$(dirname "$0")")/planted.sh" && echo did-plant
+true`,
+      cwd: checkout,
+      timeoutMs: 10_000,
+    });
+
+    expect(run).toMatchObject({ status: "ran", exitCode: 0 });
+    expect(run.output).not.toContain("did-rewrite");
+    expect(run.output).not.toContain("did-plant");
+  });
+
   it("reaches a loopback listener only from the networked shell", async () => {
     const listener = await loopbackListener();
     // nc rather than curl: a confined curl stops reading its TLS configuration
@@ -99,15 +117,17 @@ function harnessShell(networkEgress: "allow" | "none") {
   directories.push(root);
   const checkout = join(root, "checkout");
   const work = join(root, "work");
+  const scripts = join(root, "scripts");
   mkdirSync(checkout);
   mkdirSync(work, { mode: 0o700 });
+  mkdirSync(scripts, { mode: 0o700 });
   const process = new RepositoryTestProcessPort({
     receiptDirectory: join(root, "receipts"),
     temporaryDirectory: work,
     networkEgress,
-    harnessShellScripts: true,
+    harnessShellScriptDirectory: scripts,
   });
-  return { shell: createNativeHarnessShell({ process, scriptDirectory: work }), checkout };
+  return { shell: createNativeHarnessShell({ process, scriptDirectory: scripts }), checkout };
 }
 
 async function loopbackListener() {

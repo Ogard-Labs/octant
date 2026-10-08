@@ -5819,24 +5819,30 @@ export function startOctantServer(
     });
     // The harness `bash` tool runs through the same owned-process-group,
     // Seatbelt-confined port repository tests use, with its own receipt and
-    // script directories so a command's leftovers never mix with a test's.
+    // work directories so a command's leftovers never mix with a test's.
     const harnessWorkDirectory = join(providerDataDirectory, "harness", "work");
     mkdirSync(harnessWorkDirectory, { recursive: true, mode: 0o700 });
+    // Pending command scripts live outside every directory a confined command
+    // may write; each launch reads only its own script's subdirectory, so one
+    // command cannot swap the script another thread is about to run.
+    const harnessScriptDirectory = join(providerDataDirectory, "harness", "scripts");
+    mkdirSync(harnessScriptDirectory, { recursive: true, mode: 0o700 });
     const harnessProcessPort = new RepositoryTestProcessPort({
       receiptDirectory: join(providerDataDirectory, "harness", "receipts"),
       temporaryDirectory: harnessWorkDirectory,
-      harnessShellScripts: true,
+      harnessShellScriptDirectory: harnessScriptDirectory,
     });
     // A child admitted without network authority runs its commands here. Its
-    // writable temporary root is its own: a shared one would let it rewrite a
-    // networked shell's pending script and run that with the network open.
+    // writable temporary root is its own: a shared one would let it leave
+    // files a networked command later picks up and acts on with the network
+    // open.
     const harnessOfflineWorkDirectory = join(providerDataDirectory, "harness", "work-offline");
     mkdirSync(harnessOfflineWorkDirectory, { recursive: true, mode: 0o700 });
     const harnessOfflineProcessPort = new RepositoryTestProcessPort({
       receiptDirectory: join(providerDataDirectory, "harness", "receipts"),
       temporaryDirectory: harnessOfflineWorkDirectory,
       networkEgress: "none",
-      harnessShellScripts: true,
+      harnessShellScriptDirectory: harnessScriptDirectory,
     });
     const nativeHarnessRoutingStore = new NativeHarnessRoutingStore({
       journal: persistence.journal,
@@ -6119,11 +6125,11 @@ export function startOctantServer(
       plans: planService,
       shell: createNativeHarnessShell({
         process: harnessProcessPort,
-        scriptDirectory: harnessWorkDirectory,
+        scriptDirectory: harnessScriptDirectory,
       }),
       offlineShell: createNativeHarnessShell({
         process: harnessOfflineProcessPort,
-        scriptDirectory: harnessOfflineWorkDirectory,
+        scriptDirectory: harnessScriptDirectory,
       }),
       resolveWebSearch: () =>
         searxngHarnessWebSearch({

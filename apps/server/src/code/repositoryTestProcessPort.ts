@@ -96,16 +96,18 @@ interface RepositoryTestProcessPortOptions {
    */
   readonly allowSimulatorControl?: boolean;
   /**
-   * Whether `executeShellScript` may run a script from this port's temporary
-   * directory with `/bin/sh`. Only the harness `bash` ports turn this on: a
-   * repository test, Apple, or Android launch never needs a shell.
+   * Where `executeShellScript` takes the scripts it runs with `/bin/sh`. Only
+   * the harness `bash` ports name one: a repository test, Apple, or Android
+   * launch never needs a shell. It must lie outside every root a confined
+   * launch may write, so no command can rewrite a script waiting to run.
    */
-  readonly harnessShellScripts?: boolean;
+  readonly harnessShellScriptDirectory?: string;
 }
 
 /**
- * One harness shell command: a script file the harness wrote inside the
- * port's temporary directory, run as `/bin/sh <script>` and nothing else.
+ * One harness shell command: a script file the harness wrote in its own
+ * subdirectory of the port's script directory, run as `/bin/sh <script>` and
+ * nothing else.
  */
 export interface HarnessShellScriptInput {
   readonly script: string;
@@ -225,7 +227,7 @@ export class RepositoryTestProcessPort {
   readonly #literalReadPaths: ReadonlyArray<string>;
   readonly #additionalWritePaths: ReadonlyArray<string>;
   readonly #allowSimulatorControl: boolean;
-  readonly #harnessShellScripts: boolean;
+  readonly #harnessShellScriptDirectory: string | undefined;
 
   constructor(options: RepositoryTestProcessPortOptions = {}) {
     this.#platform = options.platform ?? process.platform;
@@ -245,7 +247,7 @@ export class RepositoryTestProcessPort {
     this.#literalReadPaths = options.literalReadPaths ?? [];
     this.#additionalWritePaths = options.additionalWritePaths ?? [];
     this.#allowSimulatorControl = options.allowSimulatorControl === true;
-    this.#harnessShellScripts = options.harnessShellScripts === true;
+    this.#harnessShellScriptDirectory = options.harnessShellScriptDirectory;
     this.#confinement =
       options.confinement ??
       makeSeatbeltConfinementLive({
@@ -279,22 +281,33 @@ export class RepositoryTestProcessPort {
    * The harness `bash` entry point. `execute` refuses a shell as argv[0] so a
    * test command stays one structured argv nothing reinterprets; this is the
    * one place a shell runs, and only what the harness shell needs: the fixed
-   * `/bin/sh`, one script that is a regular file inside this port's own
-   * temporary directory, no other argument, and every other check `execute`
-   * makes. A port that did not opt in refuses it.
+   * `/bin/sh`, one regular-file script in its own subdirectory of the port's
+   * script directory, no other argument, and every other check `execute`
+   * makes. The launch may read that one subdirectory and write none of it, so
+   * neither this command nor a concurrent one can swap the script another
+   * call is about to run. A port without a script directory refuses it.
    */
   async executeShellScript(
     input: HarnessShellScriptInput,
     signal?: AbortSignal,
   ): Promise<RepositoryTestProcessResult> {
-    if (!this.#harnessShellScripts || !supportsOwnedProcessGroups(this.#platform))
+    const scriptDirectory = this.#harnessShellScriptDirectory;
+    if (scriptDirectory === undefined || !supportsOwnedProcessGroups(this.#platform))
       return unavailable(false);
     if (signal?.aborted) return cancelledBeforeSpawn();
     let launchInput: RepositoryTestProcessInput;
     try {
       validateLaunchInput({ ...input, argv: [HARNESS_SHELL, input.script] }, this.#maxOutputBytes);
-      const script = await resolveScriptInside(this.#temporaryDirectory, input.script);
-      launchInput = { ...input, argv: [HARNESS_SHELL, script] };
+      const script = await resolveHarnessScript(scriptDirectory, input.script, [
+        input.cwd,
+        this.#temporaryDirectory,
+        ...this.#additionalWritePaths,
+      ]);
+      launchInput = {
+        ...input,
+        argv: [HARNESS_SHELL, script],
+        additionalReadRoots: [dirname(script)],
+      };
       validateLaunchInput(launchInput, this.#maxOutputBytes);
     } catch {
       return unavailable(false);
@@ -760,18 +773,29 @@ function validateLaunchInput(input: RepositoryTestProcessInput, maximumOutputByt
 }
 
 /**
- * The script must be a regular file the harness wrote beneath the port's
- * temporary directory, judged by its resolved path so neither a symlink nor
- * `..` can point the shell at a file elsewhere.
+ * The script must be a regular file in its own subdirectory of the script
+ * directory, judged by resolved paths so neither a symlink nor `..` can point
+ * the shell elsewhere, and that directory must not sit inside a root the
+ * launch may write.
  */
-async function resolveScriptInside(directory: string, script: string): Promise<string> {
+async function resolveHarnessScript(
+  directory: string,
+  script: string,
+  writableRoots: ReadonlyArray<string>,
+): Promise<string> {
   if (!isAbsolute(script)) throw new Error("Harness shell script is not absolute.");
   const root = await realpath(directory);
+  for (const writable of writableRoots) {
+    const resolvedWritable = await realpath(writable);
+    if (contained(resolvedWritable, root) || contained(root, resolvedWritable))
+      throw new Error("Harness shell scripts overlap a writable root.");
+  }
   const metadata = await lstat(script);
   if (!metadata.isFile()) throw new Error("Harness shell script is not a regular file.");
   const resolved = await realpath(script);
-  if (resolved === root || !contained(root, resolved))
-    throw new Error("Harness shell script is outside the work directory.");
+  const owner = dirname(resolved);
+  if (owner === root || !contained(root, owner))
+    throw new Error("Harness shell script is not in its own script subdirectory.");
   return resolved;
 }
 

@@ -13,7 +13,10 @@ export interface SandboxedProcessPort {
 
 export interface NativeHarnessShellOptions {
   readonly process: SandboxedProcessPort;
-  /** The process port's own temporary directory: it runs only scripts inside it. */
+  /**
+   * The process port's script directory: it runs only a script in its own
+   * subdirectory there, which no confined command can write.
+   */
   readonly scriptDirectory: string;
 }
 
