@@ -28,6 +28,7 @@ import {
   type PermissionPersistence,
   type ProviderDefaults,
   type ProviderDataTags,
+  type ProviderFailure,
   type ProviderInstanceId,
   type ProviderModelId,
   type ProviderAuthenticationAttempt,
@@ -90,6 +91,20 @@ function findProvider(current: ProviderRegistrySnapshot, instanceId: ProviderIns
  */
 /** What one explicit "Verify tools" request found, or "failed" when it could not run. */
 export type ModelToolVerification = "supported" | "unsupported" | "failed";
+
+/**
+ * The last connection check that failed for an instance, as the probe command
+ * answered it. The host keeps only a generic observation for some failures (a
+ * protocol failure is stored as degraded with "Provider probe failed."), so
+ * Settings keeps the precise answer here until the instance is checked again,
+ * changes, or goes away. Presentation only: it never authorizes anything.
+ */
+export interface ProviderProbeFailure {
+  readonly category: ProviderFailure["category"];
+  readonly message: string;
+  readonly reason?: ProviderFailure["reason"];
+  readonly failedAt: string;
+}
 
 function withCatalogModelTags(
   observed: ProviderObservedState,
@@ -154,6 +169,9 @@ export function useProviderController(options: ProviderControllerOptions) {
   const [busy, setBusy] = useState(false);
   const [probingIds, setProbingIds] = useState<ReadonlySet<ProviderInstanceId>>(new Set());
   const [updatingIds, setUpdatingIds] = useState<ReadonlySet<ProviderInstanceId>>(new Set());
+  const [probeFailures, setProbeFailures] = useState<
+    ReadonlyMap<ProviderInstanceId, ProviderProbeFailure>
+  >(new Map());
 
   const install = useCallback((value: ProviderRegistrySnapshot) => {
     for (const instanceId of credentialStatusUnconfirmed.current) {
@@ -185,6 +203,21 @@ export function useProviderController(options: ProviderControllerOptions) {
     }
     presentationObserved.current = nextPresentation;
     if (!mounted.current) return;
+    // A kept failure describes the observation the failed check left behind.
+    // Once that observation is gone (the instance changed, was removed, or is
+    // being checked again) the failure no longer describes anything.
+    setProbeFailures((current) => {
+      if (current.size === 0) return current;
+      let changed = false;
+      const next = new Map(current);
+      for (const instanceId of current.keys()) {
+        if (instanceIds.has(instanceId) && nextObserved.has(instanceId)) continue;
+        if (preserved.has(instanceId)) continue;
+        next.delete(instanceId);
+        changed = true;
+      }
+      return changed ? next : current;
+    });
     setObservedSnapshot(new Map(nextObserved));
     setPresentationObservedSnapshot(new Map(nextPresentation));
     setSnapshot(value);
@@ -2974,6 +3007,7 @@ export function useProviderController(options: ProviderControllerOptions) {
         });
       }
       setProbingIds((current) => new Set(current).add(instanceId));
+      setProbeFailures((current) => withoutKey(current, instanceId));
       if (!options?.quiet) setMessage(undefined);
       try {
         const observed = await client.probe(instanceId);
@@ -3000,8 +3034,12 @@ export function useProviderController(options: ProviderControllerOptions) {
         // page-level alert after the next registry snapshot is ready. Other
         // probe failures remain visible through the shared alert and the row's
         // authoritative readiness details.
-        if (mounted.current && !options?.quiet && !isInterruptedFailure(error)) {
-          setMessage(redactedProbeFailureMessage(error));
+        if (mounted.current && !isInterruptedFailure(error)) {
+          const failure = probeFailureOf(error);
+          if (failure !== undefined) {
+            setProbeFailures((current) => new Map(current).set(instanceId, failure));
+          }
+          if (!options?.quiet) setMessage(redactedProbeFailureMessage(error));
         }
         return false;
       } finally {
@@ -3149,6 +3187,7 @@ export function useProviderController(options: ProviderControllerOptions) {
     completeProviderAuthentication,
     updateProviderCli,
     probe,
+    probeFailures,
     verifyModelTools,
     updatePermissionPersistence,
     updateProviderOrder,
@@ -3321,6 +3360,40 @@ function domainValidationMessage(error: unknown): string {
     return error.message;
   }
   return "";
+}
+
+function withoutKey<Value>(
+  current: ReadonlyMap<ProviderInstanceId, Value>,
+  key: ProviderInstanceId,
+): ReadonlyMap<ProviderInstanceId, Value> {
+  if (!current.has(key)) return current;
+  const next = new Map(current);
+  next.delete(key);
+  return next;
+}
+
+/** The probe command's own failure, or nothing when the answer was unreadable. */
+function probeFailureOf(error: unknown): ProviderProbeFailure | undefined {
+  let failure: ProviderFailure;
+  try {
+    failure = decodeProviderFailure(
+      error instanceof ProviderClientFailure
+        ? {
+            category: error.category,
+            message: error.message,
+            ...(error.reason === undefined ? {} : { reason: error.reason }),
+          }
+        : error,
+    );
+  } catch {
+    return undefined;
+  }
+  return {
+    category: failure.category,
+    message: failure.message,
+    ...(failure.reason === undefined ? {} : { reason: failure.reason }),
+    failedAt: new Date().toISOString(),
+  };
 }
 
 function redactedProbeFailureMessage(error: unknown): string {

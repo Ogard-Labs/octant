@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 
 export type ProviderOAuthSignInState =
@@ -16,7 +16,13 @@ export interface ProviderOAuthSignInProps {
   readonly termsRequired: boolean;
   readonly state: ProviderOAuthSignInState;
   readonly disabled?: boolean;
-  readonly onAcknowledge: () => void;
+  /** The sign-in button's words, such as "Sign in with ChatGPT"; "Sign in" when absent. */
+  readonly signInLabel?: string;
+  /**
+   * Starts the sign-in. When the terms still need acknowledging, the consent
+   * line under the button says so, and this one click records the
+   * acknowledgment before the sign-in begins.
+   */
   readonly onSignIn: () => void;
   /** Absent where the endpoint takes no key, such as one a sign-in created. */
   readonly onUseApiKey?: () => void;
@@ -30,9 +36,13 @@ export interface ProviderOAuthSignInProps {
  */
 export function ProviderOAuthSignIn(props: ProviderOAuthSignInProps) {
   const disabled = props.disabled === true;
-  const showTerms = props.termsRequired && props.state.kind === "signed-out";
+  const signedIn = props.state.kind === "signed-in" || props.state.kind === "not-revoked";
+  // Terms are a line under the button, not a step before it: acknowledging
+  // first and then signing in was two clicks for one decision.
+  const showConsent = props.termsRequired && !signedIn;
+  const consentId = useId();
   return (
-    <div className="provider-card__edit-actions">
+    <div className="provider-card__edit-actions provider-oauth-sign-in">
       {props.state.kind === "signed-in" ? (
         <p>
           Signed in as <span className="oct-meta--mono">{props.state.accountLabel}</span>
@@ -48,7 +58,9 @@ export function ProviderOAuthSignIn(props: ProviderOAuthSignInProps) {
           Try again, or sign out on this computer only.
         </p>
       ) : null}
-      {props.state.kind === "expired" ? <p>Sign in again to use this provider.</p> : null}
+      {props.state.kind === "expired" ? (
+        <p>Your sign-in expired. Sign in again to use it.</p>
+      ) : null}
       {props.state.kind === "refused" ? <p>{props.state.message}</p> : null}
       {props.state.kind === "awaiting-consent" ? (
         <p aria-live="polite">
@@ -63,22 +75,17 @@ export function ProviderOAuthSignIn(props: ProviderOAuthSignInProps) {
           )}
         </p>
       ) : null}
-      {showTerms ? (
-        <div>
-          <p>{props.termsSummary}</p>
-          <OctantButton disabled={disabled} onClick={props.onAcknowledge} size="sm" type="button">
-            Acknowledge and continue
-          </OctantButton>
-        </div>
-      ) : null}
-      <OctantButton
-        disabled={disabled || showTerms}
-        onClick={props.onSignIn}
-        size="sm"
-        type="button"
-      >
-        Sign in
-      </OctantButton>
+      {signedIn ? null : (
+        <OctantButton
+          {...(showConsent ? { "aria-describedby": consentId } : {})}
+          disabled={disabled || props.state.kind === "awaiting-consent"}
+          onClick={props.onSignIn}
+          size="sm"
+          type="button"
+        >
+          {props.state.kind === "expired" ? "Sign in again" : (props.signInLabel ?? "Sign in")}
+        </OctantButton>
+      )}
       {props.onUseApiKey === undefined ? null : (
         <OctantButton
           disabled={disabled}
@@ -90,7 +97,7 @@ export function ProviderOAuthSignIn(props: ProviderOAuthSignInProps) {
           Use an API key
         </OctantButton>
       )}
-      {props.state.kind === "signed-in" || props.state.kind === "not-revoked" ? (
+      {signedIn ? (
         <OctantButton
           disabled={disabled}
           onClick={props.onSignOut}
@@ -112,8 +119,18 @@ export function ProviderOAuthSignIn(props: ProviderOAuthSignInProps) {
           Sign out on this computer only
         </OctantButton>
       ) : null}
+      {showConsent ? (
+        <p className="provider-oauth-sign-in__consent" id={consentId}>
+          {signInConsent(props.termsSummary)}
+        </p>
+      ) : null}
     </div>
   );
+}
+
+/** The one consent line a sign-in button carries while its terms are unacknowledged. */
+export function signInConsent(termsSummary: string): string {
+  return `Opens your browser. Signing in accepts these terms: ${termsSummary}`;
 }
 
 export interface ProviderOAuthCommand {
@@ -147,13 +164,17 @@ export function ProviderOAuthSignInPanel(props: {
   readonly accountLabel: string;
   readonly termsSummary: string;
   readonly disabled?: boolean;
+  readonly signInLabel?: string;
   readonly onUseApiKey?: () => void;
   /**
-   * Begin the sign-in once, as soon as the host reports the person signed out
-   * with no terms left to acknowledge. Set for an endpoint the person just
-   * added by choosing the sign-in; the terms still come first when they apply.
+   * Begin the sign-in once, as soon as the host reports the person signed
+   * out. Set when the person already chose to sign in elsewhere, such as the
+   * first-run choice or a row's Sign in button, beside the same consent line;
+   * the acknowledgment is recorded first when the terms still need it.
    */
   readonly startSignIn?: boolean;
+  /** Told each state the panel settles on, so the page around it can follow. */
+  readonly onStateChange?: (state: ProviderOAuthSignInState) => void;
   readonly run?: (command: ProviderOAuthCommand) => Promise<ProviderOAuthCommandResult | undefined>;
   readonly openUrl?: (url: string) => void;
 }) {
@@ -162,7 +183,7 @@ export function ProviderOAuthSignInPanel(props: {
   const [attemptId, setAttemptId] = useState<string>();
   const [statusKnown, setStatusKnown] = useState(false);
   const started = useRef(false);
-  const { run, openUrl, instanceId, descriptorId } = props;
+  const { run, openUrl, instanceId, descriptorId, onStateChange } = props;
   // The settings controller hands this panel a new `run` on every render.
   // Keying the effects on its identity re-ran the status check whenever the
   // settings re-rendered while the person was in the browser, which reset the
@@ -170,14 +191,39 @@ export function ProviderOAuthSignInPanel(props: {
   // completed was never collected. The effects read the latest `run` instead.
   const runRef = useRef(run);
   runRef.current = run;
+  const onStateChangeRef = useRef(onStateChange);
+  onStateChangeRef.current = onStateChange;
+  const termsRequiredRef = useRef(termsRequired);
+  termsRequiredRef.current = termsRequired;
   const canRun = run !== undefined;
-  const begin = () => {
+  const signIn = () => {
     const current = runRef.current;
     if (current === undefined) return;
-    void current({ kind: "begin", instanceId, descriptorId }).then((result) => {
+    void (async () => {
+      // The click that starts the sign-in is the acknowledgment: the button
+      // carries the consent line, and the host still records it through its
+      // own command before it will begin.
+      if (termsRequiredRef.current) {
+        const acknowledged = await current({ kind: "acknowledge", instanceId, descriptorId });
+        apply(acknowledged ?? unreadable, setState, setTermsRequired, setAttemptId);
+        if (
+          acknowledged === undefined ||
+          acknowledged.kind === "refused" ||
+          acknowledged.termsRequired === true
+        ) {
+          return;
+        }
+      }
+      const result = await current({ kind: "begin", instanceId, descriptorId });
       apply(result ?? unreadable, setState, setTermsRequired, setAttemptId, openUrl);
-    });
+    })();
   };
+
+  // Reported only once the host has answered, so the panel's starting
+  // "signed out" placeholder is never passed on as the host's word.
+  useEffect(() => {
+    if (statusKnown) onStateChangeRef.current?.(state);
+  }, [state, statusKnown]);
 
   useEffect(() => {
     const current = runRef.current;
@@ -215,26 +261,17 @@ export function ProviderOAuthSignInPanel(props: {
 
   useEffect(() => {
     if (props.startSignIn !== true || started.current || !statusKnown) return;
-    if (state.kind !== "signed-out" || termsRequired) return;
+    if (state.kind !== "signed-out" && state.kind !== "expired") return;
     started.current = true;
-    begin();
+    signIn();
   });
 
   return (
     <ProviderOAuthSignIn
       accountLabel={props.accountLabel}
       {...(props.disabled === undefined ? {} : { disabled: props.disabled })}
-      onAcknowledge={() => {
-        void run?.({
-          kind: "acknowledge",
-          instanceId,
-          descriptorId,
-        }).then((result) => {
-          if (result === undefined) return;
-          apply(result, setState, setTermsRequired, setAttemptId);
-        });
-      }}
-      onSignIn={begin}
+      {...(props.signInLabel === undefined ? {} : { signInLabel: props.signInLabel })}
+      onSignIn={signIn}
       onSignOut={() => {
         void run?.({
           kind: "sign-out",
@@ -337,7 +374,7 @@ function refusalMessage(reason: string | undefined): string {
     case "exchange-refused":
       return "The sign-in service refused the sign-in. Try signing in again.";
     case "terms-required":
-      return "Acknowledge the terms before signing in.";
+      return "The sign-in terms weren't recorded. Try signing in again.";
     case "local-host-required":
       return "Sign in from Octant on this computer.";
     case "unknown-instance":

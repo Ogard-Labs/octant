@@ -110,6 +110,15 @@ export interface ProviderCreateFormPresentationProps {
   readonly triggerLabel?: string;
   readonly heading?: string;
   readonly hint?: string;
+  /**
+   * The form is already the content of a dialog the person opened, so it has
+   * no disclosure trigger of its own and stays open.
+   */
+  readonly embedded?: boolean;
+  /** The submit button's words in place of "Add <kind> provider". */
+  readonly submitLabel?: string;
+  /** Called once a submitted provider exists, with its display name. */
+  readonly onCreated?: (displayName: string) => void;
 }
 
 export function ProviderCreateForm(
@@ -117,7 +126,8 @@ export function ProviderCreateForm(
 ) {
   const [creating, setCreating] = useState(false);
   const [validationMessage, setValidationMessage] = useState<string | undefined>(undefined);
-  const [manualOpen, setManualOpen] = useState(false);
+  const [manualOpenState, setManualOpen] = useState(false);
+  const manualOpen = props.embedded === true || manualOpenState;
   const initialProviderType =
     props.initialProviderType ?? props.allowedProviderTypes?.[0] ?? "opencode";
   const [providerType, setProviderType] = useState<ProviderCreateProviderType>(initialProviderType);
@@ -165,21 +175,29 @@ export function ProviderCreateForm(
           : providerType;
   return (
     <section className="provider-settings__manual" data-expanded={manualOpen ? "true" : "false"}>
-      <OctantButton
-        size="sm"
-        aria-expanded={manualOpen}
-        className="window-no-drag"
-        onClick={() => setManualOpen((current) => !current)}
-        type="button"
-        variant="secondary"
-      >
-        <span>{props.triggerLabel ?? "Add provider manually"}</span>
-        <ChevronDown aria-hidden="true" className="provider-settings__disclosure-icon" size={16} />
-      </OctantButton>
+      {props.embedded === true ? null : (
+        <OctantButton
+          size="sm"
+          aria-expanded={manualOpen}
+          className="window-no-drag"
+          onClick={() => setManualOpen((current) => !current)}
+          type="button"
+          variant="secondary"
+        >
+          <span>{props.triggerLabel ?? "Add provider manually"}</span>
+          <ChevronDown
+            aria-hidden="true"
+            className="provider-settings__disclosure-icon"
+            size={16}
+          />
+        </OctantButton>
+      )}
       {manualOpen ? (
-        <div className="provider-settings__manual-body">
+        <div className="provider-settings__manual-body" data-embedded={props.embedded === true}>
           <div className="provider-settings__create-heading">
-            <h3>{props.heading ?? "Custom endpoint or binary"}</h3>
+            {props.embedded === true ? null : (
+              <h3>{props.heading ?? "Custom endpoint or binary"}</h3>
+            )}
             <p className="provider-settings__hint">
               {props.hint ??
                 "Installed runtimes are detected automatically. Use this only for a custom HTTP endpoint or an unusual executable location."}
@@ -440,9 +458,12 @@ export function ProviderCreateForm(
                     : emptyTransientCredential(enteredCredential),
                 );
               }
+              const displayName = String(data.get("displayName") ?? "");
               void operation
                 .then((created) => {
-                  if (created) form.reset();
+                  if (!created) return;
+                  form.reset();
+                  props.onCreated?.(displayName);
                 })
                 .finally(() => setCreating(false));
             }}
@@ -944,21 +965,23 @@ export function ProviderCreateForm(
             >
               {creating
                 ? "Adding…"
-                : providerType === "openai-compatible"
-                  ? "Add OpenAI-compatible provider"
-                  : providerType === "anthropic-compatible"
-                    ? "Add Anthropic-compatible provider"
-                    : providerType === "azure-foundry"
-                      ? "Add Azure AI Foundry provider"
-                      : providerType === "openai-image"
-                        ? "Add OpenAI image profile"
-                        : providerType === "gemini-native-image"
-                          ? "Add Gemini image profile"
-                          : providerType === "bfl-image"
-                            ? "Add Black Forest Labs image profile"
-                            : providerType === "ideogram-image"
-                              ? "Add Ideogram image profile"
-                              : `Add ${selectedDriverLabel}`}
+                : props.submitLabel !== undefined
+                  ? props.submitLabel
+                  : providerType === "openai-compatible"
+                    ? "Add OpenAI-compatible provider"
+                    : providerType === "anthropic-compatible"
+                      ? "Add Anthropic-compatible provider"
+                      : providerType === "azure-foundry"
+                        ? "Add Azure AI Foundry provider"
+                        : providerType === "openai-image"
+                          ? "Add OpenAI image profile"
+                          : providerType === "gemini-native-image"
+                            ? "Add Gemini image profile"
+                            : providerType === "bfl-image"
+                              ? "Add Black Forest Labs image profile"
+                              : providerType === "ideogram-image"
+                                ? "Add Ideogram image profile"
+                                : `Add ${selectedDriverLabel}`}
             </OctantButton>
           </form>
           {providerType === "openai-compatible" ? <BedrockMantleGuide /> : null}

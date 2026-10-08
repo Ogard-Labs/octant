@@ -4,7 +4,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ProviderOAuthSignIn, ProviderOAuthSignInPanel } from "./ProviderOAuthSignIn";
 
 const handlers = () => ({
-  onAcknowledge: vi.fn(),
   onSignIn: vi.fn(),
   onUseApiKey: vi.fn(),
   onSignOut: vi.fn(),
@@ -12,23 +11,28 @@ const handlers = () => ({
 });
 
 describe("provider sign-in", () => {
-  it("shows Sign in beside Use an API key and asks for terms before starting", async () => {
+  it("carries the terms as one consent line under Sign in, so one click starts the sign-in", async () => {
     const user = userEvent.setup();
     const props = handlers();
     render(
       <ProviderOAuthSignIn
         {...props}
         accountLabel="Fixture account"
+        signInLabel="Sign in with Fixture"
         state={{ kind: "signed-out" }}
         termsRequired
-        termsSummary="Acknowledge the terms before this sign-in continues."
+        termsSummary="The fixture terms apply."
       />,
     );
-    expect(screen.getByRole("button", { name: "Sign in" })).toBeDisabled();
+    const signIn = screen.getByRole("button", { name: "Sign in with Fixture" });
+    expect(signIn).toBeEnabled();
+    expect(signIn).toHaveAccessibleDescription(
+      "Opens your browser. Signing in accepts these terms: The fixture terms apply.",
+    );
     expect(screen.getByRole("button", { name: "Use an API key" })).toBeEnabled();
-    await user.click(screen.getByRole("button", { name: "Acknowledge and continue" }));
-    expect(props.onAcknowledge).toHaveBeenCalledOnce();
-    expect(props.onSignIn).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "Acknowledge and continue" })).toBeNull();
+    await user.click(signIn);
+    expect(props.onSignIn).toHaveBeenCalledOnce();
   });
 
   it("shows the consent step without a token", () => {
@@ -78,7 +82,8 @@ describe("provider sign-in", () => {
         termsSummary="Terms"
       />,
     );
-    expect(screen.getByText("Sign in again to use this provider.")).toBeInTheDocument();
+    expect(screen.getByText("Your sign-in expired. Sign in again to use it.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Sign in again" })).toBeEnabled();
     rerender(
       <ProviderOAuthSignIn
         {...handlers()}
@@ -97,17 +102,19 @@ describe("provider sign-in panel", () => {
     vi.useRealTimers();
   });
 
-  it("begins a sign-in it is asked to start once the terms are acknowledged, and only once", async () => {
-    const user = userEvent.setup();
+  it("records the terms and begins a sign-in it is asked to start, and only once", async () => {
     let acknowledged = false;
     const run = vi.fn(async (command: { readonly kind: string }) => {
-      if (command.kind === "acknowledge") acknowledged = true;
+      if (command.kind === "acknowledge") {
+        acknowledged = true;
+        return { kind: "signed-out" as const, termsRequired: false };
+      }
       if (command.kind === "begin") {
         return { kind: "awaiting-consent" as const, attemptId: "attempt-1" };
       }
       return { kind: "signed-out" as const, termsRequired: !acknowledged };
     });
-    render(
+    const { rerender } = render(
       <ProviderOAuthSignInPanel
         accountLabel="ChatGPT plan"
         descriptorId="chatgpt-plan"
@@ -118,10 +125,40 @@ describe("provider sign-in panel", () => {
       />,
     );
 
-    await user.click(await screen.findByRole("button", { name: "Acknowledge and continue" }));
     expect(await screen.findByText(/Continue in the browser/)).toBeInTheDocument();
+    rerender(
+      <ProviderOAuthSignInPanel
+        accountLabel="ChatGPT plan"
+        descriptorId="chatgpt-plan"
+        instanceId="00000000-0000-4000-8000-000000000902"
+        run={run}
+        startSignIn
+        termsSummary="Terms"
+      />,
+    );
     expect(run.mock.calls.map((call) => call[0].kind)).toEqual(["status", "acknowledge", "begin"]);
     expect(screen.queryByRole("button", { name: "Use an API key" })).toBeNull();
+  });
+
+  it("does not begin a sign-in when the host does not record the acknowledgment", async () => {
+    const user = userEvent.setup();
+    const run = vi.fn(async (command: { readonly kind: string }) =>
+      command.kind === "acknowledge"
+        ? { kind: "refused" as const, reason: "unavailable" }
+        : { kind: "signed-out" as const, termsRequired: true },
+    );
+    render(
+      <ProviderOAuthSignInPanel
+        accountLabel="ChatGPT plan"
+        descriptorId="chatgpt-plan"
+        instanceId="00000000-0000-4000-8000-000000000903"
+        run={run}
+        termsSummary="Terms"
+      />,
+    );
+    await user.click(await screen.findByRole("button", { name: "Sign in" }));
+    expect(await screen.findByText(/Octant couldn't finish the sign-in/)).toBeInTheDocument();
+    expect(run.mock.calls.map((call) => call[0].kind)).toEqual(["status", "acknowledge"]);
   });
 
   it("offers a sign-out on this computer only when the sign-in service cannot be told, and says so afterwards", async () => {

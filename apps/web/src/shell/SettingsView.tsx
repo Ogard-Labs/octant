@@ -128,6 +128,7 @@ import type { AgentRunSettingsClient } from "@octant/client-runtime/agent-run-se
 import { AgentRunSettingsPanel } from "../agents/AgentRunSettingsPanel";
 import {
   NativeHarnessRoutingPanel,
+  nativeHarnessSlotsUsing,
   type NativeHarnessProviderOption,
 } from "../harness/NativeHarnessRoutingPanel";
 import type { NativeHarnessClient } from "@octant/client-runtime/native-harness-client";
@@ -326,6 +327,8 @@ export function SettingsView(props: SettingsViewProps) {
   const navigationClose = useRef<HTMLButtonElement>(null);
   const searchInput = useRef<HTMLInputElement>(null);
   const [searchOpen, setSearchOpen] = useState(false);
+  // An Octant Harness endpoint's detail sub-page, named for the breadcrumb.
+  const [harnessEndpoint, setHarnessEndpoint] = useState<string>();
   const resetAppearanceButton = useRef<HTMLButtonElement>(null);
   const [outline, setOutline] = useState<ReadonlyArray<SettingsOutlineEntry>>([]);
   const registerSection = useCallback((entry: SettingsOutlineEntry) => {
@@ -448,6 +451,7 @@ export function SettingsView(props: SettingsViewProps) {
   // already typed keeps the field open so the results never lose their input.
   const searchVisible = searchOpen || hasQuery;
   const PageIcon = hasQuery ? Search : settingsSectionIcon(route.activeSection);
+  const subPage = !hasQuery && route.activeSection === "harness" ? harnessEndpoint : undefined;
   const currentSectionLabel = hasQuery
     ? "Search settings"
     : (SECTION_LABELS[route.activeSection] ?? "Settings");
@@ -533,7 +537,7 @@ export function SettingsView(props: SettingsViewProps) {
                   <span>Back to app</span>
                 </OctantButton>
               )}
-              <span className="settings-view__mobile-title">{currentSectionLabel}</span>
+              <span className="settings-view__mobile-title">{subPage ?? currentSectionLabel}</span>
               <OctantButton
                 aria-expanded={navigationOpen}
                 aria-haspopup="dialog"
@@ -562,7 +566,15 @@ export function SettingsView(props: SettingsViewProps) {
             >
               <span>Settings</span>
               <span aria-hidden="true">/</span>
-              <strong>{currentSectionLabel}</strong>
+              {subPage === undefined ? (
+                <strong>{currentSectionLabel}</strong>
+              ) : (
+                <>
+                  <span>{currentSectionLabel}</span>
+                  <span aria-hidden="true">/</span>
+                  <strong aria-current="page">{subPage}</strong>
+                </>
+              )}
             </nav>
             {/* A slot of fixed size, so the mark arriving and leaving moves
                 nothing around it. The status is inserted only while the mark
@@ -579,7 +591,8 @@ export function SettingsView(props: SettingsViewProps) {
         )}
         <main className="settings-view__content" ref={contentRef}>
           <div className="settings-view__content-inner">
-            <div className="settings-view__page-head">
+            {/* A sub-page brings its own heading and Back control. */}
+            <div className="settings-view__page-head" hidden={subPage !== undefined}>
               <header className="settings-view__header">
                 <span aria-hidden="true" className="settings-view__header-tile">
                   <PageIcon size={20} strokeWidth={1.5} />
@@ -659,6 +672,8 @@ export function SettingsView(props: SettingsViewProps) {
                     capabilities={capabilities}
                     focusedSetting={route.focusedSetting}
                     onApplyDeepLink={route.applyDeepLink}
+                    onHarnessEndpointChange={setHarnessEndpoint}
+                    harnessEndpointOpen={subPage !== undefined}
                     pluginSettingsEntryPoints={pluginSettingsEntryPoints}
                     props={savingProps}
                   />
@@ -762,6 +777,8 @@ interface ActiveSectionContentProps {
   readonly activeSection: SettingsSectionId;
   readonly focusedSetting: SettingsSettingId | undefined;
   readonly onApplyDeepLink: (link: SettingsDeepLink) => void;
+  readonly onHarnessEndpointChange: (endpointName: string | undefined) => void;
+  readonly harnessEndpointOpen: boolean;
   readonly pluginSettingsEntryPoints: ReadonlyMap<string, string>;
   readonly props: SettingsViewProps;
   readonly capabilities: SettingsNativeCapabilities;
@@ -771,6 +788,8 @@ function ActiveSectionContent({
   activeSection,
   focusedSetting,
   onApplyDeepLink,
+  onHarnessEndpointChange,
+  harnessEndpointOpen,
   pluginSettingsEntryPoints,
   props,
   capabilities,
@@ -973,26 +992,37 @@ function ActiveSectionContent({
                 ? {}
                 : { discoverySnapshot: props.discoveryController.snapshot })}
               focused={focusedSetting === settingId("model-endpoints")}
+              onDetailChange={onHarnessEndpointChange}
+              probeFailures={props.providerController.probeFailures}
+              {...(props.nativeHarnessClient === undefined
+                ? {}
+                : { onRolesUsing: nativeHarnessRolesUsing(props.nativeHarnessClient) })}
             />
           )}
+          {/* Hidden rather than unmounted while an endpoint's page is open, so
+              an open backup list or a backup being added survives the visit. */}
           {props.nativeHarnessClient === undefined ? null : (
-            <NativeHarnessRoutingPanel
-              client={props.nativeHarnessClient}
-              focused={focusedSetting === settingId("model-roles")}
-              groups={nativeHarnessPickerGroups(props.providerController)}
-              hostId={LOCAL_HOST_ID}
-              onOpenModelEndpoints={openModelEndpoints}
-              providers={nativeHarnessProviderOptions(props.providerController)}
-              {...(props.providerController === undefined
-                ? {}
-                : { onVerifyTools: props.providerController.verifyModelTools })}
-            />
+            <div className="settings-section-stack" hidden={harnessEndpointOpen}>
+              <NativeHarnessRoutingPanel
+                client={props.nativeHarnessClient}
+                focused={focusedSetting === settingId("model-roles")}
+                groups={nativeHarnessPickerGroups(props.providerController)}
+                hostId={LOCAL_HOST_ID}
+                onOpenModelEndpoints={openModelEndpoints}
+                providers={nativeHarnessProviderOptions(props.providerController)}
+                {...(props.providerController === undefined
+                  ? {}
+                  : { onVerifyTools: props.providerController.verifyModelTools })}
+              />
+            </div>
           )}
           {props.agentRunSettingsClient === undefined ? null : (
-            <AgentRunSettingsPanel
-              client={props.agentRunSettingsClient}
-              focused={focusedSetting === settingId("subagent-creation-posture")}
-            />
+            <div className="settings-section-stack" hidden={harnessEndpointOpen}>
+              <AgentRunSettingsPanel
+                client={props.agentRunSettingsClient}
+                focused={focusedSetting === settingId("subagent-creation-posture")}
+              />
+            </div>
           )}
         </div>
       );
@@ -2261,6 +2291,16 @@ function SidebarBackgroundSettings({
       </label>
     </div>
   );
+}
+
+/** The model roles whose models come from one endpoint, named as Settings names them. */
+function nativeHarnessRolesUsing(
+  client: NativeHarnessClient,
+): (instanceId: string) => Promise<ReadonlyArray<string>> {
+  return async (instanceId) => {
+    const { configuration } = await client.routing();
+    return nativeHarnessSlotsUsing(configuration, instanceId);
+  };
 }
 
 /** The direct-endpoint providers a slot may name, with the models each reports. */
