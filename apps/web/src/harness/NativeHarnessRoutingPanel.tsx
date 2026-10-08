@@ -465,7 +465,7 @@ export function NativeHarnessRoutingPanel(props: NativeHarnessRoutingPanelProps)
                     description={meaning}
                     focused={id === "default" && props.focused === true}
                     label={label}
-                    scope="app"
+                    scope="host"
                     settingId={settingId(`harness-slot-${id}`)}
                   >
                     <div className="native-harness-role__control">

@@ -243,6 +243,12 @@ describe("NativeHarnessRoutingPanel roles", () => {
       "takes over when a thread's own model stops answering",
     );
     expect(screen.queryByText(/Leads each thread/)).not.toBeInTheDocument();
+    // Routing belongs to the host, not to this app's window.
+    expect(
+      within(screen.getByRole("group", { name: "Main model setting" })).getByLabelText(
+        "Scope: Selected host",
+      ),
+    ).toBeInTheDocument();
   });
 
   it("saves a chosen model at once, with the version it was read at", async () => {
