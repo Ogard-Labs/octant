@@ -1610,8 +1610,9 @@ The provider layer is defined by `@octant/provider-sdk` and implemented in
   remains redacted. Probe readiness follows the driver's failure category, so
   an unreachable endpoint is `unavailable`, and so is an OpenAI-compatible,
   Anthropic-compatible, or Ollama endpoint answering a timeout, overload, or
-  gateway status (HTTP 408, 500, 502, 503, 504, 529); the stored sentence
-  names only the status code. A connection offers `subscribe` — a
+  gateway status (HTTP 408, 500, 502, 503, 504, 529); the failure the probe
+  returns names only the status code, never the response body. A connection
+  offers `subscribe` — a
   scoped subscription to its normalized events, established before a caller
   sends so a provider that answers immediately is not missed (0082) — plus
   `start`, `resume`, `send`, `interrupt`, `stop`, `answerApproval`,
