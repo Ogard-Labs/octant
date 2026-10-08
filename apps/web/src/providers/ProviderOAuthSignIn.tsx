@@ -201,26 +201,34 @@ export function ProviderOAuthSignInPanel(props: {
   const termsRequiredRef = useRef(termsRequired);
   termsRequiredRef.current = termsRequired;
   const canRun = run !== undefined;
+  // The state stays signed-out while the acknowledgment is in flight, so a
+  // double-click, or a click while startSignIn runs, would begin two attempts.
+  const signingIn = useRef(false);
   const signIn = () => {
     const current = runRef.current;
-    if (current === undefined) return;
+    if (current === undefined || signingIn.current) return;
+    signingIn.current = true;
     void (async () => {
-      // The click that starts the sign-in is the acknowledgment: the button
-      // carries the consent line, and the host still records it through its
-      // own command before it will begin.
-      if (termsRequiredRef.current) {
-        const acknowledged = await current({ kind: "acknowledge", instanceId, descriptorId });
-        apply(acknowledged ?? unreadable, setState, setTermsRequired, setAttemptId);
-        if (
-          acknowledged === undefined ||
-          acknowledged.kind === "refused" ||
-          acknowledged.termsRequired === true
-        ) {
-          return;
+      try {
+        // The click that starts the sign-in is the acknowledgment: the button
+        // carries the consent line, and the host still records it through its
+        // own command before it will begin.
+        if (termsRequiredRef.current) {
+          const acknowledged = await current({ kind: "acknowledge", instanceId, descriptorId });
+          apply(acknowledged ?? unreadable, setState, setTermsRequired, setAttemptId);
+          if (
+            acknowledged === undefined ||
+            acknowledged.kind === "refused" ||
+            acknowledged.termsRequired === true
+          ) {
+            return;
+          }
         }
+        const result = await current({ kind: "begin", instanceId, descriptorId });
+        apply(result ?? unreadable, setState, setTermsRequired, setAttemptId, openUrl);
+      } finally {
+        signingIn.current = false;
       }
-      const result = await current({ kind: "begin", instanceId, descriptorId });
-      apply(result ?? unreadable, setState, setTermsRequired, setAttemptId, openUrl);
     })();
   };
 

@@ -833,7 +833,8 @@ function DiagnosticsSection(props: ModelEndpointDetailProps & { readonly failing
 function RemoveSection(props: ModelEndpointDetailProps & { readonly disabled: boolean }) {
   const { instance } = props;
   const [confirming, setConfirming] = useState(false);
-  const [roles, setRoles] = useState<ReadonlyArray<string> | undefined>(undefined);
+  // "unknown" when the lookup failed: saying no role uses it could be false.
+  const [roles, setRoles] = useState<ReadonlyArray<string> | "unknown" | undefined>(undefined);
   const [pending, setPending] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
   // The host keeps credential removal to the app on this Mac; an endpoint
@@ -845,16 +846,18 @@ function RemoveSection(props: ModelEndpointDetailProps & { readonly disabled: bo
     void props
       .onRolesUsing?.(String(instance.id))
       .then(setRoles)
-      .catch(() => setRoles([]));
+      .catch(() => setRoles("unknown"));
   };
   const rolesLine =
     props.onRolesUsing === undefined
       ? null
       : roles === undefined
         ? "Checking which model roles use it…"
-        : roles.length === 0
-          ? "No model role uses its models."
-          : `${roles.join(", ")} ${roles.length === 1 ? "uses" : "use"} its models, and will move to the next model in the role, or to the main model.`;
+        : roles === "unknown"
+          ? "Octant couldn't check which model roles use it."
+          : roles.length === 0
+            ? "No model role uses its models."
+            : `${roles.join(", ")} ${roles.length === 1 ? "uses" : "use"} its models, and will move to the next model in the role, or to the main model.`;
   return (
     <SettingsSection title="Remove" tone="danger">
       <div className="setgroup">
