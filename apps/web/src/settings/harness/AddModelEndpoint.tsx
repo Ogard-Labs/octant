@@ -10,6 +10,7 @@ import {
   type ProviderCreateFormProps,
 } from "../../providers/ProviderSettingsConfiguration";
 import { MODEL_ENDPOINT_DRIVER_KINDS } from "../../providers/providerSettingsPresentation";
+import { OctantAlert } from "../../ui/base/OctantAlert";
 import { OctantButton } from "../../ui/base/OctantButton";
 import { OctantDialog } from "../../ui/base/OctantDialog";
 import { EndpointState } from "./ModelEndpointRow";
@@ -76,6 +77,7 @@ export interface EndpointChoicesProps {
  */
 export function EndpointChoices(props: EndpointChoicesProps) {
   const offers = offeredSignIns();
+  const consentId = useId();
   return (
     <ul className="endpoint-choices">
       {offers.map((offer, index) => {
@@ -95,6 +97,7 @@ export function EndpointChoices(props: EndpointChoicesProps) {
               <span className="endpoint-choice__detail">{presentation.description}</span>
             </span>
             <OctantButton
+              aria-describedby={`${consentId}-${offer.descriptor.descriptorId}`}
               disabled={props.disabled}
               onClick={() => props.onSignIn(offer)}
               size="sm"
@@ -103,7 +106,10 @@ export function EndpointChoices(props: EndpointChoicesProps) {
             >
               {presentation.action}
             </OctantButton>
-            <p className="endpoint-choice__consent">
+            <p
+              className="endpoint-choice__consent"
+              id={`${consentId}-${offer.descriptor.descriptorId}`}
+            >
               {signInConsent(offer.termsSummary)}
               {props.credentialManagementAvailable
                 ? null
@@ -142,8 +148,8 @@ export interface AddEndpointDialogProps extends ProviderCreateFormProps {
   readonly open: boolean;
   readonly onClose: () => void;
   readonly onSignIn: (offer: SubscriptionOAuthOffer) => void;
-  /** Called with the new endpoint's name once it exists; the dialog then checks it. */
-  readonly onCreated: (displayName: string) => void;
+  /** A page-level message, repeated here because the page sits behind the dialog. */
+  readonly message?: string;
   /** The new endpoint's check, once it has been added. */
   readonly added?: {
     readonly name: string;
@@ -201,7 +207,6 @@ export function AddEndpointDialog(props: AddEndpointDialogProps) {
           embedded
           hint="OpenAI-compatible, Anthropic-compatible, Ollama or Azure AI Foundry. Keys stay in this Mac's Keychain."
           initialProviderType="openai-compatible"
-          onCreated={props.onCreated}
           submitLabel="Check and add"
         />
       </>
@@ -218,6 +223,11 @@ export function AddEndpointDialog(props: AddEndpointDialogProps) {
       <h2 className="endpoint-add__title" id={titleId}>
         Add a model endpoint
       </h2>
+      {props.message === undefined ? null : (
+        <OctantAlert className="provider-settings__alert" tone="warning">
+          {props.message}
+        </OctantAlert>
+      )}
       {content}
     </OctantDialog>
   );

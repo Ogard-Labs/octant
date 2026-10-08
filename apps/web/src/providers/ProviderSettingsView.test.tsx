@@ -3260,6 +3260,39 @@ describe("where Settings lists each provider kind", () => {
     expect(props.onDataTagsChange).toHaveBeenCalledWith(id, ["zdr"]);
   });
 
+  it("goes on to an endpoint the host made even when storing its key failed", async () => {
+    const user = userEvent.setup();
+    const props = {
+      ...fixture(),
+      onCreateOpenAiCompatible: vi.fn(async (_name, _configuration, credential) => {
+        credential.clear();
+        return false;
+      }),
+    } as ProviderSettingsViewProps;
+    const { rerender } = renderProviderSettings(
+      <ModelEndpointSettingsView {...props} instances={[]} />,
+    );
+    await user.click(screen.getByRole("button", { name: "Add endpoint" }));
+    const create = screen.getByRole("form", { name: "Add OpenAI-compatible provider" });
+    await user.type(within(create).getByLabelText("Provider name"), "Private gateway");
+    await user.type(within(create).getByLabelText("API base URL"), "https://gateway.example/v1");
+    await user.click(screen.getByRole("button", { name: "Check and add" }));
+    rerender(
+      <ModelEndpointSettingsView
+        {...props}
+        instances={[httpProvider()]}
+        message="The provider was created, but its credential could not be stored."
+      />,
+    );
+
+    const dialog = screen.getByRole("dialog", { name: "Add a model endpoint" });
+    expect(await within(dialog).findByText(/Added Private gateway\./)).toBeVisible();
+    expect(
+      within(dialog).getByText("The provider was created, but its credential could not be stored."),
+    ).toBeVisible();
+    expect(props.onProbe).toHaveBeenCalledWith(id, { quiet: true });
+  });
+
   it("offers three ways in on first run", async () => {
     renderProviderSettings(<ModelEndpointSettingsView {...fixture()} instances={[]} />);
 
@@ -3268,6 +3301,9 @@ describe("where Settings lists each provider kind", () => {
     expect(screen.getByRole("button", { name: "Sign in with OpenRouter" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Add endpoint" })).toBeVisible();
     expect(screen.getAllByText(/Signing in accepts these terms/).length).toBe(2);
+    expect(
+      screen.getByRole("button", { name: "Sign in with ChatGPT" }),
+    ).toHaveAccessibleDescription(/Signing in accepts these terms/);
   });
 
   it("creates the ChatGPT plan endpoint at its fixed URL with no key and starts its sign-in", async () => {

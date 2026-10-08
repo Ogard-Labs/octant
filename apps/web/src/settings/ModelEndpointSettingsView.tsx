@@ -41,6 +41,7 @@ export type ModelEndpointSettingsViewProps = Omit<ProviderSettingsViewProps, "di
 interface OpenDetail {
   readonly id: ProviderInstanceId;
   readonly startSignIn: boolean;
+  readonly consentShown: boolean;
   readonly focus: EndpointDetailFocus | undefined;
 }
 
@@ -56,7 +57,9 @@ export function ModelEndpointSettingsView(props: ModelEndpointSettingsViewProps)
   const [detail, setDetail] = useState<OpenDetail>();
   const [returnFocusTo, setReturnFocusTo] = useState<ProviderInstanceId>();
   const [adding, setAdding] = useState(false);
-  const [addedName, setAddedName] = useState<string>();
+  // Set once the add form has submitted; the endpoint it made, if any, is the
+  // one the registry lists that it did not list when the dialog opened.
+  const [addSubmitted, setAddSubmitted] = useState(false);
   const idsWhenAddOpened = useRef<ReadonlySet<string>>(new Set());
   const probedAdded = useRef<string | undefined>(undefined);
   const section = useRef<HTMLDivElement>(null);
@@ -111,11 +114,20 @@ export function ModelEndpointSettingsView(props: ModelEndpointSettingsViewProps)
 
   const openEndpoint = (
     id: ProviderInstanceId,
-    options: { readonly startSignIn?: boolean; readonly focus?: EndpointDetailFocus } = {},
+    options: {
+      readonly startSignIn?: boolean;
+      readonly consentShown?: boolean;
+      readonly focus?: EndpointDetailFocus;
+    } = {},
   ) => {
     setAdding(false);
-    setAddedName(undefined);
-    setDetail({ id, startSignIn: options.startSignIn === true, focus: options.focus });
+    setAddSubmitted(false);
+    setDetail({
+      id,
+      startSignIn: options.startSignIn === true,
+      consentShown: options.consentShown === true,
+      focus: options.focus,
+    });
   };
   const closeDetail = () => {
     if (detail !== undefined) setReturnFocusTo(detail.id);
@@ -125,7 +137,15 @@ export function ModelEndpointSettingsView(props: ModelEndpointSettingsViewProps)
   const fixRow = (instance: ModelEndpointInstance, kind: EndpointFixKind) => {
     if (kind === "try-again" || kind === "check-now") {
       void props.onProbe(instance.id, { quiet: true });
-    } else if (kind === "sign-in" || kind === "sign-in-again") {
+    } else if (kind === "sign-in") {
+      // The row shows the consent line exactly when the host says the terms
+      // still need acknowledging; without it the page asks before signing in.
+      const signIn = signIns.get(String(instance.id));
+      openEndpoint(instance.id, {
+        startSignIn: true,
+        consentShown: signIn?.kind === "signed-out" && signIn.termsRequired,
+      });
+    } else if (kind === "sign-in-again") {
       openEndpoint(instance.id, { startSignIn: true });
     } else if (kind === "replace-key" || kind === "add-key") {
       openEndpoint(instance.id, { focus: "key" });
@@ -156,7 +176,8 @@ export function ModelEndpointSettingsView(props: ModelEndpointSettingsViewProps)
       { value: "", clear: () => undefined },
       instanceId,
     );
-    if (created) openEndpoint(instanceId, { startSignIn: true });
+    // The first-run and dialog choices carry the consent line under their buttons.
+    if (created) openEndpoint(instanceId, { startSignIn: true, consentShown: true });
   }
 
   const openInstance =
@@ -206,10 +227,9 @@ export function ModelEndpointSettingsView(props: ModelEndpointSettingsViewProps)
 
   // The endpoint the add dialog just created, checked once so its result
   // shows in the dialog.
-  const addedInstance =
-    addedName === undefined
-      ? undefined
-      : endpoints.find((instance) => !idsWhenAddOpened.current.has(String(instance.id)));
+  const addedInstance = !addSubmitted
+    ? undefined
+    : endpoints.find((instance) => !idsWhenAddOpened.current.has(String(instance.id)));
   const { onProbe } = props;
   useEffect(() => {
     if (addedInstance === undefined || probedAdded.current === String(addedInstance.id)) return;
@@ -253,6 +273,7 @@ export function ModelEndpointSettingsView(props: ModelEndpointSettingsViewProps)
           }}
           signIn={described.signIn}
           signInOffer={described.presentationOffer}
+          signInConsentShown={detail.consentShown}
           startSignIn={detail.startSignIn}
           status={described.status}
         />
@@ -277,18 +298,33 @@ export function ModelEndpointSettingsView(props: ModelEndpointSettingsViewProps)
   const openAdd = () => {
     idsWhenAddOpened.current = new Set(endpoints.map((instance) => String(instance.id)));
     probedAdded.current = undefined;
-    setAddedName(undefined);
+    setAddSubmitted(false);
     setAdding(true);
   };
+  // A keyed endpoint can exist even when its create reports failure, because
+  // the host makes it before the key is stored; the dialog then goes on to the
+  // endpoint that was made rather than inviting a duplicate.
+  const afterSubmit =
+    <Args extends ReadonlyArray<unknown>>(create: (...args: Args) => Promise<boolean>) =>
+    async (...args: Args): Promise<boolean> => {
+      try {
+        return await create(...args);
+      } finally {
+        setAddSubmitted(true);
+      }
+    };
   const addDialog = (
     <AddEndpointDialog
       {...props}
       busy={busy}
       onClose={() => {
         setAdding(false);
-        setAddedName(undefined);
+        setAddSubmitted(false);
       }}
-      onCreated={setAddedName}
+      onCreateAnthropicCompatible={afterSubmit(props.onCreateAnthropicCompatible)}
+      onCreateAzureFoundry={afterSubmit(props.onCreateAzureFoundry)}
+      onCreateOllama={afterSubmit(props.onCreateOllama)}
+      onCreateOpenAiCompatible={afterSubmit(props.onCreateOpenAiCompatible)}
       onSignIn={(offer) => void addSignInEndpoint(offer)}
       open={adding}
       {...(addedInstance === undefined ? {} : { added: addedResult(addedInstance) })}

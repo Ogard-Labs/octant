@@ -230,6 +230,7 @@ export function SubscriptionEndpointSignIn(props: {
   >;
   readonly disabled: boolean;
   readonly startSignIn?: boolean;
+  readonly consentShown?: boolean;
   readonly signInLabel?: string;
   readonly onStateChange?: (state: ProviderOAuthSignInState) => void;
   readonly onProviderOAuth?: (
@@ -246,6 +247,7 @@ export function SubscriptionEndpointSignIn(props: {
       disabled={props.disabled}
       instanceId={props.instance.id}
       {...(props.startSignIn === true ? { startSignIn: true } : {})}
+      {...(props.consentShown === true ? { consentShown: true } : {})}
       {...(props.signInLabel === undefined ? {} : { signInLabel: props.signInLabel })}
       {...(props.onStateChange === undefined ? {} : { onStateChange: props.onStateChange })}
       {...(props.onProviderOAuth === undefined ? {} : { run: props.onProviderOAuth })}

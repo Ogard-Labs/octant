@@ -117,8 +117,6 @@ export interface ProviderCreateFormPresentationProps {
   readonly embedded?: boolean;
   /** The submit button's words in place of "Add <kind> provider". */
   readonly submitLabel?: string;
-  /** Called once a submitted provider exists, with its display name. */
-  readonly onCreated?: (displayName: string) => void;
 }
 
 export function ProviderCreateForm(
@@ -458,12 +456,9 @@ export function ProviderCreateForm(
                     : emptyTransientCredential(enteredCredential),
                 );
               }
-              const displayName = String(data.get("displayName") ?? "");
               void operation
                 .then((created) => {
-                  if (!created) return;
-                  form.reset();
-                  props.onCreated?.(displayName);
+                  if (created) form.reset();
                 })
                 .finally(() => setCreating(false));
             }}
