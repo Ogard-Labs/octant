@@ -149,7 +149,7 @@ export function deviceFailureSentence(
   const noun = platform === "ios" ? "Simulator" : "emulator";
   switch (failure.kind) {
     case "outcome":
-      return `${word} ${failure.intent.kind} ${failure.outcome.replace("-", " ")}.`;
+      return `${word} ${failure.intent.kind} ${failure.outcome.replaceAll("-", " ")}.`;
     case "refused":
       return `${word} ${failure.intent.kind} was refused: ${failure.reason}.`;
     case "input-not-allowed":

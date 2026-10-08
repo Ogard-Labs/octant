@@ -459,8 +459,15 @@ function AppleWorkbenchSurface(props: {
   const simulators = controller.discovery?.simulators ?? [];
   // More than one Simulator runs and nobody said which to show: the pane asks,
   // and nothing streams from one that may belong to another task meanwhile.
+  // A choice counts only while that Simulator still runs.
+  const chosenBooted =
+    chosenSimulatorId !== undefined &&
+    simulators.some(
+      (simulator) =>
+        String(simulator.simulatorId) === String(chosenSimulatorId) && simulator.state === "booted",
+    );
   const awaitingChoice =
-    chosenSimulatorId === undefined &&
+    !chosenBooted &&
     paneOpenRequestId === undefined &&
     simulators.filter((simulator) => simulator.state === "booted").length > 1;
   const platform =
@@ -547,6 +554,11 @@ function AppleWorkbenchSurface(props: {
     ...(screenshotRequest === undefined ? {} : { request: screenshotRequest }),
   });
   const liveSimulatorId = liveFrame.status === "live" ? liveFrame.simulatorId : undefined;
+  // A failure belongs to the Simulator it happened on. Once the pane shows
+  // another, its line and its Try again would name one device and act on the
+  // other, so it is dropped.
+  const shownSimulator = liveSimulatorId === undefined ? undefined : String(liveSimulatorId);
+  useEffect(() => setActionFailure(undefined), [shownSimulator]);
   const rememberedUntil =
     liveSimulatorId === undefined
       ? 0

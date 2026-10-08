@@ -306,6 +306,18 @@ describe("DevicePane", () => {
     expect(retry).toHaveBeenCalledWith(intent);
   });
 
+  it("keeps a dismissed error hidden until that failure clears and a new one comes", () => {
+    const { rerender, props } = pane({ problem: { message: "Input didn't reach iPhone 17." } });
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+    // The adapters rebuild the problem on every render.
+    rerender(<DevicePane {...props} problem={{ message: "Input didn't reach iPhone 17." }} />);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    const { problem: _cleared, ...withoutProblem } = props;
+    rerender(<DevicePane {...withoutProblem} />);
+    rerender(<DevicePane {...props} problem={{ message: "Input didn't reach iPhone 17." }} />);
+    expect(screen.getByRole("alert")).toHaveTextContent("Input didn't reach iPhone 17.");
+  });
+
   it("puts an error ahead of the approval line", () => {
     pane({
       inputAllowed: false,

@@ -131,14 +131,25 @@ export function AndroidEmulatorPane(props: {
   // More than one emulator is running and nobody has said which to show: ask
   // rather than guess, since another task may own one of them, and
   // stream nothing from either meanwhile.
+  const chosenBooted = emulators.some(
+    (emulator) =>
+      chosenEmulatorId !== undefined &&
+      String(emulator.emulatorId) === String(chosenEmulatorId) &&
+      emulator.state === "booted",
+  );
   const awaitingChoice =
-    preferred === undefined &&
+    !chosenBooted &&
+    controller.runtime?.paneOpenRequest === undefined &&
     emulators.filter((emulator) => emulator.state === "booted").length > 1;
   const liveEmulator =
     emulators.find((emulator) => preferred !== undefined && emulator.emulatorId === preferred) ??
     emulators.find((emulator) => emulator.state === "booting") ??
     emulators.find((emulator) => emulator.state === "booted");
   const liveEmulatorId = liveEmulator?.state === "booted" ? liveEmulator.emulatorId : undefined;
+  // A failure belongs to the emulator it happened on; showing another drops it,
+  // so the line and its Try again never name one device and act on another.
+  const shownEmulator = liveEmulatorId === undefined ? undefined : String(liveEmulatorId);
+  useEffect(() => setActionFailure(undefined), [shownEmulator]);
   const rememberedUntil =
     liveEmulatorId === undefined
       ? 0

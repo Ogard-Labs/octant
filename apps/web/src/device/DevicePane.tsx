@@ -59,7 +59,13 @@ export function DevicePane(props: DevicePaneProps) {
   const [typing, setTyping] = useState(false);
   const [picking, setPicking] = useState(false);
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
-  const [dismissed, setDismissed] = useState<DeviceProblem>();
+  // A dismissed line stays dismissed until the failure behind it clears: the
+  // adapters rebuild the problem on every render, so it is matched by its words.
+  const [dismissed, setDismissed] = useState<string>();
+  const problemMessage = props.problem?.message;
+  useEffect(() => {
+    if (problemMessage === undefined) setDismissed(undefined);
+  }, [problemMessage]);
 
   // A choice made about one device is not carried to the next one shown.
   useEffect(() => {
@@ -79,8 +85,11 @@ export function DevicePane(props: DevicePaneProps) {
   const approvalWanted = props.needsApproval && live !== undefined && canAct;
   const line = lineFor({
     view,
-    problem: props.problem !== undefined && props.problem !== dismissed ? props.problem : undefined,
-    onDismiss: () => setDismissed(props.problem),
+    problem:
+      props.problem !== undefined && props.problem.message !== dismissed
+        ? props.problem
+        : undefined,
+    onDismiss: () => setDismissed(props.problem?.message),
     approval:
       approvalWanted && !approvalDeferred
         ? {
