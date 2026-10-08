@@ -28,6 +28,8 @@ export interface AppleWorkbenchController {
   readonly discovery?: AppleDiscoverySnapshot;
   readonly runtime?: AppleRuntimeSnapshot;
   readonly errorMessage?: string;
+  /** The client failure's category, so Xcode missing can read as a setup step. */
+  readonly errorCategory?: string;
   readonly retry: () => void;
   readonly execute: (request: AppleActionRequest) => Promise<AppleBuildEvidence>;
   readonly cancel: (request: AppleCancelRequest) => Promise<boolean>;
@@ -39,6 +41,7 @@ export function useAppleWorkbench(options: UseAppleWorkbenchOptions): AppleWorkb
   const [discovery, setDiscovery] = useState<AppleDiscoverySnapshot>();
   const [runtime, setRuntime] = useState<AppleRuntimeSnapshot>();
   const [errorMessage, setErrorMessage] = useState<string>();
+  const [errorCategory, setErrorCategory] = useState<string>();
   const [attempt, setAttempt] = useState(0);
   const discoveryRequestRef = useRef(discoveryRequest);
   const snapshotRequestRef = useRef(snapshotRequest);
@@ -68,6 +71,7 @@ export function useAppleWorkbench(options: UseAppleWorkbenchOptions): AppleWorkb
     discoveryGeneration.current += 1;
     setStatus("loading");
     setErrorMessage(undefined);
+    setErrorCategory(undefined);
     void client
       .discover(discoveryRequestRef.current, controller.signal)
       .then(async (nextDiscovery) => {
@@ -85,6 +89,7 @@ export function useAppleWorkbench(options: UseAppleWorkbenchOptions): AppleWorkb
         const classified = classifyFailure(error);
         setStatus(classified.status);
         setErrorMessage(classified.message);
+        if (error instanceof AppleToolchainClientFailure) setErrorCategory(error.category);
       });
     return () => controller.abort();
   }, [attempt, client, discoveryRequestKey, enabled, refreshSnapshot]);
@@ -184,6 +189,7 @@ export function useAppleWorkbench(options: UseAppleWorkbenchOptions): AppleWorkb
     ...(discovery === undefined ? {} : { discovery }),
     ...(runtime === undefined ? {} : { runtime }),
     ...(errorMessage === undefined ? {} : { errorMessage }),
+    ...(errorCategory === undefined ? {} : { errorCategory }),
     retry,
     execute,
     cancel,

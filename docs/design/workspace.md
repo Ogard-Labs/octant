@@ -480,10 +480,23 @@ first frame and never prints status prose. It reads the same host snapshot the
 Browser pane reads, asks for a fresh picture only while it is on screen, pauses
 with the window, and backs off while the page does not change. Computer Use keeps
 its separate card. The iOS Simulator and Android emulator are separate device destinations. An
-agent's device open raises the relevant in-app pane once per request. Live,
-unavailable, booting, interrupted, and stale states stay explicit; closing a pane
-does not shut down its device. Allow input is the explicit destination approval;
-clicking the screen or a key button cannot grant it. The host owns observation,
+agent's device open raises the relevant in-app pane once per request. Both use
+one device-first pane that adapts to its container's width: a toolbar (device
+switcher, OS and state in words, Back on Android, Home, Screenshot, Lock when
+wide, and More with Type text, Switch device, Diagnostics, Stop live view, and
+Shut down), at most one line under it (error, then approval, then typing, then
+notice; one sentence and at most one fix), and the device on a stage with an
+original silhouette whose screen is the only input region. The pane offers only
+actions the host supports and hides the rest rather than disabling them. When
+more than one device is running and neither the person nor an agent chose one,
+the pane asks which to show; a person's choice holds until the next agent open.
+Setup, nothing running, booting, live, live view lost, interrupted, and stale
+states stay explicit; closing a pane does not shut down its device. Allow input
+is the explicit destination approval, asked per destination from that
+destination's own grant: the line's Allow opens the native confirmation that
+issues the grant, Not now leaves the screen view only, and clicking the screen or
+a key button cannot grant it. Toolbar Home, Lock, Back, and Type text share the
+ordered input queue with taps and typing. The host owns observation,
 input, and evidence safety under the [device transport contract](../architecture.md#device-transport-and-evidence).
 Dock visibility and responsive presentation follow [DESIGN.md](../../DESIGN.md#shell-and-layout).
 Environment belongs to a

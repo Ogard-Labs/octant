@@ -60,7 +60,7 @@ function client(overrides: Record<string, unknown> = {}) {
 }
 
 describe("AndroidEmulatorPane", () => {
-  it("asks once to Allow input, then Home runs without another confirmation", async () => {
+  it("asks once to allow input, then Home runs without another confirmation", async () => {
     let resolveApproval: ((id: string | undefined) => void) | undefined;
     const requestApproval = vi.fn(
       () =>
@@ -88,12 +88,14 @@ describe("AndroidEmulatorPane", () => {
     );
 
     const home = await screen.findByRole("button", { name: "Home" });
-    fireEvent.click(home);
-    fireEvent.click(home);
+    // Without a grant the device's buttons send nothing and say so.
+    expect(home).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Back" })).toBeDisabled();
     expect(requestApproval).not.toHaveBeenCalled();
     expect(execute).not.toHaveBeenCalled();
 
-    const allow = await screen.findByRole("button", { name: "Allow input to Pixel 8" });
+    expect(screen.getByRole("status")).toHaveTextContent("Allow input on Pixel 8?");
+    const allow = screen.getByRole("button", { name: "Allow" });
     fireEvent.click(allow);
     fireEvent.click(allow);
     await waitFor(() => expect(requestApproval).toHaveBeenCalledTimes(1));
@@ -102,7 +104,8 @@ describe("AndroidEmulatorPane", () => {
     expect(requestApproval).toHaveBeenCalledTimes(1);
     expect(execute).toHaveBeenCalledWith(expect.objectContaining({ kind: "open-input" }));
 
-    fireEvent.click(home);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Home" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "Home" }));
     await waitFor(() => expect(execute).toHaveBeenCalledTimes(2));
     expect(requestApproval).toHaveBeenCalledTimes(1);
     expect(execute).toHaveBeenNthCalledWith(
@@ -111,7 +114,7 @@ describe("AndroidEmulatorPane", () => {
     );
   });
 
-  it("says the destination is unavailable when the SDK is missing", async () => {
+  it("lists the Android SDK as the missing setup step when the SDK is missing", async () => {
     const { AndroidToolchainClientFailure } =
       await import("@octant/client-runtime/android-toolchain-client");
     render(
@@ -132,7 +135,10 @@ describe("AndroidEmulatorPane", () => {
       />,
     );
     expect(
-      await screen.findByRole("heading", { name: "Android emulator is unavailable" }),
+      await screen.findByRole("heading", { name: "Set up the Android emulator" }),
+    ).toBeVisible();
+    expect(
+      screen.getByText("Install platform-tools and the emulator with the Android SDK Manager."),
     ).toBeVisible();
   });
 });

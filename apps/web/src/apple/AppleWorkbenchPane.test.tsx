@@ -350,18 +350,20 @@ describe("AppleWorkbenchPane", () => {
   });
 
   it("renders the dock's iOS Simulator tab as a device pane, not the workbench dump", async () => {
-    const { render, screen } = await import("@testing-library/react");
+    const { fireEvent, render, screen } = await import("@testing-library/react");
     const { vi } = await import("vitest");
+    const onRun = vi.fn();
     render(
       <AppleWorkbenchPane
         discovery={discovery}
-        onRun={vi.fn()}
+        liveFrame={liveFrame()}
+        onRun={onRun}
         runtime={runtimeSnapshot()}
         status="ready"
         variant="device"
       />,
     );
-    expect(screen.getByLabelText("iOS Simulator")).toBeVisible();
+    expect(screen.getByRole("region", { name: "iOS Simulator" })).toBeVisible();
     expect(screen.queryByText("Apple development")).not.toBeInTheDocument();
     expect(screen.queryByText("Validation evidence")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Build Fixture" })).not.toBeInTheDocument();
@@ -369,17 +371,25 @@ describe("AppleWorkbenchPane", () => {
     expect(
       screen.queryByRole("button", { name: "Run Fixture on iPhone 16" }),
     ).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Capture the iPhone 16 screen" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "Shut down iPhone 16" })).toBeVisible();
+    expect(screen.getByRole("toolbar", { name: "iOS Simulator controls" })).toHaveTextContent(
+      "iPhone 16",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Screenshot" }));
+    expect(onRun).toHaveBeenCalledWith({
+      kind: "screenshot",
+      simulatorId: discovery.simulators[0]!.simulatorId,
+    });
   });
 
-  it("offers Allow input on an approval-gated device pane and does not send clicks until then", async () => {
+  it("asks to allow input in one line on an approval-gated device pane", async () => {
     const { fireEvent, render, screen } = await import("@testing-library/react");
     const { vi } = await import("vitest");
     const onRun = vi.fn();
     render(
       <AppleWorkbenchPane
         discovery={discovery}
+        inputAllowed={false}
+        liveFrame={liveFrame()}
         needsAllowInput
         onRun={onRun}
         runtime={runtimeSnapshot()}
@@ -387,11 +397,68 @@ describe("AppleWorkbenchPane", () => {
         variant="device"
       />,
     );
-    expect(screen.getByRole("button", { name: "Allow input to iPhone 16" })).toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: "Allow input to iPhone 16" }));
+    expect(screen.getByRole("status")).toHaveTextContent("Allow input on iPhone 16?");
+    fireEvent.click(screen.getByRole("button", { name: "Allow" }));
     expect(onRun).toHaveBeenCalledWith({
       kind: "open-input",
       simulatorId: discovery.simulators[0]!.simulatorId,
     });
   });
+
+  it("asks which Simulator to show when several run, and keeps the one chosen", async () => {
+    const { fireEvent, render, screen } = await import("@testing-library/react");
+    const { vi } = await import("vitest");
+    const onSelectSimulator = vi.fn();
+    const second = {
+      ...discovery.simulators[0]!,
+      simulatorId: "90000000-0000-4000-8000-000000000007" as never,
+      name: "iPhone 16 Pro",
+      udid: "90000000-0000-4000-8000-000000000007",
+    };
+    render(
+      <AppleWorkbenchPane
+        awaitingChoice
+        discovery={{ ...discovery, simulators: [...discovery.simulators, second] }}
+        liveFrame={liveFrame()}
+        onRun={vi.fn()}
+        onSelectSimulator={onSelectSimulator}
+        runtime={runtimeSnapshot()}
+        status="ready"
+        variant="device"
+      />,
+    );
+    expect(screen.getByRole("heading", { name: "Choose a Simulator" })).toBeVisible();
+    fireEvent.click(screen.getByRole("radio", { name: /iPhone 16 Pro/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Show iPhone 16 Pro" }));
+    expect(onSelectSimulator).toHaveBeenCalledWith(second.simulatorId);
+  });
+
+  it("shows Xcode as the missing setup step instead of a paragraph", async () => {
+    const { render, screen } = await import("@testing-library/react");
+    render(
+      <AppleWorkbenchPane
+        errorCategory="xcode-not-found"
+        errorMessage="Xcode was not found."
+        onRetry={() => undefined}
+        onRun={() => undefined}
+        status="unavailable"
+        variant="device"
+      />,
+    );
+    expect(screen.getByRole("heading", { name: "Set up the iOS Simulator" })).toBeVisible();
+    expect(screen.getByText("Install Xcode, then select it with xcode-select.")).toBeVisible();
+    expect(screen.getAllByRole("listitem")).toHaveLength(3);
+    expect(screen.getByRole("button", { name: "Check again" })).toBeVisible();
+  });
 });
+
+function liveFrame() {
+  return {
+    status: "live",
+    simulatorId: discovery.simulators[0]!.simulatorId,
+    name: "iPhone 16",
+    screen: { kind: "pending" },
+    title: "Live · iPhone 16",
+    message: "The destination is live.",
+  } as const;
+}
