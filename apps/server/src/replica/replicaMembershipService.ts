@@ -24,6 +24,8 @@ import {
   encodeReplicaEntry,
   replicaEntryRelativePaths,
   type HostId,
+  type ReplicaArtifactEntry,
+  type ReplicaArtifactReconciled,
   type ReplicaBroughtIn,
   type ReplicaEntry,
   type ReplicaJoinRequestEntry,
@@ -41,7 +43,6 @@ import {
   isReplicaAncestor,
   replicaApprovalOf,
   replicaDescendants,
-  replicaEntryCounts,
   replicaFounderReachedFrom,
   replicaInGoodStanding,
   replicaJoinRequestIsFresh,
@@ -55,6 +56,7 @@ import {
   verifyReplicaEntrySignature,
   type ReplicaDeviceSignOutcome,
 } from "./replicaDeviceKeyService";
+import { REPLICA_ARTIFACT_EVENT_NAMES } from "./replicaArtifactEvents";
 import {
   REPLICA_MEMBERSHIP_EVENT_NAMES,
   type ReplicaLocalIdentity,
@@ -67,6 +69,45 @@ export type ReplicaStoreSelection =
   | { readonly status: "not-configured" }
   | { readonly status: "selected"; readonly store: ReplicaStore };
 
+/** One valid artifact entry a pull read, with the exact text it verified. */
+export interface ReplicaArtifactRead {
+  readonly instanceId: ReplicaInstanceId;
+  readonly sequence: number;
+  readonly entry: ReplicaArtifactEntry;
+  readonly text: string;
+}
+
+/**
+ * Decides and journals what each pulled artifact entry does to the library.
+ * A pull hands it every valid artifact entry it read, after the membership
+ * records from the same read are held, so standing is current.
+ */
+export interface ReplicaArtifactReconciler {
+  readonly reconcile: (input: {
+    readonly reads: ReadonlyArray<ReplicaArtifactRead>;
+    /** Every slot the store listed in this read. */
+    readonly listed: ReadonlyArray<Slot>;
+  }) => {
+    readonly kept: ReadonlyArray<ReplicaArtifactReconciled>;
+    readonly refused: ReadonlyArray<ReplicaReadRefusal>;
+  };
+}
+
+/** What publishing one queued artifact entry did. */
+export type ReplicaArtifactPublishOutcome =
+  | { readonly status: "published"; readonly sequence: number }
+  /** Sync is off or no store is chosen: nothing was called. */
+  | { readonly status: "not-configured" }
+  | {
+      readonly status: "failed";
+      readonly reason:
+        | "not-a-member"
+        | "key-unavailable"
+        | "not-connected"
+        | "refused"
+        | "slots-squatted";
+    };
+
 export interface ReplicaMembershipPorts {
   /** The store this host is set up with. Asked once per command. */
   readonly store: () => ReplicaStoreSelection;
@@ -77,6 +118,8 @@ export interface ReplicaMembershipPorts {
     readonly sign: (instanceId: string, payload: Uint8Array) => Promise<ReplicaDeviceSignOutcome>;
   };
   readonly journal: ReplicaMembershipJournal;
+  /** Reconciles pulled artifact entries. Without it a pull reads membership records only. */
+  readonly artifacts?: ReplicaArtifactReconciler;
   /** Membership facts, rebuilt from the journal. */
   readonly state: () => ReplicaMembershipState;
   readonly localHostId: HostId;
@@ -164,11 +207,16 @@ type ReadResult =
   | { readonly status: "missing" }
   | { readonly status: "unavailable"; readonly reason: "not-connected" | "refused" };
 
-type LocalPublish<E extends ReplicaMembershipEntry> =
+type LocalPublish<E extends ReplicaEntry> =
   | { readonly status: "published"; readonly entry: E }
-  | { readonly status: "stopped"; readonly outcome: ReplicaMembershipOutcome };
+  | {
+      readonly status: "stopped";
+      readonly outcome: ReplicaMembershipOutcome;
+      /** What the store answered, when the store is why it stopped. */
+      readonly failure?: "not-connected" | "refused" | "slots-squatted";
+    };
 
-interface Slot {
+export interface Slot {
   readonly instanceId: ReplicaInstanceId;
   readonly sequence: number;
 }
@@ -179,9 +227,10 @@ type PullRead =
       readonly status: "read";
       readonly applied: number;
       readonly refused: ReadonlyArray<ReplicaReadRefusal>;
-      readonly held: ReadonlyArray<Slot>;
       /** Every valid artifact entry this read met, counted or not. */
-      readonly artifacts: ReadonlyArray<Slot>;
+      readonly artifacts: ReadonlyArray<ReplicaArtifactRead>;
+      /** Every slot the store listed. */
+      readonly listed: ReadonlyArray<Slot>;
     };
 
 export class ReplicaMembershipService {
@@ -195,7 +244,61 @@ export class ReplicaMembershipService {
   }
 
   execute(command: ReplicaMembershipCommand): Promise<ReplicaMembershipOutcome> {
-    const run = this.#queue.then(() => this.#run(command));
+    return this.#serially(() => this.#run(command));
+  }
+
+  /**
+   * Publish one queued artifact entry at this identity's next free slot.
+   *
+   * It runs in the same line as membership commands, because both take the
+   * next sequence of one identity. A membership entry whose publish stopped
+   * part-way is finished first, so an artifact never takes its slot. The
+   * entry is built for the slot it is about to take; retried at that same
+   * slot it is the same bytes and the same signature, so a publish that
+   * landed before the host stopped is found already there rather than written
+   * twice. The landed slot is journaled here, inside the line, so the next
+   * command starts after it.
+   */
+  publishArtifact(input: {
+    readonly queueId: string;
+    readonly build: (origin: ReplicaArtifactEntry["origin"]) => ReplicaArtifactEntry;
+  }): Promise<ReplicaArtifactPublishOutcome> {
+    return this.#serially(async () => {
+      const selection = this.#ports.store();
+      if (selection.status === "not-configured") return { status: "not-configured" };
+      const state = this.#ports.state();
+      const local = state.local;
+      if (local === undefined || state.localFinished) {
+        return { status: "failed", reason: "not-a-member" };
+      }
+      const store = selection.store;
+      const finished = await this.#finishPending(store, "publish-artifact");
+      if (finished !== undefined) {
+        return {
+          status: "failed",
+          reason: finished.kind === "refused" ? "key-unavailable" : "not-connected",
+        };
+      }
+      const publish = await this.#publishNext(store, "publish-artifact", local, input.build, {
+        journalSigned: false,
+        landed: (entry) =>
+          this.#journal(REPLICA_ARTIFACT_EVENT_NAMES.published, {
+            queueId: input.queueId,
+            instanceId: entry.origin.instanceId,
+            displayName: entry.origin.displayName,
+            sequence: entry.origin.sequence,
+            contentHash: entry.contentHash,
+          }),
+      });
+      if (publish.status === "published") {
+        return { status: "published", sequence: publish.entry.origin.sequence };
+      }
+      return { status: "failed", reason: publish.failure ?? "key-unavailable" };
+    });
+  }
+
+  #serially<T>(task: () => Promise<T>): Promise<T> {
+    const run = this.#queue.then(task);
     this.#queue = run.catch(() => undefined);
     return run;
   }
@@ -742,6 +845,10 @@ export class ReplicaMembershipService {
     if (read.status === "unavailable") {
       return this.#refuse("pull", "store-unavailable", "The replica store cannot be read.");
     }
+    const reconciled = this.#ports.artifacts?.reconcile({
+      reads: read.artifacts,
+      listed: read.listed,
+    });
     const now = this.#ports.clock();
     const joinRequests = this.#ports
       .state()
@@ -749,8 +856,8 @@ export class ReplicaMembershipService {
     return {
       kind: "pulled",
       applied: read.applied,
-      refused: read.refused,
-      held: read.held,
+      refused: [...read.refused, ...(reconciled?.refused ?? [])],
+      artifacts: reconciled?.kept ?? [],
       joinRequests,
     };
   }
@@ -763,22 +870,24 @@ export class ReplicaMembershipService {
    * when the approval admitting it arrives later its earlier records count
    * without being read again. A slot already held is not read again.
    *
-   * Artifact entries are not held: importing them is not built yet. One that
-   * is valid and counts is reported held for a later pull; one that does not
-   * count is reported refused.
+   * Valid artifact entries are returned for the pull to reconcile once the
+   * membership records from this same read are held. A slot whose artifact
+   * entry was published or settled here is not read again.
    */
   async #readStore(store: ReplicaStore): Promise<PullRead> {
     const listing = await this.#listInstances(store);
     if (listing === undefined) return { status: "unavailable" };
     let applied = 0;
     const refused: ReplicaReadRefusal[] = [];
-    const artifacts: Slot[] = [];
+    const artifacts: ReplicaArtifactRead[] = [];
+    const listed: Slot[] = [];
     for (const [id, sequences] of [...listing].sort(([left], [right]) =>
       left < right ? -1 : left > right ? 1 : 0,
     )) {
       const instanceId = decodeInstanceId(id);
       const ordered = [...sequences].sort((left, right) => left - right);
       for (const sequence of ordered.slice(0, MAX_ENTRIES_PER_INSTANCE)) {
+        listed.push({ instanceId, sequence });
         if (this.#ports.state().holds(instanceId, sequence)) continue;
         const read = await this.#readSigned(store, instanceId, sequence);
         if (read.status === "unavailable") return { status: "unavailable" };
@@ -788,7 +897,7 @@ export class ReplicaMembershipService {
           continue;
         }
         if (read.entry.kind === "artifact-version" || read.entry.kind === "artifact-tombstone") {
-          artifacts.push({ instanceId, sequence });
+          artifacts.push({ instanceId, sequence, entry: read.entry, text: read.text });
           continue;
         }
         try {
@@ -803,20 +912,7 @@ export class ReplicaMembershipService {
         applied += 1;
       }
     }
-    const membership = this.#ports.state().membership;
-    const held: Slot[] = [];
-    for (const artifact of artifacts) {
-      if (replicaEntryCounts(membership, artifact.instanceId, artifact.sequence)) {
-        held.push(artifact);
-        continue;
-      }
-      const node = replicaMembershipNode(membership, artifact.instanceId);
-      refused.push({
-        ...artifact,
-        reason: node?.admitted === true ? "revoked-instance" : "unknown-instance",
-      });
-    }
-    return { status: "read", applied, refused, held, artifacts };
+    return { status: "read", applied, refused, artifacts, listed };
   }
 
   async #listInstances(
@@ -955,6 +1051,29 @@ export class ReplicaMembershipService {
     local: ReplicaLocalIdentity,
     build: (origin: ReplicaMembershipEntry["origin"]) => ReplicaMembershipEntry,
   ): Promise<LocalPublish<ReplicaMembershipEntry>> {
+    return this.#publishNext(store, command, local, build, {
+      journalSigned: true,
+      landed: (entry, encoded, signature) => this.#holdPublished(entry, encoded, signature),
+    });
+  }
+
+  /**
+   * The write path every local entry takes: build for the next sequence,
+   * sign, and publish write-once, skipping a slot someone else's bytes took.
+   * A membership entry is journaled signed first so a stopped publish can be
+   * finished; an artifact entry is rebuilt from its queue at the same slot
+   * instead.
+   */
+  async #publishNext<E extends ReplicaEntry>(
+    store: ReplicaStore,
+    command: LocalCommand,
+    local: ReplicaLocalIdentity,
+    build: (origin: ReplicaMembershipEntry["origin"]) => E,
+    options: {
+      readonly journalSigned: boolean;
+      readonly landed: (entry: E, encoded: Uint8Array, signature: string) => void;
+    },
+  ): Promise<LocalPublish<E>> {
     for (let attempt = 0; attempt < REPLICA_MAX_SQUATTED_SLOTS; attempt += 1) {
       const entry = build(originFor(local, this.#ports.state().localSequence + 1));
       const encoded = encoder.encode(encodeReplicaEntry(entry));
@@ -965,14 +1084,20 @@ export class ReplicaMembershipService {
           outcome: this.#refuse(command, "key-unavailable", "The entry could not be signed."),
         };
       }
-      this.#journal(REPLICA_MEMBERSHIP_EVENT_NAMES.entrySigned, { entry });
+      if (options.journalSigned) {
+        this.#journal(REPLICA_MEMBERSHIP_EVENT_NAMES.entrySigned, { entry });
+      }
       const written = await writeSigned(store, entry, encoded, signature);
       if (written.status === "published") {
-        this.#holdPublished(entry, encoded, signature);
+        options.landed(entry, encoded, signature);
         return { status: "published", entry };
       }
       if (written.reason !== "slot-occupied") {
-        return { status: "stopped", outcome: this.#publishFailed(entry, written) };
+        return {
+          status: "stopped",
+          outcome: this.#publishFailed(entry, written),
+          failure: written.reason,
+        };
       }
       // Journaling the squatted slot moves this identity's next sequence past it.
       this.#storeFailure({
@@ -984,17 +1109,14 @@ export class ReplicaMembershipService {
     }
     return {
       status: "stopped",
-      outcome: {
-        kind: "store-failed",
-        message:
-          "The replica store holds files this computer did not write in its next slots. Remove them with the storage provider's tools, rotate the store credentials, or move to a new store.",
-      },
+      outcome: { kind: "store-failed", message: SQUATTED_SLOTS_MESSAGE },
+      failure: "slots-squatted",
     };
   }
 
   async #finishPending(
     store: ReplicaStore,
-    command: "approve-join" | "confirm-join" | "revoke",
+    command: LocalCommand,
   ): Promise<ReplicaMembershipOutcome | undefined> {
     const state = this.#ports.state();
     const entry = state.pending;
@@ -1024,7 +1146,7 @@ export class ReplicaMembershipService {
     return this.#publishFailed(entry, written);
   }
 
-  async #sign(entry: ReplicaMembershipEntry, encoded: Uint8Array): Promise<string | undefined> {
+  async #sign(entry: ReplicaEntry, encoded: Uint8Array): Promise<string | undefined> {
     try {
       const signed = await this.#ports.credentials.sign(entry.origin.instanceId, encoded);
       return signed.status === "signed" ? signed.signature : undefined;
@@ -1045,7 +1167,7 @@ export class ReplicaMembershipService {
   }
 
   #publishFailed(
-    entry: ReplicaMembershipEntry,
+    entry: ReplicaEntry,
     failure: Extract<WriteResult, { status: "failed" }>,
   ): ReplicaMembershipOutcome {
     this.#storeFailure({
@@ -1127,7 +1249,7 @@ export class ReplicaMembershipService {
   }
 
   #refuse(
-    command: ReplicaMembershipCommand["kind"],
+    command: ReplicaMembershipCommand["kind"] | "publish-artifact",
     reason: RefusalReason,
     message: string,
     subject?: ReplicaInstanceId,
@@ -1140,6 +1262,12 @@ export class ReplicaMembershipService {
     return { kind: "refused", reason, message };
   }
 }
+
+/** A command that publishes under this host's established identity. */
+type LocalCommand = "approve-join" | "confirm-join" | "revoke" | "publish-artifact";
+
+const SQUATTED_SLOTS_MESSAGE =
+  "The replica store holds files this computer did not write in its next slots. Remove them with the storage provider's tools, rotate the store credentials, or move to a new store.";
 
 type SignedRead =
   | {
@@ -1222,7 +1350,7 @@ async function readStore(store: ReplicaStore, key: string): Promise<ReadResult> 
  */
 async function writeSigned(
   store: ReplicaStore,
-  entry: ReplicaMembershipEntry,
+  entry: ReplicaEntry,
   encoded: Uint8Array,
   signature: string,
 ): Promise<WriteResult> {

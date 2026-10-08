@@ -263,6 +263,7 @@ describe("Code persistence restart", () => {
       { projection_name: "projects", reason: "unsupported-event-version" },
       { projection_name: "providers", reason: "unsupported-event-version" },
       { projection_name: "remote-access", reason: "unsupported-event-version" },
+      { projection_name: "replica-artifacts", reason: "unsupported-event-version" },
       { projection_name: "replica-membership", reason: "unsupported-event-version" },
       { projection_name: "shell", reason: "unsupported-event-version" },
       { projection_name: "spend-ceilings", reason: "unsupported-event-version" },
