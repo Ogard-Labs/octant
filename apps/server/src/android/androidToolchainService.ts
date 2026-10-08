@@ -29,8 +29,12 @@ import {
   redactedAndroidInputDiagnostic,
   type AndroidExecutionScope,
 } from "@octant/domain";
+import type {
+  AndroidScreenFallbackReason,
+  AndroidScreenTransport,
+} from "@octant/contracts/android-toolchain-rpc";
 import { takeJpegFrames } from "@octant/domain/managed-device-stream";
-import type { ServeAvdAttachment, ServeAvdPort } from "./serveAvdBrokerClient";
+import type { ServeAvdAttachment, ServeAvdOpening, ServeAvdPort } from "./serveAvdBrokerClient";
 
 export interface AndroidProcessResult {
   readonly termination: "exited" | "cancelled" | "timed-out" | "unavailable";
@@ -57,6 +61,8 @@ export interface AndroidScreenWatch {
   readonly kind: "watching";
   readonly screen: { readonly width: number; readonly height: number };
   readonly frames: ReadableStream<Uint8Array>;
+  /** The serve-avd stream, or adb screencap snapshots and why the stream is not used. */
+  readonly transport: AndroidScreenTransport;
 }
 
 export interface AndroidToolchainServiceOptions {
@@ -415,9 +421,11 @@ export class AndroidToolchainService {
     );
     signal.addEventListener("abort", finish, { once: true });
     if (signal.aborted) finish();
+    let fallback: AndroidScreenFallbackReason = "not-emulator";
     if (/^emulator-[0-9]+$/.test(serial) && !lifetime.signal.aborted) {
       const managed = await this.#watchManaged(serial, lifetime.signal);
-      if (managed !== undefined) {
+      if (managed.kind === "fallback") fallback = managed.reason;
+      else {
         const reader = managed.frames.getReader();
         const frames = new ReadableStream<Uint8Array>(
           {
@@ -437,7 +445,7 @@ export class AndroidToolchainService {
           },
           { highWaterMark: 0 },
         );
-        return { kind: "watching", screen: managed.screen, frames };
+        return { kind: "watching", screen: managed.screen, frames, transport: { kind: "stream" } };
       }
     }
     if (lifetime.signal.aborted) {
@@ -495,7 +503,12 @@ export class AndroidToolchainService {
       },
       { highWaterMark: 0 },
     );
-    return { kind: "watching", screen: size, frames };
+    return {
+      kind: "watching",
+      screen: size,
+      frames,
+      transport: { kind: "screencap", reason: fallback },
+    };
   }
 
   async #run(
@@ -762,19 +775,18 @@ export class AndroidToolchainService {
   async #watchManaged(
     serial: string,
     signal: AbortSignal,
-  ): Promise<AndroidScreenWatch | undefined> {
-    const port = this.#options.serveAvd;
-    if (port === undefined) return undefined;
-    let attachment: ServeAvdAttachment | undefined;
-    try {
-      attachment = await port.open(serial, signal);
-    } catch {
-      return undefined;
-    }
-    if (attachment === undefined || signal.aborted) return undefined;
+  ): Promise<
+    | Omit<AndroidScreenWatch, "transport">
+    | { readonly kind: "fallback"; readonly reason: AndroidScreenFallbackReason }
+  > {
+    const opened = await this.#openServeAvd(serial, signal);
+    if (opened.status !== "attached") return { kind: "fallback", reason: opened.reason };
+    const noFrames = { kind: "fallback", reason: "no-frames" } as const;
+    const attachment = opened.attachment;
+    if (signal.aborted) return noFrames;
     const fetchImpl = this.#options.fetchImpl ?? fetch;
     const screen = await readServeAvdScreen(fetchImpl, attachment, serial, signal);
-    if (screen === undefined || signal.aborted) return undefined;
+    if (screen === undefined || signal.aborted) return noFrames;
     const headers = headerDeadline(signal, 5_000);
     let response: Response;
     try {
@@ -784,19 +796,19 @@ export class AndroidToolchainService {
         signal: headers.signal,
       });
     } catch {
-      return undefined;
+      return noFrames;
     } finally {
       headers.stop();
     }
     if (!response.ok || response.body === null) {
       await response.body?.cancel();
-      return undefined;
+      return noFrames;
     }
     const reader = response.body.getReader();
     const first = await firstJpeg(reader, signal, 5_000);
     if (first === undefined) {
       await reader.cancel().catch(() => undefined);
-      return undefined;
+      return noFrames;
     }
     let rest = first.rest;
     const pending = [...first.frames];
@@ -841,17 +853,14 @@ export class AndroidToolchainService {
     signal: AbortSignal,
     startedAt: string,
   ): Promise<AndroidEmulatorEvidence | undefined> {
-    const port = this.#options.serveAvd;
-    if (port === undefined || !/^emulator-[0-9]+$/.test(serial)) return undefined;
-    const command = serveAvdCommand(request);
-    if (command === undefined) return undefined;
-    let attachment: ServeAvdAttachment | undefined;
-    try {
-      attachment = await port.open(serial, signal);
-    } catch {
+    if (this.#options.serveAvd === undefined || !/^emulator-[0-9]+$/.test(serial)) {
       return undefined;
     }
-    if (attachment === undefined || signal.aborted) return undefined;
+    const command = serveAvdCommand(request);
+    if (command === undefined) return undefined;
+    const opened = await this.#openServeAvd(serial, signal);
+    if (opened.status !== "attached" || signal.aborted) return undefined;
+    const attachment = opened.attachment;
     const fetchImpl = this.#options.fetchImpl ?? fetch;
     let body: Readonly<Record<string, unknown>> | undefined;
     if (command.kind === "direct") body = command.body;
@@ -894,9 +903,30 @@ export class AndroidToolchainService {
       request,
       refused ? "failed" : "succeeded",
       startedAt,
-      [redactedAndroidInputDiagnostic(request)],
+      [
+        redactedAndroidInputDiagnostic(request),
+        { severity: "note", message: "sent through serve-avd" },
+      ],
       "complete",
     );
+  }
+
+  /** Attaches serve-avd to a booted emulator, using the same SDK the server runs adb from. */
+  async #openServeAvd(
+    serial: string,
+    signal: AbortSignal,
+  ): Promise<
+    | Extract<ServeAvdOpening, { readonly status: "attached" }>
+    | { readonly status: "unavailable"; readonly reason: AndroidScreenFallbackReason }
+  > {
+    const port = this.#options.serveAvd;
+    if (port === undefined) return { status: "unavailable", reason: "no-desktop" };
+    const sdkRoot = this.#sdk.sdkRoot;
+    try {
+      return await port.open(serial, sdkRoot === undefined ? { signal } : { sdkRoot, signal });
+    } catch {
+      return { status: "unavailable", reason: "desktop-unreachable" };
+    }
   }
 
   async #screencap(

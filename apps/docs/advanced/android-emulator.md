@@ -15,6 +15,14 @@ the pane keeps `adb exec-out screencap` and `adb shell input`. Do not start
 `serve-avd` in a way that boots an AVD. The pane attaches only to a serial
 that is already running.
 
+Under the screen, the pane says which picture you are looking at. **Live
+stream** means `serve-avd` is attached. **Snapshots, live stream unavailable**
+means the pane is polling `adb screencap`, and it gives the reason: for
+example `serve-avd` is not installed, stopped before it attached, or did not
+attach in time, or this host is not running in the Octant desktop app.
+`serve-avd` uses the same SDK and `adb` that Octant found, and runs with
+`ADB_MDNS=0` like Octant's own `adb` commands.
+
 ## What you can do
 
 - Discover AVDs the SDK reports (`emulator -list-avds`) and which ones `adb`

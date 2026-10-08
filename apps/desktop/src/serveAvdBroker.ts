@@ -1,6 +1,8 @@
 import { spawn as spawnProcess, type ChildProcess } from "node:child_process";
 import { randomBytes, timingSafeEqual } from "node:crypto";
+import { stat } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { isAbsolute, join, normalize } from "node:path";
 import { readManagedDeviceEndpoint } from "@octant/domain/managed-device-stream";
 import type { ManagedSimulatorTools } from "./managedSimulatorHelpers";
 
@@ -8,7 +10,10 @@ const PATH = "/v1/managed-device/serve-avd";
 const HEADER = "x-octant-managed-device-token";
 const SERIAL = /^emulator-[0-9]+$/;
 const READY_MS = 8_000;
-const MAX_BODY_BYTES = 4 * 1024;
+const MAX_BODY_BYTES = 8 * 1024;
+const MAX_SDK_ROOT_LENGTH = 4_096;
+/** Longest quiet-mode state serve-avd prints before Octant stops reading for it. */
+const MAX_STATE_BYTES = 16 * 1024;
 
 export interface ServeAvdBrokerOptions {
   readonly spawn?: (
@@ -28,10 +33,18 @@ interface AvdSession {
   readonly child: ChildProcess;
 }
 
+/** Why serve-avd is not attached; the server shows it beside its screencap fallback. */
+type ServeAvdUnavailableReason = "tool-missing" | "tool-exited" | "timed-out";
+
+type AvdLaunch =
+  | { readonly kind: "attached"; readonly session: AvdSession }
+  | { readonly kind: "unavailable"; readonly reason: ServeAvdUnavailableReason };
+
 /**
  * Loopback broker the desktop's server child calls to attach serve-avd to an
  * emulator that is already booted. The tool process stays in Electron main.
- * A missing tool answers 503 so the server keeps using adb.
+ * A tool that is missing or does not attach answers 503 with the reason, so
+ * the server keeps using adb and says why.
  */
 export async function startServeAvdBroker(
   tools: ManagedSimulatorTools,
@@ -40,26 +53,30 @@ export async function startServeAvdBroker(
   const spawn = options.spawn ?? spawnProcess;
   const readyMs = options.readyMs ?? READY_MS;
   const token = randomBytes(32).toString("base64url");
-  const sessions = new Map<string, Promise<AvdSession | undefined>>();
+  const sessions = new Map<string, Promise<AvdLaunch>>();
   let closed = false;
 
-  function open(serial: string): Promise<AvdSession | undefined> {
+  function open(serial: string, sdkRoot: string | undefined): Promise<AvdLaunch> {
     const existing = sessions.get(serial);
     if (existing !== undefined) return existing;
-    let slot: Promise<AvdSession | undefined> | undefined;
-    const created = launch(serial, () => {
+    let slot: Promise<AvdLaunch> | undefined;
+    const created = launch(serial, sdkRoot, () => {
       if (slot !== undefined && sessions.get(serial) === slot) sessions.delete(serial);
-    }).then((session) => {
-      if (session === undefined && sessions.get(serial) === slot) sessions.delete(serial);
-      return session;
+    }).then((launched) => {
+      if (launched.kind !== "attached" && sessions.get(serial) === slot) sessions.delete(serial);
+      return launched;
     });
     slot = created;
     sessions.set(serial, created);
     return created;
   }
 
-  async function launch(serial: string, onExit: () => void): Promise<AvdSession | undefined> {
-    if (closed) return undefined;
+  async function launch(
+    serial: string,
+    sdkRoot: string | undefined,
+    onExit: () => void,
+  ): Promise<AvdLaunch> {
+    if (closed) return { kind: "unavailable", reason: "tool-missing" };
     const spec = await tools.launchSpec("serve-avd", [
       "--no-preview",
       "-q",
@@ -69,9 +86,9 @@ export async function startServeAvdBroker(
       "127.0.0.1",
       serial,
     ]);
-    if (spec === undefined || closed) return undefined;
+    if (spec === undefined || closed) return { kind: "unavailable", reason: "tool-missing" };
     const child = spawn(spec.command, spec.args, {
-      env: spec.env,
+      env: serveAvdEnvironment(spec.env, sdkRoot),
       stdio: ["ignore", "pipe", "pipe"],
     });
     // An unread stderr pipe fills and stalls serve-avd. An unhandled spawn
@@ -80,13 +97,21 @@ export async function startServeAvdBroker(
     child.stderr?.resume();
     tools.trackProcess("serve-avd", child);
     child.once("exit", onExit);
-    const endpoint = await readStdoutEndpoint(child, serial, AbortSignal.timeout(readyMs));
+    const ready = AbortSignal.timeout(readyMs);
+    const endpoint = await readStdoutEndpoint(child, serial, ready);
     child.stdout?.resume();
     if (endpoint === undefined || closed) {
+      const exited = child.exitCode !== null || child.signalCode !== null;
       child.kill("SIGTERM");
-      return undefined;
+      return {
+        kind: "unavailable",
+        reason: ready.aborted && !exited ? "timed-out" : "tool-exited",
+      };
     }
-    return { origin: endpoint.origin, streamUrl: endpoint.streamUrl, child };
+    return {
+      kind: "attached",
+      session: { origin: endpoint.origin, streamUrl: endpoint.streamUrl, child },
+    };
   }
 
   const server = createServer((incoming, outgoing) => {
@@ -112,8 +137,8 @@ export async function startServeAvdBroker(
     close: async () => {
       closed = true;
       for (const pending of sessions.values()) {
-        const session = await pending;
-        session?.child.kill("SIGTERM");
+        const launched = await pending;
+        if (launched.kind === "attached") launched.session.child.kill("SIGTERM");
       }
       sessions.clear();
       server.closeAllConnections();
@@ -130,7 +155,7 @@ async function handle(
   incoming: IncomingMessage,
   outgoing: ServerResponse,
   token: string,
-  open: (serial: string) => Promise<AvdSession | undefined>,
+  open: (serial: string, sdkRoot: string | undefined) => Promise<AvdLaunch>,
 ): Promise<void> {
   const headers = new Headers();
   for (const [name, value] of Object.entries(incoming.headers)) {
@@ -150,12 +175,59 @@ async function handle(
     writeJson(outgoing, 400, { error: "managed-device-broker-refused" });
     return;
   }
-  const session = await open(serial);
-  if (session === undefined) {
-    writeJson(outgoing, 503, { error: "managed-device-broker-unavailable" });
+  const requested = isRecord(body) ? body.sdkRoot : undefined;
+  const sdkRoot = requested === undefined ? undefined : await sdkRootWithAdb(requested);
+  if (requested !== undefined && sdkRoot === undefined) {
+    writeJson(outgoing, 400, { error: "managed-device-broker-refused" });
     return;
   }
-  writeJson(outgoing, 200, { origin: session.origin, streamUrl: session.streamUrl });
+  const launched = await open(serial, sdkRoot);
+  if (launched.kind !== "attached") {
+    writeJson(outgoing, 503, {
+      error: "managed-device-broker-unavailable",
+      reason: launched.reason,
+    });
+    return;
+  }
+  writeJson(outgoing, 200, {
+    origin: launched.session.origin,
+    streamUrl: launched.session.streamUrl,
+  });
+}
+
+/**
+ * The server sends the SDK it already runs adb from. serve-avd only looks in
+ * `ANDROID_HOME`, `ANDROID_SDK_ROOT`, the Android Studio location and `PATH`,
+ * so an app launched from Finder, with neither variable and no Homebrew `PATH`,
+ * would not find a Homebrew SDK's adb at all, and a different adb on `PATH`
+ * would fight the server's adb over the shared server's version.
+ */
+async function sdkRootWithAdb(sdkRoot: unknown): Promise<string | undefined> {
+  if (typeof sdkRoot !== "string" || sdkRoot.length > MAX_SDK_ROOT_LENGTH) return undefined;
+  if (sdkRoot.includes("\0") || !isAbsolute(sdkRoot) || normalize(sdkRoot) !== sdkRoot) {
+    return undefined;
+  }
+  try {
+    return (await stat(join(sdkRoot, "platform-tools", "adb"))).isFile() ? sdkRoot : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function serveAvdEnvironment(
+  base: NodeJS.ProcessEnv,
+  sdkRoot: string | undefined,
+): NodeJS.ProcessEnv {
+  return {
+    ...base,
+    ...(sdkRoot === undefined ? {} : { ANDROID_HOME: sdkRoot, ANDROID_SDK_ROOT: sdkRoot }),
+    // serve-avd's adb client starts the shared adb server when none is running,
+    // and that server inherits this environment. With mDNS discovery on, adb 37's
+    // server aborts about two seconds after it starts on macOS 27; serve-avd then
+    // finds the emulator offline ("No device or AVD matching") and exits, and
+    // every adb command Octant's server runs restarts the server again.
+    ADB_MDNS: "0",
+  };
 }
 
 function admitted(headers: Headers, peer: string, token: string): boolean {
@@ -205,6 +277,9 @@ function readStdoutEndpoint(
 ): Promise<{ readonly origin: string; readonly streamUrl: string } | undefined> {
   return new Promise((resolve) => {
     let buffer = "";
+    // serve-avd prints its quiet-mode state as indented JSON over several
+    // lines. Lines from an opening `{` are collected until they parse.
+    let state: string | undefined;
     let settled = false;
     const finish = (value: { readonly origin: string; readonly streamUrl: string } | undefined) => {
       if (settled) return;
@@ -232,14 +307,34 @@ function readStdoutEndpoint(
         // Not the tool's state line.
       }
     };
+    const collect = (line: string) => {
+      if (state === undefined) {
+        if (!line.trimStart().startsWith("{")) return;
+        state = line;
+      } else {
+        state += `\n${line}`;
+      }
+      if (state.length > MAX_STATE_BYTES) {
+        state = undefined;
+        return;
+      }
+      try {
+        JSON.parse(state);
+      } catch {
+        return;
+      }
+      const complete = state;
+      state = undefined;
+      consider(complete);
+    };
     const onData = (chunk: Uint8Array) => {
       buffer += Buffer.from(chunk).toString("utf8");
       const lines = buffer.split(/\r?\n/);
       buffer = lines.pop() ?? "";
-      for (const line of lines) consider(line);
+      for (const line of lines) collect(line);
     };
     const onClose = () => {
-      consider(buffer);
+      collect(buffer);
       finish(undefined);
     };
     const onError = () => finish(undefined);

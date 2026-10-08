@@ -2561,7 +2561,19 @@ frame. The Android pane attaches `serve-avd` for an already booted
 otherwise. Boot still uses the emulator binary. The tools run in Electron
 main. The server reaches Android streaming through a loopback broker
 (`OCTANT_SERVE_AVD_BROKER_URL`, `OCTANT_SERVE_AVD_BROKER_TOKEN`) the same way
-it reaches the Simulator device helper. An agent must not launch
+it reaches the Simulator device helper. Each attach request carries the SDK
+root the server discovered. The broker accepts only an absolute, normalized
+root that holds `platform-tools/adb`, and runs `serve-avd` with that root as
+`ANDROID_HOME` and with `ADB_MDNS=0`, so the tool uses the server's `adb` and
+any shared `adb` server it starts stays up. `serve-avd` prints its ready state
+as indented JSON over several lines, and the broker reads the whole object.
+When the tool is missing, exits, or does not attach in time, the broker
+answers with that reason. Every Android screen stream names its transport in
+`x-octant-android-transport`: `stream`, or `screencap` with the reason the
+stream is not used (no desktop, not an emulator, tool missing, tool exited,
+timed out, desktop unreachable, or no frames). The pane shows it as a quiet
+"Live stream" or "Snapshots, live stream unavailable: …" line, and an input
+sent through `serve-avd` says so in its evidence. An agent must not launch
 Simulator.app, `serve-sim`, or `serve-avd`.
 
 ### Plugin boundaries and remaining extraction

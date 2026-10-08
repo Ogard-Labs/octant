@@ -24,6 +24,7 @@ type ServiceConstructor = new (options: Record<string, unknown>) => {
         kind: "watching";
         screen: { width: number; height: number };
         frames: ReadableStream<Uint8Array>;
+        transport: { kind: "stream" } | { kind: "screencap"; reason: string };
       }
     | { kind: "unavailable"; message: string }
   >;
@@ -778,6 +779,7 @@ describe("AndroidToolchainService", () => {
         new AbortController().signal,
       );
       if (watch.kind !== "watching") throw new Error("expected screen");
+      expect(watch.transport).toEqual({ kind: "screencap", reason: "no-desktop" });
       await vi.advanceTimersByTimeAsync(4_000);
       expect(captures).toBe(1);
       const reader = watch.frames.getReader();
@@ -798,6 +800,7 @@ describe("AndroidToolchainService", () => {
   it("shows a managed JPEG stream for a booted emulator and does not screencap", async () => {
     const execute = discoveryExecutor();
     const jpeg = Uint8Array.of(0xff, 0xd8, 0x11, 0xff, 0xd9);
+    const sdkRoots: Array<string | undefined> = [];
     const service = new AndroidToolchainService({
       execute,
       access: async () => undefined,
@@ -808,10 +811,16 @@ describe("AndroidToolchainService", () => {
       now: () => "2026-09-20T20:00:00.000Z",
       newId: () => ids.action,
       serveAvd: {
-        open: async () => ({
-          origin: "http://127.0.0.1:9",
-          streamUrl: "http://127.0.0.1:9/helper/emulator-5554/stream.mjpeg",
-        }),
+        open: async (_serial: string, options?: { readonly sdkRoot?: string }) => {
+          sdkRoots.push(options?.sdkRoot);
+          return {
+            status: "attached" as const,
+            attachment: {
+              origin: "http://127.0.0.1:9",
+              streamUrl: "http://127.0.0.1:9/helper/emulator-5554/stream.mjpeg",
+            },
+          };
+        },
       },
       fetchImpl: async (input: RequestInfo | URL) => {
         const url = String(input);
@@ -831,6 +840,9 @@ describe("AndroidToolchainService", () => {
     );
     if (watch.kind !== "watching") throw new Error("expected a managed stream");
     expect(watch.screen).toEqual({ width: 1080, height: 1920 });
+    expect(watch.transport).toEqual({ kind: "stream" });
+    // serve-avd runs the same adb the server discovered, not whatever is on PATH.
+    expect(sdkRoots).toEqual(["/sdk"]);
     const reader = watch.frames.getReader();
     const chunk = await reader.read();
     expect(chunk.done).toBe(false);
@@ -842,7 +854,7 @@ describe("AndroidToolchainService", () => {
     await service.close();
   });
 
-  it("falls back to screencap when the managed stream is absent", async () => {
+  it("says why it falls back to screencap when serve-avd does not attach", async () => {
     const discovery = discoveryExecutor();
     let captures = 0;
     const execute = vi.fn(async (input: { readonly argv: ReadonlyArray<string> }) => {
@@ -863,7 +875,9 @@ describe("AndroidToolchainService", () => {
       realpath: async (path: string) => path,
       now: () => "2026-09-20T20:00:00.000Z",
       newId: () => ids.action,
-      serveAvd: { open: async () => undefined },
+      serveAvd: {
+        open: async () => ({ status: "unavailable" as const, reason: "tool-exited" as const }),
+      },
     });
     await service.discover(discoveryRequest, context);
     const watch = await service.watchScreen(
@@ -872,6 +886,9 @@ describe("AndroidToolchainService", () => {
       new AbortController().signal,
     );
     expect(watch.kind).toBe("watching");
+    if (watch.kind === "watching") {
+      expect(watch.transport).toEqual({ kind: "screencap", reason: "tool-exited" });
+    }
     expect(captures).toBe(1);
     if (watch.kind === "watching") await watch.frames.cancel();
     await service.close();
@@ -891,8 +908,11 @@ describe("AndroidToolchainService", () => {
       newId: () => ids.action,
       serveAvd: {
         open: async () => ({
-          origin: "http://127.0.0.1:9",
-          streamUrl: "http://127.0.0.1:9/helper/emulator-5554/stream.mjpeg",
+          status: "attached" as const,
+          attachment: {
+            origin: "http://127.0.0.1:9",
+            streamUrl: "http://127.0.0.1:9/helper/emulator-5554/stream.mjpeg",
+          },
         }),
       },
       fetchImpl: async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -915,6 +935,10 @@ describe("AndroidToolchainService", () => {
     );
     expect(evidence.outcome).toBe("succeeded");
     expect(actions).toEqual([{ action: "tap", x: 0.5, y: 0.5 }]);
+    expect(evidence.diagnostics).toContainEqual({
+      severity: "note",
+      message: "sent through serve-avd",
+    });
     expect(execute).not.toHaveBeenCalled();
     await service.close();
   });
@@ -932,8 +956,11 @@ describe("AndroidToolchainService", () => {
       newId: () => ids.action,
       serveAvd: {
         open: async () => ({
-          origin: "http://127.0.0.1:9",
-          streamUrl: "http://127.0.0.1:9/helper/emulator-5554/stream.mjpeg",
+          status: "attached" as const,
+          attachment: {
+            origin: "http://127.0.0.1:9",
+            streamUrl: "http://127.0.0.1:9/helper/emulator-5554/stream.mjpeg",
+          },
         }),
       },
       fetchImpl: async (input: RequestInfo | URL) => {
@@ -970,8 +997,11 @@ describe("AndroidToolchainService", () => {
         open: async (serial: string) => {
           opened.push(serial);
           return {
-            origin: "http://127.0.0.1:9",
-            streamUrl: "http://127.0.0.1:9/helper/emulator-5554/stream.mjpeg",
+            status: "attached" as const,
+            attachment: {
+              origin: "http://127.0.0.1:9",
+              streamUrl: "http://127.0.0.1:9/helper/emulator-5554/stream.mjpeg",
+            },
           };
         },
       },
