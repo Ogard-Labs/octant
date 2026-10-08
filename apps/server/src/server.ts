@@ -5826,6 +5826,12 @@ export function startOctantServer(
       receiptDirectory: join(providerDataDirectory, "harness", "receipts"),
       temporaryDirectory: harnessWorkDirectory,
     });
+    // A child admitted without network authority runs its commands here.
+    const harnessOfflineProcessPort = new RepositoryTestProcessPort({
+      receiptDirectory: join(providerDataDirectory, "harness", "receipts"),
+      temporaryDirectory: harnessWorkDirectory,
+      networkEgress: "none",
+    });
     const nativeHarnessRoutingStore = new NativeHarnessRoutingStore({
       journal: persistence.journal,
       uuid: randomUUID,
@@ -6107,6 +6113,10 @@ export function startOctantServer(
       plans: planService,
       shell: createNativeHarnessShell({
         process: harnessProcessPort,
+        scriptDirectory: harnessWorkDirectory,
+      }),
+      offlineShell: createNativeHarnessShell({
+        process: harnessOfflineProcessPort,
         scriptDirectory: harnessWorkDirectory,
       }),
       resolveWebSearch: () =>
