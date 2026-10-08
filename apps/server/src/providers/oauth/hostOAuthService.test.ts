@@ -483,6 +483,115 @@ describe("host OAuth service", () => {
     expect(result).toEqual({ kind: "signed-out" });
     expect(journal.map((record) => record.name)).toContain("host-oauth.signed-out");
   });
+
+  it("journals a finished ChatGPT plan sign-in from the answer the broker gives once the callback lands", async () => {
+    const journal: HostOAuthJournalRecord[] = [];
+    const attemptId = "acd76c77-23e4-40e0-bf23-b4783c7f4757";
+    const service = createHostOAuthService({
+      journal: { append: (record) => journal.push(record) },
+      broker: {
+        ...throwingBroker(),
+        // The exact shape a live broker published for a finished sign-in.
+        status: async () => ({
+          kind: "signed-in",
+          attemptId,
+          descriptorId: "chatgpt-plan",
+          credentialRef: "324feb28-718a-462a-9a15-1d999922d1b5",
+        }),
+      },
+    });
+    const done = await service.status({
+      principalKind: "local-window",
+      attemptId,
+      descriptor: chatGptPlan(),
+    });
+    expect(done).toMatchObject({ kind: "signed-in", attemptId });
+    expect(journal).toEqual([
+      {
+        name: "host-oauth.sign-in-completed",
+        descriptorId: "chatgpt-plan",
+        attemptId,
+        credentialRef: "324feb28-718a-462a-9a15-1d999922d1b5",
+      },
+    ]);
+  });
+
+  it("refuses a finished sign-in it cannot journal, and says why in the log without a secret", async () => {
+    const lines: string[] = [];
+    const attemptId = "6b0d0c2e-0d3a-4f0b-9c1a-6e5d4c3b2a19";
+    let fail = true;
+    const journal: HostOAuthJournalRecord[] = [];
+    const service = createHostOAuthService({
+      journal: {
+        append: (record) => {
+          if (fail) throw new Error(`disk full while writing ${ACCESS}`);
+          journal.push(record);
+        },
+      },
+      broker: {
+        ...throwingBroker(),
+        status: async () => ({
+          kind: "signed-in",
+          attemptId,
+          descriptorId: "chatgpt-plan",
+          credentialRef: "7c1e1d3f-1e4b-4051-8d2b-7f6e5d4c3b2a",
+        }),
+      },
+      log: (line) => lines.push(line),
+    });
+    const input = { principalKind: "local-window" as const, attemptId, descriptor: chatGptPlan() };
+    expect(await service.status(input)).toEqual({
+      kind: "refused",
+      attemptId,
+      descriptorId: "chatgpt-plan",
+      reason: "unavailable",
+    });
+    expect(lines.join("\n")).toContain("host-oauth.sign-in-completed");
+    expect(lines.join("\n")).not.toContain(ACCESS);
+    expect(lines.join("\n")).not.toContain("7c1e1d3f-1e4b-4051-8d2b-7f6e5d4c3b2a");
+    // Once the journal works again, the next poll still records the sign-in.
+    fail = false;
+    expect(await service.status(input)).toMatchObject({ kind: "signed-in" });
+    expect(journal.map((record) => record.name)).toEqual(["host-oauth.sign-in-completed"]);
+  });
+
+  it("refuses and logs a sign-in state from the broker the server cannot read", async () => {
+    const lines: string[] = [];
+    const journal: HostOAuthJournalRecord[] = [];
+    const attemptId = "6b0d0c2e-0d3a-4f0b-9c1a-6e5d4c3b2a19";
+    const service = createHostOAuthService({
+      journal: { append: (record) => journal.push(record) },
+      broker: {
+        ...throwingBroker(),
+        status: async () => ({
+          kind: "refused",
+          attemptId,
+          descriptorId: "chatgpt-plan",
+          reason: "client-id-unexpected",
+          accessToken: ACCESS,
+        }),
+      },
+      log: (line) => lines.push(line),
+    });
+    const refused = await service.status({
+      principalKind: "local-window",
+      attemptId,
+      descriptor: chatGptPlan(),
+    });
+    expect(refused).toMatchObject({ kind: "refused", reason: "unavailable" });
+    expect(journal).toEqual([
+      {
+        name: "host-oauth.sign-in-refused",
+        descriptorId: "chatgpt-plan",
+        attemptId,
+        reason: "unavailable",
+      },
+    ]);
+    const logged = lines.join("\n");
+    expect(logged).toContain("refused");
+    expect(logged).toContain("client-id-unexpected");
+    expect(logged).not.toContain(ACCESS);
+  });
 });
 
 describe("host OAuth broker client", () => {

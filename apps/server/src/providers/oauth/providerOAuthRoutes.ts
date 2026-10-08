@@ -148,7 +148,13 @@ export function createProviderOAuthRouteHandler(dependencies: ProviderOAuthRoute
         actorId: windowId,
       });
       return json(view, 200, origin);
-    } catch {
+    } catch (error) {
+      // Storing the credential pointer or binding the endpoint failed after
+      // the issuer finished; the panel shows the refusal, and this line keeps
+      // the failure findable. The error is not logged because it may echo data.
+      console.warn(
+        `[host-oauth] the ${command.kind} sign-in command failed (${error instanceof Error ? error.name : "unknown error"}).`,
+      );
       return json({ kind: "refused", reason: "unavailable" }, 503, origin);
     }
   };

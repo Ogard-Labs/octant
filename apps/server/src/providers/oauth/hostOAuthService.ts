@@ -106,8 +106,14 @@ export function createHostOAuthService(options: {
     readonly principalKind: PrincipalKind;
     readonly action: string;
   }) => PrincipalActionDecision;
+  /**
+   * Where a sign-in the server could not read or record is reported. Lines
+   * name record kinds and reason codes only, never a token, code, or ref.
+   */
+  readonly log?: (line: string) => void;
 }): HostOAuthService {
   const now = options.now ?? (() => new Date());
+  const log = options.log ?? ((line: string) => console.warn(line));
   const authorize =
     options.authorize ??
     ((input: { readonly principalKind: PrincipalKind; readonly action: string }) =>
@@ -116,11 +122,20 @@ export function createHostOAuthService(options: {
   const completed = new Set<string>();
   const refusedAttempts = new Set<string>();
 
-  const append = (record: unknown): boolean => {
+  // A record that cannot be journaled is reported, never dropped silently:
+  // a live sign-in once finished at the issuer while nothing was recorded.
+  // The error itself is not logged because it may echo the record.
+  const append = (record: {
+    readonly name: string;
+    readonly [field: string]: unknown;
+  }): boolean => {
     try {
       options.journal.append(decodeHostOAuthJournalRecord(record));
       return true;
-    } catch {
+    } catch (error) {
+      log(
+        `[host-oauth] could not journal ${record.name} (${error instanceof Error ? error.name : "unknown error"}).`,
+      );
       return false;
     }
   };
@@ -146,15 +161,32 @@ export function createHostOAuthService(options: {
     return decoded;
   };
 
-  const noteState = (descriptor: HostOAuthDescriptor, state: HostOAuthSignInState) => {
+  /**
+   * Journal a state the broker reported. A finished sign-in that cannot be
+   * journaled is refused, so the person sees it did not finish instead of a
+   * sign-in with no record; the attempt stays uncompleted so a later poll can
+   * still record it.
+   */
+  const noteState = (
+    descriptor: HostOAuthDescriptor,
+    state: HostOAuthSignInState,
+  ): HostOAuthSignInState => {
     if (state.kind === "signed-in" && !completed.has(state.attemptId)) {
-      completed.add(state.attemptId);
-      append({
+      const recorded = append({
         name: "host-oauth.sign-in-completed",
         descriptorId: descriptor.descriptorId,
         attemptId: state.attemptId,
         credentialRef: state.credentialRef,
       });
+      if (!recorded) {
+        return decodeHostOAuthSignInState({
+          kind: "refused",
+          attemptId: state.attemptId,
+          descriptorId: descriptor.descriptorId,
+          reason: "unavailable",
+        });
+      }
+      completed.add(state.attemptId);
     }
     if (
       state.kind === "refused" &&
@@ -169,12 +201,19 @@ export function createHostOAuthService(options: {
         reason: state.reason,
       });
     }
+    return state;
   };
 
+  // A broker answer outside the contract becomes an `unavailable` refusal at
+  // the caller; this line says which kind and reason did not decode, without
+  // the rest of the answer.
   const decodeState = (raw: unknown): HostOAuthSignInState | undefined => {
     try {
       return decodeHostOAuthSignInState(raw);
     } catch {
+      log(
+        `[host-oauth] the broker answered with a sign-in state the server cannot read (${describeRaw(raw)}).`,
+      );
       return undefined;
     }
   };
@@ -249,8 +288,7 @@ export function createHostOAuthService(options: {
           flow: state.flow,
         });
       }
-      noteState(input.descriptor, state);
-      return state;
+      return noteState(input.descriptor, state);
     },
     status: async (input) => {
       const decision = authorize({
@@ -266,8 +304,7 @@ export function createHostOAuthService(options: {
       }
       const state = decodeState(raw);
       if (state === undefined) return refuse(input.descriptor, "unavailable", input.attemptId);
-      noteState(input.descriptor, state);
-      return state;
+      return noteState(input.descriptor, state);
     },
     refresh: async (input) => {
       const decision = authorize({
@@ -399,6 +436,16 @@ function wireDescriptor(
       : { extAgentHostId: descriptor.extAgentHostId }),
     ...(descriptor.agentNameHint === undefined ? {} : { agentNameHint: descriptor.agentNameHint }),
   };
+}
+
+/** The kind and reason of an unreadable broker answer, when they are plain codes. */
+function describeRaw(raw: unknown): string {
+  if (!isRecord(raw)) return "not an object";
+  const code = (value: unknown) =>
+    typeof value === "string" && /^[a-z][a-z0-9-]{0,63}$/.test(value) ? value : "unreadable";
+  return raw.reason === undefined
+    ? `kind ${code(raw.kind)}`
+    : `kind ${code(raw.kind)}, reason ${code(raw.reason)}`;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -196,4 +196,109 @@ describe("provider sign-in panel", () => {
     expect(openUrl).toHaveBeenCalledOnce();
     expect(run.mock.calls.some((call) => call[0].kind === "poll")).toBe(true);
   });
+
+  it("keeps polling a sign-in in the browser when the settings around it re-render, and shows who signed in", async () => {
+    vi.useFakeTimers();
+    let signedInAtIssuer = false;
+    const calls: string[] = [];
+    // The settings controller hands the panel a new command function on every
+    // render. A re-render while the person is in the browser must not reset
+    // the attempt, or the finished sign-in is never collected.
+    const makeRun = () => async (command: { readonly kind: string }) => {
+      calls.push(command.kind);
+      if (command.kind === "status") return { kind: "signed-out" as const, termsRequired: false };
+      if (command.kind === "begin") {
+        return {
+          kind: "awaiting-consent" as const,
+          attemptId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          authorizationUrl: "http://127.0.0.1/consent",
+        };
+      }
+      if (!signedInAtIssuer) {
+        return {
+          kind: "awaiting-consent" as const,
+          attemptId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          authorizationUrl: "http://127.0.0.1/consent",
+        };
+      }
+      return { kind: "signed-in" as const, accountLabel: "ChatGPT plan" };
+    };
+    const panel = () => (
+      <ProviderOAuthSignInPanel
+        accountLabel="ChatGPT plan"
+        descriptorId="chatgpt-plan"
+        instanceId="00000000-0000-4000-8000-000000000903"
+        openUrl={() => undefined}
+        run={makeRun()}
+        termsSummary="Terms"
+      />
+    );
+    const { rerender } = render(panel());
+    await act(async () => {
+      await Promise.resolve();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(screen.getByText(/Continue in the browser/)).toBeInTheDocument();
+    rerender(panel());
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(screen.getByText(/Continue in the browser/)).toBeInTheDocument();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2500);
+    });
+    signedInAtIssuer = true;
+    rerender(panel());
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2500);
+    });
+    expect(screen.getByText("ChatGPT plan", { selector: "span" })).toBeInTheDocument();
+    expect(screen.getByText(/Signed in as/)).toBeInTheDocument();
+    expect(calls.filter((kind) => kind === "status")).toEqual(["status"]);
+  });
+
+  it("shows a plain refusal when the host cannot read the sign-in, instead of going back to idle", async () => {
+    const run = vi.fn(async (command: { readonly kind: string }) => {
+      if (command.kind === "status") return { kind: "signed-out" as const, termsRequired: false };
+      return { kind: "refused" as const, reason: "unavailable" };
+    });
+    const user = userEvent.setup();
+    render(
+      <ProviderOAuthSignInPanel
+        accountLabel="ChatGPT plan"
+        descriptorId="chatgpt-plan"
+        instanceId="00000000-0000-4000-8000-000000000904"
+        run={run}
+        termsSummary="Terms"
+      />,
+    );
+    await user.click(await screen.findByRole("button", { name: "Sign in" }));
+    expect(
+      await screen.findByText("Octant couldn't finish the sign-in. Try signing in again."),
+    ).toBeInTheDocument();
+  });
+
+  it("shows a refusal when the sign-in request gets no answer the panel can read", async () => {
+    const run = vi.fn(async (command: { readonly kind: string }) => {
+      if (command.kind === "status") return { kind: "signed-out" as const, termsRequired: false };
+      return undefined;
+    });
+    const user = userEvent.setup();
+    render(
+      <ProviderOAuthSignInPanel
+        accountLabel="ChatGPT plan"
+        descriptorId="chatgpt-plan"
+        instanceId="00000000-0000-4000-8000-000000000905"
+        run={run}
+        termsSummary="Terms"
+      />,
+    );
+    await user.click(await screen.findByRole("button", { name: "Sign in" }));
+    expect(
+      await screen.findByText("Octant couldn't finish the sign-in. Try signing in again."),
+    ).toBeInTheDocument();
+  });
 });

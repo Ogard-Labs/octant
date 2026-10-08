@@ -163,17 +163,27 @@ export function ProviderOAuthSignInPanel(props: {
   const [statusKnown, setStatusKnown] = useState(false);
   const started = useRef(false);
   const { run, openUrl, instanceId, descriptorId } = props;
+  // The settings controller hands this panel a new `run` on every render.
+  // Keying the effects on its identity re-ran the status check whenever the
+  // settings re-rendered while the person was in the browser, which reset the
+  // attempt to signed-out and stopped the poll, so a sign-in the issuer had
+  // completed was never collected. The effects read the latest `run` instead.
+  const runRef = useRef(run);
+  runRef.current = run;
+  const canRun = run !== undefined;
   const begin = () => {
-    void run?.({ kind: "begin", instanceId, descriptorId }).then((result) => {
-      if (result === undefined) return;
-      apply(result, setState, setTermsRequired, setAttemptId, openUrl);
+    const current = runRef.current;
+    if (current === undefined) return;
+    void current({ kind: "begin", instanceId, descriptorId }).then((result) => {
+      apply(result ?? unreadable, setState, setTermsRequired, setAttemptId, openUrl);
     });
   };
 
   useEffect(() => {
-    if (run === undefined) return;
+    const current = runRef.current;
+    if (!canRun || current === undefined) return;
     let cancelled = false;
-    void run({ kind: "status", instanceId, descriptorId }).then((result) => {
+    void current({ kind: "status", instanceId, descriptorId }).then((result) => {
       if (cancelled || result === undefined) return;
       apply(result, setState, setTermsRequired, setAttemptId);
       setStatusKnown(true);
@@ -181,23 +191,27 @@ export function ProviderOAuthSignInPanel(props: {
     return () => {
       cancelled = true;
     };
-  }, [descriptorId, instanceId, run]);
+  }, [canRun, descriptorId, instanceId]);
 
   useEffect(() => {
-    if (run === undefined || attemptId === undefined || state.kind !== "awaiting-consent") return;
+    if (!canRun || attemptId === undefined || state.kind !== "awaiting-consent") return;
     const timer = setInterval(() => {
-      void run({
-        kind: "poll",
-        instanceId,
-        descriptorId,
-        attemptId,
-      }).then((result) => {
-        if (result === undefined) return;
-        apply(result, setState, setTermsRequired, setAttemptId);
-      });
+      // An unreadable poll answer is a passing failure (the server may be
+      // restarting); the next poll asks again until the attempt ends.
+      void runRef
+        .current?.({
+          kind: "poll",
+          instanceId,
+          descriptorId,
+          attemptId,
+        })
+        .then((result) => {
+          if (result === undefined) return;
+          apply(result, setState, setTermsRequired, setAttemptId);
+        });
     }, 2000);
     return () => clearInterval(timer);
-  }, [attemptId, descriptorId, instanceId, run, state.kind]);
+  }, [attemptId, canRun, descriptorId, instanceId, state.kind]);
 
   useEffect(() => {
     if (props.startSignIn !== true || started.current || !statusKnown) return;
@@ -288,7 +302,7 @@ function apply(
   }
   if (result.kind === "refused") {
     setAttemptId(undefined);
-    setState({ kind: "refused", message: result.reason ?? "Sign-in was refused." });
+    setState({ kind: "refused", message: refusalMessage(result.reason) });
     return;
   }
   setAttemptId(result.attemptId);
@@ -303,4 +317,37 @@ function apply(
       ? { kind: "awaiting-consent", detail }
       : { kind: "awaiting-consent", detail, href },
   );
+}
+
+/** What a sign-in request that got no readable answer shows: never a silent idle. */
+const unreadable: ProviderOAuthCommandResult = { kind: "refused", reason: "unavailable" };
+
+/**
+ * A refusal in words a person can act on. The host's reason codes are not
+ * shown as they are; an unknown one still says the sign-in did not finish.
+ */
+function refusalMessage(reason: string | undefined): string {
+  switch (reason) {
+    case "denied":
+      return "The sign-in was cancelled in the browser.";
+    case "timeout":
+      return "The sign-in took too long. Try signing in again.";
+    case "state-mismatch":
+    case "verifier-mismatch":
+    case "exchange-refused":
+      return "The sign-in service refused the sign-in. Try signing in again.";
+    case "terms-required":
+      return "Acknowledge the terms before signing in.";
+    case "local-host-required":
+      return "Sign in from Octant on this computer.";
+    case "unknown-instance":
+    case "unsupported-driver":
+    case "endpoint-mismatch":
+    case "invalid":
+      return "This endpoint can't use this sign-in.";
+    case "unavailable":
+      return "Octant couldn't finish the sign-in. Try signing in again.";
+    default:
+      return "Sign-in was refused.";
+  }
 }
