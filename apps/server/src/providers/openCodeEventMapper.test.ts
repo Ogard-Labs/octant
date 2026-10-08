@@ -735,8 +735,9 @@ describe("OpenCode 2.0.22 events", () => {
   }
 
   it("streams text and reasoning deltas", () => {
-    expect(adaptAndMap("session.text.delta", { assistantMessageID, ordinal: 0, delta: "hi" }))
-      .toMatchObject([{ kind: "text-delta", text: "hi" }]);
+    expect(
+      adaptAndMap("session.text.delta", { assistantMessageID, ordinal: 0, delta: "hi" }),
+    ).toMatchObject([{ kind: "text-delta", text: "hi" }]);
     expect(
       adaptAndMap("session.reasoning.delta", { assistantMessageID, ordinal: 0, delta: "think" }),
     ).toMatchObject([{ kind: "reasoning-delta", text: "think" }]);
@@ -748,12 +749,12 @@ describe("OpenCode 2.0.22 events", () => {
     expect(
       adaptAndMap("session.tool.input.started", { ...call, name: "octant-x_octant_echo" }, calls),
     ).toBe("ignored");
-    expect(adaptAndMap("session.tool.input.ended", { ...call, text: "{}" }, calls)).toBe(
-      "ignored",
-    );
+    expect(adaptAndMap("session.tool.input.ended", { ...call, text: "{}" }, calls)).toBe("ignored");
     expect(
       adaptAndMap("session.tool.called", { ...call, input: {}, executed: false }, calls),
-    ).toMatchObject([{ kind: "tool-start", toolCallId: "call_1", toolName: "octant-x_octant_echo" }]);
+    ).toMatchObject([
+      { kind: "tool-start", toolCallId: "call_1", toolName: "octant-x_octant_echo" },
+    ]);
     expect(adaptAndMap("session.tool.progress", { ...call, metadata: {} }, calls)).toMatchObject([
       { kind: "tool-progress", toolCallId: "call_1" },
     ]);

@@ -627,7 +627,10 @@ function adaptOpenCode2022Event(
     case "session.tool.success":
     case "session.tool.failed":
       if (callID !== undefined) calls?.delete(callID);
-      return { type: type.replace("session.", "session.next."), properties: { ...properties, callID } };
+      return {
+        type: type.replace("session.", "session.next."),
+        properties: { ...properties, callID },
+      };
     case "session.step.ended":
     case "session.step.failed":
       return { type: type.replace("session.", "session.next."), properties };
