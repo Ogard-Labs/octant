@@ -637,6 +637,17 @@ export function buildDenyDefaultSeatbeltProfile(input: SeatbeltProfileInput): st
     // shell. Denying the link metadata prints an error on every npm test run.
     // Keep file contents and the rest of /private denied.
     '(allow file-read-metadata (literal "/private/var/select/sh"))',
+    // LibreSSL, behind /usr/bin/curl and /usr/bin/openssl, reads
+    // /private/etc/ssl/openssl.cnf at startup. With it denied, curl printed
+    // "Auto configuration failed" and exited before opening a socket. The
+    // directory also holds the system CA bundle (cert.pem, certs/) that a
+    // client without its own trust store verifies against. It holds public
+    // configuration and certificates only, never keys. Allowed in both
+    // egress modes so that an offline launch fails at the socket, where the
+    // policy is meant to stop it, not earlier. This rule follows the
+    // `/private` denial, because Seatbelt applies the last matching rule. It
+    // precedes a caller's own denials, so a caller can still deny it.
+    seatbeltAllowRule("file-read*", "/private/etc/ssl"),
     ...denyReadPaths.map((path) => seatbeltDenyRule("file-read*", path)),
     ...privateRules,
     // The launch roots are re-allowed under every denial above, `file-read*`

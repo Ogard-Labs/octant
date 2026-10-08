@@ -1,6 +1,17 @@
+import { execFileSync } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { readdir } from "node:fs/promises";
-import { mkdtempSync, mkdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { createServer as createHttpsServer } from "node:https";
+import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
@@ -200,6 +211,78 @@ describe("RepositoryTestProcessPort", () => {
     ).resolves.toMatchObject({ termination: "unavailable" });
     expect(linuxSpawn).not.toHaveBeenCalled();
   });
+
+  it.skipIf(process.platform !== "darwin")(
+    "lets a confined HTTPS client load the system TLS configuration, and reach the network only when allowed",
+    async () => {
+      const cwd = realpathSync(temporaryDirectory());
+      execFileSync(
+        "/usr/bin/openssl",
+        [
+          "req",
+          "-x509",
+          "-newkey",
+          "rsa:2048",
+          "-nodes",
+          "-days",
+          "1",
+          "-subj",
+          "/CN=127.0.0.1",
+          "-addext",
+          "subjectAltName=IP:127.0.0.1",
+          "-keyout",
+          join(cwd, "key.pem"),
+          "-out",
+          join(cwd, "cert.pem"),
+        ],
+        { stdio: "ignore" },
+      );
+      let connections = 0;
+      const server = createHttpsServer(
+        { key: readFileSync(join(cwd, "key.pem")), cert: readFileSync(join(cwd, "cert.pem")) },
+        (_request, response) => response.end("tls-reached"),
+      );
+      server.on("connection", () => {
+        connections += 1;
+      });
+      await new Promise<void>((done) => server.listen(0, "127.0.0.1", () => done()));
+      try {
+        const port = (server.address() as AddressInfo).port;
+        const argv = [
+          "/usr/bin/curl",
+          "--silent",
+          "--show-error",
+          "--max-time",
+          "5",
+          "--cacert",
+          join(cwd, "cert.pem"),
+          `https://127.0.0.1:${port}/`,
+        ];
+        const launch = (networkEgress: "allow" | "none") =>
+          new RepositoryTestProcessPort({
+            temporaryDirectory: realpathSync(temporaryDirectory()),
+            receiptDirectory: temporaryDirectory(),
+            networkEgress,
+          }).execute({ argv, cwd, environment: {}, timeoutMs: 10_000 });
+
+        const offline = await launch("none");
+        const offlineError = new TextDecoder().decode(offline.stderr);
+        // It must fail at the socket, not before it: a client that cannot
+        // read its TLS configuration never tries to connect at all.
+        expect(offlineError).not.toContain("openssl.cnf");
+        expect(offline.exitCode).not.toBe(0);
+        expect(connections).toBe(0);
+
+        const networked = await launch("allow");
+        expect(new TextDecoder().decode(networked.stderr)).not.toContain("openssl.cnf");
+        expect(networked).toMatchObject({ termination: "exited", exitCode: 0 });
+        expect(new TextDecoder().decode(networked.stdout)).toBe("tls-reached");
+        expect(connections).toBe(1);
+      } finally {
+        await new Promise<void>((done) => server.close(() => done()));
+      }
+    },
+  );
 
   it.skipIf(process.platform !== "darwin")(
     "runs system executables from /bin and /usr/bin without exposing another directory",
