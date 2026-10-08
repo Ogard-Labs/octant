@@ -592,6 +592,22 @@ export class AndroidToolchainService {
         return deniedEvidence(request, "invalid-destination", startedAt, this.#options.now());
       }
       const result = await this.#command(argv, context, request.timeoutMs, signal);
+      if (lostServerMidCommand(result)) {
+        // The device may already have acted, so this is not a failure to
+        // retry: a retried type-text typed its text twice.
+        return await this.#logged(
+          request,
+          "interrupted",
+          startedAt,
+          [
+            {
+              severity: "note",
+              message: `${request.kind} may have reached the emulator; adb lost its server before the device answered`,
+            },
+          ],
+          "complete",
+        );
+      }
       const note = succeeded(result)
         ? redactedAndroidInputDiagnostic(request)
         : { severity: "note" as const, message: `${request.kind} ${outcomeFor(result)}` };
@@ -653,7 +669,7 @@ export class AndroidToolchainService {
 
   async #discoverSdk(): Promise<AndroidSdkDiscovery> {
     const env = this.#options.environment?.() ?? process.env;
-    const home = env.ANDROID_HOME ?? env.ANDROID_SDK_ROOT ?? defaultSdkHome();
+    const home = env.ANDROID_HOME ?? env.ANDROID_SDK_ROOT ?? (await this.#installedSdkHome());
     const emulatorPath = home === undefined ? undefined : join(home, "emulator", "emulator");
     const adbPath = home === undefined ? undefined : join(home, "platform-tools", "adb");
     const emulatorOk = emulatorPath !== undefined && (await this.#exists(emulatorPath));
@@ -666,6 +682,14 @@ export class AndroidToolchainService {
       available: emulatorOk && adbOk,
       discoveredAt: this.#options.now(),
     });
+  }
+
+  async #installedSdkHome(): Promise<string | undefined> {
+    const candidates = defaultSdkHomes();
+    for (const candidate of candidates) {
+      if (await this.#exists(join(candidate, "platform-tools", "adb"))) return candidate;
+    }
+    return candidates[0];
   }
 
   async #exists(path: string): Promise<boolean> {
@@ -1136,13 +1160,30 @@ function androidEnv(
     next.ANDROID_HOME = sdk.sdkRoot;
     next.ANDROID_SDK_ROOT = sdk.sdkRoot;
   }
+  // Whichever adb client finds no server running forks the shared one, and that
+  // server inherits this environment. With mDNS discovery on, adb 37's server
+  // aborts about two seconds after it starts on macOS 27 (a Rust panic in its
+  // mDNS network watcher), so every command restarted it, the emulator dropped
+  // to `offline`, input took seconds to land, and a command whose server died
+  // mid-flight exited 255 after the device had already acted. Octant reaches
+  // emulators over adb's local transport and never uses wireless discovery.
+  next.ADB_MDNS = "0";
   return next;
 }
 
-function defaultSdkHome(): string | undefined {
-  const mac = join(homedir(), "Library", "Android", "sdk");
-  const linux = join(homedir(), "Android", "Sdk");
-  return process.platform === "darwin" ? mac : linux;
+/**
+ * Where an SDK lives when neither `ANDROID_HOME` nor `ANDROID_SDK_ROOT` says.
+ * Android Studio installs under the home directory; the Homebrew
+ * `android-commandlinetools` cask installs under the Homebrew prefix, and an
+ * app launched from Finder never sees the shell profile that would export it.
+ */
+function defaultSdkHomes(): ReadonlyArray<string> {
+  if (process.platform !== "darwin") return [join(homedir(), "Android", "Sdk")];
+  return [
+    join(homedir(), "Library", "Android", "sdk"),
+    "/opt/homebrew/share/android-commandlinetools",
+    "/usr/local/share/android-commandlinetools",
+  ];
 }
 
 function parseAdbDevices(output: string): ReadonlyArray<string> {
@@ -1234,6 +1275,24 @@ function stepFor(kind: AndroidEmulatorRequest["kind"]): AndroidActionProgress["s
 
 function succeeded(result: AndroidProcessResult): boolean {
   return result.termination === "exited" && result.exitCode === 0 && !result.cleanupUncertain;
+}
+
+/**
+ * Whether an `adb shell` command exited without either side saying why. A
+ * client that never reached the device names the reason (`adb: device
+ * offline`, `device 'emulator-5554' not found`, `cannot connect to daemon`),
+ * and a device-side failure prints its exception; when the server dies after
+ * the command was handed to the device, the client exits 255 with only adb's
+ * own `* daemon …` start notices on stderr.
+ */
+function lostServerMidCommand(result: AndroidProcessResult): boolean {
+  if (result.termination !== "exited" || result.exitCode === 0 || result.exitCode === null) {
+    return false;
+  }
+  if (result.cleanupUncertain) return false;
+  return text(result.stderr)
+    .split(/\r?\n/)
+    .every((line) => line.trim() === "" || line.startsWith("* "));
 }
 
 function outcomeFor(result: AndroidProcessResult): AndroidEmulatorEvidence["outcome"] {

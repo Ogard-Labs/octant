@@ -543,6 +543,17 @@ capture launch re-allows it through its own write root
 An Android emulator is a separate dock destination and `octant_android` tool,
 not an iOS helper feature
 ([decisions/0153-android-emulator-is-a-separate-device-destination.md](decisions/0153-android-emulator-is-a-separate-device-destination.md)).
+Android commands are one-shot `adb` clients. The shared `adb` server that a
+client forks puts itself in its own session, so Octant's group cleanup of a
+finished command never reaches it, and Octant never stops a server. Each
+client runs with `ADB_MDNS=0`: a server started with mDNS discovery on aborts
+within seconds on macOS 27, and every later command then restarts it while the
+emulator reconnects as `offline`. An input whose client exits non-zero with
+neither a client nor a device message lost its server after handing the
+command over. It is reported `interrupted` (delivery unknown), not `failed`,
+so a retry cannot type the same text twice. With no `ANDROID_HOME` or
+`ANDROID_SDK_ROOT`, SDK discovery tries the Android Studio home location and
+then the Homebrew `android-commandlinetools` prefixes.
 Tap, typed text,
 and hardware-key input ride the same Apple workbench control channel as boot
 and screenshot, with XCTest-less host injection behind that channel only,
