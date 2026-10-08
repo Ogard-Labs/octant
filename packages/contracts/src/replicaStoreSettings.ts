@@ -50,6 +50,19 @@ function isLinkLocalHost(hostname: string): boolean {
   return /^::ffff:a9fe:[0-9a-f]{1,4}$/.test(address);
 }
 
+/**
+ * Whether an endpoint names its host by IP address. The URL parser has already
+ * normalized IPv4 shorthand to a dotted quad and bracketed IPv6.
+ */
+function isIpAddressEndpoint(endpoint: string): boolean {
+  try {
+    const hostname = new URL(endpoint).hostname;
+    return hostname.startsWith("[") || /^\d{1,3}(\.\d{1,3}){3}$/.test(hostname);
+  } catch {
+    return false;
+  }
+}
+
 function isHttpsOrigin(value: string): boolean {
   let url: URL;
   try {
@@ -139,6 +152,16 @@ export const ReplicaStoreS3Settings = Schema.Struct({
       (settings) =>
         settings.addressing === "path" || /^[a-z0-9][a-z0-9.-]*[a-z0-9]$/.test(settings.bucket),
       { message: () => "A virtual-host bucket name must be lowercase and DNS-safe." },
+    ),
+    // Prefixing an IP address with the bucket gives `bucket.10.0.0.5` or
+    // `bucket.[::1]`, which no resolver answers, so Test connection would only
+    // say unreachable without naming the addressing choice as the cause.
+    Schema.filter(
+      (settings) => settings.addressing === "path" || !isIpAddressEndpoint(settings.endpoint),
+      {
+        message: () =>
+          "Virtual-host addressing needs an endpoint with a DNS name, not an IP address.",
+      },
     ),
   );
 export type ReplicaStoreS3Settings = typeof ReplicaStoreS3Settings.Type;

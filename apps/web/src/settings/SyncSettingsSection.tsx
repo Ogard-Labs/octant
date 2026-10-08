@@ -288,7 +288,11 @@ export function SyncSettingsSection(props: SyncSettingsSectionProps) {
               describedBy={factId}
               disabled={switchDisabled}
               disabledReason={
-                store.kind === "s3" ? "Save the access key first." : "Choose a store first."
+                draftKind === "s3"
+                  ? "Save the bucket and its access key first."
+                  : draftKind === "synced-folder"
+                    ? "Choose a folder first."
+                    : "Choose a store first."
               }
               label="Sync artifacts"
               onCheckedChange={(syncOn) =>
@@ -452,7 +456,7 @@ function BucketForm(props: {
       });
     } catch {
       setProblem(
-        "Check the region, bucket, and prefix. A virtual-host bucket name must be lowercase.",
+        "Check the region, bucket, and prefix. Virtual-host addressing needs a lowercase bucket name and an endpoint with a DNS name, not an IP address.",
       );
       return;
     }

@@ -80,6 +80,7 @@ describe("SyncSettingsSection", () => {
     expect(toggle).not.toBeChecked();
     // The switch recipe marks itself disabled with aria-disabled, not the attribute.
     expect(toggle).toHaveAttribute("aria-disabled", "true");
+    expect(toggle).toHaveAttribute("aria-description", "Choose a store first.");
     const fact = screen.getByText(SYNC_PROVIDER_FACT);
     expect(fact).toBeVisible();
     expect(toggle).toHaveAttribute("aria-describedby", fact.id);
@@ -123,6 +124,10 @@ describe("SyncSettingsSection", () => {
 
     await user.click(await screen.findByRole("combobox", { name: "Store" }));
     await user.click(await screen.findByRole("option", { name: "Synced folder" }));
+    expect(screen.getByRole("switch", { name: "Sync artifacts" })).toHaveAttribute(
+      "aria-description",
+      "Choose a folder first.",
+    );
     await user.click(screen.getByRole("button", { name: "Choose folder…" }));
     await user.click(await screen.findByRole("button", { name: "Select" }));
 

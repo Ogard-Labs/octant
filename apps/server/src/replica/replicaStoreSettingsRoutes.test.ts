@@ -192,6 +192,19 @@ describe("replica store settings routes", () => {
     expect(await response?.json()).toEqual(view);
   });
 
+  it("reads the view for the packaged renderer, whose file page sends an opaque origin", async () => {
+    const { route } = handler();
+    const response = await route(
+      localWindow(
+        new Request("http://127.0.0.1:13773/api/replica-store/settings", {
+          headers: { origin: "null", "x-octant-window-capability": "capability" },
+        }),
+      ),
+    );
+    expect(response?.status).toBe(200);
+    expect(response?.headers.get("access-control-allow-origin")).toBe("null");
+  });
+
   it("resolves a chosen folder from this window's browser candidate, never from a path", async () => {
     const { route, calls, resolved } = handler();
     const response = await route(

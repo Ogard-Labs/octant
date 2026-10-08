@@ -10011,6 +10011,9 @@ export function startOctantServer(
       windowAuthorityStore,
       resolveFolderCandidate: (windowId, input) =>
         folderBrowseService.resolveCandidate(windowId, input),
+      ...(options.allowedRendererHttpOrigin === undefined
+        ? {}
+        : { allowedRendererHttpOrigin: options.allowedRendererHttpOrigin }),
     });
     const replicaMembershipService = new ReplicaMembershipService({
       store: () => replicaStoreSettingsService.selection(),

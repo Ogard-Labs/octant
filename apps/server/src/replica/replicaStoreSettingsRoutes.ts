@@ -21,7 +21,7 @@ import {
   type ReplicaStoreSettingsResult,
 } from "@octant/contracts/replica-store-settings";
 import { authenticateRoutePrincipal } from "../principalRouteContext";
-import { isLoopbackHostname } from "../shellRoutes";
+import { isAllowedRendererOrigin, isLoopbackHostname } from "../shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "../windowAuthorityStore";
 import {
   replicaStoreRefusal,
@@ -47,6 +47,8 @@ export interface ReplicaStoreSettingsRouteDependencies {
    * this window. A renderer never names a path; it names a candidate.
    */
   readonly resolveFolderCandidate: (windowId: WindowId, input: unknown) => Promise<string>;
+  /** The development renderer origin, or null when the packaged file renderer is in use. */
+  readonly allowedRendererHttpOrigin?: string | null;
   readonly maxJsonBodySize?: number;
   readonly now?: () => number;
 }
@@ -64,7 +66,10 @@ export function createReplicaStoreSettingsRouteHandler(
     if (!isLoopbackHostname(url.hostname)) {
       return failure("Sync settings requests must use loopback.", 400, null);
     }
-    if (origin !== null && !isAllowedOrigin(origin)) {
+    if (
+      origin !== null &&
+      !isAllowedRendererOrigin(origin, dependencies.allowedRendererHttpOrigin)
+    ) {
       return failure("Renderer origin is not allowed.", 400, null);
     }
     if (request.method === "OPTIONS") {
@@ -193,16 +198,4 @@ function json(body: unknown, origin: string | null): Response {
 
 function failure(message: string, status: number, origin: string | null): Response {
   return Response.json({ message }, { status, headers: corsHeaders(origin) });
-}
-
-function isAllowedOrigin(origin: string): boolean {
-  try {
-    const parsed = new URL(origin);
-    return (
-      (parsed.protocol === "http:" && isLoopbackHostname(parsed.hostname)) ||
-      parsed.protocol === "app:"
-    );
-  } catch {
-    return false;
-  }
 }

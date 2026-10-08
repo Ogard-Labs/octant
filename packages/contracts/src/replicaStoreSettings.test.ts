@@ -111,6 +111,24 @@ describe("replica store settings contracts", () => {
     ).toBe("Octant_Sync");
   });
 
+  it("refuses virtual-host addressing against an IP-address endpoint, which has no host to prefix", () => {
+    for (const endpoint of ["https://10.0.0.5", "https://127.0.0.1:9000", "https://[::1]:9000"]) {
+      expect(() =>
+        decodeReplicaStoreS3Settings({ ...bucket, endpoint, addressing: "virtual-host" }),
+      ).toThrow("Virtual-host addressing needs an endpoint with a DNS name, not an IP address.");
+      expect(
+        decodeReplicaStoreS3Settings({ ...bucket, endpoint, addressing: "path" }).endpoint,
+      ).toBe(endpoint);
+    }
+    expect(
+      decodeReplicaStoreS3Settings({
+        ...bucket,
+        endpoint: "https://minio.local",
+        addressing: "virtual-host",
+      }).addressing,
+    ).toBe("virtual-host");
+  });
+
   it("refuses a prefix that climbs out of the bucket", () => {
     expect(() => decodeReplicaStoreS3Settings({ ...bucket, prefix: "../other" })).toThrow();
   });

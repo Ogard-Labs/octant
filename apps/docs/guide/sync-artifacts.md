@@ -84,7 +84,8 @@ the mirror folder is not this sync.
 
 An S3-compatible bucket needs its endpoint address, region, bucket name, an
 optional folder prefix, and whether the provider uses path-style or
-virtual-host addressing. The access key and secret are kept in your computer's
+virtual-host addressing. Virtual-host addressing needs an endpoint with a DNS
+name; use path-style for an endpoint written as an IP address. The access key and secret are kept in your computer's
 Keychain (macOS, under the service `app.octant.replica-store-credentials.v1`)
 or Secret Service (Linux, under the service attribute
 `octant.replica-store-credentials.v1`). Your model provider credentials and
