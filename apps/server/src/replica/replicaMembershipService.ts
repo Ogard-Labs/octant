@@ -167,16 +167,20 @@ type LocalPublish<E extends ReplicaMembershipEntry> =
   | { readonly status: "published"; readonly entry: E }
   | { readonly status: "stopped"; readonly outcome: ReplicaMembershipOutcome };
 
+interface Slot {
+  readonly instanceId: ReplicaInstanceId;
+  readonly sequence: number;
+}
+
 type PullRead =
   | { readonly status: "unavailable" }
   | {
       readonly status: "read";
       readonly applied: number;
       readonly refused: ReadonlyArray<ReplicaReadRefusal>;
-      readonly held: ReadonlyArray<{
-        readonly instanceId: ReplicaInstanceId;
-        readonly sequence: number;
-      }>;
+      readonly held: ReadonlyArray<Slot>;
+      /** Every valid artifact entry this read met, counted or not. */
+      readonly artifacts: ReadonlyArray<Slot>;
     };
 
 export class ReplicaMembershipService {
@@ -558,8 +562,15 @@ export class ReplicaMembershipService {
     return {
       kind: "revoke-preview",
       subject,
-      cut: state.heldSequence(subject),
+      cut: checked.highestSigned(subject),
       broughtIn: broughtIn(state, subject),
+      subjectRevocations: state.records
+        .flatMap(({ entry }) =>
+          entry.kind === "revocation" && same(entry.origin.instanceId, subject)
+            ? [{ sequence: entry.origin.sequence, subject: entry.subject, cut: entry.cut }]
+            : [],
+        )
+        .sort((left, right) => left.sequence - right.sequence),
       readStore: checked.readStore,
     };
   }
@@ -567,7 +578,12 @@ export class ReplicaMembershipService {
   /**
    * Revoke a computer this one brought in, directly or through others. The
    * store is read first, so the cut keeps what the revoked computer signed
-   * that this one had not read yet; a person can only move the cut earlier.
+   * that this one had not read yet, artifact entries included; a person can
+   * only move the cut earlier.
+   *
+   * Each revocation is its own publish. When the subject's lands and a later
+   * one stops, the outcome names what landed and what did not, so nothing
+   * the person asked for is dropped without saying so.
    */
   async #revoke(
     store: ReplicaStore,
@@ -579,12 +595,12 @@ export class ReplicaMembershipService {
     if (checked.status === "refused") return checked.outcome;
     const state = this.#ports.state();
     const local = checked.local;
-    const held = state.heldSequence(subject);
-    if (requestedCut !== undefined && requestedCut > held) {
+    const highest = checked.highestSigned(subject);
+    if (requestedCut !== undefined && requestedCut > highest) {
       return this.#refuse(
         "revoke",
         "invalid-cut",
-        "A cut can only fall at or before the last entry of that computer this one holds.",
+        "A cut can only fall at or before the last signed entry of that computer this one read.",
         subject,
       );
     }
@@ -612,11 +628,11 @@ export class ReplicaMembershipService {
       }
     }
     const targets = [
-      { subject, cut: requestedCut ?? held },
-      ...alsoRevoke.map((other) => ({ subject: other, cut: state.heldSequence(other) })),
+      { subject, cut: requestedCut ?? highest },
+      ...alsoRevoke.map((other) => ({ subject: other, cut: checked.highestSigned(other) })),
     ];
     const entries: ReplicaRevocationEntry[] = [];
-    for (const target of targets) {
+    for (const [index, target] of targets.entries()) {
       const publish = await this.#publishLocal(store, "revoke", local, (origin) =>
         decodeReplicaMembershipEntry({
           format: REPLICA_ENTRY_FORMAT,
@@ -626,7 +642,22 @@ export class ReplicaMembershipService {
           cut: target.cut,
         }),
       );
-      if (publish.status === "stopped") return publish.outcome;
+      if (publish.status === "stopped") {
+        const [first, ...alsoRevoked] = entries;
+        if (first === undefined) return publish.outcome;
+        return {
+          kind: "revoked-in-part",
+          subject,
+          entry: first,
+          alsoRevoked,
+          notRevoked: targets.slice(index).map((rest) => rest.subject),
+          message:
+            publish.outcome.kind === "refused" || publish.outcome.kind === "store-failed"
+              ? publish.outcome.message
+              : "The revocation could not be published.",
+          readStore: checked.readStore,
+        };
+      }
       if (publish.entry.kind !== "revocation")
         throw new Error("A revocation decoded as another kind.");
       entries.push(publish.entry);
@@ -646,6 +677,12 @@ export class ReplicaMembershipService {
         readonly status: "ready";
         readonly local: ReplicaLocalIdentity;
         readonly readStore: boolean;
+        /**
+         * The highest sequence of an instance's valid signed entries this
+         * host holds or just read, artifact entries included: the default
+         * cut, and the latest a requested cut may fall.
+         */
+        readonly highestSigned: (instanceId: ReplicaInstanceId) => number;
       }
   > {
     const local = this.#ports.state().local;
@@ -678,7 +715,18 @@ export class ReplicaMembershipService {
         outcome: this.#refuse(command, decision.reason, messages[decision.reason], subject),
       };
     }
-    return { status: "ready", local, readStore: pulled.status === "read" };
+    const artifacts = pulled.status === "read" ? pulled.artifacts : [];
+    return {
+      status: "ready",
+      local,
+      readStore: pulled.status === "read",
+      highestSigned: (instanceId) =>
+        artifacts.reduce(
+          (highest, slot) =>
+            same(slot.instanceId, instanceId) ? Math.max(highest, slot.sequence) : highest,
+          state.heldSequence(instanceId),
+        ),
+    };
   }
 
   async #pull(store: ReplicaStore): Promise<ReplicaMembershipOutcome> {
@@ -723,8 +771,7 @@ export class ReplicaMembershipService {
     if (listing === undefined) return { status: "unavailable" };
     let applied = 0;
     const refused: ReplicaReadRefusal[] = [];
-    const artifacts: Array<{ readonly instanceId: ReplicaInstanceId; readonly sequence: number }> =
-      [];
+    const artifacts: Slot[] = [];
     for (const [id, sequences] of [...listing].sort(([left], [right]) =>
       left < right ? -1 : left > right ? 1 : 0,
     )) {
@@ -748,7 +795,7 @@ export class ReplicaMembershipService {
       }
     }
     const membership = this.#ports.state().membership;
-    const held: Array<{ readonly instanceId: ReplicaInstanceId; readonly sequence: number }> = [];
+    const held: Slot[] = [];
     for (const artifact of artifacts) {
       if (replicaEntryCounts(membership, artifact.instanceId, artifact.sequence)) {
         held.push(artifact);
@@ -760,7 +807,7 @@ export class ReplicaMembershipService {
         reason: node?.admitted === true ? "revoked-instance" : "unknown-instance",
       });
     }
-    return { status: "read", applied, refused, held };
+    return { status: "read", applied, refused, held, artifacts };
   }
 
   async #listInstances(
@@ -1124,6 +1171,10 @@ function broughtIn(
           },
         ],
   );
+}
+
+function same(left: ReplicaInstanceId, right: ReplicaInstanceId): boolean {
+  return String(left) === String(right);
 }
 
 function sha256Hex(bytes: Uint8Array): string {

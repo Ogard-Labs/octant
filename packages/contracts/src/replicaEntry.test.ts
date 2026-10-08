@@ -9,6 +9,7 @@ import {
   decodeReplicaEntry,
   decodeReplicaArtifactEntry,
   decodeReplicaMembershipEntry,
+  decodeReplicaMembershipResult,
   decodeReplicaEntryText,
   encodeReplicaEntry,
   replicaEntryContentPreimage,
@@ -354,6 +355,48 @@ describe("replica entry contract", () => {
     const encoded = JSON.parse(encodeReplicaEntry(entry())) as Record<string, unknown>;
     expect(() =>
       decodeReplicaEntryText(JSON.stringify({ ...encoded, format: "octant.replica-entry/1" })),
+    ).toThrow();
+  });
+});
+
+describe("replica membership results", () => {
+  const revocation = (subject: string, sequence: number) => ({
+    format: REPLICA_ENTRY_FORMAT,
+    kind: "revocation",
+    origin: origin(sequence),
+    subject,
+    cut: 2,
+  });
+
+  it("names the computers a revoke left unrevoked, and refuses a partial revoke that names none", () => {
+    const partial = {
+      kind: "revoked-in-part",
+      subject: ids.version,
+      entry: revocation(ids.version, 3),
+      alsoRevoked: [],
+      notRevoked: [ids.otherVersion],
+      message: "The replica store did not take the entry.",
+      readStore: true,
+    };
+    expect(decodeReplicaMembershipResult(partial)).toMatchObject({
+      kind: "revoked-in-part",
+      notRevoked: [ids.otherVersion],
+    });
+    expect(() => decodeReplicaMembershipResult({ ...partial, notRevoked: [] })).toThrow();
+  });
+
+  it("carries the revocations a preview's subject already wrote, each at its sequence", () => {
+    const preview = {
+      kind: "revoke-preview",
+      subject: ids.version,
+      cut: 4,
+      broughtIn: [],
+      subjectRevocations: [{ sequence: 3, subject: ids.otherVersion, cut: 2 }],
+      readStore: true,
+    };
+    expect(decodeReplicaMembershipResult(preview)).toMatchObject(preview);
+    expect(() =>
+      decodeReplicaMembershipResult({ ...preview, subjectRevocations: undefined }),
     ).toThrow();
   });
 });

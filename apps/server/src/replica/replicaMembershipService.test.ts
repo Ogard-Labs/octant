@@ -6,14 +6,16 @@ import { Schema } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
 import type { CredentialStore } from "@octant/host-runtime";
 import {
+  ARTIFACT_BUNDLE_FORMAT,
   LOCAL_HOST_ID,
   REPLICA_ENTRY_FORMAT,
   ReplayCursor,
+  decodeReplicaArtifactEntry,
   decodeReplicaMembershipEntry,
   encodeReplicaEntry,
   type ReplicaInstanceId,
   type ReplicaJoinRequestEntry,
-  type ReplicaMembershipEntry,
+  type ReplicaEntry,
   type ReplicaMembershipResult,
 } from "@octant/contracts";
 import { REPLICA_JOIN_REQUEST_TTL_MS } from "@octant/domain/replica-membership-policy";
@@ -277,7 +279,7 @@ function cutOf(host: Computer, id: ReplicaInstanceId): number | undefined {
 async function writeRecord(
   store: MemoryStore,
   credentials: CredentialStore,
-  entry: ReplicaMembershipEntry,
+  entry: ReplicaEntry,
 ): Promise<string> {
   const bytes = new TextEncoder().encode(encodeReplicaEntry(entry));
   const { signature } = await makeReplicaDeviceSigner(credentials, entry.origin.instanceId).sign(
@@ -287,6 +289,48 @@ async function writeRecord(
   store.files.set(`${path}.json`, bytes);
   store.files.set(`${path}.sig`, new TextEncoder().encode(signature));
   return createHash("sha256").update(bytes).digest("hex");
+}
+
+/** A valid artifact version entry the host signs at `sequence`; artifact import is not built. */
+function artifactEntry(host: Computer, sequence: number): ReplicaEntry {
+  const createdAt = NOW_ISO;
+  return decodeReplicaArtifactEntry({
+    format: REPLICA_ENTRY_FORMAT,
+    kind: "artifact-version",
+    origin: originOf(host, sequence),
+    artifact: { canvasId: "11111111-1111-4111-8111-111111111111", hostId: "host-south" },
+    parents: [],
+    contentHash: "a".repeat(64),
+    bundle: {
+      octant: {
+        format: ARTIFACT_BUNDLE_FORMAT,
+        canvasId: "11111111-1111-4111-8111-111111111111",
+        versionId: "22222222-2222-4222-8222-222222222222",
+        sequence: 1,
+        title: "Launch plan",
+        mode: "work",
+        projectId: "55555555-5555-4555-8555-555555555555",
+        hostId: "host-south",
+        createdAt,
+      },
+      definition: {
+        schemaVersion: 1,
+        title: "Launch plan",
+        provenance: {
+          hostId: "host-south",
+          projectId: "55555555-5555-4555-8555-555555555555",
+          actor: { kind: "system", actorId: "88888888-8888-4888-8888-888888888888" },
+          providerInstanceId: "77777777-7777-4777-8777-777777777777",
+          modelId: "octant-test-model",
+          createdAt,
+          mode: "work",
+          threadId: "66666666-6666-4666-8666-666666666666",
+        },
+        sourceManifest: [],
+        blocks: [{ blockId: "t1", schemaVersion: 1, kind: "rich-text", text: "Ship it." }],
+      },
+    },
+  });
 }
 
 function originOf(host: Computer, sequence: number) {
@@ -524,6 +568,79 @@ describe("replica membership service", () => {
     expect(
       await north.service.execute({ kind: "revoke", subject: west.id(), alsoRevoke: [other.id()] }),
     ).toMatchObject({ kind: "refused", reason: "not-a-descendant" });
+  });
+
+  it("cuts by default at the revoked computer's last signed entry, an artifact entry included", async () => {
+    const store = memoryStore();
+    const { north, south } = await joinedPair(store);
+    // South's sequence 3 is an artifact version, which no host holds yet.
+    await writeRecord(store, south.credentials, artifactEntry(south, 3));
+    const preview = expectKind(
+      await north.service.execute({ kind: "revoke-preview", subject: south.id() }),
+      "revoke-preview",
+    );
+    expect(preview.cut).toBe(3);
+    expect(north.projection.state().heldSequence(south.id())).toBe(2);
+    expect(
+      await north.service.execute({ kind: "revoke", subject: south.id(), cut: 4 }),
+    ).toMatchObject({ kind: "refused", reason: "invalid-cut" });
+    const revoked = expectKind(
+      await north.service.execute({ kind: "revoke", subject: south.id() }),
+      "revoked",
+    );
+    expect(revoked.entry.cut).toBe(3);
+  });
+
+  it("shows the revocations a computer already wrote, so its cut can move before them", async () => {
+    const store = memoryStore();
+    const { north, south } = await joinedPair(store);
+    const east = computer({ store: selected(store) });
+    await joinThrough(east, south, "Studio");
+    const southRevokes = expectKind(
+      await south.service.execute({ kind: "revoke", subject: east.id() }),
+      "revoked",
+    );
+    const preview = expectKind(
+      await north.service.execute({ kind: "revoke-preview", subject: south.id() }),
+      "revoke-preview",
+    );
+    expect(preview.subjectRevocations).toEqual([
+      { sequence: southRevokes.entry.origin.sequence, subject: east.id(), cut: 2 },
+    ]);
+    expectKind(
+      await north.service.execute({
+        kind: "revoke",
+        subject: south.id(),
+        cut: southRevokes.entry.origin.sequence - 1,
+      }),
+      "revoked",
+    );
+    expect(cutOf(north, east.id())).toBeUndefined();
+  });
+
+  it("says which revocations landed when a later one in the same step stops", async () => {
+    const store = memoryStore();
+    const { north, south } = await joinedPair(store);
+    const east = computer({ store: selected(store) });
+    const west = computer({ store: selected(store) });
+    await joinThrough(east, south, "Studio");
+    await joinThrough(west, south, "Laptop");
+    await north.service.execute({ kind: "pull" });
+    const next = north.projection.state().localSequence + 1;
+    store.failNextPut = `${north.id()}/${next + 1}.json`;
+    const outcome = expectKind(
+      await north.service.execute({
+        kind: "revoke",
+        subject: south.id(),
+        alsoRevoke: [east.id(), west.id()],
+      }),
+      "revoked-in-part",
+    );
+    expect(outcome.entry.subject).toBe(south.id());
+    expect(outcome.alsoRevoked).toEqual([]);
+    expect(outcome.notRevoked).toEqual([east.id(), west.id()]);
+    expect(cutOf(north, south.id())).toBeDefined();
+    expect(cutOf(north, east.id())).toBeUndefined();
   });
 
   it("lets a person move the cut earlier, which removes what the revoked computer approved after it", async () => {

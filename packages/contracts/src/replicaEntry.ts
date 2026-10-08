@@ -471,6 +471,14 @@ export const ReplicaBroughtIn = Schema.Struct({
 }).annotations(strict);
 export type ReplicaBroughtIn = typeof ReplicaBroughtIn.Type;
 
+/** A revocation the subject of a revoke preview wrote, at its own sequence. */
+export const ReplicaSubjectRevocation = Schema.Struct({
+  sequence: PositiveInt,
+  subject: ReplicaInstanceId,
+  cut: Schema.Int.pipe(Schema.nonNegative()),
+}).annotations(strict);
+export type ReplicaSubjectRevocation = typeof ReplicaSubjectRevocation.Type;
+
 export const ReplicaMembershipResult = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("replica-created"),
@@ -490,9 +498,18 @@ export const ReplicaMembershipResult = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("revoke-preview"),
     subject: ReplicaInstanceId,
-    /** The cut a revoke without one would take now. */
+    /**
+     * The cut a revoke without one would take now: the highest sequence of
+     * the subject's valid signed entries this host read, artifact entries
+     * included.
+     */
     cut: Schema.Int.pipe(Schema.nonNegative()),
     broughtIn: Schema.Array(ReplicaBroughtIn),
+    /**
+     * Revocations the subject itself already wrote, each at its sequence, so
+     * the person can move the cut before one of them.
+     */
+    subjectRevocations: Schema.Array(ReplicaSubjectRevocation),
     /** False when the store could not be read first, so the cut is what this computer already holds. */
     readStore: Schema.Boolean,
   }).annotations(strict),
@@ -502,6 +519,21 @@ export const ReplicaMembershipResult = Schema.Union(
     entry: ReplicaRevocationEntry,
     alsoRevoked: Schema.Array(ReplicaRevocationEntry),
     /** False when the store could not be read first, so the cut is what this computer already holds. */
+    readStore: Schema.Boolean,
+  }).annotations(strict),
+  /**
+   * The subject's revocation was published but a later one in the same step
+   * stopped: `alsoRevoked` landed, `notRevoked` did not and needs another
+   * revoke.
+   */
+  Schema.Struct({
+    kind: Schema.Literal("revoked-in-part"),
+    subject: ReplicaInstanceId,
+    entry: ReplicaRevocationEntry,
+    alsoRevoked: Schema.Array(ReplicaRevocationEntry),
+    notRevoked: Schema.Array(ReplicaInstanceId).pipe(Schema.minItems(1)),
+    /** Why the publish stopped. */
+    message: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512)),
     readStore: Schema.Boolean,
   }).annotations(strict),
   Schema.Struct({
