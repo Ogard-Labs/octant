@@ -849,11 +849,13 @@ async function fetchSiwcJwks(
     // The cached key set is definitive when it names the wanted kid. When
     // it does not, only a refetch can tell issuer rotation from a key this
     // issuer never had; the floor keeps a burst of validations from
-    // hammering the issuer after a refetch already happened.
+    // hammering the issuer after a refetch already happened. Inside the
+    // floor the key was never checked against the issuer's current set, so
+    // it is unavailable rather than invalid: reading it as invalid deleted a
+    // grant whose refresh token the issuer had already rotated.
     const lastForced = cached.refetchedAt ?? 0;
-    if (cached.keys.has(wanted.kid) || now() - lastForced < SIWC_JWKS_REFETCH_MS) {
-      return { kind: "fetched", keys: cached.keys };
-    }
+    if (cached.keys.has(wanted.kid)) return { kind: "fetched", keys: cached.keys };
+    if (now() - lastForced < SIWC_JWKS_REFETCH_MS) return { kind: "unavailable" };
   }
   let response: Response;
   try {

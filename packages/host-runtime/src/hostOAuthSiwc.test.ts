@@ -1149,6 +1149,62 @@ describe("ChatGPT plan (SIWC) dialect", () => {
     }
   });
 
+  it("keeps a grant whose refresh names a key it cannot recheck because the JWKS was just refetched", async () => {
+    // Two grants refresh within the refetch floor while the issuer's key
+    // rotation is still propagating. The first refresh spends the refetch and
+    // the issuer still lacks the key; the second cannot ask again, so its
+    // token was never checked against the current key set and the grant, with
+    // its already-rotated refresh token, must survive.
+    const fake = await startFakeSiwcServer({ refreshIdToken: "rotated-key" });
+    const rotatedJwk = fake.rotatedJwk();
+    if (rotatedJwk === undefined) throw new Error("expected a rotated key pair");
+    let jwksFetches = 0;
+    const store = memoryStore();
+    const runtime = createHostOAuthRuntime({
+      store,
+      timeoutMs: 2_000,
+      siwcIssuer: fake.url,
+      fetch: async (input, init) => {
+        if (String(input) === `${fake.url}/.well-known/jwks.json`) jwksFetches += 1;
+        return fetch(input, init);
+      },
+    });
+    async function signIn(): Promise<string> {
+      const started = await runtime.begin({
+        descriptor: chatGptPlanDescriptor(`${fake.url}/authorize`, `${fake.url}/token`),
+        actorId: randomUUID(),
+        termsAcknowledgedAt: "2026-10-06T18:00:00.000Z",
+      });
+      if (started.kind !== "awaiting-consent" || started.flow !== "authorization-code-pkce") {
+        throw new Error("expected a PKCE attempt");
+      }
+      await fetch(started.authorizationUrl);
+      const done = await waitForState(() => runtime.status(started.attemptId), "signed-in");
+      if (done.kind !== "signed-in") throw new Error("expected a signed-in state");
+      const status = runtime.status(started.attemptId);
+      if (status.kind !== "signed-in") throw new Error("missing credential ref");
+      return status.credentialRef;
+    }
+    try {
+      const first = await signIn();
+      const second = await signIn();
+      const fetchesBefore = jwksFetches;
+      await runtime.refresh(first);
+      expect(jwksFetches).toBe(fetchesBefore + 1);
+
+      const outcome = await runtime.refresh(second);
+      expect(jwksFetches).toBe(fetchesBefore + 1);
+      expect(outcome.kind).not.toBe("refused");
+      expect(store.values.has(second)).toBe(true);
+      const stored = JSON.parse(store.values.get(second) ?? "{}") as Record<string, unknown>;
+      expect(stored.refreshToken).toBe("rotated-refresh-token");
+      expect(stored.subject).toBe(SUBJECT);
+    } finally {
+      await runtime.close();
+      await fake.close();
+    }
+  });
+
   it("reports the exchange refused as unavailable when the JWKS cannot be fetched", async () => {
     // A first sign-in whose identity token cannot be validated because the
     // JWKS is unreachable is retriable, not a refused code.
