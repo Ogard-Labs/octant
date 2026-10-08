@@ -1060,6 +1060,37 @@ describe("CanvasWorkspaceTab", () => {
     const changes = await screen.findByRole("region", { name: "Changes from v1 to v2" });
     expect(changes).toHaveTextContent("Title changed from “First draft”.");
   });
+
+  it("releases Compare when a version it was waiting for fails to load", async () => {
+    const olderVersionId = "45454545-4545-4545-8545-454545454545";
+    const get = vi.fn(async (_canvasId: unknown, versionId?: string) => {
+      if (versionId === olderVersionId) throw new Error("network down");
+      return readyVersion;
+    });
+    const client = createCanvasClient(readyVersion, twoVersionHistory(olderVersionId), {
+      get,
+    } as unknown as Partial<CanvasClient>);
+    const unhandled = (event: PromiseRejectionEvent) => event.preventDefault();
+    window.addEventListener("unhandledrejection", unhandled);
+    const swallow = (reason: unknown) => {
+      if (!(reason instanceof Error && reason.message === "network down")) throw reason;
+    };
+    process.on("unhandledRejection", swallow);
+    try {
+      render(<CanvasWorkspaceTab tab={canvasTab} client={client} />);
+      await screen.findByRole("heading", { name: "Signed Q3 report" });
+      await openVersionHistory();
+      fireEvent.click(await screen.findByTestId("canvas-version-1"));
+      await waitFor(() => expect(get).toHaveBeenCalledWith(quarterlyCanvasId, olderVersionId));
+      await openVersionHistory();
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "Compare with v1" })).toBeEnabled(),
+      );
+    } finally {
+      window.removeEventListener("unhandledrejection", unhandled);
+      process.off("unhandledRejection", swallow);
+    }
+  });
 });
 
 describe("CanvasWorkspaceTab in the narrow dock sheet", () => {

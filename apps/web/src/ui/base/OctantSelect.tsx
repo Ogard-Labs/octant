@@ -137,7 +137,8 @@ export function OctantSelectField(props: OctantSelectFieldProps) {
               props.className,
             )}
           >
-            {selectedOption?.label ?? props.placeholder}
+            {/* The same one-line ellipsis as the web trigger below. */}
+            <span className="min-w-0 truncate">{selectedOption?.label ?? props.placeholder}</span>
             <ChevronDown aria-hidden="true" size={16} />
           </OctantMenuTrigger>
           <OctantMenuPortal>

@@ -137,10 +137,18 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
       if (props.client === undefined) return;
       const current = (loadToken.current += 1);
       setLoading(true);
-      const outcome = await props.client.get(
-        props.tab.canvasId,
-        versionId === undefined ? undefined : versionId,
-      );
+      let outcome: Awaited<ReturnType<CanvasClient["get"]>>;
+      try {
+        outcome = await props.client.get(
+          props.tab.canvasId,
+          versionId === undefined ? undefined : versionId,
+        );
+      } catch (error) {
+        // A failed fetch leaves the Canvas on screen as it was, so Compare
+        // must not stay held for a version that will never arrive.
+        if (loadToken.current === current) setLoading(false);
+        throw error;
+      }
       if (loadToken.current !== current) return;
       setLoading(false);
       if (outcome.kind === "ready") {
