@@ -212,7 +212,9 @@ const SETUP_STEPS = ["xcode", "licence", "runtime", "project"] as const;
  * not been checked.
  */
 function appleSetup(props: AppleWorkbenchPaneProps): DeviceView {
-  const discovery = props.discovery;
+  // A step the host just named is the current answer; an earlier successful
+  // discovery is older than the failure and must not paint its rows as passing.
+  const discovery = props.errorStep === undefined ? props.discovery : undefined;
   const xcodeMissing =
     props.errorCategory === "xcode-not-found" ||
     discovery?.toolchain.available === false ||

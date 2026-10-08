@@ -499,6 +499,24 @@ describe("Apple setup checklist by failed step", () => {
     expect(row(screen, "Project found")).toHaveAttribute("data-state", "missing");
   });
 
+  it("lets a new failure override the discovery from before it", async () => {
+    const { render, screen } = await import("@testing-library/react");
+    render(
+      <AppleWorkbenchPane
+        discovery={discovery}
+        errorCategory="unavailable"
+        errorMessage="The Xcode licence has not been accepted on this host."
+        errorStep="licence"
+        onRetry={() => undefined}
+        onRun={() => undefined}
+        status="unavailable"
+        variant="device"
+      />,
+    );
+    expect(row(screen, "Xcode licence accepted")).toHaveAttribute("data-state", "missing");
+    expect(row(screen, "iOS Simulator runtime")).toHaveAttribute("data-state", "waiting");
+  });
+
   it("leaves every row unchecked when an older host names no step", async () => {
     const screen = await renderFailed();
     expect(row(screen, "Xcode licence accepted")).toHaveAttribute("data-state", "waiting");

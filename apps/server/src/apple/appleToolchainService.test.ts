@@ -377,6 +377,31 @@ describe("AppleToolchainService discovery", () => {
       expect(commands(execute)).not.toContain("xcodebuild -version");
     });
 
+    it("reports Command Line Tools alone as the Xcode step, not as an unaccepted licence", async () => {
+      const execute = failing(
+        "xcode-select -p",
+        processResult("/Library/Developer/CommandLineTools\n"),
+      );
+
+      await expect(discoverWith(execute)).resolves.toMatchObject({
+        kind: "failure",
+        failure: { category: "unavailable", step: "xcode" },
+      });
+      expect(commands(execute)).not.toContain("xcodebuild -license check");
+    });
+
+    it("does not blame the licence for a licence probe that timed out", async () => {
+      const execute = failing(
+        "-license check",
+        processResult("", { termination: "timed-out", exitCode: null }),
+      );
+
+      await expect(discoverWith(execute)).resolves.toMatchObject({
+        kind: "failure",
+        failure: { category: "unavailable", step: "xcode" },
+      });
+    });
+
     it("reports Xcode tools that do not answer as the Xcode step", async () => {
       const execute = failing("swift --version", processResult("", { exitCode: 1 }));
 

@@ -374,6 +374,11 @@ export class AppleToolchainService {
         },
       };
     }
+    // Command Line Tools ship no xcodebuild, so the licence probe would fail
+    // for a reason `xcodebuild -license accept` cannot fix.
+    if (text(developer.stdout).trim().endsWith("/CommandLineTools")) {
+      return unavailableFailure("Xcode is not selected; only the Command Line Tools are.", "xcode");
+    }
     // Without an accepted licence every other xcodebuild probe fails the same
     // way, so ask first and name the step instead of reporting an incomplete host.
     const licence = await this.#command(
@@ -382,7 +387,10 @@ export class AppleToolchainService {
       DISCOVERY_TIMEOUT_MS,
     );
     if (!succeeded(licence)) {
-      return unavailableFailure("The Xcode licence has not been accepted on this host.", "licence");
+      // A probe that timed out or never ran says nothing about the licence.
+      return licence.termination === "exited"
+        ? unavailableFailure("The Xcode licence has not been accepted on this host.", "licence")
+        : unavailableFailure("Apple project discovery is incomplete on this host.", "xcode");
     }
     const version = await this.#command(["xcodebuild", "-version"], context, DISCOVERY_TIMEOUT_MS);
     const swift = await this.#command(["swift", "--version"], context, DISCOVERY_TIMEOUT_MS);
