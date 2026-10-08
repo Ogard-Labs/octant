@@ -33,7 +33,10 @@ const SIWC_JWKS_PATH = "/.well-known/jwks.json";
 // failed refresh sends the user back to sign-in. The key never expires, so
 // the grant stores no expiry at all rather than a manufactured one.
 const DEVICE_GRANT = "urn:ietf:params:oauth:grant-type:device_code";
-const DEFAULT_TIMEOUT_MS = 3 * 60 * 1_000;
+// A live ChatGPT sign-in driven over Screen Sharing ran past three minutes
+// between opening the browser and choosing the account, so the callback hit a
+// closed listener. Ten minutes matches how long issuers keep a code valid.
+const DEFAULT_TIMEOUT_MS = 10 * 60 * 1_000;
 const DEFAULT_DEVICE_INTERVAL_MS = 5_000;
 const SLOW_DOWN_MS = 5_000;
 const MAX_TOKEN_CHARS = 4_096;
