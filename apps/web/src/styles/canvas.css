@@ -2372,13 +2372,16 @@
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(min(100%, 220px), 1fr));
   gap: var(--oct-space-2);
+  align-content: start;
   max-height: 360px;
   overflow-y: auto;
   padding: 2px;
 }
 
+/* The button recipe fixes a single-line height; a card grows with its text. */
 .canvas-start-from__option {
   display: grid;
+  height: auto;
   grid-template-columns: 28px minmax(0, 1fr);
   align-items: start;
   gap: var(--oct-space-2);
