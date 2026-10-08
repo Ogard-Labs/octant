@@ -1,12 +1,14 @@
 import type {
   ArtifactLibraryEntry,
   ArtifactLibraryQuery,
+  ArtifactLibrarySyncedEntry,
 } from "@octant/contracts/artifact-library";
 import { describe, expect, it } from "vitest";
 import {
   artifactEditedAgo,
   artifactKindForBlocks,
   selectArtifactLibraryEntries,
+  selectSyncedArtifactLibraryEntries,
 } from "./artifactLibraryPolicy";
 
 function entry(overrides: Partial<ArtifactLibraryEntry>): ArtifactLibraryEntry {
@@ -128,5 +130,40 @@ describe("saying how long ago an artifact was edited", () => {
     ["2024-08-18T09:00:00.000Z", "Edited 2 years ago"],
   ])("describes %s as %s", (updatedAt, expected) => {
     expect(artifactEditedAgo(updatedAt, "2026-08-18T09:00:00.000Z")).toBe(expected);
+  });
+});
+
+describe("choosing synced artifacts for a library query", () => {
+  const synced = {
+    canvasId: "10000000-0000-4000-8000-00000000000c",
+    projectName: "Launch",
+    computerName: "Studio Mac",
+    mode: "work",
+    kind: "document",
+    title: "Pricing notes",
+    versionCount: 1,
+    headCount: 1,
+    deletedElsewhere: false,
+    updatedAt: "2026-08-18T09:00:00.000Z",
+  } as unknown as ArtifactLibrarySyncedEntry;
+
+  it("matches mode, kind, and text, including the computer's name", () => {
+    expect(selectSyncedArtifactLibraryEntries([synced], query())).toEqual([synced]);
+    expect(selectSyncedArtifactLibraryEntries([synced], query({ query: "studio" }))).toEqual([
+      synced,
+    ]);
+    expect(selectSyncedArtifactLibraryEntries([synced], query({ query: "budget" }))).toEqual([]);
+    expect(selectSyncedArtifactLibraryEntries([synced], query({ kind: "diagram" }))).toEqual([]);
+    expect(selectSyncedArtifactLibraryEntries([synced], query({ mode: "chat" }))).toEqual([]);
+  });
+
+  it("matches nothing on the Shared tab or under a Project filter", () => {
+    expect(selectSyncedArtifactLibraryEntries([synced], query({ tab: "shared" }))).toEqual([]);
+    expect(
+      selectSyncedArtifactLibraryEntries(
+        [synced],
+        query({ projectId: "20000000-0000-4000-8000-000000000001" as never }),
+      ),
+    ).toEqual([]);
   });
 });

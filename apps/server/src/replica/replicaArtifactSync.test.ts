@@ -25,6 +25,7 @@ import { Journal } from "../persistence/journal";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { catchUpProjection, ProjectionRegistry } from "../persistence/projection";
 import { openSqlite, type SqliteConnection } from "../persistence/sqlitePort";
+import { erasePurgedProjectData } from "../persistence/threadPurge";
 import { REPLICA_ARTIFACT_EVENT_NAMES, ReplicaArtifactQueued } from "./replicaArtifactEvents";
 import { ReplicaArtifactProjection } from "./replicaArtifactProjection";
 import {
@@ -824,5 +825,41 @@ describe("artifact sync", () => {
     expect(bucket.requests.length).toBe(requests);
     expect(eventsNamed(studio, REPLICA_ARTIFACT_EVENT_NAMES.queued)).toEqual([]);
     expect(eventsNamed(studio, "replica.command-refused@2")).toEqual([]);
+  });
+
+  it("erases its replica copies when a person erases the Canvas, without importing it again", async () => {
+    const memory = memoryStore();
+    const shared: SharedStore = {
+      kind: "direct",
+      selection: () => ({ status: "selected", store: memory.store }),
+    };
+    const { studio, laptop } = await pair(shared);
+    await studio.commit(
+      canvasVersion({ versionId: ids.v1, sequence: 1, text: "Quarterly salary bands" }),
+    );
+    expectKind(await laptop.sync.pull(), "pulled");
+    const studioSequence = studio.membershipProjection.state().localSequence;
+
+    for (const host of [studio, laptop]) {
+      erasePurgedProjectData({
+        connection: host.connection,
+        projectId: ids.studioProject,
+        canvasIds: [ids.canvas],
+      });
+      host.artifactProjection.evict([ids.canvas]);
+      expect(host.artifactProjection.state().artifact(ids.canvas)).toBeUndefined();
+    }
+
+    const restartedStudio = computer(studio.name, shared, { disk: studio.disk });
+    const restartedLaptop = computer(laptop.name, shared, { disk: laptop.disk });
+    for (const host of [restartedStudio, restartedLaptop]) {
+      expect(JSON.stringify(host.events())).not.toContain("Quarterly salary bands");
+      expect(host.artifactProjection.state().artifact(ids.canvas)).toBeUndefined();
+    }
+    // The studio keeps its place in its own sequence; the laptop keeps the
+    // slot settled, so a pull does not bring the erased content back.
+    expect(restartedStudio.membershipProjection.state().localSequence).toBe(studioSequence);
+    expect(expectKind(await restartedLaptop.sync.pull(), "pulled").artifacts).toEqual([]);
+    expect(restartedLaptop.artifactProjection.state().artifact(ids.canvas)).toBeUndefined();
   });
 });

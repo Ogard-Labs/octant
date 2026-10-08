@@ -9874,7 +9874,10 @@ export function startOctantServer(
       forgetWorkThread: (threadId) => {
         workThreadProjection.forget(threadId as never);
       },
-      forgetCanvases: (canvasIds) => persistence.canvasProjection.evict(canvasIds),
+      forgetCanvases: (canvasIds) => {
+        persistence.canvasProjection.evict(canvasIds);
+        persistence.replicaArtifactProjection.evict(canvasIds);
+      },
       purgeCanvasFiles: (canvasIds) => removeMirrorFiles(persistence.connection, canvasIds),
       purgeThreadArtifacts: async ({ mode, threadId }) => {
         const released = await threadMessageQueue.purgeThread(

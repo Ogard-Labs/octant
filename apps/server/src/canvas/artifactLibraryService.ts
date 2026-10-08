@@ -7,7 +7,11 @@ import {
   type ArtifactLibraryQuery,
 } from "@octant/contracts/artifact-library";
 import type { CanvasId, ProjectId, UtcTimestamp } from "@octant/contracts";
-import { artifactKindForBlocks, selectArtifactLibraryEntries } from "@octant/domain";
+import {
+  artifactKindForBlocks,
+  selectArtifactLibraryEntries,
+  selectSyncedArtifactLibraryEntries,
+} from "@octant/domain";
 import type { ClientPrincipal } from "../clientPrincipal";
 import type { CanvasProjection } from "./canvasProjection";
 import { renderArtifactThumbnail } from "./artifactRender";
@@ -107,9 +111,10 @@ export class ArtifactLibraryService {
     // host, which already sees every Project's artifacts, sees them.
     const synced =
       principal.kind === "local-window"
-        ? (this.#dependencies.synced?.() ?? [])
-            .filter((entry) => !snapshot.has(entry.canvasId))
-            .slice(0, MAX_ARTIFACT_LIBRARY_ENTRIES)
+        ? selectSyncedArtifactLibraryEntries(
+            (this.#dependencies.synced?.() ?? []).filter((entry) => !snapshot.has(entry.canvasId)),
+            query,
+          ).slice(0, MAX_ARTIFACT_LIBRARY_ENTRIES)
         : [];
 
     return decodeArtifactLibraryListing({

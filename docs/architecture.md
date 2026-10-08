@@ -1538,7 +1538,16 @@ flowchart LR
     head is a tombstone. The host-wide library lists, for a local window
     only, each synced artifact this host holds no Canvas for, under the
     Project name it was filed under and the name of the computer that wrote
-    its newest head, with its head count; a paired device sees none.
+    its newest head, with its head count; a paired device sees none. The
+    library query applies to them: mode, kind, and text match (text also
+    matches the computer's name), and a Project filter or the Shared tab
+    matches none, since they have no Project or share here.
+  - **Erase.** A thread purge or Project erase also erases artifact sync's
+    copies of the Canvases it takes: a queued publish is dropped, and a kept
+    entry's event is rewritten to a content-free
+    `replica.artifact-slot-erased@2` that keeps its slot settled, so a later
+    pull does not import the erased content again. Published slots keep
+    their content-free record. Copies already in the store are not deleted.
   - **Not built yet.** An imported artifact is not bound to a thread here:
     opening or revising it, which selects or creates a compatible thread
     under 0040 and then records it through thread external-content

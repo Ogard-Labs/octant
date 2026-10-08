@@ -12,6 +12,7 @@ import type {
   ArtifactKind,
   ArtifactLibraryEntry,
   ArtifactLibraryQuery,
+  ArtifactLibrarySyncedEntry,
 } from "@octant/contracts/artifact-library";
 
 /**
@@ -93,6 +94,28 @@ export function selectArtifactLibraryEntries(
       );
     })
     .toSorted(compareArtifactLibraryEntries);
+}
+
+/**
+ * Which synced artifacts a query asks for. A synced artifact belongs to no
+ * Project on this host and has no share here, so a Project filter or the
+ * Shared tab matches none of them; mode, kind, and text match as they do
+ * for this host's own artifacts, and text also matches the computer's name.
+ */
+export function selectSyncedArtifactLibraryEntries(
+  entries: ReadonlyArray<ArtifactLibrarySyncedEntry>,
+  query: ArtifactLibraryQuery,
+): ReadonlyArray<ArtifactLibrarySyncedEntry> {
+  if (query.tab === "shared" || query.projectId !== undefined) return [];
+  const needle = query.query?.toLocaleLowerCase("en-US");
+  return entries.filter((entry) => {
+    if (query.mode !== undefined && entry.mode !== query.mode) return false;
+    if (query.kind !== undefined && entry.kind !== query.kind) return false;
+    if (needle === undefined) return true;
+    return [entry.title, entry.projectName, entry.computerName].some((text) =>
+      text.toLocaleLowerCase("en-US").includes(needle),
+    );
+  });
 }
 
 /**

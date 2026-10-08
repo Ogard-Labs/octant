@@ -185,6 +185,19 @@ export class ReplicaArtifactProjection implements Projection {
     return this.#state;
   }
 
+  /**
+   * Drop erased Canvases. A purge rewrites their replica events, but this
+   * projection lives in memory and would keep serving them until a restart.
+   */
+  evict(canvasIds: ReadonlyArray<string>): void {
+    const evicted = new Set(canvasIds);
+    for (const id of evicted) this.#artifacts.delete(id);
+    for (const [queueId, queued] of this.#queued) {
+      if (evicted.has(String(queued.artifact.canvasId))) this.#queued.delete(queueId);
+    }
+    this.#state = undefined;
+  }
+
   #keep(
     entry: Pick<ReplicaArtifactEntry, "kind" | "artifact" | "parents" | "contentHash" | "bundle">,
     writtenBy: ReplicaEntryProvenance,

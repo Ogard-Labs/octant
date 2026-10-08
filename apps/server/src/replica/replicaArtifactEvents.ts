@@ -34,6 +34,7 @@ export const REPLICA_ARTIFACT_EVENT_NAMES = {
   published: "replica.artifact-published@2",
   publishFailed: "replica.artifact-publish-failed@2",
   reconciled: "replica.artifact-reconciled@2",
+  slotErased: "replica.artifact-slot-erased@2",
 } as const;
 
 export const ReplicaArtifactKind = Schema.Literal("artifact-version", "artifact-tombstone");
@@ -116,6 +117,16 @@ export const ReplicaArtifactReconciledEvent = Schema.Union(
 export type ReplicaArtifactReconciledEvent = typeof ReplicaArtifactReconciledEvent.Type;
 
 /**
+ * What an imported entry becomes when a person erases its Canvas here: the
+ * slot stays settled, so a later pull does not import the erased content
+ * again, and nothing of the content remains.
+ */
+export const ReplicaArtifactSlotErased = Schema.Struct({
+  instanceId: ReplicaInstanceId,
+  sequence: Sequence,
+}).annotations(strict);
+
+/**
  * Refusals that depend only on the entry's own bytes, so reading it again can
  * never change them. Its slot is settled. A refusal that depends on standing
  * or on another slot - an instance not admitted yet, a cut that may move, an
@@ -134,7 +145,8 @@ export function registerReplicaArtifactEvents(registry: EventRegistry): EventReg
     .register(names.publishRefused, 1, ReplicaArtifactPublishRefused)
     .register(names.published, 1, ReplicaArtifactPublished)
     .register(names.publishFailed, 1, ReplicaArtifactPublishFailed)
-    .register(names.reconciled, 1, ReplicaArtifactReconciledEvent);
+    .register(names.reconciled, 1, ReplicaArtifactReconciledEvent)
+    .register(names.slotErased, 1, ReplicaArtifactSlotErased);
 }
 
 export const decodeReplicaArtifactQueued = Schema.decodeUnknownSync(ReplicaArtifactQueued);
@@ -145,3 +157,4 @@ export const decodeReplicaArtifactPublishFailed = Schema.decodeUnknownSync(
 export const decodeReplicaArtifactReconciled = Schema.decodeUnknownSync(
   ReplicaArtifactReconciledEvent,
 );
+export const decodeReplicaArtifactSlotErased = Schema.decodeUnknownSync(ReplicaArtifactSlotErased);

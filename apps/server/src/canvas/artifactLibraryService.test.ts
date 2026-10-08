@@ -189,5 +189,10 @@ describe("reading the host's artifact library", () => {
     // that opens a local Canvas.
     expect(local.entries.map((entry) => entry.title)).not.toContain("Pricing notes");
     expect(synced.list({ tab: "all" } as never, pairedDevice).synced).toBeUndefined();
+    // The query applies to them too.
+    expect(synced.list({ tab: "shared" } as never, localWindow).synced).toBeUndefined();
+    expect(
+      synced.list({ tab: "all", query: "budget" } as never, localWindow).synced,
+    ).toBeUndefined();
   });
 });

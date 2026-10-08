@@ -42,6 +42,7 @@ import {
   REPLICA_FINAL_ARTIFACT_REFUSALS,
   decodeReplicaArtifactPublished,
   decodeReplicaArtifactReconciled,
+  decodeReplicaArtifactSlotErased,
   registerReplicaArtifactEvents,
 } from "./replicaArtifactEvents";
 
@@ -359,6 +360,11 @@ export class ReplicaMembershipProjection implements Projection {
           instanceId: published.instanceId,
           sequence: published.sequence,
         });
+        break;
+      }
+      case REPLICA_ARTIFACT_EVENT_NAMES.slotErased: {
+        const erased = decodeReplicaArtifactSlotErased(event.payload);
+        this.#artifactSlots.set(slotKey(erased.instanceId, erased.sequence), erased);
         break;
       }
       case REPLICA_ARTIFACT_EVENT_NAMES.reconciled: {
