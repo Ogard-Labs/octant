@@ -1326,6 +1326,37 @@ describe("ProviderSettingsView", () => {
     expect(onModelContextWindowChange).toHaveBeenLastCalledWith(id, "deployment-c", undefined);
   });
 
+  it("shows the stored window again when saving an override is refused, so it can be retried", async () => {
+    const user = userEvent.setup();
+    const onModelContextWindowChange = vi.fn(async () => false);
+    renderExpanded(
+      <ProviderSettingsView
+        {...fixture({
+          instance: foundryProvider(),
+          observed: observation({
+            models: [
+              {
+                id: "deployment-a" as never,
+                displayName: "deployment-a",
+                source: "manual",
+                verification: "unverified",
+                reasoning: "unsupported",
+                inputModalities: ["text"],
+                options: [],
+              },
+            ],
+          }),
+        })}
+        onModelContextWindowChange={onModelContextWindowChange}
+      />,
+    );
+    const field = screen.getByLabelText("Context window for deployment-a");
+    await user.type(field, "131072{Enter}");
+    await waitFor(() => expect(field).toHaveValue(""));
+    await user.type(field, "131072{Enter}");
+    expect(onModelContextWindowChange).toHaveBeenCalledTimes(2);
+  });
+
   it("asks for no context window on a provider that runs its own model", () => {
     renderExpanded(
       <ProviderSettingsView

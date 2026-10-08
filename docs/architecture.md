@@ -1819,7 +1819,8 @@ takes precedence.
 
 A model's window is found without asking the person
 (`resolveModelContextWindow` in `@octant/domain/model-context-window`). The
-first source that names one wins: a window the person typed into the model's
+first source that names one wins, except that a learned window below the
+reported one takes precedence: a window the person typed into the model's
 details (`user-supplied`, "Set by you"); the provider's own model metadata
 (`provider-discovery`, "Reported"); a window learned from the endpoint's own
 refusals (`observed-evidence`, "Learned"), which also wins over a larger
@@ -1829,7 +1830,9 @@ labelled estimate above ("Estimate"). The labels appear only as the inspector's
 limit source and as the placeholder of the optional override; nothing prompts
 for a window. The profile catalogue ships with the app, is never fetched, and
 lists only families whose windows their providers publish, each with its
-reference. Profiles match on a normalized name (case, separators, a routing
+reference. The opt-in reviewed model manifest (`OCTANT_REVIEWED_MODEL_MANIFEST=1`)
+keeps its existing role as Chat's last fallback before the estimate and shares
+the `reviewed-catalog` source, so it is also labelled "Profile". Profiles match on a normalized name (case, separators, a routing
 prefix, a `:` tag, a release date, and `-latest` are ignored; a version is
 not), and also on the `model` a direct endpoint names in its responses, so an
 Azure AI Foundry or OpenAI-compatible deployment with a name of its own takes

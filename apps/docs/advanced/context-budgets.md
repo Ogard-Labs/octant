@@ -49,7 +49,7 @@ are not left waiting for a number that cannot come.
 
 Octant finds each model's context window on its own. You are never asked for
 one, and there is nothing to test. It uses the first of these that names a
-window:
+window, except that a learned limit below the reported one wins:
 
 1. **Set by you.** The optional **Context window** box in the model's details
    (shown for OpenAI-compatible, Azure AI Foundry, and Anthropic-compatible
@@ -70,7 +70,9 @@ window:
    `deepseek-ai/DeepSeek-V4.1-Flash` are one model). A deployment you gave a
    name of its own, such as an Azure AI Foundry deployment, is matched by the
    model the endpoint says it served, so its window is known after its first
-   reply.
+   reply. A host that opts in to Octant's reviewed model manifest
+   (`OCTANT_REVIEWED_MODEL_MANIFEST=1`) also labels a window from that
+   downloaded manifest as Profile, for a model the built-in catalogue lacks.
 5. **Estimate.** When nothing above names the window, the meter shows the
    fill alone (see below).
 

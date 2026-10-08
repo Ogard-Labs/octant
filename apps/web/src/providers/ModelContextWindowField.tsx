@@ -40,7 +40,13 @@ export function ModelContextWindowField(props: {
     }
     if (next === sent.current) return;
     sent.current = next;
-    void props.onChange(next);
+    void props.onChange(next).then((accepted) => {
+      // A refused save leaves the stored value standing, so the box shows it
+      // again and the same edit can be retried.
+      if (accepted) return;
+      sent.current = saved;
+      setDraft(saved === undefined ? "" : String(saved));
+    });
   };
 
   return (

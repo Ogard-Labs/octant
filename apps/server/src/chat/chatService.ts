@@ -4221,12 +4221,15 @@ export class ChatService {
     readonly modelLimitObservations: ReadonlyArray<ModelContextLimits>;
     readonly serviceLimits: ProviderServiceLimits;
   }> {
-    let modelEvidence = await this.#observeModelLimitEvidence(driver, probe, modelId);
-    if (modelEvidence.length === 0) {
-      const fromProbe = this.#modelLimitEvidenceFromProbeModel(probe, modelId);
-      if (fromProbe !== undefined) {
-        modelEvidence = [fromProbe];
-      }
+    const fromProbe = this.#modelLimitEvidenceFromProbeModel(probe, modelId);
+    // A window the person set wins over every automatic source, including a
+    // driver's own report, so it replaces that evidence rather than joining it.
+    let modelEvidence =
+      fromProbe?.source === "user-supplied"
+        ? [fromProbe]
+        : await this.#observeModelLimitEvidence(driver, probe, modelId);
+    if (modelEvidence.length === 0 && fromProbe !== undefined) {
+      modelEvidence = [fromProbe];
     }
     const modelLimitObservations = modelEvidence
       .map((evidence) => normalizeModelLimitEvidence(evidence))

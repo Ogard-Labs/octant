@@ -134,6 +134,9 @@ export async function observeWorkContext(input: {
     }
   });
   const resolved = input.model === undefined ? undefined : resolveModelContextWindow(input.model);
+  // A window the person set wins over every automatic source, including the
+  // driver's own report.
+  if (resolved?.source === "user-supplied") modelLimitObservations.length = 0;
   if (modelLimitObservations.length === 0 && resolved !== undefined) {
     modelLimitObservations.push(
       decodeModelContextLimits({
