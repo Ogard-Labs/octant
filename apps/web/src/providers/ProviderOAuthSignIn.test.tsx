@@ -97,6 +97,33 @@ describe("provider sign-in panel", () => {
     vi.useRealTimers();
   });
 
+  it("begins a sign-in it is asked to start once the terms are acknowledged, and only once", async () => {
+    const user = userEvent.setup();
+    let acknowledged = false;
+    const run = vi.fn(async (command: { readonly kind: string }) => {
+      if (command.kind === "acknowledge") acknowledged = true;
+      if (command.kind === "begin") {
+        return { kind: "awaiting-consent" as const, attemptId: "attempt-1" };
+      }
+      return { kind: "signed-out" as const, termsRequired: !acknowledged };
+    });
+    render(
+      <ProviderOAuthSignInPanel
+        accountLabel="ChatGPT plan"
+        descriptorId="chatgpt-plan"
+        instanceId="00000000-0000-4000-8000-000000000902"
+        run={run}
+        startSignIn
+        termsSummary="Terms"
+      />,
+    );
+
+    await user.click(await screen.findByRole("button", { name: "Acknowledge and continue" }));
+    expect(await screen.findByText(/Continue in the browser/)).toBeInTheDocument();
+    expect(run.mock.calls.map((call) => call[0].kind)).toEqual(["status", "acknowledge", "begin"]);
+    expect(screen.queryByRole("button", { name: "Use an API key" })).toBeNull();
+  });
+
   it("offers a sign-out on this computer only when the sign-in service cannot be told, and says so afterwards", async () => {
     const user = userEvent.setup();
     const run = vi.fn(async (command: { readonly kind: string }) => {

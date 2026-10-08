@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { octantSettingsRegistry } from "./octantSettingsRegistry";
+import { listAvailableSections, resolveDeepLink, searchSettings } from "./registry";
+
+const capabilities = { nativeBoundsAvailable: true, sidebarVibrancySupported: true };
 
 describe("octantSettingsRegistry", () => {
   it("registers only sections with working content, in navigation order", () => {
@@ -152,7 +155,39 @@ describe("octantSettingsRegistry", () => {
     const ids = octantSettingsRegistry.sections.map((section) => String(section.id));
     expect(ids).not.toContain("agents");
     const harness = octantSettingsRegistry.sections.find((s) => s.id === "harness");
-    expect(harness?.settings.map((setting) => setting.id)).toEqual(["subagent-creation-posture"]);
+    expect(harness?.settings.map((setting) => setting.id)).toEqual([
+      "model-endpoints",
+      "subagent-creation-posture",
+    ]);
     expect(harness?.keywords).toMatch(/posture/);
+  });
+
+  it("finds API model endpoints under Octant Harness rather than Providers & Models", () => {
+    const sections = listAvailableSections(octantSettingsRegistry, capabilities);
+    for (const query of ["openai-compatible", "sign in with chatgpt", "azure ai foundry"]) {
+      const results = searchSettings(sections, capabilities, query);
+      expect(results).toContainEqual(
+        expect.objectContaining({ sectionId: "harness", settingId: "model-endpoints" }),
+      );
+      expect(results.map((result) => result.sectionId)).not.toContain("providers");
+    }
+  });
+
+  it("finds the OpenAI image profile under Image generation", () => {
+    const results = searchSettings(
+      listAvailableSections(octantSettingsRegistry, capabilities),
+      capabilities,
+      "openai image",
+    );
+    expect(results.map((result) => result.sectionId)).toEqual(["image-generation"]);
+  });
+
+  it("lands a link to the model endpoints on the add-endpoint row of Octant Harness", () => {
+    const resolved = resolveDeepLink(octantSettingsRegistry, capabilities, {
+      section: "harness",
+      setting: "model-endpoints",
+    });
+    expect(resolved?.section.id).toBe("harness");
+    expect(resolved?.settingId).toBe("model-endpoints");
   });
 });

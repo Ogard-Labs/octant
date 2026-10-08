@@ -75,6 +75,27 @@ export function providerDetectionBlockedReason(snapshot: DiscoverySnapshot | und
   return "The latest scan did not find its binary on this Mac. Use “Check again” to scan again.";
 }
 
+/**
+ * The chat-model endpoints Octant calls over HTTP itself, rather than an agent
+ * runtime it drives. Settings lists them under Octant Harness › Model
+ * endpoints and keeps them out of Providers & Models; the instances, their
+ * configuration, and their authority are the same either way.
+ */
+export const MODEL_ENDPOINT_DRIVER_KINDS = [
+  "openai-compatible",
+  "anthropic-compatible",
+  "ollama",
+  "azure-foundry",
+] as const satisfies ReadonlyArray<ProviderInstance["driverKind"]>;
+
+export type ModelEndpointDriverKind = (typeof MODEL_ENDPOINT_DRIVER_KINDS)[number];
+
+export function isModelEndpointDriverKind(
+  driverKind: ProviderInstance["driverKind"],
+): driverKind is ModelEndpointDriverKind {
+  return MODEL_ENDPOINT_DRIVER_KINDS.some((kind) => kind === driverKind);
+}
+
 export function driverLabel(
   driverKind: ProviderInstance["driverKind"] | "oh-my-pi",
 ):

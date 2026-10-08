@@ -380,7 +380,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       label: "Providers & Models",
       scope: "app",
       keywords:
-        "providers models provider type opencode codex kimi code acp login claude agent sdk subscription anthropic openai-compatible http api-key api key base url endpoint authentication bearer protocol preference manual model ids permissions permission persistence runtime capabilities connection azure ai foundry deployment opencode update managed cli version",
+        "providers models agent runtimes provider type opencode codex kimi code acp cli login claude agent sdk subscription gemini qwen cline mistral vibe grok glm fx goose copilot devin kilo pi binary path permissions permission persistence runtime capabilities connection detected installed scan opencode update managed cli version",
       settings: [
         {
           id: settingId("opencode-managed-update"),
@@ -395,8 +395,15 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       label: "Octant Harness",
       scope: "app",
       keywords:
-        "octant harness native agent loop model slots default plan slow task smol vision advisor routing fallback cooldown delegate children follow-ups chips endpoint openai-compatible anthropic-compatible ollama azure agents subagents helper child creation posture off on automatic bounded hierarchy",
+        "octant harness native agent loop model endpoints endpoint api openai-compatible anthropic-compatible ollama azure ai foundry deployment base url api key bearer protocol manual model ids sign in with chatgpt plan openrouter subscription model slots default plan slow task smol vision advisor routing fallback cooldown delegate children follow-ups chips agents subagents helper child creation posture off on automatic bounded hierarchy",
       settings: [
+        {
+          id: settingId("model-endpoints"),
+          label: "Model endpoints",
+          scope: "host",
+          keywords:
+            "model endpoints add endpoint api openai-compatible anthropic-compatible ollama azure ai foundry base url api key sign in with chatgpt plan openrouter subscription",
+        },
         {
           id: settingId("subagent-creation-posture"),
           label: "Helper agents",
@@ -452,7 +459,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       label: "Image generation",
       scope: "app",
       keywords:
-        "image generation custom provider api key recraft openai-compatible bring your own endpoint",
+        "image generation image providers profiles openai image gpt-image gemini image black forest labs flux ideogram custom image sources provider api key recraft openai-compatible bring your own endpoint",
       settings: [],
     },
     {

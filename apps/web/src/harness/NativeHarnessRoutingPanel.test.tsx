@@ -12,7 +12,7 @@ const settings: NativeHarnessRoutingSettings = {
 
 describe("NativeHarnessRoutingPanel", () => {
   it("explains how to connect a provider instead of showing empty model slots", async () => {
-    const onOpenProviders = vi.fn();
+    const onOpenModelEndpoints = vi.fn();
     render(
       <NativeHarnessRoutingPanel
         client={{
@@ -20,17 +20,17 @@ describe("NativeHarnessRoutingPanel", () => {
           updateRouting: vi.fn(),
         }}
         hostId="00000000-0000-0000-0000-000000000001"
-        onOpenProviders={onOpenProviders}
+        onOpenModelEndpoints={onOpenModelEndpoints}
         providers={[]}
       />,
     );
 
-    await waitFor(() => expect(screen.getByText("No direct-endpoint provider yet")).toBeVisible());
+    await waitFor(() => expect(screen.getByText("No model endpoint yet")).toBeVisible());
     expect(screen.getByText("Model slots")).toBeVisible();
     expect(screen.queryByText("Jobs")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Save slots" })).not.toBeInTheDocument();
-    await screen.getByRole("button", { name: "Open Providers & Models" }).click();
-    expect(onOpenProviders).toHaveBeenCalledOnce();
+    await screen.getByRole("button", { name: "Open Model endpoints" }).click();
+    expect(onOpenModelEndpoints).toHaveBeenCalledOnce();
   });
 
   it("keeps saved routing visible when its providers are unavailable", async () => {
@@ -63,7 +63,7 @@ describe("NativeHarnessRoutingPanel", () => {
     );
 
     await waitFor(() => expect(screen.getByText("Jobs")).toBeVisible());
-    expect(screen.queryByText("No direct-endpoint provider yet")).not.toBeInTheDocument();
+    expect(screen.queryByText("No model endpoint yet")).not.toBeInTheDocument();
     expect(screen.getByRole("combobox", { name: "Main model, model 1 provider" })).toBeVisible();
     expect(screen.getByText("missing-model")).toBeVisible();
   });
@@ -80,12 +80,12 @@ describe("NativeHarnessRoutingPanel slot rows", () => {
   };
 
   it("names each slot by what it does and sends an unset one to Providers when nothing can fill it", async () => {
-    const onOpenProviders = vi.fn();
+    const onOpenModelEndpoints = vi.fn();
     render(
       <NativeHarnessRoutingPanel
         client={{ routing: vi.fn(async () => savedJobs), updateRouting: vi.fn() }}
         hostId={hostId}
-        onOpenProviders={onOpenProviders}
+        onOpenModelEndpoints={onOpenModelEndpoints}
         providers={[]}
       />,
     );
@@ -95,10 +95,10 @@ describe("NativeHarnessRoutingPanel slot rows", () => {
     );
     expect(screen.getByRole("group", { name: "Quick jobs setting" })).toBeVisible();
     expect(screen.queryByText("smol")).not.toBeInTheDocument();
-    const connect = screen.getAllByRole("button", { name: "Connect a provider" });
+    const connect = screen.getAllByRole("button", { name: "Add a model endpoint" });
     expect(connect).toHaveLength(7);
     await connect[0]?.click();
-    expect(onOpenProviders).toHaveBeenCalledOnce();
+    expect(onOpenModelEndpoints).toHaveBeenCalledOnce();
   });
 
   const providers = [
@@ -263,21 +263,21 @@ describe("NativeHarnessRoutingPanel with providers that list no models", () => {
 
   it("names the provider that has no models yet instead of asking to connect one, and opens Providers", async () => {
     const user = userEvent.setup();
-    const onOpenProviders = vi.fn();
+    const onOpenModelEndpoints = vi.fn();
     render(
       <NativeHarnessRoutingPanel
         client={{ routing: vi.fn(async () => chosen), updateRouting: vi.fn() }}
         hostId={hostId}
-        onOpenProviders={onOpenProviders}
+        onOpenModelEndpoints={onOpenModelEndpoints}
         providers={checking}
       />,
     );
 
     await waitFor(() => expect(screen.getByText("Jobs")).toBeVisible());
-    expect(screen.queryByRole("button", { name: "Connect a provider" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Add a model endpoint" })).not.toBeInTheDocument();
     expect(screen.getAllByText("No models from Azure yet.")[0]).toBeVisible();
-    await user.click(screen.getAllByRole("button", { name: "Open Providers & Models" })[0]!);
-    expect(onOpenProviders).toHaveBeenCalledOnce();
+    await user.click(screen.getAllByRole("button", { name: "Open Model endpoints" })[0]!);
+    expect(onOpenModelEndpoints).toHaveBeenCalledOnce();
     // The saved choice keeps reading as Azure's model rather than looking unset.
     expect(
       screen.getByRole("combobox", { name: "Main model, model 1 provider" }),
@@ -295,7 +295,7 @@ describe("NativeHarnessRoutingPanel with providers that list no models", () => {
     );
 
     await waitFor(() => expect(screen.getByText("Jobs")).toBeVisible());
-    expect(screen.queryByText("No direct-endpoint provider yet")).not.toBeInTheDocument();
+    expect(screen.queryByText("No model endpoint yet")).not.toBeInTheDocument();
   });
 
   it("lists the models a person configured before the ones the endpoint merely lists", async () => {

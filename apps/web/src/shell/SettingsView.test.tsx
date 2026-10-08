@@ -339,7 +339,7 @@ describe("SettingsView", () => {
     expect(within(header).getByLabelText("Scope: Selected host")).toBeInTheDocument();
   });
 
-  it("takes the Connect a provider button on a harness slot to Providers & Models", async () => {
+  it("takes the Add a model endpoint button on a harness slot to the add-endpoint row", async () => {
     const user = userEvent.setup();
     const nativeHarnessClient = {
       routing: vi.fn(async () => ({
@@ -370,12 +370,13 @@ describe("SettingsView", () => {
       initialDeepLink: { section: "harness" },
     });
 
-    const connect = await screen.findAllByRole("button", { name: "Connect a provider" });
+    const connect = await screen.findAllByRole("button", { name: "Add a model endpoint" });
     await user.click(connect[0]!);
 
-    expect(
-      await screen.findByRole("heading", { level: 1, name: "Providers & Models" }),
-    ).toBeVisible();
+    expect(screen.getByRole("heading", { level: 1, name: "Octant Harness" })).toBeVisible();
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Sign in with ChatGPT" })).toHaveFocus(),
+    );
   });
 
   it("scans once when the Providers section opens", async () => {

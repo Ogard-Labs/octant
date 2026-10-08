@@ -312,6 +312,42 @@ describe("HttpConfigurationForm sign-in offer", () => {
     );
   });
 
+  it("saves a sign-in endpoint's other settings without changing its fixed URL or sign-in", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn(async () => true);
+    const bound = httpInstance("https://api.openai.com/v1");
+    render(
+      <HttpConfigurationForm
+        credential={{ status: "missing", beginMutation: () => 1, finishMutation: () => undefined }}
+        credentialManagementAvailable
+        disabled={false}
+        instance={{
+          ...bound,
+          configuration: { ...bound.configuration, oauthDescriptorId: "chatgpt-plan" as never },
+        }}
+        onChange={onChange}
+        onClearCredential={vi.fn(async () => true)}
+      />,
+    );
+
+    expect(screen.queryByLabelText("API base URL for Direct endpoint")).toBeNull();
+    expect(screen.queryByRole("button", { name: /Clear stored API key/ })).toBeNull();
+    await user.type(screen.getByLabelText("Manual model IDs for Direct endpoint"), "gpt-5");
+    await user.click(
+      screen.getByRole("button", { name: "Save HTTP settings for Direct endpoint" }),
+    );
+    expect(onChange).toHaveBeenCalledWith(
+      bound.id,
+      expect.objectContaining({
+        baseUrl: "https://api.openai.com/v1",
+        authentication: "bearer",
+        manualModelIds: ["gpt-5"],
+        oauthDescriptorId: "chatgpt-plan",
+      }),
+      expect.objectContaining({ value: "" }),
+    );
+  });
+
   it("offers no sign-in for an endpoint no sign-in names", () => {
     const onProviderOAuth = renderAt("https://gateway.example/v1");
     expect(screen.queryByRole("button", { name: "Sign in" })).toBeNull();

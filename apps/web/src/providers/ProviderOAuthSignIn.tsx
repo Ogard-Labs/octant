@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 
 export type ProviderOAuthSignInState =
@@ -18,7 +18,8 @@ export interface ProviderOAuthSignInProps {
   readonly disabled?: boolean;
   readonly onAcknowledge: () => void;
   readonly onSignIn: () => void;
-  readonly onUseApiKey: () => void;
+  /** Absent where the endpoint takes no key, such as one a sign-in created. */
+  readonly onUseApiKey?: () => void;
   readonly onSignOut: () => void;
   readonly onSignOutLocally: () => void;
 }
@@ -78,15 +79,17 @@ export function ProviderOAuthSignIn(props: ProviderOAuthSignInProps) {
       >
         Sign in
       </OctantButton>
-      <OctantButton
-        disabled={disabled}
-        onClick={props.onUseApiKey}
-        size="sm"
-        type="button"
-        variant="outline"
-      >
-        Use an API key
-      </OctantButton>
+      {props.onUseApiKey === undefined ? null : (
+        <OctantButton
+          disabled={disabled}
+          onClick={props.onUseApiKey}
+          size="sm"
+          type="button"
+          variant="outline"
+        >
+          Use an API key
+        </OctantButton>
+      )}
       {props.state.kind === "signed-in" || props.state.kind === "not-revoked" ? (
         <OctantButton
           disabled={disabled}
@@ -144,14 +147,28 @@ export function ProviderOAuthSignInPanel(props: {
   readonly accountLabel: string;
   readonly termsSummary: string;
   readonly disabled?: boolean;
-  readonly onUseApiKey: () => void;
+  readonly onUseApiKey?: () => void;
+  /**
+   * Begin the sign-in once, as soon as the host reports the person signed out
+   * with no terms left to acknowledge. Set for an endpoint the person just
+   * added by choosing the sign-in; the terms still come first when they apply.
+   */
+  readonly startSignIn?: boolean;
   readonly run?: (command: ProviderOAuthCommand) => Promise<ProviderOAuthCommandResult | undefined>;
   readonly openUrl?: (url: string) => void;
 }) {
   const [termsRequired, setTermsRequired] = useState(true);
   const [state, setState] = useState<ProviderOAuthSignInState>({ kind: "signed-out" });
   const [attemptId, setAttemptId] = useState<string>();
+  const [statusKnown, setStatusKnown] = useState(false);
+  const started = useRef(false);
   const { run, openUrl, instanceId, descriptorId } = props;
+  const begin = () => {
+    void run?.({ kind: "begin", instanceId, descriptorId }).then((result) => {
+      if (result === undefined) return;
+      apply(result, setState, setTermsRequired, setAttemptId, openUrl);
+    });
+  };
 
   useEffect(() => {
     if (run === undefined) return;
@@ -159,6 +176,7 @@ export function ProviderOAuthSignInPanel(props: {
     void run({ kind: "status", instanceId, descriptorId }).then((result) => {
       if (cancelled || result === undefined) return;
       apply(result, setState, setTermsRequired, setAttemptId);
+      setStatusKnown(true);
     });
     return () => {
       cancelled = true;
@@ -181,6 +199,13 @@ export function ProviderOAuthSignInPanel(props: {
     return () => clearInterval(timer);
   }, [attemptId, descriptorId, instanceId, run, state.kind]);
 
+  useEffect(() => {
+    if (props.startSignIn !== true || started.current || !statusKnown) return;
+    if (state.kind !== "signed-out" || termsRequired) return;
+    started.current = true;
+    begin();
+  });
+
   return (
     <ProviderOAuthSignIn
       accountLabel={props.accountLabel}
@@ -195,12 +220,7 @@ export function ProviderOAuthSignInPanel(props: {
           apply(result, setState, setTermsRequired, setAttemptId);
         });
       }}
-      onSignIn={() => {
-        void run?.({ kind: "begin", instanceId, descriptorId }).then((result) => {
-          if (result === undefined) return;
-          apply(result, setState, setTermsRequired, setAttemptId, openUrl);
-        });
-      }}
+      onSignIn={begin}
       onSignOut={() => {
         void run?.({
           kind: "sign-out",
@@ -221,7 +241,7 @@ export function ProviderOAuthSignInPanel(props: {
           apply(result, setState, setTermsRequired, setAttemptId);
         });
       }}
-      onUseApiKey={props.onUseApiKey}
+      {...(props.onUseApiKey === undefined ? {} : { onUseApiKey: props.onUseApiKey })}
       state={state}
       termsRequired={termsRequired}
       termsSummary={props.termsSummary}

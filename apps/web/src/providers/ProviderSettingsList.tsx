@@ -41,6 +41,7 @@ import {
   OhMyPiConfigurationForm,
   OllamaConfigurationForm,
   PiConfigurationForm,
+  SubscriptionEndpointSignIn,
   VibeConfigurationForm,
 } from "./ProviderSettingsConfiguration";
 import { credentialStatusLabel, useCredentialStatus } from "./ProviderSettingsCredentials";
@@ -116,7 +117,17 @@ export type ProviderSettingsListProps = Pick<
   readonly createForm?: ReactNode;
   readonly heading?: string;
   readonly note?: string;
+  /** What the list says when it holds no instance yet. */
+  readonly emptyLabel?: string;
   readonly showAgentEligibleModels?: boolean;
+  /**
+   * The instances whose models the agent-eligible pool offers, when the pool
+   * spans more than this list shows: the pool is one setting across every
+   * page that lists providers.
+   */
+  readonly agentEligibleInstances?: ReadonlyArray<ProviderInstance>;
+  /** The endpoint whose subscription sign-in begins as soon as it is shown. */
+  readonly signInStartingId?: ProviderInstanceId;
   /** The Providers page separates detected rows from supported rows. */
   readonly showDetectionGroups?: boolean;
   readonly showReorder?: boolean;
@@ -273,6 +284,10 @@ export function ProviderSettingsList(props: ProviderSettingsListProps) {
         probing={props.probingIds.has(instance.id)}
         updating={props.updatingIds?.has(instance.id) === true}
         reordering={reordering}
+        startSignIn={
+          props.signInStartingId !== undefined &&
+          String(props.signInStartingId) === String(instance.id)
+        }
       />
     );
   }
@@ -319,7 +334,7 @@ export function ProviderSettingsList(props: ProviderSettingsListProps) {
         title={props.heading ?? "Configured providers"}
       >
         {ordered.length === 0 ? (
-          <p className="settings-section-line">No providers configured.</p>
+          <p className="settings-section-line">{props.emptyLabel ?? "No providers configured."}</p>
         ) : !showDetectionGroups ? (
           // Surfaces with no detection story keep one list; reorder mode must
           // show the real stored order the grips edit. Rows still keep
@@ -367,7 +382,7 @@ export function ProviderSettingsList(props: ProviderSettingsListProps) {
         <AgentEligibleModelsControls
           agentEligibleModels={props.defaults.agentEligibleModels}
           busy={busy}
-          instances={props.instances}
+          instances={props.agentEligibleInstances ?? props.instances}
           observedByInstance={props.observedByInstance}
           onAgentEligibleModelsChange={props.onAgentEligibleModelsChange}
         />
@@ -580,6 +595,7 @@ interface ProviderRowProps {
   readonly onVerifyModelTools: ProviderSettingsViewProps["onVerifyModelTools"];
   readonly hiddenModels: ReadonlyArray<HiddenProviderModelRef>;
   readonly onHiddenModelsChange: ProviderSettingsViewProps["onHiddenModelsChange"];
+  readonly startSignIn: boolean;
 }
 
 function ProviderRow(props: ProviderRowProps) {
@@ -817,6 +833,20 @@ function ProviderRow(props: ProviderRowProps) {
           onCheckedChange={() => void toggleEnabled()}
         />
       </span>
+      {props.instance.driverKind === "openai-compatible" ||
+      props.instance.driverKind === "anthropic-compatible" ? (
+        <SubscriptionRowSignIn
+          disabled={disabled}
+          instance={props.instance}
+          startSignIn={props.startSignIn}
+          {...(props.onProviderOAuth === undefined
+            ? {}
+            : { onProviderOAuth: props.onProviderOAuth })}
+          {...(props.onOpenExternalUrl === undefined
+            ? {}
+            : { onOpenExternalUrl: props.onOpenExternalUrl })}
+        />
+      ) : null}
       {detailsOpen ? (
         <div className="prov-details" id={`provider-details-${props.instance.id}`}>
           {hasSetupGuidance ? (
@@ -1624,6 +1654,40 @@ function ProviderRow(props: ProviderRowProps) {
  * switch). "checking" and "not checked" stay neutral because no reachability
  * claim has been established either way.
  */
+/**
+ * A subscription endpoint's sign-in sits on its row, outside the details, so
+ * the row itself says who is signed in and offers signing out or in again.
+ */
+function SubscriptionRowSignIn(props: {
+  readonly instance: Extract<
+    ProviderInstance,
+    { driverKind: "openai-compatible" | "anthropic-compatible" }
+  >;
+  readonly disabled: boolean;
+  readonly startSignIn: boolean;
+  readonly onProviderOAuth?: ProviderSettingsViewProps["onProviderOAuth"];
+  readonly onOpenExternalUrl?: ProviderSettingsViewProps["onOpenExternalUrl"];
+}) {
+  if (props.instance.configuration.oauthDescriptorId === undefined) return null;
+  return (
+    <div
+      aria-label={`Sign-in for ${props.instance.displayName}`}
+      className="prov-signin"
+      role="group"
+    >
+      <SubscriptionEndpointSignIn
+        disabled={props.disabled}
+        instance={props.instance}
+        startSignIn={props.startSignIn}
+        {...(props.onProviderOAuth === undefined ? {} : { onProviderOAuth: props.onProviderOAuth })}
+        {...(props.onOpenExternalUrl === undefined
+          ? {}
+          : { onOpenExternalUrl: props.onOpenExternalUrl })}
+      />
+    </div>
+  );
+}
+
 function readinessTone(
   readiness: ProviderObservedState["readiness"] | undefined,
 ): "ok" | "warn" | "danger" | "neutral" {
