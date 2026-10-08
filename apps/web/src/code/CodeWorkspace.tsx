@@ -735,6 +735,7 @@ function AppleWorkbenchSurface(props: {
       {...(controller.errorCategory === undefined
         ? {}
         : { errorCategory: controller.errorCategory })}
+      {...(controller.errorStep === undefined ? {} : { errorStep: controller.errorStep })}
       onCancel={(actionId) => void cancel(actionId)}
       onRetry={controller.retry}
       onRun={(intent) => void run(intent)}

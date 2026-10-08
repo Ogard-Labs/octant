@@ -887,6 +887,7 @@ describe("extensions marketplace integrated exit gate", () => {
       if (command === "xcode-select -p") {
         return processResult("/Applications/Xcode.app/Contents/Developer\n");
       }
+      if (command === "xcodebuild -license check") return processResult("");
       if (command === "xcodebuild -version")
         return processResult("Xcode 16.4\nBuild version 16F6\n");
       if (command === "swift --version") return processResult("Apple Swift version 6.1\n");
@@ -1591,6 +1592,7 @@ describe("extensions marketplace integrated exit gate", () => {
       if (command === "xcode-select -p") {
         return processResult("/Applications/Xcode.app/Contents/Developer\n");
       }
+      if (command === "xcodebuild -license check") return processResult("");
       if (command === "xcodebuild -version")
         return processResult("Xcode 16.4\nBuild version 16F6\n");
       if (command === "swift --version") return processResult("Apple Swift version 6.1\n");

@@ -447,8 +447,62 @@ describe("AppleWorkbenchPane", () => {
     );
     expect(screen.getByRole("heading", { name: "Set up the iOS Simulator" })).toBeVisible();
     expect(screen.getByText("Install Xcode, then select it with xcode-select.")).toBeVisible();
-    expect(screen.getAllByRole("listitem")).toHaveLength(3);
+    expect(screen.getAllByRole("listitem")).toHaveLength(4);
     expect(screen.getByRole("button", { name: "Check again" })).toBeVisible();
+  });
+});
+
+describe("Apple setup checklist by failed step", () => {
+  const row = (screen: typeof import("@testing-library/react").screen, label: string) =>
+    screen.getByText(label).closest("li") as HTMLElement;
+
+  async function renderFailed(errorStep?: "xcode" | "licence" | "runtime" | "project") {
+    const { render, screen } = await import("@testing-library/react");
+    render(
+      <AppleWorkbenchPane
+        errorCategory="unavailable"
+        errorMessage="Apple project discovery is incomplete on this host."
+        {...(errorStep === undefined ? {} : { errorStep })}
+        onRetry={() => undefined}
+        onRun={() => undefined}
+        status="unavailable"
+        variant="device"
+      />,
+    );
+    return screen;
+  }
+
+  it("shows the licence row as missing with its fix, after Xcode passed", async () => {
+    const screen = await renderFailed("licence");
+    expect(row(screen, "Xcode selected")).toHaveAttribute("data-state", "ok");
+    expect(row(screen, "Xcode licence accepted")).toHaveAttribute("data-state", "missing");
+    expect(screen.getByText("Run sudo xcodebuild -license accept in Terminal.")).toBeVisible();
+    expect(row(screen, "iOS Simulator runtime")).toHaveAttribute("data-state", "waiting");
+  });
+
+  it("marks the Xcode row when the host names the Xcode step", async () => {
+    const screen = await renderFailed("xcode");
+    expect(row(screen, "Xcode selected")).toHaveAttribute("data-state", "missing");
+    expect(row(screen, "Xcode licence accepted")).toHaveAttribute("data-state", "waiting");
+  });
+
+  it("marks the runtime row, with Xcode and the licence passed", async () => {
+    const screen = await renderFailed("runtime");
+    expect(row(screen, "Xcode licence accepted")).toHaveAttribute("data-state", "ok");
+    expect(row(screen, "iOS Simulator runtime")).toHaveAttribute("data-state", "missing");
+    expect(row(screen, "Project found")).toHaveAttribute("data-state", "waiting");
+  });
+
+  it("marks the project row, with everything before it passed", async () => {
+    const screen = await renderFailed("project");
+    expect(row(screen, "iOS Simulator runtime")).toHaveAttribute("data-state", "ok");
+    expect(row(screen, "Project found")).toHaveAttribute("data-state", "missing");
+  });
+
+  it("leaves every row unchecked when an older host names no step", async () => {
+    const screen = await renderFailed();
+    expect(row(screen, "Xcode licence accepted")).toHaveAttribute("data-state", "waiting");
+    expect(row(screen, "Xcode selected")).toHaveAttribute("data-state", "waiting");
   });
 });
 

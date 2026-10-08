@@ -379,10 +379,19 @@ export const AppleRuntimeSnapshot = Schema.Struct({
 }).annotations(strict);
 export type AppleRuntimeSnapshot = typeof AppleRuntimeSnapshot.Type;
 
+/**
+ * Which discovery probe failed, so a setup checklist can point at the step to
+ * fix. Optional and additive: a host that predates it omits it, and a failure
+ * without one still reads as a general failure.
+ */
+export const AppleDiscoveryStep = Schema.Literal("xcode", "licence", "runtime", "project");
+export type AppleDiscoveryStep = typeof AppleDiscoveryStep.Type;
+
 export const AppleToolchainFailure = Schema.Union(
   Schema.Struct({
     category: Schema.Literal("invalid"),
     message: Schema.NonEmptyTrimmedString,
+    step: Schema.optional(AppleDiscoveryStep),
   }).annotations(strict),
   Schema.Struct({
     category: Schema.Literal("unauthorized"),
@@ -391,10 +400,12 @@ export const AppleToolchainFailure = Schema.Union(
   Schema.Struct({
     category: Schema.Literal("unavailable"),
     message: Schema.NonEmptyTrimmedString,
+    step: Schema.optional(AppleDiscoveryStep),
   }).annotations(strict),
   Schema.Struct({
     category: Schema.Literal("xcode-not-found"),
     message: Schema.NonEmptyTrimmedString,
+    step: Schema.optional(AppleDiscoveryStep),
   }).annotations(strict),
   Schema.Struct({
     category: Schema.Literal("simulator-not-found"),

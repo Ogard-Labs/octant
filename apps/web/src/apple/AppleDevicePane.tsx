@@ -202,10 +202,14 @@ function liveScreenOf(props: AppleWorkbenchPaneProps): {
 
 type LiveViewState = Extract<DeviceView, { kind: "live" }>["liveView"];
 
+/** The order the host probes in, which is the order the checklist reads. */
+const SETUP_STEPS = ["xcode", "licence", "runtime", "project"] as const;
+
 /**
- * Three rows from what discovery already reports: Xcode, a Simulator runtime,
- * and the project. Discovery cannot yet tell a missing licence apart from
- * other failures, so there is no licence row.
+ * Four rows: Xcode, its licence, a Simulator runtime, and the project. A
+ * failure the host attributes to a step marks that row and every row before
+ * it as passed, because the host probes in this order; the rows after it have
+ * not been checked.
  */
 function appleSetup(props: AppleWorkbenchPaneProps): DeviceView {
   const discovery = props.discovery;
@@ -213,7 +217,13 @@ function appleSetup(props: AppleWorkbenchPaneProps): DeviceView {
     props.errorCategory === "xcode-not-found" ||
     discovery?.toolchain.available === false ||
     (props.liveFrame?.status === "unavailable" && props.liveFrame.reason === "toolchain-missing");
-  const xcodeOk = !xcodeMissing && discovery?.toolchain.available === true;
+  const failedStep = xcodeMissing ? "xcode" : props.errorStep;
+  const failedIndex = failedStep === undefined ? -1 : SETUP_STEPS.indexOf(failedStep);
+  const discovered = !xcodeMissing && discovery?.toolchain.available === true;
+  // A step passed when discovery succeeded, or the host failed a later one.
+  const passed = (step: (typeof SETUP_STEPS)[number]) =>
+    discovered || (failedIndex > SETUP_STEPS.indexOf(step) && !xcodeMissing);
+  const xcodeOk = discovered;
   const simulators = discovery?.simulators ?? [];
   const runtime = simulators[0];
   const checks: DeviceSetupCheck[] = [
@@ -226,15 +236,40 @@ function appleSetup(props: AppleWorkbenchPaneProps): DeviceView {
             ? {}
             : { detail: `Xcode ${discovery.toolchain.xcodeVersion}` }),
         }
-      : xcodeMissing
+      : failedStep === "xcode"
         ? {
             id: "xcode",
             label: "Xcode selected",
             state: "missing",
-            detail: "Xcode wasn't found on this Mac.",
-            fix: "Install Xcode, then select it with xcode-select.",
+            ...(xcodeMissing
+              ? {
+                  detail: "Xcode wasn't found on this Mac.",
+                  fix: "Install Xcode, then select it with xcode-select.",
+                }
+              : {
+                  detail: "Xcode's tools didn't answer.",
+                  fix: "Open Xcode once so it can finish installing, then check again.",
+                }),
           }
-        : { id: "xcode", label: "Xcode selected", state: "waiting", detail: "Not checked yet" },
+        : passed("xcode")
+          ? { id: "xcode", label: "Xcode selected", state: "ok" }
+          : { id: "xcode", label: "Xcode selected", state: "waiting", detail: "Not checked yet" },
+    passed("licence")
+      ? { id: "licence", label: "Xcode licence accepted", state: "ok" }
+      : failedStep === "licence"
+        ? {
+            id: "licence",
+            label: "Xcode licence accepted",
+            state: "missing",
+            detail: "Xcode's licence hasn't been accepted yet.",
+            fix: "Run sudo xcodebuild -license accept in Terminal.",
+          }
+        : {
+            id: "licence",
+            label: "Xcode licence accepted",
+            state: "waiting",
+            detail: "Checked after Xcode",
+          },
     xcodeOk && runtime !== undefined
       ? {
           id: "runtime",
@@ -242,28 +277,43 @@ function appleSetup(props: AppleWorkbenchPaneProps): DeviceView {
           state: "ok",
           detail: `${platformName(runtime.platform)} ${runtime.runtimeVersion}`,
         }
-      : xcodeOk
+      : xcodeOk || failedStep === "runtime"
         ? {
             id: "runtime",
             label: "iOS Simulator runtime",
             state: "missing",
-            detail: "None installed.",
+            detail: xcodeOk ? "None installed." : "Xcode couldn't list Simulator runtimes.",
             fix: "Add one in Xcode › Settings › Components.",
           }
-        : {
-            id: "runtime",
-            label: "iOS Simulator runtime",
-            state: "waiting",
-            detail: "Checked after Xcode",
-          },
-    discovery?.workspace.projectPath === undefined
-      ? { id: "project", label: "Project found", state: "waiting", detail: "Checked after Xcode" }
-      : {
+        : passed("runtime")
+          ? { id: "runtime", label: "iOS Simulator runtime", state: "ok" }
+          : {
+              id: "runtime",
+              label: "iOS Simulator runtime",
+              state: "waiting",
+              detail: "Checked after Xcode",
+            },
+    discovery?.workspace.projectPath !== undefined
+      ? {
           id: "project",
           label: "Project found",
           state: "ok",
           detail: basename(discovery.workspace.projectPath),
-        },
+        }
+      : failedStep === "project"
+        ? {
+            id: "project",
+            label: "Project found",
+            state: "missing",
+            detail: "Xcode couldn't read the project.",
+            fix: "Open it in Xcode and fix the project, then check again.",
+          }
+        : {
+            id: "project",
+            label: "Project found",
+            state: "waiting",
+            detail: "Checked after Xcode",
+          },
   ];
   const note =
     props.status === "failed" || (props.status === "unavailable" && !xcodeMissing)

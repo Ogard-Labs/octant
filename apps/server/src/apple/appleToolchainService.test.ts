@@ -178,6 +178,7 @@ function discoveryExecutor() {
       if (command === "xcode-select -p") {
         return processResult("/Applications/Xcode.app/Contents/Developer\n");
       }
+      if (command === "xcodebuild -license check") return processResult("");
       if (command === "xcodebuild -version")
         return processResult("Xcode 16.4\nBuild version 16F6\n");
       if (command === "swift --version") return processResult("Apple Swift version 6.1\n");
@@ -337,9 +338,72 @@ describe("AppleToolchainService discovery", () => {
 
     await expect(service.discover(discoveryRequest, context)).resolves.toEqual({
       kind: "failure",
-      failure: { category: "xcode-not-found", message: "Xcode is unavailable on this host." },
+      failure: {
+        category: "xcode-not-found",
+        message: "Xcode is unavailable on this host.",
+        step: "xcode",
+      },
     });
     expect(execute).toHaveBeenCalledTimes(1);
+  });
+
+  describe("names the probe that failed", () => {
+    const failing = (matches: string, result: ReturnType<typeof processResult>) => {
+      const healthy = discoveryExecutor();
+      return vi.fn(async (input: Parameters<typeof healthy>[0]) =>
+        input.argv.join(" ").includes(matches) ? result : healthy(input),
+      );
+    };
+    const discoverWith = (execute: ReturnType<typeof failing>) =>
+      new AppleToolchainService({
+        execute,
+        realpath: async (path: string) => path,
+        now: () => "2026-07-27T20:00:00.000Z",
+        newId: () => "30000000-0000-4000-8000-000000000012",
+      }).discover(discoveryRequest, context);
+    const commands = (execute: ReturnType<typeof failing>) =>
+      execute.mock.calls.map(([input]) => input.argv.join(" "));
+
+    it("reports an unaccepted Xcode licence before any other xcodebuild probe", async () => {
+      const execute = failing(
+        "-license check",
+        processResult("", { exitCode: 1, stderr: "Xcode license has not been accepted." }),
+      );
+
+      await expect(discoverWith(execute)).resolves.toMatchObject({
+        kind: "failure",
+        failure: { category: "unavailable", step: "licence" },
+      });
+      expect(commands(execute)).not.toContain("xcodebuild -version");
+    });
+
+    it("reports Xcode tools that do not answer as the Xcode step", async () => {
+      const execute = failing("swift --version", processResult("", { exitCode: 1 }));
+
+      await expect(discoverWith(execute)).resolves.toMatchObject({
+        kind: "failure",
+        failure: { category: "unavailable", step: "xcode" },
+      });
+    });
+
+    it("reports a Simulator listing that fails as the runtime step", async () => {
+      const execute = failing("simctl list devices", processResult("", { exitCode: 1 }));
+
+      await expect(discoverWith(execute)).resolves.toMatchObject({
+        kind: "failure",
+        failure: { category: "unavailable", step: "runtime" },
+      });
+    });
+
+    it("reports a project xcodebuild cannot list as the project step", async () => {
+      const execute = failing("-list -json", processResult("", { exitCode: 1 }));
+      const result = await discoverWith(execute);
+
+      expect(result).toMatchObject({
+        kind: "failure",
+        failure: { category: "unavailable", step: "project" },
+      });
+    });
   });
 });
 

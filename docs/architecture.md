@@ -525,7 +525,12 @@ host as it changes, authorized like a screenshot and never stored (see
 [decisions/0139-the-simulator-frame-is-a-live-view-streamed-through-the-host.md](decisions/0139-the-simulator-frame-is-a-live-view-streamed-through-the-host.md)),
 or the latest host-held screenshot evidence when there is no live view — with
 honest setup, unavailable, booting, live, interrupted, and stale-after-restart
-states; closing the tab does not shut down the destination. An agent's
+states; closing the tab does not shut down the destination. When Apple
+discovery fails, the failure may carry an optional, additive `step` (`xcode`,
+`licence`, `runtime`, or `project`) naming the probe that failed — Xcode
+selection, `xcodebuild -license check`, Simulator listing, or project listing —
+so the setup checklist marks that row and treats earlier rows as passed; a host
+that omits it leaves every row unchecked. An agent's
 `octant_apple` `boot`, `run`, or `open` raises that pane once per request
 instead of launching Simulator.app (see
 [decisions/0151-the-agent-opens-the-in-app-simulator-pane.md](decisions/0151-the-agent-opens-the-in-app-simulator-pane.md)).

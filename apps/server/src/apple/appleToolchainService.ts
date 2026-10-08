@@ -15,6 +15,7 @@ import {
   type AppleBuildEvidence,
   type AppleBuildRequest,
   type AppleDiscoveryRequest,
+  type AppleDiscoveryStep,
   type AppleRuntimeSnapshot,
   type AppleSimulatorRecord,
   type AppleSimulatorRequest,
@@ -357,7 +358,7 @@ export class AppleToolchainService {
         this.#options.realpath,
       );
     } catch {
-      return invalidFailure("Apple project selection is unavailable.");
+      return invalidFailure("Apple project selection is unavailable.", "project");
     }
 
     const developer = await this.#command(["xcode-select", "-p"], context, DISCOVERY_TIMEOUT_MS);
@@ -366,8 +367,22 @@ export class AppleToolchainService {
       this.#lastSimulators = [];
       return {
         kind: "failure",
-        failure: { category: "xcode-not-found", message: "Xcode is unavailable on this host." },
+        failure: {
+          category: "xcode-not-found",
+          message: "Xcode is unavailable on this host.",
+          step: "xcode",
+        },
       };
+    }
+    // Without an accepted licence every other xcodebuild probe fails the same
+    // way, so ask first and name the step instead of reporting an incomplete host.
+    const licence = await this.#command(
+      ["xcodebuild", "-license", "check"],
+      context,
+      DISCOVERY_TIMEOUT_MS,
+    );
+    if (!succeeded(licence)) {
+      return unavailableFailure("The Xcode licence has not been accepted on this host.", "licence");
     }
     const version = await this.#command(["xcodebuild", "-version"], context, DISCOVERY_TIMEOUT_MS);
     const swift = await this.#command(["swift", "--version"], context, DISCOVERY_TIMEOUT_MS);
@@ -383,14 +398,14 @@ export class AppleToolchainService {
       context,
       DISCOVERY_TIMEOUT_MS,
     );
-    if (![version, swift, sdks, devices, project].every(succeeded)) {
-      return {
-        kind: "failure",
-        failure: {
-          category: "unavailable",
-          message: "Apple project discovery is incomplete on this host.",
-        },
-      };
+    if (![version, swift, sdks].every(succeeded)) {
+      return unavailableFailure("Apple project discovery is incomplete on this host.", "xcode");
+    }
+    if (!succeeded(devices)) {
+      return unavailableFailure("Apple project discovery is incomplete on this host.", "runtime");
+    }
+    if (!succeeded(project)) {
+      return unavailableFailure("Apple project discovery is incomplete on this host.", "project");
     }
 
     const toolchain = decodeAppleToolchainDiscovery({
@@ -410,7 +425,7 @@ export class AppleToolchainService {
     try {
       metadata = parseProjectMetadata(text(project.stdout));
     } catch {
-      return invalidFailure("Apple project metadata is invalid.");
+      return invalidFailure("Apple project metadata is invalid.", "project");
     }
     const workspace = decodeAppleWorkspaceDiscovery({
       actionId: request.actionId,
@@ -1868,8 +1883,12 @@ function unauthorizedFailure(): AppleDiscoveryResult {
   };
 }
 
-function invalidFailure(message: string): AppleDiscoveryResult {
-  return { kind: "failure", failure: { category: "invalid", message } };
+function invalidFailure(message: string, step: AppleDiscoveryStep): AppleDiscoveryResult {
+  return { kind: "failure", failure: { category: "invalid", message, step } };
+}
+
+function unavailableFailure(message: string, step: AppleDiscoveryStep): AppleDiscoveryResult {
+  return { kind: "failure", failure: { category: "unavailable", message, step } };
 }
 
 const CAPTURE_FILE_PREFIX = "octant-apple-capture-";
