@@ -1,3 +1,4 @@
+import { decodeCanvasDocumentRecipeCatalog } from "@octant/contracts/canvas-skill";
 import {
   type CanvasId,
   decodeCanvasActionResult,
@@ -159,6 +160,7 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
       route !== "action" &&
       route !== "action-cancel" &&
       route !== "create" &&
+      route !== "recipes" &&
       route !== "share" &&
       route !== "share-revoke" &&
       route !== "share-access" &&
@@ -695,6 +697,22 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
               )
             : await dependencies.canvasService.cancelAction(body.value);
         return jsonResponse(decodeCanvasActionResult(result), 200, origin);
+      }
+
+      // The recipes a person may start a Canvas from. A recipe is a starting
+      // shape and carries no Project data, so any authenticated window may
+      // read the list; create re-resolves the chosen id against it.
+      if (route === "recipes" && request.method === "GET") {
+        if (url.searchParams.size !== 0) {
+          return failureResponse("Canvas recipes request is invalid.", 400, origin);
+        }
+        return jsonResponse(
+          decodeCanvasDocumentRecipeCatalog({
+            recipes: dependencies.canvasService.documentRecipes(),
+          }),
+          200,
+          origin,
+        );
       }
 
       if (route === "create" && request.method === "POST") {

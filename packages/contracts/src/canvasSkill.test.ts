@@ -3,6 +3,8 @@ import {
   CANVAS_SKILL_MAX_LAYOUTS,
   CANVAS_SKILL_MAX_PRESENTATION_RULES,
   CANVAS_SKILL_MAX_SLOTS,
+  CANVAS_DOCUMENT_RECIPE_SUMMARY_MAX_CHARS,
+  decodeCanvasDocumentRecipeCatalog,
   decodeCanvasSkillContribution,
   decodeCanvasSkillContributionResolution,
 } from "./canvasSkill";
@@ -196,5 +198,23 @@ describe("CanvasSkillContribution contract", () => {
         ],
       }),
     ).toThrow();
+  });
+
+  it("carries a one-line summary a person reads when choosing a recipe, within its bound", () => {
+    const recipe = {
+      id: "field-notes",
+      title: "Field notes",
+      summary: "Notes from a visit, with what to follow up.",
+      whenToUse: "When a trusted skill offers a note.",
+      skeleton: [{ kind: "rich-text", role: "The note." }],
+    };
+    const catalog = decodeCanvasDocumentRecipeCatalog({ recipes: [recipe] });
+    expect(catalog.recipes[0]?.summary).toBe("Notes from a visit, with what to follow up.");
+    expect(() =>
+      decodeCanvasDocumentRecipeCatalog({
+        recipes: [{ ...recipe, summary: "x".repeat(CANVAS_DOCUMENT_RECIPE_SUMMARY_MAX_CHARS + 1) }],
+      }),
+    ).toThrow();
+    expect(() => decodeCanvasDocumentRecipeCatalog({ recipes: [], hostPath: "/" })).toThrow();
   });
 });

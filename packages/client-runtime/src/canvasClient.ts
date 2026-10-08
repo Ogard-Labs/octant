@@ -58,6 +58,10 @@ import {
   type CanvasExportFolderResult,
   type CanvasExportFolderView,
 } from "@octant/contracts/canvas-export-folder";
+import {
+  decodeCanvasDocumentRecipeCatalog,
+  type CanvasDocumentRecipeCatalog,
+} from "@octant/contracts/canvas-skill";
 import type { FolderBrowseRequest, FolderBrowseResult } from "@octant/contracts/folder-browse";
 import { createFolderBrowseClient } from "./folderBrowseClient";
 
@@ -123,6 +127,11 @@ export interface CanvasClient {
    */
   browseFolders?(request: FolderBrowseRequest): Promise<FolderBrowseResult>;
   create(request: CanvasCreateRequest): Promise<CanvasCreateResult>;
+  /**
+   * The recipes a person may start a Canvas from. A host without the route
+   * omits it, and the chooser then offers only a blank Canvas.
+   */
+  recipes?(): Promise<CanvasDocumentRecipeCatalog>;
   threadReferenceCards(input: {
     readonly mode: OctantMode;
     readonly threadId: string;
@@ -402,6 +411,14 @@ export function createCanvasClient(options: CanvasClientOptions): CanvasClient {
           body: JSON.stringify(body),
         },
         decodeCanvasCreateResult,
+      );
+    },
+    recipes() {
+      return request(
+        options.fetch,
+        new URL("/api/canvas/recipes", options.baseUrl).toString(),
+        { method: "GET", headers },
+        decodeCanvasDocumentRecipeCatalog,
       );
     },
     threadReferenceCards(input) {

@@ -8511,6 +8511,10 @@ export function startOctantServer(
         // Reauthorize every source against authoritative server state; the
         // resolver fails closed (missing/revoked/offline/unauthorized/failed)
         // when a source is gone, deleted, offline, or not refreshable.
+        // A person starting a Canvas chooses from the same recipes describe
+        // offers an agent: in-tree, plus those admitted skills contribute.
+        documentRecipes: () =>
+          offeredCanvasDocumentRecipes(extensionApiService.snapshot().skills ?? []),
         refreshSource: createCanvasRefreshSourceResolver({
           clock: () => new Date().toISOString() as never,
           artifactState: (projectId, opaqueRef) => {
