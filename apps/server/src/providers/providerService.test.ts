@@ -17,7 +17,10 @@ import { describe, expect, it, vi } from "vitest";
 import { Effect, Queue, Stream } from "effect";
 import { ConcurrencyConflict } from "../persistence/journalErrors";
 import type { PersistenceService } from "../persistence/persistenceService";
+import { WindowAuthorityStore } from "../windowAuthorityStore";
+import { makeOpenAiCompatibleDriver } from "./openAiCompatibleDriver";
 import { ProviderDriverConfigurationError } from "./providerDriverFactory";
+import { createProviderRouteHandler } from "./providerRoutes";
 import { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
 import {
   ProviderService,
@@ -2507,6 +2510,7 @@ describe("ProviderService", () => {
     },
     { category: "unavailable" as const, readiness: "unavailable" as const },
     { category: "incompatible" as const, readiness: "incompatible" as const },
+    { category: "protocol" as const, readiness: "incompatible" as const },
   ])("replaces prior Ready discovery after a $category probe failure", async (failure) => {
     const fixture = serviceFixture({
       instances: [provider()],
@@ -2529,6 +2533,97 @@ describe("ProviderService", () => {
     expect(new Set(Object.values(observed!.capabilities))).toEqual(new Set(["unavailable"]));
     expect(JSON.stringify(observed)).not.toContain("secret provider diagnostic");
   });
+
+  it.each([
+    {
+      answer: "an HTML page",
+      response: () =>
+        new Response("<html><body>secret-page-body</body></html>", {
+          headers: { "content-type": "text/html" },
+        }),
+      status: 400,
+      failure: {
+        category: "protocol",
+        message: "The provider returned an invalid models response.",
+      },
+      readiness: "incompatible",
+    },
+    {
+      answer: "HTTP 503",
+      response: () => new Response("secret-page-body", { status: 503 }),
+      status: 503,
+      failure: { category: "unavailable", message: "The provider request failed with HTTP 503." },
+      readiness: "unavailable",
+    },
+  ])(
+    "keeps an endpoint's own failure sentence on the observation a reload reads when its models address answers $answer",
+    async ({ response, status, failure, readiness }) => {
+      const runtime = new ProviderRuntimeRegistry();
+      const fixture = serviceFixture({
+        instances: [
+          provider({
+            displayName: "Private gateway",
+            driverKind: "openai-compatible",
+            configuration: {
+              kind: "openai-compatible-http",
+              baseUrl: "https://gateway.example/v1",
+              authentication: "bearer",
+              protocol: "auto",
+              manualModelIds: [],
+            },
+          }),
+        ],
+      });
+      const service = new ProviderService({
+        persistence: fixture.persistence,
+        runtimeRegistry: runtime,
+        driver: (instance) =>
+          makeOpenAiCompatibleDriver({
+            instanceId: instance.id,
+            configuration: instance.configuration as never,
+            runtimeRegistry: runtime,
+            credentialResolver: {
+              has: async () => true,
+              resolve: async () => "secret-api-key",
+            },
+            fetch: async () => response(),
+            clock: () => now,
+          }),
+        uuid: () => crypto.randomUUID(),
+        clock: () => now,
+      });
+      const capability = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+      const windowAuthorityStore = new WindowAuthorityStore();
+      windowAuthorityStore.register({ windowId, capability, now: 0 });
+      const route = createProviderRouteHandler({ service, windowAuthorityStore, now: () => 1 });
+      const headers = { "x-octant-window-capability": capability };
+
+      const probe = await route(
+        new Request(`http://127.0.0.1/api/providers/${instanceId}/probe`, {
+          method: "POST",
+          headers,
+        }),
+      );
+      expect(probe?.status).toBe(status);
+      expect(await probe?.json()).toEqual(failure);
+
+      const reload = await route(
+        new Request("http://127.0.0.1/api/providers/bootstrap", { headers }),
+      );
+      expect(reload?.status).toBe(200);
+      const snapshot = (await reload?.json()) as { observedStates: ReadonlyArray<unknown> };
+      expect(snapshot.observedStates).toEqual([
+        expect.objectContaining({
+          instanceId,
+          readiness,
+          processState: "stopped",
+          models: [],
+          message: failure.message,
+        }),
+      ]);
+      expect(JSON.stringify(snapshot)).not.toMatch(/secret-page-body|secret-api-key/);
+    },
+  );
 
   it("preserves bounded process diagnostics and detected version after a failed probe", async () => {
     const fixture = serviceFixture({

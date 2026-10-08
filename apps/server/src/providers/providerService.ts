@@ -1471,6 +1471,11 @@ export class ProviderService implements ProviderServiceApi {
     const failure = providerFailureOfError(error);
     const readiness = probeFailureReadiness(failure?.category ?? "provider-failed");
     const diagnostic = failure?.diagnostic;
+    const driverKind = this.#persistence.readProviderInstance(instanceId)?.driverKind;
+    const endpointMessage =
+      failure !== undefined && driverKind !== undefined && authorsEndpointFailures(driverKind)
+        ? failure.message
+        : undefined;
     return decodeProviderObservedState({
       instanceId,
       readiness,
@@ -1487,7 +1492,9 @@ export class ProviderService implements ProviderServiceApi {
         diagnostic.supportedVersion !== undefined &&
         /^\d+\.\d+\.\d+$/.test(diagnostic.supportedVersion)
           ? `Provider runtime ${diagnostic.supportedVersion} or later is required.`
-          : (diagnostic?.stderrContext ?? probeFailureMessage(readiness, failure?.reason)),
+          : (diagnostic?.stderrContext ??
+            endpointMessage ??
+            probeFailureMessage(readiness, failure?.reason)),
       ...(failure?.reason === undefined ? {} : { reason: failure.reason }),
       ...(diagnostic === undefined ? {} : { diagnostic }),
       observedAt: decodeTimestamp(this.#clock()),
@@ -1932,15 +1939,33 @@ function isProviderFailure(value: unknown): value is ProviderFailure {
   }
 }
 
+/**
+ * HTTP endpoint drivers fail a probe only with fixed Octant-authored sentences
+ * ("The provider returned an invalid models response.", "The provider request
+ * failed with HTTP 503."): their sanitizers drop response bodies and
+ * credentials before a failure leaves the driver. That sentence is kept on the
+ * observation so it survives a reload; replacing it with the generic CLI
+ * wording told an HTTP endpoint's owner "Provider runtime is unavailable." or
+ * nothing at all. CLI runtimes can carry process text in their failures and
+ * keep the closed generic wording.
+ */
+function authorsEndpointFailures(driverKind: ProviderDriverKind): boolean {
+  return isNativeHarnessDriverKind(driverKind) || driverKind === "ollama";
+}
+
 function probeFailureReadiness(
   category: ProviderFailure["category"],
 ): Exclude<ProviderObservedState["readiness"], "ready" | "checking"> {
   if (category === "unauthenticated") return "unauthenticated";
   if (category === "unavailable" || category === "interrupted") return "unavailable";
+  // A probe whose answer is not the protocol Octant speaks (an HTML page, a
+  // body that is not a model list) failed; it is not usable with degraded
+  // discovery, which is how "degraded" read it.
   if (
     category === "invalid-configuration" ||
     category === "unsupported" ||
-    category === "incompatible"
+    category === "incompatible" ||
+    category === "protocol"
   ) {
     return "incompatible";
   }

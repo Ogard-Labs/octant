@@ -17,7 +17,7 @@ const baseline: ReadonlyArray<ProcessSnapshot> = [
     pid: 60_000,
     ppid: 1,
     pgid: 60_000,
-    command: "/opt/homebrew/bin/opencode serve --hostname 127.0.0.1 --port 0",
+    command: "/opt/homebrew/bin/opencode serve --hostname 127.0.0.1 --port 62940",
   },
 ];
 
@@ -28,7 +28,7 @@ describe("packaged OpenCode process-group attribution", () => {
       60_001,
       server.pid,
       60_001,
-      "/opt/homebrew/bin/opencode serve --hostname 127.0.0.1 --port 0",
+      "/opt/homebrew/bin/opencode serve --hostname 127.0.0.1 --port 62940",
     );
     const ownedGroup = findOwnedOpenCodeProcessGroup(baseline, [...baseline, server, ownedRoot], {
       serverCommand: "/package/apps/server/dist/main.mjs",
@@ -43,19 +43,53 @@ describe("packaged OpenCode process-group attribution", () => {
     ).toThrow("managed process group 60001");
   });
 
+  it("attributes the OpenCode the app started on a reserved port", () => {
+    const server = snapshot(50_001, 49_999, 49_999, "/package/apps/server/dist/main.mjs");
+    const ownedRoot = snapshot(
+      60_001,
+      server.pid,
+      60_001,
+      "/Users/test/.opencode/bin/opencode serve --hostname 127.0.0.1 --port 62940",
+    );
+
+    expect(
+      findOwnedOpenCodeProcessGroup(baseline, [...baseline, server, ownedRoot], {
+        serverCommand: "/package/apps/server/dist/main.mjs",
+      }),
+    ).toBe(60_001);
+  });
+
+  it("refuses an OpenCode that is not the managed loopback server", () => {
+    const server = snapshot(50_001, 49_999, 49_999, "/package/apps/server/dist/main.mjs");
+    for (const command of [
+      "/bin/opencode serve --hostname 0.0.0.0 --port 62940",
+      "/bin/opencode serve --hostname 127.0.0.1",
+      "/bin/opencode serve --hostname 127.0.0.1 --port abc",
+      "/bin/not-opencode serve --hostname 127.0.0.1 --port 62940",
+    ]) {
+      expect(() =>
+        findOwnedOpenCodeProcessGroup(
+          baseline,
+          [...baseline, server, snapshot(60_001, server.pid, 60_001, command)],
+          { serverCommand: "/package/apps/server/dist/main.mjs" },
+        ),
+      ).toThrow("managed OpenCode identity");
+    }
+  });
+
   it("ignores a concurrent unrelated matching OpenCode command and process group", () => {
     const server = snapshot(50_001, 49_999, 49_999, "/package/apps/server/dist/main.mjs");
     const ownedRoot = snapshot(
       60_001,
       server.pid,
       60_001,
-      "/opt/homebrew/bin/opencode serve --hostname 127.0.0.1 --port 0",
+      "/opt/homebrew/bin/opencode serve --hostname 127.0.0.1 --port 62940",
     );
     const unrelated = snapshot(
       70_001,
       70_000,
       70_001,
-      "/opt/homebrew/bin/opencode serve --hostname 127.0.0.1 --port 0",
+      "/opt/homebrew/bin/opencode serve --hostname 127.0.0.1 --port 62940",
     );
 
     expect(
@@ -72,7 +106,7 @@ describe("packaged OpenCode process-group attribution", () => {
       60_001,
       server.pid,
       60_001,
-      "/opt/homebrew/bin/opencode serve --hostname 127.0.0.1 --port 0",
+      "/opt/homebrew/bin/opencode serve --hostname 127.0.0.1 --port 62940",
     );
 
     expect(
