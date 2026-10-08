@@ -12,6 +12,7 @@ const view = {
   hostId: "local",
   mode: "work",
   credentialStore: "available",
+  replicaMember: false,
 };
 
 describe("replica store settings client", () => {

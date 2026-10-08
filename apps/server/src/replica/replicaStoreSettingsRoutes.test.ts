@@ -20,6 +20,7 @@ const view: ReplicaStoreSettingsView = {
   hostId: "local" as ReplicaStoreSettingsView["hostId"],
   mode: "work",
   credentialStore: "available",
+  replicaMember: false,
 };
 
 function service() {

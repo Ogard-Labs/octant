@@ -34,6 +34,22 @@ export const ReplicaStoreFolder = Schema.NonEmptyTrimmedString.pipe(
 );
 export type ReplicaStoreFolder = typeof ReplicaStoreFolder.Type;
 
+/**
+ * Whether a parsed host is link-local: IPv4 169.254.0.0/16 or IPv6 fe80::/10,
+ * including an IPv4 address mapped into IPv6. Cloud instance metadata answers
+ * there, and no bucket provider does, so a signed request is never sent to it.
+ * The URL parser has already turned shorthand forms such as `2852039166` or
+ * `0xa9.254.1.1` into dotted quads and compressed IPv6.
+ */
+function isLinkLocalHost(hostname: string): boolean {
+  if (/^169\.254\.\d{1,3}\.\d{1,3}$/.test(hostname)) return true;
+  if (!hostname.startsWith("[") || !hostname.endsWith("]")) return false;
+  const address = hostname.slice(1, -1).toLowerCase();
+  if (/^fe[89ab][0-9a-f]:/.test(address)) return true;
+  // `::ffff:169.254.x.y` serializes as `::ffff:a9fe:xxyy`.
+  return /^::ffff:a9fe:[0-9a-f]{1,4}$/.test(address);
+}
+
 function isHttpsOrigin(value: string): boolean {
   let url: URL;
   try {
@@ -44,10 +60,12 @@ function isHttpsOrigin(value: string): boolean {
   // Only authenticated TLS: a plaintext endpoint would carry the signed
   // request, and the access key in it, in the clear. A path, query, or
   // credentials in the address would be dropped or leaked by the request
-  // builder, so they are refused rather than ignored.
+  // builder, so they are refused rather than ignored. Loopback and private
+  // ranges stay allowed: a self-hosted bucket server is a legitimate store.
   return (
     url.protocol === "https:" &&
     url.host.length > 0 &&
+    !isLinkLocalHost(url.hostname) &&
     url.username === "" &&
     url.password === "" &&
     (url.pathname === "/" || url.pathname === "") &&
@@ -56,11 +74,14 @@ function isHttpsOrigin(value: string): boolean {
   );
 }
 
-/** The bucket provider's base address. Only `https:` with no path is accepted. */
+/**
+ * The bucket provider's base address. Only `https:` with no path is accepted,
+ * and never a link-local address.
+ */
 export const ReplicaStoreS3Endpoint = Schema.NonEmptyTrimmedString.pipe(
   Schema.maxLength(2_048),
   Schema.filter(isHttpsOrigin, {
-    message: () => "The endpoint must be an https address with no path.",
+    message: () => "The endpoint must be an https address with no path, and not link-local.",
   }),
 );
 export type ReplicaStoreS3Endpoint = typeof ReplicaStoreS3Endpoint.Type;
@@ -210,6 +231,12 @@ export const ReplicaStoreSettingsView = Schema.Struct({
   hostId: HostId,
   mode: FolderBrowseMode,
   credentialStore: Schema.Literal("available", "unavailable"),
+  /**
+   * This computer has an identity in a replica in the chosen store. Its store
+   * cannot change until leaving a replica is supported; sync on/off and a new
+   * key pair for the same bucket still can.
+   */
+  replicaMember: Schema.Boolean,
 }).annotations(strict);
 export type ReplicaStoreSettingsView = typeof ReplicaStoreSettingsView.Type;
 
@@ -233,7 +260,10 @@ export const ReplicaStoreSettingsCommand = Schema.Union(
     schemaVersion: ReplicaStoreSettingsSchemaVersion,
     kind: Schema.Literal("configure-s3"),
     settings: ReplicaStoreS3Settings,
-    /** Absent keeps the key pair already saved for this bucket. */
+    /**
+     * Absent keeps the key pair already saved for this bucket. A changed
+     * endpoint, bucket, or addressing needs a new one.
+     */
     credentials: Schema.optional(ReplicaStoreS3Credentials),
     expectedVersion: AggregateVersion,
   }).annotations(strict),
@@ -263,17 +293,20 @@ export const ReplicaStoreRefusalReason = Schema.Literal(
   "credentials-required",
   "credential-store-unavailable",
   "not-configured",
+  "member-of-replica",
 );
 export type ReplicaStoreRefusalReason = typeof ReplicaStoreRefusalReason.Type;
 
 /**
  * What a Test connection found. `reachable` means one probe file was written.
- * `sync-off` and `not-configured` mean no store was called at all.
+ * `sync-off`, `not-configured`, and `credential-store-unavailable` mean no
+ * store was called at all.
  */
 export const ReplicaStoreConnectionOutcome = Schema.Literal(
   "reachable",
   "sync-off",
   "not-configured",
+  "credential-store-unavailable",
   "not-connected",
   "refused",
   "write-failed",

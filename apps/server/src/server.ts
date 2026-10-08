@@ -9992,6 +9992,8 @@ export function startOctantServer(
       // The access-outside-project grant has no surface yet, so a sync folder
       // outside home fails closed, the same as the artifact mirror's folder.
       standingOutsideApproval: false,
+      // A computer with a founder or joiner identity keeps its replica's store.
+      memberOfReplica: () => persistence.replicaMembershipProjection.state().local !== undefined,
       // A bucket's key pair lives in a credential namespace of its own,
       // reached through the broker's bucket-key routes, so no provider
       // instance or device key with the same UUID can reach it. A host with no

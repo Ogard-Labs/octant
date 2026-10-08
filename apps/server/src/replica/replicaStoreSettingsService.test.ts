@@ -5,7 +5,10 @@ import { Schema } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
 import { startCredentialBroker, type CredentialStore } from "@octant/host-runtime";
 import { EventActor, LOCAL_HOST_ID, ReplayCursor, type UtcTimestamp } from "@octant/contracts";
-import type { ReplicaStoreSettingsResult } from "@octant/contracts/replica-store-settings";
+import {
+  REPLICA_STORE_SETTINGS_AGGREGATE_TYPE,
+  type ReplicaStoreSettingsResult,
+} from "@octant/contracts/replica-store-settings";
 import { AggregateHeadsProjection } from "../persistence/aggregateHeadsProjection";
 import { makeReplicaStoreCredentialBrokerClient } from "../providers/credentialBrokerClient";
 import { EventRegistry } from "../persistence/eventRegistry";
@@ -20,7 +23,10 @@ import {
   ReplicaMembershipProjection,
 } from "./replicaMembershipProjection";
 import { ReplicaMembershipService } from "./replicaMembershipService";
-import { registerReplicaStoreSettingsEvents } from "./replicaStoreSettingsEvents";
+import {
+  REPLICA_STORE_SETTINGS_AGGREGATE_ID,
+  registerReplicaStoreSettingsEvents,
+} from "./replicaStoreSettingsEvents";
 import { ReplicaStoreSettingsService } from "./replicaStoreSettingsService";
 import { S3_PROBE_KEY_PREFIX, type S3Transport, type S3TransportRequest } from "./s3ReplicaStore";
 import {
@@ -41,7 +47,11 @@ const bucket = {
   addressing: "path",
 } as const;
 
+/** A later build's event on the settings aggregate, which this build skips on replay. */
+const FUTURE_SETTINGS_EVENT = "replica.store-settings-future@1";
+
 const directories: string[] = [];
+let uuid = 0;
 afterEach(() => {
   while (directories.length > 0) {
     const directory = directories.pop();
@@ -94,6 +104,8 @@ function host(
   options: {
     readonly credentials?: CredentialStore;
     readonly s3Transport?: S3Transport;
+    /** Make the next settings write fail, the way a broken journal would. */
+    readonly failNextAppend?: { armed: boolean };
   } = {},
 ) {
   const membershipProjection = new ReplicaMembershipProjection();
@@ -101,19 +113,31 @@ function host(
     connection: openConnection,
     registry: registerReplicaStoreSettingsEvents(
       registerReplicaMembershipEvents(new EventRegistry()),
-    ),
+    ).register(FUTURE_SETTINGS_EVENT, 1, Schema.Struct({})),
     projections: new ProjectionRegistry()
       .register(new AggregateHeadsProjection())
       .register(membershipProjection),
     clock: () => NOW,
   });
-  let uuid = 0;
+  // One counter per file, so a host restarted on the same journal never
+  // reuses an event id.
   const nextUuid = () => {
     uuid += 1;
     return `00000000-0000-4000-8000-${String(uuid).padStart(12, "0")}`;
   };
+  const settingsJournal = {
+    append: (input: Parameters<Journal["append"]>[0]) => {
+      if (options.failNextAppend?.armed === true) {
+        options.failNextAppend.armed = false;
+        throw new Error("disk full");
+      }
+      return journal.append(input);
+    },
+    replayAggregate: (input: Parameters<Journal["replayAggregate"]>[0]) =>
+      journal.replayAggregate(input),
+  };
   const settings = new ReplicaStoreSettingsService({
-    journal,
+    journal: settingsJournal,
     uuid: nextUuid,
     actor,
     clock: () => NOW as UtcTimestamp,
@@ -122,6 +146,7 @@ function host(
     credentials: options.credentials,
     ...(options.s3Transport === undefined ? {} : { s3Transport: options.s3Transport }),
     readFileFlags: async () => 0,
+    memberOfReplica: () => membershipProjection.state().local !== undefined,
   });
   const deviceKeys = memoryCredentials().store;
   const membership = new ReplicaMembershipService({
@@ -144,7 +169,7 @@ function host(
     JSON.stringify(
       journal.replay(Schema.decodeUnknownSync(ReplayCursor)({ afterSequence: 0, limit: 1_000 })),
     );
-  return { settings, membership, journalText };
+  return { settings, membership, journal, journalText };
 }
 
 function expectView(result: ReplicaStoreSettingsResult) {
@@ -349,7 +374,10 @@ describe("replica store settings", () => {
           expectedVersion: saved.version,
         }),
       );
-      expect(JSON.parse(bucketKeys.values.get(store.credentialRef) ?? "{}")).toMatchObject({
+      const rotated = settings.settings().store;
+      if (rotated.kind !== "s3") throw new Error("expected a bucket");
+      expect([...bucketKeys.values.keys()]).toEqual([rotated.credentialRef]);
+      expect(JSON.parse(bucketKeys.values.get(rotated.credentialRef) ?? "{}")).toMatchObject({
         accessKeyId: "AKIAREPLACED",
       });
 
@@ -490,5 +518,328 @@ describe("replica store settings", () => {
 
     server.answerWith(403);
     expect(await settings.testConnection()).toMatchObject({ outcome: "unauthorized" });
+  });
+
+  it("makes no further store call once sync is turned off in the middle of a command", async () => {
+    const server = bucketServer();
+    const credentials = memoryCredentials();
+    const { settings, membership } = host(connection(), {
+      credentials: credentials.store,
+      s3Transport: async (request) => {
+        const answer = await server.transport(request);
+        if (server.requests.length === 1) {
+          // The person turns sync off while the first write is in flight.
+          await settings.setSync({ syncOn: false, expectedVersion: settings.settings().version });
+        }
+        return answer;
+      },
+    });
+    const saved = expectView(
+      await settings.configureS3({
+        settings: bucket,
+        credentials: { accessKeyId: "AKIAEXAMPLE", secretAccessKey: SECRET },
+        expectedVersion: 0,
+      }),
+    );
+    await settings.setSync({ syncOn: true, expectedVersion: saved.version });
+
+    const created = await membership.execute({ kind: "create-replica", displayName: "MacBook" });
+
+    expect(created.kind).not.toBe("replica-created");
+    expect(server.requests).toHaveLength(1);
+    expect(settings.settings().syncOn).toBe(false);
+  });
+
+  it("refuses a store opened before a change once the settings move on", async () => {
+    const folder = syncFolder();
+    const { settings } = host(connection());
+    const chosen = expectView(await settings.chooseFolder({ folder, expectedVersion: 0 }));
+    const on = expectView(
+      await settings.setSync({ syncOn: true, expectedVersion: chosen.version }),
+    );
+    const selection = settings.selection();
+    if (selection.status !== "selected") throw new Error("expected a store");
+
+    await settings.chooseFolder({ folder: syncFolder(), expectedVersion: on.version });
+    const turnedOn = await settings.setSync({
+      syncOn: true,
+      expectedVersion: settings.settings().version,
+    });
+    expectView(turnedOn);
+
+    expect(await selection.store.putIfAbsent("probe/1.json", new Uint8Array([1]))).toEqual({
+      status: "not-connected",
+    });
+    expect(existsSync(join(folder, SYNCED_FOLDER_REPLICA_DIRECTORY))).toBe(false);
+  });
+
+  it("asks for a new key pair when the endpoint, bucket, or addressing changes, and never sends the old one there", async () => {
+    const server = bucketServer();
+    const credentials = memoryCredentials();
+    const { settings } = host(connection(), {
+      credentials: credentials.store,
+      s3Transport: server.transport,
+    });
+    const saved = expectView(
+      await settings.configureS3({
+        settings: bucket,
+        credentials: { accessKeyId: "AKIAOLDPROVIDER", secretAccessKey: SECRET },
+        expectedVersion: 0,
+      }),
+    );
+
+    for (const moved of [
+      { ...bucket, endpoint: "https://elsewhere.example.test" },
+      { ...bucket, bucket: "other-bucket" },
+      { ...bucket, addressing: "virtual-host" as const },
+    ]) {
+      expect(
+        await settings.configureS3({ settings: moved, expectedVersion: saved.version }),
+      ).toMatchObject({ kind: "replica-store-refused", reason: "credentials-required" });
+    }
+    expect(settings.settings().version).toBe(saved.version);
+
+    const moved = expectView(
+      await settings.configureS3({
+        settings: { ...bucket, endpoint: "https://elsewhere.example.test" },
+        credentials: { accessKeyId: "AKIANEWPROVIDER", secretAccessKey: "new-secret" },
+        expectedVersion: saved.version,
+      }),
+    );
+    await settings.setSync({ syncOn: true, expectedVersion: moved.version });
+    expect(await settings.testConnection()).toMatchObject({ outcome: "reachable" });
+
+    const sent = JSON.stringify(server.requests);
+    expect(sent).toContain("elsewhere.example.test");
+    expect(sent).toContain("AKIANEWPROVIDER");
+    expect(sent).not.toContain("AKIAOLDPROVIDER");
+    // The old provider's key pair is gone once the new one stands.
+    expect([...credentials.values.values()].join()).not.toContain("AKIAOLDPROVIDER");
+  });
+
+  it("rotates a key pair through a fresh entry, keeps sync on, and keeps the old entry when the change fails", async () => {
+    const credentials = memoryCredentials();
+    const failNextAppend = { armed: false };
+    const { settings } = host(connection(), {
+      credentials: credentials.store,
+      failNextAppend,
+    });
+    const saved = expectView(
+      await settings.configureS3({
+        settings: bucket,
+        credentials: { accessKeyId: "AKIAFIRST", secretAccessKey: SECRET },
+        expectedVersion: 0,
+      }),
+    );
+    const on = expectView(await settings.setSync({ syncOn: true, expectedVersion: saved.version }));
+    const first = settings.settings().store;
+    if (first.kind !== "s3") throw new Error("expected a bucket");
+
+    failNextAppend.armed = true;
+    await expect(
+      settings.configureS3({
+        settings: bucket,
+        credentials: { accessKeyId: "AKIAFAILED", secretAccessKey: SECRET },
+        expectedVersion: on.version,
+      }),
+    ).rejects.toThrow("disk full");
+    expect([...credentials.values.keys()]).toEqual([first.credentialRef]);
+    expect(credentials.values.get(first.credentialRef)).toContain("AKIAFIRST");
+
+    const rotated = expectView(
+      await settings.configureS3({
+        settings: bucket,
+        credentials: { accessKeyId: "AKIASECOND", secretAccessKey: SECRET },
+        expectedVersion: on.version,
+      }),
+    );
+    expect(rotated.syncOn).toBe(true);
+    const second = settings.settings().store;
+    if (second.kind !== "s3") throw new Error("expected a bucket");
+    expect(second.credentialRef).not.toBe(first.credentialRef);
+    expect([...credentials.values.keys()]).toEqual([second.credentialRef]);
+    expect(credentials.values.get(second.credentialRef)).toContain("AKIASECOND");
+    // The new entry is written before the settings point at it, and the old
+    // one is deleted only after.
+    const order = credentials.calls.filter(
+      (call) => call.startsWith("set:") || call.startsWith("delete:"),
+    );
+    expect(order.slice(-2)).toEqual([
+      `set:${second.credentialRef}`,
+      `delete:${first.credentialRef}`,
+    ]);
+  });
+
+  it("turns sync off when a saved bucket's settings change", async () => {
+    const credentials = memoryCredentials();
+    const { settings } = host(connection(), { credentials: credentials.store });
+    const saved = expectView(
+      await settings.configureS3({
+        settings: bucket,
+        credentials: { accessKeyId: "AKIAEXAMPLE", secretAccessKey: SECRET },
+        expectedVersion: 0,
+      }),
+    );
+    const on = expectView(await settings.setSync({ syncOn: true, expectedVersion: saved.version }));
+
+    const unchanged = expectView(
+      await settings.configureS3({ settings: bucket, expectedVersion: on.version }),
+    );
+    expect(unchanged).toMatchObject({ syncOn: true, version: on.version });
+
+    const moved = expectView(
+      await settings.configureS3({
+        settings: { ...bucket, region: "us-east-1" },
+        expectedVersion: on.version,
+      }),
+    );
+    expect(moved.syncOn).toBe(false);
+  });
+
+  it("refuses to change the store of a computer that belongs to a replica, but still turns sync off and on", async () => {
+    const folder = syncFolder();
+    const { settings, membership } = host(connection());
+    const chosen = expectView(await settings.chooseFolder({ folder, expectedVersion: 0 }));
+    const on = expectView(
+      await settings.setSync({ syncOn: true, expectedVersion: chosen.version }),
+    );
+    expect(on.replicaMember).toBe(false);
+    expect(
+      (await membership.execute({ kind: "create-replica", displayName: "MacBook" })).kind,
+    ).toBe("replica-created");
+
+    const member = await settings.view();
+    expect(member.replicaMember).toBe(true);
+    for (const refused of [
+      await settings.chooseFolder({ folder: syncFolder(), expectedVersion: member.version }),
+      await settings.clear({ expectedVersion: member.version }),
+      await settings.configureS3({
+        settings: bucket,
+        credentials: { accessKeyId: "AKIAEXAMPLE", secretAccessKey: SECRET },
+        expectedVersion: member.version,
+      }),
+    ]) {
+      expect(refused).toMatchObject({
+        kind: "replica-store-refused",
+        reason: "member-of-replica",
+      });
+    }
+    expect(settings.settings()).toMatchObject({
+      store: { kind: "synced-folder", folder },
+      version: member.version,
+    });
+
+    const off = expectView(
+      await settings.setSync({ syncOn: false, expectedVersion: member.version }),
+    );
+    expect(off.syncOn).toBe(false);
+    expect(
+      expectView(await settings.setSync({ syncOn: true, expectedVersion: off.version })).syncOn,
+    ).toBe(true);
+  });
+
+  it("lets a replica member rotate its bucket's key pair but not move the bucket", async () => {
+    const server = bucketServer();
+    const credentials = memoryCredentials();
+    const { settings, membership } = host(connection(), {
+      credentials: credentials.store,
+      s3Transport: server.transport,
+    });
+    const saved = expectView(
+      await settings.configureS3({
+        settings: bucket,
+        credentials: { accessKeyId: "AKIAEXAMPLE", secretAccessKey: SECRET },
+        expectedVersion: 0,
+      }),
+    );
+    await settings.setSync({ syncOn: true, expectedVersion: saved.version });
+    expect(
+      (await membership.execute({ kind: "create-replica", displayName: "MacBook" })).kind,
+    ).toBe("replica-created");
+    const member = await settings.view();
+
+    for (const moved of [
+      { ...bucket, prefix: "laptop" },
+      { ...bucket, endpoint: "https://elsewhere.example.test" },
+    ]) {
+      expect(
+        await settings.configureS3({
+          settings: moved,
+          credentials: { accessKeyId: "AKIAEXAMPLE", secretAccessKey: SECRET },
+          expectedVersion: member.version,
+        }),
+      ).toMatchObject({ kind: "replica-store-refused", reason: "member-of-replica" });
+    }
+
+    const rotated = expectView(
+      await settings.configureS3({
+        settings: bucket,
+        credentials: { accessKeyId: "AKIAROTATED", secretAccessKey: SECRET },
+        expectedVersion: member.version,
+      }),
+    );
+    expect(rotated).toMatchObject({ syncOn: true, replicaMember: true });
+    expect([...credentials.values.values()].join()).toContain("AKIAROTATED");
+  });
+
+  it("answers why Test connection could not open a store while sync is on", async () => {
+    const opened = connection();
+    const credentials = memoryCredentials();
+    const first = host(opened, { credentials: credentials.store });
+    const saved = expectView(
+      await first.settings.configureS3({
+        settings: bucket,
+        credentials: { accessKeyId: "AKIAEXAMPLE", secretAccessKey: SECRET },
+        expectedVersion: 0,
+      }),
+    );
+    await first.settings.setSync({ syncOn: true, expectedVersion: saved.version });
+
+    // The same journal on a host whose credential store is gone.
+    const withoutCredentialStore = host(opened);
+    expect(await withoutCredentialStore.settings.testConnection()).toMatchObject({
+      outcome: "credential-store-unavailable",
+    });
+  });
+
+  it("keeps accepting changes after a newer frame it cannot read, with sync off", async () => {
+    const opened = connection();
+    const folder = syncFolder();
+    const first = host(opened);
+    const chosen = expectView(await first.settings.chooseFolder({ folder, expectedVersion: 0 }));
+    const on = expectView(
+      await first.settings.setSync({ syncOn: true, expectedVersion: chosen.version }),
+    );
+    first.journal.append({
+      aggregate: {
+        aggregateType: REPLICA_STORE_SETTINGS_AGGREGATE_TYPE,
+        aggregateId: REPLICA_STORE_SETTINGS_AGGREGATE_ID,
+      },
+      expectedVersion: on.version,
+      events: [
+        {
+          eventId: "00000000-0000-4000-8000-0000000000f1",
+          eventName: FUTURE_SETTINGS_EVENT,
+          eventVersion: 1,
+          correlationId: "00000000-0000-4000-8000-0000000000f2",
+          actor,
+          occurredAt: NOW as UtcTimestamp,
+          payload: {},
+        },
+      ],
+    });
+
+    const restarted = host(opened);
+    expect(restarted.settings.settings()).toMatchObject({
+      store: { kind: "synced-folder", folder },
+      syncOn: false,
+      version: on.version + 1,
+    });
+    expect(restarted.settings.selection()).toEqual({ status: "not-configured" });
+    expect(
+      expectView(
+        await restarted.settings.setSync({ syncOn: true, expectedVersion: on.version + 1 }),
+      ).syncOn,
+    ).toBe(true);
   });
 });

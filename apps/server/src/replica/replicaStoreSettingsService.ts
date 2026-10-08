@@ -12,6 +12,11 @@
  * broker. The journaled settings hold an opaque reference to that entry and
  * nothing else secret; the view Settings reads says only whether a key pair is
  * saved.
+ *
+ * While this computer belongs to a replica - it has a founder or joiner
+ * identity in the membership projection - the store's kind and location are
+ * fixed: the replica lives in that store, and leaving one is not supported
+ * yet. Sync on/off and a new key pair for the same bucket stay allowed.
  */
 
 import {
@@ -36,6 +41,7 @@ import {
   type ReplicaStoreSettingsView,
 } from "@octant/contracts/replica-store-settings";
 import type { CredentialStore } from "@octant/host-runtime";
+import type { ReplicaStore } from "@octant/plugin-api/replica-store";
 import { Schema } from "effect";
 import { isInsideHomeDirectory } from "../canvas/artifactMirrorFilePort";
 import type { Journal } from "../persistence/journal";
@@ -82,6 +88,11 @@ export interface ReplicaStoreSettingsServiceDependencies {
   readonly s3Transport?: S3Transport;
   /** Platform file flags for the folder store. Tests pass a stand-in. */
   readonly readFileFlags?: (absolutePath: string) => Promise<number>;
+  /**
+   * Whether this computer has an identity in a replica, read from the
+   * membership projection on every change.
+   */
+  readonly memberOfReplica: () => boolean;
 }
 
 type OpenedStore =
@@ -97,6 +108,8 @@ const REFUSAL_TEXT: Readonly<Record<ReplicaStoreRefusalReason, string>> = {
   "credential-store-unavailable":
     "The access key could not be saved in this computer's credential store.",
   "not-configured": "Choose a store before turning sync on.",
+  "member-of-replica":
+    "This computer belongs to a replica in this store. The store can't be changed until leaving a replica is supported.",
 };
 
 export function replicaStoreRefusal(
@@ -149,6 +162,7 @@ export class ReplicaStoreSettingsService {
       // sync is not a mode, and Work browses the same home folder.
       mode: "work",
       credentialStore: this.#dependencies.credentials === undefined ? "unavailable" : "available",
+      replicaMember: this.#dependencies.memberOfReplica(),
     });
   }
 
@@ -156,7 +170,10 @@ export class ReplicaStoreSettingsService {
    * The store the membership service reads and writes, opened for this call.
    *
    * In-tree stores are installed; sync on is their enablement. A store that is
-   * withheld - sync off - is not constructed, so it cannot be called.
+   * withheld - sync off - is not constructed, so it cannot be called. A
+   * membership command makes several store calls from one selection, so the
+   * store handed out refuses every call once sync turns off or the settings it
+   * was opened under change.
    */
   selection(): ReplicaStoreSelection {
     const opened = this.#open();
@@ -177,20 +194,30 @@ export class ReplicaStoreSettingsService {
       if (input.expectedVersion !== this.#settings.version) {
         return replicaStoreRefusal("stale-version");
       }
+      if (this.#dependencies.memberOfReplica()) return replicaStoreRefusal("member-of-replica");
       if (
         !this.#dependencies.standingOutsideApproval &&
         !isInsideHomeDirectory(input.folder, this.#dependencies.home)
       ) {
         return replicaStoreRefusal("outside-home");
       }
-      return this.#replaceStore({ kind: "synced-folder", folder: input.folder });
+      return this.#replaceStore({ kind: "synced-folder", folder: input.folder }, false);
     });
   }
 
   /**
    * Record a bucket's settings, and save its key pair in the host credential
-   * store when the person typed one. Without a new key pair, the one already
-   * saved for the current bucket is kept.
+   * store when the person typed one.
+   *
+   * Without a new key pair, the one saved for the current bucket is kept only
+   * while the endpoint, bucket, and addressing stay the same: those decide
+   * which server receives the signed requests, and a key pair saved for one
+   * provider is never sent to another. A new key pair goes to a fresh
+   * credential entry; the old entry is deleted only after the change is
+   * journaled, so a failed change leaves the saved key pair in place.
+   *
+   * Identical settings keep sync as it was, so rotating a key pair does not
+   * stop sync. Any other change turns sync off.
    */
   configureS3(input: {
     readonly settings: ReplicaStoreS3Settings;
@@ -202,18 +229,28 @@ export class ReplicaStoreSettingsService {
         return replicaStoreRefusal("stale-version");
       }
       const current = this.#settings.store;
-      const existingRef = current.kind === "s3" ? current.credentialRef : undefined;
+      const saved = current.kind === "s3" ? current : undefined;
+      if (
+        this.#dependencies.memberOfReplica() &&
+        (saved === undefined || !sameBucketLocation(saved.settings, input.settings))
+      ) {
+        return replicaStoreRefusal("member-of-replica");
+      }
+      const unchanged = saved !== undefined && sameBucketSettings(saved.settings, input.settings);
+      const syncOn = unchanged && this.#settings.syncOn;
       if (input.credentials === undefined) {
-        if (existingRef === undefined) return replicaStoreRefusal("credentials-required");
-        return this.#replaceStore({
-          kind: "s3",
-          settings: input.settings,
-          credentialRef: existingRef,
-        });
+        if (saved === undefined || !sameBucketServer(saved.settings, input.settings)) {
+          return replicaStoreRefusal("credentials-required");
+        }
+        if (unchanged) return this.view();
+        return this.#replaceStore(
+          { kind: "s3", settings: input.settings, credentialRef: saved.credentialRef },
+          syncOn,
+        );
       }
       const credentials = this.#dependencies.credentials;
       if (credentials === undefined) return replicaStoreRefusal("credential-store-unavailable");
-      const credentialRef = existingRef ?? this.#dependencies.uuid().toLowerCase();
+      const credentialRef = this.#dependencies.uuid().toLowerCase();
       try {
         // The exact shape the bucket store reads back; anything else is read
         // as no credential rather than guessed at.
@@ -225,15 +262,22 @@ export class ReplicaStoreSettingsService {
           }),
         );
       } catch {
+        await credentials.delete(credentialRef).catch(() => undefined);
         return replicaStoreRefusal("credential-store-unavailable");
       }
-      const result = await this.#replaceStore({
-        kind: "s3",
-        settings: input.settings,
-        credentialRef,
-      });
-      if (result.kind !== "replica-store-settings-view" && existingRef === undefined) {
-        // The change did not stand, so nothing refers to the key pair just saved.
+      let result: ReplicaStoreSettingsResult;
+      try {
+        result = await this.#replaceStore(
+          { kind: "s3", settings: input.settings, credentialRef },
+          syncOn,
+        );
+      } catch (error) {
+        await credentials.delete(credentialRef).catch(() => undefined);
+        throw error;
+      }
+      if (result.kind !== "replica-store-settings-view") {
+        // The change did not stand, so nothing refers to the key pair just
+        // saved; the old entry is untouched and still in use.
         await credentials.delete(credentialRef).catch(() => undefined);
       }
       return result;
@@ -246,7 +290,8 @@ export class ReplicaStoreSettingsService {
       if (input.expectedVersion !== this.#settings.version) {
         return replicaStoreRefusal("stale-version");
       }
-      return this.#replaceStore({ kind: "none" });
+      if (this.#dependencies.memberOfReplica()) return replicaStoreRefusal("member-of-replica");
+      return this.#replaceStore({ kind: "none" }, false);
     });
   }
 
@@ -272,12 +317,22 @@ export class ReplicaStoreSettingsService {
    * connection asks. Nothing is deleted. With sync off no store is called.
    */
   async testConnection(): Promise<ConnectionTested> {
-    if (this.#settings.store.kind === "none") {
+    const settings = this.#settings;
+    if (settings.store.kind === "none") {
       return connectionTested("not-configured", "Choose a store first.");
+    }
+    if (!settings.syncOn) {
+      return connectionTested("sync-off", "Turn sync on to test the connection.");
     }
     const opened = this.#open();
     if (opened === undefined) {
-      return connectionTested("sync-off", "Turn sync on to test the connection.");
+      // Sync is on, so the store could not be opened rather than was withheld.
+      return settings.store.kind === "s3" && this.#dependencies.credentials === undefined
+        ? connectionTested(
+            "credential-store-unavailable",
+            "This computer has no credential store to read the bucket's access key from.",
+          )
+        : connectionTested("not-connected", "Octant could not open the store.");
     }
     return opened.kind === "synced-folder" ? testFolder(opened.store) : testBucket(opened.store);
   }
@@ -285,7 +340,9 @@ export class ReplicaStoreSettingsService {
   #open(): OpenedStore | undefined {
     const settings = this.#settings;
     const store = settings.store;
-    if (store.kind === "none") return undefined;
+    if (store.kind === "none" || !settings.syncOn) return undefined;
+    // The stores take sync on as a value; this re-reads it before every call.
+    const current = () => this.#settings.syncOn && this.#settings.version === settings.version;
     if (store.kind === "synced-folder") {
       const opened = openSyncedFolderReplicaStore({
         folder: store.folder,
@@ -298,7 +355,10 @@ export class ReplicaStoreSettingsService {
           : { readFileFlags: this.#dependencies.readFileFlags }),
       });
       return opened.status === "offered"
-        ? { kind: "synced-folder", store: opened.store }
+        ? {
+            kind: "synced-folder",
+            store: whileCurrent(opened.store, current, { status: "not-connected" }),
+          }
         : undefined;
     }
     const credentials = this.#dependencies.credentials;
@@ -320,7 +380,9 @@ export class ReplicaStoreSettingsService {
         ? {}
         : { transport: this.#dependencies.s3Transport }),
     });
-    return opened.status === "offered" ? { kind: "s3", store: opened.store } : undefined;
+    return opened.status === "offered"
+      ? { kind: "s3", store: whileCurrent(opened.store, current, { status: "not-connected" }) }
+      : undefined;
   }
 
   async #credentialState(credentialRef: string): Promise<ReplicaStoreCredentialState> {
@@ -337,11 +399,14 @@ export class ReplicaStoreSettingsService {
    * A new or changed store leaves sync off: the storage provider can read the
    * files, and turning sync on is where the person accepts that for this
    * store. A bucket's key pair is removed from the credential store once that
-   * bucket is no longer the choice.
+   * entry is no longer the choice.
    */
-  async #replaceStore(store: ReplicaStoreChoice): Promise<ReplicaStoreSettingsResult> {
+  async #replaceStore(
+    store: ReplicaStoreChoice,
+    syncOn: boolean,
+  ): Promise<ReplicaStoreSettingsResult> {
     const previous = this.#settings.store;
-    const result = await this.#commit(store, false);
+    const result = await this.#commit(store, syncOn);
     if (
       result.kind === "replica-store-settings-view" &&
       previous.kind === "s3" &&
@@ -394,7 +459,14 @@ export class ReplicaStoreSettingsService {
     });
   }
 
-  /** Rebuild the last stored choice from the journal, oldest frame to newest. */
+  /**
+   * Rebuild the last stored choice from the journal, oldest frame to newest.
+   *
+   * The next change names the journal's head version, so the settings always
+   * carry it. When the newest frame no longer decodes, the last choice that
+   * does is kept with sync off: no store is called until the person turns
+   * sync on again, and a replica member keeps the store its replica lives in.
+   */
   #hydrate(): void {
     let afterVersion = 0;
     let latest: ReplicaStoreSettings | undefined;
@@ -418,7 +490,18 @@ export class ReplicaStoreSettingsService {
       }
       if (batch.length < JOURNAL_REPLAY_BATCH_SIZE) break;
     }
-    if (latest !== undefined) this.#settings = latest;
+    if (afterVersion === 0) return;
+    if (latest !== undefined && latest.version === afterVersion) {
+      this.#settings = latest;
+      return;
+    }
+    this.#settings = decodeReplicaStoreSettings({
+      kind: "replica-store-settings",
+      store: latest?.store ?? { kind: "none" },
+      syncOn: false,
+      version: afterVersion,
+      updatedAt: latest?.updatedAt ?? this.#dependencies.clock(),
+    });
   }
 
   #serially<T>(run: () => Promise<T>): Promise<T> {
@@ -426,6 +509,44 @@ export class ReplicaStoreSettingsService {
     this.#queue = next.catch(() => undefined);
     return next;
   }
+}
+
+/** Endpoint, bucket, and addressing: which server signed requests go to. */
+function sameBucketServer(left: ReplicaStoreS3Settings, right: ReplicaStoreS3Settings): boolean {
+  return (
+    left.endpoint === right.endpoint &&
+    left.bucket === right.bucket &&
+    left.addressing === right.addressing
+  );
+}
+
+/** The server plus the prefix: where a replica's files are. */
+function sameBucketLocation(left: ReplicaStoreS3Settings, right: ReplicaStoreS3Settings): boolean {
+  return sameBucketServer(left, right) && left.prefix === right.prefix;
+}
+
+function sameBucketSettings(left: ReplicaStoreS3Settings, right: ReplicaStoreS3Settings): boolean {
+  return sameBucketLocation(left, right) && left.region === right.region;
+}
+
+/**
+ * The opened store, refusing every call once `current` turns false. A refused
+ * call answers `not-connected`, the way a store opened with sync off does.
+ */
+function whileCurrent<R>(
+  store: ReplicaStore & { readonly testConnection: () => Promise<R> },
+  current: () => boolean,
+  notConnected: R,
+): ReplicaStore & { readonly testConnection: () => Promise<R> } {
+  const refused = { status: "not-connected" } as const;
+  return {
+    kind: store.kind,
+    status: async () => (current() ? store.status() : "not-connected"),
+    list: async (afterCursor) => (current() ? store.list(afterCursor) : refused),
+    get: async (key) => (current() ? store.get(key) : refused),
+    putIfAbsent: async (key, bytes) => (current() ? store.putIfAbsent(key, bytes) : refused),
+    testConnection: async () => (current() ? store.testConnection() : notConnected),
+  };
 }
 
 type ConnectionTested = Extract<

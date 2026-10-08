@@ -59,6 +59,27 @@ describe("replica store settings contracts", () => {
     }
   });
 
+  it("refuses a link-local endpoint, including instance metadata, but keeps loopback and private hosts", () => {
+    for (const endpoint of [
+      "https://169.254.169.254",
+      "https://2852039166",
+      "https://[fe80::1]",
+      "https://[febf::1]:9000",
+      "https://[::ffff:169.254.169.254]",
+    ]) {
+      expect(() => decodeReplicaStoreS3Settings({ ...bucket, endpoint })).toThrow();
+    }
+    for (const endpoint of [
+      "https://127.0.0.1:9000",
+      "https://[::1]:9000",
+      "https://10.0.0.5",
+      "https://192.168.1.20:9000",
+      "https://minio.local",
+    ]) {
+      expect(decodeReplicaStoreS3Settings({ ...bucket, endpoint }).endpoint).toBe(endpoint);
+    }
+  });
+
   it("refuses an access key or secret written into a bucket's settings", () => {
     expect(() => decodeReplicaStoreS3Settings({ ...bucket, accessKeyId: "AKIAEXAMPLE" })).toThrow();
     expect(() =>
@@ -130,6 +151,7 @@ describe("replica store settings contracts", () => {
         hostId: "local",
         mode: "work",
         credentialStore: "available",
+        replicaMember: false,
       }),
     ).toThrow();
   });
