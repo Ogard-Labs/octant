@@ -506,6 +506,7 @@ export function createFakeRemoteServer(config: FakeRemoteServerConfig): FakeRemo
         path.startsWith("/api/preview/") ||
         path === "/api/providers/bootstrap" ||
         path === "/api/projects/bootstrap" ||
+        path === "/api/replica-sync/status" ||
         path.startsWith("/api/agent-profiles")) &&
       (method === "POST" || method === "GET")
     ) {

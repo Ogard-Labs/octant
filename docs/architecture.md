@@ -1450,7 +1450,8 @@ flowchart LR
     of a replica it read with the code that member will show. A read-only
     status view without codes, requests, ids, or revocability
     (`/api/replica-sync/status`) is on the shared product dispatch, so a
-    paired device of this host can read it under `project.overview.read`.
+    paired device of this host can read it under `project.overview.read`;
+    the paired-browser shell shows it read-only.
   - **Writing.** A command that publishes journals the signed entry before
     either file is written, writes the signature and then the entry, and
     journals the record as held once both landed. If a publish stops
@@ -1487,10 +1488,10 @@ flowchart LR
   - **Not wired yet.** The membership service asks Settings › Sync's store
     selection for its store on every command; with sync off or no store
     chosen, every command answers a typed `not-configured` refusal and makes
-    no store call. No surface creates a replica, joins, or revokes yet, and
-    artifact versions are neither published nor imported. A person can choose
-    a store and turn sync on, but cannot yet join another computer or copy a
-    version. The artifact reconcile policy's `sequence-gap` refusal has no
+    no store call. Settings › Sync sets up a replica, joins, approves, and
+    revokes through these commands, but artifact versions are neither
+    published nor imported yet, so a person can join another computer but
+    cannot yet copy a version. The artifact reconcile policy's `sequence-gap` refusal has no
     caller yet; the import slice owns the gap rule. Leaving a replica is not
     supported yet, so a computer with a membership identity cannot change its
     store; leaving a replica, and changing the store after it, are a
