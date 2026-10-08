@@ -445,8 +445,11 @@ export function useProviderController(options: ProviderControllerOptions) {
       displayName: string,
       configuration: OpenAiCompatibleProviderConfiguration,
       credential: TransientProviderCredential,
+      // A sign-in offer names the instance up front so its row can begin the
+      // sign-in the moment the instance exists.
+      preassignedInstanceId?: ProviderInstanceId,
     ) => {
-      const instanceId = decodeProviderInstanceId(crypto.randomUUID());
+      const instanceId = preassignedInstanceId ?? decodeProviderInstanceId(crypto.randomUUID());
       return queueProviderMutation(mutationQueue, mounted, setBusy, setMessage, () =>
         withTransientCredential(credential, async (credentialValue) => {
           const current = authoritative.current;

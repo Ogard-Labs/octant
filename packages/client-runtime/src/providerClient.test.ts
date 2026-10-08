@@ -64,6 +64,43 @@ describe("ProviderClient", () => {
     await expect(invalidFailure.bootstrap()).rejects.toMatchObject({ category: "protocol" });
   });
 
+  it("names what failed to decode in a diagnostic without logging any decoded value", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const probe = createProviderClient({
+      baseUrl: "http://localhost",
+      windowCapability: capability,
+      fetch: async () => Response.json({ ...observation(), readiness: "secret-readiness" }),
+    });
+    const failure = await rejected(probe.probe(instanceId));
+    expect(failure).toMatchObject({
+      category: "protocol",
+      message: "Provider service returned an invalid response.",
+    });
+    expect(warn).toHaveBeenCalledTimes(1);
+    const [label, detail] = warn.mock.calls[0] ?? [];
+    expect(label).toBe("[provider-client] could not decode the provider service response");
+    expect(detail).toMatchObject({ operation: "probe", httpStatus: 200, stage: "success-body" });
+    const issues = (detail as { readonly issues: ReadonlyArray<string> }).issues;
+    expect(issues.some((issue) => issue.startsWith("readiness:"))).toBe(true);
+    expect(JSON.stringify(warn.mock.calls)).not.toContain("secret-readiness");
+
+    warn.mockClear();
+    const failureBody = createProviderClient({
+      baseUrl: "http://localhost",
+      windowCapability: capability,
+      fetch: async () =>
+        Response.json({ category: "not-a-category", message: "secret-message" }, { status: 400 }),
+    });
+    await expect(failureBody.probe(instanceId)).rejects.toMatchObject({ category: "protocol" });
+    expect(warn.mock.calls[0]?.[1]).toMatchObject({
+      operation: "probe",
+      httpStatus: 400,
+      stage: "failure-body",
+    });
+    expect(JSON.stringify(warn.mock.calls)).not.toContain("secret-message");
+    warn.mockRestore();
+  });
+
   it("preserves the typed persisted catalog snapshots returned by bootstrap", async () => {
     const catalog = {
       instanceId,

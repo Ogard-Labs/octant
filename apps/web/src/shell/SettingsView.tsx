@@ -31,7 +31,10 @@ import { isImageProfileDriverKind, resolveAppBackground } from "@octant/domain";
 import { resolveEffectiveThemeMode } from "@octant/domain/theme-policy";
 import type { ProviderController } from "../providers/useProviderController";
 import type { DiscoveryController } from "../providers/useDiscoveryController";
-import { ProviderSettingsView } from "../providers/ProviderSettingsView";
+import {
+  ProviderSettingsView,
+  type ProviderSettingsViewProps,
+} from "../providers/ProviderSettingsView";
 import { ProviderDiscoverySection } from "../providers/ProviderDiscoverySection";
 import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
 import { OctantDialog } from "../ui/base/OctantDialog";
@@ -97,6 +100,7 @@ import { KeybindingSettings } from "../keybindings/KeybindingSettings";
 import { NavigatorAssistantSettingsView } from "../settings/NavigatorAssistantSettingsView";
 import { VoiceSettingsView } from "../settings/VoiceSettingsView";
 import { ImageGenerationSettingsView } from "../settings/ImageGenerationSettingsView";
+import { ModelEndpointSettingsView } from "../settings/ModelEndpointSettingsView";
 import { ComputerUseSettingsView } from "../settings/ComputerUseSettingsView";
 import { ManagedToolsSettingsView } from "../settings/ManagedToolsSettingsView";
 import { UserProfileSettingsView } from "../profile/UserProfileSettingsView";
@@ -653,7 +657,7 @@ export function SettingsView(props: SettingsViewProps) {
                     activeSection={route.activeSection}
                     capabilities={capabilities}
                     focusedSetting={route.focusedSetting}
-                    onOpenSection={route.openSection}
+                    onApplyDeepLink={route.applyDeepLink}
                     pluginSettingsEntryPoints={pluginSettingsEntryPoints}
                     props={savingProps}
                   />
@@ -756,7 +760,7 @@ function SettingsSearchField(props: {
 interface ActiveSectionContentProps {
   readonly activeSection: SettingsSectionId;
   readonly focusedSetting: SettingsSettingId | undefined;
-  readonly onOpenSection: (sectionId: SettingsSectionId) => void;
+  readonly onApplyDeepLink: (link: SettingsDeepLink) => void;
   readonly pluginSettingsEntryPoints: ReadonlyMap<string, string>;
   readonly props: SettingsViewProps;
   readonly capabilities: SettingsNativeCapabilities;
@@ -765,11 +769,15 @@ interface ActiveSectionContentProps {
 function ActiveSectionContent({
   activeSection,
   focusedSetting,
-  onOpenSection,
+  onApplyDeepLink,
   pluginSettingsEntryPoints,
   props,
   capabilities,
 }: ActiveSectionContentProps) {
+  // Voice, image sources, and the harness model slots all run on model
+  // endpoints, so their "connect one" actions land on the add-endpoint row.
+  const openModelEndpoints = () =>
+    onApplyDeepLink({ section: "harness", setting: settingId("model-endpoints") });
   const pluginEntryPoint = pluginSettingsEntryPoints.get(activeSection);
   if (pluginEntryPoint !== undefined) {
     return (
@@ -907,7 +915,7 @@ function ActiveSectionContent({
         <VoiceSettingsView
           focusedSetting={focusedSetting}
           onSettingsChange={props.onSettingsChange}
-          onOpenProviders={() => onOpenSection("providers")}
+          onOpenModelEndpoints={openModelEndpoints}
           {...(props.providerController?.snapshot === undefined
             ? {}
             : { providerSnapshot: props.providerController.snapshot })}
@@ -918,7 +926,7 @@ function ActiveSectionContent({
       return (
         <ImageGenerationSettingsView
           onSettingsChange={props.onSettingsChange}
-          onOpenProviders={() => onOpenSection("providers")}
+          onOpenModelEndpoints={openModelEndpoints}
           {...(props.providerController?.snapshot === undefined
             ? {}
             : { providerSnapshot: props.providerController.snapshot })}
@@ -951,21 +959,31 @@ function ActiveSectionContent({
         />
       ) : null;
     case "harness":
-      // Everything the Octant Harness decides lives on this one page: which
-      // model does which job, and whether its model may start helper agents
-      // (the one place the creation posture's Ask and Automatic differ).
+      // Everything the Octant Harness decides lives on this one page: the
+      // model endpoints it calls, which model does which job, and whether its
+      // model may start helper agents (the one place the creation posture's
+      // Ask and Automatic differ).
       return (
         <div className="settings-section-stack" id="settings-harness">
+          {props.providerController === undefined ? null : (
+            <ModelEndpointSettingsView
+              {...providerSettingsViewProps(props.providerController, props.hostBridge)}
+              {...(props.discoveryController?.snapshot === undefined
+                ? {}
+                : { discoverySnapshot: props.discoveryController.snapshot })}
+              focused={focusedSetting === settingId("model-endpoints")}
+            />
+          )}
           {props.nativeHarnessClient === undefined ? null : (
             <>
               <p className="native-harness-panel__lead">
-                Models connected through API keys or local endpoints appear under{" "}
-                <strong>Octant</strong> in the model picker. Assign models to roles below.
+                Models from the endpoints above appear under <strong>Octant</strong> in the model
+                picker. Assign models to roles below.
               </p>
               <NativeHarnessRoutingPanel
                 client={props.nativeHarnessClient}
                 hostId={LOCAL_HOST_ID}
-                onOpenProviders={() => onOpenSection("providers")}
+                onOpenModelEndpoints={openModelEndpoints}
                 providers={nativeHarnessProviderOptions(props.providerController)}
                 {...(props.providerController === undefined
                   ? {}
@@ -1193,9 +1211,7 @@ function ProvidersSection(props: {
   return (
     <div id="settings-providers">
       <ProviderSettingsView
-        busy={props.providerController.busy}
-        credentialManagementAvailable={props.providerController.credentialManagementAvailable}
-        defaults={props.providerController.defaults}
+        {...providerSettingsViewProps(props.providerController, props.hostBridge)}
         discovery={
           discoveryController === undefined ? null : (
             <ProviderDiscoverySection
@@ -1213,93 +1229,101 @@ function ProvidersSection(props: {
             />
           )
         }
-        instances={props.providerController.instances}
         {...(props.discoveryController?.snapshot === undefined
           ? {}
           : { discoverySnapshot: props.discoveryController.snapshot })}
-        {...(props.providerController.message === undefined
-          ? {}
-          : { message: props.providerController.message })}
-        observedByInstance={props.providerController.observedByInstance}
-        presentationObservedByInstance={props.providerController.presentationObservedByInstance}
-        onOpenExternalUrl={(url) => openExternalUrl(props.hostBridge, url)}
-        {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
-        onChangeBinary={props.providerController.changeBinary}
-        onChangeClaudeConfiguration={props.providerController.changeClaudeConfiguration}
-        onChangeDevinConfiguration={props.providerController.changeDevinConfiguration}
-        onChangeKiloConfiguration={props.providerController.changeKiloConfiguration}
-        onChangePiConfiguration={props.providerController.changePiConfiguration}
-        onChangeOhMyPiConfiguration={props.providerController.changeOhMyPiConfiguration}
-        onChangeOllamaConfiguration={props.providerController.changeOllamaConfiguration}
-        onChangeMistralVibeConfiguration={props.providerController.changeMistralVibeConfiguration}
-        onChangeGrokConfiguration={props.providerController.changeGrokConfiguration}
-        onChangeGooseConfiguration={props.providerController.changeGooseConfiguration}
-        onChangeGlmConfiguration={props.providerController.changeGlmConfiguration}
-        onChangeGeminiConfiguration={props.providerController.changeGeminiConfiguration}
-        onChangeCopilotConfiguration={props.providerController.changeCopilotConfiguration}
-        onChangeClineConfiguration={props.providerController.changeClineConfiguration}
-        onChangeQwenConfiguration={props.providerController.changeQwenConfiguration}
-        onChangeFxConfiguration={props.providerController.changeFxConfiguration}
-        onChangeOpenAiCompatibleConfiguration={
-          props.providerController.changeOpenAiCompatibleConfiguration
-        }
-        onChangeOpenAiImageConfiguration={props.providerController.changeOpenAiImageConfiguration}
-        onChangeGeminiImageConfiguration={props.providerController.changeGeminiImageConfiguration}
-        onChangeBflImageConfiguration={props.providerController.changeBflImageConfiguration}
-        onChangeIdeogramImageConfiguration={
-          props.providerController.changeIdeogramImageConfiguration
-        }
-        onChangeAnthropicCompatibleConfiguration={
-          props.providerController.changeAnthropicCompatibleConfiguration
-        }
-        onChangeAzureFoundryConfiguration={props.providerController.changeAzureFoundryConfiguration}
-        onClearProviderCredential={props.providerController.clearProviderCredential}
-        {...(props.providerController.providerOAuth === undefined
-          ? {}
-          : { onProviderOAuth: props.providerController.providerOAuth })}
-        {...(props.providerController.claudeHelpers === undefined
-          ? {}
-          : { onClaudeHelpers: props.providerController.claudeHelpers })}
-        onBeginProviderAuthentication={props.providerController.beginProviderAuthentication}
-        onCompleteProviderAuthentication={props.providerController.completeProviderAuthentication}
-        onUpdateProviderCli={props.providerController.updateProviderCli}
-        onCreate={props.providerController.create}
-        onCreateClaude={props.providerController.createClaude}
-        onCreateMistralVibe={props.providerController.createMistralVibe}
-        onCreateGrok={props.providerController.createGrok}
-        onCreateGlm={props.providerController.createGlm}
-        onCreateGemini={props.providerController.createGemini}
-        onCreateCline={props.providerController.createCline}
-        onCreateQwen={props.providerController.createQwen}
-        onCreateFx={props.providerController.createFx}
-        onCreateOllama={props.providerController.createOllama}
-        onCreateOpenAiCompatible={props.providerController.createOpenAiCompatible}
-        onCreateAnthropicCompatible={props.providerController.createAnthropicCompatible}
-        onCreateAzureFoundry={props.providerController.createAzureFoundry}
-        onCreateOpenAiImage={props.providerController.createOpenAiImage}
-        onCreateGeminiImage={props.providerController.createGeminiImage}
-        onCreateBflImage={props.providerController.createBflImage}
-        onCreateIdeogramImage={props.providerController.createIdeogramImage}
-        onPermissionPersistenceChange={props.providerController.updatePermissionPersistence}
-        onProbe={props.providerController.probe}
-        onProviderOrderChange={props.providerController.updateProviderOrder}
-        onAgentEligibleModelsChange={props.providerController.updateAgentEligibleModels}
-        onHiddenModelsChange={props.providerController.updateHiddenModels}
-        onVerifyModelTools={props.providerController.verifyModelTools}
-        onProviderCredentialStatus={props.providerController.providerCredentialStatus}
-        onRemove={props.providerController.remove}
-        onRename={props.providerController.rename}
-        onRetry={props.providerController.retry}
-        onSetEnabled={props.providerController.setEnabled}
-        onDataTagsChange={props.providerController.setDataTags}
-        onModelDataTagsChange={props.providerController.setModelDataTags}
-        onModelContextWindowChange={props.providerController.setModelContextWindow}
-        probingIds={props.providerController.probingIds}
-        updatingIds={props.providerController.updatingIds}
-        status={props.providerController.status}
       />
     </div>
   );
+}
+
+/**
+ * The provider-instance props every Settings page that lists provider
+ * instances shares: Providers & Models lists agent runtimes and Octant
+ * Harness lists model endpoints, over the same controller.
+ */
+function providerSettingsViewProps(
+  controller: ProviderController,
+  hostBridge: OctantHostBridge | undefined,
+): Omit<ProviderSettingsViewProps, "discovery" | "discoverySnapshot"> {
+  return {
+    busy: controller.busy,
+    credentialManagementAvailable: controller.credentialManagementAvailable,
+    defaults: controller.defaults,
+    instances: controller.instances,
+    ...(controller.message === undefined ? {} : { message: controller.message }),
+    observedByInstance: controller.observedByInstance,
+    presentationObservedByInstance: controller.presentationObservedByInstance,
+    onOpenExternalUrl: (url) => openExternalUrl(hostBridge, url),
+    ...(hostBridge === undefined ? {} : { hostBridge: hostBridge }),
+    onChangeBinary: controller.changeBinary,
+    onChangeClaudeConfiguration: controller.changeClaudeConfiguration,
+    onChangeDevinConfiguration: controller.changeDevinConfiguration,
+    onChangeKiloConfiguration: controller.changeKiloConfiguration,
+    onChangePiConfiguration: controller.changePiConfiguration,
+    onChangeOhMyPiConfiguration: controller.changeOhMyPiConfiguration,
+    onChangeOllamaConfiguration: controller.changeOllamaConfiguration,
+    onChangeMistralVibeConfiguration: controller.changeMistralVibeConfiguration,
+    onChangeGrokConfiguration: controller.changeGrokConfiguration,
+    onChangeGooseConfiguration: controller.changeGooseConfiguration,
+    onChangeGlmConfiguration: controller.changeGlmConfiguration,
+    onChangeGeminiConfiguration: controller.changeGeminiConfiguration,
+    onChangeCopilotConfiguration: controller.changeCopilotConfiguration,
+    onChangeClineConfiguration: controller.changeClineConfiguration,
+    onChangeQwenConfiguration: controller.changeQwenConfiguration,
+    onChangeFxConfiguration: controller.changeFxConfiguration,
+    onChangeOpenAiCompatibleConfiguration: controller.changeOpenAiCompatibleConfiguration,
+    onChangeOpenAiImageConfiguration: controller.changeOpenAiImageConfiguration,
+    onChangeGeminiImageConfiguration: controller.changeGeminiImageConfiguration,
+    onChangeBflImageConfiguration: controller.changeBflImageConfiguration,
+    onChangeIdeogramImageConfiguration: controller.changeIdeogramImageConfiguration,
+    onChangeAnthropicCompatibleConfiguration: controller.changeAnthropicCompatibleConfiguration,
+    onChangeAzureFoundryConfiguration: controller.changeAzureFoundryConfiguration,
+    onClearProviderCredential: controller.clearProviderCredential,
+    ...(controller.providerOAuth === undefined
+      ? {}
+      : { onProviderOAuth: controller.providerOAuth }),
+    ...(controller.claudeHelpers === undefined
+      ? {}
+      : { onClaudeHelpers: controller.claudeHelpers }),
+    onBeginProviderAuthentication: controller.beginProviderAuthentication,
+    onCompleteProviderAuthentication: controller.completeProviderAuthentication,
+    onUpdateProviderCli: controller.updateProviderCli,
+    onCreate: controller.create,
+    onCreateClaude: controller.createClaude,
+    onCreateMistralVibe: controller.createMistralVibe,
+    onCreateGrok: controller.createGrok,
+    onCreateGlm: controller.createGlm,
+    onCreateGemini: controller.createGemini,
+    onCreateCline: controller.createCline,
+    onCreateQwen: controller.createQwen,
+    onCreateFx: controller.createFx,
+    onCreateOllama: controller.createOllama,
+    onCreateOpenAiCompatible: controller.createOpenAiCompatible,
+    onCreateAnthropicCompatible: controller.createAnthropicCompatible,
+    onCreateAzureFoundry: controller.createAzureFoundry,
+    onCreateOpenAiImage: controller.createOpenAiImage,
+    onCreateGeminiImage: controller.createGeminiImage,
+    onCreateBflImage: controller.createBflImage,
+    onCreateIdeogramImage: controller.createIdeogramImage,
+    onPermissionPersistenceChange: controller.updatePermissionPersistence,
+    onProbe: controller.probe,
+    onProviderOrderChange: controller.updateProviderOrder,
+    onAgentEligibleModelsChange: controller.updateAgentEligibleModels,
+    onHiddenModelsChange: controller.updateHiddenModels,
+    onVerifyModelTools: controller.verifyModelTools,
+    onProviderCredentialStatus: controller.providerCredentialStatus,
+    onRemove: controller.remove,
+    onRename: controller.rename,
+    onRetry: controller.retry,
+    onSetEnabled: controller.setEnabled,
+    onDataTagsChange: controller.setDataTags,
+    onModelDataTagsChange: controller.setModelDataTags,
+    onModelContextWindowChange: controller.setModelContextWindow,
+    probingIds: controller.probingIds,
+    updatingIds: controller.updatingIds,
+    status: controller.status,
+  };
 }
 
 interface SectionProps {

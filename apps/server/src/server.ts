@@ -473,7 +473,7 @@ import {
   makeReplicaStoreCredentialBrokerClient,
   type ProviderCredentialResolver,
 } from "./providers/credentialBrokerClient";
-import { createHostOAuthService } from "./providers/oauth/hostOAuthService";
+import { createHostOAuthService, extAgentHostIdFor } from "./providers/oauth/hostOAuthService";
 import { makeHostOAuthBrokerClient } from "./providers/oauth/hostOAuthBrokerClient";
 import { hostOAuthEventJournal } from "./providers/oauth/hostOAuthEventJournal";
 import { createProviderOAuthRouteHandler } from "./providers/oauth/providerOAuthRoutes";
@@ -4227,6 +4227,9 @@ export function startOctantServer(
         : createHostOAuthService({
             journal: oauthJournal,
             broker: oauthBroker,
+            // The ChatGPT plan sign-in registers this host under a stable id
+            // before the first sign-in.
+            extAgentHostId: extAgentHostIdFor(persistence.dataDirectory),
           });
     if (hostOAuth !== undefined && oauthJournal !== undefined) {
       for (const acknowledgment of oauthJournal.acknowledgments()) {

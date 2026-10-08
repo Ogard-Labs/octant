@@ -41,6 +41,7 @@ import {
   honestDirectEndpointCapabilities,
   inspectDirectEndpointCredential,
 } from "./directEndpointSubscriptionOAuth";
+import { chatGptPlanModelsListing, isChatGptPlanDescriptor } from "./chatGptPlanProfile";
 import { sendChatCompletionsTurn, type ChatCompletionsTurnResult } from "./openAiChatCompletions";
 import {
   makeOpenAiCompatibleEndpoint,
@@ -70,6 +71,31 @@ import {
 } from "./modelContextWindowFacts";
 import type { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
 import type { SubscriptionOAuthHost } from "@octant/provider-sdk/subscription-oauth";
+
+/** The request profile the resolved credential selects, when it selects one. */
+type CompatiblePlanProfile = "chatgpt-plan" | undefined;
+
+function planProfileOf(options: OpenAiCompatibleDriverOptions): CompatiblePlanProfile {
+  return isChatGptPlanDescriptor(options.configuration.oauthDescriptorId)
+    ? "chatgpt-plan"
+    : undefined;
+}
+
+/**
+ * The ChatGPT plan route speaks only the Responses protocol: its fixed wire
+ * contract (`store:false`, `stream:true`, Responses input shape) cannot be
+ * expressed as a Chat Completions request. Refusing here, before anything
+ * leaves the process, keeps the module's guarantee that an unexpressible
+ * request is typed and refused rather than sent under a protocol the plan
+ * does not cover.
+ */
+function refuseChatCompletionsUnderPlan(
+  profile: CompatiblePlanProfile,
+  protocol: CompatibleProtocol,
+): ProviderFailure | undefined {
+  if (profile !== "chatgpt-plan" || protocol !== "chat-completions") return undefined;
+  return failure("unsupported", "The ChatGPT plan route supports only the Responses API.");
+}
 
 const initialCapabilities: ProviderCapabilities = {
   streaming: "unavailable",
@@ -179,7 +205,13 @@ export function makeOpenAiCompatibleDriver(options: OpenAiCompatibleDriverOption
                     : options.credentialResolver,
                 profile,
               );
-              const result = await probeModels(endpoint);
+              // The plan route may not enumerate models; its profile reads that
+              // answer as an honest "cannot list" state instead of a failure.
+              const result = await probeModels(
+                endpoint,
+                undefined,
+                planProfileOf(options) === "chatgpt-plan" ? chatGptPlanModelsListing : undefined,
+              );
               // Do NOT run a generating tool-echo turn during routine probes:
               // ChatService.#prepareTurnExecution calls driver.probe() before
               // every Chat turn, so a probe-time tool echo would add an
@@ -230,6 +262,7 @@ export function makeOpenAiCompatibleDriver(options: OpenAiCompatibleDriverOption
                 endpoint,
                 modelId,
                 true,
+                planProfileOf(options),
               );
               return {
                 instanceId,
@@ -351,6 +384,12 @@ function openAiCompatibleTransport(
             ? { has: async () => true, resolve: async () => plainCredential }
             : undefined;
       let endpoint: OpenAiCompatibleEndpoint | undefined = endpointFor(options, resolver, profile);
+      // The ChatGPT plan request profile applies when the resolved
+      // credential's descriptor is the plan offer; plan usage is disabled
+      // when the sign-in did not grant use of the subscription.
+      const planProfile = planProfileOf(options);
+      const subscriptionUsageGranted =
+        gate.kind === "oauth" ? gate.subscriptionUsageGranted : undefined;
       // What each protocol's last successful call measured and billed. A
       // responses token count must not calibrate a request automatic mode may
       // send as chat completions.
@@ -376,7 +415,10 @@ function openAiCompatibleTransport(
             attempt: async (attempt) => {
               let result: CompatibleTurnResult;
               try {
-                result = await sendCompatibleRequest(options, active, request, attempt);
+                result = await sendCompatibleRequest(options, active, request, attempt, {
+                  profile: planProfile,
+                  subscriptionUsageGranted,
+                });
               } catch (error) {
                 // Learned before the harness shrinks and resends, so the
                 // shrink is measured against the window the endpoint named.
@@ -454,6 +496,10 @@ async function sendCompatibleRequest(
     readonly signal: AbortSignal;
     readonly onEvent: (event: NativeHarnessStreamEvent) => void;
   },
+  plan: {
+    readonly profile: "chatgpt-plan" | undefined;
+    readonly subscriptionUsageGranted: boolean | undefined;
+  } = { profile: undefined, subscriptionUsageGranted: undefined },
 ): Promise<CompatibleTurnResult> {
   const { history, prompt, toolAnswers } = protocolInput(request);
   const onEvent = (event: ProtocolTurnEvent) => {
@@ -474,6 +520,10 @@ async function sendCompatibleRequest(
     ...(request.system === undefined ? {} : { system: request.system }),
     ...(request.tools.length === 0 ? {} : { tools: request.tools }),
     ...(toolAnswers === undefined ? {} : { toolAnswers }),
+    ...(plan.profile === undefined ? {} : { profile: plan.profile }),
+    ...(plan.subscriptionUsageGranted === undefined
+      ? {}
+      : { subscriptionUsageGranted: plan.subscriptionUsageGranted }),
     signal: stream.signal,
     onEvent,
   };
@@ -483,6 +533,13 @@ async function sendCompatibleRequest(
     preference: options.configuration.protocol,
     cache: protocolCache(options),
     attempt: async (protocol): Promise<CompatibleProtocolAttemptResult<CompatibleTurnResult>> => {
+      // The plan profile never speaks Chat Completions: an explicit
+      // chat-completions preference, or an auto fallback onto it, is refused
+      // before anything leaves the process.
+      const refusal = refuseChatCompletionsUnderPlan(plan.profile, protocol);
+      if (refusal !== undefined) {
+        return { ok: false, failure: refusal, accepted: false, outputStarted: false };
+      }
       if (protocol === "chat-completions") {
         try {
           return { ok: true, value: await runProviderEffect(sendChatCompletionsTurn(shared)) };
@@ -619,6 +676,7 @@ async function probeToolCapabilityForModel(
   endpoint: OpenAiCompatibleEndpoint,
   modelId: ProviderModelId,
   propagateFailures = false,
+  profile: CompatiblePlanProfile = undefined,
 ): Promise<"supported" | "unsupported"> {
   const echoTool = capabilityEchoToolDefinition();
   const cache = {
@@ -634,6 +692,13 @@ async function probeToolCapabilityForModel(
       preference: options.configuration.protocol,
       cache,
       attempt: async (protocol): Promise<CompatibleProtocolAttemptResult<CompatibleTurnResult>> => {
+        // The probe speaks only the protocols the active request profile
+        // permits; the ChatGPT plan route supports only Responses, and its
+        // usage refusal must be checked by the Responses sender too.
+        const refusal = refuseChatCompletionsUnderPlan(profile, protocol);
+        if (refusal !== undefined) {
+          return { ok: false, failure: refusal, accepted: false, outputStarted: false };
+        }
         if (protocol === "chat-completions") {
           const exit = await Effect.runPromiseExit(
             sendChatCompletionsTurn({
@@ -666,6 +731,7 @@ async function probeToolCapabilityForModel(
             prompt: "echo ready",
             tools: [echoTool],
             toolChoice: "required",
+            ...(profile === undefined ? {} : { profile }),
             onAttemptFailure: (value) => {
               metadata = value;
             },

@@ -7086,7 +7086,9 @@ function LaunchedShell(
                 imageProfiles={listEligibleImageProfiles(
                   providerController.snapshot?.instances ?? [],
                 )}
-                onOpenImageSettings={() => void controller.openSettings({ section: "providers" })}
+                onOpenImageSettings={() =>
+                  void controller.openSettings({ section: "image-generation" })
+                }
                 onCreateArtifact={() => {
                   // An artifact carries the thread it was made in, so there
                   // is nowhere to put one that has no origin. Starting a

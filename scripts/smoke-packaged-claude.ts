@@ -8,6 +8,7 @@ import { domainToASCII, fileURLToPath } from "node:url";
 import { deriveHostRuntimeHostId } from "@octant/host-runtime";
 import { createQuitAppleScript, waitForChildExit } from "./package-desktop";
 import {
+  PACKAGED_SMOKE_SERVER_PORT,
   PACKAGED_SMOKE_SERVER_URL,
   appOutputContext,
   cleanupPackagedProcess,
@@ -661,7 +662,7 @@ async function main(): Promise<void> {
     process.env,
   );
   await runCommand(packageCommand.command, packageCommand.args, packageCommand.env, 180_000);
-  await assertPortAvailable(13_773);
+  await assertPortAvailable(PACKAGED_SMOKE_SERVER_PORT);
   const baseline = await processIdentities();
   const modeFailures: Error[] = [];
   for (const authentication of modes) {
@@ -705,7 +706,7 @@ async function smokePackagedLifecycle(
     registerCleanup("listener", async () => {
       await observer.close();
       await assertPortAvailable(observer.port);
-      await assertPortAvailable(13_773);
+      await assertPortAvailable(PACKAGED_SMOKE_SERVER_PORT);
     });
     const env = packagedClaudeEnvironment(
       process.env,
