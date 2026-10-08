@@ -201,9 +201,11 @@ export function OctantSelectField(props: OctantSelectFieldProps) {
           </SelectValue>
         </SelectTrigger>
         <SelectPortal>
+          {/* Above an open dialog (its viewport stacks at 51): a select inside
+              Add endpoint's dialog opened its list underneath, out of reach. */}
           <SelectPositioner
             alignItemWithTrigger={false}
-            className="z-50 outline-none window-no-drag"
+            className="z-[var(--oct-z-modal)] outline-none window-no-drag"
             sideOffset={4}
           >
             <SelectPopup>
