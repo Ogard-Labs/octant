@@ -9,6 +9,11 @@
  *
  * Authority matches the artifact mirror's global folder: inside the user's
  * home, unless the standing access-outside-project approval exists.
+ *
+ * A Test connection probe writes one empty file under
+ * `<folder>/Octant Sync/.octant-probe/`. An entry key cannot start a segment
+ * with `.`, so a probe never collides with an entry, and `list` skips that
+ * directory the way the bucket store skips its own probe prefix.
  */
 
 import { execFile as execFileCallback } from "node:child_process";
@@ -41,6 +46,9 @@ export const SYNCED_FOLDER_REPLICA_DIRECTORY = "Octant Sync";
  */
 export const DATALESS_FLAG = 0x40000000;
 
+/** Where Test connection probes land, under the sync directory. */
+export const SYNCED_FOLDER_PROBE_DIRECTORY = ".octant-probe";
+
 const LIST_PAGE_SIZE = 64;
 
 export interface OpenSyncedFolderReplicaStoreInput {
@@ -58,9 +66,25 @@ export interface OpenSyncedFolderReplicaStoreInput {
   readonly pageSize?: number;
 }
 
+/**
+ * What a Test connection found. `reachable` means one probe file landed;
+ * `refused` is authority (outside home, or a symlinked sync directory) and
+ * `not-connected` is reach (the folder is missing or not a directory).
+ */
+export type SyncedFolderConnectionTestResult =
+  | { readonly status: "reachable" }
+  | { readonly status: "not-connected" }
+  | { readonly status: "refused" }
+  | { readonly status: "failed"; readonly reason: "write-failed" };
+
+/** The port plus the Test connection probe Settings offers for every store. */
+export interface SyncedFolderReplicaStore extends ReplicaStore {
+  readonly testConnection: () => Promise<SyncedFolderConnectionTestResult>;
+}
+
 export type OpenSyncedFolderReplicaStoreResult =
   | { readonly status: "withheld"; readonly reason: "not-installed" | "disabled" }
-  | { readonly status: "offered"; readonly store: ReplicaStore };
+  | { readonly status: "offered"; readonly store: SyncedFolderReplicaStore };
 
 type ReadyRoot = {
   readonly status: "ready";
@@ -92,7 +116,7 @@ export function openSyncedFolderReplicaStore(
 
 export function createSyncedFolderReplicaStore(
   input: OpenSyncedFolderReplicaStoreInput,
-): ReplicaStore {
+): SyncedFolderReplicaStore {
   const readFileFlags = input.readFileFlags ?? readPlatformFileFlags;
   const pageSize = input.pageSize ?? LIST_PAGE_SIZE;
 
@@ -184,6 +208,25 @@ export function createSyncedFolderReplicaStore(
       if (gate === "escaped") return { status: "refused", reason: "key-refused" };
       if (gate === "occupied") return { status: "already-exists" };
       return publishIfAbsent(destination, snapshot);
+    },
+
+    async testConnection(): Promise<SyncedFolderConnectionTestResult> {
+      const root = await resolveRoot();
+      if (root.status !== "ready") return { status: root.status };
+      // The probe takes the same confined, write-once path an entry does, so
+      // a reachable answer means an entry could be published here too. It is
+      // never deleted: `list` skips the probe directory.
+      const destination = join(root.syncRoot, SYNCED_FOLDER_PROBE_DIRECTORY, randomUUID());
+      const confined = await ensureConfinedDirectory(root.folder, root.syncRoot, destination);
+      if (!confined) return { status: "refused" };
+      const gate = await publishGate(root.syncRoot, destination);
+      if (gate === "escaped") return { status: "refused" };
+      if (gate === "occupied") return { status: "reachable" };
+      const published = await publishIfAbsent(destination, new Uint8Array());
+      if (published.status === "stored" || published.status === "already-exists") {
+        return { status: "reachable" };
+      }
+      return { status: "failed", reason: "write-failed" };
     },
   };
 }
@@ -334,7 +377,7 @@ async function listSyncRoot(
     lastExamined = key;
     examined += 1;
     const name = key.slice(key.lastIndexOf("/") + 1);
-    if (isSyncedFolderWriteTempName(name)) {
+    if (isSyncedFolderWriteTempName(name) || key.startsWith(`${SYNCED_FOLDER_PROBE_DIRECTORY}/`)) {
       if (examined >= pageSize) break;
       continue;
     }

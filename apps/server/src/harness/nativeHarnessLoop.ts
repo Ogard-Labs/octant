@@ -263,7 +263,7 @@ export function createNativeHarnessConnection(
       stopped: false,
       steps: 0,
       selfCorrections: 0,
-      usage: { inputTokens: 0, outputTokens: 0 },
+      usage: { inputTokens: 0, outputTokens: 0, costUsd: 0 },
       requestStartedAt: undefined,
     });
 
@@ -545,8 +545,14 @@ export function createNativeHarnessConnection(
       // Header buckets describe the account after this response; they go
       // first so a consumer that stops at the terminal still sees them.
       for (const bucket of response.rateLimitBuckets ?? []) emitBucket(state, bucket);
-      if (response.usage !== undefined)
+      if (response.usage !== undefined) {
         state.usage = addNativeHarnessUsage(state.usage, response.usage);
+      } else if (state.usage.costUsd !== undefined) {
+        // A request that reported nothing may still have been charged, so the
+        // turn no longer has a whole cost.
+        const { costUsd: _unknown, ...withoutCost } = state.usage;
+        state.usage = withoutCost;
+      }
       if (response.toolCalls.length > 0) {
         const calls = response.toolCalls;
         // The model's own call is journaled either way: a malformed call is
@@ -787,7 +793,7 @@ export function createNativeHarnessConnection(
             state.turn = input;
             state.steps = 0;
             state.selfCorrections = 0;
-            state.usage = { inputTokens: 0, outputTokens: 0 };
+            state.usage = { inputTokens: 0, outputTokens: 0, costUsd: 0 };
             state.acceptingSteering = true;
             void runStep(state, request);
           },

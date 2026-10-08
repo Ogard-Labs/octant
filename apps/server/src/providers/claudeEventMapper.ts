@@ -108,6 +108,12 @@ export interface ClaudeEventContext {
    * fill is this and nothing else.
    */
   contextTokens?: number;
+  /**
+   * Each model call's usage this turn, by Claude message id. An assistant
+   * message reports only its own call, so the turn's usage so far is their
+   * sum; a call split across several messages repeats its id and counts once.
+   */
+  readonly callUsage: Map<string, ClaudeUsage>;
   readonly requestIds: Map<string, ClaudeRequestCorrelation>;
   readonly taskIds: Map<string, ClaudeTaskState>;
   readonly toolStates: Map<string, ClaudeToolState>;
@@ -230,6 +236,20 @@ function usageEvent(
       : { autoCompactThreshold: context.autoCompactThreshold }),
     ...(contextBreakdown === undefined ? {} : { contextBreakdown }),
   });
+}
+
+function turnUsageSoFar(calls: ReadonlyMap<string, ClaudeUsage>): ClaudeUsage {
+  let inputTokens = 0;
+  let outputTokens = 0;
+  let cacheCreationInputTokens = 0;
+  let cacheReadInputTokens = 0;
+  for (const call of calls.values()) {
+    inputTokens += call.inputTokens;
+    outputTokens += call.outputTokens;
+    cacheCreationInputTokens += call.cacheCreationInputTokens;
+    cacheReadInputTokens += call.cacheReadInputTokens;
+  }
+  return { inputTokens, outputTokens, cacheCreationInputTokens, cacheReadInputTokens };
 }
 
 function isSafeUsageValue(value: number): boolean {
@@ -453,7 +473,12 @@ function mapAssistant(
     message.usage.inputTokens +
     message.usage.cacheReadInputTokens +
     message.usage.cacheCreationInputTokens;
-  results.push(usageEvent(context, message.usage));
+  // A usage report without a request time covers the whole turn so far and
+  // replaces the one before it. Reporting only this call's usage left a turn
+  // that ended without its result (cancelled, crashed) charged for its last
+  // call alone.
+  context.callUsage.set(message.messageId, message.usage);
+  results.push(usageEvent(context, turnUsageSoFar(context.callUsage)));
   if (message.error !== undefined) {
     if (context.terminal) return [failure("Claude returned a duplicate terminal message.")];
     const classified = assistantErrorFailure(message.error);

@@ -41,6 +41,11 @@ export interface FolderPickerProps {
   readonly hint?: string;
   /** Defaults to on for Code; the clone destination browser has no Git checkbox. */
   readonly showGitInit?: boolean;
+  /**
+   * Whether the header names the mode above the title. Defaults to on; a
+   * picker that is not binding a Project, such as the sync folder, hides it.
+   */
+  readonly showMode?: boolean;
 }
 
 type PickerStatus = "loading" | "ready" | "error";
@@ -183,7 +188,7 @@ export function FolderPicker(props: FolderPickerProps) {
     >
       <div className="folder-picker__header">
         <div>
-          <span>{props.mode === "code" ? "Code" : "Work"}</span>
+          {props.showMode === false ? null : <span>{props.mode === "code" ? "Code" : "Work"}</span>}
           <h2 id={titleId}>{title}</h2>
         </div>
         <OctantButton

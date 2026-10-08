@@ -4,11 +4,8 @@ import type { HostId } from "@octant/contracts/host";
 import {
   REPLICA_ENTRY_FORMAT,
   decodeReplicaArtifactEntry,
-  decodeReplicaMembershipEntry,
-  type ReplicaEntry,
   type ReplicaInstanceId,
   type ReplicaSignatureVerdict,
-  type ReplicaMembershipEntry,
   type ReplicaArtifactEntry,
 } from "@octant/contracts/replica-entry";
 import { describe, expect, expectTypeOf, it } from "vitest";
@@ -79,7 +76,7 @@ function entry(options: {
   readonly instanceId?: ReplicaInstanceId;
   readonly displayName?: string;
   readonly sequence?: number;
-  readonly kind?: ReplicaEntry["kind"];
+  readonly kind?: ReplicaArtifactEntry["kind"];
   readonly hostId?: string;
   readonly versionId?: string;
   readonly parents?: ReadonlyArray<string>;
@@ -98,6 +95,7 @@ function entry(options: {
       instanceId: options.instanceId ?? ids.north,
       displayName: options.displayName ?? "North",
       sequence: options.sequence ?? 1,
+      publicKey: "MCowBQYDK2VwAyEAsI3Vx6E5C70zWN51mv4VIXZxVQC4M1DBS7XoBYp5/R4=",
     },
     artifact: { canvasId: ids.canvas, hostId },
     parents: (options.parents ?? [ids.parent]).map((versionId) => ({ versionId })),
@@ -212,42 +210,11 @@ function noteApplied(
   return { ...local, applied, artifacts };
 }
 
-function membershipEntry(
-  options: {
-    readonly kind?: "join-request" | "join-approved" | "revocation";
-    readonly instanceId?: ReplicaInstanceId;
-    readonly displayName?: string;
-    readonly sequence?: number;
-    readonly subject?: ReplicaInstanceId;
-    readonly subjectDisplayName?: string;
-  } = {},
-): ReplicaMembershipEntry {
-  const origin = {
-    instanceId: options.instanceId ?? ids.north,
-    displayName: options.displayName ?? "North",
-    sequence: options.sequence ?? 1,
-  };
-  return decodeReplicaMembershipEntry({
-    format: REPLICA_ENTRY_FORMAT,
-    kind: options.kind ?? "join-request",
-    origin,
-    subject: options.subject ?? origin.instanceId,
-    subjectDisplayName: options.subjectDisplayName ?? origin.displayName,
-  });
-}
-
 describe("reconciling a replica entry", () => {
   it("cannot express overwrite", () => {
     expect(replicaReconcileCannotOverwrite).toBe(true);
     expectTypeOf<ReplicaReconcileOutcome["outcome"]>().toEqualTypeOf<
-      | "append-version"
-      | "already-present"
-      | "concurrent-head"
-      | "tombstone"
-      | "request-approval"
-      | "member-added"
-      | "member-revoked"
-      | "refused"
+      "append-version" | "already-present" | "concurrent-head" | "tombstone" | "refused"
     >();
   });
 
@@ -299,7 +266,7 @@ describe("reconciling a replica entry", () => {
       instances: [
         { instanceId: ids.local, status: "member" },
         { instanceId: ids.north, status: "member" },
-        { instanceId: ids.revoked, status: "revoked" },
+        { instanceId: ids.revoked, status: "revoked", lastAcceptedSequence: 0 },
       ],
     });
     expect(reconcileReplicaEntry(revoked, value)).toEqual({
@@ -442,115 +409,6 @@ describe("reconciling a replica entry", () => {
     expect(reconcileReplicaEntry({ ...noted, measuredContentHash: hashB }, replacement)).toEqual({
       outcome: "refused",
       reason: "hash-mismatch",
-    });
-  });
-});
-
-describe("reconciling replica membership", () => {
-  it("returns a join request it does not know for approval instead of refusing it", () => {
-    const request = membershipEntry({ instanceId: ids.stranger, displayName: "Stranger" });
-    expect(reconcileReplicaEntry(state(), request)).toEqual({ outcome: "request-approval" });
-  });
-
-  it("treats a join request it already knows as already present", () => {
-    const request = membershipEntry({ instanceId: ids.north });
-    expect(reconcileReplicaEntry(state(), request)).toEqual({ outcome: "already-present" });
-  });
-
-  it("refuses a join request from an identity it revoked", () => {
-    const request = membershipEntry({
-      instanceId: ids.revoked,
-      sequence: 1,
-      subject: ids.revoked,
-      subjectDisplayName: "Revoked",
-    });
-    const revoked = state({
-      instances: [
-        { instanceId: ids.local, status: "member" },
-        { instanceId: ids.revoked, status: "revoked" },
-      ],
-    });
-    expect(reconcileReplicaEntry(revoked, request)).toEqual({
-      outcome: "refused",
-      reason: "revoked-instance",
-    });
-  });
-
-  it("journals a member approval that names an instance it does not hold yet", () => {
-    const approval = membershipEntry({
-      kind: "join-approved",
-      sequence: 1,
-      subject: ids.stranger,
-      subjectDisplayName: "Stranger",
-    });
-    expect(reconcileReplicaEntry(state(), approval)).toEqual({ outcome: "member-added" });
-  });
-
-  it("refuses an approval from an instance it has never heard of", () => {
-    const approval = membershipEntry({
-      kind: "join-approved",
-      instanceId: ids.revoked,
-      sequence: 1,
-      subject: ids.south,
-      subjectDisplayName: "South",
-    });
-    expect(reconcileReplicaEntry(state(), approval)).toEqual({
-      outcome: "refused",
-      reason: "unknown-instance",
-    });
-  });
-
-  it("refuses an approval that would re-admit a revoked instance", () => {
-    const approval = membershipEntry({
-      kind: "join-approved",
-      sequence: 1,
-      subject: ids.revoked,
-      subjectDisplayName: "Revoked",
-    });
-    const revoked = state({
-      instances: [
-        { instanceId: ids.local, status: "member" },
-        { instanceId: ids.north, status: "member" },
-        { instanceId: ids.revoked, status: "revoked" },
-      ],
-    });
-    expect(reconcileReplicaEntry(revoked, approval)).toEqual({
-      outcome: "refused",
-      reason: "revoked-instance",
-    });
-  });
-
-  it("records a revocation, and a second one is already present", () => {
-    const first = membershipEntry({
-      kind: "revocation",
-      sequence: 2,
-      subject: ids.south,
-      subjectDisplayName: "South",
-    });
-    const local = state({
-      applied: [
-        {
-          instanceId: ids.north,
-          sequence: 1,
-          kind: "join-approved",
-          subject: ids.north,
-        },
-      ],
-    });
-    expect(reconcileReplicaEntry(local, first)).toEqual({ outcome: "member-revoked" });
-  });
-
-  it("refuses a membership record at a sequence that is not the next one", () => {
-    const approval = membershipEntry({
-      kind: "join-approved",
-      instanceId: ids.north,
-      sequence: 3,
-      subject: ids.stranger,
-      subjectDisplayName: "Stranger",
-    });
-    expect(reconcileReplicaEntry(state(), approval)).toEqual({
-      outcome: "refused",
-      reason: "sequence-gap",
     });
   });
 });

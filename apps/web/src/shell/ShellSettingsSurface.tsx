@@ -8,6 +8,8 @@ import type { ExtensionClient } from "@octant/client-runtime/extension-client";
 import type { GithubClient } from "@octant/client-runtime/github-client";
 import type { IntegrationClient } from "@octant/client-runtime/integration-client";
 import type { HostControlClient } from "@octant/client-runtime/host-control-client";
+import type { FolderBrowseClient } from "@octant/client-runtime/folder-browse-client";
+import type { ReplicaStoreSettingsClient } from "@octant/client-runtime/replica-store-settings-client";
 import type { HostFederationLifecycle } from "@octant/client-runtime/host-federation-lifecycle";
 import type { UsageClient } from "@octant/client-runtime/usage-client";
 import type { ProviderUsageLimitsClient } from "@octant/client-runtime/provider-usage-limits-client";
@@ -63,6 +65,8 @@ export interface ShellSettingsSurfaceProps {
   readonly themeController: ThemeController;
   readonly diagnosticsExportClient: DiagnosticsExportClient;
   readonly hostControlClient: HostControlClient;
+  readonly replicaStoreSettingsClient?: ReplicaStoreSettingsClient;
+  readonly folderBrowseClient?: Pick<FolderBrowseClient, "browse">;
   readonly workThreads?: ReadonlyArray<{ readonly id: string; readonly title: string }>;
   readonly hostFederationLifecycle?: HostFederationLifecycle;
   readonly hostBridge?: OctantHostBridge;
@@ -133,6 +137,12 @@ export function ShellSettingsSurface(props: ShellSettingsSurfaceProps) {
               : { backgroundImageLibrary: props.backgroundImageLibrary })}
             diagnosticsExportClient={props.diagnosticsExportClient}
             hostControlClient={props.hostControlClient}
+            {...(props.replicaStoreSettingsClient === undefined
+              ? {}
+              : { replicaStoreSettingsClient: props.replicaStoreSettingsClient })}
+            {...(props.folderBrowseClient === undefined
+              ? {}
+              : { folderBrowseClient: props.folderBrowseClient })}
             {...(props.workThreads === undefined ? {} : { workThreads: props.workThreads })}
             {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
             {...(props.hostFederationLifecycle === undefined

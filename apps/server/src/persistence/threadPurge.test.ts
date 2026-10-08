@@ -29,6 +29,8 @@ import { writeChatContent } from "./chatProjection";
 import { Journal } from "./journal";
 import { applyMigrations, MIGRATIONS } from "./migrations";
 import { createPhase1RuntimeRegistries } from "./runtimeRegistry";
+import { recordAgentRunTurnUsage } from "../agentRun/agentRunUsageLedger";
+import { rebuildProjection } from "./projection";
 import { toSafeExportRow } from "./usageExport";
 import { queryUsageRecords, readAllUsageRecords } from "./usageProjection";
 import { openSqlite, type SqliteConnection } from "./sqlitePort";
@@ -151,6 +153,67 @@ describe("thread purge sweep", () => {
     // its provenance no longer names the purged thread.
     expect(projectMemoryEntriesRemain(harness.connection)).toBeGreaterThan(0);
     expect(projectMemoryNamesThread(harness.connection, threads.code.id)).toBe(false);
+  });
+
+  it("de-links a purged thread's child-run usage and keeps it de-linked through a usage rebuild", async () => {
+    const harness = openHarness();
+    const thread = threads.chat;
+    const runId = uuidFor(thread.mode, "run");
+    seedChatProjection(harness, thread.id, thread.marker);
+    insertEvent(
+      harness.connection,
+      "agent-run",
+      runId,
+      { run: { id: runId, parentThreadId: thread.id, routingReceipt: { mode: thread.mode } } },
+      "agent.run-requested@1",
+    );
+    recordAgentRunTurnUsage(
+      {
+        connection: harness.connection,
+        journal: harness.journal,
+        clock: () => now,
+        uuid: randomUUID,
+      },
+      {
+        runId: runId as never,
+        providerInstanceId: providerId as never,
+        modelId: "model-a" as never,
+        usage: { inputTokens: 3, outputTokens: 1 },
+      },
+    );
+    const childRows = () =>
+      harness.connection
+        .prepare(
+          `SELECT subject_id, input_tokens FROM usage_record_projection
+           WHERE subject_type = 'agent-run'`,
+        )
+        .all();
+    expect(childRows()).toEqual([{ subject_id: runId, input_tokens: 3 }]);
+
+    await harness.service.purge(
+      {
+        scope: {
+          kind: "thread",
+          mode: thread.mode,
+          threadId: decodeThreadRetentionThreadId(thread.id),
+        },
+        confirm: true,
+      },
+      "local-window",
+    );
+    expect(childRows()).toEqual([{ subject_id: null, input_tokens: 3 }]);
+
+    // The usage event is retained accounting; replaying it must not re-link the
+    // run its purged thread delegated.
+    const usage = createPhase1RuntimeRegistries().projections.get("usage");
+    if (usage === undefined) throw new Error("usage projection is not registered");
+    rebuildProjection({
+      connection: harness.connection,
+      journal: harness.journal,
+      projection: usage,
+      clock: () => now,
+    });
+    expect(childRows()).toEqual([{ subject_id: null, input_tokens: 3 }]);
   });
 
   it("leaves a managed worktree in place whose receipt names a path outside the managed worktree directory", async () => {
@@ -532,18 +595,20 @@ function insertEvent(
   aggregateType: string,
   aggregateId: string,
   payload: unknown,
+  eventName = "fixture.planted@1",
 ): void {
   connection
     .prepare(
       `INSERT INTO event_journal (
         event_id, aggregate_type, aggregate_id, aggregate_version, event_name, event_version,
         correlation_id, actor_kind, actor_id, occurred_at, payload_json, host_id
-      ) VALUES (?, ?, ?, 1, 'fixture.planted@1', 1, ?, 'system', ?, ?, ?, 'local')`,
+      ) VALUES (?, ?, ?, 1, ?, 1, ?, 'system', ?, ?, ?, 'local')`,
     )
     .run(
       randomUUID(),
       aggregateType,
       aggregateId,
+      eventName,
       randomUUID(),
       actorId,
       now,

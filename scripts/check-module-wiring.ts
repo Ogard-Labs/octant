@@ -102,15 +102,11 @@ export const KNOWN_ISLANDS: ReadonlyMap<string, string> = new Map([
   ],
   [
     "packages/domain/src/replicaEntryPolicy.ts",
-    "Pure reconcile policy for artifact replica entries and their membership. Nothing pulls a store yet, so no product caller imports it. Remove once the pull path imports reconcileReplicaEntry.",
+    "Pure reconcile policy for artifact replica entries. Membership is derived from the records a host holds, not reconciled entry by entry, and a pull holds verified artifact entries without importing them. Remove once the artifact import imports reconcileReplicaEntry.",
   ],
   [
-    "apps/server/src/replica/syncedFolderReplicaStore.ts",
-    "Synced-folder replica store. Nothing publishes or pulls yet, so no product caller imports it. Remove once the replica service opens the store.",
-  ],
-  [
-    "apps/server/src/replica/s3ReplicaStore.ts",
-    "S3-compatible replica store. Nothing publishes or pulls yet, so no product caller imports it. Remove once the replica service opens the store.",
+    "packages/client-runtime/src/replicaMembershipClient.ts",
+    "Loopback client for the host-only replica membership commands. Settings › Sync chooses the store and turns sync on, but no view creates a replica, joins, or revokes yet, so nothing imports it. Remove once a Settings sync view that runs membership commands imports the client.",
   ],
 ]);
 

@@ -1,9 +1,66 @@
+import type { SchemaAST } from "effect";
 import { describe, expect, it } from "vitest";
+import { CanvasBlock } from "./canvas";
 import {
+  CanvasStaticExportBlock,
   decodeCanvasStaticExportDocument,
   decodeCanvasStaticExportReceipt,
   decodeCanvasStaticExportRequest,
 } from "./canvasShare";
+
+/**
+ * Every field path each block kind admits, such as `columns[].display` for a
+ * table, read from the schema itself so a kind or field added to one union
+ * and not the other shows up without anyone listing it.
+ */
+function fieldPathsByKind(union: SchemaAST.AST): ReadonlyMap<string, ReadonlySet<string>> {
+  const byKind = new Map<string, Set<string>>();
+  const members = union._tag === "Union" ? union.types : [union];
+  for (const member of members) {
+    const kind = blockKind(member);
+    const paths = byKind.get(kind) ?? new Set<string>();
+    collectFieldPaths(member, "", paths);
+    byKind.set(kind, paths);
+  }
+  return byKind;
+}
+
+function blockKind(ast: SchemaAST.AST): string {
+  if (ast._tag === "Refinement") return blockKind(ast.from);
+  if (ast._tag !== "TypeLiteral") throw new Error(`A block schema is a struct, not ${ast._tag}.`);
+  const kind = ast.propertySignatures.find((signature) => signature.name === "kind");
+  if (kind === undefined || kind.type._tag !== "Literal") {
+    throw new Error("A block schema names its kind as a literal.");
+  }
+  return String(kind.type.literal);
+}
+
+function collectFieldPaths(ast: SchemaAST.AST, prefix: string, paths: Set<string>): void {
+  switch (ast._tag) {
+    case "Refinement":
+      return collectFieldPaths(ast.from, prefix, paths);
+    case "Transformation":
+      return collectFieldPaths(ast.to, prefix, paths);
+    case "Union":
+      for (const member of ast.types) collectFieldPaths(member, prefix, paths);
+      return;
+    case "TupleType":
+      for (const element of [...ast.elements, ...ast.rest]) {
+        collectFieldPaths(element.type, `${prefix}[]`, paths);
+      }
+      return;
+    case "TypeLiteral":
+      for (const signature of ast.propertySignatures) {
+        const path = prefix === "" ? String(signature.name) : `${prefix}.${String(signature.name)}`;
+        paths.add(path);
+        collectFieldPaths(signature.type, path, paths);
+      }
+      for (const index of ast.indexSignatures) collectFieldPaths(index.type, `${prefix}{}`, paths);
+      return;
+    default:
+      return;
+  }
+}
 
 const ids = {
   exportId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
@@ -370,6 +427,121 @@ describe("Canvas share contracts", () => {
       ],
     };
     expect(decodeCanvasStaticExportDocument(exported)).toEqual(exported);
+  });
+
+  it("shares treemaps, heatmaps, bar lists, number formats, table displays, and a dragged board from share version 3", () => {
+    const blocks = [
+      {
+        blockId: "repository-map",
+        schemaVersion: 5,
+        kind: "treemap",
+        measures: [{ measureId: "loc", label: "Lines of code", format: "compact" }],
+        sizeBy: "loc",
+        colorBy: "loc",
+        colorScale: "sequential",
+        startNodeId: "octant",
+        nodes: [
+          { nodeId: "octant", label: "octant" },
+          { nodeId: "contracts", label: "contracts", parentId: "octant", values: { loc: 38_400 } },
+        ],
+      },
+      {
+        blockId: "commits-by-hour",
+        schemaVersion: 6,
+        kind: "heatmap",
+        layout: "matrix",
+        valueLabel: "Commits",
+        format: "number",
+        scale: "sequential",
+        rows: [{ rowId: "mon", label: "Mon" }],
+        columns: [{ columnId: "h09", label: "09" }],
+        cells: [{ rowId: "mon", columnId: "h09", value: 3, note: "After the review" }],
+      },
+      {
+        blockId: "test-failures",
+        schemaVersion: 6,
+        kind: "heatmap",
+        layout: "calendar",
+        scale: "diverging",
+        days: [{ date: "2026-10-01", value: 2, note: "Flaky on CI" }],
+      },
+      {
+        blockId: "hottest-files",
+        schemaVersion: 7,
+        kind: "bar-list",
+        valueLabel: "Edits",
+        secondaryLabel: "Lines",
+        format: "number",
+        secondaryFormat: "compact",
+        scale: "sequential",
+        rows: [{ label: "packages/contracts/src/canvas.ts", value: 19, secondaryValue: 1_290 }],
+      },
+      {
+        blockId: "revenue",
+        schemaVersion: 1,
+        kind: "chart",
+        chartType: "line",
+        format: "compact",
+        series: [{ seriesId: "revenue", label: "Revenue", points: [{ x: "Q1", y: 1_200_000 }] }],
+      },
+      {
+        blockId: "coverage",
+        schemaVersion: 1,
+        kind: "table",
+        columns: [
+          { id: "file", label: "File", type: "text" },
+          { id: "covered", label: "Covered", type: "number", format: "percent", display: "bar" },
+          { id: "state", label: "State", type: "status", display: "status" },
+        ],
+        rows: [["canvas.ts", 0.82, "ok"]],
+      },
+      {
+        blockId: "board",
+        schemaVersion: 2,
+        kind: "diagram",
+        layout: "manual",
+        nodes: [
+          { nodeId: "web", label: "Web", x: 40, y: 40, positioned: true },
+          { nodeId: "db", label: "Database" },
+        ],
+        edges: [{ edgeId: "web-db", source: "web", target: "db" }],
+      },
+    ];
+    const exported = { ...document, schemaVersion: 3, blocks };
+    expect(decodeCanvasStaticExportDocument(exported)).toEqual(exported);
+    // A version 2 share is what a runtime without these wrote, so one that
+    // carries any of them is refused rather than drawn without its readings.
+    for (const block of blocks) {
+      expect(() =>
+        decodeCanvasStaticExportDocument({ ...document, schemaVersion: 2, blocks: [block] }),
+      ).toThrow();
+    }
+  });
+
+  it("carries every Canvas block kind and field except the ones a share refuses or drops", () => {
+    const live = fieldPathsByKind(CanvasBlock.ast);
+    const shared = fieldPathsByKind(CanvasStaticExportBlock.ast);
+    // A design's markup draws only inside Octant and an action names a command
+    // only this host runs, so a share refuses both. A source id resolves only
+    // against the host that wrote it, so a share drops every one.
+    const refusedKinds = new Set(["design", "action"]);
+    const dropped = (path: string) => /(?:^|\.)sourceIds?$/.test(path);
+    const missing: string[] = [];
+    for (const [kind, paths] of live) {
+      const sharedPaths = shared.get(kind);
+      if (refusedKinds.has(kind)) {
+        expect(sharedPaths).toBeUndefined();
+        continue;
+      }
+      if (sharedPaths === undefined) {
+        missing.push(kind);
+        continue;
+      }
+      for (const path of paths) {
+        if (!dropped(path) && !sharedPaths.has(path)) missing.push(`${kind}.${path}`);
+      }
+    }
+    expect(missing).toEqual([]);
   });
 
   it("rejects secret-bearing export text and credential query URLs at decode time", () => {

@@ -1064,6 +1064,7 @@ function makeConnection(
       ...(state.query.initialization.autoCompactThreshold === undefined
         ? {}
         : { autoCompactThreshold: state.query.initialization.autoCompactThreshold }),
+      callUsage: new Map(),
       requestIds: new Map(),
       taskIds: new Map(),
       toolStates: new Map(),

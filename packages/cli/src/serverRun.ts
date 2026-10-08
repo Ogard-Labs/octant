@@ -137,7 +137,13 @@ async function defaultCredentialBrokerFactory(): Promise<CredentialBroker | unde
   if (process.platform !== "linux") return undefined;
   const availability = await probeSecretService();
   if (!availability.available) return undefined;
-  return startCredentialBroker(makeSecretServiceCredentialStore());
+  return startCredentialBroker(
+    makeSecretServiceCredentialStore(),
+    undefined,
+    undefined,
+    makeSecretServiceCredentialStore({ namespace: "replica-device-key" }),
+    makeSecretServiceCredentialStore({ namespace: "replica-store-credential" }),
+  );
 }
 
 export function resolveServerRunOptions(

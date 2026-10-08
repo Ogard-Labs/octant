@@ -31,6 +31,7 @@ describe("SettingsSectionId", () => {
       "linear",
       "host",
       "data",
+      "sync",
       "remote-access",
       "usage",
     ]);

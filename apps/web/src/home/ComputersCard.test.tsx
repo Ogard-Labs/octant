@@ -55,9 +55,17 @@ function renderCard(cardSource: ComputersCardSource) {
   return render(<HomeCard definition={createComputersCard(cardSource)} />);
 }
 
+function setWindowHidden(hidden: boolean) {
+  Object.defineProperty(document, "hidden", { configurable: true, value: hidden });
+  Object.defineProperty(document, "visibilityState", {
+    configurable: true,
+    value: hidden ? "hidden" : "visible",
+  });
+}
+
 afterEach(() => {
   vi.useRealTimers();
-  Object.defineProperty(document, "hidden", { configurable: true, value: false });
+  setWindowHidden(false);
 });
 
 describe("the Computers card", () => {
@@ -246,14 +254,14 @@ describe("the Computers card", () => {
     });
     expect(readResources).toHaveBeenCalledTimes(1);
 
-    Object.defineProperty(document, "hidden", { configurable: true, value: true });
+    setWindowHidden(true);
     document.dispatchEvent(new Event("visibilitychange"));
     await act(async () => {
       vi.advanceTimersByTime(30_000);
     });
     expect(readResources).toHaveBeenCalledTimes(1);
 
-    Object.defineProperty(document, "hidden", { configurable: true, value: false });
+    setWindowHidden(false);
     document.dispatchEvent(new Event("visibilitychange"));
     await act(async () => {
       await Promise.resolve();
@@ -265,6 +273,75 @@ describe("the Computers card", () => {
       vi.advanceTimersByTime(30_000);
     });
     expect(readResources).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not ask a host again while its last read is still outstanding", async () => {
+    vi.useFakeTimers();
+    const readResources = vi.fn(() => new Promise<HostResourceRead>(() => undefined));
+    renderCard(source({ readResources, pollMs: 10_000 }));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(readResources).toHaveBeenCalledTimes(1);
+
+    // Coming back to the window asks for fresh figures at once.
+    setWindowHidden(true);
+    document.dispatchEvent(new Event("visibilitychange"));
+    setWindowHidden(false);
+    document.dispatchEvent(new Event("visibilitychange"));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(readResources).toHaveBeenCalledTimes(1);
+  });
+
+  it("drops figures a host does not answer in time and gives up on that read", async () => {
+    vi.useFakeTimers();
+    const signals: AbortSignal[] = [];
+    const readResources = vi
+      .fn<(hostId: string, signal: AbortSignal) => Promise<HostResourceRead>>()
+      .mockResolvedValueOnce({ status: "ready", snapshot: snapshot() })
+      .mockImplementation((_hostId, signal) => {
+        signals.push(signal);
+        return new Promise<HostResourceRead>(() => undefined);
+      });
+    renderCard(source({ readResources, pollMs: 10_000 }));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(screen.getByRole("meter", { name: "CPU 42 percent" })).toBeVisible();
+
+    await act(async () => {
+      vi.advanceTimersByTime(10_000);
+      await Promise.resolve();
+    });
+    expect(readResources).toHaveBeenCalledTimes(2);
+    expect(screen.getByRole("meter", { name: "CPU 42 percent" })).toBeVisible();
+
+    await act(async () => {
+      vi.advanceTimersByTime(5_000);
+      await Promise.resolve();
+    });
+    expect(signals[0]?.aborted).toBe(true);
+    expect(screen.getByText("Connected")).toBeVisible();
+    expect(screen.queryByRole("meter")).not.toBeInTheDocument();
+  });
+
+  it("stops a read still in flight when the card goes away", async () => {
+    const signals: AbortSignal[] = [];
+    const readResources = vi.fn((_hostId: string, signal: AbortSignal) => {
+      signals.push(signal);
+      return new Promise<HostResourceRead>(() => undefined);
+    });
+    const view = renderCard(source({ readResources }));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(signals).toHaveLength(1);
+    expect(signals[0]?.aborted).toBe(false);
+
+    view.unmount();
+    expect(signals[0]?.aborted).toBe(true);
   });
 
   it("does not read when the card is off", async () => {

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  AGENT_RUN_TURN_REQUEST_SHAPE,
   CONTEXT_EVENT_NAMES,
   decodeCapacityReservation,
   decodeContextCapacityReservationUpdated,
@@ -262,6 +263,23 @@ describe("context contracts", () => {
     } as const;
     expect(decodeUsageReconciliation(reconciliation)).toEqual(reconciliation);
     expect(() => decodeUsageReconciliation({ ...reconciliation, varianceTokens: -5 })).toThrow();
+    const priced = decodeUsageReconciliation({
+      ...reconciliation,
+      cost: { kind: "provider-recorded", usdMicros: 1_250_000 },
+    });
+    expect(priced.cost?.usdMicros).toBe(1_250_000);
+    expect(() =>
+      decodeUsageReconciliation({
+        ...reconciliation,
+        cost: { kind: "provider-recorded", usdMicros: 12.5 },
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeUsageReconciliation({
+        ...reconciliation,
+        cost: { kind: "api-estimate", usdMicros: -1 },
+      }),
+    ).toThrow();
     const { planId: _planId, ...reconciliationWithoutPlan } = reconciliation;
     expect(
       decodeUsageReconciliation({
@@ -281,6 +299,19 @@ describe("context contracts", () => {
         actualInputTokens: 0,
         varianceTokens: 0,
       }),
+    ).toThrow();
+    // A child run's turn has no plan to reconcile against; any other request
+    // shape still needs one.
+    const childTurn = {
+      ...reconciliationWithoutPlan,
+      requestShape: AGENT_RUN_TURN_REQUEST_SHAPE,
+      plannedInputTokens: 125,
+      varianceTokens: 0,
+    };
+    expect(decodeUsageReconciliation(childTurn).planId).toBeUndefined();
+    expect(() => decodeUsageReconciliation({ ...childTurn, planId: ids.plan })).toThrow();
+    expect(() =>
+      decodeUsageReconciliation({ ...childTurn, requestShape: "chat-streaming" }),
     ).toThrow();
 
     const reservation = {

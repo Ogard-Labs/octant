@@ -1,6 +1,7 @@
 import type { ProviderRuntimeEvent, TurnMetrics, TurnUsage } from "@octant/contracts";
 import { describe, expect, it } from "vitest";
 import {
+  accumulateTurnUsage,
   addTurnToSessionMetrics,
   addTurnUsage,
   cacheHitRate,
@@ -377,5 +378,45 @@ describe("usage totals", () => {
       reasoningTokens: 2,
       costUsd: 0.5,
     });
+  });
+});
+
+describe("a turn's usage for the ledger", () => {
+  const request = (seconds: number, fields: object) =>
+    usage(seconds, { requestStartedAt: at(seconds - 1), ...fields }) as Extract<
+      ProviderRuntimeEvent,
+      { kind: "usage" }
+    >;
+  const whole = (seconds: number, fields: object) =>
+    usage(seconds, fields) as Extract<ProviderRuntimeEvent, { kind: "usage" }>;
+  const fold = (reports: ReadonlyArray<Extract<ProviderRuntimeEvent, { kind: "usage" }>>) =>
+    reports.reduce<TurnUsage | undefined>(accumulateTurnUsage, undefined);
+
+  it("adds up the requests of a turn that never reported its whole", () => {
+    expect(
+      fold([
+        request(2, { inputTokens: 100, outputTokens: 4, costUsd: 0.01 }),
+        request(5, { inputTokens: 180, outputTokens: 8, costUsd: 0.02 }),
+      ]),
+    ).toEqual({ inputTokens: 280, outputTokens: 12, costUsd: 0.03 });
+  });
+
+  it("lets a report for the whole turn replace the requests before it", () => {
+    expect(
+      fold([
+        request(2, { inputTokens: 100, outputTokens: 4 }),
+        whole(6, { inputTokens: 300, outputTokens: 20, costUsd: 0.05 }),
+      ]),
+    ).toEqual({ inputTokens: 300, outputTokens: 20, costUsd: 0.05 });
+  });
+
+  it("has no cost once any request in the sum reported none", () => {
+    expect(
+      fold([
+        request(2, { inputTokens: 100, outputTokens: 4, costUsd: 0.01 }),
+        request(5, { inputTokens: 180, outputTokens: 8 }),
+        request(7, { inputTokens: 200, outputTokens: 2, costUsd: 0.01 }),
+      ]),
+    ).toEqual({ inputTokens: 480, outputTokens: 14 });
   });
 });

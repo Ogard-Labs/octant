@@ -27,7 +27,11 @@ export interface CiFailureCardRow {
   readonly projectId: ProjectId;
   readonly repositoryOwner: GithubRepositoryOwner;
   readonly repositoryName: GithubRepositoryName;
-  readonly branch: string;
+  /**
+   * The branch a fix starts from. Absent for a pull request from a fork: its
+   * head branch is in another repository, so a draft cannot start from it.
+   */
+  readonly branch?: string;
   /** The draft text. Opening it does not send a turn. */
   readonly prompt: string;
 }
@@ -66,6 +70,8 @@ function onCurrentBranch(
   row: CodeProjectPullRequestRow,
   branches: ReadonlyArray<CodeProjectCurrentBranch>,
 ): boolean {
+  // A fork's `main` is not this Project's `main`, however the names compare.
+  if (row.crossRepository === true) return false;
   return branches.some(
     (branch) =>
       String(branch.projectId) === String(row.projectId) && branch.branch === row.headBranch,
@@ -114,7 +120,7 @@ export function buildCiFailureCard(input: {
         projectId: row.projectId,
         repositoryOwner: row.repositoryOwner,
         repositoryName: row.repositoryName,
-        branch: row.headBranch,
+        ...(row.crossRepository === true ? {} : { branch: row.headBranch }),
         prompt: buildCiFailureFollowUpDraft({
           number: row.number,
           title: row.title,

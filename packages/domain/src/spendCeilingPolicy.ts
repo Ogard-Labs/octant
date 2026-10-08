@@ -32,6 +32,12 @@ export interface SpendCeilingScopeFacts {
   readonly usedTurns?: number;
   /** Settled run time plus elapsed in-flight time in the window; absent when unknown. */
   readonly usedRunTimeMs?: number;
+  /**
+   * Settled US-dollar spend in the window, in whole cents. Absent when the
+   * scope's spend cannot be priced: a monetary ceiling refuses rather than
+   * treating unpriced usage as free.
+   */
+  readonly usedCostUsdCents?: number;
 }
 
 export type SpendCeilingAdmission =
@@ -62,6 +68,7 @@ export type SpendCeilingCommandDecision =
       readonly previousTokenBudget?: number;
       readonly previousTurnBudget?: number;
       readonly previousRunTimeBudgetSeconds?: number;
+      readonly previousCostBudgetUsdCents?: number;
     }
   | { readonly status: "cleared"; readonly scope: SpendCeilingScope }
   | { readonly status: "refused"; readonly refusal: SpendCeilingCommandRefusal };
@@ -86,9 +93,25 @@ export function formatSpendCeilingRunTime(seconds: number): string {
   return minutes === 0 ? `${hours}h` : `${hours}h ${minutes}m`;
 }
 
-function recoveryFor(kind: SpendCeilingRefusal["kind"]): SpendCeilingRefusal["recovery"] {
+/** "$25", "$25.40": monetary budgets are whole cents with no trailing zeros. */
+export function formatSpendCeilingUsd(usdCents: number): string {
+  const dollars = Math.floor(usdCents / 100);
+  const cents = usdCents % 100;
+  if (cents === 0) return `$${dollars}`;
+  return `$${dollars}.${String(cents).padStart(2, "0")}`;
+}
+
+function recoveryFor(
+  kind: SpendCeilingRefusal["kind"],
+  dimension: SpendCeilingRefusal["dimension"],
+): SpendCeilingRefusal["recovery"] {
   if (kind === "missing-turn-bound") {
     return ["raise-ceiling", "pause-work"];
+  }
+  // Unpriced usage stays unpriced however high the budget goes, so a raise
+  // would never let the next turn through.
+  if (kind === "unknown-spend" && dimension === "monetary") {
+    return ["clear-ceiling", "open-usage", "pause-work"];
   }
   return [...DEFAULT_RECOVERY];
 }
@@ -106,6 +129,8 @@ interface RefusalInput {
   readonly ceilingTurns?: number;
   readonly remainingRunTimeSeconds?: number;
   readonly ceilingRunTimeSeconds?: number;
+  readonly remainingUsdCents?: number;
+  readonly ceilingUsdCents?: number;
 }
 
 function refusalMessage(input: RefusalInput): string {
@@ -122,6 +147,13 @@ function refusalMessage(input: RefusalInput): string {
       return `This ${who}'s agent run time ceiling cannot be measured because its turn ledger is unavailable. ${recovery}`;
     }
     return `This ${who}'s agent run time ceiling of ${formatSpendCeilingRunTime(input.ceilingRunTimeSeconds ?? 0)} is used up for this window. ${recovery}`;
+  }
+  if (input.dimension === "monetary") {
+    if (input.kind === "unknown-spend") {
+      const wait = input.scopeKind === "project" ? ", wait for this window to end" : "";
+      return `This ${who}'s money ceiling cannot be checked because some of its usage in this window has no price: the provider reported no cost and Octant has no rate for the model, or the provider reported no usage. Clear the ceiling and set it again without a money budget${wait}, open Usage for this ${who}, or pause work.`;
+    }
+    return `This ${who}'s money ceiling of ${formatSpendCeilingUsd(input.ceilingUsdCents ?? 0)} is used up for this window. ${recovery}`;
   }
   if (input.kind === "unknown-spend") {
     return `This ${who}'s token spend ceiling cannot be measured because recent usage is unavailable. ${recovery}`;
@@ -161,7 +193,11 @@ function makeRefusal(input: RefusalInput): SpendCeilingRefusal {
     ...(input.ceilingRunTimeSeconds === undefined
       ? {}
       : { ceilingRunTimeSeconds: input.ceilingRunTimeSeconds }),
-    recovery: recoveryFor(input.kind),
+    ...(input.remainingUsdCents === undefined
+      ? {}
+      : { remainingUsdCents: input.remainingUsdCents }),
+    ...(input.ceilingUsdCents === undefined ? {} : { ceilingUsdCents: input.ceilingUsdCents }),
+    recovery: recoveryFor(input.kind, input.dimension),
     message: refusalMessage(input),
   };
 }
@@ -217,6 +253,26 @@ function refuseTurnsOrRunTime(facts: SpendCeilingScopeFacts): SpendCeilingRefusa
         dimension: "run-time",
         remainingRunTimeSeconds: 0,
         ceilingRunTimeSeconds: runTimeBudgetSeconds,
+      });
+    }
+  }
+  const costBudgetUsdCents = facts.policy.costBudgetUsdCents;
+  if (costBudgetUsdCents !== undefined) {
+    if (facts.usedCostUsdCents === undefined) {
+      return makeRefusal({
+        ...where,
+        kind: "unknown-spend",
+        dimension: "monetary",
+        ceilingUsdCents: costBudgetUsdCents,
+      });
+    }
+    if (facts.usedCostUsdCents >= costBudgetUsdCents) {
+      return makeRefusal({
+        ...where,
+        kind: "exhausted",
+        dimension: "monetary",
+        remainingUsdCents: 0,
+        ceilingUsdCents: costBudgetUsdCents,
       });
     }
   }
@@ -565,6 +621,7 @@ export function decideSpendCeilingCommand(input: {
       ["token", input.command.tokenBudget, current.tokenBudget],
       ["turn", input.command.turnBudget, current.turnBudget],
       ["run-time", input.command.runTimeBudgetSeconds, current.runTimeBudgetSeconds],
+      ["money", input.command.costBudgetUsdCents, current.costBudgetUsdCents],
     ] as const;
     for (const [dimension, next, previous] of raises) {
       if (next === undefined) continue;
@@ -599,6 +656,9 @@ export function decideSpendCeilingCommand(input: {
       current.runTimeBudgetSeconds === undefined
         ? {}
         : { previousRunTimeBudgetSeconds: current.runTimeBudgetSeconds }),
+      ...(input.command.costBudgetUsdCents === undefined || current.costBudgetUsdCents === undefined
+        ? {}
+        : { previousCostBudgetUsdCents: current.costBudgetUsdCents }),
       next: {
         ...base,
         policy: {
@@ -612,6 +672,9 @@ export function decideSpendCeilingCommand(input: {
           ...(input.command.runTimeBudgetSeconds === undefined
             ? {}
             : { runTimeBudgetSeconds: input.command.runTimeBudgetSeconds }),
+          ...(input.command.costBudgetUsdCents === undefined
+            ? {}
+            : { costBudgetUsdCents: input.command.costBudgetUsdCents }),
         },
         version: nextVersion,
         setAt: input.now,

@@ -8,6 +8,30 @@ const execFileAsync = promisify(execFile);
 export const SECRET_TOOL_PATH = "/usr/bin/secret-tool";
 export const SECRET_SERVICE_BUSCTL_PATH = "/usr/bin/busctl";
 export const SECRET_SERVICE_ATTRIBUTE = "octant";
+/**
+ * Replica device signing keys carry their own `service` attribute, so a
+ * provider credential lookup naming the same instance UUID never matches one.
+ */
+export const SECRET_SERVICE_REPLICA_DEVICE_KEY_ATTRIBUTE = "octant.replica-device-keys.v1";
+/**
+ * Sync buckets' access key pairs carry their own `service` attribute too, so
+ * neither a provider credential nor a device key naming the same UUID matches
+ * one. `secret-tool store` replaces an item with the same attributes, which is
+ * how a person's new key pair replaces the old one.
+ */
+export const SECRET_SERVICE_REPLICA_STORE_CREDENTIAL_ATTRIBUTE =
+  "octant.replica-store-credentials.v1";
+const NAMESPACES = {
+  provider: { attribute: SECRET_SERVICE_ATTRIBUTE, label: "Octant provider credential" },
+  "replica-device-key": {
+    attribute: SECRET_SERVICE_REPLICA_DEVICE_KEY_ATTRIBUTE,
+    label: "Octant replica device key",
+  },
+  "replica-store-credential": {
+    attribute: SECRET_SERVICE_REPLICA_STORE_CREDENTIAL_ATTRIBUTE,
+    label: "Octant sync bucket key",
+  },
+} as const;
 const DEFAULT_TIMEOUT_MS = 2_000;
 const MAX_OUTPUT_BYTES = 16 * 1_024;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -68,6 +92,7 @@ export async function probeSecretService(
 export interface MakeSecretServiceCredentialStoreOptions {
   readonly execute?: SecretToolCommandExecutor;
   readonly timeoutMs?: number;
+  readonly namespace?: keyof typeof NAMESPACES;
 }
 
 export function makeSecretServiceCredentialStore(
@@ -81,6 +106,7 @@ export function makeSecretServiceCredentialStore(
   if (!isAbsolute(SECRET_TOOL_PATH) || limits.timeoutMs <= 0) {
     throw new CredentialStoreFailure("invalid");
   }
+  const { attribute: serviceAttribute, label } = NAMESPACES[options.namespace ?? "provider"];
 
   const invoke = async (
     operation: "set" | "has" | "resolve" | "delete",
@@ -95,14 +121,7 @@ export function makeSecretServiceCredentialStore(
       }
       spec = {
         command: SECRET_TOOL_PATH,
-        args: [
-          "store",
-          "--label=Octant provider credential",
-          "service",
-          SECRET_SERVICE_ATTRIBUTE,
-          "account",
-          normalizedId,
-        ],
+        args: ["store", `--label=${label}`, "service", serviceAttribute, "account", normalizedId],
         // secret-tool store reads until EOF; a trailing newline would be stored.
         stdin: credential,
       };
@@ -112,7 +131,7 @@ export function makeSecretServiceCredentialStore(
         args: [
           operation === "delete" ? "clear" : "lookup",
           "service",
-          SECRET_SERVICE_ATTRIBUTE,
+          serviceAttribute,
           "account",
           normalizedId,
         ],

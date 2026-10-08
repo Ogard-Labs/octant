@@ -56,6 +56,8 @@ export interface ProviderUsageObservation {
   readonly cacheReadInputTokens?: number;
   readonly cacheWriteInputTokens?: number;
   readonly providerExecutionDurationMs?: number;
+  /** The provider's own figure for what the report covers, in US dollars; never derived. */
+  readonly costUsd?: number;
   readonly accuracy: "provider-reported";
   readonly observedAt: UtcTimestamp;
 }

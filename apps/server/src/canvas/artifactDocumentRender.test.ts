@@ -296,6 +296,32 @@ describe("rendering a canvas as a document", () => {
     expect(rendered.body).toContain("- Person one — many Order (places)");
   });
 
+  it("writes a design as its numbered frame titles and never its markup", () => {
+    const design = decodeCanvasBlock({
+      blockId: "checkout",
+      schemaVersion: CANVAS_SCHEMA_VERSION,
+      kind: "design",
+      title: "Checkout",
+      size: "phone",
+      styles: "body { color: #1c1917; }",
+      frames: [
+        { frameId: "cart", title: "Cart", html: '<h1>Cart</h1><a href="#paid">Pay</a>' },
+        { frameId: "paid", title: "Paid", html: "<p>Thanks</p>" },
+      ],
+    });
+
+    const markdown = renderArtifactMarkdown(definition([design]));
+    const html = renderArtifactHtml(definition([design]));
+
+    expect(markdown.kind).toBe("rendered");
+    expect(html.kind).toBe("rendered");
+    if (markdown.kind !== "rendered" || html.kind !== "rendered") return;
+    expect(markdown.body).toContain("## Checkout\n\n1. Cart\n2. Paid\n");
+    expect(html.body).toContain("<h2>Checkout</h2><ol><li>Cart</li><li>Paid</li></ol>");
+    expect(markdown.body).not.toContain("Pay");
+    expect(html.body).not.toContain("color: #1c1917");
+  });
+
   it("writes a swimlane as numbered steps per lane and a connection list", () => {
     const swimlane = {
       blockId: "support-flow",

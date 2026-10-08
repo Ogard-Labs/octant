@@ -157,6 +157,50 @@ describe("evaluateSpendCeilingAdmission turn and run-time budgets", () => {
     ).toEqual({ status: "admitted", reservedTokens: 0, reservations: [] });
   });
 
+  it("refuses a Project whose monetary budget is used up", () => {
+    const project = projectFacts({
+      policy: { costBudgetUsdCents: 25_00 },
+      committed: { status: "known", tokens: 0 },
+      usedCostUsdCents: 25_00,
+    });
+    const result = evaluateSpendCeilingAdmission({ project });
+    expect(result.status).toBe("refused");
+    if (result.status !== "refused") return;
+    expect(result.refusal).toMatchObject({
+      kind: "exhausted",
+      dimension: "monetary",
+      scopeKind: "project",
+      remainingUsdCents: 0,
+      ceilingUsdCents: 25_00,
+    });
+    expect(result.refusal.message).toContain("money ceiling");
+    expect(
+      evaluateSpendCeilingAdmission({
+        project: { ...project, usedCostUsdCents: 24_99 },
+      }),
+    ).toEqual({ status: "admitted", reservedTokens: 0, reservations: [] });
+  });
+
+  it("refuses a monetary ceiling when the scope's spend cannot be priced", () => {
+    const project = projectFacts({
+      policy: { costBudgetUsdCents: 25_00 },
+      committed: { status: "known", tokens: 0 },
+    });
+    const result = evaluateSpendCeilingAdmission({ project });
+    expect(result.status).toBe("refused");
+    if (result.status !== "refused") return;
+    expect(result.refusal).toMatchObject({
+      kind: "unknown-spend",
+      dimension: "monetary",
+      ceilingUsdCents: 25_00,
+    });
+    expect(result.refusal.message).toContain("has no price");
+    // A raise can never price the usage, so it is not offered.
+    expect(result.refusal.recovery).toEqual(["clear-ceiling", "open-usage", "pause-work"]);
+    expect(result.refusal.message).not.toContain("Raise");
+    expect(result.refusal.message).toContain("wait for this window to end");
+  });
+
   it("refuses the turn past a thread turn budget and needs no token bound without a token budget", () => {
     const thread = threadFacts({ policy: { turnBudget: 2 }, usedTurns: 1 });
     expect(evaluateSpendCeilingAdmission({ thread }).status).toBe("admitted");
@@ -400,6 +444,57 @@ describe("decideSpendCeilingCommand run-time raises", () => {
     if (result.status !== "refused") return;
     expect(result.refusal.kind).toBe("not-a-raise");
     expect(raise({ runTimeBudgetSeconds: 7_200 }).status).toBe("refused");
+  });
+});
+
+describe("decideSpendCeilingCommand money raises", () => {
+  const scope = { kind: "project" as const, projectId };
+  const current: SpendCeilingState = {
+    scope,
+    window: { kind: "calendar", period: "month", timeZone: "UTC" },
+    policy: { costBudgetUsdCents: 25_00, turnBudget: 40 },
+    version: version1,
+    setAt: now,
+    setBy: actor,
+  };
+  const raise = (costBudgetUsdCents: number, policy = current.policy) =>
+    decideSpendCeilingCommand({
+      principalKind: "local-window",
+      command: {
+        kind: "raise-spend-ceiling",
+        scope,
+        expectedVersion: version1,
+        costBudgetUsdCents,
+      },
+      current: { ...current, policy },
+      scopeExists: true,
+      now,
+      actor,
+    });
+
+  it("widens a money budget, keeps the other dimensions, and reports the previous amount", () => {
+    const result = raise(40_00);
+    expect(result.status).toBe("accepted");
+    if (result.status !== "accepted") return;
+    expect(result.next.policy).toEqual({ costBudgetUsdCents: 40_00, turnBudget: 40 });
+    expect(result.previousCostBudgetUsdCents).toBe(25_00);
+  });
+
+  it("refuses a money raise that would lower or keep the budget", () => {
+    for (const amount of [25_00, 10_00]) {
+      const result = raise(amount);
+      expect(result.status).toBe("refused");
+      if (result.status !== "refused") continue;
+      expect(result.refusal.kind).toBe("not-a-raise");
+      expect(result.refusal.message).toContain("money");
+    }
+  });
+
+  it("refuses to add a money budget to a ceiling that has none through a raise", () => {
+    const result = raise(40_00, { turnBudget: 40 });
+    expect(result.status).toBe("refused");
+    if (result.status !== "refused") return;
+    expect(result.refusal.kind).toBe("not-a-raise");
   });
 });
 

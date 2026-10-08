@@ -24,6 +24,7 @@ const LOCAL_ONLY_PREFIXES = [
   "/api/extensions/skills",
   "/api/providers/discovery",
   "/api/host-control",
+  "/api/replica-store",
 ] as const;
 
 export const REMOTE_PROTOCOL_ROUTE_IDS = {

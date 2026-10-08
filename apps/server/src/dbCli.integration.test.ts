@@ -220,6 +220,7 @@ describe("database CLI runtime composition", () => {
         { name: "usage-resume", lastSequence: 1, lag: 0 },
         { name: "spend-ceilings", lastSequence: 1, lag: 0 },
         { name: "thread-message-queue", lastSequence: 1, lag: 0 },
+        { name: "replica-membership", lastSequence: 1, lag: 0 },
       ],
     });
 

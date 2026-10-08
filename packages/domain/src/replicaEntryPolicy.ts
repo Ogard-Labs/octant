@@ -1,6 +1,5 @@
 /**
- * Whether one replica entry may join the local library, or change who shares
- * the store it came from.
+ * Whether one artifact entry from a replica store may join the local library.
  *
  * The host has already read the file and reached a signature verdict. This
  * function decides what that entry means. It does not write, and it does not
@@ -10,18 +9,17 @@
  * talked into it. A sequence gap is refused so a later entry is never applied
  * while an earlier one is missing. A tombstone stays in the history the caller
  * already holds; a later version from another computer appends beside it.
- * A join request from a computer that is not yet a member is not a refusal:
- * it returns the one outcome that can make it one, and the approval that
- * follows is the caller's to journal.
+ *
+ * Membership records are not reconciled here: who counts is derived from the
+ * whole set of membership records a host holds, by the membership policy, and
+ * this function takes that standing as an input.
  */
 
 import {
   replicaEntryBundleAgrees,
   type ReplicaArtifactEntry,
   type ReplicaContentHash,
-  type ReplicaEntry,
   type ReplicaInstanceId,
-  type ReplicaMembershipEntry,
   type ReplicaSignatureVerdict,
 } from "@octant/contracts/replica-entry";
 import type { CanvasId, CanvasVersionId } from "@octant/contracts/canvas";
@@ -32,9 +30,6 @@ export const REPLICA_RECONCILE_OUTCOMES = [
   "already-present",
   "concurrent-head",
   "tombstone",
-  "request-approval",
-  "member-added",
-  "member-revoked",
   "refused",
 ] as const;
 
@@ -44,7 +39,6 @@ export const REPLICA_REFUSAL_REASONS = [
   "sequence-gap",
   "names-local-artifact-as-foreign",
   "hash-mismatch",
-  "membership-conflict",
   "bad-signature",
 ] as const;
 
@@ -59,19 +53,24 @@ export type ReplicaReconcileOutcome =
 type OverwriteName = Extract<(typeof REPLICA_RECONCILE_OUTCOMES)[number], "replace" | "overwrite">;
 export const replicaReconcileCannotOverwrite: [OverwriteName] extends [never] ? true : never = true;
 
-export interface ReplicaInstanceMembership {
-  readonly instanceId: ReplicaInstanceId;
-  readonly status: "member" | "revoked";
-}
+/**
+ * A revoked instance carries the cut its revocation named: entries it signed
+ * at or before that sequence keep counting, and later ones are refused.
+ */
+export type ReplicaInstanceMembership =
+  | { readonly instanceId: ReplicaInstanceId; readonly status: "member" }
+  | {
+      readonly instanceId: ReplicaInstanceId;
+      readonly status: "revoked";
+      readonly lastAcceptedSequence: number;
+    };
 
 export interface ReplicaAppliedEntry {
   readonly instanceId: ReplicaInstanceId;
   readonly sequence: number;
-  readonly kind: ReplicaEntry["kind"];
-  /** Artifact entries record the hash they were applied with. */
-  readonly contentHash?: ReplicaContentHash;
-  /** Membership entries record the instance they are about. */
-  readonly subject?: ReplicaInstanceId;
+  readonly kind: ReplicaArtifactEntry["kind"];
+  /** The hash the entry was applied with. */
+  readonly contentHash: ReplicaContentHash;
 }
 
 export interface ReplicaKnownVersion {
@@ -114,16 +113,28 @@ function refuse(reason: ReplicaRefusalReason): ReplicaReconcileOutcome {
   return { outcome: "refused", reason };
 }
 
+/**
+ * Standing of an instance. With `sequence`, it is the standing of the entry
+ * that instance signed at that sequence: at or before every cut that names it,
+ * a revoked instance's entry still counts as a member's.
+ */
 function membership(
   state: ReplicaLocalState,
   instanceId: ReplicaInstanceId,
+  sequence?: number,
 ): "unknown" | "member" | "revoked" {
   const records = state.instances.filter(
     (instance) => String(instance.instanceId) === String(instanceId),
   );
   if (records.length === 0) return "unknown";
-  if (records.some((instance) => instance.status === "revoked")) return "revoked";
-  return "member";
+  const cuts = records.flatMap((instance) =>
+    instance.status === "revoked" ? [instance.lastAcceptedSequence] : [],
+  );
+  if (cuts.length === 0) return "member";
+  if (sequence !== undefined && sequence <= Math.min(...cuts)) {
+    return records.some((instance) => instance.status === "member") ? "member" : "revoked";
+  }
+  return "revoked";
 }
 
 function highestApplied(state: ReplicaLocalState, instanceId: ReplicaInstanceId): number {
@@ -146,7 +157,7 @@ function artifactRecord(
   return state.artifacts.find((artifact) => String(artifact.canvasId) === String(canvasId));
 }
 
-function atSequence(state: ReplicaLocalState, entry: ReplicaEntry) {
+function atSequence(state: ReplicaLocalState, entry: ReplicaArtifactEntry) {
   return state.applied.find(
     (applied) =>
       String(applied.instanceId) === String(entry.origin.instanceId) &&
@@ -156,7 +167,7 @@ function atSequence(state: ReplicaLocalState, entry: ReplicaEntry) {
 
 // Sequence 3 is refused while 2 is missing. Applying it would invent the gap
 // and make the missing entry impossible to insert later.
-function behindSequence(state: ReplicaLocalState, entry: ReplicaEntry): boolean {
+function behindSequence(state: ReplicaLocalState, entry: ReplicaArtifactEntry): boolean {
   return entry.origin.sequence !== highestApplied(state, entry.origin.instanceId) + 1;
 }
 
@@ -188,16 +199,16 @@ function concurrentWithExisting(state: ReplicaLocalState, entry: ReplicaArtifact
 }
 
 /**
- * Decide what one pulled entry does to the local library.
+ * Decide what one pulled artifact entry does to the local library.
  *
  * Signature is checked first, so a bad copy is refused even when the instance
  * would otherwise be welcome. An already-applied entry is idempotent: pulling
- * it again changes nothing, whichever kind it was. A sequence other than the
- * next one for its own origin is a gap and is not applied.
+ * it again changes nothing. A sequence other than the next one for its own
+ * origin is a gap and is not applied.
  */
 export function reconcileReplicaEntry(
   localState: ReplicaLocalState,
-  entry: ReplicaEntry,
+  entry: ReplicaArtifactEntry,
 ): ReplicaReconcileOutcome {
   switch (localState.signature) {
     case "verified":
@@ -210,11 +221,8 @@ export function reconcileReplicaEntry(
       throw new Error("Unexpected signature verdict: " + String(unexpected));
     }
   }
-  return entry.kind === "artifact-version" || entry.kind === "artifact-tombstone"
-    ? artifactOutcome(localState, entry)
-    : membershipOutcome(localState, entry);
+  return artifactOutcome(localState, entry);
 }
-
 function artifactOutcome(
   state: ReplicaLocalState,
   entry: ReplicaArtifactEntry,
@@ -228,7 +236,7 @@ function artifactOutcome(
     }
     return refuse("hash-mismatch");
   }
-  const standing = membership(state, entry.origin.instanceId);
+  const standing = membership(state, entry.origin.instanceId, entry.origin.sequence);
   if (standing === "unknown") return refuse("unknown-instance");
   if (standing === "revoked") return refuse("revoked-instance");
   if (behindSequence(state, entry)) return refuse("sequence-gap");
@@ -248,51 +256,4 @@ function artifactOutcome(
   if (entry.kind === "artifact-tombstone") return { outcome: "tombstone" };
   if (concurrentWithExisting(state, entry)) return { outcome: "concurrent-head" };
   return { outcome: "append-version" };
-}
-
-/**
- * What one membership record does to the local membership list.
- *
- * A join request is the one record a computer that is not yet a member may
- * write, so its origin is not checked against membership: only a revoked
- * identity is refused, because re-joining is a new identity rather than the
- * old one back. An approval and a revocation are written by a member, so
- * their origin must be one. An approval naming a revoked instance is refused:
- * that instance rejoins with a new identity, not with this one.
- */
-function membershipOutcome(
-  state: ReplicaLocalState,
-  entry: ReplicaMembershipEntry,
-): ReplicaReconcileOutcome {
-  const recorded = atSequence(state, entry);
-  if (recorded !== undefined) {
-    if (
-      recorded.kind === entry.kind &&
-      recorded.contentHash === undefined &&
-      recorded.subject !== undefined &&
-      String(recorded.subject) === String(entry.subject)
-    ) {
-      return { outcome: "already-present" };
-    }
-    // The sequence was written once. A different record cannot take its place.
-    return refuse("membership-conflict");
-  }
-  const wrote = membership(state, entry.origin.instanceId);
-  if (entry.kind !== "join-request") {
-    if (wrote === "unknown") return refuse("unknown-instance");
-    if (wrote === "revoked") return refuse("revoked-instance");
-  } else if (wrote === "revoked") {
-    return refuse("revoked-instance");
-  }
-  if (behindSequence(state, entry)) return refuse("sequence-gap");
-  const subject = membership(state, entry.subject);
-  if (entry.kind === "join-request") {
-    return subject === "unknown" ? { outcome: "request-approval" } : { outcome: "already-present" };
-  }
-  if (entry.kind === "join-approved") {
-    if (subject === "revoked") return refuse("revoked-instance");
-    return subject === "member" ? { outcome: "already-present" } : { outcome: "member-added" };
-  }
-  if (subject === "unknown") return refuse("unknown-instance");
-  return subject === "revoked" ? { outcome: "already-present" } : { outcome: "member-revoked" };
 }

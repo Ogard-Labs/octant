@@ -638,6 +638,7 @@ function controller(
     conversation: [],
     threadUsage: { inputTokens: 0, outputTokens: 0, limits: [] },
     providerRequests: [],
+    providerAnswerRefusal: undefined,
     answerProviderRequest: vi.fn(async () => true),
     cancelTurn: vi.fn(async () => true),
 

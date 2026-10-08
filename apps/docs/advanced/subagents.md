@@ -76,7 +76,7 @@ role routing for both Octant and provider harnesses; Projects can override it.
 A thread's subagents appear in a compact card above its composer in Chat,
 Work, and Code, the same width as the message box. It starts collapsed and
 remembers your choice. Its head names each state the children are in, such as
-**1 working · 1 failed · 2 done**, and puts failed, waiting and unreviewed children
+**1 failed · 1 working · 2 done**, and puts failed, waiting and unreviewed children
 first. A result counts as **to review** only while you could still act on it: once
 the host has handed a finished result to the thread's agent, the card counts it as
 done. When a Chat thread cannot reach the host the card dims and **Stop** is

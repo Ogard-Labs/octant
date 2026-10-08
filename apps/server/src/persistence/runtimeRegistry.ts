@@ -239,6 +239,11 @@ import {
   GithubCloneProjection,
 } from "./githubCloneProjection";
 import { ImageJobProjection } from "../image/imageJobProjection";
+import {
+  registerReplicaMembershipEvents,
+  ReplicaMembershipProjection,
+} from "../replica/replicaMembershipProjection";
+import { registerReplicaStoreSettingsEvents } from "../replica/replicaStoreSettingsEvents";
 
 const fixtureRecordedPayload = Schema.Struct({ value: Schema.String });
 
@@ -250,6 +255,7 @@ export interface Phase1RuntimeRegistries {
   readonly automationProjection: AutomationProjection;
   readonly githubCloneProjection: GithubCloneProjection;
   readonly imageJobProjection: ImageJobProjection;
+  readonly replicaMembershipProjection: ReplicaMembershipProjection;
   readonly hostIdentityMigrations: HostIdentityMigrationRegistry;
 }
 
@@ -428,6 +434,8 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
   registerSideTaskEvents(events);
   registerShipEvents(events);
   registerThreadMessageQueueEvents(events);
+  registerReplicaMembershipEvents(events);
+  registerReplicaStoreSettingsEvents(events);
 
   const hostIdentityMigrations = createRuntimeHostIdentityMigrationRegistry(events);
   const agentRunProjection = new AgentRunProjection();
@@ -435,6 +443,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
   const automationProjection = new AutomationProjection();
   const githubCloneProjection = new GithubCloneProjection();
   const imageJobProjection = new ImageJobProjection();
+  const replicaMembershipProjection = new ReplicaMembershipProjection();
 
   return {
     events,
@@ -444,6 +453,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     automationProjection,
     githubCloneProjection,
     imageJobProjection,
+    replicaMembershipProjection,
     projections: new ProjectionRegistry()
       .register(new AggregateHeadsProjection())
       .register(new ProjectProjection())
@@ -473,6 +483,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
       .register(new ExternalContentTaintProjection())
       .register(new UsageResumeProjection())
       .register(new SpendCeilingProjection())
-      .register(new ThreadMessageQueueProjection()),
+      .register(new ThreadMessageQueueProjection())
+      .register(replicaMembershipProjection),
   };
 }

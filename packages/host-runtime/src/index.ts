@@ -90,6 +90,8 @@ export {
   probeSecretService,
   SECRET_SERVICE_ATTRIBUTE,
   SECRET_SERVICE_BUSCTL_PATH,
+  SECRET_SERVICE_REPLICA_DEVICE_KEY_ATTRIBUTE,
+  SECRET_SERVICE_REPLICA_STORE_CREDENTIAL_ATTRIBUTE,
   SECRET_TOOL_PATH,
   type MakeSecretServiceCredentialStoreOptions,
   type SecretServiceAvailability,

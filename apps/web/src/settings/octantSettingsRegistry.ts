@@ -613,6 +613,34 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       ],
     },
     {
+      id: "sync",
+      label: "Sync",
+      scope: "host",
+      keywords:
+        "sync artifacts replica store synced folder dropbox icloud onedrive s3 bucket endpoint region prefix access key secret keychain test connection probe other computers",
+      settings: [
+        {
+          id: settingId("sync-store"),
+          label: "Store",
+          scope: "host",
+          keywords:
+            "store synced folder s3 bucket endpoint region prefix addressing access key secret",
+        },
+        {
+          id: settingId("sync-enabled"),
+          label: "Sync artifacts",
+          scope: "host",
+          keywords: "sync on off switch artifacts storage provider readable signed not encrypted",
+        },
+        {
+          id: settingId("sync-test-connection"),
+          label: "Test connection",
+          scope: "host",
+          keywords: "test connection probe file store bucket folder",
+        },
+      ],
+    },
+    {
       id: "remote-access",
       label: "Remote access",
       scope: "host",

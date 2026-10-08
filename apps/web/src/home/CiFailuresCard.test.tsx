@@ -122,6 +122,24 @@ describe("the CI failures card", () => {
     expect(onStartFix).toHaveBeenCalledTimes(1);
   });
 
+  it("offers no Start a fix for a pull request from a fork, whose branch is not in the Project", async () => {
+    const listed = view();
+    const fromFork = {
+      ...listed,
+      rows: listed.rows.map((row) => ({ ...row, crossRepository: true as const })),
+    };
+    render(
+      <HomeDashboard
+        cards={[createCiFailuresCard(source({ load: vi.fn(async () => fromFork) }))]}
+        customization={{ order: [], visibility: [] }}
+        onCustomizationChange={vi.fn()}
+      />,
+    );
+    const card = await screen.findByRole("region", { name: "CI failures" });
+    expect(await within(card).findByText("web tests")).toBeInTheDocument();
+    expect(within(card).queryByRole("button", { name: /Start a fix/ })).toBeNull();
+  });
+
   it("is absent when the read is not allowed, and reads nothing", async () => {
     const load = vi.fn(async () => view());
     render(

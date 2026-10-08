@@ -7,6 +7,16 @@ private let protocolVersion = 1
 private let maximumMessageBytes = 16 * 1_024
 private let providerService = "app.octant.provider-credentials"
 private let hostIdentityService = "app.octant.host-identity.v1"
+// Replica device signing keys live in their own service, so a provider
+// credential request that names the same instance UUID can never read,
+// replace, or delete one.
+private let replicaDeviceKeyService = "app.octant.replica-device-keys.v1"
+private let replicaDeviceKeyNamespace = "replica-device-key"
+// Sync buckets' access key pairs live in a service of their own as well, keyed
+// by the settings' credential reference. Unlike a device key, one is replaced
+// when a person enters a new key pair.
+private let replicaStoreCredentialService = "app.octant.replica-store-credentials.v1"
+private let replicaStoreCredentialNamespace = "replica-store-credential"
 private let hostIdentityNamespace = "app.octant.host-identity.v1"
 private let hostIdentityKeyId = "host-identity"
 private let maximumPurgeProviderInstances = 128
@@ -35,7 +45,33 @@ private enum StableError: String, Error {
 // host-derived store scope in `kSecAttrGeneric`; a purge matches that exact
 // scope as well as these service strings, so a selected local store can never
 // enumerate or delete credentials belonging to another store.
-private let octantOwnedServices = [providerService, hostIdentityService]
+private let octantOwnedServices = [
+    providerService,
+    hostIdentityService,
+    replicaDeviceKeyService,
+    replicaStoreCredentialService,
+]
+
+// A credential namespace of its own: the Keychain service it reaches, the
+// request field that names an item, and whether a set may replace an item.
+private struct SeparateNamespace {
+    let service: String
+    let idField: String
+    let replaceable: Bool
+}
+
+private let separateNamespaces: [String: SeparateNamespace] = [
+    replicaDeviceKeyNamespace: SeparateNamespace(
+        service: replicaDeviceKeyService,
+        idField: "instanceId",
+        replaceable: false
+    ),
+    replicaStoreCredentialNamespace: SeparateNamespace(
+        service: replicaStoreCredentialService,
+        idField: "credentialRef",
+        replaceable: true
+    ),
+]
 
 private struct OwnedCredential {
     let service: String
@@ -423,7 +459,11 @@ private func migrateLegacyHostIdentityCredential(
 // SecItemUpdate replaces the data of an item another code identity owns while
 // leaving that owner's ACL, so this helper still cannot read it back.
 private func providerItemReadable(account: String, storeScope: String) -> Bool {
-    var query = baseQuery(service: providerService, account: account, storeScope: storeScope)
+    itemReadable(service: providerService, account: account, storeScope: storeScope)
+}
+
+private func itemReadable(service: String, account: String, storeScope: String) -> Bool {
+    var query = baseQuery(service: service, account: account, storeScope: storeScope)
     query[kSecMatchLimit as String] = kSecMatchLimitOne
     query[kSecReturnData as String] = true
     var result: CFTypeRef?
@@ -436,7 +476,11 @@ private func providerItemReadable(account: String, storeScope: String) -> Bool {
 // SecItemDelete refuses an item owned by another code identity
 // (errSecInvalidOwnerEdit); deleting the exact item reference does not.
 private func deleteProviderItem(account: String, storeScope: String) -> OSStatus {
-    var query = baseQuery(service: providerService, account: account, storeScope: storeScope)
+    deleteItem(service: providerService, account: account, storeScope: storeScope)
+}
+
+private func deleteItem(service: String, account: String, storeScope: String) -> OSStatus {
+    var query = baseQuery(service: service, account: account, storeScope: storeScope)
     query[kSecMatchLimit as String] = kSecMatchLimitOne
     query[kSecReturnRef as String] = true
     var result: CFTypeRef?
@@ -585,7 +629,7 @@ else {
 }
 
 // Host-identity namespace path
-if let namespace = request["namespace"] as? String {
+if let namespace = request["namespace"] as? String, separateNamespaces[namespace] == nil {
     guard namespace == hostIdentityNamespace,
           let keyId = request["keyId"] as? String,
           keyId == hostIdentityKeyId,
@@ -763,6 +807,97 @@ if operation == "purge" {
         "deletedCount": deletedCount,
         "failedCount": failedCount,
     ])
+}
+
+// Replica device-key and sync bucket key paths. Neither has legacy records to
+// migrate, and a request that names a namespace never falls through to the
+// provider service.
+if request["namespace"] != nil {
+    guard let namespaceName = request["namespace"] as? String,
+          let namespace = separateNamespaces[namespaceName],
+          let itemId = request[namespace.idField] as? String,
+          validProviderInstanceId(itemId),
+          let storeScope = request["storeScope"] as? String,
+          validStoreScope(storeScope)
+    else {
+        fail(.failed)
+    }
+    let commonKeys: Set<String> = ["version", "operation", "namespace", namespace.idField, "storeScope"]
+    let allowedKeys = operation == "set" ? commonKeys.union(["credential"]) : commonKeys
+    guard Set(request.keys) == allowedKeys else {
+        fail(.failed)
+    }
+    let itemAccount = providerCredentialAccount(providerInstanceId: itemId, storeScope: storeScope)
+    switch operation {
+    case "set":
+        guard let credential = request["credential"] as? String,
+              !credential.isEmpty,
+              var credentialData = credential.data(using: .utf8)
+        else {
+            fail(.failed)
+        }
+        var addQuery = baseQuery(service: namespace.service, account: itemAccount, storeScope: storeScope)
+        addQuery[kSecValueData as String] = credentialData
+        var addStatus = SecItemAdd(addQuery as CFDictionary, nil)
+        // A device key is written once: replacing one would strand every
+        // signature its public half already vouches for. A bucket key pair is
+        // replaced the way a provider credential is, including an item an
+        // earlier helper build wrote and this one cannot read back.
+        if namespace.replaceable, addStatus == errSecDuplicateItem {
+            if !itemReadable(service: namespace.service, account: itemAccount, storeScope: storeScope) {
+                let deleteStatus = deleteItem(service: namespace.service, account: itemAccount, storeScope: storeScope)
+                guard deleteStatus == errSecSuccess || deleteStatus == errSecItemNotFound else {
+                    addQuery.removeValue(forKey: kSecValueData as String)
+                    credentialData.resetBytes(in: 0..<credentialData.count)
+                    fail(mapStatus(deleteStatus))
+                }
+                addStatus = SecItemAdd(addQuery as CFDictionary, nil)
+            }
+            if addStatus == errSecDuplicateItem {
+                addStatus = SecItemUpdate(
+                    baseQuery(service: namespace.service, account: itemAccount, storeScope: storeScope) as CFDictionary,
+                    [kSecValueData as String: credentialData] as CFDictionary
+                )
+            }
+        }
+        addQuery.removeValue(forKey: kSecValueData as String)
+        credentialData.resetBytes(in: 0..<credentialData.count)
+        guard addStatus == errSecSuccess else { fail(mapStatus(addStatus)) }
+        guard itemReadable(service: namespace.service, account: itemAccount, storeScope: storeScope) else {
+            fail(.unavailable)
+        }
+        emit(["version": protocolVersion, "ok": true])
+    case "has":
+        var query = baseQuery(service: namespace.service, account: itemAccount, storeScope: storeScope)
+        query[kSecMatchLimit as String] = kSecMatchLimitOne
+        let status = SecItemCopyMatching(query as CFDictionary, nil)
+        if status == errSecItemNotFound {
+            emit(["version": protocolVersion, "ok": true, "present": false])
+        }
+        guard status == errSecSuccess else { fail(mapStatus(status)) }
+        emit(["version": protocolVersion, "ok": true, "present": true])
+    case "resolve":
+        var query = baseQuery(service: namespace.service, account: itemAccount, storeScope: storeScope)
+        query[kSecMatchLimit as String] = kSecMatchLimitOne
+        query[kSecReturnData as String] = true
+        var result: CFTypeRef?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        guard status == errSecSuccess else { fail(mapStatus(status)) }
+        guard var credentialData = result as? Data,
+              let credential = String(data: credentialData, encoding: .utf8)
+        else {
+            fail(.failed)
+        }
+        result = nil
+        credentialData.resetBytes(in: 0..<credentialData.count)
+        emit(["version": protocolVersion, "ok": true, "credential": credential])
+    case "delete":
+        let status = deleteItem(service: namespace.service, account: itemAccount, storeScope: storeScope)
+        guard status == errSecSuccess || status == errSecItemNotFound else { fail(mapStatus(status)) }
+        emit(["version": protocolVersion, "ok": true])
+    default:
+        fail(.failed)
+    }
 }
 
 // Provider-credentials path (existing)

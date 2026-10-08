@@ -77,6 +77,9 @@ import {
   type PrivacyTarget,
 } from "../host/HostSettingsSection";
 import { RemoteAccessSettingsSection } from "../host/RemoteAccessSettingsSection";
+import { SyncSettingsSection } from "../settings/SyncSettingsSection";
+import type { FolderBrowseClient } from "@octant/client-runtime/folder-browse-client";
+import type { ReplicaStoreSettingsClient } from "@octant/client-runtime/replica-store-settings-client";
 import { FederatedHostsLifecyclePanel } from "../host/FederatedHostsLifecyclePanel";
 import {
   type SettingsNativeCapabilities,
@@ -124,7 +127,7 @@ import {
   type NativeHarnessProviderOption,
 } from "../harness/NativeHarnessRoutingPanel";
 import type { NativeHarnessClient } from "@octant/client-runtime/native-harness-client";
-import { LOCAL_HOST_ID, type ProviderInstanceId, type ProviderModelId } from "@octant/contracts";
+import { LOCAL_HOST_ID } from "@octant/contracts";
 import { isNativeHarnessDriverKind, modelCarriesAppManagedTools } from "@octant/domain";
 import type { AutomationNotificationClient } from "@octant/client-runtime/automation-notification-client";
 import { ThemeAppearanceEditor } from "../theme/ThemeAppearanceEditor";
@@ -173,6 +176,10 @@ export interface SettingsViewProps {
   readonly localUsageHistoryClient?: LocalUsageHistoryClient;
   readonly diagnosticsExportClient?: DiagnosticsExportClient;
   readonly hostControlClient?: HostControlClient;
+  /** Settings › Sync on this host; absent off it, where store setup is not offered. */
+  readonly replicaStoreSettingsClient?: ReplicaStoreSettingsClient;
+  /** The host's folder browser, for choosing a synced folder. */
+  readonly folderBrowseClient?: Pick<FolderBrowseClient, "browse">;
   readonly workThreads?: ReadonlyArray<{ readonly id: string; readonly title: string }>;
   readonly hostFederationLifecycle?: HostFederationLifecycle;
   readonly githubClient?: GithubClient;
@@ -228,6 +235,7 @@ const SECTION_DESCRIPTIONS: Readonly<Partial<Record<SettingsSectionId, string>>>
   github: "Connection and repository access on the selected host.",
   host: "The host process: its status, startup, notifications, and maintenance.",
   data: "What this host stores, how long it keeps threads, and how to back it up.",
+  sync: "Where artifact versions go when sync is on, in a store you own.",
   usage: "Activity and usage across providers.",
 };
 
@@ -961,13 +969,7 @@ function ActiveSectionContent({
                 providers={nativeHarnessProviderOptions(props.providerController)}
                 {...(props.providerController === undefined
                   ? {}
-                  : {
-                      onVerifyTools: (providerInstanceId: string, modelId: string) =>
-                        props.providerController!.verifyModelTools(
-                          providerInstanceId as ProviderInstanceId,
-                          modelId as ProviderModelId,
-                        ),
-                    })}
+                  : { onVerifyTools: props.providerController.verifyModelTools })}
               />
             </>
           )}
@@ -1046,6 +1048,14 @@ function ActiveSectionContent({
         </section>
       );
     }
+    case "sync":
+      return (
+        <SyncSettingsSection
+          client={props.replicaStoreSettingsClient}
+          focusedSetting={focusedSetting}
+          folderBrowse={props.folderBrowseClient}
+        />
+      );
     case "data":
       return (
         <div className="settings-section-stack" id="settings-data">

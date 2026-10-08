@@ -202,7 +202,7 @@ navigation rail; the rail names each group of pages with a quiet label and
 draws no hairline between groups. The groups are Personal (how Octant looks and
 behaves for you), Modes (each mode's defaults), Models (which provider or model
 answers each job), Agents (what a running agent may do), Integrations, and
-System (the running host, its data, remote access, and usage). A setting lives
+System (the running host, its data, sync, remote access, and usage). A setting lives
 on the page of the thing it changes, and a moved setting keeps answering links
 to its old page. Personal holds Appearance (theme, window glass, background,
 text, accessibility) and a separate Sidebar page (layout, destinations, sidebar
@@ -245,7 +245,12 @@ Every Settings page is built from one kit, in `settings/primitives.tsx`:
   a change resolves (a shell setting or a theme write), and holds its place
   when empty so nothing shifts. A host that refuses a change shows nothing.
   A Save button exists only for compound forms: a provider's connection
-  details and the harness model slots.
+  details, a sync bucket's connection details, and the harness model slots.
+- **Said before the switch.** A switch that sends something off this
+  computer carries the fact a person must know as its section's description,
+  above the switch and named as its description, and stays disabled until it
+  has something to send to. Sync is the case: it says the storage provider can
+  read the files, which are signed but not encrypted.
 - **Destructive.** A page's destructive group (logging out of GitHub,
   disconnecting Linear, purging thread history, revoking paired devices) is
   its own section, last on the page, whose card holds the destructive row
@@ -433,7 +438,11 @@ ago" only for a host that reports none; a fact the host does not report is left
 out rather than invented. **Pull requests** lists up to six rows on a Code
 start screen, in Waiting on your review and Yours. Each row is the title, a
 short repository and number, and the words for checks and review — never
-colour alone. It is absent when that read is not allowed. **CI failures**
+colour alone. It is absent when that read is not allowed. It never says
+"Nothing is waiting on you." for a list it has not seen: a failed read says it
+could not read, and until a refresh has reached every connected Project the
+quiet line says so, with an **Open Pull requests** link under it. A snapshot
+whose latest refresh failed carries its age as meta text. **CI failures**
 lists up to five failing checks from that same read, the check name, the
 repository or branch, and how long ago it failed. It is absent when nothing is
 failing, and absent when that read is not allowed. **Start a fix** opens a
@@ -932,7 +941,10 @@ wireframe of one screen, in a desktop, tablet, or phone frame. It draws only
 the closed catalog — window, header, sidebar, list, list row, form field,
 button, toggle, tabs, card, image placeholder, and text — and those controls
 are inert. In the Default style the wireframe uses neutral ink, hairline, and
-surface, never a hue.
+surface, never a hue. A design is the author's own screens or slides: Octant draws
+only the frame around them (a hairline, the surface behind, and a numbered
+caption) and never restyles what is inside. Its player is a near-full-window
+dialog that scales the screen to fit with the stage padding around it.
 
 ## Spacing, shapes, and depth
 
@@ -1384,7 +1396,8 @@ default only when this checkout is serving something; Subagents, one row with
 its working / to review / done counts that opens the Agents tool — reading and
 steering a subagent belongs there; Computer use) and Delivery (Pull requests,
 Sources, Delivers, Working folder, and Usage, closed by default; totals, the
-one-line token ceiling form, and Open Usage dashboard inside). A card with no
+spend ceiling form for tokens, turns, hours, and US dollars, whose fields wrap
+two by two in a narrow rail, and Open Usage dashboard inside). A card with no
 rows to show is omitted with its caption. Every row has one grammar: a 26px
 glyph tile, the name, the row's state as a small neutral pill, and a trailing
 chevron where the row opens (a row's own action, such as All pull requests,

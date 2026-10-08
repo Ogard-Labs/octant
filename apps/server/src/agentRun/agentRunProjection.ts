@@ -443,6 +443,15 @@ export class AgentRunProjection implements Projection {
     });
   }
 
+  /** Every run started in the Project, by the Project its routing receipt names. */
+  projectRunIds(projectId: ProjectId): ReadonlyArray<AgentRunId> {
+    const ids: AgentRunId[] = [];
+    for (const run of this.#byId.values()) {
+      if (String(run.routingReceipt.projectId ?? "") === String(projectId)) ids.push(run.id);
+    }
+    return ids;
+  }
+
   /**
    * Every run matching the center query filters, newest first. Authorization is
    * applied by the route before pagination so pages contain only readable rows.

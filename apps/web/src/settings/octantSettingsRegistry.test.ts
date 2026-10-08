@@ -24,6 +24,7 @@ describe("octantSettingsRegistry", () => {
       "linear",
       "host",
       "data",
+      "sync",
       "remote-access",
       "usage",
     ]);

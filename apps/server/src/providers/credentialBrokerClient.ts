@@ -22,6 +22,37 @@ export interface ProviderCredentialStore extends ProviderCredentialResolver {
 export function makeCredentialBrokerClient(
   options: CredentialBrokerClientOptions,
 ): ProviderCredentialStore {
+  return makeBrokerCredentialClient(options, "/v1/credentials/", "providerInstanceId");
+}
+
+/**
+ * Replica device signing keys, through the broker's own device-key routes.
+ * Those routes reach a separate credential namespace, so no provider instance
+ * - whatever UUID it was created with - can read, replace, or delete a key.
+ */
+export function makeReplicaDeviceKeyBrokerClient(
+  options: CredentialBrokerClientOptions,
+): ProviderCredentialStore {
+  return makeBrokerCredentialClient(options, "/v1/replica-device-keys/", "instanceId");
+}
+
+/**
+ * Sync buckets' access key pairs, through the broker's own routes for them,
+ * keyed by the settings' credential reference. Those routes reach a separate
+ * credential namespace, so neither a provider instance nor a replica device
+ * key with the same UUID can read, replace, or delete a key pair.
+ */
+export function makeReplicaStoreCredentialBrokerClient(
+  options: CredentialBrokerClientOptions,
+): ProviderCredentialStore {
+  return makeBrokerCredentialClient(options, "/v1/replica-store-credentials/", "credentialRef");
+}
+
+function makeBrokerCredentialClient(
+  options: CredentialBrokerClientOptions,
+  routePrefix: "/v1/credentials/" | "/v1/replica-device-keys/" | "/v1/replica-store-credentials/",
+  field: "providerInstanceId" | "instanceId" | "credentialRef",
+): ProviderCredentialStore {
   const fetch = options.fetch ?? globalThis.fetch;
   const request = async (
     operation: "has" | "resolve" | "set" | "delete",
@@ -31,7 +62,7 @@ export function makeCredentialBrokerClient(
     if (!UUID_PATTERN.test(providerInstanceId)) throw brokerFailure();
     let response: Response;
     try {
-      response = await fetch(new URL(`/v1/credentials/${operation}`, options.url).toString(), {
+      response = await fetch(new URL(`${routePrefix}${operation}`, options.url).toString(), {
         method: "POST",
         redirect: "error",
         headers: {
@@ -39,7 +70,9 @@ export function makeCredentialBrokerClient(
           "x-octant-credential-broker-token": options.token,
         },
         body: JSON.stringify(
-          credential === undefined ? { providerInstanceId } : { providerInstanceId, credential },
+          credential === undefined
+            ? { [field]: providerInstanceId }
+            : { [field]: providerInstanceId, credential },
         ),
       });
     } catch {

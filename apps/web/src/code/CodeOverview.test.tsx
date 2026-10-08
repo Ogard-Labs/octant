@@ -543,6 +543,7 @@ function controller(): CodeController {
     turnActivity: new Map(),
     turnErrorInTranscript: false,
     providerRequests: [],
+    providerAnswerRefusal: undefined,
     bootstrap: { checkouts: [checkout], settings: {} as never, threads: [thread] } as never,
     client: { queryBoard: vi.fn(async () => boardView([])) } as never,
     editorDrafts: {

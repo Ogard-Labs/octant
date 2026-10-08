@@ -859,6 +859,22 @@ describe("fitting a request to the endpoint", () => {
       expect(usage).not.toHaveProperty("cacheReadInputTokens");
       expect(usage).not.toHaveProperty("cacheWriteInputTokens");
       expect(usage).not.toHaveProperty("reasoningTokens");
+      expect(usage).not.toHaveProperty("costUsd");
+    });
+
+    it("reports the turn's cost only when every request reported one", async () => {
+      const whole = await twoRequestTurn(
+        { inputTokens: 100, outputTokens: 10, costUsd: 0.01 },
+        { inputTokens: 160, outputTokens: 5, costUsd: 0.02 },
+      );
+      const priced = whole.find((event) => event.kind === "usage");
+      expect(priced?.kind === "usage" ? priced.costUsd : undefined).toBeCloseTo(0.03, 10);
+
+      const partial = await twoRequestTurn(
+        { inputTokens: 100, outputTokens: 10, costUsd: 0.01 },
+        { inputTokens: 160, outputTokens: 5 },
+      );
+      expect(partial.find((event) => event.kind === "usage")).not.toHaveProperty("costUsd");
     });
   });
 

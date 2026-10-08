@@ -170,6 +170,7 @@ export const spawnSetupTokenOnHostPty: SpawnSetupTokenTerminal = (input) => {
  */
 export async function runInstalledClaudeSetupToken(
   binaryPath: string,
+  signal: AbortSignal,
 ): Promise<ClaudeSetupTokenOutcome> {
   let cwd: string;
   try {
@@ -183,6 +184,7 @@ export async function runInstalledClaudeSetupToken(
       cwd,
       environment: sanitizeClaudeEnvironment("subscription", process.env),
       spawn: spawnSetupTokenOnHostPty,
+      signal,
     });
   } finally {
     await rm(cwd, { recursive: true, force: true }).catch(() => undefined);

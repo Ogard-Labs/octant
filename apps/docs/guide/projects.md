@@ -74,8 +74,9 @@ reply. Work threads do not carry an unread mark yet, so they do not appear.
 
 Work through the list with single keys: **J** and **K** move, **Enter** opens
 the thread, **C** completes it, **S** sends it back with a one-line follow-up
-that becomes its next turn, **Z** snoozes it, and **E** marks it seen. The page
-never merges, approves, or comments on a pull request, and nothing on it
+that becomes its next turn, **Z** snoozes it, and **E** marks it seen. The keys
+work while the page has focus; after clicking elsewhere, click the page to use
+them again. The page never merges, approves, or comments on a pull request, and nothing on it
 deletes work. You can also open it from the command palette with **Review
 finished threads**.
 

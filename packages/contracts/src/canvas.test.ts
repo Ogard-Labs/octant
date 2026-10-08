@@ -3,6 +3,7 @@ import {
   CANVAS_AGGREGATE_TYPE,
   CANVAS_CREATED,
   CANVAS_BAR_LIST_SCHEMA_VERSION,
+  CANVAS_DESIGN_SCHEMA_VERSION,
   CANVAS_DIAGRAM_KINDS_SCHEMA_VERSION,
   CANVAS_EVENT_NAMES,
   CANVAS_HEATMAP_SCHEMA_VERSION,
@@ -136,6 +137,32 @@ describe("Canvas contracts", () => {
     expect(
       decodeCanvasDefinition({ ...definition, schemaVersion: 4, blocks: [mockup] }),
     ).toMatchObject({ blocks: [mockup] });
+  });
+
+  it("admits design blocks only under the version that declared them", () => {
+    const design = {
+      blockId: "design-1",
+      schemaVersion: 9,
+      kind: "design",
+      title: "Checkout",
+      size: "phone",
+      frames: [{ frameId: "cart", title: "Cart", html: "<h1>Cart</h1>" }],
+    } as const;
+    expect(decodeCanvasDefinition({ ...definition, blocks: [design] })).toMatchObject({
+      blocks: [design],
+    });
+    // A design arrived at version 9, after every earlier block kind and hint.
+    for (const schemaVersion of [1, 2, 3, 4, 5, 6, 7, 8]) {
+      expect(() =>
+        decodeCanvasDefinition({ ...definition, schemaVersion, blocks: [design] }),
+      ).toThrow();
+    }
+    expect(() =>
+      decodeCanvasDefinition({ ...definition, blocks: [{ ...design, frames: [] }] }),
+    ).toThrow();
+    expect(() =>
+      decodeCanvasDefinition({ ...definition, blocks: [{ ...design, size: "watch" }] }),
+    ).toThrow();
   });
 
   it("admits a thread presentation only under the version that declared it", () => {
@@ -1146,9 +1173,10 @@ describe("entity-relationship, swimlane, and mind map diagram kinds", () => {
     ).toThrow();
   });
 
-  it("keeps the diagram-kinds floor at the current version, ahead of bar-list", () => {
-    expect(CANVAS_DIAGRAM_KINDS_SCHEMA_VERSION).toBe(CANVAS_SCHEMA_VERSION);
+  it("keeps the diagram-kinds floor ahead of bar-list and below the design block", () => {
     expect(CANVAS_DIAGRAM_KINDS_SCHEMA_VERSION).toBeGreaterThan(CANVAS_BAR_LIST_SCHEMA_VERSION);
+    expect(CANVAS_DESIGN_SCHEMA_VERSION).toBeGreaterThan(CANVAS_DIAGRAM_KINDS_SCHEMA_VERSION);
+    expect(CANVAS_DESIGN_SCHEMA_VERSION).toBe(CANVAS_SCHEMA_VERSION);
   });
 
   it("refuses a diagram kind inside a document declaring an earlier version", () => {
