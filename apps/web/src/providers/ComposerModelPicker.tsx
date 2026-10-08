@@ -660,7 +660,7 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
                   type="button"
                   variant="link"
                 >
-                  Model slots
+                  Model roles
                 </OctantButton>
               )}
             </p>

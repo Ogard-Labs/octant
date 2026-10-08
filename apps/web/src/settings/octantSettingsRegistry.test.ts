@@ -157,9 +157,19 @@ describe("octantSettingsRegistry", () => {
     const harness = octantSettingsRegistry.sections.find((s) => s.id === "harness");
     expect(harness?.settings.map((setting) => setting.id)).toEqual([
       "model-endpoints",
+      "model-roles",
       "subagent-creation-posture",
     ]);
     expect(harness?.keywords).toMatch(/posture/);
+  });
+
+  it("finds Model roles by the name Settings uses and by the slot names the CLI keeps", () => {
+    const sections = listAvailableSections(octantSettingsRegistry, capabilities);
+    for (const query of ["model roles", "main model", "advisor", "smol"]) {
+      expect(searchSettings(sections, capabilities, query)).toContainEqual(
+        expect.objectContaining({ sectionId: "harness", settingId: "model-roles" }),
+      );
+    }
   });
 
   it("finds API model endpoints under Octant Harness rather than Providers & Models", () => {

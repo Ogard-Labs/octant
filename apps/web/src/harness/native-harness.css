@@ -1,4 +1,3 @@
-.native-harness-panel__lead,
 .native-harness-card__detail {
   margin: 0 0 0.75rem;
   color: var(--color-muted-foreground);
@@ -15,20 +14,32 @@
   color: var(--color-destructive);
 }
 
-.native-harness-slots,
-.native-harness-jobs {
-  display: grid;
-  gap: 0.5rem;
-  margin-bottom: 0.75rem;
-}
-
-.native-harness-slot {
-  padding: var(--oct-space-3) 0;
+/* Model roles: each role is a setting row, optionally followed by its notes
+   and its open list of backups; the wrapper draws the divider so a role's
+   editor reads as part of its row. */
+.native-harness-role + .native-harness-role,
+.native-harness-roles__notice + .native-harness-role,
+.native-harness-suggestion + .native-harness-role,
+.native-harness-roles__notice + .native-harness-suggestion,
+.native-harness-role + .native-harness-panel__message,
+.native-harness-role + .native-harness-jobs,
+.native-harness-panel__message + .native-harness-jobs {
   border-top: 1px solid var(--oct-hairline);
 }
 
-.native-harness-slot__head,
-.native-harness-candidate,
+.native-harness-role .setrow-control {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--oct-space-1);
+  min-width: 0;
+}
+
+.native-harness-role__control,
+.native-harness-roles__notice,
+.native-harness-backups__row,
+.native-harness-backups__actions,
+.native-harness-backups__add,
 .native-harness-job,
 .native-harness-card__head,
 .native-harness-panel__actions,
@@ -36,35 +47,114 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 0.5rem;
+  gap: var(--oct-space-2);
 }
 
-.native-harness-slot__head {
-  justify-content: space-between;
+.native-harness-role__control {
+  justify-content: flex-end;
 }
 
-/* The status and its action sat touching: the kit's control cell has no gap. */
-.native-harness-slot .setrow-control {
-  display: flex;
-  align-items: center;
-  gap: var(--oct-space-3);
-}
-
-.native-harness-slot__count,
-.native-harness-candidate__rank {
+.native-harness-role__chosen,
+.native-harness-role__source,
+.native-harness-backups__rank {
   font-size: var(--text-sm);
   color: var(--color-muted-foreground);
 }
 
-.native-harness-candidate {
-  margin-top: 0.5rem;
+.native-harness-role__source {
+  text-align: right;
+  overflow-wrap: anywhere;
 }
 
-.native-harness-candidate__tools {
-  display: inline-flex;
+.native-harness-role__notes,
+.native-harness-backups,
+.native-harness-roles__notice,
+.native-harness-panel__message {
+  padding: 0 var(--oct-space-4) var(--oct-space-3);
+}
+
+.native-harness-roles__notice {
+  justify-content: space-between;
+  padding-top: var(--oct-space-3);
+}
+
+.native-harness-role__notes p {
+  margin: 0;
+}
+
+/* The open list of a role's models, under its row: first choice, then backups. */
+.native-harness-backups {
+  display: grid;
+  gap: var(--oct-space-2);
+}
+
+.native-harness-backups__row {
+  display: grid;
+  grid-template-columns: 6.5rem minmax(0, auto) 1fr;
+  padding: var(--oct-space-2) var(--oct-space-3);
+  border-radius: var(--oct-radius-sm);
+  background: color-mix(in oklab, var(--oct-fg) 3%, transparent);
+}
+
+.native-harness-backups__actions {
+  justify-content: flex-end;
+}
+
+/* One endpoint and no main model: the offer sits where the person looks first. */
+.native-harness-suggestion {
+  display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 0.5rem;
+  justify-content: space-between;
+  gap: var(--oct-space-3);
+  padding: var(--oct-space-3) var(--oct-space-4);
+}
+
+.native-harness-suggestion__copy {
+  display: grid;
+  gap: var(--oct-space-1);
+  min-width: 0;
+  flex: 1 1 16rem;
+}
+
+.native-harness-suggestion__copy .setrow-hint {
+  margin: 0;
+}
+
+.native-harness-jobs {
+  padding-inline: var(--oct-space-4);
+}
+
+.native-harness-job {
+  justify-content: space-between;
+  min-height: 44px;
+  padding-block: var(--oct-space-2);
+}
+
+.native-harness-job + .native-harness-job {
+  border-top: 1px solid var(--oct-hairline);
+}
+
+@media (max-width: 640px) {
+  .native-harness-role .setrow-control {
+    align-items: flex-start;
+  }
+
+  .native-harness-role__control {
+    justify-content: flex-start;
+  }
+
+  .native-harness-role__source {
+    text-align: left;
+  }
+
+  .native-harness-backups__row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .native-harness-backups__rank {
+    grid-column: 1 / -1;
+  }
 }
 
 .native-harness-card {
@@ -179,15 +269,4 @@
 
 .native-harness-steering__status {
   color: color-mix(in srgb, CanvasText 55%, transparent);
-}
-
-.native-harness-job {
-  justify-content: space-between;
-  min-height: 44px;
-  padding-block: var(--oct-space-2);
-  border-top: 1px solid var(--oct-hairline);
-}
-
-.native-harness-panel > .settings-card-section > h3 {
-  margin: var(--oct-space-4) 0 var(--oct-space-2);
 }

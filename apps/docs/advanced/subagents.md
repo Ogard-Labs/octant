@@ -69,9 +69,9 @@ removes saved comparisons, tool records and earlier result text.
 Subagent infrastructure — contracts, journaling, projection, the
 orchestration service, process supervision, and packaged child smoke — is on
 `main`. **Settings → Octant Harness → Helper agents** holds one
-server-authoritative switch, **Let the agent start subagents**: on (the
-default) or off. **Settings → Octant Harness → Model slots** configures shared
-role routing for both Octant and provider harnesses; Projects can override it.
+server-authoritative switch, **Let the agent start helper agents**: on (the
+default) or off. **Settings → Octant Harness → Model roles** (slots, in the
+CLI) configures shared role routing for both Octant and provider harnesses; Projects can override it.
 
 A thread's subagents appear in a compact card above its composer in Chat,
 Work, and Code, the same width as the message box. It starts collapsed and
@@ -144,7 +144,7 @@ that run only; your `CODEX_HOME` and `config.toml` are left as they are.
 
 ## Posture and clamps
 
-**Let the agent start subagents** is on by default: the agent's `delegate`
+**Let the agent start helper agents** is on by default: the agent's `delegate`
 calls start subagents within the thread's access and the clamps below. Turned
 off, every `delegate` call is refused and the agent does its work itself;
 subagents it already started stay readable and controllable. A host that had
@@ -153,8 +153,8 @@ could start a subagent under it. Provider-native subagents are not governed by t
 keeps them off where the provider allows it. The server enforces hard clamps:
 
 - How many children **run at once** is yours to set in **Settings → Octant
-  Harness → Helper agents**: per thread (default 4) and across the app
-  (default 8), each up to 16. A child that is only waiting — for the children
+  Harness → Helper agents**: **At once in one thread** (default 4) and **At
+  once across Octant** (default 8), each up to 16. A child that is only waiting — for the children
   it depends on, or for a free slot — does not take a slot.
 - At most **16 unfinished children per parent** and **32 across the app**,
   waiting ones included, so a runaway agent cannot pile up work.

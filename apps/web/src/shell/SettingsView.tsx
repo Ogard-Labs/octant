@@ -132,7 +132,8 @@ import {
 } from "../harness/NativeHarnessRoutingPanel";
 import type { NativeHarnessClient } from "@octant/client-runtime/native-harness-client";
 import { LOCAL_HOST_ID } from "@octant/contracts";
-import { isNativeHarnessDriverKind, modelCarriesAppManagedTools } from "@octant/domain";
+import { buildModelPickerGroups, isNativeHarnessDriverKind } from "@octant/domain";
+import type { PickerGroup } from "@octant/domain";
 import type { AutomationNotificationClient } from "@octant/client-runtime/automation-notification-client";
 import { ThemeAppearanceEditor } from "../theme/ThemeAppearanceEditor";
 import { AppUpdateSettings } from "../settings/AppUpdateSettings";
@@ -774,7 +775,7 @@ function ActiveSectionContent({
   props,
   capabilities,
 }: ActiveSectionContentProps) {
-  // Voice, image sources, and the harness model slots all run on model
+  // Voice, image sources, and the harness model roles all run on model
   // endpoints, so their "connect one" actions land on the add-endpoint row.
   const openModelEndpoints = () =>
     onApplyDeepLink({ section: "harness", setting: settingId("model-endpoints") });
@@ -975,21 +976,17 @@ function ActiveSectionContent({
             />
           )}
           {props.nativeHarnessClient === undefined ? null : (
-            <>
-              <p className="native-harness-panel__lead">
-                Models from the endpoints above appear under <strong>Octant</strong> in the model
-                picker. Assign models to roles below.
-              </p>
-              <NativeHarnessRoutingPanel
-                client={props.nativeHarnessClient}
-                hostId={LOCAL_HOST_ID}
-                onOpenModelEndpoints={openModelEndpoints}
-                providers={nativeHarnessProviderOptions(props.providerController)}
-                {...(props.providerController === undefined
-                  ? {}
-                  : { onVerifyTools: props.providerController.verifyModelTools })}
-              />
-            </>
+            <NativeHarnessRoutingPanel
+              client={props.nativeHarnessClient}
+              focused={focusedSetting === settingId("model-roles")}
+              groups={nativeHarnessPickerGroups(props.providerController)}
+              hostId={LOCAL_HOST_ID}
+              onOpenModelEndpoints={openModelEndpoints}
+              providers={nativeHarnessProviderOptions(props.providerController)}
+              {...(props.providerController === undefined
+                ? {}
+                : { onVerifyTools: props.providerController.verifyModelTools })}
+            />
           )}
           {props.agentRunSettingsClient === undefined ? null : (
             <AgentRunSettingsPanel
@@ -2273,27 +2270,29 @@ function nativeHarnessProviderOptions(
   if (controller === undefined) return [];
   return controller.instances
     .filter((instance) => instance.enabled && isNativeHarnessDriverKind(instance.driverKind))
-    .map((instance) => {
-      const observed = controller.observedByInstance.get(instance.id);
-      const configured: ReadonlyArray<string> =
-        instance.configuration.kind === "openai-compatible-http" ||
-        instance.configuration.kind === "anthropic-compatible-http" ||
-        instance.configuration.kind === "azure-foundry-openai-http"
-          ? instance.configuration.manualModelIds.map(String)
-          : [];
-      return {
-        instanceId: String(instance.id),
-        label: instance.displayName,
-        models: (observed?.models ?? []).map((model) => ({
-          id: String(model.id),
-          label: model.displayName,
-          configured: configured.includes(String(model.id)),
-          ...(observed === undefined
-            ? {}
-            : { toolsReady: modelCarriesAppManagedTools(observed, model.id) }),
-        })),
-      };
-    });
+    .map((instance) => ({
+      instanceId: String(instance.id),
+      label: instance.displayName,
+      modelCount: controller.observedByInstance.get(instance.id)?.models.length ?? 0,
+    }));
+}
+
+/**
+ * The harness endpoints' models as the compact chooser lists them. Chat's
+ * grouping lists every model, Chat-only ones included, because a role may
+ * answer without tools and the panel says so beside the choice.
+ */
+function nativeHarnessPickerGroups(
+  controller: SettingsViewProps["providerController"],
+): ReadonlyArray<PickerGroup> {
+  if (controller === undefined) return [];
+  return buildModelPickerGroups({
+    instances: controller.instances,
+    observedByInstance: controller.observedByInstance,
+    providerOrder: controller.defaults.providerOrder,
+    hiddenModels: controller.defaults.hiddenModels,
+    mode: "chat",
+  }).filter((group) => group.runtime === "octant-harness");
 }
 
 function privacyThreadsFromSettings(props: SettingsViewProps): ReadonlyArray<PrivacyTarget> {

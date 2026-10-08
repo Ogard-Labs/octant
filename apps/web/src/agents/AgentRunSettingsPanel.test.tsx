@@ -15,21 +15,23 @@ function baseSettings(
 }
 
 function toggle() {
-  return screen.getByRole("switch", { name: "Let the agent start subagents" });
+  return screen.getByRole("switch", { name: "Let the agent start helper agents" });
 }
 
 describe("AgentRunSettingsPanel", () => {
-  it("shows the agent may start subagents when the host lets it", async () => {
+  it("shows the agent may start helper agents when the host lets it", async () => {
     const client = {
       current: vi.fn(async () => baseSettings({ creationPosture: "automatic" })),
       update: vi.fn(),
     };
     render(<AgentRunSettingsPanel client={client} />);
     await waitFor(() => expect(toggle()).toBeChecked());
-    expect(screen.getByText(/hand part of its work to a subagent/)).toBeVisible();
+    expect(
+      screen.getByText(/hand part of its work to a helper and get the result back/),
+    ).toBeVisible();
   });
 
-  it("offers only on or off, with no choice to start subagents by hand", async () => {
+  it("offers only on or off, with no choice to start helper agents by hand", async () => {
     const client = {
       current: vi.fn(async () => baseSettings({ creationPosture: "off" })),
       update: vi.fn(),
@@ -38,10 +40,10 @@ describe("AgentRunSettingsPanel", () => {
     await waitFor(() => expect(toggle()).not.toBeChecked());
     expect(screen.queryByRole("combobox")).toBeNull();
     expect(screen.queryByText(/Only when I start them/)).toBeNull();
-    expect(screen.getByText(/does all of its work itself/)).toBeVisible();
+    expect(screen.getByText(/does all the work itself/)).toBeVisible();
   });
 
-  it("turns subagents on with the expected version and reflects the server's response", async () => {
+  it("turns helper agents on with the expected version and reflects the server's response", async () => {
     const user = userEvent.setup();
     const update = vi.fn(async () => baseSettings({ creationPosture: "automatic", version: 2 }));
     const client = {
@@ -69,10 +71,10 @@ describe("AgentRunSettingsPanel", () => {
     };
     render(<AgentRunSettingsPanel client={client} />);
     await waitFor(() => expect(toggle()).toBeChecked());
-    expect(screen.getByRole("spinbutton", { name: "Run at once in a thread" })).toHaveValue(4);
-    expect(screen.getByRole("spinbutton", { name: "Run at once in the app" })).toHaveValue(8);
+    expect(screen.getByRole("spinbutton", { name: "At once in one thread" })).toHaveValue(4);
+    expect(screen.getByRole("spinbutton", { name: "At once across Octant" })).toHaveValue(8);
 
-    await user.click(screen.getByRole("button", { name: "Increase Run at once in a thread" }));
+    await user.click(screen.getByRole("button", { name: "Increase At once in one thread" }));
 
     expect(update).toHaveBeenCalledWith({
       creationPosture: "automatic",
@@ -80,11 +82,11 @@ describe("AgentRunSettingsPanel", () => {
       expectedVersion: 1,
     });
     await waitFor(() =>
-      expect(screen.getByRole("spinbutton", { name: "Run at once in a thread" })).toHaveValue(5),
+      expect(screen.getByRole("spinbutton", { name: "At once in one thread" })).toHaveValue(5),
     );
   });
 
-  it("turns subagents off", async () => {
+  it("turns helper agents off", async () => {
     const user = userEvent.setup();
     const update = vi.fn(async () => baseSettings({ creationPosture: "off", version: 2 }));
     const client = {
