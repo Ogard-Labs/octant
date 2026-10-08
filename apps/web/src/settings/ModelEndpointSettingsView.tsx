@@ -130,11 +130,12 @@ export function ModelEndpointSettingsView(props: ModelEndpointSettingsViewProps)
                   ))}
                 </div>
                 {props.credentialManagementAvailable ? null : (
-                  // The host refuses a sign-in a paired device starts; a
-                  // browser on the host itself is a local client and may.
+                  // A browser cannot tell whether the host reads it as local
+                  // or as a paired device, so this states the host's rule
+                  // rather than telling a local browser it may not sign in.
                   <p className="provider-settings__field-guidance">
-                    A paired device cannot start a sign-in. Sign in from the Octant app or a browser
-                    on the host.
+                    Sign-in starts from the Octant app or a browser on the host; the host refuses
+                    one started from a paired device.
                   </p>
                 )}
               </SettingRow>
