@@ -46,7 +46,9 @@ import type { AndroidEmulatorRequest } from "@octant/contracts/android-toolchain
 import type {
   AppleActionProgress,
   AppleActionRequest,
+  AppleBuildEvidence,
   ApplePlatform,
+  AppleSimulatorId,
 } from "@octant/contracts/apple-toolchain";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
@@ -446,6 +448,7 @@ function AppleWorkbenchSurface(props: {
   });
   const [busy, setBusy] = useState(false);
   const [actionMessage, setActionMessage] = useState<string>();
+  const [repairInputSimulatorId, setRepairInputSimulatorId] = useState<AppleSimulatorId>();
   const approvalGated = decidesCodeEffectsByApproval(props.thread.executionPolicy);
   const simulators = controller.discovery?.simulators ?? [];
   const platform =
@@ -570,6 +573,7 @@ function AppleWorkbenchSurface(props: {
       });
       await previous;
       setActionMessage(undefined);
+      setRepairInputSimulatorId(undefined);
       setBusy(true);
       try {
         const base = appleActionRequest({
@@ -643,7 +647,14 @@ function AppleWorkbenchSurface(props: {
           rememberedInputGrants.current.delete(simulatorId);
           setRememberedGrantEpoch(Date.now());
         }
-        if (evidence.outcome !== "succeeded") {
+        if (
+          evidence.outcome !== "succeeded" &&
+          "simulatorId" in intent &&
+          inputDisconnected(evidence)
+        ) {
+          setActionMessage(APPLE_INPUT_DISCONNECTED_MESSAGE);
+          setRepairInputSimulatorId(intent.simulatorId);
+        } else if (evidence.outcome !== "succeeded") {
           setActionMessage(`Apple ${intent.kind} ${evidence.outcome.replace("-", " ")}.`);
         }
       } catch {
@@ -696,6 +707,7 @@ function AppleWorkbenchSurface(props: {
   return (
     <AppleWorkbenchPane
       {...(actionMessage === undefined ? {} : { actionMessage })}
+      {...(repairInputSimulatorId === undefined ? {} : { repairInputSimulatorId })}
       busy={busy}
       liveFrame={liveFrame}
       {...(screenUrl === undefined ? {} : { screenUrl })}
@@ -815,7 +827,25 @@ function appleActionRequest(input: {
         key: intent.key,
         timeoutMs: 30_000,
       };
+    case "repair-input":
+      return {
+        ...base,
+        kind: "repair-input",
+        simulatorId: intent.simulatorId,
+        requestedBy: localUserActor(),
+        timeoutMs: 30_000,
+      };
   }
+}
+
+const APPLE_INPUT_DISCONNECTED_MESSAGE =
+  "Simulator input is disconnected. Repair input restarts the Simulator's home screen.";
+
+/** The desktop names a Simulator whose input Device Hub took by this reason. */
+function inputDisconnected(evidence: AppleBuildEvidence): boolean {
+  return evidence.diagnostics.some((diagnostic) =>
+    diagnostic.message.includes(": input-disconnected: "),
+  );
 }
 
 /** Matches the local host principal used elsewhere on this Mac. */

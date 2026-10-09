@@ -308,6 +308,7 @@ function resultData<A>(result: { readonly data: A | undefined }): A {
 const BETA_API_TIMEOUT_MS = 5_000;
 const BETA_MUTATION_TIMEOUT_MS = 10_000;
 const MCP_PROBE_TIMEOUT_MS = 5_000;
+const BETA_MCP_POLL_MS = 100;
 const BETA_WRITE_REFUSAL_MESSAGE =
   "OpenCode 2 reported a file change that no approval or setting allowed, so the turn was stopped.";
 
@@ -472,6 +473,15 @@ function missingHealthRoute(error: unknown): boolean {
   return typeof cause === "object" && cause !== null && "status" in cause && cause.status === 404;
 }
 
+/**
+ * The OpenCode session a bridge call names: 1.x sends `sessionID` and 2.0.22
+ * sends `ai.opencode/sessionID` in the MCP request metadata. A call naming
+ * another session is refused rather than answered for the owner.
+ */
+function managedToolCallerSession(context: ManagedToolCallContext | undefined): unknown {
+  return context?.metadata.sessionID ?? context?.metadata["ai.opencode/sessionID"];
+}
+
 function awaitOpenCodeMcpAttestation(bridge: OpenCodeManagedToolsBridge): Promise<boolean> {
   return new Promise((resolve) => {
     const timeout = setTimeout(() => resolve(false), MCP_PROBE_TIMEOUT_MS);
@@ -548,7 +558,114 @@ function nonEmptyRecord(value: unknown): Record<string, unknown> | undefined {
   return record;
 }
 
-export function adaptBetaOpenCodeEvent(value: unknown): Event | undefined {
+/**
+ * 2.0.22 session events that carry nothing a runtime event reports: queueing,
+ * lifecycle markers, the start and end of parts whose deltas are reported,
+ * and running totals that each step's own usage already covers. Every other
+ * unrecognised event still reaches the mapper and fails the turn closed.
+ */
+const OPENCODE_2022_BOOKKEEPING_EVENTS: ReadonlySet<string> = new Set([
+  "session.inbox.enqueued",
+  "session.inbox.delivered",
+  "session.inbox.cancelled",
+  "session.inbox.delivery.changed",
+  "session.execution.started",
+  "session.instructions.updated",
+  "session.usage.updated",
+  "session.usage.recorded",
+  "session.renamed",
+  "session.agent.selected",
+  "session.model.selected",
+  "session.step.started",
+  "session.step.streamed",
+  "session.text.started",
+  "session.text.ended",
+  "session.reasoning.started",
+  "session.reasoning.ended",
+  "session.tool.input.delta",
+  "session.tool.input.ended",
+  "session.compaction.started",
+  "session.compaction.delta",
+  "session.compaction.ended",
+]);
+
+/**
+ * 2.0.22 drops the `session.next.` prefix earlier 2.x builds used, names a
+ * tool call `id` rather than `callID`, and announces the tool's name only on
+ * `session.tool.input.started`; `calls` remembers that name for the call's
+ * later events. The result uses the earlier names the mapper reads, so 1.x,
+ * earlier 2.x, and 2.0.22 share one mapping.
+ */
+function adaptOpenCode2022Event(
+  type: string,
+  properties: Record<string, unknown>,
+  calls: Map<string, string> | undefined,
+): { readonly type: string; readonly properties: Record<string, unknown> } | undefined {
+  if (OPENCODE_2022_BOOKKEEPING_EVENTS.has(type)) return undefined;
+  const sessionID = properties.sessionID;
+  const callID = betaString(properties.id);
+  switch (type) {
+    case "session.text.delta":
+    case "session.reasoning.delta":
+      return { type: type.replace("session.", "session.next."), properties };
+    case "session.tool.input.started": {
+      const name = betaString(properties.name);
+      // Bounded: a call past the bound keeps no name and fails closed.
+      if (callID !== undefined && name !== undefined && (calls?.size ?? 0) < 1024) {
+        calls?.set(callID, name);
+      }
+      return undefined;
+    }
+    case "session.tool.called": {
+      const tool = callID === undefined ? undefined : calls?.get(callID);
+      // A call whose name was never announced stays unmapped and fails closed.
+      if (tool === undefined) return { type, properties };
+      return { type: "session.next.tool.called", properties: { ...properties, callID, tool } };
+    }
+    case "session.tool.progress":
+      // A tool event with no call ID names no call to update, so it is dropped.
+      if (callID === undefined) return undefined;
+      return { type: "session.next.tool.progress", properties: { ...properties, callID } };
+    case "session.tool.success":
+    case "session.tool.failed":
+      if (callID === undefined) return undefined;
+      calls?.delete(callID);
+      return {
+        type: type.replace("session.", "session.next."),
+        properties: { ...properties, callID },
+      };
+    case "session.step.ended":
+    case "session.step.failed":
+      return { type: type.replace("session.", "session.next."), properties };
+    case "session.execution.succeeded":
+      return { type: "session.idle", properties: { sessionID } };
+    case "session.execution.failed":
+      return { type: "session.next.step.failed", properties };
+    case "session.execution.interrupted":
+      return {
+        type: "session.error",
+        properties: {
+          sessionID,
+          error: { name: "MessageAbortedError", data: { message: "interrupted" } },
+        },
+      };
+    case "session.retry.scheduled":
+      return {
+        type: "session.status",
+        properties: {
+          sessionID,
+          status: { type: "retry", attempt: properties.attempt, message: "", next: properties.at },
+        },
+      };
+    default:
+      return { type, properties };
+  }
+}
+
+export function adaptBetaOpenCodeEvent(
+  value: unknown,
+  calls?: Map<string, string>,
+): Event | undefined {
   const record = asRecord(value);
   const type = record === undefined ? undefined : betaString(record.type);
   if (record === undefined || type === undefined) return undefined;
@@ -565,12 +682,14 @@ export function adaptBetaOpenCodeEvent(value: unknown): Event | undefined {
       : type === "permission.replied"
         ? "permission.v2.replied"
         : type;
-  return { type: betaType, properties: properties ?? {} } as Event;
+  const adapted = adaptOpenCode2022Event(betaType, properties ?? {}, calls);
+  return adapted === undefined ? undefined : (adapted as Event);
 }
 
 async function* adaptBetaEventStream(stream: AsyncIterable<unknown>): AsyncGenerator<Event> {
+  const calls = new Map<string, string>();
   for await (const event of stream) {
-    const adapted = adaptBetaOpenCodeEvent(event);
+    const adapted = adaptBetaOpenCodeEvent(event, calls);
     if (adapted !== undefined) yield adapted;
   }
 }
@@ -580,6 +699,81 @@ function openCodeBetaPromptFiles(attachments: ProviderTurnInput["attachments"]) 
     uri: `data:${attachment.mediaType};base64,${Buffer.from(attachment.bytes).toString("base64")}`,
     name: attachment.displayName,
   }));
+}
+
+function betaMcpHeaders(server: OpenCodeServerConnection, projectRoot: string) {
+  return {
+    authorization: server.authorization,
+    "x-opencode-directory": encodeURIComponent(projectRoot),
+  };
+}
+
+function betaMcpRoute(
+  server: OpenCodeServerConnection,
+  projectRoot: string,
+  name?: string,
+): string {
+  // OpenCode's own routes, not Octant endpoints: the list is `/api/mcp` and
+  // each server is managed under `/api/experimental/mcp/{server}`.
+  const route = name === undefined ? "mcp" : `experimental/mcp/${encodeURIComponent(name)}`;
+  const url = new URL(`/api/${route}`, server.url);
+  url.searchParams.set("location[directory]", projectRoot);
+  return url.toString();
+}
+
+/**
+ * 2.0.22 answers the 1.x `POST /mcp` with 405 and registers runtime MCP
+ * servers through `PUT /api/experimental/mcp/{server}` instead. The add
+ * answers 204 while the server is still pending, and its tools join a
+ * session only once OpenCode reports it connected, so registration waits for
+ * that status and fails closed on any other outcome.
+ */
+async function addBetaMcpServer(
+  server: OpenCodeServerConnection,
+  projectRoot: string,
+  name: string,
+  url: string,
+): Promise<void> {
+  const added = await fetch(betaMcpRoute(server, projectRoot, name), {
+    method: "PUT",
+    headers: { ...betaMcpHeaders(server, projectRoot), "content-type": "application/json" },
+    // Code Mode (the 2.x default) would expose the bridge only through
+    // OpenCode's own `execute` tool; direct tools keep each call an action
+    // named for this bridge, which the written posture allows by name.
+    body: JSON.stringify({ config: { type: "remote", url, oauth: false, codemode: false } }),
+    signal: AbortSignal.timeout(BETA_MUTATION_TIMEOUT_MS),
+  });
+  if (!added.ok) {
+    throw new Error(`OpenCode 2 MCP registration failed with status ${added.status}.`);
+  }
+  const deadline = Date.now() + BETA_MUTATION_TIMEOUT_MS;
+  for (;;) {
+    const listed = await fetch(betaMcpRoute(server, projectRoot), {
+      headers: betaMcpHeaders(server, projectRoot),
+      signal: AbortSignal.timeout(BETA_API_TIMEOUT_MS),
+    });
+    if (!listed.ok) {
+      throw new Error(`OpenCode 2 MCP listing failed with status ${listed.status}.`);
+    }
+    const status = betaMcpStatus(await listed.json(), name);
+    if (status === "connected") return;
+    if (status !== "pending" || Date.now() >= deadline) {
+      throw new Error("OpenCode 2 app-managed tool server did not connect.");
+    }
+    await new Promise((resolve) => setTimeout(resolve, BETA_MCP_POLL_MS));
+  }
+}
+
+function betaMcpStatus(body: unknown, name: string): string | undefined {
+  const servers = asRecord(body)?.data;
+  if (!Array.isArray(servers)) return undefined;
+  for (const entry of servers) {
+    const record = asRecord(entry);
+    if (record === undefined || record.name !== name) continue;
+    const status = asRecord(record.status)?.status;
+    return typeof status === "string" ? status : undefined;
+  }
+  return undefined;
 }
 
 export function makeOfficialOpenCodeClient(
@@ -723,6 +917,10 @@ export function makeOfficialOpenCodeClient(
       );
     },
     addMcpServer: async ({ name, url }) => {
+      if (beta) {
+        await addBetaMcpServer(server, projectRoot, name, url);
+        return;
+      }
       await client.mcp.add(
         {
           directory: projectRoot,
@@ -733,6 +931,17 @@ export function makeOfficialOpenCodeClient(
       );
     },
     disconnectMcpServer: async (name) => {
+      if (beta) {
+        const response = await fetch(betaMcpRoute(server, projectRoot, name), {
+          method: "DELETE",
+          headers: betaMcpHeaders(server, projectRoot),
+          signal: AbortSignal.timeout(BETA_MUTATION_TIMEOUT_MS),
+        });
+        if (!response.ok) {
+          throw new Error(`OpenCode 2 MCP removal failed with status ${response.status}.`);
+        }
+        return;
+      }
       await client.mcp.disconnect(
         { name, directory: projectRoot },
         { throwOnError: true, signal: AbortSignal.timeout(10_000) },
@@ -1379,11 +1588,12 @@ function makeConnection(
       signal: AbortSignal,
       context?: ManagedToolCallContext,
     ): Promise<{ readonly resultJson: string; readonly isError: boolean }> => {
+      const callerSession = managedToolCallerSession(context);
       if (
         !state.toolNames.has(name) ||
         state.terminal ||
         state.sourceId === undefined ||
-        (context?.metadata.sessionID !== undefined && context.metadata.sessionID !== state.sourceId)
+        (callerSession !== undefined && callerSession !== state.sourceId)
       ) {
         return { resultJson: '{"error":"tool-unavailable"}', isError: true };
       }
@@ -2128,7 +2338,18 @@ function mapAndOffer(
     );
   } catch (error) {
     if (!beta) throw error;
-    offer(unmappedBetaFailure(state, instanceId, clock));
+    // The type is provider-controlled, so only a bounded event-name spelling
+    // is echoed into the failure.
+    const type = String(event.type);
+    const named = /^[a-z0-9][a-z0-9._-]{0,79}$/.test(type) ? type : "an unrecognised event";
+    offer(
+      unmappedBetaFailure(
+        state,
+        instanceId,
+        clock,
+        `OpenCode 2 sent an event Octant does not map: ${named}.`,
+      ),
+    );
     retire(state);
     return;
   }

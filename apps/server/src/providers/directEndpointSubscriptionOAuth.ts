@@ -43,6 +43,11 @@ export type DirectEndpointCredentialGate =
       readonly kind: "oauth";
       readonly credential: SubscriptionOAuthCredential;
       readonly resolve: () => Promise<string>;
+      /**
+       * False when the sign-in identifies the person but did not grant use of
+       * their subscription; requests that would bill it must be refused.
+       */
+      readonly subscriptionUsageGranted?: boolean;
     }
   | {
       readonly kind: "report";
@@ -101,6 +106,9 @@ export async function inspectDirectEndpointCredential(input: {
     kind: "oauth",
     credential: pointer,
     resolve: () => resolveBearerForRequest(input, pointer),
+    ...(resolution.subscriptionUsageGranted === undefined
+      ? {}
+      : { subscriptionUsageGranted: resolution.subscriptionUsageGranted }),
   };
 }
 

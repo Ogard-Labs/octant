@@ -23,6 +23,7 @@ import {
   type WindowId,
   type ProviderRuntimeEvent,
   type ProviderSessionId,
+  type ProviderModel,
   type ProviderModelId,
   type ProviderExecutionPolicy,
   type OctantMode,
@@ -103,6 +104,10 @@ import type { PersistenceService } from "../persistence/persistenceService";
 import { ProjectionApplicationFailed } from "../persistence/projection";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import { PROVIDER_DEFAULTS_AGGREGATE_ID } from "./providerProjection";
+import {
+  carryModelContextWindowFacts,
+  type ModelContextWindowLesson,
+} from "./modelContextWindowFacts";
 import {
   ProviderExecutableUpdateRejected,
   ProviderRuntimeInvalidationRejected,
@@ -844,6 +849,21 @@ export class ProviderService implements ProviderServiceApi {
           });
         }
 
+        if (command.kind === "set-provider-model-context-window") {
+          return decodeProviderRegistryCommandResult({
+            kind: "provider-model-updated",
+            snapshot: this.#updateCatalogModel(
+              current.id,
+              command.modelId,
+              updatedAt,
+              ({ contextWindowOverride: _cleared, ...model }) =>
+                command.contextWindow === undefined
+                  ? model
+                  : { ...model, contextWindowOverride: command.contextWindow },
+            ),
+          });
+        }
+
         if (command.kind === "set-provider-model-data-tags") {
           if (this.#persistence.readProviderCatalog === undefined) {
             throw this.#unavailable();
@@ -1334,8 +1354,18 @@ export class ProviderService implements ProviderServiceApi {
                 }),
               },
         );
-        this.#persistCatalog(observed);
-        return observed;
+        // A person's window override and what the endpoint taught about a
+        // window live in the catalogue, which outlives the in-memory
+        // observation a restart clears.
+        if (taggedCatalog !== undefined) {
+          this.#runtime.setObservedState({
+            ...observed,
+            models: carryModelContextWindowFacts(observed.models, taggedCatalog.models),
+          });
+        }
+        const withFacts = this.#runtime.observedState(instanceId) ?? observed;
+        this.#persistCatalog(withFacts);
+        return withFacts;
       } catch (error) {
         const failedObservation = this.#failedProbeObservation(instanceId, error);
         if (failedObservation !== undefined) this.#runtime.setObservedState(failedObservation);
@@ -1471,6 +1501,11 @@ export class ProviderService implements ProviderServiceApi {
     const failure = providerFailureOfError(error);
     const readiness = probeFailureReadiness(failure?.category ?? "provider-failed");
     const diagnostic = failure?.diagnostic;
+    const driverKind = this.#persistence.readProviderInstance(instanceId)?.driverKind;
+    const endpointMessage =
+      failure !== undefined && driverKind !== undefined && authorsEndpointFailures(driverKind)
+        ? failure.message
+        : undefined;
     return decodeProviderObservedState({
       instanceId,
       readiness,
@@ -1487,11 +1522,88 @@ export class ProviderService implements ProviderServiceApi {
         diagnostic.supportedVersion !== undefined &&
         /^\d+\.\d+\.\d+$/.test(diagnostic.supportedVersion)
           ? `Provider runtime ${diagnostic.supportedVersion} or later is required.`
-          : (diagnostic?.stderrContext ?? probeFailureMessage(readiness, failure?.reason)),
+          : (diagnostic?.stderrContext ??
+            endpointMessage ??
+            probeFailureMessage(readiness, failure?.reason)),
       ...(failure?.reason === undefined ? {} : { reason: failure.reason }),
       ...(diagnostic === undefined ? {} : { diagnostic }),
       observedAt: decodeTimestamp(this.#clock()),
     });
+  }
+
+  /**
+   * Keeps what a request on a direct endpoint taught about a model's window
+   * with the model's catalogue entry. Best effort: the live observation
+   * already holds the lesson, so a catalogue that is not there yet, or a
+   * write that fails, only means it is learned again after a restart.
+   */
+  rememberModelContextWindow(
+    instanceId: ProviderInstanceId,
+    modelId: ProviderModelId,
+    lesson: ModelContextWindowLesson,
+  ): void {
+    const catalog = this.#persistence.readProviderCatalog?.(instanceId);
+    const model = catalog?.models.find((candidate) => String(candidate.id) === String(modelId));
+    if (catalog === undefined || model === undefined) return;
+    if (
+      (lesson.learnedContextWindow === undefined ||
+        lesson.learnedContextWindow === model.learnedContextWindow) &&
+      (lesson.servedModelId === undefined || lesson.servedModelId === model.servedModelId)
+    ) {
+      return;
+    }
+    try {
+      this.#updateCatalogModel(instanceId, modelId, decodeTimestamp(this.#clock()), (current) => ({
+        ...current,
+        ...lesson,
+      }));
+    } catch {
+      // The live observation keeps the lesson for this session.
+    }
+  }
+
+  /**
+   * Rewrites one model of a provider's persisted catalogue and its live
+   * observation together, so what a person set takes effect on the next
+   * request rather than after the next probe.
+   */
+  #updateCatalogModel(
+    instanceId: ProviderInstanceId,
+    modelId: ProviderModelId,
+    updatedAt: UtcTimestamp,
+    update: (model: ProviderModel) => ProviderModel,
+  ): ProviderCatalogSnapshot {
+    if (this.#persistence.readProviderCatalog === undefined) throw this.#unavailable();
+    const catalog = this.#persistence.readProviderCatalog(instanceId);
+    if (catalog === undefined) throw this.#invalid("Provider model catalog was not found.");
+    const model = catalog.models.find((candidate) => String(candidate.id) === String(modelId));
+    if (model === undefined) throw this.#invalid("Provider model was not found.");
+    const updated = update(model);
+    const snapshot = decodeProviderCatalogSnapshot({
+      ...catalog,
+      version: (catalog.version + 1) as typeof catalog.version,
+      models: catalog.models.map((candidate) => (candidate === model ? updated : candidate)),
+      updatedAt,
+    });
+    this.#persistence.journal.append({
+      aggregate: { aggregateType: "provider-catalog", aggregateId: instanceId },
+      expectedVersion: catalog.version,
+      events: [this.#pendingEvent("provider.catalog-updated@1", { snapshot })],
+    });
+    const authoritative = this.#persistence.readProviderCatalog(instanceId);
+    if (authoritative?.version !== snapshot.version) throw this.#unavailable();
+    const observed = this.#runtime.observedState(instanceId);
+    if (observed !== undefined) {
+      this.#runtime.setObservedState({
+        ...observed,
+        models: observed.models.map((candidate) =>
+          String(candidate.id) === String(modelId)
+            ? { ...update(candidate), id: candidate.id }
+            : candidate,
+        ),
+      });
+    }
+    return authoritative;
   }
 
   #persistCatalog(observed: ProviderObservedState): void {
@@ -1932,15 +2044,33 @@ function isProviderFailure(value: unknown): value is ProviderFailure {
   }
 }
 
+/**
+ * HTTP endpoint drivers fail a probe only with fixed Octant-authored sentences
+ * ("The provider returned an invalid models response.", "The provider request
+ * failed with HTTP 503."): their sanitizers drop response bodies and
+ * credentials before a failure leaves the driver. That sentence is kept on the
+ * observation so it survives a reload; replacing it with the generic CLI
+ * wording told an HTTP endpoint's owner "Provider runtime is unavailable." or
+ * nothing at all. CLI runtimes can carry process text in their failures and
+ * keep the closed generic wording.
+ */
+function authorsEndpointFailures(driverKind: ProviderDriverKind): boolean {
+  return isNativeHarnessDriverKind(driverKind) || driverKind === "ollama";
+}
+
 function probeFailureReadiness(
   category: ProviderFailure["category"],
 ): Exclude<ProviderObservedState["readiness"], "ready" | "checking"> {
   if (category === "unauthenticated") return "unauthenticated";
   if (category === "unavailable" || category === "interrupted") return "unavailable";
+  // A probe whose answer is not the protocol Octant speaks (an HTML page, a
+  // body that is not a model list) failed; it is not usable with degraded
+  // discovery, which is how "degraded" read it.
   if (
     category === "invalid-configuration" ||
     category === "unsupported" ||
-    category === "incompatible"
+    category === "incompatible" ||
+    category === "protocol"
   ) {
     return "incompatible";
   }

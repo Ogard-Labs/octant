@@ -1,6 +1,17 @@
+import { execFileSync } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { readdir } from "node:fs/promises";
-import { mkdtempSync, mkdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { createServer as createHttpsServer } from "node:https";
+import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
@@ -200,6 +211,78 @@ describe("RepositoryTestProcessPort", () => {
     ).resolves.toMatchObject({ termination: "unavailable" });
     expect(linuxSpawn).not.toHaveBeenCalled();
   });
+
+  it.skipIf(process.platform !== "darwin")(
+    "lets a confined HTTPS client load the system TLS configuration, and reach the network only when allowed",
+    async () => {
+      const cwd = realpathSync(temporaryDirectory());
+      execFileSync(
+        "/usr/bin/openssl",
+        [
+          "req",
+          "-x509",
+          "-newkey",
+          "rsa:2048",
+          "-nodes",
+          "-days",
+          "1",
+          "-subj",
+          "/CN=127.0.0.1",
+          "-addext",
+          "subjectAltName=IP:127.0.0.1",
+          "-keyout",
+          join(cwd, "key.pem"),
+          "-out",
+          join(cwd, "cert.pem"),
+        ],
+        { stdio: "ignore" },
+      );
+      let connections = 0;
+      const server = createHttpsServer(
+        { key: readFileSync(join(cwd, "key.pem")), cert: readFileSync(join(cwd, "cert.pem")) },
+        (_request, response) => response.end("tls-reached"),
+      );
+      server.on("connection", () => {
+        connections += 1;
+      });
+      await new Promise<void>((done) => server.listen(0, "127.0.0.1", () => done()));
+      try {
+        const port = (server.address() as AddressInfo).port;
+        const argv = [
+          "/usr/bin/curl",
+          "--silent",
+          "--show-error",
+          "--max-time",
+          "5",
+          "--cacert",
+          join(cwd, "cert.pem"),
+          `https://127.0.0.1:${port}/`,
+        ];
+        const launch = (networkEgress: "allow" | "none") =>
+          new RepositoryTestProcessPort({
+            temporaryDirectory: realpathSync(temporaryDirectory()),
+            receiptDirectory: temporaryDirectory(),
+            networkEgress,
+          }).execute({ argv, cwd, environment: {}, timeoutMs: 10_000 });
+
+        const offline = await launch("none");
+        const offlineError = new TextDecoder().decode(offline.stderr);
+        // It must fail at the socket, not before it: a client that cannot
+        // read its TLS configuration never tries to connect at all.
+        expect(offlineError).not.toContain("openssl.cnf");
+        expect(offline.exitCode).not.toBe(0);
+        expect(connections).toBe(0);
+
+        const networked = await launch("allow");
+        expect(new TextDecoder().decode(networked.stderr)).not.toContain("openssl.cnf");
+        expect(networked).toMatchObject({ termination: "exited", exitCode: 0 });
+        expect(new TextDecoder().decode(networked.stdout)).toBe("tls-reached");
+        expect(connections).toBe(1);
+      } finally {
+        await new Promise<void>((done) => server.close(() => done()));
+      }
+    },
+  );
 
   it.skipIf(process.platform !== "darwin")(
     "runs system executables from /bin and /usr/bin without exposing another directory",
@@ -895,6 +978,103 @@ describe("RepositoryTestProcessPort", () => {
         port.execute({ argv, cwd: "/repo", environment: {}, timeoutMs: 1_000 }),
       ).resolves.toMatchObject({ termination: "unavailable" });
     }
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+  it("runs a harness shell script only as /bin/sh, reading just that script's own directory", async () => {
+    const child = fakeChild(95);
+    const spawn = vi.fn(() => child);
+    const scripts = temporaryDirectory();
+    const port = new RepositoryTestProcessPort(
+      confinedOptions({ spawn, harnessShellScriptDirectory: scripts }),
+    );
+    const own = join(scripts, "octant-harness-1");
+    mkdirSync(own);
+    const script = join(own, "command.sh");
+    writeFileSync(script, "echo ran\n");
+
+    const execution = port.executeShellScript({
+      script,
+      cwd: temporaryDirectory(),
+      environment: {},
+      timeoutMs: 1_000,
+    });
+    await vi.waitFor(() => expect(spawn).toHaveBeenCalled());
+    const [, args] = spawn.mock.calls[0] as unknown as [string, string[]];
+    expect(args.slice(-2)).toEqual(["/bin/sh", realpathSync(script)]);
+    const profile = String(args[1]);
+    expect(profile).toContain(`(allow file-read* (subpath "${realpathSync(own)}"))`);
+    expect(profile).not.toContain(`(allow file-read* (subpath "${realpathSync(scripts)}"))`);
+    expect(profile).not.toContain(`(allow file-write* (subpath "${realpathSync(own)}"))`);
+    child.close(0, null);
+    await expect(execution).resolves.toMatchObject({ termination: "exited", exitCode: 0 });
+  });
+
+  it("refuses a harness shell script outside its own script subdirectory or from a port with none", async () => {
+    const spawn = vi.fn();
+    const scripts = temporaryDirectory();
+    const options = confinedOptions({ spawn, harnessShellScriptDirectory: scripts });
+    const outside = temporaryDirectory();
+    const outsideScript = join(outside, "command.sh");
+    writeFileSync(outsideScript, "echo escaped\n");
+    mkdirSync(join(scripts, "octant-harness-1"));
+    const linked = join(scripts, "octant-harness-1", "linked.sh");
+    symlinkSync(outsideScript, linked);
+    const inside = join(scripts, "octant-harness-1", "command.sh");
+    writeFileSync(inside, "echo ran\n");
+    const atRoot = join(scripts, "command.sh");
+    writeFileSync(atRoot, "echo shared\n");
+    const cwd = temporaryDirectory();
+
+    const port = new RepositoryTestProcessPort(options);
+    for (const script of [
+      outsideScript,
+      linked,
+      atRoot,
+      join(scripts, "octant-harness-1", "..", "..", "command.sh"),
+      join(scripts, "octant-harness-1"),
+      "command.sh",
+    ]) {
+      await expect(
+        port.executeShellScript({ script, cwd, environment: {}, timeoutMs: 1_000 }),
+      ).resolves.toMatchObject({ termination: "unavailable" });
+    }
+    const none = new RepositoryTestProcessPort(confinedOptions({ spawn }));
+    await expect(
+      none.executeShellScript({ script: inside, cwd, environment: {}, timeoutMs: 1_000 }),
+    ).resolves.toMatchObject({ termination: "unavailable" });
+    // A script directory a command could write would let it swap a pending script.
+    const writable = new RepositoryTestProcessPort({
+      ...options,
+      harnessShellScriptDirectory: options.temporaryDirectory,
+    });
+    mkdirSync(join(options.temporaryDirectory, "octant-harness-2"));
+    const inWorkDirectory = join(options.temporaryDirectory, "octant-harness-2", "command.sh");
+    writeFileSync(inWorkDirectory, "echo ran\n");
+    await expect(
+      writable.executeShellScript({
+        script: inWorkDirectory,
+        cwd,
+        environment: {},
+        timeoutMs: 1_000,
+      }),
+    ).resolves.toMatchObject({ termination: "unavailable" });
+    await expect(
+      port.executeShellScript({ script: inside, cwd: scripts, environment: {}, timeoutMs: 1_000 }),
+    ).resolves.toMatchObject({ termination: "unavailable" });
+    // Naming a script directory does not let the ordinary entry point launch a shell.
+    await expect(
+      port.execute({ argv: ["/bin/sh", inside], cwd, environment: {}, timeoutMs: 1_000 }),
+    ).resolves.toMatchObject({ termination: "unavailable" });
+    // The script entry point keeps every other launch check.
+    await expect(
+      port.executeShellScript({
+        script: inside,
+        cwd,
+        environment: { NODE_OPTIONS: "--require=attacker.js" },
+        timeoutMs: 1_000,
+      }),
+    ).resolves.toMatchObject({ termination: "unavailable" });
     expect(spawn).not.toHaveBeenCalled();
   });
 

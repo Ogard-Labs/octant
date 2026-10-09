@@ -18,6 +18,7 @@ import { TextBlocks } from "./TextBlocks";
 import { TreemapBlock } from "./TreemapBlock";
 import { HeatmapBlock } from "./HeatmapBlock";
 import { BarListBlock } from "./BarListBlock";
+import { ComparisonMatrixBlock } from "./ComparisonMatrixBlock";
 import type { CanvasActionRuntime } from "../canvasActionRuntime";
 
 export function CanvasBlockRenderer({
@@ -84,6 +85,8 @@ export function CanvasBlockRenderer({
       return (
         <BarListBlock block={block} {...(actionRuntime === undefined ? {} : { actionRuntime })} />
       );
+    case "comparison-matrix":
+      return <ComparisonMatrixBlock block={block} />;
     case "code-excerpt":
     case "pseudocode":
     case "diff":

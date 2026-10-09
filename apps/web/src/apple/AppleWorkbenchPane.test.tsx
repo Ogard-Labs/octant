@@ -394,4 +394,29 @@ describe("AppleWorkbenchPane", () => {
       simulatorId: discovery.simulators[0]!.simulatorId,
     });
   });
+
+  it("offers Repair input only beside a disconnected-input message, and sends it only on a press", async () => {
+    const { fireEvent, render, screen } = await import("@testing-library/react");
+    const { vi } = await import("vitest");
+    const onRun = vi.fn();
+    const simulatorId = discovery.simulators[0]!.simulatorId;
+    const pane = (repair: boolean) => (
+      <AppleWorkbenchPane
+        actionMessage="Simulator input is disconnected. Repair input restarts the Simulator's home screen."
+        discovery={discovery}
+        onRun={onRun}
+        {...(repair ? { repairInputSimulatorId: simulatorId } : {})}
+        runtime={runtimeSnapshot()}
+        status="ready"
+        variant="device"
+      />
+    );
+    const { rerender } = render(pane(false));
+    expect(screen.queryByRole("button", { name: "Repair input" })).not.toBeInTheDocument();
+
+    rerender(pane(true));
+    expect(onRun).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Repair input" }));
+    expect(onRun).toHaveBeenCalledExactlyOnceWith({ kind: "repair-input", simulatorId });
+  });
 });

@@ -82,10 +82,10 @@ describe("ImageGenerationSettingsView", () => {
   });
 
   it("explains how to add a provider when no image endpoint is configured", async () => {
-    const onOpenProviders = vi.fn();
+    const onOpenModelEndpoints = vi.fn();
     render(
       <ImageGenerationSettingsView
-        onOpenProviders={onOpenProviders}
+        onOpenModelEndpoints={onOpenModelEndpoints}
         onSettingsChange={vi.fn()}
         providerController={providerController()}
         settings={{ customSources: [] }}
@@ -100,8 +100,8 @@ describe("ImageGenerationSettingsView", () => {
     expect(screen.getByRole("button", { name: "Add image provider" })).toBeVisible();
     expect(screen.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Add image source" })).not.toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "Open Providers & Models" }));
-    expect(onOpenProviders).toHaveBeenCalledOnce();
+    await userEvent.click(screen.getByRole("button", { name: "Open Model endpoints" }));
+    expect(onOpenModelEndpoints).toHaveBeenCalledOnce();
   });
 
   it("keeps the image source guidance when a provider is available", () => {
@@ -154,6 +154,23 @@ describe("ImageGenerationSettingsView", () => {
     expect(
       screen.queryByRole("status", { name: "Provider readiness summary" }),
     ).not.toBeInTheDocument();
+  });
+
+  it("lists the OpenAI image profile and offers it first when adding an image provider", async () => {
+    const user = userEvent.setup();
+    const snapshot = providerSnapshot();
+    render(
+      <ImageGenerationSettingsView
+        onSettingsChange={vi.fn()}
+        providerController={providerController(snapshot)}
+        providerSnapshot={snapshot}
+        settings={{ customSources: [] }}
+      />,
+    );
+
+    expect(screen.getByRole("article", { name: "OpenAI Image" })).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Add image provider" }));
+    expect(screen.getByRole("form", { name: "Add OpenAI image profile" })).toBeVisible();
   });
 
   it("does not claim a custom HTTP provider is required when a dedicated image provider is ready", () => {

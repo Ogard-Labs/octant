@@ -33,7 +33,7 @@ export interface ImageGenerationSettingsViewProps {
   readonly providerSnapshot?: ProviderRegistrySnapshot | undefined;
   readonly providerController?: ProviderController;
   readonly onSettingsChange: (patch: Partial<ShellSettings>) => void;
-  readonly onOpenProviders?: () => void;
+  readonly onOpenModelEndpoints?: () => void;
 }
 
 function sourceKey(source: {
@@ -81,9 +81,9 @@ export function ImageGenerationSettingsView(props: ImageGenerationSettingsViewPr
         <>
           <SurfaceEmpty
             action={
-              props.onOpenProviders === undefined ? null : (
-                <OctantButton onClick={props.onOpenProviders} size="sm" variant="secondary">
-                  Open Providers &amp; Models
+              props.onOpenModelEndpoints === undefined ? null : (
+                <OctantButton onClick={props.onOpenModelEndpoints} size="sm" variant="secondary">
+                  Open Model endpoints
                 </OctantButton>
               )
             }

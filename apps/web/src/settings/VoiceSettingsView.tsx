@@ -26,7 +26,7 @@ export interface VoiceSettingsViewProps {
   readonly providerSnapshot?: ProviderRegistrySnapshot | undefined;
   readonly focusedSetting?: SettingsSettingId | undefined;
   readonly onSettingsChange: (patch: Partial<ShellSettings>) => void;
-  readonly onOpenProviders?: () => void;
+  readonly onOpenModelEndpoints?: () => void;
 }
 
 /**
@@ -49,13 +49,13 @@ export function VoiceSettingsView(props: VoiceSettingsViewProps) {
       {eligible.length === 0 && !hasConfiguredEndpoint ? (
         <SurfaceEmpty
           action={
-            props.onOpenProviders === undefined ? null : (
-              <OctantButton onClick={props.onOpenProviders} size="sm" variant="secondary">
-                Open Providers &amp; Models
+            props.onOpenModelEndpoints === undefined ? null : (
+              <OctantButton onClick={props.onOpenModelEndpoints} size="sm" variant="secondary">
+                Open Model endpoints
               </OctantButton>
             )
           }
-          detail="Voice needs an enabled OpenAI-compatible HTTP provider."
+          detail="Voice needs an enabled OpenAI-compatible endpoint, added under Octant Harness › Model endpoints."
           title="No eligible provider yet"
           tone="page"
         />

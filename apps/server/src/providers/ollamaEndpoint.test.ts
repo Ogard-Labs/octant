@@ -173,6 +173,28 @@ describe("Ollama native endpoint", () => {
     ]);
   });
 
+  it.each([
+    { status: 408, message: "The Ollama request timed out." },
+    { status: 504, message: "The Ollama request timed out." },
+    { status: 500, message: "The Ollama request failed with HTTP 500." },
+    { status: 502, message: "The Ollama request failed with HTTP 502." },
+    { status: 503, message: "The Ollama request failed with HTTP 503." },
+    { status: 529, message: "The Ollama request failed with HTTP 529." },
+  ])(
+    "reports an HTTP $status answer as an endpoint that is down for now, without its body",
+    async ({ status, message }) => {
+      const endpoint = makeOllamaEndpoint({
+        baseUrl: "http://127.0.0.1:11434",
+        fetch: async () => new Response("secret upstream page", { status }),
+      });
+      const rejection = probeOllama(endpoint);
+      await expect(rejection).rejects.toEqual({ category: "unavailable", message });
+      await expect(
+        sendOllamaChat(endpoint, { modelId: "model", history: [], prompt: "hello" }),
+      ).rejects.toEqual({ category: "unavailable", message });
+    },
+  );
+
   it("fails closed for redirects, malformed streams, oversized frames, and cancellation", async () => {
     const redirect = makeOllamaEndpoint({
       baseUrl: "http://127.0.0.1:11434",

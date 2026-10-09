@@ -296,6 +296,75 @@ describe("OpenCode provider conformance", () => {
       ),
     );
   });
+
+  it("round-trips an app-managed tool on 2.x through the bridge OpenCode connected", async () => {
+    const chatSource = new EventSourceFixture();
+    const chatDriver = makeBetaHarnessDriver(chatSource, {
+      onPrompt: (nativeId, bridge) => {
+        if (bridge === undefined) return;
+        // 2.0.22 names the calling session in `ai.opencode/sessionID`.
+        void invokeManagedTool(bridge.url, "octant_web_research", bridge.session, {
+          "ai.opencode/sessionID": nativeId,
+        }).finally(() =>
+          chatSource.emit({ type: "session.idle", properties: { sessionID: nativeId } } as Event),
+        );
+      },
+      onAbort: () => undefined,
+    });
+    const tools = [
+      {
+        name: "octant_web_research",
+        inputSchema: {
+          type: "object",
+          properties: { query: { type: "string" } },
+          required: ["query"],
+        },
+      },
+    ];
+    const probe = await withProcessPlatform("darwin", () =>
+      Effect.runPromise(Effect.scoped(chatDriver.driver.probe({ instanceId }))),
+    );
+    expect(probe.capabilities.appManagedTools).toBe("supported");
+    const evidence = await withProcessPlatform("darwin", () =>
+      runProviderChatConformance({
+        driver: chatDriver.driver,
+        probeInput: { instanceId },
+        acquireInput: { instanceId, projectRoot, mode: "chat" },
+        sessionStart: { sessionId, modelId, executionPolicy: "approval-gated", tools },
+        turn: { sessionId, prompt: "hello", attachments: [], tools },
+        isReleased: chatDriver.isReleased,
+      }),
+    );
+    expect(evidence).toMatchObject({ appManagedToolRoundTrip: true, released: true });
+  });
+
+  it("reports app tools unsupported on 2.x when OpenCode refuses the MCP registration", async () => {
+    const chatSource = new EventSourceFixture();
+    const chatDriver = makeBetaHarnessDriver(
+      chatSource,
+      { onPrompt: () => undefined, onAbort: () => undefined },
+      { mcp: "refused" },
+    );
+    const tools = [{ name: "octant_web_research", inputSchema: { type: "object" } }];
+    const probe = await withProcessPlatform("darwin", () =>
+      Effect.runPromise(Effect.scoped(chatDriver.driver.probe({ instanceId }))),
+    );
+    expect(probe.readiness).toBe("ready");
+    expect(probe.capabilities.appManagedTools).toBe("unsupported");
+    // The harness requires a turn with tools to fail as `unsupported` rather
+    // than run without them.
+    const evidence = await withProcessPlatform("darwin", () =>
+      runProviderChatConformance({
+        driver: chatDriver.driver,
+        probeInput: { instanceId },
+        acquireInput: { instanceId, projectRoot, mode: "chat" },
+        sessionStart: { sessionId, modelId, executionPolicy: "approval-gated" },
+        turn: { sessionId, prompt: "hello", attachments: [], tools },
+        isReleased: chatDriver.isReleased,
+      }),
+    );
+    expect(evidence).toMatchObject({ appManagedToolRoundTrip: true, released: true });
+  });
 });
 
 class EventSourceFixture implements AsyncIterable<Event> {
@@ -321,6 +390,7 @@ async function invokeManagedTool(
   url: string,
   name: string,
   existingSessionId: string | undefined,
+  meta: Readonly<Record<string, unknown>> = {},
 ): Promise<void> {
   let sessionId = existingSessionId;
   if (sessionId === undefined) {
@@ -367,7 +437,7 @@ async function invokeManagedTool(
       params: {
         name,
         arguments: { query: "hello" },
-        _meta: { progressToken: 2 },
+        _meta: { progressToken: 2, ...meta },
       },
     }),
   });
@@ -610,11 +680,16 @@ function recordedBetaTurn(sourceId: string): ReadonlyArray<Event> {
 function makeBetaHarnessDriver(
   source: EventSourceFixture,
   handlers: {
-    readonly onPrompt: (sessionId: string) => void;
+    readonly onPrompt: (
+      sessionId: string,
+      bridge: { readonly url: string; readonly session: string } | undefined,
+    ) => void;
     readonly onAbort: (sessionId: string) => void;
   },
+  options: { readonly mcp?: "refused" } = {},
 ) {
   let released = false;
+  let bridge: { readonly url: string; readonly session: string } | undefined;
   const launchScratch = realpathSync(mkdtempSync(join(tmpdir(), "octant-opencode-launch-")));
   const session = {
     id: "provider-session",
@@ -631,12 +706,17 @@ function makeBetaHarnessDriver(
       return session;
     },
     prompt: async ({ sessionId: nativeId }) => {
-      handlers.onPrompt(nativeId);
+      handlers.onPrompt(nativeId, bridge);
     },
     // A 2.x server connects to the bridge it is given, as 1.x does; a fixture
     // that never connects leaves the probe waiting out its attestation timeout.
     addMcpServer: async ({ url }) => {
-      await attestManagedBridge(url);
+      // A runtime without a supported MCP route refuses the registration, as
+      // 2.0.22 answers the 1.x `POST /mcp` with 405.
+      if (options.mcp === "refused") {
+        throw new Error("OpenCode 2 MCP registration failed with status 405.");
+      }
+      bridge = { url, session: await attestManagedBridge(url) };
     },
     disconnectMcpServer: async () => undefined,
     abort: async (nativeId) => {

@@ -8,6 +8,7 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createQuitAppleScript, waitForChildExit } from "./package-desktop";
 import {
+  PACKAGED_SMOKE_SERVER_PORT,
   PACKAGED_SMOKE_SERVER_URL,
   appOutputContext,
   cleanupPackagedProcess,
@@ -774,7 +775,7 @@ async function waitForServerCleanup(timeoutMs: number): Promise<void> {
 
 async function assertSmokePortAvailable(): Promise<void> {
   const occupied = await new Promise<boolean>((resolvePromise) => {
-    const socket = connect({ host: "127.0.0.1", port: 13_773 });
+    const socket = connect({ host: "127.0.0.1", port: PACKAGED_SMOKE_SERVER_PORT });
     socket.setTimeout(500);
     socket.once("connect", () => {
       socket.destroy();
@@ -787,7 +788,9 @@ async function assertSmokePortAvailable(): Promise<void> {
     socket.once("error", () => resolvePromise(false));
   });
   if (occupied)
-    throw new Error("Packaged Chat smoke cannot start because Octant port 13773 is occupied.");
+    throw new Error(
+      `Packaged Chat smoke cannot start because Octant port ${PACKAGED_SMOKE_SERVER_PORT} is occupied.`,
+    );
 }
 
 async function processIdentities(timeoutMs = 5_000): Promise<readonly PackagedChatProcess[]> {

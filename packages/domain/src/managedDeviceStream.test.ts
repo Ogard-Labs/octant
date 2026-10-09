@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { readManagedDeviceEndpoint, takeJpegFrames } from "./managedDeviceStream";
+import {
+  readManagedDeviceEndpoint,
+  takeJpegFrames,
+  takeMultipartImageFrames,
+} from "./managedDeviceStream";
 
 const device = "emulator-5554";
 const streamUrl = `http://127.0.0.1:3100/helper/${device}/stream.mjpeg`;
@@ -57,7 +61,62 @@ describe("managed device streams", () => {
     expect(rest.frames).toEqual([second]);
     expect(rest.rest).toEqual(new Uint8Array());
   });
+  it("takes PNG and JPEG parts from a multipart stream by their length, across chunks", () => {
+    // serve-avd sends PNG parts when the emulator image cannot encode `screencap -j`.
+    // A PNG's compressed bytes can contain FF D8 and FF D9, so parts are cut by
+    // Content-Length, not by JPEG markers.
+    const png = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0xff, 0xd9, 0x00]);
+    const jpeg = Uint8Array.from([0xff, 0xd8, 0x02, 0xff, 0xd9]);
+    const stream = joined(part("image/png", png), part("image/jpeg", jpeg));
+    const cut = 30;
+    const first = takeMultipartImageFrames(stream.subarray(0, cut));
+    expect(first.frames).toEqual([]);
+    const second = takeMultipartImageFrames(joined(first.rest, stream.subarray(cut)));
+    expect(second.frames).toEqual([png, jpeg]);
+    expect(second.rest).toEqual(new Uint8Array());
+  });
+
+  it("keeps a boundary split after its first dash for the next chunk", () => {
+    const jpeg = Uint8Array.from([0xff, 0xd8, 0x04, 0xff, 0xd9]);
+    const stream = joined(part("image/jpeg", jpeg), part("image/jpeg", jpeg));
+    const cut = part("image/jpeg", jpeg).length + 1;
+    const first = takeMultipartImageFrames(stream.subarray(0, cut));
+    expect(first.frames).toEqual([jpeg]);
+    expect(takeMultipartImageFrames(joined(first.rest, stream.subarray(cut))).frames).toEqual([
+      jpeg,
+    ]);
+  });
+
+  it("drops a part that is not an image or is larger than a frame may be", () => {
+    const text = new TextEncoder().encode("not an image");
+    const jpeg = Uint8Array.from([0xff, 0xd8, 0x03, 0xff, 0xd9]);
+    expect(
+      takeMultipartImageFrames(joined(part("text/plain", text), part("image/jpeg", jpeg))).frames,
+    ).toEqual([jpeg]);
+    const oversized = new TextEncoder().encode(
+      "--frame\r\nContent-Type: image/png\r\nContent-Length: 99999999\r\n\r\n",
+    );
+    expect(takeMultipartImageFrames(oversized)).toEqual({ frames: [], rest: new Uint8Array() });
+  });
 });
+
+function part(type: string, body: Uint8Array): Uint8Array {
+  const header = new TextEncoder().encode(
+    `--frame\r\nContent-Type: ${type}\r\nContent-Length: ${body.length}\r\n\r\n`,
+  );
+  return joined(header, body, new TextEncoder().encode("\r\n"));
+}
+
+function joined(...parts: ReadonlyArray<Uint8Array>): Uint8Array {
+  const total = parts.reduce((sum, item) => sum + item.length, 0);
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const item of parts) {
+    out.set(item, offset);
+    offset += item.length;
+  }
+  return out;
+}
 
 function concat(left: Uint8Array, right: Uint8Array): Uint8Array {
   const out = new Uint8Array(left.length + right.length);

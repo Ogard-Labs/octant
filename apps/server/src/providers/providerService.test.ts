@@ -17,7 +17,11 @@ import { describe, expect, it, vi } from "vitest";
 import { Effect, Queue, Stream } from "effect";
 import { ConcurrencyConflict } from "../persistence/journalErrors";
 import type { PersistenceService } from "../persistence/persistenceService";
+import { WindowAuthorityStore } from "../windowAuthorityStore";
+import { makeOpenAiCompatibleDriver } from "./openAiCompatibleDriver";
 import { ProviderDriverConfigurationError } from "./providerDriverFactory";
+import { makeOllamaDriver } from "./ollamaDriver";
+import { createProviderRouteHandler } from "./providerRoutes";
 import { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
 import {
   ProviderService,
@@ -466,6 +470,75 @@ describe("ProviderService", () => {
     ).resolves.toMatchObject({
       kind: "provider-model-tags-updated",
       snapshot: { version: 2, models: [{ id: "model-1", dataTags: ["zdr"] }] },
+    });
+  });
+
+  it("keeps a person's context window override with the model and lets clearing it return to automatic", async () => {
+    const fixture = serviceFixture({
+      instances: [provider()],
+      withCatalogPersistence: true,
+      initialCatalog: persistedCatalog(),
+    });
+    await fixture.service.probe(windowId, instanceId);
+
+    await expect(
+      fixture.service.execute(windowId, {
+        kind: "set-provider-model-context-window",
+        instanceId,
+        expectedVersion: 1,
+        modelId: "model-1",
+        contextWindow: 96_000,
+      }),
+    ).resolves.toMatchObject({
+      kind: "provider-model-updated",
+      snapshot: { models: [{ id: "model-1", contextWindowOverride: 96_000 }] },
+    });
+    // The next request reads the live observation, not only the catalogue.
+    expect(fixture.runtime.observedState(instanceId)?.models[0]?.contextWindowOverride).toBe(
+      96_000,
+    );
+    // A later probe rebuilds the model from the provider and keeps what the person set.
+    await fixture.service.probe(windowId, instanceId);
+    expect(fixture.runtime.observedState(instanceId)?.models[0]?.contextWindowOverride).toBe(
+      96_000,
+    );
+
+    await fixture.service.execute(windowId, {
+      kind: "set-provider-model-context-window",
+      instanceId,
+      expectedVersion: 1,
+      modelId: "model-1",
+    });
+    expect(fixture.catalogs()[0]).toMatchObject({ models: [{ id: "model-1" }] });
+    expect(
+      (fixture.catalogs()[0] as ProviderCatalogSnapshot).models[0]?.contextWindowOverride,
+    ).toBeUndefined();
+    expect(
+      fixture.runtime.observedState(instanceId)?.models[0]?.contextWindowOverride,
+    ).toBeUndefined();
+  });
+
+  it("keeps what a request taught about a model's window past a restart", async () => {
+    const fixture = serviceFixture({
+      instances: [provider()],
+      withCatalogPersistence: true,
+      initialCatalog: persistedCatalog(),
+    });
+    fixture.service.rememberModelContextWindow(instanceId, decodeProviderModelId("model-1"), {
+      learnedContextWindow: 131_072,
+      servedModelId: "DeepSeek-V4.1-Flash",
+    });
+    expect(fixture.catalogs()[0]).toMatchObject({
+      models: [
+        { id: "model-1", learnedContextWindow: 131_072, servedModelId: "DeepSeek-V4.1-Flash" },
+      ],
+    });
+
+    // A restarted host has no live observation; the first probe restores the lesson.
+    await fixture.service.probe(windowId, instanceId);
+    expect(fixture.runtime.observedState(instanceId)?.models[0]).toMatchObject({
+      learnedContextWindow: 131_072,
+      servedModelId: "DeepSeek-V4.1-Flash",
     });
   });
 
@@ -2507,6 +2580,7 @@ describe("ProviderService", () => {
     },
     { category: "unavailable" as const, readiness: "unavailable" as const },
     { category: "incompatible" as const, readiness: "incompatible" as const },
+    { category: "protocol" as const, readiness: "incompatible" as const },
   ])("replaces prior Ready discovery after a $category probe failure", async (failure) => {
     const fixture = serviceFixture({
       instances: [provider()],
@@ -2529,6 +2603,97 @@ describe("ProviderService", () => {
     expect(new Set(Object.values(observed!.capabilities))).toEqual(new Set(["unavailable"]));
     expect(JSON.stringify(observed)).not.toContain("secret provider diagnostic");
   });
+
+  it.each([
+    {
+      answer: "an HTML page",
+      response: () =>
+        new Response("<html><body>secret-page-body</body></html>", {
+          headers: { "content-type": "text/html" },
+        }),
+      status: 400,
+      failure: {
+        category: "protocol",
+        message: "The provider returned an invalid models response.",
+      },
+      readiness: "incompatible",
+    },
+    {
+      answer: "HTTP 503",
+      response: () => new Response("secret-page-body", { status: 503 }),
+      status: 503,
+      failure: { category: "unavailable", message: "The provider request failed with HTTP 503." },
+      readiness: "unavailable",
+    },
+  ])(
+    "keeps an endpoint's own failure sentence on the observation a reload reads when its models address answers $answer",
+    async ({ response, status, failure, readiness }) => {
+      const runtime = new ProviderRuntimeRegistry();
+      const fixture = serviceFixture({
+        instances: [
+          provider({
+            displayName: "Private gateway",
+            driverKind: "openai-compatible",
+            configuration: {
+              kind: "openai-compatible-http",
+              baseUrl: "https://gateway.example/v1",
+              authentication: "bearer",
+              protocol: "auto",
+              manualModelIds: [],
+            },
+          }),
+        ],
+      });
+      const service = new ProviderService({
+        persistence: fixture.persistence,
+        runtimeRegistry: runtime,
+        driver: (instance) =>
+          makeOpenAiCompatibleDriver({
+            instanceId: instance.id,
+            configuration: instance.configuration as never,
+            runtimeRegistry: runtime,
+            credentialResolver: {
+              has: async () => true,
+              resolve: async () => "secret-api-key",
+            },
+            fetch: async () => response(),
+            clock: () => now,
+          }),
+        uuid: () => crypto.randomUUID(),
+        clock: () => now,
+      });
+      const capability = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+      const windowAuthorityStore = new WindowAuthorityStore();
+      windowAuthorityStore.register({ windowId, capability, now: 0 });
+      const route = createProviderRouteHandler({ service, windowAuthorityStore, now: () => 1 });
+      const headers = { "x-octant-window-capability": capability };
+
+      const probe = await route(
+        new Request(`http://127.0.0.1/api/providers/${instanceId}/probe`, {
+          method: "POST",
+          headers,
+        }),
+      );
+      expect(probe?.status).toBe(status);
+      expect(await probe?.json()).toEqual(failure);
+
+      const reload = await route(
+        new Request("http://127.0.0.1/api/providers/bootstrap", { headers }),
+      );
+      expect(reload?.status).toBe(200);
+      const snapshot = (await reload?.json()) as { observedStates: ReadonlyArray<unknown> };
+      expect(snapshot.observedStates).toEqual([
+        expect.objectContaining({
+          instanceId,
+          readiness,
+          processState: "stopped",
+          models: [],
+          message: failure.message,
+        }),
+      ]);
+      expect(JSON.stringify(snapshot)).not.toMatch(/secret-page-body|secret-api-key/);
+    },
+  );
 
   it("preserves bounded process diagnostics and detected version after a failed probe", async () => {
     const fixture = serviceFixture({
@@ -3031,6 +3196,35 @@ describe("ProviderService", () => {
       readiness: "incompatible",
       message: "Provider configuration is incompatible.",
     });
+  });
+
+  it("records an Ollama endpoint answering HTTP 503 as unavailable rather than degraded", async () => {
+    const fixture = serviceFixture({ instances: [ollamaProvider()] });
+    const service = new ProviderService({
+      persistence: fixture.persistence,
+      runtimeRegistry: fixture.runtime,
+      driver: (instance) =>
+        makeOllamaDriver({
+          instanceId: instance.id,
+          configuration: { kind: "ollama-native-http", baseUrl: "http://127.0.0.1:11434" },
+          runtimeRegistry: fixture.runtime,
+          fetch: async () => new Response("secret upstream page", { status: 503 }),
+        }),
+      uuid: () => crypto.randomUUID(),
+      clock: () => now,
+    });
+
+    await expect(service.probe(windowId, instanceId)).rejects.toMatchObject({
+      failure: { category: "unavailable" },
+    });
+
+    const observed = fixture.runtime.observedState(instanceId);
+    expect(observed).toMatchObject({
+      readiness: "unavailable",
+      models: [],
+      message: "The Ollama request failed with HTTP 503.",
+    });
+    expect(JSON.stringify(observed)).not.toContain("secret upstream page");
   });
 
   it("preserves a typed probe refusal reason and detected version without forwarding driver text", async () => {

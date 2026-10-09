@@ -16,7 +16,24 @@ export interface BoundedCommandHandle {
   readonly terminate: () => Promise<void>;
 }
 
-export const PACKAGED_SMOKE_SERVER_PORT = 13_773;
+const DEFAULT_PACKAGED_SMOKE_SERVER_PORT = 13_773;
+
+/**
+ * The port every packaged smoke gives its app. A developer's own Octant
+ * normally holds the default, so `OCTANT_SMOKE_SERVER_PORT` moves the smoke
+ * to a free one; an unusable value fails loudly rather than falling back.
+ */
+export function packagedSmokeServerPort(source: NodeJS.ProcessEnv): number {
+  const raw = source.OCTANT_SMOKE_SERVER_PORT;
+  if (raw === undefined || raw === "") return DEFAULT_PACKAGED_SMOKE_SERVER_PORT;
+  const port = Number(raw);
+  if (!/^\d+$/.test(raw) || port < 1 || port > 65_535) {
+    throw new Error("OCTANT_SMOKE_SERVER_PORT must be a TCP port between 1 and 65535.");
+  }
+  return port;
+}
+
+export const PACKAGED_SMOKE_SERVER_PORT = packagedSmokeServerPort(process.env);
 /** What the app last wrote, for a poll that timed out before it could answer. */
 export function appOutputContext(outputTail: () => string): string {
   const output = outputTail().replace(/\s+/g, " ").trim();

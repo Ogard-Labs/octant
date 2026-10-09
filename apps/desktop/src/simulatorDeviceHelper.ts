@@ -34,7 +34,13 @@ export type DeviceHelperRequest =
   | { readonly op: "key"; readonly key: string }
   /** A raw HID keyboard usage with modifier usages (224–231) held around it. */
   | { readonly op: "key"; readonly usage: number; readonly modifiers: ReadonlyArray<number> }
-  | { readonly op: "button"; readonly button: "home" | "lock" };
+  | { readonly op: "button"; readonly button: "home" | "lock" }
+  /**
+   * Hands touch and buttons back to the Simulator's legacy input services
+   * after Xcode's Device Hub took them. This restarts the guest's home screen
+   * and closes running apps, so it runs only when a person asks for it.
+   */
+  | { readonly op: "repair-input" };
 
 export type DeviceHelperReply =
   | {
