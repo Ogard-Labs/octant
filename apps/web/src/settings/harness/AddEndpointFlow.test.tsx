@@ -457,6 +457,51 @@ describe("Add endpoint, step by step", () => {
     expect(hidden.some((ref) => String(ref.modelId) === "vendor/model-37")).toBe(false);
   });
 
+  it("stays on Models with a way to retry when hiding the unchosen models is refused", async () => {
+    const user = userEvent.setup();
+    const props = renderFlow({
+      creates: endpoint("openai-compatible"),
+      observedAfterCreate: observed([model("vendor/a"), model("vendor/b")]),
+      onHiddenModelsChange: vi.fn(async () => false),
+    });
+    const form = await connect(user, "OpenAI-compatible", {
+      name: "Router",
+      url: "https://router.example/v1",
+      key: "k",
+    });
+    await user.click(within(form).getByRole("button", { name: "Check and add" }));
+    await user.click(await screen.findByRole("button", { name: "Continue" }));
+    await user.click(screen.getByRole("checkbox", { name: "vendor/a" }));
+    await user.click(screen.getByRole("button", { name: /^Continue and verify tools/ }));
+
+    expect(props.onHiddenModelsChange).toHaveBeenCalled();
+    expect(
+      await screen.findByText("Octant couldn't hide the models you left out. Try again."),
+    ).toBeVisible();
+    expect(screen.queryByRole("heading", { name: "Verify tools" })).not.toBeInTheDocument();
+  });
+
+  it("offers the fix for an added endpoint that needs its key before going on", async () => {
+    const user = userEvent.setup();
+    const props = renderFlow({
+      creates: endpoint("openai-compatible"),
+      statusAfterCreate: {
+        tone: "needs-you",
+        label: "Needs key",
+        sentence: "Add its API key.",
+        fix: { kind: "add-key", label: "Add key" },
+      },
+    });
+    const form = await connect(user, "OpenAI-compatible", {
+      name: "Router",
+      url: "https://router.example/v1",
+    });
+    await user.click(within(form).getByRole("button", { name: "Check and add" }));
+    await user.click(await screen.findByRole("button", { name: "Open details to fix" }));
+
+    expect(props.onOpenAdded).toHaveBeenCalledWith("key");
+  });
+
   it("lists Ollama's installed models with no Add by ID and no tool requests", async () => {
     const user = userEvent.setup();
     const props = renderFlow({

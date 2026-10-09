@@ -339,7 +339,9 @@ function ConnectStep(props: ConnectStepProps) {
 
   if (added !== undefined) {
     const { status } = added;
-    const failing = status.tone === "failed";
+    // A row that needs the person (a missing key, say) has a fix to offer
+    // just as a failed one does.
+    const failing = status.tone === "failed" || status.tone === "needs-you";
     return (
       <>
         <StepHeading headingRef={props.headingRef}>Added {added.instance.displayName}</StepHeading>
@@ -897,8 +899,12 @@ function CatalogueStep(props: ModelsStepProps) {
     const priorHidden = (props.defaults.hiddenModels ?? []).filter(
       (ref) => String(ref.providerInstanceId) === String(instance.id),
     );
-    if (hidden.length > 0 || priorHidden.length > 0) {
-      await props.onHiddenModelsChange([...others, ...hidden]);
+    if (
+      (hidden.length > 0 || priorHidden.length > 0) &&
+      !(await props.onHiddenModelsChange([...others, ...hidden]))
+    ) {
+      setProblem("Octant couldn't hide the models you left out. Try again.");
+      return;
     }
     props.onContinue(picks);
   };
