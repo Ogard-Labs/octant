@@ -13,6 +13,7 @@ import { isImageProfileDriverKind, supportsProviderCliUpdate } from "@octant/dom
 import { CheckCircle2, ChevronDown, ChevronRight, ChevronUp } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { ProviderToolVerification } from "./ProviderToolVerification";
+import { ModelContextWindowField } from "./ModelContextWindowField";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantInput } from "../ui/base/OctantInput";
@@ -105,6 +106,7 @@ export type ProviderSettingsListProps = Pick<
   | "onSetEnabled"
   | "onDataTagsChange"
   | "onModelDataTagsChange"
+  | "onModelContextWindowChange"
   | "onRemove"
   | "onProbe"
   | "onVerifyModelTools"
@@ -281,6 +283,9 @@ export function ProviderSettingsList(props: ProviderSettingsListProps) {
         onSetEnabled={props.onSetEnabled}
         onDataTagsChange={props.onDataTagsChange}
         onModelDataTagsChange={props.onModelDataTagsChange}
+        {...(props.onModelContextWindowChange === undefined
+          ? {}
+          : { onModelContextWindowChange: props.onModelContextWindowChange })}
         probing={props.probingIds.has(instance.id)}
         updating={props.updatingIds?.has(instance.id) === true}
         reordering={reordering}
@@ -590,6 +595,7 @@ interface ProviderRowProps {
   readonly onSetEnabled: ProviderSettingsViewProps["onSetEnabled"];
   readonly onDataTagsChange: ProviderSettingsViewProps["onDataTagsChange"];
   readonly onModelDataTagsChange: ProviderSettingsViewProps["onModelDataTagsChange"];
+  readonly onModelContextWindowChange?: ProviderSettingsViewProps["onModelContextWindowChange"];
   readonly onRemove: ProviderSettingsViewProps["onRemove"];
   readonly onProbe: ProviderSettingsViewProps["onProbe"];
   readonly onVerifyModelTools: ProviderSettingsViewProps["onVerifyModelTools"];
@@ -1322,6 +1328,20 @@ function ProviderRow(props: ProviderRowProps) {
                               ))}
                             </span>
                           </span>
+                          {props.onModelContextWindowChange === undefined ||
+                          (!isHttp && !isAnthropicHttp && !isFoundry) ? null : (
+                            <ModelContextWindowField
+                              disabled={disabled}
+                              model={model}
+                              onChange={(contextWindow) =>
+                                props.onModelContextWindowChange?.(
+                                  props.instance.id,
+                                  model.id,
+                                  contextWindow,
+                                ) ?? Promise.resolve(false)
+                              }
+                            />
+                          )}
                           <OctantSwitch
                             checked={!hidden}
                             disabled={disabled}

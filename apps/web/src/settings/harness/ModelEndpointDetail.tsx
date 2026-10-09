@@ -19,6 +19,7 @@ import {
   useCredentialStatus,
   type CredentialStatusController,
 } from "../../providers/ProviderSettingsCredentials";
+import { ModelContextWindowField } from "../../providers/ModelContextWindowField";
 import type { ProviderOAuthSignInState } from "../../providers/ProviderOAuthSignIn";
 import type { ProviderSettingsViewProps } from "../../providers/ProviderSettingsView";
 import {
@@ -68,6 +69,7 @@ export type ModelEndpointDetailProps = Pick<
   | "onSetEnabled"
   | "onDataTagsChange"
   | "onModelDataTagsChange"
+  | "onModelContextWindowChange"
   | "onRemove"
   | "onProbe"
   | "onHiddenModelsChange"
@@ -486,6 +488,21 @@ function ModelsSection(props: ModelEndpointDetailProps & { readonly disabled: bo
                         </>
                       ) : null}
                     </span>
+                    {/* Ollama reports its own windows; the HTTP endpoints take an override. */}
+                    {props.onModelContextWindowChange === undefined ||
+                    instance.driverKind === "ollama" ? null : (
+                      <ModelContextWindowField
+                        disabled={props.disabled}
+                        model={model}
+                        onChange={(contextWindow) =>
+                          props.onModelContextWindowChange?.(
+                            instance.id,
+                            model.id,
+                            contextWindow,
+                          ) ?? Promise.resolve(false)
+                        }
+                      />
+                    )}
                     <OctantSwitch
                       checked={!isHidden}
                       disabled={props.disabled}

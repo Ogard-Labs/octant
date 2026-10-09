@@ -86,6 +86,73 @@ describe("ContextHarnessService integration", () => {
     }
   });
 
+  it("plans Work against the model's resolved window, and a person's window over the driver's", async () => {
+    const plan = (n: { value: number }) => {
+      const planned = planWorkTurnContext({
+        threadId: decodeWorkThreadId("81000000-0000-4000-8000-000000000010"),
+        providerInstanceId,
+        modelId: "model-a",
+        createdAt: now,
+        uuid: () => `81000000-0000-4000-8000-${String(++n.value + 100).padStart(12, "0")}`,
+        contributions: [],
+      });
+      if (planned.kind !== "ok") throw new Error("The Work instructions fit");
+      return planned;
+    };
+    const model = {
+      id: "model-a" as never,
+      displayName: "Model A",
+      source: "manual" as const,
+      verification: "unverified" as const,
+      reasoning: "unsupported" as const,
+      inputModalities: ["text" as const],
+      options: [],
+      servedModelId: "gpt-4.1",
+    };
+    const driver = (reported: boolean) => ({
+      kind: "openai-compatible" as const,
+      probe: () => Effect.die("Unused"),
+      acquire: () => Effect.die("Unused"),
+      contextFacts: {
+        observeModelLimits: () =>
+          Effect.succeed(
+            reported
+              ? [
+                  {
+                    providerInstanceId,
+                    modelId: "model-a" as never,
+                    contextWindow: 32_000,
+                    source: "runtime-reported" as const,
+                    confidence: "high" as const,
+                    observedAt: now as never,
+                  },
+                ]
+              : [],
+          ),
+        observeServiceLimits: () => Effect.succeed(serviceLimits()),
+      },
+    });
+    for (const [reported, override, contextWindow, source] of [
+      [false, undefined, 1_047_576, "reviewed-catalog"],
+      [true, 96_000, 96_000, "user-supplied"],
+    ] as const) {
+      const fixture = createFixture();
+      try {
+        const published = await observeWorkContext({
+          service: fixture.service,
+          plan: plan({ value: 0 }),
+          driver: driver(reported),
+          model: override === undefined ? model : { ...model, contextWindowOverride: override },
+          displayLabel: "Work task",
+          signal: new AbortController().signal,
+        });
+        expect(published?.snapshot.modelLimits).toMatchObject({ contextWindow, source });
+      } finally {
+        fixture.connection.close();
+      }
+    }
+  });
+
   it("publishes an explicit Work estimate when the provider has no pre-turn context facts", async () => {
     const fixture = createFixture();
     let n = 0;
