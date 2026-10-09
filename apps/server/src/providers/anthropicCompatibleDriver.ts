@@ -14,12 +14,14 @@ import {
 } from "@octant/contracts";
 import type { ProviderConnection, ProviderDriver } from "@octant/provider-sdk/driver";
 import {
-  textOnlyInputModalities,
   unsupportedChatCapabilities,
   validateChatTurnInput,
 } from "@octant/provider-sdk/chat-conformance";
 import { Effect } from "effect";
-import { resolveModelContextWindow } from "@octant/domain/model-context-window";
+import {
+  resolveModelContextWindow,
+  resolveModelInputModalities,
+} from "@octant/domain/model-context-window";
 import type { NativeHarnessEndpointHooks } from "../harness/nativeHarnessEndpointRegistry";
 import { createNativeHarnessConnection } from "../harness/nativeHarnessLoop";
 import type {
@@ -487,7 +489,7 @@ function manualModels(modelIds: readonly ProviderModelId[]) {
     source: "manual" as const,
     verification: "unverified" as const,
     reasoning: "unavailable" as const,
-    inputModalities: textOnlyInputModalities,
+    ...resolveModelInputModalities({ id: String(id) }),
     options: [],
   }));
 }

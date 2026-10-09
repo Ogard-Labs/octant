@@ -1031,6 +1031,31 @@ describe("makeOpenAiCompatibleDriver under the ChatGPT plan profile", () => {
     expect(warn).not.toHaveBeenCalled();
     warn.mockRestore();
   });
+  it("takes each plan model's image input from the listing first, then the offline profile", async () => {
+    const { decoded } = await checkPlanConnection(
+      Response.json({
+        models: [
+          { slug: "gpt-plan-pro", input_modalities: ["text", "image"] },
+          { slug: "gpt-5", input_modalities: ["text"] },
+          { slug: "gpt-5-mini" },
+          { slug: "gpt-plan-house" },
+        ],
+      }),
+    );
+    expect(
+      decoded?.models.map(({ id, inputModalities, imageInput }) => ({
+        id,
+        inputModalities,
+        imageInput,
+      })),
+    ).toEqual([
+      { id: "gpt-plan-pro", inputModalities: ["text", "image"], imageInput: "supported" },
+      // The listing said text-only, and that wins over the GPT-5 profile.
+      { id: "gpt-5", inputModalities: ["text"], imageInput: "unsupported" },
+      { id: "gpt-5-mini", inputModalities: ["text", "image"], imageInput: "supported" },
+      { id: "gpt-plan-house", inputModalities: ["text"], imageInput: undefined },
+    ]);
+  });
 
   it("stays degraded in words when none of the plan's listed items can be mapped, logging only their key names", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);

@@ -1865,6 +1865,21 @@ override, the learned window, and the served model are kept per provider
 instance and model on the provider's model catalogue, so they survive probes
 and restarts; setting the override takes effect on the next request and wins
 over a runtime report, and clearing it returns to automatic resolution.
+
+A direct endpoint's model accepts images only when a source says so
+(`resolveModelInputModalities` in `@octant/domain/model-context-window`). The
+first source that names its input modalities wins: the endpoint's own listing
+(OpenRouter's `architecture.input_modalities`, a top-level `input_modalities`
+on an OpenAI-style list entry, or the ChatGPT plan listing's
+`input_modalities`), which also wins when it says text-only; then the same
+profile catalogue, whose families carry an image-input flag only where their
+cited model page lists image input, matched on the model id. Nothing naming
+them leaves the model text-only with `imageInput` absent, which reads as
+unknown rather than unsupported. Ollama keeps its own `vision` capability
+report. The modality gates which models are offered for reading images and
+whether app-managed tool results may carry images; composer attachments still
+also need the provider's `nativeAttachments`, which direct endpoints do not
+claim. There is no per-model image-input override yet.
 Provider-managed Code turns also contribute their journaled token reports to the
 usage ledger. A runtime that compacts its own session may report where, as
 `autoCompactThreshold` on the usage report (tokens of the window the last request
@@ -3099,7 +3114,8 @@ mechanisms are:
   the route's `/models` answer through the profile: a model list is reported
   as discovered, whether the OpenAI `{data:[{id}]}` shape or the plan's own
   `{models:[…]}` listing (id from `slug`, then `id`, then `name`; display
-  name and a positive integer context window kept when present; unmappable
+  name, a positive integer context window, and `input_modalities` kept when
+  present; unmappable
   items skipped); a body that is not a model list, no mappable item, a route-not-served status, a
   403, a missing model-read scope, or an empty list is a degraded, worded
   "models can't be listed" state carrying the manual model IDs, never a

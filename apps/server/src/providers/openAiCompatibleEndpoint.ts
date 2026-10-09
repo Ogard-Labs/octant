@@ -2,12 +2,16 @@ import {
   decodeProviderFailure,
   type OpenAiCompatibleProviderConfiguration,
   type ProviderFailure,
+  type ProviderInputModality,
   type ProviderModel,
   type ProviderReadiness,
 } from "@octant/contracts";
 import type { ProviderCredentialResolver } from "./credentialBrokerClient";
 import { CONTEXT_OVERFLOW_FAILURE_MESSAGE } from "./endpointRetry";
-import { textOnlyInputModalities } from "@octant/provider-sdk/chat-conformance";
+import {
+  readReportedInputModalities,
+  resolveModelInputModalities,
+} from "@octant/domain/model-context-window";
 
 const MAX_RETRY_AFTER_MS = 3_600_000;
 const DEFAULT_LIMITS: CompatibleHttpLimits = {
@@ -146,6 +150,8 @@ export interface CompatibleListedModels {
     readonly id: string;
     readonly displayName?: string;
     readonly contextLimit?: number;
+    /** The input modalities the listing itself reported for this model. */
+    readonly inputModalities?: ReadonlyArray<ProviderInputModality>;
   }>;
   /** The first listed item's key names, sorted, for the diagnostic; never its values. */
   readonly firstItemKeys?: ReadonlyArray<string>;
@@ -179,8 +185,13 @@ export async function probeModels(
   if (!isStrictModelList(value)) {
     throw fail("protocol", "The provider returned an invalid models response.");
   }
-  const discoveredIds = new Set(value.data.map(({ id }) => id));
-  const models: ProviderModel[] = [...discoveredIds].map(discoveredModel);
+  const models: ProviderModel[] = [];
+  const discoveredIds = new Set<string>();
+  for (const entry of value.data) {
+    if (discoveredIds.has(entry.id)) continue;
+    discoveredIds.add(entry.id);
+    models.push(discoveredModel(entry.id, listedInputModalities(entry)));
+  }
   for (const id of endpoint.configuration.manualModelIds) {
     if (!discoveredIds.has(id)) models.push(manualModel(id));
   }
@@ -244,7 +255,10 @@ async function readOptionalModelListing(
   }
   let listed: CompatibleListedModels["models"];
   if (isStrictModelList(value)) {
-    listed = value.data.map(({ id }) => ({ id }));
+    listed = value.data.map((entry) => {
+      const inputModalities = listedInputModalities(entry);
+      return { id: entry.id, ...(inputModalities === undefined ? {} : { inputModalities }) };
+    });
   } else {
     const own = listing.readListedModels?.(value);
     if (own === undefined) return unlisted("unlisted");
@@ -263,7 +277,7 @@ async function readOptionalModelListing(
     if (discoveredIds.has(entry.id)) continue;
     discoveredIds.add(entry.id);
     models.push({
-      ...discoveredModel(entry.id),
+      ...discoveredModel(entry.id, entry.inputModalities),
       ...(entry.displayName === undefined ? {} : { displayName: entry.displayName }),
       ...(entry.contextLimit === undefined ? {} : { contextLimit: entry.contextLimit }),
     });
@@ -574,9 +588,25 @@ async function readJson(response: Response): Promise<unknown> {
   }
 }
 
+/**
+ * The input modalities a model-list entry carries, where the endpoint names
+ * them: OpenRouter's `architecture.input_modalities`, or a top-level
+ * `input_modalities`. The plain OpenAI list names none.
+ */
+function listedInputModalities(
+  entry: Readonly<Record<string, unknown>>,
+): ReadonlyArray<ProviderInputModality> | undefined {
+  const architecture = entry.architecture;
+  const nested =
+    typeof architecture === "object" && architecture !== null && !Array.isArray(architecture)
+      ? readReportedInputModalities((architecture as Record<string, unknown>).input_modalities)
+      : undefined;
+  return nested ?? readReportedInputModalities(entry.input_modalities);
+}
+
 function isStrictModelList(
   value: unknown,
-): value is { readonly data: Array<{ readonly id: string }> } {
+): value is { readonly data: Array<{ readonly id: string } & Record<string, unknown>> } {
   // Accept the standard OpenAI model-list shape `{ object: "list", data: [...] }`
   // (and Azure AI Foundry's equivalent) without rejecting extra top-level or
   // per-entry metadata fields. Only the required `data` array and string `id`
@@ -606,19 +636,23 @@ function manualModel(id: string): ProviderModel {
     source: "manual",
     verification: "unverified",
     reasoning: "unavailable",
-    inputModalities: textOnlyInputModalities,
+    ...resolveModelInputModalities({ id }),
     options: [],
   };
 }
 
-function discoveredModel(id: string): ProviderModel {
+function discoveredModel(
+  id: string,
+  reportedInputModalities?: ReadonlyArray<ProviderInputModality>,
+): ProviderModel {
   return {
     id: id as ProviderModel["id"],
     displayName: id,
     source: "discovered",
     verification: "verified",
     reasoning: "unavailable",
-    inputModalities: textOnlyInputModalities,
+    // What the listing reported, else the offline profile, else text-only.
+    ...resolveModelInputModalities({ id, reportedInputModalities }),
     options: [],
   };
 }

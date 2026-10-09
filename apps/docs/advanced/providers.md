@@ -239,6 +239,14 @@ resource that lists every base model, **Settings → Octant Harness** shows the
 models you configured first and the rest under **Discovered on the endpoint**;
 an Azure AI Foundry provider offers only its configured deployments.
 
+An endpoint model is offered for image work, such as reading screenshots from
+browser and computer tools, only when Octant knows it accepts images: the
+endpoint's own model list says so (OpenRouter does), or the model is a family
+whose provider documents image input, such as GPT-4o, GPT-4.1, GPT-5, o3,
+o4-mini, Claude 4 models, and Gemini 2.5. What the endpoint reports wins over
+the built-in list. Any other model, including a deployment with a name of its
+own, is treated as text-only.
+
 Image generation profiles are also provider instances. Open **Settings → Image
 generation → Add image provider** to choose a provider, enter its API key, and
 set its model allowlist. Image generation is where these profiles are added
@@ -331,9 +339,9 @@ turns are refused until you sign in again and allow plan access. When the
 plan's usage limit is reached, the failure links to ChatGPT's usage settings
 (`https://chatgpt.com/settings/usage`).
 
-**Check connection** lists the models the plan route reports, with their names
-and context windows when the route gives them. When it cannot get a model list
-from the route, the row says so in words instead of reporting an
+**Check connection** lists the models the plan route reports, with their names,
+context windows, and image input when the route gives them. When it cannot get
+a model list from the route, the row says so in words instead of reporting an
 invalid response: add the model IDs your plan offers under **Manual model
 IDs**, then check the connection again. Those IDs are shown as manual and
 unverified until a turn succeeds with them. A rejected sign-in, a reached

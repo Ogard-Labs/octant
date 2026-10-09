@@ -4,7 +4,9 @@ import {
   findModelContextProfile,
   learnContextWindow,
   normalizeModelName,
+  readReportedInputModalities,
   resolveModelContextWindow,
+  resolveModelInputModalities,
 } from "./modelContextWindow";
 
 describe("model context window", () => {
@@ -104,5 +106,51 @@ describe("model context window", () => {
     expect(
       learnContextWindow(undefined, { kind: "completed", usedTokens: 70_000 }),
     ).toBeUndefined();
+  });
+
+  it("says a model whose provider documents image input accepts images", () => {
+    for (const id of ["gpt-4o-2024-08-06", "openai/gpt-5-mini", "claude-sonnet-4-5", "o3"]) {
+      expect(resolveModelInputModalities({ id })).toEqual({
+        inputModalities: ["text", "image"],
+        imageInput: "supported",
+      });
+    }
+  });
+
+  it("keeps a profiled model its provider documents as text-only on text", () => {
+    // o3-mini shares o3's window but its model page lists text input only.
+    expect(findModelContextProfile("o3-mini")?.contextWindow).toBe(200_000);
+    expect(resolveModelInputModalities({ id: "o3-mini" })).toEqual({ inputModalities: ["text"] });
+  });
+
+  it("lets the modalities a provider reports win over the profile", () => {
+    expect(
+      resolveModelInputModalities({ id: "gpt-4o", reportedInputModalities: ["text"] }),
+    ).toEqual({ inputModalities: ["text"], imageInput: "unsupported" });
+    expect(
+      resolveModelInputModalities({
+        id: "house-model",
+        reportedInputModalities: ["image", "text"],
+      }),
+    ).toEqual({ inputModalities: ["text", "image"], imageInput: "supported" });
+  });
+
+  it("keeps an unknown model text-only without claiming it cannot read images", () => {
+    expect(resolveModelInputModalities({ id: "house-model" })).toEqual({
+      inputModalities: ["text"],
+    });
+    expect(
+      resolveModelInputModalities({ id: "team-vision-prod", servedModelId: "gpt-4.1-mini" }),
+    ).toEqual({ inputModalities: ["text", "image"], imageInput: "supported" });
+  });
+
+  it("reads only the modalities Octant knows from a provider's list", () => {
+    expect(readReportedInputModalities(["image", "text", "file", "image"])).toEqual([
+      "text",
+      "image",
+    ]);
+    expect(readReportedInputModalities(["video"])).toBeUndefined();
+    expect(readReportedInputModalities("text,image")).toBeUndefined();
+    expect(readReportedInputModalities(undefined)).toBeUndefined();
   });
 });
