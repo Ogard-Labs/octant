@@ -1327,17 +1327,43 @@ Settings / Octant Harness / endpoint, a Back control, and Escape), whose h1 is
 the endpoint's name; Back returns focus to the row. The sub-page leads with
 the state, Check now, and Use, then the one fix, then Sign-in or API key,
 Models (search, a Shown / Hidden / All filter, a switch per model, and the
-plain tags "Reads images" and "Chat only" with Verify tools), Where your data
+plain tags "Reads images" and "Chat only · Verify tools"), Where your data
 goes (two labelled checkboxes the person sets, with per-model overrides in a
 disclosure), Name and address, Diagnostics (a disclosure that opens by itself
 only while the endpoint is failing, holding the address, protocol,
 authentication, last check with the host's precise answer, tool use, and
 capabilities), and Remove last, confirmed in a dialog that starts on Keep and
 names the model roles that lose a model. Precise terms (protocol names,
-bearer, capability names) appear only in Diagnostics. Add endpoint opens the
-add-by-address form in a dialog whose button reads Check and add; the new
-endpoint's check result shows in that dialog. Targets are 44px tall at phone
-width.
+bearer, capability names) appear only in Diagnostics. Add endpoint opens a
+dialog: the sign-ins first, then a guided flow with a numbered strip of steps.
+Kind is four cards (Azure AI Foundry, OpenAI-compatible, Anthropic-compatible,
+Local (Ollama)). Connect asks for a name, the address, and the key, each with a
+one-line hint, and no control is greyed out without a sentence saying why;
+protocol, how the key is sent, and "It takes no key" sit under Advanced, and
+an Azure address entered as OpenAI-compatible offers Switch to Azure AI
+Foundry. Azure also names at least one deployment, as chips, because the host
+cannot add it without one. Check and add adds the endpoint and shows its row
+state in the dialog, with its fix; from then on the endpoint exists, and
+closing the dialog keeps it. Models lists a short catalogue whole and chosen; a
+long one is searched, lists at most eight matches with a count of the rest,
+starts with nothing chosen, and has an Add by ID row; models left unchosen are
+hidden from the model picker. Azure edits its deployment chips; Local lists
+the models installed in Ollama, with no Add by ID. Verify tools checks each
+chosen model, one request at a time, after a button that says how many
+requests it sends; each model reads Checking…, Verified, or "Chat only" with
+the reason and Retry, and a failed check never stops the endpoint being
+added. Ollama models are Chat only without a request, with the reason said
+once. Agents is optional: only verified models can be offered to helper agents
+or given an Octant Harness role (a Chat only model is listed with its
+checkbox off and a sentence saying why; role choices list verified models
+only, and Reading images only those that read images). A chosen role makes the
+model its first choice and keeps what it had as backups, saved with the roles'
+version; a stale version reloads the roles and asks again. In a browser, a kind
+that needs a key is added without one and reads Needs key, sending the person
+to the desktop app; Local works fully. "Chat only · Verify tools" is the one
+label for an unverified model on the endpoint row (when no shown model is
+verified), the endpoint's Models, the model pickers, and Add endpoint.
+Targets are 44px tall at phone width.
 Skill rows show the source class and one effective state;
 filesystem paths, qualified identifiers, hashes, requested/effective
 breakdowns, and content size live behind Details. Usage opens on requests,

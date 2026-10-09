@@ -793,6 +793,9 @@ function ActiveSectionContent({
   props,
   capabilities,
 }: ActiveSectionContentProps) {
+  // Add endpoint can assign Octant Harness roles; the roles panel then reads
+  // them again rather than keep a table whose version the host has moved past.
+  const [rolesRevision, setRolesRevision] = useState(0);
   // Voice, image sources, and the harness model slots all run on model
   // endpoints, so their "connect one" actions land on the add-endpoint row.
   const openModelEndpoints = () =>
@@ -993,9 +996,14 @@ function ActiveSectionContent({
               focused={focusedSetting === settingId("model-endpoints")}
               onDetailChange={onHarnessEndpointChange}
               probeFailures={props.providerController.probeFailures}
+              onCheckModelTools={props.providerController.checkModelTools}
               {...(props.nativeHarnessClient === undefined
                 ? {}
-                : { onRolesUsing: nativeHarnessRolesUsing(props.nativeHarnessClient) })}
+                : {
+                    onRolesUsing: nativeHarnessRolesUsing(props.nativeHarnessClient),
+                    roles: { client: props.nativeHarnessClient, hostId: LOCAL_HOST_ID },
+                    onRolesSaved: () => setRolesRevision((revision) => revision + 1),
+                  })}
             />
           )}
           {/* Hidden rather than unmounted while an endpoint's page is open, so
@@ -1008,6 +1016,7 @@ function ActiveSectionContent({
               </p>
               <NativeHarnessRoutingPanel
                 client={props.nativeHarnessClient}
+                key={rolesRevision}
                 hostId={LOCAL_HOST_ID}
                 onOpenModelEndpoints={openModelEndpoints}
                 providers={nativeHarnessProviderOptions(props.providerController)}

@@ -222,32 +222,59 @@ session or treats the 2.x version as the legacy runtime.
 ### API endpoints
 
 Direct API endpoints are added in **Settings → Octant Harness → Model
-endpoints → Add endpoint**, which asks for the base URL and, where the
-endpoint needs one, an API key. **Check and add** adds the endpoint and checks
-it straight away; the result shows in the same dialog, so a mistyped address
-can be fixed from there. Supported profiles:
+endpoints → Add endpoint**. After the one-click sign-ins, the dialog walks
+through five steps:
+
+1. **Kind**: Azure AI Foundry, OpenAI-compatible, Anthropic-compatible, or
+   Local (Ollama).
+2. **Connect**: a name, the address, and the API key. The protocol, how the
+   key is sent, and **It takes no key** (for a server on this computer) are
+   under **Advanced**. If you enter an Azure address as OpenAI-compatible,
+   Octant offers **Switch to Azure AI Foundry**. Azure AI Foundry also asks
+   for at least one deployment name; type each and press Enter. **Check and
+   add** adds the endpoint and checks it straight away; the result shows in the
+   same dialog, so a mistyped address can be fixed from there. From here on the
+   endpoint is added, even if you close the dialog.
+3. **Models**: choose the models to use. A long list is searched rather than
+   shown whole, and **Add by ID** adds a model the service serves but does not
+   list. Models you leave unchosen are hidden from the model picker; show them
+   again from the endpoint's page. Azure AI Foundry lists your deployments, and
+   Local lists the models installed in Ollama.
+4. **Verify tools**: Octant sends each chosen model one short request, which
+   the service may bill, to see whether it calls Octant's tools. Each model
+   ends **Verified** or **Chat only** with the reason and **Retry**. A model
+   that stays Chat only is still added and answers in chat. Ollama models are
+   Chat only for now, so no request is sent.
+5. **Agents** (optional): let helper agents use a verified model, and make it
+   the first choice for an Octant Harness role such as the main model; the
+   role keeps its earlier models as backups. Chat only models cannot take
+   agent work, not even jobs that send no tools.
+
+Supported profiles:
 
 - **OpenAI-compatible** HTTP (`auto`, `responses`, or `chat-completions`)
 - **Anthropic-compatible** HTTP (`auto` or `messages`)
 - **Azure AI Foundry** (OpenAI-compatible v1 profile; base URL must end with
-  `/openai/v1/`; API-key only)
+  `/openai/v1/`; API-key only; at least one deployment)
 - **Ollama** local HTTP (loopback origin only)
 
-API keys are stored only by the Octant desktop app. In a browser, the add form
-says so before you fill it in and keeps the key field off; you can still add an
-endpoint that needs no key (for example a server on this computer). If a
+API keys are stored only by the Octant desktop app. In a browser, an endpoint
+that needs a key is added without one and reads **Needs key** until you add the
+key in the desktop app; an endpoint that needs no key, such as Ollama or a
+server on this computer, works fully. If a
 configured endpoint lists far more models than you set up, such as an Azure
 resource that lists every base model, **Settings → Octant Harness** shows the
 models you configured first and the rest under **Discovered on the endpoint**;
 an Azure AI Foundry provider offers only its configured deployments.
 
 Each endpoint is one row that says whether it works: **Ready**, **Sign in to
-use**, **Signed out**, **Checking…**, **Can't connect**, **Key refused**,
+use**, **Signed out**, **Checking…**, **Can't connect**, **Needs key**, **Key refused**,
 **Not working**, **No models yet**, or **Off**. A row that needs you says why
 in one sentence and offers one fix, such as **Try again**, **Replace key**,
 **Edit address**, or **Add model IDs**. Opening a row shows the endpoint's own
 page: its sign-in or key, its models (search them, show or hide each one, and
-**Verify tools** for a model marked **Chat only**), where its data goes, its
+**Verify tools** for a model marked **Chat only**; a row whose models are all
+unverified says **Chat only · Verify tools** too), where its data goes, its
 name and address, and **Diagnostics** with the protocol, authentication, the
 last check's exact answer, and capabilities. The **Use** switch on that page
 turns the endpoint off without losing its key, sign-in, or roles, and

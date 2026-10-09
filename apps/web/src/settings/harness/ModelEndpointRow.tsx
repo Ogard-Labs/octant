@@ -1,5 +1,6 @@
 import { ChevronRight } from "lucide-react";
 import { useId, type ReactNode } from "react";
+import { ChatOnlyVerify } from "../../providers/ChatOnlyVerify";
 import { ProviderGlyph } from "../../providers/ProviderGlyph";
 import { PROVIDER_LOGOS } from "../../providers/providerLogoPaths";
 import { signInConsent } from "../../providers/ProviderOAuthSignIn";
@@ -61,6 +62,12 @@ export interface ModelEndpointRowProps {
   readonly disabled: boolean;
   readonly onOpen: () => void;
   readonly onFix: (kind: EndpointFixKind) => void;
+  /**
+   * Set when none of the endpoint's shown models is verified for tools, so
+   * the row says Chat only the way the model pickers do; verifying opens the
+   * endpoint's models.
+   */
+  readonly onVerifyTools?: () => void;
 }
 
 /**
@@ -132,6 +139,16 @@ export function ModelEndpointRow(props: ModelEndpointRowProps) {
           than through a page-level alert. */}
       <div aria-live="polite" className="endpoint-row__live">
         {fixArea}
+        {fixArea !== null || props.onVerifyTools === undefined ? null : (
+          <div className="endpoint-row__tools">
+            <ChatOnlyVerify
+              disabled={props.disabled}
+              onVerify={props.onVerifyTools}
+              subject={name}
+              verifying={false}
+            />
+          </div>
+        )}
       </div>
     </li>
   );

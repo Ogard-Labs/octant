@@ -1039,7 +1039,7 @@ function ProviderOwnedApiKeyCreateFields(props: {
   );
 }
 
-function BedrockMantleGuide() {
+export function BedrockMantleGuide() {
   return (
     <section aria-labelledby="bedrock-mantle-heading" className="bedrock-mantle-guide">
       <h3 id="bedrock-mantle-heading">Amazon Bedrock Mantle setup</h3>

@@ -471,17 +471,13 @@ describe("ProviderSettingsView", () => {
     const props = fixture({ instance: ollamaProvider() });
     renderAdding(<ModelEndpointSettingsView {...props} />);
 
-    await chooseSelectFieldOption(
-      user,
-      screen.getByLabelText("Provider type"),
-      "Ollama native HTTP",
-    );
-    const create = screen.getByRole("form", { name: "Add Ollama provider" });
-    await user.type(within(create).getByLabelText("Provider name"), "Ollama local");
+    await user.click(screen.getByRole("button", { name: /^Local \(Ollama\)/ }));
+    const create = screen.getByRole("form", { name: "Connect Local (Ollama)" });
+    await user.clear(within(create).getByLabelText("Name"));
+    await user.type(within(create).getByLabelText("Name"), "Ollama local");
     expect(within(create).queryByLabelText(/binary|api key|credential/i)).not.toBeInTheDocument();
-    expect(within(create).getByText(/existing user-managed Ollama service/i)).toBeVisible();
-    await user.clear(within(create).getByLabelText("Ollama API base URL"));
-    await user.type(within(create).getByLabelText("Ollama API base URL"), "http://127.0.0.1:11434");
+    expect(within(create).getByText(/doesn't install or start it/i)).toBeVisible();
+    expect(within(create).getByLabelText("Ollama address")).toHaveValue("http://127.0.0.1:11434");
     await user.click(within(create).getByRole("button", { name: "Check and add" }));
     expect(props.onCreateOllama).toHaveBeenCalledWith("Ollama local", {
       kind: "ollama-native-http",
@@ -1239,177 +1235,6 @@ describe("ProviderSettingsView", () => {
     expect(within(page).queryByLabelText(/Binary path/)).not.toBeInTheDocument();
   });
 
-  it("creates an HTTP provider with a write-only credential and clears it after settlement", async () => {
-    const user = userEvent.setup();
-    const props = fixture({ instance: httpProvider() });
-    renderAdding(<ModelEndpointSettingsView {...props} />);
-
-    await chooseSelectFieldOption(
-      user,
-      screen.getByLabelText("Provider type"),
-      "OpenAI-compatible HTTP",
-    );
-    const create = screen.getByRole("form", { name: "Add OpenAI-compatible provider" });
-    await user.type(within(create).getByLabelText("Provider name"), "Secure gateway");
-    await user.type(within(create).getByLabelText("API base URL"), "https://gateway.example/v1");
-    await user.type(within(create).getByLabelText("API key"), "private-value");
-    await chooseSelectFieldOption(
-      user,
-      within(create).getByLabelText("Protocol preference"),
-      "Responses",
-    );
-    await user.type(within(create).getByLabelText("Manual model IDs"), "model-a, model-b\nmodel-a");
-    await user.click(screen.getByRole("button", { name: "Check and add" }));
-
-    expect(props.onCreateOpenAiCompatible).toHaveBeenCalledOnce();
-    const [name, configuration, credential] = vi.mocked(props.onCreateOpenAiCompatible).mock
-      .calls[0]!;
-    expect(name).toBe("Secure gateway");
-    expect(configuration).toMatchObject({
-      baseUrl: "https://gateway.example/v1",
-      authentication: "bearer",
-      protocol: "responses",
-      manualModelIds: ["model-a", "model-b"],
-    });
-    expect(credential.value).toBe("private-value");
-    credential.clear();
-    expect(within(create).getByLabelText("API key")).toHaveValue("");
-    expect(document.body.textContent).not.toContain("private-value");
-  });
-
-  it("creates an Anthropic-compatible provider with an API key credential", async () => {
-    const user = userEvent.setup();
-    const props = fixture({ instance: anthropicProvider() });
-    renderAdding(<ModelEndpointSettingsView {...props} />);
-
-    await chooseSelectFieldOption(
-      user,
-      screen.getByLabelText("Provider type"),
-      "Anthropic-compatible HTTP",
-    );
-    const create = screen.getByRole("form", { name: "Add Anthropic-compatible provider" });
-    await user.type(within(create).getByLabelText("Provider name"), "Anthropic relay");
-    await user.type(
-      within(create).getByLabelText("API base URL"),
-      "https://relay.anthropic.example/v1",
-    );
-    await user.type(within(create).getByLabelText("API key"), "anthropic-secret");
-    await user.type(within(create).getByLabelText("Anthropic protocol version"), "2023-06-01");
-    await chooseSelectFieldOption(
-      user,
-      within(create).getByLabelText("Protocol preference"),
-      "Messages",
-    );
-    await user.type(within(create).getByLabelText("Manual model IDs"), "claude-3-5-sonnet");
-    await user.click(screen.getByRole("button", { name: "Check and add" }));
-
-    expect(props.onCreateAnthropicCompatible).toHaveBeenCalledOnce();
-    const [name, configuration, credential] = vi.mocked(props.onCreateAnthropicCompatible).mock
-      .calls[0]!;
-    expect(name).toBe("Anthropic relay");
-    expect(configuration).toMatchObject({
-      baseUrl: "https://relay.anthropic.example/v1",
-      authentication: "api-key",
-      protocol: "messages",
-      protocolVersion: "2023-06-01",
-      manualModelIds: ["claude-3-5-sonnet"],
-    });
-    expect(credential.value).toBe("anthropic-secret");
-    credential.clear();
-    expect(within(create).getByLabelText("API key")).toHaveValue("");
-    expect(document.body.textContent).not.toContain("anthropic-secret");
-  });
-
-  it("says before the form that a browser cannot add a provider that needs an API key", async () => {
-    const user = userEvent.setup();
-    renderAdding(
-      <ModelEndpointSettingsView
-        {...fixture({ instance: foundryProvider(), credentialManagementAvailable: false })}
-      />,
-    );
-
-    await chooseSelectFieldOption(user, screen.getByLabelText("Provider type"), "Azure AI Foundry");
-
-    const notice = screen.getByTestId("provider-keys-desktop-only");
-    expect(notice).toHaveTextContent("API keys are added from the Octant desktop app");
-    expect(notice).toHaveTextContent("Azure AI Foundry needs an API key");
-    // The notice comes before the form, not inside it after the person has filled it in.
-    const form = screen.getByRole("form", { name: "Add Azure AI Foundry provider" });
-    expect(notice.compareDocumentPosition(form) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(within(form).getByLabelText("API key")).toBeDisabled();
-  });
-
-  it("offers a keyless endpoint in a browser and leaves the notice out for providers that need no key", async () => {
-    const user = userEvent.setup();
-    renderAdding(
-      <ModelEndpointSettingsView
-        {...fixture({ instance: foundryProvider(), credentialManagementAvailable: false })}
-      />,
-    );
-
-    await chooseSelectFieldOption(
-      user,
-      screen.getByLabelText("Provider type"),
-      "OpenAI-compatible HTTP",
-    );
-    expect(screen.getByTestId("provider-keys-desktop-only")).toHaveTextContent(
-      "connect an endpoint that needs no key",
-    );
-
-    await chooseSelectFieldOption(
-      user,
-      screen.getByLabelText("Provider type"),
-      "Ollama native HTTP",
-    );
-    expect(screen.queryByTestId("provider-keys-desktop-only")).not.toBeInTheDocument();
-  });
-
-  it("shows no desktop-only notice where keys can be stored", async () => {
-    const user = userEvent.setup();
-    renderAdding(<ModelEndpointSettingsView {...fixture({ instance: foundryProvider() })} />);
-
-    await chooseSelectFieldOption(user, screen.getByLabelText("Provider type"), "Azure AI Foundry");
-
-    expect(screen.queryByTestId("provider-keys-desktop-only")).not.toBeInTheDocument();
-  });
-
-  it("creates an Azure AI Foundry provider with an api-key credential", async () => {
-    const user = userEvent.setup();
-    const props = fixture({ instance: foundryProvider() });
-    renderAdding(<ModelEndpointSettingsView {...props} />);
-
-    await chooseSelectFieldOption(user, screen.getByLabelText("Provider type"), "Azure AI Foundry");
-    const create = screen.getByRole("form", { name: "Add Azure AI Foundry provider" });
-    await user.type(within(create).getByLabelText("Provider name"), "Foundry relay");
-    await user.type(
-      within(create).getByLabelText("Foundry OpenAI v1 base URL"),
-      "https://foundry.example.openai.azure.com/openai/v1/",
-    );
-    await user.type(within(create).getByLabelText("API key"), "foundry-secret");
-    await chooseSelectFieldOption(
-      user,
-      within(create).getByLabelText("Protocol preference"),
-      "Responses",
-    );
-    await user.type(within(create).getByLabelText("Deployment IDs"), "deployment-a");
-    await user.click(screen.getByRole("button", { name: "Check and add" }));
-
-    expect(props.onCreateAzureFoundry).toHaveBeenCalledOnce();
-    const [name, configuration, credential] = vi.mocked(props.onCreateAzureFoundry).mock.calls[0]!;
-    expect(name).toBe("Foundry relay");
-    expect(configuration).toMatchObject({
-      kind: "azure-foundry-openai-http",
-      baseUrl: "https://foundry.example.openai.azure.com/openai/v1/",
-      authentication: "api-key",
-      protocol: "responses",
-      manualModelIds: ["deployment-a"],
-    });
-    expect(credential.value).toBe("foundry-secret");
-    credential.clear();
-    expect(within(create).getByLabelText("API key")).toHaveValue("");
-    expect(document.body.textContent).not.toContain("foundry-secret");
-  });
-
   it.each([
     ["OpenAI-compatible", httpProvider()],
     ["Anthropic-compatible", anthropicProvider()],
@@ -1793,91 +1618,6 @@ describe("ProviderSettingsView", () => {
     expect(props.onRemove).toHaveBeenCalledWith(id);
   });
 
-  it("resets stale api-key auth back to bearer when switching from Anthropic to OpenAI-compatible", async () => {
-    const user = userEvent.setup();
-    const props = fixture({ instance: anthropicProvider() });
-    renderAdding(<ModelEndpointSettingsView {...props} />);
-
-    await chooseSelectFieldOption(
-      user,
-      screen.getByLabelText("Provider type"),
-      "Anthropic-compatible HTTP",
-    );
-    const anthropicCreate = screen.getByRole("form", { name: "Add Anthropic-compatible provider" });
-    await chooseSelectFieldOption(
-      user,
-      within(anthropicCreate).getByLabelText("Authentication"),
-      "API key (x-api-key header)",
-    );
-
-    await chooseSelectFieldOption(
-      user,
-      screen.getByLabelText("Provider type"),
-      "OpenAI-compatible HTTP",
-    );
-    const openAiCreate = screen.getByRole("form", { name: "Add OpenAI-compatible provider" });
-    const auth = within(openAiCreate).getByLabelText("Authentication");
-    expect(auth).toHaveTextContent("Bearer API key");
-  });
-
-  it("clears and disables the create credential when authentication changes to none", async () => {
-    const user = userEvent.setup();
-    renderAdding(<ModelEndpointSettingsView {...fixture({ instance: httpProvider() })} />);
-
-    await chooseSelectFieldOption(
-      user,
-      screen.getByLabelText("Provider type"),
-      "OpenAI-compatible HTTP",
-    );
-    const create = screen.getByRole("form", { name: "Add OpenAI-compatible provider" });
-    const authentication = within(create).getByLabelText("Authentication");
-    const key = within(create).getByLabelText("API key");
-    await user.type(key, "must-not-linger");
-    await chooseSelectFieldOption(
-      user,
-      authentication,
-      "No authentication (trusted loopback only)",
-    );
-    expect(key).toBeDisabled();
-    expect(key).toHaveValue("");
-
-    await chooseSelectFieldOption(user, authentication, "Bearer API key");
-    expect(key).toBeEnabled();
-    expect(key).toHaveValue("");
-  });
-
-  it("submits an empty create credential for no authentication despite injected DOM text", async () => {
-    const user = userEvent.setup();
-    const props = fixture({
-      instance: httpProvider(),
-      observed: observation({ credentialStatus: "missing" }),
-    });
-    renderAdding(<ModelEndpointSettingsView {...props} />);
-
-    await chooseSelectFieldOption(
-      user,
-      screen.getByLabelText("Provider type"),
-      "OpenAI-compatible HTTP",
-    );
-    const create = screen.getByRole("form", { name: "Add OpenAI-compatible provider" });
-    await user.type(within(create).getByLabelText("Provider name"), "No-auth gateway");
-    await user.type(within(create).getByLabelText("API base URL"), "http://127.0.0.1:11434/v1");
-    await chooseSelectFieldOption(
-      user,
-      within(create).getByLabelText("Authentication"),
-      "No authentication (trusted loopback only)",
-    );
-    const key = within(create).getByLabelText("API key");
-    (key as HTMLInputElement).value = "injected-secret";
-    await user.click(screen.getByRole("button", { name: "Check and add" }));
-
-    const [, configuration, credential] = vi.mocked(props.onCreateOpenAiCompatible).mock.calls[0]!;
-    expect(configuration.authentication).toBe("none");
-    expect(credential.value).toBe("");
-    expect(key).toHaveValue("");
-    expect(document.body.textContent).not.toContain("injected-secret");
-  });
-
   it("keeps OpenCode creation behavior unchanged when switching provider types", async () => {
     const user = userEvent.setup();
     const props = fixture();
@@ -1893,37 +1633,6 @@ describe("ProviderSettingsView", () => {
       "OpenCode local",
       "/opt/homebrew/bin/opencode",
     );
-  });
-
-  it("shows endpoint and authentication guidance without credential controls remotely", async () => {
-    const user = userEvent.setup();
-    renderAdding(
-      <ModelEndpointSettingsView
-        {...fixture({ instance: httpProvider(), credentialManagementAvailable: false })}
-      />,
-    );
-
-    await chooseSelectFieldOption(
-      user,
-      screen.getByLabelText("Provider type"),
-      "OpenAI-compatible HTTP",
-    );
-    expect(screen.getAllByText(/remote endpoints require HTTPS/i).length).toBeGreaterThan(0);
-    expect(screen.getByText("API keys are added from the Octant desktop app")).toBeVisible();
-    expect(
-      within(screen.getByRole("form", { name: "Add OpenAI-compatible provider" })).getByLabelText(
-        "API key",
-      ),
-    ).toBeDisabled();
-
-    await user.keyboard("{Escape}");
-    await user.click(screen.getByRole("link", { name: /^Private gateway,/ }));
-    const page = screen.getByRole("region", { name: "Private gateway" });
-    expect(
-      within(page).getByText("Keys are added and replaced from the Octant app on this Mac."),
-    ).toBeVisible();
-    expect(within(page).queryByRole("button", { name: /clear stored api key/i })).toBeNull();
-    expect(within(page).queryByText("Unavailable")).toBeNull();
   });
 
   it("edits HTTP configuration, preserves a blank key, and supports explicit clearing", async () => {
@@ -2913,19 +2622,11 @@ describe("ProviderSettingsView", () => {
   it("renders the Bedrock Mantle setup guide only for an OpenAI-compatible endpoint", async () => {
     const user = userEvent.setup();
     renderAdding(<ModelEndpointSettingsView {...fixture()} />);
-    await chooseSelectFieldOption(
-      user,
-      screen.getByLabelText("Provider type"),
-      "Anthropic-compatible HTTP",
-    );
-    expect(
-      screen.queryByRole("heading", { name: "Amazon Bedrock Mantle setup" }),
-    ).not.toBeInTheDocument();
-    await chooseSelectFieldOption(
-      user,
-      screen.getByLabelText("Provider type"),
-      "OpenAI-compatible HTTP",
-    );
+    await user.click(screen.getByRole("button", { name: /^Anthropic-compatible/ }));
+    expect(screen.queryByText("Connecting Amazon Bedrock?")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Back" }));
+    await user.click(screen.getByRole("button", { name: /^OpenAI-compatible/ }));
+    await user.click(screen.getByText("Connecting Amazon Bedrock?"));
     expect(screen.getByRole("heading", { name: "Amazon Bedrock Mantle setup" })).toBeVisible();
     expect(screen.getByText(/mantle\.us-east-1\.amazonaws\.com\/v1/)).toBeVisible();
     expect(
@@ -3294,9 +2995,10 @@ describe("where Settings lists each provider kind", () => {
       <ModelEndpointSettingsView {...props} instances={[]} />,
     );
     await user.click(screen.getByRole("button", { name: "Add endpoint" }));
-    const create = screen.getByRole("form", { name: "Add OpenAI-compatible provider" });
-    await user.type(within(create).getByLabelText("Provider name"), "Private gateway");
-    await user.type(within(create).getByLabelText("API base URL"), "https://gateway.example/v1");
+    await user.click(screen.getByRole("button", { name: /^OpenAI-compatible/ }));
+    const create = screen.getByRole("form", { name: "Connect OpenAI-compatible" });
+    await user.type(within(create).getByLabelText("Name"), "Private gateway");
+    await user.type(within(create).getByLabelText("Address"), "https://gateway.example/v1");
     await user.click(screen.getByRole("button", { name: "Check and add" }));
     rerender(
       <ModelEndpointSettingsView
@@ -3307,11 +3009,88 @@ describe("where Settings lists each provider kind", () => {
     );
 
     const dialog = screen.getByRole("dialog", { name: "Add a model endpoint" });
-    expect(await within(dialog).findByText(/Added Private gateway\./)).toBeVisible();
+    expect(
+      await within(dialog).findByRole("heading", { name: "Added Private gateway" }),
+    ).toBeVisible();
     expect(
       within(dialog).getByText("The provider was created, but its credential could not be stored."),
     ).toBeVisible();
     expect(props.onProbe).toHaveBeenCalledWith(id, { quiet: true });
+  });
+
+  it("labels an endpoint whose models are all unverified Chat only, as the model pickers do", async () => {
+    const user = userEvent.setup();
+    const props = fixture({ instance: httpProvider(), observed: observation() });
+    renderProviderSettings(<ModelEndpointSettingsView {...props} />);
+
+    const row = screen.getByRole("link", { name: /^Private gateway, ready/ }).closest("li")!;
+    expect(within(row).getByText("Chat only")).toBeVisible();
+    await user.click(within(row).getByRole("button", { name: "Verify tools for Private gateway" }));
+
+    // Verifying opens the endpoint on its models' Verify tools, one request away.
+    expect(screen.getByRole("button", { name: "Verify tools for Model One" })).toHaveFocus();
+  });
+
+  it("drops the Chat only label from a row once one of its models is verified", () => {
+    const props = fixture({
+      instance: httpProvider(),
+      observed: observation({ verifiedToolModelIds: ["model-1" as never] }),
+    });
+    renderProviderSettings(<ModelEndpointSettingsView {...props} />);
+
+    const row = screen.getByRole("link", { name: /^Private gateway, ready/ }).closest("li")!;
+    expect(within(row).queryByText("Chat only")).toBeNull();
+  });
+
+  it("says Needs key for an endpoint added from a browser without its key", async () => {
+    const user = userEvent.setup();
+    const props = fixture({ credentialManagementAvailable: false });
+    const { rerender } = renderProviderSettings(
+      <ModelEndpointSettingsView {...props} instances={[]} />,
+    );
+    await user.click(screen.getByRole("button", { name: "Add endpoint" }));
+    await user.click(screen.getByRole("button", { name: /^Azure AI Foundry/ }));
+    const create = screen.getByRole("form", { name: "Connect Azure AI Foundry" });
+    await user.type(within(create).getByLabelText("Name"), "Foundry relay");
+    await user.type(
+      within(create).getByLabelText("Foundry address"),
+      "https://foundry.example.openai.azure.com/openai/v1/",
+    );
+    await user.type(
+      within(create).getByRole("textbox", { name: "Deployment name" }),
+      "deployment-a",
+    );
+    await user.click(screen.getByRole("button", { name: "Check and add" }));
+    expect(props.onCreateAzureFoundry).toHaveBeenCalledOnce();
+    rerender(
+      <ModelEndpointSettingsView
+        {...props}
+        instances={[foundryProvider()]}
+        probeFailures={
+          new Map([
+            [
+              id,
+              {
+                category: "unauthenticated",
+                message: "The provider credential is missing or unavailable.",
+                failedAt: "2026-10-09T10:00:00.000Z",
+              },
+            ],
+          ])
+        }
+      />,
+    );
+
+    const dialog = screen.getByRole("dialog", { name: "Add a model endpoint" });
+    expect(await within(dialog).findByText("Needs key")).toBeVisible();
+    expect(
+      within(dialog).getByText("Add its API key in the Octant desktop app on this Mac."),
+    ).toBeVisible();
+    // The browser cannot add the key, so the dialog offers no key fix.
+    expect(within(dialog).queryByRole("button", { name: "Open details to fix" })).toBeNull();
+    await user.keyboard("{Escape}");
+    const row = screen.getByRole("link", { name: /^Foundry relay, needs key/ });
+    expect(row).toBeVisible();
   });
 
   it("offers three ways in on first run", async () => {

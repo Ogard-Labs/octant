@@ -134,7 +134,7 @@ describe("endpoint row state", () => {
       {
         failure: failure("unauthenticated", "The provider credential is missing or unavailable."),
       },
-      "Key needed",
+      "Needs key",
       "No API key is saved for it.",
       "Add key",
     ],
@@ -171,6 +171,26 @@ describe("endpoint row state", () => {
     expect(result.label).toBe(label);
     expect(result.sentence).toBe(sentence);
     expect(result.fix?.label).toBe(fix);
+  });
+
+  it("sends a browser to the desktop app for a missing key, with no fix it cannot do", () => {
+    const result = status({
+      keysHere: false,
+      failure: failure("unauthenticated", "The provider credential is missing or unavailable."),
+    });
+    expect(result.label).toBe("Needs key");
+    expect(result.tone).toBe("needs-you");
+    expect(result.sentence).toBe("Add its API key in the Octant desktop app on this Mac.");
+    expect(result.fix).toBeUndefined();
+  });
+
+  it("keeps saying Needs key in a browser after a reload, when only the observation is left", () => {
+    const result = status({
+      keysHere: false,
+      observed: observed({ readiness: "unauthenticated", models: [] }),
+    });
+    expect(result.label).toBe("Needs key");
+    expect(result.fix).toBeUndefined();
   });
 
   it("asks whether Ollama is running when nothing answers at its address", () => {

@@ -7,7 +7,11 @@ import {
   type ProviderObservedState,
   type ProviderRegistrySnapshot,
 } from "@octant/contracts";
-import { createProviderClient, type ProviderClient } from "@octant/client-runtime/provider-client";
+import {
+  createProviderClient,
+  ProviderClientFailure,
+  type ProviderClient,
+} from "@octant/client-runtime/provider-client";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { useProviderController } from "./useProviderController";
@@ -771,6 +775,95 @@ describe("useProviderController", () => {
 
     expect(calls).toEqual(["provider.create", "credential.set", "field.clear"]);
     expect(JSON.stringify(result.current)).not.toContain("private-value");
+  });
+
+  it("saves an Azure AI Foundry endpoint without a key in a browser, so it can be keyed later", async () => {
+    const api = client();
+    const foundry = decodeProviderInstance({
+      ...provider(),
+      displayName: "Foundry",
+      driverKind: "azure-foundry",
+      configuration: {
+        kind: "azure-foundry-openai-http",
+        baseUrl: "https://example.openai.azure.com/openai/v1/",
+        authentication: "api-key",
+        protocol: "auto",
+        manualModelIds: [],
+      },
+    });
+    vi.mocked(api.execute).mockImplementation(async (command) => ({
+      kind: "provider-created",
+      instance: { ...foundry, id: "instanceId" in command ? command.instanceId : id },
+    }));
+    const { result } = renderHook(() => useProviderController({ client: api }));
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    await act(async () => {
+      await expect(
+        result.current.createAzureFoundry(
+          "Foundry",
+          foundry.configuration as Extract<
+            ProviderInstance,
+            { driverKind: "azure-foundry" }
+          >["configuration"],
+          transientCredential(""),
+        ),
+      ).resolves.toBe(true);
+    });
+
+    expect(api.execute).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "create-azure-foundry-provider", displayName: "Foundry" }),
+    );
+  });
+
+  it("refuses a key typed into a browser for Azure AI Foundry rather than dropping it", async () => {
+    const api = client();
+    const { result } = renderHook(() => useProviderController({ client: api }));
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    await act(async () => {
+      await expect(
+        result.current.createAzureFoundry(
+          "Foundry",
+          {
+            kind: "azure-foundry-openai-http",
+            baseUrl: "https://example.openai.azure.com/openai/v1/",
+            authentication: "api-key",
+            protocol: "auto",
+            manualModelIds: [],
+          },
+          transientCredential("typed-in-browser"),
+        ),
+      ).resolves.toBe(false);
+    });
+
+    expect(api.execute).not.toHaveBeenCalled();
+    expect(result.current.message).toBe(
+      "Provider credential management is unavailable on this host.",
+    );
+  });
+
+  it("says what stopped a tool check without raising the page alert", async () => {
+    const api = client();
+    vi.mocked(api.execute).mockRejectedValueOnce(
+      new ProviderClientFailure({
+        category: "unauthenticated",
+        message: "Provider credential is missing or unavailable.",
+      }),
+    );
+    const { result } = renderHook(() => useProviderController({ client: api }));
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    let check: Awaited<ReturnType<typeof result.current.checkModelTools>> | undefined;
+    await act(async () => {
+      check = await result.current.checkModelTools(id, decodeProviderModelId("model-1"));
+    });
+
+    expect(check).toMatchObject({
+      outcome: "failed",
+      failure: { category: "unauthenticated" },
+    });
+    expect(result.current.message).toBeUndefined();
   });
 
   it("creates an image profile before storing its write-only credential and purges it on remove", async () => {

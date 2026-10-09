@@ -19,6 +19,7 @@ import {
   useCredentialStatus,
   type CredentialStatusController,
 } from "../../providers/ProviderSettingsCredentials";
+import { ChatOnlyVerify } from "../../providers/ChatOnlyVerify";
 import type { ProviderOAuthSignInState } from "../../providers/ProviderOAuthSignIn";
 import type { ProviderSettingsViewProps } from "../../providers/ProviderSettingsView";
 import {
@@ -51,7 +52,7 @@ import {
 import { EndpointMark, EndpointState } from "./ModelEndpointRow";
 
 /** Where the detail page puts focus when a row's fix opened it. */
-export type EndpointDetailFocus = "key" | "address" | "model-ids";
+export type EndpointDetailFocus = "key" | "address" | "model-ids" | "verify-tools";
 
 export type ModelEndpointDetailProps = Pick<
   ProviderSettingsViewProps,
@@ -100,6 +101,7 @@ const FOCUS_SELECTORS: Readonly<Record<EndpointDetailFocus, string>> = {
   key: 'input[name="credential"]',
   address: 'input[name="baseUrl"]',
   "model-ids": 'textarea[name="manualModelIds"], textarea[name="deploymentIds"]',
+  "verify-tools": '.endpoint-models button[aria-label^="Verify tools for"]',
 };
 
 /**
@@ -465,25 +467,12 @@ function ModelsSection(props: ModelEndpointDetailProps & { readonly disabled: bo
                     <span className="endpoint-model__tags">
                       {readsImages ? <span className="endpoint-tag">Reads images</span> : null}
                       {chatOnly ? (
-                        <>
-                          <span
-                            className="endpoint-tag"
-                            data-kind="chat-only"
-                            title="Octant hasn't seen this model call a tool, so it answers without Octant's tools."
-                          >
-                            Chat only
-                          </span>
-                          <OctantButton
-                            aria-label={`Verify tools for ${model.displayName}`}
-                            disabled={props.disabled || verifying !== undefined}
-                            onClick={() => verify(model.id)}
-                            size="sm"
-                            type="button"
-                            variant="ghost"
-                          >
-                            {verifying === String(model.id) ? "Verifying…" : "Verify tools"}
-                          </OctantButton>
-                        </>
+                        <ChatOnlyVerify
+                          disabled={props.disabled || verifying !== undefined}
+                          onVerify={() => verify(model.id)}
+                          subject={model.displayName}
+                          verifying={verifying === String(model.id)}
+                        />
                       ) : null}
                     </span>
                     <OctantSwitch

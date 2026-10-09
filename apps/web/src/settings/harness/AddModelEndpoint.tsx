@@ -2,19 +2,17 @@ import type { OpenAiCompatibleProviderConfiguration } from "@octant/contracts";
 import type { SubscriptionOAuthOffer } from "@octant/contracts/host-oauth";
 import { subscriptionOAuthOffers } from "@octant/domain";
 import { Plus } from "lucide-react";
-import { useId, type ReactNode } from "react";
+import { useEffect, useId, useState } from "react";
 import { ProviderGlyph } from "../../providers/ProviderGlyph";
 import { signInConsent } from "../../providers/ProviderOAuthSignIn";
-import {
-  ProviderCreateForm,
-  type ProviderCreateFormProps,
-} from "../../providers/ProviderSettingsConfiguration";
-import { MODEL_ENDPOINT_DRIVER_KINDS } from "../../providers/providerSettingsPresentation";
 import { OctantAlert } from "../../ui/base/OctantAlert";
 import { OctantButton } from "../../ui/base/OctantButton";
 import { OctantDialog } from "../../ui/base/OctantDialog";
-import { EndpointState } from "./ModelEndpointRow";
-import type { EndpointStatus } from "./endpointStatus";
+import {
+  AddEndpointFlow,
+  type AddEndpointFlowProps,
+  type AddEndpointStep,
+} from "./AddEndpointFlow";
 
 /**
  * How Settings names each sign-in it offers as a new endpoint. A catalog offer
@@ -144,74 +142,27 @@ export function EndpointChoices(props: EndpointChoicesProps) {
   );
 }
 
-export interface AddEndpointDialogProps extends ProviderCreateFormProps {
+export interface AddEndpointDialogProps extends AddEndpointFlowProps {
   readonly open: boolean;
-  readonly onClose: () => void;
   readonly onSignIn: (offer: SubscriptionOAuthOffer) => void;
   /** A page-level message, repeated here because the page sits behind the dialog. */
   readonly message?: string;
-  /** The new endpoint's check, once it has been added. */
-  readonly added?: {
-    readonly name: string;
-    readonly status: EndpointStatus;
-    readonly onOpen: () => void;
-  };
 }
 
 /**
- * Add endpoint: the sign-ins, then the endpoint-by-address form, whose button
- * adds the endpoint and checks it. The check's result shows here, so a
- * mistyped address is corrected from the dialog rather than found later as a
- * broken row.
+ * Add endpoint: the sign-ins, then the guided flow that connects an endpoint
+ * by its address. The flow starts again each time the dialog opens.
  */
 export function AddEndpointDialog(props: AddEndpointDialogProps) {
   const titleId = useId();
-  let content: ReactNode;
-  if (props.added !== undefined) {
-    const { status } = props.added;
-    content = (
-      <div aria-live="polite" className="endpoint-add__result">
-        <p className="endpoint-add__result-head">
-          Added {props.added.name}. <EndpointState status={status} />
-        </p>
-        {status.sentence === undefined ? null : <p>{status.sentence}</p>}
-        <div className="endpoint-add__actions">
-          {status.tone === "checking" ? null : (
-            <OctantButton
-              onClick={props.added.onOpen}
-              size="sm"
-              type="button"
-              variant={status.tone === "ready" ? "outline" : "default"}
-            >
-              {status.tone === "ready" ? "Open details" : "Open details to fix"}
-            </OctantButton>
-          )}
-          <OctantButton onClick={props.onClose} size="sm" type="button" variant="ghost">
-            Done
-          </OctantButton>
-        </div>
-      </div>
-    );
-  } else {
-    content = (
-      <>
-        <EndpointChoices
-          credentialManagementAvailable={props.credentialManagementAvailable}
-          disabled={props.busy}
-          onSignIn={props.onSignIn}
-        />
-        <h3 className="endpoint-add__subhead">Another endpoint, by its address</h3>
-        <ProviderCreateForm
-          {...props}
-          allowedProviderTypes={MODEL_ENDPOINT_DRIVER_KINDS}
-          embedded
-          hint="OpenAI-compatible, Anthropic-compatible, Ollama or Azure AI Foundry. Keys stay in this Mac's Keychain."
-          initialProviderType="openai-compatible"
-          submitLabel="Check and add"
-        />
-      </>
-    );
-  }
+  const [step, setStep] = useState<AddEndpointStep>("kind");
+  // Each opening starts the flow again from its first step.
+  useEffect(() => {
+    if (props.open) setStep("kind");
+  }, [props.open]);
+  // The page alert speaks for creating the endpoint; once it exists, each
+  // step says what happened next to the model it is about.
+  const showMessage = props.message !== undefined && (step === "kind" || step === "connect");
   return (
     <OctantDialog
       className="endpoint-add"
@@ -223,12 +174,27 @@ export function AddEndpointDialog(props: AddEndpointDialogProps) {
       <h2 className="endpoint-add__title" id={titleId}>
         Add a model endpoint
       </h2>
-      {props.message === undefined ? null : (
+      {showMessage ? (
         <OctantAlert className="provider-settings__alert" tone="warning">
           {props.message}
         </OctantAlert>
-      )}
-      {content}
+      ) : null}
+      {props.open ? (
+        <AddEndpointFlow
+          {...props}
+          onStepChange={(next) => {
+            setStep(next);
+            props.onStepChange?.(next);
+          }}
+          signIns={
+            <EndpointChoices
+              credentialManagementAvailable={props.credentialManagementAvailable}
+              disabled={props.busy}
+              onSignIn={props.onSignIn}
+            />
+          }
+        />
+      ) : null}
     </OctantDialog>
   );
 }
