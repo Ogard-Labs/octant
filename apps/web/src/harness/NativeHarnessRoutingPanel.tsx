@@ -133,21 +133,6 @@ export function nativeHarnessSlotsUsing(
     .map((slot) => rolePresentation(String(slot.id)).label);
 }
 
-/** The roles, by their Settings names, that list a model from this endpoint. */
-export function nativeHarnessSlotsUsing(
-  configuration: NativeHarnessRoutingConfiguration,
-  providerInstanceId: string,
-): ReadonlyArray<string> {
-  return configuration.slots
-    .filter(
-      (slot) =>
-        slot.candidates.some(
-          (candidate) => String(candidate.providerInstanceId) === providerInstanceId,
-        ) || String(slot.overflowPromotion?.providerInstanceId) === providerInstanceId,
-    )
-    .map((slot) => slotPresentation(String(slot.id)).label);
-}
-
 /**
  * Settings → Octant Harness → Model roles. A role (a slot, in the CLI and the
  * guide) is an ordered list of models: the first choice, then backups. Every
