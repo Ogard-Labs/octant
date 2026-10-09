@@ -2215,6 +2215,179 @@ describe("ChatWorkspace", () => {
     expect(screen.queryByRole("region", { name: "Canvas tools" })).toBeNull();
   });
 
+  function recipeCanvasClient() {
+    return {
+      threadReferenceCards: async () => ({ cards: [] }),
+      recipes: async () => ({
+        recipes: [
+          {
+            id: "postmortem",
+            title: "Postmortem",
+            summary: "What happened and what follows.",
+            whenToUse: "When someone asks for a postmortem.",
+            skeleton: [{ kind: "heading", role: "What happened" }],
+          },
+        ],
+      }),
+      create: vi.fn(async () => ({
+        kind: "accepted",
+        receipt: {
+          schemaVersion: 1,
+          kind: "canvas-create-receipt",
+          receiptId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          requestId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+          canvasId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+          versionId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+          intent: "template",
+          originThreadId: threadId,
+          scope: {
+            hostId: "local",
+            mode: "chat",
+            workspace: { kind: "chat-virtual", projectId: null },
+          },
+          title: "Postmortem",
+          effectiveAuthority: {},
+          outcome: "ready",
+          createdAt: now,
+        },
+        card: {},
+      })),
+    };
+  }
+
+  it("queues the fill request behind a running response instead of sending over it", async () => {
+    const user = userEvent.setup();
+    const host = queueTestHost();
+    const sendTurn = vi.fn(async () => true);
+    render(
+      <ChatWorkspace
+        canvasClient={recipeCanvasClient() as never}
+        controller={controllerFixture({
+          activeView: viewWithAttempt("streaming"),
+          pendingDraft: "half a reply",
+          sendTurn,
+        })}
+        messageQueueClient={host}
+        providerSnapshot={providerSnapshot()}
+        serverUrl="http://127.0.0.1"
+        windowCapability="window-capability"
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Thread actions" }));
+    await user.click(await screen.findByRole("menuitemradio", { name: "Show canvas" }));
+    await user.click(await screen.findByRole("radio", { name: "Postmortem" }));
+    await user.click(screen.getByRole("button", { name: "Create and ask agent" }));
+
+    await waitFor(() =>
+      expect(host.execute).toHaveBeenCalledWith(
+        expect.objectContaining({
+          kind: "enqueue",
+          payload: expect.objectContaining({
+            mode: "chat",
+            canvasSelections: [
+              expect.objectContaining({
+                canvasId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+                scope: "whole-canvas",
+              }),
+            ],
+          }),
+        }),
+      ),
+    );
+    expect(sendTurn).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("Message")).toHaveValue("half a reply");
+  });
+
+  it("asks this thread's agent to fill a Canvas started from a recipe through the ordinary send", async () => {
+    const user = userEvent.setup();
+    const sendTurn = vi.fn(async () => true);
+    const canvasId = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+    const versionId = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+    const create = vi.fn(async () => ({
+      kind: "accepted",
+      receipt: {
+        schemaVersion: 1,
+        kind: "canvas-create-receipt",
+        receiptId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        requestId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+        canvasId,
+        versionId,
+        intent: "template",
+        originThreadId: threadId,
+        scope: {
+          hostId: "local",
+          mode: "chat",
+          workspace: { kind: "chat-virtual", projectId: null },
+        },
+        title: "Postmortem",
+        effectiveAuthority: {},
+        outcome: "ready",
+        createdAt: now,
+      },
+      card: {},
+    }));
+    render(
+      <ChatWorkspace
+        canvasClient={
+          {
+            threadReferenceCards: async () => ({ cards: [] }),
+            recipes: async () => ({
+              recipes: [
+                {
+                  id: "postmortem",
+                  title: "Postmortem",
+                  summary: "What happened and what follows.",
+                  whenToUse: "When someone asks for a postmortem.",
+                  skeleton: [{ kind: "heading", role: "What happened" }],
+                },
+              ],
+            }),
+            create,
+          } as never
+        }
+        controller={controllerFixture({ activeView: viewWithAttempt("completed"), sendTurn })}
+        providerSnapshot={providerSnapshot()}
+        serverUrl="http://127.0.0.1"
+        windowCapability="window-capability"
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Thread actions" }));
+    await user.click(await screen.findByRole("menuitemradio", { name: "Show canvas" }));
+    await user.click(await screen.findByRole("radio", { name: "Postmortem" }));
+    await user.click(screen.getByRole("button", { name: "Create and ask agent" }));
+
+    await waitFor(() => expect(sendTurn).toHaveBeenCalledOnce());
+    const [message, attachments, previews, canvases, extensions, mentions, , sendOptions] = sendTurn
+      .mock.calls[0] as unknown as [
+      string,
+      unknown[],
+      unknown[],
+      unknown[],
+      unknown[],
+      unknown[],
+      unknown,
+      unknown,
+    ];
+    // The person's unsent draft is theirs; this turn is not the composer's.
+    expect(sendOptions).toEqual({ composerDraft: "keep" });
+    expect(message).toContain("Postmortem");
+    expect(message).toContain("postmortem");
+    expect([attachments, previews, extensions, mentions]).toEqual([[], [], [], []]);
+    // The new Canvas rides along as the same whole-canvas context a person
+    // attaches by hand, so the host reauthorizes it like any other.
+    expect(canvases).toEqual([
+      expect.objectContaining({
+        canvasId,
+        versionId,
+        sequence: 1,
+        displayName: "Postmortem",
+        scope: "whole-canvas",
+      }),
+    ]);
+  });
+
   it("opens the linked-thread preview dialog when $review-in-parallel is resolved from the composer", async () => {
     const user = userEvent.setup();
     // A Response body can be read once, and this surface now makes more than

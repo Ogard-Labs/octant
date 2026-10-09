@@ -1,4 +1,9 @@
 import { observedChildren } from "./agentRun/agentObservedChildren";
+import {
+  UNCLASSIFIED_STARTUP_FAILURE,
+  startupFailedOutput,
+  withStartupFailureReason,
+} from "./startupFailureReason";
 import { createLocalUsageHistoryCheckpointStore } from "./persistence/localUsageHistoryCheckpointStore";
 import { createLocalUsageHistoryLastReadStore } from "./persistence/localUsageHistoryLastReadStore";
 import { createSelectedExtensionResolver } from "./extensions/selectedExtensions";
@@ -20,7 +25,7 @@ import { IMAGE_LIBRARY_SCOPE_ID } from "@octant/contracts";
 import { createHash, randomUUID } from "node:crypto";
 import { lstatSync, mkdirSync, realpathSync } from "node:fs";
 import { lstat, realpath } from "node:fs/promises";
-import { homedir } from "node:os";
+import { homedir, hostname } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -841,10 +846,19 @@ import {
   createHostControlRouteHandler,
   type HostControlServicePolicyPort,
 } from "./hostControlRoutes";
-import { createReplicaMembershipRouteHandler } from "./replica/replicaMembershipRoutes";
+import {
+  createReplicaMembershipRouteHandler,
+  createReplicaSyncStatusRouteHandler,
+} from "./replica/replicaMembershipRoutes";
+import { replicaComputerName, replicaMembershipView } from "./replica/replicaMembershipView";
 import { createReplicaStoreSettingsRouteHandler } from "./replica/replicaStoreSettingsRoutes";
 import { ReplicaStoreSettingsService } from "./replica/replicaStoreSettingsService";
 import { ReplicaMembershipService } from "./replica/replicaMembershipService";
+import {
+  ReplicaArtifactImport,
+  ReplicaArtifactSyncService,
+  replicaSyncedLibraryEntries,
+} from "./replica/replicaArtifactSyncService";
 import { createReplicaMembershipJournal } from "./replica/replicaMembershipProjection";
 import { createReplicaDeviceKey, makeReplicaDeviceSigner } from "./replica/replicaDeviceKeyService";
 import { createHostResourceRouteHandler } from "./hostResourceRoutes";
@@ -5828,12 +5842,30 @@ export function startOctantServer(
     });
     // The harness `bash` tool runs through the same owned-process-group,
     // Seatbelt-confined port repository tests use, with its own receipt and
-    // script directories so a command's leftovers never mix with a test's.
+    // work directories so a command's leftovers never mix with a test's.
     const harnessWorkDirectory = join(providerDataDirectory, "harness", "work");
     mkdirSync(harnessWorkDirectory, { recursive: true, mode: 0o700 });
+    // Pending command scripts live outside every directory a confined command
+    // may write; each launch reads only its own script's subdirectory, so one
+    // command cannot swap the script another thread is about to run.
+    const harnessScriptDirectory = join(providerDataDirectory, "harness", "scripts");
+    mkdirSync(harnessScriptDirectory, { recursive: true, mode: 0o700 });
     const harnessProcessPort = new RepositoryTestProcessPort({
       receiptDirectory: join(providerDataDirectory, "harness", "receipts"),
       temporaryDirectory: harnessWorkDirectory,
+      harnessShellScriptDirectory: harnessScriptDirectory,
+    });
+    // A child admitted without network authority runs its commands here. Its
+    // writable temporary root is its own: a shared one would let it leave
+    // files a networked command later picks up and acts on with the network
+    // open.
+    const harnessOfflineWorkDirectory = join(providerDataDirectory, "harness", "work-offline");
+    mkdirSync(harnessOfflineWorkDirectory, { recursive: true, mode: 0o700 });
+    const harnessOfflineProcessPort = new RepositoryTestProcessPort({
+      receiptDirectory: join(providerDataDirectory, "harness", "receipts"),
+      temporaryDirectory: harnessOfflineWorkDirectory,
+      networkEgress: "none",
+      harnessShellScriptDirectory: harnessScriptDirectory,
     });
     const nativeHarnessRoutingStore = new NativeHarnessRoutingStore({
       journal: persistence.journal,
@@ -6116,7 +6148,11 @@ export function startOctantServer(
       plans: planService,
       shell: createNativeHarnessShell({
         process: harnessProcessPort,
-        scriptDirectory: harnessWorkDirectory,
+        scriptDirectory: harnessScriptDirectory,
+      }),
+      offlineShell: createNativeHarnessShell({
+        process: harnessOfflineProcessPort,
+        scriptDirectory: harnessScriptDirectory,
       }),
       resolveWebSearch: () =>
         searxngHarnessWebSearch({
@@ -8389,6 +8425,10 @@ export function startOctantServer(
     // each surface that can revise, so every revision materializes the same way
     // wherever it came from. It is constructed before the service it listens to
     // so the hook below can name it.
+    // Artifact sync is built with the replica services further down; the
+    // version hook below reaches it through this slot, which is filled before
+    // the host serves its first request.
+    const replicaArtifactSync: { service?: ReplicaArtifactSyncService } = {};
     const artifactMirrorService = new ArtifactMirrorService({
       files: createArtifactMirrorFilePort(),
       currentVersion: (canvasId) => persistence.canvasProjection.getById(canvasId)?.currentVersion,
@@ -8503,6 +8543,7 @@ export function startOctantServer(
         new GitService(new GitObservationPort(), new GitMutationPort()),
       ),
       journal: artifactMirrorEvents,
+      receiptNotJournaled: (failure) => console.error("[artifact-mirror]", failure),
       clock: () => new Date().toISOString() as never,
     });
 
@@ -8513,13 +8554,27 @@ export function startOctantServer(
         uuid: randomUUID,
         clock: () => new Date().toISOString() as never,
         onVersionCommitted: (version) => {
-          void artifactMirrorService.materialize(version);
+          // materialize reports what it can, so a rejection here is a broken
+          // invariant: surfaced by name rather than left unhandled.
+          artifactMirrorService.materialize(version).catch((error: unknown) => {
+            console.error("[artifact-mirror] materialize failed", {
+              canvasId: String(version.canvasId),
+              error: error instanceof Error ? error.name : "unknown",
+            });
+          });
+          // The replica publish listens on the same seam as the mirror, so
+          // every surface's revisions publish the same way.
+          void replicaArtifactSync.service?.versionCommitted(version);
         },
       },
       {
         // Reauthorize every source against authoritative server state; the
         // resolver fails closed (missing/revoked/offline/unauthorized/failed)
         // when a source is gone, deleted, offline, or not refreshable.
+        // A person starting a Canvas chooses from the same recipes describe
+        // offers an agent: in-tree, plus those admitted skills contribute.
+        documentRecipes: () =>
+          offeredCanvasDocumentRecipes(extensionApiService.snapshot().skills ?? []),
         refreshSource: createCanvasRefreshSourceResolver({
           clock: () => new Date().toISOString() as never,
           artifactState: (projectId, opaqueRef) => {
@@ -8919,6 +8974,7 @@ export function startOctantServer(
           lifecycle: project.lifecycle,
         })),
       liveShares: () => canvasShareService.liveShareCanvasIds(),
+      synced: () => replicaSyncedLibraryEntries(persistence.replicaArtifactProjection.state()),
       clock: () => new Date().toISOString() as never,
     });
     const artifactLibraryRoutes = createArtifactLibraryRouteHandler({
@@ -9640,6 +9696,7 @@ export function startOctantServer(
     // resolve the bound context through principalRouteContext before effects.
     const dispatchProductRoutes = async (request: Request): Promise<Response | undefined> =>
       (await hostResourceRoutes(request)) ??
+      (await replicaSyncStatusRoutes(request)) ??
       (await projectBindingRoutes(request)) ??
       (await launchSessionRoutes(request)) ??
       (await machineChangeRoutes(request)) ??
@@ -9870,7 +9927,10 @@ export function startOctantServer(
       forgetWorkThread: (threadId) => {
         workThreadProjection.forget(threadId as never);
       },
-      forgetCanvases: (canvasIds) => persistence.canvasProjection.evict(canvasIds),
+      forgetCanvases: (canvasIds) => {
+        persistence.canvasProjection.evict(canvasIds);
+        persistence.replicaArtifactProjection.evict(canvasIds);
+      },
       purgeCanvasFiles: (canvasIds) => removeMirrorFiles(persistence.connection, canvasIds),
       purgeThreadArtifacts: async ({ mode, threadId }) => {
         const released = await threadMessageQueue.purgeThread(
@@ -9904,6 +9964,22 @@ export function startOctantServer(
       windowAuthorityStore,
       dataDirectory: persistence.dataDirectory,
       hostId: () => readHostIdentity(persistence.connection)?.host_id,
+    });
+    // Settings › Sync reads membership from the journal alone: no store call,
+    // so opening the page never reaches the store.
+    const readReplicaMembershipView = () =>
+      replicaMembershipView({
+        state: persistence.replicaMembershipProjection.state(),
+        now: Date.now(),
+        computerName: replicaComputerName(hostname(), localHostDisplayName()),
+      });
+    const replicaSyncStatusRoutes = createReplicaSyncStatusRouteHandler({
+      windowAuthorityStore,
+      hostId: () => readHostIdentity(persistence.connection)?.host_id,
+      view: readReplicaMembershipView,
+      ...(options.allowedRendererHttpOrigin === undefined
+        ? {}
+        : { allowedRendererHttpOrigin: options.allowedRendererHttpOrigin }),
     });
     const hostControlRoutes = createHostControlRouteHandler({
       windowAuthorityStore,
@@ -10024,6 +10100,12 @@ export function startOctantServer(
         ? {}
         : { allowedRendererHttpOrigin: options.allowedRendererHttpOrigin }),
     });
+    const replicaJournal = createReplicaMembershipJournal({
+      journal: persistence.journal,
+      uuid: randomUUID,
+      clock: () => new Date().toISOString(),
+      actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+    });
     const replicaMembershipService = new ReplicaMembershipService({
       store: () => replicaStoreSettingsService.selection(),
       credentials: {
@@ -10036,19 +10118,46 @@ export function startOctantServer(
           return makeReplicaDeviceSigner(replicaDeviceKeys, instanceId).sign(payload);
         },
       },
-      journal: createReplicaMembershipJournal({
-        journal: persistence.journal,
-        uuid: randomUUID,
-        clock: () => new Date().toISOString(),
-        actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+      journal: replicaJournal,
+      // A pull reconciles each valid artifact entry and journals what it did.
+      artifacts: new ReplicaArtifactImport({
+        membership: () => persistence.replicaMembershipProjection.state(),
+        artifacts: () => persistence.replicaArtifactProjection.state(),
+        localCanvasIds: () => [...persistence.canvasProjection.snapshot().keys()],
+        journal: replicaJournal,
       }),
       state: () => persistence.replicaMembershipProjection.state(),
       localHostId: LOCAL_HOST_ID,
       clock: () => Date.now(),
     });
+    // Publish and pull for artifacts. With sync off, or no identity in a
+    // replica, nothing is queued and no store is called; a Code thread under
+    // Plan mode publishes nothing, the same promise the mirror keeps.
+    replicaArtifactSync.service = new ReplicaArtifactSyncService({
+      membership: replicaMembershipService,
+      store: () => replicaStoreSettingsService.selection(),
+      membershipState: () => persistence.replicaMembershipProjection.state(),
+      artifactState: () => persistence.replicaArtifactProjection.state(),
+      journal: replicaJournal,
+      uuid: randomUUID,
+      canvas: (canvasId) => persistence.canvasProjection.getById(canvasId),
+      projectName: (projectId) =>
+        persistence.readProjects().find((project) => String(project.id) === projectId)?.name,
+      planMode: (version) => {
+        const provenance = version.definition.provenance;
+        if (provenance.mode !== "code") return false;
+        return persistence.readCodeThread(provenance.threadId)?.executionPolicy === "plan";
+      },
+    });
+    const artifactSyncService = replicaArtifactSync.service;
+    let stopArtifactSync: () => void = () => undefined;
     const replicaMembershipRoutes = createReplicaMembershipRouteHandler({
       service: replicaMembershipService,
+      view: readReplicaMembershipView,
       windowAuthorityStore,
+      ...(options.allowedRendererHttpOrigin === undefined
+        ? {}
+        : { allowedRendererHttpOrigin: options.allowedRendererHttpOrigin }),
     });
     return yield* Effect.acquireRelease(
       Effect.tryPromise({
@@ -10117,6 +10226,10 @@ export function startOctantServer(
           // so a host that fails to bind never archives anything on its own,
           // and the stop below is registered before the first pass runs.
           completedThreadArchiveSweep.start();
+          // Artifact sync pulls and drains its queue now and on an interval,
+          // only once the host is serving; with sync off each pass returns
+          // before any store call.
+          stopArtifactSync = artifactSyncService.start();
           return {
             url: localServer.url,
             ...(remoteListener === undefined ? {} : { remoteListener }),
@@ -10186,6 +10299,7 @@ export function startOctantServer(
             shutdownFailure ??= error;
           }
           completedThreadArchiveSweep.stop();
+          stopArtifactSync();
           providerUsageLimitsService.stop();
           try {
             managedCloneService.close();
@@ -10742,12 +10856,7 @@ export function fatalStartupOutput(error: unknown): string {
       ? error
       : {
           category: "startup-failed",
-          message: "Octant could not start the local server.",
+          message: withStartupFailureReason(UNCLASSIFIED_STARTUP_FAILURE, error),
         };
-  return JSON.stringify({
-    product: "Octant",
-    status: "failed",
-    category: failure.category,
-    message: failure.message,
-  });
+  return startupFailedOutput(failure.category, failure.message);
 }

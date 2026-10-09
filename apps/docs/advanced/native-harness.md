@@ -126,25 +126,37 @@ the work stands and stop.
 
 ## Model slots
 
-Routing is configured by slot, in **Settings → Octant Harness → Model slots**. A slot
-is an ordered list of models: the first is used; the rest are fallbacks when
-the first is rate-limited, down, or timing out. **Choose model** and **Add
-fallback** add an empty row; Octant never picks a model for you, so choose a
-provider and a model in the row before **Save slots**. Jobs the harness
-performs map onto slots:
+Routing is configured by slot. Settings calls a slot a **model role** and
+names it by its job, in **Settings → Octant Harness → Model roles**; the CLI
+(`octant harness slots`) and this guide keep the slot ids. A slot is an
+ordered list of models: the first choice is used, and the rest are backups for
+when the model before them is rate-limited, down, or timing out.
 
-| Job                           | Default slot | Named in Settings  |
-| ----------------------------- | ------------ | ------------------ |
-| Implementer, Custom           | `default`    | Main model         |
-| Planner                       | `plan`       | Planning           |
-| Explorer, Researcher          | `task`       | Research and tasks |
-| Reviewer                      | `slow`       | Careful review     |
-| Titles, summaries, compaction | `smol`       | Quick jobs         |
-| Image understanding           | `vision`     | Images             |
-| Advisor                       | `advisor`    | Advisor            |
+Each change saves as you make it. It is sent with the version the page read,
+so if the roles changed elsewhere in the meantime, the page says so, reloads,
+and asks you to make your change again. Octant never picks a model for you.
+With exactly one endpoint ready and no main model, the page offers
+**Use** _model_ **as the main model**; nothing is set until you press it. Open
+a role's backups to add one, move one up or down, or remove it. **Reading
+images** offers only models that accept images. Which job uses which role is
+folded away under **Which job uses which role**; the lead and the advisor are
+not listed there, since the advisor runs only on its own role. Jobs the harness performs map
+onto slots:
+
+| Job                           | Default slot | Named in Settings    |
+| ----------------------------- | ------------ | -------------------- |
+| Implementer, Custom           | `default`    | Main model           |
+| Planner                       | `plan`       | Planning             |
+| Explorer, Researcher          | `task`       | Research and lookups |
+| Reviewer                      | `slow`       | Careful review       |
+| Titles, summaries, compaction | `smol`       | Quick jobs           |
+| Image understanding           | `vision`     | Reading images       |
+| Advisor                       | `advisor`    | Advisor              |
 
 A Project may override the host's table. A job whose slot is not configured
-runs on `default` and the session says so. Every routing decision — the
+runs on `default` and the session says so; Settings shows such a role as
+**Same as main model**. The advisor is the exception: with no model of its own
+it is off, and Settings shows **Off**. Every routing decision — the
 primary, a fallback with its reason and cooldown, a return to the primary, a
 warning about an unconfigured slot — is journaled and shown on the thread's
 harness card and in `octant harness session <thread-id>`.
@@ -207,7 +219,7 @@ silently. The child status reports the identity and version needed for the
 next request. The earlier reply must reach the parent or be explicitly collected
 first. Status inspection does not consume replies, and collection refuses an
 oversized response without marking it consumed.
-Whether one may start at all is **Let the agent start subagents** under
+Whether one may start at all is **Let the agent start helper agents** under
 **Settings → Octant Harness → Helper agents**: on by default, and when it is
 off the lead is told subagents are turned off and does the work itself.
 
@@ -225,10 +237,12 @@ implement: put the strong model on `default` and `slow`, the cheap one on
 
 ## The advisor
 
-When the `advisor` slot is configured, a second model reviews a digest of
-each of the lead's turns. It may redirect the next turn or pause the run for
-you; it can never run a tool, edit a file, or approve anything. Its
-interventions appear on the harness card. A pause holds the thread: the next
+The advisor runs only once you choose a model for the `advisor` slot (the
+**Advisor** role in Settings); until then it is off, even when a main model is
+set, because it costs one extra request on every turn. With a model chosen, a
+second model reviews a digest of each of the lead's turns. It may redirect the
+next turn or pause the run for you; it can never run a tool, edit a file, or
+approve anything. Its interventions appear on the harness card. A pause holds the thread: the next
 prompt is refused with the advisor's reason until you press Resume on the
 harness card, the phone panel, or type `/resume` in the CLI — the decision it
 asked for is yours, not the next prompt's. The lead can also ask it a

@@ -40,6 +40,7 @@ import {
   ReplicaMembershipProjection,
   type ReplicaMembershipJournal,
 } from "./replicaMembershipProjection";
+import { replicaMembershipView } from "./replicaMembershipView";
 import {
   deriveReplicaJoinMatchingCode,
   REPLICA_MAX_SQUATTED_SLOTS,
@@ -304,7 +305,11 @@ function artifactEntry(host: Computer, sequence: number): ReplicaEntry {
     format: REPLICA_ENTRY_FORMAT,
     kind: "artifact-version",
     origin: originOf(host, sequence),
-    artifact: { canvasId: "11111111-1111-4111-8111-111111111111", hostId: "host-south" },
+    artifact: {
+      canvasId: "11111111-1111-4111-8111-111111111111",
+      hostId: "host-south",
+      projectName: "Launch",
+    },
     parents: [],
     contentHash: "a".repeat(64),
     bundle: {
@@ -1307,5 +1312,123 @@ describe("replica membership service", () => {
     const outcome = await north.service.execute({ kind: "revoke", subject: south.id() });
     expect(outcome).toMatchObject({ kind: "refused", reason: "unknown-instance" });
     expect(store.files.has(`${north.id()}/2.json`)).toBe(false);
+  });
+});
+
+describe("membership as Settings › Sync shows it", () => {
+  const viewOf = (host: Computer) =>
+    replicaMembershipView({ state: host.projection.state(), now: NOW, computerName: "Desk" });
+
+  it("shows the joining computer and the approver the same code, and the code the commands accept", async () => {
+    const store = memoryStore();
+    const north = computer({ store: selected(store) });
+    const south = computer({ store: selected(store) });
+    expect(viewOf(north).thisComputer).toEqual({ kind: "none" });
+    expectKind(
+      await north.service.execute({ kind: "create-replica", displayName: "MacBook" }),
+      "replica-created",
+    );
+    const request = expectKind(
+      await south.service.execute({ kind: "write-join-request", displayName: "Mac mini" }),
+      "join-requested",
+    );
+    expectKind(await south.service.execute({ kind: "pull" }), "pulled");
+    const joining = viewOf(south).thisComputer;
+    if (joining.kind !== "joining") throw new Error(`expected joining, got ${joining.kind}`);
+    expect(joining.fresh).toBe(true);
+    expect(joining.approvers).toHaveLength(1);
+    const offered = joining.approvers[0];
+    expect(offered).toMatchObject({ displayName: "MacBook", approvedThisComputer: false });
+
+    expectKind(await north.service.execute({ kind: "pull" }), "pulled");
+    const northView = viewOf(north);
+    expect(northView.thisComputer.kind).toBe("founder");
+    expect(northView.joinRequests).toHaveLength(1);
+    const shown = northView.joinRequests[0];
+    expect(shown?.request.origin.displayName).toBe("Mac mini");
+    expect(shown?.matchingCode).toBe(offered?.matchingCode);
+    expect(shown?.approvedByThisComputer).toBe(false);
+
+    expectKind(
+      await north.service.execute({
+        kind: "approve-join",
+        joinRequest: request.entry,
+        confirmationCode: shown?.matchingCode ?? "",
+      }),
+      "join-approved",
+    );
+    expect(viewOf(north).joinRequests[0]?.approvedByThisComputer).toBe(true);
+    expectKind(await south.service.execute({ kind: "pull" }), "pulled");
+    const approved = viewOf(south).thisComputer;
+    expect(approved.kind === "joining" && approved.approvers[0]?.approvedThisComputer).toBe(true);
+    expectKind(
+      await south.service.execute({
+        kind: "confirm-join",
+        approver: north.id(),
+        confirmationCode: offered?.matchingCode ?? "",
+      }),
+      "join-confirmed",
+    );
+
+    expectKind(await north.service.execute({ kind: "pull" }), "pulled");
+    expect(viewOf(north).joinRequests).toEqual([]);
+    expect(viewOf(north).members).toEqual([
+      {
+        instanceId: north.id(),
+        displayName: "MacBook",
+        role: { kind: "founder" },
+        revoked: false,
+        thisComputer: true,
+        revocable: false,
+      },
+      {
+        instanceId: south.id(),
+        displayName: "Mac mini",
+        role: { kind: "approved", approver: north.id(), approverName: "MacBook" },
+        revoked: false,
+        thisComputer: false,
+        revocable: true,
+      },
+    ]);
+    // The computer that was brought in cannot revoke the one that brought it in.
+    expect(viewOf(south).thisComputer.kind).toBe("member");
+    expect(viewOf(south).members.map((member) => member.revocable)).toEqual([false, false]);
+  });
+
+  it("lists a revoked computer as revoked and the revoked one as having left", async () => {
+    const store = memoryStore();
+    const { north, south } = await joinedPair(store);
+    expectKind(await north.service.execute({ kind: "revoke", subject: south.id() }), "revoked");
+    expect(viewOf(north).members.find((member) => member.displayName === "Mac mini")).toMatchObject(
+      { revoked: true, revocable: false },
+    );
+    expectKind(await south.service.execute({ kind: "pull" }), "pulled");
+    expect(viewOf(south).thisComputer.kind).toBe("left");
+  });
+
+  it("reports the last store failure with when it happened, and nothing it cannot know yet", async () => {
+    const base = memoryStore();
+    let reachable = true;
+    const store: ReplicaStore = {
+      ...base,
+      list: async (cursor) => (reachable ? base.list(cursor) : { status: "not-connected" }),
+    };
+    const north = computer({ store: selected(store) });
+    expectKind(
+      await north.service.execute({ kind: "create-replica", displayName: "MacBook" }),
+      "replica-created",
+    );
+    expect(viewOf(north).status).toEqual({
+      lastPublish: { kind: "not-available" },
+      lastPull: { kind: "not-available" },
+      queued: { kind: "not-available" },
+    });
+    reachable = false;
+    await north.service.execute({ kind: "pull" });
+    expect(viewOf(north).status.lastError).toEqual({
+      at: NOW_ISO,
+      phase: "list",
+      reason: "not-connected",
+    });
   });
 });

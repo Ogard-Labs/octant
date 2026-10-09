@@ -137,6 +137,7 @@ import {
   type ProjectedWindowWorkspace,
   type ProjectedEnvironmentPresentation,
 } from "./shellProjection";
+import { withStartupFailureReason } from "../startupFailureReason";
 import { openSqlite, type SqliteConnection } from "./sqlitePort";
 import { prepareStore } from "./storePath";
 import { loadZenSpace, loadZenSpaceByWindowId, loadZenSpaces } from "./zenProjection";
@@ -147,6 +148,7 @@ import type { CanvasProjection } from "../canvas/canvasProjection";
 import type { GithubCloneProjection } from "./githubCloneProjection";
 import type { ImageJobProjection } from "../image/imageJobProjection";
 import type { ReplicaMembershipProjection } from "../replica/replicaMembershipProjection";
+import type { ReplicaArtifactProjection } from "../replica/replicaArtifactProjection";
 
 export interface VerifiedStoreBackupReceipt extends StoreBackupReceipt {
   readonly path: string;
@@ -170,6 +172,7 @@ export interface PersistenceService {
   readonly githubCloneProjection: GithubCloneProjection;
   readonly imageJobProjection: ImageJobProjection;
   readonly replicaMembershipProjection: ReplicaMembershipProjection;
+  readonly replicaArtifactProjection: ReplicaArtifactProjection;
   readonly readShellSettings: () => ProjectedShellSettings | undefined;
   readonly readWindowWorkspace: (windowId: WindowId) => ProjectedWindowWorkspace | undefined;
   readonly readWindowWorkspaces: () => ReadonlyArray<ProjectedWindowWorkspace>;
@@ -413,6 +416,7 @@ async function acquirePersistence(options: PersistenceLiveOptions): Promise<Pers
       githubCloneProjection: runtime.githubCloneProjection,
       imageJobProjection: runtime.imageJobProjection,
       replicaMembershipProjection: runtime.replicaMembershipProjection,
+      replicaArtifactProjection: runtime.replicaArtifactProjection,
       readShellSettings: () => readShellSettings(connection),
       readWindowWorkspace: (windowId) => readWindowWorkspace(connection, windowId),
       readWindowWorkspaces: () => readWindowWorkspaces(connection),
@@ -525,10 +529,13 @@ function redactStartupFailure(error: unknown): PersistenceStartupFailed {
     return storageFailure(error.category);
   }
   const sqliteFailure = classifySqliteFailure(error);
-  return storageFailure(sqliteFailure === "write-race" ? "busy" : "unavailable");
+  return storageFailure(sqliteFailure === "write-race" ? "busy" : "unavailable", error);
 }
 
-function storageFailure(category: "busy" | "unavailable"): PersistenceStartupFailed {
+function storageFailure(
+  category: "busy" | "unavailable",
+  cause?: unknown,
+): PersistenceStartupFailed {
   return category === "busy"
     ? new PersistenceStartupFailed({
         category: "storage-busy",
@@ -536,6 +543,6 @@ function storageFailure(category: "busy" | "unavailable"): PersistenceStartupFai
       })
     : new PersistenceStartupFailed({
         category: "storage-unavailable",
-        message: "Octant storage is unavailable.",
+        message: withStartupFailureReason("Octant storage is unavailable.", cause),
       });
 }

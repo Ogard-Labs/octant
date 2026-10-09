@@ -1,4 +1,8 @@
-import type { ContextMetadataSource } from "@octant/contracts";
+import type {
+  ContextMetadataSource,
+  ImageInputCapability,
+  ProviderInputModality,
+} from "@octant/contracts";
 
 /**
  * What Octant knows about one model's context window, from the model's
@@ -41,6 +45,12 @@ export interface ModelContextProfile {
   readonly names: ReadonlyArray<string>;
   readonly contextWindow: number;
   readonly maxOutput?: number;
+  /**
+   * Set only where the cited page lists image input for every name in the
+   * profile. Absent means the page was not read as saying so, and the model
+   * stays text-only unless its provider reports otherwise.
+   */
+  readonly acceptsImages?: true;
   readonly reference: string;
 }
 
@@ -49,22 +59,25 @@ const OPENAI_MODELS = "https://platform.openai.com/docs/models";
 const GEMINI_MODELS = "https://ai.google.dev/gemini-api/docs/models";
 
 /**
- * Families whose windows their providers publish. Kept small on purpose: an
- * entry that is wrong is worse than none, because it is believed until the
- * endpoint refuses a request. A family missing here is learned from its first
- * refusal instead.
+ * Families whose windows their providers publish. Each cited page also lists
+ * the family's input modalities, which is where `acceptsImages` was read.
+ * Kept small on purpose: an entry that is wrong is worse than none, because
+ * it is believed until the endpoint refuses a request. A family missing here
+ * is learned from its first refusal instead, and stays text-only.
  */
 export const MODEL_CONTEXT_PROFILES: ReadonlyArray<ModelContextProfile> = [
   {
     names: ["claude-opus-4-5"],
     contextWindow: 200_000,
     maxOutput: 64_000,
+    acceptsImages: true,
     reference: ANTHROPIC_MODELS,
   },
   {
     names: ["claude-opus-4-1", "claude-opus-4", "claude-opus-4-0"],
     contextWindow: 200_000,
     maxOutput: 32_000,
+    acceptsImages: true,
     reference: ANTHROPIC_MODELS,
   },
   {
@@ -77,34 +90,49 @@ export const MODEL_CONTEXT_PROFILES: ReadonlyArray<ModelContextProfile> = [
     ],
     contextWindow: 200_000,
     maxOutput: 64_000,
+    acceptsImages: true,
     reference: ANTHROPIC_MODELS,
   },
   {
     names: ["claude-3-5-haiku"],
     contextWindow: 200_000,
     maxOutput: 8_192,
+    // It launched text-only; Anthropic's release notes of 24 February 2025
+    // added vision to it.
+    acceptsImages: true,
     reference: ANTHROPIC_MODELS,
   },
   {
     names: ["gpt-5", "gpt-5-mini", "gpt-5-nano"],
     contextWindow: 400_000,
     maxOutput: 128_000,
+    acceptsImages: true,
     reference: OPENAI_MODELS,
   },
   {
     names: ["gpt-4-1", "gpt-4-1-mini", "gpt-4-1-nano"],
     contextWindow: 1_047_576,
     maxOutput: 32_768,
+    acceptsImages: true,
     reference: OPENAI_MODELS,
   },
   {
     names: ["gpt-4o", "gpt-4o-mini"],
     contextWindow: 128_000,
     maxOutput: 16_384,
+    acceptsImages: true,
     reference: OPENAI_MODELS,
   },
   {
-    names: ["o3", "o3-mini", "o4-mini"],
+    names: ["o3", "o4-mini"],
+    contextWindow: 200_000,
+    maxOutput: 100_000,
+    acceptsImages: true,
+    reference: OPENAI_MODELS,
+  },
+  {
+    // Same window as o3, but its model page lists text input only.
+    names: ["o3-mini"],
     contextWindow: 200_000,
     maxOutput: 100_000,
     reference: OPENAI_MODELS,
@@ -113,6 +141,7 @@ export const MODEL_CONTEXT_PROFILES: ReadonlyArray<ModelContextProfile> = [
     names: ["gemini-2-5-pro", "gemini-2-5-flash"],
     contextWindow: 1_048_576,
     maxOutput: 65_536,
+    acceptsImages: true,
     reference: GEMINI_MODELS,
   },
   {
@@ -212,4 +241,63 @@ export function learnContextWindow(
   }
   if (stored === undefined) return undefined;
   return Math.max(stored, observation.usedTokens);
+}
+
+/** What Octant can say about the inputs a model accepts. */
+export interface ResolvedModelInputModalities {
+  readonly inputModalities: ReadonlyArray<ProviderInputModality>;
+  /** Absent when nothing named image support either way; callers read that as unknown. */
+  readonly imageInput?: ImageInputCapability;
+}
+
+const KNOWN_INPUT_MODALITIES: ReadonlyArray<ProviderInputModality> = [
+  "text",
+  "image",
+  "audio",
+  "document",
+];
+
+/**
+ * The modalities a provider's own model metadata lists, such as OpenRouter's
+ * `architecture.input_modalities` or a plan listing's `input_modalities`.
+ * Entries Octant has no modality for are ignored; a value that is not a list,
+ * or names none Octant knows, reports nothing rather than text-only.
+ */
+export function readReportedInputModalities(
+  value: unknown,
+): ReadonlyArray<ProviderInputModality> | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const listed = new Set(value.filter((entry): entry is string => typeof entry === "string"));
+  const modalities = KNOWN_INPUT_MODALITIES.filter((modality) => listed.has(modality));
+  return modalities.length === 0 ? undefined : modalities;
+}
+
+/**
+ * The inputs a model accepts, from the most direct source that names them:
+ * the modalities its provider reported, then the built-in profile matched on
+ * the model's id or the model the endpoint said it served. Nothing naming
+ * them leaves the model text-only, with image support unknown rather than
+ * refused, so it fails closed without claiming the model cannot see.
+ */
+export function resolveModelInputModalities(model: {
+  readonly id: string;
+  readonly servedModelId?: string | undefined;
+  readonly reportedInputModalities?: ReadonlyArray<ProviderInputModality> | undefined;
+}): ResolvedModelInputModalities {
+  const reported = model.reportedInputModalities;
+  if (reported !== undefined && reported.length > 0) {
+    const inputModalities = KNOWN_INPUT_MODALITIES.filter((modality) =>
+      reported.includes(modality),
+    );
+    return {
+      inputModalities,
+      imageInput: inputModalities.includes("image") ? "supported" : "unsupported",
+    };
+  }
+  const profile =
+    findModelContextProfile(model.id) ??
+    (model.servedModelId === undefined ? undefined : findModelContextProfile(model.servedModelId));
+  return profile?.acceptsImages === true
+    ? { inputModalities: ["text", "image"], imageInput: "supported" }
+    : { inputModalities: ["text"] };
 }

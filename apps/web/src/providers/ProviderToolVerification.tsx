@@ -47,8 +47,8 @@ export function ProviderToolVerification(props: ProviderToolVerificationProps) {
       </span>
       {modelIds.length === 0 ? (
         <span>
-          Verify tools for any model from the model picker or Settings → Octant Harness. Each check
-          sends one request.
+          Verify tools for a model from the model picker, or beside it in Model roles once a role
+          uses it. Each check sends one request.
         </span>
       ) : (
         <>

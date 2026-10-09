@@ -82,7 +82,9 @@ import {
 import { RemoteAccessSettingsSection } from "../host/RemoteAccessSettingsSection";
 import { SyncSettingsSection } from "../settings/SyncSettingsSection";
 import type { FolderBrowseClient } from "@octant/client-runtime/folder-browse-client";
+import type { ReplicaMembershipClient } from "@octant/client-runtime/replica-membership-client";
 import type { ReplicaStoreSettingsClient } from "@octant/client-runtime/replica-store-settings-client";
+import type { ReplicaSyncStatusClient } from "@octant/client-runtime/replica-sync-status-client";
 import { FederatedHostsLifecyclePanel } from "../host/FederatedHostsLifecyclePanel";
 import {
   type SettingsNativeCapabilities,
@@ -133,7 +135,8 @@ import {
 } from "../harness/NativeHarnessRoutingPanel";
 import type { NativeHarnessClient } from "@octant/client-runtime/native-harness-client";
 import { LOCAL_HOST_ID } from "@octant/contracts";
-import { isNativeHarnessDriverKind, modelCarriesAppManagedTools } from "@octant/domain";
+import { buildModelPickerGroups, isNativeHarnessDriverKind } from "@octant/domain";
+import type { PickerGroup } from "@octant/domain";
 import type { AutomationNotificationClient } from "@octant/client-runtime/automation-notification-client";
 import { ThemeAppearanceEditor } from "../theme/ThemeAppearanceEditor";
 import { AppUpdateSettings } from "../settings/AppUpdateSettings";
@@ -183,6 +186,10 @@ export interface SettingsViewProps {
   readonly hostControlClient?: HostControlClient;
   /** Settings › Sync on this host; absent off it, where store setup is not offered. */
   readonly replicaStoreSettingsClient?: ReplicaStoreSettingsClient;
+  /** Creating, joining, and revoking on this host; absent off it. */
+  readonly replicaMembershipClient?: ReplicaMembershipClient;
+  /** Read-only sync status, used when this client is not on the host. */
+  readonly replicaSyncStatusClient?: ReplicaSyncStatusClient;
   /** The host's folder browser, for choosing a synced folder. */
   readonly folderBrowseClient?: Pick<FolderBrowseClient, "browse">;
   readonly workThreads?: ReadonlyArray<{ readonly id: string; readonly title: string }>;
@@ -796,7 +803,7 @@ function ActiveSectionContent({
   // Add endpoint can assign Octant Harness roles; the roles panel then reads
   // them again rather than keep a table whose version the host has moved past.
   const [rolesRevision, setRolesRevision] = useState(0);
-  // Voice, image sources, and the harness model slots all run on model
+  // Voice, image sources, and the harness model roles all run on model
   // endpoints, so their "connect one" actions land on the add-endpoint row.
   const openModelEndpoints = () =>
     onApplyDeepLink({ section: "harness", setting: settingId("model-endpoints") });
@@ -1007,15 +1014,13 @@ function ActiveSectionContent({
             />
           )}
           {/* Hidden rather than unmounted while an endpoint's page is open, so
-              an unsaved slot edit survives the visit. */}
+              an open backup list or a backup being added survives the visit. */}
           {props.nativeHarnessClient === undefined ? null : (
             <div className="settings-section-stack" hidden={harnessEndpointOpen}>
-              <p className="native-harness-panel__lead">
-                Models from the endpoints above appear under <strong>Octant</strong> in the model
-                picker. Assign models to roles below.
-              </p>
               <NativeHarnessRoutingPanel
                 client={props.nativeHarnessClient}
+                focused={focusedSetting === settingId("model-roles")}
+                groups={nativeHarnessPickerGroups(props.providerController)}
                 key={rolesRevision}
                 hostId={LOCAL_HOST_ID}
                 onOpenModelEndpoints={openModelEndpoints}
@@ -1109,6 +1114,8 @@ function ActiveSectionContent({
           client={props.replicaStoreSettingsClient}
           focusedSetting={focusedSetting}
           folderBrowse={props.folderBrowseClient}
+          membership={props.replicaMembershipClient}
+          status={props.replicaSyncStatusClient}
         />
       );
     case "data":
@@ -2321,27 +2328,29 @@ function nativeHarnessProviderOptions(
   if (controller === undefined) return [];
   return controller.instances
     .filter((instance) => instance.enabled && isNativeHarnessDriverKind(instance.driverKind))
-    .map((instance) => {
-      const observed = controller.observedByInstance.get(instance.id);
-      const configured: ReadonlyArray<string> =
-        instance.configuration.kind === "openai-compatible-http" ||
-        instance.configuration.kind === "anthropic-compatible-http" ||
-        instance.configuration.kind === "azure-foundry-openai-http"
-          ? instance.configuration.manualModelIds.map(String)
-          : [];
-      return {
-        instanceId: String(instance.id),
-        label: instance.displayName,
-        models: (observed?.models ?? []).map((model) => ({
-          id: String(model.id),
-          label: model.displayName,
-          configured: configured.includes(String(model.id)),
-          ...(observed === undefined
-            ? {}
-            : { toolsReady: modelCarriesAppManagedTools(observed, model.id) }),
-        })),
-      };
-    });
+    .map((instance) => ({
+      instanceId: String(instance.id),
+      label: instance.displayName,
+      modelCount: controller.observedByInstance.get(instance.id)?.models.length ?? 0,
+    }));
+}
+
+/**
+ * The harness endpoints' models as the compact chooser lists them. Chat's
+ * grouping lists every model, Chat-only ones included, because a role may
+ * answer without tools and the panel says so beside the choice.
+ */
+function nativeHarnessPickerGroups(
+  controller: SettingsViewProps["providerController"],
+): ReadonlyArray<PickerGroup> {
+  if (controller === undefined) return [];
+  return buildModelPickerGroups({
+    instances: controller.instances,
+    observedByInstance: controller.observedByInstance,
+    providerOrder: controller.defaults.providerOrder,
+    hiddenModels: controller.defaults.hiddenModels,
+    mode: "chat",
+  }).filter((group) => group.runtime === "octant-harness");
 }
 
 function privacyThreadsFromSettings(props: SettingsViewProps): ReadonlyArray<PrivacyTarget> {

@@ -218,24 +218,6 @@
   gap: 0;
 }
 
-.settings-view .native-harness-slots,
-.settings-view .native-harness-jobs {
-  gap: 0;
-  margin: 0;
-}
-
-.settings-view .native-harness-slot,
-.settings-view .native-harness-job {
-  min-height: 44px;
-  padding: 10px 0;
-  border-bottom: 1px solid var(--oct-hairline);
-}
-
-.settings-view .native-harness-slot:first-child,
-.settings-view .native-harness-job:first-child {
-  border-top: 1px solid var(--oct-hairline);
-}
-
 .settings-view .native-harness-card {
   margin: 0;
   padding: 14px 0;

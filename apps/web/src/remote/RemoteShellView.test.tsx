@@ -230,6 +230,25 @@ function answerProduct(seen: ProductRequest[]) {
         ],
       });
     }
+    if (method === "GET" && path === "/api/replica-sync/status") {
+      return Response.json({
+        kind: "replica-sync-status",
+        thisComputer: "founder",
+        members: [
+          {
+            displayName: "Studio Mac",
+            role: { kind: "founder" },
+            revoked: false,
+            thisComputer: true,
+          },
+        ],
+        status: {
+          lastPublish: { kind: "not-available" },
+          lastPull: { kind: "not-available" },
+          queued: { kind: "not-available" },
+        },
+      });
+    }
     if (method === "GET" && path === "/api/projects/bootstrap") {
       return Response.json({
         active: [
@@ -373,6 +392,27 @@ describe("RemoteShellView", () => {
     expect(screen.getByText("Provider credentials")).toBeInTheDocument();
     expect(screen.getAllByText("Unavailable remotely").length).toBeGreaterThanOrEqual(4);
     expect(screen.queryByRole("button", { name: /approve/i })).not.toBeInTheDocument();
+  });
+
+  it("shows sync status and the computers read-only, with nothing to set up or revoke", async () => {
+    const { bridge } = await readyBridge();
+    render(<RemoteShellView bridge={bridge} onReset={vi.fn()} />);
+
+    expect(
+      await screen.findByText(
+        "Setting up sync, joining, and revoking happen in the Octant app on the host machine.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Set up sync · this computer")).toBeInTheDocument();
+    for (const name of [
+      "Set up sync",
+      "Ask to join",
+      "Check the store",
+      /^Revoke (?!this device)/,
+      "Approve…",
+    ]) {
+      expect(screen.queryByRole("button", { name })).toBeNull();
+    }
   });
 
   it("shows device self-service and host health, and turns stale without offering to send", async () => {

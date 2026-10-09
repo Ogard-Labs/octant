@@ -100,14 +100,6 @@ export const KNOWN_ISLANDS: ReadonlyMap<string, string> = new Map([
     "packages/provider-sdk/src/contextFactsConformance.ts",
     "Conformance evidence a driver test runs against contextFacts; test scaffolding by intent, and reachable only from tests is its correct state. Remove once a product runner imports it or the last driver test that uses the kit is retired.",
   ],
-  [
-    "packages/domain/src/replicaEntryPolicy.ts",
-    "Pure reconcile policy for artifact replica entries. Membership is derived from the records a host holds, not reconciled entry by entry, and a pull holds verified artifact entries without importing them. Remove once the artifact import imports reconcileReplicaEntry.",
-  ],
-  [
-    "packages/client-runtime/src/replicaMembershipClient.ts",
-    "Loopback client for the host-only replica membership commands. Settings › Sync chooses the store and turns sync on, but no view creates a replica, joins, or revokes yet, so nothing imports it. Remove once a Settings sync view that runs membership commands imports the client.",
-  ],
 ]);
 
 /** Route modules exempt from Rule A, with the reason they are not registered. */

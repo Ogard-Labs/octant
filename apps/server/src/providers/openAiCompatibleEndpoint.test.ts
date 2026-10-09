@@ -30,6 +30,7 @@ function endpoint(
   overrides: Partial<OpenAiCompatibleProviderConfiguration> = {},
   credentialResolver: ProviderCredentialResolver = resolver(),
   requestBodyBytes?: number,
+  responseBodyBytes = 128,
 ) {
   return makeOpenAiCompatibleEndpoint({
     instanceId: "5ef85ae4-bb67-4137-9ba0-70ee21db0ddb",
@@ -38,7 +39,7 @@ function endpoint(
     fetch,
     limits: {
       connectionTimeoutMs: 50,
-      responseBodyBytes: 128,
+      responseBodyBytes,
       ...(requestBodyBytes === undefined ? {} : { requestBodyBytes }),
     },
   });
@@ -214,6 +215,34 @@ describe("OpenAI-compatible endpoint policy", () => {
     const result = await probeModels(endpoint(fetch, { manualModelIds: [] }));
 
     expect(result.models.map(({ id }) => id)).toEqual(["model-a"]);
+  });
+
+  it("reports image input from the listing, then the offline profile, and text-only otherwise", async () => {
+    const fetch = vi.fn(async () =>
+      Response.json({
+        data: [
+          { id: "or/house", architecture: { input_modalities: ["text", "image"] } },
+          { id: "openai/gpt-4o", architecture: { input_modalities: ["text"] } },
+          { id: "gpt-4o" },
+          { id: "house" },
+        ],
+      }),
+    );
+
+    const result = await probeModels(
+      endpoint(fetch, { manualModelIds: ["gpt-5" as never] }, resolver(), undefined, 1_024),
+    );
+
+    expect(
+      result.models.map(({ id, inputModalities, imageInput }) => [id, inputModalities, imageInput]),
+    ).toEqual([
+      ["or/house", ["text", "image"], "supported"],
+      // OpenRouter's own text-only answer wins over the GPT-4o profile.
+      ["openai/gpt-4o", ["text"], "unsupported"],
+      ["gpt-4o", ["text", "image"], "supported"],
+      ["house", ["text"], undefined],
+      ["gpt-5", ["text", "image"], "supported"],
+    ]);
   });
 
   it.each([

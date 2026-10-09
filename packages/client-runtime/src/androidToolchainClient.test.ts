@@ -12,6 +12,7 @@ let createAndroidToolchainClient: (options: Record<string, unknown>) => {
         readonly status: "watching";
         readonly screen: { readonly width: number; readonly height: number };
         readonly frames: AsyncIterable<Uint8Array>;
+        readonly transport?: { readonly kind: string; readonly reason?: string };
       }
     | { readonly status: "failed"; readonly kind: string; readonly message: string }
   >;
@@ -114,5 +115,27 @@ describe("androidToolchainClient", () => {
       new URL("http://127.0.0.1:13773/api/android/screen-stream"),
       expect.objectContaining({ method: "POST" }),
     );
+  });
+
+  it("says whether the frames are the live stream or screencap snapshots, and why", async () => {
+    const watchWith = async (transport: string | undefined) => {
+      const headers: Record<string, string> = { "x-octant-simulator-screen": "1080x2400" };
+      if (transport !== undefined) headers["x-octant-android-transport"] = transport;
+      const client = createAndroidToolchainClient({
+        baseUrl: "http://127.0.0.1:13773",
+        fetch: vi.fn(async () => new Response(new Uint8Array(), { status: 200, headers })),
+        windowCapability: "A".repeat(43),
+      });
+      const watch = await client.watchScreen(watchRequest);
+      if (watch.status !== "watching") throw new Error("expected a watch");
+      return watch.transport;
+    };
+    await expect(watchWith('{"kind":"stream"}')).resolves.toEqual({ kind: "stream" });
+    await expect(watchWith('{"kind":"screencap","reason":"tool-missing"}')).resolves.toEqual({
+      kind: "screencap",
+      reason: "tool-missing",
+    });
+    await expect(watchWith('{"kind":"screencap","reason":"guess"}')).resolves.toBeUndefined();
+    await expect(watchWith(undefined)).resolves.toBeUndefined();
   });
 });

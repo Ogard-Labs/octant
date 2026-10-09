@@ -28,9 +28,9 @@ const strict = { parseOptions: { onExcessProperty: "error" as const } };
 // in `canvasIdentity.ts`: version 3 added the mockup block, version 4 the
 // thread presentation, version 5 the treemap block, version 6 the heatmap
 // block, version 7 the ranked bar-list block, version 8 the
-// entity-relationship, swimlane, and mind map diagram kinds, and version 9 the
-// design block, which the definition filters below admit only under those
-// declared versions.
+// entity-relationship, swimlane, and mind map diagram kinds, version 9 the
+// design block, and version 10 the comparison matrix, which the definition
+// filters below admit only under those declared versions.
 
 // These are renderer-facing aggregate limits. Per-field structural limits are
 // also applied below; the domain policy re-checks the aggregate values before
@@ -90,6 +90,19 @@ export const CANVAS_MAX_SWIMLANE_LANES = 32;
 // A mind map note is a remark beside a topic, not a paragraph; the cap keeps
 // the tree readable when every node carries one.
 export const CANVAS_MAX_MINDMAP_NOTE_LENGTH = 240;
+// A comparison matrix is read across: a dozen options is already a wide table
+// at phone width, and four dozen criteria is a long review. Past these the
+// decision wants splitting, not a wider grid.
+export const CANVAS_MAX_MATRIX_OPTIONS = 12;
+export const CANVAS_MAX_MATRIX_CRITERIA = 48;
+export const CANVAS_MAX_MATRIX_CELLS = CANVAS_MAX_MATRIX_OPTIONS * CANVAS_MAX_MATRIX_CRITERIA;
+// A cell's text is a short reading ("EU only", "beta"); the reasoning behind it
+// is a note, which is longer and is listed under the matrix.
+export const CANVAS_MAX_MATRIX_CELL_TEXT_LENGTH = 120;
+export const CANVAS_MAX_MATRIX_NOTE_LENGTH = 280;
+// Weights are relative; a hundred is room for percentages without inviting
+// figures whose size says nothing the ratio does not.
+export const CANVAS_MAX_MATRIX_WEIGHT = 100;
 
 // The schema version that introduced each version-gated block kind or hint. A
 // document carrying one below the version that introduced it is a declared
@@ -103,6 +116,7 @@ export const CANVAS_BAR_LIST_SCHEMA_VERSION = 7;
 // they arrive together in the block catalog, so one bump admits them all.
 export const CANVAS_DIAGRAM_KINDS_SCHEMA_VERSION = 8;
 export const CANVAS_DESIGN_SCHEMA_VERSION = 9;
+export const CANVAS_COMPARISON_MATRIX_SCHEMA_VERSION = 10;
 // The metric's sparkline, goodDirection, and caption arrived with the bar list.
 export const CANVAS_METRIC_TREND_SCHEMA_VERSION = 7;
 
@@ -298,6 +312,7 @@ export const CanvasBlockKind = Schema.Literal(
   "heatmap",
   "design",
   "bar-list",
+  "comparison-matrix",
 );
 export type CanvasBlockKind = typeof CanvasBlockKind.Type;
 
@@ -833,6 +848,109 @@ export const CanvasBarListBlock = Schema.Struct({
   scale: Schema.optional(CanvasBarListScale),
 }).annotations(strict);
 export type CanvasBarListBlock = typeof CanvasBarListBlock.Type;
+
+/**
+ * A comparison or decision matrix: options as columns, criteria as rows.
+ *
+ * Options and criteria take node identifiers so a comment can anchor to a
+ * column or a row through the existing node anchor; the board contract has no
+ * cell coordinate, so a cell is commented on through its row or column. A cell
+ * names its coordinate by id, so a reader may reorder the options by their
+ * weighted score as view state without moving a reading to another option.
+ */
+export const CanvasMatrixOptionId = CanvasNodeId;
+export const CanvasMatrixCriterionId = CanvasNodeId;
+
+const CanvasMatrixNote = boundedText(CANVAS_MAX_MATRIX_NOTE_LENGTH);
+
+export const CanvasMatrixOption = Schema.Struct({
+  optionId: CanvasMatrixOptionId,
+  label: CanvasLabel,
+  /** A short line under the option's name, e.g. "managed, EU region". */
+  detail: Schema.optional(CanvasMatrixNote),
+}).annotations(strict);
+export type CanvasMatrixOption = typeof CanvasMatrixOption.Type;
+
+/**
+ * Which end of a criterion is good. `lower` turns the reading round before it
+ * counts toward a weighted score, so a low cost or a "no" on lock-in scores
+ * well. Absent reads as higher.
+ */
+export const CanvasMatrixPreference = Schema.Literal("higher", "lower");
+export type CanvasMatrixPreference = typeof CanvasMatrixPreference.Type;
+
+export const CanvasMatrixCriterion = Schema.Struct({
+  criterionId: CanvasMatrixCriterionId,
+  label: CanvasLabel,
+  /** Relative importance; absent counts as 1, and 0 keeps the row out of the score. */
+  weight: Schema.optional(FiniteNumber.pipe(Schema.between(0, CANVAS_MAX_MATRIX_WEIGHT))),
+  prefer: Schema.optional(CanvasMatrixPreference),
+  detail: Schema.optional(CanvasMatrixNote),
+}).annotations(strict);
+export type CanvasMatrixCriterion = typeof CanvasMatrixCriterion.Type;
+
+export const CanvasMatrixGlyph = Schema.Literal("yes", "partial", "no");
+export type CanvasMatrixGlyph = typeof CanvasMatrixGlyph.Type;
+
+const CanvasMatrixCellCoordinate = {
+  criterionId: CanvasMatrixCriterionId,
+  optionId: CanvasMatrixOptionId,
+  /** Why the cell reads as it does; listed under the matrix, numbered. */
+  note: Schema.optional(CanvasMatrixNote),
+} as const;
+
+// One reading per cell: a score, a short text, or a yes / partial / no glyph.
+// Each shape is strict, so a cell carrying two readings matches none of them
+// and is refused rather than drawn as whichever the decoder tried first.
+export const CanvasMatrixScoreCell = Schema.Struct({
+  ...CanvasMatrixCellCoordinate,
+  score: FiniteNumber,
+}).annotations(strict);
+export const CanvasMatrixTextCell = Schema.Struct({
+  ...CanvasMatrixCellCoordinate,
+  text: boundedNonEmptyText(CANVAS_MAX_MATRIX_CELL_TEXT_LENGTH),
+}).annotations(strict);
+export const CanvasMatrixGlyphCell = Schema.Struct({
+  ...CanvasMatrixCellCoordinate,
+  glyph: CanvasMatrixGlyph,
+}).annotations(strict);
+export const CanvasMatrixCell = Schema.Union(
+  CanvasMatrixScoreCell,
+  CanvasMatrixTextCell,
+  CanvasMatrixGlyphCell,
+);
+export type CanvasMatrixCell = typeof CanvasMatrixCell.Type;
+
+/** The scale scores are read on, e.g. 1 to 5. Absent spans zero to the largest score. */
+export const CanvasMatrixScoreRange = Schema.Struct({
+  min: FiniteNumber,
+  max: FiniteNumber,
+})
+  .annotations(strict)
+  .pipe(
+    Schema.filter((range) => range.min < range.max, {
+      message: () => "A comparison matrix score range must run from a lower to a higher score.",
+    }),
+  );
+export type CanvasMatrixScoreRange = typeof CanvasMatrixScoreRange.Type;
+
+export const CanvasComparisonMatrixBlock = Schema.Struct({
+  ...CanvasBlockFields,
+  kind: Schema.Literal("comparison-matrix"),
+  options: Schema.NonEmptyArray(CanvasMatrixOption).pipe(
+    Schema.maxItems(CANVAS_MAX_MATRIX_OPTIONS),
+  ),
+  criteria: Schema.NonEmptyArray(CanvasMatrixCriterion).pipe(
+    Schema.maxItems(CANVAS_MAX_MATRIX_CRITERIA),
+  ),
+  cells: Schema.Array(CanvasMatrixCell).pipe(Schema.maxItems(CANVAS_MAX_MATRIX_CELLS)),
+  scoreRange: Schema.optional(CanvasMatrixScoreRange),
+  /** The option the author recommends; drawn apart, never inferred from the scores. */
+  recommendedOptionId: Schema.optional(CanvasMatrixOptionId),
+  /** Why the recommended option, in a sentence or two. */
+  recommendation: Schema.optional(boundedText(CANVAS_MAX_MATRIX_NOTE_LENGTH * 2)),
+}).annotations(strict);
+export type CanvasComparisonMatrixBlock = typeof CanvasComparisonMatrixBlock.Type;
 
 export const CanvasTimelineItem = Schema.Struct({
   itemId: boundedToken("CanvasTimelineItemId"),
@@ -1444,6 +1562,7 @@ export const CanvasBlock = Schema.Union(
   CanvasHeatmapMatrixBlock,
   CanvasHeatmapCalendarBlock,
   CanvasBarListBlock,
+  CanvasComparisonMatrixBlock,
   // Typed actions (Canvas D). The block is a declarative reference to an
   // allowlisted command; the server reauthorizes every action before any side
   // effect, so union membership never makes a definition executable.
@@ -1476,8 +1595,8 @@ export const CanvasDefinition = Schema.Struct({
   .pipe(
     // Version-gated blocks and hints: a mockup is admitted from version 3, the
     // thread presentation from version 4, a treemap from version 5, a heatmap
-    // from version 6, a bar list and the metric trend fields from version 7, and
-    // a design from version 9. A
+    // from version 6, a bar list and the metric trend fields from version 7, a
+    // design from version 9, and a comparison matrix from version 10. A
     // rolled-back runtime that never learned a kind or hint must see a document
     // carrying it as a declared future version, not as a document that failed
     // to decode. Each keeps its own floor so an earlier document stays valid.
@@ -1555,6 +1674,15 @@ export const CanvasDefinition = Schema.Struct({
       {
         message: () =>
           `Design blocks require Canvas schema version ${String(CANVAS_DESIGN_SCHEMA_VERSION)}.`,
+      },
+    ),
+    Schema.filter(
+      (definition) =>
+        definition.schemaVersion >= CANVAS_COMPARISON_MATRIX_SCHEMA_VERSION ||
+        !definition.blocks.some((block) => block.kind === "comparison-matrix"),
+      {
+        message: () =>
+          `Comparison matrix blocks require Canvas schema version ${String(CANVAS_COMPARISON_MATRIX_SCHEMA_VERSION)}.`,
       },
     ),
   );

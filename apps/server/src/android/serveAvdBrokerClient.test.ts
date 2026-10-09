@@ -36,16 +36,22 @@ describe("serve-avd broker client", () => {
       fetchImpl,
     );
     expect(port).toBeDefined();
-    await expect(port?.open("Pixel_9")).resolves.toBeUndefined();
-    await expect(port?.open("emulator-5554")).resolves.toEqual({
-      origin: "http://127.0.0.1:9",
-      streamUrl: "http://127.0.0.1:9/helper/emulator-5554/stream.mjpeg",
+    await expect(port?.open("Pixel_9")).resolves.toEqual({
+      status: "unavailable",
+      reason: "not-emulator",
+    });
+    await expect(port?.open("emulator-5554", { sdkRoot: "/sdk" })).resolves.toEqual({
+      status: "attached",
+      attachment: {
+        origin: "http://127.0.0.1:9",
+        streamUrl: "http://127.0.0.1:9/helper/emulator-5554/stream.mjpeg",
+      },
     });
     expect(fetchImpl).toHaveBeenCalledWith(
       endpoint,
       expect.objectContaining({
         method: "POST",
-        body: JSON.stringify({ serial: "emulator-5554" }),
+        body: JSON.stringify({ serial: "emulator-5554", sdkRoot: "/sdk" }),
       }),
     );
 
@@ -60,6 +66,30 @@ describe("serve-avd broker client", () => {
           streamUrl: "http://192.168.1.8:9/helper/emulator-5554/stream.mjpeg",
         }),
     );
-    await expect(remote?.open("emulator-5554")).resolves.toBeUndefined();
+    await expect(remote?.open("emulator-5554")).resolves.toEqual({
+      status: "unavailable",
+      reason: "desktop-unreachable",
+    });
+  });
+
+  it("passes on why the desktop could not attach serve-avd", async () => {
+    const answering = (status: number, body: unknown) =>
+      serveAvdFromEnvironment(
+        { OCTANT_SERVE_AVD_BROKER_URL: endpoint, OCTANT_SERVE_AVD_BROKER_TOKEN: token },
+        async () => Response.json(body, { status }),
+      );
+    await expect(
+      answering(503, { error: "managed-device-broker-unavailable", reason: "timed-out" })?.open(
+        "emulator-5554",
+      ),
+    ).resolves.toEqual({ status: "unavailable", reason: "timed-out" });
+    await expect(
+      answering(503, { error: "managed-device-broker-unavailable", reason: "made-up" })?.open(
+        "emulator-5554",
+      ),
+    ).resolves.toEqual({ status: "unavailable", reason: "desktop-unreachable" });
+    await expect(
+      answering(400, { error: "managed-device-broker-refused" })?.open("emulator-5554"),
+    ).resolves.toEqual({ status: "unavailable", reason: "desktop-unreachable" });
   });
 });

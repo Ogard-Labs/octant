@@ -5387,9 +5387,16 @@ describe("ChatService", () => {
     const beforeAttachmentPurge = vi.fn(async (threadId: ChatThreadId) => {
       expect(persistence.readChatThread(threadId)?.lifecycle).toBe("deleting");
       expect(attachmentStore.isQueued(threadId, decodeChatAttachmentId(ids.attachment))).toBe(true);
-      expect(waitingAdmission).toBeDefined();
+      if (waitingAdmission === undefined) throw new Error("Expected a send waiting on admission.");
       // Queue purge waits for its in-flight admit, which must acquire Chat's admission lock.
-      await waitingAdmission;
+      // With the lock free, that send settles in microtasks, before the next event-loop turn.
+      // Racing it against that turn reports a held lock as a failure instead of a hang that
+      // only a wall-clock timeout could catch, which a loaded CI runner tripped spuriously.
+      const admitted = await Promise.race([
+        waitingAdmission.then(() => "settled" as const),
+        new Promise<"still waiting">((resolve) => setImmediate(() => resolve("still waiting"))),
+      ]);
+      expect(admitted).toBe("settled");
       expect(
         await attachmentStore.releaseQueued(threadId, "queued-message", {
           disposition: "draft",
@@ -5453,7 +5460,7 @@ describe("ChatService", () => {
       unsubscribe();
       await waitingAdmission;
     }
-  }, 2_000);
+  });
 
   it("keeps deletion retryable when queued attachment cleanup fails", async () => {
     const beforeAttachmentPurge = vi

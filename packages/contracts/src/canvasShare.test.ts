@@ -429,6 +429,43 @@ describe("Canvas share contracts", () => {
     expect(decodeCanvasStaticExportDocument(exported)).toEqual(exported);
   });
 
+  it("shares a comparison matrix with its weights, readings, notes, and recommendation from share version 4", () => {
+    const matrix = {
+      blockId: "state-store",
+      schemaVersion: 10,
+      kind: "comparison-matrix",
+      options: [
+        { optionId: "sqlite", label: "SQLite", detail: "One file per host" },
+        { optionId: "postgres", label: "Postgres" },
+      ],
+      criteria: [
+        { criterionId: "ops", label: "Operational cost", weight: 2, prefer: "lower" },
+        { criterionId: "offline", label: "Works offline" },
+        { criterionId: "licence", label: "Licence" },
+      ],
+      cells: [
+        { criterionId: "ops", optionId: "sqlite", score: 1, note: "No server to run" },
+        { criterionId: "offline", optionId: "postgres", glyph: "partial" },
+        { criterionId: "licence", optionId: "sqlite", text: "Public domain" },
+      ],
+      scoreRange: { min: 1, max: 5 },
+      recommendedOptionId: "sqlite",
+      recommendation: "No server to run.",
+    };
+    const exported = { ...document, schemaVersion: 4, blocks: [matrix] };
+    expect(decodeCanvasStaticExportDocument(exported)).toEqual(exported);
+    expect(() =>
+      decodeCanvasStaticExportDocument({ ...document, schemaVersion: 3, blocks: [matrix] }),
+    ).toThrow();
+    expect(() =>
+      decodeCanvasStaticExportDocument({
+        ...document,
+        schemaVersion: 4,
+        blocks: [{ ...matrix, recommendation: "token sk-proj-abcdefghijklmnopqrstu" }],
+      }),
+    ).toThrow();
+  });
+
   it("shares treemaps, heatmaps, bar lists, number formats, table displays, and a dragged board from share version 3", () => {
     const blocks = [
       {

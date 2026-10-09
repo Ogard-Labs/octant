@@ -69,7 +69,25 @@ function version(overrides: {
   } as unknown as CanvasVersion;
 }
 
-function library(options: { readonly liveShares?: ReadonlySet<string> } = {}) {
+const syncedFromStudio = {
+  canvasId: "10000000-0000-4000-8000-00000000000c",
+  projectName: "Launch",
+  computerName: "Studio Mac",
+  mode: "work",
+  kind: "document",
+  title: "Pricing notes",
+  versionCount: 2,
+  headCount: 2,
+  deletedElsewhere: false,
+  updatedAt: "2026-08-18T08:00:00.000Z",
+} as const;
+
+function library(
+  options: {
+    readonly liveShares?: ReadonlySet<string>;
+    readonly synced?: ReadonlyArray<unknown>;
+  } = {},
+) {
   const entries = [
     {
       canvasId: "10000000-0000-4000-8000-00000000000a",
@@ -102,6 +120,7 @@ function library(options: { readonly liveShares?: ReadonlySet<string> } = {}) {
     },
     projects: () => projects,
     liveShares: () => options.liveShares ?? new Set<string>(),
+    ...(options.synced === undefined ? {} : { synced: () => options.synced as never }),
     clock: () => "2026-08-18T10:00:00.000Z" as never,
   });
 }
@@ -158,5 +177,22 @@ describe("reading the host's artifact library", () => {
 
     expect(listing.entries.map((entry) => entry.title)).toEqual(["Old sketch"]);
     expect(listing.matchCount).toBe(1);
+  });
+
+  it("lists artifacts synced from another computer by that computer's name, on this host only", () => {
+    const alreadyHere = { ...syncedFromStudio, canvasId: "10000000-0000-4000-8000-00000000000a" };
+    const synced = library({ synced: [syncedFromStudio, alreadyHere] });
+
+    const local = synced.list({ tab: "all" } as never, localWindow);
+    expect(local.synced).toEqual([syncedFromStudio]);
+    // It is not one of this host's Project artifacts, so it is not a card
+    // that opens a local Canvas.
+    expect(local.entries.map((entry) => entry.title)).not.toContain("Pricing notes");
+    expect(synced.list({ tab: "all" } as never, pairedDevice).synced).toBeUndefined();
+    // The query applies to them too.
+    expect(synced.list({ tab: "shared" } as never, localWindow).synced).toBeUndefined();
+    expect(
+      synced.list({ tab: "all", query: "budget" } as never, localWindow).synced,
+    ).toBeUndefined();
   });
 });

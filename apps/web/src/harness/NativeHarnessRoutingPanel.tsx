@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { ArrowDown, ArrowUp, X } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
 import {
   DEFAULT_NATIVE_HARNESS_JOB_SLOTS,
   NATIVE_HARNESS_BUILT_IN_SLOT_IDS,
@@ -15,91 +16,112 @@ import {
   NativeHarnessClientFailure,
   type NativeHarnessClient,
 } from "@octant/client-runtime/native-harness-client";
-import { SettingRow, SettingsSection } from "../settings/primitives";
+import { findPickerModel, type PickerGroup, type PickerModel } from "@octant/domain";
+import { ComposerModelPicker } from "../providers/ComposerModelPicker";
+import type { ModelToolVerification } from "../providers/useProviderController";
+import { SettingRow, SettingsDisclosure, SettingsSection } from "../settings/primitives";
 import { settingId } from "../settings/registry";
 import { SurfaceEmpty } from "../surface/SurfaceHeader";
+import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import "./native-harness.css";
-import { OctantAlert } from "../ui/base/OctantAlert";
-import type { ModelToolVerification } from "../providers/useProviderController";
 
+/** A configured direct endpoint, whether or not it has listed models yet. */
 export interface NativeHarnessProviderOption {
   readonly instanceId: string;
   readonly label: string;
-  readonly models: ReadonlyArray<{
-    readonly id: string;
-    readonly label: string;
-    /**
-     * Octant sends tools to this model. False means Chat only until a person
-     * verifies it; absent when the page cannot tell.
-     */
-    readonly toolsReady?: boolean;
-    /** Set up by hand on the provider, rather than only listed by its endpoint. */
-    readonly configured?: boolean;
-  }>;
+  readonly modelCount: number;
 }
 
 export interface NativeHarnessRoutingPanelProps {
   readonly client: Pick<NativeHarnessClient, "routing" | "updateRouting">;
   readonly hostId: string;
-  /** Configured direct-endpoint providers. Without any, the editor explains why it is empty. */
+  /** Configured direct-endpoint providers. Without any, the section explains why it is empty. */
   readonly providers: ReadonlyArray<NativeHarnessProviderOption>;
+  /** The harness endpoints' models as the compact model chooser lists them. */
+  readonly groups: ReadonlyArray<PickerGroup>;
   readonly onOpenModelEndpoints?: () => void;
   /** One explicit request that proves whether a model calls tools; absent hides the action. */
   readonly onVerifyTools?: (
     providerInstanceId: ProviderInstanceId,
     modelId: ProviderModelId,
   ) => Promise<ModelToolVerification>;
+  /** A search result or link named Model roles: land on the main model. */
+  readonly focused?: boolean;
 }
 
-const JOB_LABELS: Readonly<Record<NativeHarnessJob, string>> = {
-  lead: "Lead",
-  planner: "Planner",
-  explorer: "Explorer",
-  researcher: "Researcher",
-  implementer: "Implementer",
-  reviewer: "Reviewer",
-  title: "Titles",
-  summary: "Summaries",
-  compaction: "Compaction",
-  "image-understanding": "Image understanding",
-  advisor: "Advisor",
-  custom: "Custom",
-};
+type EditableJob = Exclude<NativeHarnessJob, "lead">;
 
 /**
- * What each built-in slot is for, in the words the Jobs list uses. The meanings
- * follow the slot design: Planner on `plan`, Reviewer on `slow`, Explorer and
- * Researcher on `task`, titles, summaries and compaction on `smol`, image
- * understanding on `vision`, and the supervisor on `advisor`.
+ * Plain names for the jobs a role can take. The lead is left out: it runs on
+ * the model picked in the thread's composer, and the main model only takes
+ * over when that model stops answering, so offering to rebind it here would
+ * describe something the harness does not do.
  */
-const SLOT_PRESENTATION: Readonly<Record<string, { label: string; meaning: string }>> = {
+const JOB_LABELS: Readonly<Record<EditableJob, string>> = {
+  planner: "Planning",
+  explorer: "Exploring the code",
+  researcher: "Research",
+  implementer: "Implementing",
+  reviewer: "Reviewing finished work",
+  title: "Thread titles",
+  summary: "Summaries",
+  compaction: "Shortening long threads",
+  "image-understanding": "Reading images",
+  advisor: "Advisor",
+  custom: "Custom helper agents",
+};
+// The advisor runs only on the Advisor role, so the role row's Off and
+// "Turn the advisor off" are the whole truth; binding it to another role here
+// would keep it running while the page says it is off.
+const EDITABLE_JOBS = NativeHarnessJob.literals.filter(
+  (job): job is EditableJob => job !== "lead" && job !== "advisor",
+);
+
+/**
+ * What each built-in slot is for. The CLI and the advanced guide still call
+ * these slots; Settings names them by the job they do.
+ */
+const ROLE_PRESENTATION: Readonly<Record<string, { label: string; meaning: string }>> = {
   default: {
     label: "Main model",
-    meaning:
-      "Leads each thread and does the implementing. Roles with no model of their own use it.",
+    meaning: "Does the implementing, and takes over when a thread's own model stops answering.",
   },
-  plan: { label: "Planning", meaning: "Works out the approach before the work starts." },
-  slow: {
-    label: "Careful review",
-    meaning: "A stronger, slower model that reviews finished work.",
-  },
+  plan: { label: "Planning", meaning: "Works out the approach before work starts." },
+  slow: { label: "Careful review", meaning: "A stronger model that checks finished work." },
   task: {
-    label: "Research and tasks",
-    meaning: "Helper agents that explore the code and look things up.",
+    label: "Research and lookups",
+    meaning: "Helper agents that read code and look things up.",
   },
   smol: {
     label: "Quick jobs",
-    meaning: "A small, fast model for titles, summaries, and shortening long context.",
+    meaning: "Titles, summaries and shortening long threads. A small, fast model is enough.",
   },
-  vision: { label: "Images", meaning: "Reads screenshots and other images." },
-  advisor: { label: "Advisor", meaning: "Reviews each reply and steps in when a turn goes wrong." },
+  vision: {
+    label: "Reading images",
+    meaning: "Screenshots and other images. Only models that accept images are offered.",
+  },
+  advisor: {
+    label: "Advisor",
+    meaning:
+      "A second model reviews each turn and can pause the run for you. It costs one extra request per turn.",
+  },
 };
 
-function slotPresentation(id: string): { label: string; meaning: string } {
-  return SLOT_PRESENTATION[id] ?? { label: id, meaning: "A custom role." };
+function rolePresentation(id: string): { label: string; meaning: string } {
+  return ROLE_PRESENTATION[id] ?? { label: id, meaning: "A custom role." };
 }
+
+/** What an unset role does, in the words its chooser shows. */
+function unsetLabel(id: string): string {
+  if (id === "default") return "Choose model";
+  // The advisor is off until chosen; every other role borrows the main model.
+  if (id === "advisor") return "Off";
+  return "Same as main model";
+}
+
+const STALE_MESSAGE = "Changed elsewhere. Reloaded; make your change again.";
 
 /** The roles, by their Settings names, that list a model from this endpoint. */
 export function nativeHarnessSlotsUsing(
@@ -113,169 +135,232 @@ export function nativeHarnessSlotsUsing(
           (candidate) => String(candidate.providerInstanceId) === providerInstanceId,
         ) || String(slot.overflowPromotion?.providerInstanceId) === providerInstanceId,
     )
-    .map((slot) => slotPresentation(String(slot.id)).label);
+    .map((slot) => rolePresentation(String(slot.id)).label);
 }
 
 /**
- * A slot's model row as the person edits it. Observed models are presentation
- * only and never choose for the person, so a new row, or one moved to another
- * provider, stays unset until they pick a model. The host refuses a candidate
- * without one, so unset rows live here and only chosen rows reach the draft.
- */
-type CandidateRow =
-  | { readonly kind: "chosen"; readonly candidate: NativeHarnessSlotCandidate }
-  | { readonly kind: "unset"; readonly providerInstanceId: string | undefined };
-
-/**
- * Settings → Octant Harness → Model slots. A slot is an ordered list of models; jobs
- * map onto slots. Every edit round-trips through the host with the version it
- * was read at, so two editors cannot silently overwrite each other.
+ * Settings → Octant Harness → Model roles. A role (a slot, in the CLI and the
+ * guide) is an ordered list of models: the first choice, then backups. Every
+ * change is sent at once with the version it was read at, so two editors
+ * cannot silently overwrite each other and nothing waits behind a Save step.
  */
 export function NativeHarnessRoutingPanel(props: NativeHarnessRoutingPanelProps) {
   const [settings, setSettings] = useState<NativeHarnessRoutingSettings>();
-  const [draft, setDraft] = useState<NativeHarnessRoutingConfiguration>();
+  // The change being sent, shown at once so a choice never snaps back while it saves.
+  const [pending, setPending] = useState<NativeHarnessRoutingConfiguration>();
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [message, setMessage] = useState<string>();
-  const [saving, setSaving] = useState(false);
   const [verifying, setVerifying] = useState<string>();
-  // Rows of slots edited since the draft was last reset; untouched slots read
-  // their rows straight from the draft.
-  const [editedRows, setEditedRows] = useState<
-    Readonly<Record<string, ReadonlyArray<CandidateRow>>>
-  >({});
-
-  const resetDraft = useCallback((configuration: NativeHarnessRoutingConfiguration) => {
-    setDraft(configuration);
-    setEditedRows({});
-  }, []);
+  const [expanded, setExpanded] = useState<string>();
+  // A backup row the person added but has not chosen a model for. The host
+  // refuses a candidate without a model, so it lives here until chosen.
+  const [addingBackup, setAddingBackup] = useState<string>();
 
   const load = useCallback(async () => {
     try {
       const current = await props.client.routing();
       setSettings(current);
-      resetDraft(current.configuration);
       setStatus("ready");
     } catch (error) {
       setMessage(
         error instanceof NativeHarnessClientFailure
           ? error.message
-          : "Model slots are unavailable.",
+          : "Model roles are unavailable.",
       );
       setStatus("error");
     }
-  }, [props.client, resetDraft]);
+  }, [props.client]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
-  const dirty = useMemo(
-    () =>
-      settings !== undefined && JSON.stringify(settings.configuration) !== JSON.stringify(draft),
-    [settings, draft],
+  const commit = useCallback(
+    async (configuration: NativeHarnessRoutingConfiguration) => {
+      if (settings === undefined || pending !== undefined) return;
+      setPending(configuration);
+      setMessage(undefined);
+      try {
+        const result = await props.client.updateRouting({
+          configuration,
+          expectedVersion: settings.version,
+        });
+        if (result.kind === "routing-settings") {
+          setSettings(result.settings);
+        } else if (result.kind === "routing-refused" && result.reason === "stale-version") {
+          setMessage(STALE_MESSAGE);
+          await load();
+        } else if (result.kind === "routing-refused") {
+          setMessage(result.message);
+        }
+      } catch (error) {
+        setMessage(
+          error instanceof NativeHarnessClientFailure
+            ? error.message
+            : "Saving model roles failed.",
+        );
+      } finally {
+        setPending(undefined);
+      }
+    },
+    [props.client, settings, pending, load],
   );
 
-  const save = useCallback(async () => {
-    if (settings === undefined || draft === undefined || saving) return;
-    setSaving(true);
-    setMessage(undefined);
-    try {
-      const result = await props.client.updateRouting({
-        configuration: draft,
-        expectedVersion: settings.version,
-      });
-      if (result.kind === "routing-settings") {
-        setSettings(result.settings);
-        resetDraft(result.settings.configuration);
-      } else if (result.kind === "routing-refused" && result.reason === "stale-version") {
-        setMessage(
-          "Model slots changed elsewhere. Reloaded the current table; apply your edit again.",
-        );
-        await load();
-      } else if (result.kind === "routing-refused") {
-        setMessage(result.message);
-      }
-    } catch (error) {
-      setMessage(
-        error instanceof NativeHarnessClientFailure ? error.message : "Saving model slots failed.",
-      );
-    } finally {
-      setSaving(false);
-    }
-  }, [props.client, settings, draft, saving, load, resetDraft]);
-
-  const verifyTools = (candidate: NativeHarnessSlotCandidate) => {
+  const verifyTools = (candidate: NativeHarnessSlotCandidate, name: string) => {
     if (props.onVerifyTools === undefined || verifying !== undefined) return;
-    const modelId = String(candidate.modelId);
     setVerifying(nativeHarnessSlotCandidateKey(candidate));
     setMessage(undefined);
     void props
       .onVerifyTools(candidate.providerInstanceId, candidate.modelId)
       .then((outcome) => {
-        if (outcome === "supported") setMessage(`${modelId} supports Octant tools.`);
+        if (outcome === "supported") setMessage(`${name} can use Octant's tools.`);
         else if (outcome === "unsupported") {
-          setMessage(`${modelId} did not call the test tool, so it stays Chat only.`);
-        } else setMessage(`Could not verify tools for ${modelId}.`);
+          setMessage(`${name} did not call the test tool, so it stays Chat only.`);
+        } else setMessage(`Could not verify tools for ${name}.`);
       })
       .finally(() => setVerifying(undefined));
   };
 
-  if (status === "loading") return <p role="status">Loading model slots…</p>;
-  if (status === "error" || draft === undefined) {
+  if (status === "loading") return <p role="status">Loading model roles…</p>;
+  if (status === "error" || settings === undefined) {
     return (
       <OctantAlert className="native-harness-panel__error" tone="danger">
-        {message ?? "Model slots are unavailable."}
+        {message ?? "Model roles are unavailable."}
       </OctantAlert>
     );
   }
 
-  // A slot whose only row is unset is out of the draft, but its row is still on
-  // screen, so a custom slot stays listed while it has edited rows.
+  const configuration = pending ?? settings.configuration;
+  const saving = pending !== undefined;
   const slotIds = [
     ...new Set([
       ...NATIVE_HARNESS_BUILT_IN_SLOT_IDS,
-      ...draft.slots.map((slot) => String(slot.id)),
-      ...Object.keys(editedRows),
+      ...configuration.slots.map((slot) => String(slot.id)),
     ]),
   ];
-  const slotFor = (id: string) => draft.slots.find((slot) => String(slot.id) === id);
-  const setSlot = (id: string, next: NativeHarnessSlot | undefined) =>
-    setDraft({
-      ...draft,
+  const slotFor = (id: string) => configuration.slots.find((slot) => String(slot.id) === id);
+  const candidatesFor = (id: string): ReadonlyArray<NativeHarnessSlotCandidate> =>
+    slotFor(id)?.candidates ?? [];
+  const withCandidates = (
+    id: string,
+    candidates: ReadonlyArray<NativeHarnessSlotCandidate>,
+  ): NativeHarnessRoutingConfiguration => {
+    const saved = slotFor(id);
+    // A role keeps the settings this page does not show, such as its overflow
+    // promotion, while its models change; emptied, it is no longer configured.
+    const next: NativeHarnessSlot | undefined =
+      candidates.length === 0 ? undefined : { ...(saved ?? { id: id as never }), candidates };
+    return {
+      ...configuration,
       slots: [
-        ...draft.slots.filter((slot) => String(slot.id) !== id),
+        ...configuration.slots.filter((slot) => String(slot.id) !== id),
         ...(next === undefined ? [] : [next]),
       ],
+    };
+  };
+  const candidateFrom = (selection: {
+    readonly providerInstanceId: ProviderInstanceId;
+    readonly modelId: ProviderModelId;
+  }): NativeHarnessSlotCandidate => ({
+    hostId: props.hostId as never,
+    providerInstanceId: selection.providerInstanceId,
+    modelId: selection.modelId,
+  });
+  const pickerModelFor = (candidate: NativeHarnessSlotCandidate) =>
+    findPickerModel(props.groups, {
+      providerInstanceId: candidate.providerInstanceId,
+      modelId: candidate.modelId,
     });
-  const rowsFor = (id: string): ReadonlyArray<CandidateRow> =>
-    editedRows[id] ??
-    (slotFor(id)?.candidates ?? []).map((candidate) => ({ kind: "chosen", candidate }));
-  const setRows = (id: string, rows: ReadonlyArray<CandidateRow>) => {
-    setEditedRows({ ...editedRows, [id]: rows });
-    const candidates = rows.flatMap((row) => (row.kind === "chosen" ? [row.candidate] : []));
-    // Leaving the draft while a row is unset must not lose settings this page
-    // does not show, such as the overflow promotion, so fall back to the saved slot.
-    const slot =
-      slotFor(id) ?? settings?.configuration.slots.find((saved) => String(saved.id) === id);
-    setSlot(
-      id,
-      candidates.length === 0 ? undefined : { ...(slot ?? { id: id as never }), candidates },
+  const nameOf = (candidate: NativeHarnessSlotCandidate) =>
+    pickerModelFor(candidate)?.model.displayName ?? String(candidate.modelId);
+  const sourceOf = (candidate: NativeHarnessSlotCandidate) =>
+    props.groups.find((group) => String(group.instance.id) === String(candidate.providerInstanceId))
+      ?.instance.displayName;
+  // Only models that accept images can read them, so that role offers no others.
+  const groupsFor = (id: string): ReadonlyArray<PickerGroup> =>
+    id !== "vision"
+      ? props.groups
+      : props.groups
+          .map((group) => ({
+            ...group,
+            sections: group.sections
+              .map((section) => ({
+                ...section,
+                models: section.models.filter((picker) =>
+                  picker.model.inputModalities.includes("image"),
+                ),
+              }))
+              .filter((section) => section.models.length > 0),
+          }))
+          .filter((group) => group.sections.length > 0);
+
+  const modelsOf = (group: PickerGroup) => group.sections.flatMap((section) => section.models);
+  const hasModels = props.groups.some((group) => modelsOf(group).length > 0);
+  const waitingProviders = props.providers.filter((option) => option.modelCount === 0);
+  // Octant never picks a model by itself. With exactly one endpoint ready and
+  // no main model, it offers one, and the person decides.
+  const readyGroups = props.groups.filter(
+    (group) => group.readiness === "ready" && modelsOf(group).length > 0,
+  );
+  const suggestedGroup =
+    readyGroups.length === 1 && candidatesFor("default").length === 0 ? readyGroups[0] : undefined;
+  const suggestedModel: PickerModel | undefined =
+    suggestedGroup === undefined
+      ? undefined
+      : (modelsOf(suggestedGroup).find((picker) => picker.toolsVerifiable !== true) ??
+        modelsOf(suggestedGroup)[0]);
+  const suggestedCount = suggestedGroup === undefined ? 0 : modelsOf(suggestedGroup).length;
+
+  const standardSlot = (job: NativeHarnessJob) =>
+    String(DEFAULT_NATIVE_HARNESS_JOB_SLOTS.find((binding) => binding.job === job)?.slotId);
+  const boundSlot = (job: NativeHarnessJob) => {
+    const explicit = configuration.jobSlots.find((binding) => binding.job === job)?.slotId;
+    return explicit === undefined ? standardSlot(job) : String(explicit);
+  };
+  const standardJobs = EDITABLE_JOBS.every((job) => boundSlot(job) === standardSlot(job));
+  // A fresh host stores the standard bindings, so only a chosen model or a
+  // changed binding counts as routing someone saved.
+  const hasSavedRouting =
+    configuration.slots.some((slot) => slot.candidates.length > 0) || !standardJobs;
+
+  const chooser = (input: {
+    readonly id: string;
+    readonly ariaLabel: string;
+    readonly candidate: NativeHarnessSlotCandidate | undefined;
+    readonly unselected: string;
+    readonly onSelect: (candidate: NativeHarnessSlotCandidate) => void;
+  }) => {
+    const groups = groupsFor(input.id);
+    // With nothing to choose from, a saved choice still reads as itself
+    // rather than as "No provider ready".
+    if (groups.length === 0) {
+      return (
+        <span className="native-harness-role__chosen">
+          {input.candidate === undefined ? input.unselected : nameOf(input.candidate)}
+        </span>
+      );
+    }
+    return (
+      <ComposerModelPicker
+        ariaLabel={input.ariaLabel}
+        disabled={saving}
+        groups={groups}
+        menuSide="bottom"
+        onSelect={(selection) => input.onSelect(candidateFrom(selection))}
+        rememberChoice={false}
+        selectedModelId={input.candidate?.modelId}
+        selectedProviderInstanceId={input.candidate?.providerInstanceId}
+        unselectedLabel={input.unselected}
+      />
     );
   };
-  const hasUnsetRow = Object.values(editedRows).some((rows) =>
-    rows.some((row) => row.kind === "unset"),
-  );
-  // A provider with no observed models cannot fill a slot. While one is being
-  // checked, or cannot list its models, the page still says it exists, so the
-  // way out is its connection check rather than "Connect a provider".
-  const assignableProvider = props.providers.find((option) => option.models.length > 0);
-  const waitingProviders = props.providers.filter((option) => option.models.length === 0);
-  const hasSavedRouting =
-    draft.slots.some((slot) => slot.candidates.length > 0) || draft.jobSlots.length > 0;
 
   return (
-    <section aria-label="Model slots" className="native-harness-panel">
-      <SettingsSection title="Model slots">
+    <section aria-label="Model roles" className="native-harness-panel">
+      <SettingsSection
+        description="A thread runs on the model you pick in its composer. These roles cover the rest of the work."
+        title="Model roles"
+      >
         {props.providers.length === 0 && !hasSavedRouting ? (
           <SurfaceEmpty
             action={
@@ -285,265 +370,329 @@ export function NativeHarnessRoutingPanel(props: NativeHarnessRoutingPanelProps)
                 </OctantButton>
               )
             }
-            detail="Add an OpenAI-compatible or Anthropic-compatible endpoint under Model endpoints to assign models here."
+            detail="Add a model endpoint above, then choose which of its models does which job."
             title="No model endpoint yet"
             tone="page"
           />
         ) : (
-          <div className="settings-panel__body">
-            <p className="native-harness-panel__lead">
-              Each role is a list of models: the first is preferred and the rest are fallbacks. A
-              role with no model uses the {slotPresentation("default").label} and shows a warning.
-            </p>
-            <div className="native-harness-slots">
-              {slotIds.map((id) => {
-                const slot = slotFor(id);
-                const rows = rowsFor(id);
-                const { label, meaning } = slotPresentation(id);
-                return (
-                  <div className="native-harness-slot" key={id}>
-                    <SettingRow
-                      description={
-                        id === "default" || slot !== undefined
-                          ? meaning
-                          : `${meaning} Until set, it uses the ${slotPresentation("default").label}.`
-                      }
-                      label={label}
-                      scope="app"
-                      settingId={settingId(`harness-slot-${id}`)}
-                    >
-                      <span className="oct-meta native-harness-slot__count">
-                        {slot === undefined || slot.candidates.length === 0
-                          ? "Not set"
-                          : `${slot.candidates.length} model${slot.candidates.length === 1 ? "" : "s"}`}
-                      </span>
-                      {assignableProvider === undefined ? (
-                        <>
-                          {waitingProviders.length === 0 ? null : (
-                            <span className="oct-meta">
-                              No models from{" "}
-                              {waitingProviders.map((option) => option.label).join(", ")} yet.
-                            </span>
-                          )}
-                          {props.onOpenModelEndpoints === undefined ? null : (
-                            <OctantButton
-                              onClick={props.onOpenModelEndpoints}
-                              size="sm"
-                              variant="secondary"
-                            >
-                              {waitingProviders.length === 0
-                                ? "Add a model endpoint"
-                                : "Open Model endpoints"}
-                            </OctantButton>
-                          )}
-                        </>
-                      ) : (
-                        <OctantButton
-                          aria-label={
-                            rows.length === 0
-                              ? `Choose a model for ${label}`
-                              : `Add a fallback model for ${label}`
-                          }
-                          onClick={() =>
-                            setRows(id, [...rows, { kind: "unset", providerInstanceId: undefined }])
-                          }
-                          size="sm"
-                          variant="secondary"
-                        >
-                          {rows.length === 0 ? "Choose model" : "Add fallback"}
-                        </OctantButton>
-                      )}
-                    </SettingRow>
-                    {rows.map((row, index) => {
-                      const providerId =
-                        row.kind === "chosen"
-                          ? String(row.candidate.providerInstanceId)
-                          : row.providerInstanceId;
-                      const provider = props.providers.find(
-                        (option) => option.instanceId === providerId,
-                      );
-                      const providerOptions = props.providers
-                        .filter(
-                          (option) => option.models.length > 0 || option.instanceId === providerId,
-                        )
-                        .map((option) => ({ id: option.instanceId, label: option.label }));
-                      // An endpoint that lists every model it hosts (an Azure
-                      // resource lists hundreds that are not deployments) shows
-                      // the models the person configured first, under their
-                      // own heading, so a deployment is not buried.
-                      const separatesConfigured = (provider?.models ?? []).some(
-                        (model) => model.configured === true,
-                      );
-                      const modelOptions: Array<{ id: string; label: string; group?: string }> = [
-                        ...(provider?.models ?? [])
-                          .filter((model) => !separatesConfigured || model.configured === true)
-                          .map((model) => ({
-                            id: model.id,
-                            label: model.label,
-                            ...(separatesConfigured ? { group: "Configured models" } : {}),
-                          })),
-                        ...(provider?.models ?? [])
-                          .filter((model) => separatesConfigured && model.configured !== true)
-                          .map((model) => ({
-                            id: model.id,
-                            label: model.label,
-                            group: "Discovered on the endpoint",
-                          })),
-                      ];
-                      // A saved choice stays readable when its provider or model is
-                      // no longer observed, rather than looking unset.
-                      if (row.kind === "chosen") {
-                        if (provider === undefined && providerId !== undefined) {
-                          providerOptions.push({ id: providerId, label: providerId });
-                        }
-                        const modelId = String(row.candidate.modelId);
-                        if (!modelOptions.some((model) => model.id === modelId)) {
-                          modelOptions.push({ id: modelId, label: modelId });
-                        }
-                      }
-                      const chatOnlyCandidate =
-                        row.kind === "chosen" &&
-                        provider?.models.find((model) => model.id === String(row.candidate.modelId))
-                          ?.toolsReady === false
-                          ? row.candidate
-                          : undefined;
-                      return (
-                        <div className="native-harness-candidate" key={`${id}-${index}`}>
-                          <span className="native-harness-candidate__rank">
-                            {index === 0 ? "primary" : `fallback ${index}`}
-                          </span>
-                          <OctantSelectField
-                            aria-label={`${label}, model ${index + 1} provider`}
-                            onValueChange={(value) => {
-                              if (value === providerId) return;
-                              setRows(
-                                id,
-                                rows.map((entry, at) =>
-                                  at === index
-                                    ? { kind: "unset", providerInstanceId: value }
-                                    : entry,
-                                ),
-                              );
-                            }}
-                            options={providerOptions}
-                            placeholder="Choose a provider"
-                            value={providerId ?? ""}
-                          />
-                          <OctantSelectField
-                            aria-label={`${label}, model ${index + 1}`}
-                            disabled={providerId === undefined}
-                            onValueChange={(value) => {
-                              if (providerId === undefined) return;
-                              const candidate: NativeHarnessSlotCandidate =
-                                row.kind === "chosen"
-                                  ? { ...row.candidate, modelId: value as never }
-                                  : {
-                                      hostId: props.hostId as never,
-                                      providerInstanceId: providerId as never,
-                                      modelId: value as never,
-                                    };
-                              setRows(
-                                id,
-                                rows.map((entry, at) =>
-                                  at === index ? { kind: "chosen", candidate } : entry,
-                                ),
-                              );
-                            }}
-                            options={modelOptions}
-                            placeholder="Choose a model"
-                            value={row.kind === "chosen" ? String(row.candidate.modelId) : ""}
-                          />
-                          {chatOnlyCandidate === undefined ? null : (
-                            <span className="native-harness-candidate__tools">
-                              <span className="oct-meta">Chat only: tools not verified.</span>
-                              {props.onVerifyTools === undefined ? null : (
-                                <OctantButton
-                                  aria-label={`Verify tools for ${label}, model ${index + 1}`}
-                                  disabled={verifying !== undefined}
-                                  onClick={() => verifyTools(chatOnlyCandidate)}
-                                  size="sm"
-                                  variant="outline"
-                                >
-                                  {verifying === nativeHarnessSlotCandidateKey(chatOnlyCandidate)
-                                    ? "Verifying…"
-                                    : "Verify tools"}
-                                </OctantButton>
-                              )}
-                            </span>
-                          )}
-                          <OctantButton
-                            aria-label={`Remove ${label}, model ${index + 1}`}
-                            onClick={() =>
-                              setRows(
-                                id,
-                                rows.filter((_, at) => at !== index),
-                              )
-                            }
-                            size="sm"
-                            variant="ghost"
-                          >
-                            Remove
-                          </OctantButton>
-                        </div>
-                      );
-                    })}
-                  </div>
-                );
-              })}
-            </div>
-            <h3 className="oct-section-label">Jobs</h3>
-            <div className="native-harness-jobs">
-              {NativeHarnessJob.literals.map((job) => {
-                const bound =
-                  draft.jobSlots.find((binding) => binding.job === job)?.slotId ??
-                  DEFAULT_NATIVE_HARNESS_JOB_SLOTS.find((binding) => binding.job === job)?.slotId ??
-                  "default";
-                return (
-                  <div className="native-harness-job" key={job}>
-                    <span>{JOB_LABELS[job]}</span>
-                    <OctantSelectField
-                      aria-label={`${JOB_LABELS[job]} slot`}
-                      className="settings-view__select"
-                      onValueChange={(value) =>
-                        setDraft({
-                          ...draft,
-                          jobSlots: [
-                            ...draft.jobSlots.filter((binding) => binding.job !== job),
-                            { job, slotId: value as never },
-                          ],
-                        })
-                      }
-                      options={slotIds.map((id) => ({ id, label: slotPresentation(id).label }))}
-                      value={String(bound)}
-                    />
-                  </div>
-                );
-              })}
-            </div>
-            <div className="native-harness-panel__actions">
-              <OctantButton
-                disabled={!dirty || saving || hasUnsetRow}
-                onClick={() => void save()}
-                variant="default"
-              >
-                {saving ? "Saving…" : "Save slots"}
-              </OctantButton>
-              {(dirty || hasUnsetRow) && settings !== undefined ? (
-                <OctantButton onClick={() => resetDraft(settings.configuration)} variant="ghost">
-                  Discard
-                </OctantButton>
-              ) : null}
-              {hasUnsetRow ? (
-                <span className="oct-meta">
-                  Choose a model in every row, or remove it, to save.
-                </span>
-              ) : null}
-            </div>
+          <div className="setgroup native-harness-roles">
+            {/* The outcome of the last change sits above the roles, where it is
+                seen whichever row was changed. */}
             {message === undefined ? null : (
               <p className="native-harness-panel__message" role="status">
                 {message}
               </p>
             )}
+            {hasModels ? null : (
+              <div className="native-harness-roles__notice">
+                <span className="oct-meta">
+                  {waitingProviders.length === 0
+                    ? "No model endpoint is ready."
+                    : `No models from ${waitingProviders.map((option) => option.label).join(", ")} yet.`}
+                </span>
+                {props.onOpenModelEndpoints === undefined ? null : (
+                  <OctantButton onClick={props.onOpenModelEndpoints} size="sm" variant="secondary">
+                    {props.providers.length === 0 ? "Add a model endpoint" : "Open Model endpoints"}
+                  </OctantButton>
+                )}
+              </div>
+            )}
+            {suggestedGroup === undefined || suggestedModel === undefined ? null : (
+              <div
+                aria-label="Choose a main model to start"
+                className="native-harness-suggestion"
+                role="group"
+              >
+                <div className="native-harness-suggestion__copy">
+                  <span className="setrow-label">Choose a main model to start</span>
+                  <p className="setrow-hint">
+                    {suggestedGroup.instance.displayName} has {suggestedCount} model
+                    {suggestedCount === 1 ? "" : "s"}. Every role uses the main model until you give
+                    it its own.
+                  </p>
+                </div>
+                <OctantButton
+                  disabled={saving}
+                  onClick={() =>
+                    void commit(
+                      withCandidates("default", [
+                        candidateFrom({
+                          providerInstanceId: suggestedGroup.instance.id,
+                          modelId: suggestedModel.model.id,
+                        }),
+                      ]),
+                    )
+                  }
+                  size="sm"
+                  variant="default"
+                >
+                  Use {suggestedModel.model.displayName} as the main model
+                </OctantButton>
+              </div>
+            )}
+            {slotIds.map((id) => {
+              const candidates = candidatesFor(id);
+              const first = candidates[0];
+              const backups = candidates.slice(1);
+              const { label, meaning } = rolePresentation(id);
+              const open = expanded === id && first !== undefined;
+              const editorId = `native-harness-role-${id}-models`;
+              const chatOnly = candidates.filter(
+                (candidate) => pickerModelFor(candidate)?.toolsVerifiable === true,
+              );
+              const source = first === undefined ? undefined : sourceOf(first);
+              const replaceAt = (index: number, candidate: NativeHarnessSlotCandidate) => {
+                const duplicate = candidates.some(
+                  (existing, at) =>
+                    at !== index &&
+                    nativeHarnessSlotCandidateKey(existing) ===
+                      nativeHarnessSlotCandidateKey(candidate),
+                );
+                if (duplicate) {
+                  setMessage(`${nameOf(candidate)} is already in ${label}.`);
+                  return;
+                }
+                const next = [...candidates];
+                next[index] = candidate;
+                if (index >= candidates.length) setAddingBackup(undefined);
+                void commit(withCandidates(id, next));
+              };
+              const move = (index: number, by: -1 | 1) => {
+                const next = [...candidates];
+                const [moved] = next.splice(index, 1);
+                if (moved === undefined) return;
+                next.splice(index + by, 0, moved);
+                void commit(withCandidates(id, next));
+              };
+              return (
+                <div className="native-harness-role" key={id}>
+                  <SettingRow
+                    description={meaning}
+                    focused={id === "default" && props.focused === true}
+                    label={label}
+                    scope="host"
+                    settingId={settingId(`harness-slot-${id}`)}
+                  >
+                    <div className="native-harness-role__control">
+                      {chooser({
+                        id,
+                        ariaLabel: `${label} model`,
+                        candidate: first,
+                        unselected: unsetLabel(id),
+                        onSelect: (candidate) => replaceAt(0, candidate),
+                      })}
+                      {first === undefined || id === "default" ? null : (
+                        <OctantButton
+                          aria-label={
+                            id === "advisor" ? "Turn the advisor off" : `${label}: use main model`
+                          }
+                          disabled={saving}
+                          onClick={() => {
+                            setExpanded(undefined);
+                            void commit(withCandidates(id, []));
+                          }}
+                          size="sm"
+                          variant="ghost"
+                        >
+                          {id === "advisor" ? "Turn off" : "Use main model"}
+                        </OctantButton>
+                      )}
+                      {first === undefined ? null : (
+                        <OctantButton
+                          aria-controls={editorId}
+                          aria-expanded={open}
+                          aria-label={`${label} backups`}
+                          onClick={() => {
+                            setExpanded(open ? undefined : id);
+                            setAddingBackup(undefined);
+                          }}
+                          size="sm"
+                          variant="ghost"
+                        >
+                          {backups.length === 0
+                            ? "Add backup"
+                            : `${backups.length} backup${backups.length === 1 ? "" : "s"}`}
+                        </OctantButton>
+                      )}
+                    </div>
+                    {first === undefined ? null : (
+                      <span className="oct-meta native-harness-role__source">
+                        {[
+                          source ?? "Not offered by a ready endpoint",
+                          backups[0] === undefined ? undefined : `Backup: ${nameOf(backups[0])}`,
+                        ]
+                          .filter((part): part is string => part !== undefined)
+                          .join(" · ")}
+                      </span>
+                    )}
+                    {/* Endpoints that do not report image input (an OpenAI-compatible
+                        endpoint reports text only) leave this role nothing to offer;
+                        saying so beats a chooser that silently lists no models. */}
+                    {first !== undefined || !hasModels || groupsFor(id).length > 0 ? null : (
+                      <span className="oct-meta native-harness-role__source">
+                        No ready model says it accepts images.
+                      </span>
+                    )}
+                  </SettingRow>
+                  {chatOnly.length === 0 ? null : (
+                    <div className="native-harness-role__notes">
+                      {chatOnly.map((candidate) => (
+                        <p className="oct-meta" key={nativeHarnessSlotCandidateKey(candidate)}>
+                          {nameOf(candidate)} hasn't shown it can use Octant's tools, so it would
+                          answer without them.{" "}
+                          {props.onVerifyTools === undefined ? null : (
+                            <OctantButton
+                              aria-label={`Verify tools for ${nameOf(candidate)} (1 request)`}
+                              disabled={verifying !== undefined}
+                              onClick={() => verifyTools(candidate, nameOf(candidate))}
+                              size="sm"
+                              title="Sends one request to the endpoint, which it may bill."
+                              variant="ghost"
+                            >
+                              {verifying === nativeHarnessSlotCandidateKey(candidate)
+                                ? "Verifying…"
+                                : "Verify tools (1 request)"}
+                            </OctantButton>
+                          )}
+                        </p>
+                      ))}
+                    </div>
+                  )}
+                  {!open ? null : (
+                    <div
+                      aria-label={`${label} models`}
+                      className="native-harness-backups"
+                      id={editorId}
+                      role="group"
+                    >
+                      {candidates.map((candidate, index) => {
+                        const rank = index === 0 ? "First choice" : `Backup ${index}`;
+                        const name = nameOf(candidate);
+                        return (
+                          <div
+                            className="native-harness-backups__row"
+                            key={nativeHarnessSlotCandidateKey(candidate)}
+                          >
+                            <span className="native-harness-backups__rank">{rank}</span>
+                            {chooser({
+                              id,
+                              ariaLabel: `${label}, ${rank.toLowerCase()}`,
+                              candidate,
+                              unselected: "Choose model",
+                              onSelect: (next) => replaceAt(index, next),
+                            })}
+                            <span className="native-harness-backups__actions">
+                              <OctantButton
+                                aria-label={`Move ${name} up`}
+                                disabled={saving || index === 0}
+                                onClick={() => move(index, -1)}
+                                size="icon"
+                                variant="ghost"
+                              >
+                                <ArrowUp aria-hidden="true" size={14} strokeWidth={1.7} />
+                              </OctantButton>
+                              <OctantButton
+                                aria-label={`Move ${name} down`}
+                                disabled={saving || index === candidates.length - 1}
+                                onClick={() => move(index, 1)}
+                                size="icon"
+                                variant="ghost"
+                              >
+                                <ArrowDown aria-hidden="true" size={14} strokeWidth={1.7} />
+                              </OctantButton>
+                              <OctantButton
+                                aria-label={`Remove ${name} from ${label}`}
+                                disabled={saving}
+                                onClick={() => {
+                                  if (candidates.length === 1) setExpanded(undefined);
+                                  void commit(
+                                    withCandidates(
+                                      id,
+                                      candidates.filter((_, at) => at !== index),
+                                    ),
+                                  );
+                                }}
+                                size="icon"
+                                variant="ghost"
+                              >
+                                <X aria-hidden="true" size={14} strokeWidth={1.7} />
+                              </OctantButton>
+                            </span>
+                          </div>
+                        );
+                      })}
+                      {addingBackup === id ? (
+                        <div className="native-harness-backups__row">
+                          <span className="native-harness-backups__rank">
+                            Backup {candidates.length}
+                          </span>
+                          {chooser({
+                            id,
+                            ariaLabel: `${label}, new backup`,
+                            candidate: undefined,
+                            unselected: "Choose model",
+                            onSelect: (next) => replaceAt(candidates.length, next),
+                          })}
+                          <span className="native-harness-backups__actions">
+                            <OctantButton
+                              aria-label={`Cancel the new backup for ${label}`}
+                              onClick={() => setAddingBackup(undefined)}
+                              size="icon"
+                              variant="ghost"
+                            >
+                              <X aria-hidden="true" size={14} strokeWidth={1.7} />
+                            </OctantButton>
+                          </span>
+                        </div>
+                      ) : null}
+                      <div className="native-harness-backups__add">
+                        <OctantButton
+                          aria-label={`Add a backup for ${label}`}
+                          disabled={saving || addingBackup === id || groupsFor(id).length === 0}
+                          onClick={() => setAddingBackup(id)}
+                          size="sm"
+                          variant="ghost"
+                        >
+                          Add backup
+                        </OctantButton>
+                        <span className="oct-meta">
+                          A backup is used when the model before it is rate-limited, down or timing
+                          out.
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+            <SettingsDisclosure
+              className="native-harness-jobs"
+              title={`Which job uses which role · ${standardJobs ? "standard" : "changed"}`}
+              variant="inline"
+            >
+              {EDITABLE_JOBS.map((job) => (
+                <div className="native-harness-job" key={job}>
+                  <span>{JOB_LABELS[job]}</span>
+                  <OctantSelectField
+                    aria-label={`${JOB_LABELS[job]} role`}
+                    className="settings-view__select"
+                    disabled={saving}
+                    onValueChange={(value) => {
+                      if (value === boundSlot(job)) return;
+                      void commit({
+                        ...configuration,
+                        jobSlots: [
+                          ...configuration.jobSlots.filter((binding) => binding.job !== job),
+                          { job, slotId: value as never },
+                        ],
+                      });
+                    }}
+                    options={slotIds.map((id) => ({ id, label: rolePresentation(id).label }))}
+                    value={boundSlot(job)}
+                  />
+                </div>
+              ))}
+            </SettingsDisclosure>
           </div>
         )}
       </SettingsSection>

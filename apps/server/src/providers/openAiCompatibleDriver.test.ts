@@ -812,6 +812,24 @@ describe("makeOpenAiCompatibleDriver", () => {
       servedModelId: "DeepSeek-V4.1-Flash",
     });
   });
+
+  it("takes image input from the model a deployment served, and keeps it across probes", async () => {
+    const runtimeRegistry = new ProviderRuntimeRegistry();
+    runtimeRegistry.setObservedState(observedManualModel());
+    const fetch = vi.fn(async (url: string | URL | Request) =>
+      String(url).endsWith("/models")
+        ? new Response(null, { status: 404 })
+        : chatStream("ok", undefined, "gpt-4.1-mini-2025-04-14"),
+    );
+    const driver = makeDriver({ fetch, runtimeRegistry, contextWindows: { remember: vi.fn() } });
+
+    await runTurns(driver, ["hi"]);
+
+    const imageCapable = { inputModalities: ["text", "image"], imageInput: "supported" };
+    expect(runtimeRegistry.observedState(instanceId)?.models[0]).toMatchObject(imageCapable);
+    await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
+    expect(runtimeRegistry.observedState(instanceId)?.models[0]).toMatchObject(imageCapable);
+  });
 });
 
 function observedManualModel() {
@@ -1030,6 +1048,31 @@ describe("makeOpenAiCompatibleDriver under the ChatGPT plan profile", () => {
     ]);
     expect(warn).not.toHaveBeenCalled();
     warn.mockRestore();
+  });
+  it("takes each plan model's image input from the listing first, then the offline profile", async () => {
+    const { decoded } = await checkPlanConnection(
+      Response.json({
+        models: [
+          { slug: "gpt-plan-pro", input_modalities: ["text", "image"] },
+          { slug: "gpt-5", input_modalities: ["text"] },
+          { slug: "gpt-5-mini" },
+          { slug: "gpt-plan-house" },
+        ],
+      }),
+    );
+    expect(
+      decoded?.models.map(({ id, inputModalities, imageInput }) => ({
+        id,
+        inputModalities,
+        imageInput,
+      })),
+    ).toEqual([
+      { id: "gpt-plan-pro", inputModalities: ["text", "image"], imageInput: "supported" },
+      // The listing said text-only, and that wins over the GPT-5 profile.
+      { id: "gpt-5", inputModalities: ["text"], imageInput: "unsupported" },
+      { id: "gpt-5-mini", inputModalities: ["text", "image"], imageInput: "supported" },
+      { id: "gpt-plan-house", inputModalities: ["text"], imageInput: undefined },
+    ]);
   });
 
   it("stays degraded in words when none of the plan's listed items can be mapped, logging only their key names", async () => {

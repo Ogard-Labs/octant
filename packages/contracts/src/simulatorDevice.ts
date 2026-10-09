@@ -50,6 +50,15 @@ export const SimulatorDeviceInput = Schema.Union(
     ...destination,
     key: text(64),
   }).annotations(strict),
+  /**
+   * Gives touch and buttons back to the Simulator's legacy input services
+   * after Xcode's Device Hub took them. It restarts the guest's home screen
+   * and closes running apps.
+   */
+  Schema.Struct({
+    kind: Schema.Literal("repair-input"),
+    ...destination,
+  }).annotations(strict),
 );
 export type SimulatorDeviceInput = typeof SimulatorDeviceInput.Type;
 

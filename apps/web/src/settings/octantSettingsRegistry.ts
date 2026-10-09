@@ -395,7 +395,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       label: "Octant Harness",
       scope: "app",
       keywords:
-        "octant harness native agent loop model endpoints endpoint api openai-compatible anthropic-compatible ollama azure ai foundry deployment base url api key bearer protocol manual model ids sign in with chatgpt plan openrouter subscription model slots default plan slow task smol vision advisor routing fallback cooldown delegate children follow-ups chips agents subagents helper child creation posture off on automatic bounded hierarchy",
+        "octant harness native agent loop model endpoints endpoint api openai-compatible anthropic-compatible ollama azure ai foundry deployment base url api key bearer protocol manual model ids sign in with chatgpt plan openrouter subscription model roles main model backup model slots default plan slow task smol vision advisor routing fallback cooldown delegate children follow-ups chips agents subagents helper agents child creation posture off on automatic bounded hierarchy",
       settings: [
         {
           id: settingId("model-endpoints"),
@@ -403,6 +403,13 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           scope: "host",
           keywords:
             "model endpoints add endpoint api openai-compatible anthropic-compatible ollama azure ai foundry base url address api key replace key sign in with chatgpt plan openrouter subscription sign out check now try again can't connect not working key refused no models diagnostics remove endpoint where your data goes eu zero data retention models shown hidden reads images chat only verify tools",
+        },
+        {
+          id: settingId("model-roles"),
+          label: "Model roles",
+          scope: "host",
+          keywords:
+            "model roles main model planning careful review research lookups quick jobs reading images vision advisor backup fallback which job uses which role slots default plan slow task smol",
         },
         {
           id: settingId("subagent-creation-posture"),
