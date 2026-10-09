@@ -39,12 +39,30 @@ export type HostOAuthFlow = typeof HostOAuthFlow.Type;
 /**
  * A vendor wire dialect that is close to OAuth but not identical. The dialect
  * is what lets a catalog entry declare a flow the generic runner cannot
- * otherwise express. Only OpenRouter's key-issuing PKCE path is modeled; the
+ * otherwise express. OpenRouter's key-issuing PKCE path is modeled: the
  * exchange returns a long-lived API key, so the descriptor carries no
- * `client_id` (OpenRouter does not register clients) and no scopes.
+ * `client_id` (OpenRouter does not register clients) and no scopes. The
+ * ChatGPT plan dialect registers a user-defined agent on first sign-in: the
+ * authorize request carries `dynamic_agent_client` plus an agent name hint and
+ * a stable host id, and the callback returns the issued `client_id` the
+ * exchange and every later refresh must use.
  */
-export const HostOAuthDialect = Schema.Literal("openrouter-pkce");
+export const HostOAuthDialect = Schema.Literal("openrouter-pkce", "chatgpt-plan-siwc");
 export type HostOAuthDialect = typeof HostOAuthDialect.Type;
+
+/**
+ * The stable identifier of the host machine a ChatGPT plan sign-in is
+ * registered for. Sent as `ext_agent_host_id` before the first sign-in and
+ * kept for the life of the registration; `urn:uuid:<uuid>` is an accepted
+ * form.
+ */
+const ExtAgentHostId = Schema.String.pipe(Schema.pattern(/^urn:[a-z0-9][a-z0-9.:-]{0,127}$/));
+
+/**
+ * The application name a ChatGPT plan sign-in registers under. Sent as
+ * `agent_name_hint` on the first (registration) sign-in only.
+ */
+const AgentNameHint = Schema.String.pipe(Schema.minLength(1), Schema.maxLength(64));
 
 export const HostOAuthDescriptor = Schema.Struct({
   descriptorId: DescriptorId,
@@ -58,6 +76,13 @@ export const HostOAuthDescriptor = Schema.Struct({
   deviceAuthorizationEndpoint: Schema.optional(Endpoint),
   scopes: Schema.Array(Scope).pipe(Schema.maxItems(16)),
   termsId: TermsId,
+  /**
+   * ChatGPT plan dialect only: the stable host id sent as
+   * `ext_agent_host_id` and persisted before the first sign-in.
+   */
+  extAgentHostId: Schema.optional(ExtAgentHostId),
+  /** ChatGPT plan dialect only: the app name sent as `agent_name_hint` on registration. */
+  agentNameHint: Schema.optional(AgentNameHint),
 })
   .pipe(
     Schema.filter(
@@ -66,7 +91,14 @@ export const HostOAuthDescriptor = Schema.Struct({
           return false;
         }
         // A dialect entry declares its own wire shape; every other flow needs
-        // a client identity and at least one scope.
+        // a client identity and at least one scope. The ChatGPT plan dialect
+        // registers its client during the first sign-in, so it declares no
+        // client id but does declare scopes; the stable host id is bound by
+        // the host process when a flow begins (see the runtime's descriptor
+        // validation), not by the catalog entry.
+        if (descriptor.dialect === "chatgpt-plan-siwc") {
+          return descriptor.scopes.length >= 1;
+        }
         return (
           descriptor.dialect !== undefined ||
           (descriptor.clientId !== undefined && descriptor.scopes.length >= 1)
@@ -74,7 +106,7 @@ export const HostOAuthDescriptor = Schema.Struct({
       },
       {
         description:
-          "a standard flow requires a client ID and at least one scope; a dialect flow cannot pair with a device-code grant",
+          "a standard flow requires a client ID and at least one scope; a dialect flow cannot pair with a device-code grant; the ChatGPT plan dialect requires at least one scope",
       },
     ),
   )

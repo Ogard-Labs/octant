@@ -1,6 +1,9 @@
 import type { AndroidToolchainClient } from "@octant/client-runtime/android-toolchain-client";
 import { androidFrameMediaType } from "./androidFrameMediaType";
-import type { AndroidScreenStreamRequest } from "@octant/contracts/android-toolchain-rpc";
+import type {
+  AndroidScreenStreamRequest,
+  AndroidScreenTransport,
+} from "@octant/contracts/android-toolchain-rpc";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 export type AndroidEmulatorLiveScreen =
@@ -9,6 +12,8 @@ export type AndroidEmulatorLiveScreen =
   | {
       readonly status: "live";
       readonly screen: { readonly width: number; readonly height: number };
+      /** The serve-avd stream, or screencap snapshots and why. Absent when the server does not say. */
+      readonly transport?: AndroidScreenTransport;
       readonly attach: (canvas: HTMLCanvasElement | null) => void;
     }
   | { readonly status: "unavailable"; readonly message: string };
@@ -44,6 +49,7 @@ export function useAndroidEmulatorLiveScreen(options: {
       | {
           readonly status: "live";
           readonly screen: { readonly width: number; readonly height: number };
+          readonly transport?: AndroidScreenTransport;
         }
       | { readonly status: "unavailable"; readonly message: string };
   }>({ key: undefined, state: { status: "off" } });
@@ -123,7 +129,11 @@ export function useAndroidEmulatorLiveScreen(options: {
                 painted = true;
                 everLive = true;
                 clearTimeout(noPicture);
-                setState({ status: "live", screen: watch.screen });
+                setState({
+                  status: "live",
+                  screen: watch.screen,
+                  ...(watch.transport === undefined ? {} : { transport: watch.transport }),
+                });
               }
             }
           } finally {

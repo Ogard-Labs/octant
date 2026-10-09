@@ -76,14 +76,14 @@ existing page.
 
 The host supplies the tool transport automatically for supported runtimes:
 
-| Runtime          | Transport and current boundary                                  |
-| ---------------- | --------------------------------------------------------------- |
-| Codex            | App-server dynamic tools                                        |
-| Claude Code      | Agent SDK managed tools                                         |
-| OpenCode         | Private MCP profile, verified on 1.18.21 with macOS confinement |
-| ACP runtimes     | HTTP MCP when the runtime advertises and accepts it             |
-| Pi               | Owned extension and verified CLI catalogue on 0.85.1            |
-| Direct endpoints | Only models with verified tool support                          |
+| Runtime          | Transport and current boundary                                             |
+| ---------------- | -------------------------------------------------------------------------- |
+| Codex            | App-server dynamic tools                                                   |
+| Claude Code      | Agent SDK managed tools                                                    |
+| OpenCode         | Private MCP profile, verified on 1.18.21 and 2.0.22 with macOS confinement |
+| ACP runtimes     | HTTP MCP when the runtime advertises and accepts it                        |
+| Pi               | Owned extension and verified CLI catalogue on 0.85.1                       |
+| Direct endpoints | Only models with verified tool support                                     |
 
 A supported transport is checked before it is advertised. It does not require
 editing a user's global MCP configuration or granting Full access. A runtime

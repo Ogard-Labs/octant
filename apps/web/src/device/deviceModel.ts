@@ -56,6 +56,11 @@ export type DeviceView =
       readonly screen: DeviceScreenSource;
       /** Why there is no streamed picture, when there is not. */
       readonly liveView: "streaming" | "connecting" | "lost" | "stopped" | "not-offered";
+      /**
+       * How the picture arrives, in words, when the host says: "Live stream",
+       * or snapshots and why the stream is unavailable. A quiet status, not a problem.
+       */
+      readonly transport?: string;
     }
   | {
       readonly kind: "last-screen";
@@ -118,7 +123,7 @@ export type DeviceActionFailure<Intent extends { readonly kind: string }> =
   | { readonly kind: "cancel-finished" }
   | { readonly kind: "cancel-no-answer" };
 
-const INPUT_KINDS = new Set(["tap", "swipe", "type-text", "key-press"]);
+const INPUT_KINDS = new Set(["tap", "swipe", "type-text", "key-press", "repair-input"]);
 
 /**
  * Refusal reasons the device pane can say more about. Each is one sentence
@@ -128,13 +133,28 @@ const INPUT_KINDS = new Set(["tap", "swipe", "type-text", "key-press"]);
 const REFUSALS: Readonly<
   Record<
     string,
-    { readonly sentence: (name: string) => string; readonly fix: "try-again" | "allow-input" }
+    {
+      readonly sentence: (name: string) => string;
+      readonly fix: "try-again" | "allow-input" | "repair-input";
+    }
   >
 > = {
   unauthorized: {
     sentence: (name) => `Input on ${name} isn't allowed right now.`,
     fix: "allow-input",
   },
+  // Xcode's Device Hub took the Simulator's touch and buttons. Repairing
+  // restarts the home screen and closes running apps, so it is only offered.
+  "input-disconnected": {
+    sentence: (name) => `Input on ${name} is disconnected. Repair input restarts its home screen.`,
+    fix: "repair-input",
+  },
+};
+
+/** The workbench's words for a refusal it names, kept from before the device pane. */
+const WORKBENCH_REFUSALS: Readonly<Record<string, string>> = {
+  "input-disconnected":
+    "Simulator input is disconnected. Repair input restarts the Simulator's home screen.",
 };
 
 /**
@@ -151,7 +171,10 @@ export function deviceFailureSentence(
     case "outcome":
       return `${word} ${failure.intent.kind} ${failure.outcome.replaceAll("-", " ")}.`;
     case "refused":
-      return `${word} ${failure.intent.kind} was refused: ${failure.reason}.`;
+      return (
+        WORKBENCH_REFUSALS[failure.reason] ??
+        `${word} ${failure.intent.kind} was refused: ${failure.reason}.`
+      );
     case "input-not-allowed":
       return `Allow input to this ${noun} first.`;
     case "cannot-confirm":
@@ -178,6 +201,8 @@ export function deviceProblemFor<Intent extends { readonly kind: string }>(
     readonly deviceName: string;
     readonly retry?: (intent: Intent) => void;
     readonly allowInput?: () => void;
+    /** Gives the device's input back; offered only for a refusal that names it. */
+    readonly repairInput?: (intent: Intent) => void;
   },
 ): DeviceProblem {
   const name = context.deviceName;
@@ -217,10 +242,17 @@ export function deviceProblemFor<Intent extends { readonly kind: string }>(
       if (known === undefined) {
         return { message: `${name} refused that action.`, ...tryAgain(failure.intent) };
       }
-      return {
-        message: known.sentence(name),
-        ...(known.fix === "allow-input" ? allow : tryAgain(failure.intent)),
-      };
+      const repair = context.repairInput;
+      const intent = failure.intent;
+      const fix =
+        known.fix === "allow-input"
+          ? allow
+          : known.fix === "repair-input"
+            ? repair === undefined
+              ? {}
+              : { fix: { label: "Repair input", run: () => repair(intent) } }
+            : tryAgain(intent);
+      return { message: known.sentence(name), ...fix };
     }
     case "input-not-allowed":
       return { message: `Allow input on ${name} first.`, ...allow };

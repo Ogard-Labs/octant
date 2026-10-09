@@ -114,6 +114,59 @@ describe("AndroidEmulatorPane", () => {
     );
   });
 
+  it("keeps showing an emulator the person chose to boot while several others run", async () => {
+    const sdk = discovery.sdk;
+    let emulators = [
+      {
+        emulatorId: "A" as never,
+        name: "Pixel A",
+        state: "booted" as const,
+        serial: "emulator-5554",
+      },
+      {
+        emulatorId: "B" as never,
+        name: "Pixel B",
+        state: "booted" as const,
+        serial: "emulator-5556",
+      },
+      { emulatorId: "C" as never, name: "Pixel C", state: "shutdown" as const },
+    ];
+    const execute = vi.fn(async () => {
+      emulators = emulators.map((one) =>
+        one.emulatorId === ("C" as never) ? { ...one, state: "booting" as const } : one,
+      ) as typeof emulators;
+      return { outcome: "succeeded" };
+    });
+    const snapshot = vi.fn(async () => ({
+      sequence: 1,
+      snapshotAt: "2026-09-20T20:00:03.000Z",
+      sdk,
+      emulators,
+      active: [],
+      recentEvidence: [],
+    }));
+    render(
+      <AndroidEmulatorPane
+        checkoutId={ids.checkout as never}
+        client={
+          client({ discover: vi.fn(async () => ({ sdk, emulators })), snapshot, execute }) as never
+        }
+        createUuid={uuidFactory()}
+        thread={{ ...thread, executionPolicy: "full-access" } as never}
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole("radio", { name: /Pixel C/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Boot Pixel C" }));
+    await waitFor(() =>
+      expect(execute).toHaveBeenCalledWith(expect.objectContaining({ kind: "boot" })),
+    );
+    await waitFor(() =>
+      expect(screen.queryByRole("radio", { name: /Pixel C/ })).not.toBeInTheDocument(),
+    );
+    expect(screen.getAllByText(/Pixel C/).length).toBeGreaterThan(0);
+  });
+
   it("lists the Android SDK as the missing setup step when the SDK is missing", async () => {
     const { AndroidToolchainClientFailure } =
       await import("@octant/client-runtime/android-toolchain-client");
@@ -140,5 +193,51 @@ describe("AndroidEmulatorPane", () => {
     expect(
       screen.getByText("Install platform-tools and the emulator with the Android SDK Manager."),
     ).toBeVisible();
+  });
+
+  it("says plainly whether the frame is the live stream or snapshots, and why", async () => {
+    vi.stubGlobal(
+      "createImageBitmap",
+      vi.fn(async () => ({ width: 1080, height: 2400, close: () => undefined })),
+    );
+    const watching = (transport: unknown) =>
+      vi.fn(async () => ({
+        status: "watching",
+        screen: { width: 1080, height: 2400 },
+        frames: (async function* () {
+          yield Uint8Array.of(0xff, 0xd8, 0xff, 0xd9);
+          await new Promise(() => undefined);
+        })(),
+        transport,
+      }));
+    const pane = (watchScreen: ReturnType<typeof watching>) => (
+      <AndroidEmulatorPane
+        checkoutId={ids.checkout as never}
+        client={client({ watchScreen }) as never}
+        createUuid={uuidFactory()}
+        hostBridge={
+          {
+            getHostCapabilities: () => ({
+              sidebarVibrancySupported: false,
+              liveAndroidFrameSupported: true,
+            }),
+          } as never
+        }
+        thread={thread as never}
+      />
+    );
+    try {
+      const { unmount } = render(pane(watching({ kind: "stream" })));
+      expect(await screen.findByText("Live stream")).toBeVisible();
+      unmount();
+      render(pane(watching({ kind: "screencap", reason: "tool-exited" })));
+      expect(
+        await screen.findByText(
+          "Snapshots, live stream unavailable: serve-avd stopped before it attached.",
+        ),
+      ).toBeVisible();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

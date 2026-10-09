@@ -190,6 +190,26 @@ card, image placeholder, and text. Nodes name a parent rather than nesting.
 The drawing is a wireframe. Its controls are not live: they cannot be focused
 and they do not submit. Ask `describe` for `mockup` to get a settings screen.
 
+### Comparing options
+
+Ask the agent to compare options, choose between libraries or vendors, or
+record an architecture decision, and it builds a comparison matrix. The options
+are columns and the criteria are rows. Each cell holds a score, a short note
+such as "EU only", or a yes, partial, or no mark. A small number beside a cell
+points to its note under the table.
+
+- A criterion can count more than others. Its weight is shown under its name.
+  Some criteria are better when lower, such as cost, and say so.
+- **Weighted score** under each option is worked out by Octant from the scores
+  and the yes, partial, and no marks; text never counts. When an option has no
+  reading for a criterion that counts, its score says how many were not scored.
+- The agent's **Recommended** option is marked and explained under the table.
+  It may differ from the highest score, which is marked **Highest**.
+- **Order by score** puts the best-scoring option first. It changes only your
+  view.
+- On a narrow screen the matrix scrolls sideways while the criteria stay put.
+  **View matrix data** lists each option on its own row.
+
 ### Designs, prototypes, and slides
 
 Ask for an app, a screen, a website, a landing page, or a presentation, and the
@@ -223,13 +243,14 @@ block and select its comment marker to read or add comments on that block;
 blocks with open threads always show their marker and count. The panel filters
 open, resolved, or all threads. A comment is anchored to a
 block, to a board node, to a sequence participant or message, or to a state
-or its transition; replies, resolving, and deleting are journaled by
-the host, so they survive restart and reload. Every comment is authored as you,
+or its transition, or to a comparison matrix's option or criterion; replies,
+resolving, and deleting are journaled by the
+host, so they survive restart and reload. Every comment is authored as you,
 with the device it came through noted ("paired device" when it arrived from a
 paired phone or browser). A comment whose block has since left the canvas is
 kept and marked rather than dropped. Shared snapshots never include comments.
 A shared snapshot keeps every block, including charts, tables, treemaps,
-heatmaps, and bar lists with their number formats. A design, or an action block
+heatmaps, bar lists, and comparison matrices with their number formats. A design, or an action block
 that runs a command on this Mac, stops a share: Share then says the canvas
 cannot be shared safely.
 A treemap or bar list in a shared snapshot offers no **Open file**, because

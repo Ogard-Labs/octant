@@ -4,6 +4,10 @@ import type {
   AndroidEmulatorRecord,
   AndroidEmulatorRequest,
 } from "@octant/contracts/android-toolchain";
+import type {
+  AndroidScreenFallbackReason,
+  AndroidScreenTransport,
+} from "@octant/contracts/android-toolchain-rpc";
 import { LOCAL_TOOL_HOST_ID } from "@octant/contracts/tool-actions";
 import {
   ANDROID_INPUT_GRANT_MS,
@@ -100,7 +104,12 @@ export function AndroidEmulatorPane(props: {
     snapshotRequest,
   });
   const [busy, setBusy] = useState(false);
-  const [actionFailure, setActionFailure] = useState<DeviceActionFailure<AndroidEmulatorIntent>>();
+  // A failure is kept with the emulator its request named, so one that
+  // arrives after the pane moved to another emulator is never shown there.
+  const [failed, setFailed] = useState<{
+    readonly emulatorId: string;
+    readonly failure: DeviceActionFailure<AndroidEmulatorIntent>;
+  }>();
   // Which emulator the person chose to see. An agent's later request to show
   // a device replaces it, so the pane follows the newest ask.
   const [chosenEmulatorId, setChosenEmulatorId] = useState<AndroidEmulatorId>();
@@ -131,14 +140,16 @@ export function AndroidEmulatorPane(props: {
   // More than one emulator is running and nobody has said which to show: ask
   // rather than guess, since another task may own one of them, and
   // stream nothing from either meanwhile.
-  const chosenBooted = emulators.some(
+  // A choice holds while its emulator is booting or booted, so choosing one
+  // that is still starting shows its boot rather than asking again.
+  const chosenRunning = emulators.some(
     (emulator) =>
       chosenEmulatorId !== undefined &&
       String(emulator.emulatorId) === String(chosenEmulatorId) &&
-      emulator.state === "booted",
+      (emulator.state === "booted" || emulator.state === "booting"),
   );
   const awaitingChoice =
-    !chosenBooted &&
+    !chosenRunning &&
     controller.runtime?.paneOpenRequest === undefined &&
     emulators.filter((emulator) => emulator.state === "booted").length > 1;
   const liveEmulator =
@@ -149,7 +160,9 @@ export function AndroidEmulatorPane(props: {
   // A failure belongs to the emulator it happened on; showing another drops it,
   // so the line and its Try again never name one device and act on another.
   const shownEmulator = liveEmulatorId === undefined ? undefined : String(liveEmulatorId);
-  useEffect(() => setActionFailure(undefined), [shownEmulator]);
+  useEffect(() => setFailed(undefined), [shownEmulator]);
+  const actionFailure =
+    failed !== undefined && failed.emulatorId === shownEmulator ? failed.failure : undefined;
   const rememberedUntil =
     liveEmulatorId === undefined
       ? 0
@@ -188,7 +201,10 @@ export function AndroidEmulatorPane(props: {
         release = resolve;
       });
       await previous;
-      setActionFailure(undefined);
+      const emulatorId = String(intent.emulatorId);
+      const setActionFailure = (failure: DeviceActionFailure<AndroidEmulatorIntent>) =>
+        setFailed({ emulatorId, failure });
+      setFailed(undefined);
       setBusy(true);
       try {
         const base = androidActionRequest({
@@ -200,7 +216,6 @@ export function AndroidEmulatorPane(props: {
           checkoutId: props.checkoutId,
         });
         let request = base;
-        const emulatorId = String(intent.emulatorId);
         const now = Date.now();
         const remembered = rememberedInputGrants.current.get(emulatorId) ?? 0;
         const grantLive =
@@ -412,6 +427,9 @@ function androidDeviceView(input: {
         device,
         screen: { kind: "stream", size: liveScreen.screen, attach: liveScreen.attach },
         liveView: "streaming",
+        ...(liveScreen.transport === undefined
+          ? {}
+          : { transport: transportLabel(liveScreen.transport) }),
       };
     }
     if (liveScreen.status === "connecting") {
@@ -578,4 +596,19 @@ function localUserActor(): { readonly kind: "local-user"; readonly actorId: neve
     kind: "local-user",
     actorId: "00000000-0000-4000-8000-000000000002" as never,
   };
+}
+
+/** Says whether the pane shows serve-avd's stream or adb screencap snapshots, and why. */
+function transportLabel(transport: AndroidScreenTransport): string {
+  if (transport.kind === "stream") return "Live stream";
+  const reasons: Record<AndroidScreenFallbackReason, string> = {
+    "no-desktop": "this host is not running in the Octant desktop app.",
+    "not-emulator": "only emulators stream.",
+    "tool-missing": "serve-avd is not installed.",
+    "tool-exited": "serve-avd stopped before it attached.",
+    "timed-out": "serve-avd did not attach in time.",
+    "desktop-unreachable": "the desktop app did not answer.",
+    "no-frames": "the stream sent no picture.",
+  };
+  return `Snapshots, live stream unavailable: ${reasons[transport.reason]}`;
 }

@@ -2041,6 +2041,86 @@ describe("OpenCode driver", () => {
     expect(fixture.calls.some((call) => call.startsWith("mcp.add:"))).toBe(true);
   });
 
+  it("refuses a 2.x app tool call that names another OpenCode session", async () => {
+    const fixture = betaDriver();
+    const outcome = await Effect.runPromise(
+      Effect.scoped(
+        fixture.driver.acquire({ instanceId, projectRoot: "/tmp/project", mode: "code" }).pipe(
+          Effect.flatMap((connection) =>
+            Effect.gen(function* () {
+              const stream = yield* connection.subscribe;
+              const toolRequest = yield* Effect.fork(
+                Stream.runHead(
+                  stream.pipe(Stream.filter((event) => event.kind === "tool-request")),
+                ),
+              );
+              yield* connection.start({
+                sessionId,
+                modelId,
+                executionPolicy: "approval-gated",
+                tools: [{ name: "octant_browser", inputSchema: { type: "object" } }],
+              });
+              const bridge = fixture.mcpBridges[0];
+              if (bridge === undefined) throw new Error("Expected a registered bridge.");
+              // 2.0.22 names the calling session in `ai.opencode/sessionID`,
+              // where 1.x used `sessionID`.
+              const foreign = yield* Effect.promise(() =>
+                callBridgeTool(bridge, "octant_browser", { "ai.opencode/sessionID": "ses_other" }),
+              );
+              void callBridgeTool(bridge, "octant_browser", {
+                "ai.opencode/sessionID": "provider-session",
+              });
+              const owned = yield* Fiber.join(toolRequest);
+              return { foreign, owned };
+            }),
+          ),
+        ),
+      ),
+    );
+    expect(outcome.foreign).toContain("tool-unavailable");
+    expect(outcome.owned._tag).toBe("Some");
+  });
+
+  it("fails a 2.x turn closed on an event it cannot map, naming the event", async () => {
+    const fixture = betaDriver({
+      events: [
+        {
+          type: "session.future.event",
+          properties: { sessionID: "provider-session" },
+        } as unknown as Event,
+      ],
+    });
+    const output = await Effect.runPromise(
+      Effect.scoped(
+        fixture.driver.acquire({ instanceId, projectRoot: "/tmp/project", mode: "code" }).pipe(
+          Effect.flatMap((connection) =>
+            Effect.gen(function* () {
+              const stream = yield* connection.subscribe;
+              const collector = yield* Effect.fork(
+                Stream.runCollect(
+                  stream.pipe(
+                    Stream.takeUntil((event) =>
+                      ["completed", "failed", "interrupted"].includes(event.kind),
+                    ),
+                  ),
+                ),
+              );
+              yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+              return yield* Fiber.join(collector);
+            }),
+          ),
+        ),
+      ),
+    );
+    expect(Array.from(output).at(-1)).toMatchObject({
+      kind: "failed",
+      failure: {
+        category: "unsupported",
+        message: "OpenCode 2 sent an event Octant does not map: session.future.event.",
+      },
+    });
+  });
+
   it("fails a 2.x file-change event closed in Code mode", async () => {
     const fixture = betaDriver({
       events: [
@@ -2175,6 +2255,29 @@ describe("OpenCode driver", () => {
   });
 });
 
+/** Calls one tool on a bridge's existing MCP session, as OpenCode would mid-turn. */
+async function callBridgeTool(
+  bridge: { readonly url: string; readonly session: string | null },
+  name: string,
+  meta: Readonly<Record<string, unknown>>,
+): Promise<string> {
+  const called = await fetch(bridge.url, {
+    method: "POST",
+    headers: {
+      accept: "application/json, text/event-stream",
+      "content-type": "application/json",
+      ...(bridge.session === null ? {} : { "mcp-session-id": bridge.session }),
+    },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: 2,
+      method: "tools/call",
+      params: { name, arguments: {}, _meta: meta },
+    }),
+  });
+  return called.text();
+}
+
 function betaDriver(
   options: {
     readonly worktreeProviders?: "refused";
@@ -2250,6 +2353,7 @@ function driverFixture(
   const catalogueRoots: string[] = [];
   const processInputs: OpenCodeProcessStartInput[] = [];
   const createdPermissions: PermissionRuleset[] = [];
+  const mcpBridges: Array<{ readonly url: string; readonly session: string | null }> = [];
   const registry = new ProviderRuntimeRegistry();
   const processPort = {
     start: (input: OpenCodeProcessStartInput) =>
@@ -2321,6 +2425,7 @@ function driverFixture(
       });
       if (!initialize.ok) throw new Error("MCP initialize failed");
       const session = initialize.headers.get("mcp-session-id");
+      mcpBridges.push({ url, session });
       const listed = await fetch(url, {
         method: "POST",
         headers: {
@@ -2367,6 +2472,7 @@ function driverFixture(
     sessionRoots,
     processInputs,
     createdPermissions,
+    mcpBridges,
     registry,
     driver: makeOpenCodeDriver({
       instanceId,

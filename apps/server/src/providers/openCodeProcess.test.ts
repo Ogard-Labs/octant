@@ -195,6 +195,11 @@ describe("probeOpenCodeBinary", () => {
     expect(supportsOpenCodeIsolation("1.17.19")).toBe(false);
     expect(supportsOpenCodeIsolation("1.19.0")).toBe(false);
     expect(supportsOpenCodeIsolation("opencode2 v0.0.0-beta-18721")).toBe(false);
+    expect(supportsOpenCodeIsolation("opencode v2.0.22")).toBe(true);
+    expect(supportsOpenCodeIsolation("opencode v2.0.21")).toBe(false);
+    expect(supportsOpenCodeIsolation("opencode v2.0.23")).toBe(false);
+    expect(supportsOpenCodeIsolation("opencode2 v2.0.22")).toBe(false);
+    expect(supportsOpenCodeIsolation("2.0.22")).toBe(false);
   });
 
   // This is deliberately opt-in: it launches the installed provider runtime

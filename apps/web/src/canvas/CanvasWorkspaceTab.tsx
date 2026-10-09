@@ -108,6 +108,7 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
     | {
         readonly kind: "ready";
         readonly earlier: { readonly sequence: number; readonly definition: CanvasDefinition };
+        readonly later: { readonly sequence: number; readonly definition: CanvasDefinition };
       }
     | { readonly kind: "unavailable" }
     | undefined
@@ -123,6 +124,11 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
   // refresh/cancel race. Without it, attach and share could target a version
   // the user no longer has selected.
   const loadToken = useRef(0);
+  // True while the newest load is in flight. Compare names a pair from the
+  // version on screen, and a selection still loading is about to replace it:
+  // clicking Compare within a second of picking a version compared the
+  // earlier pick's neighbour against the version that then arrived.
+  const [loading, setLoading] = useState(false);
   const commentsReturnFocus = useRef<HTMLElement | null>(null);
   const closeCommentsButton = useRef<HTMLButtonElement | null>(null);
 
@@ -130,11 +136,21 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
     async (versionId?: string) => {
       if (props.client === undefined) return;
       const current = (loadToken.current += 1);
-      const outcome = await props.client.get(
-        props.tab.canvasId,
-        versionId === undefined ? undefined : versionId,
-      );
+      setLoading(true);
+      let outcome: Awaited<ReturnType<CanvasClient["get"]>>;
+      try {
+        outcome = await props.client.get(
+          props.tab.canvasId,
+          versionId === undefined ? undefined : versionId,
+        );
+      } catch (error) {
+        // A failed fetch leaves the Canvas on screen as it was, so Compare
+        // must not stay held for a version that will never arrive.
+        if (loadToken.current === current) setLoading(false);
+        throw error;
+      }
       if (loadToken.current !== current) return;
+      setLoading(false);
       if (outcome.kind === "ready") {
         setDefinition(outcome.version.definition);
         setSelectedVersionId(outcome.version.versionId);
@@ -229,6 +245,7 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
       // No further load will bump the token here, so retire any in-flight
       // `get` from the previous client explicitly.
       loadToken.current += 1;
+      setLoading(false);
       setDefinition(undefined);
       setSelectedVersionId(undefined);
       setMessage("The host canvas client is unavailable.");
@@ -570,6 +587,11 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
             undefined,
           );
   const commentsAvailable = commentsClient !== undefined && reviseBase !== null;
+  // Refine and Refresh write the next version on top of the head, and the host
+  // refuses either from an older version as stale. Comments anchor to blocks of
+  // the Canvas rather than to a version, so the host takes them from any
+  // version and the drawer stays open to them.
+  const viewingOlderVersion = String(selectedVersionId) !== tipVersionId;
   const openThreads = commentThreads.filter((thread) => thread.comment.resolvedAt === undefined);
   const openCounts = new Map<string, number>();
   for (const thread of openThreads) {
@@ -578,10 +600,26 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
   }
   const overflowItems = [
     ...(reviseBase !== null && reviseBase.mode === "chat"
-      ? [{ label: "Refine…", value: "refine" }]
+      ? [
+          {
+            label: "Refine…",
+            value: "refine",
+            ...(viewingOlderVersion
+              ? { disabled: true, description: "Older versions can't be refined." }
+              : {}),
+          },
+        ]
       : []),
     ...(refreshRecipe !== undefined && refreshBase !== undefined
-      ? [{ label: "Refresh…", value: "refresh" }]
+      ? [
+          {
+            label: "Refresh…",
+            value: "refresh",
+            ...(viewingOlderVersion
+              ? { disabled: true, description: "Older versions can't be refreshed." }
+              : {}),
+          },
+        ]
       : []),
     ...(shares !== undefined && selectedVersionId !== undefined
       ? [{ label: "Share…", value: "share" }]
@@ -619,6 +657,9 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
   const openCompare = async () => {
     setVersionsOpen(false);
     if (props.client === undefined || previousEntry === undefined) return;
+    // The pair is the one the button named: the version on screen and the one
+    // before it, fixed at the click so a later load cannot swap one side.
+    const later = { sequence: expectedSequence, definition };
     const outcome = await props.client.get(props.tab.canvasId, String(previousEntry.versionId));
     setCompare(
       outcome.kind === "ready"
@@ -628,6 +669,7 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
               sequence: outcome.version.sequence,
               definition: outcome.version.definition,
             },
+            later,
           }
         : { kind: "unavailable" },
     );
@@ -665,6 +707,7 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
           />
           {previousEntry === undefined ? null : (
             <OctantButton
+              disabled={loading}
               onClick={() => void openCompare()}
               size="sm"
               type="button"
@@ -727,20 +770,29 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
         )}
       </header>
       <div className="canvas-workspace-tab__body">
-        <CanvasView
-          input={definition}
-          {...(actionRuntime === undefined ? {} : { actionRuntime })}
-          {...(layoutRuntime === undefined ? {} : { layoutRuntime })}
-          {...(planRuntime === undefined ? {} : { planRuntime })}
-          {...(commentsAvailable ? { comments: { openCounts, onOpen: openCommentsOn } } : {})}
-        />
+        {/* The document scrolls on its own so the drawer beside it stays put,
+            and it is its own stacking context so a sticky table header stays
+            inside it rather than painting over the drawer's controls. */}
+        <div className="canvas-workspace-tab__document">
+          <CanvasView
+            input={definition}
+            {...(actionRuntime === undefined ? {} : { actionRuntime })}
+            {...(layoutRuntime === undefined ? {} : { layoutRuntime })}
+            {...(planRuntime === undefined ? {} : { planRuntime })}
+            {...(commentsAvailable ? { comments: { openCounts, onOpen: openCommentsOn } } : {})}
+          />
+        </div>
         {commentsClient !== undefined && reviseBase !== null ? (
           <aside
             aria-label="Comments"
             className="canvas-workspace-tab__drawer"
             hidden={!commentsOpen}
             onKeyDown={(event) => {
-              if (event.key === "Escape") closeComments();
+              if (event.key !== "Escape") return;
+              // In the narrow dock the Canvas sits inside a modal sheet that
+              // also closes on Escape; one press closes the drawer alone.
+              event.stopPropagation();
+              closeComments();
             }}
           >
             <div className="canvas-workspace-tab__drawer-header">
@@ -842,10 +894,7 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
         open={compare !== undefined}
       >
         {compare?.kind === "ready" ? (
-          <CanvasVersionCompare
-            earlier={compare.earlier}
-            later={{ sequence: expectedSequence, definition }}
-          />
+          <CanvasVersionCompare earlier={compare.earlier} later={compare.later} />
         ) : compare?.kind === "unavailable" ? (
           <p className="canvas-compare__note">The earlier version is unavailable.</p>
         ) : null}

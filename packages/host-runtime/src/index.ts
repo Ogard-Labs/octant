@@ -72,6 +72,7 @@ export {
   type HostOAuthDescriptor,
   type HostOAuthPublicState,
   type HostOAuthRefreshResult,
+  type HostOAuthRevokeResult,
   type HostOAuthRuntime,
 } from "./hostOAuth";
 export {

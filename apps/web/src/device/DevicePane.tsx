@@ -297,6 +297,7 @@ function StageFor(props: {
           name={view.device.name}
           platform={props.platform}
           screen={view.screen.kind === "connecting" ? blank : view.screen}
+          {...(view.transport === undefined ? {} : { status: view.transport })}
         />
       );
     }

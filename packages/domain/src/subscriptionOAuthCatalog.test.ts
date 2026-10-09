@@ -8,14 +8,53 @@ import { subscriptionOAuthOffers } from "./subscriptionOAuthCatalog";
 describe("subscription OAuth catalog", () => {
   it("offers OpenRouter as the first catalog entry", () => {
     const offers = subscriptionOAuthOffers();
-    expect(offers.map((offer) => offer.descriptor.descriptorId)).toEqual(["openrouter"]);
-    const openRouter = offers[0]!;
+    expect(offers.map((offer) => offer.descriptor.descriptorId)).toEqual([
+      "openrouter",
+      "chatgpt-plan",
+    ]);
+    const openRouter = offers[0];
+    if (openRouter === undefined) throw new Error("missing OpenRouter offer");
     expect(openRouter.descriptor.dialect).toBe("openrouter-pkce");
     expect(openRouter.descriptor.flow).toBe("authorization-code-pkce");
     expect(openRouter.descriptor.authorizationEndpoint).toBe("https://openrouter.ai/auth");
     expect(openRouter.descriptor.tokenEndpoint).toBe("https://openrouter.ai/api/v1/auth/keys");
     expect(openRouter.allowedEndpoint).toBe("https://openrouter.ai/api/v1");
     expect(openRouter.driverKinds).toEqual(["openai-compatible"]);
+  });
+
+  it("offers the ChatGPT plan sign-in with the SIWC dialect and endpoints", () => {
+    const offers = subscriptionOAuthOffers();
+    const chatGpt = offers.find((offer) => offer.descriptor.descriptorId === "chatgpt-plan");
+    if (chatGpt === undefined) throw new Error("missing ChatGPT plan offer");
+    expect(chatGpt.descriptor.dialect).toBe("chatgpt-plan-siwc");
+    expect(chatGpt.descriptor.flow).toBe("authorization-code-pkce");
+    expect(chatGpt.descriptor.authorizationEndpoint).toBe(
+      "https://auth.openai.com/api/accounts/authorize",
+    );
+    expect(chatGpt.descriptor.tokenEndpoint).toBe(
+      "https://auth.openai.com/api/accounts/oauth/token",
+    );
+    expect(chatGpt.descriptor.scopes).toEqual([
+      "openid",
+      "profile",
+      "email",
+      "offline_access",
+      "resource.invoke",
+      "chatgpt.tokens.use.direct",
+    ]);
+    expect(chatGpt.descriptor.agentNameHint).toBe("Octant");
+    expect(chatGpt.allowedEndpoint).toBe("https://api.openai.com/v1");
+    expect(chatGpt.driverKinds).toEqual(["openai-compatible"]);
+    expect(chatGpt.accountLabel).toBe("ChatGPT plan");
+  });
+
+  it("never carries a host id in the ChatGPT plan catalog entry", () => {
+    // The server binds the host's derived id when a sign-in begins.
+    const catalog = subscriptionOAuthOffers().find(
+      (offer) => offer.descriptor.descriptorId === "chatgpt-plan",
+    );
+    if (catalog === undefined) throw new Error("missing ChatGPT plan offer");
+    expect(catalog.descriptor.extAgentHostId).toBeUndefined();
   });
 
   it("round-trips every catalog entry through the wire schemas", () => {

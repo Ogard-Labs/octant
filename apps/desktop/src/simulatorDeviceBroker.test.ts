@@ -187,6 +187,16 @@ describe("Simulator input delivery", () => {
     ]);
   });
 
+  it("asks the helpers to repair input without first looking up the screen", async () => {
+    const { fake, send } = helpers(() => ({ status: "delivered" }));
+
+    await expect(
+      createSimulatorInputDelivery(fake)({ kind: "repair-input", udid, budgetMs: 30_000 }),
+    ).resolves.toEqual({ kind: "delivered" });
+
+    expect(send.mock.calls.map(([, sent]) => sent)).toEqual([{ op: "repair-input" }]);
+  });
+
   it("answers inside the action's deadline so the server hears the helper's own reason", async () => {
     const { fake, send } = helpers(() => ({ status: "delivered" }));
     await createSimulatorInputDelivery(fake)({

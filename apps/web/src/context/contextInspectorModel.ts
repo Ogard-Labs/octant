@@ -2,6 +2,7 @@ import type {
   ContextEntry,
   ContextEntryCategory,
   ContextHealth,
+  ContextMetadataSource,
   ModelContextLimits,
   ServiceLimitBucket,
   TokenMeasurement,
@@ -376,6 +377,23 @@ function compact(value: number): string {
 function percentOf(value: number, total: number): number {
   if (total <= 0) return 0;
   return Math.max(0, Math.min(100, Math.round((value / total) * 1000) / 10));
+}
+
+/**
+ * Where the model's window came from, in the words the inspector uses. The
+ * provider's metadata and its runtime report are both the provider saying so;
+ * a profile is Octant's built-in catalogue; learned is what the endpoint's own
+ * refusals taught; an estimate is the planner's labelled stand-in.
+ */
+export function contextWindowSourceLabel(source: ContextMetadataSource): string {
+  return {
+    "user-supplied": "Set by you",
+    "runtime-reported": "Reported",
+    "provider-discovery": "Reported",
+    "reviewed-catalog": "Profile",
+    "observed-evidence": "Learned",
+    "conservative-fallback": "Estimate",
+  }[source];
 }
 
 function shareOf(value: number, total: number | undefined): { readonly percent?: number } {

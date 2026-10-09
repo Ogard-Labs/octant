@@ -13,6 +13,9 @@ import {
   CANVAS_MAX_DESIGN_FRAMES,
   CANVAS_MAX_DESIGN_MARKUP_LENGTH,
   CANVAS_MAX_IMAGES,
+  CANVAS_MAX_MATRIX_CELLS,
+  CANVAS_MAX_MATRIX_CRITERIA,
+  CANVAS_MAX_MATRIX_OPTIONS,
   CANVAS_MAX_METRIC_SPARKLINE_POINTS,
   CANVAS_MAX_MINDMAP_NOTE_LENGTH,
   CANVAS_MAX_MOCKUP_DEPTH,
@@ -34,6 +37,7 @@ import {
   CANVAS_SCHEMA_VERSION,
   CANVAS_TREEMAP_SCHEMA_VERSION,
   CANVAS_DESIGN_SCHEMA_VERSION,
+  CANVAS_COMPARISON_MATRIX_SCHEMA_VERSION,
   CanvasBlock,
   CanvasDefinition,
   CanvasVersion,
@@ -58,6 +62,7 @@ const SUPPORTED_CANVAS_SCHEMA_VERSIONS: readonly number[] = [
   CANVAS_HEATMAP_SCHEMA_VERSION,
   CANVAS_BAR_LIST_SCHEMA_VERSION,
   CANVAS_DIAGRAM_KINDS_SCHEMA_VERSION,
+  CANVAS_DESIGN_SCHEMA_VERSION,
   CANVAS_SCHEMA_VERSION,
 ];
 
@@ -74,6 +79,7 @@ const VERSION_GATED_BLOCK_KINDS: ReadonlyArray<{ readonly kind: string; readonly
     { kind: "swimlane", since: CANVAS_DIAGRAM_KINDS_SCHEMA_VERSION },
     { kind: "mindmap", since: CANVAS_DIAGRAM_KINDS_SCHEMA_VERSION },
     { kind: "design", since: CANVAS_DESIGN_SCHEMA_VERSION },
+    { kind: "comparison-matrix", since: CANVAS_COMPARISON_MATRIX_SCHEMA_VERSION },
   ];
 
 export type CanvasPolicyRejectionCode =
@@ -146,7 +152,15 @@ export type CanvasPolicyRejectionCode =
   | "mindmap-roots"
   | "dangling-mindmap-parent"
   | "mindmap-nesting-cycle"
-  | "mindmap-note-budget-exceeded";
+  | "mindmap-note-budget-exceeded"
+  | "matrix-options-budget-exceeded"
+  | "matrix-criteria-budget-exceeded"
+  | "matrix-cells-budget-exceeded"
+  | "duplicate-matrix-id"
+  | "unknown-matrix-option"
+  | "unknown-matrix-criterion"
+  | "duplicate-matrix-cell"
+  | "matrix-score-out-of-range";
 
 export class CanvasPolicyRejected extends Error {
   override readonly name = "CanvasPolicyRejected";
@@ -450,6 +464,8 @@ function inferStructuralBudgetCode(input: unknown): CanvasPolicyRejectionCode | 
       frames?: unknown;
       styles?: unknown;
       sparkline?: unknown;
+      options?: unknown;
+      criteria?: unknown;
     };
     if (block.kind === "image") imageCount += 1;
     if (
@@ -608,6 +624,17 @@ function inferStructuralBudgetCode(input: unknown): CanvasPolicyRejectionCode | 
     ) {
       return "bar-list-rows-budget-exceeded";
     }
+    if (block.kind === "comparison-matrix") {
+      if (Array.isArray(block.options) && block.options.length > CANVAS_MAX_MATRIX_OPTIONS) {
+        return "matrix-options-budget-exceeded";
+      }
+      if (Array.isArray(block.criteria) && block.criteria.length > CANVAS_MAX_MATRIX_CRITERIA) {
+        return "matrix-criteria-budget-exceeded";
+      }
+      if (Array.isArray(block.cells) && block.cells.length > CANVAS_MAX_MATRIX_CELLS) {
+        return "matrix-cells-budget-exceeded";
+      }
+    }
     if (
       block.kind === "metric" &&
       Array.isArray(block.sparkline) &&
@@ -720,6 +747,7 @@ function validateCrossReferences(definition: CanvasDefinition): void {
     if (block.kind === "treemap") validateTreemap(block);
     if (block.kind === "heatmap") validateHeatmap(block);
     if (block.kind === "bar-list") validateBarList(block);
+    if (block.kind === "comparison-matrix") validateComparisonMatrix(block);
     if (block.kind === "metric") validateMetric(block);
   }
 }
@@ -1460,6 +1488,96 @@ function validateBarList(block: Extract<CanvasBlock, { readonly kind: "bar-list"
       reject(
         "bar-list-negative-value",
         `Canvas bar list ${block.blockId} has a second value that is negative or not finite.`,
+      );
+    }
+  }
+}
+
+/**
+ * A comparison matrix names its options and criteria by id. Both share the
+ * node anchor a comment lands on, so one id may name only one row or column. A
+ * cell on a missing option or criterion, a coordinate listed twice, a
+ * recommendation of an option the matrix does not hold, and a score outside a
+ * declared range would each draw a decision the data does not support. The
+ * weighted score is not checked against the recommendation: the author may
+ * recommend an option the arithmetic does not favour, and the screen shows both.
+ */
+function validateComparisonMatrix(
+  block: Extract<CanvasBlock, { readonly kind: "comparison-matrix" }>,
+): void {
+  if (block.options.length > CANVAS_MAX_MATRIX_OPTIONS) {
+    reject(
+      "matrix-options-budget-exceeded",
+      `Canvas comparison matrix ${block.blockId} has more than ${String(CANVAS_MAX_MATRIX_OPTIONS)} options.`,
+    );
+  }
+  if (block.criteria.length > CANVAS_MAX_MATRIX_CRITERIA) {
+    reject(
+      "matrix-criteria-budget-exceeded",
+      `Canvas comparison matrix ${block.blockId} has more than ${String(CANVAS_MAX_MATRIX_CRITERIA)} criteria.`,
+    );
+  }
+  if (block.cells.length > CANVAS_MAX_MATRIX_CELLS) {
+    reject(
+      "matrix-cells-budget-exceeded",
+      `Canvas comparison matrix ${block.blockId} has more than ${String(CANVAS_MAX_MATRIX_CELLS)} cells.`,
+    );
+  }
+  const ids = new Set<string>();
+  const options = new Set<string>();
+  const criteria = new Set<string>();
+  for (const option of block.options) {
+    const id = String(option.optionId);
+    if (ids.has(id)) {
+      reject("duplicate-matrix-id", `Canvas comparison matrix ${block.blockId} repeats ${id}.`);
+    }
+    ids.add(id);
+    options.add(id);
+  }
+  for (const criterion of block.criteria) {
+    const id = String(criterion.criterionId);
+    if (ids.has(id)) {
+      reject("duplicate-matrix-id", `Canvas comparison matrix ${block.blockId} repeats ${id}.`);
+    }
+    ids.add(id);
+    criteria.add(id);
+  }
+  if (block.recommendedOptionId !== undefined && !options.has(String(block.recommendedOptionId))) {
+    reject(
+      "unknown-matrix-option",
+      `Canvas comparison matrix ${block.blockId} recommends an option it does not hold.`,
+    );
+  }
+  const coordinates = new Set<string>();
+  for (const cell of block.cells) {
+    if (!options.has(String(cell.optionId))) {
+      reject(
+        "unknown-matrix-option",
+        `Canvas comparison matrix ${block.blockId} has a cell on an option it does not hold.`,
+      );
+    }
+    if (!criteria.has(String(cell.criterionId))) {
+      reject(
+        "unknown-matrix-criterion",
+        `Canvas comparison matrix ${block.blockId} has a cell on a criterion it does not hold.`,
+      );
+    }
+    const coordinate = `${String(cell.criterionId)}\u0000${String(cell.optionId)}`;
+    if (coordinates.has(coordinate)) {
+      reject(
+        "duplicate-matrix-cell",
+        `Canvas comparison matrix ${block.blockId} lists one cell more than once.`,
+      );
+    }
+    coordinates.add(coordinate);
+    if (
+      "score" in cell &&
+      block.scoreRange !== undefined &&
+      (cell.score < block.scoreRange.min || cell.score > block.scoreRange.max)
+    ) {
+      reject(
+        "matrix-score-out-of-range",
+        `Canvas comparison matrix ${block.blockId} has a score outside ${String(block.scoreRange.min)} to ${String(block.scoreRange.max)}.`,
       );
     }
   }

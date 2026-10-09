@@ -202,7 +202,18 @@ navigation rail; the rail names each group of pages with a quiet label and
 draws no hairline between groups. The groups are Personal (how Octant looks and
 behaves for you), Modes (each mode's defaults), Models (which provider or model
 answers each job), Agents (what a running agent may do), Integrations, and
-System (the running host, its data, sync, remote access, and usage). A setting lives
+System (the running host, its data, sync, remote access, and usage). Models
+lists each provider kind on the page of what it serves: Providers & Models
+holds only the agent runtimes Octant drives (ACP agents, CLIs, the Agent SDK,
+RPC runtimes), and its manual add form offers only those kinds; Octant Harness
+opens with Model endpoints, every endpoint Octant calls over an API itself
+(OpenAI-compatible, Anthropic-compatible, Ollama, Azure AI Foundry), whose add
+row offers one-step subscription sign-ins (Sign in with ChatGPT, Sign in with
+OpenRouter) beside Add endpoint, followed by model slots and helper agents;
+Image generation holds the image profiles and custom image sources. A
+sign-in endpoint's row shows who is signed in with sign out and sign in
+again, and its configuration fixes the base URL and asks for no key. The
+instances, commands, and credentials are the same on every page. A setting lives
 on the page of the thing it changes, and a moved setting keeps answering links
 to its old page. Personal holds Appearance (theme, window glass, background,
 text, accessibility) and a separate Sidebar page (layout, destinations, sidebar
@@ -722,7 +733,8 @@ validated semantic roles; incomplete or low-contrast imports fall back safely.
 
 Charts, metric blocks, tables, and timelines are one visual system, so a Canvas
 reads as one document whatever kinds it mixes. These rules own the mark, the
-ink, and the reading; a later block (treemap, heatmap, bar list) builds on them
+ink, and the reading; a later block (treemap, heatmap, bar list, comparison
+matrix) builds on them
 rather than inventing a second chart language.
 
 **Hue is for marks only.** Data colour appears on the mark — a bar, a line, a
@@ -828,6 +840,26 @@ screen renderer, the static SVG export, and the Markdown and HTML export rank
 the same list. The disclosed
 table is the accessible reading of every row, including the rows Show all holds
 back.
+
+**Comparison matrix.** Options across the top, criteria down the side, and a
+weighted score under each option (`packages/domain/src/canvasComparisonMatrix.ts`).
+It is a native table on its own card. The card's ground is opaque, so the
+criteria column stays pinned while the options scroll beneath it at phone width.
+The region scrolls inside itself and takes keyboard focus. A cell reads as a
+score, a short text, or a yes, partial, or no glyph. The glyphs differ in shape
+(a filled check, a half disc, an empty ring with a dash) and are always written
+beside the word, so colour never carries the reading. A score and each weighted
+score draw a neutral-ink meter of their share of the criterion. A
+lower-is-better criterion is turned round first, so a longer meter always reads
+better. The highest score is set in strong ink and marked Highest. A full tie
+marks none. The recommended option is the author's call, not the arithmetic's.
+Its column is tinted with the foreground, ruled along the top, and badged with
+an inverted Recommended pill, so emphasis is ink in the monochrome default. An
+empty coordinate reads as not assessed, never as a zero or a no. Cell notes are
+numbered in reading order and listed under the table. Ordering the options by
+score is view state. The disclosed table reads one row per option. Under forced
+colours the column keeps a system-ink rule, the badge an outline, and the meters
+a framed track.
 
 **Metric tiles.** Consecutive metric blocks are gathered into one responsive
 row of two to four tiles, and a metric's value is set large in tabular numerals
@@ -1569,7 +1601,10 @@ and Tooltip. Composition rules:
   `Separator` for navigation lists.
 - Menus, popovers, dialogs, and overlays are opaque, keyboard dismissible, and
   titled for assistive technology. Use `OctantDialog` with a real label even
-  when the title is visually hidden.
+  when the title is visually hidden. Dialogs and floating popups share one
+  layer, so the one opened last paints on top: a menu or popover opened inside
+  a dialog or the narrow dock sheet appears above it, and Escape closes the
+  innermost surface first.
 - Use Badge for status labels, Alert for callouts, Empty for empty states,
   Skeleton for loading, and the shared `.toast-stack` notification owner for
   transient acknowledgements. Do not add another toast package or recreate
