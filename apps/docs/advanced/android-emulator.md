@@ -31,8 +31,19 @@ that is already running.
 - **Install** a checkout-relative APK and **launch** a package. Gradle build
   stays the repository shell.
 
-A host without `adb` or `emulator` says the destination is unavailable
-instead of inventing a picture. Remote and headless clients stay read-only
+Octant finds the SDK through `ANDROID_HOME` or `ANDROID_SDK_ROOT`. Without
+either, macOS hosts look in `~/Library/Android/sdk` (Android Studio) and then in
+the Homebrew `android-commandlinetools` location under `/opt/homebrew/share` or
+`/usr/local/share`, using the first that has both `adb` and `emulator`. Other
+hosts look in `~/Android/Sdk`. A host without `adb` or `emulator` says the destination is
+unavailable instead of inventing a picture.
+
+When no `adb` server is running, the first `adb` command Octant sends starts
+one with mDNS discovery turned off (`ADB_MDNS=0`). Wireless-debugging
+discovery is not available through a server Octant started. A server you
+started yourself is used as it is, and Octant never stops it. If an input
+loses the `adb` server before the device answers, the pane reports it as
+interrupted rather than failed. Check the screen before you send it again. Remote and headless clients stay read-only
 for live input the same way the iOS pane does.
 
 ## Agent tool
