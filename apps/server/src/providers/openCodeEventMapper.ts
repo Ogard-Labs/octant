@@ -24,6 +24,24 @@ export interface OpenCodeEventContext {
   readonly stopMemory?: { current: ProviderOutputStopReason | undefined };
 }
 
+/**
+ * 2.0.22 ends a turn with `session.execution.interrupted` for a person's Stop
+ * (`user`) and for its own reasons (`superseded`, `inactivity`), and also when
+ * its server is going down (`shutdown`), which happens when Octant's host
+ * stops it mid-turn. Only `shutdown` reaches the mapper under its own name;
+ * the others are ordinary interruptions. The pinned SDK types predate it.
+ */
+export interface OpenCodeShutdownInterruption {
+  readonly type: "session.execution.interrupted";
+  readonly properties: { readonly sessionID: string; readonly reason: "shutdown" };
+}
+
+/** Every event the mapper reads: the SDK's, plus the 2.0.22 one it lacks. */
+export type OpenCodeEvent = Event | OpenCodeShutdownInterruption;
+
+const OPENCODE_SHUTDOWN_MESSAGE =
+  "OpenCode shut down while this turn was running. Check what it did, then resume.";
+
 type RuntimeEventWithoutEnvelope = ProviderRuntimeEvent extends infer RuntimeEvent
   ? RuntimeEvent extends ProviderRuntimeEvent
     ? Omit<RuntimeEvent, "instanceId" | "sessionId" | "sequence" | "correlationId" | "occurredAt">
@@ -183,8 +201,14 @@ function assertNever(value: never): never {
 
 export function mapOpenCodeEvent(
   context: OpenCodeEventContext,
-  event: Event,
+  event: OpenCodeEvent,
 ): ReadonlyArray<ProviderRuntimeEvent> {
+  if (event.type === "session.execution.interrupted") {
+    // Nobody asked for this stop, and the work the turn did up to it is
+    // unknown, so the turn is held for a person to check rather than reported
+    // as a Stop; nothing sends it again on its own.
+    return [mappedEvent(context, { kind: "waiting", message: OPENCODE_SHUTDOWN_MESSAGE })];
+  }
   const parts = context.messageParts?.accept(event);
   if (parts !== undefined) return parts.map((part, index) => mappedEvent(context, part, index));
   switch (event.type) {

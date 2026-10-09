@@ -1876,7 +1876,12 @@ modelId }`, and the model picker is provider-first. Discovery can find
   unsupported: 2.0.22 serves no question routes and asks through forms, which
   are not mapped, so the written posture denies `question` and a form that
   still arrives fails the turn. Resume,
-  interruption, and tool activity are reported; each allowed or approved edit
+  interruption, and tool activity are reported. A Stop the person asked for
+  (`user`) and OpenCode's own `superseded` and `inactivity` interruptions stay
+  ordinary interruptions; a `shutdown` interruption, or the OpenCode process
+  exiting under a running turn, is nobody's Stop, so the turn ends `waiting`
+  with a reason naming what happened, and nothing sends it again on its own
+  (Work, like Chat and Code, ends a turn on `waiting`); each allowed or approved edit
   request admits one reported change to each file it names (resolved against
   the project root; `*` admits one change to any file), rejecting one request
   never withdraws another's grant, and a change to a file no remaining grant

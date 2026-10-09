@@ -27,6 +27,7 @@ import {
   openCodePromptParts,
   type OpenCodeClientPort,
 } from "./openCodeDriver";
+import type { OpenCodeEvent } from "./openCodeEventMapper";
 import { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
 import type { OpenCodeProcessPort, OpenCodeProcessStartInput } from "./openCodeProcess";
 
@@ -141,7 +142,7 @@ describe("OpenCode driver", () => {
     expect(fixture.calls).not.toContain("session.promptAsync");
   });
 
-  it("interrupts a live session when its dedicated provider process exits", async () => {
+  it("holds a live turn for recovery, not as a Stop, when its dedicated provider process exits", async () => {
     const child = spawn(process.execPath, ["-e", "setTimeout(() => {}, 30000)"], {
       stdio: "ignore",
     });
@@ -176,6 +177,7 @@ describe("OpenCode driver", () => {
               Stream.runCollect(stream.pipe(Stream.take(1))),
             );
             yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+            yield* connection.send({ sessionId, prompt: "hello", attachments: [], tools: [] });
             child.kill("SIGKILL");
             const output = yield* Fiber.join(collector).pipe(Effect.timeout("2 seconds"));
             expect(fixture.registry.activeSessionCount(instanceId)).toBe(0);
@@ -184,8 +186,14 @@ describe("OpenCode driver", () => {
         ),
       );
       expect(Array.from(events)).toMatchObject([
-        { kind: "interrupted", message: "Provider runtime exited unexpectedly." },
+        {
+          kind: "waiting",
+          message:
+            "The OpenCode process stopped while this turn was running. Check what it did, then resume.",
+        },
       ]);
+      // The prompt went out once; nothing sends it again on its own.
+      expect(fixture.calls.filter((call) => call === "session.promptAsync")).toHaveLength(1);
     } finally {
       child.kill("SIGKILL");
     }
@@ -2022,6 +2030,54 @@ describe("OpenCode driver", () => {
     ).toBe(true);
   });
 
+  it("ends a 2.x turn OpenCode's shutdown cut off as held for recovery, and sends nothing again", async () => {
+    const shutdown = adaptBetaOpenCodeEvent({
+      type: "session.execution.interrupted",
+      data: { sessionID: "provider-session", reason: "shutdown" },
+    });
+    if (shutdown === undefined) throw new Error("Expected the shutdown to be adapted.");
+    const fixture = betaDriver({ events: [shutdown, idleEvent("provider-session")] });
+    const output = await Effect.runPromise(
+      Effect.scoped(
+        fixture.driver.acquire({ instanceId, projectRoot: "/tmp/project", mode: "code" }).pipe(
+          Effect.flatMap((connection) =>
+            Effect.gen(function* () {
+              const stream = yield* connection.subscribe;
+              const collector = yield* Effect.fork(
+                Stream.runCollect(
+                  stream.pipe(
+                    Stream.takeUntil((event) =>
+                      ["completed", "failed", "interrupted", "waiting"].includes(event.kind),
+                    ),
+                  ),
+                ),
+              );
+              yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+              const events = yield* Fiber.join(collector);
+              expect(fixture.registry.activeSessionCount(instanceId)).toBe(0);
+              // The held session is retired, so nothing can be sent on it again.
+              const late = yield* connection
+                .send({
+                  sessionId,
+                  prompt: "again",
+                  attachments: [],
+                  tools: [],
+                })
+                .pipe(Effect.flip);
+              return { events, late };
+            }),
+          ),
+        ),
+      ),
+    );
+    expect(Array.from(output.events).at(-1)).toMatchObject({
+      kind: "waiting",
+      message: "OpenCode shut down while this turn was running. Check what it did, then resume.",
+    });
+    expect(output.late).toMatchObject({ category: "protocol" });
+    expect(fixture.calls).not.toContain("session.promptAsync");
+  });
+
   it("registers app-managed MCP tools over the 2.x API in Code mode", async () => {
     const fixture = betaDriver();
     await Effect.runPromise(
@@ -2283,7 +2339,7 @@ function betaDriver(
     readonly worktreeProviders?: "refused";
     readonly worktreeSessionCreate?: "refused";
     readonly sessionDelete?: "refused";
-    readonly events?: ReadonlyArray<Event>;
+    readonly events?: ReadonlyArray<OpenCodeEvent>;
     readonly launchScratch?: "unreported";
     readonly permissionPersistence?: "project-default";
     readonly eventsOnReply?: ReadonlyArray<Event> | ((requestId: string) => ReadonlyArray<Event>);
@@ -2325,7 +2381,7 @@ function driverFixture(
   options: {
     readonly isolatedConfiguration?: boolean;
     readonly process?: OpenCodeProcessPort;
-    readonly events?: ReadonlyArray<Event>;
+    readonly events?: ReadonlyArray<OpenCodeEvent>;
     readonly permissionPersistence?:
       | "current-session"
       | "project-default"
@@ -2576,7 +2632,7 @@ function lateEvents() {
 }
 
 async function* lateIterable(
-  events: ReadonlyArray<Event>,
+  events: ReadonlyArray<OpenCodeEvent>,
   signal: AbortSignal,
   late: ReturnType<typeof lateEvents>,
 ) {
@@ -2591,7 +2647,7 @@ async function* lateIterable(
 }
 
 async function* asyncIterable(
-  events: ReadonlyArray<Event>,
+  events: ReadonlyArray<OpenCodeEvent>,
   signal: AbortSignal,
   streamEnd: "hang" | "eof" | "throw",
 ) {

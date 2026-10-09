@@ -9,7 +9,11 @@ import type { Event } from "@opencode-ai/sdk/v2/types";
 import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 import { adaptBetaOpenCodeEvent } from "./openCodeDriver";
-import { mapOpenCodeEvent, type OpenCodeEventContext } from "./openCodeEventMapper";
+import {
+  mapOpenCodeEvent,
+  type OpenCodeEvent,
+  type OpenCodeEventContext,
+} from "./openCodeEventMapper";
 
 const instanceId = decodeProviderInstanceId("80000000-0000-4000-8000-000000000071");
 const sessionId = decodeProviderSessionId("80000000-0000-4000-8000-000000000072");
@@ -26,7 +30,7 @@ function official<T extends Event>(event: T): T {
   return event;
 }
 
-function mapped(event: Event, sequenceStart = 41) {
+function mapped(event: OpenCodeEvent, sequenceStart = 41) {
   return mapOpenCodeEvent(context(sequenceStart), event).map((runtimeEvent) =>
     decodeProviderRuntimeEvent(runtimeEvent),
   );
@@ -819,6 +823,24 @@ describe("OpenCode 2.0.22 events", () => {
     ]);
     expect(adaptAndMap("session.execution.interrupted", { reason: "user" })).toMatchObject([
       { kind: "interrupted" },
+    ]);
+  });
+
+  it.each(["superseded", "inactivity"])(
+    "keeps an interruption OpenCode itself chose (%s) an ordinary interruption",
+    (reason) => {
+      expect(adaptAndMap("session.execution.interrupted", { reason })).toMatchObject([
+        { kind: "interrupted" },
+      ]);
+    },
+  );
+
+  it("holds a turn OpenCode's own shutdown cut off for a person to check, naming why", () => {
+    expect(adaptAndMap("session.execution.interrupted", { reason: "shutdown" })).toEqual([
+      expect.objectContaining({
+        kind: "waiting",
+        message: "OpenCode shut down while this turn was running. Check what it did, then resume.",
+      }),
     ]);
   });
 
