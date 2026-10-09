@@ -54,6 +54,11 @@ export interface EndpointStatusInput {
   readonly signIn?: EndpointSignIn;
   /** The offer's own words, such as "ChatGPT plan" and "Sign in with ChatGPT". */
   readonly signInOffer?: { readonly accountLabel: string; readonly action: string };
+  /**
+   * Whether a key can be entered from here. A browser cannot store one, so a
+   * missing key there is added in the desktop app rather than by a fix.
+   */
+  readonly keysHere?: boolean;
 }
 
 /**
@@ -105,7 +110,12 @@ export function endpointStatus(input: EndpointStatusInput): EndpointStatus {
       return noModels(observed.message);
     case "unauthenticated":
       if (offer !== undefined) return refusedSignIn(input, offer);
-      return observed.credentialStatus === "missing" ? keyNeeded() : keyRefused();
+      // A browser cannot read the Keychain, so after a reload it cannot tell a
+      // missing key from a refused one; it sends both to the desktop app,
+      // which is where either is fixed.
+      return observed.credentialStatus === "missing" || input.keysHere === false
+        ? keyNeeded(input)
+        : keyRefused();
     case "unavailable":
       return cannotConnect(`The last check couldn't reach ${endpointHost(instance)}.`);
     case "incompatible":
@@ -131,7 +141,7 @@ function failureStatus(input: EndpointStatusInput, failure: ProviderProbeFailure
     failure.reason === "authentication-required"
   ) {
     if (input.signInOffer !== undefined) return refusedSignIn(input, input.signInOffer);
-    if (/missing or unavailable/i.test(message)) return keyNeeded();
+    if (/missing or unavailable/i.test(message)) return keyNeeded(input);
     return keyRefused();
   }
   if (
@@ -201,10 +211,20 @@ function signedOut(offer: { readonly accountLabel: string; readonly action: stri
   } as const satisfies EndpointStatus;
 }
 
-function keyNeeded(): EndpointStatus {
+/** The label of an endpoint that has no key saved, which other steps can recognise. */
+export const NEEDS_KEY_LABEL = "Needs key";
+
+function keyNeeded(input: EndpointStatusInput): EndpointStatus {
+  if (input.keysHere === false) {
+    return {
+      tone: "needs-you",
+      label: NEEDS_KEY_LABEL,
+      sentence: "Add its API key in the Octant desktop app on this Mac.",
+    };
+  }
   return {
     tone: "needs-you",
-    label: "Key needed",
+    label: NEEDS_KEY_LABEL,
     sentence: "No API key is saved for it.",
     fix: { kind: "add-key", label: "Add key" },
   };

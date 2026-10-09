@@ -87,6 +87,14 @@ function findProvider(current: ProviderRegistrySnapshot, instanceId: ProviderIns
 export type ModelToolVerification = "supported" | "unsupported" | "failed";
 
 /**
+ * A tool check with what stopped it, for a surface that says why a model
+ * stayed Chat only next to that model rather than in the page alert.
+ */
+export type ModelToolCheck =
+  | { readonly outcome: "supported" | "unsupported" }
+  | { readonly outcome: "failed"; readonly failure?: ProviderProbeFailure };
+
+/**
  * The last connection check that failed for an instance, as the probe command
  * answered it. The host keeps only a generic observation for some failures (a
  * protocol failure is stored as degraded with "Provider probe failed."), so
@@ -585,16 +593,17 @@ export function useProviderController(options: ProviderControllerOptions) {
       const instanceId = decodeProviderInstanceId(crypto.randomUUID());
       return queueProviderMutation(mutationQueue, mounted, setBusy, setMessage, () =>
         withTransientCredential(credential, async (credentialValue) => {
-          // Foundry requires an API key, so report unavailable credential
-          // management before asking for a key the user cannot enter on
-          // browser/remote hosts where the Keychain bridge is absent.
-          if (hostBridge === undefined) {
+          // Foundry requires an API key. A browser cannot store one, so there
+          // the endpoint is saved without it and reads Needs key until the key
+          // is added in the desktop app; a key typed into a browser is refused
+          // rather than silently dropped.
+          if (hostBridge === undefined && credentialValue.length > 0) {
             if (mounted.current) {
               setMessage("Provider credential management is unavailable on this host.");
             }
             return false;
           }
-          if (credentialValue.length === 0) {
+          if (hostBridge !== undefined && credentialValue.length === 0) {
             if (mounted.current) {
               setMessage("Enter an Azure AI Foundry API key before creating this provider.");
             }
@@ -618,6 +627,7 @@ export function useProviderController(options: ProviderControllerOptions) {
             await recoverRegistryFailure(error, "Provider configuration could not be created.");
             return false;
           }
+          if (hostBridge === undefined) return true;
           try {
             await hostBridge.setProviderCredential(instanceId, credentialValue);
             return true;
@@ -3092,6 +3102,34 @@ export function useProviderController(options: ProviderControllerOptions) {
     [client, install],
   );
 
+  // A finished tool check updates the observation every picker reads.
+  const recordToolCheck = useCallback(
+    (instanceId: ProviderInstanceId, modelId: ProviderModelId, supported: boolean) => {
+      const current = authoritative.current;
+      if (current === undefined) return;
+      install({
+        ...current,
+        observedStates: current.observedStates.map((state) => {
+          if (state.instanceId !== instanceId) return state;
+          const priorVerified = state.verifiedToolModelIds ?? [];
+          const verifiedToolModelIds = supported
+            ? [...new Set([...priorVerified, String(modelId)])].map((id) => id as ProviderModelId)
+            : priorVerified.filter((id) => String(id) !== String(modelId));
+          return { ...state, verifiedToolModelIds };
+        }),
+      });
+    },
+    [install],
+  );
+  const endToolCheck = useCallback((instanceId: ProviderInstanceId) => {
+    if (!mounted.current) return;
+    setProbingIds((current) => {
+      const next = new Set(current);
+      next.delete(instanceId);
+      return next;
+    });
+  }, []);
+
   const verifyModelTools = useCallback(
     async (
       instanceId: ProviderInstanceId,
@@ -3107,23 +3145,7 @@ export function useProviderController(options: ProviderControllerOptions) {
           modelId,
         });
         if (result.kind !== "model-tools-verified") return "failed";
-        const current = authoritative.current;
-        if (current !== undefined) {
-          install({
-            ...current,
-            observedStates: current.observedStates.map((state) => {
-              if (state.instanceId !== instanceId) return state;
-              const priorVerified = state.verifiedToolModelIds ?? [];
-              const verifiedToolModelIds =
-                result.appManagedTools === "supported"
-                  ? [...new Set([...priorVerified, String(modelId)])].map(
-                      (id) => id as ProviderModelId,
-                    )
-                  : priorVerified.filter((id) => String(id) !== String(modelId));
-              return { ...state, verifiedToolModelIds };
-            }),
-          });
-        }
+        recordToolCheck(instanceId, modelId, result.appManagedTools === "supported");
         if (mounted.current) {
           setMessage(
             result.appManagedTools === "supported"
@@ -3136,16 +3158,35 @@ export function useProviderController(options: ProviderControllerOptions) {
         if (mounted.current) setMessage(redactedProbeFailureMessage(error));
         return "failed";
       } finally {
-        if (mounted.current) {
-          setProbingIds((current) => {
-            const next = new Set(current);
-            next.delete(instanceId);
-            return next;
-          });
-        }
+        endToolCheck(instanceId);
       }
     },
-    [client, install],
+    [client, endToolCheck, recordToolCheck],
+  );
+
+  // The same one request, with what stopped it, and no page alert: Add
+  // endpoint says why a model stayed Chat only next to that model.
+  const checkModelTools = useCallback(
+    async (instanceId: ProviderInstanceId, modelId: ProviderModelId): Promise<ModelToolCheck> => {
+      if (client === undefined) return { outcome: "failed" };
+      setProbingIds((current) => new Set(current).add(instanceId));
+      try {
+        const result = await client.execute({
+          kind: "verify-model-tools",
+          instanceId,
+          modelId,
+        });
+        if (result.kind !== "model-tools-verified") return { outcome: "failed" };
+        recordToolCheck(instanceId, modelId, result.appManagedTools === "supported");
+        return { outcome: result.appManagedTools };
+      } catch (error) {
+        const failure = probeFailureOf(error);
+        return failure === undefined ? { outcome: "failed" } : { outcome: "failed", failure };
+      } finally {
+        endToolCheck(instanceId);
+      }
+    },
+    [client, endToolCheck, recordToolCheck],
   );
 
   return {
@@ -3216,6 +3257,7 @@ export function useProviderController(options: ProviderControllerOptions) {
     probe,
     probeFailures,
     verifyModelTools,
+    checkModelTools,
     updatePermissionPersistence,
     updateProviderOrder,
     updateAgentEligibleModels,

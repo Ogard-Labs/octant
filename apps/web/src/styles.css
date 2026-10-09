@@ -2469,22 +2469,10 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   gap: var(--oct-space-3);
 }
 
-.endpoint-add__title,
-.endpoint-add__subhead {
+.endpoint-add__title {
   margin: 0;
   font-size: var(--oct-text-base);
   font-weight: var(--oct-weight-display);
-}
-
-.endpoint-add__subhead {
-  padding-top: var(--oct-space-2);
-  font-size: var(--oct-text-sm);
-}
-
-.endpoint-add .provider-settings__manual-body[data-embedded="true"] {
-  margin-top: 0;
-  padding-top: 0;
-  border-top: 0;
 }
 
 .endpoint-add__result {
@@ -2506,6 +2494,297 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   flex-wrap: wrap;
   align-items: center;
   gap: var(--oct-space-2);
+}
+
+/* Add endpoint's guided flow: a numbered strip of steps, then one step at a
+   time. Kinds are cards the person picks; fields stack label, control, hint. */
+.endpoint-flow {
+  display: grid;
+  gap: var(--oct-space-4);
+  min-width: 0;
+}
+
+.endpoint-flow__steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--oct-space-1) var(--oct-space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
+.endpoint-flow__step {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--oct-space-1);
+}
+
+.endpoint-flow__step-number {
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-pill);
+  font-variant-numeric: tabular-nums;
+}
+
+.endpoint-flow__step[data-state="current"] {
+  color: var(--oct-fg);
+  font-weight: var(--oct-weight-medium);
+}
+
+.endpoint-flow__step[data-state="current"] > .endpoint-flow__step-number {
+  border-color: currentColor;
+}
+
+.endpoint-flow__step[data-state="done"] > .endpoint-flow__step-number {
+  border-style: dashed;
+}
+
+.endpoint-flow__head {
+  display: grid;
+  gap: var(--oct-space-1);
+}
+
+.endpoint-flow__title {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-2);
+  margin: 0;
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-display);
+}
+
+.endpoint-flow__title:focus-visible {
+  outline: none;
+  box-shadow: var(--oct-focus-ring);
+}
+
+.endpoint-flow__detail,
+.endpoint-flow__note {
+  margin: 0;
+  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-sm);
+}
+
+.endpoint-flow__form,
+.endpoint-flow__advanced,
+.endpoint-flow__group {
+  display: grid;
+  gap: var(--oct-space-3);
+  min-width: 0;
+}
+
+.endpoint-flow__group {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.endpoint-flow__group > legend {
+  margin-bottom: var(--oct-space-2);
+  padding: 0;
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-medium);
+}
+
+.endpoint-flow__field {
+  display: grid;
+  gap: var(--oct-space-1);
+  min-width: 0;
+  font-size: var(--oct-text-sm);
+}
+
+.endpoint-flow__hint {
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
+.endpoint-flow__check {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--oct-space-1) var(--oct-space-2);
+  min-height: 32px;
+  font-size: var(--oct-text-sm);
+  cursor: pointer;
+}
+
+.endpoint-flow__check > span:last-child:not(.endpoint-tag) {
+  display: grid;
+}
+
+.endpoint-flow__add-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--oct-space-2);
+}
+
+.endpoint-flow__add-row > input {
+  flex: 1 1 220px;
+  min-width: 0;
+}
+
+.endpoint-flow__add-row > .endpoint-flow__hint {
+  flex-basis: 100%;
+}
+
+.endpoint-flow__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--oct-space-2);
+}
+
+.endpoint-kinds,
+.endpoint-pick,
+.endpoint-verify,
+.endpoint-chips {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.endpoint-kinds {
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: var(--oct-space-2);
+}
+
+.endpoint-kind {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  align-items: start;
+  gap: var(--oct-space-3);
+  width: 100%;
+  height: 100%;
+  padding: var(--oct-space-3);
+  border: 1px solid var(--oct-hairline);
+  border-radius: var(--oct-radius-md);
+  text-align: left;
+  white-space: normal;
+}
+
+.endpoint-kind:hover {
+  background: var(--oct-fg-soft);
+}
+
+.endpoint-kind:focus-visible {
+  outline: none;
+  box-shadow: var(--oct-focus-ring);
+}
+
+.endpoint-kind__text {
+  display: grid;
+  gap: var(--oct-space-1);
+  min-width: 0;
+}
+
+.endpoint-kind__name {
+  color: var(--oct-fg);
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-medium);
+}
+
+.endpoint-kind__detail {
+  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-xs);
+}
+
+.endpoint-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--oct-space-2);
+}
+
+.endpoint-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--oct-space-1);
+  padding-left: var(--oct-space-2);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-pill);
+}
+
+.endpoint-chip__label {
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
+  overflow-wrap: anywhere;
+}
+
+.endpoint-pick > li + li,
+.endpoint-verify__row + .endpoint-verify__row {
+  border-top: 1px solid var(--oct-hairline);
+}
+
+.endpoint-pick__name {
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
+  overflow-wrap: anywhere;
+}
+
+.endpoint-verify__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--oct-space-1) var(--oct-space-3);
+  min-height: 44px;
+  padding: var(--oct-space-2) 0;
+}
+
+.endpoint-verify__name {
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
+  overflow-wrap: anywhere;
+}
+
+.endpoint-verify__state {
+  display: grid;
+  justify-items: end;
+  gap: var(--oct-space-1);
+  text-align: right;
+}
+
+.endpoint-verify__reason {
+  max-width: 36ch;
+  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-xs);
+}
+
+.endpoint-roles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: var(--oct-space-3);
+}
+
+/* "Chat only · Verify tools": the same words wherever a model has not been
+   seen calling a tool. The dashed pill matches the tag it replaced. */
+.chat-only-verify {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--oct-space-1);
+}
+
+.chat-only-verify__label {
+  padding: 0 var(--oct-space-2);
+  border: 1px dashed var(--oct-border);
+  border-radius: var(--oct-radius-pill);
+  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-xs);
+  white-space: nowrap;
+}
+
+.chat-only-verify__separator {
+  color: var(--oct-meta);
+}
+
+.endpoint-row__tools {
+  padding: 0 var(--oct-space-4) var(--oct-space-3) 60px;
 }
 
 /* The detail sub-page. */
@@ -2744,6 +3023,27 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
     grid-template-columns: 32px minmax(0, 1fr);
   }
 
+  .endpoint-row__tools {
+    padding-left: var(--oct-space-4);
+  }
+
+  .endpoint-verify__row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .endpoint-verify__state {
+    justify-items: start;
+    text-align: left;
+  }
+
+  .endpoint-flow__actions {
+    justify-content: stretch;
+  }
+
+  .endpoint-flow__actions > [data-slot="button"] {
+    flex: 1 1 auto;
+  }
+
   .endpoint-choice > [data-slot="button"] {
     grid-column: 2;
     justify-self: start;
@@ -2775,7 +3075,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   }
 
   :is(.endpoint-list, .endpoint-choices, .endpoint-detail, .endpoint-add)
-    :is([data-slot="button"], input[type="search"]) {
+    :is([data-slot="button"], input:not([type="checkbox"])) {
     min-height: 44px;
   }
 }

@@ -5,6 +5,7 @@ import {
   type ProviderObservedState,
 } from "@octant/contracts";
 import type { SubscriptionOAuthOffer } from "@octant/contracts/host-oauth";
+import { isNativeHarnessDriverKind, modelCarriesAppManagedTools } from "@octant/domain";
 import { Plus } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { boundSubscriptionOffer } from "../providers/configuration/HttpConfigurationForms";
@@ -14,6 +15,7 @@ import type { ProviderProbeFailure } from "../providers/useProviderController";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
 import { SettingsSection } from "./primitives";
+import type { AddEndpointFlowProps, AddedEndpoint } from "./harness/AddEndpointFlow";
 import { AddEndpointDialog, EndpointChoices, SIGN_IN_ENDPOINTS } from "./harness/AddModelEndpoint";
 import {
   endpointModelCount,
@@ -36,6 +38,12 @@ export type ModelEndpointSettingsViewProps = Omit<ProviderSettingsViewProps, "di
   readonly onRolesUsing?: (instanceId: string) => Promise<ReadonlyArray<string>>;
   /** Told when an endpoint's detail sub-page opens (with its name) or closes. */
   readonly onDetailChange?: (endpointName: string | undefined) => void;
+  /** A tool check that says what stopped it, for Add endpoint's Verify tools step. */
+  readonly onCheckModelTools?: NonNullable<AddEndpointFlowProps["onCheckModelTools"]>;
+  /** Where Add endpoint reads and saves Octant Harness roles. */
+  readonly roles?: NonNullable<AddEndpointFlowProps["roles"]>;
+  /** Told after Add endpoint saved Octant Harness roles. */
+  readonly onRolesSaved?: () => void;
 };
 
 interface OpenDetail {
@@ -105,6 +113,7 @@ export function ModelEndpointSettingsView(props: ModelEndpointSettingsViewProps)
       instance,
       observed: props.observedByInstance.get(instance.id),
       checking,
+      keysHere: props.credentialManagementAvailable,
       ...(failure === undefined ? {} : { failure }),
       ...(signIn === undefined ? {} : { signIn }),
       ...(presentationOffer === undefined ? {} : { signInOffer: presentationOffer }),
@@ -281,19 +290,11 @@ export function ModelEndpointSettingsView(props: ModelEndpointSettingsViewProps)
     );
   }
 
-  // The new endpoint's check, shown in the add dialog. Opening it to fix lands
-  // on the field the fix names, as the row's fix would.
-  const addedResult = (instance: ModelEndpointInstance) => {
-    const { status } = describe(instance);
-    const fix = status.fix;
-    return {
-      name: instance.displayName,
-      status,
-      onOpen: () =>
-        fix === undefined || fix.kind === "try-again" || fix.kind === "check-now"
-          ? openEndpoint(instance.id)
-          : fixRow(instance, fix.kind),
-    };
+  // The endpoint Add endpoint made, as the page last saw it, so each step of
+  // the flow reads the same state its row shows.
+  const addedEndpoint = (instance: ModelEndpointInstance): AddedEndpoint => {
+    const { status, observed, checking } = describe(instance);
+    return { instance, status, observed, checking };
   };
   const openAdd = () => {
     idsWhenAddOpened.current = new Set(endpoints.map((instance) => String(instance.id)));
@@ -316,6 +317,7 @@ export function ModelEndpointSettingsView(props: ModelEndpointSettingsViewProps)
   const addDialog = (
     <AddEndpointDialog
       {...props}
+      added={addedInstance === undefined ? undefined : addedEndpoint(addedInstance)}
       busy={busy}
       onClose={() => {
         setAdding(false);
@@ -325,9 +327,13 @@ export function ModelEndpointSettingsView(props: ModelEndpointSettingsViewProps)
       onCreateAzureFoundry={afterSubmit(props.onCreateAzureFoundry)}
       onCreateOllama={afterSubmit(props.onCreateOllama)}
       onCreateOpenAiCompatible={afterSubmit(props.onCreateOpenAiCompatible)}
+      onOpenAdded={(focus) => {
+        if (addedInstance !== undefined) {
+          openEndpoint(addedInstance.id, focus === undefined ? {} : { focus });
+        }
+      }}
       onSignIn={(offer) => void addSignInEndpoint(offer)}
       open={adding}
-      {...(addedInstance === undefined ? {} : { added: addedResult(addedInstance) })}
     />
   );
 
@@ -386,6 +392,10 @@ export function ModelEndpointSettingsView(props: ModelEndpointSettingsViewProps)
               {...rowMeta(row.status, row.instance, row.observed, hiddenModels)}
               onFix={(kind) => fixRow(row.instance, kind)}
               onOpen={() => openEndpoint(row.instance.id)}
+              {...(row.status.tone === "ready" &&
+              noShownModelCarriesTools(row.instance, row.observed, hiddenModels)
+                ? { onVerifyTools: () => openEndpoint(row.instance.id, { focus: "verify-tools" }) }
+                : {})}
               {...(row.offer !== undefined &&
               row.signIn?.kind === "signed-out" &&
               row.signIn.termsRequired
@@ -412,6 +422,27 @@ function rowMeta(
   if (status.tone === "failed") return {};
   const meta = endpointModelCount(instance, observed, hiddenModels);
   return meta === undefined ? {} : { meta };
+}
+
+/**
+ * Whether the row says Chat only: the endpoint's driver can prove a tool turn,
+ * it lists models, and none it shows has been seen calling a tool.
+ */
+function noShownModelCarriesTools(
+  instance: ModelEndpointInstance,
+  observed: ProviderObservedState | undefined,
+  hiddenModels: ReadonlyArray<HiddenProviderModelRef>,
+): boolean {
+  if (observed === undefined || !isNativeHarnessDriverKind(instance.driverKind)) return false;
+  const hidden = new Set(
+    hiddenModels
+      .filter((ref) => String(ref.providerInstanceId) === String(instance.id))
+      .map((ref) => String(ref.modelId)),
+  );
+  const shown = observed.models.filter((model) => !hidden.has(String(model.id)));
+  return (
+    shown.length > 0 && shown.every((model) => !modelCarriesAppManagedTools(observed, model.id))
+  );
 }
 
 function signInOfferOf(instance: ModelEndpointInstance): SubscriptionOAuthOffer | undefined {

@@ -15,6 +15,7 @@ import {
 } from "./modelFavorites";
 import { OctantBadge } from "../ui/base/OctantBadge";
 import { OctantButton } from "../ui/base/OctantButton";
+import { ChatOnlyVerify } from "./ChatOnlyVerify";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantPopover } from "../ui/base/OctantPopover";
 import { OctantSelectField } from "../ui/base/OctantSelect";
@@ -398,7 +399,13 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
               <span className="composer-model-picker__model-detail">{detail}</span>
             )}
           </span>
-          {unavailable ? (
+          {/* A Chat-only model that can be verified says so once, in the
+              "Chat only · Verify tools" line under it. */}
+          {unavailable &&
+          !(
+            offersToolVerification &&
+            compactUnavailableLabel(picker.unavailableReason) === "Chat only"
+          ) ? (
             <OctantBadge className="composer-model-picker__model-badge" variant="secondary">
               {compactUnavailableLabel(picker.unavailableReason)}
             </OctantBadge>
@@ -408,33 +415,34 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
         </OctantButton>
         {offersToolVerification ? (
           <div className="composer-model-picker__verify">
-            <span>{verifyNote ?? "Chat only: tools not verified."}</span>
-            <OctantButton
-              aria-label={`Verify tools for ${picker.model.displayName} (${group.instance.displayName})`}
-              disabled={verifyingTools !== undefined}
-              onClick={() => {
-                setVerifyingTools(verifyKey);
-                void verifyTools(group.instance.id, modelId)
-                  .then((outcome) =>
-                    setToolVerifyNotes((notes) => ({
-                      ...notes,
-                      [verifyKey]:
-                        outcome === "supported"
-                          ? "Tools verified."
-                          : outcome === "unsupported"
-                            ? "Did not call the test tool; stays Chat only."
-                            : "Could not verify tools.",
-                    })),
-                  )
-                  .finally(() => setVerifyingTools(undefined));
-              }}
-              size="sm"
-              title="Sends one request to the endpoint, which it may bill."
-              type="button"
-              variant="ghost"
-            >
-              {verifyingTools === verifyKey ? "Verifying…" : "Verify tools"}
-            </OctantButton>
+            {verifyNote === "Tools verified." ? (
+              <span>{verifyNote}</span>
+            ) : (
+              <>
+                <ChatOnlyVerify
+                  disabled={verifyingTools !== undefined}
+                  onVerify={() => {
+                    setVerifyingTools(verifyKey);
+                    void verifyTools(group.instance.id, modelId)
+                      .then((outcome) =>
+                        setToolVerifyNotes((notes) => ({
+                          ...notes,
+                          [verifyKey]:
+                            outcome === "supported"
+                              ? "Tools verified."
+                              : outcome === "unsupported"
+                                ? "Did not call the test tool."
+                                : "Could not verify tools.",
+                        })),
+                      )
+                      .finally(() => setVerifyingTools(undefined));
+                  }}
+                  subject={`${picker.model.displayName} (${group.instance.displayName})`}
+                  verifying={verifyingTools === verifyKey}
+                />
+                {verifyNote === undefined ? null : <span>{verifyNote}</span>}
+              </>
+            )}
           </div>
         ) : null}
         <OctantButton
