@@ -1,4 +1,5 @@
 import { createServer, type AddressInfo } from "node:net";
+import { StringDecoder } from "node:string_decoder";
 import {
   HostRuntimePathError,
   redactHostRuntimeText,
@@ -184,6 +185,8 @@ export function createStderrTail(): StderrTail {
   let pending = "";
   let skippingLongLine = false;
   let ended = false;
+  // A multibyte character can span two chunks; the decoder holds its first bytes.
+  const decoder = new StringDecoder("utf8");
   const endWaiters = new Set<() => void>();
   const keep = (line: string) => {
     const trimmed = line.trim();
@@ -192,7 +195,9 @@ export function createStderrTail(): StderrTail {
   };
   return {
     append: (chunk) => {
-      const parts = (pending + Buffer.from(chunk).toString("utf8")).split("\n");
+      const parts = (
+        pending + (typeof chunk === "string" ? chunk : decoder.write(Buffer.from(chunk)))
+      ).split("\n");
       pending = parts.pop() ?? "";
       for (const line of parts) {
         if (skippingLongLine) {
@@ -209,6 +214,7 @@ export function createStderrTail(): StderrTail {
       }
     },
     end: () => {
+      pending += decoder.end();
       ended = true;
       for (const resolve of endWaiters) resolve();
       endWaiters.clear();
@@ -499,6 +505,20 @@ export async function waitForStorageReady(
   const healthUrl = new URL("/health", options.serverUrl).toString();
   let attemptCount = 0;
   let lastProbeOutcome: StorageReadyProbeOutcome = "not-attempted";
+  // Another owner may have won, or the child may have died, during any wait,
+  // including the last one before the deadline.
+  const attachedOrExited = async (): Promise<LocalHostProbe | undefined> => {
+    const attached = await options.resolveAttachedHost?.();
+    if (attached !== undefined && attached.instanceId !== options.instanceId) return attached;
+    if (options.child !== undefined && hasExited(options.child)) {
+      throw new ServerExitedBeforeReady(
+        options.child.exitCode,
+        options.child.signalCode,
+        (await options.lastOutput?.()) ?? "",
+      );
+    }
+    return undefined;
+  };
 
   while (now() < deadline) {
     attemptCount += 1;
@@ -514,19 +534,14 @@ export async function waitForStorageReady(
       lastProbeOutcome = "request-failed";
       // The managed child may not have bound its loopback socket yet.
     }
-    const attached = await options.resolveAttachedHost?.();
-    if (attached !== undefined && attached.instanceId !== options.instanceId) return attached;
-    if (options.child !== undefined && hasExited(options.child)) {
-      throw new ServerExitedBeforeReady(
-        options.child.exitCode,
-        options.child.signalCode,
-        (await options.lastOutput?.()) ?? "",
-      );
-    }
+    const settled = await attachedOrExited();
+    if (settled !== undefined) return settled;
     const remaining = deadline - now();
     if (remaining <= 0) break;
     await sleep(Math.min(pollIntervalMs, remaining));
   }
+  const settled = await attachedOrExited();
+  if (settled !== undefined) return settled;
   throw new ServerReadyTimeout(timeoutMs, lastProbeOutcome, attemptCount);
 }
 

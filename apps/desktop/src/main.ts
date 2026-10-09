@@ -1607,10 +1607,10 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
           env: spec.env,
           stdio: [...spec.stdio] as ["pipe", "inherit", "pipe"],
         });
-        child.stderr.on("data", (chunk: Buffer) => {
-          process.stderr.write(chunk);
-          serverStderr.append(chunk);
-        });
+        // pipe() honours backpressure from a slow parent stderr; the tail
+        // listener only keeps a bounded copy.
+        child.stderr.pipe(process.stderr, { end: false });
+        child.stderr.on("data", (chunk: Buffer) => serverStderr.append(chunk));
         child.stderr.once("end", serverStderr.end);
         return child;
       },

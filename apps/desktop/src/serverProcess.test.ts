@@ -518,6 +518,27 @@ describe("waitForStorageReady", () => {
     expect(((await failure) as Error).message).toContain("the disk is full");
   });
 
+  it("reports a child that exited during the last wait before the deadline", async () => {
+    let now = 0;
+    const child = { exitCode: null as number | null, signalCode: null, kill: vi.fn() };
+    const failure = await waitForStorageReady({
+      serverUrl: "http://127.0.0.1:43123/",
+      instanceId: "desktop-child",
+      fetch: vi.fn().mockRejectedValue(new Error("connection refused")),
+      child,
+      lastOutput: () => "the disk is full",
+      timeoutMs: 100,
+      pollIntervalMs: 100,
+      now: () => now,
+      sleep: async (milliseconds) => {
+        now += milliseconds;
+        child.exitCode = 1;
+      },
+    }).catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(ServerExitedBeforeReady);
+  });
+
   it("names the terminating signal when the child was killed", async () => {
     const failure = await waitForStorageReady({
       serverUrl: "http://127.0.0.1:43123/",
@@ -924,6 +945,16 @@ describe("createStderrTail", () => {
     expect(secrets.text()).not.toContain("supersecretvalue123");
     expect(secrets.text()).not.toContain("abcdefghijklmnop");
     expect(secrets.text()).toContain("failed");
+  });
+
+  it("keeps a character whose bytes arrive in two chunks", () => {
+    const tail = createStderrTail();
+    const bytes = Buffer.from("Kunne ikke starte: ø\n", "utf8");
+    const split = bytes.indexOf(0xc3) + 1;
+    tail.append(bytes.subarray(0, split));
+    tail.append(bytes.subarray(split));
+
+    expect(tail.text()).toBe("Kunne ikke starte: ø");
   });
 
   it("never shows part of a secret from a line too long to keep", () => {

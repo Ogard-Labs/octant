@@ -4,8 +4,8 @@
  * credentials, so only the error code selects one of these phrases.
  */
 const REASON_BY_CODE: Readonly<Record<string, string>> = {
-  EACCES: "the data directory is not writable by this user",
-  EPERM: "the data directory is not writable by this user",
+  EACCES: "a file or directory Octant needs is not accessible by this user",
+  EPERM: "a file or directory Octant needs is not accessible by this user",
   EROFS: "the data directory is on a read-only filesystem",
   ENOSPC: "the disk is full",
   ENAMETOOLONG: "the data directory path is too long",
