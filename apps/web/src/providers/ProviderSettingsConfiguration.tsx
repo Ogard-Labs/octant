@@ -25,6 +25,7 @@ export {
   AnthropicConfigurationForm,
   FoundryConfigurationForm,
   HttpConfigurationForm,
+  SubscriptionEndpointSignIn,
 } from "./configuration/HttpConfigurationForms";
 export {
   BflImageConfigurationForm,

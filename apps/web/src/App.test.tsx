@@ -1546,7 +1546,7 @@ describe("App", () => {
     await user.click(screen.getByRole("option", { name: "GPT-5" }));
 
     await openSettingsFromSidebar(user);
-    fireEvent.click(await screen.findByRole("button", { name: "Providers & Models" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Octant Harness" }));
     await user.click(await screen.findByRole("switch", { name: "Enable Primary Gateway" }));
     await waitFor(() =>
       expect(screen.getByRole("switch", { name: "Enable Primary Gateway" })).toHaveAttribute(

@@ -39,6 +39,14 @@ export interface SubscriptionOAuthHost {
         readonly accessToken: string;
         /** Absent means the credential does not expire (e.g. an OpenRouter key). */
         readonly expiresAt?: string;
+        /**
+         * False when the sign-in identifies the person but the issuer did
+         * not grant the scope that lets requests draw on their subscription.
+         * The bearer is still valid; a driver must refuse requests that would
+         * bill the subscription. Absent when the provider makes no such
+         * distinction.
+         */
+        readonly subscriptionUsageGranted?: boolean;
       }
     | { readonly kind: "sign-in-again"; readonly reason: SubscriptionOAuthSignInAgainReason }
     | { readonly kind: "unavailable" }
@@ -46,7 +54,17 @@ export interface SubscriptionOAuthHost {
 }
 
 export type SubscriptionOAuthResolution =
-  | { readonly kind: "bearer"; readonly token: string }
+  | {
+      readonly kind: "bearer";
+      readonly token: string;
+      /**
+       * False when the sign-in identifies the person but the issuer did not
+       * grant the scope that lets requests draw on their subscription. The
+       * bearer is still valid; a driver must refuse requests that would bill
+       * the subscription. Absent when the provider makes no such distinction.
+       */
+      readonly subscriptionUsageGranted?: boolean;
+    }
   | { readonly kind: "unauthenticated"; readonly reason: "missing" | "expired" | "revoked" }
   | { readonly kind: "unavailable" }
   | { readonly kind: "incompatible" };
@@ -175,7 +193,13 @@ async function accessOrRefresh(
     if (refresh.kind !== "refreshed") return { kind: "unavailable" };
     return accessOrRefresh(host, credentialRef, now, true);
   }
-  return { kind: "bearer", token: granted.accessToken };
+  return {
+    kind: "bearer",
+    token: granted.accessToken,
+    ...(granted.subscriptionUsageGranted === undefined
+      ? {}
+      : { subscriptionUsageGranted: granted.subscriptionUsageGranted }),
+  };
 }
 
 function unauthenticated(reason: SubscriptionOAuthSignInAgainReason): SubscriptionOAuthResolution {

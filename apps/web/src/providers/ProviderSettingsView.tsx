@@ -46,6 +46,7 @@ import {
   type ProviderCreateProviderType,
 } from "./ProviderSettingsConfiguration";
 import { ProviderSettingsList } from "./ProviderSettingsList";
+import { isModelEndpointDriverKind } from "./providerSettingsPresentation";
 import type { ModelToolVerification, TransientProviderCredential } from "./useProviderController";
 import { OctantAlert } from "../ui/base/OctantAlert";
 
@@ -88,6 +89,7 @@ export interface ProviderSettingsViewProps {
     displayName: string,
     configuration: OpenAiCompatibleProviderConfiguration,
     credential: TransientProviderCredential,
+    preassignedInstanceId?: ProviderInstanceId,
   ) => Promise<boolean>;
   readonly onCreateAnthropicCompatible: (
     displayName: string,
@@ -295,6 +297,12 @@ export interface ProviderSettingsViewProps {
     modelId: ProviderModelId,
     dataTags: ProviderDataTags,
   ) => Promise<boolean>;
+  /** Sets or, with `undefined`, clears a model's context window override. */
+  readonly onModelContextWindowChange?: (
+    instanceId: ProviderInstanceId,
+    modelId: ProviderModelId,
+    contextWindow: number | undefined,
+  ) => Promise<boolean>;
   readonly onRemove: (instanceId: ProviderInstanceId) => Promise<boolean>;
   readonly onProbe: (
     instanceId: ProviderInstanceId,
@@ -326,6 +334,11 @@ function keepUnlistedProviderOrder(
   return retained.length === 0 ? visibleOrder : [...visibleOrder, ...retained];
 }
 
+/**
+ * Agent runtimes Octant drives: ACP agents, CLIs, the Agent SDK, and RPC
+ * runtimes. Model endpoints Octant calls over HTTP itself are added under
+ * Octant Harness › Model endpoints, and image profiles under Image generation.
+ */
 const GENERAL_PROVIDER_TYPES: ReadonlyArray<ProviderCreateProviderType> = [
   "opencode",
   "codex",
@@ -335,7 +348,6 @@ const GENERAL_PROVIDER_TYPES: ReadonlyArray<ProviderCreateProviderType> = [
   "kilo",
   "pi",
   "oh-my-pi",
-  "ollama",
   "mistral-vibe",
   "grok",
   "goose",
@@ -345,9 +357,6 @@ const GENERAL_PROVIDER_TYPES: ReadonlyArray<ProviderCreateProviderType> = [
   "cline",
   "qwen",
   "fx",
-  "openai-compatible",
-  "anthropic-compatible",
-  "azure-foundry",
 ];
 
 export function ProviderSettingsView(props: ProviderSettingsViewProps) {
@@ -393,6 +402,8 @@ export function ProviderSettingsView(props: ProviderSettingsViewProps) {
           <ProviderCreateForm
             allowedProviderTypes={GENERAL_PROVIDER_TYPES}
             busy={props.busy}
+            heading="Agent runtime"
+            hint="Installed runtimes are detected automatically. Use this for an unusual executable location or a runtime the scan missed. Model endpoints such as OpenAI-compatible APIs are added under Octant Harness › Model endpoints."
             credentialManagementAvailable={props.credentialManagementAvailable}
             onCreate={props.onCreate}
             onCreateAnthropicCompatible={props.onCreateAnthropicCompatible}
@@ -418,6 +429,11 @@ export function ProviderSettingsView(props: ProviderSettingsViewProps) {
         discoverySnapshot={props.discoverySnapshot}
         showDetectionGroups
         instances={props.instances.filter(
+          (instance) =>
+            !isImageProfileDriverKind(instance.driverKind) &&
+            !isModelEndpointDriverKind(instance.driverKind),
+        )}
+        agentEligibleInstances={props.instances.filter(
           (instance) => !isImageProfileDriverKind(instance.driverKind),
         )}
         observedByInstance={props.observedByInstance}
@@ -475,6 +491,9 @@ export function ProviderSettingsView(props: ProviderSettingsViewProps) {
         onSetEnabled={props.onSetEnabled}
         onDataTagsChange={props.onDataTagsChange}
         onModelDataTagsChange={props.onModelDataTagsChange}
+        {...(props.onModelContextWindowChange === undefined
+          ? {}
+          : { onModelContextWindowChange: props.onModelContextWindowChange })}
         onVerifyModelTools={props.onVerifyModelTools}
       />
       <SettingsSection title="Defaults">

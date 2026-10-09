@@ -3,6 +3,12 @@ export interface CredentialStore {
   readonly has: (providerInstanceId: string) => Promise<boolean>;
   readonly resolve: (providerInstanceId: string) => Promise<string>;
   readonly delete: (providerInstanceId: string) => Promise<void>;
+  /**
+   * List the opaque credential references this store holds. Optional: a store
+   * that cannot enumerate (Keychain, Secret Service) omits it. A flow that
+   * needs one grant passes that credential ref to resolve; it does not scan.
+   */
+  readonly list?: () => Promise<readonly string[]>;
 }
 
 export type CredentialStoreFailureCategory = "failed" | "invalid" | "missing" | "unavailable";

@@ -3,6 +3,7 @@ import {
   CANVAS_AGGREGATE_TYPE,
   CANVAS_CREATED,
   CANVAS_BAR_LIST_SCHEMA_VERSION,
+  CANVAS_COMPARISON_MATRIX_SCHEMA_VERSION,
   CANVAS_DESIGN_SCHEMA_VERSION,
   CANVAS_DIAGRAM_KINDS_SCHEMA_VERSION,
   CANVAS_EVENT_NAMES,
@@ -12,6 +13,10 @@ import {
   CANVAS_MAX_DIAGRAM_EDGES,
   CANVAS_MAX_DIAGRAM_NODES,
   CANVAS_MAX_IMAGES,
+  CANVAS_MAX_MATRIX_CRITERIA,
+  CANVAS_MAX_MATRIX_NOTE_LENGTH,
+  CANVAS_MAX_MATRIX_OPTIONS,
+  CANVAS_MAX_MATRIX_WEIGHT,
   CANVAS_MAX_METRIC_SPARKLINE_POINTS,
   CANVAS_MAX_MINDMAP_NOTE_LENGTH,
   CANVAS_MAX_TABLE_ROWS,
@@ -1123,6 +1128,129 @@ describe("bar list blocks", () => {
   });
 });
 
+describe("comparison matrix blocks", () => {
+  const matrix = {
+    blockId: "state-store",
+    schemaVersion: CANVAS_SCHEMA_VERSION,
+    kind: "comparison-matrix",
+    options: [
+      { optionId: "sqlite", label: "SQLite", detail: "one file per host" },
+      { optionId: "postgres", label: "Postgres" },
+    ],
+    criteria: [
+      { criterionId: "ops", label: "Operational cost", weight: 3, prefer: "lower" },
+      { criterionId: "offline", label: "Works offline", weight: 2 },
+      { criterionId: "licence", label: "Licence" },
+    ],
+    cells: [
+      { criterionId: "ops", optionId: "sqlite", score: 1, note: "no server to run" },
+      { criterionId: "ops", optionId: "postgres", score: 4 },
+      { criterionId: "offline", optionId: "sqlite", glyph: "yes" },
+      { criterionId: "offline", optionId: "postgres", glyph: "partial" },
+      { criterionId: "licence", optionId: "sqlite", text: "Public domain" },
+    ],
+    scoreRange: { min: 1, max: 5 },
+    recommendedOptionId: "sqlite",
+    recommendation: "A local-first host has no server to run.",
+  };
+
+  it("decodes options, weighted criteria, and a score, text, or glyph in each cell", () => {
+    const block = decodeCanvasBlock(matrix);
+    expect(block).toMatchObject(matrix);
+  });
+
+  it("admits a comparison matrix only under the version that declared it", () => {
+    for (const earlier of [CANVAS_DESIGN_SCHEMA_VERSION, CANVAS_BAR_LIST_SCHEMA_VERSION]) {
+      expect(() =>
+        decodeCanvasDefinition({ ...definition, schemaVersion: earlier, blocks: [matrix] }),
+      ).toThrow();
+    }
+    expect(decodeCanvasDefinition({ ...definition, blocks: [matrix] })).toMatchObject({
+      blocks: [matrix],
+    });
+    expect(CANVAS_COMPARISON_MATRIX_SCHEMA_VERSION).toBe(CANVAS_SCHEMA_VERSION);
+  });
+
+  it("refuses a cell that carries two readings or none", () => {
+    expect(() =>
+      decodeCanvasBlock({
+        ...matrix,
+        cells: [{ criterionId: "ops", optionId: "sqlite", score: 1, glyph: "yes" }],
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeCanvasBlock({ ...matrix, cells: [{ criterionId: "ops", optionId: "sqlite" }] }),
+    ).toThrow();
+    expect(() =>
+      decodeCanvasBlock({
+        ...matrix,
+        cells: [{ criterionId: "ops", optionId: "sqlite", glyph: "maybe" }],
+      }),
+    ).toThrow();
+  });
+
+  it("refuses a weight past its bound, an inverted score range, and an unknown preference", () => {
+    expect(() =>
+      decodeCanvasBlock({
+        ...matrix,
+        criteria: [{ criterionId: "ops", label: "Ops", weight: CANVAS_MAX_MATRIX_WEIGHT + 1 }],
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeCanvasBlock({
+        ...matrix,
+        criteria: [{ criterionId: "ops", label: "Ops", weight: -1 }],
+      }),
+    ).toThrow();
+    expect(() => decodeCanvasBlock({ ...matrix, scoreRange: { min: 5, max: 1 } })).toThrow();
+    expect(() => decodeCanvasBlock({ ...matrix, scoreRange: { min: 3, max: 3 } })).toThrow();
+    expect(() =>
+      decodeCanvasBlock({
+        ...matrix,
+        criteria: [{ criterionId: "ops", label: "Ops", prefer: "middle" }],
+      }),
+    ).toThrow();
+  });
+
+  it("refuses an empty or oversized grid, a long note, and executable fields", () => {
+    expect(() => decodeCanvasBlock({ ...matrix, options: [] })).toThrow();
+    expect(() => decodeCanvasBlock({ ...matrix, criteria: [] })).toThrow();
+    expect(() =>
+      decodeCanvasBlock({
+        ...matrix,
+        options: Array.from({ length: CANVAS_MAX_MATRIX_OPTIONS + 1 }, (_value, index) => ({
+          optionId: `option-${String(index)}`,
+          label: `Option ${String(index)}`,
+        })),
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeCanvasBlock({
+        ...matrix,
+        criteria: Array.from({ length: CANVAS_MAX_MATRIX_CRITERIA + 1 }, (_value, index) => ({
+          criterionId: `criterion-${String(index)}`,
+          label: `Criterion ${String(index)}`,
+        })),
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeCanvasBlock({
+        ...matrix,
+        cells: [
+          {
+            criterionId: "ops",
+            optionId: "sqlite",
+            score: 1,
+            note: "x".repeat(CANVAS_MAX_MATRIX_NOTE_LENGTH + 1),
+          },
+        ],
+      }),
+    ).toThrow();
+    expect(() => decodeCanvasBlock({ ...matrix, html: "<b>x</b>" })).toThrow();
+    expect(() => decodeCanvasBlock({ ...matrix, onClick: "alert(1)" })).toThrow();
+  });
+});
+
 describe("entity-relationship, swimlane, and mind map diagram kinds", () => {
   const er = {
     blockId: "order-schema",
@@ -1176,7 +1304,7 @@ describe("entity-relationship, swimlane, and mind map diagram kinds", () => {
   it("keeps the diagram-kinds floor ahead of bar-list and below the design block", () => {
     expect(CANVAS_DIAGRAM_KINDS_SCHEMA_VERSION).toBeGreaterThan(CANVAS_BAR_LIST_SCHEMA_VERSION);
     expect(CANVAS_DESIGN_SCHEMA_VERSION).toBeGreaterThan(CANVAS_DIAGRAM_KINDS_SCHEMA_VERSION);
-    expect(CANVAS_DESIGN_SCHEMA_VERSION).toBe(CANVAS_SCHEMA_VERSION);
+    expect(CANVAS_DESIGN_SCHEMA_VERSION).toBeLessThan(CANVAS_SCHEMA_VERSION);
   });
 
   it("refuses a diagram kind inside a document declaring an earlier version", () => {

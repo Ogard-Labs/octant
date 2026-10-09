@@ -1,7 +1,7 @@
 import { type ProviderInstance } from "@octant/contracts";
 import { subscriptionOAuthOffers } from "@octant/domain";
 import type { SubscriptionOAuthOffer } from "@octant/contracts/host-oauth";
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import { OctantButton } from "../../ui/base/OctantButton";
 import { OctantInput } from "../../ui/base/OctantInput";
 import { OctantSelectField } from "../../ui/base/OctantSelect";
@@ -36,6 +36,10 @@ interface HttpConfigurationFormProps {
 
 export function HttpConfigurationForm(props: HttpConfigurationFormProps) {
   const credentialInput = useRef<HTMLInputElement>(null);
+  // An endpoint created by a subscription sign-in keeps the endpoint its offer
+  // names and holds that sign-in instead of a key: the row shows the sign-in,
+  // so the form keeps the fixed values without offering to change them.
+  const subscription = boundSubscriptionOffer(props.instance);
   return (
     <form
       className="provider-card__edit provider-card__edit--http"
@@ -44,6 +48,12 @@ export function HttpConfigurationForm(props: HttpConfigurationFormProps) {
         event.preventDefault();
         const configuration = {
           ...configurationFrom(new FormData(event.currentTarget)),
+          ...(subscription === undefined
+            ? {}
+            : {
+                baseUrl: props.instance.configuration.baseUrl,
+                authentication: props.instance.configuration.authentication,
+              }),
           ...(props.instance.configuration.oauthDescriptorId === undefined
             ? {}
             : { oauthDescriptorId: props.instance.configuration.oauthDescriptorId }),
@@ -69,38 +79,53 @@ export function HttpConfigurationForm(props: HttpConfigurationFormProps) {
         );
       }}
     >
-      <SettingRow
-        label="API base URL"
-        scope="host"
-        settingId={`provider-${props.instance.id}-base-url`}
-      >
-        <OctantInput
-          aria-describedby={`endpoint-guidance-${props.instance.id}`}
-          aria-label={`API base URL for ${props.instance.displayName}`}
-          className="settings-view__text-input"
-          defaultValue={props.instance.configuration.baseUrl}
-          name="baseUrl"
-          required
-          type="url"
-        />
-      </SettingRow>
-      <HttpCredentialFields
-        authentication={props.instance.configuration.authentication}
-        authenticationLabel={`Authentication for ${props.instance.displayName}`}
-        credentialInput={credentialInput}
-        credentialLabel={`API key for ${props.instance.displayName}`}
-        credentialManagementAvailable={props.credentialManagementAvailable}
-      />
-      <DirectEndpointSignIn
-        disabled={props.disabled}
-        driverKind="openai-compatible"
-        instanceId={props.instance.id}
-        {...(props.onProviderOAuth === undefined ? {} : { onProviderOAuth: props.onProviderOAuth })}
-        {...(props.onOpenExternalUrl === undefined
-          ? {}
-          : { onOpenExternalUrl: props.onOpenExternalUrl })}
-        onUseApiKey={() => credentialInput.current?.focus()}
-      />
+      {subscription === undefined ? (
+        <>
+          <SettingRow
+            label="API base URL"
+            scope="host"
+            settingId={`provider-${props.instance.id}-base-url`}
+          >
+            <OctantInput
+              aria-describedby={`endpoint-guidance-${props.instance.id}`}
+              aria-label={`API base URL for ${props.instance.displayName}`}
+              className="settings-view__text-input"
+              defaultValue={props.instance.configuration.baseUrl}
+              name="baseUrl"
+              required
+              type="url"
+            />
+          </SettingRow>
+          <HttpCredentialFields
+            authentication={props.instance.configuration.authentication}
+            authenticationLabel={`Authentication for ${props.instance.displayName}`}
+            credentialInput={credentialInput}
+            credentialLabel={`API key for ${props.instance.displayName}`}
+            credentialManagementAvailable={props.credentialManagementAvailable}
+          />
+          <DirectEndpointSignIn
+            baseUrl={props.instance.configuration.baseUrl}
+            disabled={props.disabled}
+            driverKind="openai-compatible"
+            instanceId={props.instance.id}
+            {...(props.onProviderOAuth === undefined
+              ? {}
+              : { onProviderOAuth: props.onProviderOAuth })}
+            {...(props.onOpenExternalUrl === undefined
+              ? {}
+              : { onOpenExternalUrl: props.onOpenExternalUrl })}
+            onUseApiKey={() => credentialInput.current?.focus()}
+          />
+        </>
+      ) : (
+        <>
+          <p className="provider-settings__field-guidance">
+            Uses your {subscription.accountLabel} sign-in at{" "}
+            <span className="oct-meta--mono">{props.instance.configuration.baseUrl}</span>. The
+            endpoint is fixed for this sign-in.
+          </p>
+        </>
+      )}
       <SettingRow
         label="Protocol preference"
         scope="host"
@@ -147,7 +172,7 @@ export function HttpConfigurationForm(props: HttpConfigurationFormProps) {
         >
           Save
         </OctantButton>
-        {props.credentialManagementAvailable ? (
+        {props.credentialManagementAvailable && subscription === undefined ? (
           <OctantButton
             disabled={props.disabled || props.credential.status !== "stored"}
             onClick={() => {
@@ -167,6 +192,58 @@ export function HttpConfigurationForm(props: HttpConfigurationFormProps) {
         ) : null}
       </div>
     </form>
+  );
+}
+
+/**
+ * The catalog offer an endpoint is bound to, when it was created by (or has
+ * completed) a subscription sign-in. The server binds the descriptor id on a
+ * finished sign-in and refuses a bearer whose base URL leaves the offer's
+ * endpoint, so this is presentation only.
+ */
+export function boundSubscriptionOffer(
+  instance: Extract<ProviderInstance, { driverKind: "openai-compatible" | "anthropic-compatible" }>,
+): SubscriptionOAuthOffer | undefined {
+  const descriptorId = instance.configuration.oauthDescriptorId;
+  if (descriptorId === undefined) return undefined;
+  return subscriptionOAuthOffers().find(
+    (offer) =>
+      String(offer.descriptor.descriptorId) === String(descriptorId) &&
+      offer.driverKinds.includes(instance.driverKind),
+  );
+}
+
+/**
+ * The sign-in a subscription endpoint's row shows: who is signed in, and sign
+ * out or sign in again. `startSignIn` begins the sign-in as soon as the
+ * terms are acknowledged, for an endpoint the person just added by choosing
+ * the sign-in.
+ */
+export function SubscriptionEndpointSignIn(props: {
+  readonly instance: Extract<
+    ProviderInstance,
+    { driverKind: "openai-compatible" | "anthropic-compatible" }
+  >;
+  readonly disabled: boolean;
+  readonly startSignIn?: boolean;
+  readonly onProviderOAuth?: (
+    command: ProviderOAuthCommand,
+  ) => Promise<import("../ProviderOAuthSignIn").ProviderOAuthCommandResult | undefined>;
+  readonly onOpenExternalUrl?: (url: string) => void;
+}) {
+  const offer = boundSubscriptionOffer(props.instance);
+  if (offer === undefined) return null;
+  return (
+    <ProviderOAuthSignInPanel
+      accountLabel={offer.accountLabel}
+      descriptorId={offer.descriptor.descriptorId}
+      disabled={props.disabled}
+      instanceId={props.instance.id}
+      {...(props.startSignIn === true ? { startSignIn: true } : {})}
+      {...(props.onProviderOAuth === undefined ? {} : { run: props.onProviderOAuth })}
+      {...(props.onOpenExternalUrl === undefined ? {} : { openUrl: props.onOpenExternalUrl })}
+      termsSummary={offer.termsSummary}
+    />
   );
 }
 
@@ -242,6 +319,7 @@ export function AnthropicConfigurationForm(props: AnthropicConfigurationFormProp
         supportsApiKey
       />
       <DirectEndpointSignIn
+        baseUrl={props.instance.configuration.baseUrl}
         disabled={props.disabled}
         driverKind="anthropic-compatible"
         instanceId={props.instance.id}
@@ -462,6 +540,7 @@ export function FoundryConfigurationForm(props: FoundryConfigurationFormProps) {
 function DirectEndpointSignIn(props: {
   readonly instanceId: string;
   readonly driverKind: "openai-compatible" | "anthropic-compatible";
+  readonly baseUrl: string;
   readonly disabled: boolean;
   readonly onUseApiKey: () => void;
   readonly onProviderOAuth?: (
@@ -469,10 +548,44 @@ function DirectEndpointSignIn(props: {
   ) => Promise<import("../ProviderOAuthSignIn").ProviderOAuthCommandResult | undefined>;
   readonly onOpenExternalUrl?: (url: string) => void;
 }) {
-  const offer = subscriptionOAuthOffers().find((candidate: SubscriptionOAuthOffer) =>
-    candidate.driverKinds.includes(props.driverKind),
+  // Several offers can share a driver kind (OpenRouter and the ChatGPT plan
+  // both serve openai-compatible endpoints), so the offer is selected by the
+  // instance's configured base URL: the offer whose allowed endpoint matches
+  // the base URL's canonical origin. When more than one offer matches, the
+  // person picks explicitly.
+  const candidates = subscriptionOAuthOffers().filter(
+    (candidate: SubscriptionOAuthOffer) =>
+      candidate.driverKinds.includes(props.driverKind) &&
+      originsMatch(candidate.allowedEndpoint, props.baseUrl),
   );
-  if (offer === undefined) return null;
+  const [selectedId, setSelectedId] = useState<string | undefined>(
+    candidates.length === 1 ? candidates[0]?.descriptor.descriptorId : undefined,
+  );
+  const offer =
+    candidates.find((candidate) => candidate.descriptor.descriptorId === selectedId) ??
+    (candidates.length === 1 ? candidates[0] : undefined);
+  if (offer === undefined) {
+    if (candidates.length <= 1) return null;
+    return (
+      <SettingRow
+        label="Sign-in account"
+        scope="host"
+        settingId={`provider-${props.instanceId}-oauth-offer`}
+      >
+        <OctantSelectField
+          aria-label={`Sign-in account for ${props.instanceId}`}
+          className="settings-view__select"
+          defaultValue=""
+          name="oauthOffer"
+          onValueChange={(value) => setSelectedId(value || undefined)}
+          options={candidates.map((candidate) => ({
+            id: candidate.descriptor.descriptorId,
+            label: candidate.accountLabel,
+          }))}
+        />
+      </SettingRow>
+    );
+  }
   return (
     <ProviderOAuthSignInPanel
       accountLabel={offer.accountLabel}
@@ -485,4 +598,12 @@ function DirectEndpointSignIn(props: {
       termsSummary={offer.termsSummary}
     />
   );
+}
+
+function originsMatch(allowedEndpoint: string, baseUrl: string): boolean {
+  try {
+    return new URL(allowedEndpoint).origin === new URL(baseUrl).origin;
+  } catch {
+    return false;
+  }
 }

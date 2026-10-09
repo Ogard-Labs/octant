@@ -45,7 +45,7 @@ export interface NativeHarnessRoutingPanelProps {
   readonly hostId: string;
   /** Configured direct-endpoint providers. Without any, the editor explains why it is empty. */
   readonly providers: ReadonlyArray<NativeHarnessProviderOption>;
-  readonly onOpenProviders?: () => void;
+  readonly onOpenModelEndpoints?: () => void;
   /** One explicit request that proves whether a model calls tools; absent hides the action. */
   readonly onVerifyTools?: (
     providerInstanceId: ProviderInstanceId,
@@ -264,14 +264,14 @@ export function NativeHarnessRoutingPanel(props: NativeHarnessRoutingPanelProps)
         {props.providers.length === 0 && !hasSavedRouting ? (
           <SurfaceEmpty
             action={
-              props.onOpenProviders === undefined ? null : (
-                <OctantButton onClick={props.onOpenProviders} size="sm" variant="secondary">
-                  Open Providers &amp; Models
+              props.onOpenModelEndpoints === undefined ? null : (
+                <OctantButton onClick={props.onOpenModelEndpoints} size="sm" variant="secondary">
+                  Open Model endpoints
                 </OctantButton>
               )
             }
-            detail="Connect an OpenAI-compatible or Anthropic-compatible provider in Providers & Models to assign models here."
-            title="No direct-endpoint provider yet"
+            detail="Add an OpenAI-compatible or Anthropic-compatible endpoint under Model endpoints to assign models here."
+            title="No model endpoint yet"
             tone="page"
           />
         ) : (
@@ -310,15 +310,15 @@ export function NativeHarnessRoutingPanel(props: NativeHarnessRoutingPanelProps)
                               {waitingProviders.map((option) => option.label).join(", ")} yet.
                             </span>
                           )}
-                          {props.onOpenProviders === undefined ? null : (
+                          {props.onOpenModelEndpoints === undefined ? null : (
                             <OctantButton
-                              onClick={props.onOpenProviders}
+                              onClick={props.onOpenModelEndpoints}
                               size="sm"
                               variant="secondary"
                             >
                               {waitingProviders.length === 0
-                                ? "Connect a provider"
-                                : "Open Providers & Models"}
+                                ? "Add a model endpoint"
+                                : "Open Model endpoints"}
                             </OctantButton>
                           )}
                         </>

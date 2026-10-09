@@ -473,7 +473,7 @@ import {
   makeReplicaStoreCredentialBrokerClient,
   type ProviderCredentialResolver,
 } from "./providers/credentialBrokerClient";
-import { createHostOAuthService } from "./providers/oauth/hostOAuthService";
+import { createHostOAuthService, extAgentHostIdFor } from "./providers/oauth/hostOAuthService";
 import { makeHostOAuthBrokerClient } from "./providers/oauth/hostOAuthBrokerClient";
 import { hostOAuthEventJournal } from "./providers/oauth/hostOAuthEventJournal";
 import { createProviderOAuthRouteHandler } from "./providers/oauth/providerOAuthRoutes";
@@ -4171,6 +4171,12 @@ export function startOctantServer(
     const nativeHarnessEndpoints = new NativeHarnessEndpointRegistry();
     const nativeHarnessEndpointHooks: NativeHarnessEndpointHooks = {
       endpoints: nativeHarnessEndpoints,
+      // What a request teaches about its model's window is kept with the
+      // provider's model catalogue; requests only run once the service exists.
+      contextWindows: {
+        remember: (instanceId, modelId, lesson) =>
+          providerService.rememberModelContextWindow(instanceId, modelId, lesson),
+      },
       leadFallback: {
         next: async (input) =>
           (await nativeHarnessLeadFallback?.next(input)) ?? {
@@ -4221,6 +4227,9 @@ export function startOctantServer(
         : createHostOAuthService({
             journal: oauthJournal,
             broker: oauthBroker,
+            // The ChatGPT plan sign-in registers this host under a stable id
+            // before the first sign-in.
+            extAgentHostId: extAgentHostIdFor(persistence.dataDirectory),
           });
     if (hostOAuth !== undefined && oauthJournal !== undefined) {
       for (const acknowledgment of oauthJournal.acknowledgments()) {
@@ -5844,6 +5853,16 @@ export function startOctantServer(
       networkEgress: "none",
       harnessShellScriptDirectory: harnessScriptDirectory,
     });
+    // A child admitted without network authority runs its commands here. Its
+    // writable temporary root is its own: a shared one would let it rewrite a
+    // networked shell's pending script and run that with the network open.
+    const harnessOfflineWorkDirectory = join(providerDataDirectory, "harness", "work-offline");
+    mkdirSync(harnessOfflineWorkDirectory, { recursive: true, mode: 0o700 });
+    const harnessOfflineProcessPort = new RepositoryTestProcessPort({
+      receiptDirectory: join(providerDataDirectory, "harness", "receipts"),
+      temporaryDirectory: harnessOfflineWorkDirectory,
+      networkEgress: "none",
+    });
     const nativeHarnessRoutingStore = new NativeHarnessRoutingStore({
       journal: persistence.journal,
       uuid: randomUUID,
@@ -6130,6 +6149,10 @@ export function startOctantServer(
       offlineShell: createNativeHarnessShell({
         process: harnessOfflineProcessPort,
         scriptDirectory: harnessScriptDirectory,
+      }),
+      offlineShell: createNativeHarnessShell({
+        process: harnessOfflineProcessPort,
+        scriptDirectory: harnessOfflineWorkDirectory,
       }),
       resolveWebSearch: () =>
         searxngHarnessWebSearch({

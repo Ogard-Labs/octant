@@ -5,8 +5,21 @@ description: Add and manage provider instances, choose models, and change provid
 # Providers and Models
 
 Octant is provider-neutral. The shared model works with many AI providers,
-and no core capability depends on any single provider. Providers are managed
-in **Settings → Providers & Models**.
+and no core capability depends on any single provider. Settings lists each
+kind where it is used:
+
+- **Settings → Providers & Models** holds the agent runtimes Octant drives:
+  ACP agents, coding CLIs such as OpenCode, Codex, and Kimi Code, and the
+  Claude Agent SDK.
+- **Settings → Octant Harness → Model endpoints** holds the model endpoints
+  Octant calls over an API itself: OpenAI-compatible, Anthropic-compatible,
+  Ollama, and Azure AI Foundry, including the ones you sign in to with a
+  subscription.
+- **Settings → Image generation** holds the image profiles and custom image
+  sources.
+
+All three are the same kind of provider instance, with the same credentials
+and permissions; only the page that lists them differs.
 
 ## Provider instances
 
@@ -37,7 +50,8 @@ preference; it does not grant or change provider permissions.
 Provider instances and individual models can carry user-maintained **EU** and
 **ZDR** labels. These labels are local policy metadata, not a claim that
 Octant independently verified a provider's residency or retention guarantees.
-Use the labels in **Settings → Providers & Models** when a Project needs a
+Use the labels on a provider's details, in **Settings → Providers & Models** or
+**Settings → Octant Harness → Model endpoints**, when a Project needs a
 data-handling boundary.
 
 On a Work or Code Project page, **Provider access** offers three policies:
@@ -76,7 +90,9 @@ local provider runtimes. Opening **Providers & Models** auto-registers at most
 one instance per driver family for the preferred safe candidate. On first run,
 a detected Claude Code or Codex CLI instance is created enabled; every other
 detected runtime is created disabled. After first run, auto-registration
-always creates a disabled instance. Auto-registration never toggles an
+always creates a disabled instance. A detected local Ollama server is listed
+under **Settings → Octant Harness → Model endpoints** rather than with the
+agent runtimes. Auto-registration never toggles an
 existing instance, never stores credentials, never logs in, and never installs
 or automatically updates CLIs. Explicit **Update CLI** actions are separate
 and only invoke a verified provider-owned updater. Disabled rows whose binary
@@ -205,8 +221,9 @@ session or treats the 2.x version as the legacy runtime.
 
 ### API endpoints
 
-Direct API endpoints use the short **Add API endpoint** flow. Supported
-profiles:
+Direct API endpoints are added in **Settings → Octant Harness → Model
+endpoints → Add endpoint**, which asks for the base URL and, where the
+endpoint needs one, an API key. Supported profiles:
 
 - **OpenAI-compatible** HTTP (`auto`, `responses`, or `chat-completions`)
 - **Anthropic-compatible** HTTP (`auto` or `messages`)
@@ -224,8 +241,8 @@ an Azure AI Foundry provider offers only its configured deployments.
 
 Image generation profiles are also provider instances. Open **Settings → Image
 generation → Add image provider** to choose a provider, enter its API key, and
-set its model allowlist. The same profiles are available from the manual form
-in **Providers & Models**:
+set its model allowlist. Image generation is where these profiles are added
+and listed:
 
 - **OpenAI Image** (`gpt-image-2` and related GPT Image models as suggestions)
 - **Gemini Image** (Gemini 3.1 image models as suggestions, with
@@ -269,6 +286,59 @@ process arguments or diagnostics. Remote endpoints require bearer or API-key
 authentication; anonymous access is accepted only for loopback. OAuth and
 subscription modes work where the official runtime supports them and are
 never silently replaced by API-key modes.
+
+### Signing in with a subscription
+
+An **OpenAI-compatible** endpoint can sign in with a subscription instead of
+an API key. **Settings → Octant Harness → Model endpoints** offers each one as
+its own way to add an endpoint:
+
+- **Sign in with ChatGPT** — adds an endpoint named **ChatGPT plan** at
+  `https://api.openai.com/v1` and starts the sign-in with your ChatGPT
+  account. It uses the plan's Responses route.
+- **Sign in with OpenRouter** — adds an endpoint at
+  `https://openrouter.ai/api/v1` and signs in with your OpenRouter account,
+  storing the issued API key.
+
+Neither asks for a base URL or an API key: the endpoint is fixed by the
+sign-in, and the host refuses the sign-in, and any use of its token, on any
+other endpoint. The endpoint's row then shows who is signed in, with **Sign
+out** and **Sign in** again. An endpoint you added yourself whose base URL is
+one of these offers the same sign-in beside its API key. The host refuses a
+sign-in started from a paired device; sign in from the Octant app or a browser
+on the host.
+
+The sign-in opens the provider's authorization page in the system browser and
+completes on a loopback callback; Octant never sees or types your credentials.
+On the first sign-in the host registers itself as a user-defined agent: the
+stable host id is sent before the first sign-in and the issued client id
+returned by the callback is stored and reused for every later refresh. The
+identity token is validated against the issuer's published keys before the
+grant is stored. Signing out revokes the refresh token at the issuer before
+the local grant is dropped. If the sign-in service can't be reached, Octant
+keeps you signed in and says so: try again, or choose **Sign out on this
+computer only**, which removes the stored sign-in here but leaves it valid at
+the sign-in service until it expires. Signing in again on the same endpoint
+always removes the previous sign-in from this computer.
+
+The ChatGPT plan route is a preview with a fixed request shape: storage is
+disabled, streaming is on, the full history is sent as an array, system text
+travels as instructions, and only function tools are available — no hosted
+tools. A request that cannot be expressed under that shape is refused with a
+typed reason rather than silently reshaped. If the granted scopes do not
+include plan usage, the sign-in still succeeds as identity-only and plan
+turns are refused until you sign in again and allow plan access. When the
+plan's usage limit is reached, the failure links to ChatGPT's usage settings
+(`https://chatgpt.com/settings/usage`).
+
+**Check connection** lists the models the plan route reports, with their names
+and context windows when the route gives them. When it cannot get a model list
+from the route, the row says so in words instead of reporting an
+invalid response: add the model IDs your plan offers under **Manual model
+IDs**, then check the connection again. Those IDs are shown as manual and
+unverified until a turn succeeds with them. A rejected sign-in, a reached
+usage limit, or an unavailable route still fails the check with its own
+message.
 
 ## Choosing a model
 
