@@ -143,6 +143,7 @@ describe("a synced artifact's other states", () => {
   it("says when no thread here can take it, and offers the choices there are", async () => {
     const { onCreate, onClose, onOpenIn } = dialog({
       ...twoVersions,
+      mode: "chat",
       status: "current",
       threads: [],
     } as ArtifactSyncedDetail);
@@ -160,5 +161,14 @@ describe("a synced artifact's other states", () => {
     expect(screen.getByRole("status").textContent).toBe(
       "Turn sync on to send this choice to your other computers.",
     );
+  });
+});
+
+describe("when no thread here can take a Work artifact", () => {
+  it("names the mode to start a thread in, without offering the library's Chat thread", () => {
+    dialog({ ...twoVersions, status: "current", threads: [] } as ArtifactSyncedDetail);
+    expect(screen.getByText(/Start a Work thread, then open it here/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Start a thread" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Keep it in the library" })).toBeTruthy();
   });
 });

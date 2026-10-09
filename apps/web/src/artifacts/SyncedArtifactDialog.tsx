@@ -141,7 +141,10 @@ export function SyncedArtifactDialog(props: SyncedArtifactDialogProps) {
                   busy={props.busy}
                   onAct={(id) => props.onMerge(id)}
                   onChange={setChosenThread}
-                  {...(props.onCreate === undefined ? {} : { onCreate: props.onCreate })}
+                  mode={detail.mode}
+                  {...(props.onCreate === undefined || detail.mode !== "chat"
+                    ? {}
+                    : { onCreate: props.onCreate })}
                   onClose={props.onClose}
                   threadId={threadId}
                   threads={threads}
@@ -183,7 +186,10 @@ export function SyncedArtifactDialog(props: SyncedArtifactDialogProps) {
                 busy={props.busy}
                 onAct={props.onOpenIn}
                 onChange={setChosenThread}
-                {...(props.onCreate === undefined ? {} : { onCreate: props.onCreate })}
+                mode={detail.mode}
+                {...(props.onCreate === undefined || detail.mode !== "chat"
+                  ? {}
+                  : { onCreate: props.onCreate })}
                 onClose={props.onClose}
                 threadId={threadId}
                 threads={threads}
@@ -227,6 +233,8 @@ function ThreadChoice(props: {
   readonly busy: boolean;
   readonly onChange: (threadId: string) => void;
   readonly onAct: (threadId: string) => void;
+  readonly mode: ArtifactSyncedDetail["mode"];
+  /** Offered only for Chat: the library starts a Chat thread. */
   readonly onCreate?: () => void;
   readonly onClose: () => void;
 }) {
@@ -235,8 +243,8 @@ function ThreadChoice(props: {
     return (
       <div className="synced-artifact__none">
         <p className="oct-row-detail">
-          No thread on this computer can take it. Start a thread in the same mode, or keep it in the
-          library.
+          No thread on this computer can take it. Start a {MODE_LABEL[props.mode]} thread, then open
+          it here, or keep it in the library.
         </p>
         <div className="synced-artifact__row">
           {props.onCreate === undefined ? null : (

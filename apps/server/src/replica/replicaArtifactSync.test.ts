@@ -1131,8 +1131,17 @@ describe("synced artifacts in the library", () => {
     ).toMatchObject({ status: "current" });
 
     // The Studio Mac takes the resolving version in on its next pull, on top
-    // of the version it had: nothing left to choose there either.
+    // of the version it had: nothing left to choose there either. Not while
+    // its thread is archived: nothing is recorded on a thread that cannot
+    // take it.
     await studio.sync.sync();
+    studio.threads.push({
+      ...workThread(ids.thread, { active: false }),
+      projectId: ids.studioProject,
+    });
+    expect(studio.syncedArtifacts.catchUp()).toBe(0);
+    expect(studio.ingested).toEqual([]);
+    studio.threads.splice(0, 1, { ...workThread(ids.thread), projectId: ids.studioProject });
     expect(headsOf(studio)).toEqual([{ kind: "version", versionId: laptopHead?.versionId }]);
     studio.syncedArtifacts.catchUp();
     expect(String(studio.canvases.get(String(ids.canvas))?.at(-1)?.versionId)).toBe(
@@ -1230,6 +1239,35 @@ describe("synced artifacts in the library", () => {
     expect(
       await laptop.syncedArtifacts.execute({ kind: "restore", canvasId: ids.canvas }),
     ).toMatchObject({ reason: "not-deleted" });
+  });
+
+  it("refuses to resolve two versions open here with sync off, rather than leave the choice behind", async () => {
+    const shared: SharedStore = { kind: "folder", folder: scratch(homedir()) };
+    const { studio, laptop } = await pair(shared);
+    await studio.commit(canvasVersion({ versionId: ids.v1, sequence: 1, text: "Ship it." }));
+    await laptop.sync.pull();
+    laptop.threads.push(workThread(laptopThread));
+    await laptop.syncedArtifacts.execute({
+      kind: "open",
+      canvasId: ids.canvas,
+      threadId: laptopThread,
+    });
+    await studio.commit(canvasVersion({ versionId: ids.v2a, sequence: 2, text: "Ship Monday." }));
+    await laptop.sync.pull();
+    const laptopV1 = laptop.canvases.get(String(ids.canvas))?.[0];
+    if (laptopV1 === undefined) throw new Error("not bound");
+    await laptop.settings.setSync({
+      syncOn: false,
+      expectedVersion: laptop.settings.settings().version,
+    });
+    await laptop.commit(decodeCanvasVersion({ ...laptopV1, versionId: ids.v2b, sequence: 2 }));
+    for (const command of [
+      { kind: "keep", canvasId: ids.canvas, versionId: ids.v2a as never },
+      { kind: "merge", canvasId: ids.canvas },
+    ] as const) {
+      expect(await laptop.syncedArtifacts.execute(command)).toMatchObject({ reason: "sync-off" });
+    }
+    expect(laptop.canvases.get(String(ids.canvas))).toHaveLength(2);
   });
 
   it("refuses to publish a choice with sync off", async () => {

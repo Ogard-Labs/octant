@@ -1567,8 +1567,12 @@ flowchart LR
     holds, does not publish it again. Each source keeps the origin's replica
     host id, so a refresh or Open here fails closed rather than resolving
     another computer's references. With nothing compatible the command is
-    refused as `no-compatible-thread`, and the library offers starting a
-    thread or leaving it unbound. After each pull the sync service makes, a
+    refused as `no-compatible-thread`, and the library names the mode to start
+    a thread in (offering to start one only for Chat, the kind it starts) or
+    leaves it unbound. Keep, Merge, and Restore refuse as `sync-off` before
+    committing anything when this computer cannot publish, re-check the bound
+    thread before recording ingestion on it, and report a version the share
+    filter or size bound kept here as refused rather than published. After each pull the sync service makes, a
     bound Canvas takes in an `ahead` version the same way.
   - **Resolving.** Keep this one publishes a version with the chosen content
     whose parents are every candidate; Restore publishes one whose parents

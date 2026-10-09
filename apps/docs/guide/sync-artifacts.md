@@ -54,8 +54,9 @@ computers**, lists every version with the computer that wrote it.
   an issue would, so the thread asks again before anything it cannot undo.
   A link to a file or thread on the other computer stays a link to that
   computer and cannot be refreshed or opened here. When no thread here can
-  take it, the library says so and offers to start a thread or keep it in
-  the library. Once it is open here, later versions from your other
+  take it, the library says so and names the mode to start a thread in (for
+  a Chat artifact it offers to start one), or you can keep it in the
+  library. Once it is open here, later versions from your other
   computers that build on the one you have are added to it on the next sync.
 - **Two versions.** When two computers changed it from the same version,
   its card shows **Two versions**. **Choose…** shows both side by side,

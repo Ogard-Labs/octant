@@ -195,6 +195,7 @@ export class SyncedArtifactService {
       const ahead = state.standing.ahead;
       const synced = state.artifact.versions.find((version) => same(version.versionId, ahead));
       if (synced === undefined) continue;
+      if (!this.#boundThreadTakes(state.local)) continue;
       const threadId = String(state.local.currentVersion.definition.provenance.threadId);
       const candidate: Candidate = {
         versionId: ahead,
@@ -430,6 +431,23 @@ export class SyncedArtifactService {
     };
   }
 
+  /**
+   * Whether the thread a Canvas is bound to may still take another version
+   * of it, from its durable state now. Checked before anything is recorded
+   * on the thread: a thread archived, put in Plan mode, or cut off from its
+   * workspace since it was bound takes nothing more.
+   */
+  #boundThreadTakes(local: SyncedArtifactLocalCanvas): boolean {
+    const provenance = local.currentVersion.definition.provenance;
+    const thread = this.#ports
+      .threads()
+      .find((candidate) => same(candidate.threadId, provenance.threadId));
+    return (
+      thread !== undefined &&
+      decideReplicaArtifactBinding(provenance.mode, thread.facts).kind === "compatible"
+    );
+  }
+
   #ingested(artifact: ReplicaSyncedArtifact, threadId: string, candidate: Candidate): boolean {
     if (candidate.thisComputer) return true;
     // Opaque and path-free: the label names the computer, the reference names
@@ -562,7 +580,16 @@ export class SyncedArtifactService {
     const canvasId = state.artifact.canvasId;
     const versionId = this.#ports.uuid() as CanvasVersionId;
     const now = this.#ports.clock();
+    if (!this.#ports.sync.publishes()) {
+      return refused("sync-off", "Turn sync on to send this choice to your other computers.");
+    }
     if (state.local !== undefined) {
+      if (!this.#boundThreadTakes(state.local)) {
+        return refused(
+          "incompatible-thread",
+          "The thread it is open in cannot take a new version now.",
+        );
+      }
       const threadId = String(state.local.currentVersion.definition.provenance.threadId);
       if (!this.#ingested(state.artifact, threadId, chosen)) {
         return refused("refused", "This computer could not record where the version came from.");
@@ -583,9 +610,6 @@ export class SyncedArtifactService {
       }
       if (committed.kind === "denied") return refused("refused", committed.message);
       return this.#published(canvasId, committed.version.versionId);
-    }
-    if (!this.#ports.sync.publishes()) {
-      return refused("sync-off", "Turn sync on to send this choice to your other computers.");
     }
     const sequence = Math.max(
       0,
@@ -618,17 +642,27 @@ export class SyncedArtifactService {
     };
   }
 
+  /**
+   * What became of a version committed here: waiting in the queue, or in
+   * the store under this computer's slot. A version the share filter or the
+   * size bound kept from leaving is neither, and is reported as refused
+   * rather than inferred to have gone out.
+   */
   async #published(canvasId: CanvasId, versionId: CanvasVersionId): Promise<ArtifactSyncedResult> {
     await this.#ports.sync.drain().catch(() => undefined);
-    const waiting = this.#ports
-      .artifacts()
-      .outbox.some((entry) => same(entry.bundle.octant.versionId, versionId));
-    return {
-      kind: "artifact-synced-published",
-      canvasId,
-      versionId,
-      published: this.#ports.sync.publishes() && !waiting,
-    };
+    const state = this.#ports.artifacts();
+    const waiting = state.outbox.some((entry) => same(entry.bundle.octant.versionId, versionId));
+    const landed =
+      state
+        .artifact(canvasId)
+        ?.versions.some((version) => version.local && same(version.versionId, versionId)) === true;
+    if (!waiting && !landed) {
+      return refused(
+        "refused",
+        "It changed here, but this version cannot leave this computer, so your other computers do not get it.",
+      );
+    }
+    return { kind: "artifact-synced-published", canvasId, versionId, published: landed };
   }
 
   async #merge(canvasId: CanvasId, threadId: string | undefined): Promise<ArtifactSyncedResult> {
@@ -638,6 +672,15 @@ export class SyncedArtifactService {
     }
     if (state.standing.status !== "two-versions") {
       return refused("not-two-versions", "There is only one version standing.");
+    }
+    if (!this.#ports.sync.publishes()) {
+      return refused("sync-off", "Turn sync on to send a merge to your other computers.");
+    }
+    if (state.local !== undefined && !this.#boundThreadTakes(state.local)) {
+      return refused(
+        "incompatible-thread",
+        "The thread it is open in cannot take a new version now.",
+      );
     }
     const parents = state.standing.candidates;
     const candidates = this.#candidates(state);
