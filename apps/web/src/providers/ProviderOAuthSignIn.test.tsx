@@ -161,6 +161,34 @@ describe("provider sign-in panel", () => {
     expect(run.mock.calls.map((call) => call[0].kind)).toEqual(["status"]);
   });
 
+  it("starts one sign-in when Sign in is clicked twice while the terms are recorded", async () => {
+    let release!: () => void;
+    const acknowledged = new Promise<void>((resolve) => (release = resolve));
+    const run = vi.fn(async (command: { readonly kind: string }) => {
+      if (command.kind === "acknowledge") {
+        await acknowledged;
+        return { kind: "signed-out" as const, termsRequired: false };
+      }
+      if (command.kind === "begin") return { kind: "awaiting-consent" as const, attemptId: "a" };
+      return { kind: "signed-out" as const, termsRequired: true };
+    });
+    render(
+      <ProviderOAuthSignInPanel
+        accountLabel="ChatGPT plan"
+        descriptorId="chatgpt-plan"
+        instanceId="00000000-0000-4000-8000-000000000905"
+        run={run}
+        termsSummary="Terms"
+      />,
+    );
+    const button = await screen.findByRole("button", { name: "Sign in" });
+    fireEvent.click(button);
+    fireEvent.click(button);
+    await act(async () => release());
+    expect(await screen.findByText(/Continue in the browser/)).toBeInTheDocument();
+    expect(run.mock.calls.map((call) => call[0].kind)).toEqual(["status", "acknowledge", "begin"]);
+  });
+
   it("does not begin a sign-in when the host does not record the acknowledgment", async () => {
     const user = userEvent.setup();
     const run = vi.fn(async (command: { readonly kind: string }) =>

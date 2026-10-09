@@ -189,7 +189,8 @@ describe("ProviderSettingsView", () => {
     expect(disclosure).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByRole("heading", { name: "Agent runtime" })).toBeVisible();
     await user.click(screen.getByRole("combobox", { name: "Provider type" }));
-    expect(screen.getByRole("option", { name: "Codex CLI" })).toBeInTheDocument();
+    // The list opens on the next frame; asking at once failed about half the runs.
+    expect(await screen.findByRole("option", { name: "Codex CLI" })).toBeInTheDocument();
     expect(screen.getByRole("option", { name: "Qwen Code ACP" })).toBeInTheDocument();
     for (const elsewhere of [
       "OpenAI-compatible HTTP",
@@ -3017,6 +3018,26 @@ describe("where Settings lists each provider kind", () => {
     expect(props.onRemove).not.toHaveBeenCalled();
     await user.click(within(dialog).getByRole("button", { name: "Remove endpoint" }));
     expect(props.onRemove).toHaveBeenCalledWith(endpointId);
+  });
+
+  it("says it couldn't check the roles, rather than none, when the role lookup fails", async () => {
+    const user = userEvent.setup();
+    renderProviderSettings(
+      <ModelEndpointSettingsView
+        {...fixture()}
+        instances={mixedInstances()}
+        onRolesUsing={vi.fn(async () => {
+          throw new Error("routing unavailable");
+        })}
+      />,
+    );
+    await user.click(screen.getByRole("link", { name: /^Private gateway,/ }));
+    await user.click(screen.getByRole("button", { name: "Remove Private gateway…" }));
+    const dialog = await screen.findByRole("dialog", { name: "Remove Private gateway?" });
+    expect(
+      await within(dialog).findByText(/Octant couldn't check which model roles use it\./),
+    ).toBeVisible();
+    expect(within(dialog).queryByText(/No model role uses its models/)).toBeNull();
   });
 
   it("returns to the endpoint list from the detail page and puts focus back on its row", async () => {
