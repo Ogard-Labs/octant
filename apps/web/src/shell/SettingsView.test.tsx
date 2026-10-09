@@ -1,7 +1,7 @@
 import { defaultShellSettings } from "@octant/domain/shell-policy";
 import { decodeChatBootstrap } from "@octant/contracts/chat";
 import { DEFAULT_THEME_SETTINGS } from "@octant/contracts/theme";
-import type { SettingsDeepLink } from "@octant/contracts";
+import type { ProviderInstance, SettingsDeepLink } from "@octant/contracts";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
@@ -379,6 +379,46 @@ describe("SettingsView", () => {
     );
   });
 
+  it("opens an endpoint as a sub-page under Octant Harness and comes back to its row", async () => {
+    const user = userEvent.setup();
+    const endpoint = {
+      id: "80000000-0000-4000-8000-0000000000c1",
+      displayName: "Team gateway",
+      driverKind: "openai-compatible",
+      configuration: {
+        kind: "openai-compatible-http",
+        baseUrl: "https://gateway.example/v1",
+        authentication: "none",
+        protocol: "auto",
+        manualModelIds: [],
+      },
+      enabled: true,
+      environmentPolicy: "inherit-host",
+      version: 1,
+      createdAt: now,
+      updatedAt: now,
+    } as unknown as ProviderInstance;
+    const providerController = {
+      ...providerControllerFixture(),
+      instances: [endpoint],
+      probe: vi.fn(async () => true),
+      probeFailures: new Map(),
+    } as ProviderController;
+    renderSettings({ providerController, initialDeepLink: { section: "harness" } });
+
+    await user.click(await screen.findByRole("link", { name: /^Team gateway,/ }));
+
+    const breadcrumb = screen.getByRole("navigation", { name: "Settings breadcrumb" });
+    expect(within(breadcrumb).getByText("Team gateway")).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("heading", { level: 1, name: "Team gateway" })).toBeVisible();
+    expect(screen.queryByRole("heading", { level: 1, name: "Octant Harness" })).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Back to Octant Harness" }));
+    expect(screen.getByRole("heading", { level: 1, name: "Octant Harness" })).toBeVisible();
+    await waitFor(() => expect(screen.getByRole("link", { name: /^Team gateway,/ })).toHaveFocus());
+    expect(within(breadcrumb).queryByText("Team gateway")).toBeNull();
+  });
+
   it("saves a model's context window from Octant Harness › Model endpoints", async () => {
     const user = userEvent.setup();
     const instanceId = "80000000-0000-4000-8000-000000000092";
@@ -438,7 +478,8 @@ describe("SettingsView", () => {
       initialDeepLink: { section: "harness" },
     });
 
-    await user.click(screen.getByRole("button", { name: "Details for Foundry relay" }));
+    // The box sits under Models on the endpoint's own page.
+    await user.click(await screen.findByRole("link", { name: /^Foundry relay,/ }));
     await user.type(screen.getByLabelText("Context window for deployment-a"), "131072{Enter}");
 
     expect(setModelContextWindow).toHaveBeenCalledWith(instanceId, "deployment-a", 131_072);

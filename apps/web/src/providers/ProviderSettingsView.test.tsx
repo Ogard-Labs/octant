@@ -29,9 +29,15 @@ const renderProviderSettings = render;
 
 function renderExpanded(ui: ReactElement) {
   const result = renderProviderSettings(ui);
-  const manual =
-    screen.queryByRole("button", { name: "Add provider manually" }) ??
-    screen.queryByRole("button", { name: "Add endpoint" });
+  // Octant Harness: a single endpoint opens on its detail page, where its
+  // configuration is always shown; with none, Add endpoint opens the form.
+  const endpointLinks = screen.queryAllByRole("link", { name: /Open details$/ });
+  if (endpointLinks.length === 1) fireEvent.click(endpointLinks[0]!);
+  else if (endpointLinks.length === 0) {
+    const add = screen.queryByRole("button", { name: "Add endpoint" });
+    if (add !== null) fireEvent.click(add);
+  }
+  const manual = screen.queryByRole("button", { name: "Add provider manually" });
   if (manual?.getAttribute("aria-expanded") === "false") fireEvent.click(manual);
   for (const details of screen.queryAllByRole("button", { name: /^Details for / })) {
     if (details.getAttribute("aria-expanded") === "false") fireEvent.click(details);
@@ -39,6 +45,13 @@ function renderExpanded(ui: ReactElement) {
   for (const configure of screen.queryAllByRole("button", { name: /^Configure / })) {
     if (configure.getAttribute("aria-expanded") === "false") fireEvent.click(configure);
   }
+  return result;
+}
+
+/** Opens Add endpoint, whose dialog holds the endpoint-by-address form. */
+function renderAdding(ui: ReactElement) {
+  const result = renderProviderSettings(ui);
+  fireEvent.click(screen.getByRole("button", { name: "Add endpoint" }));
   return result;
 }
 
@@ -176,7 +189,8 @@ describe("ProviderSettingsView", () => {
     expect(disclosure).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByRole("heading", { name: "Agent runtime" })).toBeVisible();
     await user.click(screen.getByRole("combobox", { name: "Provider type" }));
-    expect(screen.getByRole("option", { name: "Codex CLI" })).toBeInTheDocument();
+    // The list opens on the next frame; asking at once failed about half the runs.
+    expect(await screen.findByRole("option", { name: "Codex CLI" })).toBeInTheDocument();
     expect(screen.getByRole("option", { name: "Qwen Code ACP" })).toBeInTheDocument();
     for (const elsewhere of [
       "OpenAI-compatible HTTP",
@@ -455,7 +469,7 @@ describe("ProviderSettingsView", () => {
   it("creates and edits Ollama as a loopback-only native API without credentials or binary controls", async () => {
     const user = userEvent.setup();
     const props = fixture({ instance: ollamaProvider() });
-    renderExpanded(<ModelEndpointSettingsView {...props} />);
+    renderAdding(<ModelEndpointSettingsView {...props} />);
 
     await chooseSelectFieldOption(
       user,
@@ -468,13 +482,15 @@ describe("ProviderSettingsView", () => {
     expect(within(create).getByText(/existing user-managed Ollama service/i)).toBeVisible();
     await user.clear(within(create).getByLabelText("Ollama API base URL"));
     await user.type(within(create).getByLabelText("Ollama API base URL"), "http://127.0.0.1:11434");
-    await user.click(within(create).getByRole("button", { name: "Add Ollama" }));
+    await user.click(within(create).getByRole("button", { name: "Check and add" }));
     expect(props.onCreateOllama).toHaveBeenCalledWith("Ollama local", {
       kind: "ollama-native-http",
       baseUrl: "http://127.0.0.1:11434",
     });
 
-    const card = screen.getByRole("article", { name: "Ollama local" });
+    await user.keyboard("{Escape}");
+    await user.click(screen.getByRole("link", { name: /^Ollama local,/ }));
+    const card = screen.getByRole("region", { name: "Ollama local" });
     const endpoint = within(card).getByLabelText("Ollama API base for Ollama local");
     await user.clear(endpoint);
     await user.type(endpoint, "http://localhost:11434");
@@ -487,16 +503,30 @@ describe("ProviderSettingsView", () => {
     });
   });
 
-  it("gives Ollama service guidance instead of CLI binary guidance", () => {
-    renderExpanded(
+  it("asks whether Ollama is running when nothing answers at its address, not about a binary", () => {
+    const props = fixture({ instance: ollamaProvider() });
+    renderProviderSettings(
       <ModelEndpointSettingsView
-        {...fixture({
-          instance: ollamaProvider(),
-          observed: observation({ readiness: "unavailable" }),
-        })}
+        {...props}
+        probeFailures={
+          new Map([
+            [
+              id,
+              {
+                category: "unavailable",
+                message: "The provider endpoint could not be reached.",
+                failedAt: "2026-07-14T10:00:00.000Z",
+              },
+            ],
+          ])
+        }
       />,
     );
-    expect(screen.getByText(/start the user-managed Ollama service/i)).toBeVisible();
+    const fix = screen.getByRole("group", { name: "Fix Ollama local" });
+    expect(
+      within(fix).getByText("Nothing answered at 127.0.0.1:11434. Is Ollama running?"),
+    ).toBeVisible();
+    expect(within(fix).getByRole("button", { name: "Try again for Ollama local" })).toBeVisible();
     expect(screen.queryByText(/binary path/i)).not.toBeInTheDocument();
   });
 
@@ -1195,19 +1225,24 @@ describe("ProviderSettingsView", () => {
 
   it("renders OpenAI-compatible providers as read-only HTTP summaries", async () => {
     renderExpanded(<ModelEndpointSettingsView {...fixture({ instance: httpProvider() })} />);
-    const card = screen.getByRole("article", { name: "Private gateway" });
+    const page = screen.getByRole("region", { name: "Private gateway" });
+    const diagnostics = within(page).getByRole("region", { name: "Diagnostics" });
 
-    expect(within(card).getByText("OpenAI-compatible HTTP")).toBeVisible();
-    expect(within(card).getByText("https://gateway.example/v1/")).toBeVisible();
-    expect(within(card).getByText(/Configured protocol: Automatic/)).toBeVisible();
-    expect(within(card).getByText(/Authentication: Bearer/)).toBeVisible();
-    expect(within(card).queryByLabelText(/Binary path/)).not.toBeInTheDocument();
+    // The precise terms live under Diagnostics, folded away while the endpoint works.
+    expect(diagnostics.querySelector("details")).not.toHaveAttribute("open");
+    expect(within(diagnostics).getByText("https://gateway.example/v1/")).toBeInTheDocument();
+    expect(within(diagnostics).getByText("OpenAI-compatible")).toBeInTheDocument();
+    expect(
+      within(diagnostics).getByText("Set to Automatic · no turn has used it yet"),
+    ).toBeInTheDocument();
+    expect(within(diagnostics).getByText("API key (bearer)")).toBeInTheDocument();
+    expect(within(page).queryByLabelText(/Binary path/)).not.toBeInTheDocument();
   });
 
   it("creates an HTTP provider with a write-only credential and clears it after settlement", async () => {
     const user = userEvent.setup();
     const props = fixture({ instance: httpProvider() });
-    renderExpanded(<ModelEndpointSettingsView {...props} />);
+    renderAdding(<ModelEndpointSettingsView {...props} />);
 
     await chooseSelectFieldOption(
       user,
@@ -1224,7 +1259,7 @@ describe("ProviderSettingsView", () => {
       "Responses",
     );
     await user.type(within(create).getByLabelText("Manual model IDs"), "model-a, model-b\nmodel-a");
-    await user.click(screen.getByRole("button", { name: "Add OpenAI-compatible provider" }));
+    await user.click(screen.getByRole("button", { name: "Check and add" }));
 
     expect(props.onCreateOpenAiCompatible).toHaveBeenCalledOnce();
     const [name, configuration, credential] = vi.mocked(props.onCreateOpenAiCompatible).mock
@@ -1245,7 +1280,7 @@ describe("ProviderSettingsView", () => {
   it("creates an Anthropic-compatible provider with an API key credential", async () => {
     const user = userEvent.setup();
     const props = fixture({ instance: anthropicProvider() });
-    renderExpanded(<ModelEndpointSettingsView {...props} />);
+    renderAdding(<ModelEndpointSettingsView {...props} />);
 
     await chooseSelectFieldOption(
       user,
@@ -1266,7 +1301,7 @@ describe("ProviderSettingsView", () => {
       "Messages",
     );
     await user.type(within(create).getByLabelText("Manual model IDs"), "claude-3-5-sonnet");
-    await user.click(screen.getByRole("button", { name: "Add Anthropic-compatible provider" }));
+    await user.click(screen.getByRole("button", { name: "Check and add" }));
 
     expect(props.onCreateAnthropicCompatible).toHaveBeenCalledOnce();
     const [name, configuration, credential] = vi.mocked(props.onCreateAnthropicCompatible).mock
@@ -1382,7 +1417,7 @@ describe("ProviderSettingsView", () => {
 
   it("says before the form that a browser cannot add a provider that needs an API key", async () => {
     const user = userEvent.setup();
-    renderExpanded(
+    renderAdding(
       <ModelEndpointSettingsView
         {...fixture({ instance: foundryProvider(), credentialManagementAvailable: false })}
       />,
@@ -1401,7 +1436,7 @@ describe("ProviderSettingsView", () => {
 
   it("offers a keyless endpoint in a browser and leaves the notice out for providers that need no key", async () => {
     const user = userEvent.setup();
-    renderExpanded(
+    renderAdding(
       <ModelEndpointSettingsView
         {...fixture({ instance: foundryProvider(), credentialManagementAvailable: false })}
       />,
@@ -1426,7 +1461,7 @@ describe("ProviderSettingsView", () => {
 
   it("shows no desktop-only notice where keys can be stored", async () => {
     const user = userEvent.setup();
-    renderExpanded(<ModelEndpointSettingsView {...fixture({ instance: foundryProvider() })} />);
+    renderAdding(<ModelEndpointSettingsView {...fixture({ instance: foundryProvider() })} />);
 
     await chooseSelectFieldOption(user, screen.getByLabelText("Provider type"), "Azure AI Foundry");
 
@@ -1436,7 +1471,7 @@ describe("ProviderSettingsView", () => {
   it("creates an Azure AI Foundry provider with an api-key credential", async () => {
     const user = userEvent.setup();
     const props = fixture({ instance: foundryProvider() });
-    renderExpanded(<ModelEndpointSettingsView {...props} />);
+    renderAdding(<ModelEndpointSettingsView {...props} />);
 
     await chooseSelectFieldOption(user, screen.getByLabelText("Provider type"), "Azure AI Foundry");
     const create = screen.getByRole("form", { name: "Add Azure AI Foundry provider" });
@@ -1452,7 +1487,7 @@ describe("ProviderSettingsView", () => {
       "Responses",
     );
     await user.type(within(create).getByLabelText("Deployment IDs"), "deployment-a");
-    await user.click(screen.getByRole("button", { name: "Add Azure AI Foundry provider" }));
+    await user.click(screen.getByRole("button", { name: "Check and add" }));
 
     expect(props.onCreateAzureFoundry).toHaveBeenCalledOnce();
     const [name, configuration, credential] = vi.mocked(props.onCreateAzureFoundry).mock.calls[0]!;
@@ -1471,38 +1506,43 @@ describe("ProviderSettingsView", () => {
   });
 
   it.each([
-    ["OpenAI-compatible", httpProvider(), "model-a"],
-    ["Anthropic-compatible", anthropicProvider(), "claude-3-5-sonnet"],
-    ["Azure AI Foundry", foundryProvider(), "deployment-a"],
+    ["OpenAI-compatible", httpProvider()],
+    ["Anthropic-compatible", anthropicProvider()],
+    ["Azure AI Foundry", foundryProvider()],
   ] as const)(
-    "verifies tools for a configured model of an %s provider on request",
-    async (_label, instance, modelId) => {
+    "verifies tools for a Chat only model of an %s endpoint on request",
+    async (_label, instance) => {
       const user = userEvent.setup();
       const props = fixture({ instance, observed: observation() });
       renderExpanded(<ModelEndpointSettingsView {...props} />);
 
-      const card = screen.getByLabelText(instance.displayName);
-      await user.click(within(card).getByRole("button", { name: "Connection details" }));
-      expect(within(card).getByText(/Chat only until you verify/)).toBeVisible();
-      await user.click(within(card).getByRole("button", { name: `Verify tools for ${modelId}` }));
+      const models = screen.getByRole("list", { name: `${instance.displayName} models` });
+      expect(within(models).getByText("Chat only")).toBeVisible();
+      await user.click(within(models).getByRole("button", { name: "Verify tools for Model One" }));
 
-      expect(props.onVerifyModelTools).toHaveBeenCalledWith(id, modelId);
+      expect(props.onVerifyModelTools).toHaveBeenCalledWith(id, "model-1");
     },
   );
 
-  it("says which models are verified for tools and keeps the endpoint's other models Chat only", async () => {
-    const user = userEvent.setup();
+  it("drops the Chat only tag from a model verified for tools and keeps it on the others", () => {
     const props = fixture({
       instance: httpProvider(),
-      observed: observation({ verifiedToolModelIds: ["model-a" as never] }),
+      observed: observation({
+        models: [
+          ...observation().models,
+          { ...observation().models[0]!, id: "model-2" as never, displayName: "Model Two" },
+        ],
+        verifiedToolModelIds: ["model-1" as never],
+      }),
     });
     renderExpanded(<ModelEndpointSettingsView {...props} />);
 
-    const card = screen.getByLabelText("Private gateway");
-    await user.click(within(card).getByRole("button", { name: "Connection details" }));
-    expect(within(card).getByText("Verified (1 model)")).toBeVisible();
+    const models = screen.getByRole("list", { name: "Private gateway models" });
+    const [first, second] = within(models).getAllByRole("listitem");
+    expect(within(first!).queryByText("Chat only")).toBeNull();
+    expect(within(second!).getByText("Chat only")).toBeVisible();
     expect(
-      within(card).getByRole("button", { name: "Verify tools for model-a (verified)" }),
+      within(second!).getByRole("button", { name: "Verify tools for Model Two" }),
     ).toBeVisible();
   });
 
@@ -1851,7 +1891,7 @@ describe("ProviderSettingsView", () => {
   it("resets stale api-key auth back to bearer when switching from Anthropic to OpenAI-compatible", async () => {
     const user = userEvent.setup();
     const props = fixture({ instance: anthropicProvider() });
-    renderExpanded(<ModelEndpointSettingsView {...props} />);
+    renderAdding(<ModelEndpointSettingsView {...props} />);
 
     await chooseSelectFieldOption(
       user,
@@ -1877,7 +1917,7 @@ describe("ProviderSettingsView", () => {
 
   it("clears and disables the create credential when authentication changes to none", async () => {
     const user = userEvent.setup();
-    renderExpanded(<ModelEndpointSettingsView {...fixture({ instance: httpProvider() })} />);
+    renderAdding(<ModelEndpointSettingsView {...fixture({ instance: httpProvider() })} />);
 
     await chooseSelectFieldOption(
       user,
@@ -1907,7 +1947,7 @@ describe("ProviderSettingsView", () => {
       instance: httpProvider(),
       observed: observation({ credentialStatus: "missing" }),
     });
-    renderExpanded(<ModelEndpointSettingsView {...props} />);
+    renderAdding(<ModelEndpointSettingsView {...props} />);
 
     await chooseSelectFieldOption(
       user,
@@ -1924,14 +1964,12 @@ describe("ProviderSettingsView", () => {
     );
     const key = within(create).getByLabelText("API key");
     (key as HTMLInputElement).value = "injected-secret";
-    await user.click(screen.getByRole("button", { name: "Add OpenAI-compatible provider" }));
+    await user.click(screen.getByRole("button", { name: "Check and add" }));
 
     const [, configuration, credential] = vi.mocked(props.onCreateOpenAiCompatible).mock.calls[0]!;
     expect(configuration.authentication).toBe("none");
     expect(credential.value).toBe("");
     expect(key).toHaveValue("");
-    expect(screen.getByText("Not configured")).toBeVisible();
-    expect(screen.queryByText("Stored in Keychain")).not.toBeInTheDocument();
     expect(document.body.textContent).not.toContain("injected-secret");
   });
 
@@ -1954,7 +1992,7 @@ describe("ProviderSettingsView", () => {
 
   it("shows endpoint and authentication guidance without credential controls remotely", async () => {
     const user = userEvent.setup();
-    renderExpanded(
+    renderAdding(
       <ModelEndpointSettingsView
         {...fixture({ instance: httpProvider(), credentialManagementAvailable: false })}
       />,
@@ -1966,31 +2004,32 @@ describe("ProviderSettingsView", () => {
       "OpenAI-compatible HTTP",
     );
     expect(screen.getAllByText(/remote endpoints require HTTPS/i).length).toBeGreaterThan(0);
-    expect(
-      screen.getAllByText(/manage credentials in the Octant host app/i).length,
-    ).toBeGreaterThan(0);
+    expect(screen.getByText("API keys are added from the Octant desktop app")).toBeVisible();
     expect(
       within(screen.getByRole("form", { name: "Add OpenAI-compatible provider" })).getByLabelText(
         "API key",
       ),
     ).toBeDisabled();
+
+    await user.keyboard("{Escape}");
+    await user.click(screen.getByRole("link", { name: /^Private gateway,/ }));
+    const page = screen.getByRole("region", { name: "Private gateway" });
     expect(
-      within(screen.getByRole("article", { name: "Private gateway" })).queryByRole("button", {
-        name: /clear stored api key/i,
-      }),
-    ).not.toBeInTheDocument();
-    expect(
-      within(screen.getByRole("article", { name: "Private gateway" })).getByText("Unavailable"),
+      within(page).getByText("Keys are added and replaced from the Octant app on this Mac."),
     ).toBeVisible();
+    expect(within(page).queryByRole("button", { name: /clear stored api key/i })).toBeNull();
+    expect(within(page).queryByText("Unavailable")).toBeNull();
   });
 
   it("edits HTTP configuration, preserves a blank key, and supports explicit clearing", async () => {
     const user = userEvent.setup();
     const props = fixture({ instance: httpProvider() });
     renderExpanded(<ModelEndpointSettingsView {...props} />);
-    const card = screen.getByRole("article", { name: "Private gateway" });
+    const card = screen.getByRole("region", { name: "Private gateway" });
 
-    expect(await within(card).findByText("Stored in Keychain")).toBeVisible();
+    expect(
+      await within(card).findByText("Saved in this Mac's Keychain. Octant can't show it."),
+    ).toBeVisible();
     expect(within(card).getByLabelText("API key for Private gateway")).toHaveValue("");
     await user.clear(within(card).getByLabelText("API base URL for Private gateway"));
     await user.type(
@@ -2009,7 +2048,7 @@ describe("ProviderSettingsView", () => {
       within(card).getByRole("button", { name: "Clear stored API key for Private gateway" }),
     );
     expect(props.onClearProviderCredential).toHaveBeenCalledWith(id);
-    expect(await within(card).findByText("Not configured")).toBeVisible();
+    expect(await within(card).findByText("No key is saved for it yet.")).toBeVisible();
   });
 
   it("shows a pending credential check without claiming the key is missing", async () => {
@@ -2019,13 +2058,13 @@ describe("ProviderSettingsView", () => {
       onProviderCredentialStatus: vi.fn(() => pending.promise),
     };
     renderExpanded(<ModelEndpointSettingsView {...props} />);
-    const card = screen.getByRole("article", { name: "Private gateway" });
+    const card = screen.getByRole("region", { name: "Private gateway" });
 
-    expect(within(card).getByText("Checking Keychain…")).toBeVisible();
-    expect(within(card).queryByText("Not configured")).not.toBeInTheDocument();
+    expect(within(card).getByText("Checking the Keychain…")).toBeVisible();
+    expect(within(card).queryByText("No key is saved for it yet.")).not.toBeInTheDocument();
 
     await act(async () => pending.resolve("missing"));
-    expect(await within(card).findByText("Not configured")).toBeVisible();
+    expect(await within(card).findByText("No key is saved for it yet.")).toBeVisible();
   });
 
   it("synchronizes an authoritative observed credential status over a stale check", async () => {
@@ -2038,8 +2077,8 @@ describe("ProviderSettingsView", () => {
       onProviderCredentialStatus,
     };
     const { rerender } = renderExpanded(<ModelEndpointSettingsView {...props} />);
-    const card = screen.getByRole("article", { name: "Private gateway" });
-    expect(within(card).getByText("Checking Keychain…")).toBeVisible();
+    const card = screen.getByRole("region", { name: "Private gateway" });
+    expect(within(card).getByText("Checking the Keychain…")).toBeVisible();
 
     rerender(
       <ModelEndpointSettingsView
@@ -2047,10 +2086,14 @@ describe("ProviderSettingsView", () => {
         observedByInstance={new Map([[id, observation({ credentialStatus: "stored" })]])}
       />,
     );
-    expect(within(card).getByText("Stored in Keychain")).toBeVisible();
+    expect(
+      within(card).getByText("Saved in this Mac's Keychain. Octant can't show it."),
+    ).toBeVisible();
 
     await act(async () => first.resolve("missing"));
-    expect(within(card).getByText("Stored in Keychain")).toBeVisible();
+    expect(
+      within(card).getByText("Saved in this Mac's Keychain. Octant can't show it."),
+    ).toBeVisible();
   });
 
   it("does not let a stale credential check overwrite a successful clear", async () => {
@@ -2064,15 +2107,15 @@ describe("ProviderSettingsView", () => {
       onProviderCredentialStatus: vi.fn(() => pending.promise),
     };
     renderExpanded(<ModelEndpointSettingsView {...props} />);
-    const card = screen.getByRole("article", { name: "Private gateway" });
+    const card = screen.getByRole("region", { name: "Private gateway" });
 
     await user.click(
       within(card).getByRole("button", { name: "Clear stored API key for Private gateway" }),
     );
-    expect(await within(card).findByText("Not configured")).toBeVisible();
+    expect(await within(card).findByText("No key is saved for it yet.")).toBeVisible();
 
     await act(async () => pending.resolve("stored"));
-    expect(within(card).getByText("Not configured")).toBeVisible();
+    expect(within(card).getByText("No key is saved for it yet.")).toBeVisible();
   });
 
   it("does not let a stale credential check overwrite a successful replacement", async () => {
@@ -2086,16 +2129,20 @@ describe("ProviderSettingsView", () => {
       onProviderCredentialStatus: vi.fn(() => pending.promise),
     };
     renderExpanded(<ModelEndpointSettingsView {...props} />);
-    const card = screen.getByRole("article", { name: "Private gateway" });
+    const card = screen.getByRole("region", { name: "Private gateway" });
 
     await user.type(within(card).getByLabelText("API key for Private gateway"), "replacement");
     await user.click(
       within(card).getByRole("button", { name: "Save HTTP settings for Private gateway" }),
     );
-    expect(await within(card).findByText("Stored in Keychain")).toBeVisible();
+    expect(
+      await within(card).findByText("Saved in this Mac's Keychain. Octant can't show it."),
+    ).toBeVisible();
 
     await act(async () => pending.resolve("missing"));
-    expect(within(card).getByText("Stored in Keychain")).toBeVisible();
+    expect(
+      within(card).getByText("Saved in this Mac's Keychain. Octant can't show it."),
+    ).toBeVisible();
   });
 
   it("keeps the credential mutation authoritative across a configuration version update", async () => {
@@ -2112,13 +2159,13 @@ describe("ProviderSettingsView", () => {
       }),
     };
     const { rerender } = renderExpanded(<ModelEndpointSettingsView {...props} />);
-    let card = screen.getByRole("article", { name: "Private gateway" });
+    let card = screen.getByRole("region", { name: "Private gateway" });
 
     await user.type(within(card).getByLabelText("API key for Private gateway"), "replacement");
     await user.click(
       within(card).getByRole("button", { name: "Save HTTP settings for Private gateway" }),
     );
-    expect(within(card).getByText("Checking Keychain…")).toBeVisible();
+    expect(within(card).getByText("Checking the Keychain…")).toBeVisible();
 
     rerender(
       <ModelEndpointSettingsView
@@ -2126,11 +2173,13 @@ describe("ProviderSettingsView", () => {
         instances={[{ ...httpProvider(), version: 2 as never }]}
       />,
     );
-    card = screen.getByRole("article", { name: "Private gateway" });
-    expect(within(card).getByText("Checking Keychain…")).toBeVisible();
+    card = screen.getByRole("region", { name: "Private gateway" });
+    expect(within(card).getByText("Checking the Keychain…")).toBeVisible();
 
     await act(async () => update.resolve(true));
-    expect(await within(card).findByText("Stored in Keychain")).toBeVisible();
+    expect(
+      await within(card).findByText("Saved in this Mac's Keychain. Octant can't show it."),
+    ).toBeVisible();
   });
 
   it("discards API-key text for no-authentication saves without claiming storage", async () => {
@@ -2140,7 +2189,7 @@ describe("ProviderSettingsView", () => {
       observed: observation({ credentialStatus: "missing" }),
     });
     renderExpanded(<ModelEndpointSettingsView {...props} />);
-    const card = screen.getByRole("article", { name: "Private gateway" });
+    const card = screen.getByRole("region", { name: "Private gateway" });
     const authentication = within(card).getByLabelText("Authentication for Private gateway");
     const key = within(card).getByLabelText("API key for Private gateway");
 
@@ -2173,12 +2222,14 @@ describe("ProviderSettingsView", () => {
     expect(configuration.authentication).toBe("none");
     expect(credential.value).toBe("");
     expect(key).toHaveValue("");
-    expect(within(card).getByText("Not configured")).toBeVisible();
-    expect(within(card).queryByText("Stored in Keychain")).not.toBeInTheDocument();
+    expect(within(card).getByText("No key is saved for it yet.")).toBeVisible();
+    expect(
+      within(card).queryByText("Saved in this Mac's Keychain. Octant can't show it."),
+    ).not.toBeInTheDocument();
     expect(document.body.textContent).not.toContain("retained-value");
   });
 
-  it("separates configured and observed protocol and labels model provenance", () => {
+  it("keeps configured and observed protocol under Diagnostics and lists models by name", () => {
     renderExpanded(
       <ModelEndpointSettingsView
         {...fixture({
@@ -2207,16 +2258,17 @@ describe("ProviderSettingsView", () => {
         })}
       />,
     );
-    const card = screen.getByRole("article", { name: "Private gateway" });
+    const page = screen.getByRole("region", { name: "Private gateway" });
+    const diagnostics = within(page).getByRole("region", { name: "Diagnostics" });
 
-    expect(within(card).getByText("Configured protocol: Automatic")).toBeVisible();
-    expect(within(card).getByText("Observed protocol: Responses")).toBeVisible();
-    expect(within(card).getByText(/Model One · Discovered · Verified/)).toBeVisible();
-    expect(within(card).getByText(/manual-model · Manual · Unverified/)).toBeVisible();
-    expect(within(card).getAllByText("Unsupported", { selector: "dd" }).length).toBeGreaterThan(0);
     expect(
-      within(card).getByText(/remains usable with degraded discovery or streaming/i),
-    ).toBeVisible();
+      within(diagnostics).getByText("Set to Automatic · last turn used Responses"),
+    ).toBeInTheDocument();
+    expect(within(diagnostics).getByText(/Streaming/, { selector: "dd" })).toBeInTheDocument();
+    const models = within(page).getByRole("list", { name: "Private gateway models" });
+    expect(within(models).getByText("Model One")).toBeVisible();
+    expect(within(models).getByText("manual-model")).toBeVisible();
+    expect(within(page).queryByText(/remains usable with degraded discovery/i)).toBeNull();
   });
 
   it("says in words that the ChatGPT plan cannot list models instead of the generic degraded line", () => {
@@ -2254,7 +2306,7 @@ describe("ProviderSettingsView", () => {
         })}
       />,
     );
-    const card = screen.getByRole("article", { name: "ChatGPT plan" });
+    const card = screen.getByRole("region", { name: "ChatGPT plan" });
 
     expect(within(card).getByText(planMessage)).toBeVisible();
     expect(
@@ -2262,16 +2314,19 @@ describe("ProviderSettingsView", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("does not infer an observed protocol from a successful connection check", async () => {
-    const user = userEvent.setup();
+  it("does not infer an observed protocol from a successful connection check", () => {
     renderExpanded(
       <ModelEndpointSettingsView
         {...fixture({ instance: httpProvider(), observed: observation() })}
       />,
     );
-    const card = screen.getByRole("article", { name: "Private gateway" });
-    await user.click(within(card).getByRole("button", { name: "Connection details" }));
-    expect(within(card).getByText("Observed protocol: Not observed by a real turn")).toBeVisible();
+    const diagnostics = within(screen.getByRole("region", { name: "Private gateway" })).getByRole(
+      "region",
+      { name: "Diagnostics" },
+    );
+    expect(
+      within(diagnostics).getByText("Set to Automatic · no turn has used it yet"),
+    ).toBeInTheDocument();
   });
 
   it.each([
@@ -2660,9 +2715,13 @@ describe("ProviderSettingsView", () => {
       />,
     );
 
-    const card = screen.getByRole("article", { name: "Private gateway" });
-    expect(within(card).queryByLabelText("Detected locally")).toBeNull();
-    const control = within(card).getByRole("switch", { name: "Enable Private gateway" });
+    // Off shows on the row as words; its switch is on the endpoint's page.
+    const row = screen.getByRole("link", { name: /^Private gateway, off, kept, not offered/ });
+    expect(row).toBeVisible();
+    fireEvent.click(row);
+    const page = screen.getByRole("region", { name: "Private gateway" });
+    expect(within(page).queryByLabelText("Detected locally")).toBeNull();
+    const control = within(page).getByRole("switch", { name: "Use Private gateway" });
     expect(control).not.toHaveAttribute("aria-disabled", "true");
     expect(screen.queryByRole("heading", { name: "Supported, not detected" })).toBeNull();
     expect(screen.queryByRole("heading", { name: "Other providers" })).toBeNull();
@@ -2899,8 +2958,9 @@ describe("ProviderSettingsView", () => {
       />,
     );
 
-    const card = screen.getByRole("article", { name: "Ollama local" });
-    expect(within(card).getByRole("switch", { name: "Enable Ollama local" })).toBeVisible();
+    fireEvent.click(screen.getByRole("link", { name: /^Ollama local, off/ }));
+    const page = screen.getByRole("region", { name: "Ollama local" });
+    expect(within(page).getByRole("switch", { name: "Use Ollama local" })).toBeEnabled();
   });
 
   it("runs one automatic connection check after enabling a detected provider", async () => {
@@ -2947,7 +3007,7 @@ describe("ProviderSettingsView", () => {
 
   it("renders the Bedrock Mantle setup guide only for an OpenAI-compatible endpoint", async () => {
     const user = userEvent.setup();
-    renderExpanded(<ModelEndpointSettingsView {...fixture()} />);
+    renderAdding(<ModelEndpointSettingsView {...fixture()} />);
     await chooseSelectFieldOption(
       user,
       screen.getByLabelText("Provider type"),
@@ -3014,24 +3074,28 @@ describe("where Settings lists each provider kind", () => {
     expect(screen.queryByRole("article", { name: "GPT Image" })).toBeNull();
   });
 
-  it("lists existing API endpoints under Model endpoints and keeps them editable and removable", async () => {
+  it("lists existing API endpoints as rows that open an editable, removable detail page", async () => {
     const user = userEvent.setup();
-    const props = fixture();
+    const props = {
+      ...fixture(),
+      onRolesUsing: vi.fn(async () => ["Main model", "Quick jobs"] as const),
+    };
     renderProviderSettings(<ModelEndpointSettingsView {...props} instances={mixedInstances()} />);
 
     expect(screen.getByRole("heading", { name: "Model endpoints" })).toBeVisible();
-    expect(screen.getByRole("article", { name: "Private gateway" })).toBeVisible();
-    expect(screen.getByRole("article", { name: "Ollama local" })).toBeVisible();
-    expect(screen.queryByRole("article", { name: "Existing CLI" })).toBeNull();
-    expect(screen.queryByRole("article", { name: "GPT Image" })).toBeNull();
+    const list = screen.getByRole("list", { name: "Model endpoints" });
+    expect(within(list).getByRole("link", { name: /^Private gateway,/ })).toBeVisible();
+    expect(within(list).getByRole("link", { name: /^Ollama local,/ })).toBeVisible();
+    expect(within(list).queryByText("Existing CLI")).toBeNull();
+    expect(within(list).queryByText("GPT Image")).toBeNull();
 
-    await user.click(screen.getByRole("button", { name: "Details for Private gateway" }));
-    await user.click(screen.getByRole("button", { name: "Configure Private gateway" }));
-    const baseUrl = screen.getByLabelText("API base URL for Private gateway");
+    await user.click(within(list).getByRole("link", { name: /^Private gateway,/ }));
+    const page = screen.getByRole("region", { name: "Private gateway" });
+    const baseUrl = within(page).getByLabelText("API base URL for Private gateway");
     await user.clear(baseUrl);
     await user.type(baseUrl, "https://gateway.example/v2");
     await user.click(
-      screen.getByRole("button", { name: "Save HTTP settings for Private gateway" }),
+      within(page).getByRole("button", { name: "Save HTTP settings for Private gateway" }),
     );
     expect(props.onChangeOpenAiCompatibleConfiguration).toHaveBeenCalledWith(
       endpointId,
@@ -3039,27 +3103,323 @@ describe("where Settings lists each provider kind", () => {
       expect.anything(),
     );
 
-    await user.click(screen.getByRole("button", { name: "Remove Private gateway" }));
+    // Remove asks first, names the roles that lose a model, and starts on Keep.
+    await user.click(within(page).getByRole("button", { name: "Remove Private gateway…" }));
+    const dialog = await screen.findByRole("dialog", { name: "Remove Private gateway?" });
+    expect(await within(dialog).findByText(/Main model, Quick jobs use its models/)).toBeVisible();
+    await waitFor(() =>
+      expect(within(dialog).getByRole("button", { name: "Keep endpoint" })).toHaveFocus(),
+    );
+    expect(props.onRemove).not.toHaveBeenCalled();
+    await user.click(within(dialog).getByRole("button", { name: "Remove endpoint" }));
     expect(props.onRemove).toHaveBeenCalledWith(endpointId);
   });
 
-  it("offers only model endpoint kinds when adding an endpoint by its base URL", async () => {
+  it("says it couldn't check the roles, rather than none, when the role lookup fails", async () => {
     const user = userEvent.setup();
-    renderProviderSettings(<ModelEndpointSettingsView {...fixture()} />);
+    renderProviderSettings(
+      <ModelEndpointSettingsView
+        {...fixture()}
+        instances={mixedInstances()}
+        onRolesUsing={vi.fn(async () => {
+          throw new Error("routing unavailable");
+        })}
+      />,
+    );
+    await user.click(screen.getByRole("link", { name: /^Private gateway,/ }));
+    await user.click(screen.getByRole("button", { name: "Remove Private gateway…" }));
+    const dialog = await screen.findByRole("dialog", { name: "Remove Private gateway?" });
+    expect(
+      await within(dialog).findByText(/Octant couldn't check which model roles use it\./),
+    ).toBeVisible();
+    expect(within(dialog).queryByText(/No model role uses its models/)).toBeNull();
+  });
 
+  it("returns to the endpoint list from the detail page and puts focus back on its row", async () => {
+    const user = userEvent.setup();
+    renderProviderSettings(
+      <ModelEndpointSettingsView {...fixture()} instances={mixedInstances()} />,
+    );
+
+    await user.click(screen.getByRole("link", { name: /^Ollama local,/ }));
+    expect(screen.getByRole("heading", { level: 1, name: "Ollama local" })).toHaveFocus();
+    await user.click(screen.getByRole("button", { name: "Back to Octant Harness" }));
+    await waitFor(() => expect(screen.getByRole("link", { name: /^Ollama local,/ })).toHaveFocus());
+
+    await user.keyboard("{Enter}");
+    expect(screen.getByRole("region", { name: "Ollama local" })).toBeVisible();
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.getByRole("link", { name: /^Ollama local,/ })).toHaveFocus());
+  });
+
+  it("puts a failed check's precise reason and its one fix on the row, not in a page alert", async () => {
+    const user = userEvent.setup();
+    const props = fixture({
+      instance: { ...httpProvider(), id: endpointId, displayName: "Team gateway" },
+    });
+    renderProviderSettings(
+      <ModelEndpointSettingsView
+        {...props}
+        observedByInstance={
+          new Map([
+            [
+              endpointId,
+              observation({
+                instanceId: endpointId,
+                readiness: "degraded",
+                models: [],
+                message: "Provider probe failed.",
+              }),
+            ],
+          ])
+        }
+        probeFailures={
+          new Map([
+            [
+              endpointId,
+              {
+                category: "protocol",
+                message: "The provider returned an invalid models response.",
+                failedAt: "2026-10-08T19:34:00.000Z",
+              },
+            ],
+          ])
+        }
+      />,
+    );
+
+    expect(screen.getByRole("link", { name: /^Team gateway, not working/ })).toBeVisible();
+    const fix = screen.getByRole("group", { name: "Fix Team gateway" });
+    expect(
+      within(fix).getByText(/The address replied, but not with a list of models/),
+    ).toBeVisible();
+    expect(within(fix).getAllByRole("button")).toHaveLength(1);
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.queryByText(/degraded discovery/i)).toBeNull();
+
+    await user.click(within(fix).getByRole("button", { name: "Edit address for Team gateway" }));
+    const page = screen.getByRole("region", { name: "Team gateway" });
+    expect(within(page).getByLabelText("API base URL for Team gateway")).toHaveFocus();
+    // The precise answer stays under Diagnostics, which opens by itself while failing.
+    const diagnostics = within(page).getByRole("region", { name: "Diagnostics" });
+    expect(diagnostics.querySelector("details")).toHaveAttribute("open");
+    expect(
+      within(diagnostics).getByText(
+        /failed \(protocol\): The provider returned an invalid models response\./,
+      ),
+    ).toBeVisible();
+  });
+
+  it.each([
+    [
+      "an unreachable address",
+      { category: "unavailable", message: "The provider endpoint could not be reached." },
+      "Can't connect",
+      "Nothing answered at gateway.example.",
+      "Try again",
+    ],
+    [
+      "a busy server",
+      { category: "unavailable", message: "The provider request failed with HTTP 503." },
+      "Can't connect",
+      "The server is busy or down (HTTP 503). Try again in a moment.",
+      "Try again",
+    ],
+    [
+      "a refused key",
+      { category: "unauthenticated", message: "The provider rejected the configured credential." },
+      "Key refused",
+      "The service turned down the API key.",
+      "Replace key",
+    ],
+    [
+      "no usable model",
+      { category: "unavailable", message: "No usable model.", reason: "no-usable-model" },
+      "No models yet",
+      "Connected, but it lists no models. Add the model IDs you use.",
+      "Add model IDs",
+    ],
+  ] as const)(
+    "says what %s means on the row with its one fix",
+    (_case, failure, label, sentence, fix) => {
+      renderProviderSettings(
+        <ModelEndpointSettingsView
+          {...fixture({ instance: httpProvider() })}
+          probeFailures={new Map([[id, { ...failure, failedAt: "2026-10-08T19:34:00.000Z" }]])}
+        />,
+      );
+      expect(
+        screen.getByRole("link", { name: new RegExp(`^Private gateway, ${label.toLowerCase()}`) }),
+      ).toBeVisible();
+      const group = screen.getByRole("group", { name: "Fix Private gateway" });
+      expect(within(group).getByText(sentence)).toBeVisible();
+      expect(
+        within(group).getByRole("button", { name: `${fix} for Private gateway` }),
+      ).toBeVisible();
+    },
+  );
+
+  it("checks an endpoint again from its row's Try again without a page alert", async () => {
+    const user = userEvent.setup();
+    const props = fixture({
+      instance: httpProvider(),
+      observed: observation({ readiness: "unavailable", models: [] }),
+    });
+    renderProviderSettings(<ModelEndpointSettingsView {...props} />);
+
+    await user.click(screen.getByRole("button", { name: "Try again for Private gateway" }));
+    expect(props.onProbe).toHaveBeenCalledWith(id, { quiet: true });
+  });
+
+  it("says a ready endpoint's model count, and how many are shown once some are hidden", () => {
+    renderProviderSettings(
+      <ModelEndpointSettingsView
+        {...fixture({
+          instance: httpProvider(),
+          observed: observation({
+            models: [
+              ...observation().models,
+              { ...observation().models[0]!, id: "model-2" as never, displayName: "Model Two" },
+            ],
+          }),
+        })}
+        defaults={{
+          permissionPersistence: "current-session",
+          version: 0 as never,
+          hiddenModels: [{ providerInstanceId: id, modelId: "model-2" as never }],
+        }}
+      />,
+    );
+    expect(
+      screen.getByRole("link", { name: "Private gateway, ready, 1 of 2 shown. Open details" }),
+    ).toBeVisible();
+    expect(screen.getByText("gateway.example · API key")).toBeVisible();
+  });
+
+  it("filters an endpoint's models by shown, hidden, or all, and by search", async () => {
+    const user = userEvent.setup();
+    const models = [
+      ...observation().models,
+      {
+        ...observation().models[0]!,
+        id: "vision-2" as never,
+        displayName: "Vision Two",
+        inputModalities: ["text", "image"] as const,
+      },
+    ];
+    const props = fixture({ instance: httpProvider(), observed: observation({ models }) });
+    renderExpanded(
+      <ModelEndpointSettingsView
+        {...props}
+        defaults={{
+          permissionPersistence: "current-session",
+          version: 0 as never,
+          hiddenModels: [{ providerInstanceId: id, modelId: "vision-2" as never }],
+        }}
+      />,
+    );
+    const list = () => screen.getByRole("list", { name: "Private gateway models" });
+    expect(within(list()).getAllByRole("listitem")).toHaveLength(2);
+
+    await user.click(screen.getByRole("button", { name: "Shown 1" }));
+    expect(within(list()).getByText("Model One")).toBeVisible();
+    expect(within(list()).queryByText("Vision Two")).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Hidden 1" }));
+    expect(within(list()).getByText("Vision Two")).toBeVisible();
+    expect(within(list()).getByText("Reads images")).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: "All" }));
+    await user.type(
+      screen.getByRole("searchbox", { name: "Search Private gateway models" }),
+      "one",
+    );
+    expect(within(list()).getAllByRole("listitem")).toHaveLength(1);
+
+    await user.click(screen.getByRole("switch", { name: "Show Model One in the model picker" }));
+    expect(props.onHiddenModelsChange).toHaveBeenCalledWith([
+      { providerInstanceId: id, modelId: "vision-2" },
+      { providerInstanceId: id, modelId: "model-1" },
+    ]);
+  });
+
+  it("never says anything about a key on an endpoint that sends none", () => {
+    renderExpanded(
+      <ModelEndpointSettingsView
+        {...fixture({
+          instance: {
+            ...httpProvider(),
+            configuration: {
+              kind: "openai-compatible-http",
+              baseUrl: "http://127.0.0.1:8080/v1",
+              authentication: "none",
+              protocol: "auto",
+              manualModelIds: [],
+            },
+          } as ProviderInstance,
+          observed: observation(),
+        })}
+      />,
+    );
+    const page = screen.getByRole("region", { name: "Private gateway" });
+    expect(within(page).queryByRole("heading", { name: "API key" })).toBeNull();
+    expect(within(page).queryByText(/Credential/)).toBeNull();
+    expect(within(page).queryByText("Unavailable")).toBeNull();
+  });
+
+  it("labels where data goes in plain words the person sets", async () => {
+    const user = userEvent.setup();
+    const props = fixture({ instance: httpProvider(), observed: observation() });
+    renderExpanded(<ModelEndpointSettingsView {...props} />);
+
+    await user.click(screen.getByRole("checkbox", { name: "Nothing is kept after the reply" }));
+    expect(props.onDataTagsChange).toHaveBeenCalledWith(id, ["zdr"]);
+  });
+
+  it("goes on to an endpoint the host made even when storing its key failed", async () => {
+    const user = userEvent.setup();
+    const props = {
+      ...fixture(),
+      onCreateOpenAiCompatible: vi.fn(async (_name, _configuration, credential) => {
+        credential.clear();
+        return false;
+      }),
+    } as ProviderSettingsViewProps;
+    const { rerender } = renderProviderSettings(
+      <ModelEndpointSettingsView {...props} instances={[]} />,
+    );
     await user.click(screen.getByRole("button", { name: "Add endpoint" }));
-    await user.click(screen.getByRole("combobox", { name: "Provider type" }));
-    expect(await screen.findByRole("option", { name: "Azure AI Foundry" })).toBeInTheDocument();
-    for (const kind of [
-      "OpenAI-compatible HTTP",
-      "Anthropic-compatible HTTP",
-      "Azure AI Foundry",
-      "Ollama native HTTP",
-    ]) {
-      expect(screen.getByRole("option", { name: kind })).toBeInTheDocument();
-    }
-    expect(screen.queryByRole("option", { name: "Codex CLI" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("option", { name: "OpenAI Image" })).not.toBeInTheDocument();
+    const create = screen.getByRole("form", { name: "Add OpenAI-compatible provider" });
+    await user.type(within(create).getByLabelText("Provider name"), "Private gateway");
+    await user.type(within(create).getByLabelText("API base URL"), "https://gateway.example/v1");
+    await user.click(screen.getByRole("button", { name: "Check and add" }));
+    rerender(
+      <ModelEndpointSettingsView
+        {...props}
+        instances={[httpProvider()]}
+        message="The provider was created, but its credential could not be stored."
+      />,
+    );
+
+    const dialog = screen.getByRole("dialog", { name: "Add a model endpoint" });
+    expect(await within(dialog).findByText(/Added Private gateway\./)).toBeVisible();
+    expect(
+      within(dialog).getByText("The provider was created, but its credential could not be stored."),
+    ).toBeVisible();
+    expect(props.onProbe).toHaveBeenCalledWith(id, { quiet: true });
+  });
+
+  it("offers three ways in on first run", async () => {
+    renderProviderSettings(<ModelEndpointSettingsView {...fixture()} instances={[]} />);
+
+    expect(screen.getByRole("heading", { name: "Connect a model endpoint" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Sign in with ChatGPT" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Sign in with OpenRouter" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Add endpoint" })).toBeVisible();
+    expect(screen.getAllByText(/Signing in accepts these terms/).length).toBe(2);
+    expect(
+      screen.getByRole("button", { name: "Sign in with ChatGPT" }),
+    ).toHaveAccessibleDescription(/Signing in accepts these terms/);
   });
 
   it("creates the ChatGPT plan endpoint at its fixed URL with no key and starts its sign-in", async () => {
@@ -3079,7 +3439,6 @@ describe("where Settings lists each provider kind", () => {
       <ModelEndpointSettingsView {...props} instances={[]} />,
     );
 
-    expect(screen.getByText("No model endpoints yet.")).toBeVisible();
     await user.click(screen.getByRole("button", { name: "Sign in with ChatGPT" }));
 
     expect(props.onCreateOpenAiCompatible).toHaveBeenCalledOnce();
@@ -3095,8 +3454,6 @@ describe("where Settings lists each provider kind", () => {
       oauthDescriptorId: "chatgpt-plan",
     });
     expect(credential.value).toBe("");
-    expect(screen.queryByLabelText("API base URL")).toBeNull();
-    expect(screen.queryByLabelText("API key")).toBeNull();
     expect(instanceId).toBeDefined();
 
     rerender(
@@ -3111,20 +3468,33 @@ describe("where Settings lists each provider kind", () => {
         expect.objectContaining({ kind: "begin", descriptorId: "chatgpt-plan", instanceId }),
       ),
     );
+    expect(screen.getByRole("heading", { level: 1, name: "ChatGPT plan" })).toBeVisible();
+    expect(screen.queryByLabelText("API base URL for ChatGPT plan")).toBeNull();
+    expect(screen.queryByLabelText("API key for ChatGPT plan")).toBeNull();
     expect(openUrl).toHaveBeenCalledWith("https://auth.openai.com/api/accounts/authorize?x=1");
     expect(await screen.findByText("Continue in the browser to finish signing in.")).toBeVisible();
   });
 
-  it("asks for the sign-in terms before starting a new ChatGPT plan sign-in", async () => {
+  it("records the sign-in terms and starts the sign-in from one click on the consent line", async () => {
     const user = userEvent.setup();
-    const onProviderOAuth = vi.fn(async (_command: { readonly kind: string }) => ({
-      kind: "signed-out" as const,
-      termsRequired: true,
-    }));
+    let acknowledged = false;
+    const onProviderOAuth = vi.fn(async (command: { readonly kind: string }) => {
+      if (command.kind === "acknowledge") {
+        acknowledged = true;
+        return { kind: "signed-out" as const, termsRequired: false };
+      }
+      if (command.kind === "begin") {
+        return acknowledged
+          ? { kind: "awaiting-consent" as const, attemptId: "attempt-1" }
+          : { kind: "refused" as const, reason: "terms-required" };
+      }
+      return { kind: "signed-out" as const, termsRequired: !acknowledged };
+    });
     const props = { ...fixture(), onProviderOAuth };
     const { rerender } = renderProviderSettings(
       <ModelEndpointSettingsView {...props} instances={[]} />,
     );
+    expect(screen.getAllByText(/Signing in accepts these terms/)[0]).toBeVisible();
     await user.click(screen.getByRole("button", { name: "Sign in with ChatGPT" }));
     const instanceId = vi.mocked(props.onCreateOpenAiCompatible).mock.calls[0]?.[3];
     rerender(
@@ -3134,8 +3504,33 @@ describe("where Settings lists each provider kind", () => {
       />,
     );
 
-    expect(await screen.findByRole("button", { name: "Acknowledge and continue" })).toBeVisible();
-    expect(onProviderOAuth).not.toHaveBeenCalledWith(expect.objectContaining({ kind: "begin" }));
+    expect(await screen.findByText("Continue in the browser to finish signing in.")).toBeVisible();
+    const kinds = onProviderOAuth.mock.calls.map(([command]) => command.kind);
+    expect(kinds.indexOf("acknowledge")).toBeGreaterThanOrEqual(0);
+    expect(kinds.indexOf("acknowledge")).toBeLessThan(kinds.indexOf("begin"));
+    expect(screen.queryByRole("button", { name: "Acknowledge and continue" })).toBeNull();
+  });
+
+  it("says Sign in to use on a sign-in endpoint that has never signed in, with the sign-in as its fix", async () => {
+    const onProviderOAuth = vi.fn(async () => ({
+      kind: "signed-out" as const,
+      termsRequired: true,
+    }));
+    renderProviderSettings(
+      <ModelEndpointSettingsView
+        {...fixture()}
+        instances={[chatGptPlanEndpoint()]}
+        onProviderOAuth={onProviderOAuth}
+      />,
+    );
+    expect(
+      await screen.findByRole("link", { name: /^ChatGPT plan, sign in to use/ }),
+    ).toBeVisible();
+    const fix = screen.getByRole("group", { name: "Fix ChatGPT plan" });
+    expect(
+      within(fix).getByRole("button", { name: "Sign in with ChatGPT for ChatGPT plan" }),
+    ).toBeVisible();
+    expect(within(fix).getByText(/Signing in accepts these terms/)).toBeVisible();
   });
 
   it("shows who is signed in on a ChatGPT plan row and keeps its URL and key out of its configuration", async () => {
@@ -3143,7 +3538,7 @@ describe("where Settings lists each provider kind", () => {
     const onProviderOAuth = vi.fn(async (command: { readonly kind: string }) =>
       command.kind === "sign-out"
         ? { kind: "signed-out" as const, termsRequired: false }
-        : { kind: "signed-in" as const, accountLabel: "ChatGPT plan" },
+        : { kind: "signed-in" as const, accountLabel: "someone@example.com" },
     );
     renderProviderSettings(
       <ModelEndpointSettingsView
@@ -3153,15 +3548,15 @@ describe("where Settings lists each provider kind", () => {
       />,
     );
 
-    const signIn = screen.getByRole("group", { name: "Sign-in for ChatGPT plan" });
+    expect(await screen.findByText("Signed in as someone@example.com")).toBeVisible();
+    await user.click(screen.getByRole("link", { name: /^ChatGPT plan,/ }));
+    const page = screen.getByRole("region", { name: "ChatGPT plan" });
+    const signIn = within(page).getByRole("region", { name: "Sign-in" });
     expect(await within(signIn).findByText(/Signed in as/)).toBeVisible();
     expect(within(signIn).queryByRole("button", { name: "Use an API key" })).toBeNull();
-
-    await user.click(screen.getByRole("button", { name: "Details for ChatGPT plan" }));
-    await user.click(screen.getByRole("button", { name: "Configure ChatGPT plan" }));
-    expect(screen.queryByLabelText("API base URL for ChatGPT plan")).toBeNull();
-    expect(screen.queryByLabelText("API key for ChatGPT plan")).toBeNull();
-    expect(screen.getByText(/The endpoint is fixed for this sign-in/)).toBeVisible();
+    expect(within(page).queryByLabelText("API base URL for ChatGPT plan")).toBeNull();
+    expect(within(page).queryByLabelText("API key for ChatGPT plan")).toBeNull();
+    expect(within(page).getByText(/The endpoint is fixed for this sign-in/)).toBeVisible();
 
     await user.click(within(signIn).getByRole("button", { name: "Sign out" }));
     expect(onProviderOAuth).toHaveBeenCalledWith(
@@ -3171,7 +3566,9 @@ describe("where Settings lists each provider kind", () => {
         instanceId: planId,
       }),
     );
-    expect(await within(signIn).findByRole("button", { name: "Sign in" })).toBeVisible();
+    expect(
+      await within(signIn).findByRole("button", { name: "Sign in with ChatGPT" }),
+    ).toBeVisible();
   });
 });
 

@@ -226,7 +226,9 @@ session or treats the 2.x version as the legacy runtime.
 
 Direct API endpoints are added in **Settings → Octant Harness → Model
 endpoints → Add endpoint**, which asks for the base URL and, where the
-endpoint needs one, an API key. Supported profiles:
+endpoint needs one, an API key. **Check and add** adds the endpoint and checks
+it straight away; the result shows in the same dialog, so a mistyped address
+can be fixed from there. Supported profiles:
 
 - **OpenAI-compatible** HTTP (`auto`, `responses`, or `chat-completions`)
 - **Anthropic-compatible** HTTP (`auto` or `messages`)
@@ -241,6 +243,18 @@ configured endpoint lists far more models than you set up, such as an Azure
 resource that lists every base model, **Settings → Octant Harness** shows the
 models you configured first and the rest under **Discovered on the endpoint**;
 an Azure AI Foundry provider offers only its configured deployments.
+
+Each endpoint is one row that says whether it works: **Ready**, **Sign in to
+use**, **Signed out**, **Checking…**, **Can't connect**, **Key refused**,
+**Not working**, **No models yet**, or **Off**. A row that needs you says why
+in one sentence and offers one fix, such as **Try again**, **Replace key**,
+**Edit address**, or **Add model IDs**. Opening a row shows the endpoint's own
+page: its sign-in or key, its models (search them, show or hide each one, and
+**Verify tools** for a model marked **Chat only**), where its data goes, its
+name and address, and **Diagnostics** with the protocol, authentication, the
+last check's exact answer, and capabilities. The **Use** switch on that page
+turns the endpoint off without losing its key, sign-in, or roles, and
+**Remove** asks first and names the model roles that use it.
 
 Image generation profiles are also provider instances. Open **Settings → Image
 generation → Add image provider** to choose a provider, enter its API key, and
@@ -303,10 +317,13 @@ its own way to add an endpoint:
   `https://openrouter.ai/api/v1` and signs in with your OpenRouter account,
   storing the issued API key.
 
-Neither asks for a base URL or an API key: the endpoint is fixed by the
+Each button carries the sign-in's terms as one line under it; choosing it
+accepts them, and Octant records that acknowledgment before the sign-in
+starts. Neither asks for a base URL or an API key: the endpoint is fixed by the
 sign-in, and the host refuses the sign-in, and any use of its token, on any
-other endpoint. The endpoint's row then shows who is signed in, with **Sign
-out** and **Sign in** again. An endpoint you added yourself whose base URL is
+other endpoint. The endpoint's row then shows who is signed in, and its page
+offers **Sign out** and **Sign in again**; Octant checks the endpoint as soon
+as a sign-in finishes. An endpoint you added yourself whose base URL is
 one of these offers the same sign-in beside its API key. The host refuses a
 sign-in started from a paired device; sign in from the Octant app or a browser
 on the host.
@@ -334,9 +351,9 @@ turns are refused until you sign in again and allow plan access. When the
 plan's usage limit is reached, the failure links to ChatGPT's usage settings
 (`https://chatgpt.com/settings/usage`).
 
-**Check connection** lists the models the plan route reports, with their names
+**Check now** lists the models the plan route reports, with their names
 and context windows when the route gives them. When it cannot get a model list
-from the route, the row says so in words instead of reporting an
+from the route, the row says **No models yet** in words instead of reporting an
 invalid response: add the model IDs your plan offers under **Manual model
 IDs**, then check the connection again. Those IDs are shown as manual and
 unverified until a turn succeeds with them. A rejected sign-in, a reached

@@ -101,6 +101,21 @@ function slotPresentation(id: string): { label: string; meaning: string } {
   return SLOT_PRESENTATION[id] ?? { label: id, meaning: "A custom role." };
 }
 
+/** The roles, by their Settings names, that list a model from this endpoint. */
+export function nativeHarnessSlotsUsing(
+  configuration: NativeHarnessRoutingConfiguration,
+  providerInstanceId: string,
+): ReadonlyArray<string> {
+  return configuration.slots
+    .filter(
+      (slot) =>
+        slot.candidates.some(
+          (candidate) => String(candidate.providerInstanceId) === providerInstanceId,
+        ) || String(slot.overflowPromotion?.providerInstanceId) === providerInstanceId,
+    )
+    .map((slot) => slotPresentation(String(slot.id)).label);
+}
+
 /**
  * A slot's model row as the person edits it. Observed models are presentation
  * only and never choose for the person, so a new row, or one moved to another
