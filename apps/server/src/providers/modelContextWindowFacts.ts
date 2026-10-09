@@ -4,7 +4,10 @@ import type {
   ProviderModel,
   ProviderModelId,
 } from "@octant/contracts";
-import { learnContextWindow } from "@octant/domain/model-context-window";
+import {
+  learnContextWindow,
+  resolveModelInputModalities,
+} from "@octant/domain/model-context-window";
 import { contextWindowFromRefusal, isContextOverflowFailure } from "./endpointRetry";
 import type { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
 
@@ -27,13 +30,30 @@ export function carryModelContextWindowFacts<Model extends ProviderModel>(
     const contextWindowOverride = model.contextWindowOverride ?? previous.contextWindowOverride;
     const learnedContextWindow = model.learnedContextWindow ?? previous.learnedContextWindow;
     const servedModelId = model.servedModelId ?? previous.servedModelId;
-    return {
+    return withServedModelInputs({
       ...model,
       ...(contextWindowOverride === undefined ? {} : { contextWindowOverride }),
       ...(learnedContextWindow === undefined ? {} : { learnedContextWindow }),
       ...(servedModelId === undefined ? {} : { servedModelId }),
-    };
+    });
   });
+}
+
+/**
+ * A model whose listing and id named no inputs (`imageInput` absent) takes
+ * them from the profile of the model the endpoint said it served. A probe
+ * resolves inputs before the served model is carried back, so without this a
+ * deployment with a name of its own would stay text-only. A listing that
+ * reported its inputs, or an id with a profile, already set `imageInput` and
+ * is left alone.
+ */
+function withServedModelInputs<Model extends ProviderModel>(model: Model): Model {
+  if (model.imageInput !== undefined || model.servedModelId === undefined) return model;
+  const resolved = resolveModelInputModalities({
+    id: String(model.id),
+    servedModelId: model.servedModelId,
+  });
+  return resolved.imageInput === undefined ? model : { ...model, ...resolved };
 }
 
 /** What a request on a direct endpoint taught about one of its models. */
@@ -119,7 +139,7 @@ export function learnFromEndpointRequest(input: {
   input.runtimeRegistry.setObservedState({
     ...observed,
     models: observed.models.map((candidate) =>
-      candidate === model ? { ...candidate, ...lesson } : candidate,
+      candidate === model ? withServedModelInputs({ ...candidate, ...lesson }) : candidate,
     ),
   });
   try {

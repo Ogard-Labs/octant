@@ -1,4 +1,5 @@
 import type { ProviderFailure } from "@octant/contracts";
+import { readReportedInputModalities } from "@octant/domain/model-context-window";
 import type { CompatibleListedModels, CompatibleModelsListing } from "./openAiCompatibleEndpoint";
 
 /**
@@ -296,8 +297,9 @@ export const chatGptPlanModelsListing: CompatibleModelsListing = {
  * body whose only top-level key is `models`), in the Codex backend's item
  * style rather than the OpenAI `{data:[{id}]}` list. Each item's id is the
  * most specific field present (`slug`, then `id`, then `name`); its display
- * name and reported context window are kept when well-formed. An item that
- * cannot be mapped is skipped, never thrown on.
+ * name, reported context window and reported input modalities
+ * (`input_modalities`, the Codex backend's spelling) are kept when
+ * well-formed. An item that cannot be mapped is skipped, never thrown on.
  */
 function readChatGptPlanModels(value: unknown): CompatibleListedModels | undefined {
   if (!isRecord(value) || !Array.isArray(value.models)) return undefined;
@@ -308,10 +310,14 @@ function readChatGptPlanModels(value: unknown): CompatibleListedModels | undefin
     if (id === undefined) continue;
     const displayName = [item.display_name, item.displayName].find(isDisplayText);
     const contextLimit = [item.context_window, item.contextWindow].find(isPositiveInteger);
+    const inputModalities =
+      readReportedInputModalities(item.input_modalities) ??
+      readReportedInputModalities(item.inputModalities);
     models.push({
       id,
       ...(displayName === undefined ? {} : { displayName: displayName.trim() }),
       ...(contextLimit === undefined ? {} : { contextLimit }),
+      ...(inputModalities === undefined ? {} : { inputModalities }),
     });
   }
   const first: unknown = value.models[0];

@@ -7,7 +7,7 @@ import {
 } from "@octant/contracts";
 import type { ProviderCredentialResolver } from "./credentialBrokerClient";
 import { CONTEXT_OVERFLOW_FAILURE_MESSAGE } from "./endpointRetry";
-import { textOnlyInputModalities } from "@octant/provider-sdk/chat-conformance";
+import { resolveModelInputModalities } from "@octant/domain/model-context-window";
 
 const MAX_RETRY_AFTER_MS = 3_600_000;
 const DEFAULT_LIMITS: AnthropicHttpLimits = {
@@ -418,7 +418,8 @@ function manualModel(id: string): ProviderModel {
     source: "manual",
     verification: "unverified",
     reasoning: "unavailable",
-    inputModalities: textOnlyInputModalities,
+    // The Anthropic model list names no modalities, so the offline profile does.
+    ...resolveModelInputModalities({ id }),
     options: [],
   };
 }
@@ -430,7 +431,8 @@ function discoveredModel(id: string): ProviderModel {
     source: "discovered",
     verification: "verified",
     reasoning: "unavailable",
-    inputModalities: textOnlyInputModalities,
+    // The Anthropic model list names no modalities, so the offline profile does.
+    ...resolveModelInputModalities({ id }),
     options: [],
   };
 }
