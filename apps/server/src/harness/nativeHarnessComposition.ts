@@ -120,14 +120,17 @@ export interface NativeHarnessComposition {
 export function createNativeHarnessComposition(
   options: NativeHarnessCompositionOptions,
 ): NativeHarnessComposition {
-  const resultTaintsThread = (call: { readonly name: string; readonly inputJson: string }) => {
+  const resultTaintsThread = (
+    call: { readonly name: string; readonly inputJson: string },
+    result: unknown,
+  ) => {
     let args: unknown;
     try {
       args = call.inputJson.trim().length === 0 ? {} : JSON.parse(call.inputJson);
     } catch {
       args = undefined;
     }
-    return nativeHarnessResultTaintsThread({ toolName: call.name, arguments: args });
+    return nativeHarnessResultTaintsThread({ toolName: call.name, arguments: args, result });
   };
   const contextRemaining =
     options.contextHarness === undefined

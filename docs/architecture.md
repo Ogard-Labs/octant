@@ -2449,8 +2449,11 @@ native harness in `apps/server/src/harness`:
   authority use the ordinary one. The tool process environment carries only `PATH`, `HOME`, the temporary
   and locale variables, and what the harness sets, never a provider
   credential. Only a harness tool result that brings in outside content taints
-  the thread: `web-fetch`, `web-search`, and a `delegate` `collect` (a child's
-  reply may relay what it fetched). Local `read`, `grep`, `glob`, `bash`,
+  the thread: `web-fetch`, `web-search`, and a `delegate` `collect` that
+  returns a finished child's reply (it may relay what the child fetched). A
+  child's reply delivered to its parent as a new turn taints the parent the
+  same way, journaled before the turn is admitted; a delivery whose taint
+  cannot be recorded waits. Local `read`, `grep`, `glob`, `bash`,
   `edit`, `write`, and `goal-check` results do not, so local work keeps its
   ordinary approvals; the catalog's `resultTaintsThread` marks each tool and
   `nativeHarnessResultTaintsThread` decides, failing closed for a name it does

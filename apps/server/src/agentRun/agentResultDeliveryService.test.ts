@@ -121,6 +121,7 @@ function deliveryFixture(
     readonly runs?: ReadonlyArray<AgentRun>;
     readonly chat?: Partial<AgentResultDeliveryModePort>;
     readonly applyCommand?: (command: unknown) => unknown;
+    readonly recordResultIngestion?: (run: AgentRun) => boolean;
   } = {},
 ) {
   const runs = new Map((options.runs ?? []).map((run) => [run.id, run] as const));
@@ -170,6 +171,9 @@ function deliveryFixture(
       return timers[timers.length - 1];
     },
     unschedule: () => undefined,
+    ...(options.recordResultIngestion === undefined
+      ? {}
+      : { recordResultIngestion: options.recordResultIngestion }),
   });
   const flush = async () => {
     for (let i = 0; i < 100; i += 1) await Promise.resolve();
@@ -501,6 +505,39 @@ describe("AgentResultDeliveryService", () => {
         runId: run.id,
         outcome: "delivered",
       }),
+    );
+  });
+
+  it("taints the parent with a child's reply before the reply is delivered, and waits when it cannot", async () => {
+    const run = finishedRun();
+    const order: string[] = [];
+    let recordable = false;
+    const fixture = deliveryFixture({
+      runs: [run],
+      recordResultIngestion: (child) => {
+        order.push(`taint ${String(child.parentThreadId)}`);
+        return recordable;
+      },
+      chat: {
+        dispatch: vi.fn(async (batch: ReadonlyArray<AgentRun>) => {
+          order.push("dispatch");
+          return { kind: "dispatched" as const, runIds: batch.map((child) => child.id) };
+        }),
+      },
+    });
+    fixture.emit(settleStatusEvent(String(run.id)));
+    await fixture.flush();
+    // An untainted parent never receives the reply.
+    expect(order).toEqual([`taint ${String(run.parentThreadId)}`]);
+    expect(fixture.applyCommand).not.toHaveBeenCalled();
+    expect(fixture.timers).toHaveLength(1);
+
+    recordable = true;
+    fixture.timers[0]?.fire();
+    await fixture.flush();
+    expect(order.slice(1)).toEqual([`taint ${String(run.parentThreadId)}`, "dispatch"]);
+    expect(fixture.applyCommand).toHaveBeenCalledWith(
+      expect.objectContaining({ outcome: "delivered" }),
     );
   });
 

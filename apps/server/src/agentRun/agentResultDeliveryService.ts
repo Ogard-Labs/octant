@@ -76,6 +76,13 @@ interface AgentResultDeliveryServiceOptions {
   /** How long a deferred dispatch or a failed settle waits before retrying. */
   readonly retryAfterMs?: number;
   readonly onError?: (message: string, error: unknown) => void;
+  /**
+   * Journals that a child's reply is about to enter its parent, which taints
+   * the parent: the child may have relayed content it fetched, and a local
+   * tool result no longer taints the parent after it. Answers whether the
+   * taint was recorded; a delivery whose taint could not be recorded waits.
+   */
+  readonly recordResultIngestion?: (run: AgentRun) => boolean;
 }
 
 const DEFER_RETRY_AFTER_MS = 30_000;
@@ -303,6 +310,11 @@ export class AgentResultDeliveryService {
         return current !== undefined && owesDelivery(current) ? [current] : [];
       });
       if (runs.length === 0) return;
+      const record = this.#options.recordResultIngestion;
+      if (record !== undefined && !runs.every((run) => record(run))) {
+        this.#armTimer(pending);
+        return;
+      }
       const result = await port.dispatch(runs);
       if (this.#pending.get(key) !== pending) return;
       if (result.kind === "dispatched") {

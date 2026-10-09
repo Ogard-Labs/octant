@@ -275,7 +275,7 @@ window, or approves an action class the host policy reserves for the local user.
   tainted thread; the confirmation prompt names the ingested sources. Enforcement: the policy
   engine's step 7 — module `packages/domain/src/toolCallPolicy.ts` with the taint projection in
   `apps/server`. In the native harness only results that bring in outside content mark the thread
-  (`web-fetch`, `web-search`, a child's collected reply); local reads, searches, edits, and
+  (`web-fetch`, `web-search`, a child's collected or delivered reply); local reads, searches, edits, and
   commands do not. On a tainted thread a harness "always" approval stops covering its class, and
   `web-fetch` itself needs the per-action confirmation because a GET can carry data out in its
   URL (Henrik decision 2026-10-09; detail in `docs/architecture.md`, Native harness).
