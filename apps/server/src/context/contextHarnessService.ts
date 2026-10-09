@@ -207,6 +207,9 @@ export class ContextHarnessService {
           }
         : input.reserves;
     if (
+      // A window a person set wins over every automatic source, including a
+      // runtime report: they set it because what the provider says is wrong.
+      modelLimits.source !== "user-supplied" &&
       previousUsage?.contextWindow !== undefined &&
       String(previousUsage.providerInstanceId) === String(modelLimits.providerInstanceId) &&
       String(previousUsage.modelId) === String(modelLimits.modelId) &&
