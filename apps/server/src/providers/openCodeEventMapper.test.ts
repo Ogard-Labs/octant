@@ -774,6 +774,12 @@ describe("OpenCode 2.0.22 events", () => {
     ).toMatchObject([{ kind: "tool-failure", toolCallId: "call_1" }]);
   });
 
+  it("ignores a tool update that names no call", () => {
+    for (const type of ["session.tool.progress", "session.tool.success", "session.tool.failed"]) {
+      expect(adaptAndMap(type, { assistantMessageID, executed: false })).toBe("ignored");
+    }
+  });
+
   it("refuses a tool call whose name was never announced", () => {
     expect(() =>
       adaptAndMap("session.tool.called", { assistantMessageID, id: "call_2", input: {} }),

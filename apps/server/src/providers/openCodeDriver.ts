@@ -623,10 +623,13 @@ function adaptOpenCode2022Event(
       return { type: "session.next.tool.called", properties: { ...properties, callID, tool } };
     }
     case "session.tool.progress":
+      // A tool event with no call ID names no call to update, so it is dropped.
+      if (callID === undefined) return undefined;
       return { type: "session.next.tool.progress", properties: { ...properties, callID } };
     case "session.tool.success":
     case "session.tool.failed":
-      if (callID !== undefined) calls?.delete(callID);
+      if (callID === undefined) return undefined;
+      calls?.delete(callID);
       return {
         type: type.replace("session.", "session.next."),
         properties: { ...properties, callID },
