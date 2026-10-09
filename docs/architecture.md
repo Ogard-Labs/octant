@@ -295,8 +295,8 @@ data and creates no artifact.
 `sidebar` (the default). The value is part of the definition and needs Canvas
 schema version 4. An older runtime refuses a version-4 document as a future
 version and does not report it corrupt.
-A treemap block is gated the same way at Canvas schema version 5 and a heatmap
-block at version 6, so a document that declares an earlier version and carries
+A treemap block is gated the same way at Canvas schema version 5, a heatmap
+block at version 6, and a comparison matrix at version 10, so a document that declares an earlier version and carries
 one is refused as a declared future version. The optional table column
 `display` and the chart, table, and metric `format` fields are the one ungated
 exception: they only change how a value is drawn, so they carry no schema
@@ -400,13 +400,36 @@ blocks are gathered into one responsive row of two to four tiles. The bar list
 and the metric's direction, sparkline, and caption arrive with Canvas schema
 version 7, so a document declaring an older version that carries any of them is
 refused as a future version; a static export carries the same metric fields.
+A comparison matrix (`packages/domain/src/canvasComparisonMatrix.ts`) sets
+options as columns against criteria as rows. A criterion may carry a weight
+(absent counts once, zero keeps it out of the score) and may prefer the lower
+reading. Each cell holds exactly one reading: a score, a short text, or a glyph
+of yes, partial, or no, with an optional note. The pure layout computes each
+option's weighted score as the weighted share of the best reading it could have
+had across the criteria that can be scored. A score counts as its place on the
+score range, yes, partial, and no as the whole, half, and none of a criterion,
+and text never counts. A counted criterion an option has no reading in scores
+nothing and is reported beside its total. The author names a recommended option,
+which is drawn apart and never inferred from the scores. Options and criteria
+take node ids, so a comment anchors to a column or a row through the existing
+node anchor. The board contract has no cell anchor, so a comment on a cell sits
+on its row or column. Ordering options by score is view state. The domain policy
+refuses an id used twice across options and criteria, a cell or recommendation
+that names an option or criterion the block lacks, a repeated coordinate, a
+score outside a declared range, and a matrix past the option, criterion, or cell
+budget. The block is a native table that scrolls inside its own focusable region
+with the criteria pinned; its disclosed fallback lists one row per option. The
+screen, the artifact preview SVG, and the Markdown and HTML export read the same
+layout. The comparison matrix arrives with Canvas schema version 10 and share
+version 4.
 A share carries every block kind and field a Canvas holds except source ids
 and the design and action blocks it refuses (see the `design` block). A table
 column keeps its number format and display, and a board keeps its own layout.
 Share documents version independently of Canvas documents: a treemap, a
 heatmap, a bar list, a chart's or a table column's number format, a table
-column's display, and a board's layout arrive with share version 3, so a share
-that declares an older version and carries one is refused as a future version.
+column's display, and a board's layout arrive with share version 3, and a
+comparison matrix with share version 4, so a share that declares an older
+version and carries one is refused as a future version.
 The catalogue includes a `plan` block: phases, and one list of tasks that each
 name their phase, carry a status (todo, doing, blocked, done), and may carry an
 owner, estimate, acceptance notes, dates, dependencies on other tasks in the

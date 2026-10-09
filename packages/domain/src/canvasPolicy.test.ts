@@ -6,6 +6,9 @@ import {
   CANVAS_MAX_DIAGRAM_NODES,
   CANVAS_MAX_ER_ATTRIBUTES_PER_ENTITY,
   CANVAS_MAX_IMAGES,
+  CANVAS_MAX_MATRIX_CELLS,
+  CANVAS_MAX_MATRIX_CRITERIA,
+  CANVAS_MAX_MATRIX_OPTIONS,
   CANVAS_MAX_METRIC_SPARKLINE_POINTS,
   CANVAS_MAX_MINDMAP_NOTE_LENGTH,
   CANVAS_MAX_MOCKUP_DEPTH,
@@ -16,6 +19,7 @@ import {
   CANVAS_MAX_TABLE_ROWS,
   CANVAS_MAX_TEXT_BYTES,
   CANVAS_MAX_TREEMAP_DEPTH,
+  CANVAS_DESIGN_SCHEMA_VERSION,
   CANVAS_HEATMAP_SCHEMA_VERSION,
   CANVAS_PRESENTATION_SCHEMA_VERSION,
   CANVAS_SCHEMA_VERSION,
@@ -1515,6 +1519,195 @@ describe("bar list validation", () => {
           ]),
         ),
       "missing-source",
+    );
+  });
+});
+
+function comparisonMatrix(overrides: Record<string, unknown> = {}) {
+  return {
+    blockId: "state-store",
+    schemaVersion: CANVAS_SCHEMA_VERSION,
+    kind: "comparison-matrix" as const,
+    options: [
+      { optionId: "sqlite", label: "SQLite" },
+      { optionId: "postgres", label: "Postgres" },
+    ],
+    criteria: [
+      { criterionId: "durability", label: "Crash safety", weight: 3 },
+      { criterionId: "offline", label: "Works offline" },
+    ],
+    cells: [
+      { criterionId: "durability", optionId: "sqlite", score: 5 },
+      { criterionId: "durability", optionId: "postgres", score: 4 },
+      { criterionId: "offline", optionId: "sqlite", glyph: "yes" },
+    ],
+    scoreRange: { min: 1, max: 5 },
+    recommendedOptionId: "sqlite",
+    ...overrides,
+  };
+}
+
+describe("comparison matrix validation", () => {
+  it("accepts options and criteria whose cells all resolve", () => {
+    expect(() => validateCanvasDefinition(withBlocks([comparisonMatrix()]))).not.toThrow();
+  });
+
+  it("refuses a comparison matrix inside a document declaring an older schema version", () => {
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition({
+          ...baseDefinition,
+          schemaVersion: CANVAS_DESIGN_SCHEMA_VERSION,
+          blocks: [comparisonMatrix()],
+        }),
+      "unsupported-schema-version",
+    );
+    // The bump keeps the previous version readable: a design-era document
+    // without a matrix still validates.
+    expect(() =>
+      validateCanvasDefinition({
+        ...baseDefinition,
+        schemaVersion: CANVAS_DESIGN_SCHEMA_VERSION,
+        blocks: [{ ...onboardingFlowExample, schemaVersion: CANVAS_DESIGN_SCHEMA_VERSION }],
+      }),
+    ).not.toThrow();
+  });
+
+  it("refuses an id used twice, including an option and a criterion sharing one", () => {
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            comparisonMatrix({
+              options: [
+                { optionId: "sqlite", label: "SQLite" },
+                { optionId: "sqlite", label: "SQLite again" },
+              ],
+            }),
+          ]),
+        ),
+      "duplicate-matrix-id",
+    );
+    // Rows and columns share the node anchor a comment lands on, so one id
+    // naming both would leave the comment's place ambiguous.
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            comparisonMatrix({
+              criteria: [{ criterionId: "sqlite", label: "Is it SQLite" }],
+              cells: [],
+            }),
+          ]),
+        ),
+      "duplicate-matrix-id",
+    );
+  });
+
+  it("refuses a cell or a recommendation that names an option or criterion the matrix lacks", () => {
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            comparisonMatrix({
+              cells: [{ criterionId: "durability", optionId: "mysql", score: 3 }],
+            }),
+          ]),
+        ),
+      "unknown-matrix-option",
+    );
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            comparisonMatrix({
+              cells: [{ criterionId: "price", optionId: "sqlite", score: 3 }],
+            }),
+          ]),
+        ),
+      "unknown-matrix-criterion",
+    );
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(withBlocks([comparisonMatrix({ recommendedOptionId: "mysql" })])),
+      "unknown-matrix-option",
+    );
+  });
+
+  it("refuses a coordinate listed twice", () => {
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            comparisonMatrix({
+              cells: [
+                { criterionId: "durability", optionId: "sqlite", score: 5 },
+                { criterionId: "durability", optionId: "sqlite", text: "five" },
+              ],
+            }),
+          ]),
+        ),
+      "duplicate-matrix-cell",
+    );
+  });
+
+  it("refuses a score outside the declared range", () => {
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            comparisonMatrix({
+              cells: [{ criterionId: "durability", optionId: "sqlite", score: 7 }],
+            }),
+          ]),
+        ),
+      "matrix-score-out-of-range",
+    );
+  });
+
+  it("names the budget an oversized matrix exceeds", () => {
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            comparisonMatrix({
+              options: Array.from({ length: CANVAS_MAX_MATRIX_OPTIONS + 1 }, (_value, index) => ({
+                optionId: `option-${String(index)}`,
+                label: `Option ${String(index)}`,
+              })),
+            }),
+          ]),
+        ),
+      "matrix-options-budget-exceeded",
+    );
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            comparisonMatrix({
+              criteria: Array.from({ length: CANVAS_MAX_MATRIX_CRITERIA + 1 }, (_value, index) => ({
+                criterionId: `criterion-${String(index)}`,
+                label: `Criterion ${String(index)}`,
+              })),
+            }),
+          ]),
+        ),
+      "matrix-criteria-budget-exceeded",
+    );
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            comparisonMatrix({
+              cells: Array.from({ length: CANVAS_MAX_MATRIX_CELLS + 1 }, () => ({
+                criterionId: "durability",
+                optionId: "sqlite",
+                score: 1,
+              })),
+            }),
+          ]),
+        ),
+      "matrix-cells-budget-exceeded",
     );
   });
 });
