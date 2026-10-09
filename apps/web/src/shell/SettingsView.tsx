@@ -1356,6 +1356,7 @@ function providerSettingsViewProps(
     onSetEnabled: controller.setEnabled,
     onDataTagsChange: controller.setDataTags,
     onModelDataTagsChange: controller.setModelDataTags,
+    onModelContextWindowChange: controller.setModelContextWindow,
     probingIds: controller.probingIds,
     updatingIds: controller.updatingIds,
     status: controller.status,

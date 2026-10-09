@@ -11,6 +11,7 @@ import { encodeSubscriptionOAuthCredential } from "@octant/provider-sdk/subscrip
 import { Effect, Either, Fiber, Stream } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import type { ProviderCredentialResolver } from "./credentialBrokerClient";
+import type { ModelContextWindowMemory } from "./modelContextWindowFacts";
 import type { CompatibleFetch } from "./openAiCompatibleEndpoint";
 import { makeOpenAiCompatibleDriver } from "./openAiCompatibleDriver";
 import { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
@@ -714,7 +715,168 @@ describe("makeOpenAiCompatibleDriver", () => {
     expect(events.at(-1)?.kind).toBe("completed");
     expect(fetch).toHaveBeenCalledTimes(2);
   });
+
+  it("learns the window an overflow refusal names, keeps it, and sends a smaller request once", async () => {
+    const runtimeRegistry = new ProviderRuntimeRegistry();
+    runtimeRegistry.setObservedState(observedManualModel());
+    const remember = vi.fn();
+    const bodies: Array<{ readonly messages: ReadonlyArray<unknown> }> = [];
+    let refused = false;
+    const fetch = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      if (String(url).endsWith("/models")) return new Response(null, { status: 404 });
+      const body = JSON.parse(String(init?.body)) as { readonly messages: ReadonlyArray<unknown> };
+      bodies.push(body);
+      if (bodies.length === 3 && !refused) {
+        refused = true;
+        return Response.json(
+          {
+            error: {
+              code: "context_length_exceeded",
+              message:
+                "This model's maximum context length is 2048 tokens. However, your messages resulted in 3100 tokens.",
+            },
+          },
+          { status: 400 },
+        );
+      }
+      return chatStream("ok");
+    });
+    const driver = makeDriver({
+      fetch,
+      runtimeRegistry,
+      contextWindows: { remember },
+    });
+
+    const outcomes = await runTurns(driver, ["a".repeat(6_000), "b".repeat(6_000), "next"]);
+
+    // The person sees the turn answered, not the refusal.
+    expect(outcomes).toEqual(["completed", "completed", "completed"]);
+    expect(bodies).toHaveLength(4);
+    expect(bodies[3]?.messages.length).toBeLessThan(bodies[2]?.messages.length ?? 0);
+    expect(runtimeRegistry.observedState(instanceId)?.models[0]).toMatchObject({
+      learnedContextWindow: 2_048,
+    });
+    expect(remember).toHaveBeenCalledWith(instanceId, modelId, { learnedContextWindow: 2_048 });
+  });
+
+  it("still recovers once and learns nothing from a refusal that names no window", async () => {
+    const runtimeRegistry = new ProviderRuntimeRegistry();
+    runtimeRegistry.setObservedState(observedManualModel());
+    const remember = vi.fn();
+    let generations = 0;
+    const fetch = vi.fn(async (url: string | URL | Request) => {
+      if (String(url).endsWith("/models")) return new Response(null, { status: 404 });
+      generations += 1;
+      if (generations === 3) {
+        return Response.json(
+          { error: { code: "context_length_exceeded", message: "too long" } },
+          { status: 400 },
+        );
+      }
+      return chatStream("ok");
+    });
+    const driver = makeDriver({ fetch, runtimeRegistry, contextWindows: { remember } });
+
+    const outcomes = await runTurns(driver, ["a".repeat(600), "b".repeat(600), "next"]);
+
+    expect(outcomes).toEqual(["completed", "completed", "completed"]);
+    expect(generations).toBe(4);
+    expect(runtimeRegistry.observedState(instanceId)?.models[0]?.learnedContextWindow).toBe(
+      undefined,
+    );
+    expect(remember).not.toHaveBeenCalled();
+  });
+
+  it("records the model a deployment served and sizes the next request by its profile", async () => {
+    const runtimeRegistry = new ProviderRuntimeRegistry();
+    runtimeRegistry.setObservedState(observedManualModel());
+    const remember = vi.fn();
+    const fetch = vi.fn(async (url: string | URL | Request) =>
+      String(url).endsWith("/models")
+        ? new Response(null, { status: 404 })
+        : chatStream("ok", undefined, "DeepSeek-V4.1-Flash"),
+    );
+    const driver = makeDriver({ fetch, runtimeRegistry, contextWindows: { remember } });
+
+    await runTurns(driver, ["hi"]);
+
+    expect(runtimeRegistry.observedState(instanceId)?.models[0]).toMatchObject({
+      servedModelId: "DeepSeek-V4.1-Flash",
+    });
+    expect(remember).toHaveBeenCalledWith(instanceId, modelId, {
+      servedModelId: "DeepSeek-V4.1-Flash",
+    });
+    // A later probe rebuilds the model from the listing and keeps what was learned.
+    await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
+    expect(runtimeRegistry.observedState(instanceId)?.models[0]).toMatchObject({
+      servedModelId: "DeepSeek-V4.1-Flash",
+    });
+  });
 });
+
+function observedManualModel() {
+  return {
+    instanceId,
+    readiness: "ready" as const,
+    processState: "stopped" as const,
+    models: [
+      {
+        id: modelId,
+        displayName: "manual",
+        source: "manual" as const,
+        verification: "unverified" as const,
+        reasoning: "unavailable" as const,
+        inputModalities: ["text" as const],
+        options: [],
+      },
+    ],
+    capabilities: {
+      streaming: "supported" as const,
+      resume: "unsupported" as const,
+      interruption: "supported" as const,
+      approvals: "unsupported" as const,
+      userQuestions: "unsupported" as const,
+      reasoning: "unavailable" as const,
+      usage: "supported" as const,
+      toolActivity: "unsupported" as const,
+      fileChanges: "unsupported" as const,
+      diffs: "unsupported" as const,
+      taskProgress: "unsupported" as const,
+      nativeChildAgents: "unsupported" as const,
+      harnessAutoReview: "unsupported" as const,
+      nativeAttachments: "unsupported" as const,
+      nativeWebResearch: "unsupported" as const,
+      appManagedTools: "unsupported" as const,
+      citations: "unsupported" as const,
+    },
+    observedAt: "2026-07-15T12:00:00.000Z",
+  };
+}
+
+/** Sends each prompt as its own turn on one session and returns how each turn ended. */
+function runTurns(
+  driver: ReturnType<typeof makeDriver>,
+  prompts: ReadonlyArray<string>,
+): Promise<ReadonlyArray<string | undefined>> {
+  return Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const connection = yield* driver.acquire({ instanceId, projectRoot: "/tmp/project" });
+        yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+        const outcomes: Array<string | undefined> = [];
+        for (const prompt of prompts) {
+          const events = yield* Effect.fork(
+            collectSessionEvents(yield* connection.subscribe, sessionId),
+          );
+          yield* connection.send({ sessionId, prompt, attachments: [], tools: [] });
+          outcomes.push(Array.from(yield* Fiber.join(events)).at(-1)?.kind);
+        }
+        yield* connection.stop(sessionId);
+        return outcomes;
+      }),
+    ),
+  );
+}
 
 describe("makeOpenAiCompatibleDriver under the ChatGPT plan profile", () => {
   const planConfiguration: OpenAiCompatibleProviderConfiguration = {
@@ -1129,10 +1291,14 @@ function makeDriver(options: {
   readonly credentialResolver?: ProviderCredentialResolver;
   readonly fetch: CompatibleFetch;
   readonly runtimeRegistry?: ProviderRuntimeRegistry;
+  readonly contextWindows?: ModelContextWindowMemory;
 }) {
   const runtimeRegistry = options.runtimeRegistry ?? new ProviderRuntimeRegistry();
   const driver = makeOpenAiCompatibleDriver({
     instanceId,
+    ...(options.contextWindows === undefined
+      ? {}
+      : { harness: { contextWindows: options.contextWindows } }),
     configuration: options.configuration ?? configuration,
     credentialResolver: options.credentialResolver ?? resolver(),
     fetch: options.fetch,
@@ -1154,10 +1320,12 @@ function modelsResponse(_url: string | URL | Request): Response {
 function chatStream(
   text: string,
   usage: Record<string, unknown> = { prompt_tokens: 3, completion_tokens: 2, total_tokens: 5 },
+  servedModel?: string,
 ): Response {
+  const served = servedModel === undefined ? {} : { model: servedModel };
   const chunks = [
-    chatChunk({ role: "assistant", content: text }),
-    chatChunk({}, "stop"),
+    { ...chatChunk({ role: "assistant", content: text }), ...served },
+    { ...chatChunk({}, "stop"), ...served },
     {
       id: "chatcmpl_private",
       object: "chat.completion.chunk",

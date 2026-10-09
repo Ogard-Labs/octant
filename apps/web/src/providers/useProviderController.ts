@@ -29,6 +29,7 @@ import {
   type ProviderDefaults,
   type ProviderDataTags,
   type ProviderFailure,
+  type ProviderModel,
   type ProviderInstanceId,
   type ProviderModelId,
   type ProviderAuthenticationAttempt,
@@ -82,13 +83,6 @@ function findProvider(current: ProviderRegistrySnapshot, instanceId: ProviderIns
   return current.instances.find((instance) => instance.id === instanceId);
 }
 
-/**
- * Fold the catalog's user-maintained model tags into a probe observation.
- *
- * Model `dataTags` live on the catalog, not on a probe result, and Project
- * provider policy reads them. Both the authoritative and the presentation
- * observations carry them so every picker filters by the same facts.
- */
 /** What one explicit "Verify tools" request found, or "failed" when it could not run. */
 export type ModelToolVerification = "supported" | "unsupported" | "failed";
 
@@ -114,16 +108,32 @@ export interface ProviderProbeFailure {
   readonly failedAt: string;
 }
 
+/**
+ * Fold the catalog's user-maintained model facts into a probe observation.
+ *
+ * Model `dataTags` and a person's context window override live on the
+ * catalog, not on a probe result; Project provider policy reads the tags and
+ * Settings shows the override. Both the authoritative and the presentation
+ * observations carry them so every surface reads the same facts.
+ */
 function withCatalogModelTags(
   observed: ProviderObservedState,
-  tags: ReadonlyMap<string, ProviderDataTags | undefined> | undefined,
+  catalogModels: ReadonlyMap<string, ProviderModel> | undefined,
 ): ProviderObservedState {
-  if (tags === undefined) return observed;
+  if (catalogModels === undefined) return observed;
   return {
     ...observed,
     models: observed.models.map((model) => {
-      const dataTags = tags.get(String(model.id));
-      return dataTags === undefined ? model : { ...model, dataTags };
+      const cataloged = catalogModels.get(String(model.id));
+      if (cataloged === undefined) return model;
+      const { contextWindowOverride: _observedOverride, ...rest } = model;
+      return {
+        ...rest,
+        ...(cataloged.dataTags === undefined ? {} : { dataTags: cataloged.dataTags }),
+        ...(cataloged.contextWindowOverride === undefined
+          ? {}
+          : { contextWindowOverride: cataloged.contextWindowOverride }),
+      };
     }),
   };
 }
@@ -196,7 +206,7 @@ export function useProviderController(options: ProviderControllerOptions) {
     const catalogModels = new Map(
       (value.catalogs ?? []).map((catalog) => [
         String(catalog.instanceId),
-        new Map(catalog.models.map((model) => [String(model.id), model.dataTags] as const)),
+        new Map(catalog.models.map((model) => [String(model.id), model] as const)),
       ]),
     );
     for (const observed of value.observedStates) {
@@ -2857,6 +2867,22 @@ export function useProviderController(options: ProviderControllerOptions) {
       }),
     [execute],
   );
+  const setModelContextWindow = useCallback(
+    (instanceId: ProviderInstanceId, modelId: ProviderModelId, contextWindow: number | undefined) =>
+      execute((current) => {
+        const instance = findProvider(current, instanceId);
+        return instance === undefined
+          ? undefined
+          : {
+              kind: "set-provider-model-context-window",
+              instanceId,
+              expectedVersion: instance.version,
+              modelId,
+              ...(contextWindow === undefined ? {} : { contextWindow }),
+            };
+      }),
+    [execute],
+  );
   const remove = useCallback(
     (instanceId: ProviderInstanceId) =>
       queueProviderMutation(mutationQueue, mounted, setBusy, setMessage, async () => {
@@ -3221,6 +3247,7 @@ export function useProviderController(options: ProviderControllerOptions) {
     setEnabled,
     setDataTags,
     setModelDataTags,
+    setModelContextWindow,
     remove,
     providerCredentialStatus,
     clearProviderCredential,
@@ -3333,6 +3360,16 @@ function applyResult(
       observedStates: current.observedStates.filter(
         (value) => value.instanceId !== result.instanceId,
       ),
+    });
+  } else if (result.kind === "provider-model-updated") {
+    install({
+      ...current,
+      catalogs: [
+        ...(current.catalogs ?? []).filter(
+          (catalog) => String(catalog.instanceId) !== String(result.snapshot.instanceId),
+        ),
+        result.snapshot,
+      ],
     });
   } else if (result.kind === "provider-defaults-updated") {
     install({ ...current, defaults: result.defaults });

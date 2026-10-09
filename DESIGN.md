@@ -1642,7 +1642,10 @@ and Tooltip. Composition rules:
   `Separator` for navigation lists.
 - Menus, popovers, dialogs, and overlays are opaque, keyboard dismissible, and
   titled for assistive technology. Use `OctantDialog` with a real label even
-  when the title is visually hidden.
+  when the title is visually hidden. Dialogs and floating popups share one
+  layer, so the one opened last paints on top: a menu or popover opened inside
+  a dialog or the narrow dock sheet appears above it, and Escape closes the
+  innermost surface first.
 - Use Badge for status labels, Alert for callouts, Empty for empty states,
   Skeleton for loading, and the shared `.toast-stack` notification owner for
   transient acknowledgements. Do not add another toast package or recreate

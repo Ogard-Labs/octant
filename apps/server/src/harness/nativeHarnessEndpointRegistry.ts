@@ -5,6 +5,7 @@ import type {
   ProviderTurnInput,
 } from "@octant/contracts";
 import type { EndpointRetryOptions } from "../providers/endpointRetry";
+import type { ModelContextWindowMemory } from "../providers/modelContextWindowFacts";
 import type { NativeHarnessLeadFallback, NativeHarnessTransport } from "./nativeHarnessTransport";
 
 /** A direct endpoint as another instance's lead can reach it when its own model is down. */
@@ -42,4 +43,6 @@ export interface NativeHarnessEndpointHooks {
   readonly leadFallback?: NativeHarnessLeadFallback;
   /** A test replaces the clock and the random source so no real time passes. */
   readonly retry?: EndpointRetryOptions;
+  /** Where what a request teaches about its model's window is kept past the session. */
+  readonly contextWindows?: ModelContextWindowMemory;
 }

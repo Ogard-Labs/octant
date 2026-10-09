@@ -2897,7 +2897,6 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   list-style: none;
 }
 
-.endpoint-model,
 .endpoint-data__models > li {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto auto;
@@ -2906,6 +2905,22 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   min-height: 44px;
   padding: var(--oct-space-1) 0;
   border-top: 1px solid var(--oct-hairline);
+}
+
+/* Name, tags, the optional context-window box, then the shown switch. */
+.endpoint-model {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
+  align-items: center;
+  gap: var(--oct-space-2) var(--oct-space-3);
+  min-height: 44px;
+  padding: var(--oct-space-1) 0;
+  border-top: 1px solid var(--oct-hairline);
+}
+
+.endpoint-model > .provider-model-visibility__context-window {
+  width: 13rem;
+  max-width: 100%;
 }
 
 .endpoint-model__id {
@@ -3051,6 +3066,11 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
     grid-column: 1;
     grid-row: 2;
     justify-content: flex-start;
+  }
+
+  .endpoint-model > .provider-model-visibility__context-window {
+    grid-column: 1;
+    grid-row: 3;
   }
 
   :is(.endpoint-list, .endpoint-choices, .endpoint-detail, .endpoint-add)
@@ -3281,6 +3301,13 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 
 .provider-model-visibility li > .octant-switch {
   flex: 0 0 auto;
+}
+
+.provider-model-visibility li > .provider-model-visibility__context-window {
+  flex: 0 0 13rem;
+  width: 13rem;
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
 }
 
 .provider-details__section--capabilities dl div {
