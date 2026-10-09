@@ -148,6 +148,7 @@ import type { CanvasProjection } from "../canvas/canvasProjection";
 import type { GithubCloneProjection } from "./githubCloneProjection";
 import type { ImageJobProjection } from "../image/imageJobProjection";
 import type { ReplicaMembershipProjection } from "../replica/replicaMembershipProjection";
+import type { ReplicaArtifactProjection } from "../replica/replicaArtifactProjection";
 
 export interface VerifiedStoreBackupReceipt extends StoreBackupReceipt {
   readonly path: string;
@@ -171,6 +172,7 @@ export interface PersistenceService {
   readonly githubCloneProjection: GithubCloneProjection;
   readonly imageJobProjection: ImageJobProjection;
   readonly replicaMembershipProjection: ReplicaMembershipProjection;
+  readonly replicaArtifactProjection: ReplicaArtifactProjection;
   readonly readShellSettings: () => ProjectedShellSettings | undefined;
   readonly readWindowWorkspace: (windowId: WindowId) => ProjectedWindowWorkspace | undefined;
   readonly readWindowWorkspaces: () => ReadonlyArray<ProjectedWindowWorkspace>;
@@ -414,6 +416,7 @@ async function acquirePersistence(options: PersistenceLiveOptions): Promise<Pers
       githubCloneProjection: runtime.githubCloneProjection,
       imageJobProjection: runtime.imageJobProjection,
       replicaMembershipProjection: runtime.replicaMembershipProjection,
+      replicaArtifactProjection: runtime.replicaArtifactProjection,
       readShellSettings: () => readShellSettings(connection),
       readWindowWorkspace: (windowId) => readWindowWorkspace(connection, windowId),
       readWindowWorkspaces: () => readWindowWorkspaces(connection),

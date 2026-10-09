@@ -1360,12 +1360,16 @@ flowchart LR
   [0029](decisions/0029-artifact-storage-mirror.md) (`octant.artifact-bundle/1`),
   not a second document. Reconciling an artifact entry appends a version, keeps both
   heads when two computers revise the same parent, or records a tombstone. It
-  cannot overwrite. A gap in an instance's sequence, an unknown or revoked
-  instance, a bad or missing signature, a content-hash mismatch, or an entry
-  that names a local artifact as foreign is refused. Membership records allow
-  gaps, because a writer skips a slot someone else's file took; whether such
-  a gap holds back an artifact import is decided with the import. An unknown
-  entry format fails closed. A later version after a tombstone appends; the
+  cannot overwrite. An unknown or revoked instance, a bad or missing
+  signature, a content-hash mismatch, or an entry that names a local artifact
+  as foreign is refused. Artifact entries share each instance's sequence with
+  its membership records, and a writer skips a slot someone else's file
+  took, so a sequence has gaps by design: an artifact entry waits as
+  `sequence-gap` only while an earlier slot of its writer that the store
+  lists has no lasting verdict on this host - a membership record held, an
+  artifact entry applied or refused for its own content, or a file found not
+  to be a valid record. A slot the store does not list never holds it back.
+  An unknown entry format fails closed. A later version after a tombstone appends; the
   tombstone stays in the history.
   The detached signature covers an entry's encoded bytes whole - origin, kind,
   parents, the claimed content hash, and the bundle - so a rewrite of any of
@@ -1454,9 +1458,8 @@ flowchart LR
     first version of a slot it read; it detects a rewrite of that slot (two
     records in one slot) only if it also came to hold the other version, as
     the limits below say. A file that is not a valid record is reported
-    and journaled once. Artifact entries are not imported yet: one that is
-    valid and counts is reported held and read again by a later pull, and
-    one that does not count is reported refused.
+    and journaled once. Valid artifact entries from the same read are then
+    reconciled, as artifact sync below describes.
   - **Journal.** The `replica.*@2` events are inputs only: this computer's
     identity and role, the founder it pinned (a founding identity pins
     itself, so a host that stops right after creating it is still pinned), each valid record it holds
@@ -1534,14 +1537,81 @@ flowchart LR
   - **Not wired yet.** The membership service asks Settings › Sync's store
     selection for its store on every command; with sync off or no store
     chosen, every command answers a typed `not-configured` refusal and makes
-    no store call. No surface creates a replica, joins, or revokes yet, and
-    artifact versions are neither published nor imported. A person can choose
-    a store and turn sync on, but cannot yet join another computer or copy a
-    version. The artifact reconcile policy's `sequence-gap` refusal has no
-    caller yet; the import slice owns the gap rule. Leaving a replica is not
-    supported yet, so a computer with a membership identity cannot change its
-    store; leaving a replica, and changing the store after it, are a
-    follow-up.
+    no store call. No surface creates a replica, joins, or revokes yet, so a
+    person can choose a store and turn sync on but cannot yet join another
+    computer. Leaving a replica is not supported yet, so a computer with a
+    membership identity cannot change its store; leaving a replica, and
+    changing the store after it, are a follow-up.
+- **Artifact sync: publish and pull.** `ReplicaArtifactSyncService` and
+  `ReplicaArtifactImport` in `apps/server/src/replica/`.
+  - **Publish.** The Canvas service's committed-version hook - the seam the
+    0029 mirror listens on - hands every committed version to artifact sync,
+    whichever surface made it; a deletion is queued through the same service
+    as a tombstone over every version head this host knows. Nothing is
+    queued while sync is off or this host has no replica identity, nor for a
+    Code thread under Plan mode, so neither calls the store. Before queuing,
+    the title, every string a block carries, and each source's display name
+    pass the share filter; a version that fails, or exceeds the bundle size
+    bound, is journaled as a refused publish and never queued. A queued
+    entry is journaled first (`replica.artifact-queued@2`) with its kind,
+    artifact origin, parents (the previous local version), and the 0029
+    bundle whose header names the artifact's replica origin - the instance
+    that first published it, since every host calls itself `local` - plus
+    the Project name it is filed under. Drains run oldest first through the
+    membership service's single command line, at the identity's next free
+    slot, after finishing any stopped membership publish; only a member in
+    good standing drains. The entry is built for the slot it is about to
+    take, so a retry at that slot is the same bytes and the same signature,
+    and a publish that landed before the host stopped is found already
+    there. A landed slot is journaled inside that line
+    (`replica.artifact-published@2`), so a membership entry never takes it.
+    A publish that does not land stays queued, in order, across restarts, and
+    is journaled as a receipt once per reason
+    (`replica.artifact-publish-failed@2`); the local version is never
+    unwound. An imported entry is never published again.
+  - **Pull.** On host start, every five minutes, and on the membership pull
+    command, the read described above holds membership records and then
+    hands each valid artifact entry, in instance and sequence order, to the
+    import. The import refuses an entry whose text fails the share filter
+    (`unsafe-content`), runs the rest through `reconcileReplicaEntry` with
+    standing from the derived membership, and journals each outcome
+    (`replica.artifact-reconciled@2`): imported, already present, concurrent
+    head, or tombstone with the entry's exact text, or refused with its
+    reason and no content. A refusal is journaled once per slot and reason.
+    Refusals that depend only on the entry's bytes - content-hash mismatch,
+    a local artifact named as foreign, unsafe content - settle the slot; a
+    refusal that standing or another slot could change is read again by a
+    later pull. A store failure is the membership read's own receipt. An
+    entry reaches the import only after its signature verified under the key
+    it names, and only an admitted computer's entry within its cut is
+    imported, so imports from this person's own computers are not tainted as
+    untrusted; they enter no thread until bound.
+  - **Library.** Imported versions and tombstones live in the in-memory
+    `ReplicaArtifactProjection`, rebuilt from those events on every start;
+    a restart part-way through a pull resumes from what was journaled and
+    reaches the same state. Heads are versions no version or tombstone names
+    as a parent, plus every tombstone; an artifact is hidden only when every
+    head is a tombstone. The host-wide library lists, for a local window
+    only, each synced artifact this host holds no Canvas for, under the
+    Project name it was filed under and the name of the computer that wrote
+    its newest head, with its head count; a paired device sees none. The
+    library query applies to them: mode, kind, and text match (text also
+    matches the computer's name), and a Project filter or the Shared tab
+    matches none, since they have no Project or share here.
+  - **Erase.** A thread purge or Project erase also erases artifact sync's
+    copies of the Canvases it takes: a queued publish is dropped, and a kept
+    entry's event is rewritten to a content-free
+    `replica.artifact-slot-erased@2` that keeps its slot settled, so a later
+    pull does not import the erased content again. Published slots keep
+    their content-free record. Copies already in the store are not deleted.
+  - **Not built yet.** An imported artifact is not bound to a thread here:
+    opening or revising it, which selects or creates a compatible thread
+    under 0040 and then records it through thread external-content
+    ingestion, is a follow-up, as is the renderer view of synced library
+    entries, merging two heads, and undoing a hidden deletion. No product
+    surface deletes an artifact today; a local erase or purge stays local
+    and publishes nothing. Versions committed before this host had a
+    replica identity are not published.
 - **Artifact replica store selection.** Settings › Sync chooses this host's
   store: a synced folder, an S3-compatible bucket, or none, with a sync switch
   that starts off. It is served on the host-only `/api/replica-store` routes,
