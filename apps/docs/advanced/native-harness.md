@@ -48,8 +48,8 @@ you say so. A model without verified tools is **Chat only**: it can answer, but
 it gets none of Octant's tools and cannot start helper agents.
 
 To change that, choose **Verify tools** next to the model: in the model picker,
-under a model in **Settings → Octant Harness**, or in **Settings → Providers &
-Models → Connection details**. Octant sends one request that asks the model to
+under a model in **Settings → Octant Harness**, or in **Settings → Octant
+Harness → Model endpoints → Connection details**. Octant sends one request that asks the model to
 call a test tool. That request may be billed by your provider, once per click.
 A model that calls the tool is verified and gets Octant's tools; one that
 answers in text stays Chat only, and a failed request (a wrong key, a timeout)

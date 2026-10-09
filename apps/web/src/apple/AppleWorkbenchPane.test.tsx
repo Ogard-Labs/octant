@@ -450,6 +450,33 @@ describe("AppleWorkbenchPane", () => {
     expect(screen.getAllByRole("listitem")).toHaveLength(3);
     expect(screen.getByRole("button", { name: "Check again" })).toBeVisible();
   });
+
+  it("offers Repair input only for a disconnected-input refusal, and sends it only on a press", async () => {
+    const { fireEvent, render, screen } = await import("@testing-library/react");
+    const { vi } = await import("vitest");
+    const onRun = vi.fn();
+    const simulatorId = discovery.simulators[0]!.simulatorId;
+    const tap = { kind: "tap", simulatorId, point: { x: 10, y: 20 } } as const;
+    const pane = (reason: string) => (
+      <AppleWorkbenchPane
+        actionFailure={{ kind: "refused", intent: tap, reason }}
+        discovery={discovery}
+        liveFrame={liveFrame()}
+        onRun={onRun}
+        runtime={runtimeSnapshot()}
+        status="ready"
+        variant="device"
+      />
+    );
+    const { rerender } = render(pane("unsupported-device"));
+    expect(screen.queryByRole("button", { name: "Repair input" })).not.toBeInTheDocument();
+
+    rerender(pane("input-disconnected"));
+    expect(screen.getByRole("alert")).toHaveTextContent(/input on .+ is disconnected/i);
+    expect(onRun).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Repair input" }));
+    expect(onRun).toHaveBeenCalledExactlyOnceWith({ kind: "repair-input", simulatorId });
+  });
 });
 
 function liveFrame() {

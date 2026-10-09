@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   PACKAGED_SMOKE_PROCESS_PROBE_TIMEOUT_MS,
   PACKAGED_SMOKE_SERVER_PORT,
+  packagedSmokeServerPort,
   PACKAGED_SMOKE_SERVER_URL,
   cleanupPackagedProcess,
   packagedServerEnvironment,
@@ -69,6 +70,22 @@ describe("sanitizedPackagedEnvironment", () => {
       OCTANT_SERVER_PORT: String(PACKAGED_SMOKE_SERVER_PORT),
     });
     expect(PACKAGED_SMOKE_SERVER_URL).toBe(`http://127.0.0.1:${PACKAGED_SMOKE_SERVER_PORT}`);
+  });
+});
+
+describe("packagedSmokeServerPort", () => {
+  it("keeps the default port unless the developer moves the smoke", () => {
+    expect(packagedSmokeServerPort({})).toBe(13_773);
+    expect(packagedSmokeServerPort({ OCTANT_SMOKE_SERVER_PORT: "" })).toBe(13_773);
+    expect(packagedSmokeServerPort({ OCTANT_SMOKE_SERVER_PORT: "23456" })).toBe(23_456);
+  });
+
+  it("refuses a value that is not a TCP port", () => {
+    for (const value of ["abc", "0", "70000", "12.5", "-1"]) {
+      expect(() => packagedSmokeServerPort({ OCTANT_SMOKE_SERVER_PORT: value })).toThrow(
+        "OCTANT_SMOKE_SERVER_PORT",
+      );
+    }
   });
 });
 

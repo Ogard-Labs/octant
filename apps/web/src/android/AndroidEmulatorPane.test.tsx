@@ -141,4 +141,50 @@ describe("AndroidEmulatorPane", () => {
       screen.getByText("Install platform-tools and the emulator with the Android SDK Manager."),
     ).toBeVisible();
   });
+
+  it("says plainly whether the frame is the live stream or snapshots, and why", async () => {
+    vi.stubGlobal(
+      "createImageBitmap",
+      vi.fn(async () => ({ width: 1080, height: 2400, close: () => undefined })),
+    );
+    const watching = (transport: unknown) =>
+      vi.fn(async () => ({
+        status: "watching",
+        screen: { width: 1080, height: 2400 },
+        frames: (async function* () {
+          yield Uint8Array.of(0xff, 0xd8, 0xff, 0xd9);
+          await new Promise(() => undefined);
+        })(),
+        transport,
+      }));
+    const pane = (watchScreen: ReturnType<typeof watching>) => (
+      <AndroidEmulatorPane
+        checkoutId={ids.checkout as never}
+        client={client({ watchScreen }) as never}
+        createUuid={uuidFactory()}
+        hostBridge={
+          {
+            getHostCapabilities: () => ({
+              sidebarVibrancySupported: false,
+              liveAndroidFrameSupported: true,
+            }),
+          } as never
+        }
+        thread={thread as never}
+      />
+    );
+    try {
+      const { unmount } = render(pane(watching({ kind: "stream" })));
+      expect(await screen.findByText("Live stream")).toBeVisible();
+      unmount();
+      render(pane(watching({ kind: "screencap", reason: "tool-exited" })));
+      expect(
+        await screen.findByText(
+          "Snapshots, live stream unavailable: serve-avd stopped before it attached.",
+        ),
+      ).toBeVisible();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
 });

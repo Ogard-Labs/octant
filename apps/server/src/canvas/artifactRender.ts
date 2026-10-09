@@ -15,6 +15,7 @@ import {
   BAR_LIST_DEFAULT_VISIBLE_ROWS,
   layoutCanvasBarList,
 } from "@octant/domain/canvas-bar-list-layout";
+import { layoutCanvasComparisonMatrix } from "@octant/domain/canvas-comparison-matrix";
 
 /**
  * Drawing an artifact, once.
@@ -56,6 +57,7 @@ const DRAWN_KINDS = new Set<CanvasBlock["kind"]>([
   "heatmap",
   "design",
   "bar-list",
+  "comparison-matrix",
   "code-excerpt",
   "pseudocode",
   "diff",
@@ -233,6 +235,11 @@ function drawBlock(
       return { markup: designFrames(block, y, width, palette), height: 52 };
     case "bar-list":
       return { markup: barList(block, y, width, palette), height: barListHeight(block) };
+    case "comparison-matrix":
+      return {
+        markup: comparisonMatrix(block, y, width, palette),
+        height: comparisonMatrixHeight(block),
+      };
     case "code-excerpt":
     case "pseudocode":
     case "diff":
@@ -980,6 +987,122 @@ function barList(
       return label + bar + value;
     })
     .join("");
+}
+
+/** One row of a comparison matrix in a thumbnail, and how many rows it draws. */
+const MATRIX_ROW_HEIGHT = 9;
+const MATRIX_VISIBLE_CRITERIA = 6;
+const MATRIX_VISIBLE_OPTIONS = 5;
+
+function comparisonMatrixHeight(
+  block: Extract<CanvasBlock, { readonly kind: "comparison-matrix" }>,
+): number {
+  const rows = Math.min(block.criteria.length, MATRIX_VISIBLE_CRITERIA);
+  // A header row, the criteria drawn, and the weighted score row.
+  return (rows + 2) * MATRIX_ROW_HEIGHT + 2;
+}
+
+/**
+ * A comparison matrix drawn from the shared layout: option names across the
+ * top, a criterion label and one mark per option down the side, and the
+ * weighted score as a bar along the bottom. A score or a glyph is drawn as its
+ * share of the criterion; text is a short rule and an empty cell a dash, so a
+ * glance tells a reading from a gap. The recommended column is framed.
+ */
+function comparisonMatrix(
+  block: Extract<CanvasBlock, { readonly kind: "comparison-matrix" }>,
+  y: number,
+  width: number,
+  palette: ArtifactThumbnailPalette,
+): string {
+  const layout = layoutCanvasComparisonMatrix(block);
+  // The recommendation is the point of the picture, so a recommended option
+  // past the visible columns takes the last column rather than vanishing.
+  const shown = layout.options.slice(0, MATRIX_VISIBLE_OPTIONS);
+  const recommendedIndex = layout.options.findIndex((option) => option.recommended);
+  const columnIndexes =
+    recommendedIndex >= MATRIX_VISIBLE_OPTIONS
+      ? [...shown.slice(0, -1).map((option) => option.index), recommendedIndex]
+      : shown.map((option) => option.index);
+  const options = columnIndexes.flatMap((index) => layout.options[index] ?? []);
+  const rows = layout.rows.slice(0, MATRIX_VISIBLE_CRITERIA);
+  const labelWidth = Math.round(width * 0.34);
+  const column = (width - labelWidth) / Math.max(1, options.length);
+  const columnX = (index: number) => PADDING + labelWidth + index * column;
+  const hasTotals = layout.scoredCriteria.length > 0;
+  const bodyRows = rows.length + (hasTotals ? 1 : 0);
+  const parts: string[] = [];
+  options.forEach((option, index) => {
+    if (option.recommended) {
+      parts.push(
+        `<rect data-recommended="true" x="${String(round(columnX(index) + 1))}" y="${String(y)}" width="${String(Math.max(4, round(column - 2)))}" height="${String((bodyRows + 1) * MATRIX_ROW_HEIGHT)}" rx="2" fill="none" stroke="${palette.ink}" stroke-width="1"/>`,
+      );
+    }
+    parts.push(
+      text(
+        round(columnX(index) + 3),
+        y + 7,
+        clamp(option.label, Math.max(3, Math.floor(column / 5))),
+        7,
+        palette.ink,
+        600,
+      ),
+    );
+  });
+  rows.forEach((row, rowIndex) => {
+    const top = y + (rowIndex + 1) * MATRIX_ROW_HEIGHT;
+    parts.push(
+      text(
+        PADDING,
+        top + 7,
+        clamp(row.label, Math.max(6, Math.floor(labelWidth / 5))),
+        7,
+        palette.ink,
+      ),
+    );
+    columnIndexes
+      .flatMap((optionIndex) => row.cells[optionIndex] ?? [])
+      .forEach((cell, index) => {
+        const x = round(columnX(index) + 3);
+        const mid = top + MATRIX_ROW_HEIGHT / 2;
+        const reading = cell.reading;
+        if (reading === undefined) {
+          parts.push(
+            `<rect x="${String(x)}" y="${String(round(mid))}" width="5" height="1" fill="${palette.muted}"/>`,
+          );
+        } else if (reading.kind === "text") {
+          parts.push(
+            `<rect x="${String(x)}" y="${String(round(mid - 1))}" width="${String(Math.max(4, round(column * 0.5)))}" height="2" rx="1" fill="${palette.muted}" opacity="0.7"/>`,
+          );
+        } else if (reading.kind === "glyph") {
+          const fill = reading.glyph === "no" ? "none" : palette.accent;
+          const opacity = reading.glyph === "partial" ? "0.5" : "0.9";
+          parts.push(
+            `<circle cx="${String(x + 3)}" cy="${String(round(mid))}" r="3" fill="${fill}" fill-opacity="${opacity}" stroke="${palette.accent}" stroke-width="1"/>`,
+          );
+        } else {
+          const track = Math.max(6, round(column - 8));
+          parts.push(
+            `<rect x="${String(x)}" y="${String(round(mid - 1.5))}" width="${String(Math.max(1, round(track * (cell.fraction ?? 0))))}" height="3" rx="${String(CHART_BAR_RADIUS)}" fill="${palette.accent}" opacity="${opacityFor(0.35 + 0.55 * (cell.fraction ?? 0))}"/>`,
+          );
+        }
+      });
+  });
+  if (hasTotals) {
+    const top = y + (rows.length + 1) * MATRIX_ROW_HEIGHT;
+    parts.push(
+      `<rect x="${String(PADDING)}" y="${String(top)}" width="${String(width)}" height="0.75" fill="${palette.muted}"/>`,
+      text(PADDING, top + 7, "Weighted score", 7, palette.muted),
+    );
+    options.forEach((option, index) => {
+      const share = option.total?.share ?? 0;
+      const track = Math.max(6, round(column - 8));
+      parts.push(
+        `<rect x="${String(round(columnX(index) + 3))}" y="${String(top + 3)}" width="${String(Math.max(1, round(track * share)))}" height="4" rx="${String(CHART_BAR_RADIUS)}" fill="${palette.ink}" opacity="${opacityFor(0.4 + 0.5 * share)}"/>`,
+      );
+    });
+  }
+  return parts.join("");
 }
 
 /** A row of frame outlines in the design's own proportions, as many as fit. */

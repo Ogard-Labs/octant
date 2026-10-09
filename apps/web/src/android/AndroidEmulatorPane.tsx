@@ -4,6 +4,10 @@ import type {
   AndroidEmulatorRecord,
   AndroidEmulatorRequest,
 } from "@octant/contracts/android-toolchain";
+import type {
+  AndroidScreenFallbackReason,
+  AndroidScreenTransport,
+} from "@octant/contracts/android-toolchain-rpc";
 import { LOCAL_TOOL_HOST_ID } from "@octant/contracts/tool-actions";
 import {
   ANDROID_INPUT_GRANT_MS,
@@ -412,6 +416,9 @@ function androidDeviceView(input: {
         device,
         screen: { kind: "stream", size: liveScreen.screen, attach: liveScreen.attach },
         liveView: "streaming",
+        ...(liveScreen.transport === undefined
+          ? {}
+          : { transport: transportLabel(liveScreen.transport) }),
       };
     }
     if (liveScreen.status === "connecting") {
@@ -578,4 +585,19 @@ function localUserActor(): { readonly kind: "local-user"; readonly actorId: neve
     kind: "local-user",
     actorId: "00000000-0000-4000-8000-000000000002" as never,
   };
+}
+
+/** Says whether the pane shows serve-avd's stream or adb screencap snapshots, and why. */
+function transportLabel(transport: AndroidScreenTransport): string {
+  if (transport.kind === "stream") return "Live stream";
+  const reasons: Record<AndroidScreenFallbackReason, string> = {
+    "no-desktop": "this host is not running in the Octant desktop app.",
+    "not-emulator": "only emulators stream.",
+    "tool-missing": "serve-avd is not installed.",
+    "tool-exited": "serve-avd stopped before it attached.",
+    "timed-out": "serve-avd did not attach in time.",
+    "desktop-unreachable": "the desktop app did not answer.",
+    "no-frames": "the stream sent no picture.",
+  };
+  return `Snapshots, live stream unavailable: ${reasons[transport.reason]}`;
 }

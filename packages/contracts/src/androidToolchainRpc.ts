@@ -56,6 +56,36 @@ export const AndroidScreenStreamRequest = Schema.Struct({
 }).annotations(strict);
 export type AndroidScreenStreamRequest = typeof AndroidScreenStreamRequest.Type;
 
+/**
+ * Why the pane shows adb screencap snapshots instead of the serve-avd stream:
+ * no desktop app hosts this server, the device is not an emulator, serve-avd
+ * is not installed, exited or did not attach in time, the desktop did not
+ * answer, or the stream sent no picture.
+ */
+export const AndroidScreenFallbackReason = Schema.Literal(
+  "no-desktop",
+  "not-emulator",
+  "tool-missing",
+  "tool-exited",
+  "timed-out",
+  "desktop-unreachable",
+  "no-frames",
+);
+export type AndroidScreenFallbackReason = typeof AndroidScreenFallbackReason.Type;
+
+/** How the frames of one Android screen stream reach the pane. */
+export const AndroidScreenTransport = Schema.Union(
+  Schema.Struct({ kind: Schema.Literal("stream") }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("screencap"),
+    reason: AndroidScreenFallbackReason,
+  }).annotations(strict),
+);
+export type AndroidScreenTransport = typeof AndroidScreenTransport.Type;
+
+/** Response header naming the stream's `AndroidScreenTransport`, as JSON. */
+export const ANDROID_SCREEN_TRANSPORT_HEADER = "x-octant-android-transport";
+
 export const AndroidDiscoverySnapshot = Schema.Struct({
   sdk: AndroidSdkDiscovery,
   emulators: Schema.Array(AndroidEmulatorRecord).pipe(Schema.maxItems(256)),
@@ -107,3 +137,4 @@ export const decodeAndroidScreenStreamRequest = Schema.decodeUnknownSync(
 );
 export const decodeAndroidDiscoverySnapshot = Schema.decodeUnknownSync(AndroidDiscoverySnapshot);
 export const decodeAndroidRpcEnvelope = Schema.decodeUnknownSync(AndroidRpcEnvelope);
+export const decodeAndroidScreenTransport = Schema.decodeUnknownSync(AndroidScreenTransport);

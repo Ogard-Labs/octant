@@ -94,6 +94,17 @@ export function AppleDevicePane(props: AppleWorkbenchPaneProps) {
                 allowInput: () => onRun({ kind: "open-input", simulatorId: live.simulatorId }),
               }
             : {}),
+          ...(onRun === undefined
+            ? {}
+            : {
+                // Repairs the Simulator the refused request named, which the
+                // host reported as disconnected.
+                repairInput: (intent: AppleWorkbenchIntent) => {
+                  if ("simulatorId" in intent) {
+                    onRun({ kind: "repair-input", simulatorId: intent.simulatorId });
+                  }
+                },
+              }),
         });
 
   return (

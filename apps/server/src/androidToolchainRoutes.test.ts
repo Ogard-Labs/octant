@@ -145,4 +145,55 @@ describe("Android toolchain routes", () => {
     const ungranted = await (await handler(request(body)))?.json();
     expect(ungranted.snapshot.inputGrants).toBeUndefined();
   });
+
+  it("names how the emulator screen reaches the pane", async () => {
+    const frames = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.close();
+      },
+    });
+    const service = {
+      discover: vi.fn(),
+      execute: vi.fn(),
+      cancel: vi.fn(),
+      snapshot: vi.fn(),
+      readScreenshotArtifact: vi.fn(),
+      watchScreen: vi.fn(async () => ({
+        kind: "watching" as const,
+        screen: { width: 1080, height: 2400 },
+        frames,
+        transport: { kind: "screencap", reason: "tool-exited" },
+      })),
+    };
+    const handler = createAndroidToolchainRouteHandler({
+      windowAuthorityStore: authorityStore(),
+      resolveContext: vi.fn(async () => context),
+      service,
+      now: () => 2,
+    });
+    const response = await handler(
+      new Request("http://127.0.0.1:13773/api/android/screen-stream", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-octant-window-capability": capability,
+          origin: "http://127.0.0.1:5173",
+        },
+        body: JSON.stringify({
+          kind: "android-screen-stream-request",
+          authority,
+          ...scope,
+          emulatorId: "Pixel_8_API_34",
+        }),
+      }),
+    );
+    expect(response?.status).toBe(200);
+    expect(JSON.parse(response?.headers.get("x-octant-android-transport") ?? "null")).toEqual({
+      kind: "screencap",
+      reason: "tool-exited",
+    });
+    expect(response?.headers.get("access-control-expose-headers")).toContain(
+      "x-octant-android-transport",
+    );
+  });
 });

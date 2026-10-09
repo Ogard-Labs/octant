@@ -1,6 +1,9 @@
 import {
+  ANDROID_SCREEN_TRANSPORT_HEADER,
   decodeAndroidRpcEnvelope,
+  decodeAndroidScreenTransport,
   type AndroidArtifactRequest,
+  type AndroidScreenTransport,
   type AndroidScreenStreamRequest,
   type AndroidCancelRequest,
   type AndroidDiscoverySnapshot,
@@ -34,6 +37,8 @@ export type AndroidScreenWatchResult =
       readonly status: "watching";
       readonly screen: { readonly width: number; readonly height: number };
       readonly frames: AsyncIterable<Uint8Array>;
+      /** Absent from a server that does not name its transport. */
+      readonly transport?: AndroidScreenTransport;
     }
   | {
       readonly status: "failed";
@@ -135,10 +140,12 @@ async function watchScreen(
   }
   const size = /^(\d{1,5})x(\d{1,5})$/.exec(response.headers.get(SCREEN_HEADER) ?? "");
   if (response.ok && response.body !== null && size !== null) {
+    const transport = transportOf(response.headers.get(ANDROID_SCREEN_TRANSPORT_HEADER));
     return {
       status: "watching",
       screen: { width: Number(size[1]), height: Number(size[2]) },
       frames: framesOf(response.body),
+      ...(transport === undefined ? {} : { transport }),
     };
   }
   if (response.ok) {
@@ -158,6 +165,15 @@ async function watchScreen(
     kind: "protocol",
     message: "Android toolchain service returned an invalid response.",
   };
+}
+
+function transportOf(header: string | null): AndroidScreenTransport | undefined {
+  if (header === null) return undefined;
+  try {
+    return decodeAndroidScreenTransport(JSON.parse(header));
+  } catch {
+    return undefined;
+  }
 }
 
 async function* framesOf(stream: ReadableStream<Uint8Array>): AsyncGenerator<Uint8Array> {

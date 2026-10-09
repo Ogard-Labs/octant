@@ -24,7 +24,10 @@ export async function runProviderOAuthCommand(options: {
     body: JSON.stringify(options.command),
   });
   const body: unknown = await response.json();
-  if (!response.ok || !isRecord(body) || typeof body.kind !== "string") return undefined;
+  if (!isRecord(body) || typeof body.kind !== "string") return undefined;
+  // The route answers a refusal with an error status and a typed body; the
+  // body is what the panel shows, so it is kept instead of dropped.
+  if (!response.ok && body.kind !== "refused") return undefined;
   if (TOKEN_FIELDS.some((field) => field in body)) return undefined;
   return {
     kind: body.kind as ProviderOAuthCommandResult["kind"],

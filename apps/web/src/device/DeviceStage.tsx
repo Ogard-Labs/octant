@@ -20,6 +20,8 @@ export function DeviceStage(props: {
   readonly badge?: string;
   /** A caption under the device, for booting or connecting. */
   readonly caption?: ReactNode;
+  /** A quiet line under the device saying how its picture arrives. */
+  readonly status?: string;
 }) {
   const captionId = useId();
   const [focused, setFocused] = useState(false);
@@ -93,10 +95,16 @@ export function DeviceStage(props: {
       {props.caption !== undefined ? (
         <p className="device-stage__caption">{props.caption}</p>
       ) : screen.kind === "stream" && props.active ? (
-        // Says where the keys go while they go to the device.
-        <p className="device-stage__caption" hidden={!focused} id={captionId}>
-          Keys go to {props.name} · Tab to leave
+        // Says where the keys go while they go to the device, and otherwise
+        // how the picture arrives, in the same row so nothing moves.
+        <p className="device-stage__caption" hidden={!focused && props.status === undefined}>
+          <span hidden={!focused} id={captionId}>
+            Keys go to {props.name} · Tab to leave
+          </span>
+          {props.status === undefined ? null : <span hidden={focused}>{props.status}</span>}
         </p>
+      ) : props.status !== undefined ? (
+        <p className="device-stage__caption">{props.status}</p>
       ) : (
         <p aria-hidden="true" className="device-stage__caption" hidden />
       )}

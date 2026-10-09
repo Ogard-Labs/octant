@@ -58,7 +58,8 @@ export type AppleWorkbenchIntent =
       readonly kind: "key-press";
       readonly simulatorId: AppleSimulatorId;
       readonly key: string;
-    };
+    }
+  | { readonly kind: "repair-input"; readonly simulatorId: AppleSimulatorId };
 
 export interface AppleWorkbenchPaneProps {
   readonly status: AppleWorkbenchStatus;

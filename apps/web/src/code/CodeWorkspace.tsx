@@ -46,6 +46,7 @@ import type { AndroidEmulatorRequest } from "@octant/contracts/android-toolchain
 import type {
   AppleActionProgress,
   AppleActionRequest,
+  AppleBuildEvidence,
   ApplePlatform,
   AppleSimulatorId,
 } from "@octant/contracts/apple-toolchain";
@@ -671,7 +672,13 @@ function AppleWorkbenchSurface(props: {
           rememberedInputGrants.current.delete(simulatorId);
           setRememberedGrantEpoch(Date.now());
         }
-        if (evidence.outcome !== "succeeded") {
+        if (
+          evidence.outcome !== "succeeded" &&
+          "simulatorId" in intent &&
+          inputDisconnected(evidence)
+        ) {
+          setActionFailure({ kind: "refused", intent, reason: "input-disconnected" });
+        } else if (evidence.outcome !== "succeeded") {
           setActionFailure({ kind: "outcome", intent, outcome: evidence.outcome });
         }
       } catch {
@@ -853,7 +860,22 @@ function appleActionRequest(input: {
         key: intent.key,
         timeoutMs: 30_000,
       };
+    case "repair-input":
+      return {
+        ...base,
+        kind: "repair-input",
+        simulatorId: intent.simulatorId,
+        requestedBy: localUserActor(),
+        timeoutMs: 30_000,
+      };
   }
+}
+
+/** The desktop names a Simulator whose input Device Hub took by this reason. */
+function inputDisconnected(evidence: AppleBuildEvidence): boolean {
+  return evidence.diagnostics.some((diagnostic) =>
+    diagnostic.message.includes(": input-disconnected: "),
+  );
 }
 
 /** Matches the local host principal used elsewhere on this Mac. */
