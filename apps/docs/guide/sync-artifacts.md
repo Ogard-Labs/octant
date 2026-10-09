@@ -33,11 +33,49 @@ On a computer that belongs to a replica, with sync on:
   path. Octant records what each entry did - imported, already here, a second
   version beside one from the same parent, a deletion, or refused and why.
 - **An imported artifact is listed under the Project name and the computer it
-  came from.** It is not filed in a Project or thread on this computer.
-  Opening it here, revising it here, and the library view that shows it are
-  not built yet; Octant keeps the versions it imported for when they are.
+  came from**, in the library's **From your other computers** section. It is
+  not filed in a Project or thread on this computer until you open it here.
 - A Code thread in Plan mode copies nothing out, and with sync off Octant
   neither writes to the store nor reads from it.
+
+## Synced artifacts in the library
+
+Every artifact card in the library says which computer wrote the version it
+shows, once this computer belongs to a replica: **Written on Studio Mac**.
+**Versions…** on a card, or selecting a card under **From your other
+computers**, lists every version with the computer that wrote it.
+
+- **Open it on this computer.** Choose a thread and select **Open**. Only a
+  thread that can take it is offered: an active thread in the same mode
+  (Chat, Work, or Code), in an active Project, whose folder or checkout is
+  available, and not in Plan mode. The thread's own access applies; the
+  artifact brings none from the computer that made it. Its content joins
+  the thread as content from another computer, the same way a web page or
+  an issue would, so the thread asks again before anything it cannot undo.
+  A link to a file or thread on the other computer stays a link to that
+  computer and cannot be refreshed or opened here. When no thread here can
+  take it, the library says so and offers to start a thread or keep it in
+  the library. Once it is open here, later versions from your other
+  computers that build on the one you have are added to it on the next sync.
+- **Two versions.** When two computers changed it from the same version,
+  its card shows **Two versions**. **Choose…** shows both side by side,
+  each with the computer that wrote it. **Keep this one** makes the version
+  you chose the current one on all your computers: Octant writes a new
+  version, with both as its history, and nothing is overwritten. **Merge**
+  opens a new version made from both in a thread: every block of each, and
+  where both changed the same block, both sides one after the other, so you
+  can edit it down. A block that links to a source the merged version does
+  not have is left out, and the library says how many.
+- **Deleted on another computer.** When a deletion on another computer is
+  all that is left of an artifact, its card shows **Deleted on Studio Mac**
+  with **Restore**. Restore writes a new version over the deletion, so the
+  artifact is back on all your computers; the deletion stays in its
+  history.
+
+Keep this one and Restore send a version to your other computers, so they
+need sync on. If the store cannot be reached, the version waits on this
+computer and goes out later, and the library says so. Deleting an artifact
+on this computer, and erasing a thread or Project, stay on this computer.
 
 ## Set up a store
 
@@ -95,8 +133,9 @@ replace a version you already have.
 If two computers revise the same artifact from the same parent, the library
 shows both. You pick one, or you merge them into a new version. Nothing is
 chosen for you. A deletion and a revision from the same parent are both kept.
-The revision stays visible. The artifact is hidden only when the deletion is
-the only version left, and you can undo that.
+The revision stays visible. When the deletion is the only version left, the
+library shows the artifact as deleted, and you can restore it. See
+[Synced artifacts in the library](#synced-artifacts-in-the-library).
 
 The mirror and the export are separate. They still write plain files for you
 and for other tools, and they never push to git. Pointing a sync client at
