@@ -286,6 +286,81 @@ describe("rendering a canvas as a document", () => {
     expect(html.body).not.toMatch(/<\s*script/i);
   });
 
+  it("writes math as GitHub math in Markdown and as MathML with its source in HTML", () => {
+    const formula = decodeCanvasBlock({
+      blockId: "bayes",
+      schemaVersion: CANVAS_SCHEMA_VERSION,
+      kind: "math",
+      layout: "display",
+      source: "P(A \\mid B) = \\frac{P(B \\mid A)\\,P(A)}{P(B)}",
+      caption: "Bayes' theorem",
+    });
+    const sentence = decodeCanvasBlock({
+      blockId: "area",
+      schemaVersion: CANVAS_SCHEMA_VERSION,
+      kind: "math",
+      layout: "inline",
+      runs: [
+        { text: "A circle covers " },
+        { math: "\\pi r^2" },
+        { text: " when " },
+        { math: "r<1" },
+      ],
+    });
+
+    const markdown = renderArtifactMarkdown(definition([formula, sentence]));
+    expect(markdown.kind).toBe("rendered");
+    if (markdown.kind !== "rendered") return;
+    expect(markdown.body).toContain(
+      "```math\nP(A \\mid B) = \\frac{P(B \\mid A)\\,P(A)}{P(B)}\n```\n\nBayes' theorem",
+    );
+    // A formula is a code span, so `<` stays mathematics rather than markup,
+    // and the prose keeps the spaces that separate it from the formula.
+    expect(markdown.body).toContain("A circle covers $`\\pi r^2`$ when $`r<1`$");
+
+    const html = renderArtifactHtml(definition([formula, sentence]));
+    expect(html.kind).toBe("rendered");
+    if (html.kind !== "rendered") return;
+    expect(html.body).toMatch(/<math[^>]*display="block"/);
+    expect(html.body).toContain(
+      '<annotation encoding="application/x-tex">P(A \\mid B) = \\frac{P(B \\mid A)\\,P(A)}{P(B)}</annotation>',
+    );
+    expect(html.body).toContain("<figcaption>Bayes&apos; theorem</figcaption>");
+    expect(html.body).toContain("<summary>Source</summary>");
+    expect(html.body).toContain('A circle covers <span class="katex"><math');
+    expect(html.body).toContain('<annotation encoding="application/x-tex">r&lt;1</annotation>');
+    // MathML alone: no KaTeX glyph layer that would need its stylesheet and fonts.
+    expect(html.body).not.toContain("katex-html");
+    expect(html.body).not.toMatch(/<\s*script|\son\w+=|href=/i);
+  });
+
+  it("writes a formula the typesetter refuses, or one carrying a secret, as text", () => {
+    const broken = decodeCanvasBlock({
+      blockId: "broken",
+      schemaVersion: CANVAS_SCHEMA_VERSION,
+      kind: "math",
+      layout: "display",
+      source: "\\frac{1}{",
+    });
+    const secret = decodeCanvasBlock({
+      blockId: "secret",
+      schemaVersion: CANVAS_SCHEMA_VERSION,
+      kind: "math",
+      layout: "display",
+      source: "\\text{sk-proj-abcdefghijklmnopqrstu}",
+    });
+
+    const html = renderArtifactHtml(definition([broken, secret]));
+    expect(html.kind).toBe("rendered");
+    if (html.kind !== "rendered") return;
+    expect(html.body).toContain("<pre>\\frac{1}{</pre>");
+    expect(html.body).toContain("[redacted]");
+    expect(html.body).not.toContain("sk-proj");
+
+    const markdown = renderArtifactMarkdown(definition([secret]));
+    expect(markdown.kind === "rendered" && markdown.body).not.toContain("sk-proj");
+  });
+
   it("carries a metric caption into its reading", () => {
     const captioned = {
       blockId: "metric-caption",

@@ -36,6 +36,7 @@
     "@opencode-ai/sdk": "catalog:",
     "better-sqlite3": "catalog:",
     "effect": "catalog:",
+    "katex": "0.18.9",
     "node-pty": "catalog:",
     "playwright-core": "catalog:",
     "yaml": "catalog:"

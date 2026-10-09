@@ -865,6 +865,19 @@ score is view state. The disclosed table reads one row per option. Under forced
 colours the column keeps a system-ink rule, the badge an outline, and the meters
 a framed track.
 
+**Math.** A formula is typeset by KaTeX in the reading ink, never in a colour
+of its own: fraction rules, radicals, and delimiters all take the current
+colour, so a formula follows the theme, dark mode, and forced colours, and the
+source may not pick a colour. A display formula sits on its own line inside a
+focusable region that scrolls sideways, so a long line never widens the page at
+phone width, with its caption centred beneath in secondary ink. An inline
+formula sits in the prose line at the prose size. The drawn glyphs are hidden
+from assistive technology and MathML carries the reading. **View source**
+discloses the source as plain monospace text. A formula KaTeX refuses shows its
+source in a dashed frame with "This formula could not be drawn." rather than
+KaTeX's red error text. Under forced colours the formula is CanvasText and the
+refused frame keeps a system-ink border.
+
 **Metric tiles.** Consecutive metric blocks are gathered into one responsive
 row of two to four tiles, and a metric's value is set large in tabular numerals
 so a row of numbers aligns. A metric may name how its value reads (`format`), a

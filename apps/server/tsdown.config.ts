@@ -10,6 +10,8 @@ export default defineConfig({
       // this one is not in it: leaving it external made the server fail to start
       // outside a repository checkout.
       /^@modelcontextprotocol\//,
+      // KaTeX typesets exported math; it is bundled for the same reason.
+      /^katex(?:\/|$)/,
     ],
     onlyBundle: false,
   },

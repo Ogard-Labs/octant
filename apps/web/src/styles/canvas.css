@@ -1362,6 +1362,101 @@
   }
 }
 
+/* ── Math ────────────────────────────────────────────────────────────────
+   KaTeX draws the glyphs; this places them. Every stroke KaTeX draws, the
+   fraction rules and the radical and delimiter shapes alike, takes the
+   current ink, so a formula follows the theme and forced colours without a
+   colour of its own. A display formula scrolls inside its own focusable
+   region, so a long line never makes the page scroll sideways on a phone. */
+
+.canvas-block__math {
+  min-width: 0;
+  max-width: 100%;
+  margin: 0;
+  color: var(--oct-fg);
+}
+
+.canvas-block__math-display {
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  padding: var(--oct-space-2) 0;
+}
+
+.canvas-block__math-display:focus-visible {
+  outline: 2px solid var(--octant-focus-ring);
+  outline-offset: 2px;
+  border-radius: var(--oct-radius-md);
+}
+
+/* KaTeX centres display math with its own margin; the region supplies the
+   room, so the formula does not push the caption away. */
+.canvas-block__math-display .katex-display {
+  margin: 0;
+}
+
+.canvas-block__math-paragraph {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.canvas-block__math-caption {
+  margin-top: var(--oct-space-1);
+  color: var(--oct-fg-2);
+  font-size: var(--oct-text-sm);
+  text-align: center;
+}
+
+.canvas-block__math-source {
+  margin-top: var(--oct-space-2);
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+}
+
+.canvas-block__math-source summary {
+  cursor: pointer;
+}
+
+.canvas-block__math-source pre,
+.canvas-block__math-source p {
+  margin: var(--oct-space-1) 0 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.canvas-block__math-source code,
+.canvas-block__math-refused code {
+  font-family: var(--oct-font-mono);
+  color: var(--oct-fg);
+}
+
+.canvas-block__math-refused {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--oct-space-1);
+  padding: 0 var(--oct-space-1);
+  border: 1px dashed var(--oct-hairline);
+  border-radius: var(--oct-radius-md);
+}
+
+.canvas-block__math-refused-note {
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+}
+
+@media (forced-colors: active) {
+  .canvas-block__math,
+  .canvas-block__math .katex {
+    color: CanvasText;
+  }
+
+  .canvas-block__math-refused {
+    border-color: CanvasText;
+  }
+}
+
 /* ── Interactive table ───────────────────────────────────────────────────
    The same data-visualisation system as a chart, a treemap, and a bar list:
    shared number formats, the shared path style, and the shared scale roles.

@@ -128,7 +128,7 @@ try {
     page.setDefaultTimeout(15_000);
     await page.goto(harnessUrl, { waitUntil: "domcontentloaded" });
     await page.waitForSelector(
-      "main[data-canvas-chart-evidence='all'] .canvas-block__chart, main[data-canvas-chart-evidence='all'] .canvas-block__heatmap, main[data-canvas-chart-evidence='all'] .canvas-block__bar-list, main[data-canvas-chart-evidence='all'] .canvas-block__matrix, main[data-canvas-chart-evidence='all'] .canvas-block__table, main[data-canvas-chart-evidence='all'] .canvas-block__kind-diagram",
+      "main[data-canvas-chart-evidence='all'] .canvas-block__chart, main[data-canvas-chart-evidence='all'] .canvas-block__heatmap, main[data-canvas-chart-evidence='all'] .canvas-block__bar-list, main[data-canvas-chart-evidence='all'] .canvas-block__matrix, main[data-canvas-chart-evidence='all'] .canvas-block__math, main[data-canvas-chart-evidence='all'] .canvas-block__table, main[data-canvas-chart-evidence='all'] .canvas-block__kind-diagram",
     );
 
     // Show the table's sorted state in the capture: the sort mark and the
