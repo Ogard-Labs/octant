@@ -812,6 +812,24 @@ describe("makeOpenAiCompatibleDriver", () => {
       servedModelId: "DeepSeek-V4.1-Flash",
     });
   });
+
+  it("takes image input from the model a deployment served, and keeps it across probes", async () => {
+    const runtimeRegistry = new ProviderRuntimeRegistry();
+    runtimeRegistry.setObservedState(observedManualModel());
+    const fetch = vi.fn(async (url: string | URL | Request) =>
+      String(url).endsWith("/models")
+        ? new Response(null, { status: 404 })
+        : chatStream("ok", undefined, "gpt-4.1-mini-2025-04-14"),
+    );
+    const driver = makeDriver({ fetch, runtimeRegistry, contextWindows: { remember: vi.fn() } });
+
+    await runTurns(driver, ["hi"]);
+
+    const imageCapable = { inputModalities: ["text", "image"], imageInput: "supported" };
+    expect(runtimeRegistry.observedState(instanceId)?.models[0]).toMatchObject(imageCapable);
+    await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
+    expect(runtimeRegistry.observedState(instanceId)?.models[0]).toMatchObject(imageCapable);
+  });
 });
 
 function observedManualModel() {

@@ -94,11 +94,12 @@ export const MODEL_CONTEXT_PROFILES: ReadonlyArray<ModelContextProfile> = [
     reference: ANTHROPIC_MODELS,
   },
   {
-    // Not flagged for image input: it launched text-only, so the catalogue
-    // does not assume it reads images.
     names: ["claude-3-5-haiku"],
     contextWindow: 200_000,
     maxOutput: 8_192,
+    // It launched text-only; Anthropic's release notes of 24 February 2025
+    // added vision to it.
+    acceptsImages: true,
     reference: ANTHROPIC_MODELS,
   },
   {

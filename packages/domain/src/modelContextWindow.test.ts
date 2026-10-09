@@ -109,7 +109,13 @@ describe("model context window", () => {
   });
 
   it("says a model whose provider documents image input accepts images", () => {
-    for (const id of ["gpt-4o-2024-08-06", "openai/gpt-5-mini", "claude-sonnet-4-5", "o3"]) {
+    for (const id of [
+      "gpt-4o-2024-08-06",
+      "openai/gpt-5-mini",
+      "claude-sonnet-4-5",
+      "claude-3-5-haiku-20241022",
+      "o3",
+    ]) {
       expect(resolveModelInputModalities({ id })).toEqual({
         inputModalities: ["text", "image"],
         imageInput: "supported",

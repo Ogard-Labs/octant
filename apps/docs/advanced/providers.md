@@ -244,8 +244,9 @@ browser and computer tools, only when Octant knows it accepts images: the
 endpoint's own model list says so (OpenRouter does), or the model is a family
 whose provider documents image input, such as GPT-4o, GPT-4.1, GPT-5, o3,
 o4-mini, Claude 4 models, and Gemini 2.5. What the endpoint reports wins over
-the built-in list. Any other model, including a deployment with a name of its
-own, is treated as text-only.
+the built-in list. A deployment with a name of its own takes image input from
+the model it reports serving after its first completed request. Any other
+model is treated as text-only.
 
 Image generation profiles are also provider instances. Open **Settings → Image
 generation → Add image provider** to choose a provider, enter its API key, and

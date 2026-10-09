@@ -1873,7 +1873,8 @@ first source that names its input modalities wins: the endpoint's own listing
 on an OpenAI-style list entry, or the ChatGPT plan listing's
 `input_modalities`), which also wins when it says text-only; then the same
 profile catalogue, whose families carry an image-input flag only where their
-cited model page lists image input, matched on the model id. Nothing naming
+cited model page lists image input, matched on the model id and, when neither
+named them, on the `model` the endpoint said it served. Nothing naming
 them leaves the model text-only with `imageInput` absent, which reads as
 unknown rather than unsupported. Ollama keeps its own `vision` capability
 report. The modality gates which models are offered for reading images and
