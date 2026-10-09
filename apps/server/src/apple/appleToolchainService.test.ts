@@ -12,6 +12,8 @@ import { link, mkdir, mkdtemp, stat, symlink, utimes, writeFile } from "node:fs/
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import type { SimulatorDeviceInput } from "@octant/contracts/simulator-device";
+import { simulatorInputThroughDesktop } from "./simulatorInputThroughDesktop";
 
 const artifactFixture = mkdtempSync(join(tmpdir(), "octant-apple-build-"));
 afterAll(() => rmSync(artifactFixture, { recursive: true, force: true }));
@@ -2047,6 +2049,97 @@ describe("AppleToolchainService Simulator input", () => {
     expect(new TextDecoder().decode(artifacts.get(log!.reference))).toContain(
       "com.apple.hiservices-xpcservice",
     );
+  });
+
+  it("records a tap the desktop found disconnected as failed and says why, never as completed", async () => {
+    // Observed 2026-10-08 on Xcode 27.0: with Device Hub holding the
+    // Simulator's input, every pane tap was journaled "tap completed" and
+    // nothing moved.
+    const deliver = vi.fn(async () => ({
+      kind: "refused" as const,
+      reason: "input-disconnected",
+      message:
+        "Simulator input is disconnected. Repair input restarts the Simulator's home screen.",
+    }));
+    const service = new AppleToolchainService({
+      execute: discoveryExecutor(),
+      injectSimulatorInput: simulatorInputThroughDesktop({ deliver }),
+      writeArtifact: async () => undefined,
+      realpath: async (path: string) => path,
+      now: () => "2026-07-27T20:00:00.000Z",
+      newId: () => "30000000-0000-4000-8000-000000000012",
+    });
+    await service.discover(discoveryRequest, context);
+    const evidence = await service.execute(
+      simulatorRequest({
+        kind: "tap",
+        bundleIdentifier: undefined,
+        requestedBy: actor,
+        point: { x: 603, y: 1311 },
+        approval: { kind: "approved", approvalId: ids.approval as never },
+      }),
+      context,
+    );
+    expect(evidence.outcome).toBe("failed");
+    expect(evidence.diagnostics).toEqual([
+      {
+        severity: "note",
+        message:
+          "tap failed: input-disconnected: Simulator input is disconnected. Repair input restarts the Simulator's home screen.",
+      },
+    ]);
+  });
+
+  it("sends Repair input to the desktop only when a person asks, under the input grant", async () => {
+    const deliver = vi.fn(async (_input: SimulatorDeviceInput, _signal?: AbortSignal) => ({
+      kind: "delivered" as const,
+    }));
+    const service = new AppleToolchainService({
+      execute: discoveryExecutor(),
+      injectSimulatorInput: simulatorInputThroughDesktop({ deliver }),
+      writeArtifact: async () => undefined,
+      realpath: async (path: string) => path,
+      now: () => "2026-07-27T20:00:00.000Z",
+      newId: () => "30000000-0000-4000-8000-000000000012",
+    });
+    const gated = { ...context, executionPolicy: "approval-gated" as const };
+    await service.discover(discoveryRequest, gated);
+    const repair = simulatorRequest({
+      kind: "repair-input",
+      bundleIdentifier: undefined,
+      requestedBy: actor,
+      approval: { kind: "not-required" },
+    });
+    const ungranted = await service.execute(repair, gated);
+    expect(ungranted.outcome).toBe("unauthorized");
+    expect(deliver).not.toHaveBeenCalled();
+
+    const repaired = await service.execute(
+      { ...repair, actionId: "30000000-0000-4000-8000-000000000030" as never },
+      { ...gated, inputGranted: true },
+    );
+    expect(repaired.outcome).toBe("succeeded");
+    expect(deliver.mock.calls.map(([input]) => input)).toEqual([
+      expect.objectContaining({ kind: "repair-input", udid: ids.simulator }),
+    ]);
+
+    const byAgent = await service.execute(
+      simulatorRequest({
+        kind: "repair-input",
+        actionId: "30000000-0000-4000-8000-000000000031" as never,
+        bundleIdentifier: undefined,
+        requestedBy: {
+          kind: "agent",
+          actorId: "30000000-0000-4000-8000-000000000098" as never,
+          providerInstanceId: ids.provider as never,
+          threadId: ids.thread as never,
+        },
+        approval: { kind: "approved", approvalId: ids.approval as never },
+      }),
+      gated,
+    );
+    expect(byAgent.outcome).toBe("unauthorized");
+    expect(deliver).toHaveBeenCalledTimes(1);
   });
 
   it("refuses to re-inject interrupted input under the same actionId", async () => {

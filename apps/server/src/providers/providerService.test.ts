@@ -20,6 +20,7 @@ import type { PersistenceService } from "../persistence/persistenceService";
 import { WindowAuthorityStore } from "../windowAuthorityStore";
 import { makeOpenAiCompatibleDriver } from "./openAiCompatibleDriver";
 import { ProviderDriverConfigurationError } from "./providerDriverFactory";
+import { makeOllamaDriver } from "./ollamaDriver";
 import { createProviderRouteHandler } from "./providerRoutes";
 import { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
 import {
@@ -469,6 +470,75 @@ describe("ProviderService", () => {
     ).resolves.toMatchObject({
       kind: "provider-model-tags-updated",
       snapshot: { version: 2, models: [{ id: "model-1", dataTags: ["zdr"] }] },
+    });
+  });
+
+  it("keeps a person's context window override with the model and lets clearing it return to automatic", async () => {
+    const fixture = serviceFixture({
+      instances: [provider()],
+      withCatalogPersistence: true,
+      initialCatalog: persistedCatalog(),
+    });
+    await fixture.service.probe(windowId, instanceId);
+
+    await expect(
+      fixture.service.execute(windowId, {
+        kind: "set-provider-model-context-window",
+        instanceId,
+        expectedVersion: 1,
+        modelId: "model-1",
+        contextWindow: 96_000,
+      }),
+    ).resolves.toMatchObject({
+      kind: "provider-model-updated",
+      snapshot: { models: [{ id: "model-1", contextWindowOverride: 96_000 }] },
+    });
+    // The next request reads the live observation, not only the catalogue.
+    expect(fixture.runtime.observedState(instanceId)?.models[0]?.contextWindowOverride).toBe(
+      96_000,
+    );
+    // A later probe rebuilds the model from the provider and keeps what the person set.
+    await fixture.service.probe(windowId, instanceId);
+    expect(fixture.runtime.observedState(instanceId)?.models[0]?.contextWindowOverride).toBe(
+      96_000,
+    );
+
+    await fixture.service.execute(windowId, {
+      kind: "set-provider-model-context-window",
+      instanceId,
+      expectedVersion: 1,
+      modelId: "model-1",
+    });
+    expect(fixture.catalogs()[0]).toMatchObject({ models: [{ id: "model-1" }] });
+    expect(
+      (fixture.catalogs()[0] as ProviderCatalogSnapshot).models[0]?.contextWindowOverride,
+    ).toBeUndefined();
+    expect(
+      fixture.runtime.observedState(instanceId)?.models[0]?.contextWindowOverride,
+    ).toBeUndefined();
+  });
+
+  it("keeps what a request taught about a model's window past a restart", async () => {
+    const fixture = serviceFixture({
+      instances: [provider()],
+      withCatalogPersistence: true,
+      initialCatalog: persistedCatalog(),
+    });
+    fixture.service.rememberModelContextWindow(instanceId, decodeProviderModelId("model-1"), {
+      learnedContextWindow: 131_072,
+      servedModelId: "DeepSeek-V4.1-Flash",
+    });
+    expect(fixture.catalogs()[0]).toMatchObject({
+      models: [
+        { id: "model-1", learnedContextWindow: 131_072, servedModelId: "DeepSeek-V4.1-Flash" },
+      ],
+    });
+
+    // A restarted host has no live observation; the first probe restores the lesson.
+    await fixture.service.probe(windowId, instanceId);
+    expect(fixture.runtime.observedState(instanceId)?.models[0]).toMatchObject({
+      learnedContextWindow: 131_072,
+      servedModelId: "DeepSeek-V4.1-Flash",
     });
   });
 
@@ -3126,6 +3196,35 @@ describe("ProviderService", () => {
       readiness: "incompatible",
       message: "Provider configuration is incompatible.",
     });
+  });
+
+  it("records an Ollama endpoint answering HTTP 503 as unavailable rather than degraded", async () => {
+    const fixture = serviceFixture({ instances: [ollamaProvider()] });
+    const service = new ProviderService({
+      persistence: fixture.persistence,
+      runtimeRegistry: fixture.runtime,
+      driver: (instance) =>
+        makeOllamaDriver({
+          instanceId: instance.id,
+          configuration: { kind: "ollama-native-http", baseUrl: "http://127.0.0.1:11434" },
+          runtimeRegistry: fixture.runtime,
+          fetch: async () => new Response("secret upstream page", { status: 503 }),
+        }),
+      uuid: () => crypto.randomUUID(),
+      clock: () => now,
+    });
+
+    await expect(service.probe(windowId, instanceId)).rejects.toMatchObject({
+      failure: { category: "unavailable" },
+    });
+
+    const observed = fixture.runtime.observedState(instanceId);
+    expect(observed).toMatchObject({
+      readiness: "unavailable",
+      models: [],
+      message: "The Ollama request failed with HTTP 503.",
+    });
+    expect(JSON.stringify(observed)).not.toContain("secret upstream page");
   });
 
   it("preserves a typed probe refusal reason and detected version without forwarding driver text", async () => {

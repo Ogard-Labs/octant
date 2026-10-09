@@ -4,6 +4,7 @@ import type { NativeHarnessResponse } from "../harness/nativeHarnessTransport";
 import {
   DEFAULT_ENDPOINT_RETRY_POLICY,
   contextOverflowFromBody,
+  contextWindowFromRefusal,
   endpointRetryDelayMs,
   endpointRetryReason,
   isContextOverflowFailure,
@@ -93,6 +94,50 @@ describe("recognising a filled context window", () => {
       message: "The provider rejected the request because it exceeded the model's context length.",
     });
     expect(contextOverflowFromBody('{"error":{"code":"invalid_api_key"}}')).toBeUndefined();
+  });
+
+  it.each([
+    [
+      "This model's maximum context length is 131072 tokens. However, your messages resulted in 140000 tokens.",
+      131_072,
+    ],
+    ["prompt is too long: 250,000 tokens > 200,000 maximum", 200_000],
+    ["Prompt contains 40000 tokens, too large for model with 32768 maximum context length", 32_768],
+    ["the request exceeds the available context size (8192 tokens)", 8_192],
+    [
+      "The provider rejected the request because it exceeded the model's context length of 65536 tokens.",
+      65_536,
+    ],
+  ])("reads the window a refusal names from %j", (message, contextWindow) => {
+    expect(contextWindowFromRefusal(message)).toBe(contextWindow);
+  });
+
+  it.each([
+    "Request too large: the context window is full.",
+    '{"error":{"code":"context_length_exceeded","message":"too long"}}',
+    // A figure no model window takes is a misread, not a limit.
+    "maximum context length is 12 tokens",
+  ])("names no window for %j", (message) => {
+    expect(contextWindowFromRefusal(message)).toBeUndefined();
+  });
+
+  it("keeps the named window in the failure a driver passes on, and still reads it as overflow", () => {
+    const refused = contextOverflowFromBody(
+      JSON.stringify({
+        error: {
+          code: "context_length_exceeded",
+          message: "This model's maximum context length is 131072 tokens.",
+        },
+      }),
+    );
+    expect(refused).toEqual({
+      category: "provider-failed",
+      message:
+        "The provider rejected the request because it exceeded the model's context length of 131072 tokens.",
+    });
+    if (refused === undefined) throw new Error("Expected an overflow failure.");
+    expect(isContextOverflowFailure(refused)).toBe(true);
+    expect(contextWindowFromRefusal(refused.message)).toBe(131_072);
   });
 });
 

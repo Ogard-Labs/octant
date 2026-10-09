@@ -577,7 +577,12 @@ export function ProviderCreateForm(
                     type="url"
                   />
                 </label>
+                {/* Keyed by type so switching from an OpenAI-compatible form,
+                    which the Model endpoints list opens on, starts Anthropic
+                    at its own API-key default rather than the bearer choice
+                    the shared field remembered. */}
                 <HttpCredentialFields
+                  key={`create-anthropic-compatible-${providerType}`}
                   authentication="api-key"
                   authenticationLabel="Authentication"
                   controlClassName="window-no-drag"

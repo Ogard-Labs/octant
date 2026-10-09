@@ -1,6 +1,9 @@
 import type { AndroidToolchainClient } from "@octant/client-runtime/android-toolchain-client";
 import { androidFrameMediaType } from "./androidFrameMediaType";
-import type { AndroidScreenStreamRequest } from "@octant/contracts/android-toolchain-rpc";
+import type {
+  AndroidScreenStreamRequest,
+  AndroidScreenTransport,
+} from "@octant/contracts/android-toolchain-rpc";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 export type AndroidEmulatorLiveScreen =
@@ -9,6 +12,8 @@ export type AndroidEmulatorLiveScreen =
   | {
       readonly status: "live";
       readonly screen: { readonly width: number; readonly height: number };
+      /** The serve-avd stream, or screencap snapshots and why. Absent when the server does not say. */
+      readonly transport?: AndroidScreenTransport;
       readonly attach: (canvas: HTMLCanvasElement | null) => void;
     }
   | { readonly status: "unavailable"; readonly message: string };
@@ -27,9 +32,11 @@ export function useAndroidEmulatorLiveScreen(options: {
   readonly client: AndroidToolchainClient;
   readonly request?: AndroidScreenStreamRequest;
   readonly enabled: boolean;
+  /** Raising it gives up the current view and asks for a fresh one: Reconnect. */
+  readonly attempt?: number;
   readonly decode?: (png: Uint8Array) => Promise<DecodedFrame>;
 }): AndroidEmulatorLiveScreen {
-  const { client, enabled, request } = options;
+  const { attempt = 0, client, enabled, request } = options;
   const decode = options.decode ?? decodePng;
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const latestRef = useRef<{ readonly key: string; readonly frame: DecodedFrame } | undefined>(
@@ -42,6 +49,7 @@ export function useAndroidEmulatorLiveScreen(options: {
       | {
           readonly status: "live";
           readonly screen: { readonly width: number; readonly height: number };
+          readonly transport?: AndroidScreenTransport;
         }
       | { readonly status: "unavailable"; readonly message: string };
   }>({ key: undefined, state: { status: "off" } });
@@ -121,7 +129,11 @@ export function useAndroidEmulatorLiveScreen(options: {
                 painted = true;
                 everLive = true;
                 clearTimeout(noPicture);
-                setState({ status: "live", screen: watch.screen });
+                setState({
+                  status: "live",
+                  screen: watch.screen,
+                  ...(watch.transport === undefined ? {} : { transport: watch.transport }),
+                });
               }
             }
           } finally {
@@ -148,7 +160,7 @@ export function useAndroidEmulatorLiveScreen(options: {
       latestRef.current = undefined;
     };
     // `requestKey` stands in for `request`: callers rebuild the object each render.
-  }, [client, decode, enabled, requestKey]);
+  }, [attempt, client, decode, enabled, requestKey]);
 
   const state: (typeof known)["state"] =
     known.key === requestKey

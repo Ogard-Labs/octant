@@ -93,6 +93,7 @@ function entry(
     artifact: {
       canvasId: ids.canvas,
       hostId: "host-north",
+      projectName: "Launch",
     },
     parents: [{ versionId: ids.otherVersion }],
     contentHash: hash,
@@ -251,7 +252,7 @@ describe("replica entry contract", () => {
       "sequence",
       "publicKey",
     ]);
-    expect(Object.keys(parsed.artifact)).toEqual(["canvasId", "hostId"]);
+    expect(Object.keys(parsed.artifact)).toEqual(["canvasId", "hostId", "projectName"]);
     expect(Object.keys(parsed.bundle.octant)).toEqual([
       "format",
       "canvasId",

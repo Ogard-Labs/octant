@@ -13,10 +13,31 @@ are signed but not encrypted.
 ## What turning sync on does in this preview
 
 You can choose a store and turn sync on, and **Test connection** writes its
-probe file there. Artifact versions are not copied yet, and nothing is
-imported from the store yet. Turning sync on lets Octant reach the store you
-chose; it does not start copying. This page describes what is copied once
-that ships.
+probe file there. Copying starts only once this computer also belongs to a
+replica: it set one up, or it asked to join one, in **Settings › Sync**. On a
+computer that has done neither, turning sync on lets Octant reach the store and
+copies nothing.
+
+On a computer that belongs to a replica, with sync on:
+
+- **Each new artifact version, and each deletion, is copied out** as soon as
+  it is committed, whichever part of Octant made it. If the store cannot be
+  reached, the copy waits on this computer, even across a restart, and goes
+  out later in the order it was made. A copy that fails never undoes the
+  version on this computer; Octant records why it failed. Versions committed
+  before this computer belonged to a replica are not copied.
+- **Other computers' versions are read in** when Octant starts, every few
+  minutes, and whenever a pull is requested on this computer. Each one is checked first: the
+  signature, that its writer is one of your computers, that its content
+  matches, and that it carries no credential, secret-shaped text, or absolute
+  path. Octant records what each entry did - imported, already here, a second
+  version beside one from the same parent, a deletion, or refused and why.
+- **An imported artifact is listed under the Project name and the computer it
+  came from.** It is not filed in a Project or thread on this computer.
+  Opening it here, revising it here, and the library view that shows it are
+  not built yet; Octant keeps the versions it imported for when they are.
+- A Code thread in Plan mode copies nothing out, and with sync off Octant
+  neither writes to the store nor reads from it.
 
 ## Set up a store
 
@@ -55,7 +76,8 @@ Readable artifact versions, and a tombstone when you delete one. Each entry
 is a plain JSON bundle, the same shape as an export, signed by the computer
 that wrote it. You can open the files. The storage provider can read them.
 Octant does not encrypt them. Credentials, secret-shaped text, and absolute
-file paths in that text are refused or removed before an entry is written.
+file paths in that text are refused before an entry is written: such a
+version stays on this computer and is not copied.
 A copy this computer imported is not written out again. A later edit here is
 a new version.
 
@@ -168,8 +190,8 @@ keys, or move to a new store.
 
 **Sync status** shows the last time the store refused this computer, could
 not be reached, or held a file where this computer writes next. Last publish,
-last pull, and the queue say **Not available yet**: artifact versions are not
-copied in this preview. A paired phone or a browser on another device sees
+last pull, and the queue say **Not available yet**: Settings does not show
+them in this preview, although versions are copied. A paired phone or a browser on another device sees
 this status and the list of computers, read-only. Setting up sync, joining,
 approving, and revoking happen only in the Octant app on the computer itself.
 

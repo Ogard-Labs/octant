@@ -18,6 +18,7 @@
 @import "./styles/inbox.css";
 @import "./styles/review.css";
 @import "./styles/apple.css";
+@import "./styles/device.css";
 @import "./styles/preview.css";
 @import "./styles/zen.css";
 @import "./styles/canvas.css";
@@ -2261,6 +2262,19 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   padding: 12px 0 0;
 }
 
+/* Model endpoints: the one-step sign-ins sit in their own row above the
+   add-by-URL disclosure, so opening that form never moves the sign-ins. */
+.model-endpoints__add {
+  display: grid;
+  gap: var(--oct-space-3);
+}
+
+.model-endpoints__sign-ins {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--oct-space-2);
+}
+
 /* Reordering keeps the pre-port up/down mechanism; the grip column just
    presents it as two stacked 24px targets (the WCAG 2.5.8 floor the
    system's .prov-grip comment cites). */
@@ -2384,8 +2398,17 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   min-width: 0;
 }
 
+/* A subscription endpoint's sign-in reads as part of its row: full width,
+   on the name's reading edge, above the details. */
+.prov-signin {
+  grid-column: 1 / -1;
+  min-width: 0;
+  padding: var(--oct-space-2) 0 0 36px;
+}
+
 @media (max-width: 560px) {
-  .prov-details {
+  .prov-details,
+  .prov-signin {
     padding-inline-start: 0;
   }
 }
@@ -2474,6 +2497,13 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 
 .provider-model-visibility li > .octant-switch {
   flex: 0 0 auto;
+}
+
+.provider-model-visibility li > .provider-model-visibility__context-window {
+  flex: 0 0 13rem;
+  width: 13rem;
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
 }
 
 .provider-details__section--capabilities dl div {

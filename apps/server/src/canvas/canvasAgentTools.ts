@@ -38,6 +38,7 @@ import {
   treemapExamples,
   heatmapExamples,
   barListExamples,
+  comparisonMatrixExamples,
   metricExamples,
   CANVAS_INLINE_MAX_BLOCKS,
   canvasInlineRefusal,
@@ -255,6 +256,7 @@ function describedExamples(kinds: ReadonlyArray<string>): ReadonlyArray<unknown>
     if (kind === "treemap") examples.push(...treemapExamples);
     if (kind === "heatmap") examples.push(...heatmapExamples);
     if (kind === "bar-list") examples.push(...barListExamples);
+    if (kind === "comparison-matrix") examples.push(...comparisonMatrixExamples);
     if (kind === "metric") examples.push(...metricExamples);
   }
   return examples;
@@ -354,6 +356,7 @@ function toolDescription(
     "A grid coloured by value is a heatmap with a layout of matrix or calendar. A matrix names its rows and columns and carries a cell per coordinate with a value and an optional short note; a coordinate you do not list reads as missing, not as zero, and the person can sort the rows by their total without revising the Canvas. A calendar carries one reading per date and reads as a week grid. Both take an optional format and a scale of sequential or diverging. Describe heatmap to get commits by weekday and hour, and test failures per day.",
     'A finished-looking design is a design block: app screens, a website or landing page, or a slide deck. Pick one size for the block (phone 390x844, tablet 820x1180, desktop 1440x900, or slide 1920x1080), put shared CSS in styles, and write each screen or slide as a frame of static HTML. The person clicks through it, so link frames with href="#frameId"; a link may only name a frame or a section. Frames run no JavaScript and load nothing: no script, event handlers, external links, remote images, fonts, or imports. Draw images with inline SVG, CSS gradients, or data:image URLs, and use system fonts. Make it look finished: real copy, a clear type scale, and a deliberate palette. Describe design to get a phone flow and a deck.',
     "A ranking is a bar list: rows with a label, a value, an optional second value, and an optional manifest source id. It sorts largest first by default, shows the top rows with Show all up to 500, and a row that names a source offers Open file through the allowlisted open-source action. Give each row a unique label, a value that is not negative, and a path-like label when it names a file (the renderer draws the directory dimmed). Bars use neutral ink, or the sequential scale when the magnitude matters. Describe bar-list to get hottest files and slowest tests.",
+    "Comparing options against criteria, such as an architecture decision, a vendor or library choice, or a feature comparison, is a comparison-matrix: options (columns) and criteria (rows) with unique ids, and one cell per criterion and option holding a score, a short text, or a glyph of yes, partial, or no, with an optional note that explains it. A criterion takes an optional weight (absent counts once, 0 keeps it out of the score) and prefer lower when a low reading is good, such as cost. Declare a scoreRange such as 1 to 5 when you score. The host computes each option's weighted score from scores and glyphs, never text; do not write totals yourself. Name the option you recommend with recommendedOptionId and say why in recommendation; it may differ from the highest score. Describe comparison-matrix to get an architecture decision and a feature comparison.",
     "A table is columns of a declared type (text, number, boolean, date, status) and rows that list one value per column in the same order. A column may take an optional format and an optional display: text (the plain reading), bar (an in-cell bar whose length is the value's share of the column's largest reading), heat (a tint on the shared sequential scale), or status (the value shown as a badge). The value is always shown, so bar and heat add a mark without replacing the reading; the person can sort, filter, and hide columns without revising the Canvas. A text column whose values read as a path is drawn with the shared path style.",
     "Headline numbers are metric blocks. Give each a label and a value, and add an optional format, unit, delta, a goodDirection of up, down, or neutral so a delta's tone is never guessed, a caption, and a sparkline of at most 256 recent readings. Consecutive metric blocks are gathered into a responsive tile row of two to four tiles. Describe metric to get a repo-stats tile row.",
     "A Canvas is a document: it grants no file, shell, Git, or network access. Creation adds a card to this thread and offers the Canvas in the thread's dock the first time it appears; the user can also select Open Canvas. Do not claim the user has read it or invent a download URL.",

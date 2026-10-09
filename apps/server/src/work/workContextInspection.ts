@@ -7,11 +7,14 @@ import type { ProviderDriver } from "@octant/provider-sdk/driver";
 import { decodeModelContextLimits, UtcTimestamp } from "@octant/contracts";
 import { Schema } from "effect";
 import { resolveEffectiveModelLimits } from "@octant/domain/context-policy";
+import { resolveModelContextWindow } from "@octant/domain/model-context-window";
+import { modelWindowConfidence } from "../providers/providerContextFacts";
 import { deriveCatalogEpoch } from "../context/capabilityCatalog";
 import type {
   ContextInspectorSnapshot,
   ModelContextLimits,
   ProviderContextBlock,
+  ProviderModel,
   ProviderServiceLimits,
 } from "@octant/contracts";
 import type { ContextHarnessService } from "../context/contextHarnessService";
@@ -102,6 +105,8 @@ export async function observeWorkContext(input: {
   readonly service: ContextHarnessService;
   readonly plan: Extract<WorkTurnContextPlan, { readonly kind: "ok" }>;
   readonly driver: ProviderDriver;
+  /** The model's catalogue entry, whose window resolves when the driver reports none. */
+  readonly model?: ProviderModel | undefined;
   readonly displayLabel: string;
   readonly signal: AbortSignal;
 }) {
@@ -128,6 +133,28 @@ export async function observeWorkContext(input: {
       return [];
     }
   });
+  const resolved = input.model === undefined ? undefined : resolveModelContextWindow(input.model);
+  // A window the person set wins over every automatic source, including the
+  // driver's own report.
+  if (resolved?.source === "user-supplied") modelLimitObservations.length = 0;
+  if (modelLimitObservations.length === 0 && resolved !== undefined) {
+    modelLimitObservations.push(
+      decodeModelContextLimits({
+        providerInstanceId: input.plan.manifest.providerInstanceId,
+        modelId: input.plan.manifest.modelId,
+        contextWindow: resolved.contextWindow,
+        ...(resolved.maxOutput === undefined ? {} : { maxOutput: resolved.maxOutput }),
+        extendedContext: { kind: "unavailable" },
+        reasoning: "unknown",
+        compaction: "unknown",
+        tokenizer: { kind: "unavailable" },
+        source: resolved.source,
+        confidence: modelWindowConfidence(resolved.source, false),
+        conflicts: [],
+        verifiedAt: input.plan.manifest.createdAt,
+      }),
+    );
+  }
   if (modelLimitObservations.length === 0) {
     modelLimitObservations.push(
       decodeModelContextLimits({

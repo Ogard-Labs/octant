@@ -189,6 +189,7 @@ describe("PersistenceLive", () => {
         { name: "spend-ceilings", lastSequence: 1, lag: 0 },
         { name: "thread-message-queue", lastSequence: 1, lag: 0 },
         { name: "replica-membership", lastSequence: 1, lag: 0 },
+        { name: "replica-artifacts", lastSequence: 1, lag: 0 },
       ],
     });
   });
@@ -478,6 +479,7 @@ describe("PersistenceLive", () => {
         { projection_name: "spend-ceilings", global_sequence: 1, reason },
         { projection_name: "thread-message-queue", global_sequence: 1, reason },
         { projection_name: "replica-membership", global_sequence: 1, reason },
+        { projection_name: "replica-artifacts", global_sequence: 1, reason },
       ]);
       inspected.close();
     },
@@ -508,6 +510,36 @@ describe("PersistenceLive", () => {
     if (Either.isLeft(result)) {
       expect(result.left).toMatchObject({ category });
       expect(String(result.left)).not.toContain("private database detail");
+    }
+  });
+
+  it.each([
+    ["SQLITE_CANTOPEN", "database file cannot be opened"],
+    ["SQLITE_READONLY", "database is read-only"],
+    ["EACCES", "not accessible by this user"],
+    ["ENOSPC", "disk is full"],
+  ] as const)("names the %s cause when storage is unavailable", async (code, phrase) => {
+    const result = await Effect.runPromise(
+      Effect.either(
+        Effect.scoped(
+          Effect.provide(
+            Persistence,
+            makePersistenceLive({
+              dataDirectory: temporaryDirectory(),
+              openConnection: () => {
+                throw Object.assign(new Error("private database detail /secret/path"), { code });
+              },
+            }),
+          ),
+        ),
+      ),
+    );
+
+    expect(Either.isLeft(result)).toBe(true);
+    if (Either.isLeft(result)) {
+      expect(result.left).toMatchObject({ category: "storage-unavailable" });
+      expect(result.left.message).toContain(phrase);
+      expect(result.left.message).not.toContain("secret");
     }
   });
 });

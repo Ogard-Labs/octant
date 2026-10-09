@@ -19,6 +19,7 @@ import {
   makeSeatbeltConfinementLive,
   privateHomeDenyReadRules,
   requireSandboxExec,
+  seatbeltAllowLiteralReadRule,
   seatbeltAllowRule,
   seatbeltExecRule,
   seatbeltDenyRule,
@@ -552,6 +553,31 @@ describe("shared Seatbelt profile builder", () => {
       expect(profile).toContain(seatbeltDenyRule("file-read*", path));
     }
     expect(profile).toContain(seatbeltDenyRule("file-read*", "/private/tmp/octant-sibling"));
+  });
+
+  it("re-allows the public TLS configuration under /private but not OpenSSL's private-key directory", () => {
+    const profile = buildDenyDefaultSeatbeltProfile({
+      boundRoot: "/private/tmp/octant-project",
+      temporaryDirectory: "/private/tmp/octant-temporary",
+      networkEgress: "none",
+      allowFileReadStar: true,
+      privateHomeAllowPaths: [],
+    });
+    const denial = profile.indexOf(seatbeltDenyRule("file-read*", "/private"));
+    for (const path of [
+      "/private/etc/ssl/openssl.cnf",
+      "/private/etc/ssl/x509v3.cnf",
+      "/private/etc/ssl/cert.pem",
+    ]) {
+      expect(profile.indexOf(seatbeltAllowLiteralReadRule(path))).toBeGreaterThan(denial);
+    }
+    expect(
+      profile.indexOf(seatbeltAllowRule("file-read*", "/private/etc/ssl/certs")),
+    ).toBeGreaterThan(denial);
+    // `/etc/ssl/private` is where OpenSSL keeps keys by default; a subpath
+    // grant on the parent would hand it to every confined launch.
+    expect(profile).not.toContain('(subpath "/private/etc/ssl")');
+    expect(profile).not.toContain("/private/etc/ssl/private");
   });
 
   it("refuses a launch root that is an ancestor of a denied sensitive path", () => {

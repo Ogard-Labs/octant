@@ -58,6 +58,8 @@ export function canvasBlockLabel(block: CanvasDefinition["blocks"][number]): str
       return "Swimlane";
     case "mindmap":
       return "Mind map";
+    case "comparison-matrix":
+      return "Comparison matrix";
     case "mockup":
     case "design":
       return block.title;

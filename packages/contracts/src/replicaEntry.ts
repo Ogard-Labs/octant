@@ -81,10 +81,15 @@ export type ReplicaOrigin = typeof ReplicaOrigin.Type;
 /**
  * Where the artifact was created. A later revision from another computer
  * still carries this identity; it does not become that computer's artifact.
+ * `hostId` is the replica instance that first published the artifact, since
+ * every host calls itself `local`. `projectName` is the name of the Project
+ * the writer filed this version under, so another computer can show where it
+ * came from before anything binds it to a Project there.
  */
 export const ReplicaArtifactOrigin = Schema.Struct({
   canvasId: CanvasId,
   hostId: HostId,
+  projectName: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256)),
 }).annotations(strict);
 export type ReplicaArtifactOrigin = typeof ReplicaArtifactOrigin.Type;
 
@@ -373,6 +378,7 @@ export function encodeReplicaEntry(entry: ReplicaEntry): string {
         artifact: {
           canvasId: entry.artifact.canvasId,
           hostId: entry.artifact.hostId,
+          projectName: entry.artifact.projectName,
         },
         parents: entry.parents.map((parent) => ({ versionId: parent.versionId })),
         contentHash: entry.contentHash,
@@ -439,8 +445,10 @@ export type ReplicaMembershipCommand = typeof ReplicaMembershipCommand.Type;
  * `path-mismatch`, and `unreadable` describe the file alone: a signature that
  * does not verify under the key the entry names, an id that is not that key's
  * id, a body whose origin is not the instance and sequence its path names, or
- * a file that does not decode as an entry this format defines. The rest are
- * the artifact reconcile policy's reasons.
+ * a file that does not decode as an entry this format defines.
+ * `unsafe-content` is an artifact whose text the share filter would not let
+ * leave a host - a credential, a secret-shaped value, or an absolute path. The
+ * rest are the artifact reconcile policy's reasons.
  */
 export const ReplicaReadRefusalReason = Schema.Literal(
   "unknown-instance",
@@ -451,6 +459,7 @@ export const ReplicaReadRefusalReason = Schema.Literal(
   "bad-signature",
   "path-mismatch",
   "unreadable",
+  "unsafe-content",
 );
 export type ReplicaReadRefusalReason = typeof ReplicaReadRefusalReason.Type;
 
@@ -460,6 +469,25 @@ export const ReplicaReadRefusal = Schema.Struct({
   reason: ReplicaReadRefusalReason,
 }).annotations(strict);
 export type ReplicaReadRefusal = typeof ReplicaReadRefusal.Type;
+
+/**
+ * What one artifact entry did on this computer: a new version, a version it
+ * already had, a second head beside one from the same parent, or a tombstone.
+ */
+export const ReplicaArtifactKeptOutcome = Schema.Literal(
+  "imported",
+  "already-present",
+  "concurrent-head",
+  "tombstone",
+);
+export type ReplicaArtifactKeptOutcome = typeof ReplicaArtifactKeptOutcome.Type;
+
+export const ReplicaArtifactReconciled = Schema.Struct({
+  instanceId: ReplicaInstanceId,
+  sequence: PositiveInt,
+  outcome: ReplicaArtifactKeptOutcome,
+}).annotations(strict);
+export type ReplicaArtifactReconciled = typeof ReplicaArtifactReconciled.Type;
 
 /** A computer the revoked one brought in, directly or through others. */
 export const ReplicaBroughtIn = Schema.Struct({
@@ -546,16 +574,10 @@ export const ReplicaMembershipResult = Schema.Union(
     kind: Schema.Literal("pulled"),
     /** Membership records this pull read and now holds. */
     applied: Schema.Int.pipe(Schema.nonNegative()),
-    /** Files this pull read that are not valid records, and artifact entries that do not count. */
+    /** Files this pull read that are not valid records, and artifact entries it did not import. */
     refused: Schema.Array(ReplicaReadRefusal),
-    /**
-     * Artifact entries that are valid and count but were not imported:
-     * importing an artifact version is not built yet, so a later pull reads
-     * them again.
-     */
-    held: Schema.Array(
-      Schema.Struct({ instanceId: ReplicaInstanceId, sequence: PositiveInt }).annotations(strict),
-    ),
+    /** Artifact entries this pull reconciled into the library, with what each one did. */
+    artifacts: Schema.Array(ReplicaArtifactReconciled),
     /** Fresh join requests from computers that are not members yet. */
     joinRequests: Schema.Array(ReplicaJoinRequestEntry),
   }).annotations(strict),

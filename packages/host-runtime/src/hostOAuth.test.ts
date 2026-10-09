@@ -360,6 +360,26 @@ describe("host OAuth runners", () => {
     }
   });
 
+  it("keeps a browser sign-in open for ten minutes by default", async () => {
+    const store = memoryStore();
+    const startedAt = Date.parse("2026-10-08T19:00:00.000Z");
+    const runtime = createHostOAuthRuntime({ store, now: () => startedAt });
+    try {
+      const started = await runtime.begin({
+        descriptor: openRouterDescriptor(
+          "https://example.com/auth",
+          "https://example.com/api/v1/auth/keys",
+        ),
+        actorId: randomUUID(),
+        termsAcknowledgedAt: "2026-10-03T18:00:00.000Z",
+      });
+      if (started.kind !== "awaiting-consent") throw new Error("expected a sign-in attempt");
+      expect(Date.parse(started.expiresAt) - startedAt).toBe(10 * 60 * 1_000);
+    } finally {
+      await runtime.close();
+    }
+  });
+
   it("refuses a dialect callback whose state does not match and does not exchange the code", async () => {
     const fake = await startFakeOpenRouterServer();
     const store = memoryStore();

@@ -7,9 +7,8 @@ import {
   type S3ReplicaStore,
   type S3ReplicaStoreSettings,
   type S3Transport,
-  type S3TransportRequest,
-  type S3TransportResponse,
 } from "./s3ReplicaStore";
+import { bucketFake, response } from "./s3BucketFake.test-support";
 
 // No S3-compatible test server ships in this repository's dev tooling, so the
 // store is exercised through a recorded fake that enforces the S3 semantics it
@@ -20,10 +19,6 @@ import {
 const ENDPOINT = "https://s3.example.test";
 const BUCKET = "octant-replica";
 const CREDENTIAL_REF = "22222222-2222-4222-8222-222222222222";
-
-function response(status: number, body = ""): S3TransportResponse {
-  return { status, body: new TextEncoder().encode(body) };
-}
 
 function credentialStore(blob: string | undefined): CredentialStore {
   return {
@@ -53,65 +48,6 @@ function settings(overrides: Partial<S3ReplicaStoreSettings> = {}): S3ReplicaSto
   };
 }
 
-interface BucketFake {
-  readonly objects: Map<string, Uint8Array>;
-  readonly requests: S3TransportRequest[];
-  override: ((request: S3TransportRequest) => S3TransportResponse | undefined) | undefined;
-  readonly transport: S3Transport;
-}
-
-/**
- * A minimal in-memory bucket. PUT honours `If-None-Match: *`, HEAD and GET
- * report presence, and list answers with the ListObjectsV2 shape the store
- * parses. A test can force one response with `override`.
- */
-function bucketFake(): BucketFake {
-  const objects = new Map<string, Uint8Array>();
-  const requests: S3TransportRequest[] = [];
-  const forced: {
-    override: ((request: S3TransportRequest) => S3TransportResponse | undefined) | undefined;
-  } = {
-    override: undefined,
-  };
-  const transport: S3Transport = async (request) => {
-    requests.push(request);
-    const override = forced.override?.(request);
-    if (override !== undefined) return override;
-    const url = new URL(request.url);
-    const prefix = url.searchParams.get("prefix") ?? "";
-    if (request.method === "GET" && url.searchParams.get("list-type") === "2") {
-      const keys = [...objects.keys()].filter((key) => key.startsWith(prefix)).sort();
-      const contents = keys.map((key) => `<Contents><Key>${key}</Key></Contents>`).join("");
-      return response(
-        200,
-        `<ListBucketResult>${contents}<IsTruncated>false</IsTruncated></ListBucketResult>`,
-      );
-    }
-    const key = decodeURIComponent(
-      url.pathname.replace(/^\//, "").replace(new RegExp(`^${BUCKET}/`), ""),
-    );
-    if (request.method === "HEAD") return response(objects.has(key) ? 200 : 404);
-    if (request.method === "GET") {
-      const stored = objects.get(key);
-      return stored === undefined ? response(404) : { status: 200, body: stored };
-    }
-    if (request.headers["if-none-match"] === "*" && objects.has(key)) return response(412);
-    objects.set(key, request.body ?? new Uint8Array());
-    return response(200);
-  };
-  return {
-    objects,
-    requests,
-    get override() {
-      return forced.override;
-    },
-    set override(next) {
-      forced.override = next;
-    },
-    transport,
-  };
-}
-
 const unreachableTransport: S3Transport = async () => {
   throw new Error("Tests never reach the network.");
 };
@@ -136,7 +72,7 @@ const KEY = "11111111-1111-4111-8111-111111111111/1.json";
 
 describe("S3 replica store", () => {
   it("publishes a key only when the object is absent and leaves the original bytes", async () => {
-    const bucket = bucketFake();
+    const bucket = bucketFake(BUCKET);
     const store = offeredStore({ transport: bucket.transport });
     const original = new TextEncoder().encode("original");
     expect(await store.putIfAbsent(KEY, original)).toEqual({ status: "stored" });
@@ -151,7 +87,7 @@ describe("S3 replica store", () => {
   });
 
   it("asks the bucket to leave an existing key untouched with a conditional create", async () => {
-    const bucket = bucketFake();
+    const bucket = bucketFake(BUCKET);
     const store = offeredStore({ transport: bucket.transport });
     await store.putIfAbsent(KEY, new TextEncoder().encode("kept"));
     const conditional = bucket.requests.filter(
@@ -161,7 +97,7 @@ describe("S3 replica store", () => {
   });
 
   it("falls back to a head-then-put when the provider has no conditional create", async () => {
-    const bucket = bucketFake();
+    const bucket = bucketFake(BUCKET);
     const store = offeredStore({ transport: bucket.transport, conditionalWrites: false });
     expect(await store.putIfAbsent(KEY, new TextEncoder().encode("kept"))).toEqual({
       status: "stored",
@@ -178,7 +114,7 @@ describe("S3 replica store", () => {
   });
 
   it("signs the request with the access key from the host credential store", async () => {
-    const bucket = bucketFake();
+    const bucket = bucketFake(BUCKET);
     const store = offeredStore({ transport: bucket.transport });
     await store.get(KEY);
     const authorization = bucket.requests[0]?.headers["authorization"] ?? "";
@@ -191,7 +127,7 @@ describe("S3 replica store", () => {
     // The expected header was computed independently with the AWS Signature
     // Version 4 algorithm for this method, host, path, credentials, and time,
     // so a change to the signer that no longer matches AWS fails here.
-    const bucket = bucketFake();
+    const bucket = bucketFake(BUCKET);
     const store = offeredStore({
       transport: bucket.transport,
       settings: settings({ endpoint: "https://s3.us-east-1.amazonaws.com", region: "us-east-1" }),
@@ -209,7 +145,7 @@ describe("S3 replica store", () => {
   });
 
   it("sends every request to the configured endpoint and nowhere else", async () => {
-    const bucket = bucketFake();
+    const bucket = bucketFake(BUCKET);
     const store = offeredStore({ transport: bucket.transport });
     await store.putIfAbsent(KEY, new TextEncoder().encode("kept"));
     await store.get(KEY);
@@ -221,7 +157,7 @@ describe("S3 replica store", () => {
   });
 
   it("addresses a virtual-host bucket as a subdomain of the configured endpoint", async () => {
-    const bucket = bucketFake();
+    const bucket = bucketFake(BUCKET);
     const store = offeredStore({
       transport: bucket.transport,
       settings: settings({ addressing: "virtual-host" }),
@@ -236,7 +172,7 @@ describe("S3 replica store", () => {
   });
 
   it("stores and reads a key under the configured prefix", async () => {
-    const bucket = bucketFake();
+    const bucket = bucketFake(BUCKET);
     const store = offeredStore({
       transport: bucket.transport,
       settings: settings({ prefix: "log" }),
@@ -248,7 +184,7 @@ describe("S3 replica store", () => {
   });
 
   it("reports a rejected credential as unauthorized instead of waiting", async () => {
-    const bucket = bucketFake();
+    const bucket = bucketFake(BUCKET);
     bucket.override = () => response(403);
     const store = offeredStore({ transport: bucket.transport });
     expect(await store.testConnection()).toEqual({ status: "failed", reason: "unauthorized" });
@@ -256,7 +192,7 @@ describe("S3 replica store", () => {
   });
 
   it("retries a throttled answer with backoff and stops at the bounded attempt count", async () => {
-    const bucket = bucketFake();
+    const bucket = bucketFake(BUCKET);
     bucket.override = () => response(429);
     const delays: number[] = [];
     const store = offeredStore({
@@ -273,7 +209,7 @@ describe("S3 replica store", () => {
   });
 
   it("succeeds once a throttled answer clears", async () => {
-    const bucket = bucketFake();
+    const bucket = bucketFake(BUCKET);
     let calls = 0;
     bucket.override = () => (calls++ === 0 ? response(429) : undefined);
     const store = offeredStore({ transport: bucket.transport });
@@ -282,7 +218,7 @@ describe("S3 replica store", () => {
   });
 
   it("treats a lost connection as unreachable and retries it", async () => {
-    const bucket = bucketFake();
+    const bucket = bucketFake(BUCKET);
     let calls = 0;
     const store = offeredStore({
       transport: async (request) => {
@@ -298,7 +234,7 @@ describe("S3 replica store", () => {
   });
 
   it("does not retry a missing object", async () => {
-    const bucket = bucketFake();
+    const bucket = bucketFake(BUCKET);
     const store = offeredStore({ transport: bucket.transport });
     expect(await store.get("11111111-1111-4111-8111-111111111111/absent.json")).toEqual({
       status: "missing",
@@ -307,7 +243,7 @@ describe("S3 replica store", () => {
   });
 
   it("lists the keys under the prefix and strips it from each entry", async () => {
-    const bucket = bucketFake();
+    const bucket = bucketFake(BUCKET);
     const store = offeredStore({
       transport: bucket.transport,
       settings: settings({ prefix: "log" }),
@@ -323,7 +259,7 @@ describe("S3 replica store", () => {
   });
 
   it("follows a continuation token to the next page", async () => {
-    const bucket = bucketFake();
+    const bucket = bucketFake(BUCKET);
     bucket.override = (request) => {
       const token = new URL(request.url).searchParams.get("continuation-token");
       if (token === null) {
@@ -356,7 +292,7 @@ describe("S3 replica store", () => {
   });
 
   it("writes one connection probe and does not list it as an entry", async () => {
-    const bucket = bucketFake();
+    const bucket = bucketFake(BUCKET);
     const store = offeredStore({ transport: bucket.transport });
     expect(await store.testConnection()).toEqual({ status: "reachable" });
     expect([...bucket.objects.keys()].some((key) => key.includes(S3_PROBE_KEY_PREFIX))).toBe(true);
@@ -365,7 +301,7 @@ describe("S3 replica store", () => {
   });
 
   it("makes no request at all while sync is off", async () => {
-    const bucket = bucketFake();
+    const bucket = bucketFake(BUCKET);
     const store = offeredStore({ transport: bucket.transport, syncOn: false });
     expect(await store.status()).toBe("not-connected");
     expect(await store.list()).toEqual({ status: "not-connected" });
@@ -376,7 +312,7 @@ describe("S3 replica store", () => {
   });
 
   it("refuses a plaintext endpoint and never sends the credential", async () => {
-    const bucket = bucketFake();
+    const bucket = bucketFake(BUCKET);
     const store = offeredStore({
       transport: bucket.transport,
       settings: settings({ endpoint: "http://s3.example.test" }),
@@ -387,7 +323,7 @@ describe("S3 replica store", () => {
   });
 
   it("refuses an endpoint that carries a base path rather than dropping it", async () => {
-    const bucket = bucketFake();
+    const bucket = bucketFake(BUCKET);
     const store = offeredStore({
       transport: bucket.transport,
       settings: settings({ endpoint: "https://s3.example.test/tenant" }),
@@ -398,7 +334,7 @@ describe("S3 replica store", () => {
   });
 
   it("reports a rejected credential as a write failure on publish", async () => {
-    const bucket = bucketFake();
+    const bucket = bucketFake(BUCKET);
     bucket.override = () => response(403);
     const store = offeredStore({ transport: bucket.transport });
     expect(await store.putIfAbsent(KEY, new Uint8Array([1]))).toEqual({
@@ -408,7 +344,7 @@ describe("S3 replica store", () => {
   });
 
   it("refuses a key that could leave the prefix", async () => {
-    const bucket = bucketFake();
+    const bucket = bucketFake(BUCKET);
     const store = offeredStore({ transport: bucket.transport });
     expect(await store.putIfAbsent("../escape.json", new Uint8Array([1]))).toEqual({
       status: "refused",
@@ -429,7 +365,7 @@ describe("S3 replica store", () => {
       syncOn: true,
       installed: true,
       enabled: true,
-      transport: bucketFake().transport,
+      transport: bucketFake(BUCKET).transport,
     };
     expect(openS3ReplicaStore({ ...base, installed: false })).toEqual({
       status: "withheld",
@@ -442,7 +378,7 @@ describe("S3 replica store", () => {
   });
 
   it("stays not connected when the credential store has no entry", async () => {
-    const bucket = bucketFake();
+    const bucket = bucketFake(BUCKET);
     const store = offeredStore({
       transport: bucket.transport,
       credentialStore: credentialStore(undefined),
@@ -453,7 +389,7 @@ describe("S3 replica store", () => {
   });
 
   it("reports ready when the store is configured and sync is on", async () => {
-    const bucket = bucketFake();
+    const bucket = bucketFake(BUCKET);
     const store = offeredStore({ transport: bucket.transport });
     expect(await store.status()).toBe("ready");
   });

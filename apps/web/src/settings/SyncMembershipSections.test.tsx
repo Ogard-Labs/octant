@@ -63,7 +63,7 @@ function client(
     kind: "pulled",
     applied: 0,
     refused: [],
-    held: [],
+    artifacts: [],
     joinRequests: [],
   }),
 ) {
@@ -161,7 +161,7 @@ describe("SyncMembershipSections", () => {
     const { fake, execute, setView } = client(joining(false), (command) => {
       if (command.kind === "pull") {
         setView(joining(true));
-        return { kind: "pulled", applied: 1, refused: [], held: [], joinRequests: [] };
+        return { kind: "pulled", applied: 1, refused: [], artifacts: [], joinRequests: [] };
       }
       return { kind: "join-confirmed", approver: studio, founder: studio };
     });
