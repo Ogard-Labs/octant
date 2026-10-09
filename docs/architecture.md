@@ -3419,10 +3419,11 @@ bun run verify     # paths:check, wiring:check, decisions:check, fmt:check, lint
   restart of `bun run dev` rather than a manual
   `bun run --cwd apps/desktop build`.
 - A headless Linux station: `octant server run`, then `octant web` (or
-  `octant web --dev` for Vite). Linux requires `bubblewrap`, Git 2.36 or
-  newer, an unlocked
-  freedesktop Secret Service session, and the `secret-tool` client. Without
-  those, the host fails closed. ADE and other boot-managed hosts should run
+  `octant web --dev` for Vite). Linux requires `bubblewrap` and Git 2.36 or
+  newer; without `bubblewrap`, Work and Code fail closed. Stored provider
+  credentials also need an unlocked freedesktop Secret Service session and
+  the `secret-tool` client; without them the host still runs Chat, Work, and
+  Code but reports its secret store unavailable. ADE and other boot-managed hosts should run
   `scripts/ade/start-secret-service-session.sh` on each start so the session
   bus and keyring are live (never a snapshotted socket path alone). The start
   script writes `~/.config/octant-host/session.env`; when `start` and

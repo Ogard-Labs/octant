@@ -268,6 +268,7 @@ import { CodeProjectPullRequestSnapshotStore } from "./code/codeProjectPullReque
 import { createGhCommandPort, GhPullRequestPort } from "./code/ghPullRequestPort";
 import { RepositoryTestProcessPort } from "./code/repositoryTestProcessPort";
 import { TerminalProcessPort } from "./code/terminalProcessPort";
+import { defaultTerminalShell } from "./code/terminalShell";
 import { CodeOperationApprovalStore } from "./code/codeOperationApprovalStore";
 import { CodeSessionAuthorityStore } from "./code/codeSessionAuthorityStore";
 import { ProcessAuthorityClock } from "./processAuthorityClock";
@@ -4806,7 +4807,7 @@ export function startOctantServer(
           return {
             checkoutRoot: root.rootPath,
             workingDirectory,
-            shell: "/bin/zsh",
+            shell: defaultTerminalShell(),
             credentialReferences: [],
             environment: {},
           };

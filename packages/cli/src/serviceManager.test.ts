@@ -158,6 +158,49 @@ describe("per-user service managers", () => {
     });
   });
 
+  it("reports a systemd unit that is not installed yet as stopped, not as an unavailable manager", async () => {
+    const root = await mkdtemp(join(tmpdir(), "octant-systemd-missing-unit-"));
+    roots.push(root);
+    // systemd 259 answers `is-active` and `is-enabled` for a unit it has never
+    // loaded with exit 4 ("no such unit") rather than 3 or 1.
+    const noSuchUnit = Object.assign(new Error("Command failed"), {
+      code: 4,
+      stdout: "",
+      stderr: "",
+    });
+    const runner: ServiceCommandRunner = {
+      run: vi.fn(async (command, args) => {
+        if (args.includes("is-active") || args.includes("is-enabled")) throw noSuchUnit;
+        if (command === "/usr/bin/loginctl") {
+          return {
+            stdout: args.some((arg: string) => arg.includes("Linger")) ? "yes\n" : "active\n",
+            stderr: "",
+          };
+        }
+        return {
+          stdout: "ActiveState=inactive\nUnitFileState=\nResult=success\nNRestarts=0\n",
+          stderr: "",
+        };
+      }),
+    };
+    const manager = createSystemdUserServiceManager({
+      paths: xdgPaths(root),
+      uid: process.getuid?.() ?? 0,
+      home: join(root, "home"),
+      executable: "/opt/homebrew/bin/bun",
+      cliEntryPoint: join(root, "bin.ts"),
+      runtimeEnvironment: {},
+      runner,
+    });
+
+    await expect(manager.status()).resolves.toMatchObject({
+      kind: "systemd",
+      enabled: false,
+      active: false,
+      crashLoop: false,
+    });
+  });
+
   it("uses the absolute CLI artifact when no executable or entrypoint is injected", async () => {
     const root = await mkdtemp(join(tmpdir(), "octant-default-cli-artifact-"));
     roots.push(root);
