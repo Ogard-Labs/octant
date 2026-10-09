@@ -12,6 +12,15 @@ export interface TaintAppManagedToolResultsInput {
     input: RecordExternalContentIngestionInput,
   ) => ExternalContentIngestionResult;
   readonly uuid: () => string;
+  /**
+   * Whether this call's successful result brings in outside content. Absent
+   * means every result does, which is right for tools that reach the browser,
+   * another application, or an MCP server.
+   */
+  readonly resultTaintsThread?: (
+    call: { readonly name: string; readonly inputJson: string },
+    result: unknown,
+  ) => boolean;
 }
 
 /**
@@ -32,6 +41,7 @@ export function taintAppManagedToolResults(
     execute: async (call) => {
       const outcome = await input.tools.execute(call);
       if (outcome.isError === true) return outcome;
+      if (input.resultTaintsThread?.(call, outcome.result) === false) return outcome;
       return taintSuccessfulResult(input, call.name, outcome);
     },
   };

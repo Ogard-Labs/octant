@@ -232,7 +232,7 @@ export function NativeHarnessSessionCard(props: NativeHarnessSessionCardProps) {
             >
               Allow
             </OctantButton>
-            {pendingApproval.source === undefined ? (
+            {pendingApproval.source === undefined && pendingApproval.singleUse !== true ? (
               <OctantButton
                 disabled={busy}
                 onClick={() => void decideApproval("approve-always")}

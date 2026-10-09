@@ -1080,6 +1080,11 @@ export const NativeHarnessApproval = Schema.Struct({
   status: NativeHarnessApprovalStatus,
   /** Set on an approval that also covers the class for the session. */
   remembered: Schema.optional(Schema.Boolean),
+  /**
+   * Set when the thread has taken in outside content: the approval covers
+   * this one call, so surfaces offer no "for this session" choice.
+   */
+  singleUse: Schema.optional(Schema.Boolean),
   askedAt: UtcTimestamp,
   settledAt: Schema.optional(UtcTimestamp),
 })

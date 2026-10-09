@@ -352,6 +352,33 @@ describe("resolveToolCall fail-closed order", () => {
     });
   });
 
+  it("7a. web-fetch asks on a tainted thread under every posture, and not on a clean one", () => {
+    const fetch = (
+      externalContentIngested: boolean,
+      executionPolicy: "approval-gated" | "full-access",
+    ) =>
+      resolveToolCall(
+        baseInput({
+          capability: decodeToolActionCapability({ id: "harness-web-fetch", version: 1 }),
+          arguments: { url: "https://example.com/" },
+          thread: {
+            executionPolicy,
+            approvalSatisfied: executionPolicy === "full-access",
+            externalContentIngested,
+          },
+        }),
+      );
+    expect(fetch(false, "approval-gated").kind).toBe("allow");
+    expect(fetch(false, "full-access").kind).toBe("allow");
+    for (const posture of ["approval-gated", "full-access"] as const) {
+      expect(fetch(true, posture)).toMatchObject({
+        kind: "prompt",
+        approvalClass: "network-access",
+        reason: "taint-requires-fresh-confirmation",
+      });
+    }
+  });
+
   it("7b. auto-accept edits waives only project file writes", () => {
     const validation = (executionPolicy: "approval-gated" | "auto-accept-edits") =>
       resolveToolCall(

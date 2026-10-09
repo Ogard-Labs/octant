@@ -5,6 +5,7 @@ import {
   emptyThreadContentTaint,
   formatTaintedApprovalPrompt,
   isIrreversibleOrAuthorityBearingApprovalClass,
+  nativeHarnessResultTaintsThread,
   originTaintsThread,
   projectThreadContentTaint,
   resolveTaintedApproval,
@@ -209,5 +210,44 @@ describe("resolveTaintedApproval", () => {
     expect(prompt).toContain("readme-md");
     expect(prompt).toContain("web-fetch");
     expect(prompt.toLowerCase()).toContain("external");
+  });
+});
+
+describe("nativeHarnessResultTaintsThread", () => {
+  it("taints only for a harness tool that brings in outside content", () => {
+    const taints = (toolName: string, args: unknown = {}, result: unknown = {}) =>
+      nativeHarnessResultTaintsThread({ toolName, arguments: args, result });
+    for (const local of [
+      "read",
+      "grep",
+      "glob",
+      "bash",
+      "edit",
+      "write",
+      "goal-check",
+      "todo-write",
+    ])
+      expect(taints(local)).toBe(false);
+    expect(taints("web-fetch")).toBe(true);
+    expect(taints("web-search")).toBe(true);
+    // A child's collected reply may relay what the child fetched; its status,
+    // or a collect that finds it still running, does not.
+    expect(
+      taints(
+        "delegate",
+        { operation: "collect", runId: "run-1" },
+        { status: "completed", text: "done", truncated: false },
+      ),
+    ).toBe(true);
+    expect(
+      taints(
+        "delegate",
+        { operation: "collect", runId: "run-1" },
+        { status: "not-ready", lifecycleStatus: "running" },
+      ),
+    ).toBe(false);
+    expect(taints("delegate", { operation: "status" })).toBe(false);
+    // A tool the catalog does not know fails closed.
+    expect(taints("harness-teleport")).toBe(true);
   });
 });

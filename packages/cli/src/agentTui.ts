@@ -639,7 +639,12 @@ class AgentScreen {
     } else if (approval !== undefined) {
       this.#panel.title = " Approval ";
       this.#panel.borderColor = p.warning;
-      this.#panelText.content = t`${fg(p.text)(bold(approval.toolName))} ${fg(p.textSecondary)(approval.summary.replace(/^[a-z-]+: /, ""))}\n${dim(fg(p.muted)(`needs your say-so (${approval.approvalClass})`))}\n${fg(p.success)("y")}${fg(p.textSecondary)(" allow · ")}${fg(p.accent)("a")}${fg(p.textSecondary)(" allow for this session · ")}${fg(p.danger)("n")}${fg(p.textSecondary)(" deny — then Enter")}`;
+      const summary = approval.summary.replace(/^[a-z-]+: /, "");
+      // A single-use ask has no session-wide choice: the thread took in outside content.
+      this.#panelText.content =
+        approval.singleUse === true
+          ? t`${fg(p.text)(bold(approval.toolName))} ${fg(p.textSecondary)(summary)}\n${dim(fg(p.muted)(`needs your say-so (${approval.approvalClass})`))}\n${fg(p.success)("y")}${fg(p.textSecondary)(" allow · ")}${fg(p.danger)("n")}${fg(p.textSecondary)(" deny — then Enter")}`
+          : t`${fg(p.text)(bold(approval.toolName))} ${fg(p.textSecondary)(summary)}\n${dim(fg(p.muted)(`needs your say-so (${approval.approvalClass})`))}\n${fg(p.success)("y")}${fg(p.textSecondary)(" allow · ")}${fg(p.accent)("a")}${fg(p.textSecondary)(" allow for this session · ")}${fg(p.danger)("n")}${fg(p.textSecondary)(" deny — then Enter")}`;
       this.#panel.visible = true;
     } else if (pending !== undefined) {
       this.#panel.title = " Question ";
