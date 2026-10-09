@@ -7,6 +7,7 @@ import {
 import { describe, expect, it } from "vitest";
 import { barListExamples } from "./canvasBarListExamples";
 import { chartExamples } from "./canvasChartExamples";
+import { comparisonMatrixExamples } from "./canvasComparisonMatrixExamples";
 import { launchDeckExample, onboardingFlowExample } from "./canvasDesignExamples";
 import {
   loginSequenceExample,
@@ -265,6 +266,7 @@ describe("Canvas share policy", () => {
       ...treemapExamples,
       ...heatmapExamples,
       ...barListExamples,
+      ...comparisonMatrixExamples,
       loginSequenceExample,
       orderStateExample,
       orderSchemaExample,

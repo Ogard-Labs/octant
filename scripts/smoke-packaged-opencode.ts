@@ -8,6 +8,7 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createQuitAppleScript, waitForChildExit } from "./package-desktop";
 import {
+  PACKAGED_SMOKE_SERVER_PORT,
   PACKAGED_SMOKE_SERVER_URL,
   cleanupPackagedProcess,
   packagedServerEnvironment,
@@ -21,7 +22,10 @@ const appBundle = stagePackagedAppBundle(resolve(repositoryRoot, "out/Octant.app
 const executable = resolve(appBundle, "Contents/MacOS/Octant");
 const serverEntry = resolve(appBundle, "Contents/Resources/app/apps/server/dist/main.mjs");
 const serverUrl = PACKAGED_SMOKE_SERVER_URL;
-const openCodeCommand = "opencode serve --hostname 127.0.0.1 --port 0";
+// The app reserves a free port and passes it to OpenCode, so the real command
+// line ends in `--port <digits>`; the binary and `serve --hostname` stay pinned
+// so an unrelated OpenCode never matches.
+const openCodeCommand = /(?:^|\/)opencode serve --hostname 127\.0\.0\.1 --port \d+$/;
 
 export interface ProcessSnapshot {
   readonly pid: number;
@@ -218,7 +222,7 @@ async function waitForWindowCapability(dataDirectory: string, timeoutMs: number)
 
 async function assertSmokePortAvailable(): Promise<void> {
   const occupied = await new Promise<boolean>((resolve) => {
-    const socket = connect({ host: "127.0.0.1", port: 13_773 });
+    const socket = connect({ host: "127.0.0.1", port: PACKAGED_SMOKE_SERVER_PORT });
     socket.setTimeout(500);
     socket.once("connect", () => {
       socket.destroy();
@@ -232,7 +236,7 @@ async function assertSmokePortAvailable(): Promise<void> {
   });
   if (occupied) {
     throw new Error(
-      "Packaged OpenCode smoke cannot start because Octant port 13773 is already occupied.",
+      `Packaged OpenCode smoke cannot start because Octant port ${PACKAGED_SMOKE_SERVER_PORT} is already occupied.`,
     );
   }
 }
@@ -387,7 +391,7 @@ function signalGroupByPid(pid: number, signal: "SIGKILL" | "SIGTERM"): void {
 }
 
 function isManagedOpenCode(process: ProcessIdentity): boolean {
-  return process.command.includes(openCodeCommand);
+  return openCodeCommand.test(process.command);
 }
 
 function processKey(process: ProcessIdentity): string {

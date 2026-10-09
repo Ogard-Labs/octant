@@ -114,6 +114,7 @@ import { decodeAppleProjectPath } from "@octant/contracts/apple-toolchain";
 import { LOCAL_TOOL_HOST_ID } from "@octant/contracts/tool-actions";
 import { decodeProjectId, type ProjectId, type ProjectSummary } from "@octant/contracts/projects";
 import { enabledModes } from "@octant/domain/mode-policy";
+import { resolveModelContextWindow } from "@octant/domain/model-context-window";
 import { defaultShellSettings } from "@octant/domain/shell-policy";
 import type { UserProfile } from "@octant/contracts/user-profile";
 import {
@@ -3074,8 +3075,9 @@ function LaunchedShell(
       ? projectController.activeProject
       : undefined;
   /**
-   * The active Code thread's usage, with the model's declared context limit
-   * standing in for a window the provider's usage report never named. A
+   * The active Code thread's usage, with the model's resolved context window
+   * (set by the person, reported, learned, or its profile) standing in for a
+   * window the provider's usage report never named. A
    * reported window always wins — the declared figure only answers what the
    * provider did not.
    */
@@ -3085,8 +3087,9 @@ function LaunchedShell(
     if (thread === undefined || usage === undefined) return usage;
     const observed = providerController.observedByInstance.get(thread.providerInstanceId);
     const model = observed?.models.find((listed) => String(listed.id) === String(thread.modelId));
-    if (usage.contextWindow !== undefined || model?.contextLimit === undefined) return usage;
-    return { ...usage, modelContextWindow: model.contextLimit };
+    const declared = model === undefined ? undefined : resolveModelContextWindow(model);
+    if (usage.contextWindow !== undefined || declared === undefined) return usage;
+    return { ...usage, modelContextWindow: declared.contextWindow };
   }, [
     activeCodeThreadController?.activeView?.thread,
     activeCodeThreadController?.threadUsage,
@@ -7083,7 +7086,9 @@ function LaunchedShell(
                 imageProfiles={listEligibleImageProfiles(
                   providerController.snapshot?.instances ?? [],
                 )}
-                onOpenImageSettings={() => void controller.openSettings({ section: "providers" })}
+                onOpenImageSettings={() =>
+                  void controller.openSettings({ section: "image-generation" })
+                }
                 onCreateArtifact={() => {
                   // An artifact carries the thread it was made in, so there
                   // is nowhere to put one that has no origin. Starting a

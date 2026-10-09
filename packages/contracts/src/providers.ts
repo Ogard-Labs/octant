@@ -1027,6 +1027,22 @@ const ProviderModelFields = {
   capabilityEvidence: Schema.optional(Schema.Array(CapabilityEvidence)),
   /** User-maintained residency/privacy labels; absent means untagged. */
   dataTags: Schema.optional(ProviderDataTags),
+  /**
+   * The context window a person typed into the model's details. It wins over
+   * every automatic source; absent means the window is resolved automatically.
+   */
+  contextWindowOverride: Schema.optional(PositiveInt),
+  /**
+   * The window the endpoint's own refusals and larger successful requests
+   * taught Octant: a refusal that names a limit lowers it, a request that
+   * fit above it raises it. Kept with the catalogue so it outlives a restart.
+   */
+  learnedContextWindow: Schema.optional(PositiveInt),
+  /**
+   * The `model` the endpoint named in its responses. A deployment can carry a
+   * name of its own; this is how its model, and that model's profile, is known.
+   */
+  servedModelId: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256))),
 } as const;
 
 export const ProviderModel = Schema.Union(
@@ -1579,6 +1595,13 @@ export const ProviderRegistryCommand = Schema.Union(
     modelId: ProviderModelId,
     dataTags: ProviderDataTags,
   }).annotations(strict),
+  /** Sets the model's context window override; leaving `contextWindow` out clears it. */
+  Schema.Struct({
+    kind: Schema.Literal("set-provider-model-context-window"),
+    ...ProviderInstanceCommandFields,
+    modelId: ProviderModelId,
+    contextWindow: Schema.optional(PositiveInt),
+  }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("remove-provider"),
     ...ProviderInstanceCommandFields,
@@ -1634,6 +1657,10 @@ export const ProviderRegistryCommandResult = Schema.Union(
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("provider-model-tags-updated"),
+    snapshot: ProviderCatalogSnapshot,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("provider-model-updated"),
     snapshot: ProviderCatalogSnapshot,
   }).annotations(strict),
   Schema.Struct({

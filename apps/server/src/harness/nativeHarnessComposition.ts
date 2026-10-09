@@ -48,6 +48,12 @@ export interface NativeHarnessCompositionOptions {
   /** Code only: the sandboxed shell. */
   readonly shell?: NativeHarnessShellPort;
   /**
+   * Code only: the same sandboxed shell with the network closed at the OS, for
+   * a child that holds no network authority. Without it such a child gets no
+   * shell, because the ordinary one can reach the network.
+   */
+  readonly offlineShell?: NativeHarnessShellPort;
+  /**
    * The web search a turn may use, resolved each time a turn's tools are
    * composed: its backing endpoint is a live setting, not a startup fact.
    */
@@ -348,6 +354,9 @@ export function createNativeHarnessComposition(
           externalContentIngested: options.readThreadTaint(runId),
         }),
       });
+      // A child without network authority must not reach it through a command
+      // either, so its shell is the one whose sandbox closes the network.
+      const shell = authority.network ? options.shell : options.offlineShell;
       const tools = createNativeHarnessTools({
         threadId: runId,
         mode,
@@ -358,9 +367,7 @@ export function createNativeHarnessComposition(
           ...(authority.filesystem && mode !== "chat"
             ? { filesystem: new NativeHarnessFileSystem({ root: projectRoot }) }
             : {}),
-          ...(authority.shell && mode === "code" && options.shell !== undefined
-            ? { shell: options.shell }
-            : {}),
+          ...(authority.shell && mode === "code" && shell !== undefined ? { shell } : {}),
           ...(authority.network ? webPorts() : {}),
         },
         uuid: options.uuid,

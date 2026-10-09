@@ -36,8 +36,10 @@ unauthenticated CLI still reports that it needs setup.
 When nothing usable is already on, **Set up a provider** opens Settings on
 the Providers section:
 
-1. Create a new provider instance (for example, OpenCode, Codex, Claude, or an
-   OpenAI-compatible endpoint).
+1. Create a new provider instance (for example, OpenCode, Codex, or Claude). A
+   model endpoint Octant calls over an API itself, such as an
+   OpenAI-compatible endpoint or **Sign in with ChatGPT**, is added under
+   **Settings → Octant Harness → Model endpoints** instead.
 2. Provide the required configuration:
    - **OpenCode**: absolute path to the `opencode` binary, or use **Update** in
      Providers to install Octant's copy and agree before switching to it.
@@ -47,8 +49,8 @@ the Providers section:
      Octant if authentication is required.
    - **Claude**: absolute path to the Claude Code binary and an authentication
      mode (subscription or API key).
-   - **OpenAI-compatible**: endpoint URL, Bearer credential, and optional model
-     IDs.
+   - **OpenAI-compatible** (under Model endpoints): endpoint URL, Bearer
+     credential, and optional model IDs.
 3. Run **Connection Check** to verify readiness. The check reports normalized
    readiness, detected version, models, and capabilities without sending a
    prompt or exposing account identity.

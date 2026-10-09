@@ -51,14 +51,34 @@ describe("ContextInspector", () => {
       />,
     );
     expect(screen.getByText("Maximum output").nextElementSibling).toHaveTextContent("Unavailable");
-    expect(screen.getByText("Limit source").nextElementSibling).toHaveTextContent(
-      "Conservative estimate",
-    );
+    expect(screen.getByText("Limit source").nextElementSibling).toHaveTextContent("Estimate");
     expect(
       within(screen.getByRole("region", { name: "Planned next turn" })).getByText(
         "Response reserve",
       ).nextElementSibling,
     ).toHaveTextContent("50");
+  });
+
+  it.each([
+    ["user-supplied", "Set by you"],
+    ["provider-discovery", "Reported"],
+    ["runtime-reported", "Reported"],
+    ["reviewed-catalog", "Profile"],
+    ["observed-evidence", "Learned"],
+    ["conservative-fallback", "Estimate"],
+  ] as const)("says where a %s window came from in its detail", (source, label) => {
+    const snapshot = contextFixture();
+    render(
+      <ContextInspector
+        busy={false}
+        onClose={vi.fn()}
+        onRebuild={vi.fn()}
+        onSetExcluded={vi.fn()}
+        onSetPinned={vi.fn()}
+        snapshot={{ ...snapshot, modelLimits: { ...snapshot.modelLimits, source } }}
+      />,
+    );
+    expect(screen.getByText("Limit source").nextElementSibling).toHaveTextContent(label);
   });
 
   it("never renders canonical source references or hidden sensitive values", () => {
