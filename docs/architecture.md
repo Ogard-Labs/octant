@@ -2245,8 +2245,17 @@ native harness in `apps/server/src/harness`:
   every call refuses as `tool-authority-stale` with a message the model
   relays to the person; nothing renews it except the thread becoming usable
   again. Files go through `NativeHarnessFileSystem` (confined to the root, symlinks
-  resolved, edits require a prior read); `bash` runs through the same
-  Seatbelt-confined owned-process-group port as repository tests; web fetches
+  resolved, edits require a prior read); `bash` writes the command to a
+  script in its own subdirectory of `harness/scripts` and runs it through the
+  same confined owned-process-group port as repository tests (Seatbelt on
+  macOS, the bubblewrap capsule on Linux), so a timeout or cancel ends the
+  whole tree. That port refuses a shell as a test command's `argv[0]`, so a
+  test argv stays literal; the harness's only way to a shell is its separate
+  script entry point, which the two harness ports alone enable and which runs
+  exactly `/bin/sh` with one regular-file script. The script directory lies
+  outside every root a confined launch may write, and each launch may read
+  only its own script's subdirectory, so no command can swap the script
+  another thread is about to run; web fetches
   refuse private destinations, and connect through a `lookup` that checks
   every address the name resolves to at the moment the socket opens, so a
   name cannot pass the check and then resolve somewhere private.
@@ -2265,8 +2274,8 @@ native harness in `apps/server/src/harness`:
   again, and a scheme other than `http`/`https`, credentials in the URL, or a
   sixth redirect refuses. A harness child without network authority is offered
   no web tool, and its `bash` runs on a shell whose Seatbelt profile has no
-  network rule and its own writable work directory, so it cannot rewrite a
-  networked shell's pending script; the lead and a child with network
+  network rule and its own writable work directory, so it shares no writable
+  state with a networked command; the lead and a child with network
   authority use the ordinary one. The tool process environment carries only `PATH`, `HOME`, the temporary
   and locale variables, and what the harness sets, never a provider
   credential. Every successful harness tool result taints the thread, so after
@@ -2277,7 +2286,8 @@ native harness in `apps/server/src/harness`:
   rules, rule expiry, or learn mode: a tool process gets the thread's OS-level
   `none` or `allow`, and an "always" approval covers its class for the rest of
   the session, taint included. `nativeHarnessEgress.hostile.test.ts` holds the
-  adversarial proofs.
+  adversarial proofs; `nativeHarnessShell.test.ts` runs both shells under real
+  Seatbelt and shows only the networked one reaching a loopback listener.
 - **Tool verification.** A routine Check connection runs no generating
   request, so an OpenAI-compatible, Anthropic-compatible, or Azure AI Foundry
   endpoint offers a model Octant's tools only after a person proved that model
