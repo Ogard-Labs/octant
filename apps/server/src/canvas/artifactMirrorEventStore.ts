@@ -54,7 +54,8 @@ export interface ArtifactMirrorEventStoreOptions {
  * Appends the mirror's frames.
  *
  * These are records of what happened rather than transitions of a state
- * machine, so a frame never loses to a concurrency conflict with itself: the
+ * machine (settings, which name their expected version, are the exception and
+ * refuse a stale one), so a receipt never loses to a concurrency conflict with itself: the
  * journal has no "any version", so the first attempt assumes a fresh aggregate
  * and a conflict is answered once with the version the journal reports. The
  * append is synchronous, so nothing can interleave between the two attempts. A
@@ -71,7 +72,13 @@ export class ArtifactMirrorEventStore {
     readonly aggregateId: string;
     readonly eventName: string;
     readonly payload: unknown;
+    /** Set by a frame that is a transition (settings): a conflict then surfaces. */
+    readonly expectedVersion?: number;
   }): void {
+    if (input.expectedVersion !== undefined) {
+      this.#appendAfter(input, input.expectedVersion);
+      return;
+    }
     try {
       this.#appendAfter(input, 0);
     } catch (error) {

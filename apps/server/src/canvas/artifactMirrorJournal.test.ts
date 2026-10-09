@@ -67,40 +67,41 @@ function setup(
     clock: () => now,
   });
   const files = new Map<string, string>();
-  const service = new ArtifactMirrorService({
-    files: {
-      write: async (path, contents) => void files.set(path, contents),
-      read: async (path) => files.get(path),
-      remove: async (path) => void files.delete(path),
-      resolveRoot: async (path) => path,
-    },
-    currentVersion: () => undefined,
-    projects: { read: () => ({ name: "Storefront" }) },
-    defaultFallback: () => ({ kind: "global-folder", canonicalRoot: "/Users/me/Artifacts" }),
-    outsideRootApproved: () => true,
-    planMode: () => false,
-    appendVersionFromBundle: () => ({ kind: "denied", message: "unused" }),
-    ...(options.receiptNotJournaled === undefined
-      ? {}
-      : { receiptNotJournaled: options.receiptNotJournaled }),
-    journal: new ArtifactMirrorEventStore({
-      journal: { append: options.journalAppend ?? ((input) => journal.append(input)) },
-      uuid: randomUUID,
+  const makeService = () =>
+    new ArtifactMirrorService({
+      files: {
+        write: async (path, contents) => void files.set(path, contents),
+        read: async (path) => files.get(path),
+        remove: async (path) => void files.delete(path),
+        resolveRoot: async (path) => path,
+      },
+      currentVersion: () => undefined,
+      projects: { read: () => ({ name: "Storefront" }) },
+      defaultFallback: () => ({ kind: "global-folder", canonicalRoot: "/Users/me/Artifacts" }),
+      outsideRootApproved: () => true,
+      planMode: () => false,
+      appendVersionFromBundle: () => ({ kind: "denied", message: "unused" }),
+      ...(options.receiptNotJournaled === undefined
+        ? {}
+        : { receiptNotJournaled: options.receiptNotJournaled }),
+      journal: new ArtifactMirrorEventStore({
+        journal: { append: options.journalAppend ?? ((input) => journal.append(input)) },
+        uuid: randomUUID,
+        clock: () => now,
+        actor: { kind: "system", actorId: "00000000-0000-4000-8000-000000000002" },
+      }),
       clock: () => now,
-      actor: { kind: "system", actorId: "00000000-0000-4000-8000-000000000002" },
-    }),
-    clock: () => now,
-  });
+    });
   const receipts = () =>
     journal
-      .replayAggregate?.({
+      .replayAggregate({
         aggregateType: ARTIFACT_MIRROR_AGGREGATE_TYPE,
         aggregateId: canvasId,
         afterVersion: 0,
         limit: 100,
       })
       .filter((event) => event.eventName === "artifact.mirror-written@1");
-  return { service, receipts };
+  return { service: makeService(), restart: makeService, receipts };
 }
 
 describe("journaling mirror receipts", () => {
@@ -148,5 +149,31 @@ describe("journaling mirror receipts", () => {
         error: "JournalWriteFailed",
       },
     ]);
+  });
+
+  it("journals successive settings changes and refuses one made from a stale version", async () => {
+    const h = setup();
+    const folder = (canonicalRoot: string) => ({ kind: "global-folder", canonicalRoot }) as const;
+
+    await h.service.execute({
+      kind: "set-artifact-mirror-fallback",
+      expectedVersion: 0,
+      destination: folder("/Users/me/A"),
+    });
+    const second = await h.service.execute({
+      kind: "set-artifact-mirror-fallback",
+      expectedVersion: 1,
+      destination: folder("/Users/me/B"),
+    });
+
+    expect(second.kind).toBe("mirror-settings");
+    // A restarted host that has not replayed settings must not append over them.
+    await expect(
+      h.restart().execute({
+        kind: "set-artifact-mirror-fallback",
+        expectedVersion: 0,
+        destination: folder("/Users/me/C"),
+      }),
+    ).rejects.toMatchObject({ _tag: "ConcurrencyConflict" });
   });
 });

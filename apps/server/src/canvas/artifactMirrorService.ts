@@ -86,6 +86,7 @@ export interface ArtifactMirrorServiceDependencies {
       readonly aggregateId: string;
       readonly eventName: string;
       readonly payload: unknown;
+      readonly expectedVersion?: number;
     }) => void;
   };
   readonly clock: () => UtcTimestamp;
@@ -203,6 +204,7 @@ export class ArtifactMirrorService {
       aggregateType: ARTIFACT_MIRROR_AGGREGATE_TYPE,
       aggregateId: ARTIFACT_MIRROR_SETTINGS_AGGREGATE_ID,
       eventName: ARTIFACT_MIRROR_EVENT_NAMES.settingChanged,
+      expectedVersion: this.#settings.version,
       payload: { settings: next },
     });
     this.#settings = next;
