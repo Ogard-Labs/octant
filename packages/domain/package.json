@@ -42,6 +42,7 @@
     "./cache-backoff-policy": "./src/cacheBackoffPolicy.ts",
     "./context-compaction": "./src/contextCompaction.ts",
     "./context-policy": "./src/contextPolicy.ts",
+    "./model-context-window": "./src/modelContextWindow.ts",
     "./diagnostics-policy": "./src/diagnosticsPolicy.ts",
     "./work-confinement-policy": "./src/workConfinementPolicy.ts",
     "./work-delivery-policy": "./src/workDeliveryPolicy.ts",

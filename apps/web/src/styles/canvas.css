@@ -15,10 +15,15 @@
   background: var(--oct-bg);
 }
 
+/* An agent writes the titles, and one long word at display size set the
+   whole tab's content width: in a 411px dock column the tab measured 446px
+   and pushed the toolbar's More button and the drawer's Close off the edge.
+   A heading breaks inside a word before it widens anything. */
 .canvas-view__header h1 {
   margin: 0 0 var(--oct-space-5);
   font-size: var(--oct-text-xl);
   letter-spacing: var(--oct-tracking-snug);
+  overflow-wrap: anywhere;
 }
 
 .canvas-block {
@@ -27,6 +32,7 @@
 
 .canvas-block__heading {
   margin: var(--oct-space-6) 0 var(--oct-space-2);
+  overflow-wrap: anywhere;
 }
 
 .canvas-block__rich-text {
@@ -1763,8 +1769,12 @@
   outline: none;
 }
 
+/* Every grid here takes the drawer's width rather than its content's: the
+   anchor picker names a block by its heading, and an unbreakable heading
+   pushed the picker, the composer and its Comment button past the drawer. */
 .canvas-comments {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--oct-space-2);
 }
 
@@ -1824,11 +1834,13 @@
 .canvas-comments__actions,
 .canvas-comments__compose {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--oct-space-2);
 }
 
 .canvas-comments__field {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--oct-space-1);
   font-size: var(--oct-text-xs);
   color: var(--oct-muted);
@@ -2133,6 +2145,7 @@
 .canvas-workspace-tab {
   display: flex;
   flex-direction: column;
+  min-width: 0;
   min-height: 0;
   height: 100%;
 }
@@ -2159,6 +2172,7 @@
 
 .canvas-workspace-tab__versions {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--oct-space-2);
   padding: var(--oct-space-3);
   width: min(320px, calc(100vw - 32px));
@@ -2190,16 +2204,31 @@
 
 /* The document always owns the full width; comments slide over it rather
    than taking a column, which in a narrow dock left half the width to the
-   document. */
+   document. The body is the frame both sit in and does not scroll: the
+   drawer is laid over the frame, so scrolling the document leaves it put. */
 .canvas-workspace-tab__body {
   position: relative;
+  display: grid;
+  grid-template: minmax(0, 1fr) / minmax(0, 1fr);
+  min-width: 0;
   min-height: 0;
   flex: 1;
+  isolation: isolate;
+}
+
+/* Its own stacking context: a sticky table header raises itself over the rows
+   it scrolls past, and without this it also rose over the drawer and covered
+   its Comment button. */
+.canvas-workspace-tab__document {
+  min-width: 0;
+  min-height: 0;
   overflow: auto;
+  isolation: isolate;
 }
 
 .canvas-workspace-tab__drawer {
   position: absolute;
+  z-index: 1;
   inset: 0 0 0 auto;
   width: min(360px, 100%);
   display: flex;
@@ -2473,9 +2502,15 @@
   gap: var(--oct-space-1);
 }
 
-/* Each version reads as a small system card the current one accents. */
+/* Each version reads as a small system card the current one accents. A title
+   wraps inside the card: on one line, a long one widened the popover's column
+   past the popup, and at phone width Compare scrolled out of reach. */
 .canvas-version-history__item {
+  display: block;
   width: 100%;
+  height: auto;
+  white-space: normal;
+  overflow-wrap: anywhere;
   text-align: left;
   border: 1px solid var(--oct-border);
   border-radius: var(--oct-radius-sm);

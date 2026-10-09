@@ -51,6 +51,7 @@ export * from "./canvasSharePolicy";
 export * from "./cacheBackoffPolicy";
 export * from "./contextCompaction";
 export * from "./contextPolicy";
+export * from "./modelContextWindow";
 export * from "./diagnosticsPolicy";
 export * from "./diagnosticsExportPolicy";
 export * from "./workConfinementPolicy";

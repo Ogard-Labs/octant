@@ -202,7 +202,18 @@ navigation rail; the rail names each group of pages with a quiet label and
 draws no hairline between groups. The groups are Personal (how Octant looks and
 behaves for you), Modes (each mode's defaults), Models (which provider or model
 answers each job), Agents (what a running agent may do), Integrations, and
-System (the running host, its data, sync, remote access, and usage). A setting lives
+System (the running host, its data, sync, remote access, and usage). Models
+lists each provider kind on the page of what it serves: Providers & Models
+holds only the agent runtimes Octant drives (ACP agents, CLIs, the Agent SDK,
+RPC runtimes), and its manual add form offers only those kinds; Octant Harness
+opens with Model endpoints, every endpoint Octant calls over an API itself
+(OpenAI-compatible, Anthropic-compatible, Ollama, Azure AI Foundry), whose add
+row offers one-step subscription sign-ins (Sign in with ChatGPT, Sign in with
+OpenRouter) beside Add endpoint, followed by model slots and helper agents;
+Image generation holds the image profiles and custom image sources. A
+sign-in endpoint's row shows who is signed in with sign out and sign in
+again, and its configuration fixes the base URL and asks for no key. The
+instances, commands, and credentials are the same on every page. A setting lives
 on the page of the thing it changes, and a moved setting keeps answering links
 to its old page. Personal holds Appearance (theme, window glass, background,
 text, accessibility) and a separate Sidebar page (layout, destinations, sidebar
@@ -1590,7 +1601,10 @@ and Tooltip. Composition rules:
   `Separator` for navigation lists.
 - Menus, popovers, dialogs, and overlays are opaque, keyboard dismissible, and
   titled for assistive technology. Use `OctantDialog` with a real label even
-  when the title is visually hidden.
+  when the title is visually hidden. Dialogs and floating popups share one
+  layer, so the one opened last paints on top: a menu or popover opened inside
+  a dialog or the narrow dock sheet appears above it, and Escape closes the
+  innermost surface first.
 - Use Badge for status labels, Alert for callouts, Empty for empty states,
   Skeleton for loading, and the shared `.toast-stack` notification owner for
   transient acknowledgements. Do not add another toast package or recreate
