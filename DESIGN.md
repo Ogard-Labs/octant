@@ -208,7 +208,7 @@ holds only the agent runtimes Octant drives (ACP agents, CLIs, the Agent SDK,
 RPC runtimes), and its manual add form offers only those kinds; Octant Harness
 opens with Model endpoints, every endpoint Octant calls over an API itself
 (OpenAI-compatible, Anthropic-compatible, Ollama, Azure AI Foundry), followed
-by model slots and helper agents; with no endpoint yet it offers three ways
+by model roles and helper agents; with no endpoint yet it offers three ways
 in instead (Sign in with ChatGPT, Sign in with OpenRouter, Add endpoint), each
 sign-in one click with its terms as a consent line under the button. Image
 generation holds the image profiles and custom image sources. A sign-in
@@ -257,8 +257,10 @@ Every Settings page is built from one kit, in `settings/primitives.tsx`:
   a change resolves (a shell setting or a theme write), and holds its place
   when empty so nothing shifts. A host that refuses a change shows nothing.
   A Save button exists only for compound forms: a provider's or model
-  endpoint's connection details, a sync bucket's connection details, and the
-  harness model slots.
+  endpoint's connection details and a sync bucket's connection details. A
+  host setting that can be changed elsewhere (the harness model roles) is sent
+  with the version it was read at; a refusal says it changed elsewhere,
+  inline, and reloads.
 - **Said before the switch.** A switch that sends something off this
   computer carries the fact a person must know as its section's description,
   above the switch and named as its description, and stays disabled until it

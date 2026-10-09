@@ -17,18 +17,18 @@ import "./agent-hierarchy.css";
 import { OctantAlert } from "../ui/base/OctantAlert";
 
 // The description says what the choice does, not what it was meant to do.
-// Subagents start only when the thread's agent delegates part of its work, so
-// Off is the only way to hold them back; there is no manual start to fall
+// Helper agents start only when the thread's agent delegates part of its work,
+// so Off is the only way to hold them back; there is no manual start to fall
 // back on.
 const DESCRIPTION: Readonly<Record<AgentRunSelectableCreationPosture, string>> = {
   automatic:
-    "The agent can hand part of its work to a subagent and gets the result back, within the thread's access and capacity limits.",
-  off: "The agent does all of its work itself. Subagents it already started stay viewable.",
+    "The agent can hand part of its work to a helper and get the result back. Helpers never have more access than their thread.",
+  off: "When off, the agent does all the work itself. Helpers it already started stay viewable.",
 };
 
 /**
  * Settings → Octant Harness › Helper agents: whether the thread's agent may
- * start subagents, as the server-authoritative Off / Automatic posture. Reads
+ * start helper agents, as the server-authoritative Off / Automatic posture. Reads
  * and writes go straight through `AgentRunSettingsClient`; there is no local
  * override or cache that could drift from the server's own event-sourced
  * state.
@@ -53,7 +53,7 @@ export function AgentRunSettingsPanel(props: {
       setMessage(
         error instanceof AgentRunSettingsClientFailure
           ? error.message
-          : "Agents settings are unavailable.",
+          : "Helper agent settings are unavailable.",
       );
       setStatus("error");
     }
@@ -79,13 +79,13 @@ export function AgentRunSettingsPanel(props: {
         setSettings(updated);
       } catch (error) {
         if (error instanceof AgentRunSettingsClientFailure && error.code === "conflict") {
-          setMessage("Agents settings changed elsewhere. Reloading the current policy.");
+          setMessage("Helper agent settings changed elsewhere. Reloaded the current settings.");
           await load();
         } else {
           setMessage(
             error instanceof AgentRunSettingsClientFailure
               ? error.message
-              : "The Agents policy update failed.",
+              : "Saving helper agent settings failed.",
           );
         }
       } finally {
@@ -112,12 +112,12 @@ export function AgentRunSettingsPanel(props: {
   );
 
   if (status === "loading") {
-    return <p role="status">Loading the Agents policy…</p>;
+    return <p role="status">Loading helper agent settings…</p>;
   }
   if (status === "error") {
     return (
       <OctantAlert className="agent-run-settings-panel__error" tone="danger">
-        {message ?? "Agents settings are unavailable."}
+        {message ?? "Helper agent settings are unavailable."}
       </OctantAlert>
     );
   }
@@ -126,12 +126,12 @@ export function AgentRunSettingsPanel(props: {
   const limits = effectiveAgentRunConcurrency(settings ?? {});
 
   return (
-    <section aria-label="Agents" className="agent-run-settings-panel">
+    <section aria-label="Helper agents" className="agent-run-settings-panel">
       <SettingsSection title="Helper agents">
         <div className="setgroup">
           <SettingRow
             description={DESCRIPTION[on ? "automatic" : "off"]}
-            label="Let the agent start subagents"
+            label="Let the agent start helper agents"
             focused={props.focused === true}
             scope="app"
             settingId="subagent-creation-posture"
@@ -139,18 +139,18 @@ export function AgentRunSettingsPanel(props: {
             <OctantSwitch
               checked={on}
               disabled={saving}
-              label="Let the agent start subagents"
+              label="Let the agent start helper agents"
               onCheckedChange={(checked) => void choose(checked ? "automatic" : "off")}
             />
           </SettingRow>
           <SettingRow
-            description="How many helper agents of one thread run at the same time. Helpers that are only waiting — for other helpers or a free slot — don't count."
-            label="Run at once in a thread"
+            description="How many helper agents of one thread run at the same time. Helpers that are only waiting don't count."
+            label="At once in one thread"
             scope="app"
             settingId="subagent-concurrency-per-thread"
           >
             <OctantNumberStepper
-              label="Run at once in a thread"
+              label="At once in one thread"
               max={MAX_AGENT_RUN_CONCURRENCY}
               min={1}
               onChange={(value) => setLimit("perThread", value)}
@@ -158,13 +158,13 @@ export function AgentRunSettingsPanel(props: {
             />
           </SettingRow>
           <SettingRow
-            description="How many helper agents run at the same time across every thread."
-            label="Run at once in the app"
+            description="How many helper agents run at the same time, every thread together."
+            label="At once across Octant"
             scope="app"
             settingId="subagent-concurrency-on-host"
           >
             <OctantNumberStepper
-              label="Run at once in the app"
+              label="At once across Octant"
               max={MAX_AGENT_RUN_CONCURRENCY}
               min={1}
               onChange={(value) => setLimit("onHost", value)}

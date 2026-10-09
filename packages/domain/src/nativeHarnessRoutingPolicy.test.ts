@@ -68,6 +68,31 @@ describe("native harness route resolution", () => {
     });
   });
 
+  it("leaves the advisor off until a model is chosen for it, even with a main model set", () => {
+    const decision = resolveNativeHarnessRoute({
+      job: "advisor",
+      host: configured,
+      facts: allReady,
+      now,
+    });
+    expect(decision).toMatchObject({
+      kind: "unroutable",
+      slotId: "advisor",
+      reason: "slot-empty",
+      rejected: [],
+    });
+    const chosen = resolveNativeHarnessRoute({
+      job: "advisor",
+      host: {
+        ...configured,
+        slots: [...configured.slots, { id: "advisor" as never, candidates: [small] }],
+      },
+      facts: allReady,
+      now,
+    });
+    expect(chosen).toMatchObject({ kind: "primary", slotId: "advisor", candidate: small });
+  });
+
   it("steps to the next ready candidate while the primary cools down, and says why", () => {
     const decision = resolveNativeHarnessRoute({
       job: "lead",
