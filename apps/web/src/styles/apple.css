@@ -248,6 +248,12 @@
   font-size: var(--oct-text-xs);
 }
 
+/* Quiet note under an Android frame: live stream, or snapshots and why. */
+.apple-simulator-frame__transport {
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
 .apple-simulator-frame__keys {
   display: flex;
   flex-wrap: wrap;

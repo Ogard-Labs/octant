@@ -2777,6 +2777,20 @@ describe("startOctantServer", () => {
     );
     expect(output).not.toContain("sqlite");
   });
+
+  it("names a port that is already in use in an otherwise generic startup failure", () => {
+    const output = fatalStartupOutput(
+      Object.assign(new Error("listen EADDRINUSE: address already in use 127.0.0.1:13773"), {
+        code: "EADDRINUSE",
+      }),
+    );
+
+    expect(JSON.parse(output)).toMatchObject({
+      category: "startup-failed",
+      message: expect.stringContaining("port is already in use"),
+    });
+    expect(output).not.toContain("13773");
+  });
 });
 
 describe("admittedParentChatContext", () => {

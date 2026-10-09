@@ -97,6 +97,7 @@ export const AppleSimulatorActionKind = Schema.Literal(
   "swipe",
   "type-text",
   "key-press",
+  "repair-input",
 );
 export type AppleSimulatorActionKind = typeof AppleSimulatorActionKind.Type;
 
@@ -116,6 +117,7 @@ export const AppleActionKind = Schema.Literal(
   "swipe",
   "type-text",
   "key-press",
+  "repair-input",
 );
 export type AppleActionKind = typeof AppleActionKind.Type;
 
@@ -222,6 +224,9 @@ export const AppleSimulatorRequest = Schema.Struct({
       if (request.kind === "key-press") {
         return request.requestedBy !== undefined && request.key !== undefined;
       }
+      if (request.kind === "repair-input") {
+        return request.requestedBy !== undefined;
+      }
       return true;
     }),
   );
@@ -311,7 +316,8 @@ export const AppleBuildEvidence = Schema.Struct({
         evidence.kind === "tap" ||
         evidence.kind === "swipe" ||
         evidence.kind === "type-text" ||
-        evidence.kind === "key-press"
+        evidence.kind === "key-press" ||
+        evidence.kind === "repair-input"
       ) {
         return evidence.requestedBy !== undefined;
       }

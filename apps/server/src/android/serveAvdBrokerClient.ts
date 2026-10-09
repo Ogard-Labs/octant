@@ -1,3 +1,4 @@
+import type { AndroidScreenFallbackReason } from "@octant/contracts/android-toolchain-rpc";
 import { readManagedDeviceEndpoint } from "@octant/domain/managed-device-stream";
 
 const PATH = "/v1/managed-device/serve-avd";
@@ -12,9 +13,23 @@ export interface ServeAvdAttachment {
   readonly streamUrl: string;
 }
 
+export type ServeAvdOpening =
+  | { readonly status: "attached"; readonly attachment: ServeAvdAttachment }
+  | {
+      readonly status: "unavailable";
+      readonly reason: Extract<
+        AndroidScreenFallbackReason,
+        "not-emulator" | "tool-missing" | "tool-exited" | "timed-out" | "desktop-unreachable"
+      >;
+    };
+
 /** The desktop's serve-avd broker, as the server reaches it. */
 export interface ServeAvdPort {
-  open(serial: string, signal?: AbortSignal): Promise<ServeAvdAttachment | undefined>;
+  /** `sdkRoot` is the SDK whose adb the server runs; serve-avd uses the same one. */
+  open(
+    serial: string,
+    options?: { readonly sdkRoot?: string; readonly signal?: AbortSignal },
+  ): Promise<ServeAvdOpening>;
 }
 
 /**
@@ -48,8 +63,10 @@ export function serveAvdFromEnvironment(
     return undefined;
   }
   return {
-    open: async (serial, signal) => {
-      if (!SERIAL.test(serial)) return undefined;
+    open: async (serial, options = {}) => {
+      if (!SERIAL.test(serial)) return { status: "unavailable", reason: "not-emulator" };
+      const { sdkRoot, signal } = options;
+      const unreachable = { status: "unavailable", reason: "desktop-unreachable" } as const;
       let response: Response;
       try {
         response = await fetchImpl(endpoint, {
@@ -61,29 +78,35 @@ export function serveAvdFromEnvironment(
             "content-type": "application/json",
             [HEADER]: token,
           },
-          body: JSON.stringify({ serial }),
+          body: JSON.stringify(sdkRoot === undefined ? { serial } : { serial, sdkRoot }),
         });
       } catch {
-        return undefined;
+        return unreachable;
       }
-      if (!response.ok) return undefined;
       let body: unknown;
       try {
         body = await response.json();
       } catch {
-        return undefined;
+        return unreachable;
+      }
+      if (!response.ok) {
+        const reason = response.status === 503 && isRecord(body) ? body.reason : undefined;
+        return reason === "tool-missing" || reason === "tool-exited" || reason === "timed-out"
+          ? { status: "unavailable", reason }
+          : unreachable;
       }
       if (
         !isRecord(body) ||
         typeof body.origin !== "string" ||
         typeof body.streamUrl !== "string"
       ) {
-        return undefined;
+        return unreachable;
       }
-      return readManagedDeviceEndpoint(
+      const attachment = readManagedDeviceEndpoint(
         JSON.stringify({ device: serial, url: body.origin, streamUrl: body.streamUrl }),
         serial,
       );
+      return attachment === undefined ? unreachable : { status: "attached", attachment };
     },
   };
 }

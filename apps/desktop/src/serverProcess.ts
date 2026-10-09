@@ -1,6 +1,8 @@
 import { createServer, type AddressInfo } from "node:net";
+import { StringDecoder } from "node:string_decoder";
 import {
   HostRuntimePathError,
+  redactHostRuntimeText,
   type HostInfoReceipt,
   type ServicePolicyStore,
 } from "@octant/host-runtime";
@@ -122,7 +124,7 @@ export function serverSpawnSpec(options: ServerSpawnSpecOptions) {
       command: "bun",
       args: ["run", "--cwd", `${options.root}/apps/server`, "start"],
       env,
-      stdio: ["pipe", "inherit", "inherit"],
+      stdio: ["pipe", "inherit", "pipe"],
     } as const;
   }
   const packagedPath = resolvePackagedServerPath(options.env.PATH);
@@ -135,7 +137,7 @@ export function serverSpawnSpec(options: ServerSpawnSpecOptions) {
       ELECTRON_RUN_AS_NODE: "1",
       OCTANT_PACKAGED_RUNTIME: "1",
     },
-    stdio: ["pipe", "inherit", "inherit"],
+    stdio: ["pipe", "inherit", "pipe"],
   } as const;
 }
 
@@ -152,6 +154,110 @@ export class ServerReadyTimeout extends Error {
         `(last probe: ${lastProbeOutcome}; attempts: ${attemptCount}).`,
     );
     this.name = "ServerReadyTimeout";
+  }
+}
+
+const STDERR_TAIL_MAX_LINES = 5;
+const STDERR_TAIL_MAX_CHARS = 1_000;
+
+/**
+ * The managed server's stderr is the only place its own startup diagnosis
+ * appears. Keep a bounded tail so a start that dies before listening can say
+ * why instead of timing out with a bare probe outcome.
+ */
+export interface StderrTail {
+  readonly append: (chunk: string | Uint8Array) => void;
+  /** Marks the stream finished so `drained` stops waiting for more output. */
+  readonly end: () => void;
+  /** Resolves once the stream ended, or after `timeoutMs` if it never does. */
+  readonly drained: (timeoutMs: number) => Promise<void>;
+  readonly text: () => string;
+}
+
+const STDERR_LINE_MAX_CHARS = 4 * STDERR_TAIL_MAX_CHARS;
+const OMITTED_LINE = "[long output line omitted]";
+
+export function createStderrTail(): StderrTail {
+  // Lines are redacted whole, before any truncation: cutting first could drop
+  // the `token=` prefix that lets the redactor recognize the value after it.
+  // A line too long to hold is omitted rather than shown in part.
+  let lines: ReadonlyArray<string> = [];
+  let pending = "";
+  let skippingLongLine = false;
+  let ended = false;
+  // A multibyte character can span two chunks; the decoder holds its first bytes.
+  const decoder = new StringDecoder("utf8");
+  const endWaiters = new Set<() => void>();
+  const keep = (line: string) => {
+    const trimmed = line.trim();
+    if (trimmed === "") return;
+    lines = [...lines, redactHostRuntimeText(trimmed)].slice(-STDERR_TAIL_MAX_LINES);
+  };
+  return {
+    append: (chunk) => {
+      const parts = (
+        pending + (typeof chunk === "string" ? chunk : decoder.write(Buffer.from(chunk)))
+      ).split("\n");
+      pending = parts.pop() ?? "";
+      for (const line of parts) {
+        if (skippingLongLine) {
+          skippingLongLine = false;
+          continue;
+        }
+        if (line.length > STDERR_LINE_MAX_CHARS) keep(OMITTED_LINE);
+        else keep(line);
+      }
+      if (pending.length > STDERR_LINE_MAX_CHARS) {
+        if (!skippingLongLine) keep(OMITTED_LINE);
+        skippingLongLine = true;
+        pending = "";
+      }
+    },
+    end: () => {
+      pending += decoder.end();
+      ended = true;
+      for (const resolve of endWaiters) resolve();
+      endWaiters.clear();
+    },
+    drained: (timeoutMs) =>
+      ended
+        ? Promise.resolve()
+        : new Promise<void>((resolve) => {
+            const timer = setTimeout(() => {
+              endWaiters.delete(finish);
+              resolve();
+            }, timeoutMs);
+            const finish = () => {
+              clearTimeout(timer);
+              resolve();
+            };
+            endWaiters.add(finish);
+          }),
+    text: () => {
+      const partial = skippingLongLine ? [] : [pending.trim()].filter((line) => line !== "");
+      return [...lines, ...partial.map(redactHostRuntimeText)]
+        .slice(-STDERR_TAIL_MAX_LINES)
+        .join("\n")
+        .slice(-STDERR_TAIL_MAX_CHARS);
+    },
+  };
+}
+
+/** The managed child ended before it answered, so waiting longer cannot help. */
+export class ServerExitedBeforeReady extends Error {
+  readonly category = "server-unavailable";
+
+  constructor(
+    readonly exitCode: number | null,
+    readonly signalCode: NodeJS.Signals | null,
+    lastOutput: string,
+  ) {
+    super(
+      `Octant's local server exited before it was ready (${
+        signalCode !== null ? `signal ${signalCode}` : `exit code ${exitCode}`
+      }).` + (lastOutput === "" ? " It printed no error output." : ` Last output:\n${lastOutput}`),
+    );
+    this.name = "ServerExitedBeforeReady";
   }
 }
 
@@ -202,6 +308,13 @@ interface WaitForStorageReadyOptions {
   readonly now?: () => number;
   readonly sleep?: (milliseconds: number) => Promise<void>;
   readonly resolveAttachedHost?: () => Promise<LocalHostProbe | undefined>;
+  /** When set, a child that has exited ends the wait instead of the timeout. */
+  readonly child?: ManagedChildProcess;
+  /**
+   * The child's last output. Node reports `exit` before the piped stderr has
+   * delivered its final bytes, so this may wait for the stream to drain.
+   */
+  readonly lastOutput?: () => string | Promise<string>;
 }
 
 export interface LoopbackPortReservation {
@@ -392,6 +505,20 @@ export async function waitForStorageReady(
   const healthUrl = new URL("/health", options.serverUrl).toString();
   let attemptCount = 0;
   let lastProbeOutcome: StorageReadyProbeOutcome = "not-attempted";
+  // Another owner may have won, or the child may have died, during any wait,
+  // including the last one before the deadline.
+  const attachedOrExited = async (): Promise<LocalHostProbe | undefined> => {
+    const attached = await options.resolveAttachedHost?.();
+    if (attached !== undefined && attached.instanceId !== options.instanceId) return attached;
+    if (options.child !== undefined && hasExited(options.child)) {
+      throw new ServerExitedBeforeReady(
+        options.child.exitCode,
+        options.child.signalCode,
+        (await options.lastOutput?.()) ?? "",
+      );
+    }
+    return undefined;
+  };
 
   while (now() < deadline) {
     attemptCount += 1;
@@ -407,12 +534,14 @@ export async function waitForStorageReady(
       lastProbeOutcome = "request-failed";
       // The managed child may not have bound its loopback socket yet.
     }
-    const attached = await options.resolveAttachedHost?.();
-    if (attached !== undefined && attached.instanceId !== options.instanceId) return attached;
+    const settled = await attachedOrExited();
+    if (settled !== undefined) return settled;
     const remaining = deadline - now();
     if (remaining <= 0) break;
     await sleep(Math.min(pollIntervalMs, remaining));
   }
+  const settled = await attachedOrExited();
+  if (settled !== undefined) return settled;
   throw new ServerReadyTimeout(timeoutMs, lastProbeOutcome, attemptCount);
 }
 

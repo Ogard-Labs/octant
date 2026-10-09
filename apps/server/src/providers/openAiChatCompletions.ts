@@ -51,6 +51,8 @@ export interface ChatCompletionsTurnResult {
   readonly events: readonly ProtocolTurnEvent[];
   readonly toolCalls: readonly ProtocolToolCall[];
   readonly verifiedManualModelId?: string;
+  /** The `model` the endpoint said answered, which a deployment's own name can hide. */
+  readonly servedModelId?: string;
   /** Quota buckets from the response headers. Absent when the endpoint sent none. */
   readonly rateLimitBuckets?: ReadonlyArray<ObservedRateLimitBucket>;
   /** Present when the endpoint said this reply stopped on a known limit or filter. */
@@ -72,6 +74,7 @@ interface StreamState {
   text: string;
   usage?: ProtocolUsage;
   responseId?: string;
+  servedModelId?: string;
   nextSequence: number;
   readonly events: ProtocolTurnEvent[];
   readonly toolCalls: TrackedChatToolCall[];
@@ -226,6 +229,8 @@ function normalizeChunk(
   if (!isNonEmptyString(value.id) || !Array.isArray(value.choices)) {
     throw protocol("The provider stream contained an invalid Chat Completions event.");
   }
+  const served = state.servedModelId === undefined ? servedModel(value.model) : undefined;
+  if (served !== undefined) state.servedModelId = served;
   if (state.responseId === undefined) state.responseId = value.id;
   else if (state.responseId !== value.id) {
     throw protocol("The provider stream changed completion identity.");
@@ -485,6 +490,7 @@ async function normalizeNonStreaming(
   const content = hasToolCalls ? "" : (message.content as string);
   const usage =
     value.usage === undefined || value.usage === null ? undefined : readUsage(value.usage);
+  const servedModelId = servedModel(value.model);
   const state: StreamState = {
     accepted: true,
     outputStarted: hasToolCalls || content.length > 0,
@@ -497,6 +503,7 @@ async function normalizeNonStreaming(
     completedToolCalls: [],
     ...(usage === undefined ? {} : { usage }),
     ...(outputStopReasonValue === undefined ? {} : { outputStopReason: outputStopReasonValue }),
+    ...(servedModelId === undefined ? {} : { servedModelId }),
   };
   assertSequenceStart(state.nextSequence);
   if (hasToolCalls) {
@@ -569,9 +576,17 @@ function result(
     ...(input.endpoint.configuration.manualModelIds.includes(input.modelId as never)
       ? { verifiedManualModelId: input.modelId }
       : {}),
+    ...(state.servedModelId === undefined ? {} : { servedModelId: state.servedModelId }),
     ...(rateLimitBuckets.length === 0 ? {} : { rateLimitBuckets }),
     ...(state.outputStopReason === undefined ? {} : { outputStopReason: state.outputStopReason }),
   };
+}
+
+/** The response's `model`, when it is a name worth matching; an endpoint may leave it out. */
+function servedModel(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed.length === 0 || trimmed.length > 256 ? undefined : trimmed;
 }
 
 function isStrictStreamUnsupported(body: string): boolean {

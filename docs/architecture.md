@@ -295,8 +295,8 @@ data and creates no artifact.
 `sidebar` (the default). The value is part of the definition and needs Canvas
 schema version 4. An older runtime refuses a version-4 document as a future
 version and does not report it corrupt.
-A treemap block is gated the same way at Canvas schema version 5 and a heatmap
-block at version 6, so a document that declares an earlier version and carries
+A treemap block is gated the same way at Canvas schema version 5, a heatmap
+block at version 6, and a comparison matrix at version 10, so a document that declares an earlier version and carries
 one is refused as a declared future version. The optional table column
 `display` and the chart, table, and metric `format` fields are the one ungated
 exception: they only change how a value is drawn, so they carry no schema
@@ -400,13 +400,36 @@ blocks are gathered into one responsive row of two to four tiles. The bar list
 and the metric's direction, sparkline, and caption arrive with Canvas schema
 version 7, so a document declaring an older version that carries any of them is
 refused as a future version; a static export carries the same metric fields.
+A comparison matrix (`packages/domain/src/canvasComparisonMatrix.ts`) sets
+options as columns against criteria as rows. A criterion may carry a weight
+(absent counts once, zero keeps it out of the score) and may prefer the lower
+reading. Each cell holds exactly one reading: a score, a short text, or a glyph
+of yes, partial, or no, with an optional note. The pure layout computes each
+option's weighted score as the weighted share of the best reading it could have
+had across the criteria that can be scored. A score counts as its place on the
+score range, yes, partial, and no as the whole, half, and none of a criterion,
+and text never counts. A counted criterion an option has no reading in scores
+nothing and is reported beside its total. The author names a recommended option,
+which is drawn apart and never inferred from the scores. Options and criteria
+take node ids, so a comment anchors to a column or a row through the existing
+node anchor. The board contract has no cell anchor, so a comment on a cell sits
+on its row or column. Ordering options by score is view state. The domain policy
+refuses an id used twice across options and criteria, a cell or recommendation
+that names an option or criterion the block lacks, a repeated coordinate, a
+score outside a declared range, and a matrix past the option, criterion, or cell
+budget. The block is a native table that scrolls inside its own focusable region
+with the criteria pinned; its disclosed fallback lists one row per option. The
+screen, the artifact preview SVG, and the Markdown and HTML export read the same
+layout. The comparison matrix arrives with Canvas schema version 10 and share
+version 4.
 A share carries every block kind and field a Canvas holds except source ids
 and the design and action blocks it refuses (see the `design` block). A table
 column keeps its number format and display, and a board keeps its own layout.
 Share documents version independently of Canvas documents: a treemap, a
 heatmap, a bar list, a chart's or a table column's number format, a table
-column's display, and a board's layout arrive with share version 3, so a share
-that declares an older version and carries one is refused as a future version.
+column's display, and a board's layout arrive with share version 3, and a
+comparison matrix with share version 4, so a share that declares an older
+version and carries one is refused as a future version.
 The catalogue includes a `plan` block: phases, and one list of tasks that each
 name their phase, carry a status (todo, doing, blocked, done), and may carry an
 owner, estimate, acceptance notes, dates, dependencies on other tasks in the
@@ -543,6 +566,18 @@ capture launch re-allows it through its own write root
 An Android emulator is a separate dock destination and `octant_android` tool,
 not an iOS helper feature
 ([decisions/0153-android-emulator-is-a-separate-device-destination.md](decisions/0153-android-emulator-is-a-separate-device-destination.md)).
+Android commands are one-shot `adb` clients. The shared `adb` server that a
+client forks puts itself in its own session, so Octant's group cleanup of a
+finished command never reaches it, and Octant never stops a server. Each
+client runs with `ADB_MDNS=0`: a server started with mDNS discovery on aborts
+within seconds on macOS 27, and every later command then restarts it while the
+emulator reconnects as `offline`. An input whose client exits 255 with
+neither a client nor a device message lost its server after handing the
+command over. It is reported `interrupted` (delivery unknown), not `failed`,
+so a retry cannot type the same text twice. With no `ANDROID_HOME` or
+`ANDROID_SDK_ROOT`, SDK discovery tries the Android Studio home location and
+then the Homebrew `android-commandlinetools` prefixes, taking the first that
+has both `adb` and `emulator`.
 Tap, typed text,
 and hardware-key input ride the same Apple workbench control channel as boot
 and screenshot, with XCTest-less host injection behind that channel only,
@@ -564,6 +599,27 @@ drag is one swipe sent when it ends, keys typed on the focused screen go to
 the device as one text per pause, Home and Lock are buttons, and what a person
 does while an action runs is kept and sent in order (see
 [decisions/0140-the-live-simulator-screen-is-driven-directly.md](decisions/0140-the-live-simulator-screen-is-driven-directly.md)).
+Touch and buttons sent through the managed `serve-sim` stream are reported
+delivered only while the Simulator's legacy input services still receive them.
+Xcode 27's Device Hub can take those services over: its guest input daemon
+starts on demand (the native helper's first connection starts it), raises the
+guest notification `com.apple.coredevice.dtuhidd.active` to `1`, and from then
+on `serve-sim` exits successfully while the device drops every tap, swipe, and
+Home. Before each tap, swipe, button, or finger-down on that stream the desktop
+reads the notification; at `1` it sends nothing through `serve-sim` and hands
+the input to the native device helper, which speaks to Device Hub's daemon and
+proves it answers before sending (a finger that went down that way stays on
+it until it lifts). When the helper cannot deliver either, the input is
+refused with the reason `input-disconnected` ("Simulator input is
+disconnected. Repair input restarts the Simulator's home screen."). When the
+guest does not answer the question within 1.5 seconds the input is sent
+through `serve-sim` as before. **Repair input** is a fifth input kind,
+offered by the device pane only after that refusal: it runs
+`serve-sim repair-input` (which restarts the guest's `backboardd`, so the home
+screen restarts and running apps close) and drops the stream so the next input
+reconnects it. It rides the same Allow input grant as a tap, never runs
+automatically, and is refused unless a person (`local-user` or
+`remote-device`) requested it; `octant_apple` does not offer it.
 
 ## Modes: Chat, Work, and Code
 
@@ -1722,7 +1778,17 @@ The provider layer is defined by `@octant/provider-sdk` and implemented in
   free-form driver or provider text does not cross to clients, and Settings
   maps the reason to copy and next-step guidance. A version check may show
   its structured minimum version in provider readiness; free-form probe text
-  remains redacted. A connection offers `subscribe` — a
+  remains redacted. HTTP endpoint drivers (OpenAI-compatible,
+  Anthropic-compatible, Azure AI Foundry, Ollama) fail only with fixed
+  Octant-authored sentences that carry no response body or credential, so a
+  failed probe keeps that sentence on the observation and it survives a
+  reload. An answer that is not the expected protocol (an HTML page, a body
+  that is not a model list) is `incompatible`, not `degraded`. Readiness
+  otherwise follows the driver's failure category, so an unreachable
+  endpoint is `unavailable`, and so is an OpenAI-compatible,
+  Anthropic-compatible, or Ollama endpoint answering a timeout, overload or
+  gateway status (HTTP 408, 500, 502, 503, 504, 529). A connection
+  offers `subscribe` — a
   scoped subscription to its normalized events, established before a caller
   sends so a provider that answers immediately is not missed (0082) — plus
   `start`, `resume`, `send`, `interrupt`, `stop`, `answerApproval`,
@@ -1777,17 +1843,38 @@ modelId }`, and the model picker is provider-first. Discovery can find
   connection's app-managed tool bridge allowed — into the private
   configuration, where OpenCode appends it after every agent's built-in rules
   (its default agent otherwise allows everything); a launch that names no
-  posture denies all. The bridge allow has nothing to admit yet: Octant
-  registers app-managed tools through the 1.x MCP route, which 2.0.22 does
-  not serve (it lists `/api/experimental/mcp/{server}` instead), so the probe
-  reports app-managed tools unsupported and 2.x runs turns without Octant's
-  app tools until registration supports the 2.x MCP API. Project resolution
+  posture denies all. 2.0.22 answers the 1.x `POST /mcp` registration with
+  405 and has no per-launch MCP flag; it registers runtime MCP servers through
+  `PUT /api/experimental/mcp/{server}` (removed with `DELETE`), which Octant
+  uses for the bridge. A config-file `mcp` entry also works but connects
+  lazily after the first turn has started, so it is not used. Registration
+  turns Code Mode off for the bridge, so each tool is offered by name as
+  `<server>_<tool>` and matches the bridge allow rather than OpenCode's own
+  `execute` tool, and it waits until `GET /api/mcp` reports the server
+  `connected`, because the add answers while the server is pending and its
+  tools join a session only once connected; any other status fails the
+  registration closed. 2.0.22 names the calling session in the call's
+  `ai.opencode/sessionID` metadata, and the bridge refuses a call that names
+  another session. App-managed tools are reported only for 2.0.22 exactly,
+  the 2.x release the hostile-configuration check was repeated against, and
+  only on macOS, where the probe registers an empty bridge and OpenCode lists
+  its tools. Project resolution
   starts Git, which the Chat, Plan, and Work jail refuses; on macOS those
   launches get the failing `git` stand-in described under
   [Security and authority](#security-and-authority), so 2.x offers turns in
   every mode there; on Linux the probe fails closed and the runtime is listed
-  without turns. Approvals map through 2.0.22's `permission.asked` event and
-  its reply route, whose body is `{decision}`. An approval is answered
+  without turns. 2.0.22 names its turn events without the `session.next.`
+  prefix earlier 2.x builds used (`session.text.*`, `session.reasoning.*`,
+  `session.tool.*`, `session.step.*`, `session.execution.*`), identifies a
+  tool call by `id`, and names the tool only on `session.tool.input.started`;
+  Octant folds them onto the earlier names, so 1.x, earlier 2.x, and 2.0.22
+  share one mapping. `session.execution.succeeded` completes the turn, its
+  `failed` and `interrupted` outcomes fail or interrupt it, and a scheduled
+  retry reports waiting. Queueing, lifecycle, part start and end, and running
+  usage totals report nothing (each step reports its own usage); any other
+  event fails the turn closed with an error naming it. Approvals map
+  through 2.0.22's `permission.asked` event and its reply route, whose body
+  is `{decision}`. An approval is answered
   `once`, never `always`, even when approvals are remembered for the Project:
   `always` would save a grant in OpenCode's data directory, which it shares
   with the person's own use, outside Octant's revocation. Approval-gated on
@@ -1890,7 +1977,15 @@ modelId }`, and the model picker is provider-first. Discovery can find
   renderer-visible. The raw credential resolve path refuses that material, so
   a refresh token is not handed out as an API key. Refresh runs in the broker.
   A revoked, expired, or reused refresh token becomes a typed sign-in-again
-  state. An API-key path stays available beside every sign-in. The effective
+  state. An API-key path stays available beside every sign-in. The host-driven
+  runner speaks vendor dialects: OpenRouter exchanges the code for an API key;
+  the ChatGPT plan dialect registers the host as a user-defined agent on first
+  sign-in (placeholder client id, agent name hint, stable `ext_agent_host_id`
+  bound by the server), stores the issued `oaiapp_…` client id from the
+  callback, validates the identity token against the issuer's JWKS, and
+  revokes the refresh token at the issuer on sign-out. The plan route's
+  request profile is enforced before send and its `subscription_sharing_*`
+  error codes map to user-facing states. The effective
   authority rule is in [security and authority](#security-and-authority); the
   historical record remains Proposed. Secrets
   Octant holds for an integration use the same host credential path: the host
@@ -1931,6 +2026,38 @@ ring; the context inspector names the number as an estimate; and the native
 harness's `context-remaining` tool refuses rather than hand the model an
 estimate of its own room. A window the provider's own usage report names still
 takes precedence.
+
+A model's window is found without asking the person
+(`resolveModelContextWindow` in `@octant/domain/model-context-window`). The
+first source that names one wins, except that a learned window below the
+reported one takes precedence: a window the person typed into the model's
+details (`user-supplied`, "Set by you"); the provider's own model metadata
+(`provider-discovery`, "Reported"); a window learned from the endpoint's own
+refusals (`observed-evidence`, "Learned"), which also wins over a larger
+reported figure because the endpoint refused above it; and the built-in model
+profile catalogue (`reviewed-catalog`, "Profile"). Nothing naming one leaves the
+labelled estimate above ("Estimate"). The labels appear only as the inspector's
+limit source and as the placeholder of the optional override; nothing prompts
+for a window. The profile catalogue ships with the app, is never fetched, and
+lists only families whose windows their providers publish, each with its
+reference. The opt-in reviewed model manifest (`OCTANT_REVIEWED_MODEL_MANIFEST=1`)
+keeps its existing role as Chat's last fallback before the estimate and shares
+the `reviewed-catalog` source, so it is also labelled "Profile". Profiles match on a normalized name (case, separators, a routing
+prefix, a `:` tag, a release date, and `-latest` are ignored; a version is
+not), and also on the `model` a direct endpoint names in its responses, so an
+Azure AI Foundry or OpenAI-compatible deployment with a name of its own takes
+its model's profile from its first completed request. A direct endpoint
+(OpenAI-compatible, Azure AI Foundry, Anthropic-compatible) learns from each
+request: an overflow refusal that names the limit ("maximum context length is
+N tokens", "prompt is too long: X tokens > N maximum", and similar) lowers the
+learned window before the harness's shrink-once recovery resends a smaller
+request, and a completed request that used more than the learned window raises
+it. A refusal that names no limit teaches nothing; the shrink-once recovery
+still runs and the person sees at most the normal compaction notice. The
+override, the learned window, and the served model are kept per provider
+instance and model on the provider's model catalogue, so they survive probes
+and restarts; setting the override takes effect on the next request and wins
+over a runtime report, and clearing it returns to automatic resolution.
 Provider-managed Code turns also contribute their journaled token reports to the
 usage ledger. A runtime that compacts its own session may report where, as
 `autoCompactThreshold` on the usage report (tokens of the window the last request
@@ -2288,11 +2415,49 @@ native harness in `apps/server/src/harness`:
   every call refuses as `tool-authority-stale` with a message the model
   relays to the person; nothing renews it except the thread becoming usable
   again. Files go through `NativeHarnessFileSystem` (confined to the root, symlinks
-  resolved, edits require a prior read); `bash` runs through the same
-  Seatbelt-confined owned-process-group port as repository tests; web fetches
+  resolved, edits require a prior read); `bash` writes the command to a
+  script in its own subdirectory of `harness/scripts` and runs it through the
+  same confined owned-process-group port as repository tests (Seatbelt on
+  macOS, the bubblewrap capsule on Linux), so a timeout or cancel ends the
+  whole tree. That port refuses a shell as a test command's `argv[0]`, so a
+  test argv stays literal; the harness's only way to a shell is its separate
+  script entry point, which the two harness ports alone enable and which runs
+  exactly `/bin/sh` with one regular-file script. The script directory lies
+  outside every root a confined launch may write, and each launch may read
+  only its own script's subdirectory, so no command can swap the script
+  another thread is about to run; web fetches
   refuse private destinations, and connect through a `lookup` that checks
   every address the name resolves to at the moment the socket opens, so a
   name cannot pass the check and then resolve somewhere private.
+- **Egress and hostile content.** Inference and tool egress are separate
+  paths. A direct-endpoint request goes from the server process to the
+  configured base URL only, carries the credential, and refuses any redirect
+  without following it. `web-fetch` sends no credential and no model-chosen
+  header, method, or body (its arguments are a URL and a size), so a public
+  inference host sees an anonymous GET and a local one (Ollama, LM Studio) is a
+  private destination it refuses. Private means loopback, unspecified, RFC 1918,
+  CGNAT, link-local (including cloud metadata), multicast, and reserved IPv4;
+  in IPv6 all of `::/64` other than IPv4-mapped, unique-local, link-local
+  `fe80::/10`, site-local, and multicast. An IPv6 address is judged by its
+  value rather than its spelling, and mapped, NAT64 (`64:ff9b::/96`), and 6to4
+  addresses by the IPv4 address they carry. Every redirect hop is checked
+  again, and a scheme other than `http`/`https`, credentials in the URL, or a
+  sixth redirect refuses. A harness child without network authority is offered
+  no web tool, and its `bash` runs on a shell whose Seatbelt profile has no
+  network rule and its own writable work directory, so it shares no writable
+  state with a networked command; the lead and a child with network
+  authority use the ordinary one. The tool process environment carries only `PATH`, `HOME`, the temporary
+  and locale variables, and what the harness sets, never a provider
+  credential. Every successful harness tool result taints the thread, so after
+  the first one `bash`, `edit`, `write`, and `goal-check` need a person's
+  confirmation even under Full access, and refuse when no approval surface
+  exists; a tool the thread was not offered refuses as `tool-unavailable`
+  without reaching policy or a person. The harness has no per-host network
+  rules, rule expiry, or learn mode: a tool process gets the thread's OS-level
+  `none` or `allow`, and an "always" approval covers its class for the rest of
+  the session, taint included. `nativeHarnessEgress.hostile.test.ts` holds the
+  adversarial proofs; `nativeHarnessShell.test.ts` runs both shells under real
+  Seatbelt and shows only the networked one reaching a loopback listener.
 - **Tool verification.** A routine Check connection runs no generating
   request, so an OpenAI-compatible, Anthropic-compatible, or Azure AI Foundry
   endpoint offers a model Octant's tools only after a person proved that model
@@ -2664,7 +2829,22 @@ frame. The Android pane attaches `serve-avd` for an already booted
 otherwise. Boot still uses the emulator binary. The tools run in Electron
 main. The server reaches Android streaming through a loopback broker
 (`OCTANT_SERVE_AVD_BROKER_URL`, `OCTANT_SERVE_AVD_BROKER_TOKEN`) the same way
-it reaches the Simulator device helper. An agent must not launch
+it reaches the Simulator device helper. Each attach request carries the SDK
+root the server discovered. The broker accepts only an absolute root that,
+once normalized, holds `platform-tools/adb`, and runs `serve-avd` with that root as
+`ANDROID_HOME` and with `ADB_MDNS=0`, so the tool uses the server's `adb` and
+any shared `adb` server it starts stays up. `serve-avd` prints its ready state
+as indented JSON over several lines, and the broker reads the whole object. Its
+`stream.mjpeg` carries JPEG parts, or PNG parts when the emulator image cannot
+encode `screencap -j`; the server cuts parts by `Content-Length` and passes
+either image type to the pane.
+When the tool is missing, exits, or does not attach in time, the broker
+answers with that reason. Every Android screen stream names its transport in
+`x-octant-android-transport`: `stream`, or `screencap` with the reason the
+stream is not used (no desktop, not an emulator, tool missing, tool exited,
+timed out, desktop unreachable, or no frames). The pane shows it as a quiet
+"Live stream" or "Snapshots, live stream unavailable: …" line, and an input
+sent through `serve-avd` says so in its evidence. An agent must not launch
 Simulator.app, `serve-sim`, or `serve-avd`.
 
 ### Plugin boundaries and remaining extraction
@@ -2807,7 +2987,13 @@ mechanisms are:
   ([decisions/0068-linux-plan-process-deny.md](decisions/0068-linux-plan-process-deny.md)).
   Sensitive system roots remain denied even where runtime compatibility
   requires a broad file-read rule; each launch's exact roots are re-allowed
-  after those denials. Path checks alone are never the boundary. Confined
+  after those denials. On macOS every launch, in both egress modes, can read
+  the public TLS files under the `/private` denial: `openssl.cnf`,
+  `x509v3.cnf`, `cert.pem`, and `certs/` in `/private/etc/ssl`. Without them,
+  LibreSSL in `/usr/bin/curl` and `/usr/bin/openssl` exits before opening a
+  socket. The directory itself is not granted, so OpenSSL's default key
+  directory `/etc/ssl/private` stays denied. An offline launch still fails
+  at the socket. Path checks alone are never the boundary. Confined
   reads open a handle and verify identity against what containment resolved.
   Missing the platform-selected backend (`sandbox-exec` on macOS, `bwrap` on
   Linux) fails closed. A provider runtime that makes its own API call resolves
@@ -3113,6 +3299,64 @@ mechanisms are:
   stored grant. The API-key path remains available beside that sign-in.
   [0111](decisions/0111-host-driven-provider-oauth.md) stays a Proposed
   historical record; this section is the effective rule.
+- **Subscription sign-in dialects.** The host OAuth runner speaks vendor wire
+  dialects beside the standard PKCE path. The OpenRouter dialect exchanges the
+  code for a user-controlled API key (no refresh token, no expiry). The
+  ChatGPT plan dialect ("Sign in with ChatGPT") registers the host as a
+  user-defined agent on first sign-in: the authorize request carries the
+  placeholder client id `dynamic_agent_client`, an `agent_name_hint`, and the
+  host's stable id as `ext_agent_host_id` (derived once from the host's data
+  directory and bound by the server before the first sign-in — never invented
+  by the catalog). The loopback callback returns the issued `oaiapp_…` client
+  id, which is stored and used for the exchange and every refresh — never the
+  placeholder. The exchange and refresh send `resource=https://api.openai.com/v1`
+  and no client secret. The identity token from the authorization-code exchange
+  is validated against the issuer's JWKS (RS256 signature, issuer, audience,
+  expiry, and the per-attempt OIDC nonce) before the grant is stored; the
+  verified `sub`/`email`, the issued client id, the retained identity token
+  (for `id_token_hint` on reauthorization), and the stable host id live on the
+  stored grant. Reauthorization is addressed by the instance's stored
+  credential ref — the host does not scan the credential store, because
+  production stores cannot list their entries. It reuses the issued client id,
+  sends `id_token_hint`, and omits the agent name hint. The reauthorization
+  callback may omit `client_id`; the issued id used in the authorize request
+  is retained, and a different `client_id` is refused. A refresh that returns
+  no identity token keeps the prior identity. A refresh that returns one is
+  checked for signature, issuer, audience, expiry, and subject equal to the
+  stored subject — not for a nonce, because refresh does not send one.
+  When the granted scopes omit `chatgpt.tokens.use.direct`, the sign-in is
+  still valid as identity-only and the access result reports
+  `subscriptionUsageGranted: false`, the provider-neutral seam field drivers
+  use to refuse subscription-billed turns. A refresh answered with
+  `invalid_client` means the issued client is gone, so the grant is dropped
+  and the person signs in again. Sign-out revokes the refresh token at the
+  issuer's discovery `revocation_endpoint` before the local grant is dropped;
+  the endpoint must share the issuer's origin, and only a 2xx answer counts
+  as revoked. When the issuer does not confirm, the grant is kept and the
+  person is told the sign-in is still active; they can retry or sign out on
+  this computer only, which deletes the local grant and says the issuer was
+  not told. A re-sign-in that replaces a grant always deletes the replaced
+  grant's local material, revoking it first when the issuer answers, so no
+  refresh token is left in the credential store without a pointer. The plan
+  route's request profile is enforced before send: `store:false` and
+  `stream:true` are mandatory, `input` is an array carrying the full
+  history, system text travels as
+  `instructions` (an explicit system-role message item is rejected), a fixed
+  parameter set is omitted entirely, and only function tools are allowed —
+  hosted tools are refused. A request that cannot be expressed is refused
+  with a typed reason, and the route's `subscription_sharing_*` error codes
+  map to user-facing states (usage limit with a manage-usage link, bounded
+  backoff on unavailability, unauthenticated on 401/403). The plan contract
+  covers Responses turns, not model enumeration, so Check connection reads
+  the route's `/models` answer through the profile: a model list is reported
+  as discovered, whether the OpenAI `{data:[{id}]}` shape or the plan's own
+  `{models:[…]}` listing (id from `slug`, then `id`, then `name`; display
+  name and a positive integer context window kept when present; unmappable
+  items skipped); a body that is not a model list, no mappable item, a route-not-served status, a
+  403, a missing model-read scope, or an empty list is a degraded, worded
+  "models can't be listed" state carrying the manual model IDs, never a
+  protocol failure. Credential, usage-limit, and availability answers keep
+  failing the check with their typed states.
 
 ## Package map
 

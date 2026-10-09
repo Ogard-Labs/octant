@@ -1,4 +1,9 @@
 import { observedChildren } from "./agentRun/agentObservedChildren";
+import {
+  UNCLASSIFIED_STARTUP_FAILURE,
+  startupFailedOutput,
+  withStartupFailureReason,
+} from "./startupFailureReason";
 import { createLocalUsageHistoryCheckpointStore } from "./persistence/localUsageHistoryCheckpointStore";
 import { createLocalUsageHistoryLastReadStore } from "./persistence/localUsageHistoryLastReadStore";
 import { createSelectedExtensionResolver } from "./extensions/selectedExtensions";
@@ -473,7 +478,7 @@ import {
   makeReplicaStoreCredentialBrokerClient,
   type ProviderCredentialResolver,
 } from "./providers/credentialBrokerClient";
-import { createHostOAuthService } from "./providers/oauth/hostOAuthService";
+import { createHostOAuthService, extAgentHostIdFor } from "./providers/oauth/hostOAuthService";
 import { makeHostOAuthBrokerClient } from "./providers/oauth/hostOAuthBrokerClient";
 import { hostOAuthEventJournal } from "./providers/oauth/hostOAuthEventJournal";
 import { createProviderOAuthRouteHandler } from "./providers/oauth/providerOAuthRoutes";
@@ -4183,6 +4188,12 @@ export function startOctantServer(
     const nativeHarnessEndpoints = new NativeHarnessEndpointRegistry();
     const nativeHarnessEndpointHooks: NativeHarnessEndpointHooks = {
       endpoints: nativeHarnessEndpoints,
+      // What a request teaches about its model's window is kept with the
+      // provider's model catalogue; requests only run once the service exists.
+      contextWindows: {
+        remember: (instanceId, modelId, lesson) =>
+          providerService.rememberModelContextWindow(instanceId, modelId, lesson),
+      },
       leadFallback: {
         next: async (input) =>
           (await nativeHarnessLeadFallback?.next(input)) ?? {
@@ -4233,6 +4244,9 @@ export function startOctantServer(
         : createHostOAuthService({
             journal: oauthJournal,
             broker: oauthBroker,
+            // The ChatGPT plan sign-in registers this host under a stable id
+            // before the first sign-in.
+            extAgentHostId: extAgentHostIdFor(persistence.dataDirectory),
           });
     if (hostOAuth !== undefined && oauthJournal !== undefined) {
       for (const acknowledgment of oauthJournal.acknowledgments()) {
@@ -5831,12 +5845,30 @@ export function startOctantServer(
     });
     // The harness `bash` tool runs through the same owned-process-group,
     // Seatbelt-confined port repository tests use, with its own receipt and
-    // script directories so a command's leftovers never mix with a test's.
+    // work directories so a command's leftovers never mix with a test's.
     const harnessWorkDirectory = join(providerDataDirectory, "harness", "work");
     mkdirSync(harnessWorkDirectory, { recursive: true, mode: 0o700 });
+    // Pending command scripts live outside every directory a confined command
+    // may write; each launch reads only its own script's subdirectory, so one
+    // command cannot swap the script another thread is about to run.
+    const harnessScriptDirectory = join(providerDataDirectory, "harness", "scripts");
+    mkdirSync(harnessScriptDirectory, { recursive: true, mode: 0o700 });
     const harnessProcessPort = new RepositoryTestProcessPort({
       receiptDirectory: join(providerDataDirectory, "harness", "receipts"),
       temporaryDirectory: harnessWorkDirectory,
+      harnessShellScriptDirectory: harnessScriptDirectory,
+    });
+    // A child admitted without network authority runs its commands here. Its
+    // writable temporary root is its own: a shared one would let it leave
+    // files a networked command later picks up and acts on with the network
+    // open.
+    const harnessOfflineWorkDirectory = join(providerDataDirectory, "harness", "work-offline");
+    mkdirSync(harnessOfflineWorkDirectory, { recursive: true, mode: 0o700 });
+    const harnessOfflineProcessPort = new RepositoryTestProcessPort({
+      receiptDirectory: join(providerDataDirectory, "harness", "receipts"),
+      temporaryDirectory: harnessOfflineWorkDirectory,
+      networkEgress: "none",
+      harnessShellScriptDirectory: harnessScriptDirectory,
     });
     const nativeHarnessRoutingStore = new NativeHarnessRoutingStore({
       journal: persistence.journal,
@@ -6119,7 +6151,11 @@ export function startOctantServer(
       plans: planService,
       shell: createNativeHarnessShell({
         process: harnessProcessPort,
-        scriptDirectory: harnessWorkDirectory,
+        scriptDirectory: harnessScriptDirectory,
+      }),
+      offlineShell: createNativeHarnessShell({
+        process: harnessOfflineProcessPort,
+        scriptDirectory: harnessScriptDirectory,
       }),
       resolveWebSearch: () =>
         searxngHarnessWebSearch({
@@ -8510,6 +8546,7 @@ export function startOctantServer(
         new GitService(new GitObservationPort(), new GitMutationPort()),
       ),
       journal: artifactMirrorEvents,
+      receiptNotJournaled: (failure) => console.error("[artifact-mirror]", failure),
       clock: () => new Date().toISOString() as never,
     });
 
@@ -8520,7 +8557,14 @@ export function startOctantServer(
         uuid: randomUUID,
         clock: () => new Date().toISOString() as never,
         onVersionCommitted: (version) => {
-          void artifactMirrorService.materialize(version);
+          // materialize reports what it can, so a rejection here is a broken
+          // invariant: surfaced by name rather than left unhandled.
+          artifactMirrorService.materialize(version).catch((error: unknown) => {
+            console.error("[artifact-mirror] materialize failed", {
+              canvasId: String(version.canvasId),
+              error: error instanceof Error ? error.name : "unknown",
+            });
+          });
           // The replica publish listens on the same seam as the mirror, so
           // every surface's revisions publish the same way.
           void replicaArtifactSync.service?.versionCommitted(version);
@@ -11005,12 +11049,7 @@ export function fatalStartupOutput(error: unknown): string {
       ? error
       : {
           category: "startup-failed",
-          message: "Octant could not start the local server.",
+          message: withStartupFailureReason(UNCLASSIFIED_STARTUP_FAILURE, error),
         };
-  return JSON.stringify({
-    product: "Octant",
-    status: "failed",
-    category: failure.category,
-    message: failure.message,
-  });
+  return startupFailedOutput(failure.category, failure.message);
 }

@@ -69,7 +69,10 @@ const inTreeCanvasDocumentRecipeDocuments = [
       { kind: "heading", role: "Sources" },
       { kind: "table", role: "Sources, and what each one established." },
       { kind: "heading", role: "Comparison" },
-      { kind: "table", role: "How the options compare." },
+      {
+        kind: "comparison-matrix",
+        role: "The options against the criteria that decide between them, with the one recommended.",
+      },
       { kind: "heading", role: "Recommendation" },
       { kind: "rich-text", role: "The recommendation, and what is still unknown." },
     ],

@@ -15,6 +15,14 @@ the pane keeps `adb exec-out screencap` and `adb shell input`. Do not start
 `serve-avd` in a way that boots an AVD. The pane attaches only to a serial
 that is already running.
 
+Under the screen, the pane says which picture you are looking at. **Live
+stream** means `serve-avd` is attached. **Snapshots, live stream unavailable**
+means the pane is polling `adb screencap`, and it gives the reason: for
+example `serve-avd` is not installed, stopped before it attached, or did not
+attach in time, or this host is not running in the Octant desktop app.
+`serve-avd` uses the same SDK and `adb` that Octant found, and runs with
+`ADB_MDNS=0` like Octant's own `adb` commands.
+
 ## What you can do
 
 - Discover AVDs the SDK reports (`emulator -list-avds`) and which ones `adb`
@@ -31,8 +39,19 @@ that is already running.
 - **Install** a checkout-relative APK and **launch** a package. Gradle build
   stays the repository shell.
 
-A host without `adb` or `emulator` says the destination is unavailable
-instead of inventing a picture. Remote and headless clients stay read-only
+Octant finds the SDK through `ANDROID_HOME` or `ANDROID_SDK_ROOT`. Without
+either, macOS hosts look in `~/Library/Android/sdk` (Android Studio) and then in
+the Homebrew `android-commandlinetools` location under `/opt/homebrew/share` or
+`/usr/local/share`, using the first that has both `adb` and `emulator`. Other
+hosts look in `~/Android/Sdk`. A host without `adb` or `emulator` says the destination is
+unavailable instead of inventing a picture.
+
+When no `adb` server is running, the first `adb` command Octant sends starts
+one with mDNS discovery turned off (`ADB_MDNS=0`). Wireless-debugging
+discovery is not available through a server Octant started. A server you
+started yourself is used as it is, and Octant never stops it. If an input
+loses the `adb` server before the device answers, the pane reports it as
+interrupted rather than failed. Check the screen before you send it again. Remote and headless clients stay read-only
 for live input the same way the iOS pane does.
 
 ## Agent tool

@@ -29,8 +29,12 @@ import {
   redactedAndroidInputDiagnostic,
   type AndroidExecutionScope,
 } from "@octant/domain";
-import { takeJpegFrames } from "@octant/domain/managed-device-stream";
-import type { ServeAvdAttachment, ServeAvdPort } from "./serveAvdBrokerClient";
+import type {
+  AndroidScreenFallbackReason,
+  AndroidScreenTransport,
+} from "@octant/contracts/android-toolchain-rpc";
+import { takeMultipartImageFrames } from "@octant/domain/managed-device-stream";
+import type { ServeAvdAttachment, ServeAvdOpening, ServeAvdPort } from "./serveAvdBrokerClient";
 
 export interface AndroidProcessResult {
   readonly termination: "exited" | "cancelled" | "timed-out" | "unavailable";
@@ -57,6 +61,8 @@ export interface AndroidScreenWatch {
   readonly kind: "watching";
   readonly screen: { readonly width: number; readonly height: number };
   readonly frames: ReadableStream<Uint8Array>;
+  /** The serve-avd stream, or adb screencap snapshots and why the stream is not used. */
+  readonly transport: AndroidScreenTransport;
 }
 
 export interface AndroidToolchainServiceOptions {
@@ -415,9 +421,11 @@ export class AndroidToolchainService {
     );
     signal.addEventListener("abort", finish, { once: true });
     if (signal.aborted) finish();
+    let fallback: AndroidScreenFallbackReason = "not-emulator";
     if (/^emulator-[0-9]+$/.test(serial) && !lifetime.signal.aborted) {
       const managed = await this.#watchManaged(serial, lifetime.signal);
-      if (managed !== undefined) {
+      if (managed.kind === "fallback") fallback = managed.reason;
+      else {
         const reader = managed.frames.getReader();
         const frames = new ReadableStream<Uint8Array>(
           {
@@ -437,7 +445,7 @@ export class AndroidToolchainService {
           },
           { highWaterMark: 0 },
         );
-        return { kind: "watching", screen: managed.screen, frames };
+        return { kind: "watching", screen: managed.screen, frames, transport: { kind: "stream" } };
       }
     }
     if (lifetime.signal.aborted) {
@@ -495,7 +503,12 @@ export class AndroidToolchainService {
       },
       { highWaterMark: 0 },
     );
-    return { kind: "watching", screen: size, frames };
+    return {
+      kind: "watching",
+      screen: size,
+      frames,
+      transport: { kind: "screencap", reason: fallback },
+    };
   }
 
   async #run(
@@ -592,6 +605,22 @@ export class AndroidToolchainService {
         return deniedEvidence(request, "invalid-destination", startedAt, this.#options.now());
       }
       const result = await this.#command(argv, context, request.timeoutMs, signal);
+      if (lostServerMidCommand(result)) {
+        // The device may already have acted, so this is not a failure to
+        // retry: a retried type-text typed its text twice.
+        return await this.#logged(
+          request,
+          "interrupted",
+          startedAt,
+          [
+            {
+              severity: "note",
+              message: `${request.kind} may have reached the emulator; adb lost its server before the device answered`,
+            },
+          ],
+          "complete",
+        );
+      }
       const note = succeeded(result)
         ? redactedAndroidInputDiagnostic(request)
         : { severity: "note" as const, message: `${request.kind} ${outcomeFor(result)}` };
@@ -653,7 +682,7 @@ export class AndroidToolchainService {
 
   async #discoverSdk(): Promise<AndroidSdkDiscovery> {
     const env = this.#options.environment?.() ?? process.env;
-    const home = env.ANDROID_HOME ?? env.ANDROID_SDK_ROOT ?? defaultSdkHome();
+    const home = env.ANDROID_HOME ?? env.ANDROID_SDK_ROOT ?? (await this.#installedSdkHome());
     const emulatorPath = home === undefined ? undefined : join(home, "emulator", "emulator");
     const adbPath = home === undefined ? undefined : join(home, "platform-tools", "adb");
     const emulatorOk = emulatorPath !== undefined && (await this.#exists(emulatorPath));
@@ -666,6 +695,21 @@ export class AndroidToolchainService {
       available: emulatorOk && adbOk,
       discoveredAt: this.#options.now(),
     });
+  }
+
+  async #installedSdkHome(): Promise<string | undefined> {
+    const candidates = defaultSdkHomes();
+    for (const candidate of candidates) {
+      // A partial install (adb without the emulator) must not hide a complete
+      // SDK further down the list.
+      if (
+        (await this.#exists(join(candidate, "platform-tools", "adb"))) &&
+        (await this.#exists(join(candidate, "emulator", "emulator")))
+      ) {
+        return candidate;
+      }
+    }
+    return candidates[0];
   }
 
   async #exists(path: string): Promise<boolean> {
@@ -731,19 +775,18 @@ export class AndroidToolchainService {
   async #watchManaged(
     serial: string,
     signal: AbortSignal,
-  ): Promise<AndroidScreenWatch | undefined> {
-    const port = this.#options.serveAvd;
-    if (port === undefined) return undefined;
-    let attachment: ServeAvdAttachment | undefined;
-    try {
-      attachment = await port.open(serial, signal);
-    } catch {
-      return undefined;
-    }
-    if (attachment === undefined || signal.aborted) return undefined;
+  ): Promise<
+    | Omit<AndroidScreenWatch, "transport">
+    | { readonly kind: "fallback"; readonly reason: AndroidScreenFallbackReason }
+  > {
+    const opened = await this.#openServeAvd(serial, signal);
+    if (opened.status !== "attached") return { kind: "fallback", reason: opened.reason };
+    const noFrames = { kind: "fallback", reason: "no-frames" } as const;
+    const attachment = opened.attachment;
+    if (signal.aborted) return noFrames;
     const fetchImpl = this.#options.fetchImpl ?? fetch;
     const screen = await readServeAvdScreen(fetchImpl, attachment, serial, signal);
-    if (screen === undefined || signal.aborted) return undefined;
+    if (screen === undefined || signal.aborted) return noFrames;
     const headers = headerDeadline(signal, 5_000);
     let response: Response;
     try {
@@ -753,19 +796,19 @@ export class AndroidToolchainService {
         signal: headers.signal,
       });
     } catch {
-      return undefined;
+      return noFrames;
     } finally {
       headers.stop();
     }
     if (!response.ok || response.body === null) {
       await response.body?.cancel();
-      return undefined;
+      return noFrames;
     }
     const reader = response.body.getReader();
-    const first = await firstJpeg(reader, signal, 5_000);
+    const first = await readFirstFrames(reader, signal, 5_000);
     if (first === undefined) {
       await reader.cancel().catch(() => undefined);
-      return undefined;
+      return noFrames;
     }
     let rest = first.rest;
     const pending = [...first.frames];
@@ -781,7 +824,7 @@ export class AndroidToolchainService {
               }
               const chunk = await reader.read();
               if (chunk.done) break;
-              const taken = takeJpegFrames(concatBytes(rest, chunk.value));
+              const taken = takeMultipartImageFrames(concatBytes(rest, chunk.value));
               rest = taken.rest;
               pending.push(...taken.frames);
             }
@@ -810,17 +853,14 @@ export class AndroidToolchainService {
     signal: AbortSignal,
     startedAt: string,
   ): Promise<AndroidEmulatorEvidence | undefined> {
-    const port = this.#options.serveAvd;
-    if (port === undefined || !/^emulator-[0-9]+$/.test(serial)) return undefined;
-    const command = serveAvdCommand(request);
-    if (command === undefined) return undefined;
-    let attachment: ServeAvdAttachment | undefined;
-    try {
-      attachment = await port.open(serial, signal);
-    } catch {
+    if (this.#options.serveAvd === undefined || !/^emulator-[0-9]+$/.test(serial)) {
       return undefined;
     }
-    if (attachment === undefined || signal.aborted) return undefined;
+    const command = serveAvdCommand(request);
+    if (command === undefined) return undefined;
+    const opened = await this.#openServeAvd(serial, signal);
+    if (opened.status !== "attached" || signal.aborted) return undefined;
+    const attachment = opened.attachment;
     const fetchImpl = this.#options.fetchImpl ?? fetch;
     let body: Readonly<Record<string, unknown>> | undefined;
     if (command.kind === "direct") body = command.body;
@@ -863,9 +903,30 @@ export class AndroidToolchainService {
       request,
       refused ? "failed" : "succeeded",
       startedAt,
-      [redactedAndroidInputDiagnostic(request)],
+      [
+        redactedAndroidInputDiagnostic(request),
+        { severity: "note", message: "sent through serve-avd" },
+      ],
       "complete",
     );
+  }
+
+  /** Attaches serve-avd to a booted emulator, using the same SDK the server runs adb from. */
+  async #openServeAvd(
+    serial: string,
+    signal: AbortSignal,
+  ): Promise<
+    | Extract<ServeAvdOpening, { readonly status: "attached" }>
+    | { readonly status: "unavailable"; readonly reason: AndroidScreenFallbackReason }
+  > {
+    const port = this.#options.serveAvd;
+    if (port === undefined) return { status: "unavailable", reason: "no-desktop" };
+    const sdkRoot = this.#sdk.sdkRoot;
+    try {
+      return await port.open(serial, sdkRoot === undefined ? { signal } : { sdkRoot, signal });
+    } catch {
+      return { status: "unavailable", reason: "desktop-unreachable" };
+    }
   }
 
   async #screencap(
@@ -1136,13 +1197,30 @@ function androidEnv(
     next.ANDROID_HOME = sdk.sdkRoot;
     next.ANDROID_SDK_ROOT = sdk.sdkRoot;
   }
+  // Whichever adb client finds no server running forks the shared one, and that
+  // server inherits this environment. With mDNS discovery on, adb 37's server
+  // aborts about two seconds after it starts on macOS 27 (a Rust panic in its
+  // mDNS network watcher), so every command restarted it, the emulator dropped
+  // to `offline`, input took seconds to land, and a command whose server died
+  // mid-flight exited 255 after the device had already acted. Octant reaches
+  // emulators over adb's local transport and never uses wireless discovery.
+  next.ADB_MDNS = "0";
   return next;
 }
 
-function defaultSdkHome(): string | undefined {
-  const mac = join(homedir(), "Library", "Android", "sdk");
-  const linux = join(homedir(), "Android", "Sdk");
-  return process.platform === "darwin" ? mac : linux;
+/**
+ * Where an SDK lives when neither `ANDROID_HOME` nor `ANDROID_SDK_ROOT` says.
+ * Android Studio installs under the home directory; the Homebrew
+ * `android-commandlinetools` cask installs under the Homebrew prefix, and an
+ * app launched from Finder never sees the shell profile that would export it.
+ */
+function defaultSdkHomes(): ReadonlyArray<string> {
+  if (process.platform !== "darwin") return [join(homedir(), "Android", "Sdk")];
+  return [
+    join(homedir(), "Library", "Android", "sdk"),
+    "/opt/homebrew/share/android-commandlinetools",
+    "/usr/local/share/android-commandlinetools",
+  ];
 }
 
 function parseAdbDevices(output: string): ReadonlyArray<string> {
@@ -1234,6 +1312,24 @@ function stepFor(kind: AndroidEmulatorRequest["kind"]): AndroidActionProgress["s
 
 function succeeded(result: AndroidProcessResult): boolean {
   return result.termination === "exited" && result.exitCode === 0 && !result.cleanupUncertain;
+}
+
+/**
+ * Whether an `adb shell` command exited without either side saying why. A
+ * client that never reached the device names the reason (`adb: device
+ * offline`, `device 'emulator-5554' not found`, `cannot connect to daemon`),
+ * and a device-side failure prints its exception; when the server dies after
+ * the command was handed to the device, the client exits 255 with only adb's
+ * own `* daemon …` start notices on stderr.
+ */
+function lostServerMidCommand(result: AndroidProcessResult): boolean {
+  // 255 is what the client returned when its server was aborted mid-command;
+  // any other code is the device's own exit status and stays a failure.
+  if (result.termination !== "exited" || result.exitCode !== 255) return false;
+  if (result.cleanupUncertain) return false;
+  return text(result.stderr)
+    .split(/\r?\n/)
+    .every((line) => line.trim() === "" || line.startsWith("* "));
 }
 
 function outcomeFor(result: AndroidProcessResult): AndroidEmulatorEvidence["outcome"] {
@@ -1490,7 +1586,7 @@ async function readServeAvdScreen(
 
 type ReadChunk = { readonly done: false; readonly value: Uint8Array } | { readonly done: true };
 
-async function firstJpeg(
+async function readFirstFrames(
   reader: ReadableStreamDefaultReader<Uint8Array>,
   signal: AbortSignal,
   timeoutMs: number,
@@ -1500,7 +1596,7 @@ async function firstJpeg(
   while (!signal.aborted && Date.now() < deadline) {
     const chunk = await readChunk(reader, deadline - Date.now(), signal);
     if (chunk === undefined || chunk.done) return undefined;
-    const taken = takeJpegFrames(concatBytes(rest, chunk.value));
+    const taken = takeMultipartImageFrames(concatBytes(rest, chunk.value));
     rest = taken.rest;
     if (taken.frames.length > 0) return { frames: taken.frames, rest };
   }

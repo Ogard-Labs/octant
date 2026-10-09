@@ -137,6 +137,7 @@ import {
   type ProjectedWindowWorkspace,
   type ProjectedEnvironmentPresentation,
 } from "./shellProjection";
+import { withStartupFailureReason } from "../startupFailureReason";
 import { openSqlite, type SqliteConnection } from "./sqlitePort";
 import { prepareStore } from "./storePath";
 import { loadZenSpace, loadZenSpaceByWindowId, loadZenSpaces } from "./zenProjection";
@@ -528,10 +529,13 @@ function redactStartupFailure(error: unknown): PersistenceStartupFailed {
     return storageFailure(error.category);
   }
   const sqliteFailure = classifySqliteFailure(error);
-  return storageFailure(sqliteFailure === "write-race" ? "busy" : "unavailable");
+  return storageFailure(sqliteFailure === "write-race" ? "busy" : "unavailable", error);
 }
 
-function storageFailure(category: "busy" | "unavailable"): PersistenceStartupFailed {
+function storageFailure(
+  category: "busy" | "unavailable",
+  cause?: unknown,
+): PersistenceStartupFailed {
   return category === "busy"
     ? new PersistenceStartupFailed({
         category: "storage-busy",
@@ -539,6 +543,6 @@ function storageFailure(category: "busy" | "unavailable"): PersistenceStartupFai
       })
     : new PersistenceStartupFailed({
         category: "storage-unavailable",
-        message: "Octant storage is unavailable.",
+        message: withStartupFailureReason("Octant storage is unavailable.", cause),
       });
 }

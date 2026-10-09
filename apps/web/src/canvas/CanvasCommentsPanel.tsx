@@ -137,6 +137,24 @@ function anchorChoices(definition: CanvasDefinition): ReadonlyArray<AnchorChoice
         });
       }
     }
+    if (block.kind === "comparison-matrix") {
+      // A cell has no anchor of its own in the board contract, so a comment on
+      // one sits on its option's column or its criterion's row.
+      for (const option of block.options) {
+        choices.push({
+          id: `node:${String(block.blockId)}:${String(option.optionId)}`,
+          label: `Option · ${option.label}`,
+          anchor: { kind: "node", blockId: block.blockId, nodeId: option.optionId },
+        });
+      }
+      for (const criterion of block.criteria) {
+        choices.push({
+          id: `node:${String(block.blockId)}:${String(criterion.criterionId)}`,
+          label: `Criterion · ${criterion.label}`,
+          anchor: { kind: "node", blockId: block.blockId, nodeId: criterion.criterionId },
+        });
+      }
+    }
     if (block.kind === "mindmap") {
       for (const node of block.nodes) {
         choices.push({

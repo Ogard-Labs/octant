@@ -47,6 +47,7 @@ export function createProviderClient(options: ProviderClientOptions): ProviderCl
         new URL("/api/providers/bootstrap", options.baseUrl).toString(),
         { method: "GET", headers },
         decodeProviderRegistrySnapshot,
+        "bootstrap",
       );
     },
     async execute(command) {
@@ -65,6 +66,7 @@ export function createProviderClient(options: ProviderClientOptions): ProviderCl
           body: JSON.stringify(validated),
         },
         decodeProviderRegistryCommandResult,
+        "command",
       );
     },
     probe(instanceId) {
@@ -76,6 +78,7 @@ export function createProviderClient(options: ProviderClientOptions): ProviderCl
         ).toString(),
         { method: "POST", headers },
         decodeProviderProbeResult,
+        "probe",
       );
     },
   };
@@ -86,6 +89,7 @@ async function request<T>(
   url: string,
   init: RequestInit,
   decode: (value: unknown) => T,
+  operation: ProviderClientOperation,
 ): Promise<T> {
   let response: Response;
   try {
@@ -97,21 +101,82 @@ async function request<T>(
   try {
     body = await response.json();
   } catch {
+    reportDecodeFailure(operation, response.status, "json", undefined);
     throw protocol();
   }
   if (!response.ok) {
+    let failure: ProviderFailure;
     try {
-      throw new ProviderClientFailure(decodeProviderFailure(body));
+      failure = decodeProviderFailure(body);
     } catch (error) {
-      if (error instanceof ProviderClientFailure) throw error;
+      reportDecodeFailure(operation, response.status, "failure-body", error);
       throw protocol();
     }
+    throw new ProviderClientFailure(failure);
   }
   try {
     return decode(body);
-  } catch {
+  } catch (error) {
+    reportDecodeFailure(operation, response.status, "success-body", error);
     throw protocol();
   }
+}
+
+type ProviderClientOperation = "bootstrap" | "command" | "probe";
+
+/**
+ * Name what failed to decode. The person still sees the generic invalid
+ * response message, but a shape mismatch between server and client was
+ * otherwise silent: Check connection on a ChatGPT plan endpoint showed
+ * "Provider returned an invalid response." with nothing in any log to say
+ * which side or which field. Only schema paths and issue kinds are logged,
+ * never a decoded value, so no credential or message text can leak.
+ */
+function reportDecodeFailure(
+  operation: ProviderClientOperation,
+  httpStatus: number,
+  stage: "json" | "failure-body" | "success-body",
+  error: unknown,
+): void {
+  console.warn("[provider-client] could not decode the provider service response", {
+    operation,
+    httpStatus,
+    stage,
+    issues: decodeIssuePaths(error),
+  });
+}
+
+function decodeIssuePaths(error: unknown): ReadonlyArray<string> {
+  const found = new Set<string>();
+  const walk = (issue: unknown, path: ReadonlyArray<string>): void => {
+    if (found.size >= 8 || typeof issue !== "object" || issue === null) return;
+    const node = issue as {
+      readonly _tag?: unknown;
+      readonly path?: unknown;
+      readonly issue?: unknown;
+      readonly issues?: unknown;
+    };
+    if (node._tag === "Pointer") {
+      const segments = Array.isArray(node.path) ? node.path : [node.path];
+      walk(node.issue, [...path, ...segments.map(String)]);
+      return;
+    }
+    const children =
+      node.issues !== undefined
+        ? Array.isArray(node.issues)
+          ? node.issues
+          : [node.issues]
+        : node.issue !== undefined
+          ? [node.issue]
+          : [];
+    if (children.length === 0) {
+      found.add(`${path.length === 0 ? "(root)" : path.join(".")}: ${String(node._tag)}`);
+      return;
+    }
+    for (const child of children) walk(child, path);
+  };
+  if (typeof error === "object" && error !== null && "issue" in error) walk(error.issue, []);
+  return [...found];
 }
 
 function invalidCommand(): ProviderClientFailure {
