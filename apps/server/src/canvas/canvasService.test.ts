@@ -551,6 +551,38 @@ describe("CanvasService", () => {
     ).toBe(true);
   });
 
+  it("opens a Canvas started from an offered recipe with that recipe's starter document", () => {
+    const { service, projection } = createService();
+    const { prompt: _prompt, ...base } = createRequest();
+    const result = service.create(
+      { ...base, intent: "template", templateId: "architecture-review", title: "Queue choice" },
+      { mode: "chat", projectId: ids.project },
+      { id: ids.project, type: "chat", lifecycle: "active" },
+    );
+    expect(result.kind).toBe("accepted");
+    if (result.kind !== "accepted") return;
+    expect(result.receipt.intent).toBe("template");
+    const blocks = projection.getById(result.receipt.canvasId)?.currentVersion.definition.blocks;
+    expect(blocks?.[0]).toMatchObject({ kind: "heading", text: "Context" });
+    expect(
+      blocks?.some((block) => block.kind === "callout" && block.title?.includes("matrix")),
+    ).toBe(true);
+    expect(service.documentRecipes().map((recipe) => String(recipe.id))).toContain(
+      "architecture-review",
+    );
+  });
+
+  it("refuses to start a Canvas from a recipe this host does not offer", () => {
+    const { service } = createService();
+    const { prompt: _prompt, ...base } = createRequest();
+    const result = service.create(
+      { ...base, intent: "template", templateId: "field-notes" },
+      { mode: "chat", projectId: ids.project },
+      { id: ids.project, type: "chat", lifecycle: "active" },
+    );
+    expect(result).toMatchObject({ kind: "denied", denialCode: "invalid-template" });
+  });
+
   it("draws a small agent-written Canvas inside its thread and shows a card once it outgrows the thread", async () => {
     const { service } = createService();
     const tools = createCanvasAgentTools({

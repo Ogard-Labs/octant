@@ -1,3 +1,6 @@
+import type { CanvasDocumentRecipe } from "@octant/contracts/canvas-skill";
+import { canvasRecipeStarterBlocks } from "@octant/domain/canvas-recipe-starter";
+import { inTreeCanvasDocumentRecipes } from "./canvasDocumentRecipes";
 import {
   decodeCanvasActionCancelRequest,
   decodeCanvasActionRequest,
@@ -153,6 +156,12 @@ export interface CanvasServiceDependencies {
   ) => CanvasRefreshSkillOptions;
   readonly skillAuthorized?: (skill: CanvasRefreshSkill, request: CanvasRefreshRequest) => boolean;
   /**
+   * The document recipes a person may start a Canvas from: the in-tree
+   * catalog and what admitted skills add, the list describe gives an agent.
+   * Absent means the in-tree catalog.
+   */
+  readonly documentRecipes?: () => ReadonlyArray<CanvasDocumentRecipe>;
+  /**
    * Resolve a trusted skill contribution (layouts/presentation rules) for a
    * refresh recipe skill. A denied resolution fails the refresh closed; the
    * contribution never grants authority beyond the reauthorized sources.
@@ -213,6 +222,7 @@ export class CanvasService {
   readonly #resolveWorkspace: CanvasServiceDependencies["resolveWorkspace"];
   readonly #listRefreshSkills: CanvasServiceDependencies["listRefreshSkills"];
   readonly #skillAuthorized: CanvasServiceDependencies["skillAuthorized"];
+  readonly #documentRecipes: () => ReadonlyArray<CanvasDocumentRecipe>;
   readonly #resolveSkillContribution: CanvasServiceDependencies["resolveSkillContribution"];
   readonly #parameterAuthorized: CanvasServiceDependencies["parameterAuthorized"];
   readonly #refreshResults = new Map<string, CanvasRefreshResult>();
@@ -252,6 +262,7 @@ export class CanvasService {
     this.#resolveWorkspace = dependencies.resolveWorkspace;
     this.#listRefreshSkills = dependencies.listRefreshSkills;
     this.#skillAuthorized = dependencies.skillAuthorized;
+    this.#documentRecipes = dependencies.documentRecipes ?? inTreeCanvasDocumentRecipes;
     this.#resolveSkillContribution = dependencies.resolveSkillContribution;
     this.#parameterAuthorized = dependencies.parameterAuthorized;
     this.#actor =
@@ -293,6 +304,11 @@ export class CanvasService {
         decodeCanvasActionResult({ kind: "accepted", receipt }),
       );
     }
+  }
+
+  /** The recipes a person may start a Canvas from. A recipe grants nothing. */
+  documentRecipes(): ReadonlyArray<CanvasDocumentRecipe> {
+    return this.#documentRecipes();
   }
 
   get(
@@ -632,6 +648,24 @@ export class CanvasService {
         message: "The active Canvas Project is unavailable.",
       };
     }
+    // A Canvas started from a recipe opens with the recipe's starter document.
+    // The id is resolved against what this host offers now, so a renderer
+    // cannot name a recipe from a skill that is no longer enabled. An author
+    // who wrote blocks keeps them: the recipe was only their starting shape.
+    let starter = blocks;
+    if (request.intent === "template" && starter === undefined) {
+      const recipe = this.#documentRecipes().find(
+        (candidate) => String(candidate.id) === String(request.templateId),
+      );
+      if (recipe === undefined) {
+        return {
+          kind: "denied",
+          denialCode: "invalid-template",
+          message: "That recipe is not offered on this host.",
+        };
+      }
+      starter = canvasRecipeStarterBlocks(recipe);
+    }
     try {
       const canvasId = decodeCanvasId(this.#uuid());
       const versionId = decodeCanvasVersionId(this.#uuid());
@@ -652,7 +686,7 @@ export class CanvasService {
         providerInstanceId: this.#providerInstanceId,
         modelId: this.#modelId,
         createdAt: admitted.receipt.createdAt,
-        ...(blocks === undefined ? {} : { blocks }),
+        ...(starter === undefined ? {} : { blocks: starter }),
         ...(presentation === undefined ? {} : { presentation }),
       });
       this.#eventStore.appendCreate({

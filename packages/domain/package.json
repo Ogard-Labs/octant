@@ -36,6 +36,7 @@
     "./canvas-action-availability-policy": "./src/canvasActionAvailabilityPolicy.ts",
     "./canvas-refresh-policy": "./src/canvasRefreshPolicy.ts",
     "./canvas-skill-policy": "./src/canvasSkillPolicy.ts",
+    "./canvas-recipe-starter": "./src/canvasRecipeStarter.ts",
     "./canvas-share-policy": "./src/canvasSharePolicy.ts",
     "./canvas-export-folder-policy": "./src/canvasExportFolderPolicy.ts",
     "./cache-backoff-policy": "./src/cacheBackoffPolicy.ts",
