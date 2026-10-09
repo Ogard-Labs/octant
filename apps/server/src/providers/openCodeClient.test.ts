@@ -428,13 +428,33 @@ describe("official OpenCode client routing", () => {
     expect(requests[0]?.headers.get("x-opencode-directory")).toBe("%2Ftmp%2Fproject");
   });
 
-  it("registers and disconnects app-managed MCP servers on the 2.x API", async () => {
+  it("registers app-managed MCP servers through the 2.x runtime MCP route and waits until connected", async () => {
     const requests: Request[] = [];
+    let listReads = 0;
     vi.stubGlobal(
       "fetch",
-      vi.fn(async (request: Request) => {
+      vi.fn(async (input: Request | string, init?: RequestInit) => {
+        const request = typeof input === "string" ? new Request(input, init) : input;
         requests.push(request.clone());
-        return new Response(null, { status: 204 });
+        const path = new URL(request.url).pathname;
+        if (request.method === "PUT" && path === "/api/experimental/mcp/octant-bridge") {
+          return new Response(null, { status: 204 });
+        }
+        if (request.method === "GET" && path === "/api/mcp") {
+          listReads += 1;
+          // 2.0.22 answers the add with 204 while the server is still
+          // pending; its tools join the session only once it is connected.
+          const status = listReads < 2 ? "pending" : "connected";
+          return Response.json({
+            location: { directory: "/tmp/project" },
+            data: [{ name: "octant-bridge", status: { status } }],
+          });
+        }
+        if (request.method === "DELETE" && path === "/api/experimental/mcp/octant-bridge") {
+          return new Response(null, { status: 204 });
+        }
+        // 2.0.22 serves its web UI on `/mcp` and answers `POST /mcp` with 405.
+        return new Response(null, { status: 405 });
       }),
     );
     const client = makeOfficialOpenCodeClient(
@@ -448,18 +468,58 @@ describe("official OpenCode client routing", () => {
       "/tmp/project",
     );
 
-    await client.addMcpServer({ name: "octant-bridge", url: "http://127.0.0.1:9999/" });
+    await client.addMcpServer({ name: "octant-bridge", url: "http://127.0.0.1:9999/mcp/token" });
     await client.disconnectMcpServer("octant-bridge");
 
     expect(requests.map((request) => [request.method, new URL(request.url).pathname])).toEqual([
-      ["POST", "/mcp"],
-      ["POST", "/mcp/octant-bridge/disconnect"],
+      ["PUT", "/api/experimental/mcp/octant-bridge"],
+      ["GET", "/api/mcp"],
+      ["GET", "/api/mcp"],
+      ["DELETE", "/api/experimental/mcp/octant-bridge"],
     ]);
+    // Code Mode would hide the bridge's tools behind OpenCode's own `execute`
+    // tool; registering them directly keeps each call an `octant-*` action.
     expect(await requests[0]?.json()).toEqual({
-      name: "octant-bridge",
-      config: { type: "remote", url: "http://127.0.0.1:9999/", enabled: true, oauth: false },
+      config: {
+        type: "remote",
+        url: "http://127.0.0.1:9999/mcp/token",
+        oauth: false,
+        codemode: false,
+      },
     });
-    expect(requests[0]?.headers.get("x-opencode-directory")).toBe("%2Ftmp%2Fproject");
+    for (const request of requests) {
+      expect(request.headers.get("authorization")).toBe("Basic redacted");
+      expect(request.headers.get("x-opencode-directory")).toBe("%2Ftmp%2Fproject");
+      expect(new URL(request.url).searchParams.get("location[directory]")).toBe("/tmp/project");
+    }
+  });
+
+  it("refuses a 2.x app-tool registration that OpenCode reports as failed", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: Request | string, init?: RequestInit) => {
+        const request = typeof input === "string" ? new Request(input, init) : input;
+        if (request.method === "PUT") return new Response(null, { status: 204 });
+        return Response.json({
+          location: { directory: "/tmp/project" },
+          data: [{ name: "octant-bridge", status: { status: "failed", error: "refused" } }],
+        });
+      }),
+    );
+    const client = makeOfficialOpenCodeClient(
+      {
+        authorization: "Basic redacted",
+        pid: 1,
+        runtime: "beta",
+        version: "opencode v2.0.22",
+        url: new URL("http://127.0.0.1:41732/"),
+      },
+      "/tmp/project",
+    );
+
+    await expect(
+      client.addMcpServer({ name: "octant-bridge", url: "http://127.0.0.1:9999/mcp/token" }),
+    ).rejects.toThrow("did not connect");
   });
 
   it("deletes a 2.x session through the v2 session route", async () => {

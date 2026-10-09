@@ -77,11 +77,12 @@ Manual browser controls remain governed by the thread's normal policy.
 Supported app-tool adapters can request an isolated browser session under
 **Ask for approvals** without changing the task to Full access. The request
 names the origin. Cancelling the task revokes its browser grant, and Plan mode
-refuses browser effects. The native OpenCode CLI adapter currently reports
-app-managed tools as unsupported; its text and native-tool support do not imply
-an app-browser bridge. The adapter requires isolated configuration before it can
-expose Octant tools; changing the thread to Full access does not remove that
-requirement.
+refuses browser effects. The native OpenCode CLI adapter offers Octant tools
+only on macOS and only on the OpenCode releases whose isolated configuration
+was verified (1.18.21 and 2.0.22); on any other release it reports app-managed
+tools as unsupported, and its text and native-tool support do not imply an
+app-browser bridge. Changing the thread to Full access does not remove the
+isolation requirement.
 
 ### Discovery and auto-registration
 
@@ -202,10 +203,11 @@ not by that name: a 1.x binary keeps the legacy session API, and a 2.x binary
 lists providers and models from its HTTP catalogue and runs turns under the
 thread's approval setting, which Octant writes into OpenCode's private
 configuration: edits and shell commands ask unless the setting allows them,
-and other providers' tools and skills are refused. 2.x runs turns without
-Octant's app tools until Octant registers them through the 2.x MCP API: with
-OpenCode 2.0.22 they are reported as unsupported. Approval requests reach
-you as usual, with one exception: if you saved a permission for this
+and other providers' tools and skills are refused. With OpenCode 2.0.22 on
+macOS, Octant's app tools are registered for each session through OpenCode's
+runtime MCP API and stay private to that session; each call goes through
+Octant's own tool handling and approvals, as on every other runtime. Approval
+requests reach you as usual, with one exception: if you saved a permission for this
 repository in OpenCode itself by choosing to always allow it, OpenCode
 applies it and Octant does not ask. Octant's own refusals still apply, and
 Octant never saves such a permission for you. Clear the saved permissions in
