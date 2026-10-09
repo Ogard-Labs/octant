@@ -8503,6 +8503,7 @@ export function startOctantServer(
         new GitService(new GitObservationPort(), new GitMutationPort()),
       ),
       journal: artifactMirrorEvents,
+      receiptNotJournaled: (failure) => console.error("[artifact-mirror]", failure),
       clock: () => new Date().toISOString() as never,
     });
 
@@ -8513,7 +8514,14 @@ export function startOctantServer(
         uuid: randomUUID,
         clock: () => new Date().toISOString() as never,
         onVersionCommitted: (version) => {
-          void artifactMirrorService.materialize(version);
+          // materialize reports what it can, so a rejection here is a broken
+          // invariant: surfaced by name rather than left unhandled.
+          artifactMirrorService.materialize(version).catch((error: unknown) => {
+            console.error("[artifact-mirror] materialize failed", {
+              canvasId: String(version.canvasId),
+              error: error instanceof Error ? error.name : "unknown",
+            });
+          });
         },
       },
       {

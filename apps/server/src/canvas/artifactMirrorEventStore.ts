@@ -10,6 +10,7 @@ import {
 import { Schema } from "effect";
 import type { EventRegistry } from "../persistence/eventRegistry";
 import type { Journal } from "../persistence/journal";
+import { ConcurrencyConflict } from "../persistence/journalErrors";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 
@@ -52,10 +53,12 @@ export interface ArtifactMirrorEventStoreOptions {
 /**
  * Appends the mirror's frames.
  *
- * Every frame is written with `expectedVersion: 0` against its own aggregate
- * id, because these are records of what happened rather than transitions of a
- * state machine: two receipts for one artifact do not contend, and a mirror
- * write must never lose to a concurrency conflict with itself.
+ * These are records of what happened rather than transitions of a state
+ * machine, so a frame never loses to a concurrency conflict with itself: the
+ * journal has no "any version", so the first attempt assumes a fresh aggregate
+ * and a conflict is answered once with the version the journal reports. The
+ * append is synchronous, so nothing can interleave between the two attempts. A
+ * second receipt for the same artifact otherwise never reached the journal.
  */
 export class ArtifactMirrorEventStore {
   readonly #options: ArtifactMirrorEventStoreOptions;
@@ -69,17 +72,36 @@ export class ArtifactMirrorEventStore {
     readonly eventName: string;
     readonly payload: unknown;
   }): void {
+    try {
+      this.#appendAfter(input, 0);
+    } catch (error) {
+      if (!(error instanceof ConcurrencyConflict)) throw error;
+      this.#appendAfter(input, error.actualVersion);
+    }
+  }
+
+  #appendAfter(
+    input: {
+      readonly aggregateId: string;
+      readonly eventName: string;
+      readonly payload: unknown;
+    },
+    expectedVersion: number,
+  ): void {
     this.#options.journal.append({
       aggregate: {
         aggregateType: ARTIFACT_MIRROR_AGGREGATE_TYPE,
         aggregateId: input.aggregateId,
       },
-      expectedVersion: 0,
+      expectedVersion,
       events: [
         {
           eventId: this.#options.uuid(),
           eventName: input.eventName,
           eventVersion: 1,
+          // The journal requires one on every frame; a mirror frame starts its
+          // own chain, so it correlates with nothing but itself.
+          correlationId: this.#options.uuid(),
           actor: this.#options.actor,
           occurredAt: this.#options.clock(),
           payload: input.payload,
