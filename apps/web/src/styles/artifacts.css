@@ -88,11 +88,18 @@
   margin: 0.25rem 0.25rem 0.5rem;
 }
 
+/* The button recipe fixes a control's height and keeps it on one line; a
+   card is a tall, wrapping block, so both are released here. Without this
+   the card collapsed to the recipe's control height. */
 .artifact-card__button {
   display: flex;
   flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
   gap: 0.5rem;
   width: 100%;
+  height: auto;
+  white-space: normal;
   padding: 0;
   overflow: hidden;
   border: 0;
