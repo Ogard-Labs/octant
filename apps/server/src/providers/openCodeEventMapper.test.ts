@@ -281,30 +281,6 @@ describe("mapOpenCodeEvent", () => {
       },
     },
     {
-      name: "retry status",
-      event: official({
-        id: "event-retry",
-        type: "session.status",
-        properties: {
-          sessionID: "provider-session",
-          status: {
-            type: "retry",
-            attempt: 2,
-            message: "raw-retry-message-must-not-cross",
-            next: 2,
-            action: {
-              reason: "private",
-              provider: "private-provider-name-must-not-cross",
-              title: "private",
-              message: "private",
-              label: "private",
-            },
-          },
-        },
-      }),
-      expected: { kind: "waiting", message: "Provider is retrying." },
-    },
-    {
       name: "session idle",
       event: official({
         id: "event-idle",
@@ -330,6 +306,33 @@ describe("mapOpenCodeEvent", () => {
     expect(JSON.stringify(result)).not.toMatch(
       /providerID|metadata|must-not-cross|private-provider-name/i,
     );
+  });
+
+  it("reports nothing for a retry status, so every mode keeps the turn running", () => {
+    expect(
+      mapped(
+        official({
+          id: "event-retry",
+          type: "session.status",
+          properties: {
+            sessionID: "provider-session",
+            status: {
+              type: "retry",
+              attempt: 2,
+              message: "raw-retry-message-must-not-cross",
+              next: 2,
+              action: {
+                reason: "private",
+                provider: "private-provider-name-must-not-cross",
+                title: "private",
+                message: "private",
+                label: "private",
+              },
+            },
+          },
+        }),
+      ),
+    ).toEqual([]);
   });
 
   it("allocates contiguous stable sequences for todo progress", () => {
@@ -844,7 +847,7 @@ describe("OpenCode 2.0.22 events", () => {
     ]);
   });
 
-  it("reports a scheduled retry as waiting", () => {
+  it("keeps a turn running through a scheduled retry instead of ending it as waiting", () => {
     expect(
       adaptAndMap("session.retry.scheduled", {
         assistantMessageID,
@@ -852,7 +855,7 @@ describe("OpenCode 2.0.22 events", () => {
         at: 1,
         error: { message: "rate limited" },
       }),
-    ).toMatchObject([{ kind: "waiting" }]);
+    ).toEqual([]);
   });
 
   it.each([

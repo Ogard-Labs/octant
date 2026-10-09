@@ -2409,7 +2409,7 @@ function mapAndOffer(
       state.questions.set(requestId, { providerRequestId, index, count });
       normalized = { ...normalized, requestId };
     }
-    // A shutdown is the one hold that ends the turn; a retry's wait does not.
+    // A shutdown's hold ends the turn, as every runner treats `waiting`.
     if (isTerminalEvent(normalized) || event.type === "session.execution.interrupted") {
       retire(state);
     }

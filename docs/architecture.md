@@ -1853,8 +1853,9 @@ modelId }`, and the model picker is provider-first. Discovery can find
   tool call by `id`, and names the tool only on `session.tool.input.started`;
   Octant folds them onto the earlier names, so 1.x, earlier 2.x, and 2.0.22
   share one mapping. `session.execution.succeeded` completes the turn, its
-  `failed` and `interrupted` outcomes fail or interrupt it, and a scheduled
-  retry reports waiting. Queueing, lifecycle, part start and end, and running
+  `failed` and `interrupted` outcomes fail or interrupt it (a `shutdown`
+  interruption holds it, below), and a scheduled retry reports nothing, so
+  the turn keeps running while OpenCode retries. Queueing, lifecycle, part start and end, and running
   usage totals report nothing (each step reports its own usage); any other
   event fails the turn closed with an error naming it. Approvals map
   through 2.0.22's `permission.asked` event and its reply route, whose body

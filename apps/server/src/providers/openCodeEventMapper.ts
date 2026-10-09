@@ -403,7 +403,10 @@ export function mapOpenCodeEvent(
         case "idle":
           return [completed(context, event.properties.sessionID)];
         case "retry":
-          return [mappedEvent(context, { kind: "waiting", message: "Provider is retrying." })];
+          // OpenCode keeps working the turn after a retry. Every mode ends a
+          // turn on `waiting`, so reporting the retry that way stopped the
+          // turn while OpenCode still finished it.
+          return [];
         case "busy":
           return [];
         default:
