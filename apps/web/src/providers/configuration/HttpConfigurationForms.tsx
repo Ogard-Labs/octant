@@ -14,7 +14,11 @@ import {
   type CredentialStatusController,
 } from "../ProviderSettingsCredentials";
 import type { ProviderSettingsViewProps } from "../ProviderSettingsView";
-import { ProviderOAuthSignInPanel, type ProviderOAuthCommand } from "../ProviderOAuthSignIn";
+import {
+  ProviderOAuthSignInPanel,
+  type ProviderOAuthCommand,
+  type ProviderOAuthSignInState,
+} from "../ProviderOAuthSignIn";
 import {
   configurationFrom,
   anthropicConfigurationFrom,
@@ -226,6 +230,9 @@ export function SubscriptionEndpointSignIn(props: {
   >;
   readonly disabled: boolean;
   readonly startSignIn?: boolean;
+  readonly consentShown?: boolean;
+  readonly signInLabel?: string;
+  readonly onStateChange?: (state: ProviderOAuthSignInState) => void;
   readonly onProviderOAuth?: (
     command: ProviderOAuthCommand,
   ) => Promise<import("../ProviderOAuthSignIn").ProviderOAuthCommandResult | undefined>;
@@ -240,6 +247,9 @@ export function SubscriptionEndpointSignIn(props: {
       disabled={props.disabled}
       instanceId={props.instance.id}
       {...(props.startSignIn === true ? { startSignIn: true } : {})}
+      {...(props.consentShown === true ? { consentShown: true } : {})}
+      {...(props.signInLabel === undefined ? {} : { signInLabel: props.signInLabel })}
+      {...(props.onStateChange === undefined ? {} : { onStateChange: props.onStateChange })}
       {...(props.onProviderOAuth === undefined ? {} : { run: props.onProviderOAuth })}
       {...(props.onOpenExternalUrl === undefined ? {} : { openUrl: props.onOpenExternalUrl })}
       termsSummary={offer.termsSummary}

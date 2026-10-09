@@ -10,6 +10,8 @@ import { purgeAgentRunSubjectContent } from "./agentRunContentStore";
 import { purgeThreadContent } from "./chatProjection";
 import { purgeContextSubjectContent } from "./contextProjection";
 import { THREAD_RETENTION_AGGREGATE } from "./threadRetentionProjection";
+import { REPLICA_ARTIFACT_EVENT_NAMES } from "../replica/replicaArtifactEvents";
+import { REPLICA_MEMBERSHIP_AGGREGATE_TYPE } from "../replica/replicaMembershipProjection";
 import type { SqliteConnection } from "./sqlitePort";
 
 const THREAD_AGGREGATE_BY_MODE: Readonly<Record<OctantMode, string>> = {
@@ -43,6 +45,12 @@ export function erasePurgedThread(input: {
     );
     delinkProjectMemoryProvenance(input.connection, threadId);
     deleteThreadScopedProjectionRows(input.connection, threadId);
+    eraseReplicaArtifactCopies(
+      input.connection,
+      aggregates
+        .filter((aggregate) => aggregate.aggregateType === "canvas")
+        .map((aggregate) => aggregate.aggregateId),
+    );
     deleteJournalEvents(input.connection, aggregates);
     reconcileAggregateHeads(input.connection);
   } finally {
@@ -302,6 +310,7 @@ export function erasePurgedProjectData(input: {
   connection.pragma("foreign_keys = OFF");
   try {
     connection.prepare("DELETE FROM project_memory_projection WHERE project_id = ?").run(projectId);
+    eraseReplicaArtifactCopies(connection, input.canvasIds);
     deleteJournalEvents(connection, [...aggregates.values()]);
     reconcileAggregateHeads(connection);
   } finally {
@@ -507,6 +516,62 @@ function deleteThreadScopedProjectionRows(connection: SqliteConnection, threadId
     connection
       .prepare(`DELETE FROM "${table.replaceAll('"', '""')}" WHERE thread_id = ?`)
       .run(threadId);
+  }
+}
+
+/**
+ * Artifact sync keeps its own copies of a Canvas: a queued publish carries
+ * the bundle, and an entry a pull kept carries its exact text. Both live
+ * under the replica aggregate, which the Canvas family walk does not reach,
+ * so a purge erases them here. A queued publish of an erased Canvas is
+ * dropped. A kept entry becomes a content-free erased slot, so its slot stays
+ * settled and a later pull does not import the erased content again. Slots
+ * this host published keep their content-free `published` record for the
+ * same reason. The copy already in the store is the store's: nothing here
+ * deletes from it.
+ */
+function eraseReplicaArtifactCopies(
+  connection: SqliteConnection,
+  canvasIds: ReadonlyArray<string>,
+): void {
+  for (const canvasId of canvasIds) {
+    const queued = connection
+      .prepare(
+        `SELECT global_sequence FROM event_journal
+         WHERE aggregate_type = ? AND event_name = ?
+           AND json_extract(payload_json, '$.artifact.canvasId') = ?`,
+      )
+      .all(
+        REPLICA_MEMBERSHIP_AGGREGATE_TYPE,
+        REPLICA_ARTIFACT_EVENT_NAMES.queued,
+        canvasId,
+      ) as ReadonlyArray<{ readonly global_sequence: number }>;
+    for (const row of queued) {
+      connection
+        .prepare(`DELETE FROM event_quarantine WHERE global_sequence = ?`)
+        .run(row.global_sequence);
+      connection
+        .prepare(`DELETE FROM event_journal WHERE global_sequence = ?`)
+        .run(row.global_sequence);
+    }
+    connection
+      .prepare(
+        `UPDATE event_journal
+         SET event_name = ?,
+             payload_json = json_object(
+               'instanceId', json_extract(payload_json, '$.instanceId'),
+               'sequence', json_extract(payload_json, '$.sequence')
+             )
+         WHERE aggregate_type = ? AND event_name = ?
+           AND json_extract(payload_json, '$.text') IS NOT NULL
+           AND json_extract(json_extract(payload_json, '$.text'), '$.artifact.canvasId') = ?`,
+      )
+      .run(
+        REPLICA_ARTIFACT_EVENT_NAMES.slotErased,
+        REPLICA_MEMBERSHIP_AGGREGATE_TYPE,
+        REPLICA_ARTIFACT_EVENT_NAMES.reconciled,
+        canvasId,
+      );
   }
 }
 

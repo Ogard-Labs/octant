@@ -109,6 +109,38 @@ describe("createCanvasClient", () => {
     if (history.kind === "ready") expect(history.history.entries.length).toBeGreaterThan(0);
   });
 
+  it("reads the recipes a Canvas can start from with the window capability", async () => {
+    const fetchImpl = vi.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit) =>
+        new Response(
+          JSON.stringify({
+            recipes: [
+              {
+                id: "implementation-plan",
+                title: "Implementation plan",
+                summary: "Goal, tasks, and risks.",
+                whenToUse: "When someone asks for a plan.",
+                skeleton: [{ kind: "heading", role: "Goal" }],
+              },
+            ],
+          }),
+          { status: 200 },
+        ),
+    );
+    const client = createCanvasClient({
+      baseUrl: "http://127.0.0.1:3773",
+      fetch: fetchImpl as unknown as typeof fetch,
+      windowCapability: "capability",
+    });
+    const catalog = await client.recipes?.();
+    expect(catalog?.recipes.map((recipe) => String(recipe.id))).toEqual(["implementation-plan"]);
+    const call = fetchImpl.mock.calls[0];
+    const init = call?.[1];
+    expect(String(call?.[0])).toBe("http://127.0.0.1:3773/api/canvas/recipes");
+    expect(init?.method).toBe("GET");
+    expect(init?.headers).toMatchObject({ "x-octant-window-capability": "capability" });
+  });
+
   it("posts revise requests to the canvas revise route", async () => {
     const fetchImpl = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
       const url = String(input);

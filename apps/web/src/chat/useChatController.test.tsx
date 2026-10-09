@@ -1403,6 +1403,60 @@ describe("useChatController", () => {
     expect(result.current.draftStagedDropped).toBe(true);
   });
 
+  it("leaves the person's unsent draft alone for a turn the composer did not write", async () => {
+    const execute = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("transport failed"))
+      .mockResolvedValueOnce({
+        kind: "turn-created",
+        turn: {
+          id: "00000000-0000-4000-8000-000000000911",
+          threadId,
+          sequence: 1,
+          userMessageRef: {
+            contentId: "00000000-0000-4000-8000-000000000912",
+            digest: "a".repeat(64),
+            byteLength: 1,
+          },
+          attachmentIds: [],
+          attempts: [],
+          createdAt: now,
+        },
+      });
+    const client = createMockClient({
+      bootstrap: vi.fn(async () => bootstrap()),
+      thread: vi.fn(async () => threadView(1)),
+      subscribe: vi.fn(async function* () {}),
+      execute,
+    });
+    const { result } = renderHook(() =>
+      useChatController({
+        activeThreadId: threadId,
+        client,
+        serverUrl: "http://127.0.0.1",
+        windowCapability: capability,
+      }),
+    );
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    act(() => result.current.setPendingDraft("half a reply"));
+
+    // A refused background turn must not put its own text in the composer…
+    await act(async () => {
+      await result.current.sendTurn("Fill in the Canvas", [], [], [], [], [], undefined, {
+        composerDraft: "keep",
+      });
+    });
+    expect(result.current.pendingDraft).toBe("half a reply");
+    // …and an accepted one must not clear what the person was writing.
+    await act(async () => {
+      await result.current.sendTurn("Fill in the Canvas", [], [], [], [], [], undefined, {
+        composerDraft: "keep",
+      });
+    });
+    expect(execute).toHaveBeenCalledTimes(2);
+    expect(result.current.pendingDraft).toBe("half a reply");
+  });
+
   it("keeps composer draft text on failed sends and clears it after success", async () => {
     const attachmentId = "00000000-0000-4000-8000-000000000906" as never;
     const execute = vi

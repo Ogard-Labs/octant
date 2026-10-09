@@ -69,6 +69,33 @@ export const ArtifactLibraryEntry = Schema.Struct({
 }).annotations(strict);
 export type ArtifactLibraryEntry = typeof ArtifactLibraryEntry.Type;
 
+/**
+ * An artifact another of this person's computers made, read from the replica
+ * store and not bound to a thread here yet. It names the Project it was
+ * filed under there and the computer that wrote its latest version, because
+ * neither is a Project or a computer this host can open.
+ */
+export const ArtifactLibrarySyncedEntry = Schema.Struct({
+  canvasId: CanvasId,
+  /** The Project name on the computer that filed it. */
+  projectName: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256)),
+  /** The computer that wrote the head shown, as that computer names itself. */
+  computerName: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
+  mode: OctantMode,
+  kind: ArtifactKind,
+  title: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256)),
+  versionCount: Schema.Int.pipe(Schema.positive()),
+  /**
+   * How many heads its history has. Two computers that revised the same
+   * version leave two; the person picks one or merges them.
+   */
+  headCount: Schema.Int.pipe(Schema.positive()),
+  /** Whether one of the heads is a deletion beside a revision. */
+  deletedElsewhere: Schema.Boolean,
+  updatedAt: UtcTimestamp,
+}).annotations(strict);
+export type ArtifactLibrarySyncedEntry = typeof ArtifactLibrarySyncedEntry.Type;
+
 /** One Project, as the library's filter offers it. */
 export const ArtifactLibraryProject = Schema.Struct({
   projectId: ProjectId,
@@ -112,6 +139,13 @@ export const ArtifactLibraryListing = Schema.Struct({
       (projects) =>
         new Set(projects.map((project) => String(project.projectId))).size === projects.length,
     ),
+  ),
+  /**
+   * Artifacts synced from this person's other computers and not bound here.
+   * Only a window on this host sees them; a paired device does not.
+   */
+  synced: Schema.optional(
+    Schema.Array(ArtifactLibrarySyncedEntry).pipe(Schema.maxItems(MAX_ARTIFACT_LIBRARY_ENTRIES)),
   ),
   /** How many artifacts matched before the page ceiling, so a cut list says so. */
   matchCount: Schema.Int.pipe(Schema.nonNegative()),

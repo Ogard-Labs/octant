@@ -635,6 +635,42 @@ describe("useProviderController", () => {
     expect(result.current.message).toBeUndefined();
   });
 
+  it("keeps a failed check's precise answer for its row until the endpoint is checked again", async () => {
+    const api = client();
+    vi.mocked(api.probe)
+      .mockRejectedValueOnce({
+        category: "protocol",
+        message: "The provider returned an invalid models response.",
+      })
+      .mockResolvedValueOnce(observation());
+    vi.mocked(api.bootstrap)
+      .mockResolvedValueOnce(snapshot([provider()], [observation()]))
+      .mockResolvedValueOnce(
+        snapshot(
+          [provider()],
+          [observation({ readiness: "degraded", models: [], message: "Provider probe failed." })],
+        ),
+      );
+    const { result } = renderHook(() => useProviderController({ client: api }));
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    await act(async () => {
+      await expect(result.current.probe(id, { quiet: true })).resolves.toBe(false);
+    });
+    expect(result.current.probeFailures.get(id)).toEqual(
+      expect.objectContaining({
+        category: "protocol",
+        message: "The provider returned an invalid models response.",
+      }),
+    );
+    expect(result.current.message).toBeUndefined();
+
+    await act(async () => {
+      await expect(result.current.probe(id, { quiet: true })).resolves.toBe(true);
+    });
+    expect(result.current.probeFailures.has(id)).toBe(false);
+  });
+
   it("preserves an existing page alert during a quiet probe", async () => {
     const pending = deferred<Awaited<ReturnType<ProviderClient["probe"]>>>();
     const api = client();

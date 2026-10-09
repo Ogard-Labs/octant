@@ -1,0 +1,676 @@
+/* The device pane: the iOS Simulator and the Android emulator in the dock.
+   One toolbar, at most one line, and the device on a quiet stage. The pane
+   adapts to its container, so a wide dock gets the roomier layout. */
+
+/* ui-style-exception: fixed-scheme — a device's body is dark hardware in both
+   themes, like the real thing, so its paint does not follow the theme. */
+.device-pane {
+  --device-body: light-dark(#1c1c1c, #0e0e0e);
+  --device-edge: light-dark(rgb(0 0 0 / 22%), rgb(255 255 255 / 24%));
+  --device-key: light-dark(#2a2a2a, #3a3a3a);
+  --device-screen-off: #0b0b0b;
+  --device-shadow: 0 18px 30px light-dark(rgb(0 0 0 / 18%), rgb(0 0 0 / 60%));
+  --device-touch: rgb(255 255 255 / 38%);
+  --device-touch-edge: rgb(0 0 0 / 25%);
+}
+
+.device-pane {
+  --device-stage: light-dark(
+    color-mix(in oklab, var(--oct-bg), black 4%),
+    color-mix(in oklab, var(--oct-bg), black 32%)
+  );
+  --device-bezel: 12px;
+  /* Room kept under the device for its caption. */
+  --device-caption-room: 24px;
+  container-type: inline-size;
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  color: var(--oct-fg);
+  font-size: var(--oct-text-sm);
+  background: var(--device-stage);
+}
+
+/* ─── toolbar ──────────────────────────────────────────────────────── */
+.device-toolbar {
+  grid-row: 1;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  height: 40px;
+  padding: 0 var(--oct-space-1) 0 var(--oct-space-2);
+  border-bottom: 1px solid var(--oct-border);
+  background: var(--oct-bg);
+}
+
+.device-toolbar__device {
+  display: inline-flex;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: var(--oct-space-2);
+  min-width: 0;
+  max-width: 62%;
+  height: var(--oct-rail-button-h);
+  padding: 0 var(--oct-space-2);
+  border: 0;
+  border-radius: var(--oct-radius-sm);
+  color: inherit;
+  background: transparent;
+  font: inherit;
+}
+
+.device-toolbar__device--switch {
+  cursor: pointer;
+}
+
+.device-toolbar__device--switch:hover,
+.device-toolbar__device--switch[aria-expanded="true"] {
+  background: var(--oct-fg-soft);
+}
+
+.device-toolbar__name {
+  overflow: hidden;
+  font-weight: var(--oct-weight-medium);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.device-toolbar__chevron {
+  flex: none;
+  color: var(--oct-meta);
+}
+
+/* The state gives way before the name does. */
+.device-toolbar__meta {
+  flex: 0 100 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.device-toolbar__os {
+  display: none;
+}
+
+@container (min-width: 340px) {
+  .device-toolbar__os {
+    display: inline;
+  }
+}
+
+.device-toolbar__spacer {
+  flex: 1 1 auto;
+  min-width: var(--oct-space-1);
+}
+
+.device-toolbar__more {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: var(--oct-rail-button-h);
+  height: var(--oct-rail-button-h);
+  padding: 0;
+  border: 0;
+  border-radius: var(--oct-radius-sm);
+  color: var(--oct-muted);
+  background: transparent;
+  cursor: pointer;
+}
+
+.device-toolbar__more:hover,
+.device-toolbar__more[aria-expanded="true"] {
+  color: var(--oct-fg);
+  background: var(--oct-fg-soft);
+}
+
+.device-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: var(--oct-radius-pill);
+  background: var(--oct-meta);
+}
+
+.device-dot[data-dot="running"] {
+  background: var(--oct-success);
+  animation: device-dot-pulse var(--oct-motion-pulse) ease-out infinite;
+}
+
+.device-dot[data-dot="busy"] {
+  background: var(--oct-warn);
+}
+
+.device-dot[data-dot="lost"] {
+  background: var(--oct-danger);
+}
+
+@keyframes device-dot-pulse {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in oklab, var(--oct-success) 45%, transparent);
+  }
+  70%,
+  100% {
+    box-shadow: 0 0 0 5px transparent;
+  }
+}
+
+.device-chip {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: var(--oct-space-1);
+  height: 22px;
+  padding: 0 var(--oct-space-2);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-pill);
+  color: var(--oct-muted);
+  background: var(--oct-bg);
+  font-size: calc(11 * var(--oct-text-step));
+  white-space: nowrap;
+}
+
+.device-chip:hover {
+  color: var(--oct-fg);
+}
+
+/* ─── the one line ─────────────────────────────────────────────────── */
+.device-line {
+  grid-row: 2;
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-2);
+  min-width: 0;
+  min-height: 40px;
+  padding: var(--oct-space-1) var(--oct-space-2) var(--oct-space-1) var(--oct-space-3);
+  border-bottom: 1px solid var(--oct-border);
+  background: var(--oct-bg);
+  font-size: var(--oct-text-xs);
+}
+
+.device-line__mark {
+  flex: none;
+  color: var(--oct-meta);
+}
+
+.device-line__message {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.device-line__message strong {
+  font-weight: var(--oct-weight-medium);
+}
+
+.device-line--approval {
+  background: color-mix(in oklab, var(--oct-warn-soft) 60%, var(--oct-bg));
+}
+
+.device-line--approval .device-line__mark {
+  color: var(--oct-warn-fg);
+}
+
+.device-line--error .device-line__mark {
+  color: var(--oct-danger-fg);
+}
+
+.device-line__field {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* ─── the stage ────────────────────────────────────────────────────── */
+.device-stage {
+  grid-row: 3;
+  position: relative;
+  display: grid;
+  place-items: center;
+  min-width: 0;
+  min-height: 0;
+  padding: var(--oct-space-5) var(--oct-space-4) var(--oct-space-2);
+  overflow: hidden;
+}
+
+@container (min-width: 520px) {
+  .device-stage {
+    padding: var(--oct-space-6) var(--oct-space-6) var(--oct-space-3);
+  }
+}
+
+/* A size container, so the device can be fitted to the room it has in both
+   directions and keep its own proportions. The device and its caption row are
+   centred together, so the caption never sits on the device. */
+.device-stage__fit {
+  container-type: size;
+  position: relative;
+  display: grid;
+  grid-template-rows: auto var(--device-caption-room);
+  align-content: center;
+  justify-items: center;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+
+.device-body {
+  position: relative;
+  padding: var(--device-bezel);
+  border-radius: var(--oct-radius-device);
+  background: var(--device-body);
+  box-shadow:
+    0 0 0 1px var(--device-edge),
+    var(--device-shadow);
+}
+
+/* Side keys, drawn here: two on the left and one on the right for the iOS
+   Simulator, a rocker and a power key on the right for Android. */
+.device-body::before,
+.device-body::after {
+  position: absolute;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--device-key);
+  content: "";
+}
+
+.device-body::before {
+  top: 18%;
+  left: -3px;
+  height: 16%;
+  background: linear-gradient(
+    to bottom,
+    var(--device-key) 0 44%,
+    transparent 44% 56%,
+    var(--device-key) 56%
+  );
+}
+
+.device-body::after {
+  top: 24%;
+  right: -3px;
+  height: 11%;
+}
+
+.device-body[data-platform="android"]::before {
+  top: 30%;
+  right: -3px;
+  left: auto;
+  height: 14%;
+  background: var(--device-key);
+}
+
+.device-body[data-platform="android"]::after {
+  top: 18%;
+  height: 7%;
+}
+
+.device-body:has(.device-screen:focus-visible) {
+  box-shadow:
+    0 0 0 1px var(--oct-muted),
+    var(--device-shadow);
+}
+
+.device-body[data-ghost="true"] {
+  background: transparent;
+  box-shadow: none;
+  outline: 1px dashed var(--oct-border);
+}
+
+.device-body[data-ghost="true"]::before,
+.device-body[data-ghost="true"]::after {
+  display: none;
+}
+
+.device-body[data-dimmed="true"] .device-screen {
+  opacity: var(--oct-disabled-opacity);
+}
+
+.device-screen {
+  display: block;
+  position: relative;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  border-radius: var(--oct-radius-sheet);
+  background: var(--device-screen-off);
+  cursor: crosshair;
+}
+
+.device-screen:disabled {
+  cursor: default;
+}
+
+.device-screen canvas,
+.device-screen img {
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: calc(100cqw - 2 * var(--device-bezel));
+  max-height: calc(100cqh - 2 * var(--device-bezel) - var(--device-caption-room));
+}
+
+.device-screen--blank {
+  aspect-ratio: 9 / 19.5;
+  height: min(
+    calc(100cqh - 2 * var(--device-bezel) - var(--device-caption-room)),
+    calc((100cqw - 2 * var(--device-bezel)) * 19.5 / 9)
+  );
+}
+
+.device-body[data-ghost="true"] .device-screen--blank {
+  background: transparent;
+}
+
+.device-touch {
+  position: absolute;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--oct-radius-pill);
+  background: var(--device-touch);
+  box-shadow: 0 0 0 1px var(--device-touch-edge);
+  pointer-events: none;
+  animation: device-touch calc(2 * var(--oct-motion-base)) ease-out forwards;
+}
+
+@keyframes device-touch {
+  from {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(0.6);
+  }
+  to {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(1.4);
+  }
+}
+
+@keyframes device-touch-still {
+  from {
+    opacity: 1;
+    transform: translate(-50%, -50%);
+  }
+  to {
+    opacity: 0;
+    transform: translate(-50%, -50%);
+  }
+}
+
+.device-stage__caption {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--oct-space-2);
+  margin: 0;
+  color: var(--oct-meta);
+  font-size: calc(11 * var(--oct-text-step));
+  pointer-events: none;
+}
+
+/* A hidden caption keeps its row, so focusing the screen moves nothing. */
+.device-stage__caption[hidden] {
+  display: flex;
+  visibility: hidden;
+}
+
+.device-stage__badge {
+  position: absolute;
+  top: var(--oct-space-3);
+  left: 50%;
+  padding: 2px var(--oct-space-2);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-pill);
+  color: var(--oct-muted);
+  background: var(--oct-bg);
+  font-size: calc(11 * var(--oct-text-step));
+  white-space: nowrap;
+  transform: translateX(-50%);
+}
+
+.device-spinner {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--oct-border);
+  border-top-color: var(--oct-fg);
+  border-radius: var(--oct-radius-pill);
+  animation: oct-spin var(--oct-motion-spin) linear infinite;
+}
+
+/* ─── cards on the stage: setup, picker, diagnostics ───────────────── */
+.device-card {
+  align-self: center;
+  width: min(100%, 360px);
+  max-height: 100%;
+  padding: var(--oct-space-5);
+  overflow: auto;
+  border-radius: var(--oct-radius-lg);
+  background: var(--oct-bg);
+  box-shadow: var(--oct-elev-subtle);
+}
+
+.device-card--sheet {
+  position: absolute;
+  right: var(--oct-space-3);
+  bottom: var(--oct-space-3);
+  left: var(--oct-space-3);
+  z-index: 1;
+  width: auto;
+  max-height: 70%;
+  margin-inline: auto;
+  max-width: 420px;
+  background: var(--oct-surface);
+  box-shadow: var(--oct-elev-raised);
+}
+
+.device-card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--oct-space-2);
+}
+
+.device-card__title {
+  margin: 0 0 var(--oct-space-1);
+  font-size: var(--oct-text-base);
+  font-weight: var(--oct-weight-strong);
+}
+
+.device-card__subtitle {
+  margin: var(--oct-space-3) 0 var(--oct-space-1);
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  font-weight: var(--oct-weight-medium);
+}
+
+.device-card__lede {
+  margin: 0 0 var(--oct-space-3);
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+}
+
+.device-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--oct-space-2);
+}
+
+.device-checks {
+  display: grid;
+  margin: 0 0 var(--oct-space-4);
+  padding: 0;
+  list-style: none;
+}
+
+.device-checks li {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  gap: var(--oct-space-2);
+  padding: var(--oct-space-2) 0;
+  border-top: 1px solid var(--oct-border-soft);
+}
+
+.device-checks li:first-child {
+  border-top: 0;
+}
+
+.device-checks__mark {
+  color: var(--oct-meta);
+}
+
+.device-checks li[data-state="ok"] .device-checks__mark {
+  color: var(--oct-success-fg);
+}
+
+.device-checks li[data-state="missing"] .device-checks__mark {
+  color: var(--oct-danger-fg);
+}
+
+.device-checks__body {
+  display: grid;
+  min-width: 0;
+}
+
+.device-checks__detail {
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
+.device-checks__fix {
+  margin-top: 2px;
+  font-size: var(--oct-text-xs);
+}
+
+.device-picks {
+  display: grid;
+  gap: var(--oct-space-1);
+  margin: 0 0 var(--oct-space-4);
+}
+
+.device-pick {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--oct-space-3);
+  width: 100%;
+  padding: var(--oct-space-2) var(--oct-space-3);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-sm);
+  text-align: left;
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-regular);
+}
+
+.device-pick[aria-checked="true"] {
+  border-color: var(--oct-fg);
+  background: var(--oct-fg-soft);
+}
+
+.device-pick__radio {
+  width: 14px;
+  height: 14px;
+  border: 1px solid var(--oct-meta);
+  border-radius: var(--oct-radius-pill);
+}
+
+.device-pick[aria-checked="true"] .device-pick__radio {
+  border-color: var(--oct-fg);
+  background: var(--oct-fg);
+  box-shadow: inset 0 0 0 3px var(--oct-bg);
+}
+
+.device-pick__name {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.device-pick__meta {
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
+.device-facts {
+  display: grid;
+  gap: var(--oct-space-1);
+  margin: var(--oct-space-2) 0 0;
+}
+
+.device-facts > div {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--oct-space-3);
+  font-size: var(--oct-text-xs);
+}
+
+.device-facts dt {
+  color: var(--oct-meta);
+}
+
+.device-facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+
+.device-rows {
+  display: grid;
+  gap: var(--oct-space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--oct-text-xs);
+}
+
+.device-rows li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--oct-space-1) var(--oct-space-2);
+}
+
+.device-rows__meta {
+  color: var(--oct-meta);
+}
+
+.device-rows__detail {
+  flex-basis: 100%;
+  color: var(--oct-muted);
+  overflow-wrap: anywhere;
+}
+
+/* ─── motion ───────────────────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  .device-dot[data-dot="running"],
+  .device-spinner {
+    animation: none;
+  }
+
+  .device-spinner {
+    border-top-color: var(--oct-meta);
+  }
+
+  .device-touch {
+    animation-name: device-touch-still;
+    animation-timing-function: steps(1, end);
+  }
+}
+
+html[data-octant-reduced-motion="true"] .device-dot[data-dot="running"],
+html[data-octant-reduced-motion="true"] .device-spinner {
+  animation: none;
+}
+
+html[data-octant-reduced-motion="true"] .device-spinner {
+  border-top-color: var(--oct-meta);
+}
+
+html[data-octant-reduced-motion="true"] .device-touch {
+  animation-name: device-touch-still;
+  animation-timing-function: steps(1, end);
+}

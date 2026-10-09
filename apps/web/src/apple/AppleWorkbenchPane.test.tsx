@@ -350,18 +350,20 @@ describe("AppleWorkbenchPane", () => {
   });
 
   it("renders the dock's iOS Simulator tab as a device pane, not the workbench dump", async () => {
-    const { render, screen } = await import("@testing-library/react");
+    const { fireEvent, render, screen } = await import("@testing-library/react");
     const { vi } = await import("vitest");
+    const onRun = vi.fn();
     render(
       <AppleWorkbenchPane
         discovery={discovery}
-        onRun={vi.fn()}
+        liveFrame={liveFrame()}
+        onRun={onRun}
         runtime={runtimeSnapshot()}
         status="ready"
         variant="device"
       />,
     );
-    expect(screen.getByLabelText("iOS Simulator")).toBeVisible();
+    expect(screen.getByRole("region", { name: "iOS Simulator" })).toBeVisible();
     expect(screen.queryByText("Apple development")).not.toBeInTheDocument();
     expect(screen.queryByText("Validation evidence")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Build Fixture" })).not.toBeInTheDocument();
@@ -369,17 +371,25 @@ describe("AppleWorkbenchPane", () => {
     expect(
       screen.queryByRole("button", { name: "Run Fixture on iPhone 16" }),
     ).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Capture the iPhone 16 screen" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "Shut down iPhone 16" })).toBeVisible();
+    expect(screen.getByRole("toolbar", { name: "iOS Simulator controls" })).toHaveTextContent(
+      "iPhone 16",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Screenshot" }));
+    expect(onRun).toHaveBeenCalledWith({
+      kind: "screenshot",
+      simulatorId: discovery.simulators[0]!.simulatorId,
+    });
   });
 
-  it("offers Allow input on an approval-gated device pane and does not send clicks until then", async () => {
+  it("asks to allow input in one line on an approval-gated device pane", async () => {
     const { fireEvent, render, screen } = await import("@testing-library/react");
     const { vi } = await import("vitest");
     const onRun = vi.fn();
     render(
       <AppleWorkbenchPane
         discovery={discovery}
+        inputAllowed={false}
+        liveFrame={liveFrame()}
         needsAllowInput
         onRun={onRun}
         runtime={runtimeSnapshot()}
@@ -387,11 +397,202 @@ describe("AppleWorkbenchPane", () => {
         variant="device"
       />,
     );
-    expect(screen.getByRole("button", { name: "Allow input to iPhone 16" })).toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: "Allow input to iPhone 16" }));
+    expect(screen.getByRole("status")).toHaveTextContent("Allow input on iPhone 16?");
+    fireEvent.click(screen.getByRole("button", { name: "Allow" }));
     expect(onRun).toHaveBeenCalledWith({
       kind: "open-input",
       simulatorId: discovery.simulators[0]!.simulatorId,
     });
   });
+
+  it("asks which Simulator to show when several run, and keeps the one chosen", async () => {
+    const { fireEvent, render, screen } = await import("@testing-library/react");
+    const { vi } = await import("vitest");
+    const onSelectSimulator = vi.fn();
+    const second = {
+      ...discovery.simulators[0]!,
+      simulatorId: "90000000-0000-4000-8000-000000000007" as never,
+      name: "iPhone 16 Pro",
+      udid: "90000000-0000-4000-8000-000000000007",
+    };
+    render(
+      <AppleWorkbenchPane
+        awaitingChoice
+        discovery={{ ...discovery, simulators: [...discovery.simulators, second] }}
+        liveFrame={liveFrame()}
+        onRun={vi.fn()}
+        onSelectSimulator={onSelectSimulator}
+        runtime={runtimeSnapshot()}
+        status="ready"
+        variant="device"
+      />,
+    );
+    expect(screen.getByRole("heading", { name: "Choose a Simulator" })).toBeVisible();
+    fireEvent.click(screen.getByRole("radio", { name: /iPhone 16 Pro/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Show iPhone 16 Pro" }));
+    expect(onSelectSimulator).toHaveBeenCalledWith(second.simulatorId);
+  });
+
+  it("shows Xcode as the missing setup step instead of a paragraph", async () => {
+    const { render, screen } = await import("@testing-library/react");
+    render(
+      <AppleWorkbenchPane
+        errorCategory="xcode-not-found"
+        errorMessage="Xcode was not found."
+        onRetry={() => undefined}
+        onRun={() => undefined}
+        status="unavailable"
+        variant="device"
+      />,
+    );
+    expect(screen.getByRole("heading", { name: "Set up the iOS Simulator" })).toBeVisible();
+    expect(screen.getByText("Install Xcode, then select it with xcode-select.")).toBeVisible();
+    expect(screen.getAllByRole("listitem")).toHaveLength(4);
+    expect(screen.getByRole("button", { name: "Check again" })).toBeVisible();
+  });
+
+  it("offers Repair input only for a disconnected-input refusal, and sends it only on a press", async () => {
+    const { fireEvent, render, screen } = await import("@testing-library/react");
+    const { vi } = await import("vitest");
+    const onRun = vi.fn();
+    const simulatorId = discovery.simulators[0]!.simulatorId;
+    const tap = { kind: "tap", simulatorId, point: { x: 10, y: 20 } } as const;
+    const pane = (reason: string) => (
+      <AppleWorkbenchPane
+        actionFailure={{ kind: "refused", intent: tap, reason }}
+        discovery={discovery}
+        liveFrame={liveFrame()}
+        onRun={onRun}
+        runtime={runtimeSnapshot()}
+        status="ready"
+        variant="device"
+      />
+    );
+    const { rerender } = render(pane("unsupported-device"));
+    expect(screen.queryByRole("button", { name: "Repair input" })).not.toBeInTheDocument();
+
+    rerender(pane("input-disconnected"));
+    expect(screen.getByRole("alert")).toHaveTextContent(/input on .+ is disconnected/i);
+    expect(onRun).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Repair input" }));
+    expect(onRun).toHaveBeenCalledExactlyOnceWith({ kind: "repair-input", simulatorId });
+  });
 });
+
+describe("Apple setup checklist by failed step", () => {
+  const row = (screen: typeof import("@testing-library/react").screen, label: string) =>
+    screen.getByText(label).closest("li") as HTMLElement;
+
+  async function renderFailed(errorStep?: "xcode" | "licence" | "runtime" | "project") {
+    const { render, screen } = await import("@testing-library/react");
+    render(
+      <AppleWorkbenchPane
+        errorCategory="unavailable"
+        errorMessage="Apple project discovery is incomplete on this host."
+        {...(errorStep === undefined ? {} : { errorStep })}
+        onRetry={() => undefined}
+        onRun={() => undefined}
+        status="unavailable"
+        variant="device"
+      />,
+    );
+    return screen;
+  }
+
+  it("shows the licence row as missing with its fix, after Xcode passed", async () => {
+    const screen = await renderFailed("licence");
+    expect(row(screen, "Xcode selected")).toHaveAttribute("data-state", "ok");
+    expect(row(screen, "Xcode licence accepted")).toHaveAttribute("data-state", "missing");
+    expect(screen.getByText("Run sudo xcodebuild -license accept in Terminal.")).toBeVisible();
+    expect(row(screen, "iOS Simulator runtime")).toHaveAttribute("data-state", "waiting");
+  });
+
+  it("marks the Xcode row when the host names the Xcode step", async () => {
+    const screen = await renderFailed("xcode");
+    expect(row(screen, "Xcode selected")).toHaveAttribute("data-state", "missing");
+    expect(row(screen, "Xcode licence accepted")).toHaveAttribute("data-state", "waiting");
+  });
+
+  it("marks the runtime row, with Xcode and the licence passed", async () => {
+    const screen = await renderFailed("runtime");
+    expect(row(screen, "Xcode licence accepted")).toHaveAttribute("data-state", "ok");
+    expect(row(screen, "iOS Simulator runtime")).toHaveAttribute("data-state", "missing");
+    expect(row(screen, "Project found")).toHaveAttribute("data-state", "waiting");
+  });
+
+  it("marks the project row, with everything before it passed", async () => {
+    const screen = await renderFailed("project");
+    expect(row(screen, "iOS Simulator runtime")).toHaveAttribute("data-state", "ok");
+    expect(row(screen, "Project found")).toHaveAttribute("data-state", "missing");
+  });
+
+  it("lets a new failure override the discovery from before it", async () => {
+    const { render, screen } = await import("@testing-library/react");
+    render(
+      <AppleWorkbenchPane
+        discovery={discovery}
+        errorCategory="unavailable"
+        errorMessage="The Xcode licence has not been accepted on this host."
+        errorStep="licence"
+        onRetry={() => undefined}
+        onRun={() => undefined}
+        status="unavailable"
+        variant="device"
+      />,
+    );
+    expect(row(screen, "Xcode licence accepted")).toHaveAttribute("data-state", "missing");
+    expect(row(screen, "iOS Simulator runtime")).toHaveAttribute("data-state", "waiting");
+  });
+
+  it("does not let an older discovery pass rows for a failure that names no step", async () => {
+    const { render, screen } = await import("@testing-library/react");
+    render(
+      <AppleWorkbenchPane
+        discovery={discovery}
+        errorCategory="unavailable"
+        errorMessage="Apple project discovery is incomplete on this host."
+        onRetry={() => undefined}
+        onRun={() => undefined}
+        status="unavailable"
+        variant="device"
+      />,
+    );
+    expect(row(screen, "Xcode selected")).toHaveAttribute("data-state", "waiting");
+    expect(row(screen, "iOS Simulator runtime")).toHaveAttribute("data-state", "waiting");
+  });
+
+  it("keeps the licence row the host named over a missing-toolchain frame", async () => {
+    const { render, screen } = await import("@testing-library/react");
+    render(
+      <AppleWorkbenchPane
+        errorCategory="unavailable"
+        errorMessage="The Xcode licence has not been accepted on this host."
+        errorStep="licence"
+        liveFrame={{ status: "unavailable", reason: "toolchain-missing" } as never}
+        onRetry={() => undefined}
+        onRun={() => undefined}
+        status="unavailable"
+        variant="device"
+      />,
+    );
+    expect(row(screen, "Xcode licence accepted")).toHaveAttribute("data-state", "missing");
+    expect(screen.getByText("Run sudo xcodebuild -license accept in Terminal.")).toBeVisible();
+  });
+
+  it("leaves every row unchecked when an older host names no step", async () => {
+    const screen = await renderFailed();
+    expect(row(screen, "Xcode licence accepted")).toHaveAttribute("data-state", "waiting");
+    expect(row(screen, "Xcode selected")).toHaveAttribute("data-state", "waiting");
+  });
+});
+
+function liveFrame() {
+  return {
+    status: "live",
+    simulatorId: discovery.simulators[0]!.simulatorId,
+    name: "iPhone 16",
+    screen: { kind: "pending" },
+    title: "Live · iPhone 16",
+    message: "The destination is live.",
+  } as const;
+}

@@ -485,10 +485,7 @@ async function request(
     }
     if (!response.ok) {
       await response.body?.cancel().catch(() => undefined);
-      throw failure(
-        response.status === 404 ? "incompatible" : "provider-failed",
-        `The Ollama request failed with HTTP ${response.status}.`,
-      );
+      throw httpFailure(response.status);
     }
     const declared = Number(response.headers.get("content-length"));
     if (Number.isFinite(declared) && declared > endpoint.limits.responseBodyBytes) {
@@ -502,6 +499,26 @@ async function request(
   } finally {
     if (timeout !== undefined) clearTimeout(timeout);
     signal?.removeEventListener("abort", abort);
+  }
+}
+
+// Timeout, overload, and gateway answers lift on their own, so they read as an
+// endpoint that is down for now, matching the OpenAI/Anthropic-compatible
+// classification. Only the status code is reported; the body is never read.
+function httpFailure(status: number): ProviderFailure {
+  switch (status) {
+    case 404:
+      return failure("incompatible", `The Ollama request failed with HTTP ${status}.`);
+    case 408:
+    case 504:
+      return failure("unavailable", "The Ollama request timed out.");
+    case 500:
+    case 502:
+    case 503:
+    case 529:
+      return failure("unavailable", `The Ollama request failed with HTTP ${status}.`);
+    default:
+      return failure("provider-failed", `The Ollama request failed with HTTP ${status}.`);
   }
 }
 

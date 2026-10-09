@@ -137,7 +137,8 @@ export function OctantSelectField(props: OctantSelectFieldProps) {
               props.className,
             )}
           >
-            {selectedOption?.label ?? props.placeholder}
+            {/* The same one-line ellipsis as the web trigger below. */}
+            <span className="min-w-0 truncate">{selectedOption?.label ?? props.placeholder}</span>
             <ChevronDown aria-hidden="true" size={16} />
           </OctantMenuTrigger>
           <OctantMenuPortal>
@@ -196,14 +197,18 @@ export function OctantSelectField(props: OctantSelectFieldProps) {
         >
           {/* The recipe encodes "" as a real value, so Base UI never sees an empty
               selection; show the placeholder whenever no option matches. */}
-          <SelectValue placeholder={props.placeholder}>
+          {/* One line that ellipsizes: a long label otherwise ran out of the
+              trigger and pushed its chevron past a narrow drawer's edge. */}
+          <SelectValue className="min-w-0 truncate" placeholder={props.placeholder}>
             {selectedOption?.label ?? props.placeholder}
           </SelectValue>
         </SelectTrigger>
         <SelectPortal>
+          {/* Above an open dialog (its viewport stacks at 51): a select inside
+              Add endpoint's dialog opened its list underneath, out of reach. */}
           <SelectPositioner
             alignItemWithTrigger={false}
-            className="z-50 outline-none window-no-drag"
+            className="z-[var(--oct-z-modal)] outline-none window-no-drag"
             sideOffset={4}
           >
             <SelectPopup>

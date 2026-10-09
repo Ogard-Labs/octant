@@ -1,4 +1,6 @@
+import type { ReplicaMembershipClient } from "@octant/client-runtime/replica-membership-client";
 import type { ReplicaStoreSettingsClient } from "@octant/client-runtime/replica-store-settings-client";
+import { decodeReplicaMembershipView } from "@octant/contracts/replica-entry";
 import { decodeFolderBrowseResult } from "@octant/contracts/folder-browse";
 import {
   decodeReplicaStoreSettingsView,
@@ -414,5 +416,41 @@ describe("SyncSettingsSection", () => {
     const dialog = await screen.findByRole("dialog", { name: "Sync folder" });
     expect(dialog).not.toHaveTextContent(/^Work/);
     expect(within(dialog).queryByText("Work", { exact: true })).not.toBeInTheDocument();
+  });
+
+  it("turns on setting up a replica only once the host has a store and sync is on", async () => {
+    const membership = {
+      read: vi.fn(async () =>
+        decodeReplicaMembershipView({
+          kind: "replica-membership-view",
+          computerName: "Studio Mac",
+          thisComputer: { kind: "none" },
+          members: [],
+          joinRequests: [],
+          status: {
+            lastPublish: { kind: "not-available" },
+            lastPull: { kind: "not-available" },
+            queued: { kind: "not-available" },
+          },
+        }),
+      ),
+      execute: vi.fn(),
+    };
+    const ready = view({
+      store: { kind: "synced-folder", folder: "/Users/henrik/Dropbox" },
+      syncOn: true,
+      version: 2,
+    });
+    const { fake } = client(ready);
+    render(
+      <SyncSettingsSection
+        client={fake}
+        folderBrowse={folderBrowse}
+        membership={membership as unknown as ReplicaMembershipClient}
+      />,
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Set up sync" })).not.toBeDisabled(),
+    );
   });
 });

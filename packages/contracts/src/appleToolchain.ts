@@ -97,6 +97,7 @@ export const AppleSimulatorActionKind = Schema.Literal(
   "swipe",
   "type-text",
   "key-press",
+  "repair-input",
 );
 export type AppleSimulatorActionKind = typeof AppleSimulatorActionKind.Type;
 
@@ -116,6 +117,7 @@ export const AppleActionKind = Schema.Literal(
   "swipe",
   "type-text",
   "key-press",
+  "repair-input",
 );
 export type AppleActionKind = typeof AppleActionKind.Type;
 
@@ -222,6 +224,9 @@ export const AppleSimulatorRequest = Schema.Struct({
       if (request.kind === "key-press") {
         return request.requestedBy !== undefined && request.key !== undefined;
       }
+      if (request.kind === "repair-input") {
+        return request.requestedBy !== undefined;
+      }
       return true;
     }),
   );
@@ -311,7 +316,8 @@ export const AppleBuildEvidence = Schema.Struct({
         evidence.kind === "tap" ||
         evidence.kind === "swipe" ||
         evidence.kind === "type-text" ||
-        evidence.kind === "key-press"
+        evidence.kind === "key-press" ||
+        evidence.kind === "repair-input"
       ) {
         return evidence.requestedBy !== undefined;
       }
@@ -379,10 +385,19 @@ export const AppleRuntimeSnapshot = Schema.Struct({
 }).annotations(strict);
 export type AppleRuntimeSnapshot = typeof AppleRuntimeSnapshot.Type;
 
+/**
+ * Which discovery probe failed, so a setup checklist can point at the step to
+ * fix. Optional and additive: a host that predates it omits it, and a failure
+ * without one still reads as a general failure.
+ */
+export const AppleDiscoveryStep = Schema.Literal("xcode", "licence", "runtime", "project");
+export type AppleDiscoveryStep = typeof AppleDiscoveryStep.Type;
+
 export const AppleToolchainFailure = Schema.Union(
   Schema.Struct({
     category: Schema.Literal("invalid"),
     message: Schema.NonEmptyTrimmedString,
+    step: Schema.optional(AppleDiscoveryStep),
   }).annotations(strict),
   Schema.Struct({
     category: Schema.Literal("unauthorized"),
@@ -391,10 +406,12 @@ export const AppleToolchainFailure = Schema.Union(
   Schema.Struct({
     category: Schema.Literal("unavailable"),
     message: Schema.NonEmptyTrimmedString,
+    step: Schema.optional(AppleDiscoveryStep),
   }).annotations(strict),
   Schema.Struct({
     category: Schema.Literal("xcode-not-found"),
     message: Schema.NonEmptyTrimmedString,
+    step: Schema.optional(AppleDiscoveryStep),
   }).annotations(strict),
   Schema.Struct({
     category: Schema.Literal("simulator-not-found"),

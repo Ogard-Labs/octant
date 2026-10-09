@@ -48,6 +48,14 @@ import {
   createReplicaStoreSettingsClient,
   type ReplicaStoreSettingsClient,
 } from "@octant/client-runtime/replica-store-settings-client";
+import {
+  createReplicaMembershipClient,
+  type ReplicaMembershipClient,
+} from "@octant/client-runtime/replica-membership-client";
+import {
+  createReplicaSyncStatusClient,
+  type ReplicaSyncStatusClient,
+} from "@octant/client-runtime/replica-sync-status-client";
 import { createGithubClient } from "@octant/client-runtime/github-client";
 import { createGithubCloneClient } from "@octant/client-runtime/github-clone-client";
 import { createGoalClient } from "@octant/client-runtime/goal-client";
@@ -164,6 +172,10 @@ export interface LaunchedShellClients {
     | undefined;
   /** Absent off a local host: choosing a sync store is host authority. */
   readonly replicaStoreSettingsClient: ReplicaStoreSettingsClient | undefined;
+  /** Absent off a local host: creating, joining, and revoking are host authority. */
+  readonly replicaMembershipClient: ReplicaMembershipClient | undefined;
+  /** Read-only sync status, for a client that is not on the host. */
+  readonly replicaSyncStatusClient: ReplicaSyncStatusClient;
   readonly shipClient: ShipClient;
   readonly usageClient: ReturnType<typeof createUsageClient>;
   readonly localUsageHistoryClient: ReturnType<typeof createLocalUsageHistoryClient> | undefined;
@@ -230,6 +242,15 @@ export function createLaunchedShellClients(
     replicaStoreSettingsClient = undefined;
   }
 
+  let replicaMembershipClient: ReplicaMembershipClient | undefined;
+  try {
+    replicaMembershipClient = createReplicaMembershipClient(port);
+  } catch {
+    // Membership is host authority too; off the host, Settings › Sync reads
+    // status through the status client and offers nothing to change.
+    replicaMembershipClient = undefined;
+  }
+
   return {
     agentProfileClient: options.agentProfileClient ?? createAgentProfileClient(port),
     agentRunClient: options.agentRunClient ?? createAgentRunClient(port),
@@ -274,6 +295,8 @@ export function createLaunchedShellClients(
     previewClient: createPreviewClient(port),
     providerUsageLimitsClient,
     replicaStoreSettingsClient,
+    replicaMembershipClient,
+    replicaSyncStatusClient: createReplicaSyncStatusClient(port),
     shipClient: options.shipClient ?? createShipClient(port),
     usageClient: createUsageClient(port),
     usageDashboardClient: createUsageDashboardClient(port),

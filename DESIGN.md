@@ -207,12 +207,13 @@ lists each provider kind on the page of what it serves: Providers & Models
 holds only the agent runtimes Octant drives (ACP agents, CLIs, the Agent SDK,
 RPC runtimes), and its manual add form offers only those kinds; Octant Harness
 opens with Model endpoints, every endpoint Octant calls over an API itself
-(OpenAI-compatible, Anthropic-compatible, Ollama, Azure AI Foundry), whose add
-row offers one-step subscription sign-ins (Sign in with ChatGPT, Sign in with
-OpenRouter) beside Add endpoint, followed by model slots and helper agents;
-Image generation holds the image profiles and custom image sources. A
-sign-in endpoint's row shows who is signed in with sign out and sign in
-again, and its configuration fixes the base URL and asks for no key. The
+(OpenAI-compatible, Anthropic-compatible, Ollama, Azure AI Foundry), followed
+by model slots and helper agents; with no endpoint yet it offers three ways
+in instead (Sign in with ChatGPT, Sign in with OpenRouter, Add endpoint), each
+sign-in one click with its terms as a consent line under the button. Image
+generation holds the image profiles and custom image sources. A sign-in
+endpoint's row says who is signed in, its detail page offers sign out and
+sign in again, and its configuration fixes the base URL and asks for no key. The
 instances, commands, and credentials are the same on every page. A setting lives
 on the page of the thing it changes, and a moved setting keeps answering links
 to its old page. Personal holds Appearance (theme, window glass, background,
@@ -255,8 +256,9 @@ Every Settings page is built from one kit, in `settings/primitives.tsx`:
   right of the top rail shows a check and "Saved" for about two seconds once
   a change resolves (a shell setting or a theme write), and holds its place
   when empty so nothing shifts. A host that refuses a change shows nothing.
-  A Save button exists only for compound forms: a provider's connection
-  details, a sync bucket's connection details, and the harness model slots.
+  A Save button exists only for compound forms: a provider's or model
+  endpoint's connection details, a sync bucket's connection details, and the
+  harness model slots.
 - **Said before the switch.** A switch that sends something off this
   computer carries the fact a person must know as its section's description,
   above the switch and named as its description, and stays disabled until it
@@ -733,7 +735,8 @@ validated semantic roles; incomplete or low-contrast imports fall back safely.
 
 Charts, metric blocks, tables, and timelines are one visual system, so a Canvas
 reads as one document whatever kinds it mixes. These rules own the mark, the
-ink, and the reading; a later block (treemap, heatmap, bar list) builds on them
+ink, and the reading; a later block (treemap, heatmap, bar list, comparison
+matrix) builds on them
 rather than inventing a second chart language.
 
 **Hue is for marks only.** Data colour appears on the mark — a bar, a line, a
@@ -839,6 +842,26 @@ screen renderer, the static SVG export, and the Markdown and HTML export rank
 the same list. The disclosed
 table is the accessible reading of every row, including the rows Show all holds
 back.
+
+**Comparison matrix.** Options across the top, criteria down the side, and a
+weighted score under each option (`packages/domain/src/canvasComparisonMatrix.ts`).
+It is a native table on its own card. The card's ground is opaque, so the
+criteria column stays pinned while the options scroll beneath it at phone width.
+The region scrolls inside itself and takes keyboard focus. A cell reads as a
+score, a short text, or a yes, partial, or no glyph. The glyphs differ in shape
+(a filled check, a half disc, an empty ring with a dash) and are always written
+beside the word, so colour never carries the reading. A score and each weighted
+score draw a neutral-ink meter of their share of the criterion. A
+lower-is-better criterion is turned round first, so a longer meter always reads
+better. The highest score is set in strong ink and marked Highest. A full tie
+marks none. The recommended option is the author's call, not the arithmetic's.
+Its column is tinted with the foreground, ruled along the top, and badged with
+an inverted Recommended pill, so emphasis is ink in the monochrome default. An
+empty coordinate reads as not assessed, never as a zero or a no. Cell notes are
+numbered in reading order and listed under the table. Ordering the options by
+score is view state. The disclosed table reads one row per option. Under forced
+colours the column keeps a system-ink rule, the badge an outline, and the meters
+a framed track.
 
 **Metric tiles.** Consecutive metric blocks are gathered into one responsive
 row of two to four tiles, and a metric's value is set large in tabular numerals
@@ -1294,14 +1317,48 @@ with compact readiness counts. A provider is a row card on the Settings kit:
 a 48px rounded logo tile (the licensed bundled mark, or a monogram when there is
 none, never an approximation of a brand mark), the name in the row-label role,
 the maker and runtime in meta ink, a state line, and the details chevron and
-enable switch at the trailing edge. Cards sit two to a row, one to a row under
-900px, and a card whose details are open takes the whole row. The state line
+enable switch at the trailing edge. On Providers & Models, cards sit two to a
+row, one to a row under 900px, and a card whose details are open takes the
+whole row. The state line
 reads from a dot that carries the state without colour: a filled ink dot is
 ready, a ring in ink needs setup or a sign-in, a muted ring is off or not
 checked, and a failure keeps its red role. Only under Vivid does ready turn the
 palette's green and setup the palette's orange. The detected, supported-but-not-
 detected, and other groups are Settings sections; the readiness summary is the
 label's description. Ordering controls appear only in an explicit Reorder mode.
+
+Octant Harness lists its model endpoints differently: as rows in one list,
+never two-up cards. A row is a single link named with its state ("Team
+gateway, not working, open details") and holds the source mark (the bundled
+mark keyed by the endpoint's sign-in, a monogram otherwise), the name, a
+sub-line (who is signed in, or the host and "API key" or "No key"), the state
+in words beside a dot whose shape carries it (filled for ready, a ring when it
+needs you, a dashed ring for off, a muted ring for not checked, a turning ring
+for checking that is a static dotted ring under reduced motion, and a diamond
+for failed), and the model count ("12 of 63 shown"). The states are Ready,
+Sign in to use, Signed out, Checking…, Can't connect, Key refused, Key needed,
+Not working, No models yet, Not checked yet, and Off. One that needs you adds
+one plain sentence and exactly one fix button under the link (Sign in, Sign in
+again, Try again, Replace key, Add key, Edit address, Add model IDs, Check
+now), announced through a polite live region on that row; a failed check never
+raises a page-level banner. The enable switch is the detail page's Use switch,
+and an endpoint that is off says "Off · kept, not offered" on its row. Opening
+a row replaces the page with the endpoint's detail sub-page (breadcrumb
+Settings / Octant Harness / endpoint, a Back control, and Escape), whose h1 is
+the endpoint's name; Back returns focus to the row. The sub-page leads with
+the state, Check now, and Use, then the one fix, then Sign-in or API key,
+Models (search, a Shown / Hidden / All filter, a switch per model, and the
+plain tags "Reads images" and "Chat only" with Verify tools), Where your data
+goes (two labelled checkboxes the person sets, with per-model overrides in a
+disclosure), Name and address, Diagnostics (a disclosure that opens by itself
+only while the endpoint is failing, holding the address, protocol,
+authentication, last check with the host's precise answer, tool use, and
+capabilities), and Remove last, confirmed in a dialog that starts on Keep and
+names the model roles that lose a model. Precise terms (protocol names,
+bearer, capability names) appear only in Diagnostics. Add endpoint opens the
+add-by-address form in a dialog whose button reads Check and add; the new
+endpoint's check result shows in that dialog. Targets are 44px tall at phone
+width.
 Skill rows show the source class and one effective state;
 filesystem paths, qualified identifiers, hashes, requested/effective
 breakdowns, and content size live behind Details. Usage opens on requests,
@@ -1580,7 +1637,10 @@ and Tooltip. Composition rules:
   `Separator` for navigation lists.
 - Menus, popovers, dialogs, and overlays are opaque, keyboard dismissible, and
   titled for assistive technology. Use `OctantDialog` with a real label even
-  when the title is visually hidden.
+  when the title is visually hidden. Dialogs and floating popups share one
+  layer, so the one opened last paints on top: a menu or popover opened inside
+  a dialog or the narrow dock sheet appears above it, and Escape closes the
+  innermost surface first.
 - Use Badge for status labels, Alert for callouts, Empty for empty states,
   Skeleton for loading, and the shared `.toast-stack` notification owner for
   transient acknowledgements. Do not add another toast package or recreate

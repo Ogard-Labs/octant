@@ -1,3 +1,4 @@
+import type { ReplicaSyncStatusClient } from "@octant/client-runtime/replica-sync-status-client";
 import type { ChatClient } from "@octant/client-runtime/chat-client";
 import type { CodeClient } from "@octant/client-runtime/code-client";
 import type { ProjectClient } from "@octant/client-runtime/project-client";
@@ -42,6 +43,7 @@ function workClients(
   return {
     chat: unused<ChatClient>("chat"),
     code: unused<CodeClient>("code"),
+    syncStatus: unused<ReplicaSyncStatusClient>("syncStatus"),
     project: unused<ProjectClient>("project"),
     provider: {
       bootstrap: async () => ({

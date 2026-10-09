@@ -299,6 +299,7 @@ describe("createPhase1RuntimeRegistries", () => {
       "spend-ceilings",
       "thread-message-queue",
       "replica-membership",
+      "replica-artifacts",
     ]);
     expect(second.projections.all().map((projection) => projection.name)).toEqual([
       "aggregate-heads",
@@ -331,6 +332,7 @@ describe("createPhase1RuntimeRegistries", () => {
       "spend-ceilings",
       "thread-message-queue",
       "replica-membership",
+      "replica-artifacts",
     ]);
     expect(first.projections.all()[0]).not.toBe(second.projections.all()[0]);
     expect(first.events.decode("shell.settings-replaced", 1, validSettingsPayload())).toEqual(

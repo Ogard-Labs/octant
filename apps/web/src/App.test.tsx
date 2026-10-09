@@ -1547,9 +1547,11 @@ describe("App", () => {
 
     await openSettingsFromSidebar(user);
     fireEvent.click(await screen.findByRole("button", { name: "Octant Harness" }));
-    await user.click(await screen.findByRole("switch", { name: "Enable Primary Gateway" }));
+    // An endpoint's Use switch is on its detail page; its row says Off.
+    await user.click(await screen.findByRole("link", { name: /^Primary Gateway,/ }));
+    await user.click(await screen.findByRole("switch", { name: "Use Primary Gateway" }));
     await waitFor(() =>
-      expect(screen.getByRole("switch", { name: "Enable Primary Gateway" })).toHaveAttribute(
+      expect(screen.getByRole("switch", { name: "Use Primary Gateway" })).toHaveAttribute(
         "aria-checked",
         "false",
       ),

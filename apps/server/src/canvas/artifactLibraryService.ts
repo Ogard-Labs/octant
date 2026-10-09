@@ -1,12 +1,17 @@
 import {
   MAX_ARTIFACT_LIBRARY_ENTRIES,
   decodeArtifactLibraryListing,
+  type ArtifactLibrarySyncedEntry,
   type ArtifactLibraryEntry,
   type ArtifactLibraryListing,
   type ArtifactLibraryQuery,
 } from "@octant/contracts/artifact-library";
 import type { CanvasId, ProjectId, UtcTimestamp } from "@octant/contracts";
-import { artifactKindForBlocks, selectArtifactLibraryEntries } from "@octant/domain";
+import {
+  artifactKindForBlocks,
+  selectArtifactLibraryEntries,
+  selectSyncedArtifactLibraryEntries,
+} from "@octant/domain";
 import type { ClientPrincipal } from "../clientPrincipal";
 import type { CanvasProjection } from "./canvasProjection";
 import { renderArtifactThumbnail } from "./artifactRender";
@@ -28,6 +33,11 @@ export interface ArtifactLibraryServiceDependencies {
   readonly projects: () => ReadonlyArray<ArtifactLibraryProjectRecord>;
   /** The artifacts a share is live for right now. */
   readonly liveShares: () => ReadonlySet<string>;
+  /**
+   * Artifacts synced from this person's other computers and not bound to a
+   * thread here. Optional: a host without artifact sync lists none.
+   */
+  readonly synced?: () => ReadonlyArray<ArtifactLibrarySyncedEntry>;
   readonly clock: () => UtcTimestamp;
 }
 
@@ -97,9 +107,20 @@ export class ArtifactLibraryService {
       counts.set(String(entry.projectId), (counts.get(String(entry.projectId)) ?? 0) + 1);
     }
 
+    // Synced artifacts belong to no Project here, so only a window on this
+    // host, which already sees every Project's artifacts, sees them.
+    const synced =
+      principal.kind === "local-window"
+        ? selectSyncedArtifactLibraryEntries(
+            (this.#dependencies.synced?.() ?? []).filter((entry) => !snapshot.has(entry.canvasId)),
+            query,
+          ).slice(0, MAX_ARTIFACT_LIBRARY_ENTRIES)
+        : [];
+
     return decodeArtifactLibraryListing({
       kind: "artifact-library-listing",
       entries: page,
+      ...(synced.length === 0 ? {} : { synced }),
       projects: [...projects.values()]
         .map((project) => ({
           projectId: project.id,

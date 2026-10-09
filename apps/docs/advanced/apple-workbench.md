@@ -19,7 +19,11 @@ Manager). What you can do today is a slice of that shape:
 
 - Toolchain, project, and destination discovery (Xcode, `xcode-select`, SDKs,
   Simulator runtimes, workspaces, projects, schemes, configurations, targets,
-  destinations) — non-mutating, with setup guidance when Xcode is missing.
+  destinations) — non-mutating, with a setup checklist when discovery fails.
+  The checklist has rows for Xcode, its licence, a Simulator runtime, and the
+  project, and marks the step that failed. If the licence has not been
+  accepted, run `sudo xcodebuild -license accept` in Terminal, then choose
+  **Check again**; Octant never accepts it for you.
   The command palette lists only `.xcodeproj` and `.xcworkspace` at the
   checkout root. The `octant_apple` tool can name a `Package.swift` path, but
   Swift-package discovery is not available yet: the host passes that file to
@@ -61,16 +65,43 @@ scheme, revision, SDK count, Simulator count, **Actions**, **Simulator
 destinations**, **Current progress**, and **Validation evidence**.
 
 The iOS Simulator dock tab is a device pane bound to the owning Code thread
-and checkout: the live frame, a compact destination rail (Boot, Capture
-screen, Shut down), Home and Lock, and in-flight progress. It does not show
-scheme facts, Build, Test, or the validation-evidence dump — those stay on
-the Apple workbench command. Its states are setup, unavailable, booting, live,
+and checkout. The device is the main thing in it: one toolbar above the
+screen, at most one line under the toolbar when something needs you, and the
+Simulator drawn on a quiet stage. It does not show scheme facts, Build, Test,
+or the validation-evidence dump — those stay on the Apple workbench command.
+
+- **Toolbar.** The Simulator's name opens a list of the others, so you choose
+  which one the pane shows; the choice stays until an agent asks the pane to
+  show a device. Beside it are the OS and the state in words (**Running**,
+  **Booting**, **Live view lost**, and so on). On the right are **Home** and
+  **Screenshot**, **Lock** when the pane is wide, and **More**: **Type
+  text…**, **Lock**, **Switch device…**, **Diagnostics** (what is running,
+  recent evidence, and where the live view comes from), **Stop live view**,
+  and **Shut down**. Only actions the host supports today appear. The arrow
+  keys move along the toolbar.
+- **The line.** An error is one sentence with one fix, such as **Try again**
+  or **Reconnect**; the raw outcome is in **Diagnostics**. On an
+  approval-gated thread the line asks **Allow input on iPhone 17?**. **Allow**
+  opens Octant's usual confirmation, and that confirmation is what grants
+  input. **Not now** leaves the screen view only, and a **View only** chip in
+  the toolbar brings the question back. Each Simulator asks for itself: a
+  grant for one does not hide the question on another.
+- **Stage.** When nothing is set up, a short checklist shows Xcode, a
+  Simulator runtime, and the project, and each missing row says how to fix it.
+  When nothing is running, **Choose a Simulator** boots the one you pick. When
+  more than one Simulator is running and nobody has chosen, the pane asks
+  which to show instead of guessing. A booting Simulator keeps its outline
+  while it starts. The screen is the only place that sends input; when it has
+  focus a caption says the keys go to the device, and Tab leaves it.
+
+Its states are setup, nothing running, booting, live, live view lost,
 interrupted, and stale after a host restart. Under the Octant desktop app a
 live frame shows the Simulator's screen as it changes, so you see what a tap
 or an agent's action did without capturing in between. Frames are sent only
 when the screen changes, and they are never stored: nothing of the live view
 is written to disk, to the journal, or into a model's context. **Capture
-screen** is still how a screen becomes validation evidence. When the host has
+screen** (**Screenshot** in the device pane) is still how a screen becomes
+validation evidence. When the host has
 no live view, the frame shows the latest captured still instead. Remote,
 Linux, and headless clients say the native frame is not attachable instead of
 hanging or inventing a picture. Closing the tab unmounts the view only; it
@@ -130,8 +161,9 @@ directly: click to tap, drag to swipe — the swipe is sent when you let go and
 takes as long as your drag did — and, once you have clicked the screen, type
 on your keyboard. Typing is sent when you pause, Return, Delete, Escape and
 the arrow keys go to the device, and Command and Control shortcuts stay with
-Octant. **Home** and **Lock** are buttons under the screen. What you do while
-an action is still running is kept and sent in order. **Run** is limited to destinations
+Octant. **Home**, **Lock**, and **Type text…** are in the device pane's
+toolbar and wait in the same queue as taps and typing, so what you do while an
+action is still running is kept and sent in order. **Run** is limited to destinations
 whose platform matches the first discovered Simulator. Anything already
 running can be **Cancel**led from **Current progress**.
 

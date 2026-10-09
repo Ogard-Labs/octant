@@ -37,6 +37,14 @@ import { Schema } from "effect";
 import type { EventRegistry } from "../persistence/eventRegistry";
 import type { Projection } from "../persistence/projection";
 import type { SqliteConnection } from "../persistence/sqlitePort";
+import {
+  REPLICA_ARTIFACT_EVENT_NAMES,
+  REPLICA_FINAL_ARTIFACT_REFUSALS,
+  decodeReplicaArtifactPublished,
+  decodeReplicaArtifactReconciled,
+  decodeReplicaArtifactSlotErased,
+  registerReplicaArtifactEvents,
+} from "./replicaArtifactEvents";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const Sequence = Schema.Int.pipe(Schema.positive());
@@ -129,6 +137,7 @@ export const ReplicaMembershipCommandRefused = Schema.Struct({
     "revoke-preview",
     "revoke",
     "pull",
+    "publish-artifact",
   ),
   reason: Schema.Literal(
     "not-configured",
@@ -166,7 +175,7 @@ export function registerReplicaMembershipEvents(registry: EventRegistry): EventR
   for (const name of RETIRED_REPLICA_EVENT_NAMES) {
     registered = registered.register(name, 1, Schema.Unknown);
   }
-  return registered;
+  return registerReplicaArtifactEvents(registered);
 }
 
 const decodeIdentity = Schema.decodeUnknownSync(ReplicaIdentityCreated);
@@ -211,10 +220,26 @@ export interface ReplicaMembershipState {
   /** A signed local entry whose publish has not been confirmed yet. */
   readonly pending: ReplicaMembershipEntry | undefined;
   readonly records: ReadonlyArray<ReplicaHeldFile>;
-  /** Whether this host holds any record in that slot. */
+  /**
+   * Whether this host holds a record in that slot, or an artifact entry it
+   * published there or settled from a pull, so a pull does not read it again.
+   */
   readonly holds: (instanceId: ReplicaInstanceId, sequence: number) => boolean;
-  /** The highest sequence of an instance among the records this host holds. */
+  /**
+   * The highest sequence of an instance among the valid signed entries this
+   * host holds: membership records, and artifact entries it published or
+   * settled. It is the cut a revoke takes when the store cannot be read.
+   */
   readonly heldSequence: (instanceId: ReplicaInstanceId) => number;
+  /**
+   * Every slot this host reached a lasting verdict on: what `holds` names,
+   * and files that are not valid records. An artifact entry waits only on an
+   * earlier listed slot of its writer that is not here.
+   */
+  readonly settledSlots: ReadonlyArray<{
+    readonly instanceId: ReplicaInstanceId;
+    readonly sequence: number;
+  }>;
   /** Join requests held from computers that are not in the tree. */
   readonly joinRequests: ReadonlyArray<ReplicaJoinRequestEntry>;
   /** Whether this host published an accept for its own identity. */
@@ -227,6 +252,14 @@ export interface ReplicaMembershipState {
   readonly localFinished: boolean;
   /** Whether this unreadable file was already journaled, so a later pull does not repeat it. */
   readonly unreadableRecorded: (refusal: typeof ReplicaEntryUnreadable.Type) => boolean;
+  /** The last store failure journaled, with when it happened. */
+  readonly lastStoreFailure: ReplicaLastStoreFailure | undefined;
+}
+
+export interface ReplicaLastStoreFailure {
+  readonly at: EventEnvelope["occurredAt"];
+  readonly phase: typeof ReplicaMembershipStoreFailure.Type.phase;
+  readonly reason: typeof ReplicaMembershipStoreFailure.Type.reason;
 }
 
 function same(left: ReplicaInstanceId, right: ReplicaInstanceId): boolean {
@@ -251,6 +284,16 @@ export class ReplicaMembershipProjection implements Projection {
   #skipped = 0;
   #pending: ReplicaMembershipEntry | undefined;
   readonly #unreadable = new Set<string>();
+  #lastStoreFailure: ReplicaLastStoreFailure | undefined;
+  /** Artifact entries published or settled here, by slot; membership records live in #records. */
+  readonly #artifactSlots = new Map<
+    string,
+    { readonly instanceId: ReplicaInstanceId; readonly sequence: number }
+  >();
+  readonly #unreadableSlots = new Map<
+    string,
+    { readonly instanceId: ReplicaInstanceId; readonly sequence: number }
+  >();
   #state: ReplicaMembershipState | undefined;
 
   reset(_connection: SqliteConnection): void {
@@ -260,6 +303,9 @@ export class ReplicaMembershipProjection implements Projection {
     this.#skipped = 0;
     this.#pending = undefined;
     this.#unreadable.clear();
+    this.#lastStoreFailure = undefined;
+    this.#artifactSlots.clear();
+    this.#unreadableSlots.clear();
     this.#state = undefined;
   }
 
@@ -309,11 +355,51 @@ export class ReplicaMembershipProjection implements Projection {
         }
         break;
       }
-      case names.entryUnreadable:
-        this.#unreadable.add(unreadableKey(decodeUnreadable(event.payload)));
+      case names.entryUnreadable: {
+        const unreadable = decodeUnreadable(event.payload);
+        this.#unreadable.add(unreadableKey(unreadable));
+        this.#unreadableSlots.set(slotKey(unreadable.instanceId, unreadable.sequence), {
+          instanceId: unreadable.instanceId,
+          sequence: unreadable.sequence,
+        });
         break;
+      }
+      case REPLICA_ARTIFACT_EVENT_NAMES.published: {
+        const published = decodeReplicaArtifactPublished(event.payload);
+        this.#artifactSlots.set(slotKey(published.instanceId, published.sequence), {
+          instanceId: published.instanceId,
+          sequence: published.sequence,
+        });
+        break;
+      }
+      case REPLICA_ARTIFACT_EVENT_NAMES.slotErased: {
+        const erased = decodeReplicaArtifactSlotErased(event.payload);
+        this.#artifactSlots.set(slotKey(erased.instanceId, erased.sequence), erased);
+        break;
+      }
+      case REPLICA_ARTIFACT_EVENT_NAMES.reconciled: {
+        const reconciled = decodeReplicaArtifactReconciled(event.payload);
+        // A refusal that standing or another slot could still change leaves
+        // the slot to be read again.
+        if (
+          reconciled.outcome === "refused" &&
+          !REPLICA_FINAL_ARTIFACT_REFUSALS.has(reconciled.reason)
+        ) {
+          return;
+        }
+        this.#artifactSlots.set(slotKey(reconciled.instanceId, reconciled.sequence), {
+          instanceId: reconciled.instanceId,
+          sequence: reconciled.sequence,
+        });
+        break;
+      }
       case names.storeFailure: {
         const failure = decodeStoreFailure(event.payload);
+        this.#lastStoreFailure = {
+          at: event.occurredAt,
+          phase: failure.phase,
+          reason: failure.reason,
+        };
         // A squatted slot of this identity is skipped: the next publish goes
         // one past it.
         if (
@@ -345,11 +431,19 @@ export class ReplicaMembershipProjection implements Projection {
     const membership = deriveReplicaMembership(founder?.instanceId, records);
     const held = new Map<string, number>();
     const slots = new Set<string>();
-    for (const { entry } of records) {
-      const id = String(entry.origin.instanceId);
-      held.set(id, Math.max(held.get(id) ?? 0, entry.origin.sequence));
-      slots.add(slotKey(entry.origin.instanceId, entry.origin.sequence));
-    }
+    const settled = new Map<
+      string,
+      { readonly instanceId: ReplicaInstanceId; readonly sequence: number }
+    >();
+    const holdSlot = (instanceId: ReplicaInstanceId, sequence: number) => {
+      const id = String(instanceId);
+      held.set(id, Math.max(held.get(id) ?? 0, sequence));
+      slots.add(slotKey(instanceId, sequence));
+      settled.set(slotKey(instanceId, sequence), { instanceId, sequence });
+    };
+    for (const { entry } of records) holdSlot(entry.origin.instanceId, entry.origin.sequence);
+    for (const slot of this.#artifactSlots.values()) holdSlot(slot.instanceId, slot.sequence);
+    for (const [key, slot] of this.#unreadableSlots) settled.set(key, slot);
     const localSequence =
       local === undefined ? 0 : Math.max(held.get(String(local.instanceId)) ?? 0, this.#skipped);
     const localAccepted =
@@ -386,6 +480,7 @@ export class ReplicaMembershipProjection implements Projection {
       records,
       holds: (instanceId, sequence) => slots.has(slotKey(instanceId, sequence)),
       heldSequence: (instanceId) => held.get(String(instanceId)) ?? 0,
+      settledSlots: [...settled.values()],
       joinRequests: records.flatMap(({ entry }) =>
         entry.kind === "join-request" &&
         replicaMembershipNode(membership, entry.origin.instanceId) === undefined
@@ -395,6 +490,7 @@ export class ReplicaMembershipProjection implements Projection {
       localAccepted,
       localFinished,
       unreadableRecorded: (refusal) => unreadable.has(unreadableKey(refusal)),
+      lastStoreFailure: this.#lastStoreFailure,
     };
   }
 }

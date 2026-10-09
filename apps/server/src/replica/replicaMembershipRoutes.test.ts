@@ -1,14 +1,71 @@
 import { Schema } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import { DeviceId, RemoteSessionId, StableHostId } from "@octant/contracts/remote-access";
-import type { ReplicaMembershipResult } from "@octant/contracts";
+import {
+  ReplicaInstanceId,
+  type ReplicaMembershipResult,
+  type ReplicaMembershipView,
+} from "@octant/contracts";
 import { LOCAL_HOST_ID, decodeWindowId } from "@octant/contracts";
 import type { WindowAuthorityStore } from "../windowAuthorityStore";
-import { createReplicaMembershipRouteHandler } from "./replicaMembershipRoutes";
+
+const decodeInstanceId = Schema.decodeUnknownSync(ReplicaInstanceId);
+import {
+  createReplicaMembershipRouteHandler,
+  createReplicaSyncStatusRouteHandler,
+} from "./replicaMembershipRoutes";
+import { replicaMembershipView } from "./replicaMembershipView";
 import { ReplicaMembershipProjection } from "./replicaMembershipProjection";
 import { ReplicaMembershipService } from "./replicaMembershipService";
 
 const capability = "capability-test";
+const emptyView = replicaMembershipView({
+  state: new ReplicaMembershipProjection().state(),
+  now: 0,
+  computerName: "Studio Mac",
+});
+const memberId = "11111111-1111-4111-8111-111111111111";
+const memberView: ReplicaMembershipView = {
+  ...emptyView,
+  thisComputer: {
+    kind: "founder",
+    instanceId: decodeInstanceId(memberId),
+    displayName: "Studio Mac",
+  },
+  members: [
+    {
+      instanceId: decodeInstanceId(memberId),
+      displayName: "Studio Mac",
+      role: { kind: "founder" },
+      revoked: false,
+      thisComputer: true,
+      revocable: false,
+    },
+  ],
+};
+const thisHost = "00000000-0000-4000-8000-00000000c002";
+
+function remoteDevice(hostId: string) {
+  return {
+    kind: "remote-device" as const,
+    deviceId: Schema.decodeUnknownSync(DeviceId)("00000000-0000-4000-8000-00000000c001"),
+    hostId: Schema.decodeUnknownSync(StableHostId)(hostId),
+    credentialGeneration: 1,
+    origin: "https://octant.example",
+    protocolVersion: 1,
+    capabilityDigest: "b".repeat(64),
+    sessionId: Schema.decodeUnknownSync(RemoteSessionId)("00000000-0000-4000-8000-00000000c003"),
+  };
+}
+
+const localWindow = {
+  principal: {
+    kind: "local-window" as const,
+    windowId: "00000000-0000-4000-8000-0000000000a1",
+    capabilityGeneration: 1,
+  },
+  scopeId: decodeWindowId("00000000-0000-4000-8000-0000000000a1"),
+};
 
 function makeRequest(body: unknown): Request {
   return new Request("http://127.0.0.1:13773/api/replica-membership/commands", {
@@ -46,6 +103,7 @@ describe("replica membership routes", () => {
     const { instance } = service([]);
     const handler = createReplicaMembershipRouteHandler({
       service: instance as never,
+      view: () => emptyView,
       windowAuthorityStore: windowStore(),
     });
     const response = await handler(
@@ -59,6 +117,7 @@ describe("replica membership routes", () => {
     const { instance, calls } = service([]);
     const handler = createReplicaMembershipRouteHandler({
       service: instance as never,
+      view: () => emptyView,
       windowAuthorityStore: windowStore(),
     });
     const request = makeRequest({
@@ -90,6 +149,7 @@ describe("replica membership routes", () => {
     const { instance, calls } = service([]);
     const handler = createReplicaMembershipRouteHandler({
       service: instance as never,
+      view: () => emptyView,
       windowAuthorityStore: windowStore(),
     });
     const request = makeRequest({ kind: "not-a-command" });
@@ -111,6 +171,7 @@ describe("replica membership routes", () => {
     const { instance, calls } = service([]);
     const handler = createReplicaMembershipRouteHandler({
       service: instance as never,
+      view: () => emptyView,
       windowAuthorityStore: windowStore(),
     });
     const request = makeRequest({ kind: "revoke", subject: "../../escape" });
@@ -147,6 +208,7 @@ describe("replica membership routes", () => {
         localHostId: LOCAL_HOST_ID,
         clock: () => 0,
       }),
+      view: () => emptyView,
       windowAuthorityStore: windowStore(),
     });
     const request = makeRequest({ kind: "pull" });
@@ -162,5 +224,107 @@ describe("replica membership routes", () => {
     expect(response?.status).toBe(200);
     expect(await response?.json()).toMatchObject({ kind: "refused", reason: "not-configured" });
     expect(journaled).toHaveLength(1);
+  });
+
+  it("reads the full membership view for a local window only", async () => {
+    const { bindPrincipalRouteContext } = await import("../principalRouteContext");
+    const { instance, calls } = service([]);
+    const handler = createReplicaMembershipRouteHandler({
+      service: instance as never,
+      view: () => memberView,
+      windowAuthorityStore: windowStore(),
+    });
+    const local = new Request("http://127.0.0.1:13773/api/replica-membership/state");
+    bindPrincipalRouteContext(local, localWindow);
+    const read = await handler(local);
+    expect(read?.status).toBe(200);
+    expect(await read?.json()).toEqual(memberView);
+
+    const remote = new Request("http://127.0.0.1:13773/api/replica-membership/state");
+    bindPrincipalRouteContext(remote, {
+      principal: remoteDevice(thisHost),
+      scopeId: decodeWindowId("00000000-0000-4000-8000-0000000000a2"),
+    });
+    const refused = await handler(remote);
+    expect(refused?.status).toBe(403);
+    expect(await refused?.json()).toEqual({ message: "Replica membership is host-only." });
+    expect(calls).toHaveLength(0);
+  });
+
+  it("answers the packaged renderer's preflight and refuses a foreign origin", async () => {
+    const { instance } = service([]);
+    const handler = createReplicaMembershipRouteHandler({
+      service: instance as never,
+      view: () => emptyView,
+      windowAuthorityStore: windowStore(),
+      allowedRendererHttpOrigin: null,
+    });
+    const preflight = await handler(
+      new Request("http://127.0.0.1:13773/api/replica-membership/commands", {
+        method: "OPTIONS",
+        headers: { origin: "null" },
+      }),
+    );
+    expect(preflight?.status).toBe(204);
+    expect(preflight?.headers.get("access-control-allow-origin")).toBe("null");
+    const foreign = await handler(
+      new Request("http://127.0.0.1:13773/api/replica-membership/state", {
+        headers: { origin: "https://octant.example" },
+      }),
+    );
+    expect(foreign?.status).toBe(400);
+  });
+});
+
+describe("replica sync status route", () => {
+  it("lets a paired device of this host read status, with no codes, requests, or ids", async () => {
+    const { bindPrincipalRouteContext } = await import("../principalRouteContext");
+    const handler = createReplicaSyncStatusRouteHandler({
+      windowAuthorityStore: windowStore(),
+      hostId: () => thisHost,
+      view: () => ({
+        ...memberView,
+        joinRequests: [],
+      }),
+    });
+    const request = new Request("http://127.0.0.1:13773/api/replica-sync/status");
+    bindPrincipalRouteContext(request, {
+      principal: remoteDevice(thisHost),
+      scopeId: decodeWindowId("00000000-0000-4000-8000-0000000000a2"),
+    });
+    const response = await handler(request);
+    expect(response?.status).toBe(200);
+    const body: unknown = await response?.json();
+    expect(body).toEqual({
+      kind: "replica-sync-status",
+      thisComputer: "founder",
+      members: [
+        {
+          displayName: "Studio Mac",
+          role: { kind: "founder" },
+          revoked: false,
+          thisComputer: true,
+        },
+      ],
+      status: memberView.status,
+    });
+    expect(JSON.stringify(body)).not.toContain(memberId);
+  });
+
+  it("refuses a device paired with another host", async () => {
+    const { bindPrincipalRouteContext } = await import("../principalRouteContext");
+    const handler = createReplicaSyncStatusRouteHandler({
+      windowAuthorityStore: windowStore(),
+      hostId: () => thisHost,
+      view: () => memberView,
+    });
+    const request = new Request("http://127.0.0.1:13773/api/replica-sync/status");
+    bindPrincipalRouteContext(request, {
+      principal: remoteDevice("00000000-0000-4000-8000-00000000c009"),
+      scopeId: decodeWindowId("00000000-0000-4000-8000-0000000000a2"),
+    });
+    const response = await handler(request);
+    expect(response?.status).toBe(403);
+    expect(JSON.stringify(await response?.json())).not.toContain("Studio Mac");
   });
 });

@@ -1,4 +1,5 @@
 import {
+  ANDROID_SCREEN_TRANSPORT_HEADER,
   decodeAndroidArtifactRequest,
   decodeAndroidRpcEnvelope,
   decodeAndroidRuntimeSnapshot,
@@ -246,10 +247,11 @@ async function handleScreenStreamRequest(input: {
     status: 200,
     headers: {
       ...corsHeaders(input.origin),
-      "access-control-expose-headers": SIMULATOR_SCREEN_HEADER,
+      "access-control-expose-headers": `${SIMULATOR_SCREEN_HEADER}, ${ANDROID_SCREEN_TRANSPORT_HEADER}`,
       "cache-control": "no-store",
       "content-type": "application/octet-stream",
       [SIMULATOR_SCREEN_HEADER]: `${watch.screen.width}x${watch.screen.height}`,
+      [ANDROID_SCREEN_TRANSPORT_HEADER]: JSON.stringify(watch.transport),
     },
   });
 }

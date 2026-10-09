@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { CanvasCreationContext } from "./CreateCanvasDraft";
@@ -320,6 +320,167 @@ describe("CreateCanvasDraft", () => {
     const request = (onCreate.mock.calls[0] as unknown[])[0] as Record<string, unknown>;
     expect(typeof request.requestId).toBe("string");
     expect((request.requestId as string).length).toBeGreaterThan(0);
+  });
+});
+
+describe("Start a Canvas from a recipe", () => {
+  const recipes = [
+    {
+      id: "implementation-plan",
+      title: "Implementation plan",
+      summary: "Goal, phased tasks with status, risks, and what done means.",
+      whenToUse: "When someone asks to write a plan.",
+      skeleton: [
+        { kind: "heading", role: "Goal" },
+        { kind: "plan", role: "Phases and tasks." },
+      ],
+    },
+    {
+      id: "field-notes",
+      title: "Field notes",
+      whenToUse: "When a skill offers field notes.",
+      skeleton: [{ kind: "rich-text", role: "The notes." }],
+    },
+  ];
+
+  function createdReceipt(intent: "blank" | "template" = "template") {
+    return {
+      schemaVersion: 1,
+      kind: "canvas-create-receipt",
+      receiptId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      requestId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      canvasId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+      versionId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+      intent,
+      originThreadId: threadId,
+      scope: {
+        hostId: "local",
+        mode: "chat",
+        workspace: { kind: "chat-virtual", projectId: null },
+      },
+      title: "Implementation plan",
+      effectiveAuthority: chatContext.requestedAuthority,
+      outcome: "ready",
+      createdAt: "2026-08-01T21:00:00.000Z",
+    };
+  }
+
+  function recipeClient() {
+    return {
+      recipes: vi.fn().mockResolvedValue({ recipes }),
+      create: vi.fn().mockResolvedValue({
+        kind: "accepted",
+        receipt: createdReceipt(),
+        card: referenceCardFixture(),
+      }),
+    };
+  }
+
+  it("offers Blank and every recipe, each with one line, as one keyboard radio group", async () => {
+    const user = userEvent.setup();
+    const client = recipeClient();
+    render(<CanvasCreatePanel client={client as unknown as CanvasClient} context={chatContext} />);
+
+    const group = await screen.findByRole("radiogroup", { name: "Start from" });
+    const options = within(group).getAllByRole("radio");
+    expect(options.map((option) => option.getAttribute("aria-label"))).toEqual([
+      "Blank",
+      "Implementation plan",
+      "Field notes",
+    ]);
+    expect(options[0]).toHaveAttribute("aria-checked", "true");
+    expect(options[1]).toHaveAccessibleDescription(
+      "Goal, phased tasks with status, risks, and what done means.",
+    );
+    // A contributed recipe without a summary still says when it fits.
+    expect(options[2]).toHaveAccessibleDescription("When a skill offers field notes.");
+    // One tab stop; arrows move the choice.
+    expect(options.map((option) => option.tabIndex)).toEqual([0, -1, -1]);
+    options[0]?.focus();
+    await user.keyboard("{ArrowDown}");
+    expect(options[1]).toHaveAttribute("aria-checked", "true");
+    expect(options[1]).toHaveFocus();
+    await user.keyboard("{End}");
+    expect(options[2]).toHaveFocus();
+    await user.keyboard("{ArrowDown}");
+    expect(options[0]).toHaveAttribute("aria-checked", "true");
+  });
+
+  it("starts the recipe's skeleton without asking anyone when no thread is attached", async () => {
+    const user = userEvent.setup();
+    const client = recipeClient();
+    render(<CanvasCreatePanel client={client as unknown as CanvasClient} context={chatContext} />);
+
+    await user.click(await screen.findByRole("radio", { name: "Implementation plan" }));
+    expect(screen.queryByRole("checkbox", { name: /fill it in/i })).toBeNull();
+    expect(screen.queryByTestId("prompt-input")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Create Canvas" }));
+
+    await waitFor(() => expect(client.create).toHaveBeenCalledOnce());
+    const request = client.create.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(request).toMatchObject({
+      intent: "template",
+      templateId: "implementation-plan",
+      title: "Implementation plan",
+      requestedAuthority: chatContext.requestedAuthority,
+    });
+    expect(request).not.toHaveProperty("prompt");
+  });
+
+  it("asks the attached thread's agent to fill the new Canvas, after it exists", async () => {
+    const user = userEvent.setup();
+    const client = recipeClient();
+    const order: string[] = [];
+    client.create.mockImplementation(async () => {
+      order.push("create");
+      return { kind: "accepted", receipt: createdReceipt(), card: referenceCardFixture() };
+    });
+    const onAskAgentToFill = vi.fn(async () => {
+      order.push("fill");
+      return true;
+    });
+    render(
+      <CanvasCreatePanel
+        client={client as unknown as CanvasClient}
+        context={chatContext}
+        onAskAgentToFill={onAskAgentToFill}
+      />,
+    );
+
+    await user.click(await screen.findByRole("radio", { name: "Implementation plan" }));
+    expect(
+      screen.getByRole("checkbox", { name: "Ask this thread's agent to fill it in" }),
+    ).toBeChecked();
+    await user.type(screen.getByLabelText("What should it cover?"), "The sync rewrite");
+    await user.click(screen.getByRole("button", { name: "Create and ask agent" }));
+
+    await waitFor(() => expect(onAskAgentToFill).toHaveBeenCalledOnce());
+    expect(order).toEqual(["create", "fill"]);
+    expect(onAskAgentToFill).toHaveBeenCalledWith({
+      receipt: expect.objectContaining({ canvasId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd" }),
+      recipe: expect.objectContaining({ id: "implementation-plan" }),
+      notes: "The sync rewrite",
+    });
+  });
+
+  it("creates only the skeleton when the person unticks the fill-in", async () => {
+    const user = userEvent.setup();
+    const client = recipeClient();
+    const onAskAgentToFill = vi.fn(async () => true);
+    render(
+      <CanvasCreatePanel
+        client={client as unknown as CanvasClient}
+        context={chatContext}
+        onAskAgentToFill={onAskAgentToFill}
+      />,
+    );
+    await user.click(await screen.findByRole("radio", { name: "Implementation plan" }));
+    await user.click(
+      screen.getByRole("checkbox", { name: "Ask this thread's agent to fill it in" }),
+    );
+    await user.click(screen.getByRole("button", { name: "Create Canvas" }));
+    await waitFor(() => expect(client.create).toHaveBeenCalledOnce());
+    expect(onAskAgentToFill).not.toHaveBeenCalled();
   });
 });
 

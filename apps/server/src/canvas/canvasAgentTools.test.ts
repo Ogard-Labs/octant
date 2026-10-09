@@ -493,6 +493,40 @@ describe("createCanvasAgentTools", () => {
     expect(examples[0]).toMatchObject({ kind: "bar-list", scale: "sequential" });
   });
 
+  it("lets an agent create a decision matrix from the comparison-matrix examples describe returns", async () => {
+    const { create, set } = tools();
+    const described = await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "describe", blockKinds: ["comparison-matrix"] }),
+    });
+
+    expect(described.isError).not.toBe(true);
+    const result = described.result as {
+      examples?: ReadonlyArray<Record<string, unknown>>;
+    };
+    const examples = result.examples ?? [];
+    expect(examples.map((example) => example.blockId)).toEqual([
+      "state-store-decision",
+      "editor-features",
+    ]);
+    const blocks = examples.map((example) => decodeCanvasBlock(example));
+    expect(blocks.every((block) => block.kind === "comparison-matrix")).toBe(true);
+
+    const created = await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "create", title: "State store", blocks: examples }),
+    });
+
+    expect(created.isError).not.toBe(true);
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "State store" }),
+      expect.anything(),
+      expect.anything(),
+      blocks,
+    );
+    expect(examples[0]).toMatchObject({ recommendedOptionId: "sqlite" });
+  });
+
   it("lets an agent create a repo-stats tile row from the metric examples describe returns", async () => {
     const { set } = tools();
     const described = await set.execute({
