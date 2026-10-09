@@ -387,8 +387,13 @@ export class AppleToolchainService {
       DISCOVERY_TIMEOUT_MS,
     );
     if (!succeeded(licence)) {
-      // A probe that timed out or never ran says nothing about the licence.
-      return licence.termination === "exited"
+      // Only a refusal that names the licence is one: a probe that timed out,
+      // never ran, or failed for another reason says nothing about it, and
+      // asking to accept an accepted licence would send the person the wrong way.
+      const refusedLicence =
+        licence.termination === "exited" &&
+        /licen[cs]e/i.test(`${text(licence.stdout)}\n${text(licence.stderr)}`);
+      return refusedLicence
         ? unavailableFailure("The Xcode licence has not been accepted on this host.", "licence")
         : unavailableFailure("Apple project discovery is incomplete on this host.", "xcode");
     }

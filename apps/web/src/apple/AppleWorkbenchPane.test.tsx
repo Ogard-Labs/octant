@@ -544,6 +544,41 @@ describe("Apple setup checklist by failed step", () => {
     expect(row(screen, "iOS Simulator runtime")).toHaveAttribute("data-state", "waiting");
   });
 
+  it("does not let an older discovery pass rows for a failure that names no step", async () => {
+    const { render, screen } = await import("@testing-library/react");
+    render(
+      <AppleWorkbenchPane
+        discovery={discovery}
+        errorCategory="unavailable"
+        errorMessage="Apple project discovery is incomplete on this host."
+        onRetry={() => undefined}
+        onRun={() => undefined}
+        status="unavailable"
+        variant="device"
+      />,
+    );
+    expect(row(screen, "Xcode selected")).toHaveAttribute("data-state", "waiting");
+    expect(row(screen, "iOS Simulator runtime")).toHaveAttribute("data-state", "waiting");
+  });
+
+  it("keeps the licence row the host named over a missing-toolchain frame", async () => {
+    const { render, screen } = await import("@testing-library/react");
+    render(
+      <AppleWorkbenchPane
+        errorCategory="unavailable"
+        errorMessage="The Xcode licence has not been accepted on this host."
+        errorStep="licence"
+        liveFrame={{ status: "unavailable", reason: "toolchain-missing" } as never}
+        onRetry={() => undefined}
+        onRun={() => undefined}
+        status="unavailable"
+        variant="device"
+      />,
+    );
+    expect(row(screen, "Xcode licence accepted")).toHaveAttribute("data-state", "missing");
+    expect(screen.getByText("Run sudo xcodebuild -license accept in Terminal.")).toBeVisible();
+  });
+
   it("leaves every row unchecked when an older host names no step", async () => {
     const screen = await renderFailed();
     expect(row(screen, "Xcode licence accepted")).toHaveAttribute("data-state", "waiting");

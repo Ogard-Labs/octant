@@ -404,6 +404,18 @@ describe("AppleToolchainService discovery", () => {
       });
     });
 
+    it("does not blame the licence for a licence probe that failed for another reason", async () => {
+      const execute = failing(
+        "-license check",
+        processResult("", { exitCode: 1, stderr: "xcrun: error: unable to find utility" }),
+      );
+
+      await expect(discoverWith(execute)).resolves.toMatchObject({
+        kind: "failure",
+        failure: { category: "unavailable", step: "xcode" },
+      });
+    });
+
     it("reports Xcode tools that do not answer as the Xcode step", async () => {
       const execute = failing("swift --version", processResult("", { exitCode: 1 }));
 

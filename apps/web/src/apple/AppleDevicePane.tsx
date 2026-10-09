@@ -223,14 +223,19 @@ const SETUP_STEPS = ["xcode", "licence", "runtime", "project"] as const;
  * not been checked.
  */
 function appleSetup(props: AppleWorkbenchPaneProps): DeviceView {
-  // A step the host just named is the current answer; an earlier successful
-  // discovery is older than the failure and must not paint its rows as passing.
-  const discovery = props.errorStep === undefined ? props.discovery : undefined;
+  // A failed discovery is the current answer, named step or not; an earlier
+  // successful discovery is older than it and must not paint rows as passing.
+  const failedNow = props.status === "failed" || props.status === "unavailable";
+  const discovery = failedNow || props.errorStep !== undefined ? undefined : props.discovery;
+  // A step the host named outranks the live frame's hint about the toolchain.
   const xcodeMissing =
-    props.errorCategory === "xcode-not-found" ||
-    discovery?.toolchain.available === false ||
-    (props.liveFrame?.status === "unavailable" && props.liveFrame.reason === "toolchain-missing");
-  const failedStep = xcodeMissing ? "xcode" : props.errorStep;
+    props.errorStep === undefined
+      ? props.errorCategory === "xcode-not-found" ||
+        discovery?.toolchain.available === false ||
+        (props.liveFrame?.status === "unavailable" &&
+          props.liveFrame.reason === "toolchain-missing")
+      : props.errorStep === "xcode" && props.errorCategory === "xcode-not-found";
+  const failedStep = props.errorStep ?? (xcodeMissing ? "xcode" : undefined);
   const failedIndex = failedStep === undefined ? -1 : SETUP_STEPS.indexOf(failedStep);
   const discovered = !xcodeMissing && discovery?.toolchain.available === true;
   // A step passed when discovery succeeded, or the host failed a later one.
