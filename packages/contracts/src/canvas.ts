@@ -29,8 +29,9 @@ const strict = { parseOptions: { onExcessProperty: "error" as const } };
 // thread presentation, version 5 the treemap block, version 6 the heatmap
 // block, version 7 the ranked bar-list block, version 8 the
 // entity-relationship, swimlane, and mind map diagram kinds, version 9 the
-// design block, and version 10 the comparison matrix, which the definition
-// filters below admit only under those declared versions.
+// design block, version 10 the comparison matrix, and version 11 the math
+// block, which the definition filters below admit only under those declared
+// versions.
 
 // These are renderer-facing aggregate limits. Per-field structural limits are
 // also applied below; the domain policy re-checks the aggregate values before
@@ -103,6 +104,14 @@ export const CANVAS_MAX_MATRIX_NOTE_LENGTH = 280;
 // Weights are relative; a hundred is room for percentages without inviting
 // figures whose size says nothing the ratio does not.
 export const CANVAS_MAX_MATRIX_WEIGHT = 100;
+// A formula is math markup someone reads, not a typeset paper: a thousand
+// characters holds a long derivation line or a small aligned system. A
+// paragraph with inline formulas is prose, so its runs share one budget the
+// domain policy checks, and past these the reasoning wants several blocks.
+export const CANVAS_MAX_MATH_SOURCE_LENGTH = 1_000;
+export const CANVAS_MAX_MATH_RUNS = 48;
+export const CANVAS_MAX_MATH_PARAGRAPH_LENGTH = 4_000;
+export const CANVAS_MAX_MATH_CAPTION_LENGTH = 240;
 
 // The schema version that introduced each version-gated block kind or hint. A
 // document carrying one below the version that introduced it is a declared
@@ -117,6 +126,7 @@ export const CANVAS_BAR_LIST_SCHEMA_VERSION = 7;
 export const CANVAS_DIAGRAM_KINDS_SCHEMA_VERSION = 8;
 export const CANVAS_DESIGN_SCHEMA_VERSION = 9;
 export const CANVAS_COMPARISON_MATRIX_SCHEMA_VERSION = 10;
+export const CANVAS_MATH_SCHEMA_VERSION = 11;
 // The metric's sparkline, goodDirection, and caption arrived with the bar list.
 export const CANVAS_METRIC_TREND_SCHEMA_VERSION = 7;
 
@@ -313,6 +323,7 @@ export const CanvasBlockKind = Schema.Literal(
   "design",
   "bar-list",
   "comparison-matrix",
+  "math",
 );
 export type CanvasBlockKind = typeof CanvasBlockKind.Type;
 
@@ -952,6 +963,57 @@ export const CanvasComparisonMatrixBlock = Schema.Struct({
 }).annotations(strict);
 export type CanvasComparisonMatrixBlock = typeof CanvasComparisonMatrixBlock.Type;
 
+/**
+ * Math written in a TeX-like markup subset and drawn, never run.
+ *
+ * `display` is one formula set on its own line, with an optional caption that
+ * names it for a reader who hears it rather than sees it. `inline` is a
+ * paragraph of prose runs and formula runs, so a sentence can carry `x^2`
+ * without the whole sentence becoming markup. The source is the reading: it
+ * is what export writes, what an assistive reader can reach beside the drawn
+ * MathML, and what a reader sees when a formula cannot be drawn. The domain
+ * policy refuses the commands that would define macros, link, embed, or
+ * recolour, so a formula cannot carry behaviour or step outside the theme.
+ */
+const CanvasMathSource = boundedNonEmptyText(CANVAS_MAX_MATH_SOURCE_LENGTH);
+
+export const CanvasMathDisplayBlock = Schema.Struct({
+  ...CanvasBlockFields,
+  kind: Schema.Literal("math"),
+  layout: Schema.Literal("display"),
+  source: CanvasMathSource,
+  /** What the formula is, e.g. "Bayes' theorem"; drawn under it and read first. */
+  caption: Schema.optional(boundedNonEmptyText(CANVAS_MAX_MATH_CAPTION_LENGTH)),
+}).annotations(strict);
+export type CanvasMathDisplayBlock = typeof CanvasMathDisplayBlock.Type;
+
+// One run is either prose or a formula. Each shape is strict, so a run naming
+// both reads as neither and is refused rather than drawn as whichever matched.
+// Prose keeps its edge spaces: they are what separate a word from the formula
+// beside it, so a prose run need only hold something other than whitespace.
+export const CanvasMathTextRun = Schema.Struct({
+  text: boundedText(CANVAS_MAX_MATH_PARAGRAPH_LENGTH).pipe(
+    Schema.filter((value) => value.trim().length > 0, {
+      message: () => "A math paragraph's prose run must not be blank.",
+    }),
+  ),
+}).annotations(strict);
+export const CanvasMathFormulaRun = Schema.Struct({
+  math: CanvasMathSource,
+}).annotations(strict);
+export const CanvasMathRun = Schema.Union(CanvasMathTextRun, CanvasMathFormulaRun);
+export type CanvasMathRun = typeof CanvasMathRun.Type;
+
+export const CanvasMathInlineBlock = Schema.Struct({
+  ...CanvasBlockFields,
+  kind: Schema.Literal("math"),
+  layout: Schema.Literal("inline"),
+  runs: Schema.NonEmptyArray(CanvasMathRun).pipe(Schema.maxItems(CANVAS_MAX_MATH_RUNS)),
+}).annotations(strict);
+export type CanvasMathInlineBlock = typeof CanvasMathInlineBlock.Type;
+
+export type CanvasMathBlock = CanvasMathDisplayBlock | CanvasMathInlineBlock;
+
 export const CanvasTimelineItem = Schema.Struct({
   itemId: boundedToken("CanvasTimelineItemId"),
   title: CanvasLabel,
@@ -1563,6 +1625,8 @@ export const CanvasBlock = Schema.Union(
   CanvasHeatmapCalendarBlock,
   CanvasBarListBlock,
   CanvasComparisonMatrixBlock,
+  CanvasMathDisplayBlock,
+  CanvasMathInlineBlock,
   // Typed actions (Canvas D). The block is a declarative reference to an
   // allowlisted command; the server reauthorizes every action before any side
   // effect, so union membership never makes a definition executable.
@@ -1596,7 +1660,8 @@ export const CanvasDefinition = Schema.Struct({
     // Version-gated blocks and hints: a mockup is admitted from version 3, the
     // thread presentation from version 4, a treemap from version 5, a heatmap
     // from version 6, a bar list and the metric trend fields from version 7, a
-    // design from version 9, and a comparison matrix from version 10. A
+    // design from version 9, a comparison matrix from version 10, and math
+    // from version 11. A
     // rolled-back runtime that never learned a kind or hint must see a document
     // carrying it as a declared future version, not as a document that failed
     // to decode. Each keeps its own floor so an earlier document stays valid.
@@ -1683,6 +1748,15 @@ export const CanvasDefinition = Schema.Struct({
       {
         message: () =>
           `Comparison matrix blocks require Canvas schema version ${String(CANVAS_COMPARISON_MATRIX_SCHEMA_VERSION)}.`,
+      },
+    ),
+    Schema.filter(
+      (definition) =>
+        definition.schemaVersion >= CANVAS_MATH_SCHEMA_VERSION ||
+        !definition.blocks.some((block) => block.kind === "math"),
+      {
+        message: () =>
+          `Math blocks require Canvas schema version ${String(CANVAS_MATH_SCHEMA_VERSION)}.`,
       },
     ),
   );

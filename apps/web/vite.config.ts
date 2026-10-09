@@ -3,6 +3,7 @@ import tailwindcss from "@tailwindcss/vite";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
+import { keepFontsAsFiles } from "./vite.fonts";
 
 const rootDir = path.dirname(fileURLToPath(import.meta.url));
 
@@ -24,6 +25,7 @@ const domTestFilesWithoutJsx = [
 export default defineConfig({
   base: "./",
   plugins: [react(), tailwindcss()],
+  build: { assetsInlineLimit: keepFontsAsFiles },
   resolve: {
     alias: {
       "@": path.resolve(rootDir, "src"),

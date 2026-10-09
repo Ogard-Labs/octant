@@ -17,6 +17,9 @@ import {
   CANVAS_MAX_MATRIX_NOTE_LENGTH,
   CANVAS_MAX_MATRIX_OPTIONS,
   CANVAS_MAX_MATRIX_WEIGHT,
+  CANVAS_MAX_MATH_RUNS,
+  CANVAS_MAX_MATH_SOURCE_LENGTH,
+  CANVAS_MATH_SCHEMA_VERSION,
   CANVAS_MAX_METRIC_SPARKLINE_POINTS,
   CANVAS_MAX_MINDMAP_NOTE_LENGTH,
   CANVAS_MAX_TABLE_ROWS,
@@ -1168,7 +1171,7 @@ describe("comparison matrix blocks", () => {
     expect(decodeCanvasDefinition({ ...definition, blocks: [matrix] })).toMatchObject({
       blocks: [matrix],
     });
-    expect(CANVAS_COMPARISON_MATRIX_SCHEMA_VERSION).toBe(CANVAS_SCHEMA_VERSION);
+    expect(CANVAS_COMPARISON_MATRIX_SCHEMA_VERSION).toBe(10);
   });
 
   it("refuses a cell that carries two readings or none", () => {
@@ -1248,6 +1251,75 @@ describe("comparison matrix blocks", () => {
     ).toThrow();
     expect(() => decodeCanvasBlock({ ...matrix, html: "<b>x</b>" })).toThrow();
     expect(() => decodeCanvasBlock({ ...matrix, onClick: "alert(1)" })).toThrow();
+  });
+});
+
+describe("math blocks", () => {
+  const display = {
+    blockId: "bayes",
+    schemaVersion: CANVAS_SCHEMA_VERSION,
+    kind: "math",
+    layout: "display",
+    source: "P(A \\mid B) = \\frac{P(B \\mid A)\\,P(A)}{P(B)}",
+    caption: "Bayes' theorem",
+  };
+  const inline = {
+    blockId: "area",
+    schemaVersion: CANVAS_SCHEMA_VERSION,
+    kind: "math",
+    layout: "inline",
+    runs: [
+      { text: "A circle of radius " },
+      { math: "r" },
+      { text: " covers " },
+      { math: "\\pi r^2" },
+    ],
+  };
+
+  it("decodes a display formula with a caption and a paragraph of prose and formula runs", () => {
+    expect(decodeCanvasBlock(display)).toMatchObject(display);
+    // Prose keeps the spaces that separate it from the formula beside it.
+    expect(decodeCanvasBlock(inline)).toMatchObject(inline);
+  });
+
+  it("admits math only under the version that declared it", () => {
+    expect(() =>
+      decodeCanvasDefinition({
+        ...definition,
+        schemaVersion: CANVAS_COMPARISON_MATRIX_SCHEMA_VERSION,
+        blocks: [display],
+      }),
+    ).toThrow();
+    expect(decodeCanvasDefinition({ ...definition, blocks: [display, inline] })).toMatchObject({
+      blocks: [display, inline],
+    });
+    expect(CANVAS_MATH_SCHEMA_VERSION).toBe(CANVAS_SCHEMA_VERSION);
+  });
+
+  it("refuses a run that is both prose and a formula, or neither, and a blank prose run", () => {
+    expect(() => decodeCanvasBlock({ ...inline, runs: [{ text: "x", math: "x" }] })).toThrow();
+    expect(() => decodeCanvasBlock({ ...inline, runs: [{}] })).toThrow();
+    expect(() => decodeCanvasBlock({ ...inline, runs: [{ text: "   " }] })).toThrow();
+    expect(() => decodeCanvasBlock({ ...inline, runs: [] })).toThrow();
+    // A display formula has a source, not runs, and an inline paragraph the reverse.
+    expect(() => decodeCanvasBlock({ ...display, runs: inline.runs })).toThrow();
+    expect(() => decodeCanvasBlock({ ...inline, source: "x" })).toThrow();
+  });
+
+  it("refuses an empty or oversized formula, too many runs, an unknown layout, and markup fields", () => {
+    expect(() => decodeCanvasBlock({ ...display, source: "" })).toThrow();
+    expect(() =>
+      decodeCanvasBlock({ ...display, source: "x".repeat(CANVAS_MAX_MATH_SOURCE_LENGTH + 1) }),
+    ).toThrow();
+    expect(() =>
+      decodeCanvasBlock({
+        ...inline,
+        runs: Array.from({ length: CANVAS_MAX_MATH_RUNS + 1 }, () => ({ math: "x" })),
+      }),
+    ).toThrow();
+    expect(() => decodeCanvasBlock({ ...display, layout: "block" })).toThrow();
+    expect(() => decodeCanvasBlock({ ...display, html: "<math></math>" })).toThrow();
+    expect(() => decodeCanvasBlock({ ...display, macros: { "\\f": "x" } })).toThrow();
   });
 });
 

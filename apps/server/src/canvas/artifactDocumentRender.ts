@@ -1,3 +1,4 @@
+import katex from "katex";
 import type { CanvasBlock, CanvasDefinition, CanvasNumberFormat } from "@octant/contracts/canvas";
 import {
   CANVAS_EXPORT_BODY_MAX_BYTES,
@@ -19,6 +20,7 @@ import {
   layoutCanvasComparisonMatrix,
   type CanvasMatrixCellLayout,
 } from "@octant/domain/canvas-comparison-matrix";
+import { canvasMathRenderOptions } from "@octant/domain/canvas-math-policy";
 import { DEFAULT_ARTIFACT_PALETTE, escapeXml } from "./artifactRender";
 
 /**
@@ -69,7 +71,19 @@ type Piece =
       readonly rows: ReadonlyArray<ReadonlyArray<string>>;
     }
   | { readonly kind: "code"; readonly text: string }
-  | { readonly kind: "rule" };
+  | { readonly kind: "rule" }
+  | {
+      readonly kind: "formula";
+      /** The source, or undefined when the share filter withheld it. */
+      readonly source: string | undefined;
+      readonly caption: string;
+    }
+  | { readonly kind: "math-paragraph"; readonly runs: ReadonlyArray<MathRun> };
+
+/** A paragraph run; a withheld formula source reads as redacted prose. */
+type MathRun =
+  | { readonly kind: "text"; readonly text: string }
+  | { readonly kind: "math"; readonly source: string };
 
 function finish(title: string, body: string): ArtifactDocumentRender {
   return canvasExportBodyByteLength(body) <= CANVAS_EXPORT_BODY_MAX_BYTES
@@ -81,6 +95,47 @@ function reading(value: string): string {
   const trimmed = value.trim();
   if (trimmed.length === 0) return "";
   return isCanvasShareSafeText(trimmed) ? trimmed : "[redacted]";
+}
+
+/**
+ * Prose beside a formula keeps its edge spaces: they are what separate the
+ * words from the mathematics once the runs are joined.
+ */
+function prose(value: string): string {
+  return isCanvasShareSafeText(value) ? value : "[redacted]";
+}
+
+/**
+ * A formula's source as it may leave the host. The source is the reading in
+ * both forms, so a source the share filter would not let out is withheld
+ * whole rather than typeset around a hole.
+ */
+function mathSource(value: string): string | undefined {
+  return isCanvasShareSafeText(value) ? value : undefined;
+}
+
+function mathPieces(block: Extract<CanvasBlock, { readonly kind: "math" }>): ReadonlyArray<Piece> {
+  if (block.layout === "display") {
+    return [
+      {
+        kind: "formula",
+        source: mathSource(block.source),
+        caption: block.caption === undefined ? "" : reading(block.caption),
+      },
+    ];
+  }
+  return [
+    {
+      kind: "math-paragraph",
+      runs: block.runs.map((run): MathRun => {
+        if (!("math" in run)) return { kind: "text", text: prose(run.text) };
+        const source = mathSource(run.math);
+        return source === undefined
+          ? { kind: "text", text: "[redacted]" }
+          : { kind: "math", source };
+      }),
+    },
+  ];
 }
 
 function scalar(value: string | number | boolean | null, format?: CanvasNumberFormat): string {
@@ -487,6 +542,8 @@ function piecesFor(block: CanvasBlock): ReadonlyArray<Piece> {
     }
     case "comparison-matrix":
       return comparisonMatrixPieces(block);
+    case "math":
+      return mathPieces(block);
     case "plan": {
       const phases = new Map(
         block.phases.map((phase) => [String(phase.phaseId), reading(phase.title)]),
@@ -671,11 +728,42 @@ function markdownPiece(piece: Piece): string {
       return `\`\`\`\n${piece.text.replace(/```/g, "'''")}\n\`\`\``;
     case "rule":
       return "---";
+    case "formula": {
+      // A fenced `math` block is how GitHub and most Markdown readers typeset
+      // display math, and a fence keeps the source out of HTML parsing.
+      const formula =
+        piece.source === undefined
+          ? "[redacted]"
+          : `${fence(piece.source, "`", 3)}math\n${piece.source}\n${fence(piece.source, "`", 3)}`;
+      return piece.caption.length === 0 ? formula : `${formula}\n\n${inline(piece.caption)}`;
+    }
+    case "math-paragraph":
+      // An inline formula is a code span between dollars, GitHub's inline
+      // math, so `<` or `*` in the source stays mathematics.
+      return piece.runs
+        .map((run) => {
+          if (run.kind === "text") return inline(run.text);
+          const ticks = fence(run.source, "`", 1);
+          const pad = run.source.startsWith("`") || run.source.endsWith("`") ? " " : "";
+          return `$${ticks}${pad}${run.source}${pad}${ticks}$`;
+        })
+        .join("");
     default: {
       const unhandled: never = piece;
       return unhandled;
     }
   }
+}
+
+/** A run of `mark` longer than any run of it inside `text`, and at least `minimum` long. */
+function fence(text: string, mark: string, minimum: number): string {
+  let longest = 0;
+  let current = 0;
+  for (const character of text) {
+    current = character === mark ? current + 1 : 0;
+    longest = Math.max(longest, current);
+  }
+  return mark.repeat(Math.max(minimum, longest + 1));
 }
 
 function inline(value: string): string {
@@ -721,10 +809,34 @@ function htmlPiece(piece: Piece): string {
       return `<pre>${escapeXml(piece.text)}</pre>`;
     case "rule":
       return "<hr>";
+    case "formula": {
+      const caption =
+        piece.caption.length === 0 ? "" : `<figcaption>${escapeXml(piece.caption)}</figcaption>`;
+      if (piece.source === undefined) return `<figure><p>[redacted]</p>${caption}</figure>`;
+      return `<figure>${htmlMath(piece.source, true)}${caption}<details><summary>Source</summary><pre>${escapeXml(piece.source)}</pre></details></figure>`;
+    }
+    case "math-paragraph":
+      return `<p>${piece.runs
+        .map((run) => (run.kind === "text" ? escapeXml(run.text) : htmlMath(run.source, false)))
+        .join("")}</p>`;
     default: {
       const unhandled: never = piece;
       return unhandled;
     }
+  }
+}
+
+/**
+ * A formula as MathML alone, which a browser draws natively with no
+ * stylesheet or font to carry, and which keeps the source as an annotation.
+ * KaTeX builds it with trust off and escapes every character it emits; a
+ * source it refuses is written as the source itself.
+ */
+function htmlMath(source: string, display: boolean): string {
+  try {
+    return katex.renderToString(source, canvasMathRenderOptions(display, "mathml"));
+  } catch {
+    return display ? `<pre>${escapeXml(source)}</pre>` : `<code>${escapeXml(source)}</code>`;
   }
 }
 

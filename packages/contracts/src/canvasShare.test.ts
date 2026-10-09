@@ -466,6 +466,39 @@ describe("Canvas share contracts", () => {
     ).toThrow();
   });
 
+  it("shares a display formula and a paragraph with inline formulas from share version 5", () => {
+    const blocks = [
+      {
+        blockId: "bayes",
+        schemaVersion: 11,
+        kind: "math",
+        layout: "display",
+        source: "P(A \\mid B) = \\frac{P(B \\mid A)\\,P(A)}{P(B)}",
+        caption: "Bayes' theorem",
+      },
+      {
+        blockId: "area",
+        schemaVersion: 11,
+        kind: "math",
+        layout: "inline",
+        runs: [{ text: "A circle covers " }, { math: "\\pi r^2" }, { text: "." }],
+      },
+    ];
+    const exported = { ...document, schemaVersion: 5, blocks };
+    expect(decodeCanvasStaticExportDocument(exported)).toEqual(exported);
+    expect(() =>
+      decodeCanvasStaticExportDocument({ ...document, schemaVersion: 4, blocks }),
+    ).toThrow();
+    // The secret filter reads formula sources and prose like any other export text.
+    expect(() =>
+      decodeCanvasStaticExportDocument({
+        ...document,
+        schemaVersion: 5,
+        blocks: [{ ...blocks[0], source: "\\text{sk-proj-abcdefghijklmnopqrstu}" }],
+      }),
+    ).toThrow();
+  });
+
   it("shares treemaps, heatmaps, bar lists, number formats, table displays, and a dragged board from share version 3", () => {
     const blocks = [
       {

@@ -60,6 +60,8 @@ export function canvasBlockLabel(block: CanvasDefinition["blocks"][number]): str
       return "Mind map";
     case "comparison-matrix":
       return "Comparison matrix";
+    case "math":
+      return block.layout === "display" ? (block.caption ?? "Formula") : "Math";
     case "mockup":
     case "design":
       return block.title;

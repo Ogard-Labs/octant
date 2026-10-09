@@ -9,6 +9,10 @@ import {
   CANVAS_MAX_MATRIX_CELLS,
   CANVAS_MAX_MATRIX_CRITERIA,
   CANVAS_MAX_MATRIX_OPTIONS,
+  CANVAS_MAX_MATH_PARAGRAPH_LENGTH,
+  CANVAS_MAX_MATH_RUNS,
+  CANVAS_MAX_MATH_SOURCE_LENGTH,
+  CANVAS_COMPARISON_MATRIX_SCHEMA_VERSION,
   CANVAS_MAX_METRIC_SPARKLINE_POINTS,
   CANVAS_MAX_MINDMAP_NOTE_LENGTH,
   CANVAS_MAX_MOCKUP_DEPTH,
@@ -28,6 +32,7 @@ import {
   type CanvasDefinition,
 } from "@octant/contracts/canvas";
 import { launchDeckExample, onboardingFlowExample } from "./canvasDesignExamples";
+import { mathExamples } from "./canvasMathExamples";
 import {
   loginSequenceExample,
   orderSchemaExample,
@@ -1939,6 +1944,110 @@ describe("entity-relationship, swimlane, and mind map validation", () => {
           ]),
         ),
       "mindmap-note-budget-exceeded",
+    );
+  });
+});
+
+describe("math validation", () => {
+  const display = {
+    blockId: "bayes",
+    schemaVersion: CANVAS_SCHEMA_VERSION,
+    kind: "math" as const,
+    layout: "display" as const,
+    source: "P(A \\mid B) = \\frac{P(B \\mid A)\\,P(A)}{P(B)}",
+  };
+  const inline = {
+    blockId: "area",
+    schemaVersion: CANVAS_SCHEMA_VERSION,
+    kind: "math" as const,
+    layout: "inline" as const,
+  };
+
+  it("accepts the described examples", () => {
+    expect(() => validateCanvasDefinition(withBlocks([...mathExamples]))).not.toThrow();
+  });
+
+  it("refuses math inside a document declaring an older schema version", () => {
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition({
+          ...baseDefinition,
+          schemaVersion: CANVAS_COMPARISON_MATRIX_SCHEMA_VERSION,
+          blocks: [display],
+        }),
+      "unsupported-schema-version",
+    );
+    // The bump keeps the previous version readable: a matrix-era document
+    // without math still validates.
+    expect(() =>
+      validateCanvasDefinition({
+        ...baseDefinition,
+        schemaVersion: CANVAS_COMPARISON_MATRIX_SCHEMA_VERSION,
+        blocks: [comparisonMatrix({ schemaVersion: CANVAS_COMPARISON_MATRIX_SCHEMA_VERSION })],
+      }),
+    ).not.toThrow();
+  });
+
+  it("refuses a formula that defines a macro, links out, embeds, or picks its own colour", () => {
+    for (const source of [
+      "\\def\\x{1} \\x",
+      "\\newcommand{\\R}{\\mathbb{R}} \\R",
+      "\\href{https://example.com}{x}",
+      "\\includegraphics{a.png}",
+      "\\htmlClass{c}{x}",
+      "\\textcolor{red}{x}",
+      "\\makeatletter\\@ifnextchar",
+    ]) {
+      expectPolicyCode(
+        () => validateCanvasDefinition(withBlocks([{ ...display, source }])),
+        "math-command-refused",
+      );
+    }
+    // The same commands inside a paragraph's formula run are refused too.
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([{ ...inline, runs: [{ text: "Let " }, { math: "\\gdef\\y{2}" }] }]),
+        ),
+      "math-command-refused",
+    );
+  });
+
+  it("reads a line break before letters as a line break, not as a command", () => {
+    expect(() =>
+      validateCanvasDefinition(
+        withBlocks([{ ...display, source: "\\begin{aligned} a &= 1 \\\\def &= 2 \\end{aligned}" }]),
+      ),
+    ).not.toThrow();
+  });
+
+  it("refuses an oversized formula, too many runs, and a paragraph past its shared budget", () => {
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([{ ...display, source: "x".repeat(CANVAS_MAX_MATH_SOURCE_LENGTH + 1) }]),
+        ),
+      "math-source-budget-exceeded",
+    );
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            {
+              ...inline,
+              runs: Array.from({ length: CANVAS_MAX_MATH_RUNS + 1 }, () => ({ math: "x" })),
+            },
+          ]),
+        ),
+      "math-runs-budget-exceeded",
+    );
+    const half = "word ".repeat(CANVAS_MAX_MATH_PARAGRAPH_LENGTH / 10 + 1);
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([{ ...inline, runs: [{ text: half }, { math: "x" }, { text: half }] }]),
+        ),
+      "math-paragraph-budget-exceeded",
     );
   });
 });

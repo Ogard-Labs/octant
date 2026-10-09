@@ -8,5 +8,5 @@
       "@/*": ["./src/*"]
     }
   },
-  "include": ["src", "vite.config.ts", "vite.canvas-preview.config.ts"]
+  "include": ["src", "vite.config.ts", "vite.canvas-preview.config.ts", "vite.fonts.ts"]
 }

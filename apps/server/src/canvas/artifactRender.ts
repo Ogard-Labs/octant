@@ -58,6 +58,7 @@ const DRAWN_KINDS = new Set<CanvasBlock["kind"]>([
   "design",
   "bar-list",
   "comparison-matrix",
+  "math",
   "code-excerpt",
   "pseudocode",
   "diff",
@@ -240,6 +241,8 @@ function drawBlock(
         markup: comparisonMatrix(block, y, width, palette),
         height: comparisonMatrixHeight(block),
       };
+    case "math":
+      return { markup: math(block, y, width, palette, canvasWidth), height: 20 };
     case "code-excerpt":
     case "pseudocode":
     case "diff":
@@ -1106,6 +1109,34 @@ function comparisonMatrix(
 }
 
 /** A row of frame outlines in the design's own proportions, as many as fit. */
+/**
+ * A display formula as its source on a faint band, which is how a reader
+ * recognises a formula at a glance without a typesetter on the host; a math
+ * paragraph is prose with a formula's band inside the line.
+ */
+function math(
+  block: Extract<CanvasBlock, { readonly kind: "math" }>,
+  y: number,
+  width: number,
+  palette: ArtifactThumbnailPalette,
+  canvasWidth: number,
+): string {
+  if (block.layout === "display") {
+    return (
+      `<g data-math="display">` +
+      `<rect x="${String(PADDING)}" y="${String(y)}" width="${String(width)}" height="20" rx="3" fill="${palette.muted}" opacity="0.18"/>` +
+      `<text x="${String(PADDING + width / 2)}" y="${String(y + 13)}" font-size="9" font-family="ui-serif, Georgia, serif" font-style="italic" text-anchor="middle" fill="${palette.ink}">${escapeXml(clamp(block.source, titleLength(canvasWidth)))}</text>` +
+      `</g>`
+    );
+  }
+  return (
+    `<g data-math="inline">` +
+    lines(y, 3, width, palette) +
+    `<rect x="${String(PADDING + Math.round(width * 0.38))}" y="${String(y + 6)}" width="${String(Math.round(width * 0.18))}" height="5" rx="1.5" fill="${palette.accent}" opacity="0.7"/>` +
+    `</g>`
+  );
+}
+
 function designFrames(
   block: Extract<CanvasBlock, { readonly kind: "design" }>,
   y: number,

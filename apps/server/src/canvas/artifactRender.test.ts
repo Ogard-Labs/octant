@@ -433,6 +433,31 @@ describe("drawing a preview of an artifact", () => {
     expect(markup).toContain('data-recommended="true"');
   });
 
+  it("draws a display formula as its escaped source and a math paragraph as prose", () => {
+    const formula = decodeCanvasBlock({
+      blockId: "inequality",
+      schemaVersion: CANVAS_SCHEMA_VERSION,
+      kind: "math",
+      layout: "display",
+      source: "a<b \\Rightarrow a+c<b+c",
+    });
+    const sentence = decodeCanvasBlock({
+      blockId: "area",
+      schemaVersion: CANVAS_SCHEMA_VERSION,
+      kind: "math",
+      layout: "inline",
+      runs: [{ text: "A circle covers " }, { math: "\\pi r^2" }],
+    });
+
+    const markup = renderArtifactThumbnail(definition([formula, sentence], "Proof"));
+
+    expect(markup.startsWith("<svg")).toBe(true);
+    expect(markup).toContain('data-math="display"');
+    expect(markup).toContain("a&lt;b \\Rightarrow a+c&lt;b+c");
+    expect(markup).toContain('data-math="inline"');
+    expect(markup).not.toMatch(/<\s*script|<foreignObject/i);
+  });
+
   it("keeps a recommended option past the visible columns in the comparison matrix thumbnail", () => {
     const options = Array.from({ length: 7 }, (_value, index) => ({
       optionId: `option-${String(index)}`,

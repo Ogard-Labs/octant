@@ -11,6 +11,10 @@ import {
   CANVAS_MAX_MATRIX_NOTE_LENGTH,
   CANVAS_MAX_MATRIX_OPTIONS,
   CANVAS_MAX_MATRIX_WEIGHT,
+  CANVAS_MAX_MATH_CAPTION_LENGTH,
+  CANVAS_MAX_MATH_PARAGRAPH_LENGTH,
+  CANVAS_MAX_MATH_RUNS,
+  CANVAS_MAX_MATH_SOURCE_LENGTH,
   CANVAS_MAX_METRIC_SPARKLINE_POINTS,
   CANVAS_MAX_TREEMAP_LEAVES,
   CANVAS_MAX_TREEMAP_MEASURES,
@@ -70,8 +74,10 @@ export const CANVAS_SHARE_VISUALS_SCHEMA_VERSION = 3;
 // Version 4 accompanies Canvas schema version 10: a share may carry a
 // comparison matrix.
 export const CANVAS_SHARE_COMPARISON_MATRIX_SCHEMA_VERSION = 4;
-export const CANVAS_SHARE_SCHEMA_VERSION = 4 as const;
-export const CanvasShareSchemaVersion = Schema.Literal(1, 2, 3, CANVAS_SHARE_SCHEMA_VERSION);
+// Version 5 accompanies Canvas schema version 11: a share may carry math.
+export const CANVAS_SHARE_MATH_SCHEMA_VERSION = 5;
+export const CANVAS_SHARE_SCHEMA_VERSION = 5 as const;
+export const CanvasShareSchemaVersion = Schema.Literal(1, 2, 3, 4, CANVAS_SHARE_SCHEMA_VERSION);
 export type CanvasShareSchemaVersion = typeof CanvasShareSchemaVersion.Type;
 
 export const CanvasExportId = brandedUuid("CanvasExportId");
@@ -231,6 +237,7 @@ const exportMatrixCellFields = {
   optionId: boundedToken("CanvasNodeId"),
   note: Schema.optional(ExportMatrixNote),
 } as const;
+const ExportMathSource = ExportNonEmptyText.pipe(Schema.maxLength(CANVAS_MAX_MATH_SOURCE_LENGTH));
 const ExportUrl = Schema.String.pipe(
   Schema.maxLength(2_048),
   Schema.filter(
@@ -754,6 +761,29 @@ export const CanvasStaticExportBlock = Schema.Union(
   }).annotations(strict),
   Schema.Struct({
     ...exportBlockFields,
+    kind: Schema.Literal("math"),
+    layout: Schema.Literal("display"),
+    source: ExportMathSource,
+    caption: Schema.optional(ExportLabel.pipe(Schema.maxLength(CANVAS_MAX_MATH_CAPTION_LENGTH))),
+  }).annotations(strict),
+  Schema.Struct({
+    ...exportBlockFields,
+    kind: Schema.Literal("math"),
+    layout: Schema.Literal("inline"),
+    runs: Schema.NonEmptyArray(
+      Schema.Union(
+        Schema.Struct({
+          text: ExportText.pipe(
+            Schema.maxLength(CANVAS_MAX_MATH_PARAGRAPH_LENGTH),
+            Schema.filter((value) => value.trim().length > 0),
+          ),
+        }).annotations(strict),
+        Schema.Struct({ math: ExportMathSource }).annotations(strict),
+      ),
+    ).pipe(Schema.maxItems(CANVAS_MAX_MATH_RUNS)),
+  }).annotations(strict),
+  Schema.Struct({
+    ...exportBlockFields,
     kind: Schema.Literal("code-excerpt"),
     language: boundedToken("CanvasLanguage"),
     code: ExportNonEmptyText,
@@ -899,6 +929,12 @@ export const CanvasStaticExportDocument = Schema.Struct({
         document.schemaVersion >= CANVAS_SHARE_COMPARISON_MATRIX_SCHEMA_VERSION ||
         !document.blocks.some((block) => block.kind === "comparison-matrix"),
       { message: () => "Comparison matrix blocks require Canvas share version 4." },
+    ),
+    Schema.filter(
+      (document) =>
+        document.schemaVersion >= CANVAS_SHARE_MATH_SCHEMA_VERSION ||
+        !document.blocks.some((block) => block.kind === "math"),
+      { message: () => "Math blocks require Canvas share version 5." },
     ),
   );
 export type CanvasStaticExportDocument = typeof CanvasStaticExportDocument.Type;

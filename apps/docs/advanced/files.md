@@ -227,6 +227,23 @@ points to its note under the table.
 - On a narrow screen the matrix scrolls sideways while the criteria stay put.
   **View matrix data** lists each option on its own row.
 
+### Formulas
+
+Ask for an equation, a derivation, or an explanation with formulas in it, and
+the agent writes math blocks. A formula on its own line can carry a caption
+that names it, such as "Bayes' theorem", and a sentence can carry small
+formulas inline.
+
+- Formulas take your theme's text colour, including dark mode and high
+  contrast; an agent cannot colour them.
+- **View source** shows the formula as the agent wrote it, in LaTeX math
+  markup. A screen reader reads the formula itself.
+- A long formula scrolls sideways on a narrow screen rather than widening the
+  page.
+- A formula that cannot be drawn shows its source and says so.
+- Exported Markdown keeps formulas as GitHub math, and exported HTML keeps them
+  as MathML that a browser draws without any download.
+
 ### Designs, prototypes, and slides
 
 Ask for an app, a screen, a website, a landing page, or a presentation, and the
@@ -267,7 +284,7 @@ with the device it came through noted ("paired device" when it arrived from a
 paired phone or browser). A comment whose block has since left the canvas is
 kept and marked rather than dropped. Shared snapshots never include comments.
 A shared snapshot keeps every block, including charts, tables, treemaps,
-heatmaps, bar lists, and comparison matrices with their number formats. A design, or an action block
+heatmaps, bar lists, comparison matrices, and formulas, with their number formats. A design, or an action block
 that runs a command on this Mac, stops a share: Share then says the canvas
 cannot be shared safely.
 A treemap or bar list in a shared snapshot offers no **Open file**, because

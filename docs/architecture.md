@@ -311,8 +311,9 @@ revises it with its own tools under the thread's existing authority.
 schema version 4. An older runtime refuses a version-4 document as a future
 version and does not report it corrupt.
 A treemap block is gated the same way at Canvas schema version 5, a heatmap
-block at version 6, and a comparison matrix at version 10, so a document that declares an earlier version and carries
-one is refused as a declared future version. The optional table column
+block at version 6, a comparison matrix at version 10, and a math block at
+version 11, so a document that declares an earlier version and carries one is
+refused as a declared future version. The optional table column
 `display` and the chart, table, and metric `format` fields are the one ungated
 exception: they only change how a value is drawn, so they carry no schema
 version, but the strict definition schema refuses an unknown field, so a
@@ -437,14 +438,40 @@ with the criteria pinned; its disclosed fallback lists one row per option. The
 screen, the artifact preview SVG, and the Markdown and HTML export read the same
 layout. The comparison matrix arrives with Canvas schema version 10 and share
 version 4.
+A math block (`packages/domain/src/canvasMathPolicy.ts`) is a formula written in
+a LaTeX math subset and typeset by KaTeX (code MIT, bundled fonts SIL OFL 1.1;
+pinned in `apps/web` and `apps/server`, with both licences in
+`apps/web/public/KATEX-LICENSE.txt`). Layout
+`display` is one formula on its own line with an optional caption; layout
+`inline` is a paragraph of prose and formula runs. A formula source is at most
+1,000 characters and a paragraph 48 runs and 4,000 characters. KaTeX only draws:
+every surface passes the shared options, so `trust` is off (no links, images,
+or HTML attributes), `strict` is an error, macro expansion and explicit sizes
+are bounded, and each formula gets a fresh macro table. The domain policy also
+refuses `math-command-refused` for a source that defines a macro (`\def`,
+`\newcommand`, and the like), links or embeds (`\href`, `\url`,
+`\includegraphics`, `\html…`), sets its own colour (`\color`, `\textcolor`,
+`\colorbox`, `\fcolorbox`), or names an internal `@` command, and refuses
+oversized sources, runs, and paragraphs with their own budget codes. The
+renderer builds KaTeX's DOM into an element React leaves empty, pairs the drawn
+glyphs (hidden from assistive technology) with MathML that carries the source
+as an annotation, offers the source as text under View source, and shows a
+formula KaTeX refuses as its source with a plain note. KaTeX's stylesheet and
+fonts are bundled; the Vite builds never inline a font as a `data:` URL,
+because the renderer's content policy loads fonts from its own origin only. The
+Markdown export writes a display formula as a fenced `math` block and an inline
+formula as GitHub's code-span math; the HTML export writes MathML alone, with
+the source under a Source disclosure; the preview SVG draws the source. A
+source the share filter would not let leave the host is withheld whole. The math
+block arrives with Canvas schema version 11 and share version 5.
 A share carries every block kind and field a Canvas holds except source ids
 and the design and action blocks it refuses (see the `design` block). A table
 column keeps its number format and display, and a board keeps its own layout.
 Share documents version independently of Canvas documents: a treemap, a
 heatmap, a bar list, a chart's or a table column's number format, a table
 column's display, and a board's layout arrive with share version 3, and a
-comparison matrix with share version 4, so a share that declares an older
-version and carries one is refused as a future version.
+comparison matrix with share version 4, and math with share version 5, so a
+share that declares an older version and carries one is refused as a future version.
 The catalogue includes a `plan` block: phases, and one list of tasks that each
 name their phase, carry a status (todo, doing, blocked, done), and may carry an
 owner, estimate, acceptance notes, dates, dependencies on other tasks in the

@@ -527,6 +527,39 @@ describe("createCanvasAgentTools", () => {
     expect(examples[0]).toMatchObject({ recommendedOptionId: "sqlite" });
   });
 
+  it("lets an agent create display and inline math from the examples describe returns", async () => {
+    const { create, set } = tools();
+    const described = await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "describe", blockKinds: ["math"] }),
+    });
+
+    expect(described.isError).not.toBe(true);
+    const result = described.result as {
+      examples?: ReadonlyArray<Record<string, unknown>>;
+    };
+    const examples = result.examples ?? [];
+    expect(examples.map((example) => [example.blockId, example.layout])).toEqual([
+      ["bayes-theorem", "display"],
+      ["queue-length", "display"],
+      ["amdahl-limit", "inline"],
+    ]);
+    const blocks = examples.map((example) => decodeCanvasBlock(example));
+
+    const created = await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "create", title: "Formulas", blocks: examples }),
+    });
+
+    expect(created.isError).not.toBe(true);
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "Formulas" }),
+      expect.anything(),
+      expect.anything(),
+      blocks,
+    );
+  });
+
   it("lets an agent create a repo-stats tile row from the metric examples describe returns", async () => {
     const { set } = tools();
     const described = await set.execute({
