@@ -40,6 +40,13 @@ export function withStartupFailureReason(message: string, error: unknown): strin
   return `${message.replace(/\.$/, "")}: ${reason}.`;
 }
 
+/** The fixed failure every unclassified startup error reports, with its reason when known. */
+export const UNCLASSIFIED_STARTUP_FAILURE = "Octant could not start the local server.";
+
+export function startupFailedOutput(category: string, message: string): string {
+  return JSON.stringify({ product: "Octant", status: "failed", category, message });
+}
+
 function codeOf(value: unknown): string | undefined {
   if (typeof value !== "object" || value === null || !("code" in value)) return undefined;
   return typeof value.code === "string" ? value.code : undefined;

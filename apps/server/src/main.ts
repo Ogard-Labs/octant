@@ -11,6 +11,8 @@ import {
   deriveHostRuntimeHostId,
   prepareHostRuntimePaths,
   formatHostRuntimeError,
+  HostRuntimeOwnershipError,
+  HostRuntimePathError,
   probeHostPlatformCapabilities,
   readHostRuntimeProcessStart,
   resolveHostRuntimePaths,
@@ -26,6 +28,12 @@ import {
   type HostRuntimePaths,
 } from "@octant/host-runtime";
 import { parseServerLaunchConfig } from "./serverConfig";
+import {
+  UNCLASSIFIED_STARTUP_FAILURE,
+  startupFailedOutput,
+  startupFailureReason,
+  withStartupFailureReason,
+} from "./startupFailureReason";
 import { runStartupArtifactInspection } from "./startupArtifactInspection";
 import { watchDesktopParent } from "./desktopParentWatch";
 
@@ -206,15 +214,28 @@ try {
     }
   }
 } catch (error) {
+  // A native module that fails while the server modules are imported never
+  // reaches the Effect program, so classify it here too instead of
+  // forwarding the raw loader message.
+  const knownStartupFailure =
+    error instanceof HostRuntimePathError ||
+    error instanceof HostRuntimeOwnershipError ||
+    startupFailureReason(error) === undefined
+      ? undefined
+      : withStartupFailureReason(UNCLASSIFIED_STARTUP_FAILURE, error);
   await serviceLogs
     ?.append({
       timestamp: new Date().toISOString(),
       level: "error",
       event: "server.failure",
-      message: formatHostRuntimeError(error),
+      message: knownStartupFailure ?? formatHostRuntimeError(error),
     })
     .catch(() => undefined);
-  console.error(formatHostRuntimeError(error));
+  console.error(
+    knownStartupFailure === undefined
+      ? formatHostRuntimeError(error)
+      : startupFailedOutput("startup-failed", knownStartupFailure),
+  );
   process.exitCode = startupFailureExitCode(error);
 } finally {
   process.removeListener("SIGINT", stop);

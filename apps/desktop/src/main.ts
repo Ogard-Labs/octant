@@ -263,6 +263,8 @@ const IPC_CHANNELS = {
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const MAX_PROVIDER_CREDENTIAL_BYTES = 12 * 1_024;
+// Bounds how long a failed start waits for the child's final stderr bytes.
+const STDERR_DRAIN_TIMEOUT_MS = 500;
 const PROVIDER_INSTANCE_ID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -1609,6 +1611,7 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
           process.stderr.write(chunk);
           serverStderr.append(chunk);
         });
+        child.stderr.once("end", serverStderr.end);
         return child;
       },
     });
@@ -1625,7 +1628,15 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
     const attached = await waitForStorageReady({
       serverUrl,
       instanceId,
-      ...(server === undefined ? {} : { child: server, lastOutput: serverStderr.text }),
+      ...(server === undefined
+        ? {}
+        : {
+            child: server,
+            lastOutput: async () => {
+              await serverStderr.drained(STDERR_DRAIN_TIMEOUT_MS);
+              return serverStderr.text();
+            },
+          }),
       resolveAttachedHost: async () => {
         return (await resolveExistingHostAttachment())?.probe;
       },

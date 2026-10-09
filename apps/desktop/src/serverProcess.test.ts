@@ -500,6 +500,24 @@ describe("waitForStorageReady", () => {
     expect(now).toBeLessThan(1_000);
   });
 
+  it("reports output the child wrote just before stderr finished draining", async () => {
+    const tail = createStderrTail();
+    const failure = waitForStorageReady({
+      serverUrl: "http://127.0.0.1:43123/",
+      instanceId: "desktop-child",
+      fetch: vi.fn().mockRejectedValue(new Error("connection refused")),
+      child: { exitCode: 1, signalCode: null, kill: vi.fn() },
+      lastOutput: async () => {
+        await tail.drained(5_000);
+        return tail.text();
+      },
+    }).catch((error: unknown) => error);
+    tail.append("Octant could not start the local server: the disk is full.\n");
+    tail.end();
+
+    expect(((await failure) as Error).message).toContain("the disk is full");
+  });
+
   it("names the terminating signal when the child was killed", async () => {
     const failure = await waitForStorageReady({
       serverUrl: "http://127.0.0.1:43123/",
@@ -906,6 +924,17 @@ describe("createStderrTail", () => {
     expect(secrets.text()).not.toContain("supersecretvalue123");
     expect(secrets.text()).not.toContain("abcdefghijklmnop");
     expect(secrets.text()).toContain("failed");
+  });
+
+  it("never shows part of a secret from a line too long to keep", () => {
+    const tail = createStderrTail();
+    const secret = "s".repeat(6_000);
+    tail.append(`token=${secret.slice(0, 3_000)}`);
+    tail.append(`${secret.slice(3_000)} failed\nOctant refused to start\n`);
+
+    expect(tail.text()).not.toContain("sss");
+    expect(tail.text()).toContain("[long output line omitted]");
+    expect(tail.text()).toContain("Octant refused to start");
   });
 });
 

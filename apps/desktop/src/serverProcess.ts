@@ -166,22 +166,73 @@ const STDERR_TAIL_MAX_CHARS = 1_000;
  */
 export interface StderrTail {
   readonly append: (chunk: string | Uint8Array) => void;
+  /** Marks the stream finished so `drained` stops waiting for more output. */
+  readonly end: () => void;
+  /** Resolves once the stream ended, or after `timeoutMs` if it never does. */
+  readonly drained: (timeoutMs: number) => Promise<void>;
   readonly text: () => string;
 }
 
+const STDERR_LINE_MAX_CHARS = 4 * STDERR_TAIL_MAX_CHARS;
+const OMITTED_LINE = "[long output line omitted]";
+
 export function createStderrTail(): StderrTail {
-  let buffered = "";
+  // Lines are redacted whole, before any truncation: cutting first could drop
+  // the `token=` prefix that lets the redactor recognize the value after it.
+  // A line too long to hold is omitted rather than shown in part.
+  let lines: ReadonlyArray<string> = [];
+  let pending = "";
+  let skippingLongLine = false;
+  let ended = false;
+  const endWaiters = new Set<() => void>();
+  const keep = (line: string) => {
+    const trimmed = line.trim();
+    if (trimmed === "") return;
+    lines = [...lines, redactHostRuntimeText(trimmed)].slice(-STDERR_TAIL_MAX_LINES);
+  };
   return {
     append: (chunk) => {
-      buffered = (buffered + Buffer.from(chunk).toString("utf8")).slice(-4 * STDERR_TAIL_MAX_CHARS);
+      const parts = (pending + Buffer.from(chunk).toString("utf8")).split("\n");
+      pending = parts.pop() ?? "";
+      for (const line of parts) {
+        if (skippingLongLine) {
+          skippingLongLine = false;
+          continue;
+        }
+        if (line.length > STDERR_LINE_MAX_CHARS) keep(OMITTED_LINE);
+        else keep(line);
+      }
+      if (pending.length > STDERR_LINE_MAX_CHARS) {
+        if (!skippingLongLine) keep(OMITTED_LINE);
+        skippingLongLine = true;
+        pending = "";
+      }
     },
+    end: () => {
+      ended = true;
+      for (const resolve of endWaiters) resolve();
+      endWaiters.clear();
+    },
+    drained: (timeoutMs) =>
+      ended
+        ? Promise.resolve()
+        : new Promise<void>((resolve) => {
+            const timer = setTimeout(() => {
+              endWaiters.delete(finish);
+              resolve();
+            }, timeoutMs);
+            const finish = () => {
+              clearTimeout(timer);
+              resolve();
+            };
+            endWaiters.add(finish);
+          }),
     text: () => {
-      const lines = buffered
-        .split("\n")
-        .map((line) => line.trim())
-        .filter((line) => line !== "")
-        .slice(-STDERR_TAIL_MAX_LINES);
-      return redactHostRuntimeText(lines.join("\n")).slice(-STDERR_TAIL_MAX_CHARS);
+      const partial = skippingLongLine ? [] : [pending.trim()].filter((line) => line !== "");
+      return [...lines, ...partial.map(redactHostRuntimeText)]
+        .slice(-STDERR_TAIL_MAX_LINES)
+        .join("\n")
+        .slice(-STDERR_TAIL_MAX_CHARS);
     },
   };
 }
@@ -253,7 +304,11 @@ interface WaitForStorageReadyOptions {
   readonly resolveAttachedHost?: () => Promise<LocalHostProbe | undefined>;
   /** When set, a child that has exited ends the wait instead of the timeout. */
   readonly child?: ManagedChildProcess;
-  readonly lastOutput?: () => string;
+  /**
+   * The child's last output. Node reports `exit` before the piped stderr has
+   * delivered its final bytes, so this may wait for the stream to drain.
+   */
+  readonly lastOutput?: () => string | Promise<string>;
 }
 
 export interface LoopbackPortReservation {
@@ -465,7 +520,7 @@ export async function waitForStorageReady(
       throw new ServerExitedBeforeReady(
         options.child.exitCode,
         options.child.signalCode,
-        options.lastOutput?.() ?? "",
+        (await options.lastOutput?.()) ?? "",
       );
     }
     const remaining = deadline - now();
