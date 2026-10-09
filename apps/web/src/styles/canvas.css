@@ -2397,8 +2397,13 @@
   color: var(--oct-accent);
 }
 
-.canvas-block__comment-marker:hover {
-  background: var(--oct-surface);
+/* Focus takes the hover fill: a marker that already shows its count has no
+   other cue, so keyboard focus on it was invisible. The fill is translucent
+   ink because the marker overlaps the edge of a card drawn in the surface
+   colour, where a surface fill does not show. */
+.canvas-block__comment-marker:hover,
+.canvas-block__comment-marker:focus-visible {
+  background: var(--oct-fill-2);
 }
 
 @media (hover: none) {
