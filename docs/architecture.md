@@ -1748,8 +1748,18 @@ modelId }`, and the model picker is provider-first. Discovery can find
   launches get the failing `git` stand-in described under
   [Security and authority](#security-and-authority), so 2.x offers turns in
   every mode there; on Linux the probe fails closed and the runtime is listed
-  without turns. Approvals map through 2.0.22's `permission.asked` event and
-  its reply route, whose body is `{decision}`. An approval is answered
+  without turns. 2.0.22 names its turn events without the `session.next.`
+  prefix earlier 2.x builds used (`session.text.*`, `session.reasoning.*`,
+  `session.tool.*`, `session.step.*`, `session.execution.*`), identifies a
+  tool call by `id`, and names the tool only on `session.tool.input.started`;
+  Octant folds them onto the earlier names, so 1.x, earlier 2.x, and 2.0.22
+  share one mapping. `session.execution.succeeded` completes the turn, its
+  `failed` and `interrupted` outcomes fail or interrupt it, and a scheduled
+  retry reports waiting. Queueing, lifecycle, part start and end, and running
+  usage totals report nothing (each step reports its own usage); any other
+  event fails the turn closed with an error naming it. Approvals map
+  through 2.0.22's `permission.asked` event and its reply route, whose body
+  is `{decision}`. An approval is answered
   `once`, never `always`, even when approvals are remembered for the Project:
   `always` would save a grant in OpenCode's data directory, which it shares
   with the person's own use, outside Octant's revocation. Approval-gated on
