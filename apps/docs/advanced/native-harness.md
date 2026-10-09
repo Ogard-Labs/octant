@@ -31,8 +31,11 @@ thread holds that authority with or without a Project. A thread that can no
 longer act (archived, its folder or Project changed, or its provider turned
 off) has every tool call refused, and the model is told why so it can say so.
 A read never needs an approval; an edit, a write, or a command follows the
-thread's access posture, and a thread that has taken in untrusted content asks
-again before writing. An edit needs a prior read of the same file and refuses when
+thread's access posture. Once a thread has taken in outside content — a
+fetched page, search results, or a helper's reply — it asks before every
+edit, write, command, and page fetch, even under Full access. Reading,
+searching, and running commands in your own folder do not count as outside
+content. An edit needs a prior read of the same file and refuses when
 the file changed since. A truncated result says how much was left out and
 where to continue.
 
@@ -264,7 +267,9 @@ the harness card, the phone panel, the terminal UI's Approval panel, and as
 a `[y]es / [a]lways / [n]o` prompt in line mode. **Allow** runs it once;
 **Allow for this session** also covers that class of call (shell commands,
 project file writes, …) for the rest of the thread's session and nothing
-beyond it — the thread's posture is untouched, and a restart asks again.
+beyond it — the thread's posture is untouched, and a restart asks again. It
+stops covering the thread once the thread takes in outside content: from then
+on each such call asks again, and the choice is not offered.
 **Deny** tells the lead not to retry. Every approval and decision is
 journaled with the session.
 

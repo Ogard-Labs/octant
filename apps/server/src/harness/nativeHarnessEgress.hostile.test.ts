@@ -191,7 +191,12 @@ async function hostileCodeLead(options: {
   const checkoutRoot = temporaryDirectory("octant-egress-checkout-");
   writeFileSync(join(checkoutRoot, "README.md"), "hello\n");
   const shell = recordingShell();
-  const asked: Array<{ readonly summary: string; readonly approvalClass: string }> = [];
+  const asked: Array<{
+    readonly toolName: string;
+    readonly summary: string;
+    readonly approvalClass: string;
+    readonly singleUse: boolean;
+  }> = [];
   const answers = options.answers;
   let approvals: NativeHarnessApprovalStore | undefined;
   if (answers !== undefined) {
@@ -204,7 +209,12 @@ async function hostileCodeLead(options: {
       uuid: randomUUID,
       clock: () => now,
       onAsked: ({ approval }) => {
-        asked.push({ summary: approval.summary, approvalClass: approval.approvalClass });
+        asked.push({
+          toolName: approval.toolName,
+          summary: approval.summary,
+          approvalClass: approval.approvalClass,
+          singleUse: approval.singleUse === true,
+        });
         const answer = answers.shift() ?? "deny";
         setImmediate(() => approvals?.decide(threadId, String(approval.id), answer));
       },
@@ -341,6 +351,113 @@ describe("native harness hostile content", () => {
     }
     expect(lead.asked).toEqual([]);
     expect(lead.shell.commands).toEqual([]);
+  });
+
+  it("taints the thread only when a tool brings in outside content", async () => {
+    const lead = await hostileCodeLead({ posture: "full-access" });
+
+    // Local reads, searches, writes, and commands are not outside content.
+    expect(await lead.call("read", { path: "README.md" })).toMatchObject({ isError: false });
+    expect(await lead.call("grep", { pattern: "hello" })).toMatchObject({ isError: false });
+    expect(await lead.call("glob", { pattern: "*.md" })).toMatchObject({ isError: false });
+    expect(await lead.call("bash", { command: "bun test" })).toMatchObject({ isError: false });
+    expect(await lead.call("write", { path: "notes.md", content: "local notes\n" })).toMatchObject({
+      isError: false,
+    });
+    expect(lead.tainted()).toBe(false);
+
+    // A fetched page is.
+    expect(await lead.call("web-fetch", { url: lead.pageUrl })).toMatchObject({ isError: false });
+    expect(lead.tainted()).toBe(true);
+  });
+
+  it("stops an always approval covering its class once the thread takes in outside content", async () => {
+    const lead = await hostileCodeLead({
+      posture: "approval-gated",
+      answers: ["approve-always", "approve", "approve-always", "approve"],
+    });
+
+    // On a clean thread "always" covers the class for the session.
+    expect(await lead.call("bash", { command: "bun test" })).toMatchObject({ isError: false });
+    expect(await lead.call("bash", { command: "bun run lint" })).toMatchObject({ isError: false });
+    expect(lead.asked).toHaveLength(1);
+    expect(lead.asked[0]).toMatchObject({ approvalClass: "shell-commands", singleUse: false });
+
+    await lead.call("web-fetch", { url: lead.pageUrl });
+    expect(lead.tainted()).toBe(true);
+
+    // The next command in that class asks again, and offers no "always".
+    expect(await lead.call("bash", { command: INJECTED_COMMAND })).toMatchObject({
+      isError: false,
+    });
+    expect(lead.asked).toHaveLength(2);
+    expect(lead.asked[1]).toMatchObject({ approvalClass: "shell-commands", singleUse: true });
+
+    // An "always" answered on the tainted thread covers only that one command.
+    expect(await lead.call("bash", { command: "bun test" })).toMatchObject({ isError: false });
+    expect(await lead.call("bash", { command: "bun test" })).toMatchObject({ isError: false });
+    expect(lead.asked).toHaveLength(4);
+    expect(lead.shell.commands).toEqual([
+      "bun test",
+      "bun run lint",
+      INJECTED_COMMAND,
+      "bun test",
+      "bun test",
+    ]);
+  });
+
+  it("asks before every web-fetch on a tainted thread, so a URL cannot carry data out silently", async () => {
+    // Nobody to confirm: the second fetch refuses, even under full access.
+    const unattended = await hostileCodeLead({ posture: "full-access" });
+    await unattended.call("web-fetch", { url: unattended.pageUrl });
+    expect(unattended.tainted()).toBe(true);
+    expect(
+      await unattended.call("web-fetch", { url: `${unattended.pageUrl}?k=secret` }),
+    ).toMatchObject({ isError: true, result: { error: "approval-required" } });
+    expect(unattended.pageSeen).toHaveLength(1);
+
+    // With a person there, each fetch waits for them; "always" does not stick.
+    const lead = await hostileCodeLead({
+      posture: "approval-gated",
+      answers: ["approve-always", "deny"],
+    });
+    await lead.call("web-fetch", { url: lead.pageUrl });
+    expect(lead.asked).toEqual([]);
+    expect(await lead.call("web-fetch", { url: `${lead.pageUrl}?page=2` })).toMatchObject({
+      isError: false,
+    });
+    expect(await lead.call("web-fetch", { url: `${lead.pageUrl}?k=secret` })).toMatchObject({
+      isError: true,
+      result: { error: "approval-denied" },
+    });
+    expect(lead.asked).toEqual([
+      expect.objectContaining({
+        toolName: "web-fetch",
+        approvalClass: "network-access",
+        singleUse: true,
+      }),
+      expect.objectContaining({
+        toolName: "web-fetch",
+        approvalClass: "network-access",
+        singleUse: true,
+      }),
+    ]);
+    expect(lead.pageSeen.map((request) => request.url)).toEqual(["/forecast", "/forecast?page=2"]);
+  });
+
+  it("leaves a clean thread's web-fetch and always approvals as they were", async () => {
+    const lead = await hostileCodeLead({ posture: "approval-gated", answers: ["approve-always"] });
+    // A clean approval-gated thread fetches without asking …
+    expect(await lead.call("web-fetch", { url: lead.pageUrl })).toMatchObject({ isError: false });
+    expect(lead.asked).toEqual([]);
+
+    // … and before anything outside comes in, "always" covers a class.
+    const clean = await hostileCodeLead({ posture: "approval-gated", answers: ["approve-always"] });
+    await clean.call("read", { path: "README.md" });
+    await clean.call("bash", { command: "bun test" });
+    await clean.call("bash", { command: "bun test" });
+    expect(clean.asked).toHaveLength(1);
+    expect(clean.shell.commands).toEqual(["bun test", "bun test"]);
   });
 
   it("refuses a web-fetch that smuggles headers or a non-web scheme before anything is sent", async () => {

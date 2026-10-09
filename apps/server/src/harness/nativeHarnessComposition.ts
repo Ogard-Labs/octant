@@ -14,6 +14,7 @@ import {
   type WorkThread,
 } from "@octant/contracts";
 import { hasKnownContextWindow } from "@octant/domain/context-policy";
+import { nativeHarnessResultTaintsThread } from "@octant/domain/untrusted-content-policy";
 import { ToolCallAuthorityService } from "../toolCallAuthorityService";
 import type { ContextHarnessService } from "../context/contextHarnessService";
 import type {
@@ -112,12 +113,22 @@ export interface NativeHarnessComposition {
 /**
  * Composes the harness tool set for one thread in one mode. The mode decides
  * the root and the ports; the catalog decides which tools exist in that mode;
- * the authority service decides each call. Every result is tainted before it
- * reaches the next model turn, like any other app-managed tool.
+ * the authority service decides each call. A result that brings in outside
+ * content taints the thread before it reaches the next model turn; local
+ * reads, searches, edits, and commands do not.
  */
 export function createNativeHarnessComposition(
   options: NativeHarnessCompositionOptions,
 ): NativeHarnessComposition {
+  const resultTaintsThread = (call: { readonly name: string; readonly inputJson: string }) => {
+    let args: unknown;
+    try {
+      args = call.inputJson.trim().length === 0 ? {} : JSON.parse(call.inputJson);
+    } catch {
+      args = undefined;
+    }
+    return nativeHarnessResultTaintsThread({ toolName: call.name, arguments: args });
+  };
   const contextRemaining =
     options.contextHarness === undefined
       ? undefined
@@ -181,6 +192,7 @@ export function createNativeHarnessComposition(
       threadId: input.threadId,
       recordExternalContentIngestion: options.recordExternalContentIngestion,
       uuid: options.uuid,
+      resultTaintsThread,
     });
   const leadOf = (thread: {
     readonly providerInstanceId: ProviderInstanceId;
@@ -222,6 +234,7 @@ export function createNativeHarnessComposition(
               toolName: input.toolName,
               summary: input.summary,
               approvalClass: input.approvalClass,
+              singleUse: input.freshConfirmation,
               signal: input.signal,
             }),
         }),
@@ -377,6 +390,7 @@ export function createNativeHarnessComposition(
         threadId: runId,
         recordExternalContentIngestion: options.recordExternalContentIngestion,
         uuid: options.uuid,
+        resultTaintsThread,
       });
     },
   };

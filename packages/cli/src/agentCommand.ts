@@ -532,7 +532,7 @@ async function decidePendingApproval(
     input.stdout.write(`${JSON.stringify({ kind: "approval", approval })}\n`);
   } else {
     input.stdout.write(
-      `\n! ${approval.toolName} wants to ${approval.summary} (${approval.approvalClass})\n  allow? [y]es / [a]lways this session / [n]o > `,
+      `\n! ${approval.toolName} wants to ${approval.summary} (${approval.approvalClass})\n  allow? [y]es / ${approval.singleUse === true ? "" : "[a]lways this session / "}[n]o > `,
     );
   }
   const line = (await lines.next())?.trim().toLowerCase() ?? "";

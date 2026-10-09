@@ -42,6 +42,10 @@ export interface NativeHarnessApprovalStoreOptions {
  * session and blocks the call; a decision from any surface settles it. An
  * "always" approval remembers the class for this thread's session only —
  * the thread's posture is untouched, so a restart asks again.
+ *
+ * A single-use ask (the thread has taken in outside content) is never
+ * answered by a remembered class and never remembers one. Taint lasts for the
+ * thread's lifetime, so an "always" given then could only ever be a lie.
  */
 export class NativeHarnessApprovalStore {
   readonly #options: NativeHarnessApprovalStoreOptions;
@@ -61,13 +65,16 @@ export class NativeHarnessApprovalStore {
     readonly source?: NativeHarnessInteractionSource;
     readonly summary: string;
     readonly approvalClass: string;
+    readonly singleUse?: boolean;
     readonly signal?: AbortSignal | undefined;
   }): Promise<NativeHarnessApprovalOutcome> {
+    const singleUse = input.singleUse === true;
     if (input.signal?.aborted) return Promise.resolve("cancelled");
     if (input.source !== undefined && input.summary.length > 8_192)
       return Promise.resolve("denied");
     if (
       input.source === undefined &&
+      !singleUse &&
       this.#remembered.get(input.threadId)?.has(input.approvalClass) === true
     ) {
       return Promise.resolve("approved");
@@ -89,6 +96,7 @@ export class NativeHarnessApprovalStore {
         ? { detail: input.summary }
         : {}),
       approvalClass: input.approvalClass,
+      ...(singleUse ? { singleUse: true } : {}),
       status: "pending",
       askedAt: decodeUtcTimestamp(this.#options.clock()),
     });
@@ -114,7 +122,7 @@ export class NativeHarnessApprovalStore {
       const waiter: Waiter = {
         threadId: input.threadId,
         approvalClass: input.approvalClass,
-        allowRemember: input.source === undefined,
+        allowRemember: input.source === undefined && !singleUse,
         resolve: settle,
         timer: setTimeout(
           () => settle("expired"),

@@ -250,4 +250,25 @@ describe("NativeHarnessSessionCard", () => {
       }),
     );
   });
+
+  it("offers no session-wide choice for a call on a thread that took in outside content", async () => {
+    const approval = {
+      id: "00000000-0000-4000-8000-000000000064",
+      toolName: "web-fetch",
+      summary: "web-fetch: https://example.com/?k=1",
+      approvalClass: "network-access",
+      singleUse: true,
+      status: "pending",
+      askedAt: "2026-09-05T12:06:00.000Z",
+    };
+    const client = {
+      session: vi.fn(async () => ({ ...view(), approvals: [approval] })),
+      command: vi.fn(),
+      answerQuestion: vi.fn(),
+      decideApproval: vi.fn(),
+    };
+    render(<NativeHarnessSessionCard client={client as never} threadId={threadId} />);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Allow" })).toBeVisible());
+    expect(screen.queryByRole("button", { name: "Allow for this session" })).toBeNull();
+  });
 });

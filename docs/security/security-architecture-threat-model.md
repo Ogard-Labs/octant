@@ -274,7 +274,11 @@ window, or approves an action class the host policy reserves for the local user.
   Standing session grants and remembered Full access do not silently satisfy these classes on a
   tainted thread; the confirmation prompt names the ingested sources. Enforcement: the policy
   engine's step 7 — module `packages/domain/src/toolCallPolicy.ts` with the taint projection in
-  `apps/server`.
+  `apps/server`. In the native harness only results that bring in outside content mark the thread
+  (`web-fetch`, `web-search`, a child's collected reply); local reads, searches, edits, and
+  commands do not. On a tainted thread a harness "always" approval stops covering its class, and
+  `web-fetch` itself needs the per-action confirmation because a GET can carry data out in its
+  URL (Henrik decision 2026-10-09; detail in `docs/architecture.md`, Native harness).
 - **Structured references stay inert.** `@plugin` and `$skill` references cannot install, trust,
   enable, or elevate (exists today, `packages/plugin-host/src/composer.ts`); injected text that
   imitates them remains ordinary text.

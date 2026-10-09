@@ -188,6 +188,11 @@ export interface NativeHarnessToolPorts {
     readonly toolName: NativeHarnessToolName;
     readonly summary: string;
     readonly approvalClass: string;
+    /**
+     * The policy wants a person to confirm this one call: the thread has taken
+     * in outside content. A remembered "always" approval does not answer it.
+     */
+    readonly freshConfirmation: boolean;
     readonly signal?: AbortSignal;
   }) => Promise<"approved" | "denied" | "expired" | "cancelled">;
   /** The thread's goal, when the host can reach it. */
@@ -354,6 +359,7 @@ export function createNativeHarnessTools(
         toolName: name,
         summary: request.intent,
         approvalClass: decision.policy.approvalClass,
+        freshConfirmation: decision.reason === "taint-requires-fresh-confirmation",
         ...(signal === undefined ? {} : { signal }),
       });
       if (outcome !== "approved") {

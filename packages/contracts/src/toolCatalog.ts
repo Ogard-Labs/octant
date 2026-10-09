@@ -92,8 +92,17 @@ export type ClosedToolCatalogEntry = {
   readonly modes: ReadonlyArray<"chat" | "work" | "code">;
   readonly requiredCapabilityClass: ToolCatalogCapabilityClass;
   readonly approvalClass: ToolApprovalClass;
-  /** Classes that remain irreversible under thread taint. */
+  /**
+   * On a thread that has taken in outside content, every call needs a fresh
+   * confirmation from a person: no posture or remembered approval covers it.
+   */
   readonly irreversibleUnderTaint: boolean;
+  /**
+   * Whether a successful result brings content from outside the machine into
+   * the thread, and so taints it. Local reads, searches, edits, and commands
+   * do not; network fetches, external applications, and MCP tools do.
+   */
+  readonly resultTaintsThread: boolean;
   readonly requiresAppManagedTools: boolean;
   readonly decodeArguments: (value: unknown) => unknown;
 };
@@ -106,6 +115,7 @@ function entry(input: {
   readonly requiredCapabilityClass: ToolCatalogCapabilityClass;
   readonly approvalClass: ToolApprovalClass;
   readonly irreversibleUnderTaint: boolean;
+  readonly resultTaintsThread: boolean;
   readonly requiresAppManagedTools: boolean;
   readonly decodeArguments: (value: unknown) => unknown;
 }): ClosedToolCatalogEntry {
@@ -119,6 +129,7 @@ function entry(input: {
     requiredCapabilityClass: input.requiredCapabilityClass,
     approvalClass: input.approvalClass,
     irreversibleUnderTaint: input.irreversibleUnderTaint,
+    resultTaintsThread: input.resultTaintsThread,
     requiresAppManagedTools: input.requiresAppManagedTools,
     decodeArguments: input.decodeArguments,
   };
@@ -140,6 +151,12 @@ const decodeValidationToolArguments = Schema.decodeUnknownSync(ValidationToolArg
  * need an approval; edits, writes, and the shell are the ordinary side-effect
  * classes and stay irreversible under taint, so hostile content a tool pulled
  * in cannot quietly turn into a file write or a command.
+ *
+ * Only a tool that brings in outside content taints the thread: the web tools,
+ * and a child's collected reply, which may relay what the child fetched.
+ * Tainting every result made the first local `read` turn every later write
+ * and command into a fresh prompt. `web-fetch` asks every time on a tainted
+ * thread because a GET can carry data out in its URL.
  */
 const NATIVE_HARNESS_TOOL_POLICY: Readonly<
   Record<
@@ -149,6 +166,7 @@ const NATIVE_HARNESS_TOOL_POLICY: Readonly<
       readonly requiredCapabilityClass: ToolCatalogCapabilityClass;
       readonly approvalClass: ToolApprovalClass;
       readonly irreversibleUnderTaint: boolean;
+      readonly resultTaintsThread: boolean;
     }
   >
 > = {
@@ -157,90 +175,105 @@ const NATIVE_HARNESS_TOOL_POLICY: Readonly<
     requiredCapabilityClass: "filesystem",
     approvalClass: "project-file-reads",
     irreversibleUnderTaint: false,
+    resultTaintsThread: false,
   },
   grep: {
     modes: ["work", "code"],
     requiredCapabilityClass: "filesystem",
     approvalClass: "project-file-reads",
     irreversibleUnderTaint: false,
+    resultTaintsThread: false,
   },
   glob: {
     modes: ["work", "code"],
     requiredCapabilityClass: "filesystem",
     approvalClass: "project-file-reads",
     irreversibleUnderTaint: false,
+    resultTaintsThread: false,
   },
   bash: {
     modes: ["code"],
     requiredCapabilityClass: "shell",
     approvalClass: "shell-commands",
     irreversibleUnderTaint: true,
+    resultTaintsThread: false,
   },
   edit: {
     modes: ["work", "code"],
     requiredCapabilityClass: "filesystem",
     approvalClass: "project-file-writes",
     irreversibleUnderTaint: true,
+    resultTaintsThread: false,
   },
   write: {
     modes: ["work", "code"],
     requiredCapabilityClass: "filesystem",
     approvalClass: "project-file-writes",
     irreversibleUnderTaint: true,
+    resultTaintsThread: false,
   },
   "web-fetch": {
     modes: ["chat", "work", "code"],
     requiredCapabilityClass: "network",
     approvalClass: "network-access",
-    irreversibleUnderTaint: false,
+    irreversibleUnderTaint: true,
+    resultTaintsThread: true,
   },
   "web-search": {
     modes: ["chat", "work", "code"],
     requiredCapabilityClass: "network",
     approvalClass: "network-access",
     irreversibleUnderTaint: false,
+    resultTaintsThread: true,
   },
   "todo-write": {
     modes: ["chat", "work", "code"],
     requiredCapabilityClass: "instructions",
     approvalClass: "thread-local",
     irreversibleUnderTaint: false,
+    resultTaintsThread: false,
   },
   "context-remaining": {
     modes: ["chat", "work", "code"],
     requiredCapabilityClass: "instructions",
     approvalClass: "thread-local",
     irreversibleUnderTaint: false,
+    resultTaintsThread: false,
   },
   "journal-lookup": {
     modes: ["chat", "work", "code"],
     requiredCapabilityClass: "instructions",
     approvalClass: "thread-local",
     irreversibleUnderTaint: false,
+    resultTaintsThread: false,
   },
   "second-opinion": {
     modes: ["chat", "work", "code"],
     requiredCapabilityClass: "instructions",
     approvalClass: "thread-local",
     irreversibleUnderTaint: false,
+    resultTaintsThread: false,
   },
   delegate: {
     modes: ["chat", "work", "code"],
     requiredCapabilityClass: "agents",
     approvalClass: "child-agent-creation",
     irreversibleUnderTaint: false,
+    resultTaintsThread: true,
   },
   "ask-user": {
     modes: ["chat", "work", "code"],
     requiredCapabilityClass: "instructions",
     approvalClass: "thread-local",
     irreversibleUnderTaint: false,
+    resultTaintsThread: false,
   },
   goal: {
     modes: ["chat", "work", "code"],
     requiredCapabilityClass: "instructions",
     approvalClass: "thread-local",
     irreversibleUnderTaint: false,
+    resultTaintsThread: false,
   },
   // A check runs a command, so it is policed exactly as the shell is.
   "goal-check": {
@@ -248,6 +281,7 @@ const NATIVE_HARNESS_TOOL_POLICY: Readonly<
     requiredCapabilityClass: "shell",
     approvalClass: "shell-commands",
     irreversibleUnderTaint: true,
+    resultTaintsThread: false,
   },
 };
 
@@ -273,6 +307,7 @@ export const CLOSED_TOOL_CATALOG: ReadonlyArray<ClosedToolCatalogEntry> = [
     requiredCapabilityClass: "browser",
     approvalClass: "network-access",
     irreversibleUnderTaint: false,
+    resultTaintsThread: true,
     requiresAppManagedTools: true,
     decodeArguments: (value) => decodeBrowserContextPolicy(value),
   }),
@@ -284,6 +319,7 @@ export const CLOSED_TOOL_CATALOG: ReadonlyArray<ClosedToolCatalogEntry> = [
     requiredCapabilityClass: "computer-use",
     approvalClass: "external-application",
     irreversibleUnderTaint: true,
+    resultTaintsThread: true,
     requiresAppManagedTools: true,
     decodeArguments: (value) => decodeComputerUsePolicy(value),
   }),
@@ -295,6 +331,7 @@ export const CLOSED_TOOL_CATALOG: ReadonlyArray<ClosedToolCatalogEntry> = [
     requiredCapabilityClass: "validation",
     approvalClass: "project-file-writes",
     irreversibleUnderTaint: false,
+    resultTaintsThread: false,
     requiresAppManagedTools: true,
     decodeArguments: (value) => decodeValidationToolArguments(value ?? {}),
   }),
@@ -306,6 +343,7 @@ export const CLOSED_TOOL_CATALOG: ReadonlyArray<ClosedToolCatalogEntry> = [
     requiredCapabilityClass: "mcp",
     approvalClass: "privilege-expansion",
     irreversibleUnderTaint: true,
+    resultTaintsThread: true,
     requiresAppManagedTools: true,
     decodeArguments: (value) => decodeMcpToolArguments(value),
   }),

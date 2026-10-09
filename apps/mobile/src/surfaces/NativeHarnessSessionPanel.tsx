@@ -184,11 +184,13 @@ export function NativeHarnessSessionPanel(props: NativeHarnessSessionPanelProps)
           </Text>
           <View style={styles.chips}>
             <GlassChip active={false} label="Allow" onPress={() => decide("approve")} />
-            <GlassChip
-              active={false}
-              label="Allow this session"
-              onPress={() => decide("approve-always")}
-            />
+            {pendingApproval.singleUse === true ? null : (
+              <GlassChip
+                active={false}
+                label="Allow this session"
+                onPress={() => decide("approve-always")}
+              />
+            )}
             <GlassChip active={false} label="Deny" onPress={() => decide("deny")} />
           </View>
         </View>

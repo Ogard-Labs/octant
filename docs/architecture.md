@@ -2448,14 +2448,24 @@ native harness in `apps/server/src/harness`:
   state with a networked command; the lead and a child with network
   authority use the ordinary one. The tool process environment carries only `PATH`, `HOME`, the temporary
   and locale variables, and what the harness sets, never a provider
-  credential. Every successful harness tool result taints the thread, so after
-  the first one `bash`, `edit`, `write`, and `goal-check` need a person's
-  confirmation even under Full access, and refuse when no approval surface
-  exists; a tool the thread was not offered refuses as `tool-unavailable`
-  without reaching policy or a person. The harness has no per-host network
-  rules, rule expiry, or learn mode: a tool process gets the thread's OS-level
-  `none` or `allow`, and an "always" approval covers its class for the rest of
-  the session, taint included. `nativeHarnessEgress.hostile.test.ts` holds the
+  credential. Only a harness tool result that brings in outside content taints
+  the thread: `web-fetch`, `web-search`, and a `delegate` `collect` (a child's
+  reply may relay what it fetched). Local `read`, `grep`, `glob`, `bash`,
+  `edit`, `write`, and `goal-check` results do not, so local work keeps its
+  ordinary approvals; the catalog's `resultTaintsThread` marks each tool and
+  `nativeHarnessResultTaintsThread` decides, failing closed for a name it does
+  not know. A command can still reach the network under the thread's OS-level
+  egress, and its output does not taint. Once tainted, `bash`, `edit`,
+  `write`, `goal-check`, and `web-fetch` need a person's confirmation for every
+  call even under Full access, and refuse when no approval surface exists;
+  `web-fetch` is included because a GET can carry data out in its URL. That
+  confirmation is single-use: a remembered "always" approval stops covering
+  its class the moment the thread is tainted, and an "always" answered then
+  covers only that call, so surfaces offer no "for this session" choice
+  (`singleUse` on the approval). A tool the thread was not offered refuses as
+  `tool-unavailable` without reaching policy or a person. The harness has no
+  per-host network rules, rule expiry, or learn mode: a tool process gets the
+  thread's OS-level `none` or `allow`. `nativeHarnessEgress.hostile.test.ts` holds the
   adversarial proofs; `nativeHarnessShell.test.ts` runs both shells under real
   Seatbelt and shows only the networked one reaching a loopback listener.
 - **Tool verification.** A routine Check connection runs no generating
