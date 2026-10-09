@@ -12,8 +12,11 @@ import {
   decodeCanvasRefreshCancelRequest,
   decodeCanvasRefreshRequest,
   decodeCanvasRefreshResult,
+  decodeCanvasVersion,
   decodeCanvasVersionId,
   decodeProviderInstanceId,
+  CANVAS_SCHEMA_VERSION,
+  LOCAL_HOST_ID,
   decodeProviderModelId,
   type CanvasActionCancelRequest,
   type CanvasActionReport,
@@ -69,6 +72,7 @@ import {
   type CanvasActionCapability,
   type CanvasBoardRejectionCode,
 } from "@octant/domain";
+import { ParseResult } from "effect";
 import type { CanvasProjection } from "./canvasProjection";
 import { CanvasEventStore, CanvasEventStoreError } from "./canvasEventStore";
 
@@ -593,6 +597,105 @@ export class CanvasService {
       this.#onVersionCommitted?.(version);
     } catch {
       // Reported by the listener's own receipt, never by the revision.
+    }
+  }
+
+  /**
+   * Record a version another of this person's computers wrote, as this
+   * Canvas's next version, or as its first one when it is not open in a
+   * thread here yet (0040: bind to a compatible thread).
+   *
+   * The content - title, blocks, sources, presentation - is adopted as given.
+   * The provenance is never taken from the other computer: a first version
+   * names the thread, Project, and mode `context` authorizes, and a later
+   * one keeps the thread the Canvas is already bound to. The caller has
+   * already decided the thread is compatible and recorded the content as
+   * external content on it; this refuses anything the Canvas authority would
+   * refuse a revise.
+   */
+  adoptVersion(
+    input: {
+      readonly canvasId: CanvasId;
+      readonly versionId: CanvasVersionId;
+      readonly content: CanvasDefinition;
+      readonly createdAt: UtcTimestamp;
+    },
+    context: CanvasAuthorizationContext,
+    project: CanvasProjectRecord | undefined,
+  ):
+    | { readonly kind: "adopted"; readonly version: CanvasVersion }
+    | { readonly kind: "denied"; readonly message: string } {
+    const entry = this.#projection.getById(input.canvasId);
+    const { provenance: _theirs, ...content } = input.content;
+    try {
+      if (entry === undefined) {
+        if (
+          context.originThreadId === undefined ||
+          context.projectId === null ||
+          project === undefined ||
+          project.lifecycle !== "active" ||
+          project.type !== context.mode ||
+          String(project.id) !== String(context.projectId) ||
+          input.content.provenance.mode !== context.mode
+        ) {
+          return { kind: "denied", message: "The thread cannot take this artifact." };
+        }
+        const version = decodeCanvasVersion({
+          schemaVersion: CANVAS_SCHEMA_VERSION,
+          canvasId: input.canvasId,
+          versionId: input.versionId,
+          sequence: 1,
+          definition: {
+            ...content,
+            provenance: {
+              ...input.content.provenance,
+              hostId: context.hostId ?? LOCAL_HOST_ID,
+              projectId: project.id,
+              threadId: context.originThreadId,
+            },
+          },
+          createdBy: this.#actor,
+          createdAt: input.createdAt,
+        });
+        this.#eventStore.appendCreate({
+          canvasId: input.canvasId,
+          version,
+          occurredAt: input.createdAt,
+        });
+        this.#projection.applyCreated({ canvasId: input.canvasId, version });
+        this.#announceVersion(version);
+        return { kind: "adopted", version };
+      }
+      if (!this.#authorize(entry, context, project)) {
+        return { kind: "denied", message: "This Canvas is not authorized in this workspace." };
+      }
+      const current = entry.currentVersion;
+      if (input.content.provenance.mode !== current.definition.provenance.mode) {
+        return { kind: "denied", message: "The version is from a different mode." };
+      }
+      const next = decodeCanvasVersion({
+        schemaVersion: CANVAS_SCHEMA_VERSION,
+        canvasId: input.canvasId,
+        versionId: input.versionId,
+        sequence: current.sequence + 1,
+        definition: { ...content, provenance: current.definition.provenance },
+        createdBy: this.#actor,
+        createdAt: input.createdAt,
+      });
+      this.#eventStore.appendVersion({
+        canvasId: input.canvasId,
+        current,
+        next,
+        occurredAt: input.createdAt,
+      });
+      this.#projection.applyVersionAppended({ canvasId: input.canvasId, version: next });
+      this.#announceVersion(next);
+      return { kind: "adopted", version: next };
+    } catch (error) {
+      if (error instanceof CanvasEventStoreError || error instanceof ParseResult.ParseError) {
+        return { kind: "denied", message: "The version could not be recorded here." };
+      }
+      throw error;
     }
   }
 

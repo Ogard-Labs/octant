@@ -10,9 +10,12 @@ import {
 } from "@octant/contracts/replica-entry";
 import { describe, expect, expectTypeOf, it } from "vitest";
 import {
+  decideReplicaArtifactBinding,
+  mergeReplicaArtifactBlocks,
   reconcileReplicaEntry,
   replicaArtifactHeads,
   replicaArtifactHidden,
+  replicaArtifactStanding,
   replicaReconcileCannotOverwrite,
   type ReplicaAppliedEntry,
   type ReplicaArtifactRecord,
@@ -500,5 +503,165 @@ describe("the heads of a replicated artifact", () => {
       { kind: "tombstone", originInstanceId: ids.north, originSequence: 4 },
     ]);
     expect(replicaArtifactHidden(revised)).toBe(false);
+  });
+});
+
+describe("where a synced artifact stands", () => {
+  const version = (versionId: string, parents: ReadonlyArray<string>) => ({
+    versionId: versionId as CanvasVersionId,
+    contentHash: hashA,
+    parentVersionIds: parents,
+  });
+  const deletion = (parents: ReadonlyArray<string>) => ({
+    contentHash: hashA,
+    originInstanceId: ids.north,
+    originSequence: 7,
+    parentVersionIds: parents,
+  });
+  const twoHeads = {
+    versions: [
+      version(ids.parent, []),
+      version(ids.version, [ids.parent]),
+      version(ids.otherVersion, [ids.parent]),
+    ],
+    tombstones: [],
+  };
+
+  it("offers two versions revised from one parent to choose between", () => {
+    expect(replicaArtifactStanding(twoHeads)).toEqual({
+      status: "two-versions",
+      candidates: [ids.version, ids.otherVersion],
+      ahead: undefined,
+      deletions: [],
+    });
+  });
+
+  it("counts the version open here as one of the two, and not a head it already holds", () => {
+    // Open here at `version`; the other computer's `otherVersion` stands beside it.
+    expect(
+      replicaArtifactStanding(twoHeads, {
+        currentVersionId: ids.version,
+        versionIds: [ids.parent, ids.version],
+      }),
+    ).toMatchObject({ status: "two-versions", candidates: [ids.version, ids.otherVersion] });
+    // A version written here while sync was off descends from a head it holds.
+    const writtenHere = "12121212-1212-4121-8121-121212121212";
+    expect(
+      replicaArtifactStanding(
+        { versions: [version(ids.parent, [])], tombstones: [] },
+        { currentVersionId: writtenHere, versionIds: [ids.parent, writtenHere] },
+      ),
+    ).toMatchObject({ status: "current", candidates: [writtenHere], ahead: undefined });
+  });
+
+  it("appends a later version from another computer rather than offering a choice", () => {
+    const resolved = "13131313-1313-4131-8131-131313131313";
+    const record = {
+      versions: [...twoHeads.versions, version(resolved, [ids.version, ids.otherVersion])],
+      tombstones: [],
+    };
+    expect(
+      replicaArtifactStanding(record, {
+        currentVersionId: ids.version,
+        versionIds: [ids.parent, ids.version],
+      }),
+    ).toEqual({ status: "current", candidates: [resolved], ahead: resolved, deletions: [] });
+  });
+
+  it("says deleted only while the deletion is all that is left, and not once restored", () => {
+    const tombstone = deletion([ids.parent]);
+    const deleted = { versions: [version(ids.parent, [])], tombstones: [tombstone] };
+    expect(replicaArtifactStanding(deleted)).toEqual({
+      status: "deleted",
+      candidates: [],
+      ahead: undefined,
+      deletions: [tombstone],
+    });
+    // Open here at the deleted version, it is deleted here too.
+    expect(
+      replicaArtifactStanding(deleted, { currentVersionId: ids.parent, versionIds: [ids.parent] })
+        .status,
+    ).toBe("deleted");
+    // A restore is a version over the deleted one; the tombstone stays in the history.
+    const restored = {
+      versions: [...deleted.versions, version(ids.version, [ids.parent])],
+      tombstones: deleted.tombstones,
+    };
+    expect(replicaArtifactStanding(restored)).toMatchObject({
+      status: "current",
+      candidates: [ids.version],
+    });
+    expect(replicaArtifactHeads(restored)).toContainEqual(
+      expect.objectContaining({ kind: "tombstone" }),
+    );
+  });
+});
+
+describe("binding a synced artifact to a thread", () => {
+  const thread = {
+    mode: "work" as const,
+    active: true,
+    projectActive: true,
+    readOnly: false,
+    workspaceResolved: true,
+  };
+
+  it("takes an artifact only into an active thread of its own mode whose workspace resolves", () => {
+    expect(decideReplicaArtifactBinding("work", thread)).toEqual({ kind: "compatible" });
+    expect(decideReplicaArtifactBinding("chat", thread)).toEqual({
+      kind: "incompatible",
+      reason: "mode-mismatch",
+    });
+    expect(decideReplicaArtifactBinding("work", { ...thread, active: false })).toMatchObject({
+      reason: "thread-inactive",
+    });
+    expect(decideReplicaArtifactBinding("work", { ...thread, projectActive: false })).toMatchObject(
+      { reason: "project-unavailable" },
+    );
+    expect(
+      decideReplicaArtifactBinding("work", { ...thread, workspaceResolved: false }),
+    ).toMatchObject({ reason: "workspace-unavailable" });
+  });
+
+  it("never takes one into a thread in Plan mode", () => {
+    expect(
+      decideReplicaArtifactBinding("code", { ...thread, mode: "code", readOnly: true }),
+    ).toEqual({ kind: "incompatible", reason: "read-only" });
+  });
+});
+
+describe("merging two versions' blocks", () => {
+  const text = (blockId: string, value: string) =>
+    ({ blockId, schemaVersion: 1, kind: "rich-text", text: value }) as never;
+
+  it("keeps every block of both, and both sides of a block they changed differently", () => {
+    const merged = mergeReplicaArtifactBlocks(
+      { blocks: [text("t1", "Ship Monday"), text("t2", "Owner: Ada")], sourceManifest: [] },
+      { blocks: [text("t1", "Ship after beta"), text("t2", "Owner: Ada"), text("t3", "Risks")] },
+    );
+    expect(merged.omitted).toBe(0);
+    expect(merged.blocks.map((block) => [block.blockId, (block as { text: string }).text])).toEqual(
+      [
+        ["t1", "Ship Monday"],
+        ["t2", "Owner: Ada"],
+        ["t1-2", "Ship after beta"],
+        ["t3", "Risks"],
+      ],
+    );
+  });
+
+  it("leaves out a block that names a source the merged version does not list, and counts it", () => {
+    const citation = {
+      blockId: "c1",
+      schemaVersion: 1,
+      kind: "citation",
+      sourceId: "77777777-0000-4000-8000-000000000001",
+      label: "Spec",
+    } as never;
+    const merged = mergeReplicaArtifactBlocks(
+      { blocks: [text("t1", "Ship")], sourceManifest: [] },
+      { blocks: [citation] },
+    );
+    expect(merged).toEqual({ blocks: [text("t1", "Ship")], omitted: 1 });
   });
 });

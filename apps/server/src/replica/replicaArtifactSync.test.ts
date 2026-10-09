@@ -49,6 +49,11 @@ import {
 import { registerReplicaStoreSettingsEvents } from "./replicaStoreSettingsEvents";
 import { ReplicaStoreSettingsService } from "./replicaStoreSettingsService";
 import { bucketFake, type BucketFake } from "./s3BucketFake.test-support";
+import {
+  SyncedArtifactService,
+  type SyncedArtifactPorts,
+  type SyncedArtifactThread,
+} from "./syncedArtifactService";
 
 const NOW = "2026-10-08T09:00:00.000Z";
 const actor = Schema.decodeUnknownSync(EventActor)({
@@ -253,6 +258,81 @@ function computer(
     clock: () => NOW as UtcTimestamp,
   });
 
+  // Threads this computer has, as the binding policy sees them, and every
+  // content reference recorded as external content on a thread.
+  const threads: SyncedArtifactThread[] = [];
+  const ingested: { threadId: string; contentReference: string; sourceLabel: string }[] = [];
+  /** Commit a version the way the Canvas service does: append, then announce. */
+  const append = (version: CanvasVersion) => {
+    canvases.set(String(version.canvasId), [
+      ...(canvases.get(String(version.canvasId)) ?? []),
+      version,
+    ]);
+    void sync.versionCommitted(version);
+    return { kind: "committed" as const, version };
+  };
+  const syncedArtifacts = new SyncedArtifactService({
+    artifacts: () => artifactProjection.state(),
+    membership: () => membershipProjection.state(),
+    sync,
+    localCanvas: (canvasId) => {
+      const versions = canvases.get(String(canvasId));
+      const current = versions?.at(-1);
+      return versions === undefined || current === undefined
+        ? undefined
+        : { currentVersion: current, versions, projectName: "Here" };
+    },
+    threads: () => threads,
+    ingest: (input) => {
+      ingested.push(input);
+      return true;
+    },
+    adopt: ({ canvasId, versionId, content, createdAt, threadId }) => {
+      const current = canvases.get(String(canvasId))?.at(-1);
+      const thread = threads.find((candidate) => candidate.threadId === threadId);
+      if (current === undefined && thread === undefined) {
+        return { kind: "denied", message: "No thread." };
+      }
+      return append(
+        decodeCanvasVersion({
+          schemaVersion: 1,
+          canvasId,
+          versionId,
+          sequence: (current?.sequence ?? 0) + 1,
+          definition: {
+            ...content,
+            provenance: current?.definition.provenance ?? {
+              ...content.provenance,
+              hostId: "local",
+              projectId: thread?.projectId,
+              threadId: thread?.threadId,
+            },
+          },
+          createdBy: actor,
+          createdAt,
+        }),
+      );
+    },
+    revise: ({ canvasId, blocks }) => {
+      const current = canvases.get(String(canvasId))?.at(-1);
+      if (current === undefined) return { kind: "denied", message: "Not open here." };
+      return append(
+        decodeCanvasVersion({
+          ...current,
+          versionId: nextUuid(),
+          sequence: current.sequence + 1,
+          definition: { ...current.definition, blocks },
+        }),
+      );
+    },
+    entry: (canvasId) =>
+      canvases.has(String(canvasId))
+        ? ({ canvasId } as unknown as ReturnType<SyncedArtifactPorts["entry"]>)
+        : undefined,
+    uuid: nextUuid,
+    clock: () => NOW as UtcTimestamp,
+  });
+
   /** Commit a version locally, the way the Canvas service announces one. */
   const commit = async (version: CanvasVersion) => {
     canvases.set(String(version.canvasId), [
@@ -317,6 +397,9 @@ function computer(
     library,
     canvases,
     commit,
+    threads,
+    ingested,
+    syncedArtifacts,
     events,
     id,
     turnSyncOn,
@@ -861,5 +944,307 @@ describe("artifact sync", () => {
     expect(restartedStudio.membershipProjection.state().localSequence).toBe(studioSequence);
     expect(expectKind(await restartedLaptop.sync.pull(), "pulled").artifacts).toEqual([]);
     expect(restartedLaptop.artifactProjection.state().artifact(ids.canvas)).toBeUndefined();
+  });
+});
+
+/** A thread on one computer, compatible with a Work artifact unless told otherwise. */
+function workThread(
+  threadId: string,
+  facts: Partial<SyncedArtifactThread["facts"]> = {},
+): SyncedArtifactThread {
+  return {
+    threadId,
+    title: "Launch review",
+    updatedAt: NOW,
+    projectId: ids.laptopProject,
+    projectName: "Field notes",
+    facts: {
+      mode: "work",
+      active: true,
+      projectActive: true,
+      readOnly: false,
+      workspaceResolved: true,
+      ...facts,
+    },
+  };
+}
+
+function queuedParents(host: Computer): ReadonlyArray<ReadonlyArray<string>> {
+  return eventsNamed(host, REPLICA_ARTIFACT_EVENT_NAMES.queued).map((event) =>
+    (event.payload as { parents: { versionId: string }[] }).parents.map((parent) =>
+      String(parent.versionId),
+    ),
+  );
+}
+
+describe("synced artifacts in the library", () => {
+  const laptopThread = "40000000-0000-4000-8000-0000000000aa";
+
+  it("opens a synced artifact only in a compatible thread, as external content, and never republishes it", async () => {
+    const shared: SharedStore = { kind: "folder", folder: scratch(homedir()) };
+    const { studio, laptop } = await pair(shared);
+    await studio.commit(canvasVersion({ versionId: ids.v1, sequence: 1, text: "Ship it." }));
+    await laptop.sync.pull();
+
+    // Nothing on the laptop can take a Work artifact: an archived Work thread
+    // and a Code thread in Plan mode. The refusal says so, and nothing binds.
+    laptop.threads.push(
+      workThread("40000000-0000-4000-8000-0000000000a1", { active: false }),
+      workThread("40000000-0000-4000-8000-0000000000a2", { mode: "code", readOnly: true }),
+    );
+    const detail = await laptop.syncedArtifacts.execute({ kind: "detail", canvasId: ids.canvas });
+    expect(detail).toMatchObject({
+      kind: "artifact-synced-detail",
+      status: "current",
+      openHere: false,
+      threads: [],
+      versions: [expect.objectContaining({ computerName: "Studio Mac", thisComputer: false })],
+    });
+    expect(
+      await laptop.syncedArtifacts.execute({
+        kind: "open",
+        canvasId: ids.canvas,
+        threadId: "40000000-0000-4000-8000-0000000000a1",
+      }),
+    ).toMatchObject({ kind: "artifact-synced-refused", reason: "no-compatible-thread" });
+    expect(laptop.canvases.has(String(ids.canvas))).toBe(false);
+    expect(laptop.ingested).toEqual([]);
+
+    // With a compatible thread, a thread of the wrong mode is still refused.
+    laptop.threads.push(workThread(laptopThread));
+    expect(
+      await laptop.syncedArtifacts.execute({
+        kind: "open",
+        canvasId: ids.canvas,
+        threadId: "40000000-0000-4000-8000-0000000000a2",
+      }),
+    ).toMatchObject({ kind: "artifact-synced-refused", reason: "incompatible-thread" });
+
+    // Opened in the compatible thread: recorded as external content on that
+    // thread first, then bound there under the id it has everywhere.
+    expect(
+      await laptop.syncedArtifacts.execute({
+        kind: "open",
+        canvasId: ids.canvas,
+        threadId: laptopThread,
+      }),
+    ).toMatchObject({ kind: "artifact-synced-opened" });
+    expect(laptop.ingested).toEqual([
+      {
+        threadId: laptopThread,
+        contentReference: `replica-artifact:${ids.canvas}:${ids.v1}`,
+        sourceLabel: "Synced from Studio Mac",
+      },
+    ]);
+    const bound = laptop.canvases.get(String(ids.canvas));
+    expect(bound?.map((version) => String(version.versionId))).toEqual([ids.v1]);
+    expect(String(bound?.[0]?.definition.provenance.threadId)).toBe(laptopThread);
+    expect(String(bound?.[0]?.definition.provenance.projectId)).toBe(ids.laptopProject);
+    // The Studio Mac's version is already in the store; the laptop queues nothing.
+    expect(eventsNamed(laptop, REPLICA_ARTIFACT_EVENT_NAMES.queued)).toEqual([]);
+    expect(
+      await laptop.syncedArtifacts.execute({
+        kind: "open",
+        canvasId: ids.canvas,
+        threadId: laptopThread,
+      }),
+    ).toMatchObject({ kind: "artifact-synced-refused", reason: "already-open-here" });
+  });
+
+  it("keeps one of two versions by publishing a version that resolves both on every computer", async () => {
+    const shared: SharedStore = { kind: "folder", folder: scratch(homedir()) };
+    const { studio, laptop } = await pair(shared);
+    const v1 = canvasVersion({ versionId: ids.v1, sequence: 1, text: "Ship it." });
+    await studio.commit(v1);
+    await laptop.sync.pull();
+    laptop.threads.push(workThread(laptopThread));
+    await laptop.syncedArtifacts.execute({
+      kind: "open",
+      canvasId: ids.canvas,
+      threadId: laptopThread,
+    });
+
+    // Both computers revise v1.
+    await studio.commit(canvasVersion({ versionId: ids.v2a, sequence: 2, text: "Ship Monday." }));
+    const laptopV1 = laptop.canvases.get(String(ids.canvas))?.[0];
+    if (laptopV1 === undefined) throw new Error("not bound");
+    await laptop.commit(
+      decodeCanvasVersion({
+        ...laptopV1,
+        versionId: ids.v2b,
+        sequence: 2,
+        definition: {
+          ...laptopV1.definition,
+          blocks: [
+            { blockId: "t1", schemaVersion: 1, kind: "rich-text", text: "Ship after beta." },
+          ],
+        },
+      }),
+    );
+    await studio.sync.sync();
+    await laptop.sync.sync();
+
+    const detail = await laptop.syncedArtifacts.execute({ kind: "detail", canvasId: ids.canvas });
+    if (detail.kind !== "artifact-synced-detail") throw new Error(JSON.stringify(detail));
+    expect(detail.status).toBe("two-versions");
+    expect(
+      detail.versions
+        .filter((version) => version.candidate)
+        .map((version) => [String(version.versionId), version.computerName, version.thisComputer])
+        .sort(),
+    ).toEqual(
+      [
+        [ids.v2a, "Studio Mac", false],
+        [ids.v2b, "MacBook Air", true],
+      ].sort(),
+    );
+    expect(detail.versions.every((version) => version.computerName !== "")).toBe(true);
+    // Each candidate carries a preview, so the two can be compared side by side.
+    expect(
+      detail.versions.filter((version) => version.candidate && version.preview !== undefined),
+    ).toHaveLength(2);
+
+    expect(
+      await laptop.syncedArtifacts.execute({
+        kind: "keep",
+        canvasId: ids.canvas,
+        versionId: ids.v1 as never,
+      }),
+    ).toMatchObject({ reason: "unknown-version" });
+    const kept = await laptop.syncedArtifacts.execute({
+      kind: "keep",
+      canvasId: ids.canvas,
+      versionId: ids.v2a as never,
+    });
+    expect(kept).toMatchObject({ kind: "artifact-synced-published", published: true });
+    // The kept version takes the Studio Mac's content and names both as parents.
+    const laptopHead = laptop.canvases.get(String(ids.canvas))?.at(-1);
+    expect(laptopHead?.definition.blocks).toEqual(
+      v1.definition.blocks.map(() => expect.anything()),
+    );
+    expect((laptopHead?.definition.blocks[0] as { text: string } | undefined)?.text).toBe(
+      "Ship Monday.",
+    );
+    expect(queuedParents(laptop).at(-1)).toEqual([ids.v2a, ids.v2b].sort());
+    expect(
+      await laptop.syncedArtifacts.execute({ kind: "detail", canvasId: ids.canvas }),
+    ).toMatchObject({ status: "current" });
+
+    // The Studio Mac takes the resolving version in on its next pull, on top
+    // of the version it had: nothing left to choose there either.
+    await studio.sync.sync();
+    expect(headsOf(studio)).toEqual([{ kind: "version", versionId: laptopHead?.versionId }]);
+    studio.syncedArtifacts.catchUp();
+    expect(String(studio.canvases.get(String(ids.canvas))?.at(-1)?.versionId)).toBe(
+      String(laptopHead?.versionId),
+    );
+    expect(
+      await studio.syncedArtifacts.execute({ kind: "detail", canvasId: ids.canvas }),
+    ).toMatchObject({ status: "current" });
+  });
+
+  it("merges two versions into a new one through the revise path, naming both as parents", async () => {
+    const shared: SharedStore = { kind: "folder", folder: scratch(homedir()) };
+    const { studio, laptop } = await pair(shared);
+    const observer = computer("Mac mini", shared);
+    await observer.turnSyncOn();
+    await joinThrough(observer, studio);
+    // Two computers revise one version; the laptop holds neither open.
+    const v1 = canvasVersion({ versionId: ids.v1, sequence: 1, text: "Ship it." });
+    await studio.commit(v1);
+    await observer.sync.pull();
+    observer.canvases.set(String(ids.canvas), [v1]);
+    await studio.commit(canvasVersion({ versionId: ids.v2a, sequence: 2, text: "Ship Monday." }));
+    await observer.commit(
+      canvasVersion({ versionId: ids.v2b, sequence: 2, text: "Ship after beta." }),
+    );
+    await observer.sync.sync();
+    await laptop.sync.pull();
+
+    // Merge needs a thread when it is not open here.
+    expect(
+      await laptop.syncedArtifacts.execute({ kind: "merge", canvasId: ids.canvas }),
+    ).toMatchObject({ reason: "no-compatible-thread" });
+    laptop.threads.push(workThread(laptopThread));
+    expect(
+      await laptop.syncedArtifacts.execute({ kind: "merge", canvasId: ids.canvas }),
+    ).toMatchObject({ reason: "thread-required" });
+
+    const merged = await laptop.syncedArtifacts.execute({
+      kind: "merge",
+      canvasId: ids.canvas,
+      threadId: laptopThread,
+    });
+    expect(merged).toMatchObject({ kind: "artifact-synced-opened" });
+    const history = laptop.canvases.get(String(ids.canvas)) ?? [];
+    // Bound at one of the two, then a revision carrying both sides.
+    expect(history).toHaveLength(2);
+    expect(
+      history[1]?.definition.blocks.map((block) => (block as { text: string }).text).sort(),
+    ).toEqual(["Ship Monday.", "Ship after beta."].sort());
+    expect(queuedParents(laptop)).toEqual([[ids.v2a, ids.v2b].sort()]);
+    expect(laptop.ingested.map((record) => record.contentReference).sort()).toEqual(
+      [
+        `replica-artifact:${ids.canvas}:${ids.v2a}`,
+        `replica-artifact:${ids.canvas}:${ids.v2b}`,
+      ].sort(),
+    );
+    expect(
+      await laptop.syncedArtifacts.execute({ kind: "detail", canvasId: ids.canvas }),
+    ).toMatchObject({ status: "current", openHere: true });
+  });
+
+  it("restores an artifact deleted elsewhere by publishing a version over the deletion", async () => {
+    const shared: SharedStore = { kind: "folder", folder: scratch(homedir()) };
+    const { studio, laptop } = await pair(shared);
+    await studio.commit(canvasVersion({ versionId: ids.v1, sequence: 1, text: "Ship it." }));
+    await studio.sync.artifactDeleted(ids.canvas);
+    await laptop.sync.pull();
+
+    const listing = laptop.library.list({ tab: "all" }, { kind: "local-window" } as never);
+    expect(listing.synced).toEqual([
+      expect.objectContaining({ status: "deleted", deletedOn: "Studio Mac", title: "Launch plan" }),
+    ]);
+    expect(
+      await laptop.syncedArtifacts.execute({
+        kind: "keep",
+        canvasId: ids.canvas,
+        versionId: ids.v1 as never,
+      }),
+    ).toMatchObject({ reason: "not-two-versions" });
+
+    const restored = await laptop.syncedArtifacts.execute({
+      kind: "restore",
+      canvasId: ids.canvas,
+    });
+    expect(restored).toMatchObject({ kind: "artifact-synced-published", published: true });
+    expect(queuedParents(laptop)).toEqual([[ids.v1]]);
+    // Restored here without opening it in a thread, and on the Studio Mac
+    // once it pulls; the deletion stays in the history.
+    expect(laptop.library.list({ tab: "all" }, { kind: "local-window" } as never).synced).toEqual([
+      expect.objectContaining({ status: "current", computerName: "MacBook Air" }),
+    ]);
+    expect(laptop.canvases.has(String(ids.canvas))).toBe(false);
+    await studio.sync.pull();
+    expect(headsOf(studio).map((head) => head.kind)).toEqual(["version", "tombstone"]);
+    expect(
+      await laptop.syncedArtifacts.execute({ kind: "restore", canvasId: ids.canvas }),
+    ).toMatchObject({ reason: "not-deleted" });
+  });
+
+  it("refuses to publish a choice with sync off", async () => {
+    const shared: SharedStore = { kind: "folder", folder: scratch(homedir()) };
+    const { studio, laptop } = await pair(shared);
+    await studio.commit(canvasVersion({ versionId: ids.v1, sequence: 1, text: "Ship it." }));
+    await studio.sync.artifactDeleted(ids.canvas);
+    await laptop.sync.pull();
+    await laptop.settings.setSync({
+      syncOn: false,
+      expectedVersion: laptop.settings.settings().version,
+    });
+    expect(
+      await laptop.syncedArtifacts.execute({ kind: "restore", canvasId: ids.canvas }),
+    ).toMatchObject({ kind: "artifact-synced-refused", reason: "sync-off" });
+    expect(eventsNamed(laptop, REPLICA_ARTIFACT_EVENT_NAMES.queued)).toEqual([]);
   });
 });
