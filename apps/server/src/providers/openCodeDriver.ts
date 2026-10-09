@@ -26,14 +26,9 @@ import {
   validateChatTurnInput,
 } from "@octant/provider-sdk/chat-conformance";
 import { createOpencodeClient } from "@opencode-ai/sdk/v2/client";
-import type {
-  Event,
-  PermissionRuleset,
-  PermissionV2Ruleset,
-  Provider,
-} from "@opencode-ai/sdk/v2/types";
+import type { PermissionRuleset, PermissionV2Ruleset, Provider } from "@opencode-ai/sdk/v2/types";
 import { Cause, Effect, Exit, Option, PubSub, Scope, Stream } from "effect";
-import { mapOpenCodeEvent } from "./openCodeEventMapper";
+import { mapOpenCodeEvent, type OpenCodeEvent } from "./openCodeEventMapper";
 import type { ManagedToolAnswer, ManagedToolCallContext } from "./managedMcpTools";
 import {
   createOpenCodeManagedToolsBridge,
@@ -57,7 +52,7 @@ export interface OpenCodeClientPort {
     readonly all: ReadonlyArray<Provider>;
     readonly connected: ReadonlyArray<string>;
   }>;
-  readonly subscribe: (signal: AbortSignal) => Promise<AsyncIterable<Event>>;
+  readonly subscribe: (signal: AbortSignal) => Promise<AsyncIterable<OpenCodeEvent>>;
   readonly createSession: (input: {
     readonly permission: PermissionRuleset;
     readonly model?: { readonly providerId: string; readonly modelId: string };
@@ -642,6 +637,11 @@ function adaptOpenCode2022Event(
     case "session.execution.failed":
       return { type: "session.next.step.failed", properties };
     case "session.execution.interrupted":
+      // A shutdown keeps its own name so the turn is held for recovery; every
+      // other reason is an ordinary interruption.
+      if (properties.reason === "shutdown") {
+        return { type, properties: { sessionID, reason: "shutdown" } };
+      }
       return {
         type: "session.error",
         properties: {
@@ -665,7 +665,7 @@ function adaptOpenCode2022Event(
 export function adaptBetaOpenCodeEvent(
   value: unknown,
   calls?: Map<string, string>,
-): Event | undefined {
+): OpenCodeEvent | undefined {
   const record = asRecord(value);
   const type = record === undefined ? undefined : betaString(record.type);
   if (record === undefined || type === undefined) return undefined;
@@ -683,10 +683,12 @@ export function adaptBetaOpenCodeEvent(
         ? "permission.v2.replied"
         : type;
   const adapted = adaptOpenCode2022Event(betaType, properties ?? {}, calls);
-  return adapted === undefined ? undefined : (adapted as Event);
+  return adapted === undefined ? undefined : (adapted as OpenCodeEvent);
 }
 
-async function* adaptBetaEventStream(stream: AsyncIterable<unknown>): AsyncGenerator<Event> {
+async function* adaptBetaEventStream(
+  stream: AsyncIterable<unknown>,
+): AsyncGenerator<OpenCodeEvent> {
   const calls = new Map<string, string>();
   for await (const event of stream) {
     const adapted = adaptBetaOpenCodeEvent(event, calls);
@@ -1252,7 +1254,7 @@ function makeConnection(
     const events = yield* PubSub.unbounded<ProviderRuntimeEvent>();
     const sessionsBySource = new Map<string, SessionState>();
     const sourceBySession = new Map<ProviderSessionId, string>();
-    const pendingBySource = new Map<string, Event[]>();
+    const pendingBySource = new Map<string, OpenCodeEvent[]>();
     let subscriptionAbort = new AbortController();
     let subscriptionReady: Promise<void> | undefined;
     let streamFailure: ProviderFailure | undefined;
@@ -1357,17 +1359,23 @@ function makeConnection(
               });
             },
           };
-    const emitInterrupted = (state: SessionState, message: string) => {
+    /**
+     * The OpenCode process went away under a running turn without anyone
+     * asking it to stop: it died, or the host is shutting it down. What the
+     * turn did up to that point is unknown, so it is held for a person to
+     * check, never reported as a Stop and never sent again on its own.
+     */
+    const holdForRecovery = (state: SessionState) => {
       if (state.terminal) return;
       retireState(state);
       offer({
-        kind: "interrupted",
+        kind: "waiting",
         instanceId: options.instanceId,
         sessionId: state.sessionId,
         sequence: state.nextSequence++,
         correlationId: state.correlationId,
         occurredAt: clock() as UtcTimestamp,
-        message,
+        message: OPENCODE_PROCESS_LOST_MESSAGE,
       });
     };
     const samePorts = (left: ReadonlyArray<number>, right: ReadonlyArray<number>): boolean =>
@@ -1457,7 +1465,7 @@ function makeConnection(
               streamFailure = fail("provider-failed", "Provider runtime exited unexpectedly.");
               subscriptionAbort.abort();
               for (const state of sessionsBySource.values()) {
-                emitInterrupted(state, "Provider runtime exited unexpectedly.");
+                holdForRecovery(state);
               }
             });
             return nextClient;
@@ -1486,7 +1494,7 @@ function makeConnection(
       options.instanceId,
       () => {
         for (const state of sessionsBySource.values()) {
-          emitInterrupted(state, "Provider runtime exited unexpectedly.");
+          holdForRecovery(state);
         }
       },
     );
@@ -2253,7 +2261,7 @@ function failClosedBetaEvent(
 
 function mapAndOffer(
   state: SessionState,
-  event: Event,
+  event: OpenCodeEvent,
   instanceId: ProviderInstanceId,
   clock: () => string,
   offer: (event: ProviderRuntimeEvent) => void,
@@ -2401,7 +2409,8 @@ function mapAndOffer(
       state.questions.set(requestId, { providerRequestId, index, count });
       normalized = { ...normalized, requestId };
     }
-    if (isTerminalEvent(normalized)) {
+    // A shutdown's hold ends the turn, as every runner treats `waiting`.
+    if (isTerminalEvent(normalized) || event.type === "session.execution.interrupted") {
       retire(state);
     }
     state.nextSequence = normalized.sequence + 1;
@@ -2663,7 +2672,10 @@ export function providerFailure(error: unknown): ProviderFailure {
   return fail("provider-failed", "OpenCode request failed.");
 }
 
-export function sourceSessionId(event: Event): string | undefined {
+const OPENCODE_PROCESS_LOST_MESSAGE =
+  "The OpenCode process stopped while this turn was running. Check what it did, then resume.";
+
+export function sourceSessionId(event: OpenCodeEvent): string | undefined {
   const properties = event.properties as {
     readonly sessionID?: unknown;
     readonly form?: { readonly sessionID?: unknown };

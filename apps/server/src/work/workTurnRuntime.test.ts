@@ -228,6 +228,70 @@ describe("WorkTurnRuntime", () => {
     });
   });
 
+  it("holds a turn the provider runtime lost as waiting, with the provider's reason", async () => {
+    const events: ProviderRuntimeEvent[] = [
+      {
+        instanceId: ids.provider,
+        sequence: 1,
+        correlationId: decodeCorrelationId(String(ids.project)),
+        occurredAt: decodeTimestamp("2026-08-11T12:00:00.000Z"),
+        kind: "waiting",
+        sessionId: ids.session as never,
+        message: "OpenCode shut down while this turn was running. Check what it did, then resume.",
+      },
+    ];
+    const driver: ProviderDriver = {
+      kind: "openai-compatible",
+      probe: () => Effect.die("unused"),
+      acquire: () =>
+        Effect.succeed({
+          // The stream stays open after the hold, as a live provider stream does.
+          subscribe: Effect.succeed(Stream.concat(Stream.fromIterable(events), Stream.never)),
+          start: () => Effect.void,
+          send: () => Effect.void,
+          resume: () => Effect.void,
+          interrupt: () => Effect.void,
+          stop: () => Effect.void,
+          answerApproval: () => Effect.void,
+          answerUserInput: () => Effect.void,
+          answerTool: () => Effect.void,
+        } as never),
+    };
+    const command = decodeStartWorkThreadTurnCommand({
+      kind: "start-work-thread-turn",
+      requestId: ids.request,
+      threadId: ids.thread,
+      turnId: ids.turn,
+      prompt: "Summarize the brief",
+      authority: decodeWorkTurnAuthority({
+        hostId: "local",
+        projectId: ids.project,
+        bindingRevisionId: ids.binding,
+        workingDirectory: ".",
+        confinementPosture: "project-root-confined",
+        providerInstanceId: ids.provider,
+        modelId: "gpt-5",
+      }),
+    });
+
+    const outcome = await new WorkTurnRuntime({ timeoutMs: 2_000 }).run({
+      command,
+      providerSessionId: ids.session as never,
+      projectRoot: "/tmp/work-project",
+      driver,
+      signal: new AbortController().signal,
+      modelOptionValues: {},
+    });
+
+    expect(outcome).toEqual({
+      kind: "waiting",
+      failure: {
+        category: "interrupted",
+        message: "OpenCode shut down while this turn was running. Check what it did, then resume.",
+      },
+    });
+  });
+
   it("hands the provider's restated task list to the service whenever it moves", async () => {
     const updates: ThreadTaskProgressList[] = [];
     const events: ProviderRuntimeEvent[] = [

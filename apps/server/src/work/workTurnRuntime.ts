@@ -463,8 +463,19 @@ function stopReasonOf(outcome: WorkTurnRuntimeOutcome): TurnStopReason {
   }
 }
 
+/**
+ * `waiting` ends the turn here as it already does in Chat and Code. Claude,
+ * Codex, and OpenCode send it when their runtime went away under the turn, and
+ * nothing follows it; not ending on it left the Work turn running until the
+ * idle timeout and then replaced the provider's reason with a generic one.
+ */
 function isTerminalEvent(event: ProviderRuntimeEvent): boolean {
-  return event.kind === "completed" || event.kind === "interrupted" || event.kind === "failed";
+  return (
+    event.kind === "completed" ||
+    event.kind === "interrupted" ||
+    event.kind === "failed" ||
+    event.kind === "waiting"
+  );
 }
 
 function outcomeFromEvents(
@@ -476,6 +487,12 @@ function outcomeFromEvents(
       kind: "completed",
       response,
       ...(terminal.stopReason === "max-tokens" ? { outputLimited: true as const } : {}),
+    };
+  }
+  if (terminal?.kind === "waiting") {
+    return {
+      kind: "waiting",
+      failure: { category: "interrupted", message: truncateMessage(terminal.message) },
     };
   }
   if (terminal?.kind === "interrupted") {

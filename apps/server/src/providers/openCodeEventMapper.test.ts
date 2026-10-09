@@ -9,7 +9,11 @@ import type { Event } from "@opencode-ai/sdk/v2/types";
 import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 import { adaptBetaOpenCodeEvent } from "./openCodeDriver";
-import { mapOpenCodeEvent, type OpenCodeEventContext } from "./openCodeEventMapper";
+import {
+  mapOpenCodeEvent,
+  type OpenCodeEvent,
+  type OpenCodeEventContext,
+} from "./openCodeEventMapper";
 
 const instanceId = decodeProviderInstanceId("80000000-0000-4000-8000-000000000071");
 const sessionId = decodeProviderSessionId("80000000-0000-4000-8000-000000000072");
@@ -26,7 +30,7 @@ function official<T extends Event>(event: T): T {
   return event;
 }
 
-function mapped(event: Event, sequenceStart = 41) {
+function mapped(event: OpenCodeEvent, sequenceStart = 41) {
   return mapOpenCodeEvent(context(sequenceStart), event).map((runtimeEvent) =>
     decodeProviderRuntimeEvent(runtimeEvent),
   );
@@ -277,30 +281,6 @@ describe("mapOpenCodeEvent", () => {
       },
     },
     {
-      name: "retry status",
-      event: official({
-        id: "event-retry",
-        type: "session.status",
-        properties: {
-          sessionID: "provider-session",
-          status: {
-            type: "retry",
-            attempt: 2,
-            message: "raw-retry-message-must-not-cross",
-            next: 2,
-            action: {
-              reason: "private",
-              provider: "private-provider-name-must-not-cross",
-              title: "private",
-              message: "private",
-              label: "private",
-            },
-          },
-        },
-      }),
-      expected: { kind: "waiting", message: "Provider is retrying." },
-    },
-    {
       name: "session idle",
       event: official({
         id: "event-idle",
@@ -326,6 +306,33 @@ describe("mapOpenCodeEvent", () => {
     expect(JSON.stringify(result)).not.toMatch(
       /providerID|metadata|must-not-cross|private-provider-name/i,
     );
+  });
+
+  it("reports nothing for a retry status, so every mode keeps the turn running", () => {
+    expect(
+      mapped(
+        official({
+          id: "event-retry",
+          type: "session.status",
+          properties: {
+            sessionID: "provider-session",
+            status: {
+              type: "retry",
+              attempt: 2,
+              message: "raw-retry-message-must-not-cross",
+              next: 2,
+              action: {
+                reason: "private",
+                provider: "private-provider-name-must-not-cross",
+                title: "private",
+                message: "private",
+                label: "private",
+              },
+            },
+          },
+        }),
+      ),
+    ).toEqual([]);
   });
 
   it("allocates contiguous stable sequences for todo progress", () => {
@@ -822,7 +829,25 @@ describe("OpenCode 2.0.22 events", () => {
     ]);
   });
 
-  it("reports a scheduled retry as waiting", () => {
+  it.each(["superseded", "inactivity"])(
+    "keeps an interruption OpenCode itself chose (%s) an ordinary interruption",
+    (reason) => {
+      expect(adaptAndMap("session.execution.interrupted", { reason })).toMatchObject([
+        { kind: "interrupted" },
+      ]);
+    },
+  );
+
+  it("holds a turn OpenCode's own shutdown cut off for a person to check, naming why", () => {
+    expect(adaptAndMap("session.execution.interrupted", { reason: "shutdown" })).toEqual([
+      expect.objectContaining({
+        kind: "waiting",
+        message: "OpenCode shut down while this turn was running. Check what it did, then resume.",
+      }),
+    ]);
+  });
+
+  it("keeps a turn running through a scheduled retry instead of ending it as waiting", () => {
     expect(
       adaptAndMap("session.retry.scheduled", {
         assistantMessageID,
@@ -830,7 +855,7 @@ describe("OpenCode 2.0.22 events", () => {
         at: 1,
         error: { message: "rate limited" },
       }),
-    ).toMatchObject([{ kind: "waiting" }]);
+    ).toEqual([]);
   });
 
   it.each([
