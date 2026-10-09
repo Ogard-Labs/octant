@@ -56,7 +56,8 @@ export type AppleWorkbenchIntent =
       readonly kind: "key-press";
       readonly simulatorId: AppleSimulatorId;
       readonly key: string;
-    };
+    }
+  | { readonly kind: "repair-input"; readonly simulatorId: AppleSimulatorId };
 
 export interface AppleWorkbenchPaneProps {
   readonly status: AppleWorkbenchStatus;
@@ -70,6 +71,11 @@ export interface AppleWorkbenchPaneProps {
   /** True while a request this pane started is still in flight. */
   readonly busy?: boolean;
   readonly actionMessage?: string;
+  /**
+   * The Simulator whose input the host found disconnected. The pane offers
+   * Repair input for it beside the message, and only then.
+   */
+  readonly repairInputSimulatorId?: AppleSimulatorId;
   readonly liveFrame?: AppleSimulatorLiveFrame;
   readonly screenUrl?: string;
   readonly liveScreen?: AppleSimulatorLiveScreen;
@@ -233,6 +239,7 @@ function AppleDevicePane(
       {props.actionMessage === undefined ? null : (
         <OctantAlert className="apple-workbench__action-message" tone="warning">
           {props.actionMessage}
+          <RepairInput {...props} />
         </OctantAlert>
       )}
       <DeviceRail
@@ -249,6 +256,30 @@ function AppleDevicePane(
         />
       )}
     </section>
+  );
+}
+
+/**
+ * Repairing input restarts the Simulator's home screen and closes its apps,
+ * so it is offered only after the host said input is disconnected, and runs
+ * only when the reader presses it.
+ */
+function RepairInput(
+  props: Pick<AppleWorkbenchPaneProps, "busy" | "onRun" | "repairInputSimulatorId">,
+) {
+  const simulatorId = props.repairInputSimulatorId;
+  const onRun = props.onRun;
+  if (simulatorId === undefined || onRun === undefined) return null;
+  return (
+    <OctantButton
+      disabled={props.busy === true}
+      onClick={() => onRun({ kind: "repair-input", simulatorId })}
+      size="sm"
+      type="button"
+      variant="outline"
+    >
+      Repair input
+    </OctantButton>
   );
 }
 
