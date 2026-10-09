@@ -50,6 +50,86 @@ export function takeJpegFrames(input: Uint8Array): {
   return { frames, rest: input.subarray(start).slice() };
 }
 
+/** Longest part header Octant reads before it gives up on finding the body. */
+const MAXIMUM_PART_HEADER_BYTES = 1024;
+
+/**
+ * Cuts a `multipart/x-mixed-replace` stream into its image parts by each
+ * part's `Content-Length`. serve-avd sends PNG parts when the emulator image
+ * cannot encode `screencap -j`, and PNG data can contain the JPEG start and
+ * end markers, so a marker scan would cut those frames in the wrong places.
+ * Only parts whose bytes are a JPEG or PNG are returned; `rest` holds an
+ * unfinished part for the next chunk.
+ */
+export function takeMultipartImageFrames(input: Uint8Array): {
+  readonly frames: readonly Uint8Array[];
+  readonly rest: Uint8Array;
+} {
+  const frames: Uint8Array[] = [];
+  let offset = 0;
+  for (;;) {
+    const boundary = indexOfMarker(input, offset, 0x2d, 0x2d);
+    if (boundary === -1) {
+      // A chunk can end between the boundary's two dashes.
+      const last = input.byteLength - 1;
+      return {
+        frames,
+        rest: last >= offset && input[last] === 0x2d ? Uint8Array.of(0x2d) : new Uint8Array(),
+      };
+    }
+    const headerEnd = indexOfHeaderEnd(input, boundary);
+    if (headerEnd === -1) {
+      return input.byteLength - boundary > MAXIMUM_PART_HEADER_BYTES
+        ? { frames, rest: new Uint8Array() }
+        : { frames, rest: input.subarray(boundary).slice() };
+    }
+    const header = String.fromCharCode(...input.subarray(boundary, headerEnd));
+    const bodyStart = headerEnd + 4;
+    const length = /\r\ncontent-length:[ \t]*([0-9]{1,9})\r?$/im.exec(header);
+    if (length?.[1] === undefined) {
+      offset = bodyStart;
+      continue;
+    }
+    const bodyLength = Number(length[1]);
+    if (bodyLength > MAXIMUM_FRAME_BYTES) return { frames, rest: new Uint8Array() };
+    if (input.byteLength < bodyStart + bodyLength) {
+      return { frames, rest: input.subarray(boundary).slice() };
+    }
+    const body = input.subarray(bodyStart, bodyStart + bodyLength);
+    if (isJpeg(body) || isPng(body)) frames.push(body.slice());
+    offset = bodyStart + bodyLength;
+  }
+}
+
+function indexOfHeaderEnd(bytes: Uint8Array, from: number): number {
+  const last = Math.min(bytes.byteLength, from + MAXIMUM_PART_HEADER_BYTES) - 3;
+  for (let index = from; index < last; index += 1) {
+    if (
+      bytes[index] === 0x0d &&
+      bytes[index + 1] === 0x0a &&
+      bytes[index + 2] === 0x0d &&
+      bytes[index + 3] === 0x0a
+    ) {
+      return index;
+    }
+  }
+  return -1;
+}
+
+function isJpeg(bytes: Uint8Array): boolean {
+  return bytes.byteLength > 3 && bytes[0] === 0xff && bytes[1] === 0xd8;
+}
+
+function isPng(bytes: Uint8Array): boolean {
+  return (
+    bytes.byteLength > 8 &&
+    bytes[0] === 0x89 &&
+    bytes[1] === 0x50 &&
+    bytes[2] === 0x4e &&
+    bytes[3] === 0x47
+  );
+}
+
 function loopbackHttp(value: string): URL | undefined {
   let url: URL;
   try {
