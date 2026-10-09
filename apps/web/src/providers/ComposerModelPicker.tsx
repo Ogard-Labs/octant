@@ -59,7 +59,7 @@ export interface ComposerModelPickerProps {
   /** Existing threads return the promise that confirms or refuses the model change. */
   readonly onSelect: (selection: ModelPickerSelection) => void | Promise<void>;
   readonly onOpenSettings?: () => void;
-  /** Opens Settings → Octant Harness, shown from the Octant entry. */
+  /** Opens Model roles on Settings › Octant Harness, linked from the Octant entry's note. */
   readonly onOpenHarnessSettings?: () => void;
   readonly disabled?: boolean;
   readonly ariaLabel?: string;
