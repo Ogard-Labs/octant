@@ -7,6 +7,8 @@ import type {
   CanvasCommentThread,
   CanvasCommentsOutcome,
 } from "@octant/contracts/canvas-board";
+import { decodeCanvasDefinition } from "@octant/contracts/canvas";
+import { stateStoreDecisionExample } from "@octant/domain";
 import { CanvasCommentsPanel } from "./CanvasCommentsPanel";
 import { canvasFixture } from "./test-fixtures";
 
@@ -51,6 +53,43 @@ describe("CanvasCommentsPanel", () => {
     expect(within(threads).getByText("Should Report be a queue?")).toBeInTheDocument();
     expect(within(threads).getByText("Board · Report")).toBeInTheDocument();
     expect(within(threads).getByText("You · paired device")).toBeInTheDocument();
+  });
+
+  it("anchors a comment to a comparison matrix's option column or criterion row", async () => {
+    const definition = decodeCanvasDefinition({
+      ...canvasFixture,
+      blocks: [stateStoreDecisionExample],
+    });
+    const onMatrix = (nodeId: string, id: string): CanvasCommentThread => ({
+      comment: {
+        ...existing.comment,
+        commentId: id as never,
+        anchor: {
+          kind: "node",
+          blockId: stateStoreDecisionExample.blockId as never,
+          nodeId: nodeId as never,
+        },
+        body: `About ${nodeId}`,
+      },
+      replies: [],
+    });
+    render(
+      <CanvasCommentsPanel
+        author={author}
+        canvasId={canvasId}
+        definition={definition}
+        load={async () =>
+          ready([
+            onMatrix("sqlite", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2"),
+            onMatrix("operations", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa3"),
+          ])
+        }
+        send={vi.fn()}
+      />,
+    );
+    const threads = await screen.findByRole("list", { name: "Comment threads" });
+    expect(within(threads).getByText("Option · SQLite")).toBeInTheDocument();
+    expect(within(threads).getByText("Criterion · Operational cost")).toBeInTheDocument();
   });
 
   it("adds a comment on the chosen anchor against the sequence it saw, then reloads", async () => {

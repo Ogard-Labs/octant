@@ -1,4 +1,6 @@
 import type { FolderBrowseClient } from "@octant/client-runtime/folder-browse-client";
+import type { ReplicaMembershipClient } from "@octant/client-runtime/replica-membership-client";
+import type { ReplicaSyncStatusClient } from "@octant/client-runtime/replica-sync-status-client";
 import type { ReplicaStoreSettingsClient } from "@octant/client-runtime/replica-store-settings-client";
 import {
   ReplicaStoreS3Endpoint,
@@ -18,6 +20,7 @@ import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
 import { SettingRow, SettingsSection, SettingsState } from "./primitives";
+import { SyncMembershipSections, SyncStatusReadOnly } from "./SyncMembershipSections";
 
 type StoreKind = ReplicaStoreSettingsView["store"]["kind"];
 
@@ -51,18 +54,57 @@ export interface SyncSettingsSectionProps {
   /** The host's folder browser, for choosing a synced folder. */
   readonly folderBrowse: Pick<FolderBrowseClient, "browse"> | undefined;
   readonly focusedSetting?: string | undefined;
+  /** Absent off this host: setting up, joining, and revoking are host authority. */
+  readonly membership?: ReplicaMembershipClient | undefined;
+  /** Read-only status, shown when this client is not on the host. */
+  readonly status?: ReplicaSyncStatusClient | undefined;
 }
 
 /**
- * Settings › Sync: which store artifact versions go to, and the switch.
+ * Settings › Sync: the store and the switch, then this computer's replica -
+ * set up, join, approve, the computers in it, revoke - and status. Off the
+ * host it shows status only.
+ */
+export function SyncSettingsSection(props: SyncSettingsSectionProps) {
+  const [storeReady, setStoreReady] = useState(false);
+  // Bumped when membership changes, so the store section re-reads its lock.
+  const [membershipRevision, setMembershipRevision] = useState(0);
+  const onMembershipChange = useCallback(() => setMembershipRevision((value) => value + 1), []);
+  return (
+    <div className="settings-section-stack" id="settings-sync">
+      <SyncStoreSections
+        {...props}
+        membershipRevision={membershipRevision}
+        onStoreReady={setStoreReady}
+      />
+      {props.client !== undefined && props.membership !== undefined ? (
+        <SyncMembershipSections
+          client={props.membership}
+          onMembershipChange={onMembershipChange}
+          storeReady={storeReady}
+        />
+      ) : props.client === undefined && props.status !== undefined ? (
+        <SyncStatusReadOnly client={props.status} />
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * Which store artifact versions go to, and the switch.
  *
  * The host owns the choice and its version. This reads them, sends back a
  * folder only as a candidate the host's browser listed, and sends a bucket's
  * key pair once, inside the command that saves it; the fields are emptied as
  * soon as the host answers, so the secret does not stay in the page.
  */
-export function SyncSettingsSection(props: SyncSettingsSectionProps) {
-  const { client } = props;
+function SyncStoreSections(
+  props: SyncSettingsSectionProps & {
+    readonly membershipRevision: number;
+    readonly onStoreReady: (ready: boolean) => void;
+  },
+) {
+  const { client, membershipRevision, onStoreReady } = props;
   const factId = useId();
   const testReasonId = useId();
   const [view, setView] = useState<ReplicaStoreSettingsView>();
@@ -93,7 +135,10 @@ export function SyncSettingsSection(props: SyncSettingsSectionProps) {
 
   useEffect(() => {
     void load();
-  }, [load]);
+  }, [load, membershipRevision]);
+
+  const ready = view !== undefined && view.store.kind !== "none" && view.syncOn;
+  useEffect(() => onStoreReady(ready), [onStoreReady, ready]);
 
   /**
    * Runs one command. A refusal is shown in the section's feedback slot
@@ -148,14 +193,13 @@ export function SyncSettingsSection(props: SyncSettingsSectionProps) {
     return (
       <SettingsSection
         description="Choosing a store and turning sync on happen in the Octant app on the host machine."
-        id="settings-sync"
         title="Store"
       />
     );
   }
   if (view === undefined) {
     return (
-      <SettingsSection id="settings-sync" title="Store">
+      <SettingsSection title="Store">
         <SettingsState kind={loadFailed ? "error" : "loading"}>
           {loadFailed
             ? "Sync settings could not be read from this host."
@@ -173,7 +217,7 @@ export function SyncSettingsSection(props: SyncSettingsSectionProps) {
   const testDisabledReason = view.syncOn ? undefined : "Turn sync on to test the connection.";
 
   return (
-    <div className="settings-section-stack" id="settings-sync">
+    <>
       <SettingsSection
         description="A folder your sync client watches, or an S3-compatible bucket you own. Octant runs no store of its own."
         title="Store"
@@ -392,7 +436,7 @@ export function SyncSettingsSection(props: SyncSettingsSectionProps) {
           title="Sync folder"
         />
       ) : null}
-    </div>
+    </>
   );
 }
 

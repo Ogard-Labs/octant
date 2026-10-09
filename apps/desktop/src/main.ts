@@ -132,6 +132,7 @@ import {
   formatDesktopStartupFailure,
   probeHostInfoReceipt,
   probeLocalHost,
+  createStderrTail,
   reserveLoopbackPort,
   resolveManagedServerUrl,
   resolveStableHostAttachment,
@@ -262,6 +263,8 @@ const IPC_CHANNELS = {
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const MAX_PROVIDER_CREDENTIAL_BYTES = 12 * 1_024;
+// Bounds how long a failed start waits for the child's final stderr bytes.
+const STDERR_DRAIN_TIMEOUT_MS = 500;
 const PROVIDER_INSTANCE_ID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -1497,6 +1500,7 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
   // The reservation only selects a collision-free port. Release the listener
   // before spawning the managed server, which must bind that same port.
   await portReservation.close();
+  const serverStderr = createStderrTail();
   let startingBrowserBroker: BrowserRuntimeBroker | undefined;
   let startingComputerBroker: ComputerUseBroker | undefined;
   let startingDeviceBroker: SimulatorDeviceBroker | undefined;
@@ -1599,10 +1603,16 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
           execPath: process.execPath,
           env: { ...process.env, OCTANT_DATA_DIR: desktopDataDirectory },
         });
-        return spawn(spec.command, spec.args, {
+        const child = spawn(spec.command, spec.args, {
           env: spec.env,
-          stdio: [...spec.stdio] as ["pipe", "inherit", "inherit"],
+          stdio: [...spec.stdio] as ["pipe", "inherit", "pipe"],
         });
+        // pipe() honours backpressure from a slow parent stderr; the tail
+        // listener only keeps a bounded copy.
+        child.stderr.pipe(process.stderr, { end: false });
+        child.stderr.on("data", (chunk: Buffer) => serverStderr.append(chunk));
+        child.stderr.once("end", serverStderr.end);
+        return child;
       },
     });
     credentialBroker = resources.broker;
@@ -1618,6 +1628,15 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
     const attached = await waitForStorageReady({
       serverUrl,
       instanceId,
+      ...(server === undefined
+        ? {}
+        : {
+            child: server,
+            lastOutput: async () => {
+              await serverStderr.drained(STDERR_DRAIN_TIMEOUT_MS);
+              return serverStderr.text();
+            },
+          }),
       resolveAttachedHost: async () => {
         return (await resolveExistingHostAttachment())?.probe;
       },

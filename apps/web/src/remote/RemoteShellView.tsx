@@ -13,6 +13,7 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCard } from "../ui/base/OctantCard";
 import { HostSelector } from "../shell/HostSelector";
 import { ModeSwitcher } from "../shell/ModeSwitcher";
+import { SyncStatusReadOnly } from "../settings/SyncMembershipSections";
 import { ShellState } from "../shell/ShellState";
 import { RemoteDeviceSelfPanel } from "./RemoteDeviceSelfPanel";
 import { createRemoteProductClients } from "./remoteProductClients";
@@ -145,6 +146,10 @@ export function RemoteShellView(props: RemoteShellViewProps) {
           props.onReset();
         }}
       />
+
+      <div className="settings-section-stack">
+        <SyncStatusReadOnly client={clients.syncStatus} />
+      </div>
 
       <section
         aria-label="Local host only surfaces"

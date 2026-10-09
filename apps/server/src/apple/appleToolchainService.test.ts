@@ -12,6 +12,8 @@ import { link, mkdir, mkdtemp, stat, symlink, utimes, writeFile } from "node:fs/
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import type { SimulatorDeviceInput } from "@octant/contracts/simulator-device";
+import { simulatorInputThroughDesktop } from "./simulatorInputThroughDesktop";
 
 const artifactFixture = mkdtempSync(join(tmpdir(), "octant-apple-build-"));
 afterAll(() => rmSync(artifactFixture, { recursive: true, force: true }));
@@ -178,6 +180,7 @@ function discoveryExecutor() {
       if (command === "xcode-select -p") {
         return processResult("/Applications/Xcode.app/Contents/Developer\n");
       }
+      if (command === "xcodebuild -license check") return processResult("");
       if (command === "xcodebuild -version")
         return processResult("Xcode 16.4\nBuild version 16F6\n");
       if (command === "swift --version") return processResult("Apple Swift version 6.1\n");
@@ -337,9 +340,109 @@ describe("AppleToolchainService discovery", () => {
 
     await expect(service.discover(discoveryRequest, context)).resolves.toEqual({
       kind: "failure",
-      failure: { category: "xcode-not-found", message: "Xcode is unavailable on this host." },
+      failure: {
+        category: "xcode-not-found",
+        message: "Xcode is unavailable on this host.",
+        step: "xcode",
+      },
     });
     expect(execute).toHaveBeenCalledTimes(1);
+  });
+
+  describe("names the probe that failed", () => {
+    const failing = (matches: string, result: ReturnType<typeof processResult>) => {
+      const healthy = discoveryExecutor();
+      return vi.fn(async (input: Parameters<typeof healthy>[0]) =>
+        input.argv.join(" ").includes(matches) ? result : healthy(input),
+      );
+    };
+    const discoverWith = (execute: ReturnType<typeof failing>) =>
+      new AppleToolchainService({
+        execute,
+        realpath: async (path: string) => path,
+        now: () => "2026-07-27T20:00:00.000Z",
+        newId: () => "30000000-0000-4000-8000-000000000012",
+      }).discover(discoveryRequest, context);
+    const commands = (execute: ReturnType<typeof failing>) =>
+      execute.mock.calls.map(([input]) => input.argv.join(" "));
+
+    it("reports an unaccepted Xcode licence before any other xcodebuild probe", async () => {
+      const execute = failing(
+        "-license check",
+        processResult("", { exitCode: 1, stderr: "Xcode license has not been accepted." }),
+      );
+
+      await expect(discoverWith(execute)).resolves.toMatchObject({
+        kind: "failure",
+        failure: { category: "unavailable", step: "licence" },
+      });
+      expect(commands(execute)).not.toContain("xcodebuild -version");
+    });
+
+    it("reports Command Line Tools alone as the Xcode step, not as an unaccepted licence", async () => {
+      const execute = failing(
+        "xcode-select -p",
+        processResult("/Library/Developer/CommandLineTools\n"),
+      );
+
+      await expect(discoverWith(execute)).resolves.toMatchObject({
+        kind: "failure",
+        failure: { category: "unavailable", step: "xcode" },
+      });
+      expect(commands(execute)).not.toContain("xcodebuild -license check");
+    });
+
+    it("does not blame the licence for a licence probe that timed out", async () => {
+      const execute = failing(
+        "-license check",
+        processResult("", { termination: "timed-out", exitCode: null }),
+      );
+
+      await expect(discoverWith(execute)).resolves.toMatchObject({
+        kind: "failure",
+        failure: { category: "unavailable", step: "xcode" },
+      });
+    });
+
+    it("does not blame the licence for a licence probe that failed for another reason", async () => {
+      const execute = failing(
+        "-license check",
+        processResult("", { exitCode: 1, stderr: "xcrun: error: unable to find utility" }),
+      );
+
+      await expect(discoverWith(execute)).resolves.toMatchObject({
+        kind: "failure",
+        failure: { category: "unavailable", step: "xcode" },
+      });
+    });
+
+    it("reports Xcode tools that do not answer as the Xcode step", async () => {
+      const execute = failing("swift --version", processResult("", { exitCode: 1 }));
+
+      await expect(discoverWith(execute)).resolves.toMatchObject({
+        kind: "failure",
+        failure: { category: "unavailable", step: "xcode" },
+      });
+    });
+
+    it("reports a Simulator listing that fails as the runtime step", async () => {
+      const execute = failing("simctl list devices", processResult("", { exitCode: 1 }));
+
+      await expect(discoverWith(execute)).resolves.toMatchObject({
+        kind: "failure",
+        failure: { category: "unavailable", step: "runtime" },
+      });
+    });
+
+    it("reports a project xcodebuild cannot list as the project step", async () => {
+      const execute = failing("-list -json", processResult("", { exitCode: 1 }));
+      const result = await discoverWith(execute);
+
+      expect(result).toMatchObject({
+        kind: "failure",
+        failure: { category: "unavailable", step: "project" },
+      });
+    });
   });
 });
 
@@ -2047,6 +2150,97 @@ describe("AppleToolchainService Simulator input", () => {
     expect(new TextDecoder().decode(artifacts.get(log!.reference))).toContain(
       "com.apple.hiservices-xpcservice",
     );
+  });
+
+  it("records a tap the desktop found disconnected as failed and says why, never as completed", async () => {
+    // Observed 2026-10-08 on Xcode 27.0: with Device Hub holding the
+    // Simulator's input, every pane tap was journaled "tap completed" and
+    // nothing moved.
+    const deliver = vi.fn(async () => ({
+      kind: "refused" as const,
+      reason: "input-disconnected",
+      message:
+        "Simulator input is disconnected. Repair input restarts the Simulator's home screen.",
+    }));
+    const service = new AppleToolchainService({
+      execute: discoveryExecutor(),
+      injectSimulatorInput: simulatorInputThroughDesktop({ deliver }),
+      writeArtifact: async () => undefined,
+      realpath: async (path: string) => path,
+      now: () => "2026-07-27T20:00:00.000Z",
+      newId: () => "30000000-0000-4000-8000-000000000012",
+    });
+    await service.discover(discoveryRequest, context);
+    const evidence = await service.execute(
+      simulatorRequest({
+        kind: "tap",
+        bundleIdentifier: undefined,
+        requestedBy: actor,
+        point: { x: 603, y: 1311 },
+        approval: { kind: "approved", approvalId: ids.approval as never },
+      }),
+      context,
+    );
+    expect(evidence.outcome).toBe("failed");
+    expect(evidence.diagnostics).toEqual([
+      {
+        severity: "note",
+        message:
+          "tap failed: input-disconnected: Simulator input is disconnected. Repair input restarts the Simulator's home screen.",
+      },
+    ]);
+  });
+
+  it("sends Repair input to the desktop only when a person asks, under the input grant", async () => {
+    const deliver = vi.fn(async (_input: SimulatorDeviceInput, _signal?: AbortSignal) => ({
+      kind: "delivered" as const,
+    }));
+    const service = new AppleToolchainService({
+      execute: discoveryExecutor(),
+      injectSimulatorInput: simulatorInputThroughDesktop({ deliver }),
+      writeArtifact: async () => undefined,
+      realpath: async (path: string) => path,
+      now: () => "2026-07-27T20:00:00.000Z",
+      newId: () => "30000000-0000-4000-8000-000000000012",
+    });
+    const gated = { ...context, executionPolicy: "approval-gated" as const };
+    await service.discover(discoveryRequest, gated);
+    const repair = simulatorRequest({
+      kind: "repair-input",
+      bundleIdentifier: undefined,
+      requestedBy: actor,
+      approval: { kind: "not-required" },
+    });
+    const ungranted = await service.execute(repair, gated);
+    expect(ungranted.outcome).toBe("unauthorized");
+    expect(deliver).not.toHaveBeenCalled();
+
+    const repaired = await service.execute(
+      { ...repair, actionId: "30000000-0000-4000-8000-000000000030" as never },
+      { ...gated, inputGranted: true },
+    );
+    expect(repaired.outcome).toBe("succeeded");
+    expect(deliver.mock.calls.map(([input]) => input)).toEqual([
+      expect.objectContaining({ kind: "repair-input", udid: ids.simulator }),
+    ]);
+
+    const byAgent = await service.execute(
+      simulatorRequest({
+        kind: "repair-input",
+        actionId: "30000000-0000-4000-8000-000000000031" as never,
+        bundleIdentifier: undefined,
+        requestedBy: {
+          kind: "agent",
+          actorId: "30000000-0000-4000-8000-000000000098" as never,
+          providerInstanceId: ids.provider as never,
+          threadId: ids.thread as never,
+        },
+        approval: { kind: "approved", approvalId: ids.approval as never },
+      }),
+      gated,
+    );
+    expect(byAgent.outcome).toBe("unauthorized");
+    expect(deliver).toHaveBeenCalledTimes(1);
   });
 
   it("refuses to re-inject interrupted input under the same actionId", async () => {

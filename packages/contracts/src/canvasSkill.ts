@@ -29,6 +29,7 @@ export const CANVAS_DOCUMENT_RECIPE_MAX = 16;
 export const CANVAS_DOCUMENT_RECIPE_SKELETON_MAX = 12;
 export const CANVAS_DOCUMENT_RECIPE_WHEN_MAX_CHARS = 280;
 export const CANVAS_DOCUMENT_RECIPE_ROLE_MAX_CHARS = 120;
+export const CANVAS_DOCUMENT_RECIPE_SUMMARY_MAX_CHARS = 140;
 
 const boundedToken = <B extends string>(brand: B) =>
   Schema.NonEmptyTrimmedString.pipe(
@@ -109,12 +110,28 @@ export type CanvasDocumentRecipeSkeletonBlock = typeof CanvasDocumentRecipeSkele
 export const CanvasDocumentRecipe = Schema.Struct({
   id: CanvasDocumentRecipeId,
   title: boundedText(CANVAS_SKILL_LABEL_MAX_CHARS),
+  /**
+   * One line a person reads when choosing where a Canvas starts. `whenToUse`
+   * is written for an agent matching a request, so a chooser that showed it
+   * would read "When someone asks…" beside every recipe. A contributed recipe
+   * may omit it; the chooser then shows `whenToUse`.
+   */
+  summary: Schema.optional(boundedText(CANVAS_DOCUMENT_RECIPE_SUMMARY_MAX_CHARS)),
   whenToUse: boundedText(CANVAS_DOCUMENT_RECIPE_WHEN_MAX_CHARS),
   skeleton: Schema.NonEmptyArray(CanvasDocumentRecipeSkeletonBlock).pipe(
     Schema.maxItems(CANVAS_DOCUMENT_RECIPE_SKELETON_MAX),
   ),
 }).annotations(strict);
 export type CanvasDocumentRecipe = typeof CanvasDocumentRecipe.Type;
+
+/**
+ * The recipes a host offers a person starting a Canvas: the in-tree catalog
+ * and what admitted skills add, the same list describe gives an agent.
+ */
+export const CanvasDocumentRecipeCatalog = Schema.Struct({
+  recipes: Schema.Array(CanvasDocumentRecipe),
+}).annotations(strict);
+export type CanvasDocumentRecipeCatalog = typeof CanvasDocumentRecipeCatalog.Type;
 
 export const CanvasSkillContribution = Schema.Struct({
   schemaVersion: CanvasCardSchemaVersion,
@@ -205,6 +222,9 @@ export const decodeCanvasSkillPresentationRule = Schema.decodeUnknownSync(
   CanvasSkillPresentationRule,
 );
 export const decodeCanvasDocumentRecipe = Schema.decodeUnknownSync(CanvasDocumentRecipe);
+export const decodeCanvasDocumentRecipeCatalog = Schema.decodeUnknownSync(
+  CanvasDocumentRecipeCatalog,
+);
 export const decodeCanvasSkillContribution = Schema.decodeUnknownSync(CanvasSkillContribution);
 export const decodeCanvasSkillContributionResolution = Schema.decodeUnknownSync(
   CanvasSkillContributionResolution,

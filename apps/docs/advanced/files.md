@@ -95,6 +95,23 @@ last observed version sequence; creation starts at sequence 1. JavaScript and
 invented file or artifact references are not Canvas content, and HTML and CSS
 appear only in a design's frames.
 
+### Start a Canvas from a recipe
+
+In a Chat thread, choose **Show canvas** from the **Thread actions** menu. Under
+**Start from**, pick **Blank** or a recipe: an implementation plan, a design
+spec, an architecture review, a code review, an audit or test report, a
+postmortem, a research brief, a dashboard, and the others the host offers,
+including any an enabled skill adds. Each shows one line about what it holds
+and a small outline of its sections. Use the arrow keys to move between them.
+
+A Canvas started from a recipe opens with the recipe's sections: its headings,
+and a "To fill" note for every other block saying what belongs there. With
+**Ask this thread's agent to fill it in** ticked, Octant also sends a message on
+the thread asking its agent to fill the new Canvas, with the Canvas attached.
+The message appears in the thread like one you typed, and the agent works with
+the thread's usual model and access. Untick it to get only the outline. Add
+what the Canvas should cover in the box beneath, if you like.
+
 A created Canvas appears in its thread at the end of the turn that made it, as
 a row you can click to open it. The row shows a live miniature of the Canvas
 and one line about what it holds, such as a plan's next task and how many
@@ -190,6 +207,26 @@ card, image placeholder, and text. Nodes name a parent rather than nesting.
 The drawing is a wireframe. Its controls are not live: they cannot be focused
 and they do not submit. Ask `describe` for `mockup` to get a settings screen.
 
+### Comparing options
+
+Ask the agent to compare options, choose between libraries or vendors, or
+record an architecture decision, and it builds a comparison matrix. The options
+are columns and the criteria are rows. Each cell holds a score, a short note
+such as "EU only", or a yes, partial, or no mark. A small number beside a cell
+points to its note under the table.
+
+- A criterion can count more than others. Its weight is shown under its name.
+  Some criteria are better when lower, such as cost, and say so.
+- **Weighted score** under each option is worked out by Octant from the scores
+  and the yes, partial, and no marks; text never counts. When an option has no
+  reading for a criterion that counts, its score says how many were not scored.
+- The agent's **Recommended** option is marked and explained under the table.
+  It may differ from the highest score, which is marked **Highest**.
+- **Order by score** puts the best-scoring option first. It changes only your
+  view.
+- On a narrow screen the matrix scrolls sideways while the criteria stay put.
+  **View matrix data** lists each option on its own row.
+
 ### Designs, prototypes, and slides
 
 Ask for an app, a screen, a website, a landing page, or a presentation, and the
@@ -223,13 +260,14 @@ block and select its comment marker to read or add comments on that block;
 blocks with open threads always show their marker and count. The panel filters
 open, resolved, or all threads. A comment is anchored to a
 block, to a board node, to a sequence participant or message, or to a state
-or its transition; replies, resolving, and deleting are journaled by
-the host, so they survive restart and reload. Every comment is authored as you,
+or its transition, or to a comparison matrix's option or criterion; replies,
+resolving, and deleting are journaled by the
+host, so they survive restart and reload. Every comment is authored as you,
 with the device it came through noted ("paired device" when it arrived from a
 paired phone or browser). A comment whose block has since left the canvas is
 kept and marked rather than dropped. Shared snapshots never include comments.
 A shared snapshot keeps every block, including charts, tables, treemaps,
-heatmaps, and bar lists with their number formats. A design, or an action block
+heatmaps, bar lists, and comparison matrices with their number formats. A design, or an action block
 that runs a command on this Mac, stops a share: Share then says the canvas
 cannot be shared safely.
 A treemap or bar list in a shared snapshot offers no **Open file**, because

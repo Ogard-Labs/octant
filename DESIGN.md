@@ -737,7 +737,8 @@ validated semantic roles; incomplete or low-contrast imports fall back safely.
 
 Charts, metric blocks, tables, and timelines are one visual system, so a Canvas
 reads as one document whatever kinds it mixes. These rules own the mark, the
-ink, and the reading; a later block (treemap, heatmap, bar list) builds on them
+ink, and the reading; a later block (treemap, heatmap, bar list, comparison
+matrix) builds on them
 rather than inventing a second chart language.
 
 **Hue is for marks only.** Data colour appears on the mark — a bar, a line, a
@@ -843,6 +844,26 @@ screen renderer, the static SVG export, and the Markdown and HTML export rank
 the same list. The disclosed
 table is the accessible reading of every row, including the rows Show all holds
 back.
+
+**Comparison matrix.** Options across the top, criteria down the side, and a
+weighted score under each option (`packages/domain/src/canvasComparisonMatrix.ts`).
+It is a native table on its own card. The card's ground is opaque, so the
+criteria column stays pinned while the options scroll beneath it at phone width.
+The region scrolls inside itself and takes keyboard focus. A cell reads as a
+score, a short text, or a yes, partial, or no glyph. The glyphs differ in shape
+(a filled check, a half disc, an empty ring with a dash) and are always written
+beside the word, so colour never carries the reading. A score and each weighted
+score draw a neutral-ink meter of their share of the criterion. A
+lower-is-better criterion is turned round first, so a longer meter always reads
+better. The highest score is set in strong ink and marked Highest. A full tie
+marks none. The recommended option is the author's call, not the arithmetic's.
+Its column is tinted with the foreground, ruled along the top, and badged with
+an inverted Recommended pill, so emphasis is ink in the monochrome default. An
+empty coordinate reads as not assessed, never as a zero or a no. Cell notes are
+numbered in reading order and listed under the table. Ordering the options by
+score is view state. The disclosed table reads one row per option. Under forced
+colours the column keeps a system-ink rule, the badge an outline, and the meters
+a framed track.
 
 **Metric tiles.** Consecutive metric blocks are gathered into one responsive
 row of two to four tiles, and a metric's value is set large in tabular numerals

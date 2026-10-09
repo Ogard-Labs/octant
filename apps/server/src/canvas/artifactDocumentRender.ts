@@ -13,6 +13,12 @@ import {
 } from "@octant/domain/canvas-treemap-layout";
 import { heatmapRowTotals } from "@octant/domain/canvas-heatmap-layout";
 import { layoutCanvasBarList } from "@octant/domain/canvas-bar-list-layout";
+import {
+  COMPARISON_MATRIX_GLYPH_LABEL,
+  formatComparisonMatrixTotal,
+  layoutCanvasComparisonMatrix,
+  type CanvasMatrixCellLayout,
+} from "@octant/domain/canvas-comparison-matrix";
 import { DEFAULT_ARTIFACT_PALETTE, escapeXml } from "./artifactRender";
 
 /**
@@ -84,6 +90,90 @@ function scalar(value: string | number | boolean | null, format?: CanvasNumberFo
   // screen; a boolean has no number reading.
   if (typeof value === "number") return formatCanvasNumber(value, format);
   return String(value);
+}
+
+/**
+ * A comparison matrix as the screen draws it: options across, criteria down,
+ * a weighted score row from the shared layout, the cell notes numbered in the
+ * same order, and the author's recommendation in words. Every option and
+ * criterion the block declares is carried; an empty coordinate reads as not
+ * assessed rather than as a zero or a no.
+ */
+function comparisonMatrixPieces(
+  block: Extract<CanvasBlock, { readonly kind: "comparison-matrix" }>,
+): ReadonlyArray<Piece> {
+  const layout = layoutCanvasComparisonMatrix(block);
+  const weighted = layout.rows.some((row) => row.weight !== undefined);
+  const cellText = (cell: CanvasMatrixCellLayout | undefined): string => {
+    const value = cell?.reading;
+    let text: string;
+    if (value === undefined) text = "Not assessed";
+    else if (value.kind === "glyph") text = COMPARISON_MATRIX_GLYPH_LABEL[value.glyph];
+    else if (value.kind === "text") text = reading(value.text);
+    else text = formatCanvasNumber(value.score);
+    return cell?.noteNumber === undefined ? text : `${text} [${String(cell.noteNumber)}]`;
+  };
+  const rows: Array<ReadonlyArray<string>> = layout.rows.map((row) => [
+    row.prefer === "lower" ? `${reading(row.label)} (lower is better)` : reading(row.label),
+    ...(weighted ? [formatCanvasNumber(row.weight ?? 1)] : []),
+    ...row.cells.map(cellText),
+  ]);
+  if (layout.scoredCriteria.length > 0) {
+    rows.push([
+      "Weighted score",
+      ...(weighted ? [""] : []),
+      ...layout.options.map((option) => {
+        if (option.total === undefined) return "";
+        // The screen marks the highest score unless every option ties; the
+        // export keeps that distinction rather than leaving the reader to scan.
+        const leads =
+          layout.leaders.includes(option.optionId) && layout.leaders.length < layout.options.length;
+        const remarks = [
+          ...(leads ? ["highest"] : []),
+          ...(option.total.missing === 0 ? [] : [`${String(option.total.missing)} not scored`]),
+        ];
+        const total = formatComparisonMatrixTotal(option.total, layout.scoreRange);
+        return remarks.length === 0 ? total : `${total} (${remarks.join(", ")})`;
+      }),
+    ]);
+  }
+  const labels = new Map<string, string>();
+  for (const option of layout.options) labels.set(option.optionId, reading(option.label));
+  for (const row of layout.rows) labels.set(row.criterionId, reading(row.label));
+  const pieces: Piece[] = [
+    {
+      kind: "table",
+      headers: [
+        "Criterion",
+        ...(weighted ? ["Weight"] : []),
+        ...layout.options.map((option) =>
+          option.recommended ? `${reading(option.label)} (recommended)` : reading(option.label),
+        ),
+      ],
+      rows,
+    },
+  ];
+  if (layout.notes.length > 0) {
+    pieces.push({
+      kind: "ordered",
+      items: layout.notes.map(
+        (note) =>
+          `${labels.get(note.criterionId) ?? ""} · ${labels.get(note.optionId) ?? ""}: ${reading(note.text)}`,
+      ),
+    });
+  }
+  const recommended = layout.options.find((option) => option.recommended);
+  if (recommended !== undefined) {
+    const why = block.recommendation === undefined ? "" : reading(block.recommendation);
+    pieces.push(
+      ...paragraph(
+        [`Recommended: ${reading(recommended.label)}.`, why]
+          .filter((part) => part !== "")
+          .join(" "),
+      ),
+    );
+  }
+  return pieces;
 }
 
 function renderDocument(
@@ -395,6 +485,8 @@ function piecesFor(block: CanvasBlock): ReadonlyArray<Piece> {
         },
       ];
     }
+    case "comparison-matrix":
+      return comparisonMatrixPieces(block);
     case "plan": {
       const phases = new Map(
         block.phases.map((phase) => [String(phase.phaseId), reading(phase.title)]),

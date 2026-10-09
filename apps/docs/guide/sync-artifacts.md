@@ -13,10 +13,31 @@ are signed but not encrypted.
 ## What turning sync on does in this preview
 
 You can choose a store and turn sync on, and **Test connection** writes its
-probe file there. Artifact versions are not copied yet, and nothing is
-imported from the store yet. Turning sync on lets Octant reach the store you
-chose; it does not start copying. This page describes what is copied once
-that ships.
+probe file there. Copying starts only once this computer also belongs to a
+replica: it set one up, or it asked to join one, in **Settings › Sync**. On a
+computer that has done neither, turning sync on lets Octant reach the store and
+copies nothing.
+
+On a computer that belongs to a replica, with sync on:
+
+- **Each new artifact version, and each deletion, is copied out** as soon as
+  it is committed, whichever part of Octant made it. If the store cannot be
+  reached, the copy waits on this computer, even across a restart, and goes
+  out later in the order it was made. A copy that fails never undoes the
+  version on this computer; Octant records why it failed. Versions committed
+  before this computer belonged to a replica are not copied.
+- **Other computers' versions are read in** when Octant starts, every few
+  minutes, and whenever a pull is requested on this computer. Each one is checked first: the
+  signature, that its writer is one of your computers, that its content
+  matches, and that it carries no credential, secret-shaped text, or absolute
+  path. Octant records what each entry did - imported, already here, a second
+  version beside one from the same parent, a deletion, or refused and why.
+- **An imported artifact is listed under the Project name and the computer it
+  came from.** It is not filed in a Project or thread on this computer.
+  Opening it here, revising it here, and the library view that shows it are
+  not built yet; Octant keeps the versions it imported for when they are.
+- A Code thread in Plan mode copies nothing out, and with sync off Octant
+  neither writes to the store nor reads from it.
 
 ## Set up a store
 
@@ -55,7 +76,8 @@ Readable artifact versions, and a tombstone when you delete one. Each entry
 is a plain JSON bundle, the same shape as an export, signed by the computer
 that wrote it. You can open the files. The storage provider can read them.
 Octant does not encrypt them. Credentials, secret-shaped text, and absolute
-file paths in that text are refused or removed before an entry is written.
+file paths in that text are refused before an entry is written: such a
+version stays on this computer and is not copied.
 A copy this computer imported is not written out again. A later edit here is
 a new version.
 
@@ -105,14 +127,23 @@ when it reads the store. Octant does not delete objects from your bucket or
 files from your folder on your behalf. With sync off, Test connection calls
 nothing.
 
-## Joining another computer
+## Setting up sync and joining another computer
 
-This preview does not offer joining yet either. When it does, it works like
-this. The new computer writes a request into the store, signed with a key
-kept in its own Keychain or Secret Service. A computer that already shares
-the store shows that the new one wants to join, and both screens show the
-same six-digit code. You approve only if the codes match, then confirm on the
-new computer. The code is a quick consistency check that both screens mean
+Once a store is chosen and sync is on, **Settings › Sync** offers two things
+under **This computer**, each under a computer name you can change first:
+
+- **Set up sync** on your first computer. It becomes the computer that set up
+  the replica, and it can revoke any other.
+- **Ask to join** on each other computer. It writes a request into the store,
+  signed with a key kept in its own Keychain or Secret Service, and lists the
+  computers that already sync with the code each one will show for it.
+
+On a computer that already syncs, select **Check the store**. The request
+appears under **Join requests** with its six-digit code. Select **Approve…**
+and approve only if the new computer shows the same code. Then select **Check
+the store** on the new computer and **Confirm join**. Octant reads the store
+only when you select Check the store or act; opening the page reads nothing
+from it. The code is a quick consistency check that both screens mean
 the same two computers, the same key on the approving one, and the same
 computer that set up the store. A store someone tampered with usually shows a
 different code, but six digits are short: someone who can write to the store
@@ -131,13 +162,16 @@ To revoke a computer another one of yours brought in, revoke it from that
 computer, or from the one that set up the store. A computer you revoke cannot
 remove the computer that brought it in.
 
-Before it revokes, your computer reads the store, so what the revoked
+**Computers** lists every computer in the replica, who approved it, and
+whether it was revoked. **Revoke…** appears only on computers yours brought
+in. Before it revokes, your computer reads the store, so what the revoked
 computer already signed - artifact versions and approvals alike - keeps
 counting and the computers it brought in stay. The revoke screen lists those
 computers, so you can revoke them in the same step, for example when the
 computer was stolen, and it lists the revocations the computer already wrote.
-You can also move the point earlier, before one of those revocations, say;
-computers it approved after that point then join again. If one of the
+You can also stop counting before the first of those revocations; computers
+it approved after that point then join again. If the store cannot be read
+first, the screen says so. If one of the
 revocations in a step cannot be written, the screen says which computers were
 not revoked, so you can try them again. After your other computers read the
 record, they ignore anything the revoked computer wrote after that point.
@@ -151,6 +185,15 @@ If someone with write access to the store fills the places where one of your
 computers writes next, that computer stops publishing and says so. Remove
 those files with your storage provider's own tools, change the store's access
 keys, or move to a new store.
+
+## Sync status
+
+**Sync status** shows the last time the store refused this computer, could
+not be reached, or held a file where this computer writes next. Last publish,
+last pull, and the queue say **Not available yet**: Settings does not show
+them in this preview, although versions are copied. A paired phone or a browser on another device sees
+this status and the list of computers, read-only. Setting up sync, joining,
+approving, and revoking happen only in the Octant app on the computer itself.
 
 ## Turning sync off
 

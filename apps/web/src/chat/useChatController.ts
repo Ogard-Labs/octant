@@ -800,6 +800,13 @@ export function useChatController(options: ChatControllerOptions) {
      * the earlier command has already moved past and be refused as stale.
      */
     expectedVersion?: ChatThread["version"],
+    /**
+     * Whether this send consumes the composer's draft. A turn the composer did
+     * not write, such as asking the agent to fill a new Canvas, keeps it: the
+     * person's unsent text is neither cleared on success nor replaced by the
+     * turn's own text on a refusal.
+     */
+    sendOptions: { readonly composerDraft: "consume" | "keep" } = { composerDraft: "consume" },
   ): Promise<boolean> {
     if (
       activeView === undefined ||
@@ -821,8 +828,9 @@ export function useChatController(options: ChatControllerOptions) {
       pendingSubmissionIds.current.get(submissionKey) ??
       decodeChatSubmissionId(globalThis.crypto.randomUUID());
     pendingSubmissionIds.current.set(submissionKey, submissionId);
+    const consumesDraft = sendOptions.composerDraft === "consume";
     const previousDraft = composerDraftRef.current.readFor(sendingThreadId);
-    composerDraftRef.current.clearFor(sendingThreadId);
+    if (consumesDraft) composerDraftRef.current.clearFor(sendingThreadId);
     const revisionAfterClear = composerDraftRef.current.revisionFor(sendingThreadId);
     const result = await execute({
       kind: "send-chat-turn",
@@ -839,6 +847,7 @@ export function useChatController(options: ChatControllerOptions) {
       ...(threadMentionIds.length === 0 ? {} : { threadMentionIds: [...threadMentionIds] }),
     });
     if (
+      consumesDraft &&
       result === undefined &&
       composerDraftRef.current.revisionFor(sendingThreadId) === revisionAfterClear
     ) {

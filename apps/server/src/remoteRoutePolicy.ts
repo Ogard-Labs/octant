@@ -25,6 +25,7 @@ const LOCAL_ONLY_PREFIXES = [
   "/api/providers/discovery",
   "/api/host-control",
   "/api/replica-store",
+  "/api/replica-membership",
 ] as const;
 
 export const REMOTE_PROTOCOL_ROUTE_IDS = {
@@ -249,6 +250,12 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
     methods: ["GET"] as const,
     allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
     maxResponseBytes: 4_096,
+  },
+  {
+    kind: "exact" as const,
+    path: "/api/replica-sync/status",
+    methods: ["GET"] as const,
+    allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
   },
   ...[
     "/api/agent-profiles",

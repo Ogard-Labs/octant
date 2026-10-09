@@ -1,3 +1,4 @@
+import { decodeCanvasDocumentRecipeCatalog } from "@octant/contracts/canvas-skill";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -893,6 +894,60 @@ describe("canvas routes", () => {
     );
     const outcome = decodeCanvasThreadReferenceCardsOutcome(JSON.parse(await cards!.text()));
     expect(outcome.cards.map((card) => card.canvasId)).toContain(result.card.canvasId);
+  });
+
+  it("lists the recipes a person may start a Canvas from, and only to an authenticated window", async () => {
+    const route = createRevisionRoute();
+    const listed = await route(
+      new Request("http://127.0.0.1/api/canvas/recipes", {
+        method: "GET",
+        headers: { "x-octant-window-capability": windowCapability },
+      }),
+    );
+    expect(listed?.status).toBe(200);
+    const catalog = decodeCanvasDocumentRecipeCatalog(JSON.parse(await listed!.text()));
+    expect(catalog.recipes.map((recipe) => String(recipe.id))).toContain("implementation-plan");
+
+    const anonymous = await route(
+      new Request("http://127.0.0.1/api/canvas/recipes", { method: "GET" }),
+    );
+    expect(anonymous?.status).toBe(401);
+    const withQuery = await route(
+      new Request("http://127.0.0.1/api/canvas/recipes?projectId=x", {
+        method: "GET",
+        headers: { "x-octant-window-capability": windowCapability },
+      }),
+    );
+    expect(withQuery?.status).toBe(400);
+  });
+
+  it("creates a Canvas from a recipe through the authenticated route", async () => {
+    const route = createRevisionRoute();
+    const { prompt: _prompt, ...body } = createBody() as Record<string, unknown>;
+    const create = await route(
+      new Request("http://127.0.0.1/api/canvas/create", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-octant-window-capability": windowCapability,
+        },
+        body: JSON.stringify({ ...body, intent: "template", templateId: "postmortem" }),
+      }),
+    );
+    const result = decodeCanvasCreateResult(JSON.parse(await create!.text()));
+    expect(result.kind).toBe("accepted");
+    if (result.kind !== "accepted") return;
+    const read = await route(
+      new Request(`http://127.0.0.1/api/canvas/get?canvasId=${String(result.receipt.canvasId)}`, {
+        method: "GET",
+        headers: { "x-octant-window-capability": windowCapability },
+      }),
+    );
+    const outcome = JSON.parse(await read!.text());
+    expect(outcome.version.definition.blocks[0]).toMatchObject({
+      kind: "heading",
+      text: "What happened",
+    });
   });
 
   it("shares, serves, revokes, and then refuses a Canvas snapshot over the API", async () => {

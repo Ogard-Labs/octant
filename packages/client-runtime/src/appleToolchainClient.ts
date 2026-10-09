@@ -11,6 +11,7 @@ import type {
   AppleActionRequest,
   AppleBuildEvidence,
   AppleDiscoveryRequest,
+  AppleDiscoveryStep,
   AppleRuntimeSnapshot,
   AppleToolchainFailure,
 } from "@octant/contracts/apple-toolchain";
@@ -67,6 +68,8 @@ export class AppleToolchainClientFailure extends Error {
   constructor(
     readonly category: AppleToolchainClientFailureCategory,
     message: string,
+    /** The discovery probe the host says failed; absent from hosts that predate it. */
+    readonly step?: AppleDiscoveryStep,
   ) {
     super(message);
     this.name = "AppleToolchainClientFailure";
@@ -287,7 +290,11 @@ async function post(options: AppleToolchainClientOptions, body: unknown, signal?
     throw protocol();
   }
   if (reply.kind === "apple-failure") {
-    throw new AppleToolchainClientFailure(reply.failure.category, reply.failure.message);
+    throw new AppleToolchainClientFailure(
+      reply.failure.category,
+      reply.failure.message,
+      "step" in reply.failure ? reply.failure.step : undefined,
+    );
   }
   if (!response.ok) throw protocol();
   return reply;

@@ -6,8 +6,9 @@
  * verify a signature.
  *
  * There is no overwrite. A function that cannot return that outcome cannot be
- * talked into it. A sequence gap is refused so a later entry is never applied
- * while an earlier one is missing. A tombstone stays in the history the caller
+ * talked into it. An entry waits while an earlier slot of its writer that the
+ * store lists has no lasting verdict here yet, so one writer's entries apply
+ * in the order it wrote them. A tombstone stays in the history the caller
  * already holds; a later version from another computer appends beside it.
  *
  * Membership records are not reconciled here: who counts is derived from the
@@ -65,6 +66,12 @@ export type ReplicaInstanceMembership =
       readonly lastAcceptedSequence: number;
     };
 
+/** One write-once slot of one instance in the store. */
+export interface ReplicaSlot {
+  readonly instanceId: ReplicaInstanceId;
+  readonly sequence: number;
+}
+
 export interface ReplicaAppliedEntry {
   readonly instanceId: ReplicaInstanceId;
   readonly sequence: number;
@@ -83,6 +90,8 @@ export interface ReplicaKnownTombstone {
   readonly contentHash: ReplicaContentHash;
   readonly originInstanceId: ReplicaInstanceId;
   readonly originSequence: number;
+  /** The versions the deletion was taken from. */
+  readonly parentVersionIds: ReadonlyArray<string>;
 }
 
 export interface ReplicaArtifactRecord {
@@ -103,6 +112,19 @@ export interface ReplicaLocalState {
   readonly localInstanceId: ReplicaInstanceId;
   readonly instances: ReadonlyArray<ReplicaInstanceMembership>;
   readonly applied: ReadonlyArray<ReplicaAppliedEntry>;
+  /**
+   * Slots the store listed in the read this entry came from. Artifact entries
+   * share each instance's sequence with its membership records, and a writer
+   * skips a slot someone else's file took, so a writer's sequence has gaps
+   * that are not missing entries.
+   */
+  readonly listedSlots: ReadonlyArray<ReplicaSlot>;
+  /**
+   * Slots this host reached a lasting verdict on besides `applied`: the
+   * membership records it holds, artifact entries refused for their own
+   * content, and files that are not valid records.
+   */
+  readonly settledSlots: ReadonlyArray<ReplicaSlot>;
   readonly artifacts: ReadonlyArray<ReplicaArtifactRecord>;
   /** SHA-256 of the canonical bundle, measured by the host before this call. */
   readonly measuredContentHash: string;
@@ -137,15 +159,6 @@ function membership(
   return "revoked";
 }
 
-function highestApplied(state: ReplicaLocalState, instanceId: ReplicaInstanceId): number {
-  let highest = 0;
-  for (const applied of state.applied) {
-    if (String(applied.instanceId) !== String(instanceId)) continue;
-    if (applied.sequence > highest) highest = applied.sequence;
-  }
-  return highest;
-}
-
 function parentKey(versionIds: ReadonlyArray<string>): string {
   return [...versionIds].map(String).sort().join("\0");
 }
@@ -165,10 +178,23 @@ function atSequence(state: ReplicaLocalState, entry: ReplicaArtifactEntry) {
   );
 }
 
-// Sequence 3 is refused while 2 is missing. Applying it would invent the gap
-// and make the missing entry impossible to insert later.
-function behindSequence(state: ReplicaLocalState, entry: ReplicaArtifactEntry): boolean {
-  return entry.origin.sequence !== highestApplied(state, entry.origin.instanceId) + 1;
+// An entry waits while an earlier slot of its writer that the store lists is
+// unsettled here: applying it would let a reader skip an entry it can still
+// read. A slot the store does not list - a squatted slot whose file was
+// removed, or one a sync client has not delivered yet - does not hold it back,
+// because a writer's sequence has gaps by design.
+function waitsOnEarlierSlot(state: ReplicaLocalState, entry: ReplicaArtifactEntry): boolean {
+  const writer = String(entry.origin.instanceId);
+  const settled = new Set<number>();
+  for (const slot of [...state.applied, ...state.settledSlots]) {
+    if (String(slot.instanceId) === writer) settled.add(slot.sequence);
+  }
+  return state.listedSlots.some(
+    (slot) =>
+      String(slot.instanceId) === writer &&
+      slot.sequence < entry.origin.sequence &&
+      !settled.has(slot.sequence),
+  );
 }
 
 /**
@@ -203,8 +229,8 @@ function concurrentWithExisting(state: ReplicaLocalState, entry: ReplicaArtifact
  *
  * Signature is checked first, so a bad copy is refused even when the instance
  * would otherwise be welcome. An already-applied entry is idempotent: pulling
- * it again changes nothing. A sequence other than the next one for its own
- * origin is a gap and is not applied.
+ * it again changes nothing. An entry whose writer has an earlier listed slot
+ * still unsettled here waits as a gap and is not applied.
  */
 export function reconcileReplicaEntry(
   localState: ReplicaLocalState,
@@ -239,7 +265,7 @@ function artifactOutcome(
   const standing = membership(state, entry.origin.instanceId, entry.origin.sequence);
   if (standing === "unknown") return refuse("unknown-instance");
   if (standing === "revoked") return refuse("revoked-instance");
-  if (behindSequence(state, entry)) return refuse("sequence-gap");
+  if (waitsOnEarlierSlot(state, entry)) return refuse("sequence-gap");
   if (namesLocalArtifactAsForeign(state, entry)) {
     return refuse("names-local-artifact-as-foreign");
   }
@@ -256,4 +282,64 @@ function artifactOutcome(
   if (entry.kind === "artifact-tombstone") return { outcome: "tombstone" };
   if (concurrentWithExisting(state, entry)) return { outcome: "concurrent-head" };
   return { outcome: "append-version" };
+}
+
+/** One head of an artifact's history: a version nothing revises, or a tombstone. */
+export type ReplicaArtifactHead =
+  | { readonly kind: "version"; readonly versionId: CanvasVersionId }
+  | {
+      readonly kind: "tombstone";
+      readonly originInstanceId: ReplicaInstanceId;
+      readonly originSequence: number;
+    };
+
+/**
+ * The heads of an artifact's history, in a stable order.
+ *
+ * A version is a head while no version or tombstone names it as a parent. A
+ * tombstone is always a head: nothing revises a deletion, and a later version
+ * from the same parent stands beside it rather than replacing it. Nothing here
+ * picks a winner; two heads stay two heads until a person merges them.
+ */
+export function replicaArtifactHeads(
+  record: Pick<ReplicaArtifactRecord, "versions" | "tombstones">,
+): ReadonlyArray<ReplicaArtifactHead> {
+  const named = new Set<string>();
+  for (const version of record.versions) {
+    for (const parent of version.parentVersionIds) named.add(String(parent));
+  }
+  for (const tombstone of record.tombstones) {
+    for (const parent of tombstone.parentVersionIds) named.add(String(parent));
+  }
+  const versions: ReplicaArtifactHead[] = record.versions
+    .filter((version) => !named.has(String(version.versionId)))
+    .map((version) => ({ kind: "version", versionId: version.versionId }));
+  versions.sort((left, right) =>
+    left.kind === "version" && right.kind === "version"
+      ? String(left.versionId).localeCompare(String(right.versionId))
+      : 0,
+  );
+  const tombstones: ReplicaArtifactHead[] = [...record.tombstones]
+    .sort(
+      (left, right) =>
+        String(left.originInstanceId).localeCompare(String(right.originInstanceId)) ||
+        left.originSequence - right.originSequence,
+    )
+    .map((tombstone) => ({
+      kind: "tombstone",
+      originInstanceId: tombstone.originInstanceId,
+      originSequence: tombstone.originSequence,
+    }));
+  return [...versions, ...tombstones];
+}
+
+/**
+ * Whether another computer hides the artifact: only when every head is a
+ * tombstone. A revision beside a deletion keeps it visible.
+ */
+export function replicaArtifactHidden(
+  record: Pick<ReplicaArtifactRecord, "versions" | "tombstones">,
+): boolean {
+  const heads = replicaArtifactHeads(record);
+  return heads.length > 0 && heads.every((head) => head.kind === "tombstone");
 }
