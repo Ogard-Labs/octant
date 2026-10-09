@@ -17,17 +17,25 @@ import {
   isAndroidEmulatorOpenInputKind,
 } from "@octant/domain";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { OctantButton } from "../ui/base/OctantButton";
-import { ShellState } from "../shell/ShellState";
-import { gestureFrom, keyIntentFor, type PointerSample } from "../apple/simulatorGestures";
 import type { OctantHostBridge } from "../shell/hostBridge";
 import type { CodeController } from "../code/useCodeController";
-import { useAndroidEmulator } from "./useAndroidEmulator";
+import type { DeviceInputIntent } from "../device/deviceInput";
+import {
+  deviceFailureDetail,
+  deviceProblemFor,
+  deviceWord,
+  type DeviceAction,
+  type DeviceActionFailure,
+  type DeviceChoice,
+  type DeviceDiagnostics,
+  type DeviceView,
+} from "../device/deviceModel";
+import { DevicePane } from "../device/DevicePane";
+import { useAndroidEmulator, type AndroidEmulatorController } from "./useAndroidEmulator";
 import {
   useAndroidEmulatorLiveScreen,
   type AndroidEmulatorLiveScreen,
 } from "./useAndroidEmulatorLiveScreen";
-import { OctantAlert } from "../ui/base/OctantAlert";
 
 export type AndroidEmulatorIntent =
   | {
@@ -96,7 +104,19 @@ export function AndroidEmulatorPane(props: {
     snapshotRequest,
   });
   const [busy, setBusy] = useState(false);
-  const [actionMessage, setActionMessage] = useState<string>();
+  // A failure is kept with the emulator its request named, so one that
+  // arrives after the pane moved to another emulator is never shown there.
+  const [failed, setFailed] = useState<{
+    readonly emulatorId: string;
+    readonly failure: DeviceActionFailure<AndroidEmulatorIntent>;
+  }>();
+  // Which emulator the person chose to see. An agent's later request to show
+  // a device replaces it, so the pane follows the newest ask.
+  const [chosenEmulatorId, setChosenEmulatorId] = useState<AndroidEmulatorId>();
+  const paneOpenRequestId = controller.runtime?.paneOpenRequest?.requestId;
+  useEffect(() => setChosenEmulatorId(undefined), [paneOpenRequestId]);
+  const [liveViewStopped, setLiveViewStopped] = useState(false);
+  const [liveViewAttempt, setLiveViewAttempt] = useState(0);
   const approvalGated = decidesCodeEffectsByApproval(props.thread.executionPolicy);
   const rememberedInputGrants = useRef(new Map<string, number>());
   const inputFlight = useRef(Promise.resolve());
@@ -116,12 +136,33 @@ export function AndroidEmulatorPane(props: {
   }, [props.hostBridge]);
 
   const emulators = controller.discovery?.emulators ?? controller.runtime?.emulators ?? [];
-  const preferred = controller.runtime?.paneOpenRequest?.emulatorId;
+  const preferred = chosenEmulatorId ?? controller.runtime?.paneOpenRequest?.emulatorId;
+  // More than one emulator is running and nobody has said which to show: ask
+  // rather than guess, since another task may own one of them, and
+  // stream nothing from either meanwhile.
+  // A choice holds while its emulator is booting or booted, so choosing one
+  // that is still starting shows its boot rather than asking again.
+  const chosenRunning = emulators.some(
+    (emulator) =>
+      chosenEmulatorId !== undefined &&
+      String(emulator.emulatorId) === String(chosenEmulatorId) &&
+      (emulator.state === "booted" || emulator.state === "booting"),
+  );
+  const awaitingChoice =
+    !chosenRunning &&
+    controller.runtime?.paneOpenRequest === undefined &&
+    emulators.filter((emulator) => emulator.state === "booted").length > 1;
   const liveEmulator =
     emulators.find((emulator) => preferred !== undefined && emulator.emulatorId === preferred) ??
     emulators.find((emulator) => emulator.state === "booting") ??
     emulators.find((emulator) => emulator.state === "booted");
   const liveEmulatorId = liveEmulator?.state === "booted" ? liveEmulator.emulatorId : undefined;
+  // A failure belongs to the emulator it happened on; showing another drops it,
+  // so the line and its Try again never name one device and act on another.
+  const shownEmulator = liveEmulatorId === undefined ? undefined : String(liveEmulatorId);
+  useEffect(() => setFailed(undefined), [shownEmulator]);
+  const actionFailure =
+    failed !== undefined && failed.emulatorId === shownEmulator ? failed.failure : undefined;
   const rememberedUntil =
     liveEmulatorId === undefined
       ? 0
@@ -147,7 +188,8 @@ export function AndroidEmulatorPane(props: {
   );
   const liveScreen = useAndroidEmulatorLiveScreen({
     client: props.client,
-    enabled: liveEmulatorId !== undefined,
+    enabled: liveEmulatorId !== undefined && !liveViewStopped && !awaitingChoice,
+    attempt: liveViewAttempt,
     ...(screenStreamRequest === undefined ? {} : { request: screenStreamRequest }),
   });
 
@@ -159,7 +201,10 @@ export function AndroidEmulatorPane(props: {
         release = resolve;
       });
       await previous;
-      setActionMessage(undefined);
+      const emulatorId = String(intent.emulatorId);
+      const setActionFailure = (failure: DeviceActionFailure<AndroidEmulatorIntent>) =>
+        setFailed({ emulatorId, failure });
+      setFailed(undefined);
       setBusy(true);
       try {
         const base = androidActionRequest({
@@ -171,13 +216,12 @@ export function AndroidEmulatorPane(props: {
           checkoutId: props.checkoutId,
         });
         let request = base;
-        const emulatorId = String(intent.emulatorId);
         const now = Date.now();
         const remembered = rememberedInputGrants.current.get(emulatorId) ?? 0;
         const grantLive =
           androidInputGrantIsLive(controller.runtime, emulatorId, now) || remembered > now;
         if (approvalGated && isAndroidEmulatorInputKind(intent.kind) && !grantLive) {
-          setActionMessage("Allow input to this emulator first.");
+          setActionFailure({ kind: "input-not-allowed" });
           return;
         }
         if (approvalGated && isAndroidEmulatorOpenInputKind(intent.kind) && grantLive) {
@@ -189,14 +233,12 @@ export function AndroidEmulatorPane(props: {
           !(isAndroidEmulatorInputKind(intent.kind) && grantLive)
         ) {
           if (props.requestApproval === undefined) {
-            setActionMessage(
-              "This window cannot confirm Android actions. Approve from the desktop app.",
-            );
+            setActionFailure({ kind: "cannot-confirm" });
             return;
           }
           const approvalId = await props.requestApproval(base);
           if (approvalId === undefined) {
-            setActionMessage("The Android action was not approved, so nothing ran.");
+            setActionFailure({ kind: "not-approved", intent });
             return;
           }
           request = { ...base, approval: { kind: "approved", approvalId: approvalId as never } };
@@ -215,10 +257,10 @@ export function AndroidEmulatorPane(props: {
           setRememberedGrantEpoch(Date.now());
         }
         if (evidence.outcome !== "succeeded") {
-          setActionMessage(`Android ${intent.kind} ${evidence.outcome.replace("-", " ")}.`);
+          setActionFailure({ kind: "outcome", intent, outcome: evidence.outcome });
         }
       } catch {
-        setActionMessage("The Android toolchain service did not answer this action.");
+        setActionFailure({ kind: "no-answer", intent });
       } finally {
         setBusy(false);
         release();
@@ -235,416 +277,249 @@ export function AndroidEmulatorPane(props: {
     ],
   );
 
-  if (controller.status !== "ready") {
-    return (
-      <ShellState
-        eyebrow="Android emulator"
-        message={
-          controller.errorMessage ??
-          (controller.status === "unavailable"
-            ? "Install the Android SDK (platform-tools and an emulator) on this host, then retry."
-            : "Discovering Android emulators for this Code thread.")
-        }
-        state={controller.status === "unavailable" ? "neutral" : "loading"}
-        title={
-          controller.status === "unavailable"
-            ? "Android emulator is unavailable"
-            : "Android emulator"
-        }
-      />
-    );
-  }
-
   const offerInput =
     frameAttach &&
     inputAllowed &&
     liveEmulatorId !== undefined &&
-    props.requestApproval !== undefined
-      ? true
-      : frameAttach && inputAllowed && liveEmulatorId !== undefined && !approvalGated;
+    (props.requestApproval !== undefined || !approvalGated);
+  const devices = emulators.map(emulatorChoice);
+  const view = awaitingChoice
+    ? ({ kind: "pick" } as const)
+    : androidDeviceView({ controller, devices, liveEmulator, liveScreen, liveViewStopped });
+  const live = liveEmulatorId === undefined ? undefined : liveEmulator;
+
+  const onAction = (action: DeviceAction) => {
+    switch (action.kind) {
+      case "allow-input":
+        if (liveEmulatorId !== undefined)
+          void run({ kind: "open-input", emulatorId: liveEmulatorId });
+        return;
+      case "screenshot":
+        if (liveEmulatorId !== undefined)
+          void run({ kind: "screenshot", emulatorId: liveEmulatorId });
+        return;
+      case "shutdown":
+        if (liveEmulatorId !== undefined)
+          void run({ kind: "shutdown", emulatorId: liveEmulatorId });
+        return;
+      case "boot":
+      case "select": {
+        const emulator = emulators.find((one) => String(one.emulatorId) === action.deviceId);
+        if (emulator === undefined) return;
+        setChosenEmulatorId(emulator.emulatorId);
+        if (emulator.state === "shutdown")
+          void run({ kind: "boot", emulatorId: emulator.emulatorId });
+        return;
+      }
+      case "check-again":
+        controller.retry();
+        return;
+      case "stop-live-view":
+        setLiveViewStopped(true);
+        return;
+      case "reconnect":
+        setLiveViewStopped(false);
+        setLiveViewAttempt((attempt) => attempt + 1);
+        return;
+    }
+  };
+  const problem =
+    actionFailure === undefined
+      ? undefined
+      : deviceProblemFor(actionFailure, {
+          platform: "android",
+          deviceName: live?.name ?? "the emulator",
+          retry: (intent: AndroidEmulatorIntent) => void run(intent),
+          ...(liveEmulatorId === undefined
+            ? {}
+            : {
+                allowInput: () => void run({ kind: "open-input", emulatorId: liveEmulatorId }),
+              }),
+        });
 
   return (
-    <section aria-label="Android emulator" className="apple-workbench apple-workbench--device">
-      <LiveDevice
-        busy={busy}
-        liveScreen={liveScreen}
-        name={liveEmulator?.name ?? "Android emulator"}
-        offerInput={offerInput === true}
-        status={
-          liveEmulator?.state === "booting"
-            ? "booting"
-            : liveEmulator?.state === "booted"
-              ? "live"
-              : "idle"
-        }
-        {...(liveEmulatorId === undefined
-          ? {}
-          : {
-              onInput: (intent: AndroidFrameInputIntent) => {
-                if (intent.kind === "tap") {
-                  void run({ kind: "tap", emulatorId: liveEmulatorId, point: intent.point });
-                  return;
-                }
-                if (intent.kind === "swipe") {
-                  void run({
-                    kind: "swipe",
-                    emulatorId: liveEmulatorId,
-                    point: intent.from,
-                    toPoint: intent.to,
-                    durationMs: intent.durationMs,
-                  });
-                  return;
-                }
-                if (intent.kind === "type-text") {
-                  void run({ kind: "type-text", emulatorId: liveEmulatorId, text: intent.text });
-                  return;
-                }
-                void run({ kind: "key-press", emulatorId: liveEmulatorId, key: intent.key });
-              },
-            })}
-      />
-      {needsAllowInput && liveEmulator?.state === "booted" ? (
-        <p className="apple-workbench__action-message" role="status">
-          Allow input to drive this emulator. Clicks do not ask again after that.
-        </p>
-      ) : null}
-      {actionMessage === undefined ? null : (
-        <OctantAlert className="apple-workbench__action-message" tone="warning">
-          {actionMessage}
-        </OctantAlert>
-      )}
-      <DeviceRail
-        busy={busy}
-        emulators={emulators}
-        needsAllowInput={needsAllowInput}
-        onRun={(intent) => void run(intent)}
-      />
-    </section>
+    <DevicePane
+      busy={busy}
+      devices={devices}
+      diagnostics={androidDiagnostics({
+        controller,
+        liveScreen,
+        liveViewStopped,
+        actionFailure,
+      })}
+      inputAllowed={offerInput}
+      needsApproval={needsAllowInput && frameAttach && liveEmulatorId !== undefined}
+      onAction={onAction}
+      {...(liveEmulatorId === undefined || !frameAttach
+        ? {}
+        : {
+            onInput: (intent: DeviceInputIntent) =>
+              void run(androidInputIntent(liveEmulatorId, intent)),
+          })}
+      platform="android"
+      {...(problem === undefined ? {} : { problem })}
+      view={view}
+    />
   );
 }
 
-function LiveDevice(props: {
-  readonly status: "idle" | "booting" | "live";
-  readonly name: string;
+function androidDeviceView(input: {
+  readonly controller: AndroidEmulatorController;
+  readonly devices: ReadonlyArray<DeviceChoice>;
+  readonly liveEmulator: AndroidEmulatorRecord | undefined;
   readonly liveScreen: AndroidEmulatorLiveScreen;
-  readonly offerInput: boolean;
-  readonly busy: boolean;
-  readonly onInput?: (intent: AndroidFrameInputIntent) => void;
-}) {
-  const enqueue = useOrderedAndroidInput({
-    owner: props.status === "live" ? props.name : "",
-    busy: props.busy,
-    ...(props.onInput === undefined ? {} : { onInput: props.onInput }),
-  });
-  const streamed = props.liveScreen.status === "live" ? props.liveScreen : undefined;
-  return (
-    <figure
-      aria-label="Android emulator live frame"
-      className={`apple-simulator-frame apple-simulator-frame--${props.status === "live" ? "live" : "unavailable"} apple-simulator-frame--device`}
-      data-status={props.status === "live" ? "live" : props.status}
-    >
-      <figcaption>
-        {props.status === "live"
-          ? `Live · ${props.name}`
-          : props.status === "booting"
-            ? `Waiting for ${props.name} to become ready.`
-            : "Boot an Android emulator to open a live frame."}
-      </figcaption>
-      {streamed === undefined ? (
-        <p>
-          {props.liveScreen.status === "connecting"
-            ? "Connecting to the emulator screen."
-            : props.liveScreen.status === "unavailable"
-              ? props.liveScreen.message
-              : props.status === "live"
-                ? "The destination is live. Capture the screen if the live view is unavailable."
-                : "Boot an emulator for this Code thread to open a live frame."}
-        </p>
-      ) : (
-        <StreamedScreen
-          active={props.offerInput}
-          attach={streamed.attach}
-          enqueue={enqueue}
-          name={props.name}
-          screen={streamed.screen}
-        />
-      )}
-      {streamed?.transport === undefined ? null : (
-        <p className="apple-simulator-frame__transport" data-transport={streamed.transport.kind}>
-          {transportLabel(streamed.transport)}
-        </p>
-      )}
-      <div className="apple-simulator-frame__keys" role="group" aria-label="Emulator input">
-        <OctantButton
-          disabled={!props.offerInput}
-          onClick={() => enqueue({ kind: "key-press", key: "home" }, false)}
-          type="button"
-          variant="secondary"
-        >
-          Home
-        </OctantButton>
-        <OctantButton
-          disabled={!props.offerInput}
-          onClick={() => enqueue({ kind: "key-press", key: "back" }, false)}
-          type="button"
-          variant="secondary"
-        >
-          Back
-        </OctantButton>
-        <OctantButton
-          disabled={!props.offerInput}
-          onClick={() => enqueue({ kind: "key-press", key: "lock" }, false)}
-          type="button"
-          variant="secondary"
-        >
-          Lock
-        </OctantButton>
-      </div>
-    </figure>
-  );
-}
-
-/** Says whether the pane shows serve-avd's stream or adb screencap snapshots, and why. */
-function transportLabel(transport: AndroidScreenTransport): string {
-  if (transport.kind === "stream") return "Live stream";
-  const reasons: Record<AndroidScreenFallbackReason, string> = {
-    "no-desktop": "this host is not running in the Octant desktop app.",
-    "not-emulator": "only emulators stream.",
-    "tool-missing": "serve-avd is not installed.",
-    "tool-exited": "serve-avd stopped before it attached.",
-    "timed-out": "serve-avd did not attach in time.",
-    "desktop-unreachable": "the desktop app did not answer.",
-    "no-frames": "the stream sent no picture.",
-  };
-  return `Snapshots, live stream unavailable: ${reasons[transport.reason]}`;
-}
-
-function StreamedScreen(props: {
-  readonly name: string;
-  readonly screen: { readonly width: number; readonly height: number };
-  readonly attach: (canvas: HTMLCanvasElement | null) => void;
-  readonly active: boolean;
-  readonly enqueue: (intent: AndroidFrameInputIntent, typing: boolean) => void;
-}) {
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const pressRef = useRef<(PointerSample & { readonly pointerId: number }) | undefined>(undefined);
-  const { active, attach, enqueue } = props;
-  return (
-    /* ui-boundary-exception: specialized-editor-surface */
-    <button
-      aria-label={active ? `Tap on ${props.name} emulator screen` : `${props.name} emulator screen`}
-      className="apple-simulator-frame__screen"
-      disabled={!active}
-      onKeyDown={(event) => {
-        if (!active) return;
-        const intent = keyIntentFor(event);
-        if (intent === undefined) return;
-        event.preventDefault();
-        if (intent.kind === "text") enqueue({ kind: "type-text", text: intent.text }, true);
-        else enqueue({ kind: "key-press", key: intent.key }, false);
-      }}
-      onPointerCancel={(event) => {
-        if (pressRef.current?.pointerId === event.pointerId) pressRef.current = undefined;
-      }}
-      onPointerDown={(event) => {
-        if (!active) return;
-        if (event.button !== 0 || !event.isPrimary) return;
-        pressRef.current = {
-          x: event.clientX,
-          y: event.clientY,
-          atMs: event.timeStamp,
-          pointerId: event.pointerId,
-        };
-        event.currentTarget.setPointerCapture?.(event.pointerId);
-      }}
-      onPointerUp={(event) => {
-        const down = pressRef.current;
-        if (down === undefined || down.pointerId !== event.pointerId) return;
-        pressRef.current = undefined;
-        const canvas = canvasRef.current;
-        if (!active || canvas === null) return;
-        const gesture = gestureFrom(
-          down,
-          { x: event.clientX, y: event.clientY, atMs: event.timeStamp },
-          canvas.getBoundingClientRect(),
-          props.screen,
-        );
-        if (gesture !== undefined) enqueue(gesture, false);
-      }}
-      type="button"
-    >
-      <canvas
-        aria-label={`${props.name} live screen`}
-        ref={(canvas) => {
-          canvasRef.current = canvas;
-          attach(canvas);
-        }}
-        role="img"
-      />
-    </button>
-  );
-}
-
-function DeviceRail(props: {
-  readonly busy: boolean;
-  readonly emulators: ReadonlyArray<AndroidEmulatorRecord>;
-  readonly needsAllowInput: boolean;
-  readonly onRun: (intent: AndroidEmulatorIntent) => void;
-}) {
-  if (props.emulators.length === 0) {
-    return (
-      <p className="apple-workbench__action-message" role="status">
-        No Android Virtual Devices were found. Create an AVD in the Android SDK, then retry.
-      </p>
-    );
+  readonly liveViewStopped: boolean;
+}): DeviceView {
+  const { controller, devices, liveEmulator, liveScreen } = input;
+  if (controller.status === "loading" || controller.status === "waiting") {
+    return { kind: "checking" };
   }
-  return (
-    <ul className="apple-workbench__destinations">
-      {props.emulators.map((emulator) => (
-        <li key={String(emulator.emulatorId)}>
-          <strong>{emulator.name}</strong>
-          <span> · {emulator.state}</span>
-          <span className="apple-workbench__actions">
-            {emulator.state === "booted" ? (
-              <>
-                {props.needsAllowInput ? (
-                  <OctantButton
-                    aria-label={`Allow input to ${emulator.name}`}
-                    disabled={props.busy}
-                    onClick={() =>
-                      props.onRun({ kind: "open-input", emulatorId: emulator.emulatorId })
-                    }
-                    type="button"
-                  >
-                    Allow input
-                  </OctantButton>
-                ) : null}
-                <OctantButton
-                  aria-label={`Capture the ${emulator.name} screen`}
-                  disabled={props.busy}
-                  onClick={() =>
-                    props.onRun({ kind: "screenshot", emulatorId: emulator.emulatorId })
-                  }
-                  type="button"
-                  variant="secondary"
-                >
-                  Capture screen
-                </OctantButton>
-                <OctantButton
-                  aria-label={`Shut down ${emulator.name}`}
-                  disabled={props.busy}
-                  onClick={() => props.onRun({ kind: "shutdown", emulatorId: emulator.emulatorId })}
-                  type="button"
-                  variant="destructive"
-                >
-                  Shut down
-                </OctantButton>
-              </>
-            ) : (
-              <OctantButton
-                aria-label={`Boot ${emulator.name}`}
-                disabled={props.busy || emulator.state !== "shutdown"}
-                onClick={() => props.onRun({ kind: "boot", emulatorId: emulator.emulatorId })}
-                type="button"
-                variant="secondary"
-              >
-                Boot
-              </OctantButton>
-            )}
-          </span>
-        </li>
-      ))}
-    </ul>
-  );
+  if (controller.status !== "ready") {
+    const missing = controller.status === "unavailable";
+    return {
+      kind: "setup",
+      title: "Set up the Android emulator",
+      checks: [
+        missing
+          ? {
+              id: "sdk",
+              label: "Android SDK",
+              state: "missing",
+              detail: "The SDK wasn't found on this host.",
+              fix: "Install platform-tools and the emulator with the Android SDK Manager.",
+            }
+          : { id: "sdk", label: "Android SDK", state: "waiting", detail: "Not checked yet" },
+        { id: "avd", label: "Virtual device", state: "waiting", detail: "Checked after the SDK" },
+      ],
+      ...(controller.errorMessage === undefined || missing
+        ? {}
+        : { note: controller.errorMessage }),
+    };
+  }
+  if (devices.length === 0) {
+    return {
+      kind: "setup",
+      title: "Set up the Android emulator",
+      checks: [
+        { id: "sdk", label: "Android SDK", state: "ok" },
+        {
+          id: "avd",
+          label: "Virtual device",
+          state: "missing",
+          detail: "No Android Virtual Device was found.",
+          fix: "Create one in Android Studio › Device Manager.",
+        },
+      ],
+    };
+  }
+  const device =
+    liveEmulator === undefined
+      ? undefined
+      : devices.find((one) => one.id === String(liveEmulator.emulatorId));
+  if (device?.state === "booting") return { kind: "booting", device };
+  if (device?.state === "booted") {
+    if (input.liveViewStopped) {
+      return { kind: "live", device, screen: { kind: "none" }, liveView: "stopped" };
+    }
+    if (liveScreen.status === "live") {
+      return {
+        kind: "live",
+        device,
+        screen: { kind: "stream", size: liveScreen.screen, attach: liveScreen.attach },
+        liveView: "streaming",
+        ...(liveScreen.transport === undefined
+          ? {}
+          : { transport: transportLabel(liveScreen.transport) }),
+      };
+    }
+    if (liveScreen.status === "connecting") {
+      return { kind: "live", device, screen: { kind: "connecting" }, liveView: "connecting" };
+    }
+    return {
+      kind: "live",
+      device,
+      screen: { kind: "none" },
+      liveView: liveScreen.status === "unavailable" ? "lost" : "not-offered",
+    };
+  }
+  const stopping = devices.find((one) => one.state === "shutting-down");
+  return stopping === undefined ? { kind: "pick" } : { kind: "shutting-down", device: stopping };
 }
 
-type AndroidFrameInputIntent =
-  | { readonly kind: "tap"; readonly point: { readonly x: number; readonly y: number } }
-  | {
-      readonly kind: "swipe";
-      readonly from: { readonly x: number; readonly y: number };
-      readonly to: { readonly x: number; readonly y: number };
-      readonly durationMs: number;
-    }
-  | { readonly kind: "type-text"; readonly text: string }
-  | { readonly kind: "key-press"; readonly key: string };
-
-const TYPING_PAUSE_MS = 350;
-const LONGEST_TYPED_TEXT = 4_096;
-const UNANSWERED_INPUT_MS = 1_000;
-
-function useOrderedAndroidInput(options: {
-  readonly owner: string;
-  readonly busy: boolean;
-  readonly onInput?: (intent: AndroidFrameInputIntent) => void;
-}) {
-  const { busy, onInput, owner } = options;
-  const waitingRef = useRef<AndroidFrameInputIntent[]>([]);
-  const sentRef = useRef(false);
-  const busyRef = useRef(busy);
-  busyRef.current = busy;
-  const unansweredRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const typingRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-
-  const sendNext = useCallback(() => {
-    if (onInput === undefined || busy || sentRef.current) return;
-    const next = waitingRef.current.shift();
-    if (next === undefined) return;
-    sentRef.current = true;
-    if (unansweredRef.current !== undefined) clearTimeout(unansweredRef.current);
-    unansweredRef.current = setTimeout(() => {
-      unansweredRef.current = undefined;
-      if (busyRef.current) return;
-      sentRef.current = false;
-      sendNextRef.current();
-    }, UNANSWERED_INPUT_MS);
-    onInput(next);
-  }, [busy, onInput]);
-  const sendNextRef = useRef(sendNext);
-  sendNextRef.current = sendNext;
-
-  useEffect(() => {
-    if (busy) return;
-    sentRef.current = false;
-    if (typingRef.current === undefined) sendNext();
-  }, [busy, sendNext]);
-
-  useEffect(
-    () => () => {
-      if (typingRef.current !== undefined) clearTimeout(typingRef.current);
-      if (unansweredRef.current !== undefined) clearTimeout(unansweredRef.current);
-      typingRef.current = undefined;
-      unansweredRef.current = undefined;
-      waitingRef.current = [];
-      sentRef.current = false;
-    },
-    [owner],
-  );
-
-  return (intent: AndroidFrameInputIntent, typing: boolean) => {
-    const waiting = waitingRef.current;
-    const last = waiting.at(-1);
-    if (
-      intent.kind === "type-text" &&
-      last?.kind === "type-text" &&
-      typingRef.current !== undefined &&
-      last.text.length + intent.text.length <= LONGEST_TYPED_TEXT
-    ) {
-      waiting[waiting.length - 1] = { kind: "type-text", text: last.text + intent.text };
-    } else {
-      waiting.push(intent);
-    }
-    if (typingRef.current !== undefined) clearTimeout(typingRef.current);
-    typingRef.current = undefined;
-    if (typing) {
-      typingRef.current = setTimeout(() => {
-        typingRef.current = undefined;
-        sendNextRef.current();
-      }, TYPING_PAUSE_MS);
-      return;
-    }
-    sendNext();
+function androidDiagnostics(input: {
+  readonly controller: AndroidEmulatorController;
+  readonly liveScreen: AndroidEmulatorLiveScreen;
+  readonly liveViewStopped: boolean;
+  readonly actionFailure: DeviceActionFailure<AndroidEmulatorIntent> | undefined;
+}): DeviceDiagnostics {
+  const status = input.liveScreen.status;
+  return {
+    facts: [
+      {
+        label: "Live view",
+        value: input.liveViewStopped
+          ? "Off"
+          : status === "live"
+            ? "Streaming"
+            : status === "connecting"
+              ? "Connecting"
+              : "Not attached",
+      },
+      ...(input.actionFailure === undefined
+        ? []
+        : [{ label: "Last problem", value: deviceFailureDetail(input.actionFailure) }]),
+    ],
+    running: (input.controller.runtime?.active ?? [])
+      .filter((progress) => progress.state !== "completed")
+      .map((progress) => ({
+        id: String(progress.actionId),
+        label: deviceWord(progress.kind),
+        step: deviceWord(progress.step),
+      })),
+    recent: [...(input.controller.runtime?.recentEvidence ?? [])]
+      .slice(-5)
+      .reverse()
+      .map((item) => {
+        const first = item.diagnostics[0];
+        return {
+          id: `${String(item.actionId)}:${item.completedAt}`,
+          label: deviceWord(item.kind),
+          outcome: deviceWord(item.outcome),
+          ...(first === undefined ? {} : { detail: first.message }),
+        };
+      }),
   };
+}
+
+function emulatorChoice(emulator: AndroidEmulatorRecord): DeviceChoice {
+  return {
+    id: String(emulator.emulatorId),
+    name: emulator.name,
+    ...(emulator.apiLevel === undefined ? {} : { os: `API ${emulator.apiLevel}` }),
+    state: emulator.state,
+  };
+}
+
+function androidInputIntent(
+  emulatorId: AndroidEmulatorId,
+  intent: DeviceInputIntent,
+): AndroidEmulatorIntent {
+  switch (intent.kind) {
+    case "tap":
+      return { kind: "tap", emulatorId, point: intent.point };
+    case "swipe":
+      return {
+        kind: "swipe",
+        emulatorId,
+        point: intent.from,
+        toPoint: intent.to,
+        durationMs: intent.durationMs,
+      };
+    case "type-text":
+      return { kind: "type-text", emulatorId, text: intent.text };
+    case "key-press":
+      return { kind: "key-press", emulatorId, key: intent.key };
+  }
 }
 
 function androidActionRequest(input: {
@@ -721,4 +596,19 @@ function localUserActor(): { readonly kind: "local-user"; readonly actorId: neve
     kind: "local-user",
     actorId: "00000000-0000-4000-8000-000000000002" as never,
   };
+}
+
+/** Says whether the pane shows serve-avd's stream or adb screencap snapshots, and why. */
+function transportLabel(transport: AndroidScreenTransport): string {
+  if (transport.kind === "stream") return "Live stream";
+  const reasons: Record<AndroidScreenFallbackReason, string> = {
+    "no-desktop": "this host is not running in the Octant desktop app.",
+    "not-emulator": "only emulators stream.",
+    "tool-missing": "serve-avd is not installed.",
+    "tool-exited": "serve-avd stopped before it attached.",
+    "timed-out": "serve-avd did not attach in time.",
+    "desktop-unreachable": "the desktop app did not answer.",
+    "no-frames": "the stream sent no picture.",
+  };
+  return `Snapshots, live stream unavailable: ${reasons[transport.reason]}`;
 }

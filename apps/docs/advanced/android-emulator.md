@@ -31,20 +31,32 @@ attach in time, or this host is not running in the Octant desktop app.
   Octant's Android emulator pane. Closing the tab does not shut the emulator
   down.
 - Watch the screen as it changes while the pane is open, or after each
-  input. Frames are not stored. **Capture screen** is how a still becomes
-  validation evidence.
+  input. Frames are not stored. **Screenshot** in the toolbar is how a still
+  becomes validation evidence.
 - Drive the device: click to tap, drag to swipe, type on the focused screen,
-  and use Home, Back, and Lock. On an approval-gated thread, **Allow input**
-  is the one confirmation; clicks never open a dialog.
+  and use **Back**, **Home**, and **Lock** in the toolbar (**Lock** moves into
+  **More** when the pane is narrow). On an approval-gated thread the line
+  under the toolbar asks **Allow input on Pixel 9?**; **Allow** opens the one
+  confirmation, **Not now** leaves the screen view only, and clicks never open
+  a dialog.
 - **Install** a checkout-relative APK and **launch** a package. Gradle build
   stays the repository shell.
+
+The pane is the same device pane as the iOS Simulator's: one toolbar with the
+emulator's name and state in words, at most one line for an error, the
+approval, or typing, and the emulator on a quiet stage. The name opens a list
+of the other AVDs so you choose which one the pane shows, and when more than
+one is running and nobody has chosen, the pane asks instead of guessing.
+**More** holds **Type text…**, **Switch device…**, **Diagnostics**, **Stop
+live view**, and **Shut down**. When the SDK or an AVD is missing, a short
+checklist says what to install or create.
 
 Octant finds the SDK through `ANDROID_HOME` or `ANDROID_SDK_ROOT`. Without
 either, macOS hosts look in `~/Library/Android/sdk` (Android Studio) and then in
 the Homebrew `android-commandlinetools` location under `/opt/homebrew/share` or
 `/usr/local/share`, using the first that has both `adb` and `emulator`. Other
-hosts look in `~/Android/Sdk`. A host without `adb` or `emulator` says the destination is
-unavailable instead of inventing a picture.
+hosts look in `~/Android/Sdk`. A host without `adb` or `emulator` shows the
+setup checklist instead of inventing a picture.
 
 When no `adb` server is running, the first `adb` command Octant sends starts
 one with mDNS discovery turned off (`ADB_MDNS=0`). Wireless-debugging

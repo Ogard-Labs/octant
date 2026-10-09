@@ -50,6 +50,7 @@ import type {
   ApplePlatform,
   AppleSimulatorId,
 } from "@octant/contracts/apple-toolchain";
+import type { DeviceActionFailure } from "../device/deviceModel";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
 import type { ImageGenerationClient } from "@octant/client-runtime/image-generation-client";
@@ -447,10 +448,30 @@ function AppleWorkbenchSurface(props: {
     snapshotRequest,
   });
   const [busy, setBusy] = useState(false);
-  const [actionMessage, setActionMessage] = useState<string>();
-  const [repairInputSimulatorId, setRepairInputSimulatorId] = useState<AppleSimulatorId>();
+  const [actionFailure, setActionFailure] = useState<DeviceActionFailure<AppleWorkbenchIntent>>();
+  // Which Simulator the person chose to see. An agent's later request to show
+  // a device replaces it, so the pane follows the newest ask.
+  const [chosenSimulatorId, setChosenSimulatorId] = useState<AppleSimulatorId>();
+  const paneOpenRequestId = controller.runtime?.paneOpenRequest?.requestId;
+  useEffect(() => setChosenSimulatorId(undefined), [paneOpenRequestId]);
+  const [liveViewStopped, setLiveViewStopped] = useState(false);
+  const [liveViewAttempt, setLiveViewAttempt] = useState(0);
   const approvalGated = decidesCodeEffectsByApproval(props.thread.executionPolicy);
   const simulators = controller.discovery?.simulators ?? [];
+  // More than one Simulator runs and nobody said which to show: the pane asks,
+  // and nothing streams from one that may belong to another task meanwhile.
+  // A choice counts only while that Simulator still runs.
+  const chosenRunning =
+    chosenSimulatorId !== undefined &&
+    simulators.some(
+      (simulator) =>
+        String(simulator.simulatorId) === String(chosenSimulatorId) &&
+        (simulator.state === "booted" || simulator.state === "booting"),
+    );
+  const awaitingChoice =
+    !chosenRunning &&
+    paneOpenRequestId === undefined &&
+    simulators.filter((simulator) => simulator.state === "booted").length > 1;
   const platform =
     simulators[0]?.platform ?? controller.discovery?.toolchain.sdks[0]?.platform ?? "macos";
   const scheme = controller.discovery?.workspace.schemes[0];
@@ -506,9 +527,12 @@ function AppleWorkbenchSurface(props: {
               : { simulatorId: latestScreenshot.simulatorId }),
           },
         }),
-    ...(controller.runtime?.paneOpenRequest === undefined
-      ? {}
-      : { preferredSimulatorId: controller.runtime.paneOpenRequest.simulatorId }),
+    // A choice whose Simulator stopped no longer outranks an agent's request.
+    ...(chosenSimulatorId !== undefined && chosenRunning
+      ? { preferredSimulatorId: chosenSimulatorId }
+      : controller.runtime?.paneOpenRequest === undefined
+        ? {}
+        : { preferredSimulatorId: controller.runtime.paneOpenRequest.simulatorId }),
   });
   const screenshotReference =
     liveFrame.status === "live" && liveFrame.screen.kind === "screenshot"
@@ -533,6 +557,11 @@ function AppleWorkbenchSurface(props: {
     ...(screenshotRequest === undefined ? {} : { request: screenshotRequest }),
   });
   const liveSimulatorId = liveFrame.status === "live" ? liveFrame.simulatorId : undefined;
+  // A failure belongs to the Simulator it happened on. Once the pane shows
+  // another, its line and its Try again would name one device and act on the
+  // other, so it is dropped.
+  const shownSimulator = liveSimulatorId === undefined ? undefined : String(liveSimulatorId);
+  useEffect(() => setActionFailure(undefined), [shownSimulator]);
   const rememberedUntil =
     liveSimulatorId === undefined
       ? 0
@@ -560,7 +589,8 @@ function AppleWorkbenchSurface(props: {
   // headless client never opens a stream it could not be given.
   const liveScreen = useAppleSimulatorLiveScreen({
     client: props.client,
-    enabled: liveFrame.status === "live",
+    enabled: liveFrame.status === "live" && !liveViewStopped && !awaitingChoice,
+    attempt: liveViewAttempt,
     ...(screenStreamRequest === undefined ? {} : { request: screenStreamRequest }),
   });
 
@@ -572,8 +602,7 @@ function AppleWorkbenchSurface(props: {
         release = resolve;
       });
       await previous;
-      setActionMessage(undefined);
-      setRepairInputSimulatorId(undefined);
+      setActionFailure(undefined);
       setBusy(true);
       try {
         const base = appleActionRequest({
@@ -602,7 +631,7 @@ function AppleWorkbenchSurface(props: {
         // Clicks, typed keys, Home, and Lock never raise a confirmation. They
         // ride a live grant or Full access; without either they do not run.
         if (approvalGated && isAppleSimulatorInputKind(intent.kind) && !grantLive) {
-          setActionMessage("Allow input to this Simulator first.");
+          setActionFailure({ kind: "input-not-allowed" });
           return;
         }
         if (approvalGated && isAppleSimulatorOpenInputKind(intent.kind) && grantLive) {
@@ -614,14 +643,12 @@ function AppleWorkbenchSurface(props: {
           !(isAppleSimulatorInputKind(intent.kind) && grantLive)
         ) {
           if (requestApproval === undefined) {
-            setActionMessage(
-              "This window cannot confirm Apple actions. Approve from the desktop app.",
-            );
+            setActionFailure({ kind: "cannot-confirm" });
             return;
           }
           const approvalId = await requestApproval(base);
           if (approvalId === undefined) {
-            setActionMessage("The Apple action was not approved, so nothing ran.");
+            setActionFailure({ kind: "not-approved", intent });
             return;
           }
           request = { ...base, approval: { kind: "approved", approvalId: approvalId as never } };
@@ -652,13 +679,12 @@ function AppleWorkbenchSurface(props: {
           "simulatorId" in intent &&
           inputDisconnected(evidence)
         ) {
-          setActionMessage(APPLE_INPUT_DISCONNECTED_MESSAGE);
-          setRepairInputSimulatorId(intent.simulatorId);
+          setActionFailure({ kind: "refused", intent, reason: "input-disconnected" });
         } else if (evidence.outcome !== "succeeded") {
-          setActionMessage(`Apple ${intent.kind} ${evidence.outcome.replace("-", " ")}.`);
+          setActionFailure({ kind: "outcome", intent, outcome: evidence.outcome });
         }
       } catch {
-        setActionMessage("The Apple toolchain service did not answer this action.");
+        setActionFailure({ kind: "no-answer", intent });
       } finally {
         setBusy(false);
         release();
@@ -680,7 +706,7 @@ function AppleWorkbenchSurface(props: {
 
   const cancel = useCallback(
     async (actionId: AppleActionProgress["actionId"]) => {
-      setActionMessage(undefined);
+      setActionFailure(undefined);
       setBusy(true);
       try {
         const cancelled = await controller.cancel({
@@ -694,9 +720,9 @@ function AppleWorkbenchSurface(props: {
             reason: "user-requested",
           },
         } as never);
-        if (!cancelled) setActionMessage("That Apple action was already finished.");
+        if (!cancelled) setActionFailure({ kind: "cancel-finished" });
       } catch {
-        setActionMessage("The Apple toolchain service did not answer the cancellation.");
+        setActionFailure({ kind: "cancel-no-answer" });
       } finally {
         setBusy(false);
       }
@@ -706,8 +732,7 @@ function AppleWorkbenchSurface(props: {
 
   return (
     <AppleWorkbenchPane
-      {...(actionMessage === undefined ? {} : { actionMessage })}
-      {...(repairInputSimulatorId === undefined ? {} : { repairInputSimulatorId })}
+      {...(actionFailure === undefined ? {} : { actionFailure })}
       busy={busy}
       liveFrame={liveFrame}
       {...(screenUrl === undefined ? {} : { screenUrl })}
@@ -716,12 +741,22 @@ function AppleWorkbenchSurface(props: {
       {...(controller.discovery === undefined ? {} : { discovery: controller.discovery })}
       {...(controller.runtime === undefined ? {} : { runtime: controller.runtime })}
       {...(controller.errorMessage === undefined ? {} : { errorMessage: controller.errorMessage })}
+      {...(controller.errorCategory === undefined
+        ? {}
+        : { errorCategory: controller.errorCategory })}
       onCancel={(actionId) => void cancel(actionId)}
       onRetry={controller.retry}
       onRun={(intent) => void run(intent)}
       inputAllowed={inputAllowed}
       needsAllowInput={needsAllowInput}
       {...(props.tab.pane === "device" ? { variant: "device" as const } : {})}
+      liveViewStopped={liveViewStopped}
+      onLiveView={(next) => {
+        setLiveViewStopped(next === "stop");
+        if (next === "reconnect") setLiveViewAttempt((attempt) => attempt + 1);
+      }}
+      onSelectSimulator={setChosenSimulatorId}
+      awaitingChoice={awaitingChoice}
     />
   );
 }
@@ -837,9 +872,6 @@ function appleActionRequest(input: {
       };
   }
 }
-
-const APPLE_INPUT_DISCONNECTED_MESSAGE =
-  "Simulator input is disconnected. Repair input restarts the Simulator's home screen.";
 
 /** The desktop names a Simulator whose input Device Hub took by this reason. */
 function inputDisconnected(evidence: AppleBuildEvidence): boolean {
