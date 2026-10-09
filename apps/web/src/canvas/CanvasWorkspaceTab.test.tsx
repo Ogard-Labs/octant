@@ -1011,6 +1011,55 @@ describe("CanvasWorkspaceTab", () => {
     expect(refine).toHaveAccessibleDescription("Older versions can't be refined.");
   });
 
+  it("says why an older version cannot be shared instead of offering a share the host refuses", async () => {
+    const olderVersionId = "45454545-4545-4545-8545-454545454545";
+    const client = createCanvasClient(readyVersion, twoVersionHistory(olderVersionId), {
+      get: vi.fn(async (_canvasId, versionId) =>
+        versionId === olderVersionId ? versionOf(olderVersionId, 1) : readyVersion,
+      ),
+      shareOverview: vi.fn(async () => ({
+        schemaVersion: 1,
+        kind: "canvas-share-overview",
+        canvasId: quarterlyCanvasId,
+        hostId: "local",
+        projectId: canvasInventoryProjectId,
+        sharingEnabled: true,
+        owner: { kind: "local-user", actorId: "88888888-8888-4888-8888-888888888888" },
+        snapshots: [],
+        accessLog: [],
+      })),
+    } as unknown as Partial<CanvasClient>);
+    render(<CanvasWorkspaceTab tab={canvasTab} client={client} />);
+    await screen.findByRole("heading", { name: "Signed Q3 report" });
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "More Canvas actions" }));
+    expect(await screen.findByRole("menuitem", { name: "Share…" })).not.toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
+    await user.keyboard("{Escape}");
+
+    await openVersionHistory();
+    fireEvent.click(await screen.findByTestId("canvas-version-1"));
+    await screen.findByText("older");
+
+    await user.click(screen.getByRole("button", { name: "More Canvas actions" }));
+    const share = await screen.findByRole("menuitem", { name: "Share…" });
+    expect(share).toHaveAttribute("aria-disabled", "true");
+    expect(share).toHaveAccessibleDescription("Older versions can't be shared.");
+  });
+
+  it("shows keyboard focus on a block's comment marker with the hover fill", () => {
+    // A marker with open threads is always visible, so revealing it on focus
+    // is no cue; without a fill, focus on it could not be seen at all.
+    const focus = cssDeclarations(".canvas-block__comment-marker:focus-visible");
+    expect(focus.background).toBe(
+      cssDeclarations(".canvas-block__comment-marker:hover").background,
+    );
+    expect(focus.background).toBe("var(--oct-fill-2)");
+  });
+
   it("holds Compare until a version just picked has loaded, then compares that version", async () => {
     type GetOutcome = Awaited<ReturnType<CanvasClient["get"]>>;
     const firstVersionId = "45454545-4545-4545-8545-454545454541";

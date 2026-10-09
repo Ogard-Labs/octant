@@ -254,6 +254,8 @@ The document fills the Canvas tab and the dock. Its header holds the version
 picker (choose an earlier version, or **Compare with** the previous one to see
 which blocks were added, changed, or removed), **Comments** with the number of
 open threads, and a `⋯` menu for **Share**, **Refresh**, and **Refine**.
+Those three act on the current version, so an earlier version shows them
+unavailable and says why.
 
 **Comments** open in a panel over the document rather than beside it. Hover a
 block and select its comment marker to read or add comments on that block;

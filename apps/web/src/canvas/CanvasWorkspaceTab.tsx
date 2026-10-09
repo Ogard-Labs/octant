@@ -621,8 +621,19 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
           },
         ]
       : []),
+    // The host snapshots only the head version and refuses any other as a
+    // scope mismatch, which the panel could only report as "a different
+    // workspace", so an older version says why instead of offering Share.
     ...(shares !== undefined && selectedVersionId !== undefined
-      ? [{ label: "Share…", value: "share" }]
+      ? [
+          {
+            label: "Share…",
+            value: "share",
+            ...(viewingOlderVersion
+              ? { disabled: true, description: "Older versions can't be shared." }
+              : {}),
+          },
+        ]
       : []),
     ...(exportOffers !== undefined &&
     selectedVersionId !== undefined &&
