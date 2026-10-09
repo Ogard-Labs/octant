@@ -502,7 +502,7 @@ describe("CodeWorkspace", () => {
     expect(screen.queryByRole("region", { name: "Code overview" })).not.toBeInTheDocument();
   });
 
-  it("asks once to Allow input, then Home runs without another confirmation", async () => {
+  it("asks once to allow input, then Home runs without another confirmation", async () => {
     const simulatorId = "90000000-0000-4000-8000-000000000006";
     let resolveApproval: ((id: string | undefined) => void) | undefined;
     const requestApproval = vi.fn(
@@ -584,12 +584,15 @@ describe("CodeWorkspace", () => {
     );
 
     const home = await screen.findByRole("button", { name: "Home" });
-    fireEvent.click(home);
-    fireEvent.click(home);
+    // Without a grant the device's buttons send nothing and say so.
+    expect(home).toBeDisabled();
     expect(requestApproval).not.toHaveBeenCalled();
     expect(execute).not.toHaveBeenCalled();
 
-    const allow = await screen.findByRole("button", { name: "Allow input to iPhone 16" });
+    expect(await screen.findByText(/Allow input on/)).toHaveTextContent(
+      "Allow input on iPhone 16?",
+    );
+    const allow = screen.getByRole("button", { name: "Allow" });
     fireEvent.click(allow);
     fireEvent.click(allow);
     await waitFor(() => expect(requestApproval).toHaveBeenCalledTimes(1));
@@ -598,6 +601,7 @@ describe("CodeWorkspace", () => {
     expect(requestApproval).toHaveBeenCalledTimes(1);
     expect(execute).toHaveBeenCalledWith(expect.objectContaining({ kind: "open-input" }));
 
+    await waitFor(() => expect(screen.getByRole("button", { name: "Home" })).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: "Home" }));
     await waitFor(() => expect(execute).toHaveBeenCalledTimes(2));
     expect(requestApproval).toHaveBeenCalledTimes(1);

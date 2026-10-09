@@ -11,6 +11,8 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { AppleSimulatorLiveFrameView } from "./AppleSimulatorLiveFrame";
 import type { AppleSimulatorLiveScreen } from "./useAppleSimulatorLiveScreen";
 import { OctantAlert } from "../ui/base/OctantAlert";
+import { deviceFailureSentence, type DeviceActionFailure } from "../device/deviceModel";
+import { AppleDevicePane } from "./AppleDevicePane";
 
 export type AppleWorkbenchStatus =
   | "loading"
@@ -70,12 +72,10 @@ export interface AppleWorkbenchPaneProps {
   readonly onCancel?: (actionId: AppleActionProgress["actionId"]) => void;
   /** True while a request this pane started is still in flight. */
   readonly busy?: boolean;
-  readonly actionMessage?: string;
-  /**
-   * The Simulator whose input the host found disconnected. The pane offers
-   * Repair input for it beside the message, and only then.
-   */
-  readonly repairInputSimulatorId?: AppleSimulatorId;
+  /** Why the last request did not do what was asked, if it did not. */
+  readonly actionFailure?: DeviceActionFailure<AppleWorkbenchIntent>;
+  /** How discovery failed, when it did: Xcode missing reads differently from the rest. */
+  readonly errorCategory?: string;
   readonly liveFrame?: AppleSimulatorLiveFrame;
   readonly screenUrl?: string;
   readonly liveScreen?: AppleSimulatorLiveScreen;
@@ -94,9 +94,20 @@ export interface AppleWorkbenchPaneProps {
    * command stays the evidence surface.
    */
   readonly variant?: "workbench" | "device";
+  /** The device pane shows this Simulator; the person chose it. */
+  readonly onSelectSimulator?: (simulatorId: AppleSimulatorId) => void;
+  /**
+   * More than one Simulator is running and nobody has said which to show. The
+   * device pane asks rather than guessing, since another task may own one.
+   */
+  readonly awaitingChoice?: boolean;
+  /** The person turned the live view off in the device pane. */
+  readonly liveViewStopped?: boolean;
+  readonly onLiveView?: (next: "stop" | "reconnect") => void;
 }
 
 export function AppleWorkbenchPane(props: AppleWorkbenchPaneProps) {
+  if (props.variant === "device") return <AppleDevicePane {...props} />;
   if (props.status !== "ready") return <AppleWorkbenchState {...props} />;
   if (props.discovery === undefined || props.runtime === undefined) {
     return (
@@ -105,12 +116,8 @@ export function AppleWorkbenchPane(props: AppleWorkbenchPaneProps) {
         {...(props.liveFrame === undefined ? {} : { liveFrame: props.liveFrame })}
         {...(props.screenUrl === undefined ? {} : { screenUrl: props.screenUrl })}
         {...(props.liveScreen === undefined ? {} : { liveScreen: props.liveScreen })}
-        {...(props.variant === undefined ? {} : { variant: props.variant })}
       />
     );
-  }
-  if (props.variant === "device") {
-    return <AppleDevicePane {...props} discovery={props.discovery} runtime={props.runtime} />;
   }
   return (
     <section aria-label="Apple development workbench" className="apple-workbench">
@@ -137,9 +144,9 @@ export function AppleWorkbenchPane(props: AppleWorkbenchPaneProps) {
           scheme={props.discovery.workspace.schemes[0]}
         />
       )}
-      {props.actionMessage === undefined ? null : (
+      {props.actionFailure === undefined ? null : (
         <OctantAlert className="apple-workbench__action-message" tone="warning">
-          {props.actionMessage}
+          {deviceFailureSentence(props.actionFailure, "ios")}
         </OctantAlert>
       )}
       <SimulatorList
@@ -163,7 +170,7 @@ function LiveFrame(
   props: Pick<
     AppleWorkbenchPaneProps,
     "liveFrame" | "screenUrl" | "liveScreen" | "onRun" | "busy" | "inputAllowed"
-  > & { readonly chrome?: "workbench" | "device" },
+  >,
 ) {
   if (props.liveFrame === undefined) return null;
   const frame = props.liveFrame;
@@ -175,7 +182,6 @@ function LiveFrame(
   return (
     <AppleSimulatorLiveFrameView
       busy={props.busy === true}
-      chrome={props.chrome ?? "workbench"}
       frame={frame}
       inputEnabled={inputEnabled}
       {...(props.onRun === undefined || frame.status !== "live"
@@ -222,111 +228,10 @@ function LiveFrame(
   );
 }
 
-function AppleDevicePane(
-  props: AppleWorkbenchPaneProps & {
-    readonly discovery: NonNullable<AppleWorkbenchPaneProps["discovery"]>;
-    readonly runtime: NonNullable<AppleWorkbenchPaneProps["runtime"]>;
-  },
-) {
-  return (
-    <section aria-label="iOS Simulator" className="apple-workbench apple-workbench--device">
-      <LiveFrame {...props} chrome="device" />
-      {props.needsAllowInput === true && props.onRun !== undefined ? (
-        <p className="apple-workbench__action-message" role="status">
-          Allow input to drive this Simulator. Clicks do not ask again after that.
-        </p>
-      ) : null}
-      {props.actionMessage === undefined ? null : (
-        <OctantAlert className="apple-workbench__action-message" tone="warning">
-          {props.actionMessage}
-          <RepairInput {...props} />
-        </OctantAlert>
-      )}
-      <DeviceRail
-        busy={props.busy === true}
-        {...(props.onRun === undefined ? {} : { onRun: props.onRun })}
-        simulators={props.discovery.simulators}
-        {...(props.needsAllowInput === true ? { needsAllowInput: true } : {})}
-      />
-      {props.runtime.active.length === 0 ? null : (
-        <ProgressList
-          busy={props.busy === true}
-          {...(props.onCancel === undefined ? {} : { onCancel: props.onCancel })}
-          progress={props.runtime.active}
-        />
-      )}
-    </section>
-  );
-}
-
-/**
- * Repairing input restarts the Simulator's home screen and closes its apps,
- * so it is offered only after the host said input is disconnected, and runs
- * only when the reader presses it.
- */
-function RepairInput(
-  props: Pick<AppleWorkbenchPaneProps, "busy" | "onRun" | "repairInputSimulatorId">,
-) {
-  const simulatorId = props.repairInputSimulatorId;
-  const onRun = props.onRun;
-  if (simulatorId === undefined || onRun === undefined) return null;
-  return (
-    <OctantButton
-      disabled={props.busy === true}
-      onClick={() => onRun({ kind: "repair-input", simulatorId })}
-      size="sm"
-      type="button"
-      variant="outline"
-    >
-      Repair input
-    </OctantButton>
-  );
-}
-
-function DeviceRail(props: {
-  readonly busy: boolean;
-  readonly onRun?: (intent: AppleWorkbenchIntent) => void;
-  readonly simulators: ReadonlyArray<AppleSimulatorRecord>;
-  readonly needsAllowInput?: boolean;
-}) {
-  if (props.simulators.length === 0) {
-    return (
-      <section aria-labelledby="apple-simulators-heading" className="apple-workbench__section">
-        <h2 id="apple-simulators-heading">Simulator</h2>
-        <p>No compatible Simulator is available.</p>
-      </section>
-    );
-  }
-  return (
-    <section aria-labelledby="apple-simulators-heading" className="apple-workbench__section">
-      <h2 id="apple-simulators-heading">Simulator</h2>
-      <ul>
-        {props.simulators.map((simulator) => (
-          <li key={simulator.simulatorId}>
-            <strong>{simulator.name}</strong>
-            <span>
-              {simulator.platform} {simulator.runtimeVersion} · {simulatorState(simulator.state)}
-            </span>
-            {props.onRun === undefined ? null : (
-              <SimulatorActions
-                busy={props.busy}
-                onRun={props.onRun}
-                scheme={undefined}
-                simulator={simulator}
-                {...(props.needsAllowInput === true ? { needsAllowInput: true } : {})}
-              />
-            )}
-          </li>
-        ))}
-      </ul>
-    </section>
-  );
-}
-
 function AppleWorkbenchState(
   props: Pick<
     AppleWorkbenchPaneProps,
-    "status" | "errorMessage" | "onRetry" | "liveFrame" | "screenUrl" | "liveScreen" | "variant"
+    "status" | "errorMessage" | "onRetry" | "liveFrame" | "screenUrl" | "liveScreen"
   >,
 ) {
   const presentation = {
@@ -350,14 +255,13 @@ function AppleWorkbenchState(
     ready: ["Waiting for Apple evidence", "No authoritative Apple action state is available yet."],
   } as const;
   const [title, message] = presentation[props.status];
-  const device = props.variant === "device";
   return (
     <section
-      aria-label={device ? "iOS Simulator" : "Apple development workbench"}
-      className={`apple-workbench apple-workbench--${props.status}${device ? " apple-workbench--device" : ""}`}
+      aria-label="Apple development workbench"
+      className={`apple-workbench apple-workbench--${props.status}`}
     >
-      {device ? null : <span className="apple-workbench__eyebrow">Apple development</span>}
-      <LiveFrame {...props} chrome={device ? "device" : "workbench"} />
+      <span className="apple-workbench__eyebrow">Apple development</span>
+      <LiveFrame {...props} />
       <h1>{title}</h1>
       {/* ui-boundary-exception: compact-status */}
       <p role={props.status === "failed" ? "alert" : undefined}>{message}</p>

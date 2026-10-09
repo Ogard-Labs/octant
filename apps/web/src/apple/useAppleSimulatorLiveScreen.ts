@@ -43,10 +43,12 @@ export function useAppleSimulatorLiveScreen(options: {
   readonly client: AppleToolchainClient;
   readonly request?: AppleScreenStreamRequest;
   readonly enabled: boolean;
+  /** Raising it gives up the current view and asks for a fresh one: Reconnect. */
+  readonly attempt?: number;
   /** Replaceable where `createImageBitmap` does not exist. */
   readonly decode?: (jpeg: Uint8Array) => Promise<DecodedFrame>;
 }): AppleSimulatorLiveScreen {
-  const { client, enabled, request } = options;
+  const { attempt = 0, client, enabled, request } = options;
   const decode = options.decode ?? decodeJpeg;
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const latestRef = useRef<{ readonly key: string; readonly frame: DecodedFrame } | undefined>(
@@ -183,7 +185,7 @@ export function useAppleSimulatorLiveScreen(options: {
       latestRef.current = undefined;
     };
     // `requestKey` stands in for `request`: callers rebuild the object each render.
-  }, [client, decode, enabled, requestKey]);
+  }, [attempt, client, decode, enabled, requestKey]);
 
   const state: (typeof known)["state"] =
     known.key === requestKey
