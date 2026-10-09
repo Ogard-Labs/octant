@@ -5835,6 +5835,16 @@ export function startOctantServer(
       receiptDirectory: join(providerDataDirectory, "harness", "receipts"),
       temporaryDirectory: harnessWorkDirectory,
     });
+    // A child admitted without network authority runs its commands here. Its
+    // writable temporary root is its own: a shared one would let it rewrite a
+    // networked shell's pending script and run that with the network open.
+    const harnessOfflineWorkDirectory = join(providerDataDirectory, "harness", "work-offline");
+    mkdirSync(harnessOfflineWorkDirectory, { recursive: true, mode: 0o700 });
+    const harnessOfflineProcessPort = new RepositoryTestProcessPort({
+      receiptDirectory: join(providerDataDirectory, "harness", "receipts"),
+      temporaryDirectory: harnessOfflineWorkDirectory,
+      networkEgress: "none",
+    });
     const nativeHarnessRoutingStore = new NativeHarnessRoutingStore({
       journal: persistence.journal,
       uuid: randomUUID,
@@ -6117,6 +6127,10 @@ export function startOctantServer(
       shell: createNativeHarnessShell({
         process: harnessProcessPort,
         scriptDirectory: harnessWorkDirectory,
+      }),
+      offlineShell: createNativeHarnessShell({
+        process: harnessOfflineProcessPort,
+        scriptDirectory: harnessOfflineWorkDirectory,
       }),
       resolveWebSearch: () =>
         searxngHarnessWebSearch({

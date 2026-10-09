@@ -226,25 +226,78 @@ export function htmlToText(html: string): string {
 
 export function isPrivateAddress(address: string): boolean {
   const family = isIP(address);
-  if (family === 4) {
-    const [a = 0, b = 0] = address.split(".").map(Number);
-    return (
-      a === 0 ||
-      a === 10 ||
-      a === 127 ||
-      (a === 169 && b === 254) ||
-      (a === 172 && b >= 16 && b <= 31) ||
-      (a === 192 && b === 168) ||
-      (a === 100 && b >= 64 && b <= 127) ||
-      a >= 224
-    );
-  }
-  if (family === 6) {
-    const lower = address.toLowerCase();
-    if (lower === "::" || lower === "::1") return true;
-    if (lower.startsWith("fe80:") || lower.startsWith("fc") || lower.startsWith("fd")) return true;
-    if (lower.startsWith("::ffff:")) return isPrivateAddress(lower.slice("::ffff:".length));
-    return false;
-  }
+  if (family === 4) return isPrivateIpv4(address);
+  if (family === 6) return isPrivateIpv6(address);
   return true;
+}
+
+function isPrivateIpv4(address: string): boolean {
+  const [a = 0, b = 0] = address.split(".").map(Number);
+  return (
+    a === 0 ||
+    a === 10 ||
+    a === 127 ||
+    (a === 169 && b === 254) ||
+    (a === 172 && b >= 16 && b <= 31) ||
+    (a === 192 && b === 168) ||
+    (a === 100 && b >= 64 && b <= 127) ||
+    a >= 224
+  );
+}
+
+/**
+ * Judged on the address's value, not its spelling. Matching text prefixes let
+ * `0:0:0:0:0:ffff:7f00:1` through, which connects to loopback, and missed
+ * most of fe80::/10. Forms that carry an IPv4 address — mapped, NAT64, 6to4 —
+ * are judged by the address they carry, because that is where the packet goes.
+ */
+function isPrivateIpv6(address: string): boolean {
+  const words = ipv6Words(address);
+  if (words === undefined) return true;
+  const [w0 = 0, w1 = 0, w2 = 0, w3 = 0, w4 = 0, w5 = 0, w6 = 0, w7 = 0] = words;
+  const carried = (high: number, low: number) =>
+    `${high >> 8}.${high & 0xff}.${low >> 8}.${low & 0xff}`;
+  if (w0 === 0 && w1 === 0 && w2 === 0 && w3 === 0) {
+    // ::ffff:0:0/96 is IPv4-mapped; the rest of ::/64 is unspecified,
+    // loopback, IPv4-compatible, or reserved, none of it a public destination.
+    return w4 === 0 && w5 === 0xffff ? isPrivateIpv4(carried(w6, w7)) : true;
+  }
+  if (w0 === 0x64 && w1 === 0xff9b) {
+    // 64:ff9b::/96 is NAT64; 64:ff9b:1::/48 is reserved for local NAT64 use.
+    return w2 === 0 && w3 === 0 && w4 === 0 && w5 === 0 ? isPrivateIpv4(carried(w6, w7)) : true;
+  }
+  if (w0 === 0x2002) return isPrivateIpv4(carried(w1, w2));
+  return (
+    (w0 & 0xfe00) === 0xfc00 || // fc00::/7 unique local
+    (w0 & 0xffc0) === 0xfe80 || // fe80::/10 link-local
+    (w0 & 0xffc0) === 0xfec0 || // fec0::/10 site-local
+    (w0 & 0xff00) === 0xff00 // ff00::/8 multicast
+  );
+}
+
+/** The eight 16-bit words of an address `isIP` already accepted as IPv6. */
+function ipv6Words(address: string): ReadonlyArray<number> | undefined {
+  let text = address.toLowerCase();
+  const zone = text.indexOf("%");
+  if (zone !== -1) text = text.slice(0, zone);
+  const lastColon = text.lastIndexOf(":");
+  const tail = text.slice(lastColon + 1);
+  if (tail.includes(".")) {
+    if (isIP(tail) !== 4) return undefined;
+    const [a = 0, b = 0, c = 0, d = 0] = tail.split(".").map(Number);
+    text = `${text.slice(0, lastColon + 1)}${((a << 8) | b).toString(16)}:${((c << 8) | d).toString(16)}`;
+  }
+  const halves = text.split("::");
+  if (halves.length > 2) return undefined;
+  const parse = (part: string | undefined) =>
+    part === undefined || part.length === 0
+      ? []
+      : part.split(":").map((word) => parseInt(word, 16));
+  const head = parse(halves[0]);
+  const rest = halves.length === 2 ? parse(halves[1]) : [];
+  const gap = halves.length === 2 ? 8 - head.length - rest.length : 0;
+  if (gap < 0) return undefined;
+  const words = [...head, ...Array.from({ length: gap }, () => 0), ...rest];
+  if (words.length !== 8 || words.some((word) => !(word >= 0 && word <= 0xffff))) return undefined;
+  return words;
 }

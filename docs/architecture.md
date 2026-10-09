@@ -2250,6 +2250,34 @@ native harness in `apps/server/src/harness`:
   refuse private destinations, and connect through a `lookup` that checks
   every address the name resolves to at the moment the socket opens, so a
   name cannot pass the check and then resolve somewhere private.
+- **Egress and hostile content.** Inference and tool egress are separate
+  paths. A direct-endpoint request goes from the server process to the
+  configured base URL only, carries the credential, and refuses any redirect
+  without following it. `web-fetch` sends no credential and no model-chosen
+  header, method, or body (its arguments are a URL and a size), so a public
+  inference host sees an anonymous GET and a local one (Ollama, LM Studio) is a
+  private destination it refuses. Private means loopback, unspecified, RFC 1918,
+  CGNAT, link-local (including cloud metadata), multicast, and reserved IPv4;
+  in IPv6 all of `::/64` other than IPv4-mapped, unique-local, link-local
+  `fe80::/10`, site-local, and multicast. An IPv6 address is judged by its
+  value rather than its spelling, and mapped, NAT64 (`64:ff9b::/96`), and 6to4
+  addresses by the IPv4 address they carry. Every redirect hop is checked
+  again, and a scheme other than `http`/`https`, credentials in the URL, or a
+  sixth redirect refuses. A harness child without network authority is offered
+  no web tool, and its `bash` runs on a shell whose Seatbelt profile has no
+  network rule and its own writable work directory, so it cannot rewrite a
+  networked shell's pending script; the lead and a child with network
+  authority use the ordinary one. The tool process environment carries only `PATH`, `HOME`, the temporary
+  and locale variables, and what the harness sets, never a provider
+  credential. Every successful harness tool result taints the thread, so after
+  the first one `bash`, `edit`, `write`, and `goal-check` need a person's
+  confirmation even under Full access, and refuse when no approval surface
+  exists; a tool the thread was not offered refuses as `tool-unavailable`
+  without reaching policy or a person. The harness has no per-host network
+  rules, rule expiry, or learn mode: a tool process gets the thread's OS-level
+  `none` or `allow`, and an "always" approval covers its class for the rest of
+  the session, taint included. `nativeHarnessEgress.hostile.test.ts` holds the
+  adversarial proofs.
 - **Tool verification.** A routine Check connection runs no generating
   request, so an OpenAI-compatible, Anthropic-compatible, or Azure AI Foundry
   endpoint offers a model Octant's tools only after a person proved that model
