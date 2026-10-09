@@ -514,7 +514,7 @@ describe("PersistenceLive", () => {
   it.each([
     ["SQLITE_CANTOPEN", "database file cannot be opened"],
     ["SQLITE_READONLY", "database is read-only"],
-    ["EACCES", "not writable"],
+    ["EACCES", "not accessible by this user"],
     ["ENOSPC", "disk is full"],
   ] as const)("names the %s cause when storage is unavailable", async (code, phrase) => {
     const result = await Effect.runPromise(
