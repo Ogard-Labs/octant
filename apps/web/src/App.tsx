@@ -1454,6 +1454,8 @@ function LaunchedShell(
     previewClient,
     providerUsageLimitsClient,
     replicaStoreSettingsClient,
+    replicaMembershipClient,
+    replicaSyncStatusClient,
     shipClient,
     usageClient,
     usageDashboardClient,
@@ -6330,6 +6332,8 @@ function LaunchedShell(
       diagnosticsExportClient={diagnosticsExportClient}
       hostControlClient={hostControlClient}
       {...(replicaStoreSettingsClient === undefined ? {} : { replicaStoreSettingsClient })}
+      {...(replicaMembershipClient === undefined ? {} : { replicaMembershipClient })}
+      replicaSyncStatusClient={replicaSyncStatusClient}
       folderBrowseClient={folderBrowseClient}
       workThreads={(workNavigation.bootstrap?.threads ?? []).map((thread) => ({
         id: String(thread.id),

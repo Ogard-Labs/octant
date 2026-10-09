@@ -18,6 +18,7 @@
 import { Schema } from "effect";
 import { ArtifactBundle, decodeArtifactBundle, encodeArtifactBundle } from "./artifactBundle";
 import { CanvasId, CanvasVersionId } from "./canvas";
+import { UtcTimestamp } from "./events";
 import { HostId } from "./host";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
@@ -606,3 +607,141 @@ export type ReplicaMembershipResult = typeof ReplicaMembershipResult.Type;
 
 export const decodeReplicaMembershipCommand = Schema.decodeUnknownSync(ReplicaMembershipCommand);
 export const decodeReplicaMembershipResult = Schema.decodeUnknownSync(ReplicaMembershipResult);
+
+/**
+ * A computer that counts in this host's replica, as Settings › Sync lists it.
+ * A revoked computer stays listed: what it signed up to its cut still counts.
+ */
+export const ReplicaMemberView = Schema.Struct({
+  instanceId: ReplicaInstanceId,
+  displayName: ReplicaDisplayName,
+  role: Schema.Union(
+    Schema.Struct({ kind: Schema.Literal("founder") }).annotations(strict),
+    Schema.Struct({
+      kind: Schema.Literal("approved"),
+      approver: ReplicaInstanceId,
+      approverName: ReplicaDisplayName,
+    }).annotations(strict),
+  ),
+  revoked: Schema.Boolean,
+  thisComputer: Schema.Boolean,
+  /**
+   * Whether this computer may revoke it: this one is in good standing and
+   * brought it in, directly or through others. Always false off the host.
+   */
+  revocable: Schema.Boolean,
+}).annotations(strict);
+export type ReplicaMemberView = typeof ReplicaMemberView.Type;
+
+/**
+ * A member a joining computer can ask to approve it, with the code that
+ * member's screen will show for this computer's request. The code depends on
+ * the approver's key and the founder it reaches, so each approver has its own.
+ */
+export const ReplicaApproverView = Schema.Struct({
+  instanceId: ReplicaInstanceId,
+  displayName: ReplicaDisplayName,
+  matchingCode: Schema.String.pipe(Schema.pattern(/^\d{6}$/)),
+  /** That member's approval of this computer is in what this computer read. */
+  approvedThisComputer: Schema.Boolean,
+}).annotations(strict);
+export type ReplicaApproverView = typeof ReplicaApproverView.Type;
+
+/** A fresh join request a member in good standing can approve, with its code. */
+export const ReplicaJoinRequestView = Schema.Struct({
+  request: ReplicaJoinRequestEntry,
+  matchingCode: Schema.String.pipe(Schema.pattern(/^\d{6}$/)),
+  /**
+   * This computer already approved it; the request stays listed until the
+   * joining computer confirms, and approving again would only add a record.
+   */
+  approvedByThisComputer: Schema.Boolean,
+}).annotations(strict);
+export type ReplicaJoinRequestView = typeof ReplicaJoinRequestView.Type;
+
+/**
+ * Where this computer stands. `left` is an identity that was revoked or cut
+ * out above it: it asks to join again as a new computer.
+ */
+export const ReplicaThisComputer = Schema.Union(
+  Schema.Struct({ kind: Schema.Literal("none") }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("founder", "member", "left"),
+    instanceId: ReplicaInstanceId,
+    displayName: ReplicaDisplayName,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("joining"),
+    instanceId: ReplicaInstanceId,
+    displayName: ReplicaDisplayName,
+    /** False once the request is older than a member will approve. */
+    fresh: Schema.Boolean,
+    approvers: Schema.Array(ReplicaApproverView),
+  }).annotations(strict),
+);
+export type ReplicaThisComputer = typeof ReplicaThisComputer.Type;
+
+/**
+ * A status line the host cannot fill yet. Publishing and pulling artifact
+ * versions are not built, so their times and queue are not available rather
+ * than shown as zero.
+ */
+const ReplicaStatusNotAvailable = Schema.Struct({
+  kind: Schema.Literal("not-available"),
+}).annotations(strict);
+
+export const ReplicaSyncStatus = Schema.Struct({
+  lastPublish: ReplicaStatusNotAvailable,
+  lastPull: ReplicaStatusNotAvailable,
+  queued: ReplicaStatusNotAvailable,
+  /** The last time the store refused, could not be reached, or held a file in this computer's place. */
+  lastError: Schema.optional(
+    Schema.Struct({
+      at: UtcTimestamp,
+      phase: Schema.Literal("entry", "signature", "read", "list"),
+      reason: Schema.Literal("not-connected", "refused", "slot-occupied", "truncated"),
+    }).annotations(strict),
+  ),
+}).annotations(strict);
+export type ReplicaSyncStatus = typeof ReplicaSyncStatus.Type;
+
+/** Settings › Sync on the host: membership, what a person can do next, and status. */
+export const ReplicaMembershipView = Schema.Struct({
+  kind: Schema.Literal("replica-membership-view"),
+  /** The name this computer suggests for itself when it creates or joins a replica. */
+  computerName: ReplicaDisplayName,
+  thisComputer: ReplicaThisComputer,
+  members: Schema.Array(ReplicaMemberView),
+  joinRequests: Schema.Array(ReplicaJoinRequestView),
+  status: ReplicaSyncStatus,
+}).annotations(strict);
+export type ReplicaMembershipView = typeof ReplicaMembershipView.Type;
+
+/**
+ * What a paired phone or a remote window may read: where this computer
+ * stands, who is in the replica, and status. No matching codes, join
+ * requests, or keys, and nothing it could act on.
+ */
+export const ReplicaSyncStatusView = Schema.Struct({
+  kind: Schema.Literal("replica-sync-status"),
+  thisComputer: Schema.Literal("none", "founder", "member", "joining", "left"),
+  members: Schema.Array(
+    Schema.Struct({
+      displayName: ReplicaDisplayName,
+      role: Schema.Union(
+        Schema.Struct({ kind: Schema.Literal("founder") }).annotations(strict),
+        Schema.Struct({
+          kind: Schema.Literal("approved"),
+          approverName: ReplicaDisplayName,
+        }).annotations(strict),
+      ),
+      revoked: Schema.Boolean,
+      thisComputer: Schema.Boolean,
+    }).annotations(strict),
+  ),
+  status: ReplicaSyncStatus,
+}).annotations(strict);
+export type ReplicaSyncStatusView = typeof ReplicaSyncStatusView.Type;
+
+export const decodeReplicaMembershipView = Schema.decodeUnknownSync(ReplicaMembershipView);
+export const decodeReplicaSyncStatusView = Schema.decodeUnknownSync(ReplicaSyncStatusView);

@@ -1515,7 +1515,17 @@ flowchart LR
     one of its revocations, say - but never later. Each revocation is its own
     publish; when the subject's lands and a later one stops, the result is
     revoked-in-part and names the computers that were not revoked. Pull is
-    allowed to any computer with an identity.
+    allowed to any computer with an identity. Settings › Sync reads a
+    membership view from the journal alone, on the same host-only route
+    family (`/api/replica-membership/state`): this computer's standing, the
+    admitted computers with their approver, whether each is revoked and
+    whether this computer may revoke it, fresh join requests with their
+    matching codes, and, on a joining computer, each member in good standing
+    of a replica it read with the code that member will show. A read-only
+    status view without codes, requests, ids, or revocability
+    (`/api/replica-sync/status`) is on the shared product dispatch, so a
+    paired device of this host can read it under `project.overview.read`;
+    the paired-browser shell shows it read-only.
   - **Writing.** A command that publishes journals the signed entry before
     either file is written, writes the signature and then the entry, and
     journals the record as held once both landed. If a publish stops
@@ -1552,11 +1562,10 @@ flowchart LR
   - **Not wired yet.** The membership service asks Settings › Sync's store
     selection for its store on every command; with sync off or no store
     chosen, every command answers a typed `not-configured` refusal and makes
-    no store call. No surface creates a replica, joins, or revokes yet, so a
-    person can choose a store and turn sync on but cannot yet join another
-    computer. Leaving a replica is not supported yet, so a computer with a
-    membership identity cannot change its store; leaving a replica, and
-    changing the store after it, are a follow-up.
+    no store call. Settings › Sync sets up a replica, joins, approves, and
+    revokes through these commands. Leaving a replica is not supported yet,
+    so a computer with a membership identity cannot change its store; leaving
+    a replica, and changing the store after it, are a follow-up.
 - **Artifact sync: publish and pull.** `ReplicaArtifactSyncService` and
   `ReplicaArtifactImport` in `apps/server/src/replica/`.
   - **Publish.** The Canvas service's committed-version hook - the seam the
