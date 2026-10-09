@@ -114,6 +114,59 @@ describe("AndroidEmulatorPane", () => {
     );
   });
 
+  it("keeps showing an emulator the person chose to boot while several others run", async () => {
+    const sdk = discovery.sdk;
+    let emulators = [
+      {
+        emulatorId: "A" as never,
+        name: "Pixel A",
+        state: "booted" as const,
+        serial: "emulator-5554",
+      },
+      {
+        emulatorId: "B" as never,
+        name: "Pixel B",
+        state: "booted" as const,
+        serial: "emulator-5556",
+      },
+      { emulatorId: "C" as never, name: "Pixel C", state: "shutdown" as const },
+    ];
+    const execute = vi.fn(async () => {
+      emulators = emulators.map((one) =>
+        one.emulatorId === ("C" as never) ? { ...one, state: "booting" as const } : one,
+      ) as typeof emulators;
+      return { outcome: "succeeded" };
+    });
+    const snapshot = vi.fn(async () => ({
+      sequence: 1,
+      snapshotAt: "2026-09-20T20:00:03.000Z",
+      sdk,
+      emulators,
+      active: [],
+      recentEvidence: [],
+    }));
+    render(
+      <AndroidEmulatorPane
+        checkoutId={ids.checkout as never}
+        client={
+          client({ discover: vi.fn(async () => ({ sdk, emulators })), snapshot, execute }) as never
+        }
+        createUuid={uuidFactory()}
+        thread={{ ...thread, executionPolicy: "full-access" } as never}
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole("radio", { name: /Pixel C/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Boot Pixel C" }));
+    await waitFor(() =>
+      expect(execute).toHaveBeenCalledWith(expect.objectContaining({ kind: "boot" })),
+    );
+    await waitFor(() =>
+      expect(screen.queryByRole("radio", { name: /Pixel C/ })).not.toBeInTheDocument(),
+    );
+    expect(screen.getAllByText(/Pixel C/).length).toBeGreaterThan(0);
+  });
+
   it("lists the Android SDK as the missing setup step when the SDK is missing", async () => {
     const { AndroidToolchainClientFailure } =
       await import("@octant/client-runtime/android-toolchain-client");

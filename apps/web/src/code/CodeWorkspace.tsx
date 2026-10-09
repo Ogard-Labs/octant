@@ -461,14 +461,15 @@ function AppleWorkbenchSurface(props: {
   // More than one Simulator runs and nobody said which to show: the pane asks,
   // and nothing streams from one that may belong to another task meanwhile.
   // A choice counts only while that Simulator still runs.
-  const chosenBooted =
+  const chosenRunning =
     chosenSimulatorId !== undefined &&
     simulators.some(
       (simulator) =>
-        String(simulator.simulatorId) === String(chosenSimulatorId) && simulator.state === "booted",
+        String(simulator.simulatorId) === String(chosenSimulatorId) &&
+        (simulator.state === "booted" || simulator.state === "booting"),
     );
   const awaitingChoice =
-    !chosenBooted &&
+    !chosenRunning &&
     paneOpenRequestId === undefined &&
     simulators.filter((simulator) => simulator.state === "booted").length > 1;
   const platform =
@@ -526,7 +527,8 @@ function AppleWorkbenchSurface(props: {
               : { simulatorId: latestScreenshot.simulatorId }),
           },
         }),
-    ...(chosenSimulatorId !== undefined
+    // A choice whose Simulator stopped no longer outranks an agent's request.
+    ...(chosenSimulatorId !== undefined && chosenRunning
       ? { preferredSimulatorId: chosenSimulatorId }
       : controller.runtime?.paneOpenRequest === undefined
         ? {}
