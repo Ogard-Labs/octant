@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
-import { startCredentialBroker } from "@octant/host-runtime";
+import { deriveHostRuntimeHostId, startCredentialBroker } from "@octant/host-runtime";
 import { CredentialStoreFailure, type CredentialStore } from "@octant/host-runtime";
 import {
   decodeHostOAuthDescriptor,
@@ -9,7 +9,7 @@ import {
 } from "@octant/contracts/host-oauth";
 import { describe, expect, it } from "vitest";
 import { makeHostOAuthBrokerClient } from "./hostOAuthBrokerClient";
-import { createHostOAuthService } from "./hostOAuthService";
+import { createHostOAuthService, extAgentHostIdFor } from "./hostOAuthService";
 
 const ACCESS = "access-token-must-not-reach-the-journal";
 const REFRESH = "refresh-token-must-not-reach-the-journal";
@@ -38,6 +38,18 @@ function descriptor(authorize: string, token: string) {
     tokenEndpoint: token,
     scopes: ["read"],
     termsId: "terms-v1",
+  });
+}
+
+function chatGptPlan() {
+  return decodeHostOAuthDescriptor({
+    descriptorId: "chatgpt-plan",
+    dialect: "chatgpt-plan-siwc",
+    flow: "authorization-code-pkce",
+    authorizationEndpoint: "https://auth.openai.com/api/accounts/authorize",
+    tokenEndpoint: "https://auth.openai.com/api/accounts/oauth/token",
+    scopes: ["openid"],
+    termsId: "chatgpt-plan-terms-1",
   });
 }
 
@@ -86,6 +98,7 @@ describe("host OAuth service", () => {
         refresh: async () => ({}),
         access: async () => ({}),
         forget: async () => undefined,
+        revoke: async () => ({ kind: "revoked" }),
       },
     });
     const result = await service.begin({
@@ -110,6 +123,7 @@ describe("host OAuth service", () => {
         refresh: async () => ({}),
         access: async () => ({}),
         forget: async () => undefined,
+        revoke: async () => ({ kind: "revoked" }),
       },
     });
     const sample = descriptor("https://idp.example/authorize", "https://idp.example/token");
@@ -204,6 +218,7 @@ describe("host OAuth service", () => {
         refresh: async () => ({}),
         access: async () => ({}),
         forget: async () => undefined,
+        revoke: async () => ({ kind: "revoked" }),
       },
       now: () => new Date("2026-10-03T18:04:00.000Z"),
     });
@@ -220,6 +235,403 @@ describe("host OAuth service", () => {
     });
     expect(started).toMatchObject({ kind: "refused", reason: "unavailable" });
     expect(JSON.stringify(journal)).not.toContain(leaked);
+  });
+
+  it("forwards an optional credential ref to the broker when beginning sign-in", async () => {
+    let forwarded: { readonly credentialRef?: string } | undefined;
+    const service = createHostOAuthService({
+      journal: { append: () => undefined },
+      broker: {
+        begin: async (input) => {
+          forwarded = input;
+          return { kind: "refused", reason: "invalid" };
+        },
+        status: async () => ({}),
+        refresh: async () => ({}),
+        access: async () => ({}),
+        forget: async () => undefined,
+        revoke: async () => ({ kind: "revoked" }),
+      },
+      now: () => new Date("2026-10-03T18:04:00.000Z"),
+    });
+    const sample = descriptor("https://idp.example/authorize", "https://idp.example/token");
+    service.acknowledgeTerms({
+      principalKind: "local-window",
+      actorId: "6b0d0c2e-0d3a-4f0b-9c1a-6e5d4c3b2a19",
+      descriptor: sample,
+    });
+    await service.begin({
+      principalKind: "local-window",
+      actorId: "6b0d0c2e-0d3a-4f0b-9c1a-6e5d4c3b2a19",
+      descriptor: sample,
+      credentialRef: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    });
+    expect(forwarded?.credentialRef).toBe("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb");
+  });
+
+  it("keeps the grant and journals nothing when the issuer could not be told about the sign-out", async () => {
+    const journal: HostOAuthJournalRecord[] = [];
+    const forgotten: string[] = [];
+    const service = createHostOAuthService({
+      journal: { append: (record) => journal.push(record) },
+      broker: {
+        begin: async () => ({}),
+        status: async () => ({}),
+        refresh: async () => ({}),
+        access: async () => ({}),
+        forget: async (credentialRef) => void forgotten.push(credentialRef),
+        // The broker answers HTTP 200 with not-revoked when the issuer did
+        // not confirm the revocation: the refresh token stayed valid there.
+        revoke: async () => ({ kind: "not-revoked" }),
+      },
+    });
+    const result = await service.signOut({
+      principalKind: "local-window",
+      descriptor: chatGptPlan(),
+      credentialRef: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    });
+    expect(result).toEqual({ kind: "not-revoked" });
+    expect(forgotten).toEqual([]);
+    expect(journal.map((record) => record.name)).not.toContain("host-oauth.signed-out");
+  });
+
+  it("signs out on this host only, and says the issuer was not told, when asked to forget an unrevoked grant", async () => {
+    const journal: HostOAuthJournalRecord[] = [];
+    const forgotten: string[] = [];
+    const service = createHostOAuthService({
+      journal: { append: (record) => journal.push(record) },
+      broker: {
+        begin: async () => ({}),
+        status: async () => ({}),
+        refresh: async () => ({}),
+        access: async () => ({}),
+        forget: async (credentialRef) => void forgotten.push(credentialRef),
+        revoke: async () => ({ kind: "not-revoked" }),
+      },
+    });
+    const result = await service.signOut({
+      principalKind: "local-window",
+      descriptor: chatGptPlan(),
+      credentialRef: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      forgetWhenNotRevoked: true,
+    });
+    expect(result).toEqual({ kind: "signed-out-locally" });
+    expect(forgotten).toEqual(["bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"]);
+    expect(journal.map((record) => record.name)).toContain("host-oauth.signed-out");
+  });
+
+  it("removes a ChatGPT plan grant from the credential store on a local sign-out while the issuer is unreachable", async () => {
+    const store = memoryStore();
+    const credentialRef = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+    await store.set(
+      credentialRef,
+      JSON.stringify({
+        kind: "host-oauth-grant",
+        version: 1,
+        accessToken: ACCESS,
+        refreshToken: REFRESH,
+        tokenType: "Bearer",
+        scope: "openid",
+        clientId: "oaiapp_test-client",
+        tokenEndpoint: "https://auth.openai.com/api/accounts/oauth/token",
+        generation: 1,
+        dialect: "chatgpt-plan-siwc",
+      }),
+    );
+    let issuerCalls = 0;
+    // Every issuer request fails the way an offline network does; the
+    // broker's option is typed as Bun's fetch, which also carries preconnect.
+    const offline = Object.assign(
+      async (): Promise<Response> => {
+        issuerCalls += 1;
+        throw new TypeError("network is offline");
+      },
+      { preconnect: fetch.preconnect },
+    );
+    const broker = await startCredentialBroker(store, undefined, { fetch: offline });
+    const journal: HostOAuthJournalRecord[] = [];
+    const service = createHostOAuthService({
+      journal: { append: (record) => journal.push(record) },
+      broker: makeHostOAuthBrokerClient({ url: broker.url, token: broker.token }),
+    });
+    try {
+      await expect(
+        service.signOut({
+          principalKind: "local-window",
+          descriptor: chatGptPlan(),
+          credentialRef,
+        }),
+      ).resolves.toEqual({ kind: "not-revoked" });
+      expect(store.values.has(credentialRef)).toBe(true);
+      await expect(
+        service.signOut({
+          principalKind: "local-window",
+          descriptor: chatGptPlan(),
+          credentialRef,
+          forgetWhenNotRevoked: true,
+        }),
+      ).resolves.toEqual({ kind: "signed-out-locally" });
+      expect(issuerCalls).toBeGreaterThan(0);
+      expect(store.values.has(credentialRef)).toBe(false);
+      expect(journal.map((record) => record.name)).toEqual(["host-oauth.signed-out"]);
+    } finally {
+      await broker.close();
+    }
+  });
+
+  it("reports sign-out unavailable when the broker could not drop the grant", async () => {
+    const journal: HostOAuthJournalRecord[] = [];
+    const service = createHostOAuthService({
+      journal: { append: (record) => journal.push(record) },
+      broker: {
+        begin: async () => ({}),
+        status: async () => ({}),
+        refresh: async () => ({}),
+        access: async () => ({}),
+        forget: async () => undefined,
+        revoke: async () => ({ kind: "unavailable" }),
+      },
+    });
+    const result = await service.signOut({
+      principalKind: "local-window",
+      descriptor: chatGptPlan(),
+      credentialRef: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      forgetWhenNotRevoked: true,
+    });
+    expect(result).toEqual({ kind: "unavailable" });
+    expect(journal.map((record) => record.name)).not.toContain("host-oauth.signed-out");
+  });
+
+  it("registers a ChatGPT plan sign-in under the host id derived from the data directory", async () => {
+    const forwarded: unknown[] = [];
+    const dataDirectory = "/Users/example/Library/Application Support/Octant";
+    const hostId = extAgentHostIdFor(dataDirectory);
+    expect(hostId).toBe(`urn:uuid:${deriveHostRuntimeHostId(dataDirectory)}`);
+    expect(hostId).toMatch(
+      /^urn:uuid:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-8[0-9a-f]{3}-[0-9a-f]{12}$/,
+    );
+    // Stable across restarts of the same host, distinct for another host.
+    expect(extAgentHostIdFor(dataDirectory)).toBe(hostId);
+    expect(extAgentHostIdFor("/Users/example/other-octant-data")).not.toBe(hostId);
+    const service = createHostOAuthService({
+      journal: { append: () => undefined },
+      broker: {
+        begin: async (input) => {
+          forwarded.push(input.descriptor);
+          return {
+            kind: "refused",
+            descriptorId: input.descriptor.descriptorId,
+            reason: "invalid",
+          };
+        },
+        status: async () => ({}),
+        refresh: async () => ({}),
+        access: async () => ({}),
+        forget: async () => undefined,
+        revoke: async () => ({ kind: "revoked" }),
+      },
+      extAgentHostId: hostId,
+    });
+    for (const sample of [
+      chatGptPlan(),
+      descriptor("https://idp.example/authorize", "https://idp.example/token"),
+    ]) {
+      service.acknowledgeTerms({
+        principalKind: "local-window",
+        actorId: "6b0d0c2e-0d3a-4f0b-9c1a-6e5d4c3b2a19",
+        descriptor: sample,
+      });
+      await service.begin({
+        principalKind: "local-window",
+        actorId: "6b0d0c2e-0d3a-4f0b-9c1a-6e5d4c3b2a19",
+        descriptor: sample,
+      });
+    }
+    expect(forwarded[0]).toMatchObject({ descriptorId: "chatgpt-plan", extAgentHostId: hostId });
+    // Only the ChatGPT plan dialect registers the host; other sign-ins never
+    // carry the host id.
+    expect(forwarded[1]).not.toHaveProperty("extAgentHostId");
+  });
+
+  it("journals the sign-out only after the broker confirms the grant was revoked", async () => {
+    const journal: HostOAuthJournalRecord[] = [];
+    const service = createHostOAuthService({
+      journal: { append: (record) => journal.push(record) },
+      broker: {
+        begin: async () => ({}),
+        status: async () => ({}),
+        refresh: async () => ({}),
+        access: async () => ({}),
+        forget: async () => undefined,
+        revoke: async () => ({ kind: "revoked" }),
+      },
+    });
+    const plan = decodeHostOAuthDescriptor({
+      descriptorId: "chatgpt-plan",
+      dialect: "chatgpt-plan-siwc",
+      flow: "authorization-code-pkce",
+      authorizationEndpoint: "https://auth.openai.com/api/accounts/authorize",
+      tokenEndpoint: "https://auth.openai.com/api/accounts/oauth/token",
+      scopes: ["openid"],
+      termsId: "chatgpt-plan-terms-1",
+    });
+    const result = await service.signOut({
+      principalKind: "local-window",
+      descriptor: plan,
+      credentialRef: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    });
+    expect(result).toEqual({ kind: "signed-out" });
+    expect(journal.map((record) => record.name)).toContain("host-oauth.signed-out");
+  });
+
+  it("journals a finished ChatGPT plan sign-in from the answer the broker gives once the callback lands", async () => {
+    const journal: HostOAuthJournalRecord[] = [];
+    const attemptId = "acd76c77-23e4-40e0-bf23-b4783c7f4757";
+    const service = createHostOAuthService({
+      journal: { append: (record) => journal.push(record) },
+      broker: {
+        ...throwingBroker(),
+        // The exact shape a live broker published for a finished sign-in.
+        status: async () => ({
+          kind: "signed-in",
+          attemptId,
+          descriptorId: "chatgpt-plan",
+          credentialRef: "324feb28-718a-462a-9a15-1d999922d1b5",
+        }),
+      },
+    });
+    const done = await service.status({
+      principalKind: "local-window",
+      attemptId,
+      descriptor: chatGptPlan(),
+    });
+    expect(done).toMatchObject({ kind: "signed-in", attemptId });
+    expect(journal).toEqual([
+      {
+        name: "host-oauth.sign-in-completed",
+        descriptorId: "chatgpt-plan",
+        attemptId,
+        credentialRef: "324feb28-718a-462a-9a15-1d999922d1b5",
+      },
+    ]);
+  });
+
+  it("refuses a finished sign-in it cannot journal, and says why in the log without a secret", async () => {
+    const lines: string[] = [];
+    const attemptId = "6b0d0c2e-0d3a-4f0b-9c1a-6e5d4c3b2a19";
+    let fail = true;
+    const journal: HostOAuthJournalRecord[] = [];
+    const service = createHostOAuthService({
+      journal: {
+        append: (record) => {
+          if (fail) throw new Error(`disk full while writing ${ACCESS}`);
+          journal.push(record);
+        },
+      },
+      broker: {
+        ...throwingBroker(),
+        status: async () => ({
+          kind: "signed-in",
+          attemptId,
+          descriptorId: "chatgpt-plan",
+          credentialRef: "7c1e1d3f-1e4b-4051-8d2b-7f6e5d4c3b2a",
+        }),
+      },
+      log: (line) => lines.push(line),
+    });
+    const input = { principalKind: "local-window" as const, attemptId, descriptor: chatGptPlan() };
+    expect(await service.status(input)).toEqual({
+      kind: "refused",
+      attemptId,
+      descriptorId: "chatgpt-plan",
+      reason: "unavailable",
+    });
+    expect(lines.join("\n")).toContain("host-oauth.sign-in-completed");
+    expect(lines.join("\n")).not.toContain(ACCESS);
+    expect(lines.join("\n")).not.toContain("7c1e1d3f-1e4b-4051-8d2b-7f6e5d4c3b2a");
+    // Once the journal works again, the next poll still records the sign-in.
+    fail = false;
+    expect(await service.status(input)).toMatchObject({ kind: "signed-in" });
+    expect(journal.map((record) => record.name)).toEqual(["host-oauth.sign-in-completed"]);
+  });
+
+  it("refuses and logs a sign-in state from the broker the server cannot read", async () => {
+    const lines: string[] = [];
+    const journal: HostOAuthJournalRecord[] = [];
+    const attemptId = "6b0d0c2e-0d3a-4f0b-9c1a-6e5d4c3b2a19";
+    const service = createHostOAuthService({
+      journal: { append: (record) => journal.push(record) },
+      broker: {
+        ...throwingBroker(),
+        status: async () => ({
+          kind: "refused",
+          attemptId,
+          descriptorId: "chatgpt-plan",
+          reason: "client-id-unexpected",
+          accessToken: ACCESS,
+        }),
+      },
+      log: (line) => lines.push(line),
+    });
+    const refused = await service.status({
+      principalKind: "local-window",
+      attemptId,
+      descriptor: chatGptPlan(),
+    });
+    expect(refused).toMatchObject({ kind: "refused", reason: "unavailable" });
+    expect(journal).toEqual([
+      {
+        name: "host-oauth.sign-in-refused",
+        descriptorId: "chatgpt-plan",
+        attemptId,
+        reason: "unavailable",
+      },
+    ]);
+    const logged = lines.join("\n");
+    expect(logged).toContain("refused");
+    expect(logged).toContain("client-id-unexpected");
+    expect(logged).not.toContain(ACCESS);
+  });
+});
+
+describe("host OAuth broker client", () => {
+  it("posts an optional credential ref on begin and omits it when absent", async () => {
+    const bodies: unknown[] = [];
+    const client = makeHostOAuthBrokerClient({
+      url: "http://127.0.0.1:9",
+      token: "broker-token",
+      fetch: async (_input, init) => {
+        const parsed: unknown = JSON.parse(String(init?.body));
+        bodies.push(parsed);
+        return new Response(JSON.stringify({ kind: "refused", reason: "invalid" }), {
+          status: 200,
+        });
+      },
+    });
+    const brokerDescriptor = {
+      descriptorId: "sample-http",
+      clientId: "public-client",
+      flow: "authorization-code-pkce" as const,
+      authorizationEndpoint: "https://idp.example/authorize",
+      tokenEndpoint: "https://idp.example/token",
+      scopes: ["read"],
+      termsId: "terms-v1",
+    };
+    await client.begin({
+      descriptor: brokerDescriptor,
+      actorId: "6b0d0c2e-0d3a-4f0b-9c1a-6e5d4c3b2a19",
+      termsAcknowledgedAt: "2026-10-03T18:04:00.000Z",
+      credentialRef: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    });
+    await client.begin({
+      descriptor: brokerDescriptor,
+      actorId: "6b0d0c2e-0d3a-4f0b-9c1a-6e5d4c3b2a19",
+      termsAcknowledgedAt: "2026-10-03T18:04:00.000Z",
+    });
+    expect(bodies[0]).toMatchObject({
+      credentialRef: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    });
+    expect(bodies[1]).not.toHaveProperty("credentialRef");
   });
 });
 
@@ -238,6 +650,9 @@ function throwingBroker() {
       throw new Error("broker must not be called");
     },
     forget: async () => {
+      throw new Error("broker must not be called");
+    },
+    revoke: async () => {
       throw new Error("broker must not be called");
     },
   };

@@ -86,9 +86,22 @@ export interface ArtifactMirrorServiceDependencies {
       readonly aggregateId: string;
       readonly eventName: string;
       readonly payload: unknown;
+      readonly expectedVersion?: number;
     }) => void;
   };
   readonly clock: () => UtcTimestamp;
+  /**
+   * Told when a receipt could not be journaled. The files were already written
+   * and the version already committed, so neither is unwound; this is how "no
+   * receipt exists" is distinguishable from "nothing happened". It carries the
+   * failure's name only, never the destination or the payload.
+   */
+  readonly receiptNotJournaled?: (failure: {
+    readonly reason: "receipt-not-journaled";
+    readonly canvasId: string;
+    readonly versionId: string;
+    readonly error: string;
+  }) => void;
   /**
    * Where files go before anyone has chosen: `<default folder>/Artifacts`.
    * Read per use so a change to the default folder moves the next write.
@@ -97,6 +110,12 @@ export interface ArtifactMirrorServiceDependencies {
    */
   readonly defaultFallback?: () => ArtifactMirrorDestination;
 }
+
+/**
+ * The one aggregate every settings change is journaled under. The journal
+ * requires a UUID here, so the type name cannot stand in for it.
+ */
+const ARTIFACT_MIRROR_SETTINGS_AGGREGATE_ID = "0a1f0000-0000-4000-8000-000000000475";
 
 const INITIAL_SETTINGS = {
   kind: "artifact-mirror-settings" as const,
@@ -183,8 +202,9 @@ export class ArtifactMirrorService {
     });
     this.#dependencies.journal.append({
       aggregateType: ARTIFACT_MIRROR_AGGREGATE_TYPE,
-      aggregateId: ARTIFACT_MIRROR_AGGREGATE_TYPE,
+      aggregateId: ARTIFACT_MIRROR_SETTINGS_AGGREGATE_ID,
       eventName: ARTIFACT_MIRROR_EVENT_NAMES.settingChanged,
+      expectedVersion: this.#settings.version,
       payload: { settings: next },
     });
     this.#settings = next;
@@ -423,12 +443,21 @@ export class ArtifactMirrorService {
       ...(detail === undefined ? {} : { detail }),
       observedAt: this.#dependencies.clock(),
     });
-    this.#dependencies.journal.append({
-      aggregateType: ARTIFACT_MIRROR_AGGREGATE_TYPE,
-      aggregateId: String(version.canvasId),
-      eventName: ARTIFACT_MIRROR_EVENT_NAMES.written,
-      payload: { receipt },
-    });
+    try {
+      this.#dependencies.journal.append({
+        aggregateType: ARTIFACT_MIRROR_AGGREGATE_TYPE,
+        aggregateId: String(version.canvasId),
+        eventName: ARTIFACT_MIRROR_EVENT_NAMES.written,
+        payload: { receipt },
+      });
+    } catch (error) {
+      this.#dependencies.receiptNotJournaled?.({
+        reason: "receipt-not-journaled",
+        canvasId: String(version.canvasId),
+        versionId: String(version.versionId),
+        error: errorName(error),
+      });
+    }
     return receipt;
   }
 
@@ -438,4 +467,9 @@ export class ArtifactMirrorService {
   ): ArtifactMirrorResult {
     return decodeArtifactMirrorResult({ kind: "mirror-refused", reason, message });
   }
+}
+
+function errorName(error: unknown): string {
+  if (typeof error === "object" && error !== null && "_tag" in error) return String(error._tag);
+  return error instanceof Error ? error.name : "unknown";
 }

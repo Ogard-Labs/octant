@@ -1,14 +1,17 @@
 import {
   decodeProviderInstanceId,
+  decodeProviderProbeResult,
   decodeProviderSessionId,
   type OpenAiCompatibleProviderConfiguration,
   type ProviderFailure,
   type ProviderModelId,
   type ProviderRuntimeEvent,
 } from "@octant/contracts";
-import { Effect, Fiber, Stream } from "effect";
+import { encodeSubscriptionOAuthCredential } from "@octant/provider-sdk/subscription-oauth";
+import { Effect, Either, Fiber, Stream } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import type { ProviderCredentialResolver } from "./credentialBrokerClient";
+import type { ModelContextWindowMemory } from "./modelContextWindowFacts";
 import type { CompatibleFetch } from "./openAiCompatibleEndpoint";
 import { makeOpenAiCompatibleDriver } from "./openAiCompatibleDriver";
 import { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
@@ -712,6 +715,575 @@ describe("makeOpenAiCompatibleDriver", () => {
     expect(events.at(-1)?.kind).toBe("completed");
     expect(fetch).toHaveBeenCalledTimes(2);
   });
+
+  it("learns the window an overflow refusal names, keeps it, and sends a smaller request once", async () => {
+    const runtimeRegistry = new ProviderRuntimeRegistry();
+    runtimeRegistry.setObservedState(observedManualModel());
+    const remember = vi.fn();
+    const bodies: Array<{ readonly messages: ReadonlyArray<unknown> }> = [];
+    let refused = false;
+    const fetch = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      if (String(url).endsWith("/models")) return new Response(null, { status: 404 });
+      const body = JSON.parse(String(init?.body)) as { readonly messages: ReadonlyArray<unknown> };
+      bodies.push(body);
+      if (bodies.length === 3 && !refused) {
+        refused = true;
+        return Response.json(
+          {
+            error: {
+              code: "context_length_exceeded",
+              message:
+                "This model's maximum context length is 2048 tokens. However, your messages resulted in 3100 tokens.",
+            },
+          },
+          { status: 400 },
+        );
+      }
+      return chatStream("ok");
+    });
+    const driver = makeDriver({
+      fetch,
+      runtimeRegistry,
+      contextWindows: { remember },
+    });
+
+    const outcomes = await runTurns(driver, ["a".repeat(6_000), "b".repeat(6_000), "next"]);
+
+    // The person sees the turn answered, not the refusal.
+    expect(outcomes).toEqual(["completed", "completed", "completed"]);
+    expect(bodies).toHaveLength(4);
+    expect(bodies[3]?.messages.length).toBeLessThan(bodies[2]?.messages.length ?? 0);
+    expect(runtimeRegistry.observedState(instanceId)?.models[0]).toMatchObject({
+      learnedContextWindow: 2_048,
+    });
+    expect(remember).toHaveBeenCalledWith(instanceId, modelId, { learnedContextWindow: 2_048 });
+  });
+
+  it("still recovers once and learns nothing from a refusal that names no window", async () => {
+    const runtimeRegistry = new ProviderRuntimeRegistry();
+    runtimeRegistry.setObservedState(observedManualModel());
+    const remember = vi.fn();
+    let generations = 0;
+    const fetch = vi.fn(async (url: string | URL | Request) => {
+      if (String(url).endsWith("/models")) return new Response(null, { status: 404 });
+      generations += 1;
+      if (generations === 3) {
+        return Response.json(
+          { error: { code: "context_length_exceeded", message: "too long" } },
+          { status: 400 },
+        );
+      }
+      return chatStream("ok");
+    });
+    const driver = makeDriver({ fetch, runtimeRegistry, contextWindows: { remember } });
+
+    const outcomes = await runTurns(driver, ["a".repeat(600), "b".repeat(600), "next"]);
+
+    expect(outcomes).toEqual(["completed", "completed", "completed"]);
+    expect(generations).toBe(4);
+    expect(runtimeRegistry.observedState(instanceId)?.models[0]?.learnedContextWindow).toBe(
+      undefined,
+    );
+    expect(remember).not.toHaveBeenCalled();
+  });
+
+  it("records the model a deployment served and sizes the next request by its profile", async () => {
+    const runtimeRegistry = new ProviderRuntimeRegistry();
+    runtimeRegistry.setObservedState(observedManualModel());
+    const remember = vi.fn();
+    const fetch = vi.fn(async (url: string | URL | Request) =>
+      String(url).endsWith("/models")
+        ? new Response(null, { status: 404 })
+        : chatStream("ok", undefined, "DeepSeek-V4.1-Flash"),
+    );
+    const driver = makeDriver({ fetch, runtimeRegistry, contextWindows: { remember } });
+
+    await runTurns(driver, ["hi"]);
+
+    expect(runtimeRegistry.observedState(instanceId)?.models[0]).toMatchObject({
+      servedModelId: "DeepSeek-V4.1-Flash",
+    });
+    expect(remember).toHaveBeenCalledWith(instanceId, modelId, {
+      servedModelId: "DeepSeek-V4.1-Flash",
+    });
+    // A later probe rebuilds the model from the listing and keeps what was learned.
+    await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
+    expect(runtimeRegistry.observedState(instanceId)?.models[0]).toMatchObject({
+      servedModelId: "DeepSeek-V4.1-Flash",
+    });
+  });
+});
+
+function observedManualModel() {
+  return {
+    instanceId,
+    readiness: "ready" as const,
+    processState: "stopped" as const,
+    models: [
+      {
+        id: modelId,
+        displayName: "manual",
+        source: "manual" as const,
+        verification: "unverified" as const,
+        reasoning: "unavailable" as const,
+        inputModalities: ["text" as const],
+        options: [],
+      },
+    ],
+    capabilities: {
+      streaming: "supported" as const,
+      resume: "unsupported" as const,
+      interruption: "supported" as const,
+      approvals: "unsupported" as const,
+      userQuestions: "unsupported" as const,
+      reasoning: "unavailable" as const,
+      usage: "supported" as const,
+      toolActivity: "unsupported" as const,
+      fileChanges: "unsupported" as const,
+      diffs: "unsupported" as const,
+      taskProgress: "unsupported" as const,
+      nativeChildAgents: "unsupported" as const,
+      harnessAutoReview: "unsupported" as const,
+      nativeAttachments: "unsupported" as const,
+      nativeWebResearch: "unsupported" as const,
+      appManagedTools: "unsupported" as const,
+      citations: "unsupported" as const,
+    },
+    observedAt: "2026-07-15T12:00:00.000Z",
+  };
+}
+
+/** Sends each prompt as its own turn on one session and returns how each turn ended. */
+function runTurns(
+  driver: ReturnType<typeof makeDriver>,
+  prompts: ReadonlyArray<string>,
+): Promise<ReadonlyArray<string | undefined>> {
+  return Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const connection = yield* driver.acquire({ instanceId, projectRoot: "/tmp/project" });
+        yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+        const outcomes: Array<string | undefined> = [];
+        for (const prompt of prompts) {
+          const events = yield* Effect.fork(
+            collectSessionEvents(yield* connection.subscribe, sessionId),
+          );
+          yield* connection.send({ sessionId, prompt, attachments: [], tools: [] });
+          outcomes.push(Array.from(yield* Fiber.join(events)).at(-1)?.kind);
+        }
+        yield* connection.stop(sessionId);
+        return outcomes;
+      }),
+    ),
+  );
+}
+
+describe("makeOpenAiCompatibleDriver under the ChatGPT plan profile", () => {
+  const planConfiguration: OpenAiCompatibleProviderConfiguration = {
+    kind: "openai-compatible-http",
+    baseUrl: "https://api.openai.com/v1",
+    authentication: "bearer",
+    protocol: "chat-completions",
+    manualModelIds: [modelId],
+    oauthDescriptorId: "chatgpt-plan",
+  };
+
+  function planDriver(options: {
+    readonly fetch: CompatibleFetch;
+    readonly protocol?: OpenAiCompatibleProviderConfiguration["protocol"];
+    readonly manualModelIds?: ReadonlyArray<ProviderModelId>;
+  }) {
+    return makeOpenAiCompatibleDriver({
+      instanceId,
+      configuration: {
+        ...planConfiguration,
+        ...(options.protocol === undefined ? {} : { protocol: options.protocol }),
+        ...(options.manualModelIds === undefined ? {} : { manualModelIds: options.manualModelIds }),
+      },
+      runtimeRegistry: new ProviderRuntimeRegistry(),
+      credentialResolver: {
+        has: async () => true,
+        resolve: async () =>
+          encodeSubscriptionOAuthCredential({
+            kind: "subscription-oauth",
+            credentialRef: "7c1e1d3f-1e4b-4051-8d2b-7f6e5d4c3b2a",
+            descriptorId: "chatgpt-plan",
+            accountLabel: "ChatGPT plan",
+          }),
+      },
+      subscriptionOAuth: {
+        refresh: async () => ({ kind: "refreshed" as const }),
+        access: async () => ({
+          kind: "granted" as const,
+          accessToken: "plan-access-token",
+          subscriptionUsageGranted: true,
+        }),
+      },
+      fetch: options.fetch,
+      clock: () => "2026-10-06T18:00:00.000Z",
+    });
+  }
+
+  /**
+   * Check connection exactly as the renderer sees it: the driver's probe
+   * result, sent as JSON and decoded with the client's contract decoder.
+   */
+  async function checkPlanConnection(
+    answer: Response,
+    manualModelIds: ReadonlyArray<ProviderModelId> = [],
+  ) {
+    const calls: Array<{ url: string; authorization: string | null }> = [];
+    const fetch = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      calls.push({
+        url: String(url),
+        authorization: new Headers(init?.headers).get("authorization"),
+      });
+      return answer;
+    });
+    const either = await Effect.runPromise(
+      Effect.either(Effect.scoped(planDriver({ fetch, manualModelIds }).probe({ instanceId }))),
+    );
+    const decoded = Either.isRight(either)
+      ? decodeProviderProbeResult(JSON.parse(JSON.stringify(either.right)))
+      : undefined;
+    return { either, decoded, calls };
+  }
+
+  const planNotListedMessage =
+    "Models can't be listed on the ChatGPT plan. Add the model IDs your plan offers under Manual model IDs, then check the connection again.";
+
+  it("reports the plan's models from its own models listing, with display names and context windows", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const { either, decoded, calls } = await checkPlanConnection(
+      Response.json({
+        models: [
+          {
+            slug: "gpt-plan-pro",
+            display_name: "GPT Plan Pro",
+            description: "Plan model",
+            context_window: 272_000,
+            default_reasoning_level: "medium",
+            supported_reasoning_levels: [{ effort: "low" }, { effort: "high" }],
+            visibility: "list",
+            priority: 1,
+          },
+          { slug: "gpt-plan-mini", display_name: "GPT Plan Mini", context_window: "large" },
+          { id: "gpt-plan-legacy", displayName: "Legacy", contextWindow: 128_000 },
+          { name: "gpt-plan-named" },
+          { display_name: "No identifier" },
+          "not-an-item",
+          { slug: " padded " },
+          { slug: "gpt-plan-pro", display_name: "Duplicate" },
+        ],
+      }),
+    );
+    // Before the plan profile read this shape, the probe failed with a
+    // protocol category and the renderer said "Provider returned an invalid
+    // response."
+    expect(Either.isRight(either)).toBe(true);
+    expect(decoded).toMatchObject({
+      readiness: "ready",
+      credentialStatus: "stored",
+      lastSuccessfulProbeAt: "2026-10-06T18:00:00.000Z",
+    });
+    expect(decoded?.message).toBeUndefined();
+    expect(
+      decoded?.models.map(({ id, displayName, contextLimit, source, verification }) => ({
+        id,
+        displayName,
+        contextLimit,
+        source,
+        verification,
+      })),
+    ).toEqual([
+      {
+        id: "gpt-plan-pro",
+        displayName: "GPT Plan Pro",
+        contextLimit: 272_000,
+        source: "discovered",
+        verification: "verified",
+      },
+      {
+        id: "gpt-plan-mini",
+        displayName: "GPT Plan Mini",
+        contextLimit: undefined,
+        source: "discovered",
+        verification: "verified",
+      },
+      {
+        id: "gpt-plan-legacy",
+        displayName: "Legacy",
+        contextLimit: 128_000,
+        source: "discovered",
+        verification: "verified",
+      },
+      {
+        id: "gpt-plan-named",
+        displayName: "gpt-plan-named",
+        contextLimit: undefined,
+        source: "discovered",
+        verification: "verified",
+      },
+    ]);
+    expect(calls).toEqual([
+      { url: "https://api.openai.com/v1/models", authorization: "Bearer plan-access-token" },
+    ]);
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it("stays degraded in words when none of the plan's listed items can be mapped, logging only their key names", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const { either, decoded } = await checkPlanConnection(
+      Response.json({ models: [{ label: "secret-label", tier: "secret-tier" }, { label: "x" }] }),
+    );
+    expect(Either.isRight(either)).toBe(true);
+    expect(decoded).toMatchObject({
+      readiness: "degraded",
+      credentialStatus: "stored",
+      models: [],
+      message: planNotListedMessage,
+      lastSuccessfulProbeAt: "2026-10-06T18:00:00.000Z",
+    });
+    // The diagnostic names the answer's shape and the first item's key
+    // names, and never a value or the bearer.
+    expect(warn).toHaveBeenCalledWith("[provider] models route did not list models", {
+      instanceId,
+      httpStatus: 200,
+      contentType: "application/json",
+      shape: "{models}",
+      firstItemKeys: ["label", "tier"],
+    });
+    expect(JSON.stringify(warn.mock.calls)).not.toContain("secret-");
+    expect(JSON.stringify(warn.mock.calls)).not.toContain("plan-access-token");
+    warn.mockRestore();
+  });
+
+  it("reports the same honest state for a non-JSON answer, an OpenAI-shaped 404, a route refusal, and a missing model-read scope", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const answers = [
+      new Response("<html>ChatGPT</html>", { headers: { "content-type": "text/html" } }),
+      Response.json(
+        {
+          error: {
+            message: "Invalid URL (GET /v1/models)",
+            type: "invalid_request_error",
+            param: null,
+            code: null,
+          },
+        },
+        { status: 404 },
+      ),
+      Response.json(
+        { error: { code: "subscription_sharing_route_not_supported", message: "no" } },
+        { status: 400 },
+      ),
+      Response.json(
+        {
+          error: {
+            message:
+              "You have insufficient permissions for this operation. Missing scopes: api.model.read.",
+            type: "invalid_request_error",
+            param: null,
+            code: null,
+          },
+        },
+        { status: 401 },
+      ),
+    ];
+    for (const answer of answers) {
+      const { decoded } = await checkPlanConnection(answer);
+      expect(decoded).toMatchObject({
+        readiness: "degraded",
+        models: [],
+        message: planNotListedMessage,
+      });
+    }
+    warn.mockRestore();
+  });
+
+  it("keeps the person's manual model IDs usable when the plan cannot list models", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const { decoded } = await checkPlanConnection(
+      Response.json(
+        { error: { message: "Forbidden", type: "invalid_request_error" } },
+        { status: 403 },
+      ),
+      ["plan-model" as ProviderModelId],
+    );
+    expect(decoded).toMatchObject({
+      readiness: "degraded",
+      models: [{ id: "plan-model", source: "manual", verification: "unverified" }],
+      message: "Models can't be listed on the ChatGPT plan; Octant uses your manual model IDs.",
+    });
+    warn.mockRestore();
+  });
+
+  it("reports the plan's listed models, and says so when it lists none", async () => {
+    const listed = await checkPlanConnection(
+      Response.json({ object: "list", data: [{ id: "plan-model", object: "model" }] }),
+    );
+    expect(listed.decoded).toMatchObject({
+      readiness: "ready",
+      models: [{ id: "plan-model", source: "discovered", verification: "verified" }],
+    });
+    expect(listed.decoded?.message).toBeUndefined();
+
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const empty = await checkPlanConnection(Response.json({ object: "list", data: [] }));
+    expect(empty.decoded).toMatchObject({
+      readiness: "degraded",
+      models: [],
+      message:
+        "The ChatGPT plan listed no models. Add the model IDs your plan offers under Manual model IDs, then check the connection again.",
+    });
+    warn.mockRestore();
+  });
+
+  it("still fails Check connection with the typed state for a rejected sign-in or a reached usage limit", async () => {
+    const rejected = await checkPlanConnection(
+      Response.json(
+        {
+          error: {
+            message: "Incorrect API key provided.",
+            type: "invalid_request_error",
+            param: null,
+            code: "invalid_api_key",
+          },
+        },
+        { status: 401 },
+      ),
+    );
+    expect(Either.isLeft(rejected.either)).toBe(true);
+    if (Either.isRight(rejected.either)) throw new Error("expected a typed failure");
+    expect(rejected.either.left.category).toBe("unauthenticated");
+
+    const limited = await checkPlanConnection(
+      Response.json(
+        { error: { code: "subscription_sharing_usage_limit_exceeded", message: "limit" } },
+        { status: 429 },
+      ),
+    );
+    expect(Either.isLeft(limited.either)).toBe(true);
+    if (Either.isRight(limited.either)) throw new Error("expected a typed failure");
+    expect(limited.either.left.category).toBe("rate-limited");
+    expect(limited.either.left.message).toContain("https://chatgpt.com/settings/usage");
+  });
+
+  it("runs a Responses turn on a manual model after the plan could not list models", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const calls: string[] = [];
+    const fetch = vi.fn(async (url: string | URL | Request) => {
+      calls.push(String(url));
+      return String(url).endsWith("/models")
+        ? Response.json({ models: [{ label: "unmappable" }] })
+        : responsesTextStream("plan answer");
+    });
+    const driver = planDriver({ fetch, protocol: "responses" });
+    const events = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const probe = yield* driver.probe({ instanceId });
+          expect(probe.models.map((model) => model.id)).toEqual([modelId]);
+          const connection = yield* driver.acquire({ instanceId, projectRoot: "/tmp/project" });
+          yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+          const collected = yield* Effect.fork(
+            collectSessionEvents(yield* connection.subscribe, sessionId),
+          );
+          yield* connection.send({ sessionId, prompt: "first", attachments: [], tools: [] });
+          return Array.from(yield* Fiber.join(collected));
+        }),
+      ),
+    );
+    expect(events.at(-1)?.kind).toBe("completed");
+    expect(calls).toEqual([
+      "https://api.openai.com/v1/models",
+      "https://api.openai.com/v1/responses",
+    ]);
+    warn.mockRestore();
+  });
+
+  it("refuses a turn before any request when the plan profile is bound to chat-completions", async () => {
+    const fetch = vi.fn(async () => modelsResponse("x"));
+    const driver = planDriver({ fetch });
+
+    const events = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* driver.acquire({
+            instanceId,
+            projectRoot: "/tmp/project",
+          });
+          yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+          const collected = yield* Effect.fork(
+            collectSessionEvents(yield* connection.subscribe, sessionId),
+          );
+          yield* connection.send({ sessionId, prompt: "first", attachments: [], tools: [] });
+          return Array.from(yield* Fiber.join(collected));
+        }),
+      ),
+    );
+    const failed = events.find((event) => event.kind === "failed");
+    expect(failed).toBeDefined();
+    if (failed === undefined || failed.kind !== "failed") throw new Error("expected a failure");
+    expect(failed.failure.category).toBe("unsupported");
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("does not fall back to chat-completions from responses under the plan profile", async () => {
+    const calls: string[] = [];
+    const fetch = vi.fn(async (url: string | URL | Request) => {
+      calls.push(String(url));
+      return new Response(JSON.stringify({ error: { code: "not_found", message: "no route" } }), {
+        status: 404,
+      });
+    });
+    const driver = planDriver({ fetch, protocol: "auto" });
+
+    const events = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* driver.acquire({
+            instanceId,
+            projectRoot: "/tmp/project",
+          });
+          yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+          const collected = yield* Effect.fork(
+            collectSessionEvents(yield* connection.subscribe, sessionId),
+          );
+          yield* connection.send({ sessionId, prompt: "first", attachments: [], tools: [] });
+          return Array.from(yield* Fiber.join(collected));
+        }),
+      ),
+    );
+    const failed = events.find((event) => event.kind === "failed");
+    expect(failed).toBeDefined();
+    if (failed === undefined || failed.kind !== "failed") throw new Error("expected a failure");
+    // The fallback the auto protocol would otherwise permit is refused with
+    // the plan's typed reason, and no chat-completions request left the
+    // process — only the one Responses request was sent.
+    expect(failed.failure.category).toBe("unsupported");
+    expect(failed.failure.message).toContain("Responses API");
+    expect(calls.filter((url) => url.endsWith("/chat/completions"))).toEqual([]);
+    expect(calls.filter((url) => url.endsWith("/responses"))).toHaveLength(1);
+  });
+
+  it("refuses to verify tool support over chat-completions under the plan profile", async () => {
+    const fetch = vi.fn(async () => modelsResponse("x"));
+    const driver = planDriver({ fetch });
+    if (driver.verifyToolCapability === undefined) {
+      throw new Error("expected the driver to verify tool capability");
+    }
+
+    const either = await Effect.runPromise(
+      Effect.either(Effect.scoped(driver.verifyToolCapability({ instanceId, modelId }))),
+    );
+    expect(Either.isLeft(either)).toBe(true);
+    if (Either.isRight(either)) throw new Error("expected a typed provider failure");
+    expect(either.left.category).toBe("unsupported");
+    expect(either.left.message).toContain("Responses API");
+    expect(fetch).not.toHaveBeenCalled();
+  });
 });
 
 function makeDriver(options: {
@@ -719,10 +1291,14 @@ function makeDriver(options: {
   readonly credentialResolver?: ProviderCredentialResolver;
   readonly fetch: CompatibleFetch;
   readonly runtimeRegistry?: ProviderRuntimeRegistry;
+  readonly contextWindows?: ModelContextWindowMemory;
 }) {
   const runtimeRegistry = options.runtimeRegistry ?? new ProviderRuntimeRegistry();
   const driver = makeOpenAiCompatibleDriver({
     instanceId,
+    ...(options.contextWindows === undefined
+      ? {}
+      : { harness: { contextWindows: options.contextWindows } }),
     configuration: options.configuration ?? configuration,
     credentialResolver: options.credentialResolver ?? resolver(),
     fetch: options.fetch,
@@ -744,10 +1320,12 @@ function modelsResponse(_url: string | URL | Request): Response {
 function chatStream(
   text: string,
   usage: Record<string, unknown> = { prompt_tokens: 3, completion_tokens: 2, total_tokens: 5 },
+  servedModel?: string,
 ): Response {
+  const served = servedModel === undefined ? {} : { model: servedModel };
   const chunks = [
-    chatChunk({ role: "assistant", content: text }),
-    chatChunk({}, "stop"),
+    { ...chatChunk({ role: "assistant", content: text }), ...served },
+    { ...chatChunk({}, "stop"), ...served },
     {
       id: "chatcmpl_private",
       object: "chat.completion.chunk",

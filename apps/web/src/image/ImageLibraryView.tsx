@@ -52,7 +52,8 @@ export function ImageLibraryView(props: ImageLibraryViewProps) {
       />
       {props.profiles.length === 0 ? (
         <p className="image-library__note" role="status">
-          No image profile is configured. Add one under Providers &amp; Models to generate images.
+          No image profile is configured. Add one under Settings › Image generation to generate
+          images.
         </p>
       ) : (
         <GeneratedImageList

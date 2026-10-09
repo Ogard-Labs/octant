@@ -5,6 +5,12 @@ import {
   CANVAS_MAX_HEATMAP_COLUMNS,
   CANVAS_MAX_HEATMAP_DAYS,
   CANVAS_MAX_HEATMAP_ROWS,
+  CANVAS_MAX_MATRIX_CELLS,
+  CANVAS_MAX_MATRIX_CELL_TEXT_LENGTH,
+  CANVAS_MAX_MATRIX_CRITERIA,
+  CANVAS_MAX_MATRIX_NOTE_LENGTH,
+  CANVAS_MAX_MATRIX_OPTIONS,
+  CANVAS_MAX_MATRIX_WEIGHT,
   CANVAS_MAX_METRIC_SPARKLINE_POINTS,
   CANVAS_MAX_TREEMAP_LEAVES,
   CANVAS_MAX_TREEMAP_MEASURES,
@@ -15,6 +21,8 @@ import {
   CanvasHeatmapDate,
   CanvasHeatmapScale,
   CanvasId,
+  CanvasMatrixGlyph,
+  CanvasMatrixPreference,
   CanvasMetricDirection,
   CanvasNumberFormat,
   CanvasSchemaVersion,
@@ -59,8 +67,11 @@ export const CANVAS_SHARE_MOCKUP_SCHEMA_VERSION = 2;
 // a node's `positioned`). Until then a Canvas holding any of them could not be
 // shared at all.
 export const CANVAS_SHARE_VISUALS_SCHEMA_VERSION = 3;
-export const CANVAS_SHARE_SCHEMA_VERSION = 3 as const;
-export const CanvasShareSchemaVersion = Schema.Literal(1, 2, CANVAS_SHARE_SCHEMA_VERSION);
+// Version 4 accompanies Canvas schema version 10: a share may carry a
+// comparison matrix.
+export const CANVAS_SHARE_COMPARISON_MATRIX_SCHEMA_VERSION = 4;
+export const CANVAS_SHARE_SCHEMA_VERSION = 4 as const;
+export const CanvasShareSchemaVersion = Schema.Literal(1, 2, 3, CANVAS_SHARE_SCHEMA_VERSION);
 export type CanvasShareSchemaVersion = typeof CanvasShareSchemaVersion.Type;
 
 export const CanvasExportId = brandedUuid("CanvasExportId");
@@ -214,6 +225,12 @@ const ExportNonEmptyText = boundedNonEmptyText(32_768).pipe(
     message: () => "Canvas export text must not contain secret-bearing values.",
   }),
 );
+const ExportMatrixNote = ExportText.pipe(Schema.maxLength(CANVAS_MAX_MATRIX_NOTE_LENGTH));
+const exportMatrixCellFields = {
+  criterionId: boundedToken("CanvasNodeId"),
+  optionId: boundedToken("CanvasNodeId"),
+  note: Schema.optional(ExportMatrixNote),
+} as const;
 const ExportUrl = Schema.String.pipe(
   Schema.maxLength(2_048),
   Schema.filter(
@@ -700,6 +717,43 @@ export const CanvasStaticExportBlock = Schema.Union(
   }).annotations(strict),
   Schema.Struct({
     ...exportBlockFields,
+    kind: Schema.Literal("comparison-matrix"),
+    options: Schema.NonEmptyArray(
+      Schema.Struct({
+        optionId: boundedToken("CanvasNodeId"),
+        label: ExportLabel,
+        detail: Schema.optional(ExportMatrixNote),
+      }).annotations(strict),
+    ).pipe(Schema.maxItems(CANVAS_MAX_MATRIX_OPTIONS)),
+    criteria: Schema.NonEmptyArray(
+      Schema.Struct({
+        criterionId: boundedToken("CanvasNodeId"),
+        label: ExportLabel,
+        weight: Schema.optional(Schema.Number.pipe(Schema.between(0, CANVAS_MAX_MATRIX_WEIGHT))),
+        prefer: Schema.optional(CanvasMatrixPreference),
+        detail: Schema.optional(ExportMatrixNote),
+      }).annotations(strict),
+    ).pipe(Schema.maxItems(CANVAS_MAX_MATRIX_CRITERIA)),
+    cells: Schema.Array(
+      Schema.Union(
+        Schema.Struct({ ...exportMatrixCellFields, score: Schema.Number }).annotations(strict),
+        Schema.Struct({
+          ...exportMatrixCellFields,
+          text: ExportLabel.pipe(Schema.maxLength(CANVAS_MAX_MATRIX_CELL_TEXT_LENGTH)),
+        }).annotations(strict),
+        Schema.Struct({ ...exportMatrixCellFields, glyph: CanvasMatrixGlyph }).annotations(strict),
+      ),
+    ).pipe(Schema.maxItems(CANVAS_MAX_MATRIX_CELLS)),
+    scoreRange: Schema.optional(
+      Schema.Struct({ min: Schema.Number, max: Schema.Number }).annotations(strict),
+    ),
+    recommendedOptionId: Schema.optional(boundedToken("CanvasNodeId")),
+    recommendation: Schema.optional(
+      ExportText.pipe(Schema.maxLength(CANVAS_MAX_MATRIX_NOTE_LENGTH * 2)),
+    ),
+  }).annotations(strict),
+  Schema.Struct({
+    ...exportBlockFields,
     kind: Schema.Literal("code-excerpt"),
     language: boundedToken("CanvasLanguage"),
     code: ExportNonEmptyText,
@@ -839,6 +893,12 @@ export const CanvasStaticExportDocument = Schema.Struct({
         message: () =>
           "Treemap, heatmap, and bar-list blocks, number formats on charts and table columns, table column displays, and a board's own layout require Canvas share version 3.",
       },
+    ),
+    Schema.filter(
+      (document) =>
+        document.schemaVersion >= CANVAS_SHARE_COMPARISON_MATRIX_SCHEMA_VERSION ||
+        !document.blocks.some((block) => block.kind === "comparison-matrix"),
+      { message: () => "Comparison matrix blocks require Canvas share version 4." },
     ),
   );
 export type CanvasStaticExportDocument = typeof CanvasStaticExportDocument.Type;

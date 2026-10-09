@@ -339,7 +339,7 @@ describe("SettingsView", () => {
     expect(within(header).getByLabelText("Scope: Selected host")).toBeInTheDocument();
   });
 
-  it("takes the Connect a provider button on a harness slot to Providers & Models", async () => {
+  it("takes the Add a model endpoint button on a harness slot to the add-endpoint row", async () => {
     const user = userEvent.setup();
     const nativeHarnessClient = {
       routing: vi.fn(async () => ({
@@ -370,12 +370,78 @@ describe("SettingsView", () => {
       initialDeepLink: { section: "harness" },
     });
 
-    const connect = await screen.findAllByRole("button", { name: "Connect a provider" });
+    const connect = await screen.findAllByRole("button", { name: "Add a model endpoint" });
     await user.click(connect[0]!);
 
-    expect(
-      await screen.findByRole("heading", { level: 1, name: "Providers & Models" }),
-    ).toBeVisible();
+    expect(screen.getByRole("heading", { level: 1, name: "Octant Harness" })).toBeVisible();
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Sign in with ChatGPT" })).toHaveFocus(),
+    );
+  });
+
+  it("saves a model's context window from Octant Harness › Model endpoints", async () => {
+    const user = userEvent.setup();
+    const instanceId = "80000000-0000-4000-8000-000000000092";
+    const setModelContextWindow = vi.fn(async () => true);
+    const fixture = providerControllerFixture();
+    const instances = [
+      {
+        id: instanceId,
+        displayName: "Foundry relay",
+        driverKind: "azure-foundry",
+        configuration: {
+          kind: "azure-foundry-openai-http",
+          baseUrl: "https://foundry.example.openai.azure.com/openai/v1/",
+          authentication: "api-key",
+          protocol: "auto",
+          manualModelIds: ["deployment-a"],
+        },
+        enabled: true,
+        environmentPolicy: "inherit-host",
+        version: 1,
+        createdAt: now,
+        updatedAt: now,
+      },
+    ];
+    const providerController = {
+      ...fixture,
+      instances,
+      readInstances: () => instances,
+      observedByInstance: new Map([
+        [
+          instanceId,
+          {
+            instanceId,
+            readiness: "ready",
+            processState: "running",
+            models: [
+              {
+                id: "deployment-a",
+                displayName: "deployment-a",
+                source: "manual",
+                verification: "verified",
+                reasoning: "unsupported",
+                inputModalities: ["text"],
+                options: [],
+              },
+            ],
+            capabilities: {},
+            observedAt: now,
+          },
+        ],
+      ]),
+      setModelContextWindow,
+    } as unknown as ProviderController;
+    renderSettings({
+      providerController,
+      discoveryController: discoveryControllerFixture(),
+      initialDeepLink: { section: "harness" },
+    });
+
+    await user.click(screen.getByRole("button", { name: "Details for Foundry relay" }));
+    await user.type(screen.getByLabelText("Context window for deployment-a"), "131072{Enter}");
+
+    expect(setModelContextWindow).toHaveBeenCalledWith(instanceId, "deployment-a", 131_072);
   });
 
   it("scans once when the Providers section opens", async () => {

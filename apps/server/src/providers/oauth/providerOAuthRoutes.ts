@@ -63,6 +63,26 @@ export type ProviderOAuthView =
       readonly userCode: string;
       readonly expiresAt: string;
     }
+  | {
+      /**
+       * Signed out on this host only: the local grant is gone, but the issuer
+       * could not be told, so its refresh token stays valid there until it
+       * expires.
+       */
+      readonly kind: "signed-out-locally";
+      readonly termsRequired: boolean;
+      readonly termsSummary: string;
+      readonly accountLabel: string;
+    }
+  | {
+      /**
+       * Still signed in: the issuer could not be told about the sign-out, so
+       * the grant was kept. The person can retry, or sign out on this host
+       * only with the `sign-out-locally` command.
+       */
+      readonly kind: "not-revoked";
+      readonly accountLabel: string;
+    }
   | { readonly kind: "signed-in"; readonly accountLabel: string }
   | { readonly kind: "expired"; readonly accountLabel: string }
   | { readonly kind: "refused"; readonly reason: string };
@@ -128,7 +148,13 @@ export function createProviderOAuthRouteHandler(dependencies: ProviderOAuthRoute
         actorId: windowId,
       });
       return json(view, 200, origin);
-    } catch {
+    } catch (error) {
+      // Storing the credential pointer or binding the endpoint failed after
+      // the issuer finished; the panel shows the refusal, and this line keeps
+      // the failure findable. The error is not logged because it may echo data.
+      console.warn(
+        `[host-oauth] the ${command.kind} sign-in command failed (${error instanceof Error ? error.name : "unknown error"}).`,
+      );
       return json({ kind: "refused", reason: "unavailable" }, 503, origin);
     }
   };
@@ -161,10 +187,16 @@ async function dispatch(input: {
   if (command.kind === "begin") {
     const unmatched = unmatchedInstance(dependencies, command.instanceId, offer);
     if (unmatched !== undefined) return unmatched;
+    const pointer = await readPointer(dependencies, command.instanceId);
+    const credentialRef =
+      pointer !== undefined && pointer.descriptorId === offer.descriptor.descriptorId
+        ? pointer.credentialRef
+        : undefined;
     const started = await dependencies.service.begin({
       principalKind: principal,
       actorId,
       descriptor,
+      ...(credentialRef === undefined ? {} : { credentialRef }),
     });
     return finish(dependencies, command, offer, started, actorId, principal);
   }
@@ -189,12 +221,16 @@ async function dispatch(input: {
     principalKind: principal,
     descriptor,
     credentialRef: pointer.credentialRef,
+    forgetWhenNotRevoked: command.kind === "sign-out-locally",
   });
   if (signedOut.kind === "refused") return { kind: "refused", reason: signedOut.reason };
   if (signedOut.kind === "unavailable") return { kind: "refused", reason: "unavailable" };
+  if (signedOut.kind === "not-revoked") {
+    return { kind: "not-revoked", accountLabel: pointer.accountLabel };
+  }
   await dependencies.credentials?.delete(command.instanceId);
   return {
-    kind: "signed-out",
+    kind: signedOut.kind,
     termsRequired: false,
     termsSummary: offer.termsSummary,
     accountLabel: offer.accountLabel,
@@ -327,12 +363,17 @@ async function revokeReplacedPointer(
   const pointer = await readPointer(dependencies, command.instanceId);
   if (pointer === undefined || pointer.credentialRef === nextCredentialRef) return;
   if (pointer.descriptorId === offer.descriptor.descriptorId) {
+    // The new grant replaces this one, and nothing will point at the old
+    // grant afterwards. Its local material must go even when the issuer
+    // cannot be told, or a live refresh token would sit in the credential
+    // store with no pointer and no way to sign it out.
     const signedOut = await dependencies.service.signOut({
       principalKind: principal,
       descriptor: offer.descriptor,
       credentialRef: pointer.credentialRef,
+      forgetWhenNotRevoked: true,
     });
-    if (signedOut.kind !== "signed-out") return;
+    if (signedOut.kind !== "signed-out" && signedOut.kind !== "signed-out-locally") return;
   }
   await dependencies.credentials?.delete(command.instanceId).catch(() => undefined);
 }
@@ -382,7 +423,7 @@ async function readPointer(
 }
 
 interface OAuthCommand {
-  readonly kind: "status" | "acknowledge" | "begin" | "poll" | "sign-out";
+  readonly kind: "status" | "acknowledge" | "begin" | "poll" | "sign-out" | "sign-out-locally";
   readonly instanceId: ProviderInstanceId;
   readonly descriptorId: string;
   readonly attemptId: string;
@@ -396,7 +437,8 @@ function readCommand(value: unknown): OAuthCommand | undefined {
     kind !== "acknowledge" &&
     kind !== "begin" &&
     kind !== "poll" &&
-    kind !== "sign-out"
+    kind !== "sign-out" &&
+    kind !== "sign-out-locally"
   ) {
     return undefined;
   }

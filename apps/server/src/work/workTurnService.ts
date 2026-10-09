@@ -1119,6 +1119,10 @@ export class WorkTurnService {
             service: this.#contextHarness,
             plan: finalPlan,
             driver: input.driver,
+            model: this.#persistence.readProviderModel?.(
+              finalPlan.manifest.providerInstanceId,
+              finalPlan.manifest.modelId,
+            ),
             displayLabel: input.thread?.title ?? "Work task",
             signal: input.signal,
           });

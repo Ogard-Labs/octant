@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   DevinConfigurationForm,
   FxConfigurationForm,
+  HttpConfigurationForm,
   ProviderCreateForm,
   type ProviderCreateFormProps,
 } from "./ProviderSettingsConfiguration";
@@ -249,5 +250,107 @@ describe("DevinConfigurationForm", () => {
     expect(row).not.toBeNull();
     if (row === null) throw new Error("expected the Devin binary-path setting row");
     expect(row).toContainElement(screen.getByLabelText("Binary path for Devin local"));
+  });
+});
+
+describe("HttpConfigurationForm sign-in offer", () => {
+  function httpInstance(
+    baseUrl: string,
+  ): Extract<ProviderInstance, { driverKind: "openai-compatible" }> {
+    return {
+      id: decodeProviderInstanceId("80000000-0000-4000-8000-0000000000a1"),
+      displayName: "Direct endpoint",
+      driverKind: "openai-compatible",
+      configuration: {
+        kind: "openai-compatible-http",
+        baseUrl,
+        authentication: "bearer",
+        protocol: "responses",
+        manualModelIds: [],
+      },
+      enabled: true,
+      environmentPolicy: "inherit-host",
+      version: 1 as never,
+      createdAt: "2026-07-14T10:00:00.000Z" as never,
+      updatedAt: "2026-07-14T10:00:00.000Z" as never,
+    };
+  }
+
+  function renderAt(baseUrl: string) {
+    const onProviderOAuth = vi.fn(async () => ({
+      kind: "signed-out" as const,
+      termsRequired: false,
+    }));
+    render(
+      <HttpConfigurationForm
+        credential={{ status: "missing", beginMutation: () => 1, finishMutation: () => undefined }}
+        credentialManagementAvailable
+        disabled={false}
+        instance={httpInstance(baseUrl)}
+        onChange={vi.fn(async () => true)}
+        onClearCredential={vi.fn(async () => true)}
+        onProviderOAuth={onProviderOAuth}
+      />,
+    );
+    return onProviderOAuth;
+  }
+
+  it.each([
+    ["https://api.openai.com/v1", "chatgpt-plan"],
+    ["https://api.openai.com/", "chatgpt-plan"],
+    ["https://openrouter.ai/api/v1", "openrouter"],
+  ])("offers the sign-in whose endpoint shares the origin of %s", async (baseUrl, descriptorId) => {
+    const onProviderOAuth = renderAt(baseUrl);
+    expect(await screen.findByRole("button", { name: "Sign in" })).toBeInTheDocument();
+    expect(onProviderOAuth).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "status", descriptorId }),
+    );
+    expect(onProviderOAuth).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        descriptorId: descriptorId === "chatgpt-plan" ? "openrouter" : "chatgpt-plan",
+      }),
+    );
+  });
+
+  it("saves a sign-in endpoint's other settings without changing its fixed URL or sign-in", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn(async () => true);
+    const bound = httpInstance("https://api.openai.com/v1");
+    render(
+      <HttpConfigurationForm
+        credential={{ status: "missing", beginMutation: () => 1, finishMutation: () => undefined }}
+        credentialManagementAvailable
+        disabled={false}
+        instance={{
+          ...bound,
+          configuration: { ...bound.configuration, oauthDescriptorId: "chatgpt-plan" as never },
+        }}
+        onChange={onChange}
+        onClearCredential={vi.fn(async () => true)}
+      />,
+    );
+
+    expect(screen.queryByLabelText("API base URL for Direct endpoint")).toBeNull();
+    expect(screen.queryByRole("button", { name: /Clear stored API key/ })).toBeNull();
+    await user.type(screen.getByLabelText("Manual model IDs for Direct endpoint"), "gpt-5");
+    await user.click(
+      screen.getByRole("button", { name: "Save HTTP settings for Direct endpoint" }),
+    );
+    expect(onChange).toHaveBeenCalledWith(
+      bound.id,
+      expect.objectContaining({
+        baseUrl: "https://api.openai.com/v1",
+        authentication: "bearer",
+        manualModelIds: ["gpt-5"],
+        oauthDescriptorId: "chatgpt-plan",
+      }),
+      expect.objectContaining({ value: "" }),
+    );
+  });
+
+  it("offers no sign-in for an endpoint no sign-in names", () => {
+    const onProviderOAuth = renderAt("https://gateway.example/v1");
+    expect(screen.queryByRole("button", { name: "Sign in" })).toBeNull();
+    expect(onProviderOAuth).not.toHaveBeenCalled();
   });
 });
