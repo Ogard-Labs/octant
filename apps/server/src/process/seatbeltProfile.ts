@@ -207,6 +207,12 @@ const DEFAULT_DENY_READ_PATHS = [
   "/Library/Keychains",
   "/private",
 ] as const;
+const SYSTEM_TLS_PUBLIC_FILES = [
+  "/private/etc/ssl/openssl.cnf",
+  "/private/etc/ssl/x509v3.cnf",
+  "/private/etc/ssl/cert.pem",
+] as const;
+const SYSTEM_TLS_CA_DIRECTORY = "/private/etc/ssl/certs";
 const MAX_PRIVATE_DENY_RULES = 4_096;
 
 export function escapeSeatbeltPath(path: string): string {
@@ -638,16 +644,19 @@ export function buildDenyDefaultSeatbeltProfile(input: SeatbeltProfileInput): st
     // Keep file contents and the rest of /private denied.
     '(allow file-read-metadata (literal "/private/var/select/sh"))',
     // LibreSSL, behind /usr/bin/curl and /usr/bin/openssl, reads
-    // /private/etc/ssl/openssl.cnf at startup. With it denied, curl printed
-    // "Auto configuration failed" and exited before opening a socket. The
-    // directory also holds the system CA bundle (cert.pem, certs/) that a
-    // client without its own trust store verifies against. It holds public
-    // configuration and certificates only, never keys. Allowed in both
-    // egress modes so that an offline launch fails at the socket, where the
-    // policy is meant to stop it, not earlier. This rule follows the
-    // `/private` denial, because Seatbelt applies the last matching rule. It
-    // precedes a caller's own denials, so a caller can still deny it.
-    seatbeltAllowRule("file-read*", "/private/etc/ssl"),
+    // /private/etc/ssl/openssl.cnf at startup (x509v3.cnf when it issues
+    // certificates). With it denied, curl printed "Auto configuration failed"
+    // and exited before opening a socket. cert.pem and certs/ are the system
+    // CA bundle a client without its own trust store verifies against. Only
+    // these named public files are opened, not the directory:
+    // /etc/ssl/private is OpenSSL's default key directory, and a subpath
+    // grant on the parent would give it to every confined launch. Allowed in
+    // both egress modes so that an offline launch fails at the socket, where
+    // the policy is meant to stop it, not earlier. These rules follow the
+    // `/private` denial, because Seatbelt applies the last matching rule.
+    // They precede a caller's own denials, so a caller can still deny them.
+    ...SYSTEM_TLS_PUBLIC_FILES.map(seatbeltAllowLiteralReadRule),
+    seatbeltAllowRule("file-read*", SYSTEM_TLS_CA_DIRECTORY),
     ...denyReadPaths.map((path) => seatbeltDenyRule("file-read*", path)),
     ...privateRules,
     // The launch roots are re-allowed under every denial above, `file-read*`

@@ -2709,12 +2709,13 @@ mechanisms are:
   ([decisions/0068-linux-plan-process-deny.md](decisions/0068-linux-plan-process-deny.md)).
   Sensitive system roots remain denied even where runtime compatibility
   requires a broad file-read rule; each launch's exact roots are re-allowed
-  after those denials. On macOS the one system path re-allowed under the
-  `/private` denial for every launch is `/private/etc/ssl`, read-only, in both
-  egress modes. It holds the LibreSSL configuration that `/usr/bin/curl` and
-  `/usr/bin/openssl` read at startup, plus the public CA bundle; without it a
-  confined HTTPS client exits before it opens a socket. An offline launch
-  still fails at the socket. Path checks alone are never the boundary. Confined
+  after those denials. On macOS every launch, in both egress modes, can read
+  the public TLS files under the `/private` denial: `openssl.cnf`,
+  `x509v3.cnf`, `cert.pem`, and `certs/` in `/private/etc/ssl`. Without them,
+  LibreSSL in `/usr/bin/curl` and `/usr/bin/openssl` exits before opening a
+  socket. The directory itself is not granted, so OpenSSL's default key
+  directory `/etc/ssl/private` stays denied. An offline launch still fails
+  at the socket. Path checks alone are never the boundary. Confined
   reads open a handle and verify identity against what containment resolved.
   Missing the platform-selected backend (`sandbox-exec` on macOS, `bwrap` on
   Linux) fails closed. A provider runtime that makes its own API call resolves
