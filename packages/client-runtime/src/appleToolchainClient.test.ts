@@ -109,6 +109,25 @@ describe("appleToolchainClient", () => {
     });
   });
 
+  it("carries the discovery step a host names, and none from a host that does not", async () => {
+    const fail = (failure: Record<string, string>) =>
+      createAppleToolchainClient({
+        baseUrl: "http://127.0.0.1:13773",
+        fetch: vi.fn(async () =>
+          Response.json({ kind: "apple-failure", failure }, { status: 503 }),
+        ),
+        windowCapability: "A".repeat(43),
+      }).discover(request);
+
+    await expect(
+      fail({ category: "unavailable", message: "No licence.", step: "licence" }),
+    ).rejects.toMatchObject({ category: "unavailable", step: "licence" });
+    await expect(fail({ category: "unavailable", message: "Incomplete." })).rejects.toMatchObject({
+      category: "unavailable",
+      step: undefined,
+    });
+  });
+
   it("returns an explicit screenshot failure when host evidence is unavailable", async () => {
     const client = createAppleToolchainClient({
       baseUrl: "http://127.0.0.1:13773",

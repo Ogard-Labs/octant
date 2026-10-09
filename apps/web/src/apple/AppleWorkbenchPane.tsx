@@ -1,3 +1,4 @@
+import type { AppleDiscoveryStep } from "@octant/contracts/apple-toolchain";
 import type { AppleDiscoverySnapshot } from "@octant/contracts/apple-toolchain-rpc";
 import type {
   AppleActionProgress,
@@ -76,6 +77,8 @@ export interface AppleWorkbenchPaneProps {
   readonly actionFailure?: DeviceActionFailure<AppleWorkbenchIntent>;
   /** How discovery failed, when it did: Xcode missing reads differently from the rest. */
   readonly errorCategory?: string;
+  /** Which discovery probe failed, when the host says: names the checklist row to fix. */
+  readonly errorStep?: AppleDiscoveryStep;
   readonly liveFrame?: AppleSimulatorLiveFrame;
   readonly screenUrl?: string;
   readonly liveScreen?: AppleSimulatorLiveScreen;

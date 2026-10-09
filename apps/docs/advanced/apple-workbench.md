@@ -19,7 +19,11 @@ Manager). What you can do today is a slice of that shape:
 
 - Toolchain, project, and destination discovery (Xcode, `xcode-select`, SDKs,
   Simulator runtimes, workspaces, projects, schemes, configurations, targets,
-  destinations) — non-mutating, with setup guidance when Xcode is missing.
+  destinations) — non-mutating, with a setup checklist when discovery fails.
+  The checklist has rows for Xcode, its licence, a Simulator runtime, and the
+  project, and marks the step that failed. If the licence has not been
+  accepted, run `sudo xcodebuild -license accept` in Terminal, then choose
+  **Check again**; Octant never accepts it for you.
   The command palette lists only `.xcodeproj` and `.xcworkspace` at the
   checkout root. The `octant_apple` tool can name a `Package.swift` path, but
   Swift-package discovery is not available yet: the host passes that file to

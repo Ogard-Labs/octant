@@ -243,6 +243,22 @@ describe("AppleToolchainFailure", () => {
       expect(f.category).toBe(c);
     }
   });
+
+  it("decodes a failure without a step, as an older host sends it", () => {
+    const failure = decodeAppleToolchainFailure({ category: "unavailable", message: "incomplete" });
+    expect(failure).not.toHaveProperty("step");
+  });
+
+  it("decodes the discovery step a host names and rejects one it does not know", () => {
+    for (const step of ["xcode", "licence", "runtime", "project"] as const) {
+      expect(
+        decodeAppleToolchainFailure({ category: "unavailable", message: "incomplete", step }),
+      ).toMatchObject({ step });
+    }
+    expect(() =>
+      decodeAppleToolchainFailure({ category: "unavailable", message: "incomplete", step: "x" }),
+    ).toThrow();
+  });
 });
 
 describe("Apple runtime contracts", () => {
