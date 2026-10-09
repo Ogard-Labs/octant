@@ -521,7 +521,7 @@ describe("NativeHarnessRoutingPanel main model suggestion", () => {
 });
 
 describe("NativeHarnessRoutingPanel jobs", () => {
-  it("folds the job list away, leaves the lead out, and saves a rebinding at once", async () => {
+  it("folds the job list away, leaves the lead and the advisor out, and saves a rebinding at once", async () => {
     const user = userEvent.setup();
     const next = settings({
       slots: [],
@@ -536,7 +536,9 @@ describe("NativeHarnessRoutingPanel jobs", () => {
     await user.click(summary);
     expect(disclosure).toHaveAttribute("open");
     expect(screen.queryByRole("combobox", { name: "Lead role" })).not.toBeInTheDocument();
-    expect(screen.getAllByRole("combobox", { name: / role$/ })).toHaveLength(11);
+    // The advisor runs only on its own role, so its Off cannot be bypassed here.
+    expect(screen.queryByRole("combobox", { name: "Advisor role" })).not.toBeInTheDocument();
+    expect(screen.getAllByRole("combobox", { name: / role$/ })).toHaveLength(10);
 
     await chooseSelectFieldOption(
       user,

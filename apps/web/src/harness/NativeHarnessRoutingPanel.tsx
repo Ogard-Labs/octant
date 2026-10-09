@@ -72,7 +72,12 @@ const JOB_LABELS: Readonly<Record<EditableJob, string>> = {
   advisor: "Advisor",
   custom: "Custom helper agents",
 };
-const EDITABLE_JOBS = NativeHarnessJob.literals.filter((job): job is EditableJob => job !== "lead");
+// The advisor runs only on the Advisor role, so the role row's Off and
+// "Turn the advisor off" are the whole truth; binding it to another role here
+// would keep it running while the page says it is off.
+const EDITABLE_JOBS = NativeHarnessJob.literals.filter(
+  (job): job is EditableJob => job !== "lead" && job !== "advisor",
+);
 
 /**
  * What each built-in slot is for. The CLI and the advanced guide still call

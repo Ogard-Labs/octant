@@ -139,7 +139,8 @@ With exactly one endpoint ready and no main model, the page offers
 **Use** _model_ **as the main model**; nothing is set until you press it. Open
 a role's backups to add one, move one up or down, or remove it. **Reading
 images** offers only models that accept images. Which job uses which role is
-folded away under **Which job uses which role**. Jobs the harness performs map
+folded away under **Which job uses which role**; the lead and the advisor are
+not listed there, since the advisor runs only on its own role. Jobs the harness performs map
 onto slots:
 
 | Job                           | Default slot | Named in Settings    |
