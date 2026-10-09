@@ -11,6 +11,8 @@ import {
 import { describe, expect, expectTypeOf, it } from "vitest";
 import {
   reconcileReplicaEntry,
+  replicaArtifactHeads,
+  replicaArtifactHidden,
   replicaReconcileCannotOverwrite,
   type ReplicaAppliedEntry,
   type ReplicaArtifactRecord,
@@ -97,7 +99,7 @@ function entry(options: {
       sequence: options.sequence ?? 1,
       publicKey: "MCowBQYDK2VwAyEAsI3Vx6E5C70zWN51mv4VIXZxVQC4M1DBS7XoBYp5/R4=",
     },
-    artifact: { canvasId: ids.canvas, hostId },
+    artifact: { canvasId: ids.canvas, hostId, projectName: "Launch" },
     parents: (options.parents ?? [ids.parent]).map((versionId) => ({ versionId })),
     contentHash,
     bundle: bundle(
@@ -126,11 +128,17 @@ function state(overrides: Partial<ReplicaLocalState> = {}): ReplicaLocalState {
       { instanceId: ids.south, status: "member" },
     ],
     applied: [],
+    listedSlots: [],
+    settledSlots: [],
     artifacts: [],
     measuredContentHash: hashA,
     signature: "verified",
     ...overrides,
   };
+}
+
+function slot(instanceId: ReplicaInstanceId, sequence: number) {
+  return { instanceId, sequence };
 }
 
 function appliedFrom(value: ReplicaArtifactEntry): ReplicaAppliedEntry {
@@ -171,6 +179,7 @@ function noteApplied(
       contentHash: value.contentHash,
       originInstanceId: value.origin.instanceId,
       originSequence: value.origin.sequence,
+      parentVersionIds: value.parents.map((parent) => String(parent.versionId)),
     };
     const artifacts: ReadonlyArray<ReplicaArtifactRecord> =
       existing === undefined
@@ -312,7 +321,7 @@ describe("reconciling a replica entry", () => {
     expect(revived).not.toHaveProperty("overwrite");
   });
 
-  it("holds a later entry while an earlier sequence is missing", () => {
+  it("holds a later entry while an earlier listed slot of its writer is unsettled", () => {
     const first = entry({ sequence: 1, contentHash: hashA, versionId: ids.version, parents: [] });
     const second = entry({
       sequence: 2,
@@ -328,7 +337,8 @@ describe("reconciling a replica entry", () => {
       parents: [ids.otherVersion],
       text: "Third",
     });
-    const afterFirst = noteApplied(state(), first, reconcileReplicaEntry(state(), first));
+    const listed = state({ listedSlots: [1, 2, 3].map((sequence) => slot(ids.north, sequence)) });
+    const afterFirst = noteApplied(listed, first, reconcileReplicaEntry(listed, first));
     const held = reconcileReplicaEntry({ ...afterFirst, measuredContentHash: hashC }, third);
     expect(held).toEqual({ outcome: "refused", reason: "sequence-gap" });
     expect(noteApplied(afterFirst, third, held).applied).toHaveLength(1);
@@ -340,6 +350,41 @@ describe("reconciling a replica entry", () => {
     expect(reconcileReplicaEntry({ ...afterSecond, measuredContentHash: hashC }, third)).toEqual({
       outcome: "append-version",
     });
+  });
+
+  it("applies a writer's first artifact entry after its own membership records", () => {
+    // North founded the store at 1 and approved a computer at 2; its first
+    // Canvas is its sequence 3, in the same sequence space.
+    const first = entry({ sequence: 3, parents: [] });
+    expect(
+      reconcileReplicaEntry(
+        state({
+          listedSlots: [1, 2, 3].map((sequence) => slot(ids.north, sequence)),
+          settledSlots: [1, 2].map((sequence) => slot(ids.north, sequence)),
+        }),
+        first,
+      ),
+    ).toEqual({ outcome: "append-version" });
+  });
+
+  it("does not wait on a slot the store does not list or that holds no valid record", () => {
+    const later = entry({ sequence: 5, parents: [] });
+    // 2 was squatted and its file removed, so the store no longer lists it;
+    // 3 holds someone else's bytes, settled here as not a valid record; 4 is
+    // a membership record. None of them is an entry this writer still owes.
+    expect(
+      reconcileReplicaEntry(
+        state({
+          listedSlots: [1, 3, 4, 5].map((sequence) => slot(ids.north, sequence)),
+          settledSlots: [1, 3, 4].map((sequence) => slot(ids.north, sequence)),
+        }),
+        later,
+      ),
+    ).toEqual({ outcome: "append-version" });
+    // Another writer's unsettled slot never holds this one back.
+    expect(
+      reconcileReplicaEntry(state({ listedSlots: [slot(ids.south, 1)] }), entry({ sequence: 2 })),
+    ).toEqual({ outcome: "append-version" });
   });
 
   it("refuses an entry from an instance it does not know", () => {
@@ -410,5 +455,50 @@ describe("reconciling a replica entry", () => {
       outcome: "refused",
       reason: "hash-mismatch",
     });
+  });
+});
+
+describe("the heads of a replicated artifact", () => {
+  const version = (versionId: string, parents: ReadonlyArray<string>) => ({
+    versionId: versionId as CanvasVersionId,
+    contentHash: hashA,
+    parentVersionIds: parents,
+  });
+  const tombstone = (parents: ReadonlyArray<string>, originSequence = 4) => ({
+    contentHash: hashA,
+    originInstanceId: ids.north,
+    originSequence,
+    parentVersionIds: parents,
+  });
+
+  it("keeps both revisions from one parent as two heads", () => {
+    const record = {
+      versions: [
+        version(ids.parent, []),
+        version(ids.version, [ids.parent]),
+        version(ids.otherVersion, [ids.parent]),
+      ],
+      tombstones: [],
+    };
+    expect(replicaArtifactHeads(record)).toEqual([
+      { kind: "version", versionId: ids.version },
+      { kind: "version", versionId: ids.otherVersion },
+    ]);
+    expect(replicaArtifactHidden(record)).toBe(false);
+  });
+
+  it("hides an artifact only while a tombstone is its only head", () => {
+    const deleted = { versions: [version(ids.parent, [])], tombstones: [tombstone([ids.parent])] };
+    expect(replicaArtifactHidden(deleted)).toBe(true);
+    // A revision from the same parent stands beside the deletion, which stays.
+    const revised = {
+      versions: [...deleted.versions, version(ids.version, [ids.parent])],
+      tombstones: deleted.tombstones,
+    };
+    expect(replicaArtifactHeads(revised)).toEqual([
+      { kind: "version", versionId: ids.version },
+      { kind: "tombstone", originInstanceId: ids.north, originSequence: 4 },
+    ]);
+    expect(replicaArtifactHidden(revised)).toBe(false);
   });
 });

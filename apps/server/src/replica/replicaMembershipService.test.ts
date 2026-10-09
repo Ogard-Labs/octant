@@ -304,7 +304,11 @@ function artifactEntry(host: Computer, sequence: number): ReplicaEntry {
     format: REPLICA_ENTRY_FORMAT,
     kind: "artifact-version",
     origin: originOf(host, sequence),
-    artifact: { canvasId: "11111111-1111-4111-8111-111111111111", hostId: "host-south" },
+    artifact: {
+      canvasId: "11111111-1111-4111-8111-111111111111",
+      hostId: "host-south",
+      projectName: "Launch",
+    },
     parents: [],
     contentHash: "a".repeat(64),
     bundle: {
