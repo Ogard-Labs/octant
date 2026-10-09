@@ -16,6 +16,9 @@ import {
   CANVAS_MAX_MATRIX_CELLS,
   CANVAS_MAX_MATRIX_CRITERIA,
   CANVAS_MAX_MATRIX_OPTIONS,
+  CANVAS_MAX_MATH_PARAGRAPH_LENGTH,
+  CANVAS_MAX_MATH_RUNS,
+  CANVAS_MAX_MATH_SOURCE_LENGTH,
   CANVAS_MAX_METRIC_SPARKLINE_POINTS,
   CANVAS_MAX_MINDMAP_NOTE_LENGTH,
   CANVAS_MAX_MOCKUP_DEPTH,
@@ -38,6 +41,7 @@ import {
   CANVAS_TREEMAP_SCHEMA_VERSION,
   CANVAS_DESIGN_SCHEMA_VERSION,
   CANVAS_COMPARISON_MATRIX_SCHEMA_VERSION,
+  CANVAS_MATH_SCHEMA_VERSION,
   CanvasBlock,
   CanvasDefinition,
   CanvasVersion,
@@ -47,6 +51,7 @@ import {
   type CanvasSourceId,
 } from "@octant/contracts/canvas";
 import { canvasDesignMarkupRefusal, canvasDesignStylesheetRefusal } from "./canvasDesignPolicy";
+import { canvasMathSourceRefusal } from "./canvasMathPolicy";
 
 const encoder = new TextEncoder();
 
@@ -63,6 +68,7 @@ const SUPPORTED_CANVAS_SCHEMA_VERSIONS: readonly number[] = [
   CANVAS_BAR_LIST_SCHEMA_VERSION,
   CANVAS_DIAGRAM_KINDS_SCHEMA_VERSION,
   CANVAS_DESIGN_SCHEMA_VERSION,
+  CANVAS_COMPARISON_MATRIX_SCHEMA_VERSION,
   CANVAS_SCHEMA_VERSION,
 ];
 
@@ -80,6 +86,7 @@ const VERSION_GATED_BLOCK_KINDS: ReadonlyArray<{ readonly kind: string; readonly
     { kind: "mindmap", since: CANVAS_DIAGRAM_KINDS_SCHEMA_VERSION },
     { kind: "design", since: CANVAS_DESIGN_SCHEMA_VERSION },
     { kind: "comparison-matrix", since: CANVAS_COMPARISON_MATRIX_SCHEMA_VERSION },
+    { kind: "math", since: CANVAS_MATH_SCHEMA_VERSION },
   ];
 
 export type CanvasPolicyRejectionCode =
@@ -160,7 +167,11 @@ export type CanvasPolicyRejectionCode =
   | "unknown-matrix-option"
   | "unknown-matrix-criterion"
   | "duplicate-matrix-cell"
-  | "matrix-score-out-of-range";
+  | "matrix-score-out-of-range"
+  | "math-command-refused"
+  | "math-source-budget-exceeded"
+  | "math-runs-budget-exceeded"
+  | "math-paragraph-budget-exceeded";
 
 export class CanvasPolicyRejected extends Error {
   override readonly name = "CanvasPolicyRejected";
@@ -466,6 +477,8 @@ function inferStructuralBudgetCode(input: unknown): CanvasPolicyRejectionCode | 
       sparkline?: unknown;
       options?: unknown;
       criteria?: unknown;
+      source?: unknown;
+      runs?: unknown;
     };
     if (block.kind === "image") imageCount += 1;
     if (
@@ -635,6 +648,25 @@ function inferStructuralBudgetCode(input: unknown): CanvasPolicyRejectionCode | 
         return "matrix-cells-budget-exceeded";
       }
     }
+    if (block.kind === "math") {
+      if (typeof block.source === "string" && block.source.length > CANVAS_MAX_MATH_SOURCE_LENGTH) {
+        return "math-source-budget-exceeded";
+      }
+      if (Array.isArray(block.runs)) {
+        if (block.runs.length > CANVAS_MAX_MATH_RUNS) return "math-runs-budget-exceeded";
+        if (
+          block.runs.some(
+            (run: unknown) =>
+              typeof run === "object" &&
+              run !== null &&
+              typeof (run as { math?: unknown }).math === "string" &&
+              (run as { math: string }).math.length > CANVAS_MAX_MATH_SOURCE_LENGTH,
+          )
+        ) {
+          return "math-source-budget-exceeded";
+        }
+      }
+    }
     if (
       block.kind === "metric" &&
       Array.isArray(block.sparkline) &&
@@ -748,6 +780,7 @@ function validateCrossReferences(definition: CanvasDefinition): void {
     if (block.kind === "heatmap") validateHeatmap(block);
     if (block.kind === "bar-list") validateBarList(block);
     if (block.kind === "comparison-matrix") validateComparisonMatrix(block);
+    if (block.kind === "math") validateMath(block);
     if (block.kind === "metric") validateMetric(block);
   }
 }
@@ -1578,6 +1611,50 @@ function validateComparisonMatrix(
       reject(
         "matrix-score-out-of-range",
         `Canvas comparison matrix ${block.blockId} has a score outside ${String(block.scoreRange.min)} to ${String(block.scoreRange.max)}.`,
+      );
+    }
+  }
+}
+
+/**
+ * A formula is drawn by a typesetter with trust off, so nothing in it runs.
+ * The command scan refuses markup that would define a macro, link, embed, or
+ * recolour, naming the command so an agent can rewrite it. A paragraph's runs
+ * are each bounded by the contract; together they are one paragraph of prose,
+ * so their combined length has one budget.
+ */
+function validateMath(block: Extract<CanvasBlock, { readonly kind: "math" }>): void {
+  const sources =
+    block.layout === "display"
+      ? [block.source]
+      : block.runs.flatMap((run) => ("math" in run ? [run.math] : []));
+  for (const source of sources) {
+    if (source.length > CANVAS_MAX_MATH_SOURCE_LENGTH) {
+      reject(
+        "math-source-budget-exceeded",
+        `Canvas math ${block.blockId} has a formula longer than ${String(CANVAS_MAX_MATH_SOURCE_LENGTH)} characters.`,
+      );
+    }
+    const refusal = canvasMathSourceRefusal(source);
+    if (refusal !== undefined) {
+      reject("math-command-refused", `Canvas math ${block.blockId} ${refusal}`);
+    }
+  }
+  if (block.layout === "inline") {
+    if (block.runs.length > CANVAS_MAX_MATH_RUNS) {
+      reject(
+        "math-runs-budget-exceeded",
+        `Canvas math ${block.blockId} has more than ${String(CANVAS_MAX_MATH_RUNS)} runs.`,
+      );
+    }
+    const length = block.runs.reduce(
+      (total, run) => total + ("math" in run ? run.math.length : run.text.length),
+      0,
+    );
+    if (length > CANVAS_MAX_MATH_PARAGRAPH_LENGTH) {
+      reject(
+        "math-paragraph-budget-exceeded",
+        `Canvas math ${block.blockId} is longer than ${String(CANVAS_MAX_MATH_PARAGRAPH_LENGTH)} characters.`,
       );
     }
   }

@@ -30,6 +30,7 @@
     "./canvas-heatmap-layout": "./src/canvasHeatmapLayout.ts",
     "./canvas-bar-list-layout": "./src/canvasBarListLayout.ts",
     "./canvas-comparison-matrix": "./src/canvasComparisonMatrix.ts",
+    "./canvas-math-policy": "./src/canvasMathPolicy.ts",
     "./canvas-number-format": "./src/canvasNumberFormat.ts",
     "./canvas-presentation-policy": "./src/canvasPresentationPolicy.ts",
     "./canvas-action-policy": "./src/canvasActionPolicy.ts",
