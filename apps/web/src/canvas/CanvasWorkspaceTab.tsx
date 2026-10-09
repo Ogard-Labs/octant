@@ -563,6 +563,18 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
     [props.client, loadShares],
   );
 
+  // The host snapshots only the head version and refuses any other as a scope
+  // mismatch, which the share panel could only report as "a different
+  // workspace". Until a picked version and the history naming the head have
+  // both loaded, which version Share would send is not settled.
+  const versionSettled = !loading && tipVersionId !== "";
+  const sharingHead = versionSettled && String(selectedVersionId) === tipVersionId;
+  // A Share dialog opened while a picked older version was still loading would
+  // otherwise stay open on that version once it arrived.
+  useEffect(() => {
+    if (dialog === "share" && versionSettled && !sharingHead) setDialog(undefined);
+  }, [dialog, versionSettled, sharingHead]);
+
   if (definition === undefined) {
     return (
       <ShellState
@@ -621,17 +633,19 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
           },
         ]
       : []),
-    // The host snapshots only the head version and refuses any other as a
-    // scope mismatch, which the panel could only report as "a different
-    // workspace", so an older version says why instead of offering Share.
     ...(shares !== undefined && selectedVersionId !== undefined
       ? [
           {
             label: "Share…",
             value: "share",
-            ...(viewingOlderVersion
-              ? { disabled: true, description: "Older versions can't be shared." }
-              : {}),
+            ...(sharingHead
+              ? {}
+              : {
+                  disabled: true,
+                  description: versionSettled
+                    ? "Older versions can't be shared."
+                    : "Loading this version…",
+                }),
           },
         ]
       : []),

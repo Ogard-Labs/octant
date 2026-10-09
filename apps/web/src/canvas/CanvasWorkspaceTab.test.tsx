@@ -1050,6 +1050,37 @@ describe("CanvasWorkspaceTab", () => {
     expect(share).toHaveAccessibleDescription("Older versions can't be shared.");
   });
 
+  it("holds Share while a picked version is still loading", async () => {
+    const olderVersionId = "45454545-4545-4545-8545-454545454545";
+    const client = createCanvasClient(readyVersion, twoVersionHistory(olderVersionId), {
+      get: vi.fn((_canvasId, versionId) =>
+        versionId === olderVersionId ? new Promise(() => undefined) : Promise.resolve(readyVersion),
+      ),
+      shareOverview: vi.fn(async () => ({
+        schemaVersion: 1,
+        kind: "canvas-share-overview",
+        canvasId: quarterlyCanvasId,
+        hostId: "local",
+        projectId: canvasInventoryProjectId,
+        sharingEnabled: true,
+        owner: { kind: "local-user", actorId: "88888888-8888-4888-8888-888888888888" },
+        snapshots: [],
+        accessLog: [],
+      })),
+    } as unknown as Partial<CanvasClient>);
+    render(<CanvasWorkspaceTab tab={canvasTab} client={client} />);
+    await screen.findByRole("heading", { name: "Signed Q3 report" });
+
+    await openVersionHistory();
+    fireEvent.click(await screen.findByTestId("canvas-version-1"));
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "More Canvas actions" }));
+    const share = await screen.findByRole("menuitem", { name: "Share…" });
+    expect(share).toHaveAttribute("aria-disabled", "true");
+    expect(share).toHaveAccessibleDescription("Loading this version…");
+  });
+
   it("shows keyboard focus on a block's comment marker with the hover fill", () => {
     // A marker with open threads is always visible, so revealing it on focus
     // is no cue; without a fill, focus on it could not be seen at all.
