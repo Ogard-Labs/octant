@@ -8,7 +8,11 @@ import {
   type ChatThreadView,
   type ChatTurnId,
 } from "@octant/contracts/chat";
-import type { MentionableThreadId, SideChatSidecar } from "@octant/contracts";
+import type {
+  ImageGenerationProfileView,
+  MentionableThreadId,
+  SideChatSidecar,
+} from "@octant/contracts";
 import type { ThreadMentionClient } from "@octant/client-runtime";
 import {
   buildAttachmentCapability,
@@ -60,7 +64,6 @@ import { useLinkedThreadParallelReview } from "../linkedThread/useLinkedThreadPa
 import { isReviewInParallelReference } from "../linkedThread/parseReviewInParallelDraft";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import type { ImageGenerationClient } from "@octant/client-runtime/image-generation-client";
-import { listEligibleImageProfiles } from "@octant/domain";
 import { GeneratedImageList } from "../image/GeneratedImageList";
 import { decodeImageGenerationScopeId } from "@octant/contracts";
 import type { CanvasThreadReferenceCard } from "@octant/contracts/canvas-cards";
@@ -104,6 +107,8 @@ export interface ChatWorkspaceProps {
   readonly messageQueueClient?: ThreadMessageQueueClient;
   readonly canvasClient?: CanvasClient;
   readonly imageGenerationClient?: ImageGenerationClient;
+  /** Every image profile, custom image sources included, computed once by the shell. */
+  readonly imageGenerationProfiles?: ReadonlyArray<ImageGenerationProfileView>;
   readonly hostId?: HostId;
   readonly onOpenCanvas?: (card: CanvasThreadReferenceCard) => void;
   /** Told which Canvas the host wrote when the thread is handed off. */
@@ -966,7 +971,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
                   }
                 })();
               }}
-              profiles={listEligibleImageProfiles(props.providerSnapshot?.instances ?? [])}
+              profiles={props.imageGenerationProfiles ?? []}
               scopeId={decodeImageGenerationScopeId(String(thread.id))}
               threadKind="chat-thread"
             />
@@ -1190,7 +1195,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
             ? {}
             : {
                 imageGeneration: {
-                  profiles: listEligibleImageProfiles(props.providerSnapshot.instances),
+                  profiles: props.imageGenerationProfiles ?? [],
                   scopeId: decodeImageGenerationScopeId(String(thread.id)),
                   client: props.imageGenerationClient,
                   ...(props.onOpenSettings === undefined
