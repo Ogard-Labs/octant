@@ -21,19 +21,19 @@ const strict = { parseOptions: { onExcessProperty: "error" as const } };
 // mockup block, version 4 the thread presentation, version 5 the treemap
 // block, version 6 the heatmap block, version 7 the ranked bar list block,
 // version 8 the entity-relationship, swimlane, and mind map diagram kinds,
-// version 9 the design block, version 10 the comparison matrix, and version
-// 11 the math block. A version-gated kind or hint is only valid inside a
-// document declaring the version that introduced it, so a rolled-back older
-// runtime refuses it as a declared future version instead of reading it as
-// corrupt. Each gated block kind is admitted from the version that introduced
-// it: every earlier document (including mockup-carrying v3, presentation v4,
-// treemap-carrying v5, heatmap-carrying v6, bar-list-carrying v7,
-// diagram-kind-carrying v8, design-carrying v9, and matrix-carrying v10
-// documents) remains decodable so a host does not lose its history at the
-// bump. The literal set names each earlier version explicitly and ends at the
-// current one, so a future bump cannot silently drop an intermediate version
-// from the set that decodes.
-export const CANVAS_SCHEMA_VERSION = 11 as const;
+// version 9 the design block, version 10 the comparison matrix, version 11
+// the math block, and version 12 the mockup catalog. A version-gated kind or
+// hint is only valid inside a document declaring the version that introduced
+// it, so a rolled-back older runtime refuses it as a declared future version
+// instead of reading it as corrupt. Each gated block kind is admitted from the
+// version that introduced it: every earlier document (including
+// mockup-carrying v3, presentation v4, treemap-carrying v5, heatmap-carrying
+// v6, bar-list-carrying v7, diagram-kind-carrying v8, design-carrying v9,
+// matrix-carrying v10, and math-carrying v11 documents) remains decodable so a
+// host does not lose its history at the bump. The literal set names each
+// earlier version explicitly and ends at the current one, so a future bump
+// cannot silently drop an intermediate version from the set that decodes.
+export const CANVAS_SCHEMA_VERSION = 12 as const;
 export const CanvasSchemaVersion = Schema.Literal(
   1,
   2,
@@ -45,6 +45,7 @@ export const CanvasSchemaVersion = Schema.Literal(
   8,
   9,
   10,
+  11,
   CANVAS_SCHEMA_VERSION,
 );
 export type CanvasSchemaVersion = typeof CanvasSchemaVersion.Type;

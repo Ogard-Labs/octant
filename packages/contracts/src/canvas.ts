@@ -29,8 +29,8 @@ const strict = { parseOptions: { onExcessProperty: "error" as const } };
 // thread presentation, version 5 the treemap block, version 6 the heatmap
 // block, version 7 the ranked bar-list block, version 8 the
 // entity-relationship, swimlane, and mind map diagram kinds, version 9 the
-// design block, version 10 the comparison matrix, and version 11 the math
-// block, which the definition filters below admit only under those declared
+// design block, version 10 the comparison matrix, version 11 the math
+// block, and version 12 the mockup catalog, which the definition filters below admit only under those declared
 // versions.
 
 // These are renderer-facing aggregate limits. Per-field structural limits are
@@ -58,9 +58,26 @@ export const CANVAS_MAX_PLAN_PHASES = 32;
 export const CANVAS_MAX_PLAN_TASKS = 256;
 export const CANVAS_MAX_PLAN_TASK_DEPENDENCIES = 16;
 export const CANVAS_MAX_PLAN_TASK_SOURCES = 8;
-export const CANVAS_MAX_MOCKUP_DEPTH = 6;
-export const CANVAS_MAX_MOCKUP_NODES = 64;
+// A mockup is one screen, or a few states of it side by side. Version 3 held a
+// single screen of 64 nodes at most six deep; the version-12 catalog adds
+// layout containers (stack, row, grid), which cost a level each, and variants,
+// which share the node budget, so a document declaring version 12 gets a
+// deeper and larger tree. An older document keeps the older bounds.
+export const CANVAS_MOCKUP_LEGACY_MAX_DEPTH = 6;
+export const CANVAS_MOCKUP_LEGACY_MAX_NODES = 64;
+export const CANVAS_MAX_MOCKUP_DEPTH = 8;
+export const CANVAS_MAX_MOCKUP_NODES = 160;
 export const CANVAS_MAX_MOCKUP_TEXT_LENGTH = 120;
+export const CANVAS_MAX_MOCKUP_NOTE_LENGTH = 240;
+export const CANVAS_MAX_MOCKUP_VARIANTS = 4;
+export const CANVAS_MAX_MOCKUP_ANNOTATIONS = 12;
+// A mockup table shows what a table holds, not its data: a few columns and a
+// handful of rows are enough to read the shape.
+export const CANVAS_MAX_MOCKUP_TABLE_COLUMNS = 6;
+export const CANVAS_MAX_MOCKUP_TABLE_ROWS = 8;
+export const CANVAS_MAX_MOCKUP_GRID_COLUMNS = 4;
+export const CANVAS_MOCKUP_MIN_FRAME_EDGE = 240;
+export const CANVAS_MOCKUP_MAX_FRAME_EDGE = 2_560;
 export const CANVAS_MAX_TREEMAP_LEAVES = 4_096;
 export const CANVAS_MAX_TREEMAP_DEPTH = 8;
 export const CANVAS_MAX_TREEMAP_MEASURES = 8;
@@ -127,6 +144,9 @@ export const CANVAS_DIAGRAM_KINDS_SCHEMA_VERSION = 8;
 export const CANVAS_DESIGN_SCHEMA_VERSION = 9;
 export const CANVAS_COMPARISON_MATRIX_SCHEMA_VERSION = 10;
 export const CANVAS_MATH_SCHEMA_VERSION = 11;
+// The mockup catalog: more devices, fidelity, the wider component set, node
+// fields, variants, and callouts, and the larger node budget.
+export const CANVAS_MOCKUP_CATALOG_SCHEMA_VERSION = 12;
 // The metric's sparkline, goodDirection, and caption arrived with the bar list.
 export const CANVAS_METRIC_TREND_SCHEMA_VERSION = 7;
 
@@ -142,6 +162,69 @@ export function canvasMetricUsesTrendFields(block: {
     (block.sparkline !== undefined ||
       block.goodDirection !== undefined ||
       block.caption !== undefined)
+  );
+}
+
+// The version-3 mockup components and devices; everything else in the catalog
+// arrived at version 12.
+export const CANVAS_MOCKUP_LEGACY_COMPONENTS = [
+  "window",
+  "header",
+  "sidebar",
+  "list",
+  "list-row",
+  "form-field",
+  "button",
+  "toggle",
+  "tabs",
+  "card",
+  "image-placeholder",
+  "text",
+] as const;
+export const CANVAS_MOCKUP_LEGACY_DEVICES = ["desktop", "tablet", "phone"] as const;
+const LEGACY_MOCKUP_COMPONENTS: ReadonlySet<unknown> = new Set(CANVAS_MOCKUP_LEGACY_COMPONENTS);
+const LEGACY_MOCKUP_DEVICES: ReadonlySet<unknown> = new Set(CANVAS_MOCKUP_LEGACY_DEVICES);
+const LEGACY_MOCKUP_NODE_FIELDS: ReadonlySet<string> = new Set([
+  "nodeId",
+  "component",
+  "label",
+  "parentId",
+  "on",
+]);
+
+/**
+ * Whether a mockup uses anything the version-12 catalog introduced: a newer
+ * device, fidelity, variants, callouts, a catalog component or node field, or
+ * more nodes than version 3 allowed. Reads loose fields so the share contract
+ * and the domain's declared-version check can ask the same question.
+ */
+export function canvasMockupUsesCatalog(block: {
+  readonly kind?: unknown;
+  readonly device?: unknown;
+  readonly size?: unknown;
+  readonly fidelity?: unknown;
+  readonly variants?: unknown;
+  readonly annotations?: unknown;
+  readonly nodes?: unknown;
+}): boolean {
+  if (block.kind !== "mockup") return false;
+  if (!LEGACY_MOCKUP_DEVICES.has(block.device)) return true;
+  if (
+    block.size !== undefined ||
+    block.fidelity !== undefined ||
+    block.variants !== undefined ||
+    block.annotations !== undefined
+  ) {
+    return true;
+  }
+  if (!Array.isArray(block.nodes)) return false;
+  if (block.nodes.length > CANVAS_MOCKUP_LEGACY_MAX_NODES) return true;
+  return block.nodes.some(
+    (node: unknown) =>
+      typeof node === "object" &&
+      node !== null &&
+      (!LEGACY_MOCKUP_COMPONENTS.has((node as { component?: unknown }).component) ||
+        Object.keys(node).some((key) => !LEGACY_MOCKUP_NODE_FIELDS.has(key))),
   );
 }
 
@@ -1431,49 +1514,194 @@ export const CanvasPlanTask = Schema.Struct({
 }).annotations(strict);
 export type CanvasPlanTask = typeof CanvasPlanTask.Type;
 
+/**
+ * The closed component catalog: the version-3 components plus these, which
+ * arrived with the catalog at version 12. A form field is the labelled text
+ * input; there is no separate input component.
+ */
+export const CANVAS_MOCKUP_CATALOG_COMPONENTS = [
+  "stack",
+  "row",
+  "grid",
+  "heading",
+  "select",
+  "checkbox",
+  "table",
+  "avatar",
+  "badge",
+  "icon",
+  "nav",
+  "modal",
+  "toast",
+] as const;
 export const CanvasMockupComponent = Schema.Literal(
-  "window",
-  "header",
-  "sidebar",
-  "list",
-  "list-row",
-  "form-field",
-  "button",
-  "toggle",
-  "tabs",
-  "card",
-  "image-placeholder",
-  "text",
+  ...CANVAS_MOCKUP_LEGACY_COMPONENTS,
+  ...CANVAS_MOCKUP_CATALOG_COMPONENTS,
 );
 export type CanvasMockupComponent = typeof CanvasMockupComponent.Type;
 
-export const CanvasMockupDevice = Schema.Literal("desktop", "tablet", "phone");
+/**
+ * Where the screen is shown. `desktop` is a native window, `browser` a web
+ * page with a blank address bar, `dock-panel` a narrow tool panel, and
+ * `custom` a frame of the block's own `size`.
+ */
+export const CanvasMockupDevice = Schema.Literal(
+  ...CANVAS_MOCKUP_LEGACY_DEVICES,
+  "browser",
+  "dock-panel",
+  "custom",
+);
 export type CanvasMockupDevice = typeof CanvasMockupDevice.Type;
 
+/** The nominal frame each preset is drawn at, in CSS pixels. */
+export const CANVAS_MOCKUP_DEVICE_SIZE: Readonly<
+  Record<
+    Exclude<CanvasMockupDevice, "custom">,
+    { readonly width: number; readonly height: number | undefined }
+  >
+> = {
+  desktop: { width: 1280, height: 800 },
+  browser: { width: 1280, height: 800 },
+  tablet: { width: 820, height: 1180 },
+  phone: { width: 390, height: 844 },
+  // A dock panel is as tall as the window it sits in, so it has no height of
+  // its own and grows with its content.
+  "dock-panel": { width: 360, height: undefined },
+};
+
+/**
+ * `wireframe` draws neutral ink and hairlines only. `styled` draws the same
+ * tree with the active theme's tokens: accent, tones, and surfaces.
+ */
+export const CanvasMockupFidelity = Schema.Literal("wireframe", "styled");
+export type CanvasMockupFidelity = typeof CanvasMockupFidelity.Type;
+
+/** A semantic tone for a button, badge, or toast; the theme decides the colour. */
+export const CanvasMockupTone = Schema.Literal("neutral", "accent", "success", "warning", "danger");
+export type CanvasMockupTone = typeof CanvasMockupTone.Type;
+
+/**
+ * The bundled icon set. Names are meanings, not a vendor's glyph names; each
+ * surface maps them to its own drawing.
+ */
+export const CanvasMockupIcon = Schema.Literal(
+  "search",
+  "settings",
+  "user",
+  "bell",
+  "home",
+  "plus",
+  "close",
+  "check",
+  "chevron-right",
+  "chevron-down",
+  "menu",
+  "more",
+  "mail",
+  "lock",
+  "calendar",
+  "folder",
+  "file",
+  "trash",
+  "edit",
+  "star",
+  "share",
+  "filter",
+  "info",
+  "warning",
+);
+export type CanvasMockupIcon = typeof CanvasMockupIcon.Type;
+
 const CanvasMockupText = boundedNonEmptyText(CANVAS_MAX_MOCKUP_TEXT_LENGTH);
+const CanvasMockupCell = boundedText(CANVAS_MAX_MOCKUP_TEXT_LENGTH);
 const CanvasMockupNodeId = boundedToken("CanvasMockupNodeId");
+export const CanvasMockupVariantId = boundedToken("CanvasMockupVariantId");
+export type CanvasMockupVariantId = typeof CanvasMockupVariantId.Type;
+const CanvasMockupFrameEdge = Schema.Int.pipe(
+  Schema.greaterThanOrEqualTo(CANVAS_MOCKUP_MIN_FRAME_EDGE),
+  Schema.lessThanOrEqualTo(CANVAS_MOCKUP_MAX_FRAME_EDGE),
+);
 
 /**
  * One drawn part of a screen. The tree is a parent chain, not nested objects:
  * a nested screen lands past the Canvas depth budget before a settings screen
- * can name its rows.
+ * can name its rows. Each optional field belongs to the components the domain
+ * policy names; none of them carries markup, a style, or an image source.
  */
 export const CanvasMockupNode = Schema.Struct({
   nodeId: CanvasMockupNodeId,
   component: CanvasMockupComponent,
   label: CanvasMockupText,
   parentId: Schema.optional(CanvasMockupNodeId),
-  /** Drawn state of a toggle. The control is not live. */
+  /** Drawn state of a toggle or checkbox, or the current row of a list or nav. Not live. */
   on: Schema.optional(Schema.Boolean),
+  /** The variant a top-level node is drawn in. Children inherit their root's. */
+  variantId: Schema.optional(CanvasMockupVariantId),
+  /** The text shown inside a form field or select. */
+  value: Schema.optional(CanvasMockupText),
+  tone: Schema.optional(CanvasMockupTone),
+  icon: Schema.optional(CanvasMockupIcon),
+  /** A table's column headings and its rows of cells. */
+  columns: Schema.optional(
+    Schema.Array(CanvasMockupText).pipe(
+      Schema.minItems(1),
+      Schema.maxItems(CANVAS_MAX_MOCKUP_TABLE_COLUMNS),
+    ),
+  ),
+  rows: Schema.optional(
+    Schema.Array(
+      Schema.Array(CanvasMockupCell).pipe(Schema.maxItems(CANVAS_MAX_MOCKUP_TABLE_COLUMNS)),
+    ).pipe(Schema.maxItems(CANVAS_MAX_MOCKUP_TABLE_ROWS)),
+  ),
+  /** How many columns a grid lays its children in. */
+  gridColumns: Schema.optional(
+    Schema.Int.pipe(
+      Schema.greaterThanOrEqualTo(1),
+      Schema.lessThanOrEqualTo(CANVAS_MAX_MOCKUP_GRID_COLUMNS),
+    ),
+  ),
 }).annotations(strict);
 export type CanvasMockupNode = typeof CanvasMockupNode.Type;
+
+/** One frame of a side-by-side set: a state (Empty, Error) or an alternative (A, B). */
+export const CanvasMockupVariant = Schema.Struct({
+  variantId: CanvasMockupVariantId,
+  label: CanvasMockupText,
+}).annotations(strict);
+export type CanvasMockupVariant = typeof CanvasMockupVariant.Type;
+
+/**
+ * A numbered callout pinned to a node. Its number is its place in the list,
+ * and the node it names is the comment anchor a reader replies on.
+ */
+export const CanvasMockupAnnotation = Schema.Struct({
+  nodeId: CanvasMockupNodeId,
+  note: boundedNonEmptyText(CANVAS_MAX_MOCKUP_NOTE_LENGTH),
+}).annotations(strict);
+export type CanvasMockupAnnotation = typeof CanvasMockupAnnotation.Type;
 
 export const CanvasMockupBlock = Schema.Struct({
   ...CanvasBlockFields,
   kind: Schema.Literal("mockup"),
   device: CanvasMockupDevice,
+  /** The frame of a `custom` device. Presets carry their own size. */
+  size: Schema.optional(
+    Schema.Struct({ width: CanvasMockupFrameEdge, height: CanvasMockupFrameEdge }).annotations(
+      strict,
+    ),
+  ),
+  fidelity: Schema.optional(CanvasMockupFidelity),
   title: CanvasMockupText,
+  variants: Schema.optional(
+    Schema.Array(CanvasMockupVariant).pipe(
+      Schema.minItems(2),
+      Schema.maxItems(CANVAS_MAX_MOCKUP_VARIANTS),
+    ),
+  ),
   nodes: Schema.Array(CanvasMockupNode).pipe(Schema.maxItems(CANVAS_MAX_MOCKUP_NODES)),
+  annotations: Schema.optional(
+    Schema.Array(CanvasMockupAnnotation).pipe(Schema.maxItems(CANVAS_MAX_MOCKUP_ANNOTATIONS)),
+  ),
 }).annotations(strict);
 export type CanvasMockupBlock = typeof CanvasMockupBlock.Type;
 
@@ -1660,8 +1888,8 @@ export const CanvasDefinition = Schema.Struct({
     // Version-gated blocks and hints: a mockup is admitted from version 3, the
     // thread presentation from version 4, a treemap from version 5, a heatmap
     // from version 6, a bar list and the metric trend fields from version 7, a
-    // design from version 9, a comparison matrix from version 10, and math
-    // from version 11. A
+    // design from version 9, a comparison matrix from version 10, math from
+    // version 11, and the mockup catalog from version 12. A
     // rolled-back runtime that never learned a kind or hint must see a document
     // carrying it as a declared future version, not as a document that failed
     // to decode. Each keeps its own floor so an earlier document stays valid.
@@ -1757,6 +1985,15 @@ export const CanvasDefinition = Schema.Struct({
       {
         message: () =>
           `Math blocks require Canvas schema version ${String(CANVAS_MATH_SCHEMA_VERSION)}.`,
+      },
+    ),
+    Schema.filter(
+      (definition) =>
+        definition.schemaVersion >= CANVAS_MOCKUP_CATALOG_SCHEMA_VERSION ||
+        !definition.blocks.some(canvasMockupUsesCatalog),
+      {
+        message: () =>
+          `A mockup's catalog components, devices, fidelity, variants, callouts, or more than ${String(CANVAS_MOCKUP_LEGACY_MAX_NODES)} nodes require Canvas schema version ${String(CANVAS_MOCKUP_CATALOG_SCHEMA_VERSION)}.`,
       },
     ),
   );
