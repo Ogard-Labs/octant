@@ -8,6 +8,7 @@ import {
   CanvasNodeId,
   CanvasSchemaVersion,
   CanvasSourceId,
+  CanvasTableRowId,
   CanvasVersionId,
 } from "./canvasIdentity";
 import { CanvasActionBlock } from "./canvasActionBlock";
@@ -30,7 +31,8 @@ const strict = { parseOptions: { onExcessProperty: "error" as const } };
 // block, version 7 the ranked bar-list block, version 8 the
 // entity-relationship, swimlane, and mind map diagram kinds, version 9 the
 // design block, version 10 the comparison matrix, version 11 the math
-// block, and version 12 the mockup catalog, which the definition filters below admit only under those declared
+// block, version 12 the mockup catalog, and version 13 the stable table row
+// id, which the definition filters below admit only under those declared
 // versions.
 
 // These are renderer-facing aggregate limits. Per-field structural limits are
@@ -147,6 +149,8 @@ export const CANVAS_MATH_SCHEMA_VERSION = 11;
 // The mockup catalog: more devices, fidelity, the wider component set, node
 // fields, variants, and callouts, and the larger node budget.
 export const CANVAS_MOCKUP_CATALOG_SCHEMA_VERSION = 12;
+// A table row may carry a stable id, the identity a row comment anchors to.
+export const CANVAS_TABLE_ROW_ID_SCHEMA_VERSION = 13;
 // The metric's sparkline, goodDirection, and caption arrived with the bar list.
 export const CANVAS_METRIC_TREND_SCHEMA_VERSION = 7;
 
@@ -583,10 +587,51 @@ export type CanvasTableColumn = typeof CanvasTableColumn.Type;
 
 export const CanvasTableCell = CanvasScalar;
 export type CanvasTableCell = typeof CanvasTableCell.Type;
-export const CanvasTableRow = Schema.Array(CanvasTableCell).pipe(
+export const CanvasTableRowCells = Schema.Array(CanvasTableCell).pipe(
   Schema.maxItems(CANVAS_MAX_TABLE_COLUMNS),
 );
+export type CanvasTableRowCells = typeof CanvasTableRowCells.Type;
+
+/**
+ * A row that names itself, so a comment can stay on it.
+ *
+ * A bare list of cells has only its position, which a sort, a filter, or a
+ * revision that inserts a row changes; the id is the author's and outlives
+ * all three. A row without one cannot be commented on by itself. Ids are
+ * unique within the table, which the domain policy checks.
+ */
+export const CanvasTableKeyedRow = Schema.Struct({
+  id: CanvasTableRowId,
+  cells: CanvasTableRowCells,
+}).annotations(strict);
+export type CanvasTableKeyedRow = typeof CanvasTableKeyedRow.Type;
+
+export const CanvasTableRow = Schema.Union(CanvasTableRowCells, CanvasTableKeyedRow);
 export type CanvasTableRow = typeof CanvasTableRow.Type;
+
+/** A table row's values in column order, whether or not the row names itself. */
+export function canvasTableRowCells(row: CanvasTableRow): CanvasTableRowCells {
+  return "cells" in row ? row.cells : row;
+}
+
+/** The row's stable id, or undefined for a row that is only a list of cells. */
+export function canvasTableRowId(row: CanvasTableRow): CanvasTableRowId | undefined {
+  return "cells" in row ? row.id : undefined;
+}
+
+/** Whether a block is a table with a row that carries a stable id. */
+export function canvasTableUsesRowIds(block: {
+  readonly kind?: unknown;
+  readonly rows?: unknown;
+}): boolean {
+  return (
+    block.kind === "table" &&
+    Array.isArray(block.rows) &&
+    block.rows.some(
+      (row: unknown) => typeof row === "object" && row !== null && !Array.isArray(row),
+    )
+  );
+}
 
 export const CanvasTableBlock = Schema.Struct({
   ...CanvasBlockFields,
@@ -1889,8 +1934,8 @@ export const CanvasDefinition = Schema.Struct({
     // thread presentation from version 4, a treemap from version 5, a heatmap
     // from version 6, a bar list and the metric trend fields from version 7, a
     // design from version 9, a comparison matrix from version 10, math from
-    // version 11, and the mockup catalog from version 12. A
-    // rolled-back runtime that never learned a kind or hint must see a document
+    // version 11, the mockup catalog from version 12, and table row ids from
+    // version 13. A rolled-back runtime that never learned a kind or hint must see a document
     // carrying it as a declared future version, not as a document that failed
     // to decode. Each keeps its own floor so an earlier document stays valid.
     Schema.filter(
@@ -1994,6 +2039,15 @@ export const CanvasDefinition = Schema.Struct({
       {
         message: () =>
           `A mockup's catalog components, devices, fidelity, variants, callouts, or more than ${String(CANVAS_MOCKUP_LEGACY_MAX_NODES)} nodes require Canvas schema version ${String(CANVAS_MOCKUP_CATALOG_SCHEMA_VERSION)}.`,
+      },
+    ),
+    Schema.filter(
+      (definition) =>
+        definition.schemaVersion >= CANVAS_TABLE_ROW_ID_SCHEMA_VERSION ||
+        !definition.blocks.some(canvasTableUsesRowIds),
+      {
+        message: () =>
+          `A table row id requires Canvas schema version ${String(CANVAS_TABLE_ROW_ID_SCHEMA_VERSION)}.`,
       },
     ),
   );

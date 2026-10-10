@@ -1605,6 +1605,68 @@
   text-align: center;
 }
 
+/* The comment gutter leads each row and is pinned to the scroll region's
+   left edge, so a marker stays in view while a wide table scrolls sideways.
+   A pinned cell must be opaque or the columns scroll through it, and the
+   surface behind a table differs between the main tab, the dock, and its
+   sheet, so the gutter takes the header's warm surface: one frame along the
+   top and the left edge. The corner cell rides above both the header and the
+   gutter. Like a block's marker it shows on hover or focus and always once
+   the row holds an open thread; a row without an id has an empty gutter cell
+   because nothing could keep a comment on it. */
+.canvas-block__table-grid .canvas-block__table-comment {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  width: 1px;
+  padding-inline: var(--oct-space-1);
+  white-space: nowrap;
+  background: var(--oct-surface-warm);
+  box-shadow: inset -1px 0 0 var(--oct-border);
+}
+
+.canvas-block__table-grid th.canvas-block__table-comment {
+  z-index: calc(var(--oct-z-sticky) + 1);
+  box-shadow:
+    inset -1px 0 0 var(--oct-border),
+    inset 0 -1px 0 var(--oct-border);
+}
+
+.canvas-block__row-comment-marker {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 4px;
+  border: 0;
+  border-radius: var(--oct-radius-sm);
+  background: transparent;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+  cursor: pointer;
+  opacity: 0;
+}
+
+.canvas-block__table-grid tr:hover .canvas-block__row-comment-marker,
+.canvas-block__row-comment-marker:focus-visible,
+.canvas-block__row-comment-marker[data-has-comments="true"] {
+  opacity: 1;
+}
+
+.canvas-block__row-comment-marker[data-has-comments="true"] {
+  color: var(--oct-accent);
+}
+
+.canvas-block__row-comment-marker:hover,
+.canvas-block__row-comment-marker:focus-visible {
+  background: var(--oct-fill-2);
+}
+
+@media (hover: none) {
+  .canvas-block__row-comment-marker {
+    opacity: 1;
+  }
+}
+
 /* System colours: the bar and the tint fall to system ink, and the value text
    is the reading either way. */
 @media (forced-colors: active) {

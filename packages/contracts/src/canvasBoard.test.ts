@@ -48,6 +48,20 @@ describe("Canvas board comment contracts", () => {
     expect(comment.body).toBe("This edge feels wrong.");
   });
 
+  it("decodes a row anchor by the row's stable id and refuses one by position", () => {
+    expect(decodeCanvasCommentAnchor({ kind: "row", blockId: "vendors", rowId: "acme" })).toEqual({
+      kind: "row",
+      blockId: "vendors",
+      rowId: "acme",
+    });
+    expect(() =>
+      decodeCanvasCommentAnchor({ kind: "row", blockId: "vendors", rowIndex: 0 }),
+    ).toThrow();
+    expect(() =>
+      decodeCanvasCommentAnchor({ kind: "row", blockId: "vendors", rowId: "acme", rowIndex: 0 }),
+    ).toThrow();
+  });
+
   it("decodes comment anchors for block, node, and edge", () => {
     expect(
       decodeCanvasCommentAnchor({

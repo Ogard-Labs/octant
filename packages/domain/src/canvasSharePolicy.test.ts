@@ -1,6 +1,7 @@
 import { CANVAS_SCHEMA_VERSION, decodeCanvasVersion } from "@octant/contracts/canvas";
 import { decodeCanvasComment } from "@octant/contracts/canvas-board";
 import {
+  CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION,
   decodeCanvasStaticExportDocument,
   decodeCanvasStaticExportRequest,
 } from "@octant/contracts/canvas-share";
@@ -196,6 +197,45 @@ describe("Canvas share policy", () => {
     ]);
   });
 
+  it("shares a table's rows as their cells at block version 12, without the row ids comments anchor to", () => {
+    const table = {
+      blockId: "vendors",
+      schemaVersion: CANVAS_SCHEMA_VERSION,
+      kind: "table",
+      columns: [
+        { id: "vendor", label: "Vendor", type: "text" },
+        { id: "price", label: "Price", type: "number" },
+      ],
+      rows: [{ id: "acme", cells: ["Acme", 12] }, ["Globex", 9]],
+    } as const;
+    const receipt = buildCanvasStaticExportReceipt({
+      request,
+      current: decodeCanvasVersion({
+        ...current,
+        schemaVersion: CANVAS_SCHEMA_VERSION,
+        definition: {
+          ...current.definition,
+          schemaVersion: CANVAS_SCHEMA_VERSION,
+          blocks: [table],
+        },
+      }),
+      context,
+    });
+    // Without the row id nothing in the table is newer than Canvas version 12,
+    // so the block names 12 and a reader of share version 6 accepts it.
+    expect(receipt.document.schemaVersion).toBe(6);
+    expect(receipt.document.blocks).toEqual([
+      {
+        ...table,
+        schemaVersion: 12,
+        rows: [
+          ["Acme", 12],
+          ["Globex", 9],
+        ],
+      },
+    ]);
+  });
+
   it("round-trips entity-relationship, swimlane, and mind map blocks through the static export", () => {
     const blocks = [
       {
@@ -283,7 +323,13 @@ describe("Canvas share policy", () => {
     });
     // The snapshot record and the share panel both read a shared document
     // through this decode, so an example it refuses is one nobody can share.
-    expect(decodeCanvasStaticExportDocument(receipt.document).blocks).toEqual(examples);
+    // Each block names at most the newest Canvas version share version 6 represents.
+    expect(decodeCanvasStaticExportDocument(receipt.document).blocks).toEqual(
+      examples.map((block) => ({
+        ...block,
+        schemaVersion: Math.min(block.schemaVersion, CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION),
+      })),
+    );
 
     for (const design of [onboardingFlowExample, launchDeckExample]) {
       expect(

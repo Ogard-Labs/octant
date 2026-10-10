@@ -1,4 +1,5 @@
 import {
+  CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION,
   CANVAS_SHARE_SCHEMA_VERSION,
   decodeCanvasStaticExportRequest,
   type CanvasRedactedProvenance,
@@ -9,6 +10,7 @@ import {
   type CanvasStaticExportSourceEntry,
 } from "@octant/contracts/canvas-share";
 import {
+  canvasTableRowCells,
   decodeCanvasVersion,
   type CanvasBarListRow,
   type CanvasBlock,
@@ -151,6 +153,13 @@ function assertNoSecretShape(value: unknown, path: string): void {
   }
 }
 
+/** A shared block names the newest Canvas version this share version represents. */
+function sharedBlockVersion(block: CanvasStaticExportBlock): CanvasStaticExportBlock {
+  return block.schemaVersion > CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION
+    ? { ...block, schemaVersion: CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION }
+    : block;
+}
+
 function sanitizeBlock(block: CanvasBlock): CanvasStaticExportBlock {
   // Drop live source ids from reference-like blocks so the offline snapshot
   // cannot be used to re-resolve host-local authority later.
@@ -180,6 +189,13 @@ function sanitizeBlock(block: CanvasBlock): CanvasStaticExportBlock {
     case "plan": {
       const tasks = block.tasks.map(({ sourceIds: _sourceIds, ...task }) => task);
       const shared = { ...block, tasks };
+      assertNoSecretShape(shared, `block.${block.blockId}`);
+      return shared;
+    }
+    case "table": {
+      // A row id is the identity a comment anchors to. A snapshot carries no
+      // comments, so the rows leave as their cells in the author's order.
+      const shared = { ...block, rows: block.rows.map(canvasTableRowCells) };
       assertNoSecretShape(shared, `block.${block.blockId}`);
       return shared;
     }
@@ -312,7 +328,7 @@ export function buildCanvasStaticExportDocument(input: {
   readonly exportedAt: UtcTimestamp | string;
 }): CanvasStaticExportDocument {
   const definition = input.current.definition;
-  const blocks = definition.blocks.map((block) => sanitizeBlock(block));
+  const blocks = definition.blocks.map((block) => sharedBlockVersion(sanitizeBlock(block)));
   assertNoSecretShape(definition.title, "title");
   const exportedAtRaw = String(input.exportedAt);
   if (

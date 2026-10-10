@@ -1,6 +1,6 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { CANVAS_SCHEMA_VERSION } from "@octant/contracts/canvas";
 import { CanvasView } from "../CanvasView";
 import { canvasFixture } from "../test-fixtures";
@@ -218,3 +218,103 @@ describe("table view state", () => {
     expect(JSON.stringify(input)).toBe(before);
   });
 });
+
+describe("comment markers on table rows", () => {
+  const vendors = {
+    ...base,
+    blockId: "vendors",
+    kind: "table",
+    columns: [
+      { id: "vendor", label: "Vendor", type: "text" },
+      { id: "price", label: "Price", type: "number" },
+    ],
+    rows: [
+      { id: "acme", cells: ["Acme", 12] },
+      { id: "globex", cells: ["Globex", 9] },
+      ["Initech", 30],
+    ],
+  } as const;
+
+  function withRows(rows: ReadonlyArray<unknown>) {
+    return { ...canvasFixture, blocks: [{ ...vendors, rows }] };
+  }
+
+  function comments(onOpen = vi.fn()) {
+    return {
+      openCounts: new Map([["vendors", 2]]),
+      openRowCounts: new Map([["vendors", new Map([["globex", 2]])]]),
+      onOpen,
+    };
+  }
+
+  /** The row a marker sits in, read by its first data cell. */
+  function rowOf(marker: HTMLElement): string {
+    return marker.closest("tr")?.querySelectorAll("td")[1]?.textContent ?? "";
+  }
+
+  it("offers a marker on each row with an id and none on a row without one", () => {
+    render(<CanvasView comments={comments()} input={withRows(vendors.rows)} />);
+
+    expect(rowOf(screen.getByRole("button", { name: "Comment on row Acme" }))).toBe("Acme");
+    expect(rowOf(screen.getByRole("button", { name: "2 open comments on row Globex" }))).toBe(
+      "Globex",
+    );
+    expect(screen.queryByRole("button", { name: /on row Initech/ })).toBeNull();
+  });
+
+  it("draws no comment gutter on a table whose rows carry no id, or where comments are off", () => {
+    const { unmount } = render(
+      <CanvasView comments={comments()} input={withRows([["Initech", 30]])} />,
+    );
+    expect(screen.queryByRole("columnheader", { name: "Comments" })).toBeNull();
+    unmount();
+    render(<CanvasView input={withRows(vendors.rows)} />);
+    expect(screen.queryByRole("button", { name: /on row/ })).toBeNull();
+  });
+
+  it("keeps a row's thread on that row through a sort, a filter, and a revision", async () => {
+    const user = userEvent.setup();
+    const onOpen = vi.fn();
+    const { rerender } = render(
+      <CanvasView comments={comments(onOpen)} input={withRows(vendors.rows)} />,
+    );
+    const marked = () => screen.getByRole("button", { name: "2 open comments on row Globex" });
+
+    await user.click(screen.getByRole("button", { name: "Price" }));
+    expect(firstDataColumn()).toEqual(["Globex", "Acme", "Initech"]);
+    expect(rowOf(marked())).toBe("Globex");
+
+    await user.type(screen.getByRole("searchbox", { name: "Filter rows" }), "glo");
+    expect(firstDataColumn()).toEqual(["Globex"]);
+    expect(rowOf(marked())).toBe("Globex");
+
+    // The agent inserts a row above it and changes its price: the id holds.
+    await user.clear(screen.getByRole("searchbox", { name: "Filter rows" }));
+    rerender(
+      <CanvasView
+        comments={comments(onOpen)}
+        input={withRows([
+          { id: "umbrella", cells: ["Umbrella", 1] },
+          { id: "acme", cells: ["Acme", 12] },
+          { id: "globex", cells: ["Globex Corp", 40] },
+        ])}
+      />,
+    );
+    expect(rowOf(screen.getByRole("button", { name: "2 open comments on row Globex Corp" }))).toBe(
+      "Globex Corp",
+    );
+
+    screen.getByRole("button", { name: "2 open comments on row Globex Corp" }).focus();
+    await user.keyboard("{Enter}");
+    expect(onOpen).toHaveBeenCalledWith("vendors", "globex");
+  });
+});
+
+/** The visible body rows' first data cell, after the comment gutter. */
+function firstDataColumn(): ReadonlyArray<string> {
+  const table = screen.getByRole("table");
+  return within(table)
+    .getAllByRole("row")
+    .slice(1)
+    .map((row) => row.querySelectorAll("td")[1]?.textContent ?? "");
+}

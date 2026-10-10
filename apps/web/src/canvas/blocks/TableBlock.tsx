@@ -1,9 +1,12 @@
 import { useMemo, useState } from "react";
-import type {
-  CanvasBlock,
-  CanvasTableCell,
-  CanvasTableColumn,
-  CanvasTableColumnDisplay,
+import { MessageSquare } from "lucide-react";
+import {
+  canvasTableRowCells,
+  canvasTableRowId,
+  type CanvasBlock,
+  type CanvasTableCell,
+  type CanvasTableColumn,
+  type CanvasTableColumnDisplay,
 } from "@octant/contracts/canvas";
 import { CHART_SEQUENTIAL_STEPS, chartScaleRoleId, chartScaleStep } from "@octant/theme";
 import { OctantButton } from "../../ui/base/OctantButton";
@@ -34,6 +37,29 @@ interface ColumnView {
   readonly index: number;
 }
 
+interface RowView {
+  readonly cells: ReadonlyArray<CanvasTableCell>;
+  /** The author's position, the tie-break that keeps a sort stable. */
+  readonly index: number;
+  readonly rowId: string | undefined;
+}
+
+/**
+ * Comment markers on the rows that carry a stable id. Offered only when the
+ * host journals comments; `openCounts` holds the unresolved threads anchored
+ * to each row id.
+ */
+export interface TableRowComments {
+  readonly openCounts: ReadonlyMap<string, number>;
+  readonly onOpen: (rowId: string) => void;
+}
+
+/** What a reader would call a row: its first cell, as the table draws it. */
+export function canvasTableRowLabel(block: TableBlockShape, cells: ReadonlyArray<CanvasTableCell>) {
+  const text = formatCanvasValue(cells[0] ?? null, block.columns[0]?.format).trim();
+  return text === "" ? "Untitled row" : text;
+}
+
 // The scale roles are theme tokens applied at runtime, so the bar fill and the
 // heat tint read them from the same TS source the bar list draws its bars from.
 const BAR_SCALE_ROLE = chartScaleRoleId("sequential", CHART_SEQUENTIAL_STEPS - 2);
@@ -53,7 +79,13 @@ function heatTint(step: number): string {
  * reading: a `bar` or a `heat` column draws its mark behind the value, never
  * instead of it, and an absent or `text` display reads as plain text.
  */
-export function TableBlock({ block }: { readonly block: TableBlockShape }) {
+export function TableBlock({
+  block,
+  rowComments,
+}: {
+  readonly block: TableBlockShape;
+  readonly rowComments?: TableRowComments;
+}) {
   const [sort, setSort] = useState<SortState | undefined>(undefined);
   const [query, setQuery] = useState("");
   const [hidden, setHidden] = useState<ReadonlySet<ColumnId>>(new Set());
@@ -72,13 +104,26 @@ export function TableBlock({ block }: { readonly block: TableBlockShape }) {
   );
   // A text column whose values carry a separator is read as a path: the shared
   // path style dims the directory and keeps the file name at full ink.
+  const rows = useMemo<ReadonlyArray<RowView>>(
+    () =>
+      block.rows.map((row, index) => ({
+        cells: canvasTableRowCells(row),
+        index,
+        rowId: canvasTableRowId(row),
+      })),
+    [block.rows],
+  );
+  // The comment gutter is drawn only when some row can take a comment: a row
+  // without an id has nothing a comment could stay on through a sort. It leads
+  // the row so its marker stays in view when a wide table scrolls sideways.
+  const commentable = rowComments !== undefined && rows.some((row) => row.rowId !== undefined);
   const pathColumns = useMemo<ReadonlySet<ColumnId>>(() => {
     const ids = new Set<ColumnId>();
     for (const { column, index } of columnViews) {
       if (
         column.type === "text" &&
-        block.rows.some((row) => {
-          const value = row[index];
+        rows.some(({ cells }) => {
+          const value = cells[index];
           return typeof value === "string" && /[\\/]/.test(value);
         })
       ) {
@@ -86,17 +131,14 @@ export function TableBlock({ block }: { readonly block: TableBlockShape }) {
       }
     }
     return ids;
-  }, [block.rows, columnViews]);
+  }, [rows, columnViews]);
 
-  const ordered = useMemo<
-    ReadonlyArray<{ readonly cells: ReadonlyArray<CanvasTableCell>; readonly index: number }>
-  >(() => {
-    const indexed = block.rows.map((cells, index) => ({ cells, index }));
+  const ordered = useMemo<ReadonlyArray<RowView>>(() => {
     const needle = query.trim().toLowerCase();
     const matched =
       needle === ""
-        ? indexed
-        : indexed.filter(({ cells }) =>
+        ? rows
+        : rows.filter(({ cells }) =>
             visible.some(({ index: columnIndex }) =>
               reading(cells[columnIndex] ?? null)
                 .toLowerCase()
@@ -113,7 +155,7 @@ export function TableBlock({ block }: { readonly block: TableBlockShape }) {
       const order = compareCells(left.cells[sortIndex] ?? null, right.cells[sortIndex] ?? null);
       return order === 0 ? left.index - right.index : order * factor;
     });
-  }, [block.rows, columnViews, query, sort, visible]);
+  }, [rows, columnViews, query, sort, visible]);
 
   const toggleSort = (columnId: ColumnId) => {
     setSort((current) =>
@@ -191,6 +233,11 @@ export function TableBlock({ block }: { readonly block: TableBlockShape }) {
         <table className="ds-table canvas-block__table-grid">
           <thead>
             <tr>
+              {commentable ? (
+                <th className="canvas-block__table-comment" scope="col">
+                  <span className="visually-hidden">Comments</span>
+                </th>
+              ) : null}
               {visible.map(({ column }) => {
                 const active = sort !== undefined && sort.columnId === column.id;
                 return (
@@ -220,13 +267,29 @@ export function TableBlock({ block }: { readonly block: TableBlockShape }) {
           <tbody>
             {ordered.length === 0 ? (
               <tr>
-                <td className="canvas-block__table-empty" colSpan={Math.max(1, visible.length)}>
+                <td
+                  className="canvas-block__table-empty"
+                  colSpan={Math.max(1, visible.length + (commentable ? 1 : 0))}
+                >
                   {block.rows.length === 0 ? "No rows." : "No matching rows."}
                 </td>
               </tr>
             ) : (
-              ordered.map(({ cells, index }) => (
-                <tr key={index}>
+              ordered.map(({ cells, index, rowId }) => (
+                // A row that names itself keeps its element through a sort or a
+                // revision, so a focused marker stays on the row it belongs to.
+                <tr key={rowId === undefined ? `index:${String(index)}` : `row:${rowId}`}>
+                  {commentable ? (
+                    <td className="canvas-block__table-comment">
+                      {rowId === undefined || rowComments === undefined ? null : (
+                        <RowCommentMarker
+                          count={rowComments.openCounts.get(rowId) ?? 0}
+                          label={canvasTableRowLabel(block, cells)}
+                          onOpen={() => rowComments.onOpen(rowId)}
+                        />
+                      )}
+                    </td>
+                  ) : null}
                   {visible.map(({ column, index: columnIndex }) => {
                     const value = cells[columnIndex] ?? null;
                     const heatStep =
@@ -272,6 +335,30 @@ export function TableBlock({ block }: { readonly block: TableBlockShape }) {
         </table>
       </div>
     </div>
+  );
+}
+
+function RowCommentMarker(props: {
+  readonly count: number;
+  readonly label: string;
+  readonly onOpen: () => void;
+}) {
+  return (
+    <OctantButton
+      aria-label={
+        props.count === 0
+          ? `Comment on row ${props.label}`
+          : `${String(props.count)} open ${props.count === 1 ? "comment" : "comments"} on row ${props.label}`
+      }
+      className="canvas-block__row-comment-marker"
+      data-has-comments={props.count === 0 ? "false" : "true"}
+      onClick={props.onOpen}
+      type="button"
+      variant="bare"
+    >
+      <MessageSquare aria-hidden="true" size={12} strokeWidth={1.8} />
+      {props.count === 0 ? null : <span>{props.count}</span>}
+    </OctantButton>
   );
 }
 
@@ -359,7 +446,7 @@ function columnStats(block: TableBlockShape, index: number): ColumnStats {
   let min = Number.POSITIVE_INFINITY;
   let max = Number.NEGATIVE_INFINITY;
   for (const row of block.rows) {
-    const value = row[index];
+    const value = canvasTableRowCells(row)[index];
     if (typeof value === "number" && Number.isFinite(value)) {
       if (value < min) min = value;
       if (value > max) max = value;

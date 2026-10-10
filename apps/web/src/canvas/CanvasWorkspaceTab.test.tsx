@@ -741,6 +741,79 @@ describe("CanvasWorkspaceTab", () => {
     expect(marker).toHaveFocus();
   });
 
+  it("opens a table row's comments from its marker and returns focus there on Escape", async () => {
+    const author = readyVersion.version.createdBy;
+    const onRow = (commentId: string, rowId: string, body: string) => ({
+      comment: {
+        commentId: commentId as never,
+        anchor: { kind: "row" as const, blockId: "vendors" as never, rowId: rowId as never },
+        author,
+        origin: { kind: "host" as const },
+        body,
+        createdAt: "2026-08-01T21:00:00.000Z" as never,
+      },
+      replies: [],
+    });
+    const comments = vi.fn(async () => ({
+      kind: "ready" as const,
+      canvasId: quarterlyCanvasId,
+      sequence: 2,
+      threads: [
+        onRow("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaab1", "globex", "Globex is cheaper"),
+        onRow("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaab2", "hooli", "Hooli dropped out"),
+      ],
+    }));
+    const withTable = {
+      ...readyVersion,
+      version: {
+        ...readyVersion.version,
+        definition: {
+          ...canvasFixture,
+          blocks: [
+            {
+              blockId: "vendors",
+              schemaVersion: CANVAS_SCHEMA_VERSION,
+              kind: "table" as const,
+              columns: [{ id: "vendor", label: "Vendor", type: "text" as const }],
+              rows: [
+                { id: "acme", cells: ["Acme"] },
+                { id: "globex", cells: ["Globex"] },
+              ],
+            },
+          ],
+        },
+      },
+    };
+    const client = createCanvasClient(withTable as never, undefined, {
+      comments,
+      comment: vi.fn(),
+    } as unknown as Partial<CanvasClient>);
+
+    render(<CanvasWorkspaceTab tab={canvasTab} client={client} />);
+
+    const marker = await screen.findByRole(
+      "button",
+      { name: "1 open comment on row Globex" },
+      { timeout: 10_000 },
+    );
+    // The thread on a row that is gone still counts on its table's marker.
+    expect(screen.getByRole("button", { name: "2 open comments on table" })).toBeInTheDocument();
+    marker.focus();
+    fireEvent.click(marker);
+    const close = screen.getByRole("button", { name: "Close comments" });
+    await waitFor(() => expect(close).toHaveFocus());
+    expect(screen.getByText("Globex is cheaper")).toBeInTheDocument();
+    expect(screen.queryByText("Hooli dropped out")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Show all" }));
+    expect(screen.getByText("Hooli dropped out")).toBeInTheDocument();
+    expect(screen.getByText("No longer on the canvas")).toBeInTheDocument();
+
+    fireEvent.keyDown(close, { key: "Escape" });
+    expect(screen.queryByRole("complementary", { name: "Comments" })).toBeNull();
+    expect(marker).toHaveFocus();
+  }, 15_000);
+
   it("compares the selected version with the one before it, block by block", async () => {
     const olderVersionId = "45454545-4545-4545-8545-454545454545";
     const blocks = canvasFixture.blocks;
@@ -960,6 +1033,18 @@ describe("CanvasWorkspaceTab", () => {
         dockCss,
       ).height,
     ).toMatch(/^min\(/);
+  });
+
+  it("pins the row comment gutter to the left edge, opaque, so markers stay in view while a wide table scrolls", () => {
+    // jsdom has no layout, so this holds the rules: a pinned cell that is not
+    // opaque lets the scrolled columns show through it, and the corner cell
+    // must ride above both the sticky header and the pinned gutter.
+    const gutter = cssDeclarations(".canvas-block__table-grid .canvas-block__table-comment");
+    expect(gutter).toMatchObject({ position: "sticky", left: "0" });
+    expect(gutter.background).toBe("var(--oct-surface-warm)");
+    expect(
+      cssDeclarations(".canvas-block__table-grid th.canvas-block__table-comment")["z-index"],
+    ).toBe("calc(var(--oct-z-sticky) + 1)");
   });
 
   it("never lets a long unbreakable title widen the tab past its column", () => {

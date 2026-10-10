@@ -627,9 +627,13 @@ describe("Canvas share contracts", () => {
     const shared = fieldPathsByKind(CanvasStaticExportBlock.ast);
     // A design's markup draws only inside Octant and an action names a command
     // only this host runs, so a share refuses both. A source id resolves only
-    // against the host that wrote it, so a share drops every one.
+    // against the host that wrote it, so a share drops every one. A table
+    // row's id is what a comment anchors to and a share carries no comments,
+    // so a keyed row leaves as its cells.
     const refusedKinds = new Set(["design", "action"]);
-    const dropped = (path: string) => /(?:^|\.)sourceIds?$/.test(path);
+    const flattened = new Set(["table.rows[].id", "table.rows[].cells"]);
+    const dropped = (kind: string, path: string) =>
+      /(?:^|\.)sourceIds?$/.test(path) || flattened.has(`${kind}.${path}`);
     const missing: string[] = [];
     for (const [kind, paths] of live) {
       const sharedPaths = shared.get(kind);
@@ -642,7 +646,7 @@ describe("Canvas share contracts", () => {
         continue;
       }
       for (const path of paths) {
-        if (!dropped(path) && !sharedPaths.has(path)) missing.push(`${kind}.${path}`);
+        if (!dropped(kind, path) && !sharedPaths.has(path)) missing.push(`${kind}.${path}`);
       }
     }
     expect(missing).toEqual([]);

@@ -315,7 +315,8 @@ schema version 4. An older runtime refuses a version-4 document as a future
 version and does not report it corrupt.
 A treemap block is gated the same way at Canvas schema version 5, a heatmap
 block at version 6, a comparison matrix at version 10, a math block at
-version 11, and the mockup catalog at version 12, so a document that declares an earlier version and carries one is
+version 11, the mockup catalog at version 12, and a table row's `id` at
+version 13, so a document that declares an earlier version and carries one is
 refused as a declared future version. The optional table column
 `display` and the chart, table, and metric `format` fields are the one ungated
 exception: they only change how a value is drawn, so they carry no schema
@@ -498,7 +499,11 @@ block whole. The catalog arrives with Canvas schema version 12 and share
 version 6.
 A share carries every block kind and field a Canvas holds except source ids
 and the design and action blocks it refuses (see the `design` block). A table
-column keeps its number format and display, and a board keeps its own layout.
+column keeps its number format and display, a table row leaves as its cells
+without the `id` comments anchor to, and a board keeps its own layout. Because
+the row id is the only Canvas version 13 field and a share drops it, a share at
+version 6 names a block authored at version 13 as version 12
+(`CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION`), so a version-6 reader accepts it.
 Share documents version independently of Canvas documents: a treemap, a
 heatmap, a bar list, a chart's or a table column's number format, a table
 column's display, and a board's layout arrive with share version 3, and a
@@ -569,7 +574,18 @@ service rebuilds them with the pure `applyCanvasCommentEvent` reducer, refuses
 unauthorized reads with no bodies, and stamps each comment's origin (`host` or
 the authenticated `remote-device`) beside its `local-user` author. The host
 stamps that author (and a resolve's or delete's actor) itself and ignores the
-actor the request names, so a renderer can never author a comment as an agent. Shared
+actor the request names, so a renderer can never author a comment as an agent.
+A table row is either a list of cells or `{ id, cells }`; the id is the
+author's, unique within the table (the domain policy refuses a repeat as
+`duplicate-table-row-id`), and arrives with Canvas schema version 13. A `row`
+comment anchor names a table block and that id, never a position, so a comment
+stays on its row through the reader's sort and filter and through a revision
+that inserts, removes, or edits rows. A row without an id cannot be anchored
+and the renderer offers it no marker. A comment whose row is gone from the
+version on screen is shown as no longer on the canvas and is never dropped; the
+comment service does not check anchors against a version, because comments
+belong to the Canvas rather than one version. A comparison matrix does not use
+the table row model; its criteria already anchor through node ids. Shared
 snapshots serialise the definition and so never carry comments
 ([decisions/0052-canvas-boards.md](decisions/0052-canvas-boards.md)).
 

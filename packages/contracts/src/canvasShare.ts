@@ -82,6 +82,11 @@ export const CANVAS_SHARE_MATH_SCHEMA_VERSION = 5;
 // catalog (devices, fidelity, components, node fields, variants, callouts).
 export const CANVAS_SHARE_MOCKUP_CATALOG_SCHEMA_VERSION = 6;
 export const CANVAS_SHARE_SCHEMA_VERSION = 6 as const;
+// The newest Canvas block version a share at this version names. Canvas
+// version 13 added only the table row id, which a share drops, so a block
+// authored at 13 shares as 12 and a version-6 reader still accepts it. A later
+// Canvas bump that adds something a share carries bumps the share version.
+export const CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION = 12 as const;
 export const CanvasShareSchemaVersion = Schema.Literal(1, 2, 3, 4, 5, CANVAS_SHARE_SCHEMA_VERSION);
 export type CanvasShareSchemaVersion = typeof CanvasShareSchemaVersion.Type;
 
