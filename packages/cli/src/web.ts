@@ -63,9 +63,14 @@ export async function runWebCommand(options: WebCommandOptions): Promise<WebComm
     options.dev === true
       ? (options.resolveDevelopmentCodeFileHelperPath ?? resolveDevelopmentCodeFileHelperPath)()
       : undefined;
+  const devHostname = process.env.OCTANT_VITE_HOSTNAME ?? "127.0.0.1";
+  const devPort = process.env.OCTANT_VITE_PORT ?? "5173";
+  // A host started here admits the Vite renderer's exact origin; any other
+  // loopback page is refused local authority.
   const developmentEnvironment =
     options.dev === true
       ? {
+          OCTANT_WEB_URL: `http://${devHostname}:${devPort}`,
           ...(developmentDataDirectory === undefined
             ? {}
             : { OCTANT_DATA_DIR: developmentDataDirectory }),
@@ -104,8 +109,6 @@ export async function runWebCommand(options: WebCommandOptions): Promise<WebComm
 
   if (options.dev) {
     const startDevServer = options.startDevServer ?? defaultStartDevServer;
-    const devHostname = process.env.OCTANT_VITE_HOSTNAME ?? "127.0.0.1";
-    const devPort = process.env.OCTANT_VITE_PORT ?? "5173";
     const devUrl = await startDevServer({ hostname: devHostname, port: devPort });
     const devUrlObject = new URL(devUrl);
     const launchUrl = buildDevLaunchUrl(devUrlObject, host.url);

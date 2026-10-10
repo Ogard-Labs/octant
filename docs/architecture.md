@@ -254,7 +254,9 @@ unchanged, and native remote requests refuse redirects.
 process-local client context through `/api/shell/local-session`; no launcher
 token, persisted clock posture, or alternate profile is required. Electron,
 ordinary browsers, and Vite therefore read the same Machine-owned Projects,
-threads, settings, and journal. The context id scopes window-local presentation
+threads, settings, and journal; a Vite renderer qualifies only when the host
+was started with its origin in `OCTANT_WEB_URL` (the desktop dev loop and
+`octant web --dev` set it for the host they start). The context id scopes window-local presentation
 and guards against accidental cross-window commands, but it is not a separate
 Machine or durable authentication epoch. The packaged renderer additionally
 proves its native renderer identity for desktop-only integration. When the host
@@ -262,9 +264,13 @@ instance changes, Electron re-registers every live Project window, replaces the
 main-process authority and renderer identity, and publishes the new capability
 so the renderer rebuilds its clients before snapshot recovery. The loopback
 transport still validates the actual Host header, rejects non-loopback origins,
-and removes process-local registration when its owning client closes. Loopback
-renderer ports share the local-user trust class; the listener never reflects a
-non-loopback web origin into local authority. The renderer holds the matching
+and removes process-local registration when its owning client closes. The
+listener admits only its own loopback origin (under any loopback name), the
+packaged renderer, and the development renderer origin named by
+`OCTANT_WEB_URL`; a page on any other loopback port is refused before dispatch,
+gets no CORS grant, and cannot mint a client context, because agents start
+local dev servers whose pages the person opens in an ordinary browser. The
+listener never reflects a non-loopback web origin into local authority. The renderer holds the matching
 line before its first request: a launch address that is plain HTTP to a
 non-loopback host is refused with an explanation and never used
 (`docs/decisions/0103`). Requests that send the window capability set
