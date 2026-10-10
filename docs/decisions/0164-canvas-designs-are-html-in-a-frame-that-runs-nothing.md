@@ -80,5 +80,5 @@ stylesheet. Frames link to each other by fragment (`href="#checkout"`).
 - [0010](0010-secure-preview-and-canvas.md) — the structured Canvas this narrows
   for one block.
 - [0052](0052-canvas-boards.md) — Canvas boards and comments.
-- [0165](0165-a-canvas-in-the-thread-can-be-the-whole-answer.md) — later proposal
-  for in-thread documents; scripted frames stay deferred.
+- [0165](0165-canvas-artifacts-are-documents-designs-and-prototypes.md) — proposes
+  themed and measured static frames and a running-frame tier.

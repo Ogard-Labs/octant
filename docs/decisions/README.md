@@ -186,7 +186,7 @@ links from specifications remain useful for rationale and supporting detail.
 | [0162](0162-managed-npm-device-tools-share-one-release-channel.md) | Managed npm device tools share one release channel | Proposed |
 | [0163](0163-artifact-replicas-in-storage-the-user-owns.md) | Artifact replicas in storage the user owns | Accepted |
 | [0164](0164-canvas-designs-are-html-in-a-frame-that-runs-nothing.md) | Canvas designs are HTML in a frame that runs nothing | Accepted |
-| [0165](0165-a-canvas-in-the-thread-can-be-the-whole-answer.md) | A Canvas in the thread can be the whole answer | Proposed |
+| [0165](0165-canvas-artifacts-are-documents-designs-and-prototypes.md) | Canvas artifacts are documents, designs, and prototypes | Proposed |
 
 ## Recording architectural rationale
 
