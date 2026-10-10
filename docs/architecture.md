@@ -1981,7 +1981,9 @@ modelId }`, and the model picker is provider-first. Discovery can find
   scope; see
   [decisions/0081-image-generation-is-its-own-surface.md](decisions/0081-image-generation-is-its-own-surface.md))
   and an app-managed `octant_create_image` tool invoke that job service
-  through `/api/image/` when an enabled image profile exists; the composers
+  through `/api/image/` when an enabled image profile exists (a dedicated
+  image provider, or a custom image source named in Settings › Image
+  generation, which every renderer surface lists alongside them); the composers
   carry no generation action. Agent-generated images preview in the thread by
   opaque attachment id, chain edits through `parentArtifactRef`, export with the thread, and
   never grant Chat filesystem authority.

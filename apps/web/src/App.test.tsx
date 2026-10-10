@@ -5,6 +5,8 @@ import {
   decodeThreadBoardPullRequestSummary,
   decodeCodeProjectPullRequestDetailView,
   decodeCodeProjectPullRequestView,
+  decodeProviderInstanceId,
+  decodeProviderModelId,
   type CodeBoardView,
   type NavigatorAssistantSnapshot,
   type ShellBootstrap,
@@ -4972,6 +4974,46 @@ describe("App", () => {
     await user.click(await screen.findByRole("menuitem", { name: "Archive" }));
     expect(await screen.findByRole("region", { name: "Archive" })).toBeVisible();
     expect(screen.queryByRole("region", { name: "Image generator" })).not.toBeInTheDocument();
+  });
+
+  it("offers a custom image source from Settings in the Image generator", async () => {
+    const user = userEvent.setup();
+    const shell = codeShellBootstrap();
+    render(
+      <App
+        codeClient={codes()}
+        contextClient={contextClient()}
+        isNarrow={false}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projects()}
+        projectWindowCapability={projectWindowCapability}
+        providerClient={providersWithToolModel()}
+        shellClient={client({
+          ...shell,
+          settings: {
+            ...shell.settings,
+            imageGeneration: {
+              customSources: [
+                {
+                  providerInstanceId: decodeProviderInstanceId(
+                    "90000000-0000-4000-8000-000000000001",
+                  ),
+                  modelId: decodeProviderModelId("recraftv3"),
+                  label: "Recraft",
+                },
+              ],
+            },
+          },
+        })}
+      />,
+    );
+    await screen.findByRole("region", { name: "Workspace pane: Controller foundation" });
+    await user.click(screen.getByRole("button", { name: "More destinations" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Image generator" }));
+
+    const generator = await screen.findByRole("region", { name: "Image generator" });
+    expect(await within(generator).findByRole("button", { name: "Create image" })).toBeEnabled();
+    expect(within(generator).queryByText(/No image profile is configured/)).not.toBeInTheDocument();
   });
 
   it("lists the active Project's pull requests in the dock and opens a row in the same dock", async () => {

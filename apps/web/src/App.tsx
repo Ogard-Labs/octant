@@ -2658,6 +2658,20 @@ function LaunchedShell(
     serverUrl: props.launch.serverUrl,
     windowCapability: props.projectWindowCapability,
   });
+  // A custom image source (Settings › Image generation) is an image profile
+  // too: the host's own profile list and the agent tool already offer it, and
+  // without it here the Image generator and Revise said no profile was ready.
+  const imageGenerationCustomSources = controller.settings?.imageGeneration.customSources;
+  const imageGenerationProfiles = useMemo(
+    () =>
+      providerController.snapshot === undefined
+        ? undefined
+        : listEligibleImageProfiles(
+            providerController.snapshot.instances,
+            imageGenerationCustomSources ?? [],
+          ),
+    [providerController.snapshot, imageGenerationCustomSources],
+  );
   const discoveryController = useDiscoveryController({
     afterScan: providerController.retry,
     serverUrl: props.launch.serverUrl,
@@ -7087,9 +7101,7 @@ function LaunchedShell(
                 imageLibraryOpen={imageLibraryOpen}
                 onCloseImageLibrary={() => setImageLibraryOpen(false)}
                 imageGenerationClient={imageGenerationClient}
-                imageProfiles={listEligibleImageProfiles(
-                  providerController.snapshot?.instances ?? [],
-                )}
+                imageProfiles={imageGenerationProfiles ?? []}
                 onOpenImageSettings={() =>
                   void controller.openSettings({ section: "image-generation" })
                 }
@@ -7498,6 +7510,9 @@ function LaunchedShell(
                         previewClient={previewClient}
                         canvasClient={canvasClient}
                         imageGenerationClient={imageGenerationClient}
+                        {...(imageGenerationProfiles === undefined
+                          ? {}
+                          : { imageGenerationProfiles })}
                         onOpenCanvasInSidebar={openCanvasInSidebar}
                         onOpenCanvasReference={(card) => {
                           const projectId = card.scope.workspace.projectId;

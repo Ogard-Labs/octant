@@ -33,8 +33,7 @@ import type { ProjectClient } from "@octant/client-runtime/project-client";
 import type { PreviewClient } from "@octant/client-runtime/preview-client";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import type { ImageGenerationClient } from "@octant/client-runtime/image-generation-client";
-import { listEligibleImageProfiles } from "@octant/domain";
-import type { CanvasInventoryEntry } from "@octant/contracts";
+import type { CanvasInventoryEntry, ImageGenerationProfileView } from "@octant/contracts";
 import type { CanvasId } from "@octant/contracts/canvas";
 import type { CanvasThreadReferenceCard } from "@octant/contracts/canvas-cards";
 import type { ThreadHandOffOutcome } from "@octant/contracts/thread-hand-off";
@@ -398,6 +397,8 @@ export interface WorkspaceViewProps {
   readonly previewClient?: PreviewClient;
   readonly canvasClient?: CanvasClient;
   readonly imageGenerationClient?: ImageGenerationClient;
+  /** Every image profile, custom image sources included, computed once by the shell. */
+  readonly imageGenerationProfiles?: ReadonlyArray<ImageGenerationProfileView>;
   readonly onOpenCanvas?: (entry: CanvasInventoryEntry) => void;
   readonly onOpenCanvasReference?: (card: CanvasThreadReferenceCard) => void;
   /** Opens the dock's Canvas tool on this Canvas, beside the thread that wrote it. */
@@ -1026,13 +1027,9 @@ function renderCodeTab(
         {...(props.imageGenerationClient === undefined
           ? {}
           : { imageGenerationClient: props.imageGenerationClient })}
-        {...(props.providerController.snapshot === undefined
+        {...(props.imageGenerationProfiles === undefined
           ? {}
-          : {
-              imageGenerationProfiles: listEligibleImageProfiles(
-                props.providerController.snapshot.instances,
-              ),
-            })}
+          : { imageGenerationProfiles: props.imageGenerationProfiles })}
         {...(props.hostId === undefined ? {} : { hostId: props.hostId as HostId })}
         {...(props.projectServerUrl === undefined ? {} : { serverUrl: props.projectServerUrl })}
         {...(props.projectWindowCapability === undefined
@@ -1492,6 +1489,9 @@ function renderNonCodeTab(
         {...(props.imageGenerationClient === undefined
           ? {}
           : { imageGenerationClient: props.imageGenerationClient })}
+        {...(props.imageGenerationProfiles === undefined
+          ? {}
+          : { imageGenerationProfiles: props.imageGenerationProfiles })}
         {...(props.hostId === undefined ? {} : { hostId: props.hostId })}
         {...(props.onOpenCanvasReference === undefined
           ? {}
@@ -1610,13 +1610,9 @@ function renderNonCodeTab(
                 {...(props.imageGenerationClient === undefined
                   ? {}
                   : { imageGenerationClient: props.imageGenerationClient })}
-                {...(props.providerController.snapshot === undefined
+                {...(props.imageGenerationProfiles === undefined
                   ? {}
-                  : {
-                      imageGenerationProfiles: listEligibleImageProfiles(
-                        props.providerController.snapshot.instances,
-                      ),
-                    })}
+                  : { imageGenerationProfiles: props.imageGenerationProfiles })}
                 {...(openProviderSettings === undefined
                   ? {}
                   : { onOpenSettings: openProviderSettings })}
@@ -2209,6 +2205,8 @@ function ChatThreadWorkspace(props: {
   readonly projectWindowCapability?: string;
   readonly canvasClient?: CanvasClient;
   readonly imageGenerationClient?: ImageGenerationClient;
+  /** Every image profile, custom image sources included, computed once by the shell. */
+  readonly imageGenerationProfiles?: ReadonlyArray<ImageGenerationProfileView>;
   readonly hostId?: string;
   readonly onOpenCanvasReference?: (card: CanvasThreadReferenceCard) => void;
   readonly onCanvasReferencesObserved?: (
@@ -2299,6 +2297,9 @@ function ChatThreadWorkspace(props: {
         {...(props.imageGenerationClient === undefined
           ? {}
           : { imageGenerationClient: props.imageGenerationClient })}
+        {...(props.imageGenerationProfiles === undefined
+          ? {}
+          : { imageGenerationProfiles: props.imageGenerationProfiles })}
         {...(props.hostId === undefined ? {} : { hostId: props.hostId as HostId })}
         {...(props.onOpenCanvasReference === undefined
           ? {}
