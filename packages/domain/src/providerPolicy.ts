@@ -419,8 +419,8 @@ export interface ClaudeConfigurationInput {
   readonly kind: ClaudeProviderConfiguration["kind"];
   readonly binaryPath: string;
   readonly authentication: ClaudeAuthentication;
-  readonly configDirectory?: string;
-  readonly accent?: ClaudeAccountAccent;
+  readonly configDirectory?: string | undefined;
+  readonly accent?: ClaudeAccountAccent | undefined;
 }
 
 /** Closed accent set mirrored from the contract so Settings can list it. */
@@ -452,9 +452,10 @@ export function formatClaudeAuthLoginCommand(input: {
   readonly configDirectory?: string;
 }): string {
   const argv = claudeAuthLoginArgv(input.binaryPath);
-  const quoted = argv.map(shellSingleQuote).join(" ");
-  if (input.configDirectory === undefined) return quoted;
-  return `CLAUDE_CONFIG_DIR=${shellSingleQuote(input.configDirectory)} CLAUDE_SECURESTORAGE_CONFIG_DIR=${shellSingleQuote(input.configDirectory)} ${quoted}`;
+  const [binary, ...rest] = argv;
+  const command = `${shellSingleQuote(binary ?? "")} ${rest.join(" ")}`;
+  if (input.configDirectory === undefined) return command;
+  return `CLAUDE_CONFIG_DIR=${shellSingleQuote(input.configDirectory)} CLAUDE_SECURESTORAGE_CONFIG_DIR=${shellSingleQuote(input.configDirectory)} ${command}`;
 }
 
 function shellSingleQuote(value: string): string {
@@ -475,10 +476,7 @@ function normalizeClaudeConfigDirectory(path: string | undefined): string | unde
     reject("invalid-config-directory", "Claude config directory must be an absolute path.");
   }
   if (pathBasename(normalized) === ".credentials.json") {
-    reject(
-      "invalid-config-directory",
-      "Claude config directory cannot be a credential file.",
-    );
+    reject("invalid-config-directory", "Claude config directory cannot be a credential file.");
   }
   return normalized;
 }

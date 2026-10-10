@@ -821,16 +821,12 @@ function makeProbe(
         }
         apiKey = resolved.right;
       }
-      const sdkResult = yield* probeSdk(
-        options,
-        environmentFactory,
-        {
-          ...(apiKey === undefined ? {} : { apiKey }),
-          ...(options.configDirectory === undefined
-            ? {}
-            : { configDirectory: options.configDirectory }),
-        },
-      ).pipe(
+      const sdkResult = yield* probeSdk(options, environmentFactory, {
+        ...(apiKey === undefined ? {} : { apiKey }),
+        ...(options.configDirectory === undefined
+          ? {}
+          : { configDirectory: options.configDirectory }),
+      }).pipe(
         Effect.map((models) => ({ kind: "ready" as const, models })),
         Effect.catchAll((providerFailure) =>
           providerFailure.category === "protocol" || providerFailure.category === "unsupported"
@@ -1267,16 +1263,13 @@ function makeConnection(
         void initialized.promise.catch(() => undefined);
         const terminalResult = deferred<void>();
         const environment = await runSetupEffect(
-          environmentFactory(
-            options.authentication,
-            {
-              ...(apiKey !== undefined ? { apiKey } : {}),
-              ...(helperToken !== undefined ? { oauthToken: helperToken } : {}),
-              ...(options.configDirectory === undefined
-                ? {}
-                : { configDirectory: options.configDirectory }),
-            },
-          ).pipe(Effect.provideService(Scope.Scope, scope)),
+          environmentFactory(options.authentication, {
+            ...(apiKey !== undefined ? { apiKey } : {}),
+            ...(helperToken !== undefined ? { oauthToken: helperToken } : {}),
+            ...(options.configDirectory === undefined
+              ? {}
+              : { configDirectory: options.configDirectory }),
+          }).pipe(Effect.provideService(Scope.Scope, scope)),
           signal,
         );
         const runtimeVersion = await runSetupEffect(

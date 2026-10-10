@@ -319,7 +319,9 @@ function harness(
       instanceId,
       binaryPath: "/opt/homebrew/bin/claude",
       authentication: selectedAuthentication,
-      ...(options.configDirectory === undefined ? {} : { configDirectory: options.configDirectory }),
+      ...(options.configDirectory === undefined
+        ? {}
+        : { configDirectory: options.configDirectory }),
       process,
       sdk,
       credentialResolver,

@@ -1373,12 +1373,9 @@ describe("provider instance policy", () => {
   });
 
   it("assigns a Claude-owned account directory under the home folder", () => {
-    expect(
-      assignedClaudeAccountConfigDirectory(
-        "/Users/example/",
-        ids.local,
-      ),
-    ).toBe(`/Users/example/.claude-accounts/${ids.local}`);
+    expect(assignedClaudeAccountConfigDirectory("/Users/example/", ids.local)).toBe(
+      `/Users/example/.claude-accounts/${ids.local}`,
+    );
   });
 
   it("formats the unmodified Claude sign-in command for an isolated account", () => {

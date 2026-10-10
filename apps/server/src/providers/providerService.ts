@@ -681,7 +681,9 @@ export class ProviderService implements ProviderServiceApi {
                 ...common,
                 configuration: {
                   ...command.configuration,
-                  ...(assignedDirectory === undefined ? {} : { configDirectory: assignedDirectory }),
+                  ...(assignedDirectory === undefined
+                    ? {}
+                    : { configDirectory: assignedDirectory }),
                 },
               });
               break;

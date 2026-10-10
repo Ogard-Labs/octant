@@ -444,7 +444,9 @@ describe("ComposerModelPicker", () => {
     await user.click(screen.getByRole("button", { name: "Provider and model" }));
     const rail = await screen.findByRole("option", { name: "Work Claude" });
     expect(rail.querySelector("[data-accent='teal']")).not.toBeNull();
-    expect(screen.getByRole("option", { name: "Local OpenCode" }).querySelector("[data-accent]")).toBeNull();
+    expect(
+      screen.getByRole("option", { name: "Local OpenCode" }).querySelector("[data-accent]"),
+    ).toBeNull();
   });
 
   it("shows readiness labels on providers that are not fully ready", async () => {

@@ -54,8 +54,8 @@ export function ClaudeCreateAuthenticationFields(props: {
         </>
       ) : (
         <p className="provider-settings__field-guidance">
-          Sign in with the official Claude Code CLI using the unmodified claude auth login command in
-          a terminal for this account, then check the connection.
+          Sign in with the official Claude Code CLI using the unmodified claude auth login command
+          in a terminal for this account, then check the connection.
         </p>
       )}
     </>

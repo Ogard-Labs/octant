@@ -147,6 +147,7 @@ describe("makeClaudeEnvironmentScope", () => {
       HOME: "/Users/provider-user",
       LANG: "en_US.UTF-8",
       CLAUDE_CONFIG_DIR: configDirectory,
+      CLAUDE_SECURESTORAGE_CONFIG_DIR: configDirectory,
       ANTHROPIC_API_KEY: "broker-resolved-api-key-sentinel",
       ...requiredGuards,
     });
@@ -196,7 +197,7 @@ describe("makeClaudeEnvironmentScope", () => {
   });
 
   it("isolates a named Claude account from host Claude directories and helper tokens", async () => {
-    const accountDirectory = "/Users/provider-user/.claude-accounts/work";
+    const accountDirectory = join(await mkdtemp(join(tmpdir(), "octant-claude-account-")), "work");
     const environment = await Effect.runPromise(
       Effect.scoped(
         makeClaudeEnvironmentScope("subscription", {
@@ -216,6 +217,7 @@ describe("makeClaudeEnvironmentScope", () => {
     );
     expect(environment.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
     expect(environment.CLAUDE_CONFIG_DIR).toBe(accountDirectory);
+    expect(existsSync(accountDirectory)).toBe(true);
   });
 
   it("keeps an API-key account on its stable directory instead of deleting it", async () => {

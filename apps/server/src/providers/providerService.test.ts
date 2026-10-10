@@ -1323,8 +1323,9 @@ describe("ProviderService", () => {
     const first = await fixture.service.bootstrap(windowId);
     const personal = first.instances.find((instance) => instance.id === instanceId);
     const work = first.instances.find((instance) => instance.id === otherId);
-    expect(personal?.driverKind === "claude" ? personal.configuration.configDirectory : undefined)
-      .toBeUndefined();
+    expect(
+      personal?.driverKind === "claude" ? personal.configuration.configDirectory : undefined,
+    ).toBeUndefined();
     expect(work?.driverKind === "claude" ? work.configuration.configDirectory : undefined).toBe(
       assignedClaudeAccountConfigDirectory(homedir(), otherId),
     );

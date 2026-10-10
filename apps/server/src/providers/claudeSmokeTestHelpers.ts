@@ -141,7 +141,8 @@ export async function createClaudeSmokeHarness(
         apiEnvironmentIsolated &&=
           configDirectory !== undefined &&
           isPathInside(canonicalTmp, configDirectory) &&
-          input.env.CLAUDE_SECURESTORAGE_CONFIG_DIR === undefined &&
+          (input.env.CLAUDE_SECURESTORAGE_CONFIG_DIR === undefined ||
+            input.env.CLAUDE_SECURESTORAGE_CONFIG_DIR === configDirectory) &&
           input.env.ANTHROPIC_AUTH_TOKEN === undefined &&
           input.env.CLAUDE_CODE_OAUTH_TOKEN === undefined;
         if (configDirectory !== undefined) configDirectories.add(configDirectory);
