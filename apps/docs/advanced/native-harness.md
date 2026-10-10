@@ -273,6 +273,16 @@ on each such call asks again, and the choice is not offered.
 **Deny** tells the lead not to retry. Every approval and decision is
 journaled with the session.
 
+A Browser call that needs a site you have not allowed waits the same way. The
+terminal UI shows it in a Site approval panel, and line mode asks
+`Browser wants to open <site>` with a `[y]es / [a]lways this site / [n]o`
+prompt. **Always** remembers the site, as **Always allow** does in the app,
+and it is only offered in Work threads. A Code thread's site ask is answered
+once. With `--json`, the ask is printed as a `site-approval` line and the
+answer is read from stdin, the same as for other approvals. When stdin has
+ended, the call is refused as `browser-approval-denied` and the turn
+continues without waiting for the ask to expire.
+
 ## Steering and stopping
 
 In the terminal UI, typing while the lead works queues a note instead of a

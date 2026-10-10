@@ -2654,7 +2654,12 @@ native harness in `apps/server/src/harness`:
   events — and only uses it as a wake-up: every redraw still reads the
   thread through the mode's routes, so the stream never becomes a second
   source of truth. Harness questions and approvals have no stream and are
-  picked up by a one-second fallback read.
+  picked up by a one-second fallback read. A Browser site ask is not a
+  harness approval, so `agentSiteApprovals.ts` reads it on the same tick
+  from the route the app's thread view uses: `/api/browser/approvals` for
+  Work, and the Code entries in `/api/pending-requests` (answered with
+  `answer-provider-approval`) for Code. A terminal whose stdin has ended
+  denies the ask instead of leaving the turn waiting.
 - **Surfaces.** `/api/native-harness/routing` and
   `/api/native-harness/sessions/:threadId` serve the web, desktop, phone, and
   `octant agent` / `octant harness` from one `NativeHarnessSessionView`.
