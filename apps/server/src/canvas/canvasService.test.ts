@@ -1856,3 +1856,88 @@ describe("CanvasService published workspace scope", () => {
     expect(listRefreshSkills).not.toHaveBeenCalled();
   });
 });
+
+describe("CanvasService adopting a version another computer wrote", () => {
+  const synced = "aaaaaaaa-0000-4000-8000-000000000001";
+  const syncedVersion = "aaaaaaaa-0000-4000-8000-000000000002";
+  const theirs = {
+    ...definition,
+    title: "Written elsewhere",
+    provenance: {
+      ...provenance,
+      hostId: "cccccccc-0000-4000-8000-000000000001",
+      projectId: "cccccccc-0000-4000-8000-000000000002",
+      threadId: "cccccccc-0000-4000-8000-000000000003",
+    },
+  } as never;
+
+  it("binds a first version to the thread and Project here, never the other computer's", () => {
+    const { service, projection } = createService();
+    const adopted = service.adoptVersion(
+      {
+        canvasId: decodeCanvasId(synced),
+        versionId: syncedVersion as never,
+        content: theirs,
+        createdAt: now as never,
+      },
+      { mode: "chat", projectId: ids.project, originThreadId: ids.thread },
+      { id: ids.project, type: "chat", lifecycle: "active" },
+    );
+    expect(adopted.kind).toBe("adopted");
+    const held = projection.getById(decodeCanvasId(synced))?.currentVersion;
+    expect(String(held?.versionId)).toBe(syncedVersion);
+    expect(held?.definition.title).toBe("Written elsewhere");
+    expect(held?.definition.provenance).toMatchObject({
+      hostId: "local",
+      projectId: ids.project,
+      threadId: ids.thread,
+    });
+  });
+
+  it("refuses a first version for a Project of another mode, an archived one, or no thread", () => {
+    const { service, projection } = createService();
+    const adopt = (
+      context: Parameters<CanvasService["adoptVersion"]>[1],
+      project: Parameters<CanvasService["adoptVersion"]>[2],
+    ) =>
+      service.adoptVersion(
+        {
+          canvasId: decodeCanvasId(synced),
+          versionId: syncedVersion as never,
+          content: theirs,
+          createdAt: now as never,
+        },
+        context,
+        project,
+      ).kind;
+    const thread = { mode: "chat", projectId: ids.project, originThreadId: ids.thread } as const;
+    expect(adopt(thread, { id: ids.project, type: "work", lifecycle: "active" })).toBe("denied");
+    expect(adopt(thread, { id: ids.project, type: "chat", lifecycle: "archived" })).toBe("denied");
+    expect(
+      adopt(
+        { mode: "chat", projectId: ids.project },
+        { id: ids.project, type: "chat", lifecycle: "active" },
+      ),
+    ).toBe("denied");
+    expect(projection.getById(decodeCanvasId(synced))).toBeUndefined();
+  });
+
+  it("appends a later version on the thread the Canvas is already bound to", () => {
+    const { service, projection } = createService();
+    const adopted = service.adoptVersion(
+      {
+        canvasId,
+        versionId: ids.version2 as never,
+        content: theirs,
+        createdAt: later as never,
+      },
+      { mode: "chat", projectId: ids.project },
+      { id: ids.project, type: "chat", lifecycle: "active" },
+    );
+    expect(adopted.kind).toBe("adopted");
+    const head = projection.getById(canvasId)?.currentVersion;
+    expect(head?.sequence).toBe(2);
+    expect(String(head?.definition.provenance.threadId)).toBe(ids.thread);
+    expect(String(head?.definition.provenance.projectId)).toBe(ids.project);
+  });
+});

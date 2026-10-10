@@ -859,6 +859,13 @@ import {
   ReplicaArtifactSyncService,
   replicaSyncedLibraryEntries,
 } from "./replica/replicaArtifactSyncService";
+import {
+  localArtifactSyncFacts,
+  SyncedArtifactService,
+  type SyncedArtifactThread,
+} from "./replica/syncedArtifactService";
+import { createSyncedArtifactRouteHandler } from "./replica/syncedArtifactRoutes";
+import { decideReplicaArtifactBinding } from "@octant/domain/replica-entry-policy";
 import { createReplicaMembershipJournal } from "./replica/replicaMembershipProjection";
 import { createReplicaDeviceKey, makeReplicaDeviceSigner } from "./replica/replicaDeviceKeyService";
 import { createHostResourceRouteHandler } from "./hostResourceRoutes";
@@ -8989,7 +8996,17 @@ export function startOctantServer(
           lifecycle: project.lifecycle,
         })),
       liveShares: () => canvasShareService.liveShareCanvasIds(),
-      synced: () => replicaSyncedLibraryEntries(persistence.replicaArtifactProjection.state()),
+      synced: () =>
+        replicaSyncedLibraryEntries(
+          persistence.replicaArtifactProjection.state(),
+          persistence.replicaMembershipProjection.state().local,
+        ),
+      syncFacts: (entry) =>
+        localArtifactSyncFacts(
+          persistence.replicaArtifactProjection.state(),
+          persistence.replicaMembershipProjection.state(),
+          entry,
+        ),
       clock: () => new Date().toISOString() as never,
     });
     const artifactLibraryRoutes = createArtifactLibraryRouteHandler({
@@ -9758,6 +9775,7 @@ export function startOctantServer(
       (await speechRoutes(request)) ??
       (await artifactLibraryRoutes(request)) ??
       (await artifactMirrorRoutes(request)) ??
+      (await syncedArtifactRoutes(request)) ??
       (await automationRoutes(request)) ??
       (await automationNotificationRoutes(request)) ??
       (await workPromotionRoutes(request)) ??
@@ -10163,8 +10181,212 @@ export function startOctantServer(
         if (provenance.mode !== "code") return false;
         return persistence.readCodeThread(provenance.threadId)?.executionPolicy === "plan";
       },
+      // Built just below; a pull only happens once the host is serving.
+      afterPull: () => {
+        syncedArtifactService.catchUp();
+      },
     });
     const artifactSyncService = replicaArtifactSync.service;
+    // Opening, keeping, merging, and restoring synced artifacts. A thread
+    // takes one only when the binding policy finds it compatible from the
+    // thread's own durable state, and its content enters that thread as
+    // untrusted external content before the Canvas exists there.
+    const projectRecord = (projectId: string | undefined) => {
+      if (projectId === undefined) return undefined;
+      const project = persistence.readProject(projectId as never);
+      return project === undefined
+        ? undefined
+        : {
+            id: String(project.id),
+            type: project.type,
+            lifecycle: project.lifecycle,
+            name: project.name,
+          };
+    };
+    const syncedArtifactThreads = (): ReadonlyArray<SyncedArtifactThread> => {
+      const facts = (
+        mode: OctantMode,
+        thread: {
+          readonly id: string;
+          readonly title: string;
+          readonly updatedAt: string;
+          readonly projectId?: string | undefined;
+          readonly active: boolean;
+          readonly readOnly: boolean;
+        },
+      ): SyncedArtifactThread => {
+        const project = projectRecord(thread.projectId);
+        return {
+          threadId: thread.id,
+          title: thread.title,
+          updatedAt: thread.updatedAt,
+          projectId: project?.id,
+          projectName: project?.name,
+          facts: {
+            mode,
+            active: thread.active,
+            projectActive: project?.lifecycle === "active" && project.type === mode,
+            readOnly: thread.readOnly,
+            workspaceResolved: resolveCanvasWorkspace({ mode, threadId: thread.id }) !== undefined,
+          },
+        };
+      };
+      return [
+        ...persistence.readChatThreads().map((thread) =>
+          facts("chat", {
+            id: String(thread.id),
+            title: thread.title,
+            updatedAt: String(thread.updatedAt),
+            projectId: thread.projectId === undefined ? undefined : String(thread.projectId),
+            active: thread.lifecycle === "active",
+            readOnly: false,
+          }),
+        ),
+        ...workThreadProjection.list().map((thread) =>
+          facts("work", {
+            id: String(thread.id),
+            title: thread.title,
+            updatedAt: String(thread.updatedAt),
+            projectId: String(thread.projectId),
+            active: thread.lifecycle === "active",
+            readOnly: false,
+          }),
+        ),
+        ...persistence.readCodeThreads().map((thread) =>
+          facts("code", {
+            id: String(thread.id),
+            title: thread.title,
+            updatedAt: String(thread.updatedAt),
+            projectId: String(thread.projectId),
+            active: thread.lifecycle === "active",
+            readOnly: thread.executionPolicy === "plan",
+          }),
+        ),
+      ];
+    };
+    const syncedArtifactService = new SyncedArtifactService({
+      artifacts: () => persistence.replicaArtifactProjection.state(),
+      membership: () => persistence.replicaMembershipProjection.state(),
+      sync: artifactSyncService,
+      localCanvas: (canvasId) => {
+        const entry = persistence.canvasProjection.getById(canvasId);
+        if (entry === undefined) return undefined;
+        const project = projectRecord(String(entry.currentVersion.definition.provenance.projectId));
+        return {
+          currentVersion: entry.currentVersion,
+          versions: entry.versions,
+          projectName: project?.name ?? "Project",
+        };
+      },
+      threads: syncedArtifactThreads,
+      ingest: ({ threadId, contentReference, sourceLabel }) => {
+        const recorded = externalContentIngestionStore.record({
+          threadId,
+          provenance: { origin: "external-content", sourceLabel },
+          contentReference,
+          correlationId: randomUUID(),
+          authorized: true,
+        });
+        return recorded.kind === "recorded" || recorded.kind === "already-recorded";
+      },
+      adopt: ({ canvasId, versionId, content, createdAt, threadId }) => {
+        const held = persistence.canvasProjection.getById(canvasId);
+        const provenance = held?.currentVersion.definition.provenance;
+        const mode = provenance?.mode ?? content.provenance.mode;
+        const bound =
+          threadId ?? (provenance === undefined ? undefined : String(provenance.threadId));
+        const thread = syncedArtifactThreads().find((candidate) => candidate.threadId === bound);
+        if (thread === undefined) {
+          return { kind: "denied", message: "That thread is not on this computer." };
+        }
+        // The thread is checked again here, at the commit, so a thread that
+        // was archived or put in Plan mode since the person chose it refuses.
+        const decision = decideReplicaArtifactBinding(mode, thread.facts);
+        if (decision.kind === "incompatible") {
+          return { kind: "denied", message: "That thread cannot take this artifact now." };
+        }
+        const project = projectRecord(thread.projectId);
+        const adopted = canvasService.adoptVersion(
+          { canvasId, versionId, content, createdAt },
+          {
+            mode,
+            projectId: thread.projectId ?? null,
+            hostId: String(LOCAL_HOST_ID),
+            originThreadId: thread.threadId,
+          },
+          project,
+        );
+        return adopted.kind === "adopted"
+          ? { kind: "committed", version: adopted.version }
+          : { kind: "denied", message: adopted.message };
+      },
+      revise: ({ canvasId, blocks, prompt }) => {
+        const entry = persistence.canvasProjection.getById(canvasId);
+        if (entry === undefined) {
+          return { kind: "denied", message: "That artifact is no longer available." };
+        }
+        const current = entry.currentVersion;
+        const provenance = current.definition.provenance;
+        const workspace = resolveCanvasWorkspace(provenance);
+        if (workspace === undefined) {
+          return {
+            kind: "denied",
+            message: "The Project or thread this artifact belongs to is no longer available.",
+          };
+        }
+        const project = persistence.readProject(provenance.projectId);
+        const result = canvasService.revise(
+          {
+            schemaVersion: 1,
+            kind: "canvas-revise",
+            requestId: randomUUID(),
+            canvasId,
+            expectedSequence: current.sequence,
+            hostId: LOCAL_HOST_ID,
+            mode: provenance.mode,
+            workspace,
+            originThreadId: provenance.threadId,
+            prompt,
+            actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+            providerInstanceId: provenance.providerInstanceId,
+            modelId: provenance.modelId,
+            requestedAuthority: {
+              filesystem: false,
+              shell: false,
+              git: false,
+              network: false,
+              tools: false,
+              subagents: false,
+              executionPolicy: "plan",
+              permissionPersistence: "current-session",
+            },
+          },
+          {
+            mode: provenance.mode,
+            projectId: String(provenance.projectId),
+            hostId: String(LOCAL_HOST_ID),
+            workspace,
+            originThreadId: String(provenance.threadId),
+          },
+          project === undefined
+            ? undefined
+            : { id: String(project.id), type: project.type, lifecycle: project.lifecycle },
+          blocks,
+        );
+        if (result.kind !== "accepted") return { kind: "denied", message: result.message };
+        const revised = persistence.canvasProjection.getById(canvasId)?.currentVersion;
+        return revised === undefined
+          ? { kind: "denied", message: "That artifact is no longer available." }
+          : { kind: "committed", version: revised };
+      },
+      entry: (canvasId) => artifactLibraryService.entry(canvasId),
+      uuid: randomUUID,
+      clock: () => new Date().toISOString() as never,
+    });
+    const syncedArtifactRoutes = createSyncedArtifactRouteHandler({
+      service: syncedArtifactService,
+      windowAuthorityStore,
+    });
     let stopArtifactSync: () => void = () => undefined;
     const replicaMembershipRoutes = createReplicaMembershipRouteHandler({
       service: replicaMembershipService,

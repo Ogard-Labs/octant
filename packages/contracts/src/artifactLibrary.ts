@@ -51,6 +51,20 @@ export const ArtifactPreview = Schema.Struct({
 }).annotations(strict);
 export type ArtifactPreview = typeof ArtifactPreview.Type;
 
+/** A computer's name, as it names itself in this person's replica. */
+const ComputerName = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128));
+
+/**
+ * Where an artifact stands across this person's computers.
+ *
+ * `two-versions`: two computers revised the same version, or this computer's
+ * version and another's both stand; neither wins until the person keeps one
+ * or merges them. `deleted`: a deletion on another computer is all that is
+ * left of it, and it can be restored.
+ */
+export const ArtifactSyncStatus = Schema.Literal("current", "two-versions", "deleted");
+export type ArtifactSyncStatus = typeof ArtifactSyncStatus.Type;
+
 export const ArtifactLibraryEntry = Schema.Struct({
   canvasId: CanvasId,
   projectId: ProjectId,
@@ -66,6 +80,15 @@ export const ArtifactLibraryEntry = Schema.Struct({
   /** Whether a share of this artifact is live right now. */
   shared: Schema.Boolean,
   preview: Schema.optional(ArtifactPreview),
+  /**
+   * The computer that wrote the version shown. Present once this computer
+   * belongs to a replica, or when the version came from another computer.
+   */
+  writtenOn: Schema.optional(ComputerName),
+  /** Present only when sync has something to resolve; absent means current. */
+  syncStatus: Schema.optional(ArtifactSyncStatus),
+  /** The computer whose deletion is all that is left, when `syncStatus` is `deleted`. */
+  deletedOn: Schema.optional(ComputerName),
 }).annotations(strict);
 export type ArtifactLibraryEntry = typeof ArtifactLibraryEntry.Type;
 
@@ -80,7 +103,7 @@ export const ArtifactLibrarySyncedEntry = Schema.Struct({
   /** The Project name on the computer that filed it. */
   projectName: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256)),
   /** The computer that wrote the head shown, as that computer names itself. */
-  computerName: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
+  computerName: ComputerName,
   mode: OctantMode,
   kind: ArtifactKind,
   title: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256)),
@@ -90,9 +113,11 @@ export const ArtifactLibrarySyncedEntry = Schema.Struct({
    * version leave two; the person picks one or merges them.
    */
   headCount: Schema.Int.pipe(Schema.positive()),
-  /** Whether one of the heads is a deletion beside a revision. */
-  deletedElsewhere: Schema.Boolean,
+  status: ArtifactSyncStatus,
+  /** The computer whose deletion is all that is left, when `status` is `deleted`. */
+  deletedOn: Schema.optional(ComputerName),
   updatedAt: UtcTimestamp,
+  preview: Schema.optional(ArtifactPreview),
 }).annotations(strict);
 export type ArtifactLibrarySyncedEntry = typeof ArtifactLibrarySyncedEntry.Type;
 
@@ -159,6 +184,136 @@ export const ArtifactLibraryListing = Schema.Struct({
   .pipe(Schema.filter((listing) => listing.entries.length <= listing.matchCount));
 export type ArtifactLibraryListing = typeof ArtifactLibraryListing.Type;
 
+// ── Synced artifacts: provenance, two versions, and deletions ──────────────
+
+/** One version in an artifact's synced history, with the computer that wrote it. */
+export const ArtifactSyncedVersion = Schema.Struct({
+  versionId: CanvasVersionId,
+  title: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256)),
+  computerName: ComputerName,
+  /** Written on this computer rather than read in from another one. */
+  thisComputer: Schema.Boolean,
+  createdAt: UtcTimestamp,
+  /** One of the versions the person chooses between, or the one standing. */
+  candidate: Schema.Boolean,
+  /** Drawn only for a candidate, so two can be compared side by side. */
+  preview: Schema.optional(ArtifactPreview),
+}).annotations(strict);
+export type ArtifactSyncedVersion = typeof ArtifactSyncedVersion.Type;
+
+/** A thread here that an artifact can be opened in without widening anything. */
+export const ArtifactSyncedThread = Schema.Struct({
+  threadId: Schema.UUID,
+  mode: OctantMode,
+  projectId: ProjectId,
+  projectName: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256)),
+  title: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256)),
+}).annotations(strict);
+export type ArtifactSyncedThread = typeof ArtifactSyncedThread.Type;
+
+export const MAX_ARTIFACT_SYNCED_VERSIONS = 200;
+export const MAX_ARTIFACT_SYNCED_THREADS = 50;
+
+/** Everything the library's sync view shows for one artifact. */
+export const ArtifactSyncedDetail = Schema.Struct({
+  kind: Schema.Literal("artifact-synced-detail"),
+  canvasId: CanvasId,
+  title: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256)),
+  /** The Project it is filed under: here when it is open here, else where it came from. */
+  projectName: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256)),
+  mode: OctantMode,
+  status: ArtifactSyncStatus,
+  deletedOn: Schema.optional(ComputerName),
+  /** Whether it is open in a thread on this computer. */
+  openHere: Schema.Boolean,
+  /** Newest first. */
+  versions: Schema.Array(ArtifactSyncedVersion).pipe(Schema.maxItems(MAX_ARTIFACT_SYNCED_VERSIONS)),
+  /**
+   * Threads it may be opened in here. Empty when it is already open here or
+   * when no thread on this computer is compatible.
+   */
+  threads: Schema.Array(ArtifactSyncedThread).pipe(Schema.maxItems(MAX_ARTIFACT_SYNCED_THREADS)),
+}).annotations(strict);
+export type ArtifactSyncedDetail = typeof ArtifactSyncedDetail.Type;
+
+/**
+ * What a person can do with a synced artifact. Open binds it to a thread
+ * here. Keep publishes a version that resolves two into the one chosen.
+ * Merge opens a new version made from both through the revise path, so it
+ * needs a thread when the artifact is not open here yet. Restore publishes a
+ * version that supersedes a deletion.
+ */
+export const ArtifactSyncedCommand = Schema.Union(
+  Schema.Struct({ kind: Schema.Literal("detail"), canvasId: CanvasId }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("open"),
+    canvasId: CanvasId,
+    threadId: Schema.UUID,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("keep"),
+    canvasId: CanvasId,
+    versionId: CanvasVersionId,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("merge"),
+    canvasId: CanvasId,
+    threadId: Schema.optional(Schema.UUID),
+  }).annotations(strict),
+  Schema.Struct({ kind: Schema.Literal("restore"), canvasId: CanvasId }).annotations(strict),
+);
+export type ArtifactSyncedCommand = typeof ArtifactSyncedCommand.Type;
+
+export const ArtifactSyncedRefusalReason = Schema.Literal(
+  /** Nothing synced is known for this artifact here. */
+  "not-found",
+  /** No thread on this computer can take it without widening its authority. */
+  "no-compatible-thread",
+  /** The thread named cannot take it: wrong mode, read-only, or not active. */
+  "incompatible-thread",
+  /** It is already open in a thread here; open it from there. */
+  "already-open-here",
+  /** Merge needs a thread to open the merged version in. */
+  "thread-required",
+  "not-two-versions",
+  "unknown-version",
+  "not-deleted",
+  /** Publishing needs sync on and this computer in a replica. */
+  "sync-off",
+  /** The host refused the version itself; the message says why. */
+  "refused",
+);
+export type ArtifactSyncedRefusalReason = typeof ArtifactSyncedRefusalReason.Type;
+
+export const ArtifactSyncedResult = Schema.Union(
+  ArtifactSyncedDetail,
+  Schema.Struct({
+    kind: Schema.Literal("artifact-synced-opened"),
+    /** The artifact as the library now lists it, open in the chosen thread. */
+    entry: ArtifactLibraryEntry,
+    /**
+     * Blocks a merge left out: one that names a source the version it was
+     * merged into does not list, or one past the block ceiling.
+     */
+    omittedBlocks: Schema.optional(Schema.Int.pipe(Schema.positive())),
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("artifact-synced-published"),
+    canvasId: CanvasId,
+    versionId: CanvasVersionId,
+    /** False while the store cannot be reached: the version waits here and goes out later. */
+    published: Schema.Boolean,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("artifact-synced-refused"),
+    reason: ArtifactSyncedRefusalReason,
+    message: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512)),
+  }).annotations(strict),
+);
+export type ArtifactSyncedResult = typeof ArtifactSyncedResult.Type;
+
+export const decodeArtifactSyncedCommand = Schema.decodeUnknownSync(ArtifactSyncedCommand);
+export const decodeArtifactSyncedResult = Schema.decodeUnknownSync(ArtifactSyncedResult);
 export const decodeArtifactLibraryQuery = Schema.decodeUnknownSync(ArtifactLibraryQuery);
 export const decodeArtifactLibraryEntry = Schema.decodeUnknownSync(ArtifactLibraryEntry);
 export const decodeArtifactLibraryListing = Schema.decodeUnknownSync(ArtifactLibraryListing);

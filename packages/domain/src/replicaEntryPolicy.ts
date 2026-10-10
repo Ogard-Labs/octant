@@ -23,7 +23,14 @@ import {
   type ReplicaInstanceId,
   type ReplicaSignatureVerdict,
 } from "@octant/contracts/replica-entry";
-import type { CanvasId, CanvasVersionId } from "@octant/contracts/canvas";
+import {
+  CANVAS_MAX_BLOCKS,
+  type CanvasBlock,
+  type CanvasDefinition,
+  type CanvasId,
+  type CanvasVersionId,
+} from "@octant/contracts/canvas";
+import { sourceIdsForBlock } from "./canvasPolicy";
 import type { HostId } from "@octant/contracts/host";
 
 export const REPLICA_RECONCILE_OUTCOMES = [
@@ -342,4 +349,183 @@ export function replicaArtifactHidden(
 ): boolean {
   const heads = replicaArtifactHeads(record);
   return heads.length > 0 && heads.every((head) => head.kind === "tombstone");
+}
+
+/**
+ * Where an artifact stands across this person's computers, and what the
+ * person chooses between.
+ *
+ * `candidates` are the versions that stand: one when it is current, two or
+ * more when the person must keep one or merge them. When the artifact is
+ * open in a thread here, the version standing here is a candidate unless a
+ * version from another computer revises it. A head this computer already
+ * holds in its own history is not one: a version committed here while sync
+ * was off, or one still queued, descends from it. `ahead` is the one version
+ * from another computer that revises the version standing here, when nothing
+ * else stands beside it: it is appended here (0040: a later import of the
+ * same origin appends a version), not chosen between. `deletions` are the
+ * tombstones that are all that is left.
+ */
+export interface ReplicaArtifactStanding {
+  readonly status: "current" | "two-versions" | "deleted";
+  readonly candidates: ReadonlyArray<string>;
+  readonly ahead: string | undefined;
+  readonly deletions: ReadonlyArray<ReplicaKnownTombstone>;
+}
+
+/** Whether `versionId` is `ancestorId` or revises it, through any chain of parents. */
+function revisesVersion(
+  versions: ReadonlyArray<ReplicaKnownVersion>,
+  versionId: string,
+  ancestorId: string,
+): boolean {
+  const parents = new Map(versions.map((version) => [String(version.versionId), version]));
+  const pending = [versionId];
+  const seen = new Set<string>();
+  while (pending.length > 0) {
+    const next = pending.pop();
+    if (next === undefined || seen.has(next)) continue;
+    if (next === ancestorId) return true;
+    seen.add(next);
+    pending.push(...(parents.get(next)?.parentVersionIds.map(String) ?? []));
+  }
+  return false;
+}
+
+export function replicaArtifactStanding(
+  record: Pick<ReplicaArtifactRecord, "versions" | "tombstones">,
+  local?: {
+    readonly currentVersionId: string;
+    readonly versionIds: ReadonlyArray<string>;
+  },
+): ReplicaArtifactStanding {
+  const heads = replicaArtifactHeads(record);
+  const versionHeads = heads.flatMap((head) =>
+    head.kind === "version" ? [String(head.versionId)] : [],
+  );
+  const tombstoneHeads = record.tombstones.filter((tombstone) =>
+    heads.some(
+      (head) =>
+        head.kind === "tombstone" &&
+        String(head.originInstanceId) === String(tombstone.originInstanceId) &&
+        head.originSequence === tombstone.originSequence,
+    ),
+  );
+  if (local === undefined) {
+    if (versionHeads.length === 0 && tombstoneHeads.length > 0) {
+      return { status: "deleted", candidates: [], ahead: undefined, deletions: tombstoneHeads };
+    }
+    return {
+      status: versionHeads.length > 1 ? "two-versions" : "current",
+      candidates: versionHeads,
+      ahead: undefined,
+      deletions: [],
+    };
+  }
+  const current = String(local.currentVersionId);
+  // Deleted here only when the deletion was taken from the version standing
+  // here; a version written here since then is not covered by it.
+  if (
+    versionHeads.length === 0 &&
+    tombstoneHeads.some((tombstone) => tombstone.parentVersionIds.map(String).includes(current))
+  ) {
+    return { status: "deleted", candidates: [], ahead: undefined, deletions: tombstoneHeads };
+  }
+  const held = new Set(local.versionIds.map(String));
+  const elsewhere = versionHeads.filter((versionId) => !held.has(versionId));
+  const superseded = elsewhere.some((versionId) =>
+    revisesVersion(record.versions, versionId, current),
+  );
+  const candidates = superseded ? elsewhere : [current, ...elsewhere];
+  return {
+    status: candidates.length > 1 ? "two-versions" : "current",
+    candidates,
+    ahead: superseded && elsewhere.length === 1 ? elsewhere[0] : undefined,
+    deletions: [],
+  };
+}
+
+/** What a thread here is, as far as taking a synced artifact goes. */
+export interface ReplicaBindingThread {
+  readonly mode: "chat" | "work" | "code";
+  /** The thread is active, not archived or closed. */
+  readonly active: boolean;
+  /** Its Project exists here, is active, and is of the thread's mode. */
+  readonly projectActive: boolean;
+  /** Plan mode: nothing it holds may change. */
+  readonly readOnly: boolean;
+  /** The host resolves the thread's workspace now, from durable state. */
+  readonly workspaceResolved: boolean;
+}
+
+export type ReplicaBindingRefusal =
+  | "mode-mismatch"
+  | "thread-inactive"
+  | "project-unavailable"
+  | "read-only"
+  | "workspace-unavailable";
+
+export type ReplicaBindingDecision =
+  | { readonly kind: "compatible" }
+  | { readonly kind: "incompatible"; readonly reason: ReplicaBindingRefusal };
+
+/**
+ * Whether a synced artifact may be bound to this thread (0040: bind to a
+ * compatible thread, not merely a Project). The thread's own mode, Project,
+ * and authority decide; the artifact brings none of its origin's. A Chat
+ * artifact goes to a Chat thread, a Work artifact to a Work thread, and a
+ * Code artifact to a Code thread whose checkout is available and that is
+ * not in Plan mode, so binding never widens what a thread may do.
+ */
+export function decideReplicaArtifactBinding(
+  artifactMode: ReplicaBindingThread["mode"],
+  thread: ReplicaBindingThread,
+): ReplicaBindingDecision {
+  if (thread.mode !== artifactMode) return { kind: "incompatible", reason: "mode-mismatch" };
+  if (!thread.active) return { kind: "incompatible", reason: "thread-inactive" };
+  if (!thread.projectActive) return { kind: "incompatible", reason: "project-unavailable" };
+  if (thread.readOnly) return { kind: "incompatible", reason: "read-only" };
+  if (!thread.workspaceResolved) {
+    return { kind: "incompatible", reason: "workspace-unavailable" };
+  }
+  return { kind: "compatible" };
+}
+
+/**
+ * The blocks of a version made from two: every block of `base`, then each
+ * block of `other` that `base` does not already carry. Where both carry a
+ * block under one id with different content, both stay - `other`'s under a
+ * fresh id beside it - so the person sees each side and nothing is silently
+ * chosen. A block of `other` that names a source `base` does not list cannot
+ * stand in `base`'s manifest and is left out, as is anything past the block
+ * ceiling; `omitted` counts both, so the caller can say so.
+ */
+export function mergeReplicaArtifactBlocks(
+  base: Pick<CanvasDefinition, "blocks" | "sourceManifest">,
+  other: Pick<CanvasDefinition, "blocks">,
+): { readonly blocks: ReadonlyArray<CanvasBlock>; readonly omitted: number } {
+  const sources = new Set(base.sourceManifest.map((source) => String(source.sourceId)));
+  const byId = new Map(base.blocks.map((block) => [String(block.blockId), block]));
+  const used = new Set(byId.keys());
+  const blocks: CanvasBlock[] = [...base.blocks];
+  let omitted = 0;
+  for (const block of other.blocks) {
+    const id = String(block.blockId);
+    const existing = byId.get(id);
+    if (existing !== undefined && JSON.stringify(existing) === JSON.stringify(block)) continue;
+    if (
+      blocks.length >= CANVAS_MAX_BLOCKS ||
+      !sourceIdsForBlock(block).every((sourceId) => sources.has(String(sourceId)))
+    ) {
+      omitted += 1;
+      continue;
+    }
+    let fresh = id;
+    for (let suffix = 2; used.has(fresh); suffix += 1) {
+      fresh = `${id.slice(0, 120)}-${String(suffix)}`;
+    }
+    used.add(fresh);
+    blocks.push(fresh === id ? block : { ...block, blockId: fresh as CanvasBlock["blockId"] });
+  }
+  return { blocks, omitted };
 }

@@ -1,7 +1,10 @@
 import {
   decodeArtifactLibraryListing,
+  decodeArtifactSyncedResult,
   type ArtifactLibraryListing,
   type ArtifactLibraryQuery,
+  type ArtifactSyncedCommand,
+  type ArtifactSyncedResult,
 } from "@octant/contracts/artifact-library";
 import { bindFetchPort } from "./bindFetchPort";
 
@@ -65,6 +68,48 @@ export async function loadArtifactLibrary(
     );
   }
   return decodeArtifactLibraryListing(body);
+}
+
+/**
+ * Sends one synced-artifact command to the host: read where its versions came
+ * from, open it in a thread, keep one of two versions, merge them, or restore
+ * it. The host decides each one; a refusal comes back as a result, not an error.
+ */
+export async function executeSyncedArtifactCommand(
+  options: ArtifactLibraryClientOptions,
+  command: ArtifactSyncedCommand,
+): Promise<ArtifactSyncedResult> {
+  let url: URL;
+  try {
+    url = new URL("/api/artifacts/synced", options.baseUrl);
+  } catch {
+    throw new ArtifactLibraryClientFailure("Artifact library base URL is invalid.", 0);
+  }
+  if (!["127.0.0.1", "localhost", "::1"].includes(url.hostname)) {
+    throw new ArtifactLibraryClientFailure("Artifact library base URL must be loopback.", 0);
+  }
+  const fetch = bindFetchPort(options.fetch);
+  let response: Response;
+  try {
+    response = await fetch(url.toString(), {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-octant-window-capability": options.windowCapability,
+      },
+      body: JSON.stringify(command),
+    });
+  } catch {
+    throw new ArtifactLibraryClientFailure("Synced artifacts are unavailable.", 0);
+  }
+  const body: unknown = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new ArtifactLibraryClientFailure(
+      readString(body, "error") ?? "Synced artifacts are unavailable.",
+      response.status,
+    );
+  }
+  return decodeArtifactSyncedResult(body);
 }
 
 function readString(body: unknown, key: string): string | undefined {

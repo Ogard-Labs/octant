@@ -1,5 +1,6 @@
 import {
   MAX_ARTIFACT_LIBRARY_ENTRIES,
+  decodeArtifactLibraryEntry,
   decodeArtifactLibraryListing,
   type ArtifactLibrarySyncedEntry,
   type ArtifactLibraryEntry,
@@ -13,7 +14,7 @@ import {
   selectSyncedArtifactLibraryEntries,
 } from "@octant/domain";
 import type { ClientPrincipal } from "../clientPrincipal";
-import type { CanvasProjection } from "./canvasProjection";
+import type { CanvasProjection, CanvasProjectionEntry } from "./canvasProjection";
 import { renderArtifactThumbnail } from "./artifactRender";
 
 /**
@@ -38,8 +39,17 @@ export interface ArtifactLibraryServiceDependencies {
    * thread here. Optional: a host without artifact sync lists none.
    */
   readonly synced?: () => ReadonlyArray<ArtifactLibrarySyncedEntry>;
+  /**
+   * Which computer wrote a held Canvas's version shown, and anything sync has
+   * left to resolve for it. Optional: a host without artifact sync says none.
+   */
+  readonly syncFacts?: (
+    entry: CanvasLibrarySnapshotEntry,
+  ) => Pick<ArtifactLibraryEntry, "writtenOn" | "syncStatus" | "deletedOn">;
   readonly clock: () => UtcTimestamp;
 }
+
+type CanvasLibrarySnapshotEntry = CanvasProjectionEntry;
 
 /**
  * The host-wide artifact library.
@@ -90,6 +100,7 @@ export class ArtifactLibraryService {
         currentSequence: entry.currentVersion.sequence,
         updatedAt: entry.updatedAt,
         shared: shared.has(String(entry.canvasId)),
+        ...this.#dependencies.syncFacts?.(entry),
       });
     }
 
@@ -132,6 +143,39 @@ export class ArtifactLibraryService {
       matchCount: matched.length,
       truncated: page.length < matched.length,
       generatedAt: this.#dependencies.clock(),
+    });
+  }
+
+  /**
+   * One held artifact as a local window's library lists it, with its
+   * preview; undefined when this host holds no such Canvas.
+   */
+  entry(canvasId: CanvasId): ArtifactLibraryEntry | undefined {
+    const held = this.#dependencies.projection.snapshot().get(canvasId);
+    if (held === undefined) return undefined;
+    const project = this.#dependencies
+      .projects()
+      .find(
+        (candidate) =>
+          String(candidate.id) === String(held.currentVersion.definition.provenance.projectId),
+      );
+    if (project === undefined) return undefined;
+    const definition = held.currentVersion.definition;
+    const markup = renderArtifactThumbnail(definition);
+    return decodeArtifactLibraryEntry({
+      canvasId: held.canvasId,
+      projectId: definition.provenance.projectId,
+      projectName: project.name,
+      mode: definition.provenance.mode,
+      kind: artifactKindForBlocks(definition.blocks),
+      title: definition.title,
+      versionCount: held.versionCount,
+      currentVersionId: held.currentVersion.versionId,
+      currentSequence: held.currentVersion.sequence,
+      updatedAt: held.updatedAt,
+      shared: this.#dependencies.liveShares().has(String(held.canvasId)),
+      ...this.#dependencies.syncFacts?.(held),
+      ...(markup === "" ? {} : { preview: { format: "svg" as const, markup } }),
     });
   }
 

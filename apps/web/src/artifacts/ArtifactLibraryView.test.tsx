@@ -183,3 +183,79 @@ describe("the artifact gallery", () => {
     expect(screen.queryByRole("button", { name: "New artifact" })).not.toBeInTheDocument();
   });
 });
+
+describe("artifacts synced across this person's computers", () => {
+  const syncedListing = {
+    ...listing,
+    entries: [
+      {
+        ...listing.entries[0],
+        writtenOn: "Studio Mac",
+        syncStatus: "two-versions",
+      },
+      { ...listing.entries[1], writtenOn: "MacBook Air" },
+    ],
+    synced: [
+      {
+        canvasId: "10000000-0000-4000-8000-00000000000c",
+        projectName: "Field notes",
+        computerName: "Studio Mac",
+        mode: "work",
+        kind: "document",
+        title: "Pricing notes",
+        versionCount: 2,
+        headCount: 1,
+        status: "deleted",
+        deletedOn: "Studio Mac",
+        updatedAt: "2026-08-18T08:00:00.000Z",
+      },
+      {
+        canvasId: "10000000-0000-4000-8000-00000000000d",
+        projectName: "Field notes",
+        computerName: "Mac mini",
+        mode: "work",
+        kind: "document",
+        title: "Interview log",
+        versionCount: 1,
+        headCount: 1,
+        status: "current",
+        updatedAt: "2026-08-18T07:00:00.000Z",
+      },
+    ],
+  } as unknown as ArtifactLibraryListing;
+
+  it("names the computer that wrote each card's version", () => {
+    view({ listing: syncedListing, onSync: vi.fn(), onRestore: vi.fn() });
+    expect(screen.getByText("Written on MacBook Air")).toBeTruthy();
+    const fromElsewhere = screen.getByRole("region", { name: "From your other computers" });
+    expect(within(fromElsewhere).getByText("Written on Mac mini")).toBeTruthy();
+    expect(within(fromElsewhere).getAllByText("Field notes · Document")).toHaveLength(2);
+  });
+
+  it("shows Two versions with a way to choose, and Deleted on a computer with Restore", async () => {
+    const onSync = vi.fn();
+    const onRestore = vi.fn();
+    view({ listing: syncedListing, onSync, onRestore });
+
+    expect(screen.getByText("Two versions")).toBeTruthy();
+    await userEvent.click(
+      screen.getByRole("button", { name: "Choose between the two versions of Launch plan" }),
+    );
+    expect(onSync).toHaveBeenCalledWith("10000000-0000-4000-8000-00000000000a");
+
+    expect(screen.getByText("Deleted on Studio Mac")).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "Restore Pricing notes" }));
+    expect(onRestore).toHaveBeenCalledWith("10000000-0000-4000-8000-00000000000c");
+
+    // A current artifact says nothing about sync beyond who wrote it.
+    expect(screen.queryByRole("button", { name: "Restore Interview log" })).toBeNull();
+    expect(screen.getAllByText(/^Two versions$/)).toHaveLength(1);
+  });
+
+  it("shows nothing about other computers on a host without artifact sync", () => {
+    view({ listing: syncedListing });
+    expect(screen.queryByRole("region", { name: "From your other computers" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Choose between/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Versions of/ })).toBeNull();
+  });
+});
