@@ -1775,11 +1775,13 @@ export type ProviderOutputStopReason = typeof ProviderOutputStopReason.Type;
 /**
  * What fills a provider-run window, by kind. A kind is the provider's own
  * category where it reports one, or something Octant itself puts in the
- * window and can count (`octant-tools`). The set is closed so a surface can
- * give each kind one name and one colour.
+ * window and can count (`octant-tools`, `octant-instructions`, `attachments`,
+ * and `skills` when Octant sent them). The set is closed so a surface can give
+ * each kind one name and one colour.
  */
 export const ProviderContextPartKind = Schema.Literal(
   "system-prompt",
+  "octant-instructions",
   "system-tools",
   "octant-tools",
   "mcp-tools",
@@ -1787,6 +1789,7 @@ export const ProviderContextPartKind = Schema.Literal(
   "skills",
   "agents",
   "messages",
+  "attachments",
   "reserved",
 );
 export type ProviderContextPartKind = typeof ProviderContextPartKind.Type;
@@ -1828,9 +1831,31 @@ export type ProviderDeferredContextPart = typeof ProviderDeferredContextPart.Typ
  * never claim the whole window: whatever the occupancy holds beyond them is
  * the reader's remainder, not a part.
  */
+/**
+ * Whether the instructions, skills and attachments Octant sent with each turn
+ * of this provider session are counted among the parts. A runtime that keeps
+ * every turn's prompt holds one copy per turn, so Octant counts them only while
+ * it can account for every copy. `uncounted` says why it cannot: the runtime
+ * does not say whether it keeps earlier prompts (`retention-unknown`), it
+ * compacted the session and kept a share Octant cannot measure (`compacted`),
+ * or a turn of the session went by without a count (`history-unknown`). Once
+ * uncounted, a session stays uncounted, and what was sent is part of the
+ * remainder.
+ */
+export const ProviderSentContextAccounting = Schema.Union(
+  Schema.Struct({ status: Schema.Literal("counted") }).annotations(strict),
+  Schema.Struct({
+    status: Schema.Literal("uncounted"),
+    reason: Schema.Literal("retention-unknown", "compacted", "history-unknown"),
+  }).annotations(strict),
+);
+export type ProviderSentContextAccounting = typeof ProviderSentContextAccounting.Type;
+
 export const ProviderContextBreakdown = Schema.Struct({
   parts: Schema.Array(ProviderContextPart).pipe(Schema.maxItems(16)),
   deferred: Schema.optional(Schema.Array(ProviderDeferredContextPart).pipe(Schema.maxItems(4))),
+  /** Absent when the runtime reported its own categories, or before Octant counted any. */
+  sentContext: Schema.optional(ProviderSentContextAccounting),
 }).annotations(strict);
 export type ProviderContextBreakdown = typeof ProviderContextBreakdown.Type;
 
@@ -1987,6 +2012,16 @@ export const ProviderRuntimeEvent = Schema.Union(
      * make-up or Octant could count what it adds. Absent means neither.
      */
     contextBreakdown: Schema.optional(ProviderContextBreakdown),
+    /**
+     * What the runtime does with the prompt of each turn, which is where Octant
+     * puts the instructions, skills and attachments it sends. `kept`: every
+     * turn's prompt stays in the session's window as sent, and the runtime has
+     * not compacted the window during this turn. `compacted`: it compacted the
+     * window during this turn, keeping a share of earlier prompts that Octant
+     * cannot measure. Absent: the adapter cannot say, and nothing Octant sent is
+     * counted as a part.
+     */
+    promptRetention: Schema.optional(Schema.Literal("kept", "compacted")),
   }).annotations(strict),
   Schema.Struct({
     ...ProviderRuntimeEventFields,

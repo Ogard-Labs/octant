@@ -1588,8 +1588,11 @@ parts the data attributes: planned threads show their manifest categories,
 overhead, reserve, and free space; a provider-run window shows the parts its
 runtime reported (system prompt, system and MCP tools, memory files, skills,
 agents, messages), or, for a runtime that reported none, the parts Octant can
-count itself (Octant tools), and in either case one `Other (provider)` remainder
-so the parts add up to what the window holds. With no parts it shows used and
+count itself (Octant instructions, Octant tools, skills, attachments), and in
+either case one `Other (provider)` remainder so the parts add up to what the
+window holds. When Octant sent instructions, skills or attachments it cannot
+count (the runtime does not say what it keeps, it compacted, or a turn went
+uncounted), a line under the key says why they are in the remainder. With no parts it shows used and
 free. The thread's input and output totals stay apart because they are sums over
 turns, not parts of the window. A part Octant counted is marked `Estimated`,
 with its accuracy (the existing exact tokenizer, model-family estimate and
@@ -1610,7 +1613,8 @@ for a planned thread, a fixed part order for a provider-run window) and the
 tones are chosen against that order, so neighbours differ clearly. A category
 that is the same thing in both kinds of window (conversation and messages, MCP
 and MCP tools, Octant tools and system tools, provider framing and system
-prompt, what nothing accounts for) shares one tone. Neighbour contrast is
+prompt, a profile's instructions and Octant instructions, workspace context and
+attachments, what nothing accounts for) shares one tone. Neighbour contrast is
 measured, not judged by eye: every tone holds at least 5.2:1 against the popover
 in light and dark, and the worst neighbouring pair is 0.134 apart in OKLab.
 Adjacent lightness ratios stay under 2:1, because seven hues that each clear 5:1

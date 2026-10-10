@@ -46,6 +46,8 @@ export interface CodexEventContext {
    * `resetsAt` timing for a usage-limit failure the turn itself reports.
    */
   exhaustedWindowReset?: UtcTimestamp;
+  /** Codex compacted the thread's window during this turn. */
+  windowCompacted?: boolean;
   readonly requestIds: Map<CodexRpcId, string>;
   readonly agentMessages: Map<string, CodexAgentMessageState>;
   readonly taskIds: Map<string, string>;
@@ -465,8 +467,15 @@ function mapLifecycle(
         }),
       ];
     }
-    case "userMessage":
     case "contextCompaction":
+      // Codex rebuilds a compacted thread from a summary and as many recent
+      // user messages as fit in 20,000 tokens (`build_compacted_history` in
+      // codex-rs `core/src/compact.rs`), so how much of the earlier prompts
+      // survives is Codex's own choice. Usage reports for the rest of the turn
+      // say so.
+      context.windowCompacted = true;
+      return [{ kind: "ignored" }];
+    case "userMessage":
     case "plan":
     case "reasoning":
       return [{ kind: "ignored" }];
@@ -800,6 +809,9 @@ function mapNotification(
           message.params.tokenUsage.modelContextWindow === 0
             ? {}
             : { contextWindow: message.params.tokenUsage.modelContextWindow }),
+          // Each turn's input is recorded in the thread as a user message and
+          // sent with every later request until Codex compacts the thread.
+          promptRetention: context.windowCompacted === true ? "compacted" : "kept",
         }),
       ];
     }

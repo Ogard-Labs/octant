@@ -209,6 +209,57 @@ describe("CodeOperationEventStore", () => {
     fixture.connection.close();
   });
 
+  it("hands the next turn what the prior turn's last usage report said fills the window", () => {
+    const fixture = openJournal();
+    const store = createStore(fixture.journal);
+    const started = decodeCodeOperationEvent({
+      kind: "conversation-turn-started",
+      providerInstanceId: "89000000-0000-4000-8000-000000000040",
+      modelId: "model-one",
+      sessionId: "89000000-0000-4000-8000-000000000050",
+      prompt: decodeCodeEvidenceReference({
+        contentId: "89000000-0000-4000-8000-000000000031",
+        digest: "e".repeat(64),
+        byteLength: 5,
+      }),
+    });
+    const usage = (tokens: number) =>
+      decodeCodeOperationEvent({
+        kind: "usage",
+        inputTokens: 1,
+        outputTokens: 1,
+        contextBreakdown: {
+          parts: [{ kind: "skills", tokens, accuracy: "conservative-heuristic" }],
+          sentContext: { status: "counted" },
+        },
+      });
+    store.append({ threadId, operationId, expectedCursor: 0, event: started });
+    store.append({ threadId, operationId, expectedCursor: 1, event: usage(100) });
+    store.append({ threadId, operationId, expectedCursor: 2, event: usage(300) });
+
+    expect(store.providerSessionForThread(threadId, otherOperationId)).toMatchObject({
+      status: "ok",
+      priorTurn: true,
+      priorTurnBreakdown: {
+        parts: [{ kind: "skills", tokens: 300 }],
+        sentContext: { status: "counted" },
+      },
+    });
+
+    // A later turn that has started but reported nothing leaves no breakdown
+    // to carry: the one on record belongs to the turn before it.
+    store.append({
+      threadId,
+      operationId: otherOperationId,
+      expectedCursor: 0,
+      event: started,
+    });
+    expect(
+      store.providerSessionForThread(threadId, "89000000-0000-4000-8000-000000000099" as never),
+    ).not.toHaveProperty("priorTurnBreakdown");
+    fixture.connection.close();
+  });
+
   it("returns only exact authorized frames after the cursor with a bounded limit", () => {
     const fixture = openJournal();
     const store = createStore(fixture.journal);

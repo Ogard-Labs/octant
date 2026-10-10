@@ -646,11 +646,21 @@ describe("the public-block visual language", () => {
       ];
       // A part Octant counted appears only when the runtime reported none, so
       // the two never stand in one bar.
+      const octantOnly: ReadonlyArray<string> = [
+        "octant-instructions",
+        "octant-tools",
+        "attachments",
+      ];
       const reported = [
-        ...PROVIDER_PART_ORDER.filter((key) => key !== "reserved" && key !== "octant-tools"),
+        ...PROVIDER_PART_ORDER.filter((key) => key !== "reserved" && !octantOnly.includes(key)),
         "other-provider",
       ];
-      const counted = ["octant-tools", "other-provider"];
+      // Everything Octant can count for a runtime that reports one figure, in
+      // the order the bar lists it.
+      const counted = [
+        ...PROVIDER_PART_ORDER.filter((key) => octantOnly.includes(key) || key === "skills"),
+        "other-provider",
+      ];
 
       for (const [theme, sheet] of Object.entries(sheets)) {
         const grab = (name: string) =>

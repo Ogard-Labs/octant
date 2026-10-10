@@ -2195,11 +2195,13 @@ point and stay `unknown`.
 
 **What fills a provider-run window.** A usage report may carry
 `contextBreakdown` (`ProviderContextBreakdown` in `@octant/contracts`): a closed
-set of part kinds (`system-prompt`, `system-tools`, `octant-tools`, `mcp-tools`,
-`memory-files`, `skills`, `agents`, `messages`, `reserved`), each with tokens, an
-accuracy (`provider-reported`, `exact-tokenizer`, `model-family-estimate`,
-`conservative-heuristic`) and an optional count, plus counts of tools the runtime
-knows but has not loaded (`deferred`, no tokens, no share). Per runtime:
+set of part kinds (`system-prompt`, `octant-instructions`, `system-tools`,
+`octant-tools`, `mcp-tools`, `agents`, `memory-files`, `skills`, `attachments`,
+`messages`, `reserved`), each with tokens, an accuracy (`provider-reported`,
+`exact-tokenizer`, `model-family-estimate`, `conservative-heuristic`) and an
+optional count, plus counts of tools the runtime knows but has not loaded
+(`deferred`, no tokens, no share), and `sentContext`, which says whether what
+Octant sent inside the prompt is counted. Per runtime:
 
 - Claude Code answers `query.getContextUsage()` with `categories` (name, tokens,
   `isDeferred`), `totalTokens`, `maxTokens`, and lists that give counts
@@ -2212,16 +2214,57 @@ knows but has not loaded (`deferred`, no tokens, no share). Per runtime:
   leave it.
 - Codex app-server (`thread/tokenUsage/updated`: `last`/`total` input, cached,
   output and reasoning tokens, plus `modelContextWindow`), OpenCode (per-step
-  tokens and the model's `limit.context`), Pi (`get_session_stats.contextUsage`
-  as one figure) and ACP (`usage_update` with `used` and `size`) report no
-  categories. Lists of tools, MCP servers, skills or instruction files exist in
-  some of them but carry no token weight, so they are not parts.
+  tokens and the model's `limit.context`) and Pi (assistant `message_end` usage;
+  the occupancy is the last message's input, cache and output) report one
+  figure and no categories. The ACP driver reports no usage at all, so an ACP
+  thread shows no window. Lists of tools, MCP servers, skills or instruction
+  files exist in some runtimes but carry no token weight, so they are not parts.
 - For a runtime that reported none, the turn runner counts what Octant itself
   registered with the session: the app-managed tool definitions, which travel
   with every request. They are `octant-tools`, `conservative-heuristic` (the
   serialized definition at four characters to a token, floor 16 per tool), and
   are never added when the runtime reported its own categories, so a part is
   never counted twice.
+
+**What Octant sends with each turn.** Octant's instructions (a profile's
+instructions, the Browser guidance), skills (a profile's admitted skills and the
+skills selected for a turn) and attachments are sent with every turn, inside the
+prompt: `renderProviderTurnPrompt` puts the context blocks in the prompt text as
+JSON, and attachments travel as the prompt's images. A runtime that keeps its
+prompts therefore holds one copy per turn, and a running total is right only
+while every copy is accounted for. The adapter, which knows its runtime, says on
+each usage report what the runtime does with the prompt (`promptRetention`):
+
+| Runtime           | What earlier copies do                                                                                                                                                                                                                                                                       | `promptRetention`                                                                         | Source                                                                                                                            |
+| ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| Codex app-server  | Each turn's input is a `userMessage` in the thread and is sent with every later request. Compaction rebuilds the thread from a summary and as many recent user messages as fit in 20,000 tokens, so what survives is Codex's choice. Octant sees compaction as the `contextCompaction` item. | `kept`, or `compacted` for the rest of a turn in which a `contextCompaction` item arrived | `build_compacted_history` and `COMPACT_USER_MESSAGE_MAX_TOKENS` in codex-rs `core/src/compact.rs`; the item in `codexProtocol.ts` |
+| OpenCode          | Each prompt is a user message sent again with every request. A completed compaction sends the summary and at most a recent tail of messages. Octant sees `session.compacted` (1.x), `session.next.compaction.ended` (2.x) and `session.compaction.ended` (2.0.22).                           | `kept`, or `compacted` for the rest of a prompt in which compaction ended                 | `filterCompacted` in opencode `packages/opencode/src/session/message-v2.ts`; the events in `@opencode-ai/sdk`                     |
+| Pi                | Each prompt is a session entry sent with every request. A compaction keeps a summary and the entries from `firstKeptEntryId` on. Octant sees `compaction_end`; one without `result` (aborted or failed) changed nothing.                                                                     | `kept`, or `compacted` when a `compaction_end` with a `result` arrived during the prompt  | Pi's JSON event stream docs (`packages/coding-agent/docs/json.md`, `compaction_start`/`compaction_end`)                           |
+| ACP agents        | Each agent manages its own history; the protocol says nothing about what it keeps or compacts, and the driver reports no usage.                                                                                                                                                              | absent                                                                                    | ACP driver (`acpDriver.ts`, usage `unavailable`)                                                                                  |
+| Any other adapter | Not determined.                                                                                                                                                                                                                                                                              | absent                                                                                    | —                                                                                                                                 |
+
+From that the turn runner builds the parts (`octantWindowBreakdown` in
+`apps/server/src/code/codeTurnContext.ts`):
+
+- This turn's copy is estimated as sent: each context block's JSON at four
+  characters to a token (floor 16), and each image by area as a provider scales
+  it (fitted to 1568 px and about 1.15 megapixels, width × height / 750, at
+  most 1,600), or 1,600 when its size cannot be read. Octant ships no tokenizer
+  and does not know which model family a runtime routes to, so every figure is
+  `conservative-heuristic`; none is labelled exact or model-family.
+- What earlier turns of the provider session left comes from the last usage
+  report of the prior turn in the journal. A turn that opens a new session
+  starts from nothing; a fork whose first turn takes up another thread's session,
+  a prior turn with no report, or a report from before this accounting leaves the
+  session `history-unknown`.
+- While the runtime says `kept` and the session is counted, the parts are the
+  carried copies plus this turn's, as `octant-instructions`, `skills` and
+  `attachments`. Otherwise the breakdown says `uncounted` with the reason
+  (`retention-unknown`, `compacted`, `history-unknown`), the copies stay in
+  `Other (provider)`, and the session stays uncounted until it ends. Nothing is
+  estimated from a guess about what a runtime kept.
+- Thread and file mentions, issue context, a fork's handoff and product feedback
+  are part of the turn's own request; they stay in `Other (provider)`.
 
 The renderer shows the parts and one remainder, `Other (provider)`, which is the
 reported occupancy less the parts and is itself marked estimated when any part

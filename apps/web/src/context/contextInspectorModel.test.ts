@@ -338,6 +338,55 @@ describe("window of a provider-run thread", () => {
     expect(model.counts).toEqual([{ key: "tools", label: "Tools", loaded: 9 }]);
   });
 
+  it("shows the instructions, skills and attachments Octant sent with a Codex-style thread as estimated parts", () => {
+    const model = providerWindowModel({
+      breakdown: {
+        parts: [
+          { kind: "attachments", tokens: 1_600, accuracy: "conservative-heuristic" },
+          { kind: "skills", tokens: 2_400, accuracy: "conservative-heuristic" },
+          { kind: "octant-tools", tokens: 1_200, accuracy: "conservative-heuristic", count: 9 },
+          { kind: "octant-instructions", tokens: 800, accuracy: "conservative-heuristic" },
+        ],
+        sentContext: { status: "counted" },
+      },
+      usedTokens: 40_000,
+      windowTokens: 272_000,
+    });
+
+    expect(model.segments.map((segment) => segment.label)).toEqual([
+      "Octant instructions",
+      "Octant tools",
+      "Skills",
+      "Attachments",
+      "Other (provider)",
+      "Free space",
+    ]);
+    expect(model.segments.slice(0, 4).every((segment) => segment.estimated === true)).toBe(true);
+    expect(model.segments[4]).toMatchObject({ tokens: 34_000, estimated: true });
+    expect(sum(model.segments)).toBe(272_000);
+    expect(model).not.toHaveProperty("uncountedNote");
+    // Copies held once per turn are not things loaded, so only tools are counted.
+    expect(model.counts).toEqual([{ key: "tools", label: "Tools", loaded: 9 }]);
+  });
+
+  it.each([
+    ["retention-unknown", "does not say whether it keeps"],
+    ["compacted", "compacted this session"],
+    ["history-unknown", "could not count every earlier turn"],
+  ] as const)(
+    "says why what Octant sent is in Other (provider) when it is %s",
+    (reason, phrase) => {
+      const model = providerWindowModel({
+        breakdown: { parts: [], sentContext: { status: "uncounted", reason } },
+        usedTokens: 40_000,
+        windowTokens: 272_000,
+      });
+
+      expect(model.uncountedNote).toContain(phrase);
+      expect(model.uncountedNote).toContain("Other (provider)");
+    },
+  );
+
   it("says which accuracy each estimated part carries, whatever it is", () => {
     const model = providerWindowModel({
       breakdown: {
@@ -453,6 +502,14 @@ describe("category colours", () => {
       "subagent-results",
       "observed-overhead",
     ];
+    const tones = keys.map((key) => contextCategoryTone(key));
+
+    expect(tones.every((tone) => tone !== undefined)).toBe(true);
+    expect(new Set(tones).size).toBe(keys.length);
+  });
+
+  it("gives every part Octant counts for a runtime that reports one figure its own tone", () => {
+    const keys = ["octant-instructions", "octant-tools", "skills", "attachments", "other-provider"];
     const tones = keys.map((key) => contextCategoryTone(key));
 
     expect(tones.every((tone) => tone !== undefined)).toBe(true);

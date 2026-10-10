@@ -458,6 +458,25 @@ describe("ComposerContextMeter", () => {
       expect(popover).toHaveTextContent("Tools9 loaded");
     });
 
+    it("says why what Octant sent stays in Other (provider) after the runtime compacted", async () => {
+      const popover = await openBreakdown({
+        contextWindow: 272_000,
+        contextTokens: 40_000,
+        limits: [],
+        contextBreakdown: {
+          parts: [
+            { kind: "octant-tools", tokens: 1_200, accuracy: "conservative-heuristic", count: 9 },
+          ],
+          sentContext: { status: "uncounted", reason: "compacted" },
+        },
+      });
+
+      expect(popover).toHaveTextContent(
+        "The runtime compacted this session and kept a share of earlier turns that Octant cannot measure",
+      );
+      expect(within(popover).queryByText("Octant instructions")).toBeNull();
+    });
+
     it("raises the ring and the figure to what the parts add up to when they outrun the occupancy", async () => {
       render(
         <ComposerContextMeterProvider

@@ -21,6 +21,7 @@ import {
   type CodeProviderLimit,
   type CodeOperationId,
   type CodeThreadId,
+  type ProviderContextBreakdown,
   type ProviderInstanceId,
 } from "@octant/contracts";
 import { Schema } from "effect";
@@ -312,6 +313,11 @@ export class CodeOperationEventStore {
         readonly priorTurn: boolean;
         readonly priorTurnSettled: boolean;
         readonly session?: Extract<CodeOperationEvent, { readonly kind: "provider-session-ready" }>;
+        /**
+         * What fills the window, from the last usage report of the prior turn.
+         * Absent when that turn reported none or the report said nothing of it.
+         */
+        readonly priorTurnBreakdown?: ProviderContextBreakdown;
       }
     | { readonly status: "rebuild-required" } {
     try {
@@ -357,11 +363,20 @@ export class CodeOperationEventStore {
             (frame.event.result.kind !== "provider-turn-state" ||
               (frame.event.result.state !== "running" && frame.event.result.state !== "waiting")),
         );
+      const priorUsage = read("usage", 1)[0];
+      const priorTurnBreakdown =
+        priorStart !== undefined &&
+        priorUsage !== undefined &&
+        String(priorUsage.operationId) === String(priorStart.operationId) &&
+        priorUsage.event.kind === "usage"
+          ? priorUsage.event.contextBreakdown
+          : undefined;
       return {
         status: "ok",
         priorTurn: priorStart !== undefined,
         priorTurnSettled,
         ...(session?.kind === "provider-session-ready" ? { session } : {}),
+        ...(priorTurnBreakdown === undefined ? {} : { priorTurnBreakdown }),
       };
     } catch {
       return { status: "rebuild-required" };

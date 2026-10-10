@@ -2419,6 +2419,31 @@ describe("provider runtime contracts", () => {
     ).toThrow();
   });
 
+  it("carries what the runtime keeps of each turn's prompt and whether Octant counted what it sent", () => {
+    const event = {
+      ...common,
+      kind: "usage",
+      inputTokens: 10,
+      outputTokens: 4,
+      promptRetention: "compacted",
+      contextBreakdown: {
+        parts: [
+          { kind: "octant-instructions", tokens: 200, accuracy: "conservative-heuristic" },
+          { kind: "attachments", tokens: 1_600, accuracy: "conservative-heuristic" },
+        ],
+        sentContext: { status: "uncounted", reason: "compacted" },
+      },
+    } as const;
+    expect(decodeProviderRuntimeEvent(event)).toMatchObject(event);
+    expect(() => decodeProviderRuntimeEvent({ ...event, promptRetention: "forgotten" })).toThrow();
+    expect(() =>
+      decodeProviderRuntimeEvent({
+        ...event,
+        contextBreakdown: { parts: [], sentContext: { status: "uncounted" } },
+      }),
+    ).toThrow();
+  });
+
   it("refuses a deferred part that claims a share of the window", () => {
     expect(() =>
       decodeProviderRuntimeEvent({

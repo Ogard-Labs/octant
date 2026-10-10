@@ -225,6 +225,47 @@ describe("Pi provider driver", () => {
     },
   );
 
+  it.each([
+    ["kept", []],
+    ["kept", [{ type: "compaction_end", reason: "threshold", aborted: true }]],
+    [
+      "compacted",
+      [
+        {
+          type: "compaction_end",
+          reason: "threshold",
+          result: { summary: "s", firstKeptEntryId: "e", tokensBefore: 9, estimatedTokensAfter: 3 },
+        },
+      ],
+    ],
+  ] as const)(
+    "says the prompt stays in the session as %s until Pi completes a compaction",
+    async (retention, compaction) => {
+      const { driver, client } = fixture();
+      const scope = Effect.runSync(Scope.make());
+      const connection = await Effect.runPromise(
+        driver.acquire({ instanceId, projectRoot: root, mode: "code" }).pipe(Scope.extend(scope)),
+      );
+      await Effect.runPromise(
+        connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+      );
+      const collected = terminal(Stream.unwrapScoped(connection.subscribe));
+      await Effect.runPromise(
+        connection.send({ sessionId, prompt: "hello", attachments: [], tools: [] }),
+      );
+      client.emit({
+        type: "message_end",
+        message: { role: "assistant", usage: { input: 1, output: 2, cacheRead: 0, cacheWrite: 0 } },
+      });
+      for (const event of compaction) client.emit(event);
+      client.emit({ type: "agent_settled" });
+      const usage = (await collected).find((event) => event.kind === "usage");
+      expect(usage).toMatchObject({ kind: "usage", promptRetention: retention });
+      await Effect.runPromise(connection.stop(sessionId));
+      await Effect.runPromise(Scope.close(scope, Exit.void));
+    },
+  );
+
   it("records a length stop on the completed event", async () => {
     const { driver, client } = fixture();
     const scope = Effect.runSync(Scope.make());

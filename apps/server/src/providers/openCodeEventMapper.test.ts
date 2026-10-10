@@ -879,9 +879,12 @@ describe("OpenCode 2.0.22 events", () => {
     ["session.tool.input.delta", { assistantMessageID, id: "call_1", delta: "{" }],
     ["session.compaction.started", { reason: "auto", recent: "" }],
     ["session.compaction.delta", { text: "" }],
-    ["session.compaction.ended", { reason: "auto" }],
   ] as const)("records %s as bookkeeping with no runtime event", (type, data) => {
     expect(adaptAndMap(type, data)).toBe("ignored");
+  });
+
+  it("passes a finished compaction on, for the driver to note, with no runtime event of its own", () => {
+    expect(adaptAndMap("session.compaction.ended", { reason: "auto" })).toEqual([]);
   });
 
   it("fails closed on an event this mapping does not know", () => {

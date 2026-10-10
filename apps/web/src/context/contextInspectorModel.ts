@@ -406,9 +406,10 @@ function shareOf(value: number, total: number | undefined): { readonly percent?:
  * the fourteen categories of a planned thread without any two of them sharing a
  * tone, and a provider-run window uses a subset of the same table: a category
  * that is the same thing in both (conversation and messages, MCP and MCP tools,
- * Octant tools and system tools, framing and system prompt, the unattributed
- * remainder) shares one tone, and the pairs that share one never stand in the
- * same bar. The assignment was chosen so that neighbours in the display order
+ * Octant tools and system tools, framing and system prompt, a profile's
+ * instructions and the Octant instructions sent with a turn, the pictures a turn
+ * carries and the workspace context it reads, the unattributed remainder)
+ * shares one tone, and the pairs that share one never stand in the same bar. The assignment was chosen so that neighbours in the display order
  * (`CONTEXT_CATEGORY_ORDER`, `PROVIDER_PART_ORDER`) differ clearly in both
  * themes: the worst neighbouring pair is 0.134 apart in OKLab, and every tone
  * holds at least 5.2:1 against the popover. `visualLanguageContract.test.ts`
@@ -426,7 +427,9 @@ const CATEGORY_TONES: Readonly<Record<string, ContextTone>> = {
   "subagent-results": 3,
   agents: 3,
   "workspace-context": 4,
+  attachments: 4,
   "user-instructions": 5,
+  "octant-instructions": 5,
   "extension-instructions": 6,
   skills: 6,
   "provider-framing": 7,
@@ -466,15 +469,22 @@ export const CONTEXT_CATEGORY_ORDER: ReadonlyArray<ContextEntryCategory> = [
   "reserves",
 ];
 
-/** The order a provider-run window's parts are listed in. */
+/**
+ * The order a provider-run window's parts are listed in. Octant's own parts
+ * (instructions, tools, skills and attachments it counted) stand in a bar only
+ * when the runtime reported no categories, so they sit beside the runtime's
+ * nearest equivalents and are never neighbours of them.
+ */
 export const PROVIDER_PART_ORDER: ReadonlyArray<ProviderContextPartKind> = [
   "system-prompt",
+  "octant-instructions",
   "system-tools",
   "octant-tools",
   "mcp-tools",
   "agents",
   "memory-files",
   "skills",
+  "attachments",
   "messages",
   "reserved",
 ];
@@ -490,6 +500,8 @@ export function contextCategoryTone(key: string): ContextTone | undefined {
 
 const partLabels: Readonly<Record<ProviderContextPartKind, string>> = {
   "system-prompt": "System prompt",
+  "octant-instructions": "Octant instructions",
+  attachments: "Attachments",
   "system-tools": "System tools",
   "octant-tools": "Octant tools",
   "mcp-tools": "MCP tools",
@@ -516,9 +528,31 @@ export interface ProviderWindowModel {
     Exclude<ContextSegmentAccuracy, "provider-reported" | "exact-tokenizer">
   >;
   readonly segments: ReadonlyArray<ContextWindowSegment>;
+  /**
+   * Why the instructions, skills and attachments Octant sent are not parts of
+   * their own, when it sent some it could not count. They are in the remainder.
+   */
+  readonly uncountedNote?: string;
   /** What the window holds. Never less than the parts that were counted in it. */
   readonly usedTokens: number;
 }
+
+const uncountedNotes: Readonly<
+  Record<
+    Extract<
+      NonNullable<ProviderContextBreakdown["sentContext"]>,
+      { readonly status: "uncounted" }
+    >["reason"],
+    string
+  >
+> = {
+  "retention-unknown":
+    "This runtime does not say whether it keeps earlier turns' copies of the instructions, skills and attachments Octant sends with each turn, so they are counted in Other (provider).",
+  compacted:
+    "The runtime compacted this session and kept a share of earlier turns that Octant cannot measure, so the instructions, skills and attachments Octant sent are counted in Other (provider).",
+  "history-unknown":
+    "Octant could not count every earlier turn of this session, so any instructions, skills and attachments it sent are counted in Other (provider).",
+};
 
 /**
  * The window of a thread a provider runtime runs, as the parts that fill it.
@@ -663,7 +697,16 @@ export function providerWindowModel(input: {
   countRow("skills", "Skills", loaded("skills"));
   countRow("agents", "Agents", loaded("agents"));
 
-  return { counts, estimatedAccuracies, segments, usedTokens };
+  const accounting = breakdown?.sentContext;
+  return {
+    counts,
+    estimatedAccuracies,
+    segments,
+    usedTokens,
+    ...(accounting?.status === "uncounted"
+      ? { uncountedNote: uncountedNotes[accounting.reason] }
+      : {}),
+  };
 }
 
 export function contextAccuracyLabel(accuracy: ContextSegmentAccuracy): string {

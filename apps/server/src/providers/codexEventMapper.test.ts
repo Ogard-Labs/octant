@@ -1112,6 +1112,47 @@ describe("mapCodexMessage", () => {
     ]);
   });
 
+  it("says each turn's prompt stays in the thread until Codex compacts it", () => {
+    const session = context();
+    const usage = () =>
+      map(
+        session,
+        notification("thread/tokenUsage/updated", {
+          threadId: "thread-1",
+          turnId: "turn-1",
+          tokenUsage: {
+            total: {
+              totalTokens: 7,
+              inputTokens: 4,
+              cachedInputTokens: 1,
+              outputTokens: 3,
+              reasoningOutputTokens: 1,
+            },
+            last: {
+              totalTokens: 7,
+              inputTokens: 4,
+              cachedInputTokens: 1,
+              outputTokens: 3,
+              reasoningOutputTokens: 1,
+            },
+            modelContextWindow: 200_000,
+          },
+        }),
+      );
+
+    expect(usage()).toMatchObject([{ event: { kind: "usage", promptRetention: "kept" } }]);
+    map(
+      session,
+      notification("item/completed", {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        item: { type: "contextCompaction", id: "provider-compaction" },
+        completedAtMs: 20,
+      }),
+    );
+    expect(usage()).toMatchObject([{ event: { kind: "usage", promptRetention: "compacted" } }]);
+  });
+
   it("ignores delayed usage from an earlier turn without poisoning the active turn totals", () => {
     const session = context({ turnId: "turn-2" });
     const report = (turnId: string, inputTokens: number, threadId = "thread-1") =>

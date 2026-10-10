@@ -20,7 +20,7 @@ import type {
   ProviderSessionHandle,
 } from "@octant/provider-sdk/driver";
 import { summarizeTurnEnd, type TurnEndSummary } from "../metrics/turnEnd";
-import { estimateOctantToolsPart } from "./codeTurnContext";
+import { octantWindowBreakdown, type CodeTurnContextAccount } from "./codeTurnContext";
 import type { LiveTurnTracker } from "../liveTurn/liveTurnRegistry";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import { subscribeThenSend } from "../providers/providerEventDelivery";
@@ -145,6 +145,11 @@ export interface CodeTurnRunnerInput {
   readonly context?: Parameters<ProviderConnection["send"]>[0]["context"];
   readonly attachments?: Parameters<ProviderConnection["send"]>[0]["attachments"];
   readonly appManagedTools?: AppManagedToolSet;
+  /**
+   * What this turn sends inside its prompt and what the session already held,
+   * counted for the window of a runtime that reports no categories.
+   */
+  readonly contextAccount?: CodeTurnContextAccount;
   /**
    * Whether the harness's native reviewer may answer approval prompts for
    * this turn. The caller computes this from the thread's `autoApprove` flag,
@@ -751,7 +756,12 @@ function normalizeProviderEvent(
       // The runtime's own categories win. Octant counts what it adds only for
       // a runtime that reported none, so a part is never counted twice.
       const contextBreakdown =
-        event.contextBreakdown ?? estimateOctantToolsPart(input.appManagedTools?.definitions ?? []);
+        event.contextBreakdown ??
+        octantWindowBreakdown({
+          tools: input.appManagedTools?.definitions ?? [],
+          account: input.contextAccount,
+          promptRetention: event.promptRetention,
+        });
       // Priced here, once, and journaled with the report. A ledger that priced
       // the turn on rebuild would re-price Code history after any revision of
       // the standard-rate table, and could change what a money ceiling saw.
