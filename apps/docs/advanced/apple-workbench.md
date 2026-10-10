@@ -158,14 +158,17 @@ Simulator. Each Simulator destination offers only what its reported state
 can do: a shut-down Simulator offers **Boot**; a booted one offers **Run**,
 **Capture screen**, and **Shut down**. A live attachable frame is driven
 directly: click to tap, drag to swipe — the swipe is sent when you let go and
-takes as long as your drag did — and, once you have clicked the screen, type
-on your keyboard. Typing is sent when you pause, Return, Delete, Escape and
-the arrow keys go to the device, and Command and Control shortcuts stay with
-Octant. **Home**, **Lock**, and **Type text…** are in the device pane's
-toolbar and wait in the same queue as taps and typing, so what you do while an
-action is still running is kept and sent in order. **Run** is limited to destinations
-whose platform matches the first discovered Simulator. Anything already
-running can be **Cancel**led from **Current progress**.
+replays your drag as a straight line taking as long as your drag did; on the
+managed stream a drag up from the bottom edge goes Home or unlocks — and, once
+you have clicked the screen, type on your keyboard. Typing is sent when you
+pause, Return, Delete, Escape and the arrow keys go to the device, and Command
+and Control shortcuts stay with Octant. **Home**, **Lock**, and **Type text…**
+are in the device pane's toolbar and wait in the same queue as taps and
+typing, so what you do while an action is still running is kept and sent in
+order. Holding the mouse button down without moving is a tap; long press and
+pinch are not available. **Run** is limited to destinations whose platform
+matches the first discovered Simulator. Anything already running can be
+**Cancel**led from **Current progress**.
 
 An approval-gated Code thread asks for confirmation before each of these, the
 same confirmation the rest of Code uses. Input to the device is the exception

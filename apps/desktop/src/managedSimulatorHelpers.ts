@@ -10,6 +10,7 @@ import type {
   DeviceViewer,
   SimulatorDeviceHelpers,
 } from "./simulatorDeviceHelper";
+import { swipeEdge, swipePath, type ScreenEdge, type ScreenFraction } from "./swipePath";
 
 const SIMULATOR_ID = /^[0-9A-Fa-f]{8}(?:-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}$/;
 const READY_MS = 8_000;
@@ -33,6 +34,18 @@ const INPUT_CONNECTION_MS = 1_500;
  */
 const DEVICE_HUB_INPUT_NOTIFICATION = "com.apple.coredevice.dtuhidd.active";
 
+/** The native helper's pace for a swipe that names none. */
+const DEFAULT_SWIPE_MS = 250;
+/** serve-sim's tag for a single-finger touch on its input socket. */
+const TOUCH_MESSAGE = 3;
+/** The edge flags serve-sim passes to the Simulator's HID layer. */
+const SERVE_SIM_EDGE: Readonly<Record<ScreenEdge, number>> = {
+  left: 1,
+  top: 2,
+  bottom: 3,
+  right: 4,
+};
+
 export const INPUT_DISCONNECTED_MESSAGE =
   "Simulator input is disconnected. Repair input restarts the Simulator's home screen.";
 
@@ -41,6 +54,26 @@ export const INPUT_DISCONNECTED_MESSAGE =
  * serve-sim sends. `unknown` means the guest did not answer in time.
  */
 export type SimulatorInputConnection = "connected" | "disconnected" | "unknown";
+
+/** One touch on serve-sim's input socket, in fractions of the screen. */
+export interface ServeSimTouch {
+  readonly type: "begin" | "move" | "end";
+  readonly x: number;
+  readonly y: number;
+  readonly edge?: number;
+}
+
+/**
+ * An open connection to serve-sim's input socket. A swipe holds one from
+ * finger-down to lift: its command line opens a socket per touch and takes
+ * about half a second to start (measured 2026-10-10 with serve-sim 0.1.46),
+ * so a path sent one command at a time would arrive as a hold and a jump.
+ */
+export interface ServeSimTouchChannel {
+  /** Sends one touch; false when the socket is no longer open. */
+  send(touch: ServeSimTouch): boolean;
+  close(): void;
+}
 
 /** `aborted` can flip during an await, so this read stays outside control-flow narrowing. */
 function actionWasCancelled(signal: AbortSignal | undefined): boolean {
@@ -85,6 +118,11 @@ export interface ManagedSimulatorHelpersOptions {
     udid: string,
     signal: AbortSignal,
   ) => Promise<SimulatorInputConnection>;
+  /** Opens serve-sim's input socket; resolves nothing when it does not open. */
+  readonly openTouchChannel?: (
+    url: string,
+    signal: AbortSignal,
+  ) => Promise<ServeSimTouchChannel | undefined>;
 }
 
 interface StreamSession {
@@ -136,6 +174,7 @@ export function createManagedSimulatorHelpers(
   const firstFrameMs = options.firstFrameMs ?? FIRST_FRAME_MS;
   const copyToPasteboard = options.copyToPasteboard ?? simctlPasteboardCopy;
   const inputConnection = options.inputConnection ?? simctlInputConnection;
+  const openTouchChannel = options.openTouchChannel ?? openServeSimTouchChannel;
   const sessions = new Map<string, Promise<StreamSession | undefined>>();
   const live = new Set<ChildProcess>();
   /** Simulators whose finger went down through the native helper. */
@@ -297,45 +336,69 @@ export function createManagedSimulatorHelpers(
       if (connection === "disconnected") return { kind: "disconnected", remainingMs: timeoutMs };
     }
     let sent = false;
-    let gestureOpen = false;
-    const releaseGesture = async () => {
-      if (!gestureOpen || request.op !== "swipe") return;
-      gestureOpen = false;
-      await runControl(
-        [
-          "gesture",
-          JSON.stringify({ type: "end", x: request.toX, y: request.toY }),
-          "-d",
-          session.udid,
-        ],
-        timeoutMs,
-        undefined,
-      );
-    };
     for (const command of commands) {
-      if (command.kind === "wait") {
-        await delay(command.ms, cancelled);
-        if (actionWasCancelled(cancelled)) {
-          await releaseGesture();
-          return { status: "unavailable", message: "The action was cancelled." };
-        }
-        continue;
-      }
+      if (command.kind === "swipe")
+        return swipeThroughStream(session, command, timeoutMs, cancelled);
       const outcome = await runControl(command.args, timeoutMs, cancelled);
       // A command that already reached the stream must not be repeated on the
       // native helper. A missing tool before anything was sent still can.
-      // A swipe that already put a finger down lifts it before returning.
       if (outcome !== "ok") {
-        if (sent && command.gesture !== "close") await releaseGesture();
         return sent || outcome !== "missing"
           ? { status: "unavailable", message: "The simulator stream did not accept the input." }
           : "native";
       }
       sent = true;
-      if (command.gesture === "open") gestureOpen = true;
-      if (command.gesture === "close") gestureOpen = false;
     }
     return { status: "delivered" };
+  }
+
+  /**
+   * Moves one finger along the swipe's path through a single socket, each
+   * touch at its own time. A swipe stopped part-way lifts the finger where it
+   * is, so the guest is never left with a finger down.
+   */
+  async function swipeThroughStream(
+    session: StreamSession,
+    swipe: SwipeCommand,
+    timeoutMs: number,
+    cancelled: AbortSignal | undefined,
+  ): Promise<DeviceHelperReply> {
+    const signal = AbortSignal.any([
+      AbortSignal.timeout(timeoutMs),
+      ...(cancelled === undefined ? [] : [cancelled]),
+    ]);
+    const stopped = (): DeviceHelperReply =>
+      actionWasCancelled(cancelled)
+        ? { status: "unavailable", message: "The action was cancelled." }
+        : { status: "unavailable", message: "The simulator stream did not accept the input." };
+    inflight += 1;
+    const channel = await openTouchChannel(touchUrl(session.endpoint), signal);
+    if (channel === undefined) {
+      inflight -= 1;
+      return stopped();
+    }
+    const edge = swipeEdge(swipe.from);
+    const flag = edge === undefined ? {} : { edge: SERVE_SIM_EDGE[edge] };
+    const path = swipePath(swipe.from, swipe.to, swipe.durationMs);
+    const startedAt = performance.now();
+    let at: ScreenFraction | undefined;
+    try {
+      for (const sample of path) {
+        await delay(startedAt + sample.atMs - performance.now(), signal);
+        if (signal.aborted) {
+          if (at !== undefined) channel.send({ type: "end", x: at.x, y: at.y, ...flag });
+          return stopped();
+        }
+        const type = at === undefined ? "begin" : "move";
+        if (!channel.send({ type, x: sample.x, y: sample.y, ...flag })) return stopped();
+        at = sample;
+      }
+      if (!channel.send({ type: "end", x: swipe.to.x, y: swipe.to.y, ...flag })) return stopped();
+      return { status: "delivered" };
+    } finally {
+      channel.close();
+      inflight -= 1;
+    }
   }
 
   /**
@@ -564,12 +627,15 @@ export function createManagedSimulatorHelpers(
 }
 
 type ControlCommand =
-  | {
-      readonly kind: "args";
-      readonly args: ReadonlyArray<string>;
-      readonly gesture?: "open" | "close";
-    }
-  | { readonly kind: "wait"; readonly ms: number };
+  | { readonly kind: "args"; readonly args: ReadonlyArray<string> }
+  | SwipeCommand;
+
+interface SwipeCommand {
+  readonly kind: "swipe";
+  readonly from: ScreenFraction;
+  readonly to: ScreenFraction;
+  readonly durationMs: number;
+}
 
 function controlCommands(
   udid: string,
@@ -596,35 +662,67 @@ function controlCommands(
   if (request.op === "swipe") {
     return [
       {
-        kind: "args",
-        gesture: "open",
-        args: [
-          "gesture",
-          JSON.stringify({ type: "begin", x: request.fromX, y: request.fromY }),
-          ...device,
-        ],
-      },
-      { kind: "wait", ms: request.durationMs ?? 0 },
-      {
-        kind: "args",
-        args: [
-          "gesture",
-          JSON.stringify({ type: "move", x: request.toX, y: request.toY }),
-          ...device,
-        ],
-      },
-      {
-        kind: "args",
-        gesture: "close",
-        args: [
-          "gesture",
-          JSON.stringify({ type: "end", x: request.toX, y: request.toY }),
-          ...device,
-        ],
+        kind: "swipe",
+        from: { x: request.fromX, y: request.fromY },
+        to: { x: request.toX, y: request.toY },
+        durationMs: request.durationMs ?? DEFAULT_SWIPE_MS,
       },
     ];
   }
   return undefined;
+}
+
+/** serve-sim's input socket sits beside the stream that was already checked to be loopback. */
+function touchUrl(endpoint: ManagedDeviceEndpoint): string {
+  return endpoint.streamUrl.replace(/^http:/, "ws:").replace(/\/stream\.mjpeg$/, "/ws");
+}
+
+/** Speaks serve-sim's input socket the way its own command line does: a tag byte, then JSON. */
+function openServeSimTouchChannel(
+  url: string,
+  signal: AbortSignal,
+): Promise<ServeSimTouchChannel | undefined> {
+  return new Promise((resolve) => {
+    if (signal.aborted) {
+      resolve(undefined);
+      return;
+    }
+    const socket = new WebSocket(url);
+    socket.binaryType = "arraybuffer";
+    const onAbort = () => {
+      socket.close();
+      resolve(undefined);
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    socket.addEventListener(
+      "error",
+      () => {
+        signal.removeEventListener("abort", onAbort);
+        resolve(undefined);
+      },
+      { once: true },
+    );
+    socket.addEventListener(
+      "open",
+      () => {
+        signal.removeEventListener("abort", onAbort);
+        resolve({
+          send(touch) {
+            if (socket.readyState !== WebSocket.OPEN) return false;
+            const body = new TextEncoder().encode(JSON.stringify(touch));
+            const message = new Uint8Array(body.length + 1);
+            message[0] = TOUCH_MESSAGE;
+            message.set(body, 1);
+            socket.send(message);
+            return true;
+          },
+          // Messages already queued are sent before the closing handshake.
+          close: () => socket.close(),
+        });
+      },
+      { once: true },
+    );
+  });
 }
 
 function publish(session: StreamSession, frame: Uint8Array): void {

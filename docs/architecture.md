@@ -646,6 +646,16 @@ drag is one swipe sent when it ends, keys typed on the focused screen go to
 the device as one text per pause, Home and Lock are buttons, and what a person
 does while an action runs is kept and sent in order (see
 [decisions/0140-the-live-simulator-screen-is-driven-directly.md](decisions/0140-the-live-simulator-screen-is-driven-directly.md)).
+A swipe reaches the device as a finger that moves: it goes down at the start,
+moves in even steps of about 16 ms along the straight line to the end over the
+swipe's duration, and lifts there. The native helper paces the steps itself;
+on the managed `serve-sim` stream the desktop sends them through one held
+connection to the stream's input socket, because that tool's command line
+starts too slowly to send a path one touch at a time. A swipe that starts
+within 2% of a screen edge is flagged as an edge touch on that stream, which
+is what lets a drag from the bottom go Home or unlock. Only straight
+single-finger swipes exist: a press held in place is a tap, and there is no
+long press or pinch.
 Touch and buttons sent through the managed `serve-sim` stream are reported
 delivered only while the Simulator's legacy input services still receive them.
 Xcode 27's Device Hub can take those services over: its guest input daemon
