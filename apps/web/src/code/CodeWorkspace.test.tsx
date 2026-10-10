@@ -549,10 +549,19 @@ describe("CodeWorkspace", () => {
       snapshot: vi.fn(async () => ({ sequence: 1, active: [], recentEvidence: [], simulators })),
       execute,
       cancel: vi.fn(),
-      watchScreen: vi.fn(async () => ({
-        status: "failed",
-        message: "The live Simulator view is not available in this test.",
-      })),
+      // The live view stays connecting. A view that fails turns into the
+      // "live view stopped" notice, which takes the line ahead of the input
+      // approval, so the Allow prompt would vanish once the failure landed.
+      watchScreen: vi.fn(
+        (_request: unknown, signal: AbortSignal) =>
+          new Promise((resolve) => {
+            signal.addEventListener(
+              "abort",
+              () => resolve({ status: "failed", message: "The live view was given up." }),
+              { once: true },
+            );
+          }),
+      ),
     };
     render(
       <CodeWorkspace
