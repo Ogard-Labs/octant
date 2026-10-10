@@ -214,18 +214,50 @@ describe("the public-block visual language", () => {
     expect(focus).not.toMatch(/box-shadow:\s*(?!none\s*;)[^;]+;/);
   });
 
-  it("keeps keyboard focus visible without outlining controls or popups", () => {
+  it("draws one neutral keyboard focus edge that no surface suppresses or repaints", () => {
     const system = readFileSync(join(webRoot, "styles/octant.css"), "utf8");
+    const bridge = readFileSync(join(webRoot, "styles/octant-bridge.css"), "utf8");
     const withoutComments = system.replace(/\/\*[\s\S]*?\*\//g, "");
+
+    // Assert the rule was found before asserting about it, so the negative
+    // checks below cannot pass on an empty string.
     const rule = withoutComments.match(/(?:^|\n)\s*:focus-visible\s*\{[^}]+\}/)?.[0] ?? "";
-    expect(rule).toMatch(/outline:\s*none/);
-    expect(withoutComments).toMatch(/text-decoration:\s*underline/);
+    expect(rule).not.toBe("");
+
+    // A focus fill alone was the hover fill, so keyboard focus could not be
+    // told from the pointer. One inset edge, declared once, is the indicator.
+    expect(rule).toMatch(/outline:\s*2px solid var\(--oct-focus-edge\)/);
+    expect(rule).toMatch(/outline-offset:\s*-2px/);
+    expect(rule).not.toMatch(/background|box-shadow|border-radius/);
+    expect(withoutComments).not.toMatch(/:focus-visible[^{]*\{[^}]*text-decoration:\s*underline/);
+
+    // Mixed from the foreground, never from the accent or the focus-ring theme
+    // role, so it holds contrast on any surface without a coloured halo.
+    const edge = bridge.match(/--oct-focus-edge:[^;]+;/)?.[0] ?? "";
+    expect(edge).toMatch(/var\(--oct-fg\)/);
+    expect(edge).not.toMatch(/accent|focus-ring/);
+
+    // A control filled with the accent inverts the edge, or it draws the edge
+    // in the colour it is already painted with.
     expect(withoutComments).toMatch(
-      /input:focus-visible[^{}]*[\s\S]*?background-color:\s*var\(--octant-control-hover\)/,
+      /\[data-slot="button"\]\[data-variant="default"\]:focus-visible[^{]*\{[^}]*--oct-focus-edge-on-accent/,
     );
-    expect(withoutComments).toMatch(
-      /\[data-slot="button"\]\[data-variant="default"\]:focus-visible[^{}]*\{[^}]*background-color:\s*var\(--octant-text-primary\)/,
-    );
+
+    // A feature stylesheet may move the edge (an inline link, a drawn mark)
+    // but may not suppress it, colour it, or draw a second ring of its own.
+    for (const file of cssFiles(webRoot)) {
+      if (file.endsWith(join("styles", "octant.css"))) continue;
+      const source = readFileSync(file, "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+      for (const block of source.matchAll(/([^{}]*):focus-visible[^{}]*\{([^}]*)\}/g)) {
+        const where = `${relative(webRoot, file)} on ${block[1]?.trim() ?? ""}`;
+        expect(block[2], `${where} suppresses the focus edge`).not.toMatch(
+          /outline:\s*(?:none|0)\b/,
+        );
+        expect(block[2], `${where} draws its own focus ring`).not.toMatch(
+          /outline(?:-color)?:[^;]*(?:solid|focus-ring)|box-shadow:[^;]*focus-ring/,
+        );
+      }
+    }
   });
 
   it("keeps one transcript rhythm across Chat, Work, and Code", () => {

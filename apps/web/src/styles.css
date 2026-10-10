@@ -2300,11 +2300,6 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   background: var(--oct-fg-soft);
 }
 
-.endpoint-row__link:focus-visible {
-  outline: none;
-  box-shadow: var(--oct-focus-ring);
-}
-
 .endpoint-mark {
   display: grid;
   place-items: center;
@@ -2558,11 +2553,6 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   font-weight: var(--oct-weight-display);
 }
 
-.endpoint-flow__title:focus-visible {
-  outline: none;
-  box-shadow: var(--oct-focus-ring);
-}
-
 .endpoint-flow__detail,
 .endpoint-flow__note {
   margin: 0;
@@ -2671,11 +2661,6 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 
 .endpoint-kind:hover {
   background: var(--oct-fg-soft);
-}
-
-.endpoint-kind:focus-visible {
-  outline: none;
-  box-shadow: var(--oct-focus-ring);
 }
 
 .endpoint-kind__text {
@@ -2820,11 +2805,6 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   font-size: var(--oct-text-xl);
   font-weight: var(--oct-weight-display);
   overflow-wrap: anywhere;
-}
-
-.endpoint-detail__name:focus-visible {
-  outline: none;
-  box-shadow: var(--oct-focus-ring);
 }
 
 .endpoint-detail__state {
