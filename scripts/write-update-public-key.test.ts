@@ -69,6 +69,16 @@ describe("writing the update public key into the desktop source", () => {
     expect(await readFile(copy, "utf8")).toBe(before);
   });
 
+  it("refuses a valid key with trailing characters that would break the source string", async () => {
+    const { publicKey } = generateFeedKeyPair();
+    const before = await readFile(copy, "utf8");
+
+    const result = await writeUpdatePublicKey(copy, `${publicKey}\\`);
+
+    expect(result).toMatchObject({ status: "refused" });
+    expect(await readFile(copy, "utf8")).toBe(before);
+  });
+
   it("exits non-zero with a message naming the constant when it cannot write the key", async () => {
     const { publicKey } = generateFeedKeyPair();
     await writeFile(copy, "export const NOTHING_HERE = 1;\n");

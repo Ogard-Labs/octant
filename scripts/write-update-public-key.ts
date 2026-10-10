@@ -29,9 +29,14 @@ export type KeyWrite =
   | { readonly status: "refused"; readonly reason: string };
 
 function isEd25519PublicKey(publicKey: string): boolean {
+  // Buffer's base64 decoder skips characters it does not understand, so a
+  // valid key with a trailing `\` or quote would pass and then break the
+  // TypeScript string it is written into. Only canonical base64 is accepted.
+  const bytes = Buffer.from(publicKey, "base64");
+  if (bytes.toString("base64") !== publicKey) return false;
   try {
     const key = createPublicKey({
-      key: Buffer.from(publicKey, "base64"),
+      key: bytes,
       format: "der",
       type: "spki",
     });
