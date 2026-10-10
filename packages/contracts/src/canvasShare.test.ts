@@ -310,6 +310,63 @@ describe("Canvas share contracts", () => {
     ).toThrow();
   });
 
+  it("round-trips funnel, radar, and sankey charts only under the share version that declared them", () => {
+    const blocks = [
+      {
+        blockId: "funnel",
+        schemaVersion: 14,
+        kind: "chart",
+        chartType: "funnel",
+        series: [
+          {
+            seriesId: "visitors",
+            label: "Visitors",
+            points: [
+              { x: "Visited", y: 100 },
+              { x: "Paid", y: 10 },
+            ],
+          },
+        ],
+      },
+      {
+        blockId: "radar",
+        schemaVersion: 14,
+        kind: "chart",
+        chartType: "radar",
+        series: [
+          {
+            seriesId: "api",
+            label: "API",
+            points: [
+              { x: "Speed", y: 4 },
+              { x: "Cost", y: 2 },
+              { x: "Uptime", y: 5 },
+            ],
+          },
+        ],
+      },
+      {
+        blockId: "sankey",
+        schemaVersion: 14,
+        kind: "chart",
+        chartType: "sankey",
+        series: [],
+        links: [{ source: "Search", target: "Signup", value: 12 }],
+      },
+    ];
+    for (const block of blocks) {
+      const exported = { ...document, schemaVersion: 7, blocks: [block] };
+      expect(decodeCanvasStaticExportDocument(exported)).toEqual(exported);
+      expect(() =>
+        decodeCanvasStaticExportDocument({
+          ...document,
+          schemaVersion: 6,
+          blocks: [{ ...block, schemaVersion: 12 }],
+        }),
+      ).toThrow();
+    }
+  });
+
   it("round-trips entity-relationship, swimlane, and mind map blocks in a static export document", () => {
     const blocks = [
       {

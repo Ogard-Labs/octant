@@ -30,6 +30,7 @@
     "./canvas-treemap-layout": "./src/canvasTreemapLayout.ts",
     "./canvas-heatmap-layout": "./src/canvasHeatmapLayout.ts",
     "./canvas-bar-list-layout": "./src/canvasBarListLayout.ts",
+    "./canvas-sankey-layout": "./src/canvasSankeyLayout.ts",
     "./canvas-comparison-matrix": "./src/canvasComparisonMatrix.ts",
     "./canvas-math-policy": "./src/canvasMathPolicy.ts",
     "./canvas-mockup-outline": "./src/canvasMockupOutline.ts",

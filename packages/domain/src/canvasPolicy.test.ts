@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   CANVAS_MAX_BLOCKS,
+  CANVAS_MAX_CHART_CATEGORY_LABEL_LENGTH,
+  CANVAS_MAX_FUNNEL_STAGES,
+  CANVAS_MAX_RADAR_AXES,
+  CANVAS_MAX_SANKEY_LINKS,
+  CANVAS_MAX_SANKEY_NODES,
+  CANVAS_MIN_RADAR_AXES,
   CANVAS_MAX_BAR_LIST_ROWS,
   CANVAS_MAX_DIAGRAM_EDGES,
   CANVAS_MAX_DIAGRAM_NODES,
@@ -2304,6 +2310,186 @@ describe("math validation", () => {
           withBlocks([{ ...inline, runs: [{ text: half }, { math: "x" }, { text: half }] }]),
         ),
       "math-paragraph-budget-exceeded",
+    );
+  });
+});
+
+describe("funnel, radar, and sankey chart policy", () => {
+  const funnel = (values: ReadonlyArray<number>) => ({
+    blockId: "funnel",
+    schemaVersion: CANVAS_SCHEMA_VERSION,
+    kind: "chart",
+    chartType: "funnel",
+    series: [
+      {
+        seriesId: "visitors",
+        label: "Visitors",
+        points: values.map((y, index) => ({ x: `Stage ${String(index)}`, y })),
+      },
+    ],
+  });
+  const radar = (axes: number, value = 3) => ({
+    blockId: "radar",
+    schemaVersion: CANVAS_SCHEMA_VERSION,
+    kind: "chart",
+    chartType: "radar",
+    series: [
+      {
+        seriesId: "api",
+        label: "API",
+        points: Array.from({ length: axes }, (_value, index) => ({
+          x: `Axis ${String(index)}`,
+          y: value,
+        })),
+      },
+    ],
+  });
+  const sankey = (links: ReadonlyArray<readonly [string, string, number]>) => ({
+    blockId: "sankey",
+    schemaVersion: CANVAS_SCHEMA_VERSION,
+    kind: "chart",
+    chartType: "sankey",
+    series: [],
+    links: links.map(([source, target, value]) => ({ source, target, value })),
+  });
+
+  it("accepts a narrowing funnel, a radar, and an acyclic sankey", () => {
+    expect(() =>
+      validateCanvasDefinition(
+        withBlocks([
+          funnel([100, 40, 40, 8]),
+          radar(5),
+          sankey([
+            ["Search", "Landing", 6],
+            ["Ads", "Landing", 4],
+            ["Landing", "Signup", 3],
+            ["Search", "Signup", 1],
+          ]),
+        ]),
+      ),
+    ).not.toThrow();
+  });
+
+  it("refuses a sankey whose flows return to a node they left", () => {
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            sankey([
+              ["A", "B", 1],
+              ["B", "C", 1],
+              ["C", "A", 1],
+            ]),
+          ]),
+        ),
+      "sankey-cycle",
+    );
+    expectPolicyCode(
+      () => validateCanvasDefinition(withBlocks([sankey([["A", "A", 1]])])),
+      "sankey-cycle",
+    );
+  });
+
+  it("refuses a sankey flow that is negative or zero, and a flow listed twice", () => {
+    for (const value of [-1, 0]) {
+      expectPolicyCode(
+        () => validateCanvasDefinition(withBlocks([sankey([["A", "B", value]])])),
+        "sankey-flow-not-positive",
+      );
+    }
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            sankey([
+              ["A", "B", 1],
+              ["A", "B", 2],
+            ]),
+          ]),
+        ),
+      "duplicate-sankey-link",
+    );
+  });
+
+  it("names the budget a sankey exceeds", () => {
+    const hub = Array.from(
+      { length: CANVAS_MAX_SANKEY_NODES },
+      (_value, index) => ["Hub", `n${String(index)}`, 1] as const,
+    );
+    expectPolicyCode(
+      () => validateCanvasDefinition(withBlocks([sankey(hub)])),
+      "sankey-nodes-budget-exceeded",
+    );
+    const many = Array.from(
+      { length: CANVAS_MAX_SANKEY_LINKS + 1 },
+      (_value, index) => [`s${String(index % 8)}`, `t${String(index % 40)}`, 1] as const,
+    );
+    expectPolicyCode(
+      () => validateCanvasDefinition(withBlocks([sankey(many)])),
+      "sankey-links-budget-exceeded",
+    );
+  });
+
+  it("refuses a funnel that widens, a negative stage, and too many stages", () => {
+    expectPolicyCode(
+      () => validateCanvasDefinition(withBlocks([funnel([100, 40, 60])])),
+      "funnel-not-narrowing",
+    );
+    expectPolicyCode(
+      () => validateCanvasDefinition(withBlocks([funnel([100, -4])])),
+      "funnel-negative-value",
+    );
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            funnel(Array.from({ length: CANVAS_MAX_FUNNEL_STAGES + 1 }, (_v, index) => 99 - index)),
+          ]),
+        ),
+      "funnel-stages-budget-exceeded",
+    );
+  });
+
+  it("refuses a radar outside its axis bounds and a negative reading", () => {
+    for (const axes of [CANVAS_MIN_RADAR_AXES - 1, CANVAS_MAX_RADAR_AXES + 1]) {
+      expectPolicyCode(
+        () => validateCanvasDefinition(withBlocks([radar(axes)])),
+        "radar-axis-count",
+      );
+    }
+    expectPolicyCode(
+      () => validateCanvasDefinition(withBlocks([radar(4, -1)])),
+      "radar-negative-value",
+    );
+  });
+
+  it("names a stage, axis, or node label past its length budget", () => {
+    const long = "x".repeat(CANVAS_MAX_CHART_CATEGORY_LABEL_LENGTH + 1);
+    const longFunnel = funnel([10, 5]);
+    const stages = longFunnel.series[0]?.points ?? [];
+    const relabeled = {
+      ...longFunnel,
+      series: [{ ...longFunnel.series[0], points: [{ ...stages[0], x: long }, stages[1]] }],
+    };
+    expectPolicyCode(
+      () => validateCanvasDefinition(withBlocks([relabeled])),
+      "chart-label-budget-exceeded",
+    );
+    expectPolicyCode(
+      () => validateCanvasDefinition(withBlocks([sankey([[long, "B", 1]])])),
+      "chart-label-budget-exceeded",
+    );
+  });
+
+  it("refuses a flow chart in a document that declares an earlier version as a future version", () => {
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition({
+          ...baseDefinition,
+          schemaVersion: 13,
+          blocks: [{ ...funnel([10, 5]), schemaVersion: 13 }],
+        }),
+      "unsupported-schema-version",
     );
   });
 });
