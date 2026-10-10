@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { createManagedSimulatorHelpers, readInputConnection } from "./managedSimulatorHelpers";
+import {
+  createManagedSimulatorHelpers,
+  readInputConnection,
+  type ServeSimTouch,
+} from "./managedSimulatorHelpers";
 import type { DeviceHelperReply, SimulatorDeviceHelpers } from "./simulatorDeviceHelper";
 
 const udid = "7E29846E-F920-438E-8AB2-930C1A0F7FB7";
@@ -21,11 +25,6 @@ if (args.includes("--no-preview")) {
 } else {
   const fail = process.env.OCTANT_TEST_CONTROL_EXIT;
   if (fail === "1") process.exit(1);
-  const gestureAt = args.indexOf("gesture");
-  if (fail === "move" && gestureAt !== -1) {
-    const body = JSON.parse(args[gestureAt + 1]);
-    if (body.type === "move") process.exit(1);
-  }
   process.exit(0);
 }
 `;
@@ -46,7 +45,6 @@ function nativeHelpers(): SimulatorDeviceHelpers & {
 function tools(
   options: {
     readonly failTap?: boolean;
-    readonly failGestureMove?: boolean;
     readonly badHost?: boolean;
   } = {},
 ) {
@@ -64,7 +62,6 @@ function tools(
           ...(options.failTap === true && args[0] === "tap"
             ? { OCTANT_TEST_CONTROL_EXIT: "1" }
             : {}),
-          ...(options.failGestureMove === true ? { OCTANT_TEST_CONTROL_EXIT: "move" } : {}),
           ...(options.badHost === true ? { OCTANT_TEST_STREAM_HOST: "192.168.1.8" } : {}),
         },
       };
@@ -74,6 +71,31 @@ function tools(
 }
 
 const connected = async () => "connected" as const;
+
+/** A serve-sim input socket that records each touch and when it was sent. */
+function touchChannel(options: { readonly opens?: boolean } = {}) {
+  const touches: Array<ServeSimTouch & { readonly sentAt: number }> = [];
+  const urls: string[] = [];
+  let closed = 0;
+  return {
+    touches,
+    urls,
+    closed: () => closed,
+    open: async (url: string) => {
+      urls.push(url);
+      if (options.opens === false) return undefined;
+      return {
+        send: (touch: ServeSimTouch) => {
+          touches.push({ ...touch, sentAt: performance.now() });
+          return true;
+        },
+        close: () => {
+          closed += 1;
+        },
+      };
+    },
+  };
+}
 
 const fetchStream: typeof fetch = async (input) => {
   const url = String(input);
@@ -301,32 +323,119 @@ describe("managed simulator streams", () => {
     }
   });
 
-  it("lifts the finger when a swipe move does not reach the stream", async () => {
+  it("moves the finger along the swipe over its whole duration through one socket", async () => {
     const native = nativeHelpers();
-    const managed = tools({ failGestureMove: true });
+    const managed = tools();
+    const channel = touchChannel();
     const helpers = createManagedSimulatorHelpers(native, managed, {
       fetch: fetchStream,
       inputConnection: connected,
+      openTouchChannel: channel.open,
+    });
+    try {
+      const startedAt = performance.now();
+      await expect(
+        helpers.send(
+          udid,
+          { op: "swipe", fromX: 0.2, fromY: 0.3, toX: 0.8, toY: 0.7, durationMs: 160 },
+          2_000,
+        ),
+      ).resolves.toEqual({ status: "delivered" });
+      expect(performance.now() - startedAt).toBeGreaterThanOrEqual(150);
+      expect(channel.urls).toEqual([`ws://127.0.0.1:9/helper/${udid}/ws`]);
+      const types = channel.touches.map((touch) => touch.type);
+      expect(types).toEqual(["begin", ...Array.from({ length: 10 }, () => "move"), "end"]);
+      expect(channel.touches[0]).toMatchObject({ x: 0.2, y: 0.3 });
+      expect(channel.touches.at(-1)).toMatchObject({ x: 0.8, y: 0.7 });
+      // Every move goes further along the line; none waits and then jumps.
+      const ys = channel.touches.map((touch) => touch.y);
+      for (let index = 1; index < ys.length - 1; index += 1) {
+        expect(ys[index]).toBeGreaterThan(ys[index - 1] ?? 1);
+      }
+      const last = channel.touches.at(-1)?.sentAt ?? 0;
+      expect(last - (channel.touches[0]?.sentAt ?? 0)).toBeGreaterThanOrEqual(150);
+      expect(channel.touches.every((touch) => touch.edge === undefined)).toBe(true);
+      expect(channel.closed()).toBe(1);
+      expect(managed.commands.some((args) => args[0] === "gesture")).toBe(false);
+      expect(native.send).not.toHaveBeenCalled();
+    } finally {
+      helpers.dispose();
+    }
+  });
+
+  it("flags a swipe from the bottom edge as an edge touch so it can go Home", async () => {
+    const native = nativeHelpers();
+    const channel = touchChannel();
+    const helpers = createManagedSimulatorHelpers(native, tools(), {
+      fetch: fetchStream,
+      inputConnection: connected,
+      openTouchChannel: channel.open,
     });
     try {
       await expect(
         helpers.send(
           udid,
-          { op: "swipe", fromX: 0.2, fromY: 0.3, toX: 0.8, toY: 0.7, durationMs: 0 },
+          { op: "swipe", fromX: 0.5, fromY: 0.995, toX: 0.5, toY: 0.3, durationMs: 50 },
+          2_000,
+        ),
+      ).resolves.toEqual({ status: "delivered" });
+      expect(channel.touches.length).toBeGreaterThan(2);
+      expect(channel.touches.every((touch) => touch.edge === 3)).toBe(true);
+    } finally {
+      helpers.dispose();
+    }
+  });
+
+  it("lifts the finger where it is when a swipe is cancelled part-way", async () => {
+    const native = nativeHelpers();
+    const channel = touchChannel();
+    const helpers = createManagedSimulatorHelpers(native, tools(), {
+      fetch: fetchStream,
+      inputConnection: connected,
+      openTouchChannel: channel.open,
+    });
+    try {
+      await helpers.send(udid, { op: "hello" }, 2_000);
+      const cancel = new AbortController();
+      setTimeout(() => cancel.abort(), 100);
+      await expect(
+        helpers.send(
+          udid,
+          { op: "swipe", fromX: 0.2, fromY: 0.2, toX: 0.2, toY: 0.8, durationMs: 1_000 },
+          5_000,
+          cancel.signal,
+        ),
+      ).resolves.toEqual({ status: "unavailable", message: "The action was cancelled." });
+      const end = channel.touches.at(-1);
+      const before = channel.touches.at(-2);
+      expect(end?.type).toBe("end");
+      expect(end?.y).toBe(before?.y);
+      expect(end?.y).toBeLessThan(0.8);
+      expect(channel.closed()).toBe(1);
+    } finally {
+      helpers.dispose();
+    }
+  });
+
+  it("does not repeat a swipe on the native helper when the stream's socket does not open", async () => {
+    const native = nativeHelpers();
+    const channel = touchChannel({ opens: false });
+    const helpers = createManagedSimulatorHelpers(native, tools(), {
+      fetch: fetchStream,
+      inputConnection: connected,
+      openTouchChannel: channel.open,
+    });
+    try {
+      await expect(
+        helpers.send(
+          udid,
+          { op: "swipe", fromX: 0.2, fromY: 0.3, toX: 0.8, toY: 0.7, durationMs: 50 },
           2_000,
         ),
       ).resolves.toEqual({
         status: "unavailable",
         message: "The simulator stream did not accept the input.",
       });
-      const gestures = managed.commands
-        .filter((args) => args[0] === "gesture")
-        .map((args) => JSON.parse(args[1] ?? "{}"));
-      expect(gestures).toEqual([
-        { type: "begin", x: 0.2, y: 0.3 },
-        { type: "move", x: 0.8, y: 0.7 },
-        { type: "end", x: 0.8, y: 0.7 },
-      ]);
       expect(native.send).not.toHaveBeenCalled();
     } finally {
       helpers.dispose();
