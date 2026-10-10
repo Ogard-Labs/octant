@@ -3,6 +3,7 @@ import type { PendingRequest, PendingRequestList } from "@octant/contracts/pendi
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
+import { codeDecision, workDecision } from "../palette/pendingRequests.test-fixtures";
 import { HomeDashboard } from "./HomeDashboard";
 import { createNeedsYouCard, type NeedsYouCardSource } from "./NeedsYouCard";
 
@@ -94,6 +95,7 @@ function clients() {
       putEvidence: vi.fn(async () => ({ evidenceId: "evidence-1" })),
     },
     workRequestClient: { execute: vi.fn(async () => ({})) },
+    workTurnClient: { startFirstTurn: vi.fn(async () => ({ kind: "accepted" })) },
   };
 }
 
@@ -280,6 +282,89 @@ describe("the Needs you card", () => {
       requestId: "question-1",
       answer: "Red",
     });
+  });
+
+  it("sends a Code decision's option as the thread's next turn and drops it on the next read", async () => {
+    const user = userEvent.setup();
+    const answerClients = clients();
+    answerClients.codeClient.executeOperation.mockResolvedValueOnce({
+      kind: "provider-turn-state",
+      operationId: "operation-2",
+      state: "running",
+    } as never);
+    const client = reader([codeDecision()], []);
+    renderCard(
+      createNeedsYouCard(
+        source({ answerClients: answerClients as never, pendingRequestClient: client }),
+      ),
+    );
+    const row = await screen.findByRole("group", { name: "Fix the parser asks you to decide" });
+    within(row)
+      .getByRole("button", { name: /Open it/ })
+      .focus();
+    await user.keyboard("1");
+    expect(answerClients.codeClient.putEvidence).toHaveBeenCalledExactlyOnceWith(
+      codeDecision().threadId,
+      "Open it",
+    );
+    expect(answerClients.codeClient.executeOperation).toHaveBeenCalledExactlyOnceWith({
+      kind: "start-provider-turn",
+      operationId: expect.any(String),
+      threadId: codeDecision().threadId,
+      checkoutId: "55555555-5555-4555-8555-555555555555",
+      sessionId: expect.any(String),
+      prompt: { evidenceId: "evidence-1" },
+    });
+    // Nothing but the turn: no approval, question, or Work command goes out.
+    expect(answerClients.workRequestClient.execute).not.toHaveBeenCalled();
+    expect(answerClients.chatClient.execute).not.toHaveBeenCalled();
+    await waitFor(() =>
+      expect(screen.queryByRole("group", { name: "Fix the parser asks you to decide" })).toBeNull(),
+    );
+  });
+
+  it("sends a Work decision's option through Work's send command with the listed authority", async () => {
+    const user = userEvent.setup();
+    const answerClients = clients();
+    renderCard(
+      createNeedsYouCard(
+        source({
+          answerClients: answerClients as never,
+          pendingRequestClient: reader([workDecision()]),
+        }),
+      ),
+    );
+    await user.click(await screen.findByRole("button", { name: /Headcount/ }));
+    expect(answerClients.workTurnClient.startFirstTurn).toHaveBeenCalledExactlyOnceWith({
+      kind: "start-work-thread-turn",
+      requestId: expect.any(String),
+      threadId: workDecision().threadId,
+      turnId: expect.any(String),
+      prompt: "Headcount",
+      authority: (workDecision().answer as { readonly authority: unknown }).authority,
+    });
+    expect(answerClients.workRequestClient.execute).not.toHaveBeenCalled();
+  });
+
+  it("shows one quiet line when a decision's turn is refused and keeps the card", async () => {
+    const user = userEvent.setup();
+    const answerClients = clients();
+    answerClients.codeClient.executeOperation.mockResolvedValueOnce({
+      kind: "operation-failed",
+      operationId: "operation-2",
+      failure: { category: "invalid", message: "This thread is archived." },
+    } as never);
+    const client = reader([codeDecision()]);
+    renderCard(
+      createNeedsYouCard(
+        source({ answerClients: answerClients as never, pendingRequestClient: client }),
+      ),
+    );
+    const row = await screen.findByRole("group", { name: "Fix the parser asks you to decide" });
+    await user.click(within(row).getByRole("button", { name: /Open it/ }));
+    expect(await within(row).findByRole("status")).toHaveTextContent("This thread is archived.");
+    await waitFor(() => expect(client.list).toHaveBeenCalledTimes(2));
+    expect(within(row).getByRole("button", { name: /Open it/ })).toBeEnabled();
   });
 
   it("opens the thread from its title and from Reply…", async () => {

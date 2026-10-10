@@ -5,6 +5,7 @@ import type { OctantCommand } from "./commandModel";
 
 export type ApprovalPendingRequest = Extract<PendingRequest, { readonly kind: "approval" }>;
 export type ApprovalDecision = "approved" | "denied";
+export type DecisionPendingRequest = Extract<PendingRequest, { readonly kind: "decision" }>;
 
 /**
  * What the palette needs to turn the host's pending-request read into rows.
@@ -17,6 +18,8 @@ export interface NeedsYouSources {
   readonly nowMs: number;
   readonly onOpenThread: (thread: CommandThread) => void;
   readonly onAnswerApproval: (request: ApprovalPendingRequest, decision: ApprovalDecision) => void;
+  /** Sends the option's words as the thread's next turn, as the card's button does. */
+  readonly onAnswerDecision: (request: DecisionPendingRequest, option: string) => void;
 }
 
 const MODE_LABEL: Record<OctantMode, string> = { chat: "Chat", work: "Work", code: "Code" };
@@ -26,9 +29,12 @@ const MAX_TEXT_CHARACTERS = 64;
 
 /**
  * One row per waiting thread, oldest wait first, plus an Approve and a Deny
- * command for each approval. A question's choices are not listed: answering one
- * needs the whole question on screen, so its row opens the thread instead.
- * Nothing is listed when nothing waits, so the group never shows empty.
+ * command for each approval and one command per option of a decision, so
+ * typing an option's words finds it. A question's choices are not listed:
+ * answering one needs the whole question on screen, so its row opens the
+ * thread instead. A decision's options are short words the agent offered for
+ * its next turn, and its row says the ask. Nothing is listed when nothing
+ * waits, so the group never shows empty.
  */
 export function buildNeedsYouCommands(sources: NeedsYouSources): ReadonlyArray<OctantCommand> {
   const threads = new Map<string, Array<PendingRequest>>();
@@ -58,10 +64,32 @@ export function buildNeedsYouCommands(sources: NeedsYouSources): ReadonlyArray<O
         waitingOn(requests),
         waited(sources.nowMs - Date.parse(first.requestedAt)),
       ].join(" · "),
-      keywords: ["waiting", "needs you", "question", "approval", first.threadTitle],
+      keywords: [
+        "waiting",
+        "needs you",
+        "question",
+        "approval",
+        "decision",
+        first.threadTitle,
+        ...requests.flatMap((request) => (request.kind === "decision" ? [request.text] : [])),
+      ],
       action: { kind: "run", run: () => sources.onOpenThread(thread) },
     });
     for (const request of requests) {
+      if (request.kind === "decision") {
+        const detail = `${MODE_LABEL[request.mode]} · ${shorten(request.text)}`;
+        request.options.forEach((option, index) => {
+          commands.push({
+            id: `needs-you:decision:${key}:${String(index)}`,
+            title: `${option.label}: ${request.threadTitle}`,
+            group: "Needs you",
+            detail: option.recommended ? `Recommended · ${detail}` : detail,
+            keywords: [option.label, "decision", "reply", request.threadTitle],
+            action: { kind: "run", run: () => sources.onAnswerDecision(request, option.label) },
+          });
+        });
+        continue;
+      }
       if (request.kind !== "approval") continue;
       const detail = `${MODE_LABEL[request.mode]} · ${shorten(request.text)}`;
       for (const decision of ["approved", "denied"] as const) {
@@ -84,7 +112,9 @@ function waitingOn(requests: ReadonlyArray<PendingRequest>): string {
   const approval = requests.some((request) => request.kind === "approval");
   const question = requests.some((request) => request.kind === "question");
   if (approval && question) return "waiting on approval and your answer";
-  return approval ? "waiting on approval" : "waiting on your answer";
+  if (approval) return "waiting on approval";
+  if (question) return "waiting on your answer";
+  return "waiting on your decision";
 }
 
 function waited(elapsedMs: number): string {

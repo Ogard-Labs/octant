@@ -18,6 +18,7 @@ export type ThreadBoardReason =
   | "delivery-satisfied"
   | "executing"
   | "awaiting-input"
+  | "decision-pending"
   | "interrupted"
   | "recovering"
   | "delivery-waiting"
@@ -76,13 +77,21 @@ export interface ThreadBoardStatusInput {
    * projection or an operation-journal rebuild).
    */
   readonly recovering: boolean;
+  /**
+   * The thread's latest finished turn closed by asking the person to decide
+   * something, and nothing has answered or set it aside since. Absent means
+   * no decision is open.
+   */
+  readonly decisionPending?: boolean;
 }
 
 /**
  * Derive board status from authoritative evidence. Precedence is Done → In
  * Progress → Waiting → Ready. Waiting picks the most specific reason that still
- * applies: recovering, then awaiting input, then an interrupted turn, then a
- * waiting delivery target.
+ * applies: recovering, then awaiting input, then an open decision, then an
+ * interrupted turn, then a waiting delivery target. A live provider request
+ * outranks a decision because it holds an open turn; a decision never moves a
+ * thread out of Done.
  */
 export function deriveThreadBoardStatus(input: ThreadBoardStatusInput): ThreadBoardDerivation {
   if (input.deliverySatisfaction === "done") {
@@ -96,6 +105,9 @@ export function deriveThreadBoardStatus(input: ThreadBoardStatusInput): ThreadBo
   }
   if (input.awaitingInput) {
     return { status: "waiting", reason: "awaiting-input" };
+  }
+  if (input.decisionPending === true) {
+    return { status: "waiting", reason: "decision-pending" };
   }
   if (input.interrupted) {
     return { status: "waiting", reason: "interrupted" };

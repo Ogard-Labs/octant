@@ -1,4 +1,4 @@
-/* One waiting approval or question. Neutral ink and a hairline between rows:
+/* One waiting approval, question, or decision. Neutral ink and a hairline between rows:
    the waiting state is a glyph and words, never a hue or a tinted fill. */
 
 .pending-request {
@@ -83,6 +83,11 @@
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* The recommended option says so in words beside its label; no hue marks it. */
+.pending-request__recommended {
+  flex: 0 0 auto;
 }
 
 .pending-request__notice {

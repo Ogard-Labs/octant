@@ -441,7 +441,9 @@ comes first and leaves the grid while nothing waits: each row is the provider
 mark (or the mode's glyph), the thread title, "Waiting 4m" with a pause glyph
 at the 12px step, the Project as meta text, and the request text clamped to two
 lines, with small buttons below (Approve filled, Deny ghost; a question's
-choices as outline buttons with a leading number, then a ghost Reply…). Rows
+choices as outline buttons with a leading number, then a ghost Reply…; a
+decision's options the same way, the recommended one first with a trailing
+"Recommended" in meta text rather than a hue). Rows
 are told apart by a hairline, never a tinted fill, and the waiting state is a
 glyph and words with no hue. **Working now**
 lists up to five rows of threads and agent runs in progress, each with the

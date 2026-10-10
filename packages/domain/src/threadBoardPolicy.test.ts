@@ -17,10 +17,33 @@ function statusInput(overrides: Partial<ThreadBoardStatusInput> = {}): ThreadBoa
     awaitingInput: overrides.awaitingInput ?? false,
     interrupted: overrides.interrupted ?? false,
     recovering: overrides.recovering ?? false,
+    decisionPending: overrides.decisionPending ?? false,
   };
 }
 
 describe("deriveThreadBoardStatus", () => {
+  it("files a thread whose finished turn asked for a decision under Waiting", () => {
+    expect(deriveThreadBoardStatus(statusInput({ decisionPending: true }))).toEqual({
+      status: "waiting",
+      reason: "decision-pending",
+    });
+  });
+
+  it("keeps a satisfied delivery target Done even with an open decision", () => {
+    expect(
+      deriveThreadBoardStatus(statusInput({ deliverySatisfaction: "done", decisionPending: true })),
+    ).toEqual({ status: "done", reason: "delivery-satisfied" });
+  });
+
+  it("shows a live provider request ahead of a stale decision", () => {
+    expect(
+      deriveThreadBoardStatus(statusInput({ awaitingInput: true, decisionPending: true })),
+    ).toEqual({ status: "waiting", reason: "awaiting-input" });
+    expect(
+      deriveThreadBoardStatus(statusInput({ executing: true, decisionPending: true })),
+    ).toEqual({ status: "in-progress", reason: "executing" });
+  });
+
   it("derives Done only when the confirmed delivery target is objectively satisfied", () => {
     expect(deriveThreadBoardStatus(statusInput({ deliverySatisfaction: "done" }))).toEqual({
       status: "done",

@@ -48,6 +48,8 @@ export interface WorkBoardRuntimeActivity {
   readonly awaitingKind?: "approval" | "user-input";
   readonly interrupted: boolean;
   readonly blockingReason?: string;
+  /** The latest finished turn closed by asking the person to decide; absent means none. */
+  readonly decisionPending?: boolean;
 }
 
 export interface WorkBoardRuntimeSource {
@@ -217,6 +219,7 @@ function buildCard(
     executing: activity.executing,
     awaitingInput: activity.awaitingInput,
     interrupted: activity.interrupted,
+    decisionPending: activity.decisionPending === true,
     recovering: recovery.kind === "recovering",
   });
   const blockingReason = activity.blockingReason ?? waitingReasonLabel(derivation.reason);
@@ -272,6 +275,8 @@ function waitingReasonLabel(reason: WorkBoardCard["statusReason"]): string | und
       return "Catching up after a restart.";
     case "awaiting-input":
       return "Waiting for a decision or answer.";
+    case "decision-pending":
+      return "Asked you to decide how to continue.";
     case "interrupted":
       return "The last agent turn was interrupted.";
     case "delivery-waiting":

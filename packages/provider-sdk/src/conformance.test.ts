@@ -60,6 +60,9 @@ function makeFakeFixture(options?: {
   readonly userInputFailure?: ProviderFailure;
   readonly capabilities?: Partial<ProviderCapabilities>;
   readonly omitEventKinds?: ReadonlyArray<ProviderRuntimeEvent["kind"]>;
+  /** The two text chunks the turn streams, in place of "hello" and " world". */
+  readonly replyChunks?: readonly [string, string];
+  readonly expectedReply?: string;
 }): ProviderConformanceFixture {
   let acquired = false;
   let released = false;
@@ -71,7 +74,7 @@ function makeFakeFixture(options?: {
       sequence: 1,
       correlationId,
       occurredAt,
-      text: "hello",
+      text: options?.replyChunks?.[0] ?? "hello",
     },
     {
       kind: "text-delta",
@@ -80,7 +83,7 @@ function makeFakeFixture(options?: {
       sequence: 2,
       correlationId,
       occurredAt,
-      text: " world",
+      text: options?.replyChunks?.[1] ?? " world",
     },
     {
       kind: "reasoning-delta",
@@ -308,6 +311,7 @@ function makeFakeFixture(options?: {
     unknownApproval: { sessionId, requestId: "missing-approval", approved: false },
     unknownUserInput: { sessionId, requestId: "missing-question", answer: "none" },
     expectedEventKinds: events.map((event) => event.kind),
+    ...(options?.expectedReply === undefined ? {} : { expectedReply: options.expectedReply }),
     expectedFailureCategories: {
       staleResume: capabilities.resume === "supported" ? "stale-resume" : capabilities.resume,
       unknownApproval: capabilities.approvals === "supported" ? "protocol" : capabilities.approvals,
@@ -337,6 +341,21 @@ describe("runProviderConformance", () => {
       failureClassified: true,
       released: true,
     });
+  });
+
+  it("carries a closing decision block whole when the provider splits it across chunks", async () => {
+    const replyChunks = [
+      "The fix is ready.\n\n```octant-deci",
+      'sion\n{"ask":"Open the pull request?","options":[{"label":"Open it","recommended":true}]}\n```',
+    ] as const;
+    await expect(
+      runProviderConformance(makeFakeFixture({ replyChunks, expectedReply: replyChunks.join("") })),
+    ).resolves.toMatchObject({ streamedInOrder: true });
+    await expect(
+      runProviderConformance(
+        makeFakeFixture({ replyChunks, expectedReply: `${replyChunks.join("")}\n\nExtra.` }),
+      ),
+    ).rejects.toThrow(/reply whole and in order/);
   });
 
   it("rejects streamed-in-order evidence when no normalized text was observed", async () => {

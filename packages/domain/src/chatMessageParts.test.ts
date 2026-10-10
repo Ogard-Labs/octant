@@ -120,3 +120,24 @@ describe("parseChatMessageBody on hostile model output", () => {
     expect(parts.length).toBeGreaterThan(0);
   });
 });
+
+describe("parseChatMessageBody with a closing decision", () => {
+  const block =
+    '```octant-decision\n{"ask":"Open the pull request now?","options":[{"label":"Open it","recommended":true},{"label":"Wait"}]}\n```';
+
+  it("reads the decision as its ask and numbered options instead of raw JSON", () => {
+    expect(parseChatMessageBody(`The fix is ready.\n\n${block}`)).toEqual([
+      { kind: "markdown", text: "The fix is ready." },
+      { kind: "markdown", text: "Open the pull request now?\n\n1. Open it (recommended)\n2. Wait" },
+    ]);
+  });
+
+  it("hides a decision block that is still streaming in or cannot be read", () => {
+    expect(parseChatMessageBody('Ready.\n\n```octant-decision\n{"ask":"Op')).toEqual([
+      { kind: "markdown", text: "Ready." },
+    ]);
+    expect(parseChatMessageBody("Ready.\n\n```octant-decision\n{not json}\n```")).toEqual([
+      { kind: "markdown", text: "Ready." },
+    ]);
+  });
+});

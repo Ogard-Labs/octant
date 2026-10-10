@@ -6,6 +6,7 @@ import { parseUnifiedDiff } from "../code/unifiedDiff";
 import { ReviewPage, type ReviewPageProps } from "./ReviewPage";
 import type { ReviewEntry } from "./reviewModel";
 import type { ReviewFacts, ReviewSource } from "./reviewSource";
+import type { PendingRequest } from "@octant/contracts/pending-requests";
 
 const NOW = Date.parse("2026-10-06T12:00:00Z");
 
@@ -89,9 +90,92 @@ function props(overrides: Partial<ReviewPageProps> = {}): ReviewPageProps {
   };
 }
 
+/** A decision the first thread's finished turn asked, its recommended option second. */
+const firstDecision = {
+  mode: "code",
+  kind: "decision",
+  projectId: "project-code",
+  threadId: "t1",
+  threadTitle: "Fix the sidebar clip",
+  text: "The clip is fixed. Should I open the pull request?",
+  options: [
+    { label: "Not yet", recommended: false },
+    { label: "Open it", recommended: true },
+  ],
+  requestedAt: "2026-10-06T11:00:00.000Z",
+  answer: { threadId: "t1", checkoutId: "checkout-1", operationId: "operation-1" },
+} as unknown as PendingRequest;
+
+function decisionClients() {
+  return {
+    chatClient: { execute: vi.fn(async () => ({})) },
+    codeClient: {
+      executeOperation: vi.fn(async () => ({ kind: "provider-turn-state", state: "running" })),
+      putEvidence: vi.fn(async () => ({ evidenceId: "evidence-1" })),
+    },
+    workRequestClient: { execute: vi.fn(async () => ({})) },
+    workTurnClient: { startFirstTurn: vi.fn(async () => ({ kind: "accepted" })) },
+  };
+}
+
+function decisions(
+  clients: ReturnType<typeof decisionClients>,
+): NonNullable<ReviewPageProps["decisions"]> {
+  return {
+    pendingRequestClient: {
+      list: vi.fn(async () => ({ requests: [firstDecision], truncated: false })),
+    },
+    answerClients: clients as unknown as NonNullable<ReviewPageProps["decisions"]>["answerClients"],
+    feedRevision: 0,
+    settings: undefined,
+    workspace: undefined,
+    modes: ["work", "code"],
+    now: NOW,
+  };
+}
+
 function current() {
   return screen.getByRole("region", { name: /^Review (?!finished)/ });
 }
+
+describe("ReviewPage decisions", () => {
+  it("shows the ask and its options above the full reply, and a number key sends an option", async () => {
+    const user = userEvent.setup();
+    const clients = decisionClients();
+    render(<ReviewPage {...props({ decisions: decisions(clients) })} />);
+
+    const detail = current();
+    const asked = await within(detail).findByRole("region", { name: "Decision" });
+    const reply = await within(detail).findByRole("region", { name: "Last reply" });
+    expect(asked.compareDocumentPosition(reply) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(
+      within(asked).getByText("The clip is fixed. Should I open the pull request?"),
+    ).toBeVisible();
+    await waitFor(() =>
+      expect(within(reply).getByText("Reply for Fix the sidebar clip")).toBeVisible(),
+    );
+
+    within(asked)
+      .getByRole("button", { name: /Open it/ })
+      .focus();
+    await user.keyboard("2");
+    await waitFor(() =>
+      expect(clients.codeClient.putEvidence).toHaveBeenCalledWith("t1", "Not yet"),
+    );
+    expect(clients.codeClient.executeOperation).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "start-provider-turn", threadId: "t1" }),
+    );
+  });
+
+  it("shows no decision for a thread that asked none", async () => {
+    const clients = decisionClients();
+    render(<ReviewPage {...props({ entries: [second], decisions: decisions(clients) })} />);
+    await waitFor(() =>
+      expect(within(current()).getByText("Reply for Add the export route")).toBeVisible(),
+    );
+    expect(within(current()).queryByRole("region", { name: "Decision" })).toBeNull();
+  });
+});
 
 describe("ReviewPage", () => {
   it("asks to open a Code thread's Project instead of reading what the window may not read", async () => {

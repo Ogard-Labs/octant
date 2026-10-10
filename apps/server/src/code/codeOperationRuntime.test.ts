@@ -56,11 +56,16 @@ import {
   readCodeRuntimeWorks,
   readCodeRuntimeWorkAggregateVersion,
 } from "../persistence/codeProjection";
-import { CODE_OPERATION_EVENT_RECORDED, CodeOperationEventStore } from "./codeOperationEventStore";
+import {
+  CODE_OPERATION_EVENT_RECORDED,
+  CodeOperationEventStore,
+  MAX_CODE_OPERATION_REPLAY_LIMIT,
+} from "./codeOperationEventStore";
 import { createCodeOperationRuntime } from "./codeOperationRuntime";
 import { CODE_RUNTIME_WORK_UPDATED } from "./codeRuntimeWorkRecorder";
 import { boardRuntimeActivityFromWorks } from "./codeThreadBoardService";
 import { CodeEvidenceCapacityExceeded } from "./codeEvidenceStore";
+import { CodeTurnDecisions } from "../turnDecisions/codeTurnDecisions";
 import type {
   GitObservationPort,
   GitObservationResult,
@@ -2365,6 +2370,96 @@ describe("CodeOperationRuntime", () => {
     fixture.close();
   });
 
+  it("raises a decision from a finished turn's closing ask, replays it, and drops it at the next turn", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const fixture = runtimeFixture({ provider: providerDriver(connection) });
+    const asking = operationId(36);
+    await fixture.runtime.execute(windowId, {
+      kind: "start-provider-turn",
+      operationId: asking,
+      threadId,
+      checkoutId,
+      sessionId,
+      prompt: fixture.prompt,
+    });
+    await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+    await Effect.runPromise(
+      Queue.offerAll(queue, [
+        providerEvent({ kind: "text-delta", text: "The fix is ready.\n\n```octant-decision\n" }),
+        providerEvent({
+          kind: "text-delta",
+          text: '{"ask":"Open the pull request now?","options":[{"label":"Open it","recommended":true},{"label":"Wait"}]}\n```',
+        }),
+        providerEvent({ kind: "completed" }),
+      ]),
+    );
+    await vi.waitFor(() =>
+      expect(fixture.runtimeWorks().at(-1)).toMatchObject({ id: asking, state: "completed" }),
+    );
+
+    const listed = await fixture.turnDecisions().listForWindow(windowId);
+    expect(listed).toEqual([
+      expect.objectContaining({
+        mode: "code",
+        kind: "decision",
+        threadId,
+        text: "Open the pull request now?",
+        options: [
+          { label: "Open it", recommended: true },
+          { label: "Wait", recommended: false },
+        ],
+        answer: { threadId, checkoutId, operationId: asking },
+      }),
+    ]);
+    // A host that starts again reads the same decision back from the journal.
+    expect(await fixture.turnDecisions().listForWindow(windowId)).toEqual(listed);
+
+    await fixture.runtime.execute(windowId, {
+      kind: "start-provider-turn",
+      operationId: operationId(37),
+      threadId,
+      checkoutId,
+      sessionId,
+      prompt: fixture.prompt,
+    });
+    await vi.waitFor(() => expect(connection.send).toHaveBeenCalledTimes(2));
+    expect(await fixture.turnDecisions().listForWindow(windowId)).toEqual([]);
+    fixture.close();
+  });
+
+  it("lists no decision for a turn that did not complete", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const fixture = runtimeFixture({ provider: providerDriver(connection) });
+    const asking = operationId(38);
+    await fixture.runtime.execute(windowId, {
+      kind: "start-provider-turn",
+      operationId: asking,
+      threadId,
+      checkoutId,
+      sessionId,
+      prompt: fixture.prompt,
+    });
+    await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+    await Effect.runPromise(
+      Queue.offerAll(queue, [
+        providerEvent({
+          kind: "text-delta",
+          text: '```octant-decision\n{"ask":"Go on?","options":[{"label":"Yes","recommended":true}]}\n```',
+        }),
+        providerEvent({ kind: "interrupted" }),
+      ]),
+    );
+    // A running turn's ask is not a decision yet.
+    expect(await fixture.turnDecisions().listForWindow(windowId)).toEqual([]);
+    await vi.waitFor(() =>
+      expect(fixture.runtimeWorks().at(-1)).toMatchObject({ id: asking, state: "failed" }),
+    );
+    expect(await fixture.turnDecisions().listForWindow(windowId)).toEqual([]);
+    fixture.close();
+  });
+
   it("persists a failed turn outcome when durable evidence capacity rejects a provider chunk", async () => {
     const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
     const connection = providerConnection(queue);
@@ -3721,6 +3816,29 @@ function runtimeFixture(options: {
         }),
     /** The board reads the rebuildable Code projection, not journal history. */
     boardActivity: () => boardRuntimeActivityFromWorks(readCodeRuntimeWorks(connection, threadId)),
+    /**
+     * A decision reader over this journal with nothing remembered, the way a
+     * host that just started reads it.
+     */
+    turnDecisions: () => {
+      const events = new CodeOperationEventStore({
+        journal,
+        uuid: () => "",
+        clock: () => now,
+        actor,
+      });
+      return new CodeTurnDecisions({
+        threads: async () => [activeThread],
+        admitsTurn: (id, candidate) =>
+          runtime.admitsTurn?.(id, candidate) ?? Promise.resolve(false),
+        runtimeWorks: (id) => readCodeRuntimeWorks(connection, id),
+        replay: (input) => {
+          const replay = events.replay({ ...input, limit: MAX_CODE_OPERATION_REPLAY_LIMIT });
+          return replay.status === "ok" ? replay.frames : undefined;
+        },
+        readEvidence: (reference) => evidenceValues.get(reference.contentId),
+      });
+    },
     runtimeWorkFailures,
     /**
      * The store the service writes a turn's opening frame through, so a test

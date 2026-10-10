@@ -102,6 +102,7 @@ export function CommandPalette() {
             nowMs: Date.now(),
             onOpenThread: needsYou.onOpenThread,
             onAnswerApproval: needsYou.onAnswerApproval,
+            onAnswerDecision: needsYou.onAnswerDecision,
           }),
     [needsYou, open],
   );

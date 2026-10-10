@@ -11,6 +11,7 @@ export * from "./chatProviderFallbackPolicy";
 export * from "./chatMessageParts";
 export * from "./codePolicy";
 export * from "./threadBoardPolicy";
+export * from "./turnDecisionPolicy";
 export * from "./keybindings";
 export * from "./codeProjectWorkspacePolicy";
 export * from "./localServerPolicy";

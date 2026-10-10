@@ -1,9 +1,16 @@
 import type { GithubCatalogueReadResponse } from "@octant/contracts";
+import type { PendingRequest } from "@octant/contracts/pending-requests";
 import type { GithubAssignedWorkPage } from "@octant/contracts";
 import type { AssignedLinearIssuesList } from "./loadAssignedLinearIssues";
 import { CircleDot, GitPullRequest, Inbox, ListTodo, RefreshCw } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { ThreadAttentionSignal } from "../notifications/threadAttention";
+import { PendingRequestRow } from "../pendingRequests/PendingRequestRow";
+import { pendingRequestKey } from "../pendingRequests/pendingRequests";
+import {
+  usePendingRequestRows,
+  type PendingRequestRowsSource,
+} from "../pendingRequests/usePendingRequestRows";
 import { Surface, SurfaceEmpty, SurfaceHeader, SurfaceSection } from "../surface/SurfaceHeader";
 import { OctantButton } from "../ui/base/OctantButton";
 import {
@@ -16,8 +23,19 @@ import {
 import { markInboxKeySeen, readSeenInboxKeys } from "./inboxSeen";
 import { OctantAlert } from "../ui/base/OctantAlert";
 
+/**
+ * The window's pending-request reader, for the decisions finished turns asked.
+ * Absent in a remote window, which has no decision source.
+ */
+export interface InboxDecisionSource extends PendingRequestRowsSource {
+  readonly projectNames: ReadonlyMap<string, string>;
+  /** Opens the thread, where Reply… lets the person type their own answer. */
+  readonly onOpenThread: (request: PendingRequest) => void;
+}
+
 export interface InboxViewProps {
   readonly attentionItems: ReadonlyArray<InboxAttentionItem>;
+  readonly decisions?: InboxDecisionSource;
   readonly onOpenThread: (signal: ThreadAttentionSignal) => void;
   readonly onClose: () => void;
   /** Absent while the GitHub issues read is not connected; hides the section. */
@@ -44,8 +62,9 @@ type LinearSection =
 
 /**
  * Everything waiting on the user, in one glance: threads blocked on an
- * approval or question, finished turns, and open GitHub/Linear work assigned
- * to the connected accounts. Rows are pointers — a thread opens in its own
+ * approval or question, decisions finished turns asked (answered right here,
+ * as the thread's next turn), finished turns, and open GitHub/Linear work
+ * assigned to the connected accounts. Rows are pointers — a thread opens in its own
  * surface, external work opens where it lives — so the inbox never becomes a
  * fourth browser. A source that fails reports on its own section; the others
  * still render.
@@ -128,6 +147,15 @@ export function InboxView(props: InboxViewProps) {
   }
 
   const externalSectionsPresent = loadGithub !== undefined || loadLinear !== undefined;
+  const decisions = props.decisions;
+  const { rows: requestRows, answer } = usePendingRequestRows(decisions);
+  const decisionRows = (requestRows ?? []).filter((entry) => entry.request.kind === "decision");
+  // A thread whose finished turn asked a decision is listed once, as that
+  // decision, rather than again as a turn waiting to be read.
+  const deciding = new Set(decisionRows.map((entry) => String(entry.request.threadId)));
+  const attentionItems = props.attentionItems.filter(
+    (item) => !(item.signal.reason === "turn-finished" && deciding.has(item.signal.threadId)),
+  );
 
   return (
     <Surface ariaLabel="Inbox" measure="wide">
@@ -154,7 +182,23 @@ export function InboxView(props: InboxViewProps) {
           : {})}
       />
       <SurfaceSection label="Needs you">
-        {props.attentionItems.length === 0 ? (
+        {decisions === undefined || decisionRows.length === 0 ? null : (
+          <ul className="surface-list">
+            {decisionRows.map(({ request, unlisted }) => (
+              <li className="surface-row" key={pendingRequestKey(request)}>
+                <PendingRequestRow
+                  now={decisions.now}
+                  onAnswer={answer}
+                  onOpenThread={decisions.onOpenThread}
+                  projectName={decisions.projectNames.get(String(request.projectId))}
+                  request={request}
+                  settled={unlisted}
+                />
+              </li>
+            ))}
+          </ul>
+        )}
+        {attentionItems.length === 0 && decisionRows.length === 0 ? (
           <SurfaceEmpty
             icon={<Inbox size={20} strokeWidth={1.5} />}
             title="No thread is waiting on you."
@@ -173,9 +217,9 @@ export function InboxView(props: InboxViewProps) {
                   ),
                 })}
           />
-        ) : (
+        ) : attentionItems.length === 0 ? null : (
           <ul className="surface-list">
-            {props.attentionItems.map((item) => (
+            {attentionItems.map((item) => (
               <li className="surface-row" key={`${item.signal.threadId}:${item.signal.reason}`}>
                 <OctantButton
                   className="inbox-view__row"

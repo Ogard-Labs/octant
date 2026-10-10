@@ -91,7 +91,33 @@ export function answerClients() {
       putEvidence: vi.fn(async () => ({ evidenceId: "evidence-1" })),
     },
     workRequestClient: { execute: vi.fn(async () => ({})) },
+    workTurnClient: { startFirstTurn: vi.fn(async () => ({ kind: "accepted" })) },
   };
+}
+
+/** What the host lists for a Code thread whose finished turn closed by asking. */
+export function codeDecisionRequest(input: {
+  readonly threadId: string;
+  readonly threadTitle: string;
+  readonly text: string;
+  readonly minutesAgo: number;
+  readonly options: ReadonlyArray<{ readonly label: string; readonly recommended: boolean }>;
+}): PendingRequest {
+  return {
+    mode: "code",
+    kind: "decision",
+    projectId: "project-code",
+    threadId: input.threadId,
+    threadTitle: input.threadTitle,
+    text: input.text,
+    options: input.options,
+    requestedAt: minutesAgo(input.minutesAgo),
+    answer: {
+      threadId: input.threadId,
+      checkoutId: "checkout-1",
+      operationId: `operation-${input.threadId}`,
+    },
+  } as unknown as PendingRequest;
 }
 
 export function boardPendingSource(

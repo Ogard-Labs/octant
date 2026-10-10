@@ -16,6 +16,9 @@ const ids = {
   chatThread: "77777777-7777-4777-8777-777777777777",
   turn: "88888888-8888-4888-8888-888888888888",
   attempt: "99999999-9999-4999-8999-999999999999",
+  operation: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+  workTurn: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+  binding: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
 } as const;
 const requestedAt = "2026-10-06T08:00:00.000Z";
 
@@ -59,7 +62,102 @@ const chatQuestion = {
   },
 } as const;
 
+const codeDecision = {
+  mode: "code",
+  kind: "decision",
+  projectId: ids.project,
+  threadId: ids.codeThread,
+  threadTitle: "Fix the parser",
+  text: "The fix is ready. Should I open the pull request now?",
+  options: [
+    { label: "Open it", recommended: true },
+    { label: "Wait for review", recommended: false },
+  ],
+  requestedAt,
+  answer: { threadId: ids.codeThread, checkoutId: ids.checkout, operationId: ids.operation },
+} as const;
+
+const workDecision = {
+  mode: "work",
+  kind: "decision",
+  projectId: ids.project,
+  threadId: ids.workThread,
+  threadTitle: "Quarterly report",
+  text: "Which chart should lead the summary?",
+  options: [{ label: "Revenue", recommended: true }],
+  requestedAt,
+  answer: {
+    threadId: ids.workThread,
+    turnId: ids.workTurn,
+    authority: {
+      hostId: "local",
+      projectId: ids.project,
+      bindingRevisionId: ids.binding,
+      workingDirectory: ".",
+      confinementPosture: "project-root-confined",
+      providerInstanceId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+      modelId: "gpt-5",
+    },
+  },
+} as const;
+
 describe("pending request contract", () => {
+  it("carries a decision from Code and Work with what each mode's send command takes", () => {
+    const list = decodePendingRequestList({
+      requests: [codeDecision, workDecision],
+      truncated: false,
+    });
+    expect(list.requests.map((request) => `${request.mode}:${request.kind}`)).toEqual([
+      "code:decision",
+      "work:decision",
+    ]);
+  });
+
+  it("refuses a decision without exactly one recommended option", () => {
+    expect(() =>
+      decodePendingRequest({
+        ...codeDecision,
+        options: codeDecision.options.map((option) => ({ ...option, recommended: false })),
+      }),
+    ).toThrow();
+    expect(() =>
+      decodePendingRequest({
+        ...codeDecision,
+        options: codeDecision.options.map((option) => ({ ...option, recommended: true })),
+      }),
+    ).toThrow();
+  });
+
+  it("bounds a decision's ask, its options, and their length", () => {
+    expect(() => decodePendingRequest({ ...codeDecision, text: "x".repeat(111) })).toThrow();
+    expect(() => decodePendingRequest({ ...codeDecision, options: [] })).toThrow();
+    expect(() =>
+      decodePendingRequest({
+        ...codeDecision,
+        options: ["a", "b", "c", "d", "e"].map((label, index) => ({
+          label,
+          recommended: index === 0,
+        })),
+      }),
+    ).toThrow();
+    expect(() =>
+      decodePendingRequest({
+        ...workDecision,
+        options: [{ label: "y".repeat(61), recommended: true }],
+      }),
+    ).toThrow();
+  });
+
+  it("refuses a decision whose send handle names another thread or mode", () => {
+    expect(() =>
+      decodePendingRequest({
+        ...codeDecision,
+        answer: { ...codeDecision.answer, threadId: ids.otherCodeThread },
+      }),
+    ).toThrow();
+    expect(() => decodePendingRequest({ ...codeDecision, mode: "chat" })).toThrow();
+  });
+
   it("carries a request from each mode with the handle its answer command takes", () => {
     const list = decodePendingRequestList({
       requests: [

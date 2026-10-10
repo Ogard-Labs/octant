@@ -244,7 +244,10 @@ import {
   createCodeProfileSkillResolver,
   createStoredCodeProfileSkillTextLoader,
 } from "./code/codeProfileSkillResolver";
-import { CodeOperationEventStore } from "./code/codeOperationEventStore";
+import {
+  CodeOperationEventStore,
+  MAX_CODE_OPERATION_REPLAY_LIMIT,
+} from "./code/codeOperationEventStore";
 import {
   CodeThreadMetadataService,
   pullRequestIdentitiesFromHistory,
@@ -707,6 +710,9 @@ import {
   type FollowUpCreationDependencies,
 } from "./followUps/followUpSuggestionCreation";
 import { FOLLOW_UP_SUGGESTION_INSTRUCTIONS } from "./followUps/followUpSuggestionInstructions";
+import { CodeTurnDecisions } from "./turnDecisions/codeTurnDecisions";
+import { turnDecisionInstructions } from "./turnDecisions/turnDecisionInstructions";
+import { listWorkTurnDecisions, workTurnDecision } from "./turnDecisions/workTurnDecisions";
 import { parseFollowUpSuggestions } from "./followUps/followUpSuggestionParsing";
 import {
   createFollowUpSuggestionRouteHandler,
@@ -2020,6 +2026,7 @@ export function startOctantServer(
       },
       contextFor: (scope: Parameters<NativeHarnessTurnObserver["contextFor"]>[0]) => [
         ...(nativeHarnessObserver?.contextFor(scope) ?? []),
+        ...turnDecisionInstructions(scope.mode),
         FOLLOW_UP_SUGGESTION_INSTRUCTIONS,
       ],
       admitTurn: (scope: Parameters<NativeHarnessTurnObserver["admitTurn"]>[0]) =>
@@ -5216,6 +5223,26 @@ export function startOctantServer(
       codeOperationRuntime === undefined
         ? codeService
         : withCodeOperationRuntime(codeService, codeOperationRuntime);
+    // A finished Code turn that closed with an ask, read back from the journal
+    // so the board and every attention surface agree after a restart.
+    const codeTurnDecisions = new CodeTurnDecisions({
+      threads: async (windowId) => (await baseRouteCodeService.navigation(windowId)).threads,
+      admitsTurn: async (windowId, thread) =>
+        (await codeOperationRuntime?.admitsTurn?.(windowId, thread)) === true,
+      runtimeWorks: (threadId) => persistence.readCodeRuntimeWorks(threadId),
+      replay: (input) => {
+        try {
+          const replay = codeBoardEventStore.replay({
+            ...input,
+            limit: MAX_CODE_OPERATION_REPLAY_LIMIT,
+          });
+          return replay.status === "ok" ? replay.frames : undefined;
+        } catch {
+          return undefined;
+        }
+      },
+      readEvidence: (reference) => codeEvidence.read(reference),
+    });
     // The Code Thread Board composes the journal-rebuildable operational
     // metadata projection with live runtime works. Local Git worktree
     // observation still degrades to unavailable here when the checkout cannot
@@ -5293,11 +5320,17 @@ export function startOctantServer(
           threads: { list: () => boardThreads },
           metadata: codeThreadMetadataService,
           runtime: {
-            observe: (threadId) =>
-              boardRuntimeActivityFromWorks(persistence.readCodeRuntimeWorks(threadId), {
-                turnParkedOnPerson:
-                  codeOperationRuntime?.turnAwaitsPerson?.(String(threadId)) === true,
-              }),
+            observe: (threadId) => {
+              const thread = persistence.readCodeThread(threadId);
+              return {
+                ...boardRuntimeActivityFromWorks(persistence.readCodeRuntimeWorks(threadId), {
+                  turnParkedOnPerson:
+                    codeOperationRuntime?.turnAwaitsPerson?.(String(threadId)) === true,
+                }),
+                decisionPending:
+                  thread !== undefined && codeTurnDecisions.forThread(thread) !== undefined,
+              };
+            },
           },
           pullRequests: {
             snapshot: () => projectPullRequestService.boardSnapshot(windowId),
@@ -9601,8 +9634,21 @@ export function startOctantServer(
     const pendingRequestRoutes = createPendingRequestRouteHandler({
       service: new PendingRequestService({
         readSettings: () => persistence.readShellSettings()?.settings ?? defaultShellSettings(),
-        work: (windowId) => workRequestApplication.listPendingForWindow(windowId),
-        code: async (windowId) => (await codeOperationRuntime?.pendingRequests?.(windowId)) ?? [],
+        work: async (windowId) => [
+          ...(await workRequestApplication.listPendingForWindow(windowId)),
+          ...(await listWorkTurnDecisions(
+            {
+              projects: (id) => projectService.bootstrap(id),
+              threads: async (id) => await workThreadServiceWithWorkflows.navigation(id),
+              turns: (threadId) => workTurnProjection.listForThread(threadId),
+            },
+            windowId,
+          )),
+        ],
+        code: async (windowId) => [
+          ...((await codeOperationRuntime?.pendingRequests?.(windowId)) ?? []),
+          ...(await codeTurnDecisions.listForWindow(windowId)),
+        ],
         chat: () => chatService.listPendingQuestions(),
       }),
       windowAuthorityStore,
@@ -9695,12 +9741,22 @@ export function startOctantServer(
                 }),
             },
             runtime: {
-              observe: (threadId) =>
-                observeWorkThreadRuntime?.(threadId) ?? {
+              observe: (threadId) => {
+                const activity = observeWorkThreadRuntime?.(threadId) ?? {
                   executing: false,
                   awaitingInput: false,
                   interrupted: false,
-                },
+                };
+                const thread = workThreadProjection.read(threadId);
+                return thread === undefined
+                  ? activity
+                  : {
+                      ...activity,
+                      decisionPending:
+                        workTurnDecision(thread, workTurnProjection.listForThread(threadId)) !==
+                        undefined,
+                    };
+              },
             },
             clock: () => new Date().toISOString(),
           });

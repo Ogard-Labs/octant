@@ -10,6 +10,12 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { ParsedDiffFile } from "../code/unifiedDiff";
 import { UnifiedDiffList } from "../code/UnifiedDiffList";
 import { useKeybindings } from "../keybindings/useKeybindings";
+import { PendingRequestRow } from "../pendingRequests/PendingRequestRow";
+import { pendingRequestKey } from "../pendingRequests/pendingRequests";
+import {
+  usePendingRequestRows,
+  type PendingRequestRowsSource,
+} from "../pendingRequests/usePendingRequestRows";
 import { relativeTimeLabel } from "../lib/relativeTime";
 import { isApplePlatform } from "../platform";
 import { Surface, SurfaceEmpty, SurfaceHeader } from "../surface/SurfaceHeader";
@@ -62,6 +68,12 @@ export interface ReviewPageProps {
   };
   /** Injected in tests; otherwise the window's own keybindings. */
   readonly keybindings?: OctantKeybindings;
+  /**
+   * The window's pending-request reader, so a thread whose finished turn asked
+   * a decision shows the ask and its options above the reply. Absent in a
+   * remote window, which has no decision source.
+   */
+  readonly decisions?: PendingRequestRowsSource;
 }
 
 type Loaded<T> =
@@ -271,6 +283,19 @@ export function ReviewPage(props: ReviewPageProps) {
   );
 
   const [fileId, setFileId] = useState<{ readonly key: string; readonly id: string }>();
+
+  // The decision the selected thread's finished turn asked, answered here as
+  // its next turn. The row's number keys pick an option while it has focus.
+  const { rows: requestRows, answer: answerDecision } = usePendingRequestRows(props.decisions);
+  const decision =
+    selected === undefined
+      ? undefined
+      : requestRows?.find(
+          (entry) =>
+            entry.request.kind === "decision" &&
+            entry.request.mode === selected.mode &&
+            String(entry.request.threadId) === selected.threadId,
+        );
 
   async function run(
     entry: ReviewEntry,
@@ -632,6 +657,20 @@ export function ReviewPage(props: ReviewPageProps) {
                 </section>
               ) : (
                 <>
+                  {decision === undefined ? null : (
+                    <section aria-label="Decision" className="review-section">
+                      <h3 className="oct-section-label">Asks you to decide</h3>
+                      <PendingRequestRow
+                        embedded
+                        key={pendingRequestKey(decision.request)}
+                        now={props.now}
+                        onAnswer={answerDecision}
+                        onOpenThread={() => props.onOpen(selected)}
+                        request={decision.request}
+                        settled={decision.unlisted}
+                      />
+                    </section>
+                  )}
                   <LastReply reply={reply} />
                   {selected.mode === "chat" ? null : (
                     <Checks facts={selectedFacts} octant={octantCheck} />
