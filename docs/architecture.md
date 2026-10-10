@@ -2772,8 +2772,9 @@ native harness in `apps/server/src/harness`:
   words, but only to the endpoint the person chose. Revisit if a default
   hosted third-party search provider ships. A tool the thread was not offered
   refuses as `tool-unavailable` without reaching policy or a person. The harness has no
-  per-host network rules, rule expiry, or learn mode: a tool process gets the
-  thread's OS-level `none` or `allow`. `nativeHarnessEgress.hostile.test.ts` holds the
+  per-host network rules, rule expiry, or learn mode yet: a tool process gets the
+  thread's OS-level `none` or `allow`. The proposed design for them is
+  [Harness tool egress rules](#harness-tool-egress-rules). `nativeHarnessEgress.hostile.test.ts` holds the
   adversarial proofs; `nativeHarnessShell.test.ts` runs both shells under real
   Seatbelt and shows only the networked one reaching a loopback listener.
 - **Tool verification.** A routine Check connection runs no generating
@@ -2972,6 +2973,262 @@ message through the mode's ordinary turn command on the confirming window
 one place a prompt is sent for the person, and only on their click. If the
 message does not go out, the thread stays and the prompt waits in its
 composer. The web shows open offers as cards above the chips.
+
+### Harness tool egress rules
+
+**Status: proposed design, pending the maintainer's approval. Nothing in this
+section is implemented.** Today a harness tool process gets the thread's
+OS-level `none` or `allow` (see Egress and hostile content above). Once
+approved, this section becomes the approved-but-unfinished design and the
+phases below track its delivery; it replaces the "no local egress proxy in
+this release" decision in the
+[threat model](security/security-architecture-threat-model.md#approved-decisions-henrik-2026-08-12)
+for native-harness tool processes only.
+
+**Outcome.** A command the harness runs for a thread reaches exactly the
+destination hosts and ports a person allowed for that thread, until the
+allowance expires, and nothing else. A refused connection can become a
+proposal the person sees, never a rule by itself.
+
+**Where it applies.** The harness `bash` tool and the repository test runs a
+harness thread starts, on a thread whose tool egress resolves
+`provider-endpoints-only` (Code approval-gated and auto-accept-edits). Under
+this design that policy materializes as a new third OS level, `proxied`,
+instead of `allow`, so the name finally means what it says for tools: the
+command reaches only what a rule names. `none` (Plan, Work, Chat, a child
+without network authority) is unchanged and runs no proxy. Full access and an
+explicit network approval (`unrestricted`) keep OS `allow`. `web-fetch` and
+`web-search` run in the server process, not in a confined command, and keep
+their own rules above; they neither use nor consult egress rules. Provider
+runtimes that run their own tools inside their own process (Claude Agent SDK,
+Codex, OpenCode, ACP, Pi) are out of scope: their inference and tool traffic
+share one process, so a proxy could not tell them apart, and 0132's
+provider-endpoints-only exception still materializes as `allow` for them.
+Saying so is the honest boundary; routing those runtimes through the proxy
+with provider-endpoint rules is a separate follow-up.
+
+**Enforcement point.** A forward proxy owned by the server process, one
+listener per confined launch:
+
+- **Listener.** Before a `proxied` launch the host binds a fresh listener on
+  `127.0.0.1` at an OS-chosen port (macOS) or a fresh Unix socket in a `0700`
+  per-launch directory under the host's data directory (Linux), and mints a
+  256-bit launch token. The listener carries the launch's identity — thread,
+  Project, tool call, and parent thread for a child — so every decision and
+  audit record names the call that made the connection. It closes when the
+  launch's process group ends. A per-launch listener rather than one shared
+  port means a confined process cannot borrow another launch's identity, and a
+  call-scoped rule needs no extra bookkeeping.
+- **Protocol.** HTTP `CONNECT host:port` tunnels, and absolute-form plain
+  `http://` requests, which the proxy forwards with `Proxy-Authorization` and
+  hop-by-hop headers removed and nothing added. Every request must carry
+  `Proxy-Authorization` with the launch token; a missing or wrong token gets
+  `407` and is recorded. The proxy does not terminate TLS, inspect bodies, add
+  credentials, or follow redirects; a redirect is the client's next request,
+  checked like any other. When the first bytes of a `CONNECT` tunnel are a TLS
+  ClientHello with a server name, that name must equal the `CONNECT` host or
+  the tunnel closes (`sni-mismatch`). That stops a client naming an allowed
+  host to the proxy and a different one to a shared front end; fronting by a
+  Host header inside TLS, and Encrypted Client Hello, remain a residual risk
+  stated in the approval copy for wildcard and CDN-hosted rules.
+- **Decision order per request.** Token, then destination syntax (an IP
+  literal, a port outside 1–65535, or a name that is not a valid DNS name
+  refuses), then the rule match, then resolution, then the private-destination
+  check on every resolved address, then connect. A refusal at any step answers
+  `403` with a one-line reason the command's output shows, such as
+  `octant-egress-refused: no-rule registry.npmjs.org:443`.
+- **DNS and rebinding.** The confined process does no resolution: proxy-aware
+  clients send the name in `CONNECT`, and the OS rules below leave it no
+  resolver to ask, which also closes DNS as an exfiltration channel. The proxy
+  resolves the name itself with the same all-addresses lookup `web-fetch` uses,
+  refuses when any answer is private, and connects to the address it checked,
+  so a name cannot pass the check and then resolve somewhere else. Each
+  `CONNECT` resolves afresh; the proxy keeps no cache of its own.
+- **Private and loopback refusals.** The proxy refuses any destination that
+  resolves to an address `isPrivateAddress` (in `nativeHarnessWebFetch.ts`)
+  classifies as private, under every rule, including a wildcard rule whose
+  subdomain resolves privately. This is what keeps the proxy from being a path
+  to the Octant server's own API, the remote listener, a local inference
+  endpoint, a LAN service, or cloud metadata. A rule cannot name an IP literal,
+  `localhost`, or a single-label name. There is no private-destination
+  exception in this design.
+- **Forcing traffic through it on macOS.** The Seatbelt profile for `proxied`
+  replaces `(allow network*)` with one rule,
+  `(allow network-outbound (remote ip "localhost:<port>"))`, keeping the trust
+  daemon lookups and public trust material `allow` already opens (TLS still
+  runs in the client). It opens no `mDNSResponder` socket or DNS service
+  lookup, no other loopback port, no inbound rule, and no UDP. Seatbelt's
+  remote-address filter accepts only `*` or `localhost` as the host, which is
+  why the allowlist cannot live in the profile itself.
+- **Forcing traffic through it on Linux.** The bubblewrap capsule keeps
+  `--unshare-all` without `--share-net`, so it has a private network
+  namespace whose only interface is loopback, binds the per-launch socket
+  directory read-only, and does not bind `/run/systemd/resolve`. An
+  Octant-owned forwarder starts first inside the capsule, listens on
+  `127.0.0.1` at a fixed port in that private namespace, relays each accepted
+  connection byte-for-byte to the Unix socket, then runs the command and exits
+  with it. The forwarder holds no policy; the token and every decision stay
+  with the host proxy.
+- **Environment.** The launch environment adds `HTTPS_PROXY`, `HTTP_PROXY`,
+  and `ALL_PROXY` (and their lowercase forms) set to
+  `http://octant:<token>@127.0.0.1:<port>`, empty `NO_PROXY`/`no_proxy`, and
+  `NODE_USE_ENV_PROXY=1`. The environment is advisory: a client that ignores
+  it reaches nothing, because the OS rules deny direct egress. SSH remotes,
+  raw TCP, UDP, and HTTP/3 fail under `proxied`; HTTPS Git remotes, npm, pip,
+  cargo, Go, and curl honour the variables. The token is visible to the
+  command itself and may appear in its output; it is worthless once the launch
+  ends and is never journaled or logged by the host.
+
+**Rule model.**
+
+- **Shape.** A rule names one destination host — an exact name or
+  `*.suffix`, which matches subdomains but not the suffix itself and needs at
+  least two labels after the wildcard — and one port (default 443). Names are
+  compared in lowercase IDNA ASCII form without a trailing dot. A rule has an
+  id, a scope, an absolute `expiresAt`, the principal who granted it, and the
+  approval it came from. At most 64 live rules per thread and per Project.
+- **Scope.** `call` (one launch; ends with it), `thread`, or `project` (every
+  `proxied` launch of every thread in that Code Project). A child with network
+  authority uses its parent's live rules and holds none of its own, so it is
+  never wider than its parent, and a parent's revocation or expiry reaches it
+  at once; a child without network authority stays `none`. Rules are local to
+  the host that granted them: they are never exported, synced, or replicated,
+  and a paired device sees them only as the host reports them.
+- **Expiry.** Every rule expires; there is no permanent rule. Thread rules
+  offer `call`, 1 hour, 8 hours (the default), and 7 days; Project rules
+  offer 7 days (the default) and 30 days. The proxy compares `now` against
+  `expiresAt` on every new request and on every chunk relayed through an open
+  tunnel, so a rule is dead at `expiresAt` whatever a timer or a sleeping
+  machine did, and its tunnels close then. Revocation closes them at once.
+  Expiry is derived from the stored timestamp rather than journaled as its own
+  event, so replay reaches the same answer with no clock-dependent record.
+- **Who grants.** Rules arise only from answering a `network-access` approval
+  — a learn-mode proposal or a person adding a rule in the thread's rules
+  list — never from a model tool call, a tool result, a reviewer, or
+  configuration a repository ships. Thread and call rules may be granted by
+  anyone who may already answer that thread's approvals, a paired device
+  included under its existing clamps. Project rules need the person at a local
+  window whose workspace holds the Project, like remembered Full access. The
+  planned reviewer (0110) may answer a per-call `network-access` prompt but
+  cannot mint a rule of any scope.
+- **Taint.** Taint suspends standing rules, matching the rule that a
+  remembered "always" approval stops covering its class once a thread is
+  tainted. On a tainted thread every `bash` call already needs a single-use
+  confirmation; that prompt lists the hosts the thread's thread and Project
+  rules name, preselected, and the person confirms the set this call may
+  reach. What is confirmed becomes `call` rules for that launch only. Thread
+  and Project rules are neither applied nor grantable from a tainted thread,
+  so an injected command cannot inherit a host allowed before the injection,
+  and an allowed host that accepts anonymous or attacker-supplied writes
+  cannot carry data out without a person seeing that host for that command.
+
+**Learn mode.** A per-thread setting, on by default for `proxied` threads.
+With it on, a request the proxy refuses for `no-rule` or `expired` records a
+proposal — host, port, the launch that asked, and a count — and still
+refuses: the connection fails, the command sees the refusal, and nothing waits
+on the person. When the call ends, the thread's open proposals surface as one
+`network-access` request listing each host with a scope and expiry choice;
+granting creates the rules and the model may retry. Proposals are a separate
+record the proxy's decision function never reads, so no number of attempts,
+and no proposal left unanswered, grants anything. Refusals for a private
+destination, an IP literal, a token, or an SNI mismatch are not proposable.
+Proposals are bounded at 16 distinct hosts per launch and 64 open per thread;
+beyond that refusals are counted, not proposed. A proposal from a tainted
+thread is marked and can only be granted as a `call` rule on the next
+confirmed call. A child's proposals surface on its parent's thread with the
+child named, and granting them grants the parent. With learn mode off, the
+refusal reaches the command's output and nothing is proposed.
+
+**Audit journal.** On the thread aggregate unless noted; payloads carry host,
+port, scope, `expiresAt`, rule and launch identity, the server-resolved
+principal, and the thread's taint at the time, never a token, URL path, header,
+or body:
+
+- `thread.egress-rule-granted@1`, `thread.egress-rule-revoked@1`, and on the
+  Project aggregate `project.egress-rule-granted@1` and
+  `project.egress-rule-revoked@1`. A grant is journal-first: a rule whose event
+  cannot be appended is not in force.
+- `thread.egress-proposal-raised@1` and `thread.egress-proposal-declined@1`.
+- `thread.egress-launch-summarized@1` when a `proxied` launch ends: each
+  distinct host and port with its decision, reason, request count, and bytes
+  each way, at most 64 entries with a `truncated` flag. It is appended before
+  the tool result returns to the model; when it cannot be, the call reports
+  `unavailable`, so the model never acts on egress the journal does not hold.
+
+**Failure modes.** Each fails closed:
+
+| Failure                                                        | Result                                                                     |
+| -------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| Listener cannot bind, or the forwarder cannot start            | The launch refuses before the command runs; it never falls back to `allow` |
+| Rule projection unreadable                                     | Empty rule set; every request refuses                                      |
+| Resolution fails or times out                                  | That request refuses (`resolve-failed`)                                    |
+| Rule expires or is revoked during a tunnel                     | The tunnel closes                                                          |
+| Server exits or restarts                                       | Confined process groups die with it; listeners do not outlive the host     |
+| Client ignores the proxy variables                             | Its direct connection is denied by the OS rules                            |
+| Concurrency limit reached (128 tunnels, 16 pending per launch) | Further requests refuse (`limit`)                                          |
+| Grant or launch summary cannot be journaled                    | The rule is not in force; the call reports `unavailable`                   |
+
+**Inference stays separate.** Harness inference leaves from the server
+process to the configured base URL with the credential, as today; it never
+passes through the proxy, and the proxy has no access to the credential
+broker. The inference host is not implicitly allowed for tools: a rule naming
+it lets a command make anonymous requests there and nothing more, and a local
+inference endpoint is private, so the proxy refuses it under any rule.
+
+**Linux parity.** Linux enforces the same rules through the private network
+namespace and the forwarder described above, with the same proxy, decisions,
+and journal. The difference is mechanical: a Unix socket replaces the loopback
+port at the host side. A Linux host that cannot start the capsule or the
+forwarder refuses the launch, as a missing `bwrap` already does.
+
+**Performance.** Per launch: one listener bind and one token, well under a
+millisecond beside the existing confinement start. Per request: one
+resolution (served by the system resolver's cache), a linear match over at
+most 128 rules, and a first-chunk peek for the server name. The data path is
+a socket pipe with no inspection, so throughput is bound by loopback. The
+phase 2 benchmark sets the budget: a clone and a package install against a
+local fixture origin within 10% of the direct path.
+
+**Delivery phases.** Each phase lands as its own PR with the hostile cases
+for what it adds in `nativeHarnessEgress.hostile.test.ts`, extending the
+proofs that suite already holds:
+
+1. **Rule model and decision (domain, contracts).** A pure
+   `decideToolEgress` in `packages/domain` and the event schemas. Accepted
+   when truth-table tests show: a rule allows only its own thread or
+   Project; a wildcard matches subdomains and not the apex; an IP literal and
+   a single-label name refuse; `now >= expiresAt` refuses; taint suspends
+   thread and Project rules and leaves `call` rules; a child sees exactly its
+   parent's live rules; the decision takes no proposal input.
+2. **Host proxy.** The listener, token, `CONNECT` and plain-HTTP paths,
+   resolution with pinning, private refusal, server-name check, limits, and
+   launch summary, tested against fixture origins through an injected
+   resolver. Accepted when integration tests show: an allowed host connects;
+   an unruled host, a rule for another thread, an expired rule, a missing or
+   forged token, a private answer, a name that is public then private, an IP
+   literal, the Octant server's port, and a mismatched server name all refuse
+   with their reason and a summary entry; a tunnel closes when its rule
+   expires or is revoked; and the benchmark budget holds.
+3. **Confinement wiring.** The `proxied` OS level in the Seatbelt builder
+   and the bubblewrap capsule with its forwarder, and the harness ports that
+   launch with it. Accepted when native probes under real Seatbelt on macOS
+   and real `bwrap` on Linux show: a direct connection to a public fixture
+   fails; a name lookup fails; another loopback listener is unreachable; the
+   proxy is reachable and an allowed host works; a client that ignores the
+   proxy variables fails; and a launch whose listener cannot bind never runs.
+   This phase changes approval-gated Code harness commands from open network
+   to ruled network, so the user guide changes with it.
+4. **Grants, expiry, learn mode.** The `network-access` grant flow,
+   learn-mode proposals, the thread and Project rules lists with revoke, and
+   the journal events. Accepted when server integration tests show: learn mode
+   refuses and proposes but never connects, however often it is asked; an
+   unanswered or declined proposal grants nothing; a paired device cannot grant
+   a Project rule; a tainted thread can grant only `call` rules and its
+   standing rules stop applying; a grant that cannot be journaled is not in
+   force; and rendered QA covers the proposal card and the rules lists.
+5. **Escape-suite gate.** An `egress-rule-bypass` fixture row in the threat
+   model's escape suite drives phases 1–4 end to end, and the layer-3 native
+   probes join the pre-release check.
 
 ## Extensions and skills
 
