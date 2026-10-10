@@ -13,6 +13,7 @@ import {
   decodeCanvasId,
   decodeCanvasActor,
   type CanvasActor,
+  type CanvasComment,
   type CanvasCommentCommandResult,
   type CanvasCommentDenialCode,
   type CanvasCommentEvent,
@@ -20,6 +21,7 @@ import {
   type CanvasCommentsOutcome,
   type CanvasId,
   type EventEnvelope,
+  type ReplicaCommentChange,
   type UtcTimestamp,
 } from "@octant/contracts";
 import {
@@ -27,6 +29,10 @@ import {
   CANVAS_COMMENT_DELETED,
   CANVAS_COMMENT_REPLIED,
   CANVAS_COMMENT_RESOLVED,
+} from "@octant/contracts/canvas-board";
+import {
+  CANVAS_MAX_COMMENTS_PER_CANVAS,
+  CANVAS_MAX_REPLIES_PER_COMMENT,
 } from "@octant/contracts/canvas-board";
 import {
   EMPTY_CANVAS_COMMENT_STATE,
@@ -68,6 +74,12 @@ export interface CanvasCommentServiceOptions {
   readonly projection: Pick<CanvasProjection, "getById">;
   readonly uuid: () => string;
   readonly actor: typeof EventActor.Type;
+  /**
+   * Told after a person's comment change is journaled here, so artifact sync
+   * can carry it to their other computers. A change taken in from another
+   * computer is not announced: it is already in the store.
+   */
+  readonly committed?: (canvasId: CanvasId, event: CanvasCommentEvent) => void;
 }
 
 export interface CanvasCommentServiceDependencies {
@@ -127,6 +139,7 @@ export class CanvasCommentService {
   readonly #actor: typeof EventActor.Type;
   readonly #person: CanvasActor;
   readonly #authorize: CanvasCommentServiceDependencies["authorize"];
+  readonly #committed: CanvasCommentServiceOptions["committed"];
   readonly #state = new Map<string, CanvasCommentState>();
   #replayed = false;
 
@@ -140,6 +153,7 @@ export class CanvasCommentService {
     this.#actor = decodeActor(options.actor);
     this.#person = decodeCanvasActor({ kind: "local-user", actorId: this.#actor.actorId });
     this.#authorize = dependencies.authorize;
+    this.#committed = options.committed;
   }
 
   /** The comments a workspace may read. Unauthorized reads carry no bodies. */
@@ -223,24 +237,7 @@ export class CanvasCommentService {
     }
     const event = toCommentEvent(admitted.event);
     try {
-      this.#journal.append({
-        aggregate: {
-          aggregateType: CANVAS_COMMENT_AGGREGATE_TYPE,
-          aggregateId: decodeAggregateId(String(canvasId)),
-        },
-        expectedVersion: state.sequence,
-        events: [
-          {
-            eventId: decodeEventId(this.#uuid()),
-            eventName: eventNameOf(event),
-            eventVersion: 1,
-            correlationId: decodeCorrelationId(this.#uuid()),
-            actor: this.#actor,
-            occurredAt: occurredAtOf(event),
-            payload: event.event,
-          },
-        ],
-      });
+      this.#append(canvasId, state, event);
     } catch (error) {
       if (error instanceof ConcurrencyConflict || error instanceof DuplicateEventIdentity) {
         return {
@@ -253,7 +250,56 @@ export class CanvasCommentService {
     }
     const next = applyCanvasCommentEvent(state, event);
     this.#state.set(String(canvasId), next);
+    try {
+      this.#committed?.(canvasId, event);
+    } catch {
+      // The comment is journaled here; carrying it elsewhere cannot unwind it.
+    }
     return { kind: "accepted", canvasId, sequence: next.sequence };
+  }
+
+  /**
+   * Take in a comment change another of this person's computers wrote, as
+   * artifact sync verified and reconciled it. The comment keeps its author
+   * and names the computer it came from. It is idempotent: a comment or
+   * reply already here, a resolve of a resolved comment, and anything about
+   * a comment this computer no longer holds change nothing. Artifact sync
+   * applies changes in the order their writers saw them, so the threads
+   * show them in that order. It does not pass through `authorize`: no
+   * workspace asked for it, and a read of the Canvas still does.
+   */
+  adoptReplicaChange(input: {
+    readonly canvasId: CanvasId;
+    readonly change: ReplicaCommentChange;
+    readonly writer: { readonly instanceId: string; readonly displayName: string };
+  }): "applied" | "unchanged" {
+    const state = this.#stateFor(input.canvasId);
+    const event = replicaCommentEvent(input, state);
+    if (event === undefined) return "unchanged";
+    this.#append(input.canvasId, state, event);
+    this.#state.set(String(input.canvasId), applyCanvasCommentEvent(state, event));
+    return "applied";
+  }
+
+  #append(canvasId: CanvasId, state: CanvasCommentState, event: CanvasCommentEvent): void {
+    this.#journal.append({
+      aggregate: {
+        aggregateType: CANVAS_COMMENT_AGGREGATE_TYPE,
+        aggregateId: decodeAggregateId(String(canvasId)),
+      },
+      expectedVersion: state.sequence,
+      events: [
+        {
+          eventId: decodeEventId(this.#uuid()),
+          eventName: eventNameOf(event),
+          eventVersion: 1,
+          correlationId: decodeCorrelationId(this.#uuid()),
+          actor: this.#actor,
+          occurredAt: occurredAtOf(event),
+          payload: event.event,
+        },
+      ],
+    });
   }
 
   #stateFor(canvasId: CanvasId): CanvasCommentState {
@@ -281,6 +327,102 @@ export class CanvasCommentService {
         );
       }
       if (batch.length < JOURNAL_REPLAY_BATCH_SIZE) break;
+    }
+  }
+}
+
+/**
+ * The comment event a change from another computer becomes here, or nothing
+ * when it would change nothing or break a budget this computer keeps.
+ */
+function replicaCommentEvent(
+  input: {
+    readonly canvasId: CanvasId;
+    readonly change: ReplicaCommentChange;
+    readonly writer: { readonly instanceId: string; readonly displayName: string };
+  },
+  state: CanvasCommentState,
+): CanvasCommentEvent | undefined {
+  const { canvasId, change } = input;
+  const sequence = state.sequence + 1;
+  const origin = {
+    kind: "replica" as const,
+    instanceId: input.writer.instanceId,
+    computerName: input.writer.displayName,
+  };
+  const held = (commentId: string): CanvasComment | undefined =>
+    state.comments.find((comment) => String(comment.commentId) === commentId);
+  switch (change.kind) {
+    case "comment": {
+      if (held(String(change.commentId)) !== undefined) return undefined;
+      if (state.comments.length >= CANVAS_MAX_COMMENTS_PER_CANVAS) return undefined;
+      return decodeCanvasCommentEvent({
+        kind: "added",
+        event: {
+          canvasId,
+          comment: {
+            commentId: change.commentId,
+            anchor: change.anchor,
+            author: change.author,
+            origin,
+            body: change.body,
+            createdAt: change.createdAt,
+          },
+          sequence,
+        },
+      });
+    }
+    case "reply": {
+      if (held(String(change.commentId)) === undefined) return undefined;
+      if (state.replies.some((reply) => String(reply.replyId) === String(change.replyId))) {
+        return undefined;
+      }
+      const replies = state.replies.filter(
+        (reply) => String(reply.commentId) === String(change.commentId),
+      );
+      if (replies.length >= CANVAS_MAX_REPLIES_PER_COMMENT) return undefined;
+      return decodeCanvasCommentEvent({
+        kind: "replied",
+        event: {
+          canvasId,
+          reply: {
+            replyId: change.replyId,
+            commentId: change.commentId,
+            author: change.author,
+            origin,
+            body: change.body,
+            createdAt: change.createdAt,
+          },
+          sequence,
+        },
+      });
+    }
+    case "resolve": {
+      const comment = held(String(change.commentId));
+      if (comment === undefined || comment.resolvedAt !== undefined) return undefined;
+      return decodeCanvasCommentEvent({
+        kind: "resolved",
+        event: {
+          canvasId,
+          commentId: change.commentId,
+          resolvedBy: change.resolvedBy,
+          resolvedAt: change.resolvedAt,
+          sequence,
+        },
+      });
+    }
+    case "tombstone": {
+      if (held(String(change.commentId)) === undefined) return undefined;
+      return decodeCanvasCommentEvent({
+        kind: "deleted",
+        event: {
+          canvasId,
+          commentId: change.commentId,
+          deletedBy: change.deletedBy,
+          deletedAt: change.deletedAt,
+          sequence,
+        },
+      });
     }
   }
 }

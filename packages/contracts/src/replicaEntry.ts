@@ -18,6 +18,14 @@
 import { Schema } from "effect";
 import { ArtifactBundle, decodeArtifactBundle, encodeArtifactBundle } from "./artifactBundle";
 import { CanvasId, CanvasVersionId } from "./canvas";
+import {
+  CANVAS_COMMENT_BODY_MAX_CHARS,
+  CANVAS_COMMENT_REPLY_BODY_MAX_CHARS,
+  CanvasCommentAnchor,
+  CanvasCommentId,
+  CanvasCommentReplyId,
+} from "./canvasBoard";
+import { CanvasActor } from "./canvasIdentity";
 import { UtcTimestamp } from "./events";
 import { HostId } from "./host";
 
@@ -143,6 +151,83 @@ export type ReplicaTombstoneEntry = typeof ReplicaTombstoneEntry.Type;
 export const ReplicaArtifactEntry = Schema.Union(ReplicaVersionEntry, ReplicaTombstoneEntry);
 export type ReplicaArtifactEntry = typeof ReplicaArtifactEntry.Type;
 
+/** One write-once slot of one instance: `<instanceId>/<sequence>.json`. */
+export const ReplicaSlotRef = Schema.Struct({
+  instanceId: ReplicaInstanceId,
+  sequence: PositiveInt,
+}).annotations(strict);
+export type ReplicaSlotRef = typeof ReplicaSlotRef.Type;
+
+const commentBody = (maxLength: number) =>
+  Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(maxLength));
+
+/**
+ * One change to a Canvas's comment threads, as it travels between computers.
+ * A comment and a reply carry what the person wrote and when; the device a
+ * comment came through on its own computer stays there. A tombstone is a
+ * deletion: it removes the comment and its replies wherever it is read, and
+ * the entry stays in the log.
+ */
+export const ReplicaCommentChange = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal("comment"),
+    commentId: CanvasCommentId,
+    anchor: CanvasCommentAnchor,
+    author: CanvasActor,
+    body: commentBody(CANVAS_COMMENT_BODY_MAX_CHARS),
+    createdAt: UtcTimestamp,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("reply"),
+    commentId: CanvasCommentId,
+    replyId: CanvasCommentReplyId,
+    author: CanvasActor,
+    body: commentBody(CANVAS_COMMENT_REPLY_BODY_MAX_CHARS),
+    createdAt: UtcTimestamp,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("resolve"),
+    commentId: CanvasCommentId,
+    resolvedBy: CanvasActor,
+    resolvedAt: UtcTimestamp,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("tombstone"),
+    commentId: CanvasCommentId,
+    deletedBy: CanvasActor,
+    deletedAt: UtcTimestamp,
+  }).annotations(strict),
+);
+export type ReplicaCommentChange = typeof ReplicaCommentChange.Type;
+
+/**
+ * A change to a Canvas's comment threads, carried in the same log as its
+ * versions and under the same rules: write-once, signed by the computer that
+ * wrote it, and never overwritten. `after` names, for each other computer,
+ * the newest comment entry on this Canvas the writer held when the change
+ * was made, so every reader applies a change only after what its writer had
+ * already seen; the writer's own earlier entries come first by its sequence.
+ * `contentHash` is the SHA-256 of {@link replicaCommentContentPreimage}.
+ */
+export const ReplicaCommentEntry = Schema.Struct({
+  format: Schema.Literal(REPLICA_ENTRY_FORMAT),
+  kind: Schema.Literal("canvas-comment"),
+  origin: ReplicaOrigin,
+  artifact: ReplicaArtifactOrigin,
+  after: Schema.Array(ReplicaSlotRef).pipe(
+    Schema.maxItems(64),
+    Schema.filter(
+      (after) => new Set(after.map((slot) => String(slot.instanceId))).size === after.length,
+    ),
+  ),
+  contentHash: ReplicaContentHash,
+  change: ReplicaCommentChange,
+}).annotations(strict);
+export type ReplicaCommentEntry = typeof ReplicaCommentEntry.Type;
+
+/** An entry about a Canvas: a version, a deletion, or a change to its comments. */
+export type ReplicaCanvasEntry = ReplicaArtifactEntry | ReplicaCommentEntry;
+
 /**
  * Membership lifecycle, carried in the same log so a computer that is not yet
  * a member can be discovered and approved by name instead of being invisible.
@@ -259,11 +344,26 @@ export const ReplicaMembershipEntry = Schema.Union(
 );
 export type ReplicaMembershipEntry = typeof ReplicaMembershipEntry.Type;
 
-export const ReplicaEntry = Schema.Union(ReplicaArtifactEntry, ReplicaMembershipEntry);
+export const ReplicaEntry = Schema.Union(
+  ReplicaArtifactEntry,
+  ReplicaCommentEntry,
+  ReplicaMembershipEntry,
+);
 export type ReplicaEntry = typeof ReplicaEntry.Type;
+
+/** Whether an entry is a membership record rather than an entry about a Canvas. */
+export function isReplicaMembershipEntry(entry: ReplicaEntry): entry is ReplicaMembershipEntry {
+  return (
+    entry.kind !== "artifact-version" &&
+    entry.kind !== "artifact-tombstone" &&
+    entry.kind !== "canvas-comment"
+  );
+}
 
 export const decodeReplicaEntry = Schema.decodeUnknownSync(ReplicaEntry);
 export const decodeReplicaArtifactEntry = Schema.decodeUnknownSync(ReplicaArtifactEntry);
+export const decodeReplicaCommentEntry = Schema.decodeUnknownSync(ReplicaCommentEntry);
+export const decodeReplicaCommentChange = Schema.decodeUnknownSync(ReplicaCommentChange);
 export const decodeReplicaMembershipEntry = Schema.decodeUnknownSync(ReplicaMembershipEntry);
 export const decodeReplicaSignatureVerdict = Schema.decodeUnknownSync(ReplicaSignatureVerdict);
 
@@ -289,6 +389,20 @@ export function decodeReplicaEntryText(text: string): ReplicaEntry {
  */
 export function replicaEntryContentPreimage(entry: ReplicaArtifactEntry): string {
   return encodeArtifactBundle(entry.bundle);
+}
+
+/**
+ * The bytes a comment entry's content hash covers: the change alone, in its
+ * canonical key order, with a trailing newline.
+ */
+export function replicaCommentContentPreimage(change: ReplicaCommentChange): string {
+  return `${JSON.stringify(canonicalCommentChange(change), null, 2)}\n`;
+}
+
+function canonicalCommentChange(change: ReplicaCommentChange): ReplicaCommentChange {
+  // Decoding puts the keys in schema order, so every writer and reader
+  // encodes one change as one byte string.
+  return decodeReplicaCommentChange(JSON.parse(JSON.stringify(change)));
 }
 
 /**
@@ -383,6 +497,22 @@ export function encodeReplicaEntry(entry: ReplicaEntry): string {
         parents: entry.parents.map((parent) => ({ versionId: parent.versionId })),
         contentHash: entry.contentHash,
         bundle: decodeArtifactBundle(JSON.parse(encodeArtifactBundle(entry.bundle))),
+      };
+      break;
+    case "canvas-comment":
+      body = {
+        ...head,
+        artifact: {
+          canvasId: entry.artifact.canvasId,
+          hostId: entry.artifact.hostId,
+          projectName: entry.artifact.projectName,
+        },
+        after: entry.after.map((slot) => ({
+          instanceId: slot.instanceId,
+          sequence: slot.sequence,
+        })),
+        contentHash: entry.contentHash,
+        change: canonicalCommentChange(entry.change),
       };
       break;
   }
@@ -690,10 +820,56 @@ const ReplicaStatusNotAvailable = Schema.Struct({
   kind: Schema.Literal("not-available"),
 }).annotations(strict);
 
+/**
+ * Bringing a replica's whole library onto this computer: the first read of a
+ * new identity in a replica. `done` counts the store slots this restore has
+ * read out of `total`; `total` grows when the store lists more while it runs.
+ * A stopped restore stays stopped across a restart until the person resumes
+ * it, and while it is stopped this computer reads nothing from the store.
+ */
+export const ReplicaRestoreProgress = Schema.Struct({
+  state: Schema.Literal("running", "stopped", "finished"),
+  done: Schema.Int.pipe(Schema.nonNegative()),
+  total: Schema.Int.pipe(Schema.nonNegative()),
+})
+  .annotations(strict)
+  .pipe(
+    Schema.filter((progress) => progress.done <= progress.total, {
+      message: () => "A restore cannot have read more slots than it counted.",
+    }),
+  );
+export type ReplicaRestoreProgress = typeof ReplicaRestoreProgress.Type;
+
+/** Host commands for a restore. They travel only over the loopback host route. */
+export const ReplicaRestoreCommand = Schema.Union(
+  Schema.Struct({ kind: Schema.Literal("stop-restore") }).annotations(strict),
+  Schema.Struct({ kind: Schema.Literal("resume-restore") }).annotations(strict),
+);
+export type ReplicaRestoreCommand = typeof ReplicaRestoreCommand.Type;
+
+export const ReplicaRestoreResult = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal("restore"),
+    restore: ReplicaRestoreProgress,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("refused"),
+    /** No restore to stop or resume, or sync is off so none can run. */
+    reason: Schema.Literal("no-restore", "not-configured", "finished"),
+    message: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512)),
+  }).annotations(strict),
+);
+export type ReplicaRestoreResult = typeof ReplicaRestoreResult.Type;
+
+export const decodeReplicaRestoreCommand = Schema.decodeUnknownSync(ReplicaRestoreCommand);
+export const decodeReplicaRestoreResult = Schema.decodeUnknownSync(ReplicaRestoreResult);
+
 export const ReplicaSyncStatus = Schema.Struct({
   lastPublish: ReplicaStatusNotAvailable,
   lastPull: ReplicaStatusNotAvailable,
   queued: ReplicaStatusNotAvailable,
+  /** The restore of this computer's current identity, once one has started. */
+  restore: Schema.optional(ReplicaRestoreProgress),
   /** The last time the store refused, could not be reached, or held a file in this computer's place. */
   lastError: Schema.optional(
     Schema.Struct({

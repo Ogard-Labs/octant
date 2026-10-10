@@ -17,6 +17,7 @@
 
 import {
   decodeReplicaEntryText,
+  isReplicaMembershipEntry,
   ReplicaDevicePublicKey,
   ReplicaDisplayName,
   ReplicaInstanceId,
@@ -338,7 +339,7 @@ export class ReplicaMembershipProjection implements Projection {
         if (this.#records.has(key)) return;
         const entry = decodeReplicaEntryText(held.text);
         // Only membership records are held; the service never journals others.
-        if (entry.kind === "artifact-version" || entry.kind === "artifact-tombstone") return;
+        if (!isReplicaMembershipEntry(entry)) return;
         this.#records.set(key, {
           entry,
           hash: held.hash,

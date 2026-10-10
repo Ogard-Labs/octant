@@ -8,7 +8,9 @@
  * There is no overwrite. A function that cannot return that outcome cannot be
  * talked into it. An entry waits while an earlier slot of its writer that the
  * store lists has no lasting verdict here yet, so one writer's entries apply
- * in the order it wrote them. A tombstone stays in the history the caller
+ * in the order it wrote them - except a version or tombstone during a
+ * restore, whose heads do not depend on order. A comment entry also waits
+ * for the other computers' comment entries its writer had seen. A tombstone stays in the history the caller
  * already holds; a later version from another computer appends beside it.
  *
  * Membership records are not reconciled here: who counts is derived from the
@@ -19,6 +21,8 @@
 import {
   replicaEntryBundleAgrees,
   type ReplicaArtifactEntry,
+  type ReplicaCanvasEntry,
+  type ReplicaCommentEntry,
   type ReplicaContentHash,
   type ReplicaInstanceId,
   type ReplicaSignatureVerdict,
@@ -35,6 +39,7 @@ import type { HostId } from "@octant/contracts/host";
 
 export const REPLICA_RECONCILE_OUTCOMES = [
   "append-version",
+  "append-comment",
   "already-present",
   "concurrent-head",
   "tombstone",
@@ -82,7 +87,7 @@ export interface ReplicaSlot {
 export interface ReplicaAppliedEntry {
   readonly instanceId: ReplicaInstanceId;
   readonly sequence: number;
-  readonly kind: ReplicaArtifactEntry["kind"];
+  readonly kind: ReplicaCanvasEntry["kind"];
   /** The hash the entry was applied with. */
   readonly contentHash: ReplicaContentHash;
 }
@@ -133,9 +138,22 @@ export interface ReplicaLocalState {
    */
   readonly settledSlots: ReadonlyArray<ReplicaSlot>;
   readonly artifacts: ReadonlyArray<ReplicaArtifactRecord>;
-  /** SHA-256 of the canonical bundle, measured by the host before this call. */
+  /**
+   * SHA-256 of the canonical bundle, or of a comment entry's canonical
+   * change, measured by the host before this call.
+   */
   readonly measuredContentHash: string;
   readonly signature: ReplicaSignatureVerdict;
+  /**
+   * A restore is bringing the whole store onto this computer, newest first.
+   * An artifact version or tombstone then applies before its writer's earlier
+   * slots: heads are derived from the whole set of versions and tombstones,
+   * so the library a restore ends with does not depend on the order it read
+   * them in, and the restore reads every listed slot before it finishes. A
+   * comment entry still waits for its writer's earlier slots, because the
+   * order comments apply in is the order their threads show.
+   */
+  readonly restoring?: boolean;
 }
 
 function refuse(reason: ReplicaRefusalReason): ReplicaReconcileOutcome {
@@ -177,7 +195,7 @@ function artifactRecord(
   return state.artifacts.find((artifact) => String(artifact.canvasId) === String(canvasId));
 }
 
-function atSequence(state: ReplicaLocalState, entry: ReplicaArtifactEntry) {
+function atSequence(state: ReplicaLocalState, entry: ReplicaCanvasEntry) {
   return state.applied.find(
     (applied) =>
       String(applied.instanceId) === String(entry.origin.instanceId) &&
@@ -190,7 +208,7 @@ function atSequence(state: ReplicaLocalState, entry: ReplicaArtifactEntry) {
 // read. A slot the store does not list - a squatted slot whose file was
 // removed, or one a sync client has not delivered yet - does not hold it back,
 // because a writer's sequence has gaps by design.
-function waitsOnEarlierSlot(state: ReplicaLocalState, entry: ReplicaArtifactEntry): boolean {
+function waitsOnEarlierSlot(state: ReplicaLocalState, entry: ReplicaCanvasEntry): boolean {
   const writer = String(entry.origin.instanceId);
   const settled = new Set<number>();
   for (const slot of [...state.applied, ...state.settledSlots]) {
@@ -241,7 +259,7 @@ function concurrentWithExisting(state: ReplicaLocalState, entry: ReplicaArtifact
  */
 export function reconcileReplicaEntry(
   localState: ReplicaLocalState,
-  entry: ReplicaArtifactEntry,
+  entry: ReplicaCanvasEntry,
 ): ReplicaReconcileOutcome {
   switch (localState.signature) {
     case "verified":
@@ -254,8 +272,55 @@ export function reconcileReplicaEntry(
       throw new Error("Unexpected signature verdict: " + String(unexpected));
     }
   }
-  return artifactOutcome(localState, entry);
+  return entry.kind === "canvas-comment"
+    ? commentOutcome(localState, entry)
+    : artifactOutcome(localState, entry);
 }
+
+/**
+ * A comment entry applies once its writer's earlier listed slots are
+ * settled here and every slot its `after` names is applied or settled here,
+ * so each computer applies comment changes in an order consistent with what
+ * each writer had seen: a reply after its comment, a resolve or a deletion
+ * after what it acts on, and a comment written after reading another after
+ * that one.
+ */
+function commentOutcome(
+  state: ReplicaLocalState,
+  entry: ReplicaCommentEntry,
+): ReplicaReconcileOutcome {
+  if (state.measuredContentHash !== entry.contentHash) return refuse("hash-mismatch");
+  const recorded = atSequence(state, entry);
+  if (recorded !== undefined) {
+    if (recorded.kind === entry.kind && recorded.contentHash === entry.contentHash) {
+      return { outcome: "already-present" };
+    }
+    return refuse("hash-mismatch");
+  }
+  const standing = membership(state, entry.origin.instanceId, entry.origin.sequence);
+  if (standing === "unknown") return refuse("unknown-instance");
+  if (standing === "revoked") return refuse("revoked-instance");
+  if (waitsOnEarlierSlot(state, entry)) return refuse("sequence-gap");
+  const reached = new Set<string>();
+  for (const slot of [...state.applied, ...state.settledSlots]) {
+    reached.add(`${String(slot.instanceId)}/${String(slot.sequence)}`);
+  }
+  if (
+    entry.after.some((slot) => !reached.has(`${String(slot.instanceId)}/${String(slot.sequence)}`))
+  ) {
+    return refuse("sequence-gap");
+  }
+  const known = artifactRecord(state, entry.artifact.canvasId);
+  if (
+    known !== undefined &&
+    String(known.originHostId) === String(state.localHostId) &&
+    String(entry.artifact.hostId) !== String(state.localHostId)
+  ) {
+    return refuse("names-local-artifact-as-foreign");
+  }
+  return { outcome: "append-comment" };
+}
+
 function artifactOutcome(
   state: ReplicaLocalState,
   entry: ReplicaArtifactEntry,
@@ -272,7 +337,7 @@ function artifactOutcome(
   const standing = membership(state, entry.origin.instanceId, entry.origin.sequence);
   if (standing === "unknown") return refuse("unknown-instance");
   if (standing === "revoked") return refuse("revoked-instance");
-  if (waitsOnEarlierSlot(state, entry)) return refuse("sequence-gap");
+  if (state.restoring !== true && waitsOnEarlierSlot(state, entry)) return refuse("sequence-gap");
   if (namesLocalArtifactAsForeign(state, entry)) {
     return refuse("names-local-artifact-as-foreign");
   }

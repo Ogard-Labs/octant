@@ -35,8 +35,33 @@ On a computer that belongs to a replica, with sync on:
 - **An imported artifact is listed under the Project name and the computer it
   came from**, in the library's **From your other computers** section. It is
   not filed in a Project or thread on this computer until you open it here.
+- **Comments on a Canvas travel too**, once that Canvas has been copied out
+  or read in: each comment, reply, resolve, and deletion is copied out like
+  a version, and read in on your other computers. A comment from another
+  computer shows that computer's name beside it, such as **You · Studio
+  Mac**, and replies always appear after the comment they answer. Comments
+  on a Canvas that never left this computer stay here.
 - A Code thread in Plan mode copies nothing out, and with sync off Octant
   neither writes to the store nor reads from it.
+
+## Restore your library on a new computer
+
+When a new or wiped computer joins, its first sync brings in every artifact
+in the store with its full version history, and the comments on them.
+**Settings › Sync** shows **Restore library** with how many entries it has
+read so far. The newest versions arrive first, so every artifact shows up in
+the library early and older versions keep arriving in the background.
+
+- **Stop** pauses it after the batch it is reading. While it is stopped,
+  Octant reads nothing more from the store in the background, even after a
+  restart; versions you make on this computer are still copied out.
+- **Resume** carries on where it stopped. Nothing it already read is read
+  or imported again, and the same is true if Octant quits or the computer
+  restarts in the middle.
+
+A restore does not bring back threads, Projects, or settings. Restored
+artifacts are listed under the computer and Project they came from until you
+open them here.
 
 ## Synced artifacts in the library
 
@@ -120,9 +145,13 @@ version stays on this computer and is not copied.
 A copy this computer imported is not written out again. A later edit here is
 a new version.
 
-Threads, settings, and credentials do not leave this way. Canvas comments
-are not part of this copy. Joining another computer can import the versions
-in the store. It does not bring back threads, Projects, or settings.
+Comments on a Canvas that was copied out leave the same way, as plain JSON
+signed by the computer that wrote them; a comment or reply with a
+credential, secret-shaped text, or an absolute file path is not copied, and
+a deleted comment is a deletion entry rather than a removed file. Threads,
+settings, and credentials do not leave this way. Joining another computer
+can import the versions and comments in the store. It does not bring back
+threads, Projects, or settings.
 
 ## Where it goes
 

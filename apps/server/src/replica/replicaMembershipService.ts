@@ -22,9 +22,11 @@ import {
   decodeReplicaEntryText,
   decodeReplicaMembershipEntry,
   encodeReplicaEntry,
+  isReplicaMembershipEntry,
   replicaEntryRelativePaths,
   type HostId,
   type ReplicaArtifactEntry,
+  type ReplicaCanvasEntry,
   type ReplicaArtifactReconciled,
   type ReplicaBroughtIn,
   type ReplicaEntry,
@@ -69,11 +71,14 @@ export type ReplicaStoreSelection =
   | { readonly status: "not-configured" }
   | { readonly status: "selected"; readonly store: ReplicaStore };
 
-/** One valid artifact entry a pull read, with the exact text it verified. */
+/**
+ * One valid entry about a Canvas a pull read - a version, a tombstone, or a
+ * comment change - with the exact text it verified.
+ */
 export interface ReplicaArtifactRead {
   readonly instanceId: ReplicaInstanceId;
   readonly sequence: number;
-  readonly entry: ReplicaArtifactEntry;
+  readonly entry: ReplicaCanvasEntry;
   readonly text: string;
 }
 
@@ -87,6 +92,8 @@ export interface ReplicaArtifactReconciler {
     readonly reads: ReadonlyArray<ReplicaArtifactRead>;
     /** Every slot the store listed in this read. */
     readonly listed: ReadonlyArray<Slot>;
+    /** A restore read these newest first; see the reconcile policy. */
+    readonly restoring?: boolean;
   }) => {
     readonly kept: ReadonlyArray<ReplicaArtifactReconciled>;
     readonly refused: ReadonlyArray<ReplicaReadRefusal>;
@@ -221,17 +228,32 @@ export interface Slot {
   readonly sequence: number;
 }
 
-type PullRead =
-  | { readonly status: "unavailable" }
-  | {
-      readonly status: "read";
-      readonly applied: number;
-      readonly refused: ReadonlyArray<ReplicaReadRefusal>;
-      /** Every valid artifact entry this read met, counted or not. */
-      readonly artifacts: ReadonlyArray<ReplicaArtifactRead>;
-      /** Every slot the store listed. */
-      readonly listed: ReadonlyArray<Slot>;
-    };
+interface ReadSlots {
+  readonly status: "read";
+  readonly applied: number;
+  readonly refused: ReadonlyArray<ReplicaReadRefusal>;
+  /** Every valid entry about a Canvas this read met, counted or not. */
+  readonly artifacts: ReadonlyArray<ReplicaArtifactRead>;
+  /** Every slot the store listed. */
+  readonly listed: ReadonlyArray<Slot>;
+}
+
+type PullRead = { readonly status: "unavailable" } | ReadSlots;
+
+/** Every listed slot, by instance and then sequence, within the per-instance bound. */
+function listedSlots(listing: ReadonlyMap<string, ReadonlySet<number>>): ReadonlyArray<Slot> {
+  const slots: Slot[] = [];
+  for (const [id, sequences] of [...listing].sort(([left], [right]) =>
+    left < right ? -1 : left > right ? 1 : 0,
+  )) {
+    const instanceId = decodeInstanceId(id);
+    const ordered = [...sequences].sort((left, right) => left - right);
+    for (const sequence of ordered.slice(0, MAX_ENTRIES_PER_INSTANCE)) {
+      slots.push({ instanceId, sequence });
+    }
+  }
+  return slots;
+}
 
 export class ReplicaMembershipService {
   readonly #ports: ReplicaMembershipPorts;
@@ -261,7 +283,7 @@ export class ReplicaMembershipService {
    */
   publishArtifact(input: {
     readonly queueId: string;
-    readonly build: (origin: ReplicaArtifactEntry["origin"]) => ReplicaArtifactEntry;
+    readonly build: (origin: ReplicaArtifactEntry["origin"]) => ReplicaCanvasEntry;
   }): Promise<ReplicaArtifactPublishOutcome> {
     return this.#serially(async () => {
       const selection = this.#ports.store();
@@ -877,42 +899,116 @@ export class ReplicaMembershipService {
   async #readStore(store: ReplicaStore): Promise<PullRead> {
     const listing = await this.#listInstances(store);
     if (listing === undefined) return { status: "unavailable" };
+    const listed = listedSlots(listing);
+    const read = await this.#readSlots(store, listed);
+    return read.status === "unavailable" ? read : { ...read, listed };
+  }
+
+  /**
+   * Read each slot this host holds nothing in, in the order given, and hold
+   * every valid membership record among them. Valid entries about a Canvas
+   * are returned for the caller to reconcile.
+   */
+  async #readSlots(
+    store: ReplicaStore,
+    slots: ReadonlyArray<Slot>,
+  ): Promise<Exclude<PullRead, { readonly status: "read" }> | Omit<ReadSlots, "listed">> {
     let applied = 0;
     const refused: ReplicaReadRefusal[] = [];
     const artifacts: ReplicaArtifactRead[] = [];
-    const listed: Slot[] = [];
-    for (const [id, sequences] of [...listing].sort(([left], [right]) =>
-      left < right ? -1 : left > right ? 1 : 0,
-    )) {
-      const instanceId = decodeInstanceId(id);
-      const ordered = [...sequences].sort((left, right) => left - right);
-      for (const sequence of ordered.slice(0, MAX_ENTRIES_PER_INSTANCE)) {
-        listed.push({ instanceId, sequence });
-        if (this.#ports.state().holds(instanceId, sequence)) continue;
-        const read = await this.#readSigned(store, instanceId, sequence);
-        if (read.status === "unavailable") return { status: "unavailable" };
-        if (read.status === "missing") continue;
-        if (read.status !== "ready") {
-          refused.push(this.#unreadable({ instanceId, sequence, reason: read.status }));
-          continue;
-        }
-        if (read.entry.kind === "artifact-version" || read.entry.kind === "artifact-tombstone") {
-          artifacts.push({ instanceId, sequence, entry: read.entry, text: read.text });
-          continue;
-        }
-        try {
-          this.#hold(read);
-        } catch {
-          // A record the journal will not take is unreadable here, not a
-          // failed pull: otherwise its slot stays unheld and every later
-          // read stops on it again.
-          refused.push(this.#unreadable({ instanceId, sequence, reason: "unreadable" }));
-          continue;
-        }
-        applied += 1;
+    for (const { instanceId, sequence } of slots) {
+      if (this.#ports.state().holds(instanceId, sequence)) continue;
+      const read = await this.#readSigned(store, instanceId, sequence);
+      if (read.status === "unavailable") return { status: "unavailable" };
+      if (read.status === "missing") continue;
+      if (read.status !== "ready") {
+        refused.push(this.#unreadable({ instanceId, sequence, reason: read.status }));
+        continue;
       }
+      if (!isReplicaMembershipEntry(read.entry)) {
+        artifacts.push({ instanceId, sequence, entry: read.entry, text: read.text });
+        continue;
+      }
+      try {
+        this.#hold(read);
+      } catch {
+        // A record the journal will not take is unreadable here, not a
+        // failed pull: otherwise its slot stays unheld and every later
+        // read stops on it again.
+        refused.push(this.#unreadable({ instanceId, sequence, reason: "unreadable" }));
+        continue;
+      }
+      applied += 1;
     }
-    return { status: "read", applied, refused, artifacts, listed };
+    return { status: "read", applied, refused, artifacts };
+  }
+
+  /**
+   * What a restore reads: every slot the store lists, and those this host
+   * holds nothing in yet. It runs in the command line, like a pull.
+   */
+  restoreListing(): Promise<
+    | {
+        readonly status: "listed";
+        readonly listed: ReadonlyArray<Slot>;
+        readonly unread: ReadonlyArray<Slot>;
+      }
+    | { readonly status: "not-configured" | "unavailable" }
+  > {
+    return this.#serially(async () => {
+      const selection = this.#ports.store();
+      if (selection.status === "not-configured" || this.#ports.state().local === undefined) {
+        return { status: "not-configured" };
+      }
+      const listing = await this.#listInstances(selection.store);
+      if (listing === undefined) return { status: "unavailable" };
+      const listed = listedSlots(listing);
+      const state = this.#ports.state();
+      return {
+        status: "listed",
+        listed,
+        unread: listed.filter((slot) => !state.holds(slot.instanceId, slot.sequence)),
+      };
+    });
+  }
+
+  /**
+   * Read one batch of a restore: hold its membership records, then reconcile
+   * its entries about a Canvas as a restore, so an artifact version applies
+   * ahead of its writer's earlier slots. Everything it keeps is journaled
+   * before it returns, so a restart resumes at the next unread slot. Each
+   * batch takes the command line once, so publishes and commands run
+   * between batches.
+   */
+  restoreRead(input: {
+    readonly slots: ReadonlyArray<Slot>;
+    readonly listed: ReadonlyArray<Slot>;
+  }): Promise<
+    | {
+        readonly status: "read";
+        readonly kept: ReadonlyArray<ReplicaArtifactReconciled>;
+        readonly refused: ReadonlyArray<ReplicaReadRefusal>;
+      }
+    | { readonly status: "not-configured" | "unavailable" }
+  > {
+    return this.#serially(async () => {
+      const selection = this.#ports.store();
+      if (selection.status === "not-configured" || this.#ports.state().local === undefined) {
+        return { status: "not-configured" };
+      }
+      const read = await this.#readSlots(selection.store, input.slots);
+      if (read.status === "unavailable") return read;
+      const reconciled = this.#ports.artifacts?.reconcile({
+        reads: read.artifacts,
+        listed: input.listed,
+        restoring: true,
+      });
+      return {
+        status: "read",
+        kept: reconciled?.kept ?? [],
+        refused: [...read.refused, ...(reconciled?.refused ?? [])],
+      };
+    });
   }
 
   async #listInstances(
@@ -1190,7 +1286,7 @@ export class ReplicaMembershipService {
   }
 
   #hold(read: Extract<SignedRead, { status: "ready" }>): void {
-    if (read.entry.kind === "artifact-version" || read.entry.kind === "artifact-tombstone") return;
+    if (!isReplicaMembershipEntry(read.entry)) return;
     this.#journalHeld(read.entry, read.bytes, read.text, read.signature);
   }
 

@@ -3,6 +3,7 @@ import type { ReplicaSyncStatusClient } from "@octant/client-runtime/replica-syn
 import {
   decodeReplicaMembershipResult,
   decodeReplicaMembershipView,
+  decodeReplicaRestoreResult,
   decodeReplicaSyncStatusView,
   type ReplicaMembershipView,
 } from "@octant/contracts/replica-entry";
@@ -71,13 +72,18 @@ function client(
   const execute = vi.fn(async (command: { readonly kind: string }) =>
     decodeReplicaMembershipResult(answer(command)),
   );
+  const restore = vi.fn(async (command: { readonly kind: string }) =>
+    decodeReplicaRestoreResult(answer(command)),
+  );
   const fake: ReplicaMembershipClient = {
     read: vi.fn(async () => current),
     execute: execute as unknown as ReplicaMembershipClient["execute"],
+    restore: restore as unknown as ReplicaMembershipClient["restore"],
   };
   return {
     fake,
     execute,
+    restore,
     setView: (next: ReplicaMembershipView) => {
       current = next;
     },
@@ -374,6 +380,63 @@ describe("SyncMembershipSections", () => {
     const section = await screen.findByRole("region", { name: "Sync status" });
     expect(within(section).getAllByText(SYNC_STATUS_NOT_AVAILABLE)).toHaveLength(3);
     expect(within(section).getByText(/The store could not be reached\.$/)).toBeVisible();
+  });
+});
+
+describe("restoring the library", () => {
+  const member = {
+    thisComputer: { kind: "member", instanceId: laptop, displayName: "Laptop" },
+    members: founderMembers,
+  };
+
+  it("shows a running restore's progress and stops it, then offers to resume where it stopped", async () => {
+    const running = view({
+      ...member,
+      status: { ...status, restore: { state: "running", done: 25, total: 60 } },
+    });
+    const stopped = view({
+      ...member,
+      status: { ...status, restore: { state: "stopped", done: 25, total: 60 } },
+    });
+    const { fake, restore, setView } = client(running, (command) =>
+      command.kind === "stop-restore"
+        ? { kind: "restore", restore: { state: "stopped", done: 25, total: 60 } }
+        : { kind: "restore", restore: { state: "running", done: 25, total: 60 } },
+    );
+    renderSections(fake);
+    const section = await screen.findByRole("region", { name: "Restore library" });
+    expect(within(section).getByText("Restoring: 25 of 60 entries read.")).toBeVisible();
+    expect(within(section).getByRole("progressbar", { name: "Progress" })).toHaveAttribute(
+      "value",
+      "25",
+    );
+
+    setView(stopped);
+    await userEvent.click(within(section).getByRole("button", { name: "Stop" }));
+    expect(restore).toHaveBeenCalledWith({ kind: "stop-restore" });
+    expect(
+      await within(section).findByText(
+        "Stopped: 25 of 60 entries read. Background sync reads nothing more from the store until you resume.",
+      ),
+    ).toBeVisible();
+
+    setView(running);
+    await userEvent.click(within(section).getByRole("button", { name: "Resume" }));
+    expect(restore).toHaveBeenLastCalledWith({ kind: "resume-restore" });
+    expect(await within(section).findByRole("button", { name: "Stop" })).toBeVisible();
+  });
+
+  it("offers neither Stop nor Resume once the library is restored", async () => {
+    const { fake } = client(
+      view({
+        ...member,
+        status: { ...status, restore: { state: "finished", done: 60, total: 60 } },
+      }),
+    );
+    renderSections(fake);
+    const section = await screen.findByRole("region", { name: "Restore library" });
+    expect(within(section).getByText("Restored: 60 of 60 entries read.")).toBeVisible();
+    expect(within(section).queryByRole("button")).not.toBeInTheDocument();
   });
 });
 

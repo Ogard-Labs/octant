@@ -9162,6 +9162,11 @@ export function startOctantServer(
         projection: persistence.canvasProjection,
         uuid: randomUUID,
         actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+        // A person's comment change on a Canvas the replica carries goes to
+        // their other computers; one taken in from another computer does not.
+        committed: (canvasId, event) => {
+          void replicaArtifactSync.service?.commentCommitted({ canvasId, event });
+        },
       },
       { authorize: authorizeCanvas },
     );
@@ -10072,6 +10077,7 @@ export function startOctantServer(
         state: persistence.replicaMembershipProjection.state(),
         now: Date.now(),
         computerName: replicaComputerName(hostname(), localHostDisplayName()),
+        restore: replicaArtifactSync.service?.restoreProgress(),
       });
     const replicaSyncStatusRoutes = createReplicaSyncStatusRouteHandler({
       windowAuthorityStore,
@@ -10225,6 +10231,17 @@ export function startOctantServer(
         artifacts: () => persistence.replicaArtifactProjection.state(),
         localCanvasIds: () => [...persistence.canvasProjection.snapshot().keys()],
         journal: replicaJournal,
+        // A comment another computer wrote joins the Canvas's comments here,
+        // naming that computer.
+        comments: {
+          adopt: ({ canvasId, change, writer }) => {
+            canvasCommentService.adoptReplicaChange({
+              canvasId,
+              change,
+              writer: { instanceId: String(writer.instanceId), displayName: writer.displayName },
+            });
+          },
+        },
       }),
       state: () => persistence.replicaMembershipProjection.state(),
       localHostId: LOCAL_HOST_ID,
@@ -10458,6 +10475,10 @@ export function startOctantServer(
     const replicaMembershipRoutes = createReplicaMembershipRouteHandler({
       service: replicaMembershipService,
       view: readReplicaMembershipView,
+      restore: {
+        stop: () => artifactSyncService.stopRestore(),
+        resume: () => artifactSyncService.resumeRestore(),
+      },
       windowAuthorityStore,
       ...(options.allowedRendererHttpOrigin === undefined
         ? {}

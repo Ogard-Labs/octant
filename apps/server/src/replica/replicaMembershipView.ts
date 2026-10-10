@@ -16,6 +16,7 @@ import {
   type ReplicaJoinRequestEntry,
   type ReplicaMemberView,
   type ReplicaMembershipView,
+  type ReplicaRestoreProgress,
   type ReplicaSyncStatus,
   type ReplicaSyncStatusView,
   type ReplicaThisComputer,
@@ -55,6 +56,8 @@ export function replicaMembershipView(input: {
   readonly state: ReplicaMembershipState;
   readonly now: number;
   readonly computerName: ReplicaDisplayName;
+  /** The restore of this computer's current identity, once one started. */
+  readonly restore?: ReplicaRestoreProgress | undefined;
 }): ReplicaMembershipView {
   const { state } = input;
   const local = state.local;
@@ -108,7 +111,7 @@ export function replicaMembershipView(input: {
                 ]
               : [],
           ),
-    status: syncStatus(state),
+    status: syncStatus(state, input.restore),
   };
 }
 
@@ -193,12 +196,16 @@ function approvers(
   return found.sort((left, right) => left.displayName.localeCompare(right.displayName));
 }
 
-function syncStatus(state: ReplicaMembershipState): ReplicaSyncStatus {
+function syncStatus(
+  state: ReplicaMembershipState,
+  restore: ReplicaRestoreProgress | undefined,
+): ReplicaSyncStatus {
   const failure = state.lastStoreFailure;
   return {
     lastPublish: { kind: "not-available" },
     lastPull: { kind: "not-available" },
     queued: { kind: "not-available" },
+    ...(restore === undefined ? {} : { restore }),
     ...(failure === undefined
       ? {}
       : { lastError: { at: failure.at, phase: failure.phase, reason: failure.reason } }),

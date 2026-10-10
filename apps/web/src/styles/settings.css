@@ -2444,6 +2444,16 @@ textarea.settings-view__text-input {
   text-align: center;
 }
 
+/* A restore's progress reads at a glance beside its Stop or Resume. */
+.sync-settings__progress {
+  /* A fixed width: alone in the controls, a percentage of a shrink-wrapped
+     row collapses to nothing once Stop and Resume are gone. */
+  width: 12rem;
+  max-width: 100%;
+  height: 8px;
+  accent-color: var(--oct-accent);
+}
+
 .sync-settings__muted {
   font-size: var(--oct-text-detail);
   color: var(--oct-muted);

@@ -19,6 +19,7 @@ import {
 import { replicaArtifactHeads, replicaArtifactHidden } from "@octant/domain/replica-entry-policy";
 import type { ReplicaStore, ReplicaStorePutResult } from "@octant/plugin-api/replica-store";
 import { ArtifactLibraryService } from "../canvas/artifactLibraryService";
+import { CanvasCommentService, registerCanvasCommentEvents } from "../canvas/canvasCommentService";
 import { AggregateHeadsProjection } from "../persistence/aggregateHeadsProjection";
 import { EventRegistry } from "../persistence/eventRegistry";
 import { Journal } from "../persistence/journal";
@@ -167,8 +168,8 @@ function computer(
   const artifactProjection = new ReplicaArtifactProjection();
   const journal = new Journal({
     connection: saved.connection,
-    registry: registerReplicaStoreSettingsEvents(
-      registerReplicaMembershipEvents(new EventRegistry()),
+    registry: registerCanvasCommentEvents(
+      registerReplicaStoreSettingsEvents(registerReplicaMembershipEvents(new EventRegistry())),
     ),
     projections: new ProjectionRegistry()
       .register(new AggregateHeadsProjection())
@@ -211,6 +212,21 @@ function computer(
   );
   const store = shared.kind === "direct" ? shared.selection : () => settings.selection();
   const canvases = new Map<string, CanvasVersion[]>();
+  // Comments live on the Canvas's own comment aggregate, which exists here
+  // whether or not the Canvas is open in a thread on this computer.
+  const syncSlot: { service?: ReplicaArtifactSyncService } = {};
+  const comments = new CanvasCommentService(
+    {
+      journal,
+      projection: { getById: () => ({}) as never },
+      uuid: nextUuid,
+      actor,
+      committed: (canvasId, event) => {
+        void syncSlot.service?.commentCommitted({ canvasId, event });
+      },
+    },
+    { authorize: () => true },
+  );
   const projects = new Map<string, string>([
     [ids.studioProject, "Launch"],
     [ids.laptopProject, "Field notes"],
@@ -228,6 +244,15 @@ function computer(
       artifacts: () => artifactProjection.state(),
       localCanvasIds: () => [...canvases.keys()] as CanvasId[],
       journal: replicaJournal,
+      comments: {
+        adopt: ({ canvasId, change, writer }) => {
+          comments.adoptReplicaChange({
+            canvasId,
+            change,
+            writer: { instanceId: String(writer.instanceId), displayName: writer.displayName },
+          });
+        },
+      },
     }),
     state: () => membershipProjection.state(),
     localHostId: LOCAL_HOST_ID,
@@ -250,6 +275,7 @@ function computer(
     projectName: (projectId) => projects.get(projectId),
     planMode: () => options.planMode === true,
   });
+  syncSlot.service = sync;
   const library = new ArtifactLibraryService({
     projection: { snapshot: () => new Map() },
     projects: () => [],
@@ -384,10 +410,49 @@ function computer(
       await settings.setSync({ syncOn: true, expectedVersion: settings.settings().version });
     }
   };
+  /** Write a comment change the way the Canvas comments panel does. */
+  const comment = (
+    canvasId: CanvasId,
+    command:
+      | { readonly kind: "canvas-comment-add"; readonly commentId: string; readonly body: string }
+      | {
+          readonly kind: "canvas-comment-reply";
+          readonly commentId: string;
+          readonly replyId: string;
+          readonly body: string;
+        }
+      | { readonly kind: "canvas-comment-delete"; readonly commentId: string },
+  ) => {
+    const current = threadsOf(canvasId);
+    const result = comments.comment(
+      {
+        ...command,
+        canvasId,
+        ...(command.kind === "canvas-comment-add"
+          ? { anchor: { kind: "block", blockId: "t1" }, author: actor }
+          : command.kind === "canvas-comment-reply"
+            ? { author: actor }
+            : { deletedBy: actor }),
+        expectedSequence: current.sequence,
+        issuedAt: NOW,
+      },
+      { mode: "work", projectId: null },
+      undefined,
+      { kind: "host" },
+    );
+    if (result.kind !== "accepted") throw new Error(`comment refused: ${JSON.stringify(result)}`);
+  };
+  const threadsOf = (canvasId: CanvasId) => {
+    const read = comments.comments(canvasId, { mode: "work", projectId: null }, undefined);
+    if (read.kind !== "ready") throw new Error("comments unavailable");
+    return read;
+  };
   return {
     name,
     disk: saved,
     journal,
+    comment,
+    threadsOf,
     connection: saved.connection,
     settings,
     membership,
@@ -1284,5 +1349,331 @@ describe("synced artifacts in the library", () => {
       await laptop.syncedArtifacts.execute({ kind: "restore", canvasId: ids.canvas }),
     ).toMatchObject({ kind: "artifact-synced-refused", reason: "sync-off" });
     expect(eventsNamed(laptop, REPLICA_ARTIFACT_EVENT_NAMES.queued)).toEqual([]);
+  });
+});
+
+/** A Canvas id and version id that stay distinct across many Canvases. */
+function numbered(prefix: "1" | "2", canvas: number, version = 0): string {
+  return `${prefix}0000000-0000-4000-8${String(version).padStart(3, "0")}-${String(canvas).padStart(12, "0")}`;
+}
+
+/** Every artifact a computer holds, by Canvas: its versions and its heads. */
+function librarySummary(host: Computer) {
+  return host.artifactProjection
+    .state()
+    .artifacts.map((artifact) => ({
+      canvasId: String(artifact.canvasId),
+      versions: artifact.versions.map((version) => String(version.versionId)).sort(),
+      tombstones: artifact.tombstones.length,
+      heads: replicaArtifactHeads(artifact),
+    }))
+    .sort((left, right) => left.canvasId.localeCompare(right.canvasId));
+}
+
+function keptSlots(host: Computer): ReadonlyArray<string> {
+  return eventsNamed(host, REPLICA_ARTIFACT_EVENT_NAMES.reconciled).flatMap((event) => {
+    const payload = event.payload as { instanceId: string; sequence: number; outcome: string };
+    return payload.outcome === "refused" ? [] : [`${payload.instanceId}/${payload.sequence}`];
+  });
+}
+
+describe("restoring a whole library on a computer that joins", () => {
+  it("brings 50 Canvases and their history, newest first, and resumes after a restart with no duplicates", async () => {
+    const shared: SharedStore = { kind: "folder", folder: scratch(homedir()) };
+    const studio = computer("Studio Mac", shared);
+    await studio.turnSyncOn();
+    expectKind(
+      await studio.membership.execute({ kind: "create-replica", displayName: studio.name }),
+      "replica-created",
+    );
+    // Three rounds of revisions over 50 Canvases, the newest round last.
+    for (let round = 1; round <= 3; round += 1) {
+      for (let canvas = 1; canvas <= 50; canvas += 1) {
+        await studio.commit(
+          canvasVersion({
+            canvasId: numbered("1", canvas) as CanvasId,
+            versionId: numbered("2", canvas, round),
+            sequence: round,
+            text: `Plan ${String(canvas)}, round ${String(round)}`,
+            title: `Plan ${String(canvas)}`,
+          }),
+        );
+      }
+    }
+    await studio.sync.artifactDeleted(numbered("1", 50) as CanvasId);
+    expect(studio.artifactProjection.state().queue).toEqual([]);
+
+    // A fresh computer joins, and stops after its second restore batch.
+    const fresh = computer("New PC", shared);
+    await fresh.turnSyncOn();
+    await joinThrough(fresh, studio);
+    const stopping = computer(fresh.name, shared, {
+      disk: fresh.disk,
+      stopAfter: { eventName: REPLICA_ARTIFACT_EVENT_NAMES.restoreProgress, times: 2 },
+    });
+    await expect(stopping.sync.restore()).rejects.toThrow("The host stopped.");
+    expect(stopping.sync.restoreProgress()).toEqual({ state: "running", done: 50, total: 151 });
+    // Newest first: the deletion and the newest round arrived before any
+    // history - 50 slots, the deletion and the newest versions of 49 Canvases.
+    const partial = librarySummary(stopping);
+    expect(partial).toHaveLength(49);
+    expect(partial.filter((artifact) => artifact.tombstones === 1)).toHaveLength(1);
+    expect(
+      partial.flatMap((artifact) => artifact.versions).every((id) => id.includes("-8003-")),
+    ).toBe(true);
+
+    // It starts again on the same journal and finishes the restore.
+    const restarted = computer(fresh.name, shared, { disk: fresh.disk });
+    expect(restarted.sync.restoreProgress()).toEqual({ state: "running", done: 50, total: 151 });
+    await restarted.sync.restore();
+    expect(restarted.sync.restoreProgress()).toEqual({ state: "finished", done: 151, total: 151 });
+
+    // The same library as the computer that wrote it, every slot kept once.
+    expect(librarySummary(restarted)).toEqual(librarySummary(studio));
+    const kept = keptSlots(restarted);
+    expect(kept).toHaveLength(151);
+    expect(new Set(kept).size).toBe(151);
+    expect(
+      restarted.library.list({ tab: "all" }, { kind: "local-window" } as never).synced,
+    ).toHaveLength(50);
+    // A later sync reads nothing it already holds.
+    expect(expectKind(await restarted.sync.pull(), "pulled").artifacts).toEqual([]);
+    expect(keptSlots(computer(fresh.name, shared, { disk: fresh.disk }))).toEqual(kept);
+  });
+
+  it("stops when asked, reads nothing while stopped, and resumes where it stopped", async () => {
+    const memory = memoryStore();
+    const hooks: { onGet: (() => void) | undefined } = { onGet: undefined };
+    const store: ReplicaStore = {
+      ...memory.store,
+      async get(key) {
+        hooks.onGet?.();
+        return memory.store.get(key);
+      },
+    };
+    const shared: SharedStore = {
+      kind: "direct",
+      selection: () => ({ status: "selected", store }),
+    };
+    const { studio, laptop } = await pair(shared);
+    for (let canvas = 1; canvas <= 60; canvas += 1) {
+      await studio.commit(
+        canvasVersion({
+          canvasId: numbered("1", canvas) as CanvasId,
+          versionId: numbered("2", canvas, 1),
+          sequence: 1,
+          text: `Plan ${String(canvas)}`,
+        }),
+      );
+    }
+    // The person presses Stop while the first batch is being read.
+    let reads = 0;
+    hooks.onGet = () => {
+      reads += 1;
+      if (reads === 3) expect(laptop.sync.stopRestore().kind).toBe("restore");
+    };
+    await laptop.sync.restore();
+    hooks.onGet = undefined;
+    expect(laptop.sync.restoreProgress()).toEqual({ state: "stopped", done: 25, total: 60 });
+    expect(librarySummary(laptop)).toHaveLength(25);
+
+    // Stopped stays stopped, across a restart too, and reads nothing.
+    const calls = memory.state.calls;
+    await laptop.sync.sync();
+    expect(await laptop.sync.pull()).toBeUndefined();
+    const restarted = computer(laptop.name, shared, { disk: laptop.disk });
+    await restarted.sync.sync();
+    expect(memory.state.calls).toBe(calls);
+    expect(restarted.sync.restoreProgress()?.state).toBe("stopped");
+
+    const resumed = restarted.sync.resumeRestore();
+    expect(resumed).toEqual({
+      kind: "restore",
+      restore: { state: "running", done: 25, total: 60 },
+    });
+    await restarted.sync.restore();
+    expect(restarted.sync.restoreProgress()).toEqual({ state: "finished", done: 60, total: 60 });
+    expect(librarySummary(restarted)).toEqual(librarySummary(studio));
+    expect(new Set(keptSlots(restarted)).size).toBe(60);
+    expect(restarted.sync.stopRestore()).toEqual(
+      expect.objectContaining({ kind: "refused", reason: "finished" }),
+    );
+  });
+
+  it("stays stopped when Stop is pressed during the restore's final pull", async () => {
+    const memory = memoryStore();
+    const hooks: { onList: (() => void) | undefined } = { onList: undefined };
+    const store: ReplicaStore = {
+      ...memory.store,
+      async list(cursor) {
+        hooks.onList?.();
+        return memory.store.list(cursor);
+      },
+    };
+    const shared: SharedStore = {
+      kind: "direct",
+      selection: () => ({ status: "selected", store }),
+    };
+    const { studio, laptop } = await pair(shared);
+    await studio.commit(canvasVersion({ versionId: ids.v1, sequence: 1, text: "Ship it." }));
+    // The restore lists once to plan, then once more for its final pull.
+    let lists = 0;
+    hooks.onList = () => {
+      lists += 1;
+      if (lists === 2) laptop.sync.stopRestore();
+    };
+    await laptop.sync.restore();
+    expect(lists).toBe(2);
+    expect(laptop.sync.restoreProgress()?.state).toBe("stopped");
+  });
+
+  it("stops a restore with sync off, and resumes it only once sync is on", async () => {
+    const shared: SharedStore = { kind: "folder", folder: scratch(homedir()) };
+    const { studio, laptop } = await pair(shared);
+    for (let canvas = 1; canvas <= 30; canvas += 1) {
+      await studio.commit(
+        canvasVersion({
+          canvasId: numbered("1", canvas) as CanvasId,
+          versionId: numbered("2", canvas, 1),
+          sequence: 1,
+          text: `Plan ${String(canvas)}`,
+        }),
+      );
+    }
+    const stopping = computer(laptop.name, shared, {
+      disk: laptop.disk,
+      stopAfter: { eventName: REPLICA_ARTIFACT_EVENT_NAMES.restoreProgress, times: 1 },
+    });
+    await expect(stopping.sync.restore()).rejects.toThrow("The host stopped.");
+    const restarted = computer(laptop.name, shared, { disk: laptop.disk });
+    await restarted.settings.setSync({
+      syncOn: false,
+      expectedVersion: restarted.settings.settings().version,
+    });
+    expect(restarted.sync.stopRestore()).toEqual({
+      kind: "restore",
+      restore: { state: "stopped", done: 25, total: 30 },
+    });
+    expect(restarted.sync.resumeRestore()).toEqual(
+      expect.objectContaining({ kind: "refused", reason: "not-configured" }),
+    );
+    expect(restarted.sync.restoreProgress()?.state).toBe("stopped");
+  });
+});
+
+describe("Canvas comments through the replica", () => {
+  const ids2 = {
+    first: "50000000-0000-4000-8000-000000000001",
+    second: "50000000-0000-4000-8000-000000000002",
+    studioAside: "50000000-0000-4000-8000-000000000003",
+    laptopAside: "50000000-0000-4000-8000-000000000004",
+    reply: "60000000-0000-4000-8000-000000000001",
+  };
+  const bodies = (host: Computer) =>
+    host.threadsOf(ids.canvas).threads.map((thread) => ({
+      body: thread.comment.body,
+      from: thread.comment.origin?.kind === "replica" ? thread.comment.origin.computerName : "here",
+      replies: thread.replies.map((reply) => reply.body),
+    }));
+
+  it("shows comments made on two computers on both, in the order their writers saw them", async () => {
+    const shared: SharedStore = { kind: "folder", folder: scratch(homedir()) };
+    const { studio, laptop } = await pair(shared);
+    await studio.commit(canvasVersion({ versionId: ids.v1, sequence: 1, text: "Ship it." }));
+    await laptop.sync.pull();
+
+    // The Studio Mac comments; the MacBook Air reads it, then answers with a
+    // comment of its own and a reply.
+    studio.comment(ids.canvas, {
+      kind: "canvas-comment-add",
+      commentId: ids2.first,
+      body: "Is Monday too early?",
+    });
+    await studio.sync.drain();
+    await laptop.sync.pull();
+    laptop.comment(ids.canvas, {
+      kind: "canvas-comment-add",
+      commentId: ids2.second,
+      body: "Tuesday works better.",
+    });
+    laptop.comment(ids.canvas, {
+      kind: "canvas-comment-reply",
+      commentId: ids2.first,
+      replyId: ids2.reply,
+      body: "A little.",
+    });
+    // Then both comment at once, neither having seen the other's.
+    studio.comment(ids.canvas, {
+      kind: "canvas-comment-add",
+      commentId: ids2.studioAside,
+      body: "Studio aside.",
+    });
+    laptop.comment(ids.canvas, {
+      kind: "canvas-comment-add",
+      commentId: ids2.laptopAside,
+      body: "Laptop aside.",
+    });
+    await studio.sync.drain();
+    await laptop.sync.drain();
+    await studio.sync.sync();
+    await laptop.sync.sync();
+
+    // Each shows its own comments where it wrote them and the other's after
+    // what it had already shown: the asides were written at once, so either
+    // order is one their writers saw.
+    expect(bodies(studio)).toEqual([
+      { body: "Is Monday too early?", from: "here", replies: ["A little."] },
+      { body: "Studio aside.", from: "here", replies: [] },
+      { body: "Tuesday works better.", from: "MacBook Air", replies: [] },
+      { body: "Laptop aside.", from: "MacBook Air", replies: [] },
+    ]);
+    expect(bodies(laptop)).toEqual([
+      { body: "Is Monday too early?", from: "Studio Mac", replies: ["A little."] },
+      { body: "Tuesday works better.", from: "here", replies: [] },
+      { body: "Laptop aside.", from: "here", replies: [] },
+      { body: "Studio aside.", from: "Studio Mac", replies: [] },
+    ]);
+
+    // A deletion travels as a tombstone and stays in the log.
+    studio.comment(ids.canvas, { kind: "canvas-comment-delete", commentId: ids2.studioAside });
+    await studio.sync.drain();
+    await laptop.sync.pull();
+    expect(bodies(laptop).map((thread) => thread.body)).not.toContain("Studio aside.");
+
+    // A computer that joins later restores the threads in an order each
+    // writer saw: the MacBook Air's comment and reply after the comment they
+    // answer, whichever computer's entries it read first.
+    const later = computer("Mac mini", shared);
+    await later.turnSyncOn();
+    await joinThrough(later, studio);
+    await later.sync.sync();
+    const restored = bodies(later);
+    expect(restored.map((thread) => thread.body)).toEqual(
+      expect.arrayContaining(["Is Monday too early?", "Tuesday works better.", "Laptop aside."]),
+    );
+    expect(restored).toHaveLength(3);
+    expect(restored.findIndex((thread) => thread.body === "Is Monday too early?")).toBeLessThan(
+      restored.findIndex((thread) => thread.body === "Tuesday works better."),
+    );
+    expect(restored.find((thread) => thread.body === "Is Monday too early?")?.replies).toEqual([
+      "A little.",
+    ]);
+    // Nothing a pull took in is published again under the importer's name.
+    const published = (host: Computer) =>
+      eventsNamed(host, REPLICA_ARTIFACT_EVENT_NAMES.commentQueued).length;
+    expect(published(later)).toBe(0);
+    expect(published(laptop)).toBe(3);
+    expect(published(studio)).toBe(3);
+  });
+
+  it("keeps the comments of a Canvas that never left this computer here", async () => {
+    const shared: SharedStore = { kind: "folder", folder: scratch(homedir()) };
+    const { studio } = await pair(shared);
+    studio.comment(ids.second, {
+      kind: "canvas-comment-add",
+      commentId: ids2.first,
+      body: "Only here.",
+    });
+    expect(eventsNamed(studio, REPLICA_ARTIFACT_EVENT_NAMES.commentQueued)).toEqual([]);
   });
 });

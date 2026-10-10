@@ -1,9 +1,12 @@
 import {
   decodeReplicaMembershipResult,
   decodeReplicaMembershipView,
+  decodeReplicaRestoreResult,
   type ReplicaMembershipCommand,
   type ReplicaMembershipResult,
   type ReplicaMembershipView,
+  type ReplicaRestoreCommand,
+  type ReplicaRestoreResult,
 } from "@octant/contracts/replica-entry";
 import { bindFetchPort } from "./bindFetchPort";
 
@@ -21,6 +24,8 @@ export interface ReplicaMembershipClient {
     command: ReplicaMembershipCommand,
     signal?: AbortSignal,
   ): Promise<ReplicaMembershipResult>;
+  /** Stops or resumes this host's restore of the replica's library. A paired phone is refused. */
+  restore(command: ReplicaRestoreCommand, signal?: AbortSignal): Promise<ReplicaRestoreResult>;
 }
 
 export class ReplicaMembershipClientFailure extends Error {
@@ -89,6 +94,18 @@ export function createReplicaMembershipClient(
         ...(signal === undefined ? {} : { signal }),
       });
       return decodeReplicaMembershipResult(body);
+    },
+    async restore(command, signal) {
+      const body = await send(commandsUrl, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-octant-window-capability": options.windowCapability,
+        },
+        body: JSON.stringify(command),
+        ...(signal === undefined ? {} : { signal }),
+      });
+      return decodeReplicaRestoreResult(body);
     },
   };
 }

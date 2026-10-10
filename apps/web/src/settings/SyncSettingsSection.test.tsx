@@ -89,6 +89,12 @@ describe("SyncSettingsSection", () => {
     expect(SYNC_PROVIDER_FACT).toBe(
       "Your storage provider can read the synced files: they are signed but not encrypted.",
     );
+    // The switch says what sync does once this computer belongs to a replica.
+    expect(
+      screen.getByText(
+        "Once this computer belongs to a replica, sync on copies artifact versions and comments to the store and brings in your other computers'.",
+      ),
+    ).toBeVisible();
     // Focusable while off, with its reason announced.
     const test = screen.getByRole("button", { name: "Test connection" });
     expect(test).toHaveAttribute("aria-disabled", "true");

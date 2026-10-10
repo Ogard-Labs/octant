@@ -207,9 +207,17 @@ function sameAnchor(left: CanvasCommentAnchor, right: CanvasCommentAnchor): bool
 
 const OUTDATED_ANCHOR_LABEL = "No longer on the canvas";
 
-function authorLabel(thread: CanvasCommentThread["comment"]): string {
-  const who = thread.author.kind === "agent" ? "Agent" : "You";
-  return thread.origin?.kind === "remote-device" ? `${who} · paired device` : who;
+function authorLabel(item: Pick<CanvasCommentThread["comment"], "author" | "origin">): string {
+  const who = item.author.kind === "agent" ? "Agent" : "You";
+  switch (item.origin?.kind) {
+    case "remote-device":
+      return `${who} · paired device`;
+    case "replica":
+      // Written on another of this person's computers and taken in by sync.
+      return `${who} · ${item.origin.computerName}`;
+    default:
+      return who;
+  }
 }
 
 /**
@@ -353,9 +361,7 @@ export function CanvasCommentsPanel(props: CanvasCommentsPanelProps) {
                 <p className="canvas-comments__body">{thread.comment.body}</p>
                 {thread.replies.map((reply) => (
                   <p className="canvas-comments__reply" key={String(reply.replyId)}>
-                    <span className="canvas-comments__meta">
-                      {reply.author.kind === "agent" ? "Agent" : "You"}
-                    </span>
+                    <span className="canvas-comments__meta">{authorLabel(reply)}</span>
                     {reply.body}
                   </p>
                 ))}
