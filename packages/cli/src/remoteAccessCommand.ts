@@ -234,9 +234,10 @@ async function runListenerCommand(
       body: {
         hostname: command.hostname,
         port: command.port,
-        // The same origin Settings derives: the listener's own address and
-        // port, which the host refuses unless they match the bind.
-        origin: `https://${command.hostname}${command.port === 443 ? "" : `:${command.port}`}`,
+        // The listener's own address and port, as Settings derives it, which
+        // the host refuses unless they match the bind; an IPv6 address must be
+        // bracketed to be a valid URL authority.
+        origin: `https://${command.hostname.includes(":") ? `[${command.hostname}]` : command.hostname}${command.port === 443 ? "" : `:${command.port}`}`,
         certificatePem,
         privateKeyPem,
       },

@@ -254,6 +254,24 @@ describe("runRemoteAccessCliCommand", () => {
     expect(test.sent[0]?.body).toMatchObject({ origin: "https://192.168.1.20" });
   });
 
+  it("brackets an IPv6 listener address in the origin", async () => {
+    const test = fixture(() => ({ status: 200, body: { status: READY_STATUS } }), {
+      "/c.pem": "cert",
+      "/k.pem": "key",
+    });
+    await test.run({
+      action: "listener-enable",
+      hostname: "fd7a:115c:a1e0::7033:4105",
+      port: 8455,
+      certificatePath: "/c.pem",
+      privateKeyPath: "/k.pem",
+    });
+    expect(test.sent[0]?.body).toMatchObject({
+      hostname: "fd7a:115c:a1e0::7033:4105",
+      origin: "https://[fd7a:115c:a1e0::7033:4105]:8455",
+    });
+  });
+
   it("sends nothing when a certificate or key file cannot be read", async () => {
     const test = fixture(() => ({ status: 200, body: { status: READY_STATUS } }), {
       "/c.pem": "cert",

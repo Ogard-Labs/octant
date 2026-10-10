@@ -208,6 +208,24 @@ describe("private listener administration routes", () => {
     expect(setting.clear).not.toHaveBeenCalled();
   });
 
+  it("says so and forgets the old listener when the new one cannot be remembered", async () => {
+    const { handle, setting } = setup();
+    setting.save.mockImplementation(() => {
+      throw new Error("ENOSPC");
+    });
+    const response = await handle(
+      request("/api/desktop/private-listener/enable", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: enableBody(),
+      }),
+    );
+    expect(response?.status).toBe(503);
+    expect(await response?.json()).toMatchObject({ category: "unavailable" });
+    // The previously remembered address must not come back after a restart.
+    expect(setting.clear).toHaveBeenCalledOnce();
+  });
+
   it("maps a listener lifecycle failure to a typed retryable error", async () => {
     const { handle } = setup({
       enable: vi.fn(async () => {

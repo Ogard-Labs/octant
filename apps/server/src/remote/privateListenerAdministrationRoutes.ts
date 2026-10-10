@@ -121,7 +121,16 @@ export function createPrivateListenerAdministrationRouteHandler(
       const config = decodeListenerConfig(decoded.value);
       const status =
         route === ROUTES.enable ? await control.enable(config) : await control.restart(config);
-      rememberListener(options.setting, config);
+      if (!rememberListener(options.setting, config)) {
+        return Response.json(
+          {
+            category: "unavailable",
+            message:
+              "Octant private listener is serving but could not be remembered; it will be off after a restart.",
+          },
+          { status: 503 },
+        );
+      }
       return statusResponse(status);
     } catch (error) {
       return mapError(error);
@@ -129,15 +138,26 @@ export function createPrivateListenerAdministrationRouteHandler(
   };
 }
 
+/**
+ * Remembers the listener just enabled. When that fails, the previously
+ * remembered listener is forgotten too: otherwise a restart would bring back
+ * an address and key the person believed they had moved away from.
+ */
 function rememberListener(
   setting: PrivateListenerAdministrationRouteOptions["setting"],
   config: PrivateListenerConfig,
-): void {
+): boolean {
+  if (setting === undefined) return true;
   try {
-    setting?.save(config);
+    setting.save(config);
+    return true;
   } catch {
-    // The listener is serving; failing to remember it only means it comes
-    // back off after a restart, which is the default it had before.
+    try {
+      setting.clear();
+    } catch {
+      // Nothing more can be done here; the response already reports the failure.
+    }
+    return false;
   }
 }
 
