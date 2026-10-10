@@ -79,7 +79,11 @@ that delivers the result, and may mix them in one Canvas.
   or file capability. Desktop runs these frames out of process, cancels any
   navigation of a frame away from its own page, and reserves a shortcut that
   frame script cannot intercept to move focus back to host chrome. In every
-  client a frame that loads a second page is removed.
+  client a frame that loads a second page is removed. A remote browser cannot
+  cancel a frame's own navigation, so there a running frame is not
+  network-contained: the page it navigates to runs its own script. That
+  exposure is accepted, bounded by what the frame holds, and the Run control
+  in a remote browser says so.
 - **The thread can hold the whole Canvas.** A person may expand any Canvas
   in its thread, including a board, a plan, a design, and a running
   prototype. An expanded Canvas grows with its content up to about the
