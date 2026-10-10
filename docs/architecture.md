@@ -102,7 +102,8 @@ The design rests on a small set of invariants that every package obeys:
   catalog. All have a Settings off switch: marketplace off means no catalog
   request; Updates off disables automatic update checks (manual Check for
   updates may still contact the signed feed); device tools' automatic updates
-  off means no registry request (a manual check may still contact it). An in-app
+  start off, and off means no registry request (a manual check may still
+  contact it). An in-app
   changelog rides that update path and bundled notes rather than adding a
   separate call ([decisions/0061-in-app-changelog.md](decisions/0061-in-app-changelog.md)).
   Opening Updates reads the desktop's current local update state so the installed
@@ -3128,9 +3129,19 @@ the Computer-use driver: each release is a pinned npm tarball the packager
 verifies against the registry's published `dist.integrity` (sha512) and lands
 in `Resources/managed-tools/<tool>` with its license. Electron main owns the
 per-tool instances; tools launch under the desktop runtime
-(`ELECTRON_RUN_AS_NODE` with `process.execPath`), never a system Node. The
-same updater state machine as the driver checks `registry.npmjs.org` daily by
-default; a newer release stages with its dependency closure resolved
+(`ELECTRON_RUN_AS_NODE` with `process.execPath`), never a system Node. Tools
+run unconfined under Octant's signed identity: no sandbox profile limits them,
+and macOS may attribute their access to Octant's privacy (TCC) grants. They
+need `simctl`, the Simulator's frameworks, and the shared `adb` server, and
+Octant has no confinement profile for them yet. Octant narrows what they
+inherit instead: each
+launch receives only an allowlisted environment (`PATH`, `HOME`, user and
+locale variables, `TMPDIR`, `DEVELOPER_DIR`, and the Android SDK and `adb`
+variables), never provider keys, tokens, broker credentials, or other `OCTANT_*`
+values. The same updater state machine as the driver checks
+`registry.npmjs.org` daily only when the person turns automatic updates on in
+Settings › Device tools; it is off by default, a saved choice is kept, and a
+manual check or Update still works. A newer release stages with its dependency closure resolved
 in-app (no npm or Bun is available inside the packaged app), each package
 integrity-verified, and activates only while idle and after its entrypoint
 survives a smoke launch. A staged tree that cannot start keeps the previous
