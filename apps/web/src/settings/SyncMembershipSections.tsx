@@ -60,6 +60,8 @@ export function SyncMembershipSections(props: SyncMembershipSectionsProps) {
   const [loadFailed, setLoadFailed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [feedback, setFeedback] = useState<Feedback>();
+  // A restore's outcome is said in its own section.
+  const [restoreFeedback, setRestoreFeedback] = useState<Feedback>();
   // A revoke's outcome is said beside the computers it changed, not in the
   // section above that the person did not act in.
   const [feedbackNearComputers, setFeedbackNearComputers] = useState(false);
@@ -93,14 +95,15 @@ export function SyncMembershipSections(props: SyncMembershipSectionsProps) {
   const runRestore = useCallback(
     async (command: ReplicaRestoreCommand) => {
       setBusy(true);
-      setFeedback(undefined);
-      setFeedbackNearComputers(false);
+      setRestoreFeedback(undefined);
       try {
         const result = await client.restore(command);
-        if (result.kind === "refused") setFeedback({ kind: "error", message: result.message });
+        if (result.kind === "refused") {
+          setRestoreFeedback({ kind: "error", message: result.message });
+        }
         await load();
       } catch (error) {
-        setFeedback({
+        setRestoreFeedback({
           kind: "error",
           message: error instanceof Error ? error.message : "Replica restore is unavailable.",
         });
@@ -339,7 +342,13 @@ export function SyncMembershipSections(props: SyncMembershipSectionsProps) {
       {view.status.restore === undefined ? null : (
         <SyncRestoreSection
           busy={busy}
-          feedback={feedbackSlot(false)}
+          feedback={
+            <div aria-live="polite" className="settings-feedback-slot">
+              {restoreFeedback === undefined ? null : (
+                <SettingsState kind={restoreFeedback.kind}>{restoreFeedback.message}</SettingsState>
+              )}
+            </div>
+          }
           onResume={() => void runRestore({ kind: "resume-restore" })}
           onStop={() => void runRestore({ kind: "stop-restore" })}
           restore={view.status.restore}

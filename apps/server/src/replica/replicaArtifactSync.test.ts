@@ -1499,6 +1499,39 @@ describe("restoring a whole library on a computer that joins", () => {
       expect.objectContaining({ kind: "refused", reason: "finished" }),
     );
   });
+
+  it("stops a restore with sync off, and resumes it only once sync is on", async () => {
+    const shared: SharedStore = { kind: "folder", folder: scratch(homedir()) };
+    const { studio, laptop } = await pair(shared);
+    for (let canvas = 1; canvas <= 30; canvas += 1) {
+      await studio.commit(
+        canvasVersion({
+          canvasId: numbered("1", canvas) as CanvasId,
+          versionId: numbered("2", canvas, 1),
+          sequence: 1,
+          text: `Plan ${String(canvas)}`,
+        }),
+      );
+    }
+    const stopping = computer(laptop.name, shared, {
+      disk: laptop.disk,
+      stopAfter: { eventName: REPLICA_ARTIFACT_EVENT_NAMES.restoreProgress, times: 1 },
+    });
+    await expect(stopping.sync.restore()).rejects.toThrow("The host stopped.");
+    const restarted = computer(laptop.name, shared, { disk: laptop.disk });
+    await restarted.settings.setSync({
+      syncOn: false,
+      expectedVersion: restarted.settings.settings().version,
+    });
+    expect(restarted.sync.stopRestore()).toEqual({
+      kind: "restore",
+      restore: { state: "stopped", done: 25, total: 30 },
+    });
+    expect(restarted.sync.resumeRestore()).toEqual(
+      expect.objectContaining({ kind: "refused", reason: "not-configured" }),
+    );
+    expect(restarted.sync.restoreProgress()?.state).toBe("stopped");
+  });
 });
 
 describe("Canvas comments through the replica", () => {

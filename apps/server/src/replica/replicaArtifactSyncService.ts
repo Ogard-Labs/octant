@@ -585,7 +585,8 @@ export class ReplicaArtifactSyncService {
 
   /** Stop the restore after the batch it is reading. It stays stopped across restarts. */
   stopRestore(): ReplicaRestoreResult {
-    const restore = this.#currentRestore();
+    // Stopping needs no store: it only says what background sync may do.
+    const restore = this.#currentRestore({ needsStore: false });
     if (restore.status !== "found") return restore.refusal;
     if (restore.restore.state === "running") {
       this.#ports.journal.append({
@@ -598,7 +599,7 @@ export class ReplicaArtifactSyncService {
 
   /** Resume a stopped restore where it stopped, and carry on reading in the background. */
   resumeRestore(): ReplicaRestoreResult {
-    const restore = this.#currentRestore();
+    const restore = this.#currentRestore({ needsStore: true });
     if (restore.status !== "found") return restore.refusal;
     if (restore.restore.state === "stopped") {
       this.#ports.journal.append({
@@ -610,13 +611,13 @@ export class ReplicaArtifactSyncService {
     return { kind: "restore", restore: this.restoreProgress() ?? restore.restore };
   }
 
-  #currentRestore():
+  #currentRestore(options: { readonly needsStore: boolean }):
     | {
         readonly status: "found";
         readonly restore: ReplicaRestoreProgress & { readonly restoreId: string };
       }
     | { readonly status: "refused"; readonly refusal: ReplicaRestoreResult } {
-    if (this.#ports.store().status !== "selected") {
+    if (options.needsStore && this.#ports.store().status !== "selected") {
       return {
         status: "refused",
         refusal: {
