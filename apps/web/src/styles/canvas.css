@@ -442,6 +442,13 @@
   opacity: 0.62;
 }
 
+/* A sankey chain longer than the column holds draws at its own width and
+   scrolls sideways rather than stacking its columns on each other. */
+.canvas-chart__scroll {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
 .canvas-chart__flow:focus-visible,
 .canvas-chart__node:focus-visible,
 .canvas-chart__dot:focus-visible,

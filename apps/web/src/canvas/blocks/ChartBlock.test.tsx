@@ -382,6 +382,57 @@ describe("funnel, radar, and sankey charts", () => {
     expect(within(table).getAllByRole("row")).toHaveLength(9);
     expect(within(table).getByRole("row", { name: /Pricing Left 1.9K 55.9%/ })).toBeVisible();
   });
+
+  it("gives a crowded sankey column and a long sankey chain room instead of overlapping them", () => {
+    const sankey = (links: ReadonlyArray<{ source: string; target: string; value: number }>) =>
+      chartBlock({
+        blockId: `sankey-${String(links.length)}`,
+        schemaVersion: CANVAS_SCHEMA_VERSION,
+        kind: "chart",
+        chartType: "sankey",
+        series: [],
+        links,
+      });
+    const fan = sankey(
+      Array.from({ length: 63 }, (_value, index) => ({
+        source: `Source ${String(index)}`,
+        target: "Sink",
+        value: 1,
+      })),
+    );
+    const chain = sankey(
+      Array.from({ length: 63 }, (_value, index) => ({
+        source: `Step ${String(index)}`,
+        target: `Step ${String(index + 1)}`,
+        value: 1,
+      })),
+    );
+    render(<CanvasDocument definition={{ ...canvasFixture, blocks: [fan, chain] }} />);
+    const [fanSvg, chainSvg] = [...document.querySelectorAll(".canvas-block__chart--sankey svg")];
+    if (fanSvg === undefined || chainSvg === undefined) throw new Error("Sankeys were not drawn.");
+
+    const sources = [...fanSvg.querySelectorAll("rect.canvas-chart__node")]
+      .filter((node) => Number(node.getAttribute("x")) === 0)
+      .map((node) => ({
+        y: Number(node.getAttribute("y")),
+        h: Number(node.getAttribute("height")),
+      }))
+      .sort((a, b) => a.y - b.y);
+    expect(sources).toHaveLength(63);
+    for (const [index, node] of sources.entries()) {
+      expect(node.h).toBeGreaterThanOrEqual(3);
+      const next = sources[index + 1];
+      if (next !== undefined) expect(node.y + node.h).toBeLessThanOrEqual(next.y);
+    }
+
+    const xs = [...chainSvg.querySelectorAll("rect.canvas-chart__node")].map((node) =>
+      Number(node.getAttribute("x")),
+    );
+    for (let index = 1; index < xs.length; index += 1) {
+      expect((xs[index] ?? 0) - (xs[index - 1] ?? 0)).toBeGreaterThanOrEqual(56);
+    }
+    expect(chainSvg.closest(".canvas-chart__scroll")).not.toBeNull();
+  });
 });
 
 function chartBlock(value: unknown): CanvasChartBlock {

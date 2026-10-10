@@ -929,7 +929,10 @@ nodes as 10px columns and each flow as a translucent band in the hue of the node
 it leaves, so a source can be followed to its endings; a hovered band, or every
 band through a hovered node, darkens. Node names read into the gap beside their
 column in text ink, and where two columns face across one gap they share it; a
-node's total joins its name only where both fit. The legend toggles nodes.
+node's total joins its name only where both fit. A crowded column closes its
+gaps and the picture grows taller rather than squeezing a node below 4px, and a
+chain with more columns than the figure holds at 56px apart draws wider and
+scrolls sideways. The legend toggles nodes.
 Under forced colours the washes fall away: radar areas and funnel necks become
 outlines, and sankey bands become system-ink outlines told apart by their dash.
 

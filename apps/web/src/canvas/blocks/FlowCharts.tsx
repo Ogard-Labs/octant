@@ -407,6 +407,12 @@ function RadarChart({
 
 const SANKEY_NODE_WIDTH = 10;
 const SANKEY_ROW = 36;
+const SANKEY_MAX_HEIGHT = 440;
+/** The least room between two columns, so a long chain stays apart and scrolls. */
+const SANKEY_MIN_COLUMN_GAP = 56;
+/** A crowded column closes its gaps and keeps each node at least this tall. */
+const SANKEY_DENSE_GAP = 4;
+const SANKEY_MIN_NODE = 4;
 
 /** The legend id a sankey node toggles under, kept apart from a series id. */
 export function sankeyNodeId(label: string): string {
@@ -422,7 +428,7 @@ export function sankeyNodeId(label: string): string {
 function SankeyChart({
   block,
   hidden,
-  width,
+  width: columnWidth,
   label,
 }: {
   readonly block: CanvasChartBlock;
@@ -440,7 +446,7 @@ function SankeyChart({
   const links = allLinks.filter(
     (link) => !hidden.has(sankeyNodeId(link.source)) && !hidden.has(sankeyNodeId(link.target)),
   );
-  const probe = layoutCanvasSankey(links, { width, height: 100 });
+  const probe = layoutCanvasSankey(links, { width: columnWidth, height: 100 });
   const tallest = Math.max(
     1,
     ...Array.from(
@@ -448,11 +454,23 @@ function SankeyChart({
       (_value, column) => probe.nodes.filter((node) => node.column === column).length,
     ),
   );
-  const height = Math.min(440, Math.max(200, tallest * SANKEY_ROW));
+  // A column of many nodes closes its gaps, and the picture grows past its
+  // usual cap rather than squeezing a node to nothing; a chain of many columns
+  // draws wider than the figure and scrolls, rather than stacking its columns.
+  const nodeGap = tallest > 12 ? SANKEY_DENSE_GAP : 10;
+  const height = Math.max(
+    Math.min(SANKEY_MAX_HEIGHT, Math.max(200, tallest * SANKEY_ROW)),
+    tallest * (nodeGap + SANKEY_MIN_NODE),
+  );
+  const width = Math.max(
+    columnWidth,
+    (probe.columns - 1) * SANKEY_MIN_COLUMN_GAP + SANKEY_NODE_WIDTH,
+  );
   const layout = layoutCanvasSankey(links, {
     width,
     height,
     nodeWidth: SANKEY_NODE_WIDTH,
+    nodeGap,
   });
   const keyboard = layout.links.length + layout.nodes.length <= MAX_INTERACTIVE_MARKS;
   const hue = (name: string) => hueOf.get(name) ?? 0;
@@ -498,80 +516,82 @@ function SankeyChart({
 
   return (
     <div className="canvas-chart">
-      <div className="canvas-chart__plot">
-        <svg
-          aria-label={label}
-          className="canvas-chart__svg"
-          height={height}
-          role="img"
-          viewBox={`0 0 ${String(width)} ${String(height)}`}
-          width={width}
-        >
-          {layout.links.map((link, index) => (
-            <path
-              className={`canvas-block__chart-mark canvas-chart__flow ${seriesClass(hue(link.source))}`}
-              d={link.path}
-              data-active={
-                (hover?.kind === "link" && hover.index === index) ||
-                (hover?.kind === "node" &&
-                  (layout.nodes[hover.index]?.label === link.source ||
-                    layout.nodes[hover.index]?.label === link.target))
-                  ? "true"
-                  : undefined
-              }
-              data-series={seriesAttr(hue(link.source))}
-              key={`${link.source}→${link.target}`}
-              {...readable(
-                keyboard,
-                `${link.source} to ${link.target}: ${formatCanvasValue(link.value, block.format)}`,
-                () => setHover({ kind: "link", index }),
-                () => setHover(undefined),
-              )}
-            />
-          ))}
-          {layout.nodes.map((node, index) => {
-            const last = node.column === layout.columns - 1 && layout.columns > 1;
-            const total = formatCanvasValue(Math.max(node.inflow, node.outflow), block.format);
-            const room = labelRoom(node.column, layout.columns, width);
-            // A total joins the name only where both fit; the tooltip and the
-            // table always carry it.
-            const withTotal = room >= 140;
-            const nameRoom = withTotal ? room - (total.length + 1) * 7 : room;
-            return (
-              <g key={node.label}>
-                <rect
-                  className={`canvas-block__chart-mark canvas-chart__node ${seriesClass(hue(node.label))}`}
-                  data-series={seriesAttr(hue(node.label))}
-                  height={node.height}
-                  rx={2}
-                  width={node.width}
-                  x={node.x}
-                  y={node.y}
-                  {...readable(
-                    keyboard,
-                    `${node.label}: ${nodeReading(node.inflow, node.outflow)}`,
-                    () => setHover({ kind: "node", index }),
-                    () => setHover(undefined),
-                  )}
-                />
-                <text
-                  aria-hidden="true"
-                  className="canvas-chart__category"
-                  dominantBaseline="middle"
-                  textAnchor={last ? "end" : "start"}
-                  x={last ? node.x - 6 : node.x + node.width + 6}
-                  y={node.y + node.height / 2}
-                >
-                  {fitLabel(node.label, nameRoom)}
-                  {withTotal ? (
-                    <tspan className="canvas-chart__reading-share">{` ${total}`}</tspan>
-                  ) : null}
-                </text>
-              </g>
-            );
-          })}
-        </svg>
-        <ChartTooltip anchor={anchor} />
+      <div className="canvas-chart__scroll">
+        <div className="canvas-chart__plot" style={{ width }}>
+          <svg
+            aria-label={label}
+            className="canvas-chart__svg"
+            height={height}
+            role="img"
+            viewBox={`0 0 ${String(width)} ${String(height)}`}
+            width={width}
+          >
+            {layout.links.map((link, index) => (
+              <path
+                className={`canvas-block__chart-mark canvas-chart__flow ${seriesClass(hue(link.source))}`}
+                d={link.path}
+                data-active={
+                  (hover?.kind === "link" && hover.index === index) ||
+                  (hover?.kind === "node" &&
+                    (layout.nodes[hover.index]?.label === link.source ||
+                      layout.nodes[hover.index]?.label === link.target))
+                    ? "true"
+                    : undefined
+                }
+                data-series={seriesAttr(hue(link.source))}
+                key={`${link.source}→${link.target}`}
+                {...readable(
+                  keyboard,
+                  `${link.source} to ${link.target}: ${formatCanvasValue(link.value, block.format)}`,
+                  () => setHover({ kind: "link", index }),
+                  () => setHover(undefined),
+                )}
+              />
+            ))}
+            {layout.nodes.map((node, index) => {
+              const last = node.column === layout.columns - 1 && layout.columns > 1;
+              const total = formatCanvasValue(Math.max(node.inflow, node.outflow), block.format);
+              const room = labelRoom(node.column, layout.columns, width);
+              // A total joins the name only where both fit; the tooltip and the
+              // table always carry it.
+              const withTotal = room >= 140;
+              const nameRoom = withTotal ? room - (total.length + 1) * 7 : room;
+              return (
+                <g key={node.label}>
+                  <rect
+                    className={`canvas-block__chart-mark canvas-chart__node ${seriesClass(hue(node.label))}`}
+                    data-series={seriesAttr(hue(node.label))}
+                    height={node.height}
+                    rx={2}
+                    width={node.width}
+                    x={node.x}
+                    y={node.y}
+                    {...readable(
+                      keyboard,
+                      `${node.label}: ${nodeReading(node.inflow, node.outflow)}`,
+                      () => setHover({ kind: "node", index }),
+                      () => setHover(undefined),
+                    )}
+                  />
+                  <text
+                    aria-hidden="true"
+                    className="canvas-chart__category"
+                    dominantBaseline="middle"
+                    textAnchor={last ? "end" : "start"}
+                    x={last ? node.x - 6 : node.x + node.width + 6}
+                    y={node.y + node.height / 2}
+                  >
+                    {fitLabel(node.label, nameRoom)}
+                    {withTotal ? (
+                      <tspan className="canvas-chart__reading-share">{` ${total}`}</tspan>
+                    ) : null}
+                  </text>
+                </g>
+              );
+            })}
+          </svg>
+          <ChartTooltip anchor={anchor} />
+        </div>
       </div>
     </div>
   );
