@@ -914,6 +914,97 @@ describe("CodeOperationRuntime", () => {
     },
   );
 
+  it("boots an approval-gated agent's Simulator only on an approval the host accepts exactly once", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const provider = providerConnection(queue);
+    const authority = decodeToolActionAuthority({
+      hostId: "90000000-0000-4000-8000-000000000001",
+      mode: "code",
+      projectId: thread().projectId,
+      providerInstanceId: thread().providerInstanceId,
+      extension: { kind: "core" },
+    });
+    const received: unknown[] = [];
+    const execute = vi.fn(async (_windowId: WindowId, request: unknown) => {
+      received.push(request);
+      return undefined;
+    });
+    const fixture = runtimeFixture({
+      provider: providerDriver(provider),
+      approvalValidator: false,
+      supportsAppManagedTools: true,
+      appleToolchain: {
+        resolveAuthority: () => authority,
+        discover: vi.fn(),
+        execute,
+        snapshot: vi.fn(),
+        requestPaneOpen: vi.fn(async () => undefined),
+        readScreenshot: vi.fn(),
+        inputGrantIsOpen: () => false,
+      } as never,
+    });
+    try {
+      const operation = operationId(90);
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: operation,
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      });
+      await vi.waitFor(() => expect(provider.send).toHaveBeenCalledOnce());
+      await Effect.runPromise(
+        Queue.offer(
+          queue,
+          providerEvent({
+            kind: "tool-request",
+            requestId: "apple-boot",
+            toolName: "octant_apple",
+            inputJson: JSON.stringify({
+              operation: "boot",
+              simulatorId: "90000000-0000-4000-8000-000000000011",
+            }),
+          }),
+        ),
+      );
+      let approval: Extract<OperationFrame["event"], { kind: "approval-requested" }> | undefined;
+      await vi.waitFor(async () => {
+        const frames = await fixture.runtime.subscribe(windowId, threadId, operation, 0, 30);
+        approval = frames
+          .map((frame) => frame.event)
+          .find((event) => event.kind === "approval-requested");
+        expect(approval).toBeDefined();
+      });
+      if (approval === undefined) throw new Error("Expected a device approval");
+      expect(approval.summary).toContain("Allow Apple boot?");
+      expect(execute).not.toHaveBeenCalled();
+
+      await fixture.runtime.execute(windowId, {
+        kind: "answer-provider-approval",
+        operationId: operationId(91),
+        threadId,
+        checkoutId,
+        approvalId: approval.approvalId,
+        decision: "approved",
+      });
+      await vi.waitFor(() => expect(execute).toHaveBeenCalledOnce());
+
+      const validate = (
+        fixture.runtime as unknown as {
+          validateAppleApproval: (windowId: WindowId, request: unknown) => Promise<boolean>;
+        }
+      ).validateAppleApproval;
+      const request = received[0] as { readonly approval: { readonly kind: string } };
+      expect(request.approval.kind).toBe("approved");
+      await expect(validate.call(fixture.runtime, windowId, request)).resolves.toBe(true);
+      await expect(validate.call(fixture.runtime, windowId, request)).resolves.toBe(false);
+    } finally {
+      await fixture.runtime.close();
+      fixture.close();
+    }
+  });
+
   it.each([true, false])(
     "resumes without replay when a replacement cursor is returned: %s",
     async (replacementCursor) => {
@@ -3480,6 +3571,7 @@ describe("managed Code creation approval", () => {
 function runtimeFixture(options: {
   provider?: ProviderDriver | undefined;
   browserAutomation?: Parameters<typeof createCodeOperationRuntime>[0]["browserAutomation"];
+  appleToolchain?: Parameters<typeof createCodeOperationRuntime>[0]["appleToolchain"];
   computerUseTools?: Parameters<typeof createCodeOperationRuntime>[0]["computerUseTools"];
   resolveSelectedExtensions?: Parameters<
     typeof createCodeOperationRuntime
@@ -3668,6 +3760,7 @@ function runtimeFixture(options: {
                 supportsAcpClientCapabilities: () => options.supportsAcpClientCapabilities ?? false,
               }),
         }),
+    ...(options.appleToolchain === undefined ? {} : { appleToolchain: options.appleToolchain }),
     ...(options.supportsModelSwitch === undefined
       ? {}
       : { supportsModelSwitch: () => options.supportsModelSwitch ?? false }),

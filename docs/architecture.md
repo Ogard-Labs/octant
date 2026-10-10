@@ -713,6 +713,22 @@ attach gate (see
 On an approval-gated thread, **Allow input** is the confirmation that opens
 that destination; clicks, typing, Home, and Lock never raise it
 ([decisions/0152-allow-input-opens-a-device-to-clicks.md](decisions/0152-allow-input-opens-a-device-to-clicks.md)).
+The agent's `octant_apple` and `octant_android` tools follow the thread's
+turn posture per operation, not a Full-access gate on the whole tool:
+`discover`, `status`, and `screenshot` are reads and run under every posture,
+Plan included. Every other operation is an effect. Plan refuses it; Full access
+sends it with no approval; under approval-gated and auto-accept-edits the
+server asks in the thread (an `approval-requested` turn event, answered like a
+Browser session ask) before the pane opens or the host is called, and an
+approval mints the host's one-use, five-minute approval bound to exactly that
+request and its checkout context — the same receipt a workbench confirmation
+yields, validated by the same Apple or Android policy. A denial, expiry, or
+thread that went stale or into Plan while waiting refuses the call. Input to a
+destination the turn's window already holds open under Allow input rides that
+grant without asking; an approved agent input opens or renews it as a pane
+input does. `octant_terminal` still requires Full access: it runs arbitrary
+shell commands, which an approval-gated thread already reaches through its
+provider's own per-command approvals.
 Under the desktop app that injection is the native device helper of 0137: a
 tap is a point on the captured screen, typed text is letters, digits, spaces
 and new lines, and every refusal names the helper's own reason. Without that
