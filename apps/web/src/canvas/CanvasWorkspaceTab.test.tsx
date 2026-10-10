@@ -1035,6 +1035,18 @@ describe("CanvasWorkspaceTab", () => {
     ).toMatch(/^min\(/);
   });
 
+  it("pins the row comment gutter to the left edge, opaque, so markers stay in view while a wide table scrolls", () => {
+    // jsdom has no layout, so this holds the rules: a pinned cell that is not
+    // opaque lets the scrolled columns show through it, and the corner cell
+    // must ride above both the sticky header and the pinned gutter.
+    const gutter = cssDeclarations(".canvas-block__table-grid .canvas-block__table-comment");
+    expect(gutter).toMatchObject({ position: "sticky", left: "0" });
+    expect(gutter.background).toBe("var(--oct-surface-warm)");
+    expect(
+      cssDeclarations(".canvas-block__table-grid th.canvas-block__table-comment")["z-index"],
+    ).toBe("calc(var(--oct-z-sticky) + 1)");
+  });
+
   it("never lets a long unbreakable title widen the tab past its column", () => {
     // jsdom has no layout, so this holds the three rules that measured the
     // 446px Canvas tab in a 411px dock column back to 411px: the dock's grid

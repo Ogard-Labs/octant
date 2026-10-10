@@ -268,7 +268,17 @@ export function CanvasCommentsPanel(props: CanvasCommentsPanelProps) {
   useEffect(() => {
     if (focusedChoiceId !== undefined) setAnchorId(focusedChoiceId);
   }, [focusedChoiceId]);
-  const selectedAnchor = choices.find((choice) => choice.id === anchorId) ?? choices[0];
+  // A reader focused on a row or block that a later version removed has
+  // nothing to add a comment to. Falling back to the first anchor would land
+  // the comment on an unrelated block, hidden by the focused filter, so the
+  // composer is withheld until the reader shows all comments or picks again.
+  const focusLeftCanvas =
+    focusedChoiceId !== undefined &&
+    anchorId === focusedChoiceId &&
+    !choices.some((choice) => choice.id === focusedChoiceId);
+  const selectedAnchor = focusLeftCanvas
+    ? undefined
+    : (choices.find((choice) => choice.id === anchorId) ?? choices[0]);
   const { onThreadsChange } = props;
 
   const reload = useCallback(async () => {

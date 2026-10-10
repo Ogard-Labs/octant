@@ -1605,14 +1605,31 @@
   text-align: center;
 }
 
-/* The comment gutter leads each row, so a marker stays in view while a wide
-   table scrolls sideways. Like a block's marker it shows on hover or focus
-   and always once the row holds an open thread; a row without an id has an
-   empty gutter cell because nothing could keep a comment on it. */
+/* The comment gutter leads each row and is pinned to the scroll region's
+   left edge, so a marker stays in view while a wide table scrolls sideways.
+   A pinned cell must be opaque or the columns scroll through it, and the
+   surface behind a table differs between the main tab, the dock, and its
+   sheet, so the gutter takes the header's warm surface: one frame along the
+   top and the left edge. The corner cell rides above both the header and the
+   gutter. Like a block's marker it shows on hover or focus and always once
+   the row holds an open thread; a row without an id has an empty gutter cell
+   because nothing could keep a comment on it. */
 .canvas-block__table-grid .canvas-block__table-comment {
+  position: sticky;
+  left: 0;
+  z-index: 1;
   width: 1px;
   padding-inline: var(--oct-space-1);
   white-space: nowrap;
+  background: var(--oct-surface-warm);
+  box-shadow: inset -1px 0 0 var(--oct-border);
+}
+
+.canvas-block__table-grid th.canvas-block__table-comment {
+  z-index: calc(var(--oct-z-sticky) + 1);
+  box-shadow:
+    inset -1px 0 0 var(--oct-border),
+    inset 0 -1px 0 var(--oct-border);
 }
 
 .canvas-block__row-comment-marker {

@@ -500,7 +500,10 @@ version 6.
 A share carries every block kind and field a Canvas holds except source ids
 and the design and action blocks it refuses (see the `design` block). A table
 column keeps its number format and display, a table row leaves as its cells
-without the `id` comments anchor to, and a board keeps its own layout.
+without the `id` comments anchor to, and a board keeps its own layout. Because
+the row id is the only Canvas version 13 field and a share drops it, a share at
+version 6 names a block authored at version 13 as version 12
+(`CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION`), so a version-6 reader accepts it.
 Share documents version independently of Canvas documents: a treemap, a
 heatmap, a bar list, a chart's or a table column's number format, a table
 column's display, and a board's layout arrive with share version 3, and a

@@ -1,4 +1,5 @@
 import {
+  CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION,
   CANVAS_SHARE_SCHEMA_VERSION,
   decodeCanvasStaticExportRequest,
   type CanvasRedactedProvenance,
@@ -150,6 +151,13 @@ function assertNoSecretShape(value: unknown, path: string): void {
       assertNoSecretShape(entry, `${path}.${key}`);
     }
   }
+}
+
+/** A shared block names the newest Canvas version this share version represents. */
+function sharedBlockVersion(block: CanvasStaticExportBlock): CanvasStaticExportBlock {
+  return block.schemaVersion > CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION
+    ? { ...block, schemaVersion: CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION }
+    : block;
 }
 
 function sanitizeBlock(block: CanvasBlock): CanvasStaticExportBlock {
@@ -320,7 +328,7 @@ export function buildCanvasStaticExportDocument(input: {
   readonly exportedAt: UtcTimestamp | string;
 }): CanvasStaticExportDocument {
   const definition = input.current.definition;
-  const blocks = definition.blocks.map((block) => sanitizeBlock(block));
+  const blocks = definition.blocks.map((block) => sharedBlockVersion(sanitizeBlock(block)));
   assertNoSecretShape(definition.title, "title");
   const exportedAtRaw = String(input.exportedAt);
   if (

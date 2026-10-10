@@ -246,6 +246,46 @@ describe("CanvasCommentsPanel", () => {
     });
   });
 
+  it("withholds the composer when the focused row left the canvas instead of commenting elsewhere", async () => {
+    const definition = decodeCanvasDefinition({
+      ...canvasFixture,
+      blocks: [
+        {
+          blockId: "vendors",
+          schemaVersion: CANVAS_SCHEMA_VERSION,
+          kind: "table",
+          columns: [{ id: "vendor", label: "Vendor", type: "text" }],
+          rows: [{ id: "acme", cells: ["Acme"] }],
+        },
+      ],
+    });
+    const { rerender } = render(
+      <CanvasCommentsPanel
+        author={author}
+        canvasId={canvasId}
+        definition={definition}
+        focusedBlockId="vendors"
+        focusedRowId="hooli"
+        load={async () => ready()}
+        send={vi.fn()}
+      />,
+    );
+    await screen.findByText("No comments yet.");
+    expect(screen.getByText("On No longer on the canvas")).toBeInTheDocument();
+    expect(screen.queryByLabelText("New comment")).toBeNull();
+
+    rerender(
+      <CanvasCommentsPanel
+        author={author}
+        canvasId={canvasId}
+        definition={definition}
+        load={async () => ready()}
+        send={vi.fn()}
+      />,
+    );
+    expect(screen.getByLabelText("New comment")).toBeInTheDocument();
+  });
+
   it("adds a comment on the chosen anchor against the sequence it saw, then reloads", async () => {
     const user = userEvent.setup();
     const load = vi.fn(async () => ready());

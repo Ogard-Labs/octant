@@ -904,7 +904,9 @@ announces its direction with `aria-sort`; hiding the sorted column drops the
 sort), a text filter, and hidden columns are view state and revise nothing, so the exported and static forms keep the order
 the author wrote. The header sticks through a scrolling table. Where comments
 are available, a row the author gave an `id` carries a comment marker in a
-leading gutter, so it stays in view while a wide table scrolls sideways. Like a
+leading gutter pinned to the left edge, so it stays in view while a wide table
+scrolls sideways; the gutter takes the header's warm surface so the scrolled
+columns never show through it. Like a
 block's marker it shows on row hover or keyboard focus, and always with its
 count once the row holds an open thread. A row without an id has an empty
 gutter cell, and a table with no ids draws no gutter.
