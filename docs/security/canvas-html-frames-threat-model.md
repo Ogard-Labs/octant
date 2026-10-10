@@ -2,7 +2,7 @@
 
 - Date: 2026-10-10
 - Threat model id: `canvas-html-frames-v1`
-- Status: Proposed with
+- Status: Accepted with
   [0165](../decisions/0165-canvas-artifacts-are-documents-designs-and-prototypes.md).
   Static frames that run nothing ship today under
   [0164](../decisions/0164-canvas-designs-are-html-in-a-frame-that-runs-nothing.md);

@@ -1,6 +1,6 @@
 # 0165. Canvas artifacts are documents, designs, and prototypes
 
-**Status:** Proposed
+**Status:** Accepted
 
 ## Context
 

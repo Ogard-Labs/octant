@@ -603,6 +603,12 @@ gain a design; a version append never moves a Canvas back. Agents writing
 a design can be silent for minutes while composing the tool call, so Chat and Work
 wait five minutes for a provider event before cutting a turn off, as Code does
 ([decisions/0164-canvas-designs-are-html-in-a-frame-that-runs-nothing.md](decisions/0164-canvas-designs-are-html-in-a-frame-that-runs-nothing.md)).
+The frame described here is the shipped tier. Themed frames measured to their
+content, frames that show Project assets, and frames that run script in an
+opaque-origin sandbox with no network are accepted but not yet built; each
+replaces the matching sentence above when it ships, under the
+[Canvas HTML frames threat model](security/canvas-html-frames-threat-model.md)
+([decisions/0165-canvas-artifacts-are-documents-designs-and-prototypes.md](decisions/0165-canvas-artifacts-are-documents-designs-and-prototypes.md)).
 
 The local-server provider adapter owns a separate process for each acquired
 connection and allows one live session per connection. Its MCP protocol does
