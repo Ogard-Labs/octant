@@ -1990,6 +1990,13 @@ flowchart LR
 The provider layer is defined by `@octant/provider-sdk` and implemented in
 `apps/server/src/providers`.
 
+- **Project provider policy.** A Project allows all providers (the default),
+  an explicit list of provider instances, or `eu-zdr`: a provider instance or
+  its selected model must carry an `eu` or a `zdr` data tag. Either tag
+  suffices, as the Project page says; `eu-zdr` does not by itself guarantee
+  zero retention. The host checks the policy before every Work and Code turn
+  and handoff, including child runs, and refuses a disallowed provider.
+
 - **Driver interface.** A `ProviderDriver` exposes `probe` (readiness and
   capability report without side effects), `acquire` (a `ProviderConnection`
   for a workspace), and tool verification. OpenCode and ACP probe refusals
@@ -3573,6 +3580,11 @@ mechanisms are:
   remembered owner-only under the data directory (the boundary that holds the
   host identity key), including its TLS key, and re-enabled when the server
   starts; a server shutdown keeps it and only a local disable forgets it.
+  A paired client may click, scroll, and press keys in the host's agent
+  browser, but may not navigate it, type into it, or close a tab. Those clicks
+  and keys can still follow a link or submit a form within the context's
+  approved origins; the host's navigation guards refuse any page outside them,
+  so a paired client cannot take the host browser to a new origin.
 - **Artifact replica membership.** Each replica entry carries a detached
   Ed25519 signature from the device signing key the writing host holds for its
   replica instance, in a credential namespace of its own that provider
