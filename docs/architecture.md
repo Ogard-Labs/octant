@@ -3338,8 +3338,17 @@ mechanisms are:
   `awaiting-input`, before an interrupted turn); Done still requires the
   delivery target to be satisfied, and a decision blocks neither completing nor
   snoozing.
-- **Sandbox.** Provider CLIs, Git, terminals, test runners, and extension
-  executables launch through one shared confinement port. On macOS that is
+- **Fail-closed refusals name a recovery.** A refusal that fails closed on
+  authority must name a recovery a person can perform: a user action, a
+  restart, or elapsed time. A posture none of those can clear is not an
+  acceptable resting state. Recovery is a deliberate act by the machine's
+  owner, never a widening of the automatic admission rule, and the refusal
+  says what clears it where the person is, not only in a log. "Connect Claude
+  for helpers in Settings › Claude Code." is the shape.
+- **Sandbox.** Git, terminals, test runners, extension executables, and every
+  provider `--version` read launch through one shared confinement port, and so
+  do provider runtimes except where the confinement matrix below says a
+  runtime is unwrapped. On macOS that is
   `sandbox-exec` with deny-default Seatbelt profiles; on Linux it is Bubblewrap
   (`bwrap`) with private `/tmp`, bound roots, and no unconfined fallback,
   recorded in [decisions/0057-linux-confinement-bubblewrap.md](decisions/0057-linux-confinement-bubblewrap.md).
@@ -3365,15 +3374,31 @@ mechanisms are:
   and extended by
   [decisions/0145-a-plan-turn-is-confined-by-octant.md](decisions/0145-a-plan-turn-is-confined-by-octant.md):
   the process producing a plan still has to ask the model for it, while the
-  tools that thread reaches keep `none`.
+  tools that thread reaches keep `none`. Seatbelt and Bubblewrap cannot express
+  a host allowlist, so `provider-endpoints-only` materializes as plain OS
+  network `allow` for the runtime process (`materializeOsNetworkEgress`): the
+  runtime, Plan included, can reach any host. The endpoint restriction the name
+  promises holds only for Octant-brokered tools (browser origin allowlists,
+  research backends). The persisted value keeps its name for journal
+  compatibility.
   A provider runtime launch is wrapped when the process carries exactly one
-  thread's authority, which is why the ACP, OpenCode, and Pi runtimes are below
-  Full access, and the Claude Agent SDK launch is on Plan; the Codex app-server
-  and the two Claude postures that write are not. That set is named and pinned
-  by
-  [decisions/0143-confinement-wraps-a-runtime-that-carries-one-thread.md](decisions/0143-confinement-wraps-a-runtime-that-carries-one-thread.md)
-  and narrowed by 0145, and the tools those threads reach stay confined either
-  way. A confined Claude launch never reaches the keychain itself: the runtime
+  thread's authority. The goal is that every runtime below Full access is
+  wrapped; the current state, which `providerProcessConfinement.test.ts` pins
+  against this table, is below. Full access is never wrapped for any runtime.
+
+  | Runtime (module)                                                          | Plan                            | Approval-gated, auto-accept-edits                   | OS egress below Full access                      | Plan's read-only enforced by                   |
+  | ------------------------------------------------------------------------- | ------------------------------- | --------------------------------------------------- | ------------------------------------------------ | ---------------------------------------------- |
+  | ACP, OpenCode, Pi (`acpProcess.ts`, `openCodeProcess.ts`, `piProcess.ts`) | Wrapped                         | Wrapped                                             | `allow`                                          | Octant sandbox: no root write, no exec or fork |
+  | Claude Agent SDK (`claudeProcess.ts`)                                     | Wrapped; Chat children run here | Unwrapped; runtime's own sandbox, project root only | `allow` on Plan; not limited by Octant otherwise | Octant sandbox: no root write, no exec or fork |
+  | Codex app-server (`codexProcess.ts`)                                      | Unwrapped                       | Unwrapped                                           | Not limited by Octant                            | Codex's own `read-only` sandbox                |
+  | Oh My Pi (`ohMyPiProcess.ts`), readiness probe only                       | Unwrapped                       | Unwrapped                                           | Not limited by Octant                            | No turn runs                                   |
+
+  Codex is unwrapped because one app-server carries every thread on a provider
+  instance, so it has no one root to bind. Oh My Pi's probe is a held gap, not
+  an exception. Octant-owned tools those threads reach stay confined either
+  way. A runtime's own built-in tools (Codex's shell, Claude's Bash on the
+  postures that write) run under that runtime's sandbox, not Octant's.
+  A confined Claude launch never reaches the keychain itself: the runtime
   reads its subscription sign-in by running `/usr/bin/security`, which would
   return any keychain item that trusts that tool, including other command-line
   programs' tokens, so the profile runs neither the tool nor reads the keychain
@@ -3389,6 +3414,11 @@ mechanisms are:
   switched to an API key is discarded, never kept.
   A confined launch receives it as `CLAUDE_CODE_OAUTH_TOKEN`
   and no keychain lookup; unconfined launches keep the runtime's own sign-in.
+  The one confined Claude launch with no credential of its own is the
+  subscription readiness probe, which runs under Plan; only it keeps the
+  security-server lookup (`allowProviderCredentialLookup`), with the keychain
+  files and `/usr/bin/security` still denied. That lookup signs no turn in;
+  whether the probe's account read depends on it has not been measured.
   Without a connected token the launch refuses with "Connect Claude for helpers
   in Settings › Claude Code.", which a parent's `wait` and `status` carry. The
   runtime never refreshes a handed-in token, so one it refuses is marked
@@ -3441,6 +3471,7 @@ mechanisms are:
   reads its product from the same directory without write access; XCTest
   results also land inside it. Simulator captures remain isolated in their own
   private directory and are writable only by the capture launch.
+
 - **ACP client capabilities.** ACP client filesystem and terminal effects are
   executed by Octant inside the Code confinement, with bounded reads, writes,
   terminal lifetimes, and output. Terminal requests with direct `args` use
