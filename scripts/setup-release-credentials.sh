@@ -244,7 +244,7 @@ if ! gh api "repos/${REPO}" --jq '.permissions.admin' | grep -q true; then
   warn "This account is not an admin of ${REPO}, so it cannot write environment secrets."
   exit 1
 fi
-for tool in openssl ssh-keygen security base64; do
+for tool in bun openssl ssh-keygen security base64; do
   command -v "$tool" >/dev/null 2>&1 || { warn "missing required tool: $tool"; exit 1; }
 done
 say "GitHub CLI is authenticated and this account administers ${REPO}."
@@ -348,9 +348,17 @@ say "Public half (this belongs in the source, and is not secret):"
 say "  ${FEED_PUBLIC_KEY}"
 FEED_SOURCE="apps/desktop/src/appUpdateFeed.ts"
 if [[ -f "$FEED_SOURCE" ]] && confirm "Write it into ${FEED_SOURCE} now?"; then
-  /usr/bin/sed -i '' \
-    "s|^export const OCTANT_UPDATE_PUBLIC_KEY = .*|export const OCTANT_UPDATE_PUBLIC_KEY = \"${FEED_PUBLIC_KEY}\";|" \
-    "$FEED_SOURCE"
+  # The writer edits the constant wherever the formatter put it and reads it
+  # back; the grep is a second, independent check. A line-oriented sed once
+  # matched nothing here and still reported success, which ships the old key.
+  if ! bun scripts/write-update-public-key.ts "$FEED_SOURCE" "$FEED_PUBLIC_KEY" \
+    || ! grep -qF "\"${FEED_PUBLIC_KEY}\"" "$FEED_SOURCE"; then
+    printf '  %s✗ OCTANT_UPDATE_PUBLIC_KEY in %s was NOT updated.%s\n' "$RED" "$FEED_SOURCE" "$RESET" >&2
+    warn "The feed signing secret is already set, so the app must ship this public key:"
+    warn "  ${FEED_PUBLIC_KEY}"
+    warn "Set it in ${FEED_SOURCE} by hand before any release; the old key would refuse every update."
+    exit 1
+  fi
   say "Written. Commit that change — until it ships, builds verify nothing and offer no updates."
 else
   SKIPPED+=("set OCTANT_UPDATE_PUBLIC_KEY in ${FEED_SOURCE} to ${FEED_PUBLIC_KEY}")
