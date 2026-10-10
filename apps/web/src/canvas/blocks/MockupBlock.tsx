@@ -225,6 +225,11 @@ function MockupItem({
   if (node.component === "window") {
     return (
       <li className="canvas-mockup__window" {...common}>
+        {callout === undefined ? null : (
+          <span className="canvas-mockup__face canvas-mockup__window-mark" aria-hidden="true">
+            <CalloutMark number={callout} />
+          </span>
+        )}
         <WindowBody branches={branch.children} callouts={callouts} />
       </li>
     );

@@ -1224,7 +1224,9 @@ function validateMockup(
         `${name} has text longer than ${CANVAS_MAX_MOCKUP_TEXT_LENGTH} characters.`,
       );
     }
-    for (const rule of MOCKUP_FIELD_COMPONENTS) {
+    // Version 3 admitted `on` on any node, and a stored screen must stay
+    // revisable, so the component rules bind only catalog documents.
+    for (const rule of catalog ? MOCKUP_FIELD_COMPONENTS : []) {
       if (node[rule.field] !== undefined && !rule.components.includes(node.component)) {
         reject(
           "mockup-field-refused",

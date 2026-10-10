@@ -3202,6 +3202,10 @@
   min-width: 0;
 }
 
+.canvas-mockup__window-mark {
+  padding: var(--oct-space-2) var(--oct-space-3) 0;
+}
+
 .canvas-mockup__node--list-row {
   border-bottom: 1px solid var(--oct-border);
   padding: var(--oct-space-2) var(--oct-space-3);

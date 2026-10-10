@@ -764,6 +764,17 @@ describe("mockup catalog", () => {
     );
   });
 
+  it("keeps reading a version-3 screen that carries on beside a component that does not draw it", () => {
+    const legacy = {
+      ...mockup("legacy", []),
+      schemaVersion: 3,
+      nodes: [{ nodeId: "save", component: "button", label: "Save", on: false }],
+    };
+    expect(() =>
+      validateCanvasDefinition({ ...baseDefinition, schemaVersion: 11, blocks: [legacy] }),
+    ).not.toThrow();
+  });
+
   it("refuses a table whose rows do not match its columns, or a table with no columns", () => {
     expectPolicyCode(
       () =>

@@ -91,6 +91,16 @@ describe("mockup wireframe", () => {
     ]);
   });
 
+  it("pins a callout on the window itself inside the frame", () => {
+    draw({
+      ...settingsScreenExampleBlock,
+      annotations: [{ nodeId: "screen", note: "Opens from the app menu." }],
+    });
+    const mockup = screen.getByRole("region", { name: "Settings, Desktop mockup" });
+    const window = within(mockup).getByRole("treeitem", { name: "Window, Settings, callout 1" });
+    expect(window.querySelector(".canvas-mockup__callout-mark")?.textContent).toBe("1");
+  });
+
   it("offers the component tree as an outline list", async () => {
     draw(settingsScreenExampleBlock);
     await userEvent.click(screen.getByText("Outline"));
