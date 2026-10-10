@@ -41,6 +41,16 @@ export function negotiateRemoteProtocol(input: {
   return { kind: "negotiated", protocolVersion: maximum, securityFloor };
 }
 
+/**
+ * The origin a private listener answers on. An IPv6 address must be bracketed
+ * to be a valid URL authority, and the default HTTPS port is left out so the
+ * host's bind comparison sees the same string everywhere it is built.
+ */
+export function remoteListenerOrigin(hostname: string, port: number): string {
+  const host = hostname.includes(":") ? `[${hostname}]` : hostname;
+  return `https://${host}${port === 443 ? "" : `:${port}`}`;
+}
+
 export function classifyRemoteListenerAddress(address: string): RemoteListenerAddressClass {
   const value = address.trim().toLowerCase();
   if (value === "" || value === "0.0.0.0" || value === "::") return "invalid";
