@@ -460,11 +460,12 @@ function lineFor(input: {
   if (input.problem !== undefined) {
     return { kind: "error", problem: input.problem, onDismiss: input.onDismiss };
   }
-  if (input.approval !== undefined) return input.approval;
-  if (input.typing !== undefined) return input.typing;
   const reconnect = (label: string) =>
     input.canAct ? { fix: { label, run: () => input.act({ kind: "reconnect" }) } } : {};
   const { view } = input;
+  // A device whose live view is off gets its way back ahead of the input
+  // approval: Resume must not wait on a grant, and input cannot reach a device
+  // that is not being watched anyway. The approval line returns after Resume.
   if (view.kind === "live" && view.liveView === "lost") {
     return {
       kind: "notice",
@@ -480,6 +481,8 @@ function lineFor(input: {
   if (view.kind === "live" && view.liveView === "stopped") {
     return { kind: "notice", problem: { message: "Live view is off.", ...reconnect("Resume") } };
   }
+  if (input.approval !== undefined) return input.approval;
+  if (input.typing !== undefined) return input.typing;
   if (view.kind === "last-screen") {
     return {
       kind: "notice",
