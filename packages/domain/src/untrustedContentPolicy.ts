@@ -161,6 +161,7 @@ export type SearchQueryRefusalDetail =
   | "contains a URL"
   | "contains an email address"
   | "contains a hex run"
+  | "contains a percent-encoded run"
   | "contains a base64 run"
   | "contains a long high-entropy token"
   | "is longer than 200 characters";
@@ -170,15 +171,20 @@ export type SearchQueryRefusal = {
   readonly detail: SearchQueryRefusalDetail;
 };
 
-// A scheme, a `www.` host, a dotted name or IPv4 address followed by a path,
-// query, fragment, or port. A bare version such as `19.2` or `v1.2.3/dist`
-// is not a URL: the last label of a name must be letters.
+// A scheme, a `www.` host, a dotted name followed by a path, query, fragment,
+// or a port and one of those, or an IPv4 address followed by a port or path.
+// A bare version such as `19.2` or `v1.2.3/dist` is not a URL: the last label
+// of a name must be letters. A port alone after a name is not enough, because
+// `Component.test.tsx:42` is a file and line.
 const URL_PATTERN =
-  /[a-z][a-z0-9+.-]*:\/\/|\bwww\.|\b[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,}[/?#]|\b\d{1,3}(?:\.\d{1,3}){3}[:/]/i;
+  /[a-z][a-z0-9+.-]*:\/\/|\bwww\.|\b[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,}(?::\d{1,5})?[/?#]|\b\d{1,3}(?:\.\d{1,3}){3}[:/]/i;
 const EMAIL_PATTERN = /[^\s@]+@[^\s@]+\.[^\s@]+/;
 // Sixteen hex digits is a 64-bit value: longer than a short commit SHA, and
 // as long as a card number or the start of a key.
 const HEX_RUN_PATTERN = /[0-9a-f]{16,}/i;
+// Three escaped bytes in a row: `%68%75%6E` or `\x68\x75\x6e` is text spelled
+// to slip past the hex and base64 checks, never part of a question.
+const ESCAPED_BYTE_RUN_PATTERN = /(?:(?:%|\\x)[0-9a-f]{2}){3,}/i;
 const BASE64_RUN_PATTERN = /[A-Za-z0-9+/]{24,}={0,2}|[A-Za-z0-9+/]{16,}={1,2}/g;
 const MIN_HIGH_ENTROPY_TOKEN_LENGTH = 20;
 const MIN_HIGH_ENTROPY_BITS_PER_CHARACTER = 3.5;
@@ -202,6 +208,7 @@ function searchQueryDataSign(query: string): SearchQueryRefusalDetail | undefine
   if (URL_PATTERN.test(query)) return "contains a URL";
   if (EMAIL_PATTERN.test(query)) return "contains an email address";
   if (HEX_RUN_PATTERN.test(query)) return "contains a hex run";
+  if (ESCAPED_BYTE_RUN_PATTERN.test(query)) return "contains a percent-encoded run";
   for (const run of query.match(BASE64_RUN_PATTERN) ?? []) {
     // Real base64 mixes cases and digits; a long identifier or word does not.
     if (run.endsWith("=") || (/[a-z]/.test(run) && /[A-Z]/.test(run) && /\d/.test(run))) {

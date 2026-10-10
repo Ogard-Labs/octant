@@ -2504,9 +2504,11 @@ native harness in `apps/server/src/harness`:
   data, under every posture and before any request leaves, with a named
   reason such as `search-query-refused-under-taint: contains a URL`. A query
   is refused when it is longer than 200 characters; contains a URL (a scheme,
-  `www.`, a dotted name ending in letters or an IPv4 address followed by a
-  path, query, fragment, or port); contains an email address; contains a run
-  of 16 or more hex digits; contains a base64 run (24 or more base64
+  `www.`, a dotted name ending in letters followed by a path, query, or
+  fragment, optionally after a port, or an IPv4 address followed by a port or
+  path); contains an email address; contains a run of 16 or more hex digits;
+  contains three or more `%XX` or `\xXX` escaped bytes in a row; contains a
+  base64 run (24 or more base64
   characters mixing upper case, lower case, and digits, or 16 or more ending
   in `=` padding); or contains a token of 20 or more characters, split on
   whitespace and path punctuation, that mixes letters and digits at 3.5 or more

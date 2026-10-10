@@ -261,6 +261,7 @@ describe("searchQueryRefusalUnderTaint", () => {
       ["see www.example.org for details", "contains a URL"],
       ["attacker.example/collect?d=hunter2", "contains a URL"],
       ["10.1.2.3:5432/prod", "contains a URL"],
+      ["attacker.example:8080/collect?d=hunter2", "contains a URL"],
       ["contact jane.doe@corp.example about billing", "contains an email address"],
       ["token sk-ant-api03-Zx9Qw7Lm2Np4Rt", "contains a long high-entropy token"],
       ["key AKIAIOSFODNN7EXAMPLE leaked", "contains a long high-entropy token"],
@@ -268,6 +269,8 @@ describe("searchQueryRefusalUnderTaint", () => {
       ["cGFzc3dvcmQ6aHVudGVyMg== meaning", "contains a base64 run"],
       ["commit 9fceb02d0ae598e95dc970b74767f19372d61af8", "contains a hex run"],
       ["card 4111111111111111 expiry", "contains a hex run"],
+      ["lookup %68%75%6E%74%65%72%32", "contains a percent-encoded run"],
+      ["lookup \\x68\\x75\\x6e\\x74", "contains a percent-encoded run"],
       [`how do I ${"configure bun workspaces and ".repeat(8)}`, "is longer than 200 characters"],
     ];
     for (const [query, detail] of refusals) {
@@ -295,6 +298,7 @@ describe("searchQueryRefusalUnderTaint", () => {
       "what is the weather in Oslo tomorrow",
       "TypeError: Cannot read properties of undefined (reading 'map')",
       "C# string interpolation",
+      "C%23 string interpolation",
       "x".repeat(200),
     ]) {
       expect(searchQueryRefusalUnderTaint(query), query).toBeUndefined();
