@@ -1,7 +1,11 @@
-const MAX_MANIFEST_BYTES = 262_144;
-const MAX_COMPONENTS = 4_096;
+// An artifact lists every vendored dependency file as its own component (about
+// 3,500 for a self-contained build), and npm package paths carry scoped
+// `@scope` directories and `_`-prefixed module files. Hidden and dot segments
+// stay refused.
+const MAX_MANIFEST_BYTES = 4_194_304;
+const MAX_COMPONENTS = 16_384;
 const HEX_256 = /^[0-9a-f]{64}$/;
-const SAFE_PATH_SEGMENT = /^[A-Za-z0-9][A-Za-z0-9._@-]*$/;
+const SAFE_PATH_SEGMENT = /^[A-Za-z0-9@_][A-Za-z0-9._@-]*$/;
 
 export const HEADLESS_ARTIFACT_MANIFEST_FILENAME = "octant-artifact.json";
 

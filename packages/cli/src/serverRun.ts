@@ -8,6 +8,11 @@ import {
   startCredentialBroker,
   type CredentialBroker,
 } from "@octant/host-runtime";
+import {
+  installedArtifactServerStartCommand,
+  resolveInstalledArtifactRoot,
+  type ServerStartCommand,
+} from "./installedArtifact";
 
 export interface ServerRunSpawnSpec {
   readonly command: string;
@@ -24,10 +29,7 @@ export interface ServerRunOptions {
   readonly env?: NodeJS.ProcessEnv;
   readonly port?: number;
   readonly spawn?: (spec: ServerRunSpawnSpec) => ServerRunChild;
-  readonly serverStartCommand?: () => {
-    readonly command: string;
-    readonly args: readonly string[];
-  };
+  readonly serverStartCommand?: () => ServerStartCommand;
   readonly instanceId?: () => string;
   readonly bridgeSecret?: () => string;
   readonly credentialBrokerFactory?: () => Promise<CredentialBroker | undefined>;
@@ -90,6 +92,7 @@ export async function runServerRunCommand(options: ServerRunOptions = {}): Promi
       const startedAt = now();
       const childEnv: NodeJS.ProcessEnv = {
         ...env,
+        ...command.env,
         OCTANT_DESKTOP_BRIDGE_SECRET: (options.bridgeSecret ?? createBridgeSecret)(),
         OCTANT_HOST_SERVICE_MODE: env.OCTANT_HOST_SERVICE_MODE ?? "foreground",
         OCTANT_SERVER_INSTANCE_ID: (options.instanceId ?? randomUUID)(),
@@ -181,10 +184,11 @@ function configurationFailureNotice(env: NodeJS.ProcessEnv): string {
   );
 }
 
-function defaultServerStartCommand(): {
-  readonly command: string;
-  readonly args: readonly string[];
-} {
+function defaultServerStartCommand(): ServerStartCommand {
+  const artifactRoot = resolveInstalledArtifactRoot(import.meta.url);
+  if (artifactRoot !== undefined) {
+    return installedArtifactServerStartCommand(artifactRoot, process.execPath);
+  }
   return {
     command: process.execPath,
     args: [
