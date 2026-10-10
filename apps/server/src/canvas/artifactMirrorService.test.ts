@@ -54,7 +54,7 @@ function harness(
   const remove = vi.fn(async (path: string) => {
     files.delete(path);
   });
-  const journal = { append: vi.fn() };
+  const journal = { append: vi.fn(), replay: () => [] };
   const appendVersionFromBundle = vi.fn(
     (_input: { readonly canvasId: unknown; readonly definition: unknown }) =>
       ({ kind: "accepted", versionId: "30000000-0000-4000-8000-0000000000ff" }) as const,

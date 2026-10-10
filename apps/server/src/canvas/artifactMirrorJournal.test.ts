@@ -85,7 +85,10 @@ function setup(
         ? {}
         : { receiptNotJournaled: options.receiptNotJournaled }),
       journal: new ArtifactMirrorEventStore({
-        journal: { append: options.journalAppend ?? ((input) => journal.append(input)) },
+        journal: {
+          append: options.journalAppend ?? ((input) => journal.append(input)),
+          replayAggregate: (cursor) => journal.replayAggregate(cursor),
+        },
         uuid: randomUUID,
         clock: () => now,
         actor: { kind: "system", actorId: "00000000-0000-4000-8000-000000000002" },
@@ -167,13 +170,67 @@ describe("journaling mirror receipts", () => {
     });
 
     expect(second.kind).toBe("mirror-settings");
-    // A restarted host that has not replayed settings must not append over them.
-    await expect(
-      h.restart().execute({
-        kind: "set-artifact-mirror-fallback",
-        expectedVersion: 0,
-        destination: folder("/Users/me/C"),
-      }),
-    ).rejects.toMatchObject({ _tag: "ConcurrencyConflict" });
+    // A restarted host replays the settings, so a change named from before
+    // them is refused as stale rather than appended over them.
+    const stale = await h.restart().execute({
+      kind: "set-artifact-mirror-fallback",
+      expectedVersion: 0,
+      destination: folder("/Users/me/C"),
+    });
+    expect(stale).toMatchObject({ kind: "mirror-refused", reason: "stale-version" });
+  });
+});
+
+describe("replaying mirror settings at startup", () => {
+  it("keeps the mirror configured across a restart and accepts the next change", async () => {
+    const h = setup();
+    const folder = (canonicalRoot: string) => ({ kind: "global-folder", canonicalRoot }) as const;
+    await h.service.execute({
+      kind: "set-artifact-mirror-fallback",
+      expectedVersion: 0,
+      destination: folder("/Users/me/Mirror"),
+    });
+    await h.service.execute({
+      kind: "set-artifact-mirror-override",
+      expectedVersion: 1,
+      projectId,
+      destination: { kind: "internal-only" },
+    });
+    const configured = h.service.settings();
+
+    const restarted = h.restart();
+
+    expect(restarted.settings()).toEqual(configured);
+    expect(restarted.settings()).toMatchObject({
+      version: 2,
+      fallback: folder("/Users/me/Mirror"),
+      overrides: [{ projectId, destination: { kind: "internal-only" } }],
+    });
+    // Replay is a projection of the journal: doing it again gives the same state.
+    expect(h.restart().settings()).toEqual(restarted.settings());
+
+    const next = await restarted.execute({
+      kind: "clear-artifact-mirror-override",
+      expectedVersion: 2,
+      projectId,
+    });
+    expect(next).toMatchObject({
+      kind: "mirror-settings",
+      settings: { version: 3, overrides: [] },
+    });
+    expect(h.restart().settings()).toMatchObject({
+      version: 3,
+      fallback: folder("/Users/me/Mirror"),
+      overrides: [],
+    });
+  });
+
+  it("starts from the host default when no settings were ever journaled", () => {
+    const h = setup();
+
+    expect(h.restart().settings()).toMatchObject({
+      version: 0,
+      fallback: { kind: "global-folder", canonicalRoot: "/Users/me/Artifacts" },
+    });
   });
 });

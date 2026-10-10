@@ -88,6 +88,16 @@ export interface ArtifactMirrorServiceDependencies {
       readonly payload: unknown;
       readonly expectedVersion?: number;
     }) => void;
+    /** One page of an aggregate's frames, oldest first; how settings survive a restart. */
+    readonly replay: (input: {
+      readonly aggregateId: string;
+      readonly afterVersion: number;
+      readonly limit: number;
+    }) => ReadonlyArray<{
+      readonly aggregateVersion: number;
+      readonly eventName: string;
+      readonly payload: unknown;
+    }>;
   };
   readonly clock: () => UtcTimestamp;
   /**
@@ -117,6 +127,8 @@ export interface ArtifactMirrorServiceDependencies {
  */
 const ARTIFACT_MIRROR_SETTINGS_AGGREGATE_ID = "0a1f0000-0000-4000-8000-000000000475";
 
+const SETTINGS_REPLAY_BATCH_SIZE = 1_000;
+
 const INITIAL_SETTINGS = {
   kind: "artifact-mirror-settings" as const,
   fallback: { kind: "internal-only" as const },
@@ -144,6 +156,49 @@ export class ArtifactMirrorService {
       ...INITIAL_SETTINGS,
       updatedAt: dependencies.clock(),
     });
+    this.#replaySettings();
+  }
+
+  /**
+   * Rebuild the settings from the journal, oldest frame to newest.
+   *
+   * Without this a restarted host started at version 0: the person's
+   * destination was forgotten and their next change was refused as a
+   * concurrency conflict. The next change names the journal's head version,
+   * so the settings always carry it. When the newest frame no longer decodes,
+   * the last one that does is kept at the head version rather than a choice
+   * nobody made; the journal stays authoritative.
+   */
+  #replaySettings(): void {
+    let afterVersion = 0;
+    let latest: ArtifactMirrorSettings | undefined;
+    for (;;) {
+      const batch = this.#dependencies.journal.replay({
+        aggregateId: ARTIFACT_MIRROR_SETTINGS_AGGREGATE_ID,
+        afterVersion,
+        limit: SETTINGS_REPLAY_BATCH_SIZE,
+      });
+      for (const frame of batch) {
+        afterVersion = frame.aggregateVersion;
+        if (frame.eventName !== ARTIFACT_MIRROR_EVENT_NAMES.settingChanged) continue;
+        const payload = frame.payload;
+        if (typeof payload !== "object" || payload === null || !("settings" in payload)) continue;
+        try {
+          latest = decodeArtifactMirrorSettings(payload.settings);
+        } catch {
+          // Kept from the last frame that decodes, below.
+        }
+      }
+      if (batch.length < SETTINGS_REPLAY_BATCH_SIZE) break;
+    }
+    if (afterVersion === 0) return;
+    this.#settings =
+      latest !== undefined && latest.version === afterVersion
+        ? latest
+        : decodeArtifactMirrorSettings({
+            ...(latest ?? { ...INITIAL_SETTINGS, updatedAt: this.#dependencies.clock() }),
+            version: afterVersion,
+          });
   }
 
   /**
