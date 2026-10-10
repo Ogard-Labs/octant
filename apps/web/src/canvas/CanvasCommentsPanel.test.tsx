@@ -55,6 +55,34 @@ describe("CanvasCommentsPanel", () => {
     expect(within(threads).getByText("You · paired device")).toBeInTheDocument();
   });
 
+  it("names the computer a synced comment was written on", async () => {
+    render(
+      <CanvasCommentsPanel
+        author={author}
+        canvasId={canvasId}
+        definition={canvasFixture}
+        load={async () =>
+          ready([
+            {
+              ...existing,
+              comment: {
+                ...existing.comment,
+                origin: {
+                  kind: "replica" as const,
+                  instanceId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+                  computerName: "Studio Mac",
+                },
+              },
+            },
+          ])
+        }
+        send={vi.fn()}
+      />,
+    );
+    const threads = await screen.findByRole("list", { name: "Comment threads" });
+    expect(within(threads).getByText("You · Studio Mac")).toBeInTheDocument();
+  });
+
   it("anchors a comment to a comparison matrix's option column or criterion row", async () => {
     const definition = decodeCanvasDefinition({
       ...canvasFixture,

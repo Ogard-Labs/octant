@@ -13,8 +13,11 @@
 
 import {
   decodeReplicaMembershipCommand,
+  decodeReplicaRestoreCommand,
   type ReplicaMembershipCommand,
   type ReplicaMembershipView,
+  type ReplicaRestoreCommand,
+  type ReplicaRestoreResult,
 } from "@octant/contracts/replica-entry";
 import type { ClientPrincipal } from "../clientPrincipal";
 import { authenticateRoutePrincipal, readPrincipalRouteContext } from "../principalRouteContext";
@@ -35,6 +38,11 @@ export interface ReplicaMembershipRouteDependencies {
   readonly service: ReplicaMembershipService;
   /** Membership as Settings › Sync shows it on this host. */
   readonly view: () => ReplicaMembershipView;
+  /** Stop and resume this computer's restore of the replica's library. */
+  readonly restore?: {
+    readonly stop: () => ReplicaRestoreResult;
+    readonly resume: () => ReplicaRestoreResult;
+  };
   readonly windowAuthorityStore: WindowAuthorityStore;
   /** The development renderer origin, or null when the packaged file renderer is in use. */
   readonly allowedRendererHttpOrigin?: string | null;
@@ -99,6 +107,22 @@ export function createReplicaMembershipRouteHandler(
     // Host-only: a paired phone is refused even if transport policy regressed.
     if (principal.principal.kind !== "local-window") {
       return failure("Replica membership is host-only.", 403, origin);
+    }
+
+    // Stopping and resuming a restore are host decisions too, on this route.
+    let restoreCommand: ReplicaRestoreCommand | undefined;
+    try {
+      restoreCommand = decodeReplicaRestoreCommand(body);
+    } catch {
+      restoreCommand = undefined;
+    }
+    if (restoreCommand !== undefined) {
+      const restore = dependencies.restore;
+      if (restore === undefined) {
+        return failure("Replica restore is not available on this host.", 404, origin);
+      }
+      const result = restoreCommand.kind === "stop-restore" ? restore.stop() : restore.resume();
+      return Response.json(result, { status: 200, headers: corsHeaders(origin) });
     }
 
     // The contract decoder is the only way in: a join request a caller hands

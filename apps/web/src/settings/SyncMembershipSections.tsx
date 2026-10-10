@@ -7,6 +7,8 @@ import type {
   ReplicaMembershipResult,
   ReplicaMembershipView,
   ReplicaMemberView,
+  ReplicaRestoreCommand,
+  ReplicaRestoreProgress,
   ReplicaSubjectRevocation,
   ReplicaSyncStatus,
   ReplicaSyncStatusView,
@@ -23,6 +25,9 @@ export const SYNC_STATUS_NOT_AVAILABLE = "Not available yet";
 
 /** Why Create and Join are off until the store above is ready. */
 export const SYNC_STORE_NOT_READY = "Choose a store and turn sync on first.";
+
+/** How often the page reads a running restore's progress again. */
+export const SYNC_RESTORE_POLL_MS = 2_000;
 
 type Feedback = {
   readonly kind: "loading" | "success" | "error";
@@ -76,6 +81,35 @@ export function SyncMembershipSections(props: SyncMembershipSectionsProps) {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // A running restore reads in the background; the page follows its count.
+  const restoreRunning = view?.status.restore?.state === "running";
+  useEffect(() => {
+    if (!restoreRunning) return;
+    const timer = setInterval(() => void load(), SYNC_RESTORE_POLL_MS);
+    return () => clearInterval(timer);
+  }, [load, restoreRunning]);
+
+  const runRestore = useCallback(
+    async (command: ReplicaRestoreCommand) => {
+      setBusy(true);
+      setFeedback(undefined);
+      setFeedbackNearComputers(false);
+      try {
+        const result = await client.restore(command);
+        if (result.kind === "refused") setFeedback({ kind: "error", message: result.message });
+        await load();
+      } catch (error) {
+        setFeedback({
+          kind: "error",
+          message: error instanceof Error ? error.message : "Replica restore is unavailable.",
+        });
+      } finally {
+        setBusy(false);
+      }
+    },
+    [client, load],
+  );
 
   /** Runs one command, reloads what the host now holds, and returns its result. */
   const run = useCallback(
@@ -301,6 +335,17 @@ export function SyncMembershipSections(props: SyncMembershipSectionsProps) {
           {feedbackSlot(false)}
         </SettingsSection>
       ) : null}
+
+      {view.status.restore === undefined ? null : (
+        <SyncRestoreSection
+          busy={busy}
+          feedback={feedbackSlot(false)}
+          onResume={() => void runRestore({ kind: "resume-restore" })}
+          onStop={() => void runRestore({ kind: "stop-restore" })}
+          restore={view.status.restore}
+          storeReady={props.storeReady}
+        />
+      )}
 
       <SyncStatusSection status={view.status} />
 
@@ -734,6 +779,7 @@ export function SyncStatusReadOnly(props: { readonly client: ReplicaSyncStatusCl
     <>
       <SyncStatusSection
         description="Setting up sync, joining, and revoking happen in the Octant app on the host machine."
+        restoreFact
         standing={STANDING[view.thisComputer]}
         status={view.status}
       />
@@ -759,8 +805,92 @@ const STANDING: Readonly<Record<ReplicaSyncStatusView["thisComputer"], string>> 
   left: "Revoked",
 };
 
+/**
+ * The first read of this computer's identity in a replica brings every
+ * artifact and its history in, newest first. The person can stop it, and
+ * resume it where it stopped.
+ */
+function SyncRestoreSection(props: {
+  readonly restore: ReplicaRestoreProgress;
+  readonly busy: boolean;
+  readonly storeReady: boolean;
+  readonly feedback: ReactNode;
+  readonly onStop: () => void;
+  readonly onResume: () => void;
+}) {
+  const { restore } = props;
+  const progressId = useId();
+  return (
+    <SettingsSection
+      description={
+        restore.state === "finished"
+          ? "Every artifact and its history in the store is on this computer. New versions from your other computers arrive with each sync."
+          : "This computer is bringing in every artifact in the store with its full history, newest versions first. It reads in the background, and you can stop it and resume it later, also after a restart."
+      }
+      title="Restore library"
+    >
+      <div className="setgroup">
+        <SettingRow
+          description={restoreSentence(restore)}
+          htmlFor={progressId}
+          label="Progress"
+          scope="host"
+          settingId="sync-restore"
+        >
+          <div className="sync-settings__member-controls">
+            <progress
+              className="sync-settings__progress"
+              id={progressId}
+              max={Math.max(1, restore.total)}
+              value={restore.total === 0 ? 1 : restore.done}
+            >
+              {restore.done} of {restore.total}
+            </progress>
+            {restore.state === "running" ? (
+              <OctantButton
+                disabled={props.busy}
+                onClick={props.onStop}
+                size="sm"
+                type="button"
+                variant="secondary"
+              >
+                Stop
+              </OctantButton>
+            ) : restore.state === "stopped" ? (
+              <OctantButton
+                disabled={props.busy || !props.storeReady}
+                onClick={props.onResume}
+                size="sm"
+                title={props.storeReady ? undefined : SYNC_STORE_NOT_READY}
+                type="button"
+              >
+                Resume
+              </OctantButton>
+            ) : null}
+          </div>
+        </SettingRow>
+      </div>
+      {props.feedback}
+    </SettingsSection>
+  );
+}
+
+function restoreSentence(restore: ReplicaRestoreProgress): string {
+  const count = `${String(restore.done)} of ${String(restore.total)} entries read`;
+  switch (restore.state) {
+    case "running":
+      return `Restoring: ${count}.`;
+    case "stopped":
+      return `Stopped: ${count}. Nothing more is read from the store until you resume.`;
+    case "finished":
+      return `Restored: ${count}.`;
+  }
+}
+
 function SyncStatusSection(props: {
   readonly status: ReplicaSyncStatus;
+  /** Off the host the restore has no section of its own, so status names it. */
+  readonly restoreFact?: boolean;
   readonly description?: string;
   readonly standing?: string;
 }) {
@@ -769,7 +899,7 @@ function SyncStatusSection(props: {
     <SettingsSection
       description={
         props.description ??
-        "Publishing and pulling artifact versions are not built yet in this preview."
+        "The time of the last publish and pull, and the queue, are not shown yet in this preview."
       }
       title="Sync status"
     >
@@ -781,6 +911,9 @@ function SyncStatusSection(props: {
           { label: "Last publish", value: SYNC_STATUS_NOT_AVAILABLE },
           { label: "Last pull", value: SYNC_STATUS_NOT_AVAILABLE },
           { label: "Queued", value: SYNC_STATUS_NOT_AVAILABLE },
+          ...(props.status.restore === undefined || props.restoreFact !== true
+            ? []
+            : [{ label: "Restore", value: restoreSentence(props.status.restore) }]),
           {
             label: "Last error",
             value:

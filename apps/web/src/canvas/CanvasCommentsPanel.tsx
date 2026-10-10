@@ -191,7 +191,15 @@ const OUTDATED_ANCHOR_LABEL = "No longer on the canvas";
 
 function authorLabel(thread: CanvasCommentThread["comment"]): string {
   const who = thread.author.kind === "agent" ? "Agent" : "You";
-  return thread.origin?.kind === "remote-device" ? `${who} · paired device` : who;
+  switch (thread.origin?.kind) {
+    case "remote-device":
+      return `${who} · paired device`;
+    case "replica":
+      // Written on another of this person's computers and taken in by sync.
+      return `${who} · ${thread.origin.computerName}`;
+    default:
+      return who;
+  }
 }
 
 /**

@@ -88,13 +88,20 @@ export type CanvasCommentAnchor = typeof CanvasCommentAnchor.Type;
  * authored as the single local user; the device it came through is recorded
  * beside the author rather than becoming a second author. The server stamps
  * it from the principal it authenticated — a client never names its own
- * origin.
+ * origin. `replica` is a comment another of this person's computers wrote,
+ * taken in through artifact sync: it names that computer as its signed
+ * replica entry does, and only the sync import stamps it.
  */
 export const CanvasCommentOrigin = Schema.Union(
   Schema.Struct({ kind: Schema.Literal("host") }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("remote-device"),
     deviceId: boundedNonEmptyText(128),
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("replica"),
+    instanceId: Schema.UUID,
+    computerName: boundedNonEmptyText(128),
   }).annotations(strict),
 );
 export type CanvasCommentOrigin = typeof CanvasCommentOrigin.Type;

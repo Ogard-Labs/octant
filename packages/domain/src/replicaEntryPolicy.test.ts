@@ -4,6 +4,8 @@ import type { HostId } from "@octant/contracts/host";
 import {
   REPLICA_ENTRY_FORMAT,
   decodeReplicaArtifactEntry,
+  decodeReplicaCommentEntry,
+  type ReplicaCommentEntry,
   type ReplicaInstanceId,
   type ReplicaSignatureVerdict,
   type ReplicaArtifactEntry,
@@ -226,7 +228,12 @@ describe("reconciling a replica entry", () => {
   it("cannot express overwrite", () => {
     expect(replicaReconcileCannotOverwrite).toBe(true);
     expectTypeOf<ReplicaReconcileOutcome["outcome"]>().toEqualTypeOf<
-      "append-version" | "already-present" | "concurrent-head" | "tombstone" | "refused"
+      | "append-version"
+      | "append-comment"
+      | "already-present"
+      | "concurrent-head"
+      | "tombstone"
+      | "refused"
     >();
   });
 
@@ -457,6 +464,148 @@ describe("reconciling a replica entry", () => {
     expect(reconcileReplicaEntry({ ...noted, measuredContentHash: hashB }, replacement)).toEqual({
       outcome: "refused",
       reason: "hash-mismatch",
+    });
+  });
+});
+
+function commentEntry(options: {
+  readonly instanceId?: ReplicaInstanceId;
+  readonly sequence?: number;
+  readonly hostId?: string;
+  readonly after?: ReadonlyArray<{
+    readonly instanceId: ReplicaInstanceId;
+    readonly sequence: number;
+  }>;
+  readonly contentHash?: string;
+}): ReplicaCommentEntry {
+  return decodeReplicaCommentEntry({
+    format: REPLICA_ENTRY_FORMAT,
+    kind: "canvas-comment",
+    origin: {
+      instanceId: options.instanceId ?? ids.north,
+      displayName: "North",
+      sequence: options.sequence ?? 1,
+      publicKey: "MCowBQYDK2VwAyEAsI3Vx6E5C70zWN51mv4VIXZxVQC4M1DBS7XoBYp5/R4=",
+    },
+    artifact: {
+      canvasId: ids.canvas,
+      hostId: options.hostId ?? "host-north",
+      projectName: "Launch",
+    },
+    after: options.after ?? [],
+    contentHash: options.contentHash ?? hashA,
+    change: {
+      kind: "comment",
+      commentId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+      anchor: { kind: "block", blockId: "t1" },
+      author: { kind: "local-user", actorId: ids.actor },
+      body: "Move the launch to Monday?",
+      createdAt: now,
+    },
+  });
+}
+
+describe("reconciling a restore", () => {
+  it("applies an artifact entry ahead of its writer's earlier slots, and ends with the same heads", () => {
+    const first = entry({ sequence: 1, contentHash: hashA, versionId: ids.version, parents: [] });
+    const second = entry({
+      sequence: 2,
+      contentHash: hashB,
+      versionId: ids.otherVersion,
+      parents: [ids.version],
+      text: "Second",
+    });
+    const listed = state({
+      listedSlots: [slot(ids.north, 1), slot(ids.north, 2)],
+      restoring: true,
+    });
+    // Newest first: the second version applies before the first is read.
+    const newest = reconcileReplicaEntry({ ...listed, measuredContentHash: hashB }, second);
+    expect(newest).toEqual({ outcome: "append-version" });
+    const afterNewest = noteApplied(listed, second, newest);
+    const oldest = reconcileReplicaEntry(afterNewest, first);
+    expect(oldest).toEqual({ outcome: "append-version" });
+    const restored = noteApplied(afterNewest, first, oldest);
+
+    const inOrder = noteApplied(listed, first, reconcileReplicaEntry(listed, first));
+    const writerOrder = noteApplied(
+      inOrder,
+      second,
+      reconcileReplicaEntry({ ...inOrder, measuredContentHash: hashB }, second),
+    );
+    const record = (local: ReplicaLocalState) => {
+      const artifact = local.artifacts[0];
+      if (artifact === undefined) throw new Error("no artifact");
+      return replicaArtifactHeads(artifact);
+    };
+    expect(record(restored)).toEqual(record(writerOrder));
+    expect(record(restored)).toEqual([{ kind: "version", versionId: ids.otherVersion }]);
+  });
+
+  it("still holds a comment entry until its writer's earlier slots are settled", () => {
+    const comment = commentEntry({ sequence: 2 });
+    const restoring = state({
+      listedSlots: [slot(ids.north, 1), slot(ids.north, 2)],
+      restoring: true,
+    });
+    expect(reconcileReplicaEntry(restoring, comment)).toEqual({
+      outcome: "refused",
+      reason: "sequence-gap",
+    });
+    expect(
+      reconcileReplicaEntry({ ...restoring, settledSlots: [slot(ids.north, 1)] }, comment),
+    ).toEqual({ outcome: "append-comment" });
+  });
+});
+
+describe("reconciling a comment entry", () => {
+  it("waits until every comment entry its writer had seen is here", () => {
+    const reply = commentEntry({
+      instanceId: ids.south,
+      sequence: 1,
+      after: [slot(ids.north, 4)],
+    });
+    expect(reconcileReplicaEntry(state(), reply)).toEqual({
+      outcome: "refused",
+      reason: "sequence-gap",
+    });
+    const seen = state({
+      applied: [{ instanceId: ids.north, sequence: 4, kind: "canvas-comment", contentHash: hashB }],
+    });
+    expect(reconcileReplicaEntry(seen, reply)).toEqual({ outcome: "append-comment" });
+  });
+
+  it("changes nothing when the same comment entry is pulled again, and refuses another body in its slot", () => {
+    const comment = commentEntry({ sequence: 3 });
+    const applied = state({
+      applied: [{ instanceId: ids.north, sequence: 3, kind: "canvas-comment", contentHash: hashA }],
+    });
+    expect(reconcileReplicaEntry(applied, comment)).toEqual({ outcome: "already-present" });
+    expect(
+      reconcileReplicaEntry(
+        { ...applied, measuredContentHash: hashB },
+        commentEntry({ sequence: 3, contentHash: hashB }),
+      ),
+    ).toEqual({ outcome: "refused", reason: "hash-mismatch" });
+  });
+
+  it("refuses a comment from a computer that is not a member, or one whose content does not match", () => {
+    expect(reconcileReplicaEntry(state(), commentEntry({ instanceId: ids.stranger }))).toEqual({
+      outcome: "refused",
+      reason: "unknown-instance",
+    });
+    expect(
+      reconcileReplicaEntry({ ...state(), measuredContentHash: hashB }, commentEntry({})),
+    ).toEqual({ outcome: "refused", reason: "hash-mismatch" });
+  });
+
+  it("refuses a comment that names a local artifact as foreign", () => {
+    const local = state({
+      artifacts: [{ canvasId: ids.canvas, originHostId: localHost, versions: [], tombstones: [] }],
+    });
+    expect(reconcileReplicaEntry(local, commentEntry({}))).toEqual({
+      outcome: "refused",
+      reason: "names-local-artifact-as-foreign",
     });
   });
 });

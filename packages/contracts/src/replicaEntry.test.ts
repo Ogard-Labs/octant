@@ -11,7 +11,11 @@ import {
   decodeReplicaMembershipEntry,
   decodeReplicaMembershipResult,
   decodeReplicaEntryText,
+  decodeReplicaRestoreCommand,
+  decodeReplicaSyncStatusView,
   encodeReplicaEntry,
+  isReplicaMembershipEntry,
+  replicaCommentContentPreimage,
   replicaEntryContentPreimage,
   replicaEntryRelativePaths,
   type ReplicaEntry,
@@ -357,6 +361,94 @@ describe("replica entry contract", () => {
     expect(() =>
       decodeReplicaEntryText(JSON.stringify({ ...encoded, format: "octant.replica-entry/1" })),
     ).toThrow();
+  });
+});
+
+describe("canvas comment entries", () => {
+  const commentEntry = (change: unknown, after: unknown = []) => ({
+    format: REPLICA_ENTRY_FORMAT,
+    kind: "canvas-comment",
+    origin: origin(4),
+    artifact: { canvasId: ids.canvas, hostId: "host-north", projectName: "Launch" },
+    after,
+    contentHash: hash,
+    change,
+  });
+  const added = {
+    kind: "comment",
+    commentId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1",
+    anchor: { kind: "node", blockId: "d1", nodeId: "n1" },
+    author: { kind: "local-user", actorId: ids.actor },
+    body: "Is Monday too early?",
+    createdAt: now,
+  };
+
+  it("round-trips a comment change in a fixed key order, and is not a membership record", () => {
+    const decoded = decodeReplicaEntry(
+      commentEntry(added, [{ instanceId: ids.instance, sequence: 3 }]),
+    );
+    const encoded = encodeReplicaEntry(decoded);
+    expect(Object.keys(JSON.parse(encoded) as object)).toEqual([
+      "format",
+      "kind",
+      "origin",
+      "artifact",
+      "after",
+      "contentHash",
+      "change",
+    ]);
+    expect(encodeReplicaEntry(decodeReplicaEntryText(encoded))).toBe(encoded);
+    expect(isReplicaMembershipEntry(decoded)).toBe(false);
+    // The hash covers the change alone, whatever order its keys arrived in.
+    const shuffled = { ...added, body: added.body, kind: "comment" };
+    expect(replicaCommentContentPreimage(shuffled as never)).toBe(
+      replicaCommentContentPreimage(added as never),
+    );
+  });
+
+  it("carries a deletion as a tombstone, and refuses a comment that names the device it came through", () => {
+    expect(
+      decodeReplicaEntry(
+        commentEntry({
+          kind: "tombstone",
+          commentId: added.commentId,
+          deletedBy: added.author,
+          deletedAt: now,
+        }),
+      ).kind,
+    ).toBe("canvas-comment");
+    expect(() =>
+      decodeReplicaEntry(commentEntry({ ...added, origin: { kind: "host" } })),
+    ).toThrow();
+    expect(() =>
+      decodeReplicaEntry(
+        commentEntry(added, [
+          { instanceId: ids.instance, sequence: 1 },
+          { instanceId: ids.instance, sequence: 2 },
+        ]),
+      ),
+    ).toThrow();
+  });
+});
+
+describe("restoring a library", () => {
+  it("decodes Stop and Resume, and shows progress that never runs past its total", () => {
+    expect(decodeReplicaRestoreCommand({ kind: "stop-restore" })).toEqual({ kind: "stop-restore" });
+    expect(() => decodeReplicaRestoreCommand({ kind: "pull" })).toThrow();
+    const status = (restore: unknown) =>
+      decodeReplicaSyncStatusView({
+        kind: "replica-sync-status",
+        thisComputer: "member",
+        members: [],
+        status: {
+          lastPublish: { kind: "not-available" },
+          lastPull: { kind: "not-available" },
+          queued: { kind: "not-available" },
+          restore,
+        },
+      });
+    expect(status({ state: "running", done: 25, total: 60 }).status.restore?.done).toBe(25);
+    expect(() => status({ state: "running", done: 61, total: 60 })).toThrow();
   });
 });
 

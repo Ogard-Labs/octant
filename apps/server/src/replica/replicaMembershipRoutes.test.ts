@@ -188,6 +188,43 @@ describe("replica membership routes", () => {
     expect(calls.length).toBe(0);
   });
 
+  it("stops and resumes a restore for a local window, and refuses a paired device", async () => {
+    const { bindPrincipalRouteContext } = await import("../principalRouteContext");
+    const { instance, calls } = service([]);
+    const restoreCalls: string[] = [];
+    const handler = createReplicaMembershipRouteHandler({
+      service: instance as never,
+      view: () => emptyView,
+      windowAuthorityStore: windowStore(),
+      restore: {
+        stop: () => {
+          restoreCalls.push("stop");
+          return { kind: "restore", restore: { state: "stopped", done: 25, total: 60 } };
+        },
+        resume: () => {
+          restoreCalls.push("resume");
+          return { kind: "restore", restore: { state: "running", done: 25, total: 60 } };
+        },
+      },
+    });
+    const stop = makeRequest({ kind: "stop-restore" });
+    bindPrincipalRouteContext(stop, localWindow);
+    const stopped = await handler(stop);
+    expect(stopped?.status).toBe(200);
+    expect(await stopped?.json()).toEqual({
+      kind: "restore",
+      restore: { state: "stopped", done: 25, total: 60 },
+    });
+    const resume = makeRequest({ kind: "resume-restore" });
+    bindPrincipalRouteContext(resume, {
+      principal: remoteDevice(thisHost),
+      scopeId: localWindow.scopeId,
+    });
+    expect((await handler(resume))?.status).toBe(403);
+    expect(restoreCalls).toEqual(["stop"]);
+    expect(calls).toEqual([]);
+  });
+
   it("answers a typed not-configured refusal when the host has no replica store", async () => {
     const { bindPrincipalRouteContext } = await import("../principalRouteContext");
     const projection = new ReplicaMembershipProjection();

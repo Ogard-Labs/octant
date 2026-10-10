@@ -15,6 +15,13 @@
  * of the computer that wrote them and the Project they were filed under; an
  * imported artifact is not bound to a thread here until a person opens or
  * revises it here.
+ *
+ * Restore. A computer's first sync in a replica reads the whole store in
+ * batches, newest first, with progress a person can stop and resume.
+ *
+ * Comments. A comment change on a Canvas the replica carries is queued and
+ * published like a version, and a pulled one joins that Canvas's comments
+ * here, naming the computer it came from.
  */
 
 import { createHash } from "node:crypto";
@@ -33,17 +40,25 @@ import type {
 } from "@octant/contracts/canvas";
 import { isCanvasShareSafeText } from "@octant/contracts/canvas-share";
 import type { HostId } from "@octant/contracts/host";
+import type { CanvasCommentEvent } from "@octant/contracts/canvas-board";
 import {
   REPLICA_ENTRY_FORMAT,
   decodeReplicaArtifactEntry,
+  decodeReplicaCommentEntry,
+  replicaCommentContentPreimage,
   replicaEntryContentPreimage,
   type ReplicaArtifactEntry,
   type ReplicaArtifactKeptOutcome,
   type ReplicaArtifactReconciled,
+  type ReplicaCanvasEntry,
+  type ReplicaCommentChange,
+  type ReplicaCommentEntry,
   type ReplicaContentHash,
   type ReplicaDisplayName,
   type ReplicaInstanceId,
   type ReplicaReadRefusal,
+  type ReplicaRestoreProgress,
+  type ReplicaRestoreResult,
 } from "@octant/contracts/replica-entry";
 import {
   reconcileReplicaEntry,
@@ -57,9 +72,14 @@ import {
 import { replicaInGoodStanding } from "@octant/domain/replica-membership-policy";
 import { artifactKindForBlocks } from "@octant/domain";
 import type { ArtifactLibrarySyncedEntry } from "@octant/contracts/artifact-library";
-import { REPLICA_ARTIFACT_EVENT_NAMES, type ReplicaArtifactQueued } from "./replicaArtifactEvents";
+import {
+  REPLICA_ARTIFACT_EVENT_NAMES,
+  type ReplicaArtifactQueued,
+  type ReplicaCommentQueued,
+} from "./replicaArtifactEvents";
 import type {
   ReplicaArtifactState,
+  ReplicaQueuedEntry,
   ReplicaSyncedArtifact,
   ReplicaSyncedTombstone,
   ReplicaSyncedVersion,
@@ -80,6 +100,19 @@ import type {
 
 /** How often a host with sync on pulls and retries its queue on its own. */
 export const REPLICA_SYNC_INTERVAL_MS = 5 * 60_000;
+
+/**
+ * How many store slots one restore batch reads before it journals its
+ * progress and checks whether the person stopped it.
+ */
+export const REPLICA_RESTORE_BATCH = 25;
+
+/** Whether a comment change's text may leave this host, or come into it. */
+export function replicaCommentTextLeavesSafely(change: ReplicaCommentChange): boolean {
+  return change.kind === "comment" || change.kind === "reply"
+    ? isCanvasShareSafeText(change.body)
+    : true;
+}
 
 /**
  * Whether an artifact's text may leave this host: the share filter every
@@ -115,13 +148,30 @@ export interface ReplicaArtifactImportPorts {
   /** Canvases this host holds in its own journal. */
   readonly localCanvasIds: () => ReadonlyArray<CanvasId>;
   readonly journal: ReplicaMembershipJournal;
+  /**
+   * Takes a comment change another computer wrote into this host's Canvas
+   * comments, naming that computer. Idempotent: a change already taken in
+   * here, or one about a comment deleted here, changes nothing. Without it
+   * comment entries are reconciled and journaled but shown nowhere.
+   */
+  readonly comments?: {
+    readonly adopt: (input: {
+      readonly canvasId: CanvasId;
+      readonly change: ReplicaCommentChange;
+      readonly writer: { readonly instanceId: ReplicaInstanceId; readonly displayName: string };
+    }) => void;
+  };
 }
+
+/** Refusals another slot arriving in the same read can lift. */
+const WAITING_REFUSALS: ReadonlySet<string> = new Set(["sequence-gap"]);
 
 const KEPT: Record<
   Exclude<ReplicaReconcileOutcome["outcome"], "refused">,
   ReplicaArtifactKeptOutcome
 > = {
   "append-version": "imported",
+  "append-comment": "imported",
   "already-present": "already-present",
   "concurrent-head": "concurrent-head",
   tombstone: "tombstone",
@@ -147,54 +197,87 @@ export class ReplicaArtifactImport implements ReplicaArtifactReconciler {
   reconcile(input: {
     readonly reads: ReadonlyArray<ReplicaArtifactRead>;
     readonly listed: ReadonlyArray<Slot>;
+    readonly restoring?: boolean;
   }): {
     readonly kept: ReadonlyArray<ReplicaArtifactReconciled>;
     readonly refused: ReadonlyArray<ReplicaReadRefusal>;
   } {
     const kept: ReplicaArtifactReconciled[] = [];
     const refused: ReplicaReadRefusal[] = [];
-    for (const read of input.reads) {
-      const outcome = this.#decide(read, input.listed);
-      if (outcome === undefined) continue;
-      if (outcome.outcome === "refused") {
-        refused.push({
-          instanceId: read.instanceId,
-          sequence: read.sequence,
-          reason: outcome.reason,
-        });
-        if (
-          !this.#ports.artifacts().refusalRecorded(read.instanceId, read.sequence, outcome.reason)
-        ) {
-          this.#ports.journal.append({
-            eventName: REPLICA_ARTIFACT_EVENT_NAMES.reconciled,
-            payload: {
-              instanceId: read.instanceId,
-              sequence: read.sequence,
-              outcome: "refused",
-              reason: outcome.reason,
-            },
-          });
+    // An entry that waits on another slot is tried again while the same read
+    // keeps applying others: a comment can name another computer's entry that
+    // this read reaches later in instance order, and a restore reads newest
+    // first. What still waits once nothing more applies is refused for now.
+    let pending: ReadonlyArray<ReplicaArtifactRead> = input.reads;
+    for (;;) {
+      const waiting: { read: ReplicaArtifactRead; reason: ReplicaReadRefusal["reason"] }[] = [];
+      let progressed = false;
+      for (const read of pending) {
+        const outcome = this.#decide(read, input.listed, input.restoring === true);
+        if (outcome === undefined) continue;
+        if (outcome.outcome === "refused") {
+          if (WAITING_REFUSALS.has(outcome.reason)) {
+            waiting.push({ read, reason: outcome.reason });
+          } else {
+            refused.push(this.#refusal(read, outcome.reason));
+          }
+          continue;
         }
-        continue;
+        progressed = true;
+        kept.push(this.#keep(read, KEPT[outcome.outcome]));
       }
-      const result = KEPT[outcome.outcome];
+      if (!progressed || waiting.length === 0) {
+        for (const { read, reason } of waiting) refused.push(this.#refusal(read, reason));
+        break;
+      }
+      pending = waiting.map(({ read }) => read);
+    }
+    return { kept, refused };
+  }
+
+  #refusal(read: ReplicaArtifactRead, reason: ReplicaReadRefusal["reason"]): ReplicaReadRefusal {
+    if (!this.#ports.artifacts().refusalRecorded(read.instanceId, read.sequence, reason)) {
       this.#ports.journal.append({
         eventName: REPLICA_ARTIFACT_EVENT_NAMES.reconciled,
         payload: {
           instanceId: read.instanceId,
           sequence: read.sequence,
-          outcome: result,
-          text: read.text,
+          outcome: "refused",
+          reason,
         },
       });
-      kept.push({ instanceId: read.instanceId, sequence: read.sequence, outcome: result });
     }
-    return { kept, refused };
+    return { instanceId: read.instanceId, sequence: read.sequence, reason };
+  }
+
+  #keep(read: ReplicaArtifactRead, result: ReplicaArtifactKeptOutcome): ReplicaArtifactReconciled {
+    const entry = read.entry;
+    // A comment is taken into the Canvas's comments before its slot is
+    // journaled as kept: a host that stops between the two reads the slot
+    // again, and taking the same change in twice changes nothing.
+    if (entry.kind === "canvas-comment" && result === "imported") {
+      this.#ports.comments?.adopt({
+        canvasId: entry.artifact.canvasId,
+        change: entry.change,
+        writer: { instanceId: entry.origin.instanceId, displayName: entry.origin.displayName },
+      });
+    }
+    this.#ports.journal.append({
+      eventName: REPLICA_ARTIFACT_EVENT_NAMES.reconciled,
+      payload: {
+        instanceId: read.instanceId,
+        sequence: read.sequence,
+        outcome: result,
+        text: read.text,
+      },
+    });
+    return { instanceId: read.instanceId, sequence: read.sequence, outcome: result };
   }
 
   #decide(
     read: ReplicaArtifactRead,
     listed: ReadonlyArray<Slot>,
+    restoring: boolean,
   ):
     | ReplicaReconcileOutcome
     | { readonly outcome: "refused"; readonly reason: "unsafe-content" }
@@ -202,11 +285,13 @@ export class ReplicaArtifactImport implements ReplicaArtifactReconciler {
     const membership = this.#ports.membership();
     const local = membership.local;
     if (local === undefined) return undefined;
-    if (!replicaArtifactTextLeavesSafely(read.entry.bundle.definition)) {
-      return { outcome: "refused", reason: "unsafe-content" };
-    }
+    const safe =
+      read.entry.kind === "canvas-comment"
+        ? replicaCommentTextLeavesSafely(read.entry.change)
+        : replicaArtifactTextLeavesSafely(read.entry.bundle.definition);
+    if (!safe) return { outcome: "refused", reason: "unsafe-content" };
     return reconcileReplicaEntry(
-      this.#localState(membership, local.instanceId, listed, read.entry),
+      this.#localState(membership, local.instanceId, listed, read.entry, restoring),
       read.entry,
     );
   }
@@ -215,7 +300,8 @@ export class ReplicaArtifactImport implements ReplicaArtifactReconciler {
     membership: ReplicaMembershipState,
     localInstanceId: ReplicaLocalState["localInstanceId"],
     listed: ReadonlyArray<Slot>,
-    entry: ReplicaArtifactEntry,
+    entry: ReplicaCanvasEntry,
+    restoring: boolean,
   ): ReplicaLocalState {
     const artifacts = this.#ports.artifacts();
     // Every host calls itself `local`, so an artifact's origin is the replica
@@ -244,16 +330,24 @@ export class ReplicaArtifactImport implements ReplicaArtifactReconciler {
       listedSlots: listed,
       settledSlots: membership.settledSlots,
       artifacts: records,
-      measuredContentHash: sha256Hex(replicaEntryContentPreimage(entry)),
+      measuredContentHash: sha256Hex(
+        entry.kind === "canvas-comment"
+          ? replicaCommentContentPreimage(entry.change)
+          : replicaEntryContentPreimage(entry),
+      ),
       // The pull verified the detached signature under the key the entry
       // names before handing it here; an entry that failed never arrives.
       signature: "verified",
+      ...(restoring ? { restoring: true } : {}),
     };
   }
 }
 
 export interface ReplicaArtifactSyncPorts {
-  readonly membership: Pick<ReplicaMembershipService, "execute" | "publishArtifact">;
+  readonly membership: Pick<
+    ReplicaMembershipService,
+    "execute" | "publishArtifact" | "restoreListing" | "restoreRead"
+  >;
   /** The store sync uses; `not-configured` while sync is off or none is chosen. */
   readonly store: () => ReplicaStoreSelection;
   readonly membershipState: () => ReplicaMembershipState;
@@ -280,6 +374,8 @@ export interface ReplicaArtifactSyncPorts {
 export class ReplicaArtifactSyncService {
   readonly #ports: ReplicaArtifactSyncPorts;
   #drain: Promise<void> = Promise.resolve();
+  /** The restore run in progress, so a tick and a Resume share one. */
+  #restoring: Promise<void> | undefined;
   /**
    * Parents the next commit of a Canvas resolves, by Canvas. Keep, Merge,
    * and Restore name every version they resolve just before the commit
@@ -401,6 +497,225 @@ export class ReplicaArtifactSyncService {
   }
 
   /**
+   * Queue a change a person made to a Canvas's comments here, and publish it.
+   * Only a Canvas the replica already carries has its comments published: a
+   * Canvas that never left this host keeps its comments here too. Never
+   * throws: the comment already happened here.
+   */
+  async commentCommitted(input: {
+    readonly canvasId: CanvasId;
+    readonly event: CanvasCommentEvent;
+  }): Promise<void> {
+    try {
+      if (!this.#queues()) return;
+      const local = this.#ports.membershipState().local;
+      if (local === undefined) return;
+      const current = this.#ports.canvas(input.canvasId)?.currentVersion;
+      if (current !== undefined && this.#ports.planMode(current)) return;
+      const state = this.#ports.artifactState();
+      const synced = state.artifact(input.canvasId);
+      const queuedVersion = state.outbox.find((queued) =>
+        same(queued.artifact.canvasId, input.canvasId),
+      );
+      const artifact = synced ?? queuedVersion?.artifact;
+      if (artifact === undefined) return;
+      const change = commentChangeOf(input.event);
+      if (!replicaCommentTextLeavesSafely(change)) {
+        this.#ports.journal.append({
+          eventName: REPLICA_ARTIFACT_EVENT_NAMES.publishRefused,
+          payload: { canvasId: input.canvasId, kind: "canvas-comment", reason: "unsafe-content" },
+        });
+        return;
+      }
+      const queued: ReplicaCommentQueued = {
+        queueId: this.#ports.uuid(),
+        kind: "canvas-comment",
+        artifact: {
+          canvasId: input.canvasId,
+          hostId:
+            synced?.originHostId ??
+            queuedVersion?.artifact.hostId ??
+            (String(local.instanceId) as HostId),
+          projectName: synced?.projectName ?? queuedVersion?.artifact.projectName ?? "Project",
+        },
+        // What this computer had seen of the others' comments on this Canvas.
+        // Its own earlier changes come first by its own sequence.
+        after: state
+          .commentsSeen(input.canvasId)
+          .filter((slot) => !same(slot.instanceId, local.instanceId)),
+        change,
+      };
+      this.#ports.journal.append({
+        eventName: REPLICA_ARTIFACT_EVENT_NAMES.commentQueued,
+        payload: queued,
+      });
+      await this.drain();
+    } catch {
+      // A change that could not be queued stays on this computer.
+    }
+  }
+
+  /** The restore of this computer's current identity, once one started. */
+  restoreProgress(): ReplicaRestoreProgress | undefined {
+    const local = this.#ports.membershipState().local;
+    if (local === undefined) return undefined;
+    const restore = this.#ports.artifactState().restore(local.instanceId);
+    return restore === undefined
+      ? undefined
+      : { state: restore.state, done: restore.done, total: restore.total };
+  }
+
+  /**
+   * Bring the replica's whole library onto this computer: the first read of
+   * a new identity, and the rest of one that stopped part-way. It lists the
+   * store once, reads every slot this computer holds nothing in, newest first
+   * for each computer that wrote them, and journals what it read after every
+   * batch, so a restart resumes at the next unread slot with nothing applied
+   * twice. A pull in writer order at the end takes in what had to wait - a
+   * comment's earlier slots, or another computer's comment it came after.
+   * It returns when it finished, was stopped, or the store stopped
+   * answering; the next sync carries on.
+   */
+  restore(): Promise<void> {
+    this.#restoring ??= this.#restoreOnce().finally(() => {
+      this.#restoring = undefined;
+    });
+    return this.#restoring;
+  }
+
+  /** Stop the restore after the batch it is reading. It stays stopped across restarts. */
+  stopRestore(): ReplicaRestoreResult {
+    const restore = this.#currentRestore();
+    if (restore.status !== "found") return restore.refusal;
+    if (restore.restore.state === "running") {
+      this.#ports.journal.append({
+        eventName: REPLICA_ARTIFACT_EVENT_NAMES.restoreStopped,
+        payload: { restoreId: restore.restore.restoreId },
+      });
+    }
+    return { kind: "restore", restore: this.restoreProgress() ?? restore.restore };
+  }
+
+  /** Resume a stopped restore where it stopped, and carry on reading in the background. */
+  resumeRestore(): ReplicaRestoreResult {
+    const restore = this.#currentRestore();
+    if (restore.status !== "found") return restore.refusal;
+    if (restore.restore.state === "stopped") {
+      this.#ports.journal.append({
+        eventName: REPLICA_ARTIFACT_EVENT_NAMES.restoreResumed,
+        payload: { restoreId: restore.restore.restoreId },
+      });
+    }
+    void this.restore().catch(() => undefined);
+    return { kind: "restore", restore: this.restoreProgress() ?? restore.restore };
+  }
+
+  #currentRestore():
+    | {
+        readonly status: "found";
+        readonly restore: ReplicaRestoreProgress & { readonly restoreId: string };
+      }
+    | { readonly status: "refused"; readonly refusal: ReplicaRestoreResult } {
+    if (this.#ports.store().status !== "selected") {
+      return {
+        status: "refused",
+        refusal: {
+          kind: "refused",
+          reason: "not-configured",
+          message: "Turn sync on to restore the library from the store.",
+        },
+      };
+    }
+    const local = this.#ports.membershipState().local;
+    const restore =
+      local === undefined ? undefined : this.#ports.artifactState().restore(local.instanceId);
+    if (restore === undefined) {
+      return {
+        status: "refused",
+        refusal: {
+          kind: "refused",
+          reason: "no-restore",
+          message: "This computer has not started restoring a library.",
+        },
+      };
+    }
+    if (restore.state === "finished") {
+      return {
+        status: "refused",
+        refusal: {
+          kind: "refused",
+          reason: "finished",
+          message: "This computer already restored the library.",
+        },
+      };
+    }
+    return { status: "found", restore };
+  }
+
+  async #restoreOnce(): Promise<void> {
+    const state = this.#ports.membershipState();
+    const local = state.local;
+    if (local === undefined || this.#ports.store().status !== "selected") return;
+    // A computer restores once it counts in the replica: before its join is
+    // confirmed nothing it reads would be imported, and the restore would
+    // finish having read the store for nothing.
+    if (!replicaInGoodStanding(state.membership, local.instanceId)) return;
+    const before = this.#ports.artifactState().restore(local.instanceId);
+    if (before !== undefined && before.state !== "running") return;
+    const listing = await this.#ports.membership.restoreListing();
+    if (listing.status !== "listed") return;
+    let restoreId: string;
+    let done: number;
+    let total: number;
+    if (before === undefined) {
+      restoreId = this.#ports.uuid();
+      done = 0;
+      total = listing.unread.length;
+      this.#ports.journal.append({
+        eventName: REPLICA_ARTIFACT_EVENT_NAMES.restoreStarted,
+        payload: { restoreId, instanceId: local.instanceId, total },
+      });
+    } else {
+      // Slots read before a restart are held now and not listed as unread;
+      // what the store gained since counts toward the total.
+      restoreId = before.restoreId;
+      done = Math.max(before.done, before.total - listing.unread.length);
+      total = Math.max(before.total, done + listing.unread.length);
+      this.#ports.journal.append({
+        eventName: REPLICA_ARTIFACT_EVENT_NAMES.restoreProgress,
+        payload: { restoreId, done, total },
+      });
+    }
+    const order = newestFirst(listing.unread);
+    for (let start = 0; start < order.length; start += REPLICA_RESTORE_BATCH) {
+      if (this.#ports.artifactState().restore(local.instanceId)?.state !== "running") return;
+      const batch = order.slice(start, start + REPLICA_RESTORE_BATCH);
+      const read = await this.#ports.membership.restoreRead({
+        slots: batch,
+        listed: listing.listed,
+      });
+      if (read.status !== "read") return;
+      done = Math.min(total, done + batch.length);
+      this.#ports.journal.append({
+        eventName: REPLICA_ARTIFACT_EVENT_NAMES.restoreProgress,
+        payload: { restoreId, done, total },
+      });
+    }
+    if (this.#ports.artifactState().restore(local.instanceId)?.state !== "running") return;
+    const pulled = await this.#ports.membership.execute({ kind: "pull" });
+    if (pulled.kind !== "pulled") return;
+    this.#ports.journal.append({
+      eventName: REPLICA_ARTIFACT_EVENT_NAMES.restoreFinished,
+      payload: { restoreId },
+    });
+    try {
+      this.#ports.afterPull?.();
+    } catch {
+      // A version that could not be taken in here stays in the library.
+    }
+  }
+
+  /**
    * Publish queued entries oldest first until one does not land. The one that
    * did not land is retried on the next drain, ahead of anything newer.
    */
@@ -410,10 +725,15 @@ export class ReplicaArtifactSyncService {
     return run;
   }
 
-  /** Read the store, when there is one and this computer has an identity in it. */
+  /**
+   * Read the store, when there is one and this computer has an identity in
+   * it. While the person has a restore stopped, background sync reads
+   * nothing.
+   */
   async pull(): Promise<ReplicaMembershipOutcome | undefined> {
     if (this.#ports.store().status !== "selected") return undefined;
     if (this.#ports.membershipState().local === undefined) return undefined;
+    if (this.restoreProgress()?.state === "stopped") return undefined;
     const pulled = await this.#ports.membership.execute({ kind: "pull" });
     try {
       this.#ports.afterPull?.();
@@ -423,9 +743,22 @@ export class ReplicaArtifactSyncService {
     return pulled;
   }
 
-  /** Pull, then publish what is queued. */
+  /**
+   * Pull, then publish what is queued. Until this identity's restore has
+   * finished, the restore reads in place of the pull.
+   */
   async sync(): Promise<void> {
-    await this.pull();
+    const restore = this.restoreProgress();
+    const state = this.#ports.membershipState();
+    if (
+      state.local !== undefined &&
+      replicaInGoodStanding(state.membership, state.local.instanceId) &&
+      restore?.state !== "finished"
+    ) {
+      await this.restore();
+    } else {
+      await this.pull();
+    }
     await this.drain();
   }
 
@@ -456,14 +789,14 @@ export class ReplicaArtifactSyncService {
   }
 
   async #drainOnce(): Promise<void> {
-    const pending = this.#ports.artifactState().outbox.length;
+    const pending = this.#ports.artifactState().queue.length;
     for (let index = 0; index < pending; index += 1) {
-      const next = this.#ports.artifactState().outbox[0];
+      const next = this.#ports.artifactState().queue[0];
       if (next === undefined) return;
       if (!this.#publishes()) return;
       const outcome = await this.#ports.membership.publishArtifact({
         queueId: next.queueId,
-        build: (origin) => replicaArtifactEntryFor(next, origin),
+        build: (origin) => replicaCanvasEntryFor(next, origin),
       });
       if (outcome.status === "published") continue;
       if (outcome.status === "not-configured") return;
@@ -572,6 +905,101 @@ function bundleFor(version: CanvasVersion, originHostId: HostId): ArtifactBundle
     },
     definition: version.definition,
   });
+}
+
+/** The entry a queued version or comment change becomes at one slot. */
+export function replicaCanvasEntryFor(
+  queued: ReplicaQueuedEntry,
+  origin: ReplicaArtifactEntry["origin"],
+): ReplicaCanvasEntry {
+  return queued.kind === "canvas-comment"
+    ? replicaCommentEntryFor(queued, origin)
+    : replicaArtifactEntryFor(queued, origin);
+}
+
+/** The entry a queued comment change becomes at one slot. Rebuilt at the same slot it is the same bytes. */
+export function replicaCommentEntryFor(
+  queued: ReplicaCommentQueued,
+  origin: ReplicaCommentEntry["origin"],
+): ReplicaCommentEntry {
+  return decodeReplicaCommentEntry({
+    format: REPLICA_ENTRY_FORMAT,
+    kind: "canvas-comment",
+    origin,
+    artifact: queued.artifact,
+    after: queued.after,
+    contentHash: sha256Hex(replicaCommentContentPreimage(queued.change)),
+    change: queued.change,
+  });
+}
+
+/**
+ * The change a comment event a person made here becomes in the store. The
+ * device it came through stays on this computer.
+ */
+function commentChangeOf(event: CanvasCommentEvent): ReplicaCommentChange {
+  switch (event.kind) {
+    case "added": {
+      const comment = event.event.comment;
+      return {
+        kind: "comment",
+        commentId: comment.commentId,
+        anchor: comment.anchor,
+        author: comment.author,
+        body: comment.body,
+        createdAt: comment.createdAt,
+      };
+    }
+    case "replied": {
+      const reply = event.event.reply;
+      return {
+        kind: "reply",
+        commentId: reply.commentId,
+        replyId: reply.replyId,
+        author: reply.author,
+        body: reply.body,
+        createdAt: reply.createdAt,
+      };
+    }
+    case "resolved":
+      return {
+        kind: "resolve",
+        commentId: event.event.commentId,
+        resolvedBy: event.event.resolvedBy,
+        resolvedAt: event.event.resolvedAt,
+      };
+    case "deleted":
+      return {
+        kind: "tombstone",
+        commentId: event.event.commentId,
+        deletedBy: event.event.deletedBy,
+        deletedAt: event.event.deletedAt,
+      };
+  }
+}
+
+/**
+ * A restore's reading order: each computer's slots newest first, taking one
+ * from each computer in turn, so every computer's newest versions arrive
+ * before anyone's older history.
+ */
+function newestFirst(slots: ReadonlyArray<Slot>): ReadonlyArray<Slot> {
+  const byWriter = new Map<string, Slot[]>();
+  for (const slot of slots) {
+    const key = String(slot.instanceId);
+    byWriter.set(key, [...(byWriter.get(key) ?? []), slot]);
+  }
+  const queues = [...byWriter.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([, writer]) => writer.sort((left, right) => right.sequence - left.sequence));
+  const ordered: Slot[] = [];
+  for (let index = 0; ordered.length < slots.length; index += 1) {
+    for (const writer of queues) {
+      const slot = writer[index];
+      if (slot !== undefined) ordered.push(slot);
+    }
+  }
+  return ordered;
 }
 
 /** The entry a queued artifact becomes at one slot. Rebuilt at the same slot it is the same bytes. */

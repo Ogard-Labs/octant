@@ -1391,8 +1391,9 @@ flowchart LR
   version, so a computer that joins can import those versions. It does not
   recreate threads, Projects, or settings. Binding an imported version to a
   local Project follows the existing artifact import rule and is not widened
-  here. Scope is artifact and Canvas versions and tombstones.
-  Canvas comments are not in this log. Threads and settings are not. A
+  here. Scope is artifact and Canvas versions and tombstones, and changes to
+  a Canvas's comment threads under the same rules. Threads and settings are
+  not in this log. A
   replica-store contribution offers list, get, and put-if-absent. A folder
   store and an S3-compatible store ship in-tree on that seam. Direct cloud
   APIs for a host with no desktop sync client come later as plugins. Every
@@ -1417,7 +1418,21 @@ flowchart LR
   artifact entry applied or refused for its own content, or a file found not
   to be a valid record. A slot the store does not list never holds it back.
   An unknown entry format fails closed. A later version after a tombstone appends; the
-  tombstone stays in the history.
+  tombstone stays in the history. A restore is the one exception to waiting
+  on a gap, and only for versions and tombstones: see artifact sync below.
+  A `canvas-comment` entry carries one change to a Canvas's comment
+  threads - a comment, a reply, a resolve, or a `tombstone` deleting a
+  comment and its replies - with the artifact origin, a content hash over
+  the canonical change, and `after`: for each other computer, the newest
+  comment entry on that Canvas its writer held when the change was made. A
+  comment carries its author, text, anchor, and time; the device it came
+  through stays on its computer. A comment entry waits as `sequence-gap`
+  until its writer's earlier listed slots are settled and every slot its
+  `after` names is applied or settled here, so each computer applies
+  comment changes in an order its writers saw. Its other rules are a
+  version's: signed, write-once, refused when its writer is not admitted,
+  its hash does not match, it names a local artifact as foreign, or its
+  text fails the share filter.
   The detached signature covers an entry's encoded bytes whole - origin, kind,
   parents, the claimed content hash, and the bundle - so a rewrite of any of
   those is a different signature, not the same one the log recorded. The log
@@ -1642,6 +1657,56 @@ flowchart LR
     it names, and only an admitted computer's entry within its cut is
     imported, so imports from this person's own computers are not tainted as
     untrusted; they enter no thread until bound.
+  - **Restore.** A computer whose identity is a member in good standing
+    restores the whole library on its first sync: a fresh or wiped
+    computer that joins gets every live artifact and its full version
+    history. The restore lists the store once and reads every slot this
+    computer holds nothing in, each computer's slots newest first, taking
+    one from each computer in turn, in batches of 25. Each batch takes the
+    membership command line once, so publishes and commands run between
+    batches; it holds membership records, then reconciles its entries with
+    `restoring` set, which lets a version or tombstone apply ahead of its
+    writer's earlier slots. Heads are derived from the whole set of
+    versions and tombstones, so the library a restore ends with does not
+    depend on the order it read them in, and every listed slot is read
+    before it finishes; a version id already held keeps the body it was
+    first held with. Comment entries still wait on their writer's earlier
+    slots. Entries that wait on another slot are tried again within the
+    same read while others keep applying. After the last batch, one pull in
+    writer order takes in what still waited, then the restore is finished.
+    The journal holds `replica.restore-started@2` (the identity and the
+    unread total), `replica.restore-progress@2` after each batch once its
+    entries are journaled, and `replica.restore-stopped@2`,
+    `replica.restore-resumed@2`, and `replica.restore-finished@2`. A restart
+    lists the store again and resumes at the next unread slot; slots read
+    before it are held, so nothing applies twice, and what the store gained
+    meanwhile is added to the total. Until it finishes, the restore reads in
+    place of the interval pull. A person can stop it from Settings › Sync on
+    the host; a stopped restore stays stopped across restarts, and
+    background sync reads nothing from the store until the person resumes
+    it (publishing continues, and an explicit Check the store still reads).
+    Stop and Resume ride the host-only membership commands route
+    (`stop-restore`, `resume-restore`); the restore's state, read count, and
+    total are in the sync status, which a paired device reads without the
+    controls.
+  - **Comments.** The Canvas comment service tells artifact sync about each
+    comment change a person makes on this host. Only a Canvas the replica
+    carries - one this host published or imported - has its comments
+    published; a Canvas that never left this host keeps them here, as does
+    Plan mode and sync off. A change is queued in the same queue as versions
+    (`replica.comment-queued@2`) with `after` taken at that moment, and a
+    comment or reply whose text fails the share filter is journaled as a
+    refused publish and never queued. A pulled comment entry is first taken
+    into the Canvas's `canvas-comments` aggregate - as a comment or reply
+    whose origin names the writing computer (`replica`, with its instance id
+    and name), a resolve, or a deletion - and then journaled as kept, so a
+    host that stops in between reads the slot again and the second take
+    changes nothing. A change about a comment no longer held here changes
+    nothing. Taken-in changes are never announced again, so they are not
+    published under this host's sequence. Comments land on the aggregate
+    whether or not the Canvas is open here, and show once it is. A purge
+    or Project erase drops queued comment changes and rewrites kept ones to
+    content-free erased slots, as for versions.
   - **Library.** Imported versions and tombstones live in the in-memory
     `ReplicaArtifactProjection`, rebuilt from those events on every start;
     a restart part-way through a pull resumes from what was journaled and
@@ -1705,7 +1770,9 @@ flowchart LR
     `replica.artifact-slot-erased@2` that keeps its slot settled, so a later
     pull does not import the erased content again. Published slots keep
     their content-free record. Copies already in the store are not deleted.
-  - **Not built yet.** Binding selects an existing compatible thread; it
+  - **Not built yet.** Confirming a join still reads every slot of the
+    store once without progress before the restore starts. Binding selects
+    an existing compatible thread; it
     does not create one. Keep and Merge resolve version heads only: a
     tombstone beside a revision stays a head, and the artifact stays
     visible. A pull through the membership route rather than the sync

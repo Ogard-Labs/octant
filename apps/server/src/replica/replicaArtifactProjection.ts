@@ -21,6 +21,8 @@ import type {
   ReplicaDisplayName,
   ReplicaInstanceId,
   ReplicaReadRefusalReason,
+  ReplicaRestoreProgress,
+  ReplicaSlotRef,
 } from "@octant/contracts/replica-entry";
 import type { EventEnvelope } from "@octant/contracts";
 import type {
@@ -37,8 +39,13 @@ import {
   decodeReplicaArtifactPublishFailed,
   decodeReplicaArtifactQueued,
   decodeReplicaArtifactReconciled,
+  decodeReplicaCommentQueued,
+  decodeReplicaRestoreMarked,
+  decodeReplicaRestoreProgressed,
+  decodeReplicaRestoreStarted,
   type ReplicaArtifactPublishFailure,
   type ReplicaArtifactQueued,
+  type ReplicaCommentQueued,
 } from "./replicaArtifactEvents";
 import { REPLICA_MEMBERSHIP_AGGREGATE_TYPE } from "./replicaMembershipProjection";
 
@@ -73,8 +80,22 @@ export interface ReplicaQueuedArtifact extends ReplicaArtifactQueued {
   readonly lastFailure: ReplicaArtifactPublishFailure | undefined;
 }
 
+export interface ReplicaQueuedComment extends ReplicaCommentQueued {
+  /** Why the last publish attempt did not land, if one did not. */
+  readonly lastFailure: ReplicaArtifactPublishFailure | undefined;
+}
+
+export type ReplicaQueuedEntry = ReplicaQueuedArtifact | ReplicaQueuedComment;
+
+/** A restore of one identity's library, with the id its events share. */
+export interface ReplicaRestoreState extends ReplicaRestoreProgress {
+  readonly restoreId: string;
+}
+
 export interface ReplicaArtifactState {
-  /** Entries waiting to publish, oldest first. */
+  /** Every entry waiting to publish, versions and comment changes, oldest first. */
+  readonly queue: ReadonlyArray<ReplicaQueuedEntry>;
+  /** Artifact versions and tombstones waiting to publish, oldest first. */
   readonly outbox: ReadonlyArray<ReplicaQueuedArtifact>;
   readonly artifacts: ReadonlyArray<ReplicaSyncedArtifact>;
   readonly artifact: (canvasId: CanvasId) => ReplicaSyncedArtifact | undefined;
@@ -86,6 +107,13 @@ export interface ReplicaArtifactState {
     sequence: number,
     reason: ReplicaReadRefusalReason,
   ) => boolean;
+  /**
+   * For each computer, the newest comment entry on this Canvas held here,
+   * published or pulled: what a comment written now has seen.
+   */
+  readonly commentsSeen: (canvasId: CanvasId) => ReadonlyArray<ReplicaSlotRef>;
+  /** The restore of this identity, once one started. */
+  readonly restore: (instanceId: ReplicaInstanceId) => ReplicaRestoreState | undefined;
 }
 
 interface MutableArtifact {
@@ -104,10 +132,14 @@ export class ReplicaArtifactProjection implements Projection {
   readonly name = "replica-artifacts";
   readonly dependencies: ReadonlyArray<string> = [];
   readonly holdsStateInMemory = true as const;
-  readonly #queued = new Map<string, ReplicaQueuedArtifact>();
+  readonly #queued = new Map<string, ReplicaQueuedEntry>();
   readonly #artifacts = new Map<string, MutableArtifact>();
   readonly #applied = new Map<string, ReplicaAppliedEntry>();
   readonly #refusals = new Set<string>();
+  /** By Canvas, then by writer: the newest comment entry held here. */
+  readonly #comments = new Map<string, Map<string, ReplicaSlotRef>>();
+  /** By identity; a restore id names which one a later event continues. */
+  readonly #restores = new Map<string, ReplicaRestoreState & { readonly instanceId: string }>();
   #state: ReplicaArtifactState | undefined;
 
   reset(_connection: SqliteConnection): void {
@@ -115,6 +147,8 @@ export class ReplicaArtifactProjection implements Projection {
     this.#artifacts.clear();
     this.#applied.clear();
     this.#refusals.clear();
+    this.#comments.clear();
+    this.#restores.clear();
     this.#state = undefined;
   }
 
@@ -131,6 +165,53 @@ export class ReplicaArtifactProjection implements Projection {
         }
         break;
       }
+      case names.commentQueued: {
+        const queued = decodeReplicaCommentQueued(event.payload);
+        if (!this.#queued.has(queued.queueId)) {
+          this.#queued.set(queued.queueId, { ...queued, lastFailure: undefined });
+        }
+        break;
+      }
+      case names.restoreStarted: {
+        const started = decodeReplicaRestoreStarted(event.payload);
+        this.#restores.set(String(started.instanceId), {
+          restoreId: started.restoreId,
+          instanceId: String(started.instanceId),
+          state: "running",
+          done: 0,
+          total: started.total,
+        });
+        break;
+      }
+      case names.restoreProgress: {
+        const progress = decodeReplicaRestoreProgressed(event.payload);
+        this.#updateRestore(progress.restoreId, (restore) => ({
+          ...restore,
+          done: Math.max(restore.done, Math.min(progress.done, progress.total)),
+          total: Math.max(progress.total, restore.done),
+        }));
+        break;
+      }
+      case names.restoreStopped:
+      case names.restoreResumed:
+      case names.restoreFinished: {
+        const marked = decodeReplicaRestoreMarked(event.payload);
+        const next =
+          event.eventName === names.restoreStopped
+            ? "stopped"
+            : event.eventName === names.restoreResumed
+              ? "running"
+              : "finished";
+        this.#updateRestore(marked.restoreId, (restore) =>
+          // A finished restore stays finished; stopping or resuming it is a no-op.
+          restore.state === "finished"
+            ? restore
+            : next === "finished"
+              ? { ...restore, state: next, done: restore.total }
+              : { ...restore, state: next },
+        );
+        break;
+      }
       case names.publishFailed: {
         const failed = decodeReplicaArtifactPublishFailed(event.payload);
         const queued = this.#queued.get(failed.queueId);
@@ -143,6 +224,15 @@ export class ReplicaArtifactProjection implements Projection {
         const queued = this.#queued.get(published.queueId);
         if (queued === undefined) return;
         this.#queued.delete(published.queueId);
+        if (queued.kind === "canvas-comment") {
+          this.#keepComment(
+            queued.artifact.canvasId,
+            published.instanceId,
+            published.sequence,
+            published.contentHash,
+          );
+          break;
+        }
         this.#keep(
           {
             kind: queued.kind,
@@ -169,6 +259,15 @@ export class ReplicaArtifactProjection implements Projection {
           break;
         }
         const entry = decodeReplicaEntryText(reconciled.text);
+        if (entry.kind === "canvas-comment") {
+          this.#keepComment(
+            entry.artifact.canvasId,
+            entry.origin.instanceId,
+            entry.origin.sequence,
+            entry.contentHash,
+          );
+          break;
+        }
         if (entry.kind !== "artifact-version" && entry.kind !== "artifact-tombstone") return;
         const artifactEntry = decodeReplicaArtifactEntry(entry);
         this.#keep(artifactEntry, artifactEntry.origin, false);
@@ -191,11 +290,41 @@ export class ReplicaArtifactProjection implements Projection {
    */
   evict(canvasIds: ReadonlyArray<string>): void {
     const evicted = new Set(canvasIds);
-    for (const id of evicted) this.#artifacts.delete(id);
+    for (const id of evicted) {
+      this.#artifacts.delete(id);
+      this.#comments.delete(id);
+    }
     for (const [queueId, queued] of this.#queued) {
       if (evicted.has(String(queued.artifact.canvasId))) this.#queued.delete(queueId);
     }
     this.#state = undefined;
+  }
+
+  #updateRestore(
+    restoreId: string,
+    update: (restore: ReplicaRestoreState & { readonly instanceId: string }) => ReplicaRestoreState,
+  ): void {
+    for (const [instanceId, restore] of this.#restores) {
+      if (restore.restoreId !== restoreId) continue;
+      this.#restores.set(instanceId, { ...update(restore), instanceId: restore.instanceId });
+    }
+  }
+
+  #keepComment(
+    canvasId: CanvasId,
+    instanceId: ReplicaInstanceId,
+    sequence: number,
+    contentHash: ReplicaAppliedEntry["contentHash"],
+  ): void {
+    const key = slotKey(instanceId, sequence);
+    if (this.#applied.has(key)) return;
+    this.#applied.set(key, { instanceId, sequence, kind: "canvas-comment", contentHash });
+    const byWriter = this.#comments.get(String(canvasId)) ?? new Map<string, ReplicaSlotRef>();
+    const newest = byWriter.get(String(instanceId));
+    if (newest === undefined || newest.sequence < sequence) {
+      byWriter.set(String(instanceId), { instanceId, sequence });
+    }
+    this.#comments.set(String(canvasId), byWriter);
   }
 
   #keep(
@@ -264,8 +393,28 @@ export class ReplicaArtifactProjection implements Projection {
     }));
     const byId = new Map(artifacts.map((artifact) => [String(artifact.canvasId), artifact]));
     const refusals = new Set(this.#refusals);
+    const queue = [...this.#queued.values()];
+    const comments = new Map(
+      [...this.#comments].map(([canvasId, byWriter]) => [
+        canvasId,
+        [...byWriter.values()].sort((left, right) =>
+          String(left.instanceId).localeCompare(String(right.instanceId)),
+        ),
+      ]),
+    );
+    const restores = new Map(
+      [...this.#restores].map(([instanceId, { instanceId: _instance, ...restore }]) => [
+        instanceId,
+        restore,
+      ]),
+    );
     return {
-      outbox: [...this.#queued.values()],
+      queue,
+      outbox: queue.filter(
+        (entry): entry is ReplicaQueuedArtifact => entry.kind !== "canvas-comment",
+      ),
+      commentsSeen: (canvasId) => comments.get(String(canvasId)) ?? [],
+      restore: (instanceId) => restores.get(String(instanceId)),
       artifacts,
       artifact: (canvasId) => byId.get(String(canvasId)),
       applied: [...this.#applied.values()],

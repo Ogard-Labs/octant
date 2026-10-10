@@ -38,6 +38,7 @@ import {
   LOCAL_HOST_ID,
   REPLICA_ENTRY_FORMAT,
   decodeReplicaEntryText,
+  isReplicaMembershipEntry,
   decodeReplicaMembershipEntry,
   encodeReplicaEntry,
   type ReplicaInstanceId,
@@ -309,7 +310,7 @@ class LaggedStore {
       } catch {
         continue;
       }
-      if (entry.kind !== "artifact-version" && entry.kind !== "artifact-tombstone") {
+      if (isReplicaMembershipEntry(entry)) {
         result.push(entry);
       }
     }
@@ -336,7 +337,7 @@ class LaggedStore {
       } catch {
         continue;
       }
-      if (entry.kind === "artifact-version" || entry.kind === "artifact-tombstone") continue;
+      if (!isReplicaMembershipEntry(entry)) continue;
       if (
         text !== encodeReplicaEntry(entry) ||
         Buffer.from(signatureText, "base64").toString("base64") !== signatureText ||

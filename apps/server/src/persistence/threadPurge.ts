@@ -521,7 +521,8 @@ function deleteThreadScopedProjectionRows(connection: SqliteConnection, threadId
 
 /**
  * Artifact sync keeps its own copies of a Canvas: a queued publish carries
- * the bundle, and an entry a pull kept carries its exact text. Both live
+ * the bundle or the comment change, and an entry a pull kept - a version, a
+ * tombstone, or a comment change - carries its exact text. Both live
  * under the replica aggregate, which the Canvas family walk does not reach,
  * so a purge erases them here. A queued publish of an erased Canvas is
  * dropped. A kept entry becomes a content-free erased slot, so its slot stays
@@ -538,12 +539,13 @@ function eraseReplicaArtifactCopies(
     const queued = connection
       .prepare(
         `SELECT global_sequence FROM event_journal
-         WHERE aggregate_type = ? AND event_name = ?
+         WHERE aggregate_type = ? AND event_name IN (?, ?)
            AND json_extract(payload_json, '$.artifact.canvasId') = ?`,
       )
       .all(
         REPLICA_MEMBERSHIP_AGGREGATE_TYPE,
         REPLICA_ARTIFACT_EVENT_NAMES.queued,
+        REPLICA_ARTIFACT_EVENT_NAMES.commentQueued,
         canvasId,
       ) as ReadonlyArray<{ readonly global_sequence: number }>;
     for (const row of queued) {
