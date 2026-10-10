@@ -2184,6 +2184,9 @@ modelId }`, and the model picker is provider-first. Discovery can find
 - **Credentials.** API keys live in the host credential store — macOS Keychain
   on macOS, freedesktop Secret Service on Linux — and are reached only
   through the host's loopback credential broker by opaque UUID reference.
+  The desktop saves a key from its own renderer; a host without the desktop
+  app takes it only from the host-local CLI, as
+  [security and authority](#security-and-authority) states.
   Provider OAuth has two postures ([0111](decisions/0111-host-driven-provider-oauth.md)).
   **Delegated** (`delegated-oauth`, including CLI `subscription`): login stays
   on the provider's own runtime; Octant never stores, refreshes, or journals
@@ -3573,6 +3576,85 @@ mechanisms are:
   remembered owner-only under the data directory (the boundary that holds the
   host identity key), including its TLS key, and re-enabled when the server
   starts; a server shutdown keeps it and only a local disable forgets it.
+- **Provider keys on a host without the desktop app.** _Designed, not yet
+  built._ The desktop saves an endpoint's API key or bearer token over
+  native IPC from its own renderer, so a browser client — local or paired —
+  has no way to save one and says provider credential management is
+  unavailable. On a headless host the key is entered with the host-local
+  `octant` CLI, and only there:
+  - **Commands.** `octant provider key set <instance>`,
+    `octant provider key status <instance>`, and
+    `octant provider key remove <instance>`; `octant provider remove <instance>`
+    removes a credential-bearing instance. `<instance>` is an instance id or
+    an exact, unique display name; an ambiguous name is refused with the
+    candidates. The instance must exist and use API-key or bearer
+    authentication, so no secret is written for an instance that cannot use
+    it.
+  - **Entry.** With a terminal, the key is read from `/dev/tty` with echo off
+    and the prompt on standard error. Without one, the command refuses unless
+    `--stdin` is given, then reads standard input to end of file and drops
+    one trailing newline. The key is never accepted as an argument or
+    environment variable, which other processes and shell history can read,
+    and is never printed, not even its length or a prefix. An empty key or
+    one over the broker's 12 KiB bound is refused before anything is sent.
+  - **Channel.** The CLI sends the key once, over the loopback administration
+    session `octant listener` uses, to host-local routes under
+    `/api/desktop/provider-credentials/` that require the desktop bridge
+    secret on every request plus a registered window capability, refuse any
+    request carrying an `Origin` header or a non-loopback `Host`, and are not
+    forwarded by the private listener. The bridge secret lives in the
+    owner-only runtime directory, so only processes running as the host's
+    user can call these routes, and no browser page can: a browser always
+    sends `Origin` and never holds the secret. The server passes the key to
+    the credential broker's provider routes, which store it with
+    `secret-tool` on standard input (Keychain on macOS). It is never in a
+    process argument, the environment, the journal, logs, diagnostics, a
+    provider child, or a response; the routes answer only `stored`,
+    `missing`, `removed`, or a typed refusal.
+  - **Not the browser.** The loopback browser client cannot save a key, even
+    on the host itself. The host cannot tell who is behind a loopback
+    connection: the local session (`/api/shell/local-session`) is granted to
+    any process that can reach `127.0.0.1` and send a loopback `Origin`,
+    including another OS user on the same machine, an SSH port forward from
+    another computer, or a proxy that rewrites `Host`. Listener identity
+    proves a request is not a paired device's, but not that the person is at
+    the host. In the same browser, the Host check keeps out a page on another
+    site, including one using DNS rebinding. A page on another loopback port
+    is kept out only once the listener refuses foreign loopback origins, and
+    cross-site scripting in the renderer would inherit the window capability
+    either way. The
+    bridge secret binds the CLI to the host's OS user, and nothing a browser
+    can present does. A browser on a host with no desktop app stays
+    read-only for credentials and names the CLI command.
+  - **Store absent or locked.** `octant server run` starts a credential
+    broker only when Secret Service (`org.freedesktop.secrets` on the user
+    bus) and `/usr/bin/secret-tool` are present at start. Without a broker the
+    routes refuse as `credential-store-unavailable`, and the CLI names both
+    requirements and says to restart the server after starting the keyring.
+    A locked collection, or one that would need an unlock prompt a headless
+    session cannot show, fails the store as unavailable. Nothing is written
+    in either case, and there is no fallback to a file, the data directory,
+    or an environment variable. A turn that resolves a key from a locked store
+    fails with the driver's existing unauthenticated state.
+  - **Replace and remove.** `set` on an instance that already has a key
+    refuses unless `--replace` is given, so a mistyped name cannot overwrite
+    another endpoint's key. Replacing overwrites the entry in place. A failed
+    store leaves the old key in use, and the next connection check or turn
+    resolves the new key without a restart. `key remove` clears the key and
+    leaves the instance configured and unauthenticated. `provider remove`
+    runs the existing `remove-provider` command first and clears the key only
+    once the instance is gone, the same order the desktop uses, so a refused
+    removal never leaves a configured instance with no key. A clear that fails
+    after removal is reported. `key remove` then accepts that removed
+    instance's id to retry, because clearing a secret is never a widening.
+    The server serializes credential writes with provider registry commands
+    for the same instance, so a concurrent removal cannot leave a new orphaned
+    secret behind.
+  - **Audit.** Each store, replace, and remove is journaled as a provider
+    credential change. The record holds the instance id, the action, the
+    outcome category, the local window id, and the time. It holds no key,
+    length, prefix, or hash, because a hash of a short key can be guessed
+    offline. Refusals carry only their category.
 - **Artifact replica membership.** Each replica entry carries a detached
   Ed25519 signature from the device signing key the writing host holds for its
   replica instance, in a credential namespace of its own that provider
