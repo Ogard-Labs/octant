@@ -2495,6 +2495,208 @@ session's `usage` and `metrics` totals fold them, so a Code turn on a direct
 endpoint no longer records zero tokens. Chat, Work and Code on every provider
 journal the frame; the harness additionally keeps its own record.
 
+**Compacting a session on request.** Not built yet: this is the design the
+implementation follows, and until it lands `compact-range` stays a listed remedy
+with no action behind it. **Compact session** replaces what the model sees from
+the next turn on with a summary of the earlier conversation and a recent tail,
+when the person asks, outside a turn. It never deletes or rewrites the journal:
+the thread keeps every message, tool call and result, and the compaction is
+itself an event in it.
+
+Who compacts follows who owns the conversation (`conversationOwnership` on the
+driver). Where Octant owns it, the host summarizes with the thread's own
+provider and model. Where a runtime owns it, only that runtime can change what
+its session sends, so Octant asks the runtime to compact and refuses where it
+cannot. The host never starts a replacement provider session seeded with its
+own summary behind the person's back; that is the existing fork handoff, which
+stays a separate, explicit action.
+
+| Thread                                                   | Who compacts             | How                                                                                                                                                                                                                                                         | Refuses with                                                  |
+| -------------------------------------------------------- | ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
+| Chat or Work on a direct endpoint (host-planned history) | Host                     | `ContextHarnessService` summarizes the planned conversation before the tail through the existing summary generator (`makeContextSummaryGenerator`, a one-shot session on the thread's provider and model), then commits it as `maintainContext` does today. | `nothing-to-compact`                                          |
+| Code on Octant Harness (journaled transcript)            | Octant Harness           | The harness connection's `compact` summarizes the transcript turns before the tail with the same endpoint and journals a `compacted` transcript event; later requests are built from the summary and the tail.                                              | `nothing-to-compact`, `no-session`                            |
+| Codex app-server, any mode                               | Codex                    | `thread/compact/start` with the thread id (codex-cli 0.159.3 app-server schema); the run is observed as a turn carrying the `contextCompaction` item.                                                                                                       | `runtime-version-unsupported` when the method is not found    |
+| Claude Code, any mode                                    | Claude Code              | The runtime's own `/compact`, sent by the port as a control input rather than a user turn; observed as `system`/`compact_boundary` (`compact_metadata.trigger: "manual"`, `pre_tokens`) and the `status` message's `compact_result`.                        | `runtime-version-unsupported` when `compact` is not announced |
+| OpenCode, any mode                                       | OpenCode                 | `/api/session/:sessionID/compact` (served by OpenCode 2.0.26); observed as `session.compaction.ended`, `session.next.compaction.ended` or `session.compacted`.                                                                                              | `runtime-version-unsupported` on a server without the route   |
+| Pi and Oh My Pi, any mode                                | Pi                       | Pi's RPC `compact` command (`packages/coding-agent/docs/rpc.md`); observed as `compaction_end`, which changed nothing when it carries no `result`.                                                                                                          | `runtime-version-unsupported` when the command is refused     |
+| ACP agents                                               | Nobody                   | The protocol has no compaction request.                                                                                                                                                                                                                     | `runtime-cannot-compact`                                      |
+| Any other adapter                                        | Nobody, unless it claims | An adapter compacts only by reporting the capability and implementing the seam below.                                                                                                                                                                       | `runtime-cannot-compact`                                      |
+
+Every runtime also refuses, before anything is journaled, with `turn-running`
+(a turn is in flight; compaction never runs inside one), `compaction-running`,
+`no-session` (nothing has been sent, so there is no session to compact),
+`provider-unavailable` (the instance is disabled, signed out or unreachable),
+`spend-ceiling-reached`, `mode-disabled`, or `remote-client`. The Claude decoder
+today refuses `compact_boundary` as an unsupported runtime message, so accepting
+it is part of the Claude work, not an assumption of this design.
+
+The host path picks what to summarize the same way for every planned thread:
+the conversation entries before a tail of the most recent exchanges that fit a
+quarter of the plan's safe input budget, always keeping the latest exchange.
+Pinned entries are never summarized and excluded entries stay excluded.
+Material that does not fit one safe summary request is summarized from the
+oldest end as far as it fits, and the rest stays as it was. A requested
+compaction skips the reuse economics that automatic maintenance applies
+(`not-net-positive`), because the person asked, but still requires the summary
+to be smaller than what it replaces.
+
+_Authority._ Compaction is a command on the thread, not a tool call, and the
+server checks it before any side effect:
+
+- The caller is a local window authenticated for the thread's Project, exactly
+  as for the other context commands on `POST /api/context/commands`; the subject
+  must be the thread's own context subject and its mode enabled.
+- It needs no tool approval. It reads only the thread's own conversation, sends
+  it to the provider and model the thread already uses, and writes no files and
+  runs no commands. The confirm dialog is the person's consent.
+- The summarizer is always the thread's own provider instance and model. The
+  command carries no summarizer choice, and the domain's
+  `cross-vendor-opt-in-required` refusal stays the guard on the host path.
+- Plan mode allows it: compaction changes what the model sees, not what it may
+  touch, so a Plan thread stays read-only.
+- It never clears taint. A summary of tainted content is tainted content; the
+  thread's taint and its single-use approval rule carry over unchanged, and
+  remembered approvals are neither added nor removed.
+- A paired remote client is refused (`remote-client`): context commands are
+  already local-window only (`authenticatedProductRoutes.ts` admits no remote
+  POST to `/api/context/commands`), and this design keeps that boundary.
+- The request costs tokens. It is reserved through the capacity scheduler as
+  Chat maintenance is, recorded in the usage ledger under the thread with request
+  shape `context-compaction`, priced, and counted against the Project's spend
+  ceilings.
+
+_Command and receipt._ One new `ContextCommand` kind in
+`packages/contracts/src/contextRpc.ts`:
+
+```ts
+{
+  kind: "compact-session",
+  subject: ContextSubjectRef,
+  // Chosen by the renderer when the person confirms. Repeating it returns the
+  // same compaction rather than compacting twice.
+  compactionId: ContextCompactionId,
+}
+```
+
+The command answers as soon as the request is journaled, with
+`{ kind: "compaction-started", compactionId, executor }`, because a runtime's
+compaction is a model call that can outlast an HTTP request. The receipt arrives
+on the thread's live stream as `context.compaction-completed@1` and is also on
+the inspector snapshot as `latestCompaction`:
+
+- `executor`: `{ kind: "host", providerInstanceId, modelId }`, or
+  `{ kind: "runtime", driverKind, providerInstanceId, modelId? }`.
+- `trigger`: `requested`, or `automatic` for a runtime's own compaction that
+  Octant observed (below).
+- `tokensBefore`: the window's occupancy before, with its accuracy: the latest
+  usage report's `contextTokens`, a figure the runtime reported with the
+  compaction (Claude's `pre_tokens`), or the host plan's estimate.
+- `tokensAfter`: the occupancy the runtime or the replanned host request
+  reports, or `pending` until the next usage report arrives.
+- `tokensFreed`: `{ kind: "measured" | "estimated", tokens, accuracy }`, or
+  `{ kind: "unknown", reason: "awaiting-next-report" | "not-reported" }`. It is
+  `tokensBefore − tokensAfter`, never negative and never guessed; a
+  compaction that freed nothing says so.
+- `summary`: `{ visibility: "stored", summaryId, summaryTokens, throughTurnId }`
+  on the host path, where the text is the existing `ContextSummaryContent`; or
+  `{ visibility: "runtime-only" }` where the runtime keeps the text (Codex's
+  item carries none).
+- `usage`: the compaction request's own tokens and cost, as reconciled.
+
+Refusals answer the command as the existing `ContextFailure` with a
+`compaction-refused` category and one reason from the closed set above.
+
+_Journaling._ All on the subject's `context-ledger` aggregate:
+
+- `context.compaction-requested@1` (compaction id, subject, executor, the
+  requesting principal's kind), then exactly one of
+  `context.compaction-completed@1` (the receipt) or
+  `context.compaction-failed@1` (compaction id, reason, whether the session may
+  have changed).
+- The host path also appends `context.manifest-created@1`,
+  `context.summary-created@1` and `context.plan-created@1` as `#commitSummary`
+  does today; the summary text stays subject content, outside the journal, where
+  a thread purge erases it.
+- Octant Harness appends a `compacted` event to `native-harness-transcript`
+  that names the summary and the last turn it covers. Earlier messages stay in
+  the aggregate; resume and replay build requests from the summary and the tail.
+  A fork after the compaction copies the marker with the transcript, so the
+  fork sees what its source saw.
+- The thread's timeline shows a compaction divider from the completed event.
+  Everything above it stays visible, searchable and exported.
+- A completed compaction marks a runtime's session `compacted`, so the window
+  breakdown goes `uncounted` with that reason under the existing rule.
+- A request with no terminal event when the host starts is closed as
+  `context.compaction-failed@1` with `interrupted`; for a runtime executor the
+  session may have changed, and the next usage report shows what it holds.
+
+_Provider seam._ The extension is plugin-shaped: the server reaches a runtime
+only through `@octant/provider-sdk`, never by sending `/compact` text or a
+Codex RPC itself.
+
+- `ProviderCapabilities` gains `sessionCompaction` (`supported`,
+  `unsupported`, `unavailable`), reported per mode; absent means unsupported.
+- `ProviderConnection` gains an optional
+  `compact({ sessionId, compactionId })`, which resolves when the runtime
+  reports the compaction ended, with
+  `{ kind: "compacted", tokensBefore?, tokensAfter? }`,
+  `{ kind: "refused", reason }` or `{ kind: "failed", message }`. A connection
+  without it cannot compact. Octant Harness implements it over its transcript.
+- One normalized runtime event, `context-compacted`
+  (`trigger: "requested" | "automatic"`, optional token figures), is emitted by
+  each adapter that observes a compaction: the Codex item, the OpenCode events,
+  Pi's `compaction_end` with a `result`, and Claude's `compact_boundary`. It
+  replaces the per-driver `windowCompacted` flags as the source of
+  `promptRetention: "compacted"`, and the turn runner journals it, so a
+  runtime's automatic compactions get the same receipt. Provider payloads stop
+  at the adapter.
+- The provider-sdk conformance harness checks that a driver claiming
+  `sessionCompaction` implements `compact`, emits `context-compacted` with
+  `requested` before it resolves, and leaves the session resumable, and that a
+  driver without `compact` does not claim the capability.
+
+The host path for Chat and Work on a direct endpoint does not use the
+connection's `compact`: their history is the host's, so `ContextHarnessService`
+compacts the plan, and the next turn's fresh session receives it.
+
+_UI._ The server says per thread whether compaction is offered
+(`compaction: { status: "available" } | { status: "refused", reason }` on the
+context answer), and the renderer never decides it.
+
+- The context popover's footer gets a secondary **Compact session** button
+  beside its existing action. The inspector gets the same button beside
+  Rebuild, and its `compact-range` remedy runs the same command, labelled
+  Compact session; choosing a range is not offered.
+- A permanent refusal (`runtime-cannot-compact`,
+  `runtime-version-unsupported`) hides the button; a transient one
+  (`turn-running`, `compaction-running`, `provider-unavailable`) disables it with
+  the reason as its tooltip.
+- The confirm uses the shared alert recipe. Title: "Compact this session?" Body:
+  "The earlier conversation is replaced by a summary. From the next message the
+  model sees the summary and the most recent messages. The full history stays in
+  this thread. This sends the conversation to {provider} · {model} and uses
+  tokens." For a runtime executor it adds "{Runtime} writes the summary; Octant
+  can't show it." Actions: **Compact** and Cancel.
+- While it runs, the popover reads "Compacting…", the composer's send is
+  disabled with "Compacting session" as the reason, and no new turn starts.
+- The result line, in the popover and on the timeline divider:
+  "Compacted · 41.2k freed · summary by Codex", "Compacted · freed amount shows
+  after the next reply", "Compacted · nothing freed", or "Couldn't compact:
+  {reason}". It is announced through the existing live region.
+
+_Failures._
+
+| What happens                                                       | Result                                                                                                                         |
+| ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------ |
+| A turn is running, or another compaction is                        | Refused before anything is journaled; the same `compactionId` returns the compaction already under way.                        |
+| The runtime reports failure (Pi with no `result`, Claude `failed`) | `failed` (`runtime-failed`); the session is unchanged and the person can retry.                                                |
+| The host summary is not smaller than what it replaces              | `failed` (`summary-not-smaller`); nothing changes.                                                                             |
+| The request times out                                              | `failed` (`timed-out`) on the existing maintenance timeout; a host summary call is cancelled, a runtime is interrupted.        |
+| The runtime lacks the request (older Codex, OpenCode, Pi, Claude)  | Refused `runtime-version-unsupported`, and the capability reports `unavailable` for that install.                              |
+| The provider is disabled, signed out or over a spend ceiling       | Refused `provider-unavailable` or `spend-ceiling-reached`.                                                                     |
+| The thread is deleted or its mode disabled while compacting        | The result is discarded and recorded as `failed` (`subject-unavailable`).                                                      |
+| The host restarts mid-compaction                                   | Recorded as `failed` (`interrupted`); for a runtime the line says it may have compacted, and the next usage report settles it. |
+
 ### Stop reasons
 
 A completed runtime event may carry an optional stop reason. `max-tokens` means
