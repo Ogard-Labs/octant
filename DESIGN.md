@@ -69,11 +69,7 @@ but they do not own a second palette or visual language.
 - **Crafted, not vibed.** Hierarchy comes from size, then weight, then
   colour — never capitals. One title per page. Section labels are
   sentence-case and quiet. Nothing is uppercase except a monospace identifier
-  that already is. Weights follow one ladder: 400 for reading text, 500 for
-  labels and controls, 600 for emphasis (section and card titles, counts, the
-  app's name), and 700 only for the page title and the welcome greeting,
-  through the title-only `--oct-weight-title` token the stylesheet check
-  refuses anywhere else.
+  that already is. Weights follow the one ladder in [Scale](#scale).
 - **Sentence case everywhere**: titles, labels, buttons, tabs, menu items.
   Product nouns keep their capital (Project, Chat, Work, Code, Environment).
 - **One sentence of help.** A subtitle or row description is one sentence
@@ -94,24 +90,35 @@ identifiers, and terminal text use the monospace stack. Antialiased,
 
 ### Scale
 
-Eight sizes at the default 13px setting. Everything scales together with the
-Appearance interface size; nothing is authored at 11.5 or 12.5, and nothing
-essential sits under 12px at the default.
+This table is the one statement of the type roles; sizes are at the default
+13px interface size. Everything scales together with the Appearance interface
+size through `--oct-text-step`; nothing is authored at 11.5 or 12.5, and
+nothing essential sits under 12px at the default. The roles live in
+`styles/surface.css`; the size tokens are listed under
+[Typography](#typography).
 
-| Role          | Size | Weight | Colour          | Where                                                     |
-| ------------- | ---- | ------ | --------------- | --------------------------------------------------------- |
-| Hero          | 36   | 700    | primary         | Welcome greeting only (`oct-title--hero`)                 |
-| Title         | 28   | 700    | primary         | One per page (`oct-title`)                                |
-| Section label | 14   | 600    | secondary       | Group heading over a hairline (`oct-section-label`)       |
-| Row label     | 14   | 500    | primary         | Setting, list row, menu option (`oct-row-label`)          |
-| Body          | 14   | 400    | primary         | Transcript, paragraphs, controls                          |
-| Detail        | 13   | 400    | secondary       | Subtitle, row description, menu detail (`oct-row-detail`) |
-| Meta          | 12   | 400    | muted           | Timestamps, counts, hints (`oct-meta`)                    |
-| Identifier    | 13   | 400    | secondary, mono | Paths, branches, ids (`oct-meta--mono`)                   |
+| Role          | Size | Weight | Leading | Colour      | Where                                                               |
+| ------------- | ---- | ------ | ------- | ----------- | ------------------------------------------------------------------- |
+| Hero          | 36   | 700    | 1.1     | primary     | Welcome greeting only (`oct-title--hero`, `--oct-text-3xl`)         |
+| Title         | 28   | 700    | 1.15    | primary     | One per page (`oct-title`; a role size, not one of the size tokens) |
+| Section label | 14   | 600    | 1.35    | secondary   | Group heading over a hairline (`oct-section-label`)                 |
+| Row label     | 14   | 500    | 1.35    | primary     | Setting, list row, menu option, and a Settings section's label      |
+| Body          | 13   | 400    | 1.5     | primary     | Interface text and the transcript (the interface size, `body`)      |
+| Detail        | 13   | 400    | 1.45    | secondary   | Subtitle, row description, menu detail (`oct-row-detail`)           |
+| Meta          | 12   | 400    | 1.4     | muted       | Timestamps, counts, hints (`oct-meta`)                              |
+| Identifier    | 12   | 400    | 1.4     | muted, mono | Paths, branches, ids (`oct-meta--mono`)                             |
 
-Titles and the hero use `--oct-tracking-tight` (-0.025em); section labels use
-`--oct-tracking-snug`; body and detail use none. Line heights: 1.2 title,
-1.35 label, 1.45 detail and body, 1.7 code.
+Weights are one ladder, as tokens in `octant.css`: 400 (`--oct-weight-regular`)
+for reading text, 500 (`--oct-weight-medium`, `--oct-weight-display`) for
+labels and controls, 600 (`--oct-weight-strong`) for emphasis (section labels,
+card titles, counts, `strong`, the app's name), and 700 (`--oct-weight-title`)
+only for the page title and the welcome greeting. `bun run ui:check` counts a
+weight above 600 outside the title roles in `styles/surface.css` as a
+`heavy-weight` finding and ratchets it against the baseline.
+
+Titles use `--oct-tracking-tight` (-0.025em) and the hero
+`--oct-tracking-stat` (-0.04em); section labels use `--oct-tracking-snug`;
+body and detail use none.
 
 ### Colour
 
@@ -140,15 +147,27 @@ always publishes `default`. Vivid reads best in the light theme.
 
 ### Shapes and depth
 
-Radius has one number per role, defined once as `--oct-radius-*` in
-`octant.css`: a compact control is 6px, a control or a row 8px, an object
-resting inside a card or well, such as a Settings page's icon tile or a board
-card in its column, 8px (`--oct-radius-inset`), and a card, panel, menu, or
-popover 12px. The scale is deliberately tight: the first desktop scale
-(10/16/20) read as soft beside the dense text it framed. The recipes reach the
-same numbers through `--radius`, whose `lg` step is the control and whose `xl`
-step lands on the card's 12px, so a menu and the popover beside it share a
-corner. Welcome composers and dialogs use 14px; follow-up composers use the shared medium radius (0098). A surface is flat by default. A discrete object is
+Radius has one number per role. This table is its one statement; elsewhere
+this document names the token, not the number.
+
+| Token                 | Value  | Role                                                                                                         |
+| --------------------- | ------ | ------------------------------------------------------------------------------------------------------------ |
+| `--oct-radius-sm`     | 8px    | A control or a row; a composer context chip                                                                  |
+| `--oct-radius-inset`  | 8px    | An object resting inside a card or well: a Settings page's icon tile, a board card in its column             |
+| `--oct-radius-md`     | 12px   | A card, panel, or well; a Settings section card; the window-frame cards; a user bubble; a follow-up composer |
+| `--oct-radius-lg`     | 14px   | A welcome composer and a dialog                                                                              |
+| `--oct-radius-pill`   | 9999px | Compact chips, meters, and circular icon controls only                                                       |
+| `--radius` (`md`)     | 6px    | The recipes' compact step: xs and sm buttons, menu items (`rounded-md`)                                      |
+| `--radius-lg` / `-xl` | 8 / 12 | The recipes' control and card steps (`rounded-lg`, `rounded-xl`): a menu and a popover                       |
+
+The `--oct-radius-*` tokens live in `octant.css`. The shadcn recipes derive
+their scale in `tailwind.css` from `--radius`, which `shadcn-theme.css` sets to
+`--oct-radius-sm` less 2px, so `rounded-lg` lands on the control's 8px and
+`rounded-xl` on the card's 12px, and a menu shares a corner with the popover
+beside it. Phone-only surfaces use the mobile radii
+(`--oct-radius-bubble`, `--oct-radius-card-m`, `--oct-radius-sheet`).
+
+A surface is flat by default. A discrete object is
 bounded by a hairline ring, not lifted; shadow means something that genuinely
 floats — a welcome composer (`--octant-shadow-md`) or an overlay
 (`--octant-shadow-overlay`). A card is for a discrete object a person acts on
@@ -172,12 +191,12 @@ copy beside the cards. With Cover the sidebar on, the ground runs under the
 whole window and one frost lies over it with the card's rectangle cut out, so
 the sidebar and gutters frost as one piece with no seam where they meet; the
 dither stays inside the card either way. A pane header and the dock head share the 38px
-title rail, and the card draws the one hairline under both. Below 681px the
+title rail, and the card draws the one hairline under both. At 680px and below the
 workspace sidebar is an overlay drawer and the frame stays flat, with a scrim
 (`--octant-scrim`) dimming the page behind it. The drawer
 starts closed on every load, closes on Escape, on a tap outside it, and on
 choosing somewhere to go, and never changes the saved wide-window choice.
-Settings keeps its own narrow layout, a drawer with a flat page, below 960px.
+Settings keeps its own narrow layout, a drawer with a flat page, at 960px and below (see [breakpoints](#breakpoints)).
 
 ### Page shell
 
@@ -218,8 +237,7 @@ instances, commands, and credentials are the same on every page. A setting lives
 on the page of the thing it changes, and a moved setting keeps answering links
 to its old page. Personal holds Appearance (theme, window glass, background,
 text, accessibility) and a separate Sidebar page (layout, destinations, sidebar
-background, and a thread-row grid of detail by list); Appearance had grown to
-twelve sections. A page names its scope once, under its title, and a row names
+background, and a thread-row grid of detail by list). A page names its scope once, under its title, and a row names
 its own only when it differs. Settings folds long choices it does not need
 open: the built-in background pictures sit behind the current one and a
 Change action, and the pattern dials appear only while the pattern is drawn.
@@ -228,7 +246,7 @@ draw the same hairline.
 
 Every Settings page is built from one kit, in `settings/primitives.tsx`:
 
-- **Page header.** A 42px icon tile (8px inset radius, a faint 8% ink fill, a
+- **Page header.** A 42px icon tile (`--oct-radius-inset`, a faint 8% ink fill, a
   hairline) holding the page's own navigation icon at 20px, the page title
   (`.oct-title`, 28px), a one-line subtitle with the page scope, and an
   optional ghost action at the far edge (Appearance's "Reset to default").
@@ -240,8 +258,8 @@ Every Settings page is built from one kit, in `settings/primitives.tsx`:
   so one that mounts late joins the row and the row never names one that is
   not drawn.
 - **Section.** A 14px label in medium weight, an optional one-line
-  description in the secondary ink below it, then one grouped card: the 16px
-  card radius, one hairline, a fill one step above the workspace
+  description in the secondary ink below it, then one grouped card: the
+  `--oct-radius-md` card radius, one hairline, a fill one step above the workspace
   (`color-mix(in oklab, var(--oct-fg) 3%, var(--oct-bg))`), no shadow. The
   card never clips: a section keeps `overflow: visible` because its rows hold
   menus and popovers, so the first and last row round themselves instead.
@@ -277,9 +295,6 @@ Every Settings page is built from one kit, in `settings/primitives.tsx`:
   focuses it, the field stays mounted while folded away, and it folds back
   when it loses focus empty. Below the narrow breakpoint the field is always
   shown.
-
-This kit reverses the earlier open-row layout, in which a section was a label
-over hairline rows on the page ground, at the maintainer's request.
 
 ### Content tabs
 
@@ -514,13 +529,12 @@ by `data-octant-theme-mode`. A settings row written before the ground
 existed replays as the plain page it showed. Effect: the picture is shown as it is, pixelated, or
 dithered, at a chosen pixel size and colour count; an animated picture is
 printed from its still frame. Nothing is drawn over the picture and nothing
-moves across it: the drawn dot pattern and its pulse and wave motions read as
-noise behind the work and were removed, and a ground saved with them resolves
-to the plain page. Behind a
+moves across it; a ground saved with the retired dot pattern resolves to the
+plain page. Behind a
 start screen the ground is masked away behind the composer and fades out below
 it, so the prompt and the recent-thread list read on the plain page; in the
-light theme it fades out sooner, because dark dots on a pale ground leave less
-contrast for the text above them. A person
+light theme it fades out sooner, because dark text over a pale picture has
+less contrast headroom than light text over a dark one. A person
 may instead put the ground behind every page, inside the primary card, and
 under the sidebar too when they ask for it (see Shapes and depth). Conversations
 soften it beneath one continuous reading background so agent replies remain
@@ -566,8 +580,8 @@ block that must depict one fixed scheme regardless of theme, such as the
 light/dark preview swatches in Settings, carries
 `/* ui-style-exception: fixed-scheme */` on the line before it. Off-scale
 `font-size` values, raw `transition`/`animation` durations, and `!important`
-outside an accessibility fallback, any `font-weight` heavier than 500 (only a
-page title and content emphasis such as `strong` are 600), and any paint
+outside an accessibility fallback, any `font-weight` heavier than 600 outside
+the title roles (see [Scale](#scale)), and any paint
 (colour, background, border, radius, shadow, outline) that a feature rule puts
 on a class handed to an Octant primitive (0046: place or size a shared control,
 never repaint it; pick a recipe variant instead) ratchet against
@@ -623,7 +637,7 @@ The rest of the thread view is one set of recipes in `octant.css` and the
 reply prose in `chat.css`, worn by Chat, Work, and Code alike; a mode positions
 them and repaints nothing. The scroll frame (`transcript-scroll`) keeps 20px
 between rows. A person's message is a right-aligned bubble (`turn-user`,
-`bubble`: control fill, hairline, 12px radius, no shadow) with its time beneath
+`bubble`: control fill, hairline, `--oct-radius-md`, no shadow) with its time beneath
 it (`turn-time`: detail size, muted, right edge), and carries 12px more air
 above it than the reply before it. A reply (`turn-agent`) is bare prose at the
 transcript size with 1.5 leading, with no card of its own: only the work a turn
@@ -955,22 +969,22 @@ Typography has distinct jobs:
 | Terminal   | Geist Mono, SF Mono, Nerd Font fallbacks, monospace                                                 | Terminal output and prompt glyphs                                                  |
 
 The default interface is Geist at 13px and weight 400; transcript text defaults
-to 13px. Geist and Geist Mono are one family, both bundled, and the only faces Octant
-ships (the earlier Inter default and the Space Grotesk display face are gone),
-so text, code, and paths share one set of proportions on every platform; the stylesheet's own
-first-paint defaults are the same faces, so nothing swaps when settings load.
-Stacks saved while the defaults named a face Octant never bundled (the system
-interface stack, the JetBrains code and terminal stacks) read as today's
-defaults. At 13px Geist keeps the sidebar and rows uncramped; 14px measured
-too wide for the 304px sidebar. The editor defaults to 13px, line height 1.5, and enabled ligatures.
-The terminal defaults to 12px, line height 1.4, and disabled ligatures.
+to 13px. Geist and Geist Mono are one family, both bundled
+(`@fontsource-variable/geist` and `geist-mono`), and the only faces Octant
+ships, so text, code, and paths share one set of proportions on every
+platform; the stylesheet's own first-paint defaults are the same faces, so
+nothing swaps when settings load. The editor defaults to 13px, line height
+1.5, and enabled ligatures. The terminal defaults to 12px, line height 1.4,
+and disabled ligatures.
 
-The legacy saved interface stack beginning `-apple-system, BlinkMacSystemFont`
-continues to mean the default face. The explicit System interface choice saves
-`system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif` so it
-remains distinct. Legacy explicit System selections that used the default's
-identical string cannot be distinguished and need reselection. This preference
-semantics is the reason for the two spellings, not a second typography authority.
+A saved stack that only ever meant "the default" reads as today's default
+(`savedUiFamily` in `packages/theme/src/typography.ts`): the old system
+interface stack beginning `-apple-system, BlinkMacSystemFont`, the unbundled
+`Geist, system-ui, sans-serif`, and the JetBrains code and terminal stacks. The
+explicit System interface choice therefore saves a different spelling,
+`system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif`, so it
+stays distinct; an old System choice saved under the default's identical string
+cannot be told apart and needs reselecting.
 
 The persisted typography schema supports independent UI, editor, and terminal
 family, size, weight, line height, and ligatures. Families are sanitized: no
@@ -993,18 +1007,20 @@ branches, identifiers, or serialized theme source.
 
 Static type tokens in `octant.css` are:
 
-- `--oct-text-xs: 12px`, `--oct-text-detail: 13px`, `--oct-text-sm: 14px`,
-  `--oct-text-base: 15px`, each multiplied by `--oct-text-step` so the
-  Appearance interface size moves the whole ladder. Feature CSS reads these
-  tokens; it does not author `calc(N * var(--oct-text-step))`, so the 12px
-  floor for meta text is one definition.
+- `--oct-text-xs: 12px`, `--oct-text-detail: 13px` (declared in
+  `surface.css`), `--oct-text-sm: 14px`, `--oct-text-base: 15px`, each
+  multiplied by `--oct-text-step` so the Appearance interface size moves the
+  whole ladder. Feature CSS reads these tokens; it does not author
+  `calc(N * var(--oct-text-step))`, so the 12px floor for meta text is one
+  definition.
 - `--oct-text-lg: 17px`, `--oct-text-xl: 20px`, `--oct-text-2xl: 26px`,
-  `--oct-text-3xl: 36px`, `--oct-text-4xl: 72px`.
+  `--oct-text-3xl: 36px`, `--oct-text-4xl: 72px`. The page title's 28px is the
+  `oct-title` role's own size, not `--oct-text-2xl`.
 - Body leading `1.5`, snug `1.3`, heading `1.14`, tight `1.1`, code `1.7`.
-- Only the page title uses 600; every other label uses 500. Avoid bolding
-  whole paragraphs. The type roles in `styles/surface.css` (`oct-title`,
-  `oct-section-label`, `oct-row-label`, `oct-row-detail`, `oct-meta`) are the
-  only heading and label recipes; feature CSS does not author a new size.
+- Weights are the ladder in [Scale](#scale). Avoid bolding whole paragraphs.
+  The type roles in `styles/surface.css` (`oct-title`, `oct-section-label`,
+  `oct-row-label`, `oct-row-detail`, `oct-meta`) are the only heading and
+  label recipes; feature CSS does not author a new size.
 - Mono metadata uses positive tracking (`--oct-tracking-wide`); display
   headings use restrained negative tracking.
 
@@ -1035,15 +1051,11 @@ dialog that scales the screen to fit with the stage padding around it.
 
 Spacing is a 4px base scale: 4, 8, 12, 16, 20, 24, 32, and 48px. Off-scale pixel spacing in a stylesheet is ratcheted by `bun run ui:check` against the recorded baseline; a change may lower a file's count but never raise it. Use `gap-*`
 for stacks and groups; do not reintroduce `space-x-*` or `space-y-*` utility
-chains. The desktop radius scale is 8px control, 12px panel and card, 14px
-welcome composer and dialog, the shared medium follow-up radius, and 9999px only for compact chips, meters, or circular icon
-controls. Product
+chains. Radii are the tokens in [Shapes and depth](#shapes-and-depth). Product
 chrome uses those tokens and nothing else: a `border-radius` is a token, `0`,
 `50%`, or the 1–4px of a chart bar, mark, or status dot, never a rem or a
 bare pixel literal. A rem corner also shrinks with the interface font size,
-which a token does not. Leftover `.btn*` recipes are gone; adapters own
-button paint. Phone-only
-surfaces use the larger 22/26/30px mobile radii.
+which a token does not. Adapters own button paint.
 
 Controls are 44px by default and 34px compact. Recipe controls (buttons, tabs,
 toggles, comboboxes, badges) size in rem so they grow with the interface size;
@@ -1092,7 +1104,7 @@ a Settings section's group is the same hairline-ringed shape in its own fill,
 and neither draws a shadow —
 a card sits in the page, and shadow is reserved for something that floats
 above it (0090). Welcome composers keep their raised frame.
-Chat, Work, and Code welcome composers share the `.composer` frame (20px,
+Chat, Work, and Code welcome composers share the `.composer` frame (`--oct-radius-lg`,
 `--octant-shadow-md`) and one first-read hierarchy: one question, then the
 composer. Starter actions appear only when recent work does not already give
 the person a next step. In light the card is workspace white on the
@@ -1155,11 +1167,23 @@ the floating surface and the overlay shadow, and have exactly one 1px hairline
 edge: the overlay shadow carries it for menus and popovers, and the shared
 dialog draws it as a border. A feature stylesheet sizes and places a popup and
 never sets its fill, border, or shadow. Environment's cards on the dock and a Settings section on the page are
-hairline-ringed cards, not floating objects. Frosted material is limited to native/optional sidebar
-translucency and the floating activity picture-in-picture (the Browser's live
-preview shows the page itself and frosts only its caption, count, and close
-control, over the glass tokens, never over the page); reduced
-transparency and unsupported `backdrop-filter` resolve to opaque surfaces.
+hairline-ringed cards, not floating objects. Frosted material (a
+`backdrop-filter` blur) is used only where a surface has a ground behind it to
+read through:
+
+- the sidebar's optional translucency, the opt-in translucent workspace that
+  extends it, and the one frost over the application ground when it covers the
+  sidebar;
+- a thread's user bubbles and composer over the application ground (agent
+  replies stay bare prose; see [Transcript](#transcript));
+- Zen's windows, dock, pills, and sheets (glass cards);
+- the floating activity picture-in-picture, and the Browser's live preview,
+  which shows the page itself and frosts only its caption, count, and close
+  control, never the page;
+- the phone's glass surfaces.
+
+Its tint, stroke, and highlight are theme roles. Reduced transparency and
+unsupported `backdrop-filter` resolve every one of them to an opaque surface.
 
 Shadow tokens are `--octant-shadow-hairline`, `--octant-shadow-xs`,
 `--octant-shadow-sm`, `--octant-shadow-md`, `--octant-shadow-lg`,
@@ -1192,9 +1216,7 @@ into the room the surface has, leaving the spaces pill and the Navigator bar
 their own edges; the column count follows the window count and drops when the
 area is too narrow for a readable measure. A space that has never been arranged
 is tiled once when it opens and that tiling is written down as each window's
-own geometry, so nothing jumps when a person first drags one. (This replaces
-the self-arranging wall of 0106, which refused every drag outside a separate
-Arrange mode.)
+own geometry, so nothing jumps when a person first drags one.
 
 A window's title bar is one quiet line: a small mark for its kind, its name,
 how long ago it moved for a thread, and two icons, minimize and remove, that
@@ -1567,7 +1589,7 @@ is neutral explanatory text rather than a warning callout.
 The Board is an operational reading surface with four fixed,
 server-authoritative statuses: Ready, In Progress, Waiting, and Done. All
 four lanes show by default as soft wells: a faint tint of the text ink (3%)
-over the workspace colour, one soft hairline, the 12px radius, 8px of inner
+over the workspace colour, one soft hairline, `--oct-radius-md`, 8px of inner
 padding, and 12px between wells. A well's head names it once by mark, name,
 and count, with no rule under it: the name at the section-label step in the
 secondary ink and the count pinned to the trailing edge in the meta ink. The
@@ -1578,7 +1600,7 @@ take palette colours (Ready stays grey, In Progress orange, Waiting purple,
 Done green). A Board/List toggle leads the toolbar, and every control on it
 (the segmented choices, search, Filters, Refresh, View) is one 28px rail
 control. A card is a raised object inside its well: the card fill, a hairline,
-the 8px inset radius, and 12px of padding. It carries the Project as an
+`--oct-radius-inset`, and 12px of padding. It carries the Project as an
 eyebrow, the title, and, while the thread is executing, a live line under the
 title (a small turning arc and the latest sub-agent line in the mono meta voice,
 or "Working…" before one reports). Under that come what the thread waits on,
@@ -1599,7 +1621,7 @@ recipe; in Settings, the extension and skill collections are kit cards too, and
 the Installed and Marketplace switch rides the first section's label line. The
 command palette
 groups results and shows a shortcut badge when a row maps to a user-bindable
-chord. Shared dialogs keep the 14px overlay radius and overlay shadow.
+chord. Shared dialogs keep `--oct-radius-lg` and overlay shadow.
 
 The context meter is a circular composer control, not a dock tab: a 16px
 gauge with a full track and a 2px round-capped arc filled clockwise from
@@ -1677,12 +1699,25 @@ claim that the agent is still running. Expansion shows the recorded ordered
 steps in a bounded, scrollable list. Neither this list nor the journaled plan
 borrows progress, completion, or authority from the subagent group.
 
-Responsive breakpoints are 560px, 720px, and 920px. Below 920px the right dock
-is removed rather than squeezing the transcript unreadably. Below 720px split
-layouts stack, the workspace navigation sidebar becomes a dismissible overlay,
-and Settings replaces its rail with a left drawer opened from the active page
-header. Below 560px compact spacing and single-column forms apply. The mobile
-app has a separate design system under `apps/mobile/design-system`.
+### Breakpoints
+
+The shell has two breakpoints, both `max-width` queries, so each names the
+widest viewport its behavior applies to:
+
+| At or below | Source                                                     | What changes                                                                                                                                                                                                                                     |
+| ----------- | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 960px       | `useNarrowViewport` (`useShellPresentation.ts`), shell.css | The right dock opens as one narrow modal sheet over the page (a titled dialog, no resize handle, Escape closes it and returns focus) instead of a column; the bottom panel is unavailable; the sidebar stops resizing; Settings uses its drawer. |
+| 680px       | `useSidebarDrawerViewport`, shell.css (`min-width: 681px`) | The workspace sidebar becomes an overlay drawer, the window frame goes flat, and pane headers drop their Project and branch chips.                                                                                                               |
+
+Inside a surface, layouts reflow at component breakpoints rather than shell
+ones: 920px (two-to-four column grids and the Project overview gutter),
+720px (Settings fact lists and gutters, issue rows), and 560px (start-screen
+tiles and cards to one column, compact Settings title bars, 44px Project
+rows and always-visible thread row actions). Other widths in feature stylesheets are local to that
+surface. The mobile app has a separate design system under
+`apps/mobile/design-system`.
+
+### Tabs and segmented choices
 
 True page tabs, segmented choices, and pane identity are intentionally
 different. `OctantTabs` owns a flat rail with selected fill and keyboard tab
@@ -1954,26 +1989,13 @@ When adding or touching UI:
 - Feature styles position product surfaces; adapters paint shared controls.
   When migrating an old control, remove the replaced paint rules rather than
   keeping a parallel recipe.
-- Glass is the material for a surface with a ground behind it: the phone, Zen,
-  and a thread's user bubbles and composer over the application ground.
-  Agent replies stay bare prose on the continuous conversation reading surface
-  described in [Transcript](#transcript). Its tint,
-  stroke, and highlight are theme roles like every other colour; what those
-  surfaces get is a different material, not a second palette. Do not copy mobile atmosphere or phone radii
+- Glass is limited to the surfaces listed under
+  [Spacing, shapes, and depth](#spacing-shapes-and-depth); it is a different
+  material, not a second palette. Do not copy mobile atmosphere or phone radii
   into a flat desktop pane, and do not bring a blur onto a pane that has no
   ground under it.
 
-## Evidence inspected
-
-This document is maintained against the current shared renderer:
-`packages/theme` token roles, `ThemeSettingsProvider` and
-`ThemeTypographyProvider`, the `octant.css` static system and bridge,
-shadcn/Tailwind projection, `apps/web/components.json`, all owned
-`ui/shadcn` recipes and `ui/base` adapters, the production control-boundary
-inventory, shell/settings/project/dock styles, the task visualizer, context
-meter, usage surfaces, and decisions 0016, 0027, 0038, 0044, 0045, and 0046.
-Values marked as defaults come directly from those files; layout guidance
-follows the rendered contracts encoded by their selectors and tests.
+## Surface behavior
 
 ### Settings stability
 
@@ -1997,14 +2019,12 @@ in named disclosures. Host data inventory lives under Stored data. Installed
 skills and collision diagnostics scroll within a bounded collection while
 search, counts, and Show all remain outside that scroller.
 
-Execution profiles are retained and named explicitly in Settings. They are
-saved agent defaults, distinct from the person's identity in General. The
-legacy `--oct-fg-2` alias maps directly to `--octant-text-secondary`; primary,
+The legacy `--oct-fg-2` alias maps directly to `--octant-text-secondary`; primary,
 secondary, and metadata remain the only text strengths. The theme schema keeps
 its focus compatibility role for imports, but Appearance does not expose a
 Focus ring color control because the product does not draw focus rings.
 
-### Visual-audit corrections
+### Shell edge cases
 
 - Native sidebar glass keeps a transparent backing beneath the sidebar. The
   opaque application ground starts at the reading area's edge and covers the
@@ -2022,11 +2042,13 @@ Focus ring color control because the product does not draw focus rings.
 
 ### Mode-specific utility chrome
 
-Chat has no generic right or bottom utility panel. The conversation uses the
-available workspace width; existing central artifact routes remain available.
-Work shares Code's quiet transcript edge: Browser is a dock tool and completion
-lives in the composer's compact Task actions menu, preserving its confirmation
-flow. See decision 0099.
+Chat has no bottom panel. Its right dock offers the thread tools valid in Chat:
+Environment, Side chat, Canvas, Plan, and Agents (`rightUtilityDockModel.ts`);
+Browser, Files, Review, Terminal, and the device tools are Work or Code only. A
+Canvas a Chat turn authors is offered in the dock once, like Work and Code; its
+card in the transcript opens it as a content tab (**Open Canvas**). Work shares
+Code's quiet transcript edge: Browser is a dock tool and completion lives in the
+composer's compact Task actions menu, preserving its confirmation flow.
 
 ### Readability and scroll containment
 

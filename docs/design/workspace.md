@@ -447,15 +447,17 @@ or a valid launchable tool. An available empty dock opens on a thread overview (
 changes; see [DESIGN.md](../../DESIGN.md#shell-and-layout))
 above a grid of tool tiles; an open dock shows a tool strip. Direct tools are Side Chat, Browser, Files,
 Document, Canvas, artifact-gated Plan, conditional Delivery, Review, Terminal,
-Tests, iOS Simulator, and Android emulator, as mode and capability allow. Side
+Tests, iOS Simulator, and Android emulator, as mode and capability allow; a
+Chat thread's dock offers Environment, Side Chat, Canvas, Plan, and Agents, and
+Chat has no bottom panel. Side
 Chat is a Chat conversation about the pane's thread: it reads that thread's
 conversation, current state, files, and subagent results, and changes none of
 them ([authority](../architecture.md#security-and-authority)). Its notice says
 what the source offers once the host names the source's mode. Document shows the
 Markdown or text file the Code thread's turn most recently wrote, read through
 the host-authorized file open; the renderer offers a written document, or a
-Canvas the thread's agent authored in Work or Code and did not ask to show
-inline, in the dock once per document, never after the person closed its tab,
+Canvas the thread's agent authored in Chat, Work, or Code and did not ask to
+show inline, in the dock once per document, never after the person closed its tab,
 and never by moving focus. Every Canvas a thread wrote appears at the end of
 the turn that wrote it, on the reply's card face. One the agent asked to show
 inline is drawn there read-only, within a fixed height that fades out instead
@@ -463,9 +465,9 @@ of scrolling, and is never offered in the dock, because it is already in front
 of the person; any other is a single row (a live miniature, its title, one
 line of facts) that opens it. The inline frame holds **Show as card**, a fold
 the window remembers. In Work and Code it also holds **Open in sidebar**, which
-opens the same Canvas in the dock tool, and a row opens it there too. Chat has
-no dock, so there the frame holds **Open Canvas**, and the frame and a row open
-the Canvas as a content tab. An
+opens the same Canvas in the dock tool, and a row opens it there too. In Chat
+the frame holds **Open Canvas**, and the frame and a row open the Canvas as a
+content tab beside the thread. An
 agent-authored Canvas belongs to the thread's own scope as the host resolves
 it: the active Chat Project, the Work thread's confined root, or the Code
 thread's checkout; a thread whose binding the host cannot resolve is refused
