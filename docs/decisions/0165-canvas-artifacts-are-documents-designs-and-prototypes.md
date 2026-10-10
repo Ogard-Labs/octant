@@ -76,7 +76,10 @@ that delivers the result, and may mix them in one Canvas.
   in the page reports size, script errors, and a heartbeat; the parent
   accepts only those typed messages from that frame, clamps them, and
   removes a frame that stops answering. The bridge grants no tool, journal,
-  or file capability. Desktop runs these frames out of process.
+  or file capability. Desktop runs these frames out of process, cancels any
+  navigation of a frame away from its own page, and reserves a shortcut that
+  frame script cannot intercept to move focus back to host chrome. In every
+  client a frame that loads a second page is removed.
 - **The thread can hold the whole Canvas.** A person may expand any Canvas
   in its thread, including a board, a plan, a design, and a running
   prototype. An expanded Canvas grows with its content up to about the

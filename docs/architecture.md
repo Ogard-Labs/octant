@@ -325,7 +325,11 @@ drawing it as plain text.
 The pure `canvasInlineRefusal` policy admits `inline` only for at most 12 blocks
 with no `diagram`, `plan`, `mockup` or `design`. When an author asks for `inline` over
 that bound, the host records `sidebar` and returns the reason as
-`presentationNote`.
+`presentationNote`. Accepted but not yet built: the 12-block cap goes for
+reading blocks and static design frames within the ordinary block budget, the
+refusal applies only to the author's unprompted request, and a person's expand
+in the thread may show any Canvas; until that ships, the bound above holds
+([decisions/0165-canvas-artifacts-are-documents-designs-and-prototypes.md](decisions/0165-canvas-artifacts-are-documents-designs-and-prototypes.md)).
 A revise without a choice keeps the current presentation.
 `preview` returns a picture and a layout reading of one shipped version. Its
 input is the `canvasId`, an optional `version` (a sequence), a `width`

@@ -465,7 +465,13 @@ line of facts) that opens it. The inline frame holds **Show as card**, a fold
 the window remembers. In Work and Code it also holds **Open in sidebar**, which
 opens the same Canvas in the dock tool, and a row opens it there too. Chat has
 no dock, so there the frame holds **Open Canvas**, and the frame and a row open
-the Canvas as a content tab. An
+the Canvas as a content tab. Accepted but not yet built: a person may expand
+any Canvas of the thread in place, including one shown as a row; the expanded
+frame grows with its content up to about the thread viewport instead of
+fading, the thread keeps the wheel until the person focuses a region inside
+it, and a running design frame starts there only when the person presses
+**Run**. Until that ships, the fixed-height fade above is the behavior (see
+[decisions/0165-canvas-artifacts-are-documents-designs-and-prototypes.md](../decisions/0165-canvas-artifacts-are-documents-designs-and-prototypes.md)). An
 agent-authored Canvas belongs to the thread's own scope as the host resolves
 it: the active Chat Project, the Work thread's confined root, or the Code
 thread's checkout; a thread whose binding the host cannot resolve is refused
