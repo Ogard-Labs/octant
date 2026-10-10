@@ -3026,7 +3026,7 @@
 }
 
 .canvas-mockup__frames[data-count="1"] .canvas-mockup__variant {
-  flex-grow: 0;
+  flex-basis: 100%;
 }
 
 .canvas-mockup__variant-label {
@@ -3278,7 +3278,7 @@
 }
 
 .canvas-mockup__label {
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
   color: var(--oct-fg-2);
   font-size: var(--oct-text-xs);
 }

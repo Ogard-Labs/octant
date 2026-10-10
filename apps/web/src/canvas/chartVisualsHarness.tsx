@@ -10,6 +10,8 @@ import {
   comparisonMatrixExampleBlocks,
   mathExampleBlocks,
   metricExampleBlocks,
+  notificationStatesExampleBlock,
+  settingsScreenExampleBlock,
   orderSchemaBlock,
   supportFlowBlock,
   releaseMindmapBlock,
@@ -202,30 +204,134 @@ const timeline = decodeCanvasBlock({
   ],
 });
 
-const definition = {
-  ...canvasFixture,
-  blocks: [
-    line,
-    bar,
-    area,
-    scatter,
-    distribution,
-    ...chartExampleBlocks,
-    ...treemapExampleBlocks,
-    ...heatmapExampleBlocks,
-    ...barListExampleBlocks,
-    hotFiles,
-    ...comparisonMatrixExampleBlocks,
-    ...mathExampleBlocks,
-    ...metricExampleBlocks,
-    metric,
-    table,
-    timeline,
-    orderSchemaBlock,
-    supportFlowBlock,
-    releaseMindmapBlock,
+// Mockups beyond the describe examples: a styled browser page with a table
+// under a confirmation modal, and a custom-size dashboard grid in a wireframe.
+const membersMockup = decodeCanvasBlock({
+  ...base,
+  blockId: "mockup-members",
+  kind: "mockup",
+  device: "browser",
+  fidelity: "styled",
+  title: "Members",
+  nodes: [
+    { nodeId: "page", component: "stack", label: "Members" },
+    { nodeId: "bar", component: "row", label: "Toolbar", parentId: "page" },
+    { nodeId: "title", component: "heading", label: "Members", parentId: "bar" },
+    {
+      nodeId: "count",
+      component: "badge",
+      label: "3 seats left",
+      tone: "warning",
+      parentId: "bar",
+    },
+    {
+      nodeId: "invite",
+      component: "button",
+      label: "Invite",
+      icon: "plus",
+      tone: "accent",
+      parentId: "bar",
+    },
+    {
+      nodeId: "people",
+      component: "table",
+      label: "People",
+      columns: ["Name", "Role", "Last active"],
+      rows: [
+        ["Ada Lovelace", "Owner", "Today"],
+        ["Grace Hopper", "Member", "Yesterday"],
+        ["Alan Turing", "Member", "Last week"],
+      ],
+      parentId: "page",
+    },
+    { nodeId: "remove", component: "modal", label: "Remove Grace Hopper?", parentId: "page" },
+    {
+      nodeId: "remove-copy",
+      component: "text",
+      label: "They lose access to every project.",
+      parentId: "remove",
+    },
+    { nodeId: "remove-actions", component: "row", label: "Actions", parentId: "remove" },
+    { nodeId: "keep", component: "button", label: "Cancel", parentId: "remove-actions" },
+    {
+      nodeId: "confirm",
+      component: "button",
+      label: "Remove",
+      tone: "danger",
+      parentId: "remove-actions",
+    },
   ],
-};
+  annotations: [{ nodeId: "confirm", note: "Removing the last owner is refused." }],
+});
+
+const dashboardMockup = decodeCanvasBlock({
+  ...base,
+  blockId: "mockup-dashboard",
+  kind: "mockup",
+  device: "custom",
+  size: { width: 640, height: 400 },
+  title: "Usage",
+  nodes: [
+    { nodeId: "page", component: "stack", label: "Usage" },
+    { nodeId: "title", component: "heading", label: "This month", parentId: "page" },
+    { nodeId: "tiles", component: "grid", label: "Tiles", gridColumns: 3, parentId: "page" },
+    { nodeId: "t1", component: "card", label: "Requests", parentId: "tiles" },
+    { nodeId: "t2", component: "card", label: "Errors", parentId: "tiles" },
+    { nodeId: "t3", component: "card", label: "Spend", parentId: "tiles" },
+    {
+      nodeId: "chart",
+      component: "image-placeholder",
+      label: "Requests per day",
+      parentId: "page",
+    },
+    {
+      nodeId: "saved",
+      component: "toast",
+      label: "Report saved",
+      tone: "success",
+      parentId: "page",
+    },
+  ],
+});
+
+const mockupBlocks = [
+  settingsScreenExampleBlock,
+  notificationStatesExampleBlock,
+  membersMockup,
+  dashboardMockup,
+];
+
+// `?only=mockup` draws the mockups alone, so their capture is not a page of
+// every chart.
+const onlyMockups = new URLSearchParams(window.location.search).get("only") === "mockup";
+
+const definition = onlyMockups
+  ? { ...canvasFixture, blocks: mockupBlocks }
+  : {
+      ...canvasFixture,
+      blocks: [
+        line,
+        bar,
+        area,
+        scatter,
+        distribution,
+        ...chartExampleBlocks,
+        ...treemapExampleBlocks,
+        ...heatmapExampleBlocks,
+        ...barListExampleBlocks,
+        hotFiles,
+        ...comparisonMatrixExampleBlocks,
+        ...mathExampleBlocks,
+        ...metricExampleBlocks,
+        metric,
+        table,
+        timeline,
+        orderSchemaBlock,
+        supportFlowBlock,
+        releaseMindmapBlock,
+        ...mockupBlocks,
+      ],
+    };
 
 type ChartThemeScenario = "default-light" | "default-dark" | "vivid" | "contrast";
 
