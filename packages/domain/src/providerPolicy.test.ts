@@ -2117,9 +2117,9 @@ describe("provider instance policy", () => {
 
     const removed = removeProvider(original, { activeSessionCount: 0, updatedAt });
     expect(removed.configuration).toEqual(original.configuration);
-    expect(removed.driverKind === "claude" ? removed.configuration.configDirectory : undefined).toBe(
-      "/Users/example/.claude-accounts/work",
-    );
+    expect(
+      removed.driverKind === "claude" ? removed.configuration.configDirectory : undefined,
+    ).toBe("/Users/example/.claude-accounts/work");
   });
 
   it("returns an immutable Claude configuration update with a new version and timestamp", () => {
