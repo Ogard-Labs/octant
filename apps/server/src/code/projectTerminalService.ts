@@ -27,6 +27,7 @@ import {
 import { Schema } from "effect";
 import type { Journal } from "../persistence/journal";
 import type { TerminalService, TerminalSnapshot } from "./terminalService";
+import { defaultTerminalShell } from "./terminalShell";
 
 const decodeActor = Schema.decodeUnknownSync(EventActor);
 const decodeActorId = Schema.decodeUnknownSync(ActorId);
@@ -250,7 +251,7 @@ export class ProjectTerminalService {
     try {
       await this.#options.terminals.launch({
         terminalId: String(command.terminalId),
-        shell: this.#options.shell ?? "/bin/zsh",
+        shell: this.#options.shell ?? defaultTerminalShell(),
         cwd: root,
         // Its own shell history and state, apart from every thread's shells in
         // the same repository.

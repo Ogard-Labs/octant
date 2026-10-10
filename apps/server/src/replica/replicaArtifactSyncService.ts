@@ -25,7 +25,12 @@ import {
   type ArtifactBundle,
 } from "@octant/contracts/artifact-bundle";
 import { MAX_ARTIFACT_BUNDLE_BYTES } from "@octant/contracts/artifact-mirror";
-import type { CanvasDefinition, CanvasId, CanvasVersion } from "@octant/contracts/canvas";
+import type {
+  CanvasDefinition,
+  CanvasId,
+  CanvasVersion,
+  CanvasVersionId,
+} from "@octant/contracts/canvas";
 import { isCanvasShareSafeText } from "@octant/contracts/canvas-share";
 import type { HostId } from "@octant/contracts/host";
 import {
@@ -35,12 +40,15 @@ import {
   type ReplicaArtifactEntry,
   type ReplicaArtifactKeptOutcome,
   type ReplicaArtifactReconciled,
+  type ReplicaContentHash,
+  type ReplicaDisplayName,
+  type ReplicaInstanceId,
   type ReplicaReadRefusal,
 } from "@octant/contracts/replica-entry";
 import {
   reconcileReplicaEntry,
   replicaArtifactHeads,
-  replicaArtifactHidden,
+  replicaArtifactStanding,
   type ReplicaArtifactRecord,
   type ReplicaInstanceMembership,
   type ReplicaLocalState,
@@ -50,7 +58,13 @@ import { replicaInGoodStanding } from "@octant/domain/replica-membership-policy"
 import { artifactKindForBlocks } from "@octant/domain";
 import type { ArtifactLibrarySyncedEntry } from "@octant/contracts/artifact-library";
 import { REPLICA_ARTIFACT_EVENT_NAMES, type ReplicaArtifactQueued } from "./replicaArtifactEvents";
-import type { ReplicaArtifactState } from "./replicaArtifactProjection";
+import type {
+  ReplicaArtifactState,
+  ReplicaSyncedArtifact,
+  ReplicaSyncedTombstone,
+  ReplicaSyncedVersion,
+} from "./replicaArtifactProjection";
+import { renderArtifactThumbnail } from "../canvas/artifactRender";
 import type {
   ReplicaMembershipJournal,
   ReplicaMembershipState,
@@ -256,11 +270,22 @@ export interface ReplicaArtifactSyncPorts {
   readonly projectName: (projectId: string) => string | undefined;
   /** Whether the thread that owns this version is read-only. */
   readonly planMode: (version: CanvasVersion) => boolean;
+  /**
+   * Told after every pull this service makes, so an artifact open in a
+   * thread here takes a later version another computer wrote on top of it.
+   */
+  readonly afterPull?: () => void;
 }
 
 export class ReplicaArtifactSyncService {
   readonly #ports: ReplicaArtifactSyncPorts;
   #drain: Promise<void> = Promise.resolve();
+  /**
+   * Parents the next commit of a Canvas resolves, by Canvas. Keep, Merge,
+   * and Restore name every version they resolve just before the commit
+   * announces itself, which happens synchronously inside the commit.
+   */
+  readonly #resolving = new Map<string, ReadonlyArray<string>>();
 
   constructor(ports: ReplicaArtifactSyncPorts) {
     this.#ports = ports;
@@ -271,8 +296,17 @@ export class ReplicaArtifactSyncService {
    * already happened, and nothing here can unwind it.
    */
   async versionCommitted(version: CanvasVersion): Promise<void> {
+    const resolving = this.#resolving.get(String(version.canvasId));
+    this.#resolving.delete(String(version.canvasId));
     try {
       if (!this.#queues() || this.#ports.planMode(version)) return;
+      // A version another computer wrote, now open in a thread here, is
+      // already in the store under its writer's slot; it is not published
+      // again under this computer's.
+      const synced = this.#ports.artifactState().artifact(version.canvasId);
+      if (synced?.versions.some((held) => same(held.versionId, version.versionId)) === true) {
+        return;
+      }
       const versions = this.#ports.canvas(version.canvasId)?.versions ?? [];
       const parent = versions
         .filter((candidate) => candidate.sequence < version.sequence)
@@ -281,12 +315,61 @@ export class ReplicaArtifactSyncService {
         kind: "artifact-version",
         canvasId: version.canvasId,
         version,
-        parents: parent === undefined ? [] : [String(parent.versionId)],
+        parents: resolving ?? (parent === undefined ? [] : [String(parent.versionId)]),
       });
       await this.drain();
     } catch {
       // A publish that could not be queued leaves the version as it is.
     }
+  }
+
+  /**
+   * Name the versions the next commit of this Canvas resolves. Keep, Merge,
+   * and Restore on an artifact open here commit through the Canvas service,
+   * whose hook only knows the previous local version; this tells it the
+   * rest. Call it just before the commit, and call what it returns just
+   * after, so a commit that was refused leaves nothing behind for the next.
+   */
+  resolveNext(canvasId: CanvasId, parents: ReadonlyArray<string>): () => void {
+    const key = String(canvasId);
+    const sorted = [...new Set(parents.map(String))].sort();
+    this.#resolving.set(key, sorted);
+    return () => {
+      if (this.#resolving.get(key) === sorted) this.#resolving.delete(key);
+    };
+  }
+
+  /**
+   * Publish a version of an artifact that is not open in a thread here: Keep
+   * or Restore from the library. It is queued and drained like any other
+   * version; `published` is false while the store cannot be reached.
+   */
+  async publishVersion(input: {
+    readonly canvasId: CanvasId;
+    readonly bundle: ArtifactBundle;
+    readonly parents: ReadonlyArray<string>;
+  }): Promise<
+    | { readonly status: "queued"; readonly published: boolean }
+    | { readonly status: "refused"; readonly reason: "sync-off" | "unsafe-content" | "too-large" }
+  > {
+    if (!this.#queues()) return { status: "refused", reason: "sync-off" };
+    const queued = this.#queue({
+      kind: "artifact-version",
+      canvasId: input.canvasId,
+      version: input.bundle,
+      parents: [...new Set(input.parents.map(String))].sort(),
+    });
+    if (queued.status === "refused") return queued;
+    await this.drain().catch(() => undefined);
+    const waiting = this.#ports
+      .artifactState()
+      .outbox.some((entry) => entry.queueId === queued.queueId);
+    return { status: "queued", published: !waiting };
+  }
+
+  /** Whether this computer can publish at all: sync on and an identity that can still write. */
+  publishes(): boolean {
+    return this.#queues();
   }
 
   /**
@@ -331,7 +414,13 @@ export class ReplicaArtifactSyncService {
   async pull(): Promise<ReplicaMembershipOutcome | undefined> {
     if (this.#ports.store().status !== "selected") return undefined;
     if (this.#ports.membershipState().local === undefined) return undefined;
-    return this.#ports.membership.execute({ kind: "pull" });
+    const pulled = await this.#ports.membership.execute({ kind: "pull" });
+    try {
+      this.#ports.afterPull?.();
+    } catch {
+      // A version that could not be taken in here stays in the library.
+    }
+    return pulled;
   }
 
   /** Pull, then publish what is queued. */
@@ -411,9 +500,11 @@ export class ReplicaArtifactSyncService {
     readonly canvasId: CanvasId;
     readonly version: CanvasVersion | ArtifactBundle;
     readonly parents: ReadonlyArray<string>;
-  }): void {
+  }):
+    | { readonly status: "queued"; readonly queueId: string }
+    | { readonly status: "refused"; readonly reason: "sync-off" | "unsafe-content" | "too-large" } {
     const local = this.#ports.membershipState().local;
-    if (local === undefined) return;
+    if (local === undefined) return { status: "refused", reason: "sync-off" };
     const synced = this.#ports.artifactState().artifact(input.canvasId);
     // A revision of an artifact another computer made keeps that origin.
     const originHostId = synced?.originHostId ?? (String(local.instanceId) as HostId);
@@ -424,16 +515,17 @@ export class ReplicaArtifactSyncService {
       this.#ports.projectName(String(bundle.octant.projectId)) ?? synced?.projectName ?? "Project";
     if (!replicaArtifactTextLeavesSafely(bundle.definition)) {
       this.#refuse(input.canvasId, versionId, input.kind, "unsafe-content");
-      return;
+      return { status: "refused", reason: "unsafe-content" };
     }
     if (Buffer.byteLength(encodeArtifactBundle(bundle), "utf8") > MAX_ARTIFACT_BUNDLE_BYTES) {
       this.#refuse(input.canvasId, versionId, input.kind, "too-large");
-      return;
+      return { status: "refused", reason: "too-large" };
     }
+    const queueId = this.#ports.uuid();
     this.#ports.journal.append({
       eventName: REPLICA_ARTIFACT_EVENT_NAMES.queued,
       payload: {
-        queueId: this.#ports.uuid(),
+        queueId,
         kind: input.kind,
         artifact: {
           canvasId: input.canvasId,
@@ -444,6 +536,7 @@ export class ReplicaArtifactSyncService {
         bundle: { ...bundle, octant: { ...bundle.octant, hostId: originHostId } },
       },
     });
+    return { status: "queued", queueId };
   }
 
   #refuse(
@@ -499,28 +592,98 @@ export function replicaArtifactEntryFor(
 }
 
 /**
- * What the library lists for artifacts other computers made: every synced
- * artifact with a version head, unless a tombstone is its only head. The
- * card shows the newest version head, named by the computer that wrote it,
- * under the Project name it was filed under there.
+ * Every synced artifact, with this computer's queued versions counted as
+ * versions it wrote. A version kept or restored here waits in the queue
+ * until the store takes it; counting it keeps the library from offering the
+ * same choice again while it waits.
+ */
+export function replicaArtifactsWithQueued(
+  state: ReplicaArtifactState,
+  local: { readonly instanceId: ReplicaInstanceId; readonly displayName: string } | undefined,
+): ReadonlyArray<ReplicaSyncedArtifact> {
+  const artifacts = new Map(
+    state.artifacts.map((artifact) => [String(artifact.canvasId), artifact]),
+  );
+  if (local === undefined) return [...artifacts.values()];
+  for (const queued of state.outbox) {
+    if (queued.kind !== "artifact-version") continue;
+    const key = String(queued.artifact.canvasId);
+    const known = artifacts.get(key);
+    const versionId = String(queued.bundle.octant.versionId);
+    if (known?.versions.some((version) => same(version.versionId, versionId)) === true) continue;
+    const version: ReplicaSyncedVersion = {
+      versionId: queued.bundle.octant.versionId as CanvasVersionId,
+      contentHash: sha256Hex(encodeArtifactBundle(queued.bundle)) as ReplicaContentHash,
+      parentVersionIds: queued.parents.map((parent) => String(parent.versionId)),
+      bundle: queued.bundle,
+      writtenBy: {
+        instanceId: local.instanceId,
+        displayName: local.displayName as ReplicaDisplayName,
+        sequence: 0,
+      },
+      local: true,
+    };
+    artifacts.set(key, {
+      canvasId: queued.artifact.canvasId,
+      originHostId: known?.originHostId ?? queued.artifact.hostId,
+      projectName: queued.artifact.projectName,
+      versions: [...(known?.versions ?? []), version],
+      tombstones: known?.tombstones ?? [],
+    });
+  }
+  return [...artifacts.values()];
+}
+
+/** The version a tombstone deleted, newest deletion first, with who deleted it. */
+export function replicaDeletionShown(
+  artifact: ReplicaSyncedArtifact,
+  deletions: ReadonlyArray<{
+    readonly originInstanceId: ReplicaInstanceId;
+    readonly originSequence: number;
+  }>,
+): ReplicaSyncedTombstone | undefined {
+  return artifact.tombstones
+    .filter((tombstone) =>
+      deletions.some(
+        (deletion) =>
+          same(deletion.originInstanceId, tombstone.originInstanceId) &&
+          deletion.originSequence === tombstone.originSequence,
+      ),
+    )
+    .sort((left, right) =>
+      String(right.bundle.octant.createdAt).localeCompare(String(left.bundle.octant.createdAt)),
+    )[0];
+}
+
+/**
+ * What the library lists for artifacts other computers made and that are not
+ * open in a thread here. Each card shows the newest version standing, named
+ * by the computer that wrote it, under the Project name it was filed under
+ * there. Two versions standing is `two-versions`; a deletion that is all that
+ * is left is `deleted`, shown as the version it deleted and the computer
+ * that deleted it, so the person can restore it.
  */
 export function replicaSyncedLibraryEntries(
   state: ReplicaArtifactState,
+  local?: { readonly instanceId: ReplicaInstanceId; readonly displayName: string },
 ): ReadonlyArray<ArtifactLibrarySyncedEntry> {
   const entries: ArtifactLibrarySyncedEntry[] = [];
-  for (const artifact of state.artifacts) {
-    if (replicaArtifactHidden(artifact)) continue;
+  for (const artifact of replicaArtifactsWithQueued(state, local)) {
+    const standing = replicaArtifactStanding(artifact);
     const heads = replicaArtifactHeads(artifact);
-    const shown = heads
-      .flatMap((head) =>
-        head.kind === "version"
-          ? artifact.versions.filter((version) => same(version.versionId, head.versionId))
-          : [],
-      )
+    const deletion =
+      standing.status === "deleted"
+        ? replicaDeletionShown(artifact, standing.deletions)
+        : undefined;
+    const newest = artifact.versions
+      .filter((version) => standing.candidates.includes(String(version.versionId)))
       .sort((left, right) =>
         String(right.bundle.octant.createdAt).localeCompare(String(left.bundle.octant.createdAt)),
       )[0];
+    const shown =
+      deletion === undefined ? newest : { bundle: deletion.bundle, writtenBy: deletion.writtenBy };
     if (shown === undefined) continue;
+    const markup = renderArtifactThumbnail(shown.bundle.definition);
     entries.push({
       canvasId: artifact.canvasId,
       projectName: artifact.projectName,
@@ -528,10 +691,12 @@ export function replicaSyncedLibraryEntries(
       mode: shown.bundle.octant.mode,
       kind: artifactKindForBlocks(shown.bundle.definition.blocks),
       title: shown.bundle.definition.title,
-      versionCount: artifact.versions.length,
+      versionCount: Math.max(1, artifact.versions.length),
       headCount: heads.length,
-      deletedElsewhere: heads.some((head) => head.kind === "tombstone"),
+      status: standing.status,
+      ...(deletion === undefined ? {} : { deletedOn: deletion.writtenBy.displayName }),
       updatedAt: shown.bundle.octant.createdAt,
+      ...(markup === "" ? {} : { preview: { format: "svg" as const, markup } }),
     });
   }
   return entries.sort((left, right) =>

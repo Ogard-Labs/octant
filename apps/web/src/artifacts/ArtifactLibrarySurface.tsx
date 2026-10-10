@@ -10,6 +10,9 @@ import { ArtifactLibraryView } from "./ArtifactLibraryView";
 import { ArtifactMirrorSettings } from "./ArtifactMirrorSettings";
 import { useArtifactLibrary } from "./useArtifactLibrary";
 import { useArtifactMirror } from "./useArtifactMirror";
+import { SyncedArtifactDialog } from "./SyncedArtifactDialog";
+import { useSyncedArtifacts } from "./useSyncedArtifacts";
+import type { executeSyncedArtifactCommand } from "@octant/client-runtime/artifact-library-client";
 
 export interface ArtifactLibrarySurfaceProps {
   readonly serverUrl?: string;
@@ -18,6 +21,8 @@ export interface ArtifactLibrarySurfaceProps {
   readonly onClose: () => void;
   /** Absent on a host that cannot start one, which hides the create action. */
   readonly onCreate?: () => void;
+  /** Injected in tests; the host's synced-artifact commands otherwise. */
+  readonly execute?: typeof executeSyncedArtifactCommand;
 }
 
 /**
@@ -71,14 +76,30 @@ export function ArtifactLibrarySurface(props: ArtifactLibrarySurfaceProps) {
     }
   }
 
+  const synced = useSyncedArtifacts({
+    ...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl }),
+    ...(props.windowCapability === undefined ? {} : { windowCapability: props.windowCapability }),
+    ...(props.execute === undefined ? {} : { execute: props.execute }),
+    onChanged: library.refresh,
+    onOpened: props.onOpen,
+  });
+  const observedAt = String(library.listing?.generatedAt ?? "");
+  const viewMessage = synced.notice ?? library.message;
+
   return (
     <Surface ariaLabel="Artifact library">
       <ArtifactLibraryView
         busy={library.busy}
         filters={library.filters}
         listing={library.listing}
-        {...(library.message === undefined ? {} : { message: library.message })}
-        observedAt={String(library.listing?.generatedAt ?? "")}
+        {...(viewMessage === undefined ? {} : { message: viewMessage })}
+        {...(synced.available
+          ? {
+              onSync: (canvasId) => void synced.select(canvasId),
+              onRestore: (canvasId) => void synced.run({ kind: "restore", canvasId }),
+            }
+          : {})}
+        observedAt={observedAt}
         onClose={props.onClose}
         onFiltersChange={library.setFilters}
         onOpen={props.onOpen}
@@ -93,6 +114,29 @@ export function ArtifactLibrarySurface(props: ArtifactLibrarySurfaceProps) {
         onChangeAutoCommit={(autoCommit) => void mirror.changeAutoCommit(autoCommit)}
         onChangeDestination={(destination) => void mirror.changeDestination(destination)}
         settings={mirror.settings}
+      />
+      <SyncedArtifactDialog
+        busy={synced.busy}
+        detail={synced.detail}
+        {...(synced.message === undefined ? {} : { message: synced.message })}
+        observedAt={observedAt}
+        onClose={synced.close}
+        {...(props.onCreate === undefined ? {} : { onCreate: props.onCreate })}
+        onKeep={(versionId) =>
+          void synced.runOnSelected((canvasId) => ({ kind: "keep", canvasId, versionId }))
+        }
+        onMerge={(threadId) =>
+          void synced.runOnSelected((canvasId) => ({
+            kind: "merge",
+            canvasId,
+            ...(threadId === undefined ? {} : { threadId }),
+          }))
+        }
+        onOpenIn={(threadId) =>
+          void synced.runOnSelected((canvasId) => ({ kind: "open", canvasId, threadId }))
+        }
+        onRestore={() => void synced.runOnSelected((canvasId) => ({ kind: "restore", canvasId }))}
+        open={synced.selected !== undefined}
       />
       <OctantDialog
         className="canvas-workspace-tab__share-dialog"

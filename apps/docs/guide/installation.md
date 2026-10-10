@@ -22,7 +22,7 @@ relay is included in this preview.
 
 - x64 Linux host (Ubuntu is the dogfood target)
 - Bun 1.3.14 (required for development and local iteration)
-- Bubblewrap and a live Secret Service session for Work/Code
+- Bubblewrap for Work and Code, and a live Secret Service session to store provider credentials ([Linux Host](./linux-host))
 - Node 26 only when running the Node SQLite portability smoke
 
 ## Install from source
