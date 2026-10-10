@@ -106,12 +106,12 @@ Whether a confined launch that can read that directory, and cannot run
   verification shows the config-directory path cannot work.
 - **Several Claude accounts are allowed, later, on this same
   mechanism.** Each account has its own Claude-owned config directory.
-  The person signs in once per account with unmodified `claude auth
-  login`. Each thread is pinned to the account it started with; the
-  person picks the account explicitly. Automatic failover, rotation
-  between accounts when a usage limit is hit, load-balancing across
-  subscriptions, and any pooling of subscriptions to get around limits
-  are refused.
+  The person signs in once per account with unmodified
+  `claude auth login`. Each thread is pinned to the account it
+  started with; the person picks the account explicitly. Automatic
+  failover, rotation between accounts when a usage limit is hit,
+  load-balancing across subscriptions, and any pooling of
+  subscriptions to get around limits are refused.
 - **The native harness is an optional alternative, not the default.**
   People who want Claude on the native harness use an Anthropic API key
   on an Anthropic-compatible HTTP endpoint. Billing goes to the key

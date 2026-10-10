@@ -228,8 +228,8 @@ Allowed:
 
 - One Claude-owned config directory per account (`CLAUDE_CONFIG_DIR`,
   plus `CLAUDE_SECURESTORAGE_CONFIG_DIR` when distinct).
-- The person signs in once per account with unmodified `claude auth
-  login`.
+- The person signs in once per account with unmodified
+  `claude auth login`.
 - Octant never reads, copies, or stores the credentials.
 - The person picks the account explicitly. A thread stays on the
   account it started with.
