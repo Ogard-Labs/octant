@@ -1,5 +1,6 @@
 import type { ClaudeAccountAccent } from "@octant/contracts";
 import { CLAUDE_ACCOUNT_ACCENT_VALUES, formatClaudeAuthLoginCommand } from "@octant/domain";
+import { OctantButton } from "../../ui/base/OctantButton";
 import { OctantInput } from "../../ui/base/OctantInput";
 import { SettingRow } from "../../settings/primitives";
 import { CLAUDE_ACCOUNT_ACCENT_LABELS } from "./claudeAccountValues";
@@ -13,7 +14,7 @@ export function ClaudeAccountAccentPicker(props: {
   return (
     <div className="claude-account-accent-picker" role="radiogroup" aria-label={props.label}>
       {CLAUDE_ACCOUNT_ACCENT_VALUES.map((accent) => (
-        <button
+        <OctantButton
           aria-checked={props.value === accent}
           aria-label={CLAUDE_ACCOUNT_ACCENT_LABELS[accent]}
           className="claude-account-accent-picker__swatch"
@@ -23,6 +24,7 @@ export function ClaudeAccountAccentPicker(props: {
           onClick={() => props.onChange(accent)}
           role="radio"
           type="button"
+          variant="bare"
         />
       ))}
     </div>
@@ -78,7 +80,7 @@ export function ClaudeAccountSettingsFields(props: {
         scope="host"
         settingId={`${settingPrefix}-accent`}
       >
-        <input name="accent" type="hidden" value={props.accent} />
+        <OctantInput name="accent" type="hidden" value={props.accent} />
         <ClaudeAccountAccentPicker
           id={`${settingPrefix}-accent`}
           label="Account accent"

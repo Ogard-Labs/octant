@@ -5048,7 +5048,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 .claude-account-accent-picker {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 8px;
 }
 
 .claude-account-accent-picker__swatch {
@@ -5061,7 +5061,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 }
 
 .claude-account-accent-picker__swatch[data-selected="true"] {
-  box-shadow: 0 0 0 2px var(--octant-focus-edge);
+  box-shadow: 0 0 0 2px var(--octant-focus-ring);
 }
 
 .composer-model-picker__rail-item--favorites {
