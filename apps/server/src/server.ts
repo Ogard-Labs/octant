@@ -543,6 +543,7 @@ import { attachProviderRuntimeUsageLimits } from "./providers/providerRuntimeUsa
 import {
   createShellRouteHandler,
   isAllowedRendererOrigin,
+  isForeignLoopbackOrigin,
   isLoopbackHostname,
 } from "./shellRoutes";
 import { OCTANT_LOCAL_ACTOR_ID, ShellService, ShellServiceError } from "./shellService";
@@ -10498,6 +10499,22 @@ export function startOctantServer(
                   activeAgentCount: providerRuntimeRegistry.activeSessionTotal(),
                   attentionRequired: providerRuntimeRegistry.attentionRequired(),
                 });
+              }
+              // Every route below trusts a loopback Origin as the renderer, so a
+              // page on another loopback port (a dev server a Code thread
+              // started, say) is refused here before any route can reflect it
+              // into CORS or mint local authority for it.
+              if (
+                isForeignLoopbackOrigin(
+                  request.headers.get("origin"),
+                  url,
+                  options.allowedRendererHttpOrigin,
+                )
+              ) {
+                return Response.json(
+                  { category: "unauthorized", message: "Renderer origin is not allowed." },
+                  { status: 403, headers: { vary: "Origin" } },
+                );
               }
               // Intentionally pre-auth (like /health): returns static, non-sensitive
               // host identity so the UI can render the selector before capability exchange.

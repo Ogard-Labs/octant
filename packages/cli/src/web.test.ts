@@ -146,6 +146,7 @@ describe("runWebCommand", () => {
     expect(attachOrCreateHost).toHaveBeenCalledWith(
       expect.objectContaining({
         environment: {
+          OCTANT_WEB_URL: "http://127.0.0.1:5173",
           OCTANT_CODE_FILE_HELPER_PATH: "/repo/dist/octant-code-file-helper",
         },
       }),

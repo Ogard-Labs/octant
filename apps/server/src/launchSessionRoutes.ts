@@ -6,7 +6,7 @@ import {
   type LaunchSessionFailure,
   type WindowId,
 } from "@octant/contracts";
-import { isLoopbackHostname, isAllowedRendererOrigin } from "./shellRoutes";
+import { isAllowedRendererOrigin, isLocalRendererOrigin, isLoopbackHostname } from "./shellRoutes";
 import { LaunchSessionError, type LaunchSessionStore } from "./launchSessionStore";
 import { WindowAuthorityError, type WindowAuthorityStore } from "./windowAuthorityStore";
 
@@ -64,7 +64,7 @@ async function handleLocalBootstrap(
   }
   if (
     origin === null ||
-    !isAllowedLocalRendererOrigin(origin, dependencies.allowedRendererHttpOrigin)
+    !isAllowedLocalRendererOrigin(origin, url, dependencies.allowedRendererHttpOrigin)
   ) {
     return failureResponse(
       { category: "invalid", message: "Renderer origin is not allowed." },
@@ -142,8 +142,14 @@ function localAuthorityCandidate(
   }
 }
 
-function isAllowedLocalRendererOrigin(origin: string, allowedHttpOrigin?: string | null): boolean {
-  if (!isAllowedRendererOrigin(origin, allowedHttpOrigin)) return false;
+// This route mints window authority, so it admits only renderers this listener
+// serves; any other loopback page is refused before a capability exists.
+function isAllowedLocalRendererOrigin(
+  origin: string,
+  listenerUrl: URL,
+  allowedHttpOrigin?: string | null,
+): boolean {
+  if (!isLocalRendererOrigin(origin, listenerUrl, allowedHttpOrigin)) return false;
   try {
     return new URL(origin).protocol === "http:";
   } catch {
