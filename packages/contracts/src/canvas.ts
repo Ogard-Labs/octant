@@ -2029,6 +2029,7 @@ export const decodeCanvasVersion = Schema.decodeUnknownSync(CanvasVersion);
 export const decodeCanvasPresentation = Schema.decodeUnknownSync(CanvasPresentation);
 export const decodeCanvasDiagramLayoutKind = Schema.decodeUnknownSync(CanvasDiagramLayoutKind);
 export const decodeCanvasPlanTaskId = Schema.decodeUnknownSync(CanvasPlanTaskId);
+export const decodeCanvasNodeId = Schema.decodeUnknownSync(CanvasNodeId);
 
 // ── Journaled lifecycle events ──────────────────────────────────────────────
 //

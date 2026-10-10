@@ -8,7 +8,7 @@ import type {
   CanvasCommentsOutcome,
 } from "@octant/contracts/canvas-board";
 import { decodeCanvasDefinition } from "@octant/contracts/canvas";
-import { stateStoreDecisionExample } from "@octant/domain";
+import { settingsScreenExample, stateStoreDecisionExample } from "@octant/domain";
 import { CanvasCommentsPanel } from "./CanvasCommentsPanel";
 import { canvasFixture } from "./test-fixtures";
 
@@ -90,6 +90,37 @@ describe("CanvasCommentsPanel", () => {
     const threads = await screen.findByRole("list", { name: "Comment threads" });
     expect(within(threads).getByText("Option · SQLite")).toBeInTheDocument();
     expect(within(threads).getByText("Criterion · Operational cost")).toBeInTheDocument();
+  });
+
+  it("anchors a comment to a mockup's numbered callout", async () => {
+    const definition = decodeCanvasDefinition({
+      ...canvasFixture,
+      blocks: [settingsScreenExample],
+    });
+    const onCallout: CanvasCommentThread = {
+      comment: {
+        ...existing.comment,
+        commentId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa4" as never,
+        anchor: {
+          kind: "node",
+          blockId: settingsScreenExample.blockId as never,
+          nodeId: "save" as never,
+        },
+        body: "Should Save stay enabled?",
+      },
+      replies: [],
+    };
+    render(
+      <CanvasCommentsPanel
+        author={author}
+        canvasId={canvasId}
+        definition={definition}
+        load={async () => ready([onCallout])}
+        send={vi.fn()}
+      />,
+    );
+    const threads = await screen.findByRole("list", { name: "Comment threads" });
+    expect(within(threads).getByText("Callout 2 · Save")).toBeInTheDocument();
   });
 
   it("adds a comment on the chosen anchor against the sequence it saw, then reloads", async () => {

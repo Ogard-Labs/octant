@@ -2996,10 +2996,43 @@
 }
 
 /* A mockup is a wireframe. Neutral ink only: the Default style has no hue,
-   and nothing here is a live control. */
+   and nothing here is a live control. The styled fidelity below this section
+   draws the same tree with the theme's accent and tones. */
+.canvas-mockup-block {
+  display: grid;
+  gap: var(--oct-space-3);
+  min-width: 0;
+}
+
 .canvas-mockup {
   max-width: 100%;
   color: var(--oct-fg);
+}
+
+.canvas-mockup__frames {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--oct-space-4);
+}
+
+.canvas-mockup__variant {
+  display: grid;
+  flex: 1 1 auto;
+  gap: var(--oct-space-2);
+  min-width: 0;
+  max-width: 100%;
+  margin: 0;
+}
+
+.canvas-mockup__frames[data-count="1"] .canvas-mockup__variant {
+  flex-grow: 0;
+}
+
+.canvas-mockup__variant-label {
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  font-weight: var(--oct-weight-strong);
 }
 
 .canvas-mockup__frame {
@@ -3009,7 +3042,8 @@
   background: var(--oct-surface);
 }
 
-.canvas-mockup__frame[data-device="desktop"] {
+.canvas-mockup__frame[data-device="desktop"],
+.canvas-mockup__frame[data-device="browser"] {
   width: min(100%, 720px);
 }
 
@@ -3019,6 +3053,24 @@
 
 .canvas-mockup__frame[data-device="phone"] {
   width: min(100%, var(--oct-phone-w));
+}
+
+.canvas-mockup__frame[data-device="dock-panel"] {
+  width: min(100%, 320px);
+}
+
+.canvas-mockup__frame[data-device="custom"] {
+  width: min(100%, var(--canvas-mockup-frame-w, 720px));
+}
+
+/* Side by side, a variant takes its share of the row and wraps to its own
+   line when that share would be narrower than a phone. */
+.canvas-mockup__frames:not([data-count="1"]) .canvas-mockup__variant {
+  flex-basis: min(100%, 260px);
+}
+
+.canvas-mockup__frames:not([data-count="1"]) .canvas-mockup__frame {
+  width: 100%;
 }
 
 .canvas-mockup__chrome {
@@ -3031,21 +3083,72 @@
   padding: var(--oct-space-2) var(--oct-space-3);
 }
 
+.canvas-mockup__chrome-dots {
+  display: none;
+  flex: none;
+  width: 32px;
+  height: 8px;
+  background:
+    radial-gradient(circle at 4px 4px, var(--oct-border) 3px, transparent 3.5px),
+    radial-gradient(circle at 16px 4px, var(--oct-border) 3px, transparent 3.5px),
+    radial-gradient(circle at 28px 4px, var(--oct-border) 3px, transparent 3.5px);
+}
+
+.canvas-mockup--desktop .canvas-mockup__chrome-dots,
+.canvas-mockup--browser .canvas-mockup__chrome-dots {
+  display: block;
+}
+
 .canvas-mockup__chrome-title {
+  overflow: hidden;
+  min-width: 0;
   font-weight: var(--oct-weight-strong);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A browser frame shows a blank address bar: the mockup names no address. */
+.canvas-mockup--browser .canvas-mockup__chrome-title {
+  flex: 1 1 auto;
+  border-radius: var(--oct-radius-pill);
+  background: var(--oct-surface);
+  padding: 0 var(--oct-space-3);
+  font-weight: var(--oct-weight-regular);
+  text-align: center;
 }
 
 .canvas-mockup__chrome-device {
+  flex: none;
   color: var(--oct-meta);
   font-family: var(--oct-font-mono);
   font-size: var(--oct-text-xs);
 }
 
+.canvas-mockup__screen {
+  position: relative;
+  min-height: var(--oct-space-12);
+}
+
+.canvas-mockup__frame[data-device="custom"] .canvas-mockup__screen {
+  aspect-ratio: var(--canvas-mockup-frame-ratio, auto);
+}
+
+.canvas-mockup__tree {
+  padding: var(--oct-space-3);
+}
+
 .canvas-mockup__tree,
 .canvas-mockup__tree ul {
   margin: 0;
-  padding: 0;
   list-style: none;
+}
+
+.canvas-mockup__tree ul {
+  padding: 0;
+}
+
+.canvas-mockup__tree:has(> .canvas-mockup__window) {
+  padding: 0;
 }
 
 .canvas-mockup__columns {
@@ -3054,7 +3157,8 @@
   min-width: 0;
 }
 
-.canvas-mockup--phone .canvas-mockup__columns {
+.canvas-mockup--phone .canvas-mockup__columns,
+.canvas-mockup--dock-panel .canvas-mockup__columns {
   flex-direction: column;
 }
 
@@ -3073,7 +3177,8 @@
   flex-basis: 34%;
 }
 
-.canvas-mockup--phone .canvas-mockup__sidebar-slot {
+.canvas-mockup--phone .canvas-mockup__sidebar-slot,
+.canvas-mockup--dock-panel .canvas-mockup__sidebar-slot {
   flex-basis: auto;
   border-right: 0;
   border-bottom: 1px solid var(--oct-border);
@@ -3086,12 +3191,34 @@
 }
 
 .canvas-mockup__node {
+  min-width: 0;
   padding-block: var(--oct-space-1);
+}
+
+.canvas-mockup__face {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-2);
+  min-width: 0;
 }
 
 .canvas-mockup__node--list-row {
   border-bottom: 1px solid var(--oct-border);
   padding: var(--oct-space-2) var(--oct-space-3);
+}
+
+.canvas-mockup__node--nav > ul > .canvas-mockup__node--list-row {
+  border-bottom: 0;
+  border-radius: var(--oct-radius-sm);
+}
+
+.canvas-mockup__node--list-row.is-on {
+  background: var(--oct-fill-2);
+}
+
+.canvas-mockup__node--list-row.is-on .canvas-mockup__label {
+  color: var(--oct-fg);
+  font-weight: var(--oct-weight-strong);
 }
 
 .canvas-mockup__node--card {
@@ -3104,41 +3231,126 @@
   padding: var(--oct-space-2) var(--oct-space-3);
 }
 
-.canvas-mockup__node--list > .canvas-mockup__face {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip: rect(0 0 0 0);
+.canvas-mockup__node--stack > ul,
+.canvas-mockup__node--card > ul,
+.canvas-mockup__modal-box > ul {
+  display: grid;
+  gap: var(--oct-space-2);
+}
+
+.canvas-mockup__node--row > ul,
+.canvas-mockup__node--header > ul {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--oct-space-2);
+}
+
+.canvas-mockup__node--grid > ul {
+  display: grid;
+  grid-template-columns: repeat(var(--canvas-mockup-grid-columns, 2), minmax(0, 1fr));
+  gap: var(--oct-space-2);
+}
+
+.canvas-mockup__node--header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--oct-space-2);
+}
+
+.canvas-mockup__header-slot .canvas-mockup__node--nav > ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--oct-space-1);
+}
+
+.canvas-mockup__header-title,
+.canvas-mockup__heading,
+.canvas-mockup__modal-title {
+  color: var(--oct-fg);
+  font-weight: var(--oct-weight-strong);
+}
+
+.canvas-mockup__heading {
+  font-size: var(--oct-text-lg);
 }
 
 .canvas-mockup__label {
+  overflow-wrap: anywhere;
   color: var(--oct-fg-2);
   font-size: var(--oct-text-xs);
 }
 
+.canvas-mockup__value {
+  overflow: hidden;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.canvas-mockup__glyph {
+  flex: none;
+  color: var(--oct-fg-2);
+}
+
+.canvas-mockup__row-face {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-2);
+  min-width: 0;
+}
+
 .canvas-mockup__field {
   display: flex;
+  flex: 1 1 auto;
   flex-direction: column;
   gap: var(--oct-space-1);
+  min-width: 0;
 }
 
 .canvas-mockup__field-box {
-  display: block;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--oct-space-2);
   height: var(--oct-space-6);
   border: 1px solid var(--oct-border);
   border-radius: var(--oct-radius-sm);
   background: var(--oct-bg);
+  padding: 0 var(--oct-space-2);
 }
 
 .canvas-mockup__button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: var(--oct-space-1);
   border: 1px solid var(--oct-border);
   border-radius: var(--oct-radius-sm);
   padding: var(--oct-space-1) var(--oct-space-3);
   color: var(--oct-fg);
+}
+
+/* In a wireframe a tone is emphasis, not colour: the primary action is
+   filled with ink, and a destructive one keeps its outline but is drawn
+   heavier. The styled fidelity paints the tone. */
+.canvas-mockup__node[data-tone="accent"] .canvas-mockup__button {
+  border-color: var(--oct-fg);
+  background: var(--oct-fg);
+  color: var(--oct-bg);
+}
+
+.canvas-mockup__node[data-tone="accent"] .canvas-mockup__button .canvas-mockup__glyph {
+  color: currentColor;
+}
+
+.canvas-mockup__node[data-tone="danger"] .canvas-mockup__button,
+.canvas-mockup__node[data-tone="warning"] .canvas-mockup__button {
+  border-width: 2px;
+  border-color: var(--oct-fg);
 }
 
 .canvas-mockup__toggle {
@@ -3146,15 +3358,17 @@
   align-items: center;
   justify-content: space-between;
   gap: var(--oct-space-3);
+  width: 100%;
 }
 
 .canvas-mockup__switch {
   display: inline-flex;
+  flex: none;
   align-items: center;
   width: 28px;
   height: 16px;
   border: 1px solid var(--oct-border);
-  border-radius: 50%;
+  border-radius: var(--oct-radius-pill);
   background: var(--oct-bg);
 }
 
@@ -3177,9 +3391,35 @@
   background: var(--oct-bg);
 }
 
+.canvas-mockup__check {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-2);
+}
+
+.canvas-mockup__box {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border: 1px solid var(--oct-border);
+  border-radius: 3px;
+  background: var(--oct-bg);
+  color: var(--oct-bg);
+}
+
+.canvas-mockup__box.is-on {
+  border-color: var(--oct-fg);
+  background: var(--oct-fg);
+}
+
 .canvas-mockup__tab-strip {
   display: flex;
   gap: var(--oct-space-2);
+  overflow: hidden;
+  width: 100%;
   border-bottom: 1px solid var(--oct-border);
 }
 
@@ -3187,6 +3427,7 @@
   padding: var(--oct-space-1) var(--oct-space-2);
   border-bottom: 2px solid transparent;
   color: var(--oct-muted);
+  white-space: nowrap;
 }
 
 .canvas-mockup__tab.is-shown {
@@ -3196,6 +3437,7 @@
 
 .canvas-mockup__image {
   display: flex;
+  flex: 1 1 auto;
   align-items: flex-end;
   min-height: var(--oct-space-12);
   padding: var(--oct-space-2);
@@ -3218,6 +3460,298 @@
     var(--oct-bg);
   color: var(--oct-muted);
   font-size: var(--oct-text-xs);
+}
+
+.canvas-mockup__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--oct-text-xs);
+  table-layout: fixed;
+}
+
+.canvas-mockup__table th,
+.canvas-mockup__table td {
+  overflow: hidden;
+  border-bottom: 1px solid var(--oct-border);
+  padding: var(--oct-space-1) var(--oct-space-2);
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.canvas-mockup__table th {
+  color: var(--oct-fg);
+  font-weight: var(--oct-weight-strong);
+}
+
+.canvas-mockup__table td {
+  color: var(--oct-fg-2);
+}
+
+.canvas-mockup__avatar {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: var(--oct-space-6);
+  height: var(--oct-space-6);
+  border: 1px solid var(--oct-border);
+  border-radius: 50%;
+  background: var(--oct-bg);
+  color: var(--oct-fg-2);
+  font-size: var(--oct-text-xs);
+  font-weight: var(--oct-weight-strong);
+}
+
+.canvas-mockup__badge {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-pill);
+  padding: 0 var(--oct-space-2);
+  color: var(--oct-fg-2);
+  font-size: var(--oct-text-xs);
+}
+
+.canvas-mockup__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--oct-space-6);
+  height: var(--oct-space-6);
+}
+
+/* A modal covers its screen with a scrim and centres its box; a toast floats
+   at the bottom of the screen. Both are drawn, not opened. */
+.canvas-mockup__node--modal {
+  display: grid;
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  place-items: center;
+  padding: var(--oct-space-4);
+  background: color-mix(in oklab, var(--oct-fg) 24%, transparent);
+}
+
+.canvas-mockup__modal-box {
+  display: grid;
+  gap: var(--oct-space-2);
+  width: min(100%, 320px);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-md);
+  background: var(--oct-surface);
+  padding: var(--oct-space-3);
+}
+
+.canvas-mockup__node--toast {
+  position: absolute;
+  right: var(--oct-space-3);
+  bottom: var(--oct-space-3);
+  left: var(--oct-space-3);
+  z-index: 2;
+  display: flex;
+  justify-content: center;
+  padding: 0;
+}
+
+.canvas-mockup__toast {
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-pill);
+  background: var(--oct-surface);
+  padding: var(--oct-space-1) var(--oct-space-3);
+  color: var(--oct-fg);
+  font-size: var(--oct-text-xs);
+}
+
+/* A screen with a toast keeps room for it below the last row. */
+.canvas-mockup__screen:has(.canvas-mockup__node--toast) {
+  padding-bottom: var(--oct-space-8);
+}
+
+.canvas-mockup__callout-mark {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  border-radius: var(--oct-radius-pill);
+  background: var(--oct-fg);
+  color: var(--oct-bg);
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.canvas-mockup__callouts {
+  display: grid;
+  gap: var(--oct-space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--oct-text-sm);
+}
+
+.canvas-mockup__callout {
+  display: flex;
+  align-items: baseline;
+  gap: var(--oct-space-2);
+  color: var(--oct-fg-2);
+}
+
+.canvas-mockup__callout-target {
+  color: var(--oct-fg);
+  font-weight: var(--oct-weight-strong);
+}
+
+.canvas-mockup__outline {
+  font-size: var(--oct-text-sm);
+}
+
+.canvas-mockup__outline summary {
+  width: fit-content;
+  color: var(--oct-meta);
+  cursor: pointer;
+}
+
+.canvas-mockup__outline ul {
+  margin: 0;
+  padding-left: var(--oct-space-4);
+}
+
+.canvas-mockup__outline-variant {
+  margin: var(--oct-space-2) 0 0;
+  color: var(--oct-fg);
+  font-weight: var(--oct-weight-strong);
+}
+
+/* mockup: styled fidelity. The same tree drawn with the active theme: the
+   accent fills the primary action, the selected tab, and an on control, and a
+   tone takes its theme role. It follows light, dark, and any imported theme. */
+.canvas-mockup--styled .canvas-mockup__frame {
+  border-radius: var(--oct-radius-lg);
+}
+
+.canvas-mockup--styled .canvas-mockup__node--card {
+  border-color: var(--oct-hairline-strong);
+  border-radius: var(--oct-radius-md);
+  background: var(--oct-bg);
+}
+
+.canvas-mockup--styled .canvas-mockup__node[data-tone="accent"] .canvas-mockup__button,
+.canvas-mockup--styled .canvas-mockup__switch.is-on,
+.canvas-mockup--styled .canvas-mockup__box.is-on {
+  border-color: var(--oct-accent);
+  background: var(--oct-accent);
+  color: var(--oct-accent-on);
+}
+
+.canvas-mockup--styled .canvas-mockup__switch.is-on .canvas-mockup__knob {
+  background: var(--oct-accent-on);
+}
+
+.canvas-mockup--styled .canvas-mockup__tab.is-shown {
+  border-bottom-color: var(--oct-accent);
+  color: var(--oct-accent-fg);
+}
+
+.canvas-mockup--styled .canvas-mockup__node[data-tone="danger"] .canvas-mockup__button {
+  border-width: 1px;
+  border-color: var(--oct-danger);
+  background: var(--oct-danger);
+  color: var(--oct-bg);
+}
+
+.canvas-mockup--styled .canvas-mockup__node[data-tone="warning"] .canvas-mockup__button {
+  border-width: 1px;
+  border-color: var(--oct-warn);
+  color: var(--oct-warn-fg);
+}
+
+.canvas-mockup--styled .canvas-mockup__node[data-tone="success"] .canvas-mockup__button {
+  border-color: var(--oct-success);
+  color: var(--oct-success-fg);
+}
+
+.canvas-mockup--styled
+  .canvas-mockup__node[data-tone="accent"]
+  :is(.canvas-mockup__badge, .canvas-mockup__toast) {
+  border-color: var(--oct-accent);
+  color: var(--oct-accent-fg);
+}
+
+.canvas-mockup--styled
+  .canvas-mockup__node[data-tone="success"]
+  :is(.canvas-mockup__badge, .canvas-mockup__toast) {
+  border-color: transparent;
+  background: var(--oct-success-soft);
+  color: var(--oct-success-fg);
+}
+
+.canvas-mockup--styled
+  .canvas-mockup__node[data-tone="warning"]
+  :is(.canvas-mockup__badge, .canvas-mockup__toast) {
+  border-color: transparent;
+  background: var(--oct-warn-soft);
+  color: var(--oct-warn-fg);
+}
+
+.canvas-mockup--styled
+  .canvas-mockup__node[data-tone="danger"]
+  :is(.canvas-mockup__badge, .canvas-mockup__toast) {
+  border-color: transparent;
+  background: var(--oct-danger-soft);
+  color: var(--oct-danger-fg);
+}
+
+.canvas-mockup--styled .canvas-mockup__node--list-row.is-on {
+  background: color-mix(in oklab, var(--oct-accent) 12%, transparent);
+}
+
+/* System colours: hairlines become the system frame, filled marks become
+   system text on canvas, and a tone keeps its outline so it stays apart
+   without a colour. */
+@media (forced-colors: active) {
+  .canvas-mockup__frame,
+  .canvas-mockup__node--card,
+  .canvas-mockup__field-box,
+  .canvas-mockup__button,
+  .canvas-mockup__switch,
+  .canvas-mockup__box,
+  .canvas-mockup__badge,
+  .canvas-mockup__toast,
+  .canvas-mockup__avatar,
+  .canvas-mockup__modal-box,
+  .canvas-mockup__image {
+    border-color: CanvasText;
+  }
+
+  .canvas-mockup__switch.is-on,
+  .canvas-mockup__box.is-on,
+  .canvas-mockup__callout-mark,
+  .canvas-mockup__node[data-tone="accent"] .canvas-mockup__button {
+    forced-color-adjust: none;
+    border-color: CanvasText;
+    background: CanvasText;
+    color: Canvas;
+  }
+
+  .canvas-mockup__switch.is-on .canvas-mockup__knob {
+    forced-color-adjust: none;
+    background: Canvas;
+  }
+
+  .canvas-mockup__tab.is-shown {
+    border-bottom-color: CanvasText;
+  }
+
+  .canvas-mockup__node--list-row.is-on {
+    outline: 1px solid CanvasText;
+  }
+
+  .canvas-mockup__node--modal {
+    background: Canvas;
+  }
 }
 
 /* A design: real screens or slides drawn from the author's HTML and CSS in a

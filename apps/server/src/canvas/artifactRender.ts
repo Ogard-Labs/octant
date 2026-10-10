@@ -16,6 +16,11 @@ import {
   layoutCanvasBarList,
 } from "@octant/domain/canvas-bar-list-layout";
 import { layoutCanvasComparisonMatrix } from "@octant/domain/canvas-comparison-matrix";
+import {
+  canvasMockupCallouts,
+  canvasMockupFrames,
+  type CanvasMockupBranch,
+} from "@octant/domain/canvas-mockup-outline";
 
 /**
  * Drawing an artifact, once.
@@ -773,19 +778,47 @@ function mockupFrame(
   width: number,
   palette: ArtifactThumbnailPalette,
 ): string {
-  const frameWidth =
-    block.device === "phone"
-      ? Math.min(width, 40)
-      : block.device === "tablet"
-        ? Math.min(width, 88)
-        : width;
-  const x = PADDING;
-  const frame = `<rect x="${String(x)}" y="${String(y)}" width="${String(frameWidth)}" height="48" rx="4" fill="none" stroke="${palette.accent}" stroke-width="1.2"/>`;
-  const rows = block.nodes.slice(0, 4).map((node, index) => {
-    const rowWidth = Math.round((frameWidth - 8) * (node.component === "button" ? 0.42 : 0.78));
-    return `<rect x="${String(x + 4)}" y="${String(y + 6 + index * 10)}" width="${String(rowWidth)}" height="6" rx="1.5" fill="${palette.muted}" opacity="0.5"/>`;
-  });
-  return frame + rows.join("");
+  // One frame per variant, side by side, each at the device's narrowness: a
+  // phone or panel stays a slim frame, a desktop or browser takes its share.
+  const frames = canvasMockupFrames(block);
+  const gap = 4;
+  const share = Math.floor((width - gap * (frames.length - 1)) / frames.length);
+  const narrow = block.device === "phone" || block.device === "dock-panel";
+  const frameWidth = Math.max(
+    12,
+    narrow ? Math.min(share, 40) : block.device === "tablet" ? Math.min(share, 88) : share,
+  );
+  const styled = block.fidelity === "styled";
+  const callouts = canvasMockupCallouts(block);
+  return frames
+    .map((frame, index) => {
+      const x = PADDING + index * (frameWidth + gap);
+      const outline = `<rect data-mockup-frame="${String(index)}" x="${String(x)}" y="${String(y)}" width="${String(frameWidth)}" height="48" rx="${styled ? "6" : "4"}" fill="none" stroke="${styled ? palette.accent : palette.muted}" stroke-width="1.2"/>`;
+      const nodes: Array<CanvasMockupBranch["node"]> = [];
+      const walk = (branch: CanvasMockupBranch) => {
+        nodes.push(branch.node);
+        branch.children.forEach(walk);
+      };
+      frame.roots.forEach(walk);
+      const rows = nodes
+        .filter(
+          (node) => !["window", "stack", "row", "grid", "list", "nav"].includes(node.component),
+        )
+        .slice(0, 4)
+        .map((node, row) => {
+          const primary = node.component === "button" && node.tone === "accent";
+          const rowWidth = Math.round(
+            (frameWidth - 8) * (node.component === "button" ? 0.42 : 0.78),
+          );
+          const bar = `<rect x="${String(x + 4)}" y="${String(y + 6 + row * 10)}" width="${String(rowWidth)}" height="6" rx="1.5" fill="${primary && styled ? palette.accent : primary ? palette.ink : palette.muted}" opacity="${primary ? "0.9" : "0.5"}"/>`;
+          const mark = callouts.has(String(node.nodeId))
+            ? `<circle cx="${String(x + frameWidth - 5)}" cy="${String(y + 9 + row * 10)}" r="2.5" fill="${palette.ink}"/>`
+            : "";
+          return bar + mark;
+        });
+      return outline + rows.join("");
+    })
+    .join("");
 }
 
 /**

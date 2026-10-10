@@ -5,7 +5,12 @@ import {
   type CanvasBlock,
 } from "@octant/contracts/canvas";
 import { describe, expect, it } from "vitest";
-import { releaseMindmapBlock, supportFlowBlock } from "@octant/domain";
+import {
+  notificationStatesExampleBlock,
+  releaseMindmapBlock,
+  settingsScreenExampleBlock,
+  supportFlowBlock,
+} from "@octant/domain";
 import { renderArtifactSidecarSvg, renderArtifactThumbnail } from "./artifactRender";
 
 function definition(blocks: ReadonlyArray<CanvasBlock>, title = "Launch plan") {
@@ -333,6 +338,20 @@ describe("drawing a preview of an artifact", () => {
     expect(phone).toContain("<rect");
     expect(phone).not.toMatch(/<\s*script/i);
     expect(phone).not.toBe(desktop);
+  });
+
+  it("draws one frame per mockup variant, and a styled screen apart from a wireframe", () => {
+    const states = renderArtifactThumbnail(definition([notificationStatesExampleBlock]));
+    const single = renderArtifactThumbnail(definition([settingsScreenExampleBlock]));
+    const frames = (markup: string) => (markup.match(/data-mockup-frame/g) ?? []).length;
+
+    expect(frames(states)).toBe(3);
+    expect(frames(single)).toBe(1);
+    const wireframe = renderArtifactThumbnail(
+      definition([decodeCanvasBlock({ ...notificationStatesExampleBlock, fidelity: "wireframe" })]),
+    );
+    expect(wireframe).not.toBe(states);
+    expect(states).not.toMatch(/<\s*script/i);
   });
 
   it("draws a heatmap as one cell per coordinate, with a dashed cell for a gap", () => {

@@ -8,7 +8,12 @@ import {
   type CanvasCommentThread,
   type CanvasCommentsOutcome,
 } from "@octant/contracts/canvas-board";
-import type { CanvasActor, CanvasDefinition, CanvasId } from "@octant/contracts/canvas";
+import {
+  decodeCanvasNodeId,
+  type CanvasActor,
+  type CanvasDefinition,
+  type CanvasId,
+} from "@octant/contracts/canvas";
 import { decodeUtcTimestamp } from "@octant/contracts/events";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { canvasBlockLabel } from "./CanvasDocument";
@@ -154,6 +159,19 @@ function anchorChoices(definition: CanvasDefinition): ReadonlyArray<AnchorChoice
           anchor: { kind: "node", blockId: block.blockId, nodeId: criterion.criterionId },
         });
       }
+    }
+    if (block.kind === "mockup") {
+      // A numbered callout is a place a reader replies: its comment anchors to
+      // the node the callout is pinned to.
+      const labels = new Map(block.nodes.map((node) => [String(node.nodeId), node.label]));
+      (block.annotations ?? []).forEach((annotation, index) => {
+        const nodeId = String(annotation.nodeId);
+        choices.push({
+          id: `node:${String(block.blockId)}:${nodeId}`,
+          label: `Callout ${String(index + 1)} · ${labels.get(nodeId) ?? nodeId}`,
+          anchor: { kind: "node", blockId: block.blockId, nodeId: decodeCanvasNodeId(nodeId) },
+        });
+      });
     }
     if (block.kind === "mindmap") {
       for (const node of block.nodes) {

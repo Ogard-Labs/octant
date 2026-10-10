@@ -21,6 +21,13 @@ import {
   type CanvasMatrixCellLayout,
 } from "@octant/domain/canvas-comparison-matrix";
 import { canvasMathRenderOptions } from "@octant/domain/canvas-math-policy";
+import {
+  CANVAS_MOCKUP_DEVICE_NAME,
+  canvasMockupCallouts,
+  canvasMockupFrames,
+  canvasMockupNodeReading,
+  type CanvasMockupBranch,
+} from "@octant/domain/canvas-mockup-outline";
 import { DEFAULT_ARTIFACT_PALETTE, escapeXml } from "./artifactRender";
 
 /**
@@ -425,13 +432,7 @@ function piecesFor(block: CanvasBlock): ReadonlyArray<Piece> {
           .join(" — "),
       );
     case "mockup":
-      return [
-        { kind: "heading", level: 2, text: reading(block.title) },
-        {
-          kind: "list",
-          items: block.nodes.map((node) => `${node.component}: ${reading(node.label)}`),
-        },
-      ];
+      return mockupPieces(block);
     case "treemap": {
       // The hierarchy as a table: one row per node, indented by depth, so the
       // exported document carries the same readings the picture shows.
@@ -670,6 +671,56 @@ function piecesFor(block: CanvasBlock): ReadonlyArray<Piece> {
       return unhandled;
     }
   }
+}
+
+/**
+ * A mockup as the outline a reader would get from the screen: its device and
+ * fidelity, then each frame's component tree as a nested list (under the
+ * variant's name when there are several), then the numbered callouts.
+ */
+function mockupPieces(
+  block: Extract<CanvasBlock, { readonly kind: "mockup" }>,
+): ReadonlyArray<Piece> {
+  const callouts = canvasMockupCallouts(block);
+  const labels = new Map(block.nodes.map((node) => [String(node.nodeId), node.label]));
+  const size =
+    block.size === undefined
+      ? ""
+      : ` at ${String(block.size.width)} × ${String(block.size.height)}`;
+  const pieces: Piece[] = [
+    { kind: "heading", level: 2, text: reading(block.title) },
+    {
+      kind: "paragraph",
+      text: `${CANVAS_MOCKUP_DEVICE_NAME[block.device]} mockup${size}, ${block.fidelity ?? "wireframe"}.`,
+    },
+  ];
+  for (const frame of canvasMockupFrames(block)) {
+    if (frame.label !== undefined) {
+      pieces.push({ kind: "heading", level: 3, text: reading(frame.label) });
+    }
+    const items: Array<{ readonly depth: number; readonly text: string }> = [];
+    const walk = (branch: CanvasMockupBranch, depth: number) => {
+      items.push({
+        depth,
+        text: reading(
+          canvasMockupNodeReading(branch.node, callouts.get(String(branch.node.nodeId))),
+        ),
+      });
+      for (const child of branch.children) walk(child, depth + 1);
+    };
+    for (const root of frame.roots) walk(root, 0);
+    if (items.length > 0) pieces.push({ kind: "tree", items });
+  }
+  if (block.annotations !== undefined && block.annotations.length > 0) {
+    pieces.push({
+      kind: "ordered",
+      items: block.annotations.map(
+        (annotation) =>
+          `${reading(labels.get(String(annotation.nodeId)) ?? String(annotation.nodeId))} — ${reading(annotation.note)}`,
+      ),
+    });
+  }
+  return pieces;
 }
 
 function paragraph(text: string): ReadonlyArray<Piece> {

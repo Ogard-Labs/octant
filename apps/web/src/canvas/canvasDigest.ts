@@ -99,7 +99,13 @@ export function canvasDigest(definition: CanvasDefinition): CanvasDigest {
     (block): block is Extract<Block, { kind: "mockup" }> => block.kind === "mockup",
   );
   if (mockup !== undefined) {
-    return { kind: "mockup", label: "Mockup", facts: [`${mockup.device} screen`] };
+    const device = mockup.device.replace("-", " ");
+    const variants = mockup.variants?.length ?? 0;
+    return {
+      kind: "mockup",
+      label: "Mockup",
+      facts: [variants === 0 ? `${device} screen` : `${String(variants)} ${device} variants`],
+    };
   }
   const table = blocks.find(
     (block): block is Extract<Block, { kind: "table" }> => block.kind === "table",
