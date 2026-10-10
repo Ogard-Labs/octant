@@ -56,6 +56,7 @@ export const IPC_CHANNELS = {
   resetBounds: "octant:window:reset-bounds",
   selectProjectRoot: "octant:project:select-root",
   selectLocalPluginFolder: "octant:extensions:select-local-plugin-folder",
+  selectRuntimeBinary: "octant:providers:select-runtime-binary",
   setProviderCredential: "octant:provider-credential:set",
   hostCapabilities: "octant:window:host-capabilities",
   resolvedMaterial: "octant:window:resolved-material",
@@ -311,7 +312,8 @@ const PROJECT_WINDOW_CAPABILITY_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 type ProjectRootPickerResult =
   | Readonly<{ kind: "cancelled" }>
   | Readonly<{ kind: "selected"; receiptId: string; displayName: string }>;
-type LocalPluginFolderPickerResult =
+/** What a receipt-issuing native picker answers: an opaque receipt, never the path. */
+type PickerReceiptResult =
   | Readonly<{ kind: "cancelled" }>
   | Readonly<{ kind: "selected"; receiptId: string; displayName: string }>;
 export interface CodeExternalEditorRequest {
@@ -447,7 +449,9 @@ export interface OctantHostBridge {
   ) => Promise<ProviderCredentialStatus>;
   readonly resetBounds: () => Promise<void>;
   readonly selectProjectRoot: (projectType: BoundProjectType) => Promise<ProjectRootPickerResult>;
-  readonly selectLocalPluginFolder: () => Promise<LocalPluginFolderPickerResult>;
+  readonly selectLocalPluginFolder: () => Promise<PickerReceiptResult>;
+  /** Native file picker for a runtime's executable; returns an opaque receipt, never the path. */
+  readonly selectRuntimeBinary: () => Promise<PickerReceiptResult>;
   readonly setProviderCredential: (providerInstanceId: string, credential: string) => Promise<void>;
   readonly setSidebarMaterialPreference: (preference: SidebarMaterialPreference) => Promise<void>;
   readonly setSidebarVibrancyMode: (mode: SidebarVibrancyMode) => Promise<void>;
@@ -830,7 +834,12 @@ export function createHostBridge(
       }
     },
     selectLocalPluginFolder: async () =>
-      decodeLocalPluginFolderPickerResult(await ipc.invoke(IPC_CHANNELS.selectLocalPluginFolder)),
+      decodePickerReceiptResult(
+        await ipc.invoke(IPC_CHANNELS.selectLocalPluginFolder),
+        "local plugin folder",
+      ),
+    selectRuntimeBinary: async () =>
+      decodePickerReceiptResult(await ipc.invoke(IPC_CHANNELS.selectRuntimeBinary), "binary"),
     setProviderCredential: async (providerInstanceId: string, credential: string) => {
       validateProviderInstanceId(providerInstanceId);
       if (
@@ -1435,8 +1444,11 @@ function decodeProjectRootPickerResult(value: unknown): ProjectRootPickerResult 
   throw new TypeError("Invalid Project root picker result.");
 }
 
-function decodeLocalPluginFolderPickerResult(value: unknown): LocalPluginFolderPickerResult {
-  if (!isRecord(value)) throw new TypeError("Invalid local plugin folder picker result.");
+function decodePickerReceiptResult(
+  value: unknown,
+  picker: "local plugin folder" | "binary",
+): PickerReceiptResult {
+  if (!isRecord(value)) throw new TypeError(`Invalid ${picker} picker result.`);
   const keys = Object.keys(value).sort();
   if (keys.length === 1 && keys[0] === "kind" && value.kind === "cancelled") {
     return Object.freeze({ kind: "cancelled" });
@@ -1459,7 +1471,7 @@ function decodeLocalPluginFolderPickerResult(value: unknown): LocalPluginFolderP
       displayName: value.displayName.trim(),
     });
   }
-  throw new TypeError("Invalid local plugin folder picker result.");
+  throw new TypeError(`Invalid ${picker} picker result.`);
 }
 
 function validateAttentionNotificationRequest(value: unknown): void {

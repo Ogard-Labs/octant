@@ -139,6 +139,36 @@ export function supportsProviderCliUpdate(driverKind: ProviderDriverKind): boole
 }
 
 /**
+ * The agent runtimes "Locate binary" can point at an executable the person
+ * picked: every runtime whose configuration names a binary and whose version
+ * probe the host can run to check the pick. GLM Agent is left out because its
+ * ACP agent has no version flag; run bare it starts the agent and waits on
+ * stdin, so the host could never accept a picked file.
+ */
+const LOCATABLE_RUNTIME_DRIVER_KINDS: ReadonlySet<ProviderDriverKind> = new Set([
+  "codex",
+  "opencode",
+  "kimi-code",
+  "claude",
+  "mistral-vibe",
+  "grok",
+  "goose",
+  "gemini",
+  "copilot",
+  "cline",
+  "qwen",
+  "fx",
+  "devin",
+  "kilo",
+  "pi",
+  "oh-my-pi",
+]);
+
+export function canLocateRuntimeBinary(driverKind: ProviderDriverKind): boolean {
+  return LOCATABLE_RUNTIME_DRIVER_KINDS.has(driverKind);
+}
+
+/**
  * The providers Octant drives with its own agent loop. They are inference
  * transports only: every tool they are offered is app-managed and every call
  * passes the server's authority choke point before it runs.

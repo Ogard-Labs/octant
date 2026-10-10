@@ -126,6 +126,7 @@ import {
   namesItsCause,
 } from "./projectRootPicker";
 import { createLocalPluginFolderPicker } from "./localPluginFolderPicker";
+import { createRuntimeBinaryPicker } from "./runtimeBinaryPicker";
 import {
   createSingleFlight,
   assertAutomaticHostStartupEnabled,
@@ -237,6 +238,7 @@ const IPC_CHANNELS = {
   resetBounds: "octant:window:reset-bounds",
   selectProjectRoot: "octant:project:select-root",
   selectLocalPluginFolder: "octant:extensions:select-local-plugin-folder",
+  selectRuntimeBinary: "octant:providers:select-runtime-binary",
   setProviderCredential: "octant:provider-credential:set",
   resolvedMaterial: "octant:window:resolved-material",
   resolvedSidebarVibrancy: "octant:window:resolved-sidebar-vibrancy",
@@ -1057,6 +1059,7 @@ interface DesktopWindowContext extends DesktopWindowIdentity {
   readonly primary: boolean;
   readonly picker: ReturnType<typeof createProjectRootPicker>;
   readonly localPluginFolderPicker: ReturnType<typeof createLocalPluginFolderPicker>;
+  readonly runtimeBinaryPicker: ReturnType<typeof createRuntimeBinaryPicker>;
   readonly presentationController: WindowPresentationController;
   readonly refreshAuthorityAfterHostRestart: (host: LocalHostDescriptor) => Promise<void>;
 }
@@ -1942,6 +1945,19 @@ async function createWindow(): Promise<void> {
         serverUrl,
         windowId: state.windowId,
       });
+      const runtimeBinaryPicker = createRuntimeBinaryPicker<BrowserWindow>({
+        desktopBridgeSecret,
+        dialog: {
+          showOpenDialog: (owner, options) =>
+            dialog.showOpenDialog(owner, { properties: [...options.properties] }),
+        },
+        resolveOwnedWindow: (sender) => {
+          const owner = BrowserWindow.fromWebContents(sender as Electron.WebContents);
+          return owner !== null && owner === window ? owner : undefined;
+        },
+        serverUrl,
+        windowId: state.windowId,
+      });
 
       let resolvedMaterial: ResolvedSidebarMaterial = presentation.material;
       let resolvedSidebarVibrancy: "sidebar" | null = presentation.vibrancy;
@@ -1980,6 +1996,7 @@ async function createWindow(): Promise<void> {
         primary: true,
         picker: projectRootPicker,
         localPluginFolderPicker,
+        runtimeBinaryPicker,
         presentationController: controller,
         refreshAuthorityAfterHostRestart: createProjectWindowAuthorityRefresh(
           host.instanceId,
@@ -2175,6 +2192,19 @@ async function openSecondaryProjectWindow(target: ProjectWindowTarget): Promise<
           serverUrl,
           windowId,
         });
+        const runtimeBinaryPicker = createRuntimeBinaryPicker<BrowserWindow>({
+          desktopBridgeSecret,
+          dialog: {
+            showOpenDialog: (owner, options) =>
+              dialog.showOpenDialog(owner, { properties: [...options.properties] }),
+          },
+          resolveOwnedWindow: (sender) => {
+            const owner = BrowserWindow.fromWebContents(sender as Electron.WebContents);
+            return owner !== null && owner === window ? owner : undefined;
+          },
+          serverUrl,
+          windowId,
+        });
         let resolvedMaterial: ResolvedSidebarMaterial = presentation.material;
         let resolvedSidebarVibrancy: "sidebar" | null = presentation.vibrancy;
         const controller = createWindowPresentationController({
@@ -2215,6 +2245,7 @@ async function openSecondaryProjectWindow(target: ProjectWindowTarget): Promise<
           primary: false,
           picker,
           localPluginFolderPicker,
+          runtimeBinaryPicker,
           presentationController: controller,
           refreshAuthorityAfterHostRestart: createProjectWindowAuthorityRefresh(
             initialAuthorityInstanceId,
@@ -3055,6 +3086,9 @@ function installIpcHandlers(): void {
   });
   ipcMain.handle(IPC_CHANNELS.selectLocalPluginFolder, async (event) => {
     return await ownedWindowContext(event).localPluginFolderPicker(event);
+  });
+  ipcMain.handle(IPC_CHANNELS.selectRuntimeBinary, async (event) => {
+    return await ownedWindowContext(event).runtimeBinaryPicker(event);
   });
   ipcMain.handle(IPC_CHANNELS.sidebarMaterialPreference, (event, preference: unknown) => {
     const context = ownedWindowContext(event);

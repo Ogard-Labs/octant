@@ -48,6 +48,7 @@ import {
 import { ProviderSettingsList } from "./ProviderSettingsList";
 import { isModelEndpointDriverKind } from "./providerSettingsPresentation";
 import type { ModelToolVerification, TransientProviderCredential } from "./useProviderController";
+import type { LocateBinaryOutcome } from "./useDiscoveryController";
 import { OctantAlert } from "../ui/base/OctantAlert";
 
 export interface ProviderSettingsViewProps {
@@ -167,6 +168,11 @@ export interface ProviderSettingsViewProps {
   ) => Promise<boolean>;
   readonly onRename: (instanceId: ProviderInstanceId, displayName: string) => Promise<boolean>;
   readonly onChangeBinary: (instanceId: ProviderInstanceId, binaryPath: string) => Promise<boolean>;
+  /**
+   * "Locate binary" on a runtime card: the host's native file picker chooses
+   * the executable and the host checks it. Absent where there is no picker.
+   */
+  readonly onLocateBinary?: (instanceId: ProviderInstanceId) => Promise<LocateBinaryOutcome>;
   readonly onChangeOpenAiCompatibleConfiguration: (
     instanceId: ProviderInstanceId,
     configuration: OpenAiCompatibleProviderConfiguration,
@@ -452,6 +458,7 @@ export function ProviderSettingsView(props: ProviderSettingsViewProps) {
         onChangeAnthropicCompatibleConfiguration={props.onChangeAnthropicCompatibleConfiguration}
         onChangeAzureFoundryConfiguration={props.onChangeAzureFoundryConfiguration}
         onChangeBinary={props.onChangeBinary}
+        {...(props.onLocateBinary === undefined ? {} : { onLocateBinary: props.onLocateBinary })}
         onChangeClaudeConfiguration={props.onChangeClaudeConfiguration}
         onChangeDevinConfiguration={props.onChangeDevinConfiguration}
         onChangeGrokConfiguration={props.onChangeGrokConfiguration}

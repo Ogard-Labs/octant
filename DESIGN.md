@@ -1348,6 +1348,12 @@ checked, and a failure keeps its red role. Only under Vivid does ready turn the
 palette's green and setup the palette's orange. The detected, supported-but-not-
 detected, and other groups are Settings sections; the readiness summary is the
 label's description. Ordering controls appear only in an explicit Reorder mode.
+A runtime installed in an unusual location is fixed from its own card rather
+than a manual form: the card's details carry an outlined "Locate binary…"
+action beside Check connection, shown only where the desktop's file picker
+exists and only for a runtime whose version probe the host can run. Its
+answer is one quiet line under the actions (the version the host read), or a
+warning box saying why the host refused the file.
 
 Octant Harness lists its model endpoints differently: as rows in one list,
 never two-up cards. A row is a single link named with its state ("Team

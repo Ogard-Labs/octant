@@ -111,6 +111,26 @@ muted ring for off), two to a row on a wide window. A manual endpoint addition h
 binary, is not described as undetected, and can be enabled without detection.
 Enabled is not ready: detection does not assert authentication.
 
+### Locate binary
+
+A runtime installed somewhere the scan does not look — a custom prefix, a
+version manager's directory, a build you made yourself — does not need a manual
+form. Open the runtime's card details and choose **Locate binary…**, then pick
+the executable in the file picker. This works on any CLI, ACP, Agent SDK, or
+RPC runtime card, detected or not, in the Octant desktop app; a browser or a
+paired device has no file picker, so the action is not offered there. GLM Agent
+is the exception: it has no version flag the host could check a pick with.
+
+Octant only uses a file you picked. The picker hands the page an opaque,
+single-use receipt for this window rather than the path, so nothing else can
+point a runtime at a file you did not choose. The host then checks the file the
+way discovery checks what it finds — an executable regular file, with the
+runtime's version probe run under the same confinement — and refuses a file
+that is not executable or does not answer with a version number. Once it is
+accepted, the card's binary path changes to the file you picked and its other
+settings (sign-in method, display name) stay as they were; an enabled runtime
+is checked again right away.
+
 Discovery also recognizes a narrowly parsed alias declaration for a supported
 executable in `~/.bash_aliases`, `~/.bash_profile`, `~/.bashrc`, `~/.zprofile`,
 or `~/.zshrc`. Octant reads those files without sourcing them, accepts only a
@@ -118,8 +138,8 @@ single executable token or absolute executable path, then applies the same
 absolute-path, executable-file, symlink, probe-timeout, and output-size checks
 as ordinary `PATH` results. Shell functions, aliases with arguments, command
 substitution, and aliases that exist only in an already-running interactive
-shell are intentionally ignored; add a persistent alias declaration or use the
-manual binary path field for those cases.
+shell are intentionally ignored; add a persistent alias declaration or use
+**Locate binary…** for those cases.
 
 Local CLI and SDK providers include Codex CLI, Claude Agent SDK,
 OpenCode CLI, Kilo ACP, Pi RPC, Oh My Pi, Devin ACP, Mistral Vibe ACP,

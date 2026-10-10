@@ -432,6 +432,11 @@ export interface OctantHostBridge extends Partial<RemoteAccessAdministrationBrid
   readonly resetBounds: () => Promise<void> | void;
   readonly selectProjectRoot: (projectType: BoundProjectType) => Promise<ProjectRootPickerResult>;
   readonly selectLocalPluginFolder?: () => Promise<LocalPluginFolderPickerResult>;
+  /**
+   * Native file picker for a runtime's executable. Answers an opaque receipt
+   * the host later redeems for the chosen path; the renderer never sees it.
+   */
+  readonly selectRuntimeBinary?: () => Promise<LocalPluginFolderPickerResult>;
   readonly setProviderCredential: (providerInstanceId: string, credential: string) => Promise<void>;
   readonly setSidebarMaterialPreference: (preference: "opaque" | "system") => Promise<void> | void;
   readonly setSidebarVibrancyMode?: (mode: "off" | "subtle" | "strong") => Promise<void> | void;

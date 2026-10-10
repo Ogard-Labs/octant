@@ -24,6 +24,7 @@ const AbsolutePath = Schema.NonEmptyTrimmedString.pipe(
 );
 const CanonicalBinaryPath = AbsolutePath;
 const DetectedVersion = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128));
+const PickerReceiptId = Schema.String.pipe(Schema.pattern(/^[A-Za-z0-9_-]{43}$/));
 
 export const DiscoveryCandidate = Schema.Struct({
   driverKind: ProviderDriverKind,
@@ -92,6 +93,17 @@ export const DiscoveryCommand = Schema.Union(
     binaryPath: CanonicalBinaryPath,
     displayName: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(255)),
   }).annotations(strict),
+  /**
+   * Points a runtime at the executable a person chose in the host's native file
+   * picker. The renderer holds only the picker's opaque, window-bound receipt;
+   * it never names a path, so it cannot point a runtime anywhere the picker did
+   * not return.
+   */
+  Schema.Struct({
+    kind: Schema.Literal("locate-binary"),
+    instanceId: ProviderInstanceId,
+    receiptId: PickerReceiptId,
+  }).annotations(strict),
 );
 export type DiscoveryCommand = typeof DiscoveryCommand.Type;
 
@@ -103,6 +115,12 @@ export const DiscoveryCommandResult = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("candidate-connected"),
     instanceId: ProviderInstanceId,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("binary-located"),
+    instanceId: ProviderInstanceId,
+    /** The first line the version probe printed. */
+    version: DetectedVersion,
   }).annotations(strict),
 );
 export type DiscoveryCommandResult = typeof DiscoveryCommandResult.Type;

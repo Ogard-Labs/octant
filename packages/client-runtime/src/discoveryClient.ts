@@ -16,6 +16,10 @@ export interface DiscoveryClientOptions {
 export interface DiscoveryClient {
   scan(): Promise<DiscoverySnapshot>;
   connect(command: Extract<DiscoveryCommand, { kind: "connect" }>): Promise<DiscoveryCommandResult>;
+  /** Points a runtime at the executable behind a native file-picker receipt. */
+  locateBinary(
+    command: Extract<DiscoveryCommand, { kind: "locate-binary" }>,
+  ): Promise<Extract<DiscoveryCommandResult, { kind: "binary-located" }>>;
 }
 
 export class DiscoveryClientFailure extends Error {
@@ -60,6 +64,27 @@ export function createDiscoveryClient(options: DiscoveryClientOptions): Discover
         // No client-side limit: the host does not cancel a connect when the
         // request is dropped, so timing out here would report a provider the
         // host goes on to create as failed and invite a duplicate.
+        undefined,
+      );
+    },
+    locateBinary(command) {
+      return request(
+        options.fetch,
+        new URL("/api/providers/discovery/locate-binary", options.baseUrl).toString(),
+        {
+          method: "POST",
+          headers: { ...headers, "content-type": "application/json" },
+          body: JSON.stringify(command),
+        },
+        (body) => {
+          const result = decodeDiscoveryCommandResult(body);
+          if (result.kind !== "binary-located") {
+            throw new DiscoveryClientFailure("protocol", "Expected binary-located result.");
+          }
+          return result;
+        },
+        // Like connect: the host finishes a change it has started even when the
+        // request is dropped, so a client timeout would misreport it.
         undefined,
       );
     },
