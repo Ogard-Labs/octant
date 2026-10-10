@@ -418,9 +418,11 @@ async function assembleRepositoryArtifact(
     components,
     outputDirectory,
   });
-  // Fail closed if the server's external imports do not resolve inside the
-  // artifact alone. scripts/smoke-headless-install.ts proves the full install.
+  // Fail closed if the server's or the CLI's external imports do not resolve
+  // inside the artifact alone. scripts/smoke-headless-install.ts proves the
+  // full install.
   await validatePackagedRuntimeImports(built.artifactRoot, EXTERNAL_RUNTIME_PACKAGES, "lib/server");
+  await validatePackagedRuntimeImports(built.artifactRoot, HEADLESS_CLI_RUNTIME_PACKAGES, "bin");
   return built;
 }
 

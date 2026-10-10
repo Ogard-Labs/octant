@@ -208,14 +208,21 @@ async function smokeHeadlessInstall(argv: readonly string[]): Promise<void> {
       "octant server status",
       await run(installed, ["server", "status"], { cwd: prefix, env }),
     );
-    const stopped = await run(installed, ["server", "stop"], { cwd: prefix, env });
-    started = false;
-    await expectSuccess("octant server stop", stopped);
-    const afterStop = await fetch(`http://127.0.0.1:${port}/health`).then(
-      () => "answering",
-      () => "closed",
+    await expectSuccess(
+      "octant server stop",
+      await run(installed, ["server", "stop"], { cwd: prefix, env }),
     );
-    if (afterStop !== "closed") throw new Error("The host still answers after server stop.");
+    started = false;
+    // The stop acknowledgment can arrive before the listener has closed.
+    let answering = true;
+    for (let attempt = 0; attempt < 20 && answering; attempt += 1) {
+      answering = await fetch(`http://127.0.0.1:${port}/health`).then(
+        () => true,
+        () => false,
+      );
+      if (answering) await Bun.sleep(250);
+    }
+    if (answering) throw new Error("The host still answers after server stop.");
   } finally {
     if (started) await run(installed, ["server", "stop"], { cwd: prefix, env });
     await removeServiceDescriptor(descriptor, env, prefix);
