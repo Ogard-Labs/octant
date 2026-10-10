@@ -91,4 +91,3 @@ route and nothing else.
 - [0165](../decisions/0165-canvas-artifacts-are-documents-designs-and-prototypes.md)
 - [canvas-share-authenticated-snapshot-threat-model.md](canvas-share-authenticated-snapshot-threat-model.md)
 - [canvas-share-static-export-threat-model.md](canvas-share-static-export-threat-model.md)
-- [Plan](../plans/canvas-rich-artifacts.md)

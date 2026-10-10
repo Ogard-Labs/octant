@@ -144,4 +144,3 @@ future version.
 - [0080](0080-hand-off-writes-a-canvas-from-the-export-cut.md) — hand-off still writes typed blocks
 - [0164](0164-canvas-designs-are-html-in-a-frame-that-runs-nothing.md) — the static design frame this extends
 - [Canvas HTML frames threat model](../security/canvas-html-frames-threat-model.md)
-- [Plan](../plans/canvas-rich-artifacts.md) — order of work
