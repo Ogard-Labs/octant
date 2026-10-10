@@ -334,7 +334,11 @@ drawing it as plain text.
 The pure `canvasInlineRefusal` policy admits `inline` only for at most 12 blocks
 with no `diagram`, `plan`, `mockup` or `design`. When an author asks for `inline` over
 that bound, the host records `sidebar` and returns the reason as
-`presentationNote`.
+`presentationNote`. Accepted but not yet built: the 12-block cap goes for
+reading blocks and static design frames within the ordinary block budget, the
+refusal applies only to the author's unprompted request, and a person's expand
+in the thread may show any Canvas; until that ships, the bound above holds
+([decisions/0165-canvas-artifacts-are-documents-designs-and-prototypes.md](decisions/0165-canvas-artifacts-are-documents-designs-and-prototypes.md)).
 A revise without a choice keeps the current presentation.
 `preview` returns a picture and a layout reading of one shipped version. Its
 input is the `canvasId`, an optional `version` (a sequence), a `width`
@@ -649,6 +653,12 @@ gain a design; a version append never moves a Canvas back. Agents writing
 a design can be silent for minutes while composing the tool call, so Chat and Work
 wait five minutes for a provider event before cutting a turn off, as Code does
 ([decisions/0164-canvas-designs-are-html-in-a-frame-that-runs-nothing.md](decisions/0164-canvas-designs-are-html-in-a-frame-that-runs-nothing.md)).
+The frame described here is the shipped tier. Themed frames measured to their
+content, frames that show Project assets, and frames that run script in an
+opaque-origin sandbox with no network are accepted but not yet built; each
+replaces the matching sentence above when it ships, under the
+[Canvas HTML frames threat model](security/canvas-html-frames-threat-model.md)
+([decisions/0165-canvas-artifacts-are-documents-designs-and-prototypes.md](decisions/0165-canvas-artifacts-are-documents-designs-and-prototypes.md)).
 
 The local-server provider adapter owns a separate process for each acquired
 connection and allows one live session per connection. Its MCP protocol does
