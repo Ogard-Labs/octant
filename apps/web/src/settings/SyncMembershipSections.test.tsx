@@ -416,7 +416,7 @@ describe("restoring the library", () => {
     expect(restore).toHaveBeenCalledWith({ kind: "stop-restore" });
     expect(
       await within(section).findByText(
-        "Stopped: 25 of 60 entries read. Nothing more is read from the store until you resume.",
+        "Stopped: 25 of 60 entries read. Background sync reads nothing more from the store until you resume.",
       ),
     ).toBeVisible();
 

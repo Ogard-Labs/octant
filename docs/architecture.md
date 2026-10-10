@@ -1680,7 +1680,12 @@ flowchart LR
     `replica.restore-resumed@2`, and `replica.restore-finished@2`. A restart
     lists the store again and resumes at the next unread slot; slots read
     before it are held, so nothing applies twice, and what the store gained
-    meanwhile is added to the total. Until it finishes, the restore reads in
+    meanwhile is added to the total. A batch holds only the membership
+    records it read, so a revocation written after this computer confirmed
+    its join and read in a later batch does not undo entries an earlier
+    batch already imported - the lag limit membership already states,
+    narrowed by the join having held every record in the store when it
+    was confirmed. Until it finishes, the restore reads in
     place of the interval pull. A person can stop it from Settings › Sync on
     the host; a stopped restore stays stopped across restarts, and
     background sync reads nothing from the store until the person resumes
@@ -1702,7 +1707,9 @@ flowchart LR
     and name), a resolve, or a deletion - and then journaled as kept, so a
     host that stops in between reads the slot again and the second take
     changes nothing. A change about a comment no longer held here changes
-    nothing. Taken-in changes are never announced again, so they are not
+    nothing, and so does one past this computer's per-Canvas comment or
+    reply budget: its slot settles, so a full thread does not hold the
+    writer's later entries behind it, and that change is not taken in later. Taken-in changes are never announced again, so they are not
     published under this host's sequence. Comments land on the aggregate
     whether or not the Canvas is open here, and show once it is. A purge
     or Project erase drops queued comment changes and rewrites kept ones to

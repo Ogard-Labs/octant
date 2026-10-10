@@ -1500,6 +1500,33 @@ describe("restoring a whole library on a computer that joins", () => {
     );
   });
 
+  it("stays stopped when Stop is pressed during the restore's final pull", async () => {
+    const memory = memoryStore();
+    const hooks: { onList: (() => void) | undefined } = { onList: undefined };
+    const store: ReplicaStore = {
+      ...memory.store,
+      async list(cursor) {
+        hooks.onList?.();
+        return memory.store.list(cursor);
+      },
+    };
+    const shared: SharedStore = {
+      kind: "direct",
+      selection: () => ({ status: "selected", store }),
+    };
+    const { studio, laptop } = await pair(shared);
+    await studio.commit(canvasVersion({ versionId: ids.v1, sequence: 1, text: "Ship it." }));
+    // The restore lists once to plan, then once more for its final pull.
+    let lists = 0;
+    hooks.onList = () => {
+      lists += 1;
+      if (lists === 2) laptop.sync.stopRestore();
+    };
+    await laptop.sync.restore();
+    expect(lists).toBe(2);
+    expect(laptop.sync.restoreProgress()?.state).toBe("stopped");
+  });
+
   it("stops a restore with sync off, and resumes it only once sync is on", async () => {
     const shared: SharedStore = { kind: "folder", folder: scratch(homedir()) };
     const { studio, laptop } = await pair(shared);

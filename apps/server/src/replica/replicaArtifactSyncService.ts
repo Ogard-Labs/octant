@@ -705,6 +705,8 @@ export class ReplicaArtifactSyncService {
     if (this.#ports.artifactState().restore(local.instanceId)?.state !== "running") return;
     const pulled = await this.#ports.membership.execute({ kind: "pull" });
     if (pulled.kind !== "pulled") return;
+    // A Stop pressed while that pull ran keeps the restore stopped.
+    if (this.#ports.artifactState().restore(local.instanceId)?.state !== "running") return;
     this.#ports.journal.append({
       eventName: REPLICA_ARTIFACT_EVENT_NAMES.restoreFinished,
       payload: { restoreId },

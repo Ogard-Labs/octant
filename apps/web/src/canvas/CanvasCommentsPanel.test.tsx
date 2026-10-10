@@ -55,7 +55,7 @@ describe("CanvasCommentsPanel", () => {
     expect(within(threads).getByText("You · paired device")).toBeInTheDocument();
   });
 
-  it("names the computer a synced comment was written on", async () => {
+  it("names the computer a synced comment or reply was written on", async () => {
     render(
       <CanvasCommentsPanel
         author={author}
@@ -73,6 +73,20 @@ describe("CanvasCommentsPanel", () => {
                   computerName: "Studio Mac",
                 },
               },
+              replies: [
+                {
+                  replyId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc" as never,
+                  commentId,
+                  author,
+                  origin: {
+                    kind: "replica" as const,
+                    instanceId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+                    computerName: "MacBook Air",
+                  },
+                  body: "Yes, a queue.",
+                  createdAt: "2026-08-01T21:05:00.000Z" as never,
+                },
+              ],
             },
           ])
         }
@@ -81,6 +95,7 @@ describe("CanvasCommentsPanel", () => {
     );
     const threads = await screen.findByRole("list", { name: "Comment threads" });
     expect(within(threads).getByText("You · Studio Mac")).toBeInTheDocument();
+    expect(within(threads).getByText("You · MacBook Air")).toBeInTheDocument();
   });
 
   it("anchors a comment to a comparison matrix's option column or criterion row", async () => {

@@ -890,7 +890,7 @@ function restoreSentence(restore: ReplicaRestoreProgress): string {
     case "running":
       return `Restoring: ${count}.`;
     case "stopped":
-      return `Stopped: ${count}. Nothing more is read from the store until you resume.`;
+      return `Stopped: ${count}. Background sync reads nothing more from the store until you resume.`;
     case "finished":
       return `Restored: ${count}.`;
   }
