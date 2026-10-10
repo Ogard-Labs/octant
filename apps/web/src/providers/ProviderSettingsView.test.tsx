@@ -721,10 +721,11 @@ describe("ProviderSettingsView", () => {
     "clears the real controller-backed Claude key input after host storage %s",
     async (outcome) => {
       const user = userEvent.setup();
-      const setProviderCredential = vi.fn(async () => {
+      const addProviderApiKey = vi.fn(async () => {
         if (outcome === "failure") throw new Error("private-value raw Keychain diagnostic");
+        return { id: "7d444840-9dc0-11d1-b245-5ffdce74fad2", label: "Key 1", active: true };
       });
-      const host = controllerHost(setProviderCredential);
+      const host = controllerHost(addProviderApiKey);
       const client = controllerClient();
       render(<ControllerBackedProviderSettings client={client} host={host} />);
       await user.click(await screen.findByRole("button", { name: "Add provider manually" }));
@@ -748,7 +749,7 @@ describe("ProviderSettingsView", () => {
       await user.click(within(create).getByRole("button", { name: "Add Claude" }));
 
       await waitFor(() => expect(apiKey).toHaveValue(""));
-      expect(setProviderCredential).toHaveBeenCalledWith(expect.any(String), "private-value");
+      expect(addProviderApiKey).toHaveBeenCalledWith(expect.any(String), "private-value");
       expect(document.body.textContent).not.toContain("private-value");
       if (outcome === "failure") {
         expect(screen.getByRole("alert")).toHaveTextContent(
@@ -3541,7 +3542,7 @@ function controllerClient(): ProviderClient {
 }
 
 function controllerHost(
-  setProviderCredential: OctantHostBridge["setProviderCredential"],
+  addProviderApiKey: OctantHostBridge["addProviderApiKey"],
 ): OctantHostBridge {
   return {
     clearProviderCredential: vi.fn(async () => undefined),
@@ -3552,9 +3553,16 @@ function controllerHost(
     providerCredentialStatus: vi.fn(async () => "missing" as const),
     resetBounds: vi.fn(),
     selectProjectRoot: vi.fn(async () => ({ kind: "cancelled" as const })),
-    setProviderCredential,
+    addProviderApiKey,
+    setProviderCredential: vi.fn(),
     setSidebarMaterialPreference: vi.fn(),
     subscribeResolvedMaterial: vi.fn(() => vi.fn()),
+    listProviderApiKeys: vi.fn(async () => []),
+    renameProviderApiKey: vi.fn(),
+    replaceProviderApiKey: vi.fn(),
+    removeProviderApiKey: vi.fn(),
+    setActiveProviderApiKey: vi.fn(),
+    moveProviderApiKey: vi.fn(),
   };
 }
 

@@ -1,5 +1,9 @@
 import { decodeProviderFailure, type ProviderFailure } from "@octant/contracts";
-import type { ProviderCredentialResolver } from "../providers/credentialBrokerClient";
+import type {
+  ProviderCredentialLease,
+  ProviderCredentialResolver,
+} from "../providers/credentialBrokerClient";
+import { acquireProviderCredential, reportKeyRejection } from "../providers/providerApiKeyPool";
 
 const MAX_RETRY_AFTER_MS = 3_600_000;
 
@@ -50,13 +54,19 @@ export interface ImageHttpRequest {
 export async function performImageHttpRequest(request: ImageHttpRequest): Promise<Response> {
   if (isAborted(request.signal)) throw interrupted();
   const deadline = makeRequestDeadline(request.signal, request.limits.connectionTimeoutMs);
+  const attempt: { lease?: ProviderCredentialLease | undefined } = {};
   try {
     const headers = new Headers(request.headers);
     let credential: string;
     try {
-      const resolution = Promise.resolve().then(() =>
-        request.credentialResolver.resolve(request.instanceId),
-      );
+      const resolution = Promise.resolve().then(async () => {
+        const acquired = await acquireProviderCredential(
+          request.credentialResolver,
+          request.instanceId,
+        );
+        attempt.lease = acquired.lease;
+        return acquired.credential;
+      });
       credential = await Promise.race([resolution, deadline.failure]);
     } catch (error) {
       if (isProviderFailure(error)) throw error;
@@ -126,6 +136,7 @@ export async function performImageHttpRequest(request: ImageHttpRequest): Promis
       await cancelResponseBody(response);
       throw fail("invalid-configuration", "The configured endpoint returned a redirect.");
     }
+    await reportKeyRejection(attempt.lease, response);
     return boundResponse(response, request.limits, request.signal);
   } finally {
     deadline.close();
