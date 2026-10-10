@@ -500,9 +500,10 @@ agent's device open raises the relevant in-app pane once per request. Both use
 one device-first pane that adapts to its container's width: a toolbar (device
 switcher, OS and state in words, Back on Android, Home, Screenshot, Lock when
 wide, and More with Type text, Switch device, Diagnostics, Stop live view, and
-Shut down), at most one line under it (error, then approval, then typing, then
-notice; one sentence and at most one fix, such as Repair input after the host
-refuses input as disconnected), and the device on a stage with an original
+Shut down), at most one line under it (error, then the notice that the live view is
+off or lost, then approval, then typing, then any other notice, so Resume or
+Reconnect never waits on an input grant; one sentence and at most one fix,
+such as Repair input after the host refuses input as disconnected), and the device on a stage with an original
 silhouette whose screen is the only input region; the row under the device says
 where keys go while the screen has focus and otherwise, quietly, how the picture
 arrives (Android's live stream or snapshots and why). The pane offers only
