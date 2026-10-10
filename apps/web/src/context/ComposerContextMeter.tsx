@@ -444,6 +444,9 @@ function ContextUsageFallback(props: {
                   {reportedSourceNote(reported.model, reported.declared)}
                 </p>
               )}
+              {reported.model.uncountedNote === undefined ? null : (
+                <p className="context-window-popover__source">{reported.model.uncountedNote}</p>
+              )}
               <ProviderCounts counts={reported.model.counts} />
               {totals}
             </div>

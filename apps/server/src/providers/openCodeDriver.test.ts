@@ -412,6 +412,46 @@ describe("OpenCode driver", () => {
     ]);
   });
 
+  it("says each prompt stays in the session until OpenCode compacts it", async () => {
+    const tokens = { input: 1, output: 1, reasoning: 0, cache: { read: 0, write: 0 }, cost: 0 };
+    const fixture = driverFixture({
+      events: [
+        stepEndedEvent("provider-session", "message-1", tokens),
+        { type: "session.compacted", properties: { sessionID: "provider-session" } } as Event,
+        stepEndedEvent("provider-session", "message-2", tokens),
+        idleEvent("provider-session"),
+      ],
+    });
+    const output = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* fixture.driver.acquire({
+            instanceId,
+            projectRoot: "/tmp/project",
+          });
+          const stream = yield* connection.subscribe;
+          const collector = yield* Effect.fork(
+            Stream.runCollect(
+              stream.pipe(
+                Stream.filter((event) => event.sessionId === sessionId),
+                Stream.takeUntil((event) => event.kind === "completed"),
+              ),
+            ),
+          );
+          yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+          yield* connection.send({ sessionId, prompt: "hello", attachments: [], tools: [] });
+          return yield* Fiber.join(collector);
+        }),
+      ),
+    );
+
+    expect(
+      Array.from(output).flatMap((event) =>
+        event.kind === "usage" ? [event.promptRetention] : [],
+      ),
+    ).toEqual(["kept", "compacted"]);
+  });
+
   it("rejects a second start for the same session", async () => {
     const fixture = driverFixture();
     const exit = await Effect.runPromise(
@@ -1451,6 +1491,18 @@ describe("OpenCode driver", () => {
         data: { sessionID: "ses_1", requestID: "per_1", reply: "reject" },
       }),
     ).toMatchObject({ type: "permission.v2.replied" });
+  });
+
+  it("reads 2.0.22's finished compaction as the 2.x compaction end, so the session's reports say it compacted", () => {
+    expect(
+      adaptBetaOpenCodeEvent({
+        type: "session.compaction.ended",
+        data: { sessionID: "ses_1", reason: "auto" },
+      }),
+    ).toEqual({
+      type: "session.next.compaction.ended",
+      properties: { sessionID: "ses_1", reason: "auto" },
+    });
   });
 
   it("adapts a 2.x event from data when properties is empty", () => {

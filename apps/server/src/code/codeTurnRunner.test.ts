@@ -705,6 +705,57 @@ describe("CodeTurnRunner", () => {
 
       expect(usage).not.toHaveProperty("contextBreakdown");
     });
+
+    it("adds what Octant sent with each turn to what the session already held, while the runtime keeps its prompts", async () => {
+      const usage = await usageOf(
+        event({
+          kind: "usage",
+          inputTokens: 10,
+          outputTokens: 20,
+          contextTokens: 9_000,
+          promptRetention: "kept",
+        }),
+        {
+          contextAccount: {
+            carried: {
+              status: "counted",
+              parts: [
+                { kind: "octant-instructions", tokens: 100, accuracy: "conservative-heuristic" },
+              ],
+            },
+            turn: [
+              { kind: "octant-instructions", tokens: 100, accuracy: "conservative-heuristic" },
+              { kind: "attachments", tokens: 400, accuracy: "conservative-heuristic" },
+            ],
+          },
+        },
+      );
+
+      expect(usage?.contextBreakdown).toEqual({
+        parts: [
+          { kind: "octant-instructions", tokens: 200, accuracy: "conservative-heuristic" },
+          { kind: "attachments", tokens: 400, accuracy: "conservative-heuristic" },
+        ],
+        sentContext: { status: "counted" },
+      });
+    });
+
+    it("leaves what Octant sent in the remainder when the runtime does not say what it keeps", async () => {
+      const usage = await usageOf(
+        event({ kind: "usage", inputTokens: 10, outputTokens: 20, contextTokens: 9_000 }),
+        {
+          contextAccount: {
+            carried: { status: "counted", parts: [] },
+            turn: [{ kind: "skills", tokens: 300, accuracy: "conservative-heuristic" }],
+          },
+        },
+      );
+
+      expect(usage?.contextBreakdown).toEqual({
+        parts: [],
+        sentContext: { status: "uncounted", reason: "retention-unknown" },
+      });
+    });
   });
 
   it("journals a bounded managed-tool error code when execution fails", async () => {

@@ -978,6 +978,78 @@ describe("CodeOperationRuntime", () => {
     },
   );
 
+  it("counts one copy of the profile's instructions per turn of a session whose runtime keeps its prompts", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const fixture = runtimeFixture({ provider: providerDriver(connection) });
+    fixture.setThread(
+      decodeCodeThread({
+        ...thread(),
+        profileId: "60000000-0000-4000-8000-000000000001",
+        profileContext: {
+          displayName: "Reviewer",
+          instructions: "Review as a skeptic. ".repeat(40).trim(),
+          approvedSkillIds: [],
+        },
+      }),
+    );
+    const usage = providerEvent({
+      kind: "usage",
+      inputTokens: 10,
+      outputTokens: 2,
+      contextTokens: 9_000,
+      promptRetention: "kept",
+    });
+    const instructionTokens = async (operation: ReturnType<typeof operationId>) => {
+      let tokens: number | undefined;
+      await vi.waitFor(async () => {
+        const frames = await fixture.runtime.subscribe(windowId, threadId, operation, 0, 20);
+        const event = frames.find((frame) => frame.event.kind === "usage")?.event;
+        if (event?.kind !== "usage") throw new Error("no usage yet");
+        tokens = event.contextBreakdown?.parts.find(
+          (part) => part.kind === "octant-instructions",
+        )?.tokens;
+      });
+      return tokens;
+    };
+    try {
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: operationId(87),
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      });
+      await vi.waitFor(() => expect(connection.send).toHaveBeenCalledTimes(1));
+      await Effect.runPromise(Queue.offer(queue, usage));
+      await Effect.runPromise(Queue.offer(queue, providerEvent({ kind: "completed" })));
+      await vi.waitFor(() => expect(connection.stop).toHaveBeenCalledOnce());
+      const first = await instructionTokens(operationId(87));
+      expect(first).toBeGreaterThan(16);
+
+      const nextPrompt = storedEvidence(88, "again");
+      fixture.evidenceValues.set(nextPrompt.contentId, "again");
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: operationId(89),
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: nextPrompt,
+      });
+      await vi.waitFor(() => expect(connection.send).toHaveBeenCalledTimes(2));
+      expect(connection.resume).toHaveBeenCalled();
+      await Effect.runPromise(Queue.offer(queue, usage));
+      await Effect.runPromise(Queue.offer(queue, providerEvent({ kind: "completed" })));
+
+      expect(await instructionTokens(operationId(89))).toBe((first ?? 0) * 2);
+    } finally {
+      await fixture.runtime.close();
+      fixture.close();
+    }
+  });
+
   it.each([true, false])(
     "carries the conversation on after a switch to another model of the same provider only when it can: %s",
     async (canSwitch) => {
@@ -2230,6 +2302,9 @@ describe("CodeOperationRuntime", () => {
           inputTokens: 100_000,
           outputTokens: 10_000,
           cost: { kind: "api-estimate", usdMicros: 600_000 },
+          // Octant sent nothing it counts, and says so, so the next turn of
+          // the session can start its count from this one.
+          contextBreakdown: { parts: [], sentContext: { status: "counted" } },
         });
       });
     } finally {

@@ -116,6 +116,8 @@ interface SessionState {
   sequence: number;
   usage?: Extract<RuntimeEventWithoutEnvelope, { readonly kind: "usage" }>;
   usageIncomplete?: boolean;
+  /** Pi compacted the session during the current prompt. */
+  windowCompacted?: boolean;
   promptActive: boolean;
   terminal: boolean;
   closed: boolean;
@@ -671,10 +673,24 @@ function makeConnection(
         });
         return;
       }
+      // Pi keeps a compacted session's summary and the entries from
+      // `firstKeptEntryId` on (`compaction_end` in Pi's JSON event stream
+      // docs), so how much of the earlier prompts survives is Pi's own choice.
+      // An aborted or failed compaction carries no result and changed nothing.
+      if (event.type === "compaction_end" && state.promptActive) {
+        if (record(event.result) !== undefined) state.windowCompacted = true;
+        return;
+      }
       if (event.type === "agent_settled") {
         if (!state.promptActive)
           return protocolFailure(state, "Pi settled without an active turn.");
-        if (state.usage !== undefined && !state.usageIncomplete) emit(state, state.usage);
+        if (state.usage !== undefined && !state.usageIncomplete)
+          emit(state, {
+            ...state.usage,
+            // Each prompt is stored in the session as a user message and sent
+            // with every later request until Pi compacts the session.
+            promptRetention: state.windowCompacted === true ? "compacted" : "kept",
+          });
         state.promptActive = false;
         state.terminal = true;
         state.completed = true;
@@ -1035,6 +1051,7 @@ function makeConnection(
                   return Effect.fail(failure("protocol", "Pi already has an active turn."));
                 delete state.usage;
                 delete state.usageIncomplete;
+                delete state.windowCompacted;
                 state.promptActive = true;
                 state.correlationId = factories.makeCorrelation() as CorrelationId;
                 return request(() =>

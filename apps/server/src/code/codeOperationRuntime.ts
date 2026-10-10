@@ -141,6 +141,13 @@ import { CodeSessionAuthorityStore } from "./codeSessionAuthorityStore";
 import { boundedDiff, draftGitText, type CodeGitDraftResult } from "./codeGitDraftService";
 import { turnChangedFiles } from "./codeTurnChangedFiles";
 import { CodeTurnRunner, type CodeTurnEvent, type CodeTurnOutcome } from "./codeTurnRunner";
+import {
+  carriedSentContext,
+  estimateSentContextParts,
+  type CarriedSentContext,
+  type CodeTurnContextAccount,
+  type CodeTurnSentContext,
+} from "./codeTurnContext";
 import { createCodeAppManagedTools, type CodeAppManagedToolsOptions } from "./codeAppManagedTools";
 import { combineAppManagedToolSets, type AppManagedToolSet } from "../providers/appManagedToolSet";
 import { CodeEvidenceCapacityExceeded } from "./codeEvidenceStore";
@@ -1509,6 +1516,10 @@ interface ActiveTurn {
   readonly checkoutRoot: string;
   readonly driver: ProviderDriver;
   readonly resumeCursor?: ProviderResumeCursor;
+  /** What the provider session held of Octant's per-turn context before this turn. */
+  readonly carriedSentContext: CarriedSentContext;
+  /** Which of this turn's context blocks are Octant's instructions and skills. */
+  readonly sentContext?: CodeTurnSentContext;
   readonly secrets: readonly string[];
   readonly abort: AbortController;
   readonly approvals: Map<string, string>;
@@ -1775,6 +1786,13 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       ...(resumeCursor === undefined ? {} : { resumeCursor }),
       checkoutRoot: input.checkoutRoot,
       driver,
+      carriedSentContext: carriedSentContext({
+        freshSession: resumeCursor === undefined,
+        forkSeeded,
+        priorTurn,
+        previousBreakdown: recovered.priorTurnBreakdown,
+      }),
+      ...(input.sentContext === undefined ? {} : { sentContext: input.sentContext }),
       secrets,
       abort: new AbortController(),
       approvals: new Map(),
@@ -2337,6 +2355,21 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     ];
     const harnessAutoReviewEnabled = this.#resolveHarnessAutoReview(active.thread);
     const appManagedTools = this.#appManagedTools(active);
+    const contextAccount: CodeTurnContextAccount = {
+      carried: active.carriedSentContext,
+      turn: estimateSentContextParts({
+        sent: {
+          instructions: [
+            ...(browserSelected
+              ? [{ kind: "instructions" as const, text: BROWSER_SELECTION_GUIDANCE }]
+              : []),
+            ...(active.sentContext?.instructions ?? []),
+          ],
+          skills: active.sentContext?.skills ?? [],
+        },
+        attachments,
+      }),
+    };
     void Effect.runPromise(
       Effect.scoped(
         this.#runner.run({
@@ -2370,6 +2403,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           checkoutRoot: active.checkoutRoot,
           prompt,
           ...(fullContext.length === 0 ? {} : { context: fullContext }),
+          contextAccount,
           onTurnEnded: (ended) => {
             endedTurn = ended;
           },

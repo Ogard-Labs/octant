@@ -46,7 +46,11 @@ import {
   type WindowId,
 } from "@octant/contracts";
 import type { FramedExternalContent } from "../context/externalContentFraming";
-import { composeCodeProfileContext } from "./codeTurnContext";
+import {
+  composeCodeProfileContext,
+  type CodeTurnSentContext,
+  type ComposedCodeProfileContext,
+} from "./codeTurnContext";
 import type { CodeProfileSkillResolver } from "./codeProfileSkillResolver";
 import {
   authorizeCodeOperation,
@@ -624,6 +628,11 @@ export interface CodeOperationTurnPort {
      * a fork never reads its history twice.
      */
     readonly forkHandoff?: ProviderContextBlock;
+    /**
+     * Which of the context blocks are Octant's instructions and skills, so the
+     * window of a runtime that reports no categories can count them.
+     */
+    readonly sentContext?: CodeTurnSentContext;
     /** Images this turn carries, already read from the host's own store. */
     readonly attachments?: ReadonlyArray<ProviderAttachmentInput>;
     /** The selected MCP servers' tools, beside the host's own for this turn. */
@@ -2797,9 +2806,13 @@ export class CodeOperationService {
       this.#options.peekIssueContextFramed?.(String(thread.id)) ??
       this.#options.takeIssueContextFramed?.(String(thread.id));
     const [forkHandoff] = await this.#resolveForkHandoff(thread, windowId, command.operationId);
+    const sentContext: CodeTurnSentContext = {
+      instructions: profileContext.sent.instructions,
+      skills: [...skillContext, ...profileContext.sent.skills],
+    };
     const context = [
       ...skillContext,
-      ...profileContext,
+      ...profileContext.blocks,
       ...(await this.#resolveThreadMentions(command.threadMentionIds, windowId)),
       ...(await this.#resolveFileMentions(command.fileMentionPaths, windowId, thread)),
       ...(issueContext === undefined
@@ -2843,6 +2856,9 @@ export class CodeOperationService {
       checkoutRoot,
       prompt,
       ...(context.length === 0 ? {} : { context }),
+      ...(sentContext.instructions.length === 0 && sentContext.skills.length === 0
+        ? {}
+        : { sentContext }),
       ...(forkHandoff === undefined ? {} : { forkHandoff }),
       ...(attachments.length === 0 ? {} : { attachments }),
       ...(extensionTools === undefined ? {} : { extensionTools }),
@@ -2936,8 +2952,11 @@ export class CodeOperationService {
    * never re-read here: instructions and the skill allowlist come from the
    * thread record, so a later profile edit cannot change a running thread.
    */
-  async #resolveProfileContext(thread: CodeThread): Promise<ReadonlyArray<ProviderContextBlock>> {
-    if (thread.profileContext === undefined) return [];
+  async #resolveProfileContext(
+    thread: CodeThread,
+  ): Promise<Pick<ComposedCodeProfileContext, "blocks" | "sent">> {
+    if (thread.profileContext === undefined)
+      return { blocks: [], sent: { instructions: [], skills: [] } };
     const skills =
       this.#options.resolveProfileSkills === undefined
         ? []
@@ -2950,7 +2969,7 @@ export class CodeOperationService {
       thread,
       skills,
       uuid: randomUUID,
-    }).blocks;
+    });
   }
 
   async #resolveForkHandoff(

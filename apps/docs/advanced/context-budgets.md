@@ -150,13 +150,26 @@ What the breakdown can say depends on the runtime:
   of but has not loaded are counted as **deferred** and take no share of the
   bar. Memory file paths and skill names are never kept, only how many there
   are.
-- **Codex CLI, OpenCode, Pi and ACP agents** report one occupancy figure and no
-  categories. Where Octant registered tools with the session, it counts their
-  definitions itself and shows them as **Octant tools**, marked **Estimated**
-  (a conservative estimate: four characters to a token). Everything else the
-  provider reported is shown as **Other (provider)**, also marked Estimated,
-  because what is left of a figure after an estimate is not exact. A runtime
-  that gives no window size shows no share at all.
+- **Codex CLI, OpenCode and Pi** report one occupancy figure and no
+  categories. Octant counts what it adds itself, each part marked **Estimated**
+  (a conservative estimate: four characters to a token, and an image by its
+  size up to 1,600 tokens):
+  - **Octant tools**: the definitions of tools Octant registered with the
+    session.
+  - **Octant instructions**, **Skills** and **Attachments**: what Octant sends
+    with every turn, inside the prompt. These runtimes keep every turn's prompt,
+    so the window holds one copy per turn, and Octant adds them up. Once the
+    runtime compacts the session it keeps a share of earlier turns Octant cannot
+    measure, so from then on these stay in Other (provider) and the breakdown
+    says so. The same happens if Octant could not count an earlier turn of the
+    session.
+
+  Everything else the provider reported is shown as **Other (provider)**, also
+  marked Estimated, because what is left of a figure after an estimate is not
+  exact. A runtime that gives no window size shows no share at all.
+
+- **ACP agents** manage their own history and report no usage, so there is no
+  window to show.
 - A planned thread (Octant Harness, Chat, Work) shows the categories Octant
   itself attributed, as before.
 
