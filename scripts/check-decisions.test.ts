@@ -126,6 +126,21 @@ describe("findDecisionViolations", () => {
       ]),
     ).toEqual(["routes to decision record 0009, which does not exist"]);
   });
+
+  it("refuses a record added after the archive closed", () => {
+    expect(
+      findDecisionViolations([
+        record("0165", "a-new-rule", wellFormed("0165", "A new rule")),
+        index(row("0165", "a-new-rule", "A new rule")),
+      ]).filter((violation) => violation.path === "docs/decisions/0165-a-new-rule.md"),
+    ).toEqual([
+      {
+        path: "docs/decisions/0165-a-new-rule.md",
+        reason:
+          "the decision archive closed at 0164; put the rule and its rationale in the owning specification",
+      },
+    ]);
+  });
 });
 
 describe("current specification references", () => {

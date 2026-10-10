@@ -21,6 +21,8 @@ import { fileURLToPath } from "node:url";
  * Rule F: every Markdown file in the directory is either the index or a record
  *         named the way the conventions require, and the numbers run without
  *         gaps.
+ * Rule H: the archive is closed. A record numbered after the last archived one
+ *         is refused; its rule belongs in the owning current specification.
  *
  * It cannot enforce that an agent read the record it was routed to. That stays a
  * review question; the gate's job is to make sure the record it would read says
@@ -43,6 +45,10 @@ const SPECIFICATION_PATHS = ["AGENTS.md", "DESIGN.md", "docs/architecture.md"] a
 const DESIGN_DIRECTORY = "docs/design";
 const REQUIRED_SECTIONS = ["## Context", "## Decision", "## Consequences"] as const;
 const SIMPLE_STATUSES = new Set(["Proposed", "Accepted", "Deprecated"]);
+// New records kept landing after the specifications became the design authority,
+// each restating a rule the specification already carried and then drifting from
+// it (0161 still says Inter stays bundled after DESIGN.md removed it).
+const LAST_ARCHIVED_RECORD = 164;
 
 interface DecisionRecord {
   readonly path: string;
@@ -69,6 +75,7 @@ export function findDecisionViolations(
   return [
     ...findMisnamedFiles(files),
     ...findNumberingGaps(records),
+    ...findRecordsAfterClosure(records),
     ...findMalformedRecords(records, numbers),
     ...findIndexDisagreements(
       records,
@@ -126,6 +133,18 @@ function findNumberingGaps(
           reason: `numbering skips ${missing.join(", ")} before reaching ${String(highest).padStart(4, "0")}`,
         },
       ];
+}
+
+/** Rule H: nothing is added to the archive. */
+function findRecordsAfterClosure(
+  records: ReadonlyArray<DecisionRecord>,
+): ReadonlyArray<DecisionViolation> {
+  return records
+    .filter((record) => Number(record.number) > LAST_ARCHIVED_RECORD)
+    .map((record) => ({
+      path: record.path,
+      reason: `the decision archive closed at ${String(LAST_ARCHIVED_RECORD).padStart(4, "0")}; put the rule and its rationale in the owning specification`,
+    }));
 }
 
 /**

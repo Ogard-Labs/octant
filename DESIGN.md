@@ -470,11 +470,14 @@ Work's Write, Learn, Plan, and Explore starters use the same chip (the outline
 button: hairline, resting fill, hover and focus fill); the prompt rides as the
 chip's tooltip and description and fills the composer when chosen, nothing more.
 
-First-run setup is optional from its first step. Skipping preserves settled answers,
-waits for pending writes, and grants no authority. Profile editing has its own
-Personal settings destination. Continue retains compact recent-task rows and
-their status and Git cues.
-Empty Code entry offers folder setup and a direct route to Code settings.
+First-run setup is optional from its first step, and a display name is optional
+in it; no name is inferred from the OS account. Skipping preserves settled answers,
+waits for pending writes, grants no authority, and creates no thread: provider,
+Project, model, and permission readiness are checked when work is requested.
+Profile editing has its own Personal settings destination. Continue retains
+compact recent-task rows and their status and Git cues.
+Empty Code entry offers folder setup and a direct route to Code settings; opening
+that setting never turns on projectless threads.
 A Work or Code pane with no thread and no Project asks one centred question
 ("Pick a folder to work in"), says in one sentence what choosing a folder
 means, and offers Choose a folder… as the primary action with starting
@@ -1907,7 +1910,7 @@ request from the person.
 
 When adding or touching UI:
 
-1. Read this file and the owning decision record.
+1. Read this file and, for system boundaries, the owning architecture section.
 2. Reuse an existing adapter and semantic token before adding CSS.
 3. Keep domain logic in its owning package; keep renderer components focused on
    presentation and user interaction.
@@ -1916,8 +1919,8 @@ When adding or touching UI:
    the repository verification command for cross-package changes.
 6. For shell, title-bar, dock, Environment, context, or settings work, perform
    rendered/native verification at the relevant viewport and capability state.
-7. Record a deliberate exception here or in the owning ADR when a surface
-   cannot yet use the shared recipe.
+7. Record a deliberate exception here when a surface cannot yet use the shared
+   recipe.
 
 ### Current exceptions and known migration edges
 

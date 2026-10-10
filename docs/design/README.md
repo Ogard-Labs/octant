@@ -41,12 +41,12 @@ Preserve those boundaries unless the maintainer explicitly authorizes a change.
 Examples:
 
 - Changing the default interface face updates DESIGN.md, preference behavior, and
-  relevant tests together. It does not require another numbered typography ADR.
+  relevant tests together. It does not require a numbered typography ADR.
 - Changing where files open updates Workspace and the opening/navigation tests.
   A historical content-strip decision does not block the new request.
 - Changing a credential boundary requires explicit scope, an updated architecture
-  rule, and permission-negative verification. A separate rationale record may
-  help explain alternatives, but its status is not an extra approval ceremony.
+  rule, and permission-negative verification. Its reasons and rejected
+  alternatives go in a short rationale beside that rule, not in a new record.
 
 ## Writing a topic specification
 
@@ -64,10 +64,12 @@ execution in Linear. Do not infer approval or implementation from an archived
 `Proposed` or `Accepted` label. New unapproved ideas stay in planning until the
 maintainer chooses them; they do not become constraints on unrelated work.
 
-Git and the PR preserve routine change history. Use a short rationale record in
-`docs/decisions/` only when a durable architectural tradeoff needs its own account
-of alternatives, such as journal authority, plugin trust, or update signing.
-Always keep the effective rule in its current specification.
+Git and the PR preserve routine change history. The decision archive is closed:
+do not add records to `docs/decisions/`. When a durable tradeoff needs its
+alternatives or measurements preserved (journal authority, plugin trust, a
+measured confinement grant, update signing), write a short **Rationale** paragraph
+beside the rule in its owning specification. `bun run decisions:check` refuses a
+record numbered after the last archived one.
 
 ## Historical detail and consolidation
 

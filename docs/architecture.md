@@ -617,7 +617,12 @@ revision declares the current schema version on the version and its
 definition, so a Canvas written under an earlier version moves forward and can
 gain a design; a version append never moves a Canvas back. Agents writing
 a design can be silent for minutes while composing the tool call, so Chat and Work
-wait five minutes for a provider event before cutting a turn off, as Code does
+wait five minutes for a provider event before cutting a turn off, as Code does.
+Chromium stops painting sandboxed frames that are `inert` or have
+`pointer-events: none`, so a frame shown as a picture stays hit-testable and a
+cover over it takes the pointer. Frames that run script were set aside: they
+need their own serving origin, a network policy the renderer lacks, and a
+threat model of their own
 ([decisions/0164-canvas-designs-are-html-in-a-frame-that-runs-nothing.md](decisions/0164-canvas-designs-are-html-in-a-frame-that-runs-nothing.md)).
 
 The local-server provider adapter owns a separate process for each acquired
@@ -657,7 +662,12 @@ A screenshot's raw capture lands in a host-private directory under the data root
 denies outright to every launch except the one taking the capture — the deny is
 emitted after the broad launch-root grants, so a checkout bound to an ancestor
 of the directory cannot read another thread's screen either, and only the
-capture launch re-allows it through its own write root
+capture launch re-allows it through its own write root. A subtree grant is
+acceptable here because the directory holds only host-minted, per-attempt UUID
+names, re-read with no-follow, single-link, size-bound, and PNG-signature checks
+before becoming an artifact. Redirecting the whole Apple temporary directory
+instead was measured and reverted: `xcrun` and the Simulator services need the
+host's real temporary and cache roots
 ([decisions/0160-an-apple-screen-capture-lands-in-a-directory-only-its-launch-can-write.md](decisions/0160-an-apple-screen-capture-lands-in-a-directory-only-its-launch-can-write.md)).
 An Android emulator is a separate dock destination and `octant_android` tool,
 not an iOS helper feature
@@ -3104,7 +3114,12 @@ default; a newer release stages with its dependency closure resolved
 in-app (no npm or Bun is available inside the packaged app), each package
 integrity-verified, and activates only while idle and after its entrypoint
 survives a smoke launch. A staged tree that cannot start keeps the previous
-release. Settings shows each tool's channel, version, and update state.
+release. Extraction accepts only allowlisted tar entries (no absolute path, no
+`..`, no `:`) and never runs an upstream installer or lifecycle script. The
+in-app resolver handles only `^`, `~`, and exact ranges, nests a conflicting
+version under its owner, and stops at 64 packages; an upstream release that
+needs anything else fails honestly and keeps the previous version. Settings
+shows each tool's channel, version, and update state.
 Verification is the registry's package-level integrity hash — npm publishes
 no per-package signature — so the design pins URL plus hash and reports
 honestly when they disagree. OpenCode is a descriptor on this same channel,
@@ -3398,14 +3413,29 @@ mechanisms are:
   builder refuse every Android command.
   The Apple `test` action stays confined too, and splits so the extra reach
   touches only the phase that needs it: `build-for-testing` runs under the
-  ordinary profile while `test-without-building` carries a closed set of
-  measured per-launch grants through `extraRules` — literal reads of the SDK
-  index plist and the launchd socket's ancestors, read-write over the
-  per-boot launchd session socket family, four named `mach-lookup` services,
-  the pseudo-terminal pair it allocates, `job-creation`, and `signal` for
-  the session's stale-app teardown — recorded with each measurement in
-  [decisions/0159-a-confined-apple-test-carries-its-measured-grants.md](decisions/0159-a-confined-apple-test-carries-its-measured-grants.md).
-  No other Apple launch receives any of them.
+  ordinary profile, which keeps the project's Run Script phases away from the
+  widened reach, while `test-without-building` carries a closed set of
+  per-launch grants through `extraRules`, never the shared profile default:
+  literal `file-read*` on `~/Library/Developer/Xcode/SDKToSimulatorIndexMapping.plist`;
+  literal `file-read-metadata` on `/private`, `/private/var`, and
+  `/private/var/tmp`; `file-read* file-write*` over
+  `^/private/var/tmp/com\.apple\.launchd\.[^/]+(/.*)?$`, the per-boot launchd
+  session socket family; `mach-lookup` on `com.apple.PowerManagement.control`,
+  `com.apple.testmanagerd.control`, `com.apple.dt.instruments.dtarbiter.xpc`,
+  and `com.apple.dt.instruments.dtsecurity.xpc`; `pseudo-tty` with
+  `file-write*`/`file-ioctl` on `/dev/ptmx` and `/dev/ttys<N>`;
+  `job-creation`; and untargeted `signal`. No other Apple launch receives any
+  of them. Xcode's `IDETestProgressNotification` post stays denied: it is
+  cosmetic to a CLI run.
+  _Rationale:_ each grant is the weakest spelling that cleared a measured,
+  fatal refusal — an empty destination list, an aborted power assertion, an
+  unreachable session socket, "Pseudo Terminal Setup Error", a runner that
+  could not launch, and hangs at `testmanagerd`, the DT arbiter, and "Testing
+  started" — and no single grant unblocks the run alone. `signal` is the
+  broadest: the session kills a stale app copy it did not fork, and denying it
+  hangs every later session; the launch still cannot read user files, open the
+  network, or leave its root. A future xcodebuild refusal is measured and added
+  to this list, never to the shared profile.
   Apple builds prepare a private derived-data directory per action and grant
   writes to that directory only for its `xcodebuild` phases. Run installation
   reads its product from the same directory without write access; XCTest
