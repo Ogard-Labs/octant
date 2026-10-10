@@ -74,3 +74,5 @@ boards, and Mermaid or PlantUML import.
 - 0010 Secure file preview and canvas artifacts
 - 0002 Durable event journal and rebuildable projections
 - 0028 The artifact library
+- [0165](0165-a-canvas-in-the-thread-can-be-the-whole-answer.md) — in-thread
+  documents; Mermaid stays a non-renderer
