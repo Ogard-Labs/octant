@@ -39,6 +39,44 @@
   white-space: nowrap;
 }
 
+/* A provider's account window: its short name, a bar of the share left, and
+   the share. The bar fills in the same inks as the context meter's popover, so
+   near and spent read the same in both places. */
+.thread-stats__limit {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--oct-space-1);
+  white-space: nowrap;
+}
+
+.thread-stats__limit-name {
+  color: var(--oct-fg);
+}
+
+.thread-stats__limit-meter {
+  display: inline-block;
+  width: 2.5rem;
+  height: 3px;
+  overflow: hidden;
+  background: color-mix(in oklab, var(--oct-fg) 12%, transparent);
+  border-radius: var(--oct-radius-pill);
+}
+
+.thread-stats__limit-meter > span {
+  display: block;
+  height: 100%;
+  background: var(--octant-palette-blue, var(--oct-fg));
+  border-radius: inherit;
+}
+
+.thread-stats__limit[data-level="near"] .thread-stats__limit-meter > span {
+  background: var(--oct-warn-fg);
+}
+
+.thread-stats__limit[data-level="spent"] .thread-stats__limit-meter > span {
+  background: var(--oct-danger-fg);
+}
+
 .thread-stats__item[data-hinted="true"] {
   text-decoration: underline dotted color-mix(in oklab, currentcolor 40%, transparent);
   text-underline-offset: 3px;

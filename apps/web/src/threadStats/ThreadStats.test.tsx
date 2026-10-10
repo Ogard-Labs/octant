@@ -3,6 +3,7 @@ import {
   type TurnMetricsRecord,
   type TurnMetricsSummary,
 } from "@octant/contracts";
+import type { CodeProviderLimit } from "@octant/contracts/code-operations";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
@@ -71,6 +72,7 @@ function summaryOf(turns: ReadonlyArray<TurnMetricsRecord>): TurnMetricsSummary 
 
 function Harness(props: {
   readonly summary: TurnMetricsSummary | undefined;
+  readonly limits?: ReadonlyArray<CodeProviderLimit>;
   readonly initiallyVisible?: boolean;
   readonly onVisibleChange?: (visible: boolean) => void;
 }) {
@@ -85,7 +87,11 @@ function Harness(props: {
       subjectKey="thread-a"
       summary={props.summary}
     >
-      <ComposerContextMeterProvider status="not-planned" subjectKey="code-thread:a">
+      <ComposerContextMeterProvider
+        status="not-planned"
+        subjectKey="code-thread:a"
+        {...(props.limits === undefined ? {} : { fallback: { limits: props.limits } })}
+      >
         <ComposerContextMeterGate enabled>
           <ComposerContextMeter />
           <ThreadStats />
@@ -105,6 +111,49 @@ describe("the thread stats line", () => {
     expect(line).toHaveTextContent(
       "↑ 48k in · ↓ 3.1k out · cache 92% · 41 tok/s · 0.9 s first token · $0.01 est.",
     );
+  });
+
+  it("leads with the provider's account windows as the share left", () => {
+    render(
+      <Harness
+        limits={[
+          { window: "five_hour", status: "allowed", utilization: 0.12 },
+          { window: "seven_day", status: "allowed", utilization: 0.62 },
+        ]}
+        summary={summaryOf([turn()])}
+      />,
+    );
+
+    const line = screen.getByTestId("thread-stats-line");
+    expect(within(line).getByText("5h")).toBeInTheDocument();
+    expect(within(line).getByText("88%")).toBeInTheDocument();
+    expect(within(line).getByText("Week")).toBeInTheDocument();
+    expect(within(line).getByText("38%")).toBeInTheDocument();
+    expect(line).toHaveTextContent("88% · Week");
+    expect(
+      screen.getByRole("button", {
+        name: /^Thread stats: 5-hour limit 88% left, 7-day limit 38% left/,
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it("shows the windows alone before any turn is recorded", () => {
+    render(
+      <Harness
+        limits={[{ window: "five_hour", status: "warning", utilization: 0.85 }]}
+        summary={undefined}
+      />,
+    );
+
+    const line = screen.getByTestId("thread-stats-line");
+    expect(within(line).getByText("5h")).toBeInTheDocument();
+    expect(line.querySelector('[data-level="near"]')).not.toBeNull();
+  });
+
+  it("shows no line for a provider that reported neither usage nor windows", () => {
+    render(<Harness summary={undefined} />);
+
+    expect(screen.queryByTestId("thread-stats-line")).toBeNull();
   });
 
   it("never rounds a partial cache hit up to a whole", () => {
