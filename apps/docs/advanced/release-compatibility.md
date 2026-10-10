@@ -66,9 +66,12 @@ and the signed feed verifies.
   one host that owns the thread)
 - Signed Intel and Windows packaging, an operating-system code signature on
   the Linux image, and native mobile store distribution
-- Mutating PR review and merge operations
-- Schedules, connector/OAuth marketplace, and data migration from current
-  Octant
+- Pull-request review mutation (approve, comment, request changes, close)
+  and any merge an agent or paired device starts; you can merge a pull request
+  yourself from its review on the desktop after confirming
+- Cloud-run schedules that wake a sleeping computer; routines run only while
+  the host is running
+- Connector/OAuth marketplace and data migration from current Octant
 
 These are tracked on the post-preview roadmap; nothing on this page is a
 commitment that a deferred capability will ship.
