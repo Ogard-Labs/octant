@@ -44,7 +44,7 @@ export function registerArtifactMirrorEvents(registry: EventRegistry): EventRegi
 }
 
 export interface ArtifactMirrorEventStoreOptions {
-  readonly journal: Pick<Journal, "append">;
+  readonly journal: Pick<Journal, "append" | "replayAggregate">;
   readonly uuid: () => string;
   readonly clock: () => UtcTimestamp;
   readonly actor: { readonly kind: "system" | "local-user"; readonly actorId: string };
@@ -85,6 +85,24 @@ export class ArtifactMirrorEventStore {
       if (!(error instanceof ConcurrencyConflict)) throw error;
       this.#appendAfter(input, error.actualVersion);
     }
+  }
+
+  /** One page of an aggregate's frames, oldest first, after `afterVersion`. */
+  replay(input: {
+    readonly aggregateId: string;
+    readonly afterVersion: number;
+    readonly limit: number;
+  }): ReadonlyArray<{
+    readonly aggregateVersion: number;
+    readonly eventName: string;
+    readonly payload: unknown;
+  }> {
+    return this.#options.journal.replayAggregate({
+      aggregateType: ARTIFACT_MIRROR_AGGREGATE_TYPE,
+      aggregateId: input.aggregateId,
+      afterVersion: input.afterVersion,
+      limit: input.limit,
+    });
   }
 
   #appendAfter(
