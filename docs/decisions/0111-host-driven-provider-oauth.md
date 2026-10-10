@@ -82,5 +82,6 @@ This record is design only. It does not authorize implementation.
 - 0007 Direct API providers and the native agent harness
 - 0013 Remote access (credential changes local-host-required)
 - 0054 Headless host credential store
+- 0165 Claude runs inside Anthropic's terms (Anthropic exclusion confirmed; no Claude subscription OAuth on the native harness)
 - `docs/enterprise-provider-identity.md` (directory ID / cloud-IAM, not this)
 - `docs/security/security-architecture-threat-model.md` (O1–O5 delta)

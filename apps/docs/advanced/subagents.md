@@ -48,6 +48,10 @@ you do, a Claude Code subagent stops and its parent is told to "Connect Claude
 for helpers in Settings › Claude Code." See [Providers](/advanced/providers).
 Claude Code with an Anthropic API key, and the other providers, need no extra
 step.
+**Deprecated by decision 0165** (Claude runs inside Anthropic's terms). The
+current build still requires that button; a follow-up will sign confined
+Claude launches in from a Claude-owned config directory instead of a token
+Octant stores.
 
 For writable Code children, **Review changes** opens the host's saved comparison
 for that generation in **Review**. It includes committed changes and non-ignored

@@ -90,3 +90,4 @@ the product would quietly depend on one vendor's features.
 - 0006 ACP agent drivers as one generic stack
 - 0007 Direct API providers and the native agent harness
 - 0009 Sandbox confinement, approvals, and Plan mode
+- 0165 Claude runs inside Anthropic's terms (restores the never-store rule for Claude)
