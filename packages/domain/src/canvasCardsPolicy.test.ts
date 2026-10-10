@@ -10,7 +10,6 @@ import {
   projectThreadReferenceCardFromVersion,
   validateCanvasThreadReferenceCard,
 } from "./canvasCardsPolicy";
-import { CANVAS_INLINE_MAX_BLOCKS } from "./canvasPresentationPolicy";
 
 const requestId = "20000000-0000-4000-8000-000000000000";
 const threadId = "11111111-1111-4111-8111-111111111111";
@@ -335,7 +334,7 @@ describe("Canvas create version projection", () => {
     expect(version.definition.blocks.map((block) => block.kind)).toEqual(["heading", "diagram"]);
   });
 
-  it("shows a Canvas inline in its thread only while it fits the inline bound", () => {
+  it("shows a reading document of any length inline but keeps worked-on blocks out of the thread", () => {
     const request = authorizeCanvasCreateRequest({
       request: chatRequest({ workspace: { kind: "chat-virtual", projectId } }),
       activeContext: { mode: "chat", projectId },
@@ -387,14 +386,13 @@ describe("Canvas create version projection", () => {
     });
     // A board is worked on in the sidebar, so asking for inline does not put it in the thread.
     expect(cardFor([heading, board]).presentation).toBe("sidebar");
-    expect(
-      cardFor(
-        Array.from({ length: CANVAS_INLINE_MAX_BLOCKS + 1 }, (_, index) => ({
-          ...heading,
-          blockId: `heading-${String(index)}`,
-        })),
-      ).presentation,
-    ).toBe("sidebar");
+    // A long reading document is no longer cut to a teaser's block count.
+    const longDocument = Array.from({ length: 40 }, (_, index) => ({
+      ...heading,
+      blockId: `heading-${String(index)}`,
+    }));
+    expect(cardFor(longDocument).presentation).toBe("inline");
+    expect(cardFor([...longDocument, board]).presentation).toBe("sidebar");
   });
 
   it("rejects a create request bound to another active Project", () => {

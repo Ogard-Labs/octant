@@ -583,7 +583,7 @@ describe("CanvasService", () => {
     expect(result).toMatchObject({ kind: "denied", denialCode: "invalid-template" });
   });
 
-  it("draws a small agent-written Canvas inside its thread and shows a card once it outgrows the thread", async () => {
+  it("draws an agent-written reading document inside its thread and shows a card once it gains a board", async () => {
     const { service } = createService();
     const tools = createCanvasAgentTools({
       windowId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" as never,
@@ -672,6 +672,23 @@ describe("CanvasService", () => {
       kind: "ready",
       version: { definition: { presentation: "sidebar" } },
     });
+
+    // A long reading document is drawn in the thread rather than cut to a teaser's block count.
+    const article = await tools.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({
+        operation: "create",
+        title: "Research brief",
+        presentation: "inline",
+        blocks: Array.from({ length: 40 }, (_unused, index) => ({
+          ...heading,
+          blockId: `section-${String(index)}`,
+        })),
+      }),
+    });
+    expect(article.isError).toBeUndefined();
+    expect(article.result).toMatchObject({ presentation: "inline" });
+    expect(article.result).not.toHaveProperty("presentationNote");
   });
 
   it("keeps an agent-written design that follows the frame rules and tells the agent why one does not", async () => {

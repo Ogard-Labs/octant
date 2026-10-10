@@ -41,7 +41,6 @@ import {
   comparisonMatrixExamples,
   mathExamples,
   metricExamples,
-  CANVAS_INLINE_MAX_BLOCKS,
   canvasInlineRefusal,
   effectiveCanvasPresentation,
 } from "@octant/domain";
@@ -138,7 +137,8 @@ const canvasDefinitionSchema = {
     presentation: {
       type: "string",
       enum: ["inline", "sidebar"],
-      description: `For create and revise: inline draws a small Canvas (at most ${String(CANVAS_INLINE_MAX_BLOCKS)} blocks, no diagram board, plan, mockup, or design) inside the conversation; sidebar, the default, shows a card that opens it beside the thread. Revise keeps the current choice when omitted.`,
+      description:
+        "For create and revise: inline draws the Canvas inside the conversation (any number of reading blocks; no diagram board, plan, mockup, or design); sidebar, the default, shows a card that opens it beside the thread. Revise keeps the current choice when omitted.",
     },
   },
   required: ["operation"],
@@ -363,9 +363,9 @@ function toolDescription(
     "A table is columns of a declared type (text, number, boolean, date, status) and rows that list one value per column in the same order. A column may take an optional format and an optional display: text (the plain reading), bar (an in-cell bar whose length is the value's share of the column's largest reading), heat (a tint on the shared sequential scale), or status (the value shown as a badge). The value is always shown, so bar and heat add a mark without replacing the reading; the person can sort, filter, and hide columns without revising the Canvas. A text column whose values read as a path is drawn with the shared path style.",
     "Headline numbers are metric blocks. Give each a label and a value, and add an optional format, unit, delta, a goodDirection of up, down, or neutral so a delta's tone is never guessed, a caption, and a sparkline of at most 256 recent readings. Consecutive metric blocks are gathered into a responsive tile row of two to four tiles. Describe metric to get a repo-stats tile row.",
     "A Canvas is a document: it grants no file, shell, Git, or network access. Creation adds a card to this thread and offers the Canvas in the thread's dock the first time it appears; the user can also select Open Canvas. Do not claim the user has read it or invent a download URL.",
-    `Choose where the thread shows it. Use presentation inline for one small visual that answers the question, such as a chart, a few metrics, a short table, or a sequence or state diagram; it is drawn in the conversation just below your reply to this turn, so refer to it as below, and the user can still open it in the sidebar. Leave presentation out (sidebar) for reports, plans, boards, mockups, designs, and anything the user will keep working on. Inline holds at most ${String(CANVAS_INLINE_MAX_BLOCKS)} blocks; when the host shows a card instead, the result says so in presentationNote.`,
+    "Choose where the thread shows it. Use presentation inline for a visual or a reading document that answers the question in place, such as a chart, a few metrics, a short table, a sequence or state diagram, or an article or brief made of reading blocks; it is drawn in the conversation just below your reply to this turn, so refer to it as below. A long one starts as a faded teaser the user can expand in place, and the user can still open it in the sidebar. Leave presentation out (sidebar) for plans, boards, mockups, designs, and anything the user will keep working on. Inline never holds a diagram board, plan, mockup, or design; when the host shows a card instead, the result says so in presentationNote.",
     "Revise with the canvasId, the last observed expectedSequence, and the complete replacement blocks. Reference blocks require source ids already in the Canvas source manifest; create attaches no sources. Never invent file or artifact references.",
-    "Preview once after you create or revise a chart, treemap, or inline Canvas: preview returns the same picture the person will see and the warnings it can measure: an inline document past its height cap, and on a chart clipped labels, legend overflow, empty series, or ink below its contrast target, and on a bar list clipped labels or empty series. Every other block kind gets no warnings, so read its picture yourself. Fix what the warnings or the picture show with a revise, then reply. Previewing again before you change the document only spends the host's browser and your context, so look once per change.",
+    "Preview once after you create or revise a chart, treemap, or inline Canvas: preview returns the same picture the person will see and the warnings it can measure: on a chart clipped labels, legend overflow, empty series, or ink below its contrast target, and on a bar list clipped labels or empty series. Every other block kind gets no warnings, so read its picture yourself. Fix what the warnings or the picture show with a revise, then reply. Previewing again before you change the document only spends the host's browser and your context, so look once per change.",
   ].join(" ");
 }
 
