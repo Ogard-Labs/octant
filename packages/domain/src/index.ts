@@ -36,6 +36,7 @@ export * from "./canvasMathExamples";
 export * from "./canvasMetricExamples";
 export * from "./canvasNumberFormat";
 export * from "./canvasMockupExamples";
+export * from "./canvasMockupOutline";
 export * from "./canvasDesignPolicy";
 export * from "./canvasMathPolicy";
 export * from "./canvasDesignExamples";

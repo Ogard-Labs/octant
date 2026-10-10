@@ -201,11 +201,21 @@ transitions, and an initial and a final state. Both use the same node and
 edge budgets as a board. Comments can sit on a participant, a message, a
 state, or a transition.
 
-A screen is a mockup block: a desktop, tablet, or phone frame and a tree of
-window, header, sidebar, list, list row, form field, button, toggle, tabs,
-card, image placeholder, and text. Nodes name a parent rather than nesting.
-The drawing is a wireframe. Its controls are not live: they cannot be focused
-and they do not submit. Ask `describe` for `mockup` to get a settings screen.
+A screen is a mockup block: a desktop window, browser, phone, tablet, dock
+panel, or custom-size frame, and a tree drawn from a closed set of parts:
+window, header, sidebar, navigation, stack, row, grid, card, tabs, list, list
+row, heading, text, form field, select, button, toggle, checkbox, badge,
+avatar, icon, image placeholder, table, modal, and toast. Nodes name a parent
+rather than nesting. A mockup is a wireframe in neutral ink unless the agent
+asks for the styled fidelity, which draws the same parts with your theme's
+accent and status colours. Several frames can sit side by side to show states
+(empty, loading, error) or alternatives. Numbered callouts explain parts of the
+screen, and you can comment on a callout from the Comments panel. The controls
+are not live: they cannot be focused and they do not submit, and a screen
+reader announces each part as part of the mockup. Outline, under the frame,
+lists the whole tree as text, and a Markdown or HTML export writes the same
+outline. Ask `describe` for `mockup` to get a settings screen and a set of
+states.
 
 ### Comparing options
 

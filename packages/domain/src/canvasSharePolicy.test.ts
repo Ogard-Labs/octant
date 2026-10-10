@@ -19,7 +19,7 @@ import {
 } from "./canvasDiagramExamples";
 import { heatmapExamples } from "./canvasHeatmapExamples";
 import { metricExamples } from "./canvasMetricExamples";
-import { settingsScreenExample } from "./canvasMockupExamples";
+import { mockupExamples } from "./canvasMockupExamples";
 import { treemapExamples } from "./canvasTreemapExamples";
 import {
   buildCanvasStaticExportDocument,
@@ -274,7 +274,7 @@ describe("Canvas share policy", () => {
       orderSchemaExample,
       supportFlowExample,
       releaseMindmapExample,
-      settingsScreenExample,
+      ...mockupExamples,
     ];
     const receipt = buildCanvasStaticExportReceipt({
       request,

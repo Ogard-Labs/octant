@@ -4,6 +4,7 @@ import {
   type CanvasBlock,
 } from "@octant/contracts/canvas";
 import { formatCanvasNumber } from "@octant/domain/canvas-number-format";
+import { notificationStatesExampleBlock, settingsScreenExampleBlock } from "@octant/domain";
 import { describe, expect, it } from "vitest";
 import { renderArtifactHtml, renderArtifactMarkdown } from "./artifactDocumentRender";
 
@@ -500,5 +501,39 @@ describe("rendering a canvas as a document", () => {
     expect(html.body).toContain(
       "<ul><li>Release readiness<ul><li>Test coverage — green on head</li><li>Documentation<ul><li>User guide</li></ul></li></ul></li></ul>",
     );
+  });
+
+  it("writes a mockup as an outline of its component tree, per variant, with its callouts", () => {
+    const markdown = renderArtifactMarkdown(definition([notificationStatesExampleBlock]));
+    const html = renderArtifactHtml(definition([notificationStatesExampleBlock]));
+
+    expect(markdown.kind).toBe("rendered");
+    expect(html.kind).toBe("rendered");
+    if (markdown.kind !== "rendered" || html.kind !== "rendered") return;
+    expect(markdown.body).toContain("## Notifications");
+    expect(markdown.body).toContain("Phone mockup, styled.");
+    expect(markdown.body).toContain("### Error");
+    expect(markdown.body).toContain("- Stack, Notifications");
+    expect(markdown.body).toContain("  - Button, Try again, accent, callout 1");
+    expect(markdown.body).toContain(
+      "1. Try again — Retries once, then keeps the toast until online.",
+    );
+    expect(markdown.body.indexOf("### Loaded")).toBeLessThan(markdown.body.indexOf("### Empty"));
+    expect(html.body).toContain(
+      "<h3>Empty</h3><ul><li>Stack, Notifications<ul><li>Heading, Notifications</li>",
+    );
+    expect(html.body).toContain(
+      "<ol><li>Try again — Retries once, then keeps the toast until online.</li></ol>",
+    );
+  });
+
+  it("writes a single-screen wireframe without variant headings, nesting the tree", () => {
+    const markdown = renderArtifactMarkdown(definition([settingsScreenExampleBlock]));
+    expect(markdown.kind).toBe("rendered");
+    if (markdown.kind !== "rendered") return;
+    expect(markdown.body).toContain("Desktop mockup, wireframe.");
+    expect(markdown.body).not.toContain("### ");
+    expect(markdown.body).toContain("- Window, Settings");
+    expect(markdown.body).toContain("      - Form field, Display name, Ada Lovelace");
   });
 });

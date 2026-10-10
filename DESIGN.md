@@ -986,11 +986,18 @@ composer under them all read at 13px, never under the chrome around them. The co
 `width: min(100% - 40px, measure)` with automatic horizontal margins. Welcome composers share a 768px maximum so
 Chat, Work, and Code start from the same prompt geometry independently of the
 reading-width preference. Canvas documents use a 62ch measure. A mockup is a
-wireframe of one screen, in a desktop, tablet, or phone frame. It draws only
-the closed catalog — window, header, sidebar, list, list row, form field,
-button, toggle, tabs, card, image placeholder, and text — and those controls
-are inert. In the Default style the wireframe uses neutral ink, hairline, and
-surface, never a hue. A design is the author's own screens or slides: Octant draws
+screen drawn from a closed catalog in a desktop, browser, tablet, phone, dock
+panel, or custom-size frame — window, header, sidebar, navigation, stack, row,
+grid, card, tabs, list, list row, heading, text, form field, select, button,
+toggle, checkbox, badge, avatar, icon, image placeholder, table, modal, and
+toast — and those controls are inert. The wireframe fidelity uses neutral ink,
+hairline, and surface, never a hue; a tone is drawn as emphasis (a filled or
+heavier outline). The styled fidelity draws the same tree with the active
+theme's accent, status roles, and surfaces, so it follows light, dark, and an
+imported theme. Variants sit side by side and wrap below 260px each. Numbered
+callouts are ink marks on their node with the notes listed under the frame. In
+forced colours every hairline is the system frame and a filled mark is system
+text. A design is the author's own screens or slides: Octant draws
 only the frame around them (a hairline, the surface behind, and a numbered
 caption) and never restyles what is inside. Its player is a near-full-window
 dialog that scales the screen to fit with the stage padding around it.

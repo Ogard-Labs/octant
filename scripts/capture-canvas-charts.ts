@@ -93,8 +93,10 @@ if (executable === undefined) {
   process.exit(2);
 }
 
+// `--only=mockup` captures the mockup blocks alone, as `canvas-mockup-*.png`.
+const onlyMockups = process.argv.includes("--only=mockup");
 const port = pickPort();
-const harnessUrl = `http://localhost:${String(port)}/chart-visuals-evidence.html`;
+const harnessUrl = `http://localhost:${String(port)}/chart-visuals-evidence.html${onlyMockups ? "?only=mockup" : ""}`;
 const serverProcess = Bun.spawn(
   [process.execPath, "run", "dev", "--", "--port", String(port), "--strictPort"],
   { cwd: webDir, stdout: "ignore", stderr: "ignore" },
@@ -128,7 +130,7 @@ try {
     page.setDefaultTimeout(15_000);
     await page.goto(harnessUrl, { waitUntil: "domcontentloaded" });
     await page.waitForSelector(
-      "main[data-canvas-chart-evidence='all'] .canvas-block__chart, main[data-canvas-chart-evidence='all'] .canvas-block__heatmap, main[data-canvas-chart-evidence='all'] .canvas-block__bar-list, main[data-canvas-chart-evidence='all'] .canvas-block__matrix, main[data-canvas-chart-evidence='all'] .canvas-block__math, main[data-canvas-chart-evidence='all'] .canvas-block__table, main[data-canvas-chart-evidence='all'] .canvas-block__kind-diagram",
+      "main[data-canvas-chart-evidence='all'] .canvas-mockup, main[data-canvas-chart-evidence='all'] .canvas-block__chart, main[data-canvas-chart-evidence='all'] .canvas-block__heatmap, main[data-canvas-chart-evidence='all'] .canvas-block__bar-list, main[data-canvas-chart-evidence='all'] .canvas-block__matrix, main[data-canvas-chart-evidence='all'] .canvas-block__math, main[data-canvas-chart-evidence='all'] .canvas-block__table, main[data-canvas-chart-evidence='all'] .canvas-block__kind-diagram",
     );
 
     // Show the table's sorted state in the capture: the sort mark and the
@@ -139,6 +141,13 @@ try {
       await page.waitForTimeout(50);
     }
 
+    // Open each mockup's Outline so the capture shows the text fallback too.
+    if (onlyMockups) {
+      for (const summary of await page.locator(".canvas-mockup__outline summary").all()) {
+        await summary.click();
+      }
+    }
+
     for (const scenario of SCENARIOS) {
       await page.emulateMedia({ forcedColors: scenario === "forced" ? "active" : "none" });
       await page.evaluate((value: Scenario) => {
@@ -146,7 +155,10 @@ try {
       }, scenario);
       // Let fonts and any layout settle before the capture.
       await page.waitForTimeout(150);
-      const path = join(evidenceDir, `canvas-charts-${scenario}${suffix}.png`);
+      const path = join(
+        evidenceDir,
+        `canvas-${onlyMockups ? "mockup" : "charts"}-${scenario}${suffix}.png`,
+      );
       await page.screenshot({ path, fullPage: true });
       written.push(path);
     }

@@ -276,6 +276,40 @@ describe("Canvas share contracts", () => {
     expect(() => decodeCanvasStaticExportDocument({ ...document, blocks })).toThrow();
   });
 
+  it("round-trips a catalog mockup only under the share version that declared it", () => {
+    const mockup = {
+      blockId: "settings",
+      schemaVersion: 12,
+      kind: "mockup",
+      device: "dock-panel",
+      fidelity: "styled",
+      title: "Settings",
+      variants: [
+        { variantId: "a", label: "A" },
+        { variantId: "b", label: "B" },
+      ],
+      nodes: [
+        { nodeId: "a-root", component: "stack", label: "Option A", variantId: "a" },
+        { nodeId: "save", component: "button", label: "Save", tone: "accent", parentId: "a-root" },
+        { nodeId: "b-root", component: "stack", label: "Option B", variantId: "b" },
+        {
+          nodeId: "people",
+          component: "table",
+          label: "People",
+          columns: ["Name"],
+          rows: [["Ada"]],
+          parentId: "b-root",
+        },
+      ],
+      annotations: [{ nodeId: "save", note: "Saves every section at once." }],
+    };
+    const exported = { ...document, schemaVersion: 6, blocks: [mockup] };
+    expect(decodeCanvasStaticExportDocument(exported)).toEqual(exported);
+    expect(() =>
+      decodeCanvasStaticExportDocument({ ...document, schemaVersion: 5, blocks: [mockup] }),
+    ).toThrow();
+  });
+
   it("round-trips entity-relationship, swimlane, and mind map blocks in a static export document", () => {
     const blocks = [
       {

@@ -27,6 +27,7 @@ import {
   CanvasId,
   CanvasMatrixGlyph,
   CanvasMatrixPreference,
+  CanvasMockupBlock,
   CanvasMetricDirection,
   CanvasNumberFormat,
   CanvasSchemaVersion,
@@ -34,6 +35,7 @@ import {
   CanvasTreemapScale,
   CanvasVersionId,
   canvasChartSeriesIssue,
+  canvasMockupUsesCatalog,
   decodeCanvasDefinition,
   type CanvasDefinition,
   type CanvasVersion,
@@ -76,8 +78,11 @@ export const CANVAS_SHARE_VISUALS_SCHEMA_VERSION = 3;
 export const CANVAS_SHARE_COMPARISON_MATRIX_SCHEMA_VERSION = 4;
 // Version 5 accompanies Canvas schema version 11: a share may carry math.
 export const CANVAS_SHARE_MATH_SCHEMA_VERSION = 5;
-export const CANVAS_SHARE_SCHEMA_VERSION = 5 as const;
-export const CanvasShareSchemaVersion = Schema.Literal(1, 2, 3, 4, CANVAS_SHARE_SCHEMA_VERSION);
+// Version 6 accompanies Canvas schema version 12: a shared mockup may use the
+// catalog (devices, fidelity, components, node fields, variants, callouts).
+export const CANVAS_SHARE_MOCKUP_CATALOG_SCHEMA_VERSION = 6;
+export const CANVAS_SHARE_SCHEMA_VERSION = 6 as const;
+export const CanvasShareSchemaVersion = Schema.Literal(1, 2, 3, 4, 5, CANVAS_SHARE_SCHEMA_VERSION);
 export type CanvasShareSchemaVersion = typeof CanvasShareSchemaVersion.Type;
 
 export const CanvasExportId = brandedUuid("CanvasExportId");
@@ -150,6 +155,11 @@ const exportBlockFields = {
   blockId: boundedToken("CanvasBlockId"),
   schemaVersion: CanvasSchemaVersion,
 } as const;
+const {
+  blockId: _mockupBlockId,
+  schemaVersion: _mockupSchemaVersion,
+  ...exportMockupFields
+} = CanvasMockupBlock.fields;
 
 const EXPORT_SECRET_VALUE_PATTERN =
   /(?:sk-(?:proj-)?[A-Za-z0-9_-]{10,}|gh[pousr]_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16}|ASIA[0-9A-Z]{16}|Bearer\s+[A-Za-z0-9._~+/=-]{12,}|Basic\s+[A-Za-z0-9+/=]{8,}|xox[baprs]-[A-Za-z0-9-]{10,}|-----BEGIN [A-Z ]*PRIVATE KEY-----)/i;
@@ -616,33 +626,12 @@ export const CanvasStaticExportBlock = Schema.Union(
       }).annotations(strict),
     ).pipe(Schema.maxItems(512)),
   }).annotations(strict),
+  // A shared mockup is the live block as it stands: every field is drawn
+  // data from closed sets or bounded text, and nothing in it resolves against
+  // the host. The share policy still runs the secret filter over its text.
   Schema.Struct({
     ...exportBlockFields,
-    kind: Schema.Literal("mockup"),
-    device: Schema.Literal("desktop", "tablet", "phone"),
-    title: boundedNonEmptyText(120),
-    nodes: Schema.Array(
-      Schema.Struct({
-        nodeId: boundedToken("CanvasMockupNodeId"),
-        component: Schema.Literal(
-          "window",
-          "header",
-          "sidebar",
-          "list",
-          "list-row",
-          "form-field",
-          "button",
-          "toggle",
-          "tabs",
-          "card",
-          "image-placeholder",
-          "text",
-        ),
-        label: boundedNonEmptyText(120),
-        parentId: Schema.optional(boundedToken("CanvasMockupNodeId")),
-        on: Schema.optional(Schema.Boolean),
-      }).annotations(strict),
-    ).pipe(Schema.maxItems(64)),
+    ...exportMockupFields,
   }).annotations(strict),
   // A shared treemap or bar list keeps its readings but drops each leaf's or
   // row's source id, which only resolves against the host that wrote it.
@@ -935,6 +924,12 @@ export const CanvasStaticExportDocument = Schema.Struct({
         document.schemaVersion >= CANVAS_SHARE_MATH_SCHEMA_VERSION ||
         !document.blocks.some((block) => block.kind === "math"),
       { message: () => "Math blocks require Canvas share version 5." },
+    ),
+    Schema.filter(
+      (document) =>
+        document.schemaVersion >= CANVAS_SHARE_MOCKUP_CATALOG_SCHEMA_VERSION ||
+        !document.blocks.some(canvasMockupUsesCatalog),
+      { message: () => "A mockup that uses the catalog requires Canvas share version 6." },
     ),
   );
 export type CanvasStaticExportDocument = typeof CanvasStaticExportDocument.Type;

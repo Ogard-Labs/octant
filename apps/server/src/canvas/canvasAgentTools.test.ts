@@ -619,17 +619,25 @@ describe("createCanvasAgentTools", () => {
       [block],
     );
 
+    // The person asks for a styled phone version with a callout on the new
+    // control: the agent revises the same block with catalog fields.
     const revisedBlock = {
       ...example,
       device: "phone",
+      fidelity: "styled",
       nodes: [
         ...block.nodes,
         {
-          nodeId: "portrait",
-          component: "image-placeholder",
-          label: "Avatar",
+          nodeId: "two-factor",
+          component: "checkbox",
+          label: "Require two-factor sign-in",
+          on: true,
           parentId: "profile",
         },
+      ],
+      annotations: [
+        ...(block.annotations ?? []),
+        { nodeId: "two-factor", note: "Admins can enforce this for the workspace." },
       ],
     };
     const revised = await set.execute({
@@ -647,8 +655,58 @@ describe("createCanvasAgentTools", () => {
       expect.objectContaining({ canvasId: "canvas-1", expectedSequence: 1 }),
       expect.anything(),
       expect.anything(),
-      [expect.objectContaining({ kind: "mockup", device: "phone" })],
+      [
+        expect.objectContaining({
+          kind: "mockup",
+          device: "phone",
+          fidelity: "styled",
+          annotations: expect.arrayContaining([expect.objectContaining({ nodeId: "two-factor" })]),
+        }),
+      ],
     );
+
+    // A component outside the closed catalog never reaches the Canvas.
+    revise.mockClear();
+    const refused = await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({
+        operation: "revise",
+        canvasId: "canvas-1",
+        expectedSequence: 2,
+        title: "Settings",
+        blocks: [
+          {
+            ...revisedBlock,
+            nodes: [...revisedBlock.nodes, { nodeId: "embed", component: "iframe", label: "Map" }],
+          },
+        ],
+      }),
+    });
+    expect(refused.isError).toBe(true);
+    expect(revise).not.toHaveBeenCalled();
+  });
+
+  it("describes mockup with a wireframe settings screen and a styled set of states", async () => {
+    const { set } = tools();
+    const described = await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "describe", blockKinds: ["mockup"] }),
+    });
+    const examples = (described.result as { examples?: ReadonlyArray<Record<string, unknown>> })
+      .examples;
+    expect(examples).toEqual([
+      expect.objectContaining({ blockId: "settings-screen", fidelity: "wireframe" }),
+      expect.objectContaining({
+        blockId: "notification-states",
+        fidelity: "styled",
+        variants: [
+          expect.objectContaining({ label: "Loaded" }),
+          expect.objectContaining({ label: "Empty" }),
+          expect.objectContaining({ label: "Error" }),
+        ],
+      }),
+    ]);
+    expect(examples?.every((example) => decodeCanvasBlock(example).kind === "mockup")).toBe(true);
   });
 
   it.each([

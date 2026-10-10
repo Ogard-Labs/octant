@@ -311,8 +311,8 @@ revises it with its own tools under the thread's existing authority.
 schema version 4. An older runtime refuses a version-4 document as a future
 version and does not report it corrupt.
 A treemap block is gated the same way at Canvas schema version 5, a heatmap
-block at version 6, a comparison matrix at version 10, and a math block at
-version 11, so a document that declares an earlier version and carries one is
+block at version 6, a comparison matrix at version 10, a math block at
+version 11, and the mockup catalog at version 12, so a document that declares an earlier version and carries one is
 refused as a declared future version. The optional table column
 `display` and the chart, table, and metric `format` fields are the one ungated
 exception: they only change how a value is drawn, so they carry no schema
@@ -464,14 +464,44 @@ formula as GitHub's code-span math; the HTML export writes MathML alone, with
 the source under a Source disclosure; the preview SVG draws the source. A
 source the share filter would not let leave the host is withheld whole. The math
 block arrives with Canvas schema version 11 and share version 5.
+A mockup block (`packages/domain/src/canvasMockupOutline.ts` for its tree and
+reading) describes a screen as data drawn from a closed catalog; it holds no
+HTML, CSS, script, or image source. The frame is a device preset (`desktop`
+window, `browser`, `tablet`, `phone`, `dock-panel`) or `custom` with its own
+size (240–2,560 px a side), and the fidelity is `wireframe` (neutral ink, the
+default) or `styled` (the active theme's accent, status roles, and surfaces).
+Nodes name a parent and take a component from window, header, sidebar, list,
+list row, form field, button, toggle, tabs, card, image placeholder, text,
+stack, row, grid, heading, select, checkbox, table, avatar, badge, icon (a
+bundled set of meanings each surface maps to its own glyph), nav, modal, and
+toast. Optional node fields (`on`, `value`, `tone`, `icon`, table `columns` and
+`rows`, `gridColumns`) belong to named components, and the domain policy
+refuses one on any other component as `mockup-field-refused`. Up to four
+`variants` put states or alternatives side by side; every top-level node then
+names one and its children follow it. Up to twelve `annotations` are numbered
+callouts pinned to nodes, and a comment on a callout uses the node anchor of
+the node it names. A version-12 mockup holds at most 160 nodes eight deep, with
+120-character text, 240-character callouts, and tables of six columns and eight
+rows; a document declaring an earlier version keeps the version-3 bounds of 64
+nodes six deep. The policy also refuses a custom device without a size or a
+preset with one (`mockup-size-mismatch`), a table whose rows do not match its
+columns (`mockup-table-shape`), an undeclared or repeated variant, and a
+dangling or repeated callout. The renderer draws every control inert: each
+part is a disabled tree item whose name says what it is and what it shows, the
+frame is a region whose role description is mockup, and Outline lists the tree
+as text. The Markdown and HTML export write that outline per variant with the
+callouts, the preview SVG draws a frame per variant, and a share carries the
+block whole. The catalog arrives with Canvas schema version 12 and share
+version 6.
 A share carries every block kind and field a Canvas holds except source ids
 and the design and action blocks it refuses (see the `design` block). A table
 column keeps its number format and display, and a board keeps its own layout.
 Share documents version independently of Canvas documents: a treemap, a
 heatmap, a bar list, a chart's or a table column's number format, a table
 column's display, and a board's layout arrive with share version 3, and a
-comparison matrix with share version 4, and math with share version 5, so a
-share that declares an older version and carries one is refused as a future version.
+comparison matrix with share version 4, math with share version 5, and the
+mockup catalog with share version 6, so a share that declares an older version
+and carries one is refused as a future version.
 The catalogue includes a `plan` block: phases, and one list of tasks that each
 name their phase, carry a status (todo, doing, blocked, done), and may carry an
 owner, estimate, acceptance notes, dates, dependencies on other tasks in the

@@ -16,6 +16,8 @@ import {
   CANVAS_MAX_METRIC_SPARKLINE_POINTS,
   CANVAS_MAX_MINDMAP_NOTE_LENGTH,
   CANVAS_MAX_MOCKUP_DEPTH,
+  CANVAS_MAX_MOCKUP_NOTE_LENGTH,
+  CANVAS_MOCKUP_LEGACY_MAX_DEPTH,
   CANVAS_MAX_MOCKUP_NODES,
   CANVAS_MAX_MOCKUP_TEXT_LENGTH,
   CANVAS_MAX_SERIES,
@@ -33,6 +35,7 @@ import {
 } from "@octant/contracts/canvas";
 import { launchDeckExample, onboardingFlowExample } from "./canvasDesignExamples";
 import { mathExamples } from "./canvasMathExamples";
+import { mockupExamples } from "./canvasMockupExamples";
 import {
   loginSequenceExample,
   orderSchemaExample,
@@ -691,6 +694,212 @@ describe("mockup limits", () => {
             mockup("long", [
               mockupNode("name", undefined, "x".repeat(CANVAS_MAX_MOCKUP_TEXT_LENGTH + 1)),
             ]),
+          ]),
+        ),
+      "mockup-text-budget-exceeded",
+    );
+  });
+});
+
+describe("mockup catalog", () => {
+  const screen = (overrides: Record<string, unknown> = {}, nodes?: ReadonlyArray<unknown>) => ({
+    ...mockup("catalog", []),
+    nodes: nodes ?? [
+      { nodeId: "page", component: "stack", label: "Settings" },
+      { nodeId: "plan", component: "select", label: "Plan", value: "Team", parentId: "page" },
+      { nodeId: "save", component: "button", label: "Save", tone: "accent", parentId: "page" },
+    ],
+    ...overrides,
+  });
+
+  it("accepts the examples describe hands an agent", () => {
+    expect(mockupExamples.length).toBeGreaterThanOrEqual(2);
+    expect(() => validateCanvasDefinition(withBlocks(mockupExamples))).not.toThrow();
+  });
+
+  it("refuses the catalog inside a document declaring an older schema version", () => {
+    const [example] = mockupExamples;
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition({
+          ...baseDefinition,
+          schemaVersion: 11,
+          blocks: [{ ...example, schemaVersion: 11 }],
+        }),
+      "unsupported-schema-version",
+    );
+  });
+
+  it("keeps the version-3 depth for a document declaring an older version", () => {
+    const nodes = [mockupNode("n0")];
+    for (let index = 1; index < CANVAS_MOCKUP_LEGACY_MAX_DEPTH + 1; index += 1) {
+      nodes.push(mockupNode(`n${String(index)}`, `n${String(index - 1)}`));
+    }
+    const deep = { ...mockup("deep", nodes), schemaVersion: 11 };
+    expectPolicyCode(
+      () => validateCanvasDefinition({ ...baseDefinition, schemaVersion: 11, blocks: [deep] }),
+      "mockup-depth-exceeded",
+    );
+    expect(() =>
+      validateCanvasDefinition(withBlocks([{ ...deep, schemaVersion: CANVAS_SCHEMA_VERSION }])),
+    ).not.toThrow();
+  });
+
+  it("refuses a field on a component that does not draw it, naming both", () => {
+    expect(
+      refusalOf(
+        screen({}, [{ nodeId: "title", component: "heading", label: "Settings", on: true }]),
+      ),
+    ).toBe(
+      "mockup-field-refused: Canvas mockup catalog gives heading title the on field; only toggle, checkbox, list-row draw it.",
+    );
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            screen({}, [{ nodeId: "t", component: "text", label: "Hi", columns: ["A"] }]),
+          ]),
+        ),
+      "mockup-field-refused",
+    );
+  });
+
+  it("keeps reading a version-3 screen that carries on beside a component that does not draw it", () => {
+    const legacy = {
+      ...mockup("legacy", []),
+      schemaVersion: 3,
+      nodes: [{ nodeId: "save", component: "button", label: "Save", on: false }],
+    };
+    expect(() =>
+      validateCanvasDefinition({ ...baseDefinition, schemaVersion: 11, blocks: [legacy] }),
+    ).not.toThrow();
+  });
+
+  it("refuses a table whose rows do not match its columns, or a table with no columns", () => {
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            screen({}, [
+              {
+                nodeId: "t",
+                component: "table",
+                label: "People",
+                columns: ["Name", "Role"],
+                rows: [["Ada"]],
+              },
+            ]),
+          ]),
+        ),
+      "mockup-table-shape",
+    );
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([screen({}, [{ nodeId: "t", component: "table", label: "People" }])]),
+        ),
+      "mockup-table-shape",
+    );
+  });
+
+  it("refuses a custom device without a size, and a size on a preset", () => {
+    expectPolicyCode(
+      () => validateCanvasDefinition(withBlocks([screen({ device: "custom" })])),
+      "mockup-size-mismatch",
+    );
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([screen({ device: "phone", size: { width: 400, height: 800 } })]),
+        ),
+      "mockup-size-mismatch",
+    );
+    expect(() =>
+      validateCanvasDefinition(
+        withBlocks([screen({ device: "custom", size: { width: 400, height: 800 } })]),
+      ),
+    ).not.toThrow();
+  });
+
+  it("refuses a root outside the declared variants, a nested variant, and a repeated variant", () => {
+    const variants = [
+      { variantId: "empty", label: "Empty" },
+      { variantId: "error", label: "Error" },
+    ];
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            screen({ variants }, [{ nodeId: "a", component: "stack", label: "Somewhere" }]),
+          ]),
+        ),
+      "unknown-mockup-variant",
+    );
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            screen({}, [{ nodeId: "a", component: "stack", label: "A", variantId: "empty" }]),
+          ]),
+        ),
+      "unknown-mockup-variant",
+    );
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            screen({ variants }, [
+              { nodeId: "a", component: "stack", label: "A", variantId: "empty" },
+              { nodeId: "b", component: "text", label: "B", parentId: "a", variantId: "error" },
+            ]),
+          ]),
+        ),
+      "mockup-field-refused",
+    );
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            screen({ variants: [variants[0], variants[0]] }, [
+              { nodeId: "a", component: "stack", label: "A", variantId: "empty" },
+            ]),
+          ]),
+        ),
+      "duplicate-mockup-variant",
+    );
+  });
+
+  it("refuses a callout on a node the mockup lacks, or two callouts on one node", () => {
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([screen({ annotations: [{ nodeId: "missing", note: "Why" }] })]),
+        ),
+      "dangling-mockup-annotation",
+    );
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            screen({
+              annotations: [
+                { nodeId: "save", note: "One" },
+                { nodeId: "save", note: "Two" },
+              ],
+            }),
+          ]),
+        ),
+      "duplicate-mockup-annotation",
+    );
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            screen({
+              annotations: [
+                { nodeId: "save", note: "x".repeat(CANVAS_MAX_MOCKUP_NOTE_LENGTH + 1) },
+              ],
+            }),
           ]),
         ),
       "mockup-text-budget-exceeded",

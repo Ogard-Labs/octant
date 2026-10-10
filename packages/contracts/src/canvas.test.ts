@@ -20,6 +20,12 @@ import {
   CANVAS_MAX_MATH_RUNS,
   CANVAS_MAX_MATH_SOURCE_LENGTH,
   CANVAS_MATH_SCHEMA_VERSION,
+  CANVAS_MAX_MOCKUP_ANNOTATIONS,
+  CANVAS_MAX_MOCKUP_NODES,
+  CANVAS_MAX_MOCKUP_TABLE_COLUMNS,
+  CANVAS_MAX_MOCKUP_VARIANTS,
+  CANVAS_MOCKUP_CATALOG_SCHEMA_VERSION,
+  CANVAS_MOCKUP_LEGACY_MAX_NODES,
   CANVAS_MAX_METRIC_SPARKLINE_POINTS,
   CANVAS_MAX_MINDMAP_NOTE_LENGTH,
   CANVAS_MAX_TABLE_ROWS,
@@ -1293,7 +1299,7 @@ describe("math blocks", () => {
     expect(decodeCanvasDefinition({ ...definition, blocks: [display, inline] })).toMatchObject({
       blocks: [display, inline],
     });
-    expect(CANVAS_MATH_SCHEMA_VERSION).toBe(CANVAS_SCHEMA_VERSION);
+    expect(CANVAS_MATH_SCHEMA_VERSION).toBe(11);
   });
 
   it("refuses a run that is both prose and a formula, or neither, and a blank prose run", () => {
@@ -1556,6 +1562,183 @@ describe("metric additions", () => {
           (_value, index) => index,
         ),
       }),
+    ).toThrow();
+  });
+});
+
+describe("mockup catalog", () => {
+  const screen = {
+    blockId: "settings",
+    schemaVersion: CANVAS_SCHEMA_VERSION,
+    kind: "mockup",
+    device: "browser",
+    fidelity: "styled",
+    title: "Settings",
+    variants: [
+      { variantId: "filled", label: "Filled" },
+      { variantId: "empty", label: "Empty" },
+    ],
+    nodes: [
+      { nodeId: "page", component: "stack", label: "Settings", variantId: "filled" },
+      { nodeId: "title", component: "heading", label: "Settings", parentId: "page" },
+      { nodeId: "plan", component: "select", label: "Plan", value: "Team", parentId: "page" },
+      { nodeId: "beta", component: "checkbox", label: "Beta features", on: true, parentId: "page" },
+      { nodeId: "status", component: "badge", label: "Active", tone: "success", parentId: "page" },
+      { nodeId: "find", component: "icon", label: "Search", icon: "search", parentId: "page" },
+      {
+        nodeId: "members",
+        component: "table",
+        label: "Members",
+        columns: ["Name", "Role"],
+        rows: [["Ada", "Owner"]],
+        parentId: "page",
+      },
+      { nodeId: "cards", component: "grid", label: "Cards", gridColumns: 2, parentId: "page" },
+      { nodeId: "saved", component: "toast", label: "Saved", tone: "success", parentId: "page" },
+      { nodeId: "blank", component: "stack", label: "Nothing here", variantId: "empty" },
+    ],
+    annotations: [{ nodeId: "plan", note: "Plan changes bill at the next cycle." }],
+  } as const;
+
+  it("decodes a styled browser screen with variants, catalog components, and a callout", () => {
+    expect(decodeCanvasBlock(screen)).toMatchObject(screen);
+    expect(decodeCanvasDefinition({ ...definition, blocks: [screen] })).toMatchObject({
+      blocks: [screen],
+    });
+    expect(CANVAS_MOCKUP_CATALOG_SCHEMA_VERSION).toBe(12);
+    expect(CANVAS_SCHEMA_VERSION).toBe(12);
+  });
+
+  it("admits the catalog only under the version that declared it, and keeps a version-3 screen readable", () => {
+    const legacy = {
+      blockId: "legacy",
+      schemaVersion: 3,
+      kind: "mockup",
+      device: "phone",
+      title: "Settings",
+      nodes: [{ nodeId: "screen", component: "window", label: "Settings" }],
+    } as const;
+    expect(
+      decodeCanvasDefinition({ ...definition, schemaVersion: 11, blocks: [legacy] }),
+    ).toMatchObject({ blocks: [legacy] });
+    const older = { ...screen, schemaVersion: 11 } as const;
+    expect(() =>
+      decodeCanvasDefinition({ ...definition, schemaVersion: 11, blocks: [older] }),
+    ).toThrow();
+    for (const gated of [
+      { ...legacy, device: "dock-panel" },
+      { ...legacy, fidelity: "wireframe" },
+      { ...legacy, nodes: [{ nodeId: "a", component: "badge", label: "New" }] },
+      { ...legacy, annotations: [{ nodeId: "screen", note: "Why" }] },
+      {
+        ...legacy,
+        nodes: Array.from({ length: CANVAS_MOCKUP_LEGACY_MAX_NODES + 1 }, (_value, index) => ({
+          nodeId: `n${String(index)}`,
+          component: "text",
+          label: "Row",
+        })),
+      },
+    ]) {
+      expect(() =>
+        decodeCanvasDefinition({ ...definition, schemaVersion: 11, blocks: [gated] }),
+      ).toThrow();
+      expect(() =>
+        decodeCanvasDefinition({
+          ...definition,
+          blocks: [{ ...gated, schemaVersion: CANVAS_SCHEMA_VERSION }],
+        }),
+      ).not.toThrow();
+    }
+  });
+
+  it("refuses a component, icon, or tone outside the closed sets", () => {
+    expect(() =>
+      decodeCanvasBlock({
+        ...screen,
+        nodes: [{ nodeId: "x", component: "iframe", label: "Embed" }],
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeCanvasBlock({
+        ...screen,
+        nodes: [{ nodeId: "x", component: "icon", label: "Logo", icon: "brand-logo" }],
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeCanvasBlock({
+        ...screen,
+        nodes: [{ nodeId: "x", component: "button", label: "Go", tone: "#ff0000" }],
+      }),
+    ).toThrow();
+    // No markup, style, or image source rides on a node.
+    expect(() =>
+      decodeCanvasBlock({
+        ...screen,
+        nodes: [
+          {
+            nodeId: "x",
+            component: "image-placeholder",
+            label: "Hero",
+            src: "https://x.test/a.png",
+          },
+        ],
+      }),
+    ).toThrow();
+  });
+
+  it("bounds nodes, variants, callouts, table width, and a custom size", () => {
+    const many = (count: number) =>
+      Array.from({ length: count }, (_value, index) => ({
+        nodeId: `n${String(index)}`,
+        component: "text",
+        label: "Row",
+      }));
+    expect(() =>
+      decodeCanvasBlock({ ...screen, variants: undefined, nodes: many(CANVAS_MAX_MOCKUP_NODES) }),
+    ).not.toThrow();
+    expect(() =>
+      decodeCanvasBlock({
+        ...screen,
+        variants: undefined,
+        nodes: many(CANVAS_MAX_MOCKUP_NODES + 1),
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeCanvasBlock({
+        ...screen,
+        variants: Array.from({ length: CANVAS_MAX_MOCKUP_VARIANTS + 1 }, (_value, index) => ({
+          variantId: `v${String(index)}`,
+          label: "State",
+        })),
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeCanvasBlock({
+        ...screen,
+        annotations: Array.from({ length: CANVAS_MAX_MOCKUP_ANNOTATIONS + 1 }, () => ({
+          nodeId: "plan",
+          note: "Note",
+        })),
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeCanvasBlock({
+        ...screen,
+        nodes: [
+          {
+            nodeId: "t",
+            component: "table",
+            label: "Wide",
+            columns: Array.from({ length: CANVAS_MAX_MOCKUP_TABLE_COLUMNS + 1 }, () => "Col"),
+          },
+        ],
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeCanvasBlock({ ...screen, device: "custom", size: { width: 600, height: 400 } }),
+    ).not.toThrow();
+    expect(() =>
+      decodeCanvasBlock({ ...screen, device: "custom", size: { width: 100_000, height: 400 } }),
     ).toThrow();
   });
 });

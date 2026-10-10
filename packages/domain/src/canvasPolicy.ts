@@ -22,6 +22,10 @@ import {
   CANVAS_MAX_METRIC_SPARKLINE_POINTS,
   CANVAS_MAX_MINDMAP_NOTE_LENGTH,
   CANVAS_MAX_MOCKUP_DEPTH,
+  CANVAS_MAX_MOCKUP_NOTE_LENGTH,
+  CANVAS_MOCKUP_CATALOG_SCHEMA_VERSION,
+  CANVAS_MOCKUP_LEGACY_MAX_DEPTH,
+  CANVAS_MOCKUP_LEGACY_MAX_NODES,
   CANVAS_MAX_MOCKUP_NODES,
   CANVAS_MAX_MOCKUP_TEXT_LENGTH,
   CANVAS_MAX_PAYLOAD_BYTES,
@@ -44,6 +48,9 @@ import {
   CANVAS_MATH_SCHEMA_VERSION,
   CanvasBlock,
   CanvasDefinition,
+  canvasMockupUsesCatalog,
+  type CanvasMockupComponent,
+  type CanvasMockupNode,
   CanvasVersion,
   canvasMetricUsesTrendFields,
   decodeCanvasDefinition,
@@ -69,6 +76,7 @@ const SUPPORTED_CANVAS_SCHEMA_VERSIONS: readonly number[] = [
   CANVAS_DIAGRAM_KINDS_SCHEMA_VERSION,
   CANVAS_DESIGN_SCHEMA_VERSION,
   CANVAS_COMPARISON_MATRIX_SCHEMA_VERSION,
+  CANVAS_MATH_SCHEMA_VERSION,
   CANVAS_SCHEMA_VERSION,
 ];
 
@@ -125,6 +133,13 @@ export type CanvasPolicyRejectionCode =
   | "mockup-text-budget-exceeded"
   | "dangling-mockup-parent"
   | "mockup-nesting-cycle"
+  | "mockup-field-refused"
+  | "mockup-table-shape"
+  | "mockup-size-mismatch"
+  | "unknown-mockup-variant"
+  | "duplicate-mockup-variant"
+  | "dangling-mockup-annotation"
+  | "duplicate-mockup-annotation"
   | "duplicate-measure-id"
   | "unknown-treemap-measure"
   | "treemap-roots"
@@ -409,7 +424,9 @@ function declaredSchemaRejection(input: unknown): CanvasPolicyRejectionCode | un
           (gated) => gated.kind === (block as { kind?: unknown }).kind && declared < gated.since,
         ) ||
           (declared < CANVAS_METRIC_TREND_SCHEMA_VERSION &&
-            canvasMetricUsesTrendFields(block as Record<string, unknown>))),
+            canvasMetricUsesTrendFields(block as Record<string, unknown>)) ||
+          (declared < CANVAS_MOCKUP_CATALOG_SCHEMA_VERSION &&
+            canvasMockupUsesCatalog(block as Record<string, unknown>))),
     )
   ) {
     return "unsupported-schema-version";
@@ -592,8 +609,21 @@ function inferStructuralBudgetCode(input: unknown): CanvasPolicyRejectionCode | 
       if (Array.isArray(block.nodes)) {
         for (const node of block.nodes) {
           if (typeof node !== "object" || node === null) continue;
-          const label = (node as { label?: unknown }).label;
-          if (typeof label === "string" && label.length > CANVAS_MAX_MOCKUP_TEXT_LENGTH) {
+          const { label, value } = node as { label?: unknown; value?: unknown };
+          if (
+            (typeof label === "string" && label.length > CANVAS_MAX_MOCKUP_TEXT_LENGTH) ||
+            (typeof value === "string" && value.length > CANVAS_MAX_MOCKUP_TEXT_LENGTH)
+          ) {
+            return "mockup-text-budget-exceeded";
+          }
+        }
+      }
+      const annotations = (block as { annotations?: unknown }).annotations;
+      if (Array.isArray(annotations)) {
+        for (const annotation of annotations) {
+          if (typeof annotation !== "object" || annotation === null) continue;
+          const note = (annotation as { note?: unknown }).note;
+          if (typeof note === "string" && note.length > CANVAS_MAX_MOCKUP_NOTE_LENGTH) {
             return "mockup-text-budget-exceeded";
           }
         }
@@ -775,7 +805,7 @@ function validateCrossReferences(definition: CanvasDefinition): void {
     if (block.kind === "er") validateEr(block);
     if (block.kind === "swimlane") validateSwimlane(block);
     if (block.kind === "mindmap") validateMindmap(block);
-    if (block.kind === "mockup") validateMockup(block);
+    if (block.kind === "mockup") validateMockup(block, definition.schemaVersion);
     if (block.kind === "design") validateDesign(block);
     if (block.kind === "treemap") validateTreemap(block);
     if (block.kind === "heatmap") validateHeatmap(block);
@@ -1125,63 +1155,150 @@ function validateMindmap(block: Extract<CanvasBlock, { readonly kind: "mindmap" 
   }
 }
 
+// Which components draw each optional node field. A field on any other
+// component would be stored but never drawn, so the author is told instead.
+const MOCKUP_FIELD_COMPONENTS: ReadonlyArray<{
+  readonly field: keyof CanvasMockupNode;
+  readonly components: ReadonlyArray<CanvasMockupComponent>;
+}> = [
+  { field: "on", components: ["toggle", "checkbox", "list-row"] },
+  { field: "value", components: ["form-field", "select"] },
+  { field: "tone", components: ["button", "badge", "toast"] },
+  { field: "icon", components: ["icon", "button", "list-row"] },
+  { field: "columns", components: ["table"] },
+  { field: "rows", components: ["table"] },
+  { field: "gridColumns", components: ["grid"] },
+];
+
 /**
  * A mockup's nodes name their parent. A chain longer than the depth limit, a
  * parent the block does not hold, or a cycle would draw a screen inside itself.
+ * A document declaring a version before the catalog keeps the version-3
+ * bounds, so a runtime rolled back to it still reads every screen it accepted.
+ * Variants, callouts, and node fields must name what the block holds and what
+ * its components draw.
  */
-function validateMockup(block: Extract<CanvasBlock, { readonly kind: "mockup" }>): void {
+function validateMockup(
+  block: Extract<CanvasBlock, { readonly kind: "mockup" }>,
+  declared: number,
+): void {
+  const catalog = declared >= CANVAS_MOCKUP_CATALOG_SCHEMA_VERSION;
+  const maxDepth = catalog ? CANVAS_MAX_MOCKUP_DEPTH : CANVAS_MOCKUP_LEGACY_MAX_DEPTH;
+  const maxNodes = catalog ? CANVAS_MAX_MOCKUP_NODES : CANVAS_MOCKUP_LEGACY_MAX_NODES;
+  const name = `Canvas mockup ${block.blockId}`;
   if (block.title.length > CANVAS_MAX_MOCKUP_TEXT_LENGTH) {
     reject(
       "mockup-text-budget-exceeded",
-      `Canvas mockup ${block.blockId} has a title longer than ${CANVAS_MAX_MOCKUP_TEXT_LENGTH} characters.`,
+      `${name} has a title longer than ${CANVAS_MAX_MOCKUP_TEXT_LENGTH} characters.`,
     );
   }
-  if (block.nodes.length > CANVAS_MAX_MOCKUP_NODES) {
+  if (block.nodes.length > maxNodes) {
+    reject("mockup-node-budget-exceeded", `${name} has more than ${maxNodes} nodes.`);
+  }
+  if ((block.device === "custom") !== (block.size !== undefined)) {
     reject(
-      "mockup-node-budget-exceeded",
-      `Canvas mockup ${block.blockId} has more than ${CANVAS_MAX_MOCKUP_NODES} nodes.`,
+      "mockup-size-mismatch",
+      block.device === "custom"
+        ? `${name} uses a custom device without a size.`
+        : `${name} gives the ${block.device} preset a size; only a custom device takes one.`,
     );
+  }
+  const variantIds = new Set<string>();
+  for (const variant of block.variants ?? []) {
+    if (variantIds.has(String(variant.variantId))) {
+      reject("duplicate-mockup-variant", `${name} declares variant ${variant.variantId} twice.`);
+    }
+    variantIds.add(String(variant.variantId));
   }
   const nodes = new Map<string, string | undefined>();
   for (const node of block.nodes) {
     const id = String(node.nodeId);
     if (nodes.has(id)) {
-      reject("duplicate-node-id", `Canvas mockup ${block.blockId} has duplicate nodes.`);
+      reject("duplicate-node-id", `${name} has duplicate nodes.`);
     }
-    if (node.label.length > CANVAS_MAX_MOCKUP_TEXT_LENGTH) {
+    if (
+      node.label.length > CANVAS_MAX_MOCKUP_TEXT_LENGTH ||
+      (node.value !== undefined && node.value.length > CANVAS_MAX_MOCKUP_TEXT_LENGTH)
+    ) {
       reject(
         "mockup-text-budget-exceeded",
-        `Canvas mockup ${block.blockId} has text longer than ${CANVAS_MAX_MOCKUP_TEXT_LENGTH} characters.`,
+        `${name} has text longer than ${CANVAS_MAX_MOCKUP_TEXT_LENGTH} characters.`,
+      );
+    }
+    // Version 3 admitted `on` on any node, and a stored screen must stay
+    // revisable, so the component rules bind only catalog documents.
+    for (const rule of catalog ? MOCKUP_FIELD_COMPONENTS : []) {
+      if (node[rule.field] !== undefined && !rule.components.includes(node.component)) {
+        reject(
+          "mockup-field-refused",
+          `${name} gives ${node.component} ${id} the ${rule.field} field; only ${rule.components.join(", ")} draw it.`,
+        );
+      }
+    }
+    if (node.component === "table") {
+      const width = node.columns?.length ?? 0;
+      if (width === 0 || (node.rows ?? []).some((row) => row.length !== width)) {
+        reject(
+          "mockup-table-shape",
+          `${name} table ${id} needs columns, and one cell per column in every row.`,
+        );
+      }
+    }
+    if (node.variantId !== undefined) {
+      if (node.parentId !== undefined) {
+        reject(
+          "mockup-field-refused",
+          `${name} gives nested node ${id} a variant; only a top-level node names one, and its children follow it.`,
+        );
+      }
+      if (!variantIds.has(String(node.variantId))) {
+        reject("unknown-mockup-variant", `${name} draws ${id} in a variant it does not declare.`);
+      }
+    } else if (node.parentId === undefined && variantIds.size > 0) {
+      reject(
+        "unknown-mockup-variant",
+        `${name} declares variants, so top-level node ${id} must name one.`,
       );
     }
     nodes.set(id, node.parentId === undefined ? undefined : String(node.parentId));
   }
   for (const [id, parentId] of nodes) {
     if (parentId !== undefined && !nodes.has(parentId)) {
-      reject(
-        "dangling-mockup-parent",
-        `Canvas mockup ${block.blockId} nests a node it does not hold.`,
-      );
+      reject("dangling-mockup-parent", `${name} nests a node it does not hold.`);
     }
     const seen = new Set<string>([id]);
     let current = parentId;
     let depth = 1;
     while (current !== undefined) {
       if (seen.has(current)) {
-        reject(
-          "mockup-nesting-cycle",
-          `Canvas mockup ${block.blockId} nests a node inside itself.`,
-        );
+        reject("mockup-nesting-cycle", `${name} nests a node inside itself.`);
       }
       seen.add(current);
       depth += 1;
-      if (depth > CANVAS_MAX_MOCKUP_DEPTH) {
-        reject(
-          "mockup-depth-exceeded",
-          `Canvas mockup ${block.blockId} nests nodes deeper than ${CANVAS_MAX_MOCKUP_DEPTH}.`,
-        );
+      if (depth > maxDepth) {
+        reject("mockup-depth-exceeded", `${name} nests nodes deeper than ${maxDepth}.`);
       }
       current = nodes.get(current);
+    }
+  }
+  const annotated = new Set<string>();
+  for (const annotation of block.annotations ?? []) {
+    const id = String(annotation.nodeId);
+    if (!nodes.has(id)) {
+      reject(
+        "dangling-mockup-annotation",
+        `${name} pins a callout to ${id}, which it does not hold.`,
+      );
+    }
+    if (annotated.has(id)) {
+      reject("duplicate-mockup-annotation", `${name} pins two callouts to ${id}.`);
+    }
+    annotated.add(id);
+    if (annotation.note.length > CANVAS_MAX_MOCKUP_NOTE_LENGTH) {
+      reject(
+        "mockup-text-budget-exceeded",
+        `${name} has a callout longer than ${CANVAS_MAX_MOCKUP_NOTE_LENGTH} characters.`,
+      );
     }
   }
 }
