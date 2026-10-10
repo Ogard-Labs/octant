@@ -334,7 +334,10 @@ as in the app, and a pending question is answered by typing its number or an
 answer. The folder you run it in decides the mode, the way a coding CLI does: inside
 a folder you have added as a Code Project, `octant agent` starts a Code
 thread there — in the current checkout, approval-gated, so its edits and
-commands ask you first, right there in the terminal; inside a Work Project it
+commands ask you first, right there in the terminal. A Project that remembers
+Full access (`octant project access <name> full-access`) starts it with Full
+access instead, the same as a new thread in the app that keeps Remember for
+this Project; the host decides, and there is no flag that asks for more. Inside a Work Project it
 starts a Work thread; anywhere else, Chat. `--mode chat|work|code` and
 `--project <name>` override that, and a folder that is not a Project yet is
 refused with the exact `octant project add` command to run. If the host is not

@@ -3016,7 +3016,11 @@ mechanisms are:
   `project.code-access-changed@1`); a thread that asks for Full access for
   the Project's default then starts without a per-thread native
   confirmation, and an existing thread can be raised to it the same way,
-  while session-only Full access still needs one. A composer
+  while session-only Full access still needs one. `octant agent` sends that
+  same request for a Code thread exactly when the Project's bootstrap says it
+  remembers Full access, and approval-gated otherwise; the host's check is
+  the only grant, so it refuses the request once the Project stops
+  remembering, and the terminal has no way to ask for more. A composer
   turn may
   request a narrower posture; the server clamps it to the thread's grant
   and records the posture the turn ran under. Compatible harnesses may

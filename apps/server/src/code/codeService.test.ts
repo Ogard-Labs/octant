@@ -104,6 +104,11 @@ const rememberedFullAccessProject = {
   codeAccessPersistence: "project-default",
 } as never;
 
+const approvalGatedProject = {
+  ...(rememberedFullAccessProject as object),
+  codeAccessPersistence: "current-session",
+} as never;
+
 describe("codeNavigationCheckoutChip", () => {
   it("names the branch for both existing and managed worktrees", () => {
     expect(codeNavigationCheckoutChip(checkout)).toEqual({
@@ -1621,6 +1626,59 @@ describe("CodeService commands", () => {
       fixture.service.execute(ids.window, { kind: "create-code-thread", thread: created }),
     ).rejects.toThrow(/Full access requires native confirmation/);
     expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+  });
+
+  it("starts a thread approval-gated in a Code Project that never remembered Full access", async () => {
+    const created = thread({
+      executionPolicy: "approval-gated",
+      permissionPersistence: "current-session",
+    });
+    const fixture = serviceFixture({ threads: [], approve: false, project: approvalGatedProject });
+
+    await expect(
+      fixture.service.execute(ids.window, { kind: "create-code-thread", thread: created }),
+    ).resolves.toEqual({ kind: "thread-created", thread: created });
+    expect(fixture.approvals.validate).not.toHaveBeenCalled();
+  });
+
+  it("refuses remembered Full access the Code Project never remembered, however the client asks", async () => {
+    // A terminal or any other client can name project-default Full access;
+    // only the Project's own remembered choice backs it.
+    const created = thread({
+      executionPolicy: "full-access",
+      permissionPersistence: "project-default",
+    });
+    const fixture = serviceFixture({ threads: [], approve: false, project: approvalGatedProject });
+
+    await expect(
+      fixture.service.execute(ids.window, { kind: "create-code-thread", thread: created }),
+    ).rejects.toMatchObject({ failure: { category: "unauthorized" } });
+    expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+  });
+
+  it("keeps a Plan thread read-only in a Project that remembers Full access", async () => {
+    const created = thread({ executionPolicy: "plan", permissionPersistence: "project-default" });
+    const fixture = serviceFixture({
+      threads: [],
+      approve: false,
+      project: rememberedFullAccessProject,
+    });
+
+    await expect(
+      fixture.service.execute(ids.window, { kind: "create-code-thread", thread: created }),
+    ).resolves.toMatchObject({ kind: "thread-created", thread: { executionPolicy: "plan" } });
+    expect(fixture.persistence.journal.append).toHaveBeenCalledWith(
+      expect.objectContaining({
+        events: [
+          expect.objectContaining({
+            eventName: "code.thread-created@1",
+            payload: expect.objectContaining({
+              thread: expect.objectContaining({ executionPolicy: "plan" }),
+            }),
+          }),
+        ],
+      }),
+    );
   });
 
   it("re-observes the checkout atomically and rejects a stale thread creation", async () => {
