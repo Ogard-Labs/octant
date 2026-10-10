@@ -19,16 +19,25 @@ export interface TurnDecision {
 /**
  * The marker closes the reply, so only its tail is read: a long reply costs no
  * more to check than a short one, and a block quoted earlier in the text is
- * never mistaken for the ask.
+ * never mistaken for the ask. A follow-up block may come after it, and one
+ * can run to several thousand characters, so it is cut off before the tail is
+ * taken.
  */
 const TAIL_CHARACTERS = 4_096;
 
-const CLOSING_FOLLOW_UPS = new RegExp(
-  `\`\`\`${FOLLOW_UP_BLOCK_LANGUAGE}[^\\n]*\\n[\\s\\S]*?\`\`\`\\s*$`,
-);
+const FOLLOW_UPS_OPENER = `\`\`\`${FOLLOW_UP_BLOCK_LANGUAGE}`;
+const WHOLE_FOLLOW_UPS = new RegExp(`^${FOLLOW_UPS_OPENER}[^\\n]*\\n[\\s\\S]*\`\`\`$`);
 const CLOSING_DECISION = new RegExp(
   `\`\`\`${TURN_DECISION_BLOCK_LANGUAGE}[^\\n]*\\n([\\s\\S]*?)\`\`\`\\s*$`,
 );
+
+/** The reply without a follow-up block that ends it, found from its last opener. */
+function withoutClosingFollowUps(reply: string): string {
+  const trimmed = reply.trimEnd();
+  const opener = trimmed.lastIndexOf(FOLLOW_UPS_OPENER);
+  if (opener === -1 || !WHOLE_FOLLOW_UPS.test(trimmed.slice(opener))) return trimmed;
+  return trimmed.slice(0, opener).trimEnd();
+}
 
 /**
  * The decision a normalized reply closes with, or undefined. The block must
@@ -39,7 +48,7 @@ const CLOSING_DECISION = new RegExp(
  * recommendation — raises nothing rather than a guessed decision.
  */
 export function parseTurnDecision(reply: string): TurnDecision | undefined {
-  const tail = reply.slice(-TAIL_CHARACTERS).replace(CLOSING_FOLLOW_UPS, "").trimEnd();
+  const tail = withoutClosingFollowUps(reply).slice(-TAIL_CHARACTERS);
   const match = CLOSING_DECISION.exec(tail);
   if (match === null) return undefined;
   return readTurnDecisionBlock(match[1] ?? "");

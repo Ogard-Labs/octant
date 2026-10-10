@@ -61,6 +61,15 @@ describe("Code turn decisions", () => {
     }
   });
 
+  it("lists nothing on a thread whose next turn this window's send command would refuse", async () => {
+    const { decisions, sources } = fixture({ message: [decisionBlock], admitted: false });
+    expect(await decisions.listForWindow(windowId)).toEqual([]);
+    expect(sources.admitsTurn).toHaveBeenCalledWith(
+      windowId,
+      expect.objectContaining({ id: threadId }),
+    );
+  });
+
   it("lists nothing once a newer turn has started", async () => {
     const { decisions } = fixture({ message: [decisionBlock], newerTurn: "running" });
     expect(await decisions.listForWindow(windowId)).toEqual([]);
@@ -113,6 +122,7 @@ function fixture(options: {
   readonly thread?: Partial<Record<string, unknown>>;
   readonly newerTurn?: "running";
   readonly unreadable?: boolean;
+  readonly admitted?: boolean;
 }) {
   const texts = new Map<string, string>();
   let contentCounter = 0;
@@ -175,6 +185,7 @@ function fixture(options: {
   ];
   const sources = {
     threads: vi.fn(async () => [thread(options.thread)]),
+    admitsTurn: vi.fn(async () => options.admitted ?? true),
     runtimeWorks: vi.fn(() => works),
     replay: vi.fn((input: { readonly afterCursor: number }) =>
       frames.filter((frame) => frame.cursor > input.afterCursor),

@@ -514,6 +514,8 @@ export interface CodeOperationRuntime {
    * could answer through `execute`, under the same scope those answers pass.
    */
   pendingRequests?(windowId: WindowId): Promise<ReadonlyArray<PendingRequest>>;
+  /** Whether this window's `start-provider-turn` would pass its scope on the thread's checkout. */
+  admitsTurn?(windowId: WindowId, thread: Pick<CodeThread, "id" | "checkoutId">): Promise<boolean>;
   /**
    * Whether the thread's running turn waits on an approval or a question that
    * `pendingRequests` would list. It ends the moment the answer is taken, so
@@ -1142,6 +1144,7 @@ export function createCodeOperationRuntime(
     },
     raiseHarnessQuestion: (input) => turns.raiseHarnessQuestion(input),
     pendingRequests: (windowId) => service.listPendingForWindow(windowId),
+    admitsTurn: (windowId, thread) => service.admitsTurn(windowId, thread),
     turnAwaitsPerson: (threadId) => turns.awaitsPerson(threadId),
     subscribe: (windowId, threadId, operationId, afterCursor, limit) =>
       service.subscribe(windowId, threadId, operationId, afterCursor, limit),

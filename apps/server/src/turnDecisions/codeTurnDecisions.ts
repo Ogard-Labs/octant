@@ -18,6 +18,12 @@ export interface CodeTurnDecisionSources {
    * Code send command checks before it starts a turn.
    */
   readonly threads: (windowId: WindowId) => Promise<ReadonlyArray<CodeThread>>;
+  /**
+   * Whether the window's Code send command would start a turn on this thread
+   * now. The thread list is read with browse reach, which is wider, so a
+   * decision is offered only where its answer could land.
+   */
+  readonly admitsTurn: (windowId: WindowId, thread: CodeThread) => Promise<boolean>;
   readonly runtimeWorks: (threadId: CodeThreadId) => ReadonlyArray<ProjectedCodeRuntimeWork>;
   /**
    * One page of an operation's journaled frames after `afterCursor`, at most
@@ -57,7 +63,7 @@ export class CodeTurnDecisions {
     const pending: PendingRequest[] = [];
     for (const thread of await this.#sources.threads(windowId)) {
       const open = this.forThread(thread);
-      if (open === undefined) continue;
+      if (open === undefined || !(await this.#sources.admitsTurn(windowId, thread))) continue;
       pending.push({
         mode: "code",
         kind: "decision",

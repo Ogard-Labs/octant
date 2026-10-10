@@ -41,6 +41,15 @@ describe("parseTurnDecision", () => {
     expect(parseTurnDecision(text)?.ask).toBe(ask);
   });
 
+  it("reads a decision followed by a follow-up block longer than the tail it reads", () => {
+    const prompt = "p".repeat(4_000);
+    const followUps = `\`\`\`octant-follow-ups\n${JSON.stringify({
+      suggestions: [{ title: "Tests", prompt, target: "new-thread" }],
+    })}\n\`\`\``;
+    const text = `${reply(JSON.stringify({ ask, options: [{ label: "Yes", recommended: true }] }))}${followUps}\n`;
+    expect(parseTurnDecision(text)?.ask).toBe(ask);
+  });
+
   it("refuses more than four options", () => {
     const options = ["a", "b", "c", "d", "e"].map((label, index) => ({
       label,

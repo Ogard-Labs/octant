@@ -3748,6 +3748,8 @@ function runtimeFixture(options: {
       });
       return new CodeTurnDecisions({
         threads: async () => [activeThread],
+        admitsTurn: (id, candidate) =>
+          runtime.admitsTurn?.(id, candidate) ?? Promise.resolve(false),
         runtimeWorks: (id) => readCodeRuntimeWorks(connection, id),
         replay: (input) => {
           const replay = events.replay({ ...input, limit: MAX_CODE_OPERATION_REPLAY_LIMIT });

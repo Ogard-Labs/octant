@@ -1377,6 +1377,23 @@ export class CodeOperationService {
    * offered only where its answer would be admitted. Both answers classify as
    * reads, which every posture allows.
    */
+  /**
+   * Whether this window could start the thread's next turn: the scope every
+   * Code operation, `start-provider-turn` included, passes first (thread and
+   * checkout identity, the window's Code Project, an available checkout, an
+   * active thread). A decision is offered only where its answer could land.
+   */
+  async admitsTurn(
+    windowId: WindowId,
+    thread: Pick<CodeThread, "id" | "checkoutId">,
+  ): Promise<boolean> {
+    const scope = await this.#scope(windowId, {
+      threadId: thread.id,
+      checkoutId: thread.checkoutId,
+    });
+    return !("failure" in scope);
+  }
+
   async listPendingForWindow(windowId: WindowId): Promise<ReadonlyArray<PendingRequest>> {
     const pending: PendingRequest[] = [];
     for (const request of this.#options.turns.pendingRequests?.() ?? []) {

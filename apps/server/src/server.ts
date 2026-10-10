@@ -5218,6 +5218,8 @@ export function startOctantServer(
     // so the board and every attention surface agree after a restart.
     const codeTurnDecisions = new CodeTurnDecisions({
       threads: async (windowId) => (await baseRouteCodeService.navigation(windowId)).threads,
+      admitsTurn: async (windowId, thread) =>
+        (await codeOperationRuntime?.admitsTurn?.(windowId, thread)) === true,
       runtimeWorks: (threadId) => persistence.readCodeRuntimeWorks(threadId),
       replay: (input) => {
         try {
