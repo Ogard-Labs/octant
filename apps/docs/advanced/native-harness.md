@@ -35,7 +35,12 @@ thread's access posture. Once a thread has taken in outside content — a
 fetched page, search results, or a helper's reply — it asks before every
 edit, write, command, and page fetch, even under Full access. Reading,
 searching, and running commands in your own folder do not count as outside
-content. An edit needs a prior read of the same file and refuses when
+content. A web search on such a thread does not ask, because it only reaches
+the search endpoint you set; instead Octant refuses a query that looks like it
+carries data — a link, an email address, a key or other long random-looking
+token, an encoded or hex string, or more than 200 characters — and tells the
+model why, so it can ask a plain question instead. A short query can still
+carry a few words, but only to your own search endpoint. An edit needs a prior read of the same file and refuses when
 the file changed since. A truncated result says how much was left out and
 where to continue.
 

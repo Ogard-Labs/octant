@@ -156,7 +156,9 @@ const decodeValidationToolArguments = Schema.decodeUnknownSync(ValidationToolArg
  * and a child's collected reply, which may relay what the child fetched.
  * Tainting every result made the first local `read` turn every later write
  * and command into a fresh prompt. `web-fetch` asks every time on a tainted
- * thread because a GET can carry data out in its URL.
+ * thread because a GET can carry data out in its URL. `web-search` does not
+ * ask: it reaches only the person's configured endpoint, and the tool-call
+ * policy refuses a query that looks like it carries data instead.
  */
 const NATIVE_HARNESS_TOOL_POLICY: Readonly<
   Record<

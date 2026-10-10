@@ -278,7 +278,13 @@ window, or approves an action class the host policy reserves for the local user.
   (`web-fetch`, `web-search`, a child's collected or delivered reply); local reads, searches, edits, and
   commands do not. On a tainted thread a harness "always" approval stops covering its class, and
   `web-fetch` itself needs the per-action confirmation because a GET can carry data out in its
-  URL (Henrik decision 2026-10-09; detail in `docs/architecture.md`, Native harness).
+  URL (Henrik decision 2026-10-09; detail in `docs/architecture.md`, Native harness). A tainted
+  thread's `web-search` asks nobody, because it reaches only the search endpoint the person
+  configured; instead the policy refuses a query that looks like it carries data — a URL, an email
+  address, a long high-entropy token, a base64, hex, or percent-encoded run, or more than 200 characters — with a
+  named reason (`search-query-refused-under-taint: …`) before any request leaves (Henrik decision
+  2026-10-10). Residual risk: a short plain-word query can still leak a few words, but only to the
+  endpoint the person chose. Revisit if a default hosted third-party search provider ships.
 - **Structured references stay inert.** `@plugin` and `$skill` references cannot install, trust,
   enable, or elevate (exists today, `packages/plugin-host/src/composer.ts`); injected text that
   imitates them remains ordinary text.
