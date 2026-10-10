@@ -3251,7 +3251,15 @@ mechanisms are:
   Remote requests are classified fail-closed by an admission policy and route
   classifier. A remote principal can never exceed host, mode, provider, Project,
   or thread authority, cannot mint local receipts, and every remote mutation is
-  journaled with its principal.
+  journaled with its principal. The listener, pairing tickets, pairing
+  decisions, and device inventory are administered only over the host's
+  loopback administration channel — the desktop bridge secret plus a
+  registered window capability — which both Settings → Remote access and the
+  `octant listener` / `octant pair` / `octant auth` commands use; the private
+  listener forwards none of those routes. A listener enabled there is
+  remembered owner-only under the data directory (the boundary that holds the
+  host identity key), including its TLS key, and re-enabled when the server
+  starts; a server shutdown keeps it and only a local disable forgets it.
 - **Artifact replica membership.** Each replica entry carries a detached
   Ed25519 signature from the device signing key the writing host holds for its
   replica instance, in a credential namespace of its own that provider

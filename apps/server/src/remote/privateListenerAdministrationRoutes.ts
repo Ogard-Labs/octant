@@ -16,6 +16,7 @@ import {
   type PrivateListenerHostStatus,
   type PrivateListenerLifecycleController,
 } from "./privateListenerLifecycleController";
+import type { PrivateListenerSettingPort } from "./privateListenerSetting";
 
 const DEFAULT_BODY_LIMIT = 64 * 1_024;
 
@@ -42,6 +43,12 @@ export interface PrivateListenerAdministrationRouteOptions {
     | PrivateListenerLifecycleController
     | undefined
     | (() => PrivateListenerLifecycleController | undefined);
+  /**
+   * Where a listener enabled here is remembered across server restarts. Only
+   * these routes change it: a server shutdown disables the listener through
+   * the controller without forgetting it.
+   */
+  readonly setting?: Pick<PrivateListenerSettingPort, "save" | "clear">;
   readonly maxRequestBodySize?: number;
   readonly now?: () => number;
 }
@@ -100,7 +107,9 @@ export function createPrivateListenerAdministrationRouteHandler(
     try {
       if (route === ROUTES.disable) {
         await readNoBody(request);
-        return statusResponse(await control.disable());
+        const disabled = await control.disable();
+        options.setting?.clear();
+        return statusResponse(disabled);
       }
       if (request.headers.get("content-type")?.split(";", 1)[0]?.trim() !== "application/json") {
         return failure("invalid", 400);
@@ -112,11 +121,24 @@ export function createPrivateListenerAdministrationRouteHandler(
       const config = decodeListenerConfig(decoded.value);
       const status =
         route === ROUTES.enable ? await control.enable(config) : await control.restart(config);
+      rememberListener(options.setting, config);
       return statusResponse(status);
     } catch (error) {
       return mapError(error);
     }
   };
+}
+
+function rememberListener(
+  setting: PrivateListenerAdministrationRouteOptions["setting"],
+  config: PrivateListenerConfig,
+): void {
+  try {
+    setting?.save(config);
+  } catch {
+    // The listener is serving; failing to remember it only means it comes
+    // back off after a restart, which is the default it had before.
+  }
 }
 
 function statusResponse(status: PrivateListenerHostStatus): Response {

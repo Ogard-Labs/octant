@@ -1901,6 +1901,104 @@ describe("startOctantServer", () => {
     );
   });
 
+  it("brings back the listener enabled from local administration after a restart, until it is disabled", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "octant-server-private-listener-remembered-"));
+    directories.push(directory);
+    const capability = "A".repeat(43);
+    const local = (path: string, init: RequestInit = {}) =>
+      new Request(`http://127.0.0.1:13773${path}`, {
+        ...init,
+        headers: {
+          "x-octant-desktop-secret": "desktop-secret",
+          "x-octant-window-capability": capability,
+          ...init.headers,
+        },
+      });
+
+    // One server lifetime against the same data directory: start, register a
+    // local window, run `act`, then stop through the scope like a restart.
+    const lifetime = (
+      act: (
+        handle: (request: Request) => Promise<Response>,
+        remoteListenerBound: boolean,
+      ) => Promise<void>,
+    ) =>
+      Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            let routeHandler: ((request: Request) => Response | Promise<Response>) | undefined;
+            const server = yield* startOctantServer({
+              hostname: "127.0.0.1",
+              port: 0,
+              desktopBridgeSecret: "desktop-secret",
+              remoteServe: () => ({
+                url: new URL("https://192.168.1.20:9443"),
+                stop: async () => undefined,
+              }),
+              serve: (serveOptions) => {
+                routeHandler = serveOptions.fetch;
+                return { url: new URL("http://127.0.0.1:13773"), stop: () => undefined };
+              },
+            });
+            const handle = (request: Request) =>
+              Promise.resolve(routeHandler?.(request)).then(assertResponse);
+            yield* Effect.promise(() =>
+              handle(
+                new Request("http://127.0.0.1:13773/api/desktop/window-authorities", {
+                  method: "POST",
+                  headers: { "x-octant-desktop-secret": "desktop-secret" },
+                  body: JSON.stringify({
+                    windowId: "00000000-0000-4000-8000-000000000662",
+                    capability,
+                  }),
+                }),
+              ),
+            );
+            yield* Effect.promise(() => act(handle, server.remoteListener !== undefined));
+            // Stop while the provided persistence is still open; it is released
+            // when this generator ends, before the scope's own server release.
+            yield* Effect.promise(() => Promise.resolve(server.stop()));
+          }).pipe(Effect.provide(makePersistenceLive({ dataDirectory: directory }))),
+        ),
+      );
+    const statusOf = async (handle: (request: Request) => Promise<Response>) =>
+      (
+        (await (await handle(local("/api/desktop/private-listener/status"))).json()) as {
+          status: { state: string };
+        }
+      ).status.state;
+
+    await lifetime(async (handle, bound) => {
+      expect(bound).toBe(false);
+      const enabled = await handle(
+        local("/api/desktop/private-listener/enable", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            hostname: "192.168.1.20",
+            port: 9443,
+            origin: "https://192.168.1.20:9443",
+            certificatePem: PRIVATE_LISTENER_TEST_CERT,
+            privateKeyPem: PRIVATE_LISTENER_TEST_KEY,
+          }),
+        }),
+      );
+      expect(enabled.status).toBe(200);
+    });
+    await lifetime(async (handle, bound) => {
+      expect(bound).toBe(true);
+      expect(await statusOf(handle)).toBe("ready");
+      const disabled = await handle(
+        local("/api/desktop/private-listener/disable", { method: "POST" }),
+      );
+      expect(disabled.status).toBe(200);
+    });
+    await lifetime(async (handle, bound) => {
+      expect(bound).toBe(false);
+      expect(await statusOf(handle)).toBe("disabled");
+    });
+  });
+
   it("F3: propagates remote stop failure while still attempting local stop", async () => {
     const directory = mkdtempSync(join(tmpdir(), "octant-server-remote-stop-fail-"));
     directories.push(directory);

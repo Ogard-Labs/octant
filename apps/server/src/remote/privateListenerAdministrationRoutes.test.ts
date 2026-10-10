@@ -7,6 +7,7 @@ import {
   type PrivateListenerLifecycleController,
 } from "./privateListenerLifecycleController";
 import { createPrivateListenerAdministrationRouteHandler } from "./privateListenerAdministrationRoutes";
+import type { PrivateListenerSettingPort } from "./privateListenerSetting";
 
 const windowId = decodeWindowId("33333333-3333-4333-8333-333333333333");
 const capability = "A".repeat(43);
@@ -51,13 +52,20 @@ function setup(overrides: Partial<PrivateListenerLifecycleController> = {}) {
     restart: vi.fn(async () => readyStatus()),
     ...overrides,
   };
+  const setting = {
+    load: vi.fn(() => undefined),
+    save: vi.fn(),
+    clear: vi.fn(),
+  } satisfies PrivateListenerSettingPort;
   return {
     control,
+    setting,
     handle: createPrivateListenerAdministrationRouteHandler({
       desktopBridgeSecret: secret,
       windowAuthorityStore: authority,
       hostIdentityFingerprint: () => "b".repeat(64),
       control,
+      setting,
       now: () => Date.parse("2026-08-01T10:00:00.000Z"),
     }),
   };
@@ -143,6 +151,61 @@ describe("private listener administration routes", () => {
     expect(disable?.status).toBe(200);
     expect(await disable?.json()).toEqual({ status: disabledStatus() });
     expect(control.disable).toHaveBeenCalledOnce();
+  });
+
+  it("remembers the enabled listener so it comes back after a restart", async () => {
+    const { handle, setting } = setup();
+    for (const path of ["enable", "restart"]) {
+      const response = await handle(
+        request(`/api/desktop/private-listener/${path}`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: enableBody(),
+        }),
+      );
+      expect(response?.status).toBe(200);
+    }
+    expect(setting.save).toHaveBeenCalledTimes(2);
+    expect(setting.save).toHaveBeenLastCalledWith({
+      hostname: "192.168.1.20",
+      port: 9443,
+      origin: "https://192.168.1.20:9443",
+      tls: { cert: CERT, key: KEY },
+    });
+    expect(setting.clear).not.toHaveBeenCalled();
+  });
+
+  it("forgets the remembered listener only when it is disabled", async () => {
+    const { handle, setting } = setup();
+    await handle(request("/api/desktop/private-listener/status"));
+    expect(setting.clear).not.toHaveBeenCalled();
+    const response = await handle(
+      request("/api/desktop/private-listener/disable", { method: "POST" }),
+    );
+    expect(response?.status).toBe(200);
+    expect(setting.clear).toHaveBeenCalledOnce();
+    expect(setting.save).not.toHaveBeenCalled();
+  });
+
+  it("keeps the remembered listener when an enable or disable fails", async () => {
+    const { handle, setting } = setup({
+      enable: vi.fn(async () => {
+        throw new PrivateListenerLifecycleError("occupied-port");
+      }),
+      disable: vi.fn(async () => {
+        throw new PrivateListenerLifecycleError("shutdown-failed");
+      }),
+    });
+    await handle(
+      request("/api/desktop/private-listener/enable", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: enableBody(),
+      }),
+    );
+    await handle(request("/api/desktop/private-listener/disable", { method: "POST" }));
+    expect(setting.save).not.toHaveBeenCalled();
+    expect(setting.clear).not.toHaveBeenCalled();
   });
 
   it("maps a listener lifecycle failure to a typed retryable error", async () => {
