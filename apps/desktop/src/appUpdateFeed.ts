@@ -1,10 +1,10 @@
 import { createHash, createPublicKey, timingSafeEqual, verify, type KeyObject } from "node:crypto";
-import { OCTANT_UPDATE_CHECK_DISCLOSURE } from "@octant/contracts/app-updates";
+import { type AppReleaseRing, OCTANT_UPDATE_CHECK_DISCLOSURE } from "@octant/contracts/app-updates";
 
 /**
- * The public half of the key that signs Octant's update feed, as base64 DER
- * (SPKI). The private half lives with the maintainer and never in this
- * repository.
+ * The public half of the key that signs Octant's stable update feed, as base64
+ * DER (SPKI). The private half lives with the maintainer and the approval-gated
+ * stable release environment, never in this repository.
  *
  * This, not the host the feed came from, is what makes an update trustworthy.
  * A feed served from the right domain over a valid certificate proves only that
@@ -18,6 +18,37 @@ import { OCTANT_UPDATE_CHECK_DISCLOSURE } from "@octant/contracts/app-updates";
  */
 export const OCTANT_UPDATE_PUBLIC_KEY =
   "MCowBQYDK2VwAyEA5n78HQaS4Z3kQbVzFG3NCUaW3Gkx4ZogaxpTYPt4B/8=";
+
+/**
+ * The public half of the key the preview workflow signs preview and candidate
+ * feeds with, as base64 DER (SPKI).
+ *
+ * Separate from the stable key because the preview workflow builds unreviewed
+ * `main` without an approval gate: anything that runs there can read its
+ * signing key. With one shared key, that code could sign a `ring: "stable"`
+ * feed and the stable approval would protect nothing. This key verifies only
+ * the preview and candidate rings.
+ *
+ * Empty until the maintainer mints the preview key pair. While empty those
+ * rings trust only the stable key, and `scripts/sign-update-feed.ts` refuses to
+ * sign a preview feed with a key no install trusts.
+ */
+export const OCTANT_UPDATE_PREVIEW_PUBLIC_KEY = "";
+
+/**
+ * Which keys each ring believes.
+ *
+ * Stable trusts only the stable key. Preview and candidate trust the preview
+ * key and also the stable key: whoever holds the stable key can already sign
+ * stable releases, so letting it sign a preview grants nothing new, and it is
+ * how installs that shipped before the preview key existed (which know only
+ * the stable key) receive the first build that knows the preview key.
+ */
+export const OCTANT_UPDATE_TRUSTED_KEYS: Readonly<Record<AppReleaseRing, ReadonlyArray<string>>> = {
+  stable: [OCTANT_UPDATE_PUBLIC_KEY],
+  preview: [OCTANT_UPDATE_PREVIEW_PUBLIC_KEY, OCTANT_UPDATE_PUBLIC_KEY],
+  candidate: [OCTANT_UPDATE_PREVIEW_PUBLIC_KEY, OCTANT_UPDATE_PUBLIC_KEY],
+};
 
 /**
  * What an update check says about the machine asking.
@@ -98,46 +129,57 @@ function isHttpsUrl(value: string): boolean {
 }
 
 export interface FeedVerifier {
-  /** Whether this signature is one our key produced over these exact bytes. */
-  readonly verify: (message: Uint8Array, signature: string) => boolean;
-  /** Whether a release key is configured at all. */
-  readonly configured: boolean;
+  /**
+   * Whether this signature is one a key trusted for `ring` produced over these
+   * exact bytes.
+   */
+  readonly verify: (message: Uint8Array, signature: string, ring: AppReleaseRing) => boolean;
+  /** Whether any usable key is configured for this ring at all. */
+  readonly configured: (ring: AppReleaseRing) => boolean;
 }
 
 /**
- * Ed25519 verification against the compiled-in release key.
+ * Ed25519 verification against the compiled-in release keys of each ring.
  *
- * Fails closed in every direction: no key, an unusable key, a malformed
- * signature, or a signature over different bytes all return false. Nothing here
- * can be persuaded to return true by the document it is checking.
+ * Fails closed in every direction: no key for the ring, an unusable key, a
+ * malformed signature, or a signature over different bytes all return false.
+ * Nothing here can be persuaded to return true by the document it is checking.
  */
-export function createFeedVerifier(publicKeyBase64 = OCTANT_UPDATE_PUBLIC_KEY): FeedVerifier {
-  let key: KeyObject | undefined;
-  if (publicKeyBase64 !== "") {
-    try {
-      key = createPublicKey({
-        key: Buffer.from(publicKeyBase64, "base64"),
-        format: "der",
-        type: "spki",
-      });
-    } catch {
-      // An unusable key is the same as no key. Saying so here rather than at
-      // verify time keeps "we cannot check" from ever reading as "it checked
-      // out".
-      key = undefined;
-    }
-  }
+export function createFeedVerifier(
+  trustedKeys: Readonly<Record<AppReleaseRing, ReadonlyArray<string>>> = OCTANT_UPDATE_TRUSTED_KEYS,
+): FeedVerifier {
+  const keysFor = (ring: AppReleaseRing): ReadonlyArray<KeyObject> =>
+    trustedKeys[ring].flatMap((publicKeyBase64) => {
+      const key = parsePublicKey(publicKeyBase64);
+      return key === undefined ? [] : [key];
+    });
   return {
-    configured: key !== undefined,
-    verify: (message, signature) => {
-      if (key === undefined) return false;
-      try {
-        return verify(null, message, key, Buffer.from(signature, "base64"));
-      } catch {
-        return false;
-      }
-    },
+    configured: (ring) => keysFor(ring).length > 0,
+    verify: (message, signature, ring) =>
+      keysFor(ring).some((key) => {
+        try {
+          return verify(null, message, key, Buffer.from(signature, "base64"));
+        } catch {
+          return false;
+        }
+      }),
   };
+}
+
+function parsePublicKey(publicKeyBase64: string): KeyObject | undefined {
+  if (publicKeyBase64 === "") return undefined;
+  try {
+    const key = createPublicKey({
+      key: Buffer.from(publicKeyBase64, "base64"),
+      format: "der",
+      type: "spki",
+    });
+    // An unusable key is the same as no key, which keeps "we cannot check"
+    // from ever reading as "it checked out".
+    return key.asymmetricKeyType === "ed25519" ? key : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export interface FeedFetchResult {

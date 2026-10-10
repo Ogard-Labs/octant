@@ -3728,6 +3728,26 @@ mechanisms are:
   "models can't be listed" state carrying the manual model IDs, never a
   protocol failure. Credential, usage-limit, and availability answers keep
   failing the check with their typed states.
+- **Update feed signing keys are per ring.** The desktop updater verifies a
+  feed's Ed25519 signature against the compiled-in keys of the ring the signed
+  release names, before any other field is believed. Stable trusts only the
+  stable key (`OCTANT_UPDATE_PUBLIC_KEY`); preview and candidate trust the
+  preview key (`OCTANT_UPDATE_PREVIEW_PUBLIC_KEY`) and the stable key. The
+  preview workflow builds unreviewed `main` without an approval gate, so
+  anything merged there can read the key it signs with; a shared key would let
+  that code sign a `ring: "stable"` feed and make the stable approval
+  meaningless. The stable key may sign previews because its holder can already
+  sign stable, and it is how installs that predate the preview key reach a
+  build that knows it. The private halves are environment secrets:
+  `OCTANT_UPDATE_FEED_PRIVATE_KEY` only in `stable`,
+  `OCTANT_UPDATE_FEED_PREVIEW_PRIVATE_KEY` only in `preview`.
+  `scripts/sign-update-feed.ts` reads the secret for the ring it signs and
+  refuses a key whose public half the app does not trust for that ring, so an
+  unset preview public key fails the release job instead of publishing a feed
+  no install can verify. The signed ring must still equal the ring the app
+  follows. The feed's publish credential is not part of this trust: a writer
+  that can replace a feed file can withhold a ring's updates, never install
+  something no trusted key signed.
 
 ## Package map
 

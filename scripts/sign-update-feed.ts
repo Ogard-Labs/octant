@@ -10,12 +10,21 @@
  * meaning rather than the whitespace a server happened to send.
  *
  * The private key lives with the maintainer and reaches a build host as a
- * secret. Everything here that decides *what* to sign is pure and tested; the
- * key handling is at the edges, so the shape of a feed is exercised on hosts
- * that hold no key.
+ * secret. Each ring has its own: stable is signed with the key only the
+ * approval-gated stable environment holds, and preview and candidate with a
+ * separate preview key, because the preview workflow runs unreviewed `main`
+ * and anything that runs there can read its key. Everything here that decides
+ * *what* to sign is pure and tested; the key handling is at the edges, so the
+ * shape of a feed is exercised on hosts that hold no key.
  */
 
-import { createHash, createPrivateKey, generateKeyPairSync, sign } from "node:crypto";
+import {
+  createHash,
+  createPrivateKey,
+  createPublicKey,
+  generateKeyPairSync,
+  sign,
+} from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
 import { mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
@@ -29,8 +38,24 @@ import {
   isAppReleaseRing,
 } from "@octant/contracts/app-updates";
 import { canonicalReleaseBytes } from "@octant/domain";
+import { OCTANT_UPDATE_TRUSTED_KEYS } from "../apps/desktop/src/appUpdateFeed";
 
 export const FEED_PRIVATE_KEY_ENVIRONMENT_VARIABLE = "OCTANT_UPDATE_FEED_PRIVATE_KEY";
+export const FEED_PREVIEW_PRIVATE_KEY_ENVIRONMENT_VARIABLE =
+  "OCTANT_UPDATE_FEED_PREVIEW_PRIVATE_KEY";
+
+/**
+ * The secret a ring's feed is signed with.
+ *
+ * Chosen by ring rather than passed in, so the preview workflow cannot sign
+ * with the stable key by forgetting to switch variables, and the stable
+ * workflow never reads the preview one.
+ */
+export function feedPrivateKeyVariable(ring: AppReleaseRing): string {
+  return ring === "stable"
+    ? FEED_PRIVATE_KEY_ENVIRONMENT_VARIABLE
+    : FEED_PREVIEW_PRIVATE_KEY_ENVIRONMENT_VARIABLE;
+}
 
 export interface ReleaseInput {
   readonly version: string;
@@ -123,16 +148,51 @@ export type FeedSigningMaterial =
   | { readonly kind: "unsigned-refuse"; readonly reason: string };
 
 export function resolveFeedSigningMaterial(
+  ring: AppReleaseRing,
   environment: NodeJS.ProcessEnv = process.env,
 ): FeedSigningMaterial {
-  const privateKey = (environment[FEED_PRIVATE_KEY_ENVIRONMENT_VARIABLE] ?? "").trim();
+  const variable = feedPrivateKeyVariable(ring);
+  const privateKey = (environment[variable] ?? "").trim();
   if (privateKey === "") {
     return {
       kind: "unsigned-refuse",
-      reason: `${FEED_PRIVATE_KEY_ENVIRONMENT_VARIABLE} is not set, so this release cannot be signed.`,
+      reason: `${variable} is not set, so this ${ring} release cannot be signed.`,
     };
   }
   return { kind: "ready", privateKey };
+}
+
+/**
+ * Refuse to sign with a key the app does not trust for this ring.
+ *
+ * Signing still works with any key, so without this a preview release signed
+ * before its public half was compiled in, or a secret pasted into the wrong
+ * environment, would publish a feed every install refuses. Checking against
+ * the same table the app verifies with makes that a failed release job instead.
+ */
+export function refuseUntrustedSigningKey(
+  privateKeyBase64: string,
+  ring: AppReleaseRing,
+  trustedKeys: Readonly<Record<AppReleaseRing, ReadonlyArray<string>>> = OCTANT_UPDATE_TRUSTED_KEYS,
+): { readonly kind: "trusted" } | { readonly kind: "refused"; readonly reason: string } {
+  let publicKey: string;
+  try {
+    const privateKey = createPrivateKey({
+      key: Buffer.from(privateKeyBase64, "base64"),
+      format: "der",
+      type: "pkcs8",
+    });
+    publicKey = createPublicKey(privateKey.export({ format: "pem", type: "pkcs8" }))
+      .export({ format: "der", type: "spki" })
+      .toString("base64");
+  } catch {
+    return { kind: "refused", reason: "the signing key is not a base64 PKCS8 private key." };
+  }
+  if (trustedKeys[ring].includes(publicKey)) return { kind: "trusted" };
+  return {
+    kind: "refused",
+    reason: `the app does not trust this key for the ${ring} ring; compile its public half (${publicKey}) into apps/desktop/src/appUpdateFeed.ts first.`,
+  };
 }
 
 /**
@@ -216,9 +276,11 @@ export function parseFeedCommand(argv: ReadonlyArray<string>): FeedCommand {
 async function main(argv: ReadonlyArray<string>): Promise<void> {
   if (argv.includes("--generate-key")) {
     const pair = generateFeedKeyPair();
-    console.log(`public  (compile into OCTANT_UPDATE_PUBLIC_KEY):\n${pair.publicKey}\n`);
     console.log(
-      `private (store as the ${FEED_PRIVATE_KEY_ENVIRONMENT_VARIABLE} secret):\n${pair.privateKey}`,
+      `public  (compile into OCTANT_UPDATE_PUBLIC_KEY for stable, or OCTANT_UPDATE_PREVIEW_PUBLIC_KEY for preview):\n${pair.publicKey}\n`,
+    );
+    console.log(
+      `private (store as the ${FEED_PRIVATE_KEY_ENVIRONMENT_VARIABLE} secret in the stable environment, or ${FEED_PREVIEW_PRIVATE_KEY_ENVIRONMENT_VARIABLE} in the preview environment):\n${pair.privateKey}`,
     );
     return;
   }
@@ -243,7 +305,7 @@ async function main(argv: ReadonlyArray<string>): Promise<void> {
 
   if (dryRun) {
     const { release, feedPath } = dryRunFeedDocument(releaseInput);
-    const material = resolveFeedSigningMaterial();
+    const material = resolveFeedSigningMaterial(release.ring);
     console.log(`Dry-run feed path: <base>/${feedPath}`);
     console.log(
       `Dry-run release schema ok for ${release.version} (${release.platform}-${release.arch}).`,
@@ -257,9 +319,13 @@ async function main(argv: ReadonlyArray<string>): Promise<void> {
     return;
   }
 
-  const material = resolveFeedSigningMaterial();
+  const material = resolveFeedSigningMaterial(command.ring);
   if (material.kind === "unsigned-refuse") {
     throw new Error(material.reason);
+  }
+  const trust = refuseUntrustedSigningKey(material.privateKey, command.ring);
+  if (trust.kind === "refused") {
+    throw new Error(`Refusing to sign: ${trust.reason}`);
   }
   const release = buildRelease(releaseInput);
   const feed = signFeed(release, material.privateKey);

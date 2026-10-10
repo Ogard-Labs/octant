@@ -8,6 +8,7 @@ import {
   feedRelativePath,
   generateFeedKeyPair,
   parseFeedCommand,
+  refuseUntrustedSigningKey,
   resolveFeedSigningMaterial,
   sha256Hex,
   signFeed,
@@ -55,9 +56,9 @@ describe("signing an update feed", () => {
 
   it("refuses a preview feed served where a stable app is looking", () => {
     const keys = generateFeedKeyPair();
-    // The same key signs both rings, so this is the check that keeps them
-    // separate: a genuine preview release moved to the stable address is still
-    // correctly signed, and must still be refused.
+    // The stable key may also sign previews, so this is the check that keeps
+    // the rings separate: a genuine preview release moved to the stable address
+    // is still correctly signed, and must still be refused.
     const feed = signFeed(
       release({ version: "0.2.0-preview.20260828", ring: "preview" }),
       keys.privateKey,
@@ -141,10 +142,72 @@ describe("signing an update feed", () => {
   });
 
   it("refuses unsigned feed signing when the private key is missing", () => {
-    expect(resolveFeedSigningMaterial({})).toEqual({
+    expect(resolveFeedSigningMaterial("stable", {})).toEqual({
       kind: "unsigned-refuse",
       reason: expect.stringMatching(/OCTANT_UPDATE_FEED_PRIVATE_KEY/),
     });
+  });
+
+  it("signs preview and candidate feeds only with the preview secret", () => {
+    // The preview workflow must never need the stable key, and an environment
+    // that holds only the stable key cannot be mistaken for a preview signer.
+    const environment = { OCTANT_UPDATE_FEED_PRIVATE_KEY: "stable-secret" };
+    for (const ring of ["preview", "candidate"] as const) {
+      expect(resolveFeedSigningMaterial(ring, environment)).toEqual({
+        kind: "unsigned-refuse",
+        reason: expect.stringMatching(/OCTANT_UPDATE_FEED_PREVIEW_PRIVATE_KEY/),
+      });
+      expect(
+        resolveFeedSigningMaterial(ring, {
+          OCTANT_UPDATE_FEED_PREVIEW_PRIVATE_KEY: "preview-secret",
+        }),
+      ).toEqual({ kind: "ready", privateKey: "preview-secret" });
+    }
+    expect(
+      resolveFeedSigningMaterial("stable", {
+        OCTANT_UPDATE_FEED_PREVIEW_PRIVATE_KEY: "preview-secret",
+      }),
+    ).toMatchObject({ kind: "unsigned-refuse" });
+  });
+});
+
+describe("refusing a signing key the app does not trust for the ring", () => {
+  const stable = generateFeedKeyPair();
+  const preview = generateFeedKeyPair();
+  const trusted = {
+    stable: [stable.publicKey],
+    preview: [preview.publicKey, stable.publicKey],
+    candidate: [preview.publicKey, stable.publicKey],
+  };
+
+  it("refuses to sign a stable feed with the preview key", () => {
+    expect(refuseUntrustedSigningKey(preview.privateKey, "stable", trusted)).toMatchObject({
+      kind: "refused",
+    });
+  });
+
+  it("signs each ring with a key that ring trusts", () => {
+    expect(refuseUntrustedSigningKey(stable.privateKey, "stable", trusted)).toEqual({
+      kind: "trusted",
+    });
+    expect(refuseUntrustedSigningKey(preview.privateKey, "preview", trusted)).toEqual({
+      kind: "trusted",
+    });
+    expect(refuseUntrustedSigningKey(stable.privateKey, "candidate", trusted)).toEqual({
+      kind: "trusted",
+    });
+  });
+
+  it("refuses a key whose public half was never compiled into the app", () => {
+    // What a preview release meets before the preview public key is set: the
+    // job fails instead of publishing a feed every install refuses.
+    const minted = generateFeedKeyPair();
+    for (const ring of ["stable", "preview", "candidate"] as const) {
+      expect(refuseUntrustedSigningKey(minted.privateKey, ring)).toMatchObject({
+        kind: "refused",
+        reason: expect.stringContaining(minted.publicKey),
+      });
+    }
   });
 });
 

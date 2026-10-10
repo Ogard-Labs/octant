@@ -49,6 +49,19 @@ describe("writing the update public key into the desktop source", () => {
     });
   });
 
+  it("writes the preview key without touching the stable key", async () => {
+    const { publicKey } = generateFeedKeyPair();
+    const before = await readFile(copy, "utf8");
+    const stable = /OCTANT_UPDATE_PUBLIC_KEY\s*=\s*"([^"]*)"/.exec(before)?.[1];
+
+    const result = await writeUpdatePublicKey(copy, publicKey, "preview");
+
+    expect(result.status).toBe("written");
+    const after = await readFile(copy, "utf8");
+    expect(/OCTANT_UPDATE_PREVIEW_PUBLIC_KEY\s*=\s*"([^"]*)"/.exec(after)?.[1]).toBe(publicKey);
+    expect(/OCTANT_UPDATE_PUBLIC_KEY\s*=\s*"([^"]*)"/.exec(after)?.[1]).toBe(stable);
+  });
+
   it("refuses and leaves the file untouched when the constant cannot be found", async () => {
     const { publicKey } = generateFeedKeyPair();
     const renamed = 'export const SOME_OTHER_KEY =\n  "MCowBQYDK2VwAyEA";\n';
