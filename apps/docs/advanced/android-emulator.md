@@ -68,9 +68,12 @@ for live input the same way the iOS pane does.
 
 ## Agent tool
 
-A Code thread on **Full access** reaches these actions through
-`octant_android`. Begin with `discover` or `status`. `boot`, `open`,
-`install`, and `launch` show the emulator in Octant's pane — do not start an
-external emulator window as the place to look. The tool is unavailable under
-Plan and approval-gated postures. Pane-driven input journals as
+A Code thread's agent reaches these actions through `octant_android`. Begin
+with `discover` or `status`. `boot`, `open`, `install`, and `launch` show the
+emulator in Octant's pane — do not start an external emulator window as the
+place to look. Discover, status, and screenshot work under every posture,
+Plan included. On an approval-gated thread every other operation asks in the
+thread first and runs only once you allow it; input the window's
+**Allow input** already covers goes through without asking again. Plan mode
+refuses them, and Full access runs them without asking. Pane-driven input journals as
 `local-user`; tool-driven input journals as `agent`.

@@ -4,6 +4,7 @@ import {
   type AgentRun,
   type AgentRunId,
   CodeApprovalId,
+  ToolApprovalId,
   MAX_CODE_CONVERSATION_PAGE_SIZE,
   MAX_CODE_OPERATION_FAILURE_MESSAGE_BYTES,
   MAX_CODE_OPERATION_SUMMARY_BYTES,
@@ -148,7 +149,11 @@ import {
   type CodeTurnContextAccount,
   type CodeTurnSentContext,
 } from "./codeTurnContext";
-import { createCodeAppManagedTools, type CodeAppManagedToolsOptions } from "./codeAppManagedTools";
+import {
+  createCodeAppManagedTools,
+  type CodeAppManagedToolsOptions,
+  type CodeDeviceApprovalEffect,
+} from "./codeAppManagedTools";
 import { combineAppManagedToolSets, type AppManagedToolSet } from "../providers/appManagedToolSet";
 import { CodeEvidenceCapacityExceeded } from "./codeEvidenceStore";
 import {
@@ -715,6 +720,7 @@ export function createCodeOperationRuntime(
     runtimeWork,
     observeRuntimeWorkOutcome,
     spendReservations,
+    approvalStore,
   });
   const authorityForTurn: CodeOperationAuthorityPort = {
     ...authority,
@@ -1526,11 +1532,14 @@ interface ActiveTurn {
   readonly secrets: readonly string[];
   readonly abort: AbortController;
   readonly approvals: Map<string, string>;
-  /** Each Browser ask's settle function, with the site it waits to open. */
-  readonly browserApprovals: Map<
+  /**
+   * Each app-managed tool ask's settle function: a Browser session, with the
+   * site it waits to open, or a device effect, which has none.
+   */
+  readonly toolApprovals: Map<
     string,
     {
-      readonly origin: string;
+      readonly origin?: string;
       readonly finish: (outcome: "approved" | "denied" | "cancelled" | "expired") => void;
     }
   >;
@@ -1573,6 +1582,8 @@ class RuntimeTurnController implements CodeOperationTurnPort {
   readonly #approvedBrowserContexts = new Set<string>();
 
   readonly #spendReservations: Map<string, ReturnType<typeof decodeSpendCeilingReservationId>>;
+  /** Mints the one-use approval a device effect the person allowed in the thread carries. */
+  readonly #approvalStore: CodeOperationApprovalStore | undefined;
 
   constructor(input: {
     options: CodeOperationRuntimeOptions;
@@ -1582,8 +1593,10 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     runtimeWork: CodeRuntimeWorkRecorder;
     observeRuntimeWorkOutcome: (outcome: CodeRuntimeWorkRecordOutcome) => void;
     spendReservations: Map<string, ReturnType<typeof decodeSpendCeilingReservationId>>;
+    approvalStore: CodeOperationApprovalStore | undefined;
   }) {
     this.#options = input.options;
+    this.#approvalStore = input.approvalStore;
     this.#spendReservations = input.spendReservations;
     this.#events = input.events;
     this.#roots = input.roots;
@@ -1803,7 +1816,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       secrets,
       abort: new AbortController(),
       approvals: new Map(),
-      browserApprovals: new Map(),
+      toolApprovals: new Map(),
       browserGrantKeys: new Set(),
       questions: new Set(),
       harnessQuestions: new Set(),
@@ -1898,9 +1911,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     const active = this.#active.get(threadId);
     if (active === undefined || (active.state !== "running" && active.state !== "waiting"))
       return false;
-    return (
-      active.approvals.size > 0 || active.browserApprovals.size > 0 || active.questions.size > 0
-    );
+    return active.approvals.size > 0 || active.toolApprovals.size > 0 || active.questions.size > 0;
   }
 
   /**
@@ -1915,7 +1926,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     const pending: CodeTurnPendingRequest[] = [];
     for (const active of this.#active.values()) {
       if (active.state !== "running" && active.state !== "waiting") continue;
-      const approvals = new Set([...active.approvals.keys(), ...active.browserApprovals.keys()]);
+      const approvals = new Set([...active.approvals.keys(), ...active.toolApprovals.keys()]);
       if (approvals.size === 0 && active.questions.size === 0) continue;
       // A provider may ask again under an identity it used before; the latest
       // ask is the one still waiting.
@@ -1928,7 +1939,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           requestedAt: frame.occurredAt,
         };
         if (event.kind === "approval-requested" && approvals.has(String(event.approvalId))) {
-          const browserOrigin = active.browserApprovals.get(String(event.approvalId))?.origin;
+          const browserOrigin = active.toolApprovals.get(String(event.approvalId))?.origin;
           asked.set(`approval:${String(event.approvalId)}`, {
             ...scope,
             kind: "approval",
@@ -1987,12 +1998,67 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     origin: string,
     signal?: AbortSignal,
   ): Promise<"approved" | "denied" | "cancelled" | "expired"> {
-    if (signal?.aborted || active.abort.signal.aborted || active.browserApprovals.size >= 4)
+    return this.#askToolApproval(
+      active,
+      `Allow this thread to use an isolated browser session at ${origin.slice(0, 512)}? Shell and file access stay unchanged.`,
+      origin.slice(0, 2048),
+      signal,
+    );
+  }
+
+  /**
+   * One device effect the thread's agent asked for, asked of the person in the
+   * thread like a Browser session. An approval becomes the host's one-use
+   * approval for exactly that request, so the Apple or Android policy checks it
+   * as it checks a workbench click's. Only an approved input goes on to open
+   * the window's Allow input grant, exactly as a pane input does.
+   */
+  async #askDeviceApproval(
+    active: ActiveTurn,
+    effect: CodeDeviceApprovalEffect,
+    signal?: AbortSignal,
+  ): Promise<
+    | { readonly status: "approved"; readonly approvalId: ToolApprovalId }
+    | { readonly status: "denied" | "cancelled" | "expired" | "unavailable" }
+  > {
+    const store = this.#approvalStore;
+    if (store === undefined) return { status: "unavailable" };
+    const scope = await resolveDeviceApprovalScope(this.#options, active.windowId, effect.request);
+    if (scope === undefined) return { status: "unavailable" };
+    const context = await approvalContext(this.#options, undefined, scope.thread, scope.checkout);
+    if (context === undefined) return { status: "unavailable" };
+    const prompt = approvalPrompt(effect, scope.thread, scope.checkout, undefined);
+    const summary = boundProviderSummary(`${prompt.message}\n${prompt.detail}`);
+    if (summary === undefined) return { status: "unavailable" };
+    const outcome = await this.#askToolApproval(active, summary, undefined, signal);
+    if (outcome !== "approved") return { status: outcome };
+    try {
+      const receipt = store.issue({
+        windowId: active.windowId,
+        effect,
+        contextDigest: approvalContextDigest(context),
+      });
+      return receipt === undefined
+        ? { status: "unavailable" }
+        : { status: "approved", approvalId: ToolApprovalId.make(String(receipt.approvalId)) };
+    } catch {
+      // Host time recovery refuses to mint approvals; the effect stays refused.
+      return { status: "unavailable" };
+    }
+  }
+
+  #askToolApproval(
+    active: ActiveTurn,
+    summary: string,
+    origin: string | undefined,
+    signal?: AbortSignal,
+  ): Promise<"approved" | "denied" | "cancelled" | "expired"> {
+    if (signal?.aborted || active.abort.signal.aborted || active.toolApprovals.size >= 4)
       return Promise.resolve("cancelled");
     const approvalId = CodeApprovalId.make(this.#options.uuid());
     return new Promise((resolve) => {
       const finish = (outcome: "approved" | "denied" | "cancelled" | "expired") => {
-        if (!active.browserApprovals.delete(String(approvalId))) return;
+        if (!active.toolApprovals.delete(String(approvalId))) return;
         clearTimeout(timer);
         signal?.removeEventListener("abort", abort);
         active.abort.signal.removeEventListener("abort", abort);
@@ -2005,7 +2071,10 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       };
       const abort = () => finish("cancelled");
       const timer = setTimeout(() => finish("expired"), 10 * 60_000);
-      active.browserApprovals.set(String(approvalId), { origin: origin.slice(0, 2048), finish });
+      active.toolApprovals.set(String(approvalId), {
+        ...(origin === undefined ? {} : { origin }),
+        finish,
+      });
       signal?.addEventListener("abort", abort, { once: true });
       active.abort.signal.addEventListener("abort", abort, { once: true });
       try {
@@ -2017,7 +2086,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
             kind: "approval-requested",
             approvalId,
             action: "provider-tool",
-            summary: `Allow this thread to use an isolated browser session at ${origin.slice(0, 512)}? Shell and file access stay unchanged.`,
+            summary,
           },
         });
         active.cursor = frame.cursor;
@@ -2037,14 +2106,14 @@ class RuntimeTurnController implements CodeOperationTurnPort {
             requested: active.thread.executionPolicy,
             thread: input.thread.executionPolicy,
           });
-    const browserApproval = active?.browserApprovals.get(input.approvalId);
-    if (active !== undefined && browserApproval !== undefined) {
+    const toolApproval = active?.toolApprovals.get(input.approvalId);
+    if (active !== undefined && toolApproval !== undefined) {
       if (
         turnPosture === "plan" ||
         active.thread.permissionPersistence !== input.thread.permissionPersistence
       )
         return turnState("failed");
-      browserApproval.finish(input.decision === "approved" ? "approved" : "denied");
+      toolApproval.finish(input.decision === "approved" ? "approved" : "denied");
       if (input.decision === "approved") return answeredTurnState(active.state);
       return this.#countDeniedApproval(active);
     }
@@ -2233,6 +2302,9 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           thread: active.thread,
           readThread: (windowId, threadId) => this.#effectiveThread(windowId, threadId),
           uuid: this.#options.uuid,
+          deviceApproval: {
+            request: (effect, signal) => this.#askDeviceApproval(active, effect, signal),
+          },
           browserApproval: {
             isApproved: (contextId) => {
               const key = this.#browserApprovalKey(active, contextId);

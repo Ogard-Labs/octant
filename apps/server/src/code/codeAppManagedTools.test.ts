@@ -18,6 +18,7 @@ import {
 const windowId = "10000000-0000-4000-8000-000000000001" as WindowId;
 const threadId = "20000000-0000-4000-8000-000000000001";
 const checkoutId = "30000000-0000-4000-8000-000000000001";
+const simulatorId = "80000000-0000-4000-8000-000000000001";
 
 describe("Code app-managed tools", () => {
   it("runs a command in the stable thread terminal and returns its bounded transcript", async () => {
@@ -1187,6 +1188,7 @@ describe("the Apple capability as an agent tool", () => {
   function appleTools(
     apple: Partial<Parameters<typeof createCodeAppManagedTools>[0]["apple"]> = {},
     threadOverrides: Partial<CodeThread> = {},
+    deviceApproval?: Parameters<typeof createCodeAppManagedTools>[0]["deviceApproval"],
   ) {
     const execute = vi.fn(async (..._args: ReadonlyArray<unknown>) => appleEvidence());
     const snapshot = vi.fn(async () => appleSnapshot());
@@ -1198,6 +1200,7 @@ describe("the Apple capability as an agent tool", () => {
       execute,
       snapshot,
       requestPaneOpen,
+      inputGrantIsOpen: () => false,
       ...apple,
     } as never;
     return {
@@ -1213,6 +1216,7 @@ describe("the Apple capability as an agent tool", () => {
         executeOperation: async () => ({}) as never,
         terminal: { read: async () => ({}) as never },
         apple: port,
+        ...(deviceApproval === undefined ? {} : { deviceApproval }),
       }),
     };
   }
@@ -1446,18 +1450,136 @@ describe("the Apple capability as an agent tool", () => {
     expect(execute).not.toHaveBeenCalled();
   });
 
-  it("stays unavailable to a thread that is not on full access", async () => {
-    const { execute, snapshot, tools } = appleTools({}, { executionPolicy: "plan" } as never);
+  it("lets an approval-gated thread take a Simulator screenshot without asking", async () => {
+    const request = vi.fn();
+    const readScreenshot = vi.fn(async () => Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10]));
+    const { execute, tools } = appleTools(
+      { readScreenshot },
+      { executionPolicy: "approval-gated" } as never,
+      { request },
+    );
 
     const outcome = await tools.execute({
       name: "octant_apple",
-      inputJson: JSON.stringify({ operation: "status" }),
-    } as never);
+      inputJson: JSON.stringify({ operation: "screenshot", simulatorId }),
+    });
 
-    expect(outcome.isError).toBe(true);
-    expect(outcome.result).toMatchObject({ error: "full-access-required" });
-    expect(snapshot).not.toHaveBeenCalled();
+    expect(outcome.isError).toBe(false);
+    expect(outcome.images).toHaveLength(1);
+    expect(request).not.toHaveBeenCalled();
+    expect(execute.mock.calls[0]?.[1]).toMatchObject({
+      kind: "screenshot",
+      approval: { kind: "not-required" },
+    });
+  });
+
+  it("holds an approval-gated boot until the person answers, and refuses it when they deny", async () => {
+    let answer: (outcome: { readonly status: "denied" }) => void = () => undefined;
+    const request = vi.fn(
+      (_effect: unknown) =>
+        new Promise<{ readonly status: "denied" }>((resolve) => {
+          answer = resolve;
+        }),
+    );
+    const { execute, requestPaneOpen, tools } = appleTools(
+      {},
+      { executionPolicy: "approval-gated" } as never,
+      { request },
+    );
+
+    const pending = tools.execute({
+      name: "octant_apple",
+      inputJson: JSON.stringify({ operation: "boot", simulatorId }),
+    });
+    await vi.waitFor(() => expect(request).toHaveBeenCalledTimes(1));
+    expect(request.mock.calls[0]?.[0]).toMatchObject({
+      kind: "apple-action",
+      request: { kind: "boot", simulatorId, threadId, checkoutId },
+    });
     expect(execute).not.toHaveBeenCalled();
+    expect(requestPaneOpen).not.toHaveBeenCalled();
+
+    answer({ status: "denied" });
+    const outcome = await pending;
+
+    expect(outcome).toMatchObject({ isError: true, result: { error: "device-approval-denied" } });
+    expect(execute).not.toHaveBeenCalled();
+    expect(requestPaneOpen).not.toHaveBeenCalled();
+  });
+
+  it("boots an approval-gated thread's Simulator with the one-use approval the person gave", async () => {
+    const approvalId = "d0000000-0000-4000-8000-000000000001";
+    const request = vi.fn(async () => ({
+      status: "approved" as const,
+      approvalId: approvalId as never,
+    }));
+    const { execute, tools } = appleTools({}, { executionPolicy: "approval-gated" } as never, {
+      request,
+    });
+
+    await tools.execute({
+      name: "octant_apple",
+      inputJson: JSON.stringify({ operation: "boot", simulatorId }),
+    });
+
+    const asked = (request.mock.calls[0] as unknown as [{ readonly request: object }])[0].request;
+    // The host receives the very request the person allowed, now carrying it.
+    expect(execute.mock.calls[0]?.[1]).toEqual({
+      ...asked,
+      approval: { kind: "approved", approvalId },
+    });
+  });
+
+  it("sends an approval-gated agent's tap on a live Allow input grant without asking again", async () => {
+    const request = vi.fn();
+    const inputGrantIsOpen = vi.fn(() => true);
+    const { execute, tools } = appleTools(
+      { inputGrantIsOpen },
+      { executionPolicy: "approval-gated" } as never,
+      { request },
+    );
+
+    await tools.execute({
+      name: "octant_apple",
+      inputJson: JSON.stringify({ operation: "tap", simulatorId, x: 10, y: 20 }),
+    });
+
+    expect(request).not.toHaveBeenCalled();
+    expect(inputGrantIsOpen).toHaveBeenCalledWith(windowId, threadId, simulatorId);
+    expect(execute.mock.calls[0]?.[1]).toMatchObject({
+      kind: "tap",
+      approval: { kind: "not-required" },
+    });
+  });
+
+  it("refuses a boot in Plan mode while still reading the Simulator's status", async () => {
+    const request = vi.fn();
+    const { execute, requestPaneOpen, snapshot, tools } = appleTools(
+      {},
+      { executionPolicy: "plan" } as never,
+      { request },
+    );
+
+    const booted = await tools.execute({
+      name: "octant_apple",
+      inputJson: JSON.stringify({ operation: "boot", simulatorId }),
+    });
+    const opened = await tools.execute({
+      name: "octant_apple",
+      inputJson: JSON.stringify({ operation: "open", simulatorId }),
+    });
+    const status = await tools.execute({
+      name: "octant_apple",
+      inputJson: JSON.stringify({ operation: "status" }),
+    });
+
+    expect(booted.result).toMatchObject({ error: "plan-mode-read-only" });
+    expect(opened.result).toMatchObject({ error: "plan-mode-read-only" });
+    expect(status.isError).toBe(false);
+    expect(snapshot).toHaveBeenCalledTimes(1);
+    expect(request).not.toHaveBeenCalled();
+    expect(execute).not.toHaveBeenCalled();
+    expect(requestPaneOpen).not.toHaveBeenCalled();
   });
 
   it("reports a refused action as an error rather than a silent success", async () => {
@@ -1623,6 +1745,7 @@ describe("the Android capability as an agent tool", () => {
   function androidTools(
     android: Partial<Parameters<typeof createCodeAppManagedTools>[0]["android"]> = {},
     threadOverrides: Partial<CodeThread> = {},
+    deviceApproval?: Parameters<typeof createCodeAppManagedTools>[0]["deviceApproval"],
   ) {
     const execute = vi.fn(async (..._args: ReadonlyArray<unknown>) => androidEvidence());
     const snapshot = vi.fn(async () => androidSnapshot());
@@ -1634,6 +1757,7 @@ describe("the Android capability as an agent tool", () => {
       execute,
       snapshot,
       requestPaneOpen,
+      inputGrantIsOpen: () => false,
       ...android,
     } as never;
     return {
@@ -1649,6 +1773,7 @@ describe("the Android capability as an agent tool", () => {
         executeOperation: async () => ({}) as never,
         terminal: { read: async () => ({}) as never },
         android: port,
+        ...(deviceApproval === undefined ? {} : { deviceApproval }),
       }),
     };
   }
@@ -1690,15 +1815,36 @@ describe("the Android capability as an agent tool", () => {
     ).not.toContain("octant_android");
   });
 
-  it("stays unavailable to a thread that is not on full access", async () => {
+  it("refuses a boot in Plan mode while still reading the emulator's status", async () => {
     const { execute, snapshot, tools } = androidTools({}, { executionPolicy: "plan" } as never);
-    const outcome = await tools.execute({
+    const booted = await tools.execute({
+      name: "octant_android",
+      inputJson: JSON.stringify({ operation: "boot", emulatorId: "Pixel_Test" }),
+    });
+    const status = await tools.execute({
       name: "octant_android",
       inputJson: JSON.stringify({ operation: "status" }),
-    } as never);
-    expect(outcome.isError).toBe(true);
-    expect(outcome.result).toMatchObject({ error: "full-access-required" });
-    expect(snapshot).not.toHaveBeenCalled();
+    });
+    expect(booted.result).toMatchObject({ error: "plan-mode-read-only" });
+    expect(status.isError).toBe(false);
+    expect(snapshot).toHaveBeenCalledTimes(1);
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it("holds an approval-gated emulator boot for the person and refuses it when they deny", async () => {
+    const request = vi.fn(async (_effect: unknown) => ({ status: "denied" as const }));
+    const { execute, tools } = androidTools({}, { executionPolicy: "approval-gated" } as never, {
+      request,
+    });
+    const outcome = await tools.execute({
+      name: "octant_android",
+      inputJson: JSON.stringify({ operation: "boot", emulatorId: "Pixel_Test" }),
+    });
+    expect(request.mock.calls[0]?.[0]).toMatchObject({
+      kind: "android-action",
+      request: { kind: "boot", emulatorId: "Pixel_Test" },
+    });
+    expect(outcome.result).toMatchObject({ error: "device-approval-denied" });
     expect(execute).not.toHaveBeenCalled();
   });
 

@@ -190,15 +190,19 @@ Open the workbench from the command palette: **Open Apple workbench for
 finds at the root of the Code thread's checkout. A checkout with none offers
 no such command. `Package.swift` is not listed.
 
-A Code thread on **Full access** also reaches these actions through the
-app-managed `octant_apple` tool, so an agent can discover the toolchain, read
-Simulator state, build, test, run, boot, open the in-app pane, shut down,
-capture the screen, and inject tap, swipe, typed text, and hardware keys.
+A Code thread's agent also reaches these actions through the app-managed
+`octant_apple` tool, so it can discover the toolchain, read Simulator state,
+build, test, run, boot, open the in-app pane, shut down, capture the screen,
+and inject tap, swipe, typed text, and hardware keys.
 `boot`, `run`, and `open` show the Simulator in Octant's iOS Simulator pane
 — never by launching Simulator.app. Pane-driven input journals as
 `local-user`; tool-driven input journals as `agent`. The host binds both to
-the same thread and checkout and refuses them with the same policy; the tool
-is unavailable under Plan and approval-gated postures. The workbench never
+the same thread and checkout and refuses them with the same policy. Discover,
+status, and screenshot work under every posture, Plan included. On an
+approval-gated thread every other operation asks in the thread first and runs
+only once you allow it; input the window's **Allow input** already covers
+goes through without asking again. Plan mode refuses them, and Full access
+runs them without asking. The workbench never
 treats Boot as a side effect of Run: a shut-down Simulator only offers
 **Boot**. The tool's `run` operation currently boots a named Simulator that
 is shut down, then installs and launches; that is today's toolchain behavior,
