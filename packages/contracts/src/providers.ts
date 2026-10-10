@@ -566,11 +566,20 @@ export const CLAUDE_ACCOUNT_ACCENTS = [
 ] as const;
 export const ClaudeAccountAccent = Schema.Literal(...CLAUDE_ACCOUNT_ACCENTS);
 export type ClaudeAccountAccent = typeof ClaudeAccountAccent.Type;
+/** Linear scan. A `/+$` replace is polynomial in the trailing slashes. */
+function claudeConfigDirectoryBasename(path: string): string {
+  let end = path.length;
+  while (end > 0 && path.charAt(end - 1) === "/") {
+    end -= 1;
+  }
+  const slash = path.lastIndexOf("/", end - 1);
+  return slash === -1 ? path.slice(0, end) : path.slice(slash + 1, end);
+}
+
 const ClaudeConfigDirectory = Schema.NonEmptyTrimmedString.pipe(
   Schema.filter((path) => {
     if (!path.startsWith("/")) return false;
-    const base = path.replace(/\/+$/, "").split("/").pop();
-    return base !== undefined && base !== ".credentials.json";
+    return claudeConfigDirectoryBasename(path) !== ".credentials.json";
   }),
 );
 export const ClaudeProviderConfiguration = Schema.Struct({

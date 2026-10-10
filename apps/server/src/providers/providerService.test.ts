@@ -1331,6 +1331,77 @@ describe("ProviderService", () => {
     );
   });
 
+  it("keeps a Claude account on its directory after rename, disable, and removal of another account", async () => {
+    const fixture = serviceFixture();
+    await fixture.service.execute(windowId, {
+      kind: "create-claude-provider",
+      instanceId,
+      expectedVersion: 0,
+      displayName: "Claude personal",
+      configuration: {
+        kind: "claude-agent-sdk",
+        binaryPath: "/opt/homebrew/bin/claude",
+        authentication: "subscription",
+      },
+    });
+    await fixture.service.execute(windowId, {
+      kind: "create-claude-provider",
+      instanceId: otherId,
+      expectedVersion: 0,
+      displayName: "Claude work",
+      configuration: {
+        kind: "claude-agent-sdk",
+        binaryPath: "/opt/homebrew/bin/claude",
+        authentication: "subscription",
+        accent: "teal",
+      },
+    });
+    const directory = assignedClaudeAccountConfigDirectory(homedir(), otherId);
+    await expect(
+      fixture.service.execute(windowId, {
+        kind: "rename-provider",
+        instanceId: otherId,
+        expectedVersion: 1,
+        displayName: "Claude office",
+      }),
+    ).resolves.toMatchObject({
+      kind: "provider-updated",
+      instance: {
+        id: otherId,
+        displayName: "Claude office",
+        configuration: { configDirectory: directory, accent: "teal" },
+      },
+    });
+    await expect(
+      fixture.service.execute(windowId, {
+        kind: "set-provider-enabled",
+        instanceId: otherId,
+        expectedVersion: 2,
+        enabled: false,
+      }),
+    ).resolves.toMatchObject({
+      kind: "provider-updated",
+      instance: {
+        id: otherId,
+        enabled: false,
+        configuration: { configDirectory: directory },
+      },
+    });
+    await expect(
+      fixture.service.execute(windowId, {
+        kind: "remove-provider",
+        instanceId: otherId,
+        expectedVersion: 3,
+      }),
+    ).resolves.toMatchObject({ kind: "provider-removed", instanceId: otherId });
+    const after = await fixture.service.bootstrap(windowId);
+    const personal = after.instances.find((instance) => instance.id === instanceId);
+    expect(after.instances.find((instance) => instance.id === otherId)).toBeUndefined();
+    expect(
+      personal?.driverKind === "claude" ? personal.configuration.configDirectory : undefined,
+    ).toBeUndefined();
+  });
+
   it("creates, replays, and reconfigures a strict Mistral Vibe provider", async () => {
     const fixture = serviceFixture();
     await expect(

@@ -435,8 +435,8 @@ export function assignedClaudeAccountConfigDirectory(
   homeDirectory: string,
   instanceId: ProviderInstanceId,
 ): string {
-  const home = homeDirectory.trim().replace(/\/+$/, "");
-  if (!home.startsWith("/")) {
+  const home = stripTrailingSlashes(homeDirectory.trim());
+  if (!isPosixAbsolutePath(home)) {
     reject("invalid-config-directory", "Claude account home must be an absolute directory.");
   }
   return `${home}/.claude-accounts/${instanceId}`;
@@ -462,8 +462,21 @@ function shellSingleQuote(value: string): string {
   return `'${value.replaceAll("'", `'\\''`)}'`;
 }
 
+/** Linear scan. A `/+$` replace is polynomial in the trailing slashes. */
+function stripTrailingSlashes(path: string): string {
+  let end = path.length;
+  while (end > 0 && path.charAt(end - 1) === "/") {
+    end -= 1;
+  }
+  return path.slice(0, end);
+}
+
+function isPosixAbsolutePath(path: string): boolean {
+  return path.startsWith("/");
+}
+
 function pathBasename(path: string): string {
-  const trimmed = path.replace(/\/+$/, "");
+  const trimmed = stripTrailingSlashes(path);
   const slash = trimmed.lastIndexOf("/");
   return slash === -1 ? trimmed : trimmed.slice(slash + 1);
 }
@@ -472,7 +485,7 @@ function normalizeClaudeConfigDirectory(path: string | undefined): string | unde
   if (path === undefined) return undefined;
   const normalized = path.trim();
   if (normalized.length === 0) return undefined;
-  if (!normalized.startsWith("/")) {
+  if (!isPosixAbsolutePath(normalized)) {
     reject("invalid-config-directory", "Claude config directory must be an absolute path.");
   }
   if (pathBasename(normalized) === ".credentials.json") {

@@ -2,7 +2,7 @@ import type { ClaudeAccountAccent } from "@octant/contracts";
 import { CLAUDE_ACCOUNT_ACCENT_VALUES, formatClaudeAuthLoginCommand } from "@octant/domain";
 import { OctantInput } from "../../ui/base/OctantInput";
 import { SettingRow } from "../../settings/primitives";
-import { CLAUDE_ACCOUNT_ACCENT_LABELS } from "./claudeAccountFields";
+import { CLAUDE_ACCOUNT_ACCENT_LABELS } from "./claudeAccountValues";
 
 export function ClaudeAccountAccentPicker(props: {
   readonly id: string;

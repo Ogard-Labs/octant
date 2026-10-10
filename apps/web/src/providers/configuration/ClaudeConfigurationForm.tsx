@@ -16,7 +16,7 @@ import {
 import type { ProviderSettingsViewProps } from "../ProviderSettingsView";
 import { ClaudeHelperSignIn, type RunClaudeHelperCommand } from "../ClaudeHelperSignIn";
 import { ClaudeAccountSettingsFields } from "./ClaudeAccountFields";
-import { claudeConfigurationFromFields } from "./claudeAccountFields";
+import { claudeConfigurationFromFields } from "./claudeAccountValues";
 
 interface ClaudeConfigurationFormProps {
   readonly instance: Extract<ProviderInstance, { driverKind: "claude" }>;

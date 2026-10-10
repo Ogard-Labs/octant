@@ -556,6 +556,24 @@ describe("provider registry contracts", () => {
     expect(() =>
       decodeProviderInstance({
         ...claude,
+        configuration: {
+          ...claude.configuration,
+          configDirectory: "/Users/example/.claude/.credentials.json////",
+        },
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeProviderInstance({
+        ...claude,
+        configuration: {
+          ...claude.configuration,
+          configDirectory: "C:\\Users\\example\\.claude-accounts\\work",
+        },
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeProviderInstance({
+        ...claude,
         configuration: { ...claude.configuration, accent: "magenta" },
       }),
     ).toThrow();

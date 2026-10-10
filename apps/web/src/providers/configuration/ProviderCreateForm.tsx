@@ -32,7 +32,7 @@ import {
 import { driverLabel } from "../providerSettingsPresentation";
 import type { ProviderSettingsViewProps } from "../ProviderSettingsView";
 import { ClaudeAccountSettingsFields } from "./ClaudeAccountFields";
-import { claudeConfigurationFromFields } from "./claudeAccountFields";
+import { claudeConfigurationFromFields } from "./claudeAccountValues";
 import {
   configurationFrom,
   anthropicConfigurationFrom,
