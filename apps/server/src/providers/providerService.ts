@@ -1654,31 +1654,43 @@ export class ProviderService implements ProviderServiceApi {
     if (this.#persistence.readProviderCatalog === undefined) return;
     const current = this.#persistence.readProviderCatalog(instanceId);
     if (current === undefined) return;
-    const updatedModels = current.models.map((model) => ({
-      ...model,
-      capabilityEvidence: model.capabilityEvidence
-        ? invalidateModelCapabilityEvidence(model.capabilityEvidence, change, invalidatedAt, reason)
-        : model.capabilityEvidence,
-    }));
+    // The journal refuses a payload that holds `undefined`, so a model without
+    // evidence keeps no `capabilityEvidence` key, and the cleared tool list
+    // below is omitted rather than set to `undefined`. Writing either made
+    // every configuration change and removal fail after its own event had
+    // already landed, so the renderer never stored or cleared the credential.
+    const updatedModels = current.models.map((model) =>
+      model.capabilityEvidence === undefined
+        ? model
+        : {
+            ...model,
+            capabilityEvidence: invalidateModelCapabilityEvidence(
+              model.capabilityEvidence,
+              change,
+              invalidatedAt,
+              reason,
+            ),
+          },
+    );
     const evidenceChanged = updatedModels.some(
       (model, index) => model.capabilityEvidence !== current.models[index]?.capabilityEvidence,
     );
     if (current.invalidated && !evidenceChanged) return;
+    // Clear verifiedToolModelIds on invalidation: a config change
+    // (endpoint, protocol, or deployment IDs) invalidates prior per-
+    // deployment tool verification evidence. Keeping stale IDs would
+    // allow the next Check connection to revive them and enable tools
+    // for a deployment that may now point at a different endpoint or
+    // capability set.
+    const { verifiedToolModelIds: _cleared, ...unverified } = current;
     const snapshot = decodeProviderCatalogSnapshot({
-      ...current,
+      ...unverified,
       version: current.version + 1,
       invalidated: true,
       invalidatedAt,
       invalidationReason: reason,
       updatedAt: invalidatedAt,
       models: updatedModels,
-      // Clear verifiedToolModelIds on invalidation: a config change
-      // (endpoint, protocol, or deployment IDs) invalidates prior per-
-      // deployment tool verification evidence. Keeping stale IDs would
-      // allow the next Check connection to revive them and enable tools
-      // for a deployment that may now point at a different endpoint or
-      // capability set.
-      verifiedToolModelIds: undefined,
     });
     this.#persistence.journal.append({
       aggregate: { aggregateType: "provider-catalog", aggregateId: instanceId },

@@ -1891,6 +1891,36 @@ describe("ProviderService", () => {
     });
   });
 
+  it("journals an invalidated catalog the store can encode when a model has no capability evidence", async () => {
+    const fixture = serviceFixture({
+      instances: [httpProvider()],
+      withCatalogPersistence: true,
+      initialCatalog: persistedCatalog(),
+    });
+
+    await expect(
+      fixture.service.execute(windowId, {
+        kind: "change-openai-compatible-configuration",
+        instanceId,
+        expectedVersion: 1,
+        configuration: {
+          kind: "openai-compatible-http",
+          baseUrl: "https://other.example/v1/",
+          authentication: "bearer",
+          protocol: "auto",
+          manualModelIds: ["model-a"],
+        },
+      }),
+    ).resolves.toMatchObject({ kind: "provider-updated" });
+
+    // The journal refuses a payload holding `undefined`, which a plain object
+    // spread does not show; a JSON round trip drops those keys, so a strict
+    // comparison catches any that remain.
+    const catalog = fixture.catalogs()[0];
+    expect(catalog).toMatchObject({ version: 2, invalidated: true });
+    expect(catalog).toStrictEqual(JSON.parse(JSON.stringify(catalog)));
+  });
+
   it("invalidates only endpoint-derived evidence when the endpoint changes and preserves curated metadata", async () => {
     const catalogWithEvidence = decodeProviderCatalogSnapshot({
       instanceId,
