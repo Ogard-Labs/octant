@@ -9,6 +9,7 @@ import {
   originTaintsThread,
   projectThreadContentTaint,
   resolveTaintedApproval,
+  searchQueryRefusalUnderTaint,
   type ToolApprovalClass,
 } from "./untrustedContentPolicy";
 
@@ -249,5 +250,54 @@ describe("nativeHarnessResultTaintsThread", () => {
     expect(taints("delegate", { operation: "status" })).toBe(false);
     // A tool the catalog does not know fails closed.
     expect(taints("harness-teleport")).toBe(true);
+  });
+});
+
+describe("searchQueryRefusalUnderTaint", () => {
+  it("names why a query that looks like it carries data is refused", () => {
+    const refusals: ReadonlyArray<readonly [string, string]> = [
+      ["docs at https://example.com/setup", "contains a URL"],
+      ["status of http://10.0.0.4:8080", "contains a URL"],
+      ["see www.example.org for details", "contains a URL"],
+      ["attacker.example/collect?d=hunter2", "contains a URL"],
+      ["10.1.2.3:5432/prod", "contains a URL"],
+      ["contact jane.doe@corp.example about billing", "contains an email address"],
+      ["token sk-ant-api03-Zx9Qw7Lm2Np4Rt", "contains a long high-entropy token"],
+      ["key AKIAIOSFODNN7EXAMPLE leaked", "contains a long high-entropy token"],
+      ["aGVsbG8gd29ybGQsIHRoaXMgaXMgc2VjcmV0", "contains a base64 run"],
+      ["cGFzc3dvcmQ6aHVudGVyMg== meaning", "contains a base64 run"],
+      ["commit 9fceb02d0ae598e95dc970b74767f19372d61af8", "contains a hex run"],
+      ["card 4111111111111111 expiry", "contains a hex run"],
+      [`how do I ${"configure bun workspaces and ".repeat(8)}`, "is longer than 200 characters"],
+    ];
+    for (const [query, detail] of refusals) {
+      expect(searchQueryRefusalUnderTaint(query), query).toEqual({
+        reason: "search-query-refused-under-taint",
+        detail,
+      });
+    }
+  });
+
+  it("lets ordinary questions through", () => {
+    for (const query of [
+      "how do I configure bun workspaces",
+      "error TS2322 in vitest",
+      "react 19.2 release notes",
+      "node 22.11.0 changelog",
+      "electron 38 macOS notarization",
+      "ERR_PACKAGE_PATH_NOT_EXPORTED vite",
+      "@typescript-eslint/no-unused-vars ignore pattern",
+      "UserProfileController.test.ts mock not called",
+      "MyComponent.test.tsx:42 act warning",
+      "git commit 9fceb02 revert",
+      "useLayoutEffect vs useEffect",
+      "Effect.Schema decodeUnknownSync exactOptionalPropertyTypes",
+      "what is the weather in Oslo tomorrow",
+      "TypeError: Cannot read properties of undefined (reading 'map')",
+      "C# string interpolation",
+      "x".repeat(200),
+    ]) {
+      expect(searchQueryRefusalUnderTaint(query), query).toBeUndefined();
+    }
   });
 });

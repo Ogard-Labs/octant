@@ -2498,8 +2498,24 @@ native harness in `apps/server/src/harness`:
   confirmation is single-use: a remembered "always" approval stops covering
   its class the moment the thread is tainted, and an "always" answered then
   covers only that call, so surfaces offer no "for this session" choice
-  (`singleUse` on the approval). A tool the thread was not offered refuses as
-  `tool-unavailable` without reaching policy or a person. The harness has no
+  (`singleUse` on the approval). `web-search` does not ask under taint: it
+  reaches only the search endpoint the person configured, so the tool-call
+  policy instead refuses a tainted thread's query that looks like it carries
+  data, under every posture and before any request leaves, with a named
+  reason such as `search-query-refused-under-taint: contains a URL`. A query
+  is refused when it is longer than 200 characters; contains a URL (a scheme,
+  `www.`, a dotted name ending in letters or an IPv4 address followed by a
+  path, query, fragment, or port); contains an email address; contains a run
+  of 16 or more hex digits; contains a base64 run (24 or more base64
+  characters mixing upper case, lower case, and digits, or 16 or more ending
+  in `=` padding); or contains a token of 20 or more characters, split on
+  whitespace and path punctuation, that mixes letters and digits at 3.5 or more
+  bits of Shannon entropy per character. `searchQueryRefusalUnderTaint` in
+  `packages/domain/src/untrustedContentPolicy.ts` decides; untainted threads
+  are unchanged. Residual risk: a short plain-word query can still carry a few
+  words, but only to the endpoint the person chose. Revisit if a default
+  hosted third-party search provider ships. A tool the thread was not offered
+  refuses as `tool-unavailable` without reaching policy or a person. The harness has no
   per-host network rules, rule expiry, or learn mode: a tool process gets the
   thread's OS-level `none` or `allow`. `nativeHarnessEgress.hostile.test.ts` holds the
   adversarial proofs; `nativeHarnessShell.test.ts` runs both shells under real
