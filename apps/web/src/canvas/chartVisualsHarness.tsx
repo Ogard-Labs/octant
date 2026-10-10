@@ -377,8 +377,135 @@ const flowBlocks = [
   longFunnel,
 ];
 
-// `?only=mockup` draws the mockups alone and `?only=flow` the funnel, radar,
-// and sankey charts alone, so their capture is not a page of every chart.
+// A table wide enough to scroll sideways in the main tab, with row ids so the
+// comment gutter draws, for the grouping and pinning capture.
+const wideTable = decodeCanvasBlock({
+  ...base,
+  blockId: "table-services",
+  kind: "table",
+  columns: [
+    { id: "service", label: "Service", type: "text" },
+    { id: "owner", label: "Owner", type: "text" },
+    { id: "region", label: "Region", type: "text" },
+    { id: "state", label: "State", type: "text", display: "status" },
+    { id: "requests", label: "Requests", type: "number", format: "compact", display: "bar" },
+    { id: "errors", label: "Errors", type: "number", display: "heat" },
+    { id: "p95", label: "p95 (ms)", type: "number" },
+    { id: "cost", label: "Monthly cost (USD)", type: "number" },
+    { id: "uptime", label: "Uptime", type: "number", format: "percent" },
+    { id: "release", label: "Last release", type: "text" },
+  ],
+  rows: [
+    {
+      id: "gateway",
+      cells: [
+        "API gateway",
+        "Platform",
+        "eu-north-1",
+        "Ready",
+        1_360_000,
+        3,
+        120,
+        4200,
+        0.9995,
+        "2026-10-02",
+      ],
+    },
+    {
+      id: "search",
+      cells: [
+        "Search indexer",
+        "Discovery",
+        "us-east-1",
+        "Blocked",
+        980_000,
+        7,
+        840,
+        3100,
+        0.991,
+        "2026-09-18",
+      ],
+    },
+    {
+      id: "billing",
+      cells: [
+        "Billing worker",
+        "Payments",
+        "eu-north-1",
+        "Ready",
+        300_000,
+        0,
+        160,
+        900,
+        0.9999,
+        "2026-10-08",
+      ],
+    },
+    {
+      id: "media",
+      cells: [
+        "Media resizer",
+        "Platform",
+        "us-west-2",
+        "Warning",
+        420_000,
+        12,
+        2300,
+        2600,
+        0.987,
+        "2026-09-30",
+      ],
+    },
+    {
+      id: "notify",
+      cells: [
+        "Notifications",
+        "Messaging",
+        "eu-north-1",
+        "Ready",
+        150_000,
+        2,
+        90,
+        450,
+        0.9992,
+        "2026-10-05",
+      ],
+    },
+    {
+      id: "export",
+      cells: [
+        "Export jobs",
+        "Discovery",
+        "us-east-1",
+        "Blocked",
+        12_000,
+        5,
+        5400,
+        300,
+        0.97,
+        "2026-08-27",
+      ],
+    },
+  ],
+});
+
+const tableComments = {
+  openCounts: new Map([["table-services", 3]]),
+  openRowCounts: new Map([
+    [
+      "table-services",
+      new Map([
+        ["search", 2],
+        ["gateway", 1],
+      ]),
+    ],
+  ]),
+  onOpen: () => undefined,
+};
+
+// `?only=mockup` draws the mockups alone, `?only=flow` the funnel, radar, and
+// sankey charts alone, and `?only=table` the grouped and pinned table alone, so
+// their capture is not a page of every chart.
 const only = new URLSearchParams(window.location.search).get("only");
 
 const definition =
@@ -386,34 +513,36 @@ const definition =
     ? { ...canvasFixture, blocks: mockupBlocks }
     : only === "flow"
       ? { ...canvasFixture, blocks: flowBlocks }
-      : {
-          ...canvasFixture,
-          blocks: [
-            line,
-            bar,
-            area,
-            scatter,
-            distribution,
-            ...chartExampleBlocks,
-            budgetSankey,
-            loneRadar,
-            longFunnel,
-            ...treemapExampleBlocks,
-            ...heatmapExampleBlocks,
-            ...barListExampleBlocks,
-            hotFiles,
-            ...comparisonMatrixExampleBlocks,
-            ...mathExampleBlocks,
-            ...metricExampleBlocks,
-            metric,
-            table,
-            timeline,
-            orderSchemaBlock,
-            supportFlowBlock,
-            releaseMindmapBlock,
-            ...mockupBlocks,
-          ],
-        };
+      : only === "table"
+        ? { ...canvasFixture, blocks: [wideTable] }
+        : {
+            ...canvasFixture,
+            blocks: [
+              line,
+              bar,
+              area,
+              scatter,
+              distribution,
+              ...chartExampleBlocks,
+              budgetSankey,
+              loneRadar,
+              longFunnel,
+              ...treemapExampleBlocks,
+              ...heatmapExampleBlocks,
+              ...barListExampleBlocks,
+              hotFiles,
+              ...comparisonMatrixExampleBlocks,
+              ...mathExampleBlocks,
+              ...metricExampleBlocks,
+              metric,
+              table,
+              timeline,
+              orderSchemaBlock,
+              supportFlowBlock,
+              releaseMindmapBlock,
+              ...mockupBlocks,
+            ],
+          };
 
 type ChartThemeScenario = "default-light" | "default-dark" | "vivid" | "contrast";
 
@@ -462,7 +591,10 @@ if (!rootElement) throw new Error("Chart visuals evidence root is missing");
 createRoot(rootElement).render(
   <StrictMode>
     <main data-canvas-chart-evidence="all">
-      <CanvasDocument definition={definition} />
+      <CanvasDocument
+        definition={definition}
+        {...(only === "table" ? { comments: tableComments } : {})}
+      />
     </main>
   </StrictMode>,
 );

@@ -609,7 +609,8 @@ A table row is either a list of cells or `{ id, cells }`; the id is the
 author's, unique within the table (the domain policy refuses a repeat as
 `duplicate-table-row-id`), and arrives with Canvas schema version 13. A `row`
 comment anchor names a table block and that id, never a position, so a comment
-stays on its row through the reader's sort and filter and through a revision
+stays on its row through the reader's sort, filter, and grouping (all view
+state, never journaled; a table stores no default grouping) and through a revision
 that inserts, removes, or edits rows. A row without an id cannot be anchored
 and the renderer offers it no marker. A comment whose row is gone from the
 version on screen is shown as no longer on the canvas and is never dropped; the

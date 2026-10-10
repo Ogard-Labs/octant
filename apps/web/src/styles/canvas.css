@@ -1519,8 +1519,8 @@
 /* ── Interactive table ───────────────────────────────────────────────────
    The same data-visualisation system as a chart, a treemap, and a bar list:
    shared number formats, the shared path style, and the shared scale roles.
-   The sort, the filter, and the hidden columns are view state — they are never
-   journaled, so the definition and the exported forms keep the order the
+   The sort, the filter, the hidden and pinned columns, and the grouping are
+   view state — they are never journaled, so the definition and the exported forms keep the order the
    author wrote. A `bar` or a `heat` column draws its mark with the value, never
    instead of it. */
 
@@ -1565,6 +1565,13 @@
   overflow: auto;
 }
 
+.canvas-block__table-columns li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--oct-space-2);
+}
+
 .canvas-block__table-columns li label {
   display: flex;
   align-items: center;
@@ -1589,9 +1596,40 @@
   border-spacing: 0;
 }
 
+.canvas-block__table-select {
+  flex: 0 1 auto;
+  width: auto;
+  min-width: 0;
+  max-width: 100%;
+  font-size: var(--oct-text-xs);
+}
+
+/* A pin toggle sits at the end of its column's row in the Columns list; it is
+   muted until pressed, and a pressed pin takes the accent ink. */
+.canvas-block__table-pin {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px;
+  border: 0;
+  border-radius: var(--oct-radius-sm);
+  background: transparent;
+  color: var(--oct-muted);
+  cursor: pointer;
+}
+
+.canvas-block__table-pin[aria-pressed="true"] {
+  color: var(--oct-accent);
+}
+
+.canvas-block__table-pin:hover,
+.canvas-block__table-pin:focus-visible {
+  background: var(--oct-fill-2);
+}
+
 /* The header stays put through a long scroll, which is what keeps a reading
-   labelled in a narrow sidebar. */
-.canvas-block__table-grid th {
+   labelled in a narrow sidebar. Only the column header sticks: a group's
+   header row scrolls with its rows. */
+.canvas-block__table-grid thead th {
   position: sticky;
   top: 0;
   z-index: var(--oct-z-sticky);
@@ -1662,6 +1700,111 @@
 .canvas-block__table-empty {
   color: var(--oct-muted);
   text-align: center;
+}
+
+/* A pinned column stays at the leading edge, after the comment gutter and the
+   columns pinned before it; its offset is measured from the drawn header and
+   set inline. Like the gutter it must be opaque, so it takes the same warm
+   surface and extends that frame; a hairline marks the last pinned edge. A
+   pinned heat cell layers its tint over that ground. */
+.canvas-block__table-grid [data-pinned] {
+  position: sticky;
+  z-index: 1;
+  background-color: var(--oct-surface-warm);
+}
+
+.canvas-block__table-grid thead th[data-pinned] {
+  z-index: calc(var(--oct-z-sticky) + 1);
+}
+
+.canvas-block__table-grid [data-pinned-edge] {
+  box-shadow: inset -1px 0 0 var(--oct-border);
+}
+
+.canvas-block__table-grid thead th[data-pinned-edge] {
+  box-shadow:
+    inset -1px 0 0 var(--oct-border),
+    inset 0 -1px 0 var(--oct-border);
+}
+
+/* Each group is its own row group: a header row whose rowgroup header holds
+   the disclosure, the value, its row count, an optional summary, and — while
+   collapsed — how many open threads its rows hold. The header's content is
+   pinned to the leading edge so it stays readable while a wide table
+   scrolls sideways. */
+.canvas-block__table-grid .canvas-block__table-group th {
+  padding-block: var(--oct-space-2);
+  background: var(--oct-fill-2);
+  color: var(--oct-fg);
+  text-align: left;
+}
+
+.canvas-block__table-group-head {
+  position: sticky;
+  left: var(--oct-space-2);
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--oct-space-1) var(--oct-space-3);
+  max-width: 100%;
+}
+
+.canvas-block__table-group-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--oct-space-1);
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.canvas-block__table-group-toggle:focus-visible {
+  outline: 2px solid var(--octant-focus-ring);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+.canvas-block__table-group-chevron {
+  transition: transform var(--oct-motion-fast) var(--oct-ease-standard);
+}
+
+.canvas-block__table-group-toggle[aria-expanded="true"] .canvas-block__table-group-chevron {
+  transform: rotate(90deg);
+}
+
+/* The value reads in the body face like the cells it heads; the count and the
+   summary keep the header's mono detail type. */
+.canvas-block__table-group-label {
+  font-family: var(--oct-font-body);
+  font-size: var(--oct-text-sm);
+  font-weight: 600;
+  letter-spacing: normal;
+}
+
+.canvas-block__table-group-count,
+.canvas-block__table-group-summary {
+  color: var(--oct-muted);
+}
+
+.canvas-block__table-group-summary {
+  font-variant-numeric: tabular-nums;
+}
+
+.canvas-block__table-group-comments {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  color: var(--oct-accent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .canvas-block__table-group-chevron {
+    transition: none;
+  }
 }
 
 /* The comment gutter leads each row and is pinned to the scroll region's
@@ -1735,6 +1878,26 @@
 
   .canvas-block__table td[data-heat-step] {
     background: none !important;
+  }
+
+  /* System colours drop box shadows, so the pinned edge and the group header
+     draw real borders, and the pressed pin reads as selected. */
+  .canvas-block__table-grid [data-pinned],
+  .canvas-block__table td[data-pinned][data-heat-step] {
+    background: Canvas !important;
+  }
+
+  .canvas-block__table-grid [data-pinned-edge] {
+    border-inline-end: 1px solid CanvasText;
+  }
+
+  .canvas-block__table-grid .canvas-block__table-group th {
+    background: Canvas;
+    border-block: 1px solid CanvasText;
+  }
+
+  .canvas-block__table-pin[aria-pressed="true"] {
+    color: Highlight;
   }
 }
 
