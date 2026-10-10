@@ -13,8 +13,6 @@ export interface FirstRunModelStepProps {
   readonly selectedProviderInstanceId?: ProviderInstanceId | undefined;
   readonly selectedModelId?: ProviderModelId | undefined;
   readonly onSelect: (selection: ModelPickerSelection) => void;
-  readonly onClear?: () => void;
-  readonly clearLabel?: string;
   readonly onOpenProviderSettings: () => void;
 }
 
@@ -85,14 +83,6 @@ export function FirstRunModelStep(props: FirstRunModelStepProps) {
           {props.unsetNote}
         </p>
       )}
-
-      {chosen && props.onClear !== undefined ? (
-        <div className="first-run__button-row">
-          <OctantButton onClick={props.onClear} type="button" variant="ghost">
-            {props.clearLabel ?? "Clear selection"}
-          </OctantButton>
-        </div>
-      ) : null}
     </div>
   );
 }

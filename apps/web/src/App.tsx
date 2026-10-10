@@ -1,5 +1,9 @@
 import { useMenuBarTasks } from "./shell/useMenuBarTasks";
-import { MODEL_CHOICE_CHANGED, readLastModelChoice } from "./providers/modelChoiceMemory";
+import {
+  MODEL_CHOICE_CHANGED,
+  readLastModelChoice,
+  rememberModelChoice,
+} from "./providers/modelChoiceMemory";
 import { createNewTaskDrafts, NewTaskDraftsContext } from "./composer/useNewTaskPrompt";
 import { StreamRepliesContext } from "./transcript/AssistantMessageBody";
 import { ComputerUseEnabledContext } from "./computerUse/ComputerUseMention";
@@ -115,8 +119,6 @@ import { LOCAL_TOOL_HOST_ID } from "@octant/contracts/tool-actions";
 import { decodeProjectId, type ProjectId, type ProjectSummary } from "@octant/contracts/projects";
 import { enabledModes } from "@octant/domain/mode-policy";
 import { resolveModelContextWindow } from "@octant/domain/model-context-window";
-import { defaultShellSettings } from "@octant/domain/shell-policy";
-import type { UserProfile } from "@octant/contracts/user-profile";
 import {
   enforceSidebarBackgroundAccessibility,
   resolveEffectiveSidebarBackground,
@@ -271,7 +273,6 @@ import type { ThreadSearchThread } from "./shell/threadSearchViewModel";
 import { useWorkPromotionController } from "./work/useWorkPromotionController";
 import { ShellState } from "./shell/ShellState";
 import type { FirstRunHandoffProject } from "./onboarding/firstRunHandoffModel";
-import type { WorkspaceChoices } from "./onboarding/firstRunStepModel";
 import {
   describeDiscoveryNotice,
   summarizeFirstRunReadiness,
@@ -301,10 +302,7 @@ import {
   useChatController,
   type ChatThreadRestOutcome,
 } from "./chat/useChatController";
-import {
-  autoConfigureChatDefaults,
-  chatDefaultModelCommand,
-} from "./chat/autoConfigureChatDefaults";
+import { autoConfigureChatDefaults } from "./chat/autoConfigureChatDefaults";
 import { ShellFrame } from "./shell/ShellFrame";
 import {
   parseRepository,
@@ -2773,57 +2771,32 @@ function LaunchedShell(
       controller.updateSettings({ firstRunOnboarding: outcome }),
     [controller],
   );
-  const saveUserProfile = useCallback(
-    (profile: UserProfile) => controller.updateSettings({ userProfile: profile }),
-    [controller],
-  );
-  const selectNavigatorDefault = useCallback(
-    (selection: ModelPickerSelection) =>
-      controller.updateSettings({
-        navigatorAssistant: {
-          ...controller.settings?.navigatorAssistant,
-          defaultProvider: selection,
-        },
-      }),
-    [controller],
-  );
-  const clearNavigatorDefault = useCallback(() => {
-    const { defaultProvider: _cleared, ...rest } = controller.settings?.navigatorAssistant ?? {};
-    return controller.updateSettings({ navigatorAssistant: rest });
-  }, [controller]);
-  // The workspace step writes through to the same settings Settings owns:
-  // appearance lives in theme settings, the modes and switcher in shell
-  // settings. First run keeps no copy of either.
-  const firstRunWorkspace = useMemo<WorkspaceChoices>(
-    () => ({
-      // `undefined` while theme settings load, which the step reports as an
-      // unknown rather than drawing "system" as though it had been chosen.
-      colorScheme: themeController.settings?.mode,
-      chatEnabled: controller.settings?.chatEnabled ?? true,
-      workEnabled: controller.settings?.workEnabled ?? true,
-      modeSwitcher: controller.settings?.modeSwitcherPresentation ?? "buttons",
-    }),
-    [
-      themeController.settings?.mode,
-      controller.settings?.chatEnabled,
-      controller.settings?.workEnabled,
-      controller.settings?.modeSwitcherPresentation,
-    ],
-  );
-  const selectColorScheme = useCallback(
-    (scheme: "system" | "light" | "dark") => themeController.applyPatch({ mode: scheme }),
-    [themeController],
-  );
-  const selectChatDefaultModel = useCallback(
-    async (selection: ModelPickerSelection) => {
-      const settings = chatController.bootstrap?.settings;
-      // Without Chat's own settings there is no version to write against, so
+  // First run's model step writes to whatever a new task in that mode already
+  // starts from: Work's own default in Work settings, and the composer's
+  // remembered choice for Code (and for Work on a host without Work settings).
+  // First run keeps no copy of either.
+  const selectFirstRunModel = useCallback(
+    async (mode: "work" | "code", selection: ModelPickerSelection) => {
+      if (mode === "work" && workSettings.status === "ready") {
+        return await workSettings.update({ defaultModel: selection });
+      }
+      // Without Work's settings there is no version to write against yet, so
       // the choice has not been taken rather than merely deferred.
-      if (settings === undefined) return false;
-      return await chatController.updateSettings(chatDefaultModelCommand(settings, selection));
+      if (mode === "work" && workSettings.status === "loading") return false;
+      rememberModelChoice(selection);
+      return true;
     },
-    [chatController],
+    [workSettings],
   );
+  const workDefaultModel = workSettings.settings;
+  const firstRunWorkModel = useMemo(() => {
+    if (workDefaultModel?.defaultProviderInstanceId === undefined) return undefined;
+    if (workDefaultModel.defaultModelId === undefined) return undefined;
+    return {
+      providerInstanceId: workDefaultModel.defaultProviderInstanceId,
+      modelId: workDefaultModel.defaultModelId,
+    };
+  }, [workDefaultModel?.defaultProviderInstanceId, workDefaultModel?.defaultModelId]);
   // Chat stores the pair as two independent optional fields, and the contract
   // only allows them together. Reading it as one value keeps a half-configured
   // default from ever reaching a picker as a selection.
@@ -8003,35 +7976,26 @@ function LaunchedShell(
             ? {}
             : { windowCapability: props.projectWindowCapability })}
           firstRun={{
-            chatModelGroups: chatProviderGroups,
             workModelGroups: workProviderGroups,
             codeModelGroups: codeProviderGroups,
             controller: firstRunController,
-            navigatorModelGroups: chatProviderGroups,
-            onClearNavigatorDefault: clearNavigatorDefault,
-            onSaveProfile: saveUserProfile,
-            onSelectChatDefault: selectChatDefaultModel,
-            onSelectColorScheme: selectColorScheme,
-            onSelectModeSwitcher: (modeSwitcherPresentation) =>
-              controller.updateSettings({ modeSwitcherPresentation }),
-            onSelectNavigatorDefault: selectNavigatorDefault,
-            onToggleChat: (chatEnabled) => controller.updateSettings({ chatEnabled }),
-            onToggleWork: (workEnabled) => controller.updateSettings({ workEnabled }),
-            workspace: firstRunWorkspace,
-            profile: controller.settings?.userProfile ?? defaultShellSettings().userProfile,
+            onSelectModel: selectFirstRunModel,
+            workEnabled: controller.settings?.workEnabled ?? true,
+            workModel:
+              workSettings.status === "unsupported" ? rawDraftSelection : firstRunWorkModel,
+            codeModel: rawDraftSelection,
             projects: firstRunProjects,
             onCreateProject: (mode) => openProjectCreate(mode),
             onStartThread: ({ mode, projectId }) => {
-              void controller.openDraftThread(mode, projectId);
+              const project = firstRunProjects.find(
+                (candidate) => String(candidate.id) === String(projectId),
+              );
+              void openDraftInKnownProject(projectId, mode, project?.name ?? "");
             },
             readiness: firstRunReadiness,
             ...(firstRunDiscoveryNotice === undefined
               ? {}
               : { discoveryNotice: firstRunDiscoveryNotice }),
-            ...(firstRunChatDefault === undefined ? {} : { chatDefault: firstRunChatDefault }),
-            ...(controller.settings?.navigatorAssistant.defaultProvider === undefined
-              ? {}
-              : { navigatorDefault: controller.settings.navigatorAssistant.defaultProvider }),
             onOpenProviderSettings: () => void controller.openSettings({ section: "providers" }),
             onRescan: () => void discoveryController.scan(),
             onSetProviderEnabled: (instanceId, enabled) =>

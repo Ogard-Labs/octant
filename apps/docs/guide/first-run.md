@@ -4,22 +4,25 @@ description: "Complete the first-run flow: configure a provider, create a Projec
 
 # First Run
 
-After launching Octant for the first time, the welcome surface walks through
-who you are, how the workspace looks, which providers this Mac can reach, a
-default Chat model, and whether Navigator is on. Every step is optional,
-including your name. **Skip setup** is available from the first step and keeps
-answers that have already been saved. Quitting without completing or skipping
-leaves first run pending. If Octant could not save one of your answers it
-tells you, and pressing Skip setup or the primary action again continues without
-that answer. You can edit your name, avatar, and other identity
-details later in **Settings → Profile**.
+After launching Octant for the first time, the welcome surface asks only what
+your first task needs, in three steps: **Providers** (what this Mac can
+reach), **Project** (the folder the task works in), and **Model** (the model it
+starts with). Every step is optional. **Skip setup** is available from the
+first step and keeps answers that have already been saved. Quitting without
+completing or skipping leaves first run pending. If Octant could not save one
+of your answers it tells you, and pressing Skip setup or the primary action
+again continues without that answer.
+
+Your name and avatar, appearance, and Navigator are not part of first run. Set
+them whenever you like in **Settings → Profile**, **Settings → Appearance**,
+and **Settings → Navigator**.
 
 The last screen is a readiness view. It reports three facts separately:
 whether a provider can answer, whether a Project exists for the mode you
-selected, and whether that mode has a model it can actually use. One primary
-action starts a real thread in that mode when those facts are true. A missing
-prerequisite opens its exact setup surface — provider settings, Project
-create, or the default-model step — and returns to the same draft when that
+selected, and whether that mode has a model it can actually use. When all
+three hold, **Start a task** opens the new-task composer in that Project. A
+missing prerequisite opens its exact setup surface — provider settings,
+Project create, or the Model step — and returns to the same draft when that
 surface closes. Skip does not mark the host ready or start a thread.
 
 ## Configure a provider
@@ -64,14 +67,26 @@ Closing Settings returns to first run with the answers you already gave.
 
 ## Create your first Project
 
-A thread starts in a Project. The readiness view's Project fact opens the
-same create surface the sidebar uses:
+A task starts in a Project. The Project step first asks which mode your first
+task uses — **Work** or **Code** (only Code when Work is turned off) — then
+**Choose a folder…** opens the same create surface the empty Work and Code
+pages use. Making the folder a Git repository is a separate, explicit choice
+there. The folder you create becomes your first task's Project; if you
+already have Projects, pick one on the step instead.
 
-- **Chat Projects** are virtual containers with scoped memory and no
-  filesystem authority. First run asks only for a name.
 - **Work Projects** bind one OS-confined folder for local knowledge work.
 - **Code Projects** bind one folder for engineering work; Git tools activate
   when it is a repository.
+- **Chat Projects** are virtual containers with scoped memory and no
+  filesystem authority. They have no folder, so first run does not ask for
+  one; create them from the sidebar.
+
+## Choose a model
+
+The Model step lists the models the providers you set up actually offer for
+the selected mode. Your choice becomes what new tasks in that mode start with:
+Work's default model in Work settings, or the model the Code composer
+remembers. You can change the model for any task in the composer.
 
 On an empty Code screen, **Add a folder** opens Project setup. If threads
 without a Project are disabled, the screen explains this and links directly
@@ -80,14 +95,11 @@ to **Code settings**. Choosing a folder does not change access permissions.
 The selected root is validated to exist. The renderer receives an opaque,
 single-use receipt rather than the raw path.
 
-## Start a thread
+## Start a task
 
-When the readiness view shows a provider, a Project, and a mode-valid model:
-
-1. Choose Chat, Work, or Code. Modes you turned off on the workspace step are
-   absent.
-2. Press the primary action. Octant records first run as completed and opens a
-   real draft thread in that Project.
+When the readiness view shows a provider, a Project, and a mode-valid model,
+press **Start a task**. Octant records first run as completed and opens the
+new-task composer in that Project. Nothing is sent until you send it.
 
 The thread starts in the authority mode you selected: **Full access**,
 **Approval-gated**, or **Plan** (read-only). Code threads start approval-gated

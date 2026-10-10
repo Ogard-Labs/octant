@@ -7,7 +7,7 @@ import type {
 import { providerCanServeAnyModel } from "@octant/domain";
 
 /**
- * How one configured provider looks to a user completing first run (`BOOT-01`).
+ * How one configured provider looks to a user completing first run.
  *
  * The states are deliberately finer than {@link ProviderObservedState.readiness}
  * because first run has to answer a different question: not "what did the last

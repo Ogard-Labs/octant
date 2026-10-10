@@ -1,5 +1,5 @@
 /*
- * First-run onboarding (BOOT-01).
+ * First-run onboarding.
  *
  * Status is carried by an icon and a status word in the markup; colour here is
  * reinforcement only, so the surface stays readable under Increased Contrast
@@ -15,7 +15,7 @@
  */
 
 /*
- * First run carries two columns and five steps' worth of content, so it asks
+ * First run carries two columns and several steps' worth of content, so it asks
  * the dialog for more than the default confirm-sized popup. It is also its own
  * query container: the rail collapses when *this dialog* is narrow, which is
  * not the same question as whether the window is — the popup stops growing
@@ -256,11 +256,6 @@
   max-width: 64ch;
   font-size: var(--oct-text-sm);
   color: var(--oct-muted);
-}
-
-.first-run__loading-value {
-  color: var(--oct-muted);
-  font-size: var(--oct-text-sm);
 }
 
 /* The verdict for the whole list is the section's note, so it takes that
