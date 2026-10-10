@@ -138,6 +138,38 @@ describe("buildHeadlessArtifact", () => {
     expect(statSync(join(extractedRoot, "bin/octant")).mode & 0o111).not.toBe(0);
   });
 
+  it("packs a web asset whose archive path is longer than 100 bytes", async () => {
+    // The built renderer ships hashed font files deep under canvas-preview;
+    // with the artifact prefix their paths exceed the 100-byte ustar name.
+    const base = temporaryRoot("octant-headless-long-path-");
+    const longPath =
+      "share/web/canvas-preview/assets/geist-cyrillic-ext-wght-normal-DjL33-gN.woff2";
+    const longSource = join(base, "sources", "long-asset.woff2");
+    mkdirSync(dirname(longSource), { recursive: true });
+    writeFileSync(longSource, "font-bytes");
+    const built = await buildHeadlessArtifact({
+      version: "0.0.0-dev",
+      target: { platform: "linux", arch: "x64" },
+      wireVersion: "1",
+      storeVersion: 1,
+      components: [
+        ...fixtureSources(base),
+        { role: "web-assets", path: longPath, source: longSource },
+      ],
+      outputDirectory: join(base, "out"),
+    });
+    const extracted = join(base, "extracted");
+    mkdirSync(extracted, { recursive: true });
+    await execFileAsync("tar", ["-xzf", built.tarPath, "-C", extracted]);
+    const extractedRoot = join(extracted, "octant-0.0.0-dev-linux-x64");
+    expect(readFileSync(join(extractedRoot, longPath), "utf8")).toBe("font-bytes");
+    const inspection = await inspectHeadlessArtifact({
+      artifactRoot: extractedRoot,
+      runtime: { platform: "linux", arch: "x64", wireVersion: "1", storeVersion: 1 },
+    });
+    expect(inspection).toMatchObject({ ok: true });
+  });
+
   it("fails closed when a required component role is missing", async () => {
     const base = temporaryRoot("octant-headless-missing-");
     const components = fixtureSources(base).filter((component) => component.role !== "notices");

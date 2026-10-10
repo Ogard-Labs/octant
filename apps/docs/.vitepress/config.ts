@@ -51,6 +51,7 @@ export default defineConfig({
           items: [
             { text: "Overview", link: "/guide/" },
             { text: "Installation", link: "/guide/installation" },
+            { text: "Linux Host", link: "/guide/linux-host" },
             { text: "First Run", link: "/guide/first-run" },
           ],
         },
