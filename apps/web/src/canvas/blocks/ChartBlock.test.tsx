@@ -27,7 +27,8 @@ describe("chart marks", () => {
           name: new RegExp(`${spoken[block.chartType] ?? block.chartType} chart`),
         }),
       ).toBeVisible();
-      expect(screen.getAllByRole("button").length).toBeGreaterThan(0);
+      // A funnel is one series, so like a lone line it carries no legend.
+      expect(screen.queryAllByRole("button").length > 0).toBe(block.chartType !== "funnel");
       const summary = screen.getByText("View chart data");
       expect(summary.tagName).toBe("SUMMARY");
       await user.click(summary);
@@ -299,6 +300,138 @@ describe("chart tooltip", () => {
 
     fireEvent.blur(mark);
     expect(screen.queryByRole("tooltip")).toBeNull();
+  });
+});
+
+describe("funnel, radar, and sankey charts", () => {
+  function example(chartType: string): CanvasChartBlock {
+    const block = chartExampleBlocks.find((candidate) => candidate.chartType === chartType);
+    if (block === undefined) throw new Error(`${chartType} example is missing.`);
+    return block;
+  }
+
+  function figureOf(chartType: string): HTMLElement {
+    render(<CanvasDocument definition={{ ...canvasFixture, blocks: [example(chartType)] }} />);
+    const figure = document.querySelector(`.canvas-block__chart--${chartType}`);
+    if (!(figure instanceof HTMLElement)) throw new Error(`${chartType} chart was not drawn.`);
+    return figure;
+  }
+
+  it("reads a funnel stage's share of the first stage and of the stage before, by keyboard and in the table", async () => {
+    const user = userEvent.setup();
+    const figure = figureOf("funnel");
+    const stage = within(figure).getByRole("img").querySelectorAll("rect.canvas-chart__bar")[1];
+    if (stage === undefined) throw new Error("Funnel stage was not drawn.");
+    expect(stage.getAttribute("tabindex")).toBe("0");
+    fireEvent.focus(stage);
+    const tip = screen.getByRole("tooltip");
+    expect(tip).toHaveTextContent("Started trial");
+    expect(tip).toHaveTextContent("25% of Visited pricing");
+    expect(tip).toHaveTextContent("25% of the stage before");
+    fireEvent.blur(stage);
+
+    await user.click(within(figure).getByText("View chart data"));
+    const table = within(figure).getByRole("table", { name: "Chart readings" });
+    expect(within(table).getByRole("columnheader", { name: "Of stage before" })).toBeVisible();
+    expect(within(table).getByRole("row", { name: /Paid 410 3.3% 33.1%/ })).toBeVisible();
+  });
+
+  it("lists every radar series at the focused axis and hides a series from the legend", async () => {
+    const user = userEvent.setup();
+    const figure = figureOf("radar");
+    const vertex = figure.querySelector("circle.canvas-chart__dot[data-series='0']");
+    if (vertex === null) throw new Error("Radar vertex was not drawn.");
+    expect(vertex.getAttribute("tabindex")).toBe("0");
+    fireEvent.focus(vertex);
+    const tip = screen.getByRole("tooltip");
+    expect(tip).toHaveTextContent("Latency");
+    expect(tip).toHaveTextContent("Managed");
+    expect(tip).toHaveTextContent("Self-hosted");
+    fireEvent.blur(vertex);
+
+    await user.click(within(figure).getByRole("button", { name: "Self-hosted" }));
+    expect(figure.querySelector("svg [data-series='1']")).toBeNull();
+    expect(figure.querySelector("svg [data-series='0']")).not.toBeNull();
+    await user.click(within(figure).getByText("View chart data"));
+    expect(within(figure).getByRole("columnheader", { name: "Axis" })).toBeVisible();
+  });
+
+  it("names a sankey flow by keyboard, drops a hidden node's flows, and lists every flow", async () => {
+    const user = userEvent.setup();
+    const figure = figureOf("sankey");
+    const bands = () => figure.querySelectorAll("path.canvas-chart__flow");
+    expect(bands()).toHaveLength(8);
+    const band = bands()[0];
+    if (band === undefined) throw new Error("Sankey band was not drawn.");
+    expect(band.getAttribute("tabindex")).toBe("0");
+    fireEvent.focus(band);
+    expect(screen.getByRole("tooltip")).toHaveTextContent("Search → Docs");
+    expect(screen.getByRole("tooltip")).toHaveTextContent("5.2K");
+    fireEvent.blur(band);
+
+    await user.click(within(figure).getByRole("button", { name: "Pricing" }));
+    expect(within(figure).getByRole("button", { name: "Pricing" })).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
+    // Pricing carries four of the eight flows.
+    expect(bands()).toHaveLength(4);
+
+    await user.click(within(figure).getByText("View chart data"));
+    const table = within(figure).getByRole("table", { name: "Chart readings" });
+    expect(within(table).getAllByRole("row")).toHaveLength(9);
+    expect(within(table).getByRole("row", { name: /Pricing Left 1.9K 55.9%/ })).toBeVisible();
+  });
+
+  it("gives a crowded sankey column and a long sankey chain room instead of overlapping them", () => {
+    const sankey = (links: ReadonlyArray<{ source: string; target: string; value: number }>) =>
+      chartBlock({
+        blockId: `sankey-${String(links.length)}`,
+        schemaVersion: CANVAS_SCHEMA_VERSION,
+        kind: "chart",
+        chartType: "sankey",
+        series: [],
+        links,
+      });
+    const fan = sankey(
+      Array.from({ length: 63 }, (_value, index) => ({
+        source: `Source ${String(index)}`,
+        target: "Sink",
+        value: 1,
+      })),
+    );
+    const chain = sankey(
+      Array.from({ length: 63 }, (_value, index) => ({
+        source: `Step ${String(index)}`,
+        target: `Step ${String(index + 1)}`,
+        value: 1,
+      })),
+    );
+    render(<CanvasDocument definition={{ ...canvasFixture, blocks: [fan, chain] }} />);
+    const [fanSvg, chainSvg] = [...document.querySelectorAll(".canvas-block__chart--sankey svg")];
+    if (fanSvg === undefined || chainSvg === undefined) throw new Error("Sankeys were not drawn.");
+
+    const sources = [...fanSvg.querySelectorAll("rect.canvas-chart__node")]
+      .filter((node) => Number(node.getAttribute("x")) === 0)
+      .map((node) => ({
+        y: Number(node.getAttribute("y")),
+        h: Number(node.getAttribute("height")),
+      }))
+      .sort((a, b) => a.y - b.y);
+    expect(sources).toHaveLength(63);
+    for (const [index, node] of sources.entries()) {
+      expect(node.h).toBeGreaterThanOrEqual(3);
+      const next = sources[index + 1];
+      if (next !== undefined) expect(node.y + node.h).toBeLessThanOrEqual(next.y);
+    }
+
+    const xs = [...chainSvg.querySelectorAll("rect.canvas-chart__node")].map((node) =>
+      Number(node.getAttribute("x")),
+    );
+    for (let index = 1; index < xs.length; index += 1) {
+      expect((xs[index] ?? 0) - (xs[index - 1] ?? 0)).toBeGreaterThanOrEqual(56);
+    }
+    expect(chainSvg.closest(".canvas-chart__scroll")).not.toBeNull();
   });
 });
 

@@ -124,12 +124,88 @@ export const revenueAndMarginExample = {
   ],
 };
 
+/** Where visitors drop off on the way to paying: each stage no larger than the last. */
+export const signupFunnelExample = {
+  blockId: "signup-funnel",
+  schemaVersion: CANVAS_SCHEMA_VERSION,
+  kind: "chart" as const,
+  chartType: "funnel" as const,
+  format: "number" as const,
+  series: [
+    {
+      seriesId: "visitors",
+      label: "Visitors",
+      points: [
+        { x: "Visited pricing", y: 12_400 },
+        { x: "Started trial", y: 3_100 },
+        { x: "Invited a teammate", y: 1_240 },
+        { x: "Paid", y: 410 },
+      ],
+    },
+  ],
+};
+
+/** Two services compared on the same five axes, each scored out of five. */
+export const serviceProfileRadarExample = {
+  blockId: "service-profile",
+  schemaVersion: CANVAS_SCHEMA_VERSION,
+  kind: "chart" as const,
+  chartType: "radar" as const,
+  series: [
+    {
+      seriesId: "managed",
+      label: "Managed",
+      points: [
+        { x: "Latency", y: 4 },
+        { x: "Cost", y: 2 },
+        { x: "Uptime", y: 5 },
+        { x: "Support", y: 4 },
+        { x: "Control", y: 2 },
+      ],
+    },
+    {
+      seriesId: "self-hosted",
+      label: "Self-hosted",
+      points: [
+        { x: "Latency", y: 3 },
+        { x: "Cost", y: 4 },
+        { x: "Uptime", y: 3 },
+        { x: "Support", y: 2 },
+        { x: "Control", y: 5 },
+      ],
+    },
+  ],
+};
+
+/** Where a week's sessions came from and where they ended, as flows between named nodes. */
+export const trafficSankeyExample = {
+  blockId: "traffic-flow",
+  schemaVersion: CANVAS_SCHEMA_VERSION,
+  kind: "chart" as const,
+  chartType: "sankey" as const,
+  format: "compact" as const,
+  series: [],
+  links: [
+    { source: "Search", target: "Docs", value: 5_200 },
+    { source: "Search", target: "Pricing", value: 2_100 },
+    { source: "Social", target: "Pricing", value: 1_300 },
+    { source: "Social", target: "Blog", value: 900 },
+    { source: "Docs", target: "Trial", value: 1_800 },
+    { source: "Pricing", target: "Trial", value: 1_500 },
+    { source: "Pricing", target: "Left", value: 1_900 },
+    { source: "Blog", target: "Left", value: 900 },
+  ],
+};
+
 export const chartExamples = [
   revenueShareExample,
   costSplitExample,
   quarterlyStackExample,
   quarterlyGroupExample,
   revenueAndMarginExample,
+  signupFunnelExample,
+  serviceProfileRadarExample,
+  trafficSankeyExample,
 ] as const;
 
 function chartBlock(value: unknown): CanvasChartBlock {

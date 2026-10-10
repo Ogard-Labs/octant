@@ -312,6 +312,17 @@ function piecesFor(block: CanvasBlock): ReadonlyArray<Piece> {
         },
       ];
     case "chart":
+      if (block.chartType === "sankey") {
+        return [
+          {
+            kind: "list",
+            items: (block.links ?? []).map(
+              (link) =>
+                `${reading(link.source)} → ${reading(link.target)} = ${scalar(link.value, block.format)}`,
+            ),
+          },
+        ];
+      }
       return [
         {
           kind: "list",

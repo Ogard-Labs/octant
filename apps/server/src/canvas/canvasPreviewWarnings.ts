@@ -136,6 +136,12 @@ function chartWarnings(
   input: CanvasPreviewWarningInput,
 ): ReadonlyArray<CanvasPreviewWarning> {
   const warnings: CanvasPreviewWarning[] = [];
+  // A sankey draws flows rather than series, and its node labels sit beside
+  // their columns rather than in category slots; its legend toggles at most the
+  // catalog's bound, like a pie's. What it can still get wrong is contrast.
+  if (block.chartType === "sankey") {
+    return contrastWarnings(block.blockId, input.palette);
+  }
   if (block.series.length === 0) {
     warnings.push({ kind: "empty-series", blockId: block.blockId });
     return warnings;
@@ -154,7 +160,11 @@ function chartWarnings(
       fits: legendLimit,
     });
   }
-  warnings.push(...clippedChartLabels(block, input.width));
+  // A funnel's stages and a radar's axes are labelled beside their marks, not
+  // in a slot per category, so the slot measure does not apply to them.
+  if (block.chartType !== "funnel" && block.chartType !== "radar") {
+    warnings.push(...clippedChartLabels(block, input.width));
+  }
   warnings.push(...contrastWarnings(block.blockId, input.palette));
   return warnings;
 }
@@ -172,6 +182,8 @@ function legendCapacity(
   if (block.chartType === "pie" || block.chartType === "donut") {
     return PART_TO_WHOLE_LEGEND_LIMIT;
   }
+  // A funnel is one series and draws no legend.
+  if (block.chartType === "funnel") return Number.POSITIVE_INFINITY;
   return Math.max(1, Math.floor((width - PLOT_CHROME_PX) / LEGEND_ENTRY_PX));
 }
 

@@ -47,7 +47,15 @@ import {
   CANVAS_COMPARISON_MATRIX_SCHEMA_VERSION,
   CANVAS_MATH_SCHEMA_VERSION,
   CANVAS_TABLE_ROW_ID_SCHEMA_VERSION,
+  CANVAS_FLOW_CHARTS_SCHEMA_VERSION,
+  CANVAS_MAX_CHART_CATEGORY_LABEL_LENGTH,
+  CANVAS_MAX_FUNNEL_STAGES,
+  CANVAS_MAX_RADAR_AXES,
+  CANVAS_MAX_SANKEY_LINKS,
+  CANVAS_MAX_SANKEY_NODES,
+  CANVAS_MIN_RADAR_AXES,
   CanvasBlock,
+  canvasChartUsesFlowTypes,
   CanvasDefinition,
   canvasMockupUsesCatalog,
   type CanvasMockupComponent,
@@ -82,6 +90,7 @@ const SUPPORTED_CANVAS_SCHEMA_VERSIONS: readonly number[] = [
   CANVAS_COMPARISON_MATRIX_SCHEMA_VERSION,
   CANVAS_MATH_SCHEMA_VERSION,
   CANVAS_MOCKUP_CATALOG_SCHEMA_VERSION,
+  CANVAS_TABLE_ROW_ID_SCHEMA_VERSION,
   CANVAS_SCHEMA_VERSION,
 ];
 
@@ -192,7 +201,18 @@ export type CanvasPolicyRejectionCode =
   | "math-command-refused"
   | "math-source-budget-exceeded"
   | "math-runs-budget-exceeded"
-  | "math-paragraph-budget-exceeded";
+  | "math-paragraph-budget-exceeded"
+  | "chart-label-budget-exceeded"
+  | "funnel-stages-budget-exceeded"
+  | "funnel-negative-value"
+  | "funnel-not-narrowing"
+  | "radar-axis-count"
+  | "radar-negative-value"
+  | "sankey-nodes-budget-exceeded"
+  | "sankey-links-budget-exceeded"
+  | "sankey-flow-not-positive"
+  | "duplicate-sankey-link"
+  | "sankey-cycle";
 
 export class CanvasPolicyRejected extends Error {
   override readonly name = "CanvasPolicyRejected";
@@ -434,7 +454,9 @@ function declaredSchemaRejection(input: unknown): CanvasPolicyRejectionCode | un
           (declared < CANVAS_MOCKUP_CATALOG_SCHEMA_VERSION &&
             canvasMockupUsesCatalog(block as Record<string, unknown>)) ||
           (declared < CANVAS_TABLE_ROW_ID_SCHEMA_VERSION &&
-            canvasTableUsesRowIds(block as Record<string, unknown>))),
+            canvasTableUsesRowIds(block as Record<string, unknown>)) ||
+          (declared < CANVAS_FLOW_CHARTS_SCHEMA_VERSION &&
+            canvasChartUsesFlowTypes(block as Record<string, unknown>))),
     )
   ) {
     return "unsupported-schema-version";
@@ -505,6 +527,8 @@ function inferStructuralBudgetCode(input: unknown): CanvasPolicyRejectionCode | 
       criteria?: unknown;
       source?: unknown;
       runs?: unknown;
+      chartType?: unknown;
+      links?: unknown;
     };
     if (block.kind === "image") imageCount += 1;
     if (
@@ -520,6 +544,10 @@ function inferStructuralBudgetCode(input: unknown): CanvasPolicyRejectionCode | 
       block.series.length > CANVAS_MAX_SERIES
     ) {
       return "series-budget-exceeded";
+    }
+    if (block.kind === "chart") {
+      const flowBudget = flowChartBudgetCode(block.chartType, block.series, block.links);
+      if (flowBudget !== undefined) return flowBudget;
     }
     if (block.kind === "diagram") {
       if (Array.isArray(block.nodes) && block.nodes.length > CANVAS_MAX_DIAGRAM_NODES) {
@@ -718,6 +746,151 @@ function inferStructuralBudgetCode(input: unknown): CanvasPolicyRejectionCode | 
   return undefined;
 }
 
+/**
+ * The budget a funnel, radar, or sankey chart exceeds, read from the raw input.
+ *
+ * The contract refuses these shapes at decode; naming which bound was crossed
+ * here lets an author fix the right thing instead of reading "invalid schema".
+ */
+function flowChartBudgetCode(
+  chartType: unknown,
+  series: unknown,
+  links: unknown,
+): CanvasPolicyRejectionCode | undefined {
+  const tooLong = (label: unknown) =>
+    typeof label === "string" && label.length > CANVAS_MAX_CHART_CATEGORY_LABEL_LENGTH;
+  if (chartType === "sankey" && Array.isArray(links)) {
+    if (links.length > CANVAS_MAX_SANKEY_LINKS) return "sankey-links-budget-exceeded";
+    const nodes = new Set<unknown>();
+    for (const link of links) {
+      if (typeof link !== "object" || link === null) continue;
+      const { source, target } = link as { source?: unknown; target?: unknown };
+      if (tooLong(source) || tooLong(target)) return "chart-label-budget-exceeded";
+      nodes.add(source);
+      nodes.add(target);
+    }
+    if (nodes.size > CANVAS_MAX_SANKEY_NODES) return "sankey-nodes-budget-exceeded";
+    return undefined;
+  }
+  if ((chartType !== "funnel" && chartType !== "radar") || !Array.isArray(series)) {
+    return undefined;
+  }
+  for (const item of series) {
+    if (typeof item !== "object" || item === null) continue;
+    const points = (item as { points?: unknown }).points;
+    if (!Array.isArray(points)) continue;
+    if (chartType === "funnel" && points.length > CANVAS_MAX_FUNNEL_STAGES) {
+      return "funnel-stages-budget-exceeded";
+    }
+    if (
+      chartType === "radar" &&
+      (points.length < CANVAS_MIN_RADAR_AXES || points.length > CANVAS_MAX_RADAR_AXES)
+    ) {
+      return "radar-axis-count";
+    }
+    if (
+      points.some(
+        (point: unknown) =>
+          typeof point === "object" && point !== null && tooLong((point as { x?: unknown }).x),
+      )
+    ) {
+      return "chart-label-budget-exceeded";
+    }
+  }
+  return undefined;
+}
+
+/**
+ * What a funnel, radar, or sankey must hold to be drawn honestly.
+ *
+ * A funnel shows what is lost between stages, so a stage larger than the one
+ * before it is not a funnel (a bar chart compares stages that can grow). A
+ * radar's radius starts at zero, so a negative reading has nowhere to sit. A
+ * sankey's bands are flows of a positive quantity laid out left to right: a
+ * flow back to a node it left has no column to return to, a zero flow has no
+ * width, and a flow listed twice would draw two bands for one movement.
+ */
+function validateFlowChart(block: Extract<CanvasBlock, { readonly kind: "chart" }>): void {
+  if (block.chartType === "funnel") {
+    let previous = Number.POSITIVE_INFINITY;
+    for (const point of block.series[0]?.points ?? []) {
+      if (point.y < 0) {
+        reject("funnel-negative-value", `Canvas funnel ${block.blockId} has a negative stage.`);
+      }
+      if (point.y > previous) {
+        reject(
+          "funnel-not-narrowing",
+          `Canvas funnel ${block.blockId} has a stage larger than the one before it.`,
+        );
+      }
+      previous = point.y;
+    }
+  }
+  if (block.chartType === "radar") {
+    if (block.series.some((item) => item.points.some((point) => point.y < 0))) {
+      reject("radar-negative-value", `Canvas radar ${block.blockId} has a negative reading.`);
+    }
+  }
+  if (block.chartType === "sankey") validateSankey(block.blockId, block.links ?? []);
+}
+
+function validateSankey(
+  blockId: string,
+  links: ReadonlyArray<{
+    readonly source: string;
+    readonly target: string;
+    readonly value: number;
+  }>,
+): void {
+  const pairs = new Set<string>();
+  const outgoing = new Map<string, string[]>();
+  for (const link of links) {
+    if (!(link.value > 0)) {
+      reject(
+        "sankey-flow-not-positive",
+        `Canvas sankey ${blockId} has a flow that is not positive.`,
+      );
+    }
+    const pair = JSON.stringify([link.source, link.target]);
+    if (pairs.has(pair)) {
+      reject("duplicate-sankey-link", `Canvas sankey ${blockId} lists one flow twice.`);
+    }
+    pairs.add(pair);
+    outgoing.set(link.source, [...(outgoing.get(link.source) ?? []), link.target]);
+  }
+  // Depth-first search with an explicit stack: a node reached again while it is
+  // still on the current path closes a cycle, a self-flow included.
+  const state = new Map<string, "visiting" | "done">();
+  for (const start of outgoing.keys()) {
+    if (state.has(start)) continue;
+    const stack: Array<{ readonly node: string; next: number }> = [{ node: start, next: 0 }];
+    state.set(start, "visiting");
+    while (stack.length > 0) {
+      const frame = stack[stack.length - 1];
+      if (frame === undefined) break;
+      const targets = outgoing.get(frame.node) ?? [];
+      const target = targets[frame.next];
+      if (target === undefined) {
+        state.set(frame.node, "done");
+        stack.pop();
+        continue;
+      }
+      frame.next += 1;
+      const seen = state.get(target);
+      if (seen === "visiting") {
+        reject(
+          "sankey-cycle",
+          `Canvas sankey ${blockId} has flows that return to a node they left.`,
+        );
+      }
+      if (seen === undefined) {
+        state.set(target, "visiting");
+        stack.push({ node: target, next: 0 });
+      }
+    }
+  }
+}
+
 function validateCrossReferences(definition: CanvasDefinition): void {
   const sources = new Set<string>();
   for (const entry of definition.sourceManifest) {
@@ -767,6 +940,7 @@ function validateCrossReferences(definition: CanvasDefinition): void {
         }
         series.add(item.seriesId);
       }
+      validateFlowChart(block);
     }
 
     if (block.kind === "plan") validatePlan(block);

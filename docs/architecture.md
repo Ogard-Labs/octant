@@ -315,8 +315,9 @@ schema version 4. An older runtime refuses a version-4 document as a future
 version and does not report it corrupt.
 A treemap block is gated the same way at Canvas schema version 5, a heatmap
 block at version 6, a comparison matrix at version 10, a math block at
-version 11, the mockup catalog at version 12, and a table row's `id` at
-version 13, so a document that declares an earlier version and carries one is
+version 11, the mockup catalog at version 12, a table row's `id` at
+version 13, and the funnel, radar, and sankey chart types at version 14, so a
+document that declares an earlier version and carries one is
 refused as a declared future version. The optional table column
 `display` and the chart, table, and metric `format` fields are the one ungated
 exception: they only change how a value is drawn, so they carry no schema
@@ -365,12 +366,32 @@ it gets no layout, plan, comment or action runtime, so nothing drawn inline can
 journal a version. Any other is a row that opens it. A card from an older host,
 or one no loaded turn can place, stays in the thread's card list.
 A chart is a closed type: line, area, bar, scatter, distribution, pie, donut,
-stacked bar, grouped bar, or bar-and-line. Pie and donut are one series of
-labeled non-negative slices. Stacked, grouped, and bar-and-line charts share
-categories across series; a bar-and-line series names itself as a bar or a line.
-The accessible table lists every reading. A pie or donut legend toggles at most
-24 slices; the rest stay in the picture and the table. A shared snapshot keeps
-the chart, its number format, and every series mark.
+stacked bar, grouped bar, bar-and-line, funnel, radar, or sankey. Pie and donut
+are one series of labeled non-negative slices. Stacked, grouped, and
+bar-and-line charts share categories across series; a bar-and-line series names
+itself as a bar or a line. A funnel is one series of at most 16 labeled stages,
+each no larger than the one before. A radar compares series on 3 to 16 shared,
+labeled axes with readings that are not negative. A sankey carries no series:
+its `links` are flows of a positive value from one named node to another (at
+most 256 flows between 64 nodes); a flow listed twice or a set of flows that
+returns to a node it left is refused. Stage, axis, and node labels are at most
+80 characters. The domain policy names each refusal (`funnel-not-narrowing`,
+`funnel-negative-value`, `funnel-stages-budget-exceeded`, `radar-axis-count`,
+`radar-negative-value`, `sankey-cycle`, `sankey-flow-not-positive`,
+`duplicate-sankey-link`, `sankey-nodes-budget-exceeded`,
+`sankey-links-budget-exceeded`, `chart-label-budget-exceeded`). The sankey
+layout is pure and deterministic in `packages/domain`
+(`canvasSankeyLayout`): a node sits one column right of the furthest node that
+feeds it, every ending lines up in the last column, and one scale sizes every
+band, so the screen and the artifact preview SVG draw the same picture. The
+three types arrive together with Canvas schema version 14.
+The accessible table lists every reading: a funnel's stages with their share of
+the first stage and of the stage before, a radar's axes by series, and a
+sankey's flows with each one's share of its source. A pie or donut legend
+toggles at most 24 slices, and a sankey legend at most 24 nodes (hiding a node
+hides every flow through it); the rest stay in the picture and the table. A
+shared snapshot keeps the chart, its number format, every series mark, and a
+sankey's links.
 A treemap is a hierarchy drawn as squarified rectangles: nodes name a parent,
 one root, values sit on leaves, and a group's reading is the sum of its
 children. A leaf carries a value for every declared measure and may name a
@@ -502,13 +523,15 @@ and the design and action blocks it refuses (see the `design` block). A table
 column keeps its number format and display, a table row leaves as its cells
 without the `id` comments anchor to, and a board keeps its own layout. Because
 the row id is the only Canvas version 13 field and a share drops it, a share at
-version 6 names a block authored at version 13 as version 12
-(`CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION`), so a version-6 reader accepts it.
+version 6 named a block authored at version 13 as version 12. Share version 7
+carries the version-14 chart types, so it names blocks up to version 14
+(`CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION`).
 Share documents version independently of Canvas documents: a treemap, a
 heatmap, a bar list, a chart's or a table column's number format, a table
 column's display, and a board's layout arrive with share version 3, and a
-comparison matrix with share version 4, math with share version 5, and the
-mockup catalog with share version 6, so a share that declares an older version
+comparison matrix with share version 4, math with share version 5, the
+mockup catalog with share version 6, and the funnel, radar, and sankey charts
+with share version 7 (whose blocks may name Canvas version 14), so a share that declares an older version
 and carries one is refused as a future version.
 The catalogue includes a `plan` block: phases, and one list of tasks that each
 name their phase, carry a status (todo, doing, blocked, done), and may carry an

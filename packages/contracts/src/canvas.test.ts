@@ -7,6 +7,13 @@ import {
   CANVAS_DESIGN_SCHEMA_VERSION,
   CANVAS_DIAGRAM_KINDS_SCHEMA_VERSION,
   CANVAS_EVENT_NAMES,
+  CANVAS_FLOW_CHARTS_SCHEMA_VERSION,
+  CANVAS_MAX_CHART_CATEGORY_LABEL_LENGTH,
+  CANVAS_MAX_FUNNEL_STAGES,
+  CANVAS_MAX_RADAR_AXES,
+  CANVAS_MAX_SANKEY_LINKS,
+  CANVAS_MAX_SANKEY_NODES,
+  CANVAS_MIN_RADAR_AXES,
   CANVAS_HEATMAP_SCHEMA_VERSION,
   CANVAS_MAX_BAR_LIST_ROWS,
   CANVAS_MAX_BLOCKS,
@@ -1768,7 +1775,7 @@ describe("table row ids", () => {
       ["Globex", 9],
     ]);
     expect(CANVAS_TABLE_ROW_ID_SCHEMA_VERSION).toBe(13);
-    expect(CANVAS_SCHEMA_VERSION).toBe(13);
+    expect(CANVAS_SCHEMA_VERSION).toBeGreaterThanOrEqual(13);
   });
 
   it("admits a row id only under the version that declared it, and keeps an older table readable", () => {
@@ -1791,5 +1798,143 @@ describe("table row ids", () => {
     ]) {
       expect(() => decodeCanvasBlock({ ...table, rows: [row] })).toThrow();
     }
+  });
+});
+
+describe("funnel, radar, and sankey charts", () => {
+  const funnel = {
+    blockId: "signup-funnel",
+    schemaVersion: CANVAS_SCHEMA_VERSION,
+    kind: "chart",
+    chartType: "funnel",
+    series: [
+      {
+        seriesId: "visitors",
+        label: "Visitors",
+        points: [
+          { x: "Visited", y: 1200 },
+          { x: "Signed up", y: 480 },
+          { x: "Paid", y: 96 },
+        ],
+      },
+    ],
+  } as const;
+  const radar = {
+    blockId: "service-profile",
+    schemaVersion: CANVAS_SCHEMA_VERSION,
+    kind: "chart",
+    chartType: "radar",
+    series: ["api", "web"].map((seriesId, index) => ({
+      seriesId,
+      label: seriesId.toUpperCase(),
+      points: ["Speed", "Cost", "Uptime"].map((x, axis) => ({ x, y: axis + index + 1 })),
+    })),
+  } as const;
+  const sankey = {
+    blockId: "traffic",
+    schemaVersion: CANVAS_SCHEMA_VERSION,
+    kind: "chart",
+    chartType: "sankey",
+    series: [],
+    links: [
+      { source: "Search", target: "Landing", value: 60 },
+      { source: "Landing", target: "Signup", value: 25 },
+    ],
+  } as const;
+
+  it("decodes each flow chart at the version that introduced them", () => {
+    expect(CANVAS_FLOW_CHARTS_SCHEMA_VERSION).toBe(14);
+    expect(CANVAS_SCHEMA_VERSION).toBe(14);
+    const decoded = decodeCanvasDefinition({ ...definition, blocks: [funnel, radar, sankey] });
+    expect(decoded.blocks).toEqual([funnel, radar, sankey]);
+  });
+
+  it("refuses a flow chart in a document that declares an earlier version", () => {
+    for (const block of [funnel, radar, sankey]) {
+      const older = { ...block, schemaVersion: 13 };
+      expect(() =>
+        decodeCanvasDefinition({ ...definition, schemaVersion: 13, blocks: [older] }),
+      ).toThrow();
+    }
+  });
+
+  it("refuses links on any chart but a sankey, and a sankey that plots series", () => {
+    expect(() => decodeCanvasBlock({ ...funnel, links: sankey.links })).toThrow();
+    expect(() => decodeCanvasBlock({ ...sankey, series: funnel.series })).toThrow();
+    expect(() => decodeCanvasBlock({ ...sankey, links: [] })).toThrow();
+    expect(() => decodeCanvasBlock({ ...sankey, links: undefined })).toThrow();
+  });
+
+  it("bounds a sankey's links, nodes, and node labels", () => {
+    const tooMany = Array.from({ length: CANVAS_MAX_SANKEY_LINKS + 1 }, (_value, index) => ({
+      source: `s${String(index % 8)}`,
+      target: `t${String(index)}`,
+      value: 1,
+    }));
+    expect(() => decodeCanvasBlock({ ...sankey, links: tooMany })).toThrow();
+    const wide = Array.from({ length: CANVAS_MAX_SANKEY_NODES }, (_value, index) => ({
+      source: "Hub",
+      target: `n${String(index)}`,
+      value: 1,
+    }));
+    expect(() => decodeCanvasBlock({ ...sankey, links: wide })).toThrow();
+    const longLabel = "x".repeat(CANVAS_MAX_CHART_CATEGORY_LABEL_LENGTH + 1);
+    expect(() =>
+      decodeCanvasBlock({
+        ...sankey,
+        links: [{ source: longLabel, target: "Landing", value: 1 }],
+      }),
+    ).toThrow();
+  });
+
+  it("asks a funnel for one series of labeled stages within the stage budget", () => {
+    expect(() => decodeCanvasBlock({ ...funnel, series: radar.series })).toThrow();
+    const unlabeled = [
+      {
+        ...funnel.series[0],
+        points: [
+          { x: 1, y: 5 },
+          { x: 2, y: 3 },
+        ],
+      },
+    ];
+    expect(() => decodeCanvasBlock({ ...funnel, series: unlabeled })).toThrow();
+    const repeated = [
+      {
+        ...funnel.series[0],
+        points: [
+          { x: "Visited", y: 5 },
+          { x: "Visited", y: 3 },
+        ],
+      },
+    ];
+    expect(() => decodeCanvasBlock({ ...funnel, series: repeated })).toThrow();
+    const long = [
+      {
+        ...funnel.series[0],
+        points: Array.from({ length: CANVAS_MAX_FUNNEL_STAGES + 1 }, (_value, index) => ({
+          x: `Stage ${String(index)}`,
+          y: 100 - index,
+        })),
+      },
+    ];
+    expect(() => decodeCanvasBlock({ ...funnel, series: long })).toThrow();
+  });
+
+  it("asks a radar for shared labeled axes within the axis bounds", () => {
+    const axes = (count: number) =>
+      Array.from({ length: count }, (_value, index) => ({ x: `Axis ${String(index)}`, y: 1 }));
+    const withAxes = (count: number) => ({
+      ...radar,
+      series: [{ seriesId: "only", label: "Only", points: axes(count) }],
+    });
+    expect(decodeCanvasBlock(withAxes(CANVAS_MIN_RADAR_AXES))).toBeDefined();
+    expect(decodeCanvasBlock(withAxes(CANVAS_MAX_RADAR_AXES))).toBeDefined();
+    expect(() => decodeCanvasBlock(withAxes(CANVAS_MIN_RADAR_AXES - 1))).toThrow();
+    expect(() => decodeCanvasBlock(withAxes(CANVAS_MAX_RADAR_AXES + 1))).toThrow();
+    const [first, second] = radar.series;
+    if (first === undefined || second === undefined) throw new Error("expected two series");
+    const misaligned = [first, { ...second, points: [...second.points].reverse() }];
+    expect(() => decodeCanvasBlock({ ...radar, series: misaligned })).toThrow();
   });
 });

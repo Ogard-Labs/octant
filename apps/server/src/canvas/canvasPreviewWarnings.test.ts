@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { decodeCanvasBlock } from "@octant/contracts";
 import type { CanvasBlock } from "@octant/contracts/canvas";
+import { chartExampleBlocks } from "@octant/domain";
 import { canvasPreviewWarnings, type CanvasPreviewPalette } from "./canvasPreviewWarnings";
 import { canvasPreviewPalette } from "./canvasPreviewService";
 
@@ -132,6 +133,17 @@ describe("canvasPreviewWarnings", () => {
       block({ blockId: "blank", schemaVersion: 1, kind: "chart", chartType: "bar", series: [] }),
     ];
     expect(warningsFor(blocks)).toEqual([{ kind: "empty-series", blockId: "blank" }]);
+  });
+
+  it("reports a sankey as no empty series and a funnel's long stage as no clipped slot", () => {
+    const blocks = chartExampleBlocks.filter(
+      (candidate) =>
+        candidate.chartType === "sankey" ||
+        candidate.chartType === "funnel" ||
+        candidate.chartType === "radar",
+    );
+    expect(blocks).toHaveLength(3);
+    expect(warningsFor(blocks, { width: 360 })).toEqual([]);
   });
 
   it("reports an inline document that is past the block cap", () => {

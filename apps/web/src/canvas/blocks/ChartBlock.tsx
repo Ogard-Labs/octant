@@ -22,6 +22,8 @@ import {
   type YDomain,
 } from "../chartGeometry";
 import { formatCanvasValue } from "../canvasRuntime";
+import { sankeyNodeLabels } from "@octant/domain/canvas-sankey-layout";
+import { FlowChart, FlowTable, StageTable, isFlowChart, sankeyNodeId } from "./FlowCharts";
 
 const PLOT_WIDTH = 320;
 const PLOT_HEIGHT = 168;
@@ -106,6 +108,8 @@ export function ChartBlock({ block }: { readonly block: CanvasChartBlock }) {
     >
       {isCartesian(block.chartType) ? (
         <CartesianChart block={block} hidden={hidden} width={width} />
+      ) : isFlowChart(block.chartType) ? (
+        <FlowChart block={block} hidden={hidden} label={chartLabel(block)} width={width} />
       ) : (
         <div className="canvas-block__chart-plot">
           <svg
@@ -120,8 +124,10 @@ export function ChartBlock({ block }: { readonly block: CanvasChartBlock }) {
         </div>
       )}
       {/* One series is named by the Canvas around it; a legend that can only
-          hide the whole chart is noise. */}
-      {isCartesian(block.chartType) && block.series.length === 1 ? null : (
+          hide the whole chart is noise. A funnel is always one series. */}
+      {((isCartesian(block.chartType) || block.chartType === "radar") &&
+        block.series.length === 1) ||
+      block.chartType === "funnel" ? null : (
         <ChartLegend block={block} hidden={hidden} onToggle={toggle} />
       )}
       <ChartData block={block} />
@@ -518,7 +524,10 @@ function ChartMarks({
     case "scatter":
     case "bar":
     case "distribution":
-      // Drawn at the figure's measured width by CartesianChart instead.
+    case "funnel":
+    case "radar":
+    case "sankey":
+      // Drawn at the figure's measured width by CartesianChart or FlowChart.
       return null;
     default: {
       const exhaustive: never = block.chartType;
@@ -943,6 +952,10 @@ function ChartData({ block }: { readonly block: CanvasChartBlock }) {
       <div aria-label="Chart data" className="canvas-block__chart-table" role="region" tabIndex={0}>
         {block.chartType === "pie" || block.chartType === "donut" ? (
           <SliceTable block={block} />
+        ) : block.chartType === "funnel" ? (
+          <StageTable block={block} />
+        ) : block.chartType === "sankey" ? (
+          <FlowTable block={block} />
         ) : (
           <SeriesTable block={block} />
         )}
@@ -981,7 +994,8 @@ function SeriesTable({ block }: { readonly block: CanvasChartBlock }) {
   const aligned =
     block.chartType === "stacked-bar" ||
     block.chartType === "grouped-bar" ||
-    block.chartType === "bar-line";
+    block.chartType === "bar-line" ||
+    block.chartType === "radar";
   const repeats = block.series.some(
     (series) =>
       new Set(series.points.map((point) => categoryKey(point.x))).size !== series.points.length,
@@ -991,7 +1005,7 @@ function SeriesTable({ block }: { readonly block: CanvasChartBlock }) {
       <table aria-label="Chart readings" className="ds-table">
         <thead>
           <tr>
-            <th scope="col">Category</th>
+            <th scope="col">{block.chartType === "radar" ? "Axis" : "Category"}</th>
             {block.series.map((series) => (
               <th key={series.seriesId} scope="col">
                 {series.label}
@@ -1057,6 +1071,18 @@ function legendItems(block: CanvasChartBlock): ReadonlyArray<{
         seriesAttr: String(index % 6),
       }));
   }
+  if (block.chartType === "sankey") {
+    // Each node toggles every flow that touches it; past the cap the rest stay
+    // in the picture and the table, as a pie's slices do.
+    return sankeyNodeLabels(block.links ?? [])
+      .slice(0, MAX_INTERACTIVE_LEGEND_ITEMS)
+      .map((label, index) => ({
+        id: sankeyNodeId(label),
+        label,
+        keyClass: `chart-key is-block ${seriesClass(index)}`,
+        seriesAttr: String(index % 6),
+      }));
+  }
   return block.series.map((series, index) => ({
     id: series.seriesId,
     label: series.label,
@@ -1070,7 +1096,7 @@ function keyClass(
   mark: CanvasChartSeries["mark"],
   index: number,
 ): string {
-  const line = chartType === "line" || mark === "line";
+  const line = chartType === "line" || chartType === "radar" || mark === "line";
   return line ? `chart-key ${seriesClass(index)}` : `chart-key is-block ${seriesClass(index)}`;
 }
 
@@ -1162,6 +1188,18 @@ function chartLabel(block: CanvasChartBlock): string {
     const slices = block.series[0]?.points.length ?? 0;
     return `${name} chart with ${String(slices)} slices. Open chart data for the values.`;
   }
+  if (block.chartType === "funnel") {
+    const stages = block.series[0]?.points.length ?? 0;
+    return `${name} chart with ${String(stages)} stages. Open chart data for the values.`;
+  }
+  if (block.chartType === "radar") {
+    const axes = block.series[0]?.points.length ?? 0;
+    return `${name} chart with ${String(block.series.length)} series on ${String(axes)} axes. Open chart data for the values.`;
+  }
+  if (block.chartType === "sankey") {
+    const links = block.links ?? [];
+    return `${name} chart with ${String(links.length)} flows between ${String(sankeyNodeLabels(links).length)} nodes. Open chart data for the values.`;
+  }
   return `${name} chart with ${String(block.series.length)} series. Open chart data for the values.`;
 }
 
@@ -1180,6 +1218,9 @@ function chartTypeName(type: CanvasChartType): string {
     case "distribution":
     case "pie":
     case "donut":
+    case "funnel":
+    case "radar":
+    case "sankey":
       return type;
     default: {
       const exhaustive: never = type;

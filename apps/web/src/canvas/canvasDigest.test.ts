@@ -39,6 +39,24 @@ describe("a one-line read of a Canvas", () => {
     ).toEqual(["2 series"]);
   });
 
+  it("counts a sankey's flows, since it plots no series", () => {
+    expect(
+      canvasDigest(
+        withBlocks([
+          {
+            kind: "chart",
+            chartType: "sankey",
+            series: [],
+            links: [
+              { source: "A", target: "B", value: 1 },
+              { source: "B", target: "C", value: 1 },
+            ],
+          },
+        ]),
+      ).facts,
+    ).toEqual(["2 flows"]);
+  });
+
   it("calls a Canvas of mostly numbers figures, and falls back to its sections", () => {
     expect(canvasDigest(withBlocks([{ kind: "metric" }, { kind: "metric" }])).label).toBe(
       "Numbers",

@@ -7,7 +7,12 @@ import {
 } from "@octant/contracts/canvas-share";
 import { describe, expect, it } from "vitest";
 import { barListExamples } from "./canvasBarListExamples";
-import { chartExamples } from "./canvasChartExamples";
+import {
+  chartExamples,
+  serviceProfileRadarExample,
+  signupFunnelExample,
+  trafficSankeyExample,
+} from "./canvasChartExamples";
 import { comparisonMatrixExamples } from "./canvasComparisonMatrixExamples";
 import { mathExamples } from "./canvasMathExamples";
 import { launchDeckExample, onboardingFlowExample } from "./canvasDesignExamples";
@@ -197,7 +202,7 @@ describe("Canvas share policy", () => {
     ]);
   });
 
-  it("shares a table's rows as their cells at block version 12, without the row ids comments anchor to", () => {
+  it("shares a table's rows as their cells, without the row ids comments anchor to", () => {
     const table = {
       blockId: "vendors",
       schemaVersion: CANVAS_SCHEMA_VERSION,
@@ -221,19 +226,32 @@ describe("Canvas share policy", () => {
       }),
       context,
     });
-    // Without the row id nothing in the table is newer than Canvas version 12,
-    // so the block names 12 and a reader of share version 6 accepts it.
-    expect(receipt.document.schemaVersion).toBe(6);
+    expect(receipt.document.schemaVersion).toBe(7);
     expect(receipt.document.blocks).toEqual([
       {
         ...table,
-        schemaVersion: 12,
+        schemaVersion: CANVAS_SCHEMA_VERSION,
         rows: [
           ["Acme", 12],
           ["Globex", 9],
         ],
       },
     ]);
+  });
+
+  it("shares a funnel, a radar, and a sankey with every stage, axis, and flow", () => {
+    const blocks = [signupFunnelExample, serviceProfileRadarExample, trafficSankeyExample];
+    const receipt = buildCanvasStaticExportReceipt({
+      request,
+      current: decodeCanvasVersion({
+        ...current,
+        schemaVersion: CANVAS_SCHEMA_VERSION,
+        definition: { ...current.definition, schemaVersion: CANVAS_SCHEMA_VERSION, blocks },
+      }),
+      context,
+    });
+    expect(receipt.document.schemaVersion).toBe(7);
+    expect(receipt.document.blocks).toEqual(blocks);
   });
 
   it("round-trips entity-relationship, swimlane, and mind map blocks through the static export", () => {

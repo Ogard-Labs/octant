@@ -4,7 +4,11 @@ import {
   type CanvasBlock,
 } from "@octant/contracts/canvas";
 import { formatCanvasNumber } from "@octant/domain/canvas-number-format";
-import { notificationStatesExampleBlock, settingsScreenExampleBlock } from "@octant/domain";
+import {
+  chartExampleBlocks,
+  notificationStatesExampleBlock,
+  settingsScreenExampleBlock,
+} from "@octant/domain";
 import { describe, expect, it } from "vitest";
 import { renderArtifactHtml, renderArtifactMarkdown } from "./artifactDocumentRender";
 
@@ -148,6 +152,22 @@ describe("rendering a canvas as a document", () => {
     if (formatted.kind !== "rendered") return;
     expect(formatted.body).toContain(`Requests: ${formatCanvasNumber(1_360_000, "compact")}`);
     expect(formatted.body).not.toContain("1360000");
+  });
+
+  it("writes a sankey as its flows and a funnel or radar as every reading", () => {
+    const blocks = ["sankey", "funnel", "radar"].map((chartType) => {
+      const block = chartExampleBlocks.find((candidate) => candidate.chartType === chartType);
+      if (block === undefined) throw new Error(`${chartType} example is missing.`);
+      return block;
+    });
+    const rendered = renderArtifactMarkdown(definition(blocks));
+    if (rendered.kind !== "rendered") throw new Error("expected a rendered document");
+    expect(rendered.body).toContain("- Search → Docs = 5.2K");
+    expect(rendered.body).toContain("- Visitors: Paid = 410");
+    expect(rendered.body).toContain("- Self-hosted: Control = 5");
+    const html = renderArtifactHtml(definition(blocks));
+    if (html.kind !== "rendered") throw new Error("expected a rendered document");
+    expect(html.body).toContain("Search → Docs = 5.2K");
   });
 
   it("writes a treemap as an indented table of every measure", () => {
