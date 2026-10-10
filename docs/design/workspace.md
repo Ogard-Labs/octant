@@ -461,16 +461,24 @@ the turn that wrote it, on the reply's card face. One the agent asked to show
 inline is drawn there read-only, within a fixed height that fades out instead
 of scrolling, and is never offered in the dock, because it is already in front
 of the person; any other is a single row (a live miniature, its title, one
-line of facts) that opens it. The inline frame holds **Show as card**, a fold
-the window remembers. In Work and Code it also holds **Open in sidebar**, which
-opens the same Canvas in the dock tool, and a row opens it there too. Chat has
-no dock, so there the frame holds **Open Canvas**, and the frame and a row open
-the Canvas as a content tab. Accepted but not yet built: a person may expand
-any Canvas of the thread in place, including one shown as a row; the expanded
-frame grows with its content up to about the thread viewport instead of
-fading, the thread keeps the wheel until the person focuses a region inside
-it, and a running design frame starts there only when the person presses
-**Run**. Until that ships, the fixed-height fade above is the behavior (see
+line of facts) that opens it. The person may expand any Canvas in place,
+including one shown as a row: **Expand in thread** on the frame or the row, or
+**Show the whole Canvas** under a faded one. Expanded, the frame grows with
+its content up to about the thread viewport instead of fading. The thread
+keeps the wheel until the person focuses the region inside the frame (a click
+or Tab); then the wheel scrolls only the Canvas, and Escape hands it back. A
+board pans by drag and zooms on ctrl/meta wheel, never on a plain wheel. The
+drawing in the thread is read-only at every size: it gets no layout, plan,
+comment, or action runtime, so nothing drawn there writes a version. The
+inline frame holds **Show as card**, a fold the window remembers, and the
+window remembers an expansion the same way; **Collapse** returns an inline
+Canvas to its faded frame, and **Show as card** returns an expanded row to its
+row. In Work and Code the frame also holds **Open in sidebar**, which opens
+the same Canvas in the dock tool, and a row opens it there too. Chat has no
+dock, so there the frame holds **Open Canvas**, and the frame and a row open
+the Canvas as a content tab. Editing, comments, and sharing stay there.
+Accepted but not yet built: a running design frame starts in the thread only
+when the person presses **Run** (see
 [decisions/0165-canvas-artifacts-are-documents-designs-and-prototypes.md](../decisions/0165-canvas-artifacts-are-documents-designs-and-prototypes.md)). An
 agent-authored Canvas belongs to the thread's own scope as the host resolves
 it: the active Chat Project, the Work thread's confined root, or the Code

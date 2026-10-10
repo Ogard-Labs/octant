@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { CanvasCreationContext } from "./CreateCanvasDraft";
@@ -6,7 +6,7 @@ import { CanvasThreadReferenceCard } from "./CanvasThreadReferenceCard";
 import { CreateCanvasDraft } from "./CreateCanvasDraft";
 import { CanvasCreatePanel } from "./CanvasCreatePanel";
 import { CanvasThreadReferenceCardList } from "./CanvasThreadReferenceCardList";
-import { InlineThreadCanvas } from "./InlineThreadCanvas";
+import { InlineThreadCanvas, ThreadCanvases } from "./InlineThreadCanvas";
 import { useThreadCanvasCards } from "./useThreadCanvasCards";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 
@@ -668,6 +668,132 @@ describe("Canvas create panel and card list", () => {
       render(<InlineThreadCanvas card={inlineCard()} client={client} />);
       expect(screen.getByRole("button", { name: "Show in thread" })).toBeInTheDocument();
       expect(client.get).not.toHaveBeenCalled();
+      localStorage.clear();
+    });
+
+    // A long document with a board: the agent could never ask for it inline,
+    // so the thread first shows it as a row.
+    const longDefinition = {
+      ...definition,
+      title: "Launch review",
+      presentation: "sidebar",
+      blocks: [
+        {
+          blockId: "flow",
+          schemaVersion: 1,
+          kind: "diagram",
+          nodes: [
+            { nodeId: "draft", label: "Draft" },
+            { nodeId: "ship", label: "Ship" },
+          ],
+          edges: [{ edgeId: "next", source: "draft", target: "ship" }],
+        },
+        ...Array.from({ length: 39 }, (_unused, index) => ({
+          blockId: `finding-${String(index)}`,
+          schemaVersion: 1,
+          kind: "rich-text",
+          text: `Finding ${String(index + 1)}`,
+        })),
+      ],
+    };
+    const rowCard = () =>
+      referenceCardFixture({ title: "Launch review", canvasCreatedAt: "2026-08-01T21:00:00.000Z" });
+    // Only a read: any write the thread attempted would fail on this client.
+    const readOnlyClient = () =>
+      ({
+        get: vi.fn().mockResolvedValue({
+          kind: "ready",
+          version: {
+            schemaVersion: 4,
+            canvasId: "20000000-0000-4000-8000-000000000002",
+            versionId: "20000000-0000-4000-8000-000000000003",
+            sequence: 1,
+            definition: longDefinition,
+            createdBy: definition.provenance.actor,
+            createdAt: "2026-08-01T21:00:00.000Z",
+          },
+        }),
+      }) as unknown as CanvasClient;
+
+    it("expands a Canvas shown as a row in place, board and all, without a way to change it", async () => {
+      const user = userEvent.setup();
+      localStorage.clear();
+      const onOpen = vi.fn();
+      render(
+        <ThreadCanvases
+          cards={[rowCard()]}
+          client={readOnlyClient()}
+          onOpen={onOpen}
+          openLabel="Open Canvas"
+        />,
+      );
+
+      await user.click(await screen.findByRole("button", { name: "Expand in thread" }));
+      expect(await screen.findByText("Finding 39")).toBeInTheDocument();
+      const board = screen.getByRole("group", { name: "Board" });
+      // No layout runtime reaches the thread, so a drag can never journal a version.
+      expect(board).toHaveAttribute("data-editable", "false");
+      expect(onOpen).not.toHaveBeenCalled();
+
+      await user.click(screen.getByRole("button", { name: "Open Canvas" }));
+      expect(onOpen).toHaveBeenCalledTimes(1);
+      await user.click(screen.getByRole("button", { name: "Show as card" }));
+      expect(screen.queryByRole("region", { name: "Launch review content" })).toBeNull();
+      expect(screen.getByTestId("canvas-card-title")).toHaveTextContent("Launch review");
+      localStorage.clear();
+    });
+
+    it("leaves the wheel with the thread until the person focuses the expanded Canvas", async () => {
+      const user = userEvent.setup();
+      localStorage.clear();
+      render(<ThreadCanvases cards={[rowCard()]} client={readOnlyClient()} />);
+      await user.click(await screen.findByRole("button", { name: "Expand in thread" }));
+      const region = await screen.findByRole("region", { name: "Launch review content" });
+      expect(region).toHaveAttribute("data-wheel", "thread");
+
+      await user.click(screen.getByText("Finding 3"));
+      expect(region).toHaveAttribute("data-wheel", "canvas");
+
+      // Escape hands the wheel back and leaves focus on the frame's own control.
+      await user.keyboard("{Escape}");
+      expect(region).toHaveAttribute("data-wheel", "thread");
+      expect(screen.getByRole("button", { name: "Show as card" })).toHaveFocus();
+      localStorage.clear();
+    });
+
+    it("zooms an expanded board only on a ctrl or meta wheel", async () => {
+      const user = userEvent.setup();
+      localStorage.clear();
+      render(<ThreadCanvases cards={[rowCard()]} client={readOnlyClient()} />);
+      await user.click(await screen.findByRole("button", { name: "Expand in thread" }));
+      const board = await screen.findByRole("group", { name: "Board" });
+      const surface = board.querySelector("svg");
+      expect(surface).not.toBeNull();
+      if (surface === null) return;
+
+      fireEvent.wheel(surface, { deltaY: -100 });
+      expect(within(board).getByText("100%")).toBeInTheDocument();
+      fireEvent.wheel(surface, { deltaY: -100, ctrlKey: true });
+      expect(within(board).getByText("120%")).toBeInTheDocument();
+      localStorage.clear();
+    });
+
+    it("remembers an expanded Canvas, and folding it to a card ends the expansion", async () => {
+      const user = userEvent.setup();
+      localStorage.clear();
+      const first = render(<InlineThreadCanvas card={inlineCard()} client={clientWith()} />);
+      await screen.findByText("Signups this week");
+      await user.click(screen.getByRole("button", { name: "Expand in thread" }));
+      expect(screen.getByTestId("thread-canvas")).toHaveAttribute("data-shown-as", "expanded");
+      first.unmount();
+
+      const second = render(<InlineThreadCanvas card={inlineCard()} client={clientWith()} />);
+      expect(screen.getByTestId("thread-canvas")).toHaveAttribute("data-shown-as", "expanded");
+      await user.click(screen.getByRole("button", { name: "Show as card" }));
+      second.unmount();
+
+      render(<InlineThreadCanvas card={inlineCard()} client={clientWith()} />);
+      expect(screen.getByTestId("thread-canvas")).toHaveAttribute("data-shown-as", "card");
       localStorage.clear();
     });
   });
