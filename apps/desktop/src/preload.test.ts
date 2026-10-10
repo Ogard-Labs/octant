@@ -224,6 +224,7 @@ describe("desktop preload bridge", () => {
       "rotateRemoteHostIdentity",
       "selectLocalPluginFolder",
       "selectProjectRoot",
+      "selectRuntimeBinary",
       "setAppUpdateRing",
       "setApprovalSurfacePalette",
       "setAttentionBadge",
@@ -328,6 +329,7 @@ describe("desktop preload bridge", () => {
     await bridge.selectProjectRoot("work");
     await bridge.selectProjectRoot("code");
     await bridge.selectLocalPluginFolder();
+    await bridge.selectRuntimeBinary();
     await bridge.openCodeExternalEditor({
       threadId: "20000000-0000-4000-8000-000000000001",
       checkoutId: "30000000-0000-4000-8000-000000000001",
@@ -377,6 +379,7 @@ describe("desktop preload bridge", () => {
       [IPC_CHANNELS.selectProjectRoot, "work"],
       [IPC_CHANNELS.selectProjectRoot, "code"],
       [IPC_CHANNELS.selectLocalPluginFolder],
+      [IPC_CHANNELS.selectRuntimeBinary],
       [
         IPC_CHANNELS.openCodeExternalEditor,
         {

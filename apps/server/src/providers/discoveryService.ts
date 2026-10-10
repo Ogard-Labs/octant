@@ -95,7 +95,24 @@ export interface DiscoveryService {
   scan(signal?: AbortSignal): Promise<DiscoverySnapshot>;
   /** Canonical candidates from the most recent completed/partial scan. */
   getLastScanCandidates(): ReadonlyArray<DiscoveryCandidate>;
+  /**
+   * Checks an executable a person picked for a runtime of this kind, with the
+   * validation and confined version probe the scan applies to what it finds.
+   */
+  checkPickedBinary(
+    driverKind: ProviderDriverKind,
+    path: string,
+    signal?: AbortSignal,
+  ): Promise<PickedBinaryCheck>;
 }
+
+export type PickedBinaryCheck =
+  | { readonly status: "accepted"; readonly version: string }
+  | {
+      readonly status: "refused";
+      readonly reason: "unsupported-kind" | "not-executable" | "probe-failed";
+      readonly message: string;
+    };
 
 export function makeDiscoveryService(options: DiscoveryServiceOptions = {}): DiscoveryService {
   const exec = options.exec ?? defaultExec;
@@ -210,6 +227,52 @@ export function makeDiscoveryService(options: DiscoveryServiceOptions = {}): Dis
     getLastScanCandidates() {
       return lastScanCandidates;
     },
+    async checkPickedBinary(driverKind, path, signal) {
+      const descriptor = discoverableDescriptorsForAdmittedDrivers(admittedDriverKinds).find(
+        (candidate) => candidate.driverKind === driverKind,
+      );
+      if (
+        descriptor === undefined ||
+        descriptor.isDirectEndpoint ||
+        descriptor.versionProbeArgs.length === 0
+      ) {
+        return {
+          status: "refused",
+          reason: "unsupported-kind",
+          message: "Octant cannot check a picked binary for this runtime.",
+        };
+      }
+      const validated = await validateExecutable(path, fs);
+      if (validated === undefined) {
+        return {
+          status: "refused",
+          reason: "not-executable",
+          message: "The chosen file is not an executable program.",
+        };
+      }
+      // A picked file was named by the person, not found by the scan, but it
+      // runs under the same confinement: a host that cannot confine it never
+      // runs it, and the pick is refused rather than accepted unchecked.
+      const read = await readConfinedVersion(
+        descriptor,
+        validated.canonicalPath,
+        exec,
+        environment,
+        versionProbeConfinement,
+        signal,
+      );
+      // A program that exits cleanly but prints no version number (`echo`
+      // printing its own arguments, a shell script that ignores them) is not
+      // a runtime of this kind either.
+      if (read === undefined || !/\d+\.\d+/.test(read)) {
+        return {
+          status: "refused",
+          reason: "probe-failed",
+          message: `The chosen file did not answer ${descriptor.displayName}'s version check.`,
+        };
+      }
+      return { status: "accepted", version: read };
+    },
     scan(signal?: AbortSignal): Promise<DiscoverySnapshot> {
       inFlightScan ??= runScan(signal).finally(() => {
         inFlightScan = undefined;
@@ -280,29 +343,13 @@ async function scanDescriptor(
     // approved directory rather than one the user named, so it is confined
     // before it runs; a host that cannot confine reports no version rather
     // than running it anyway.
-    let version: string | undefined;
-    const probe = prepareConfinedVersionProbe({
-      binaryPath: validated.canonicalPath,
-      displayName: descriptor.displayName,
-      args: descriptor.versionProbeArgs,
-      environment: () => sanitizeProbeEnvironment(environment),
-      ...(versionProbeConfinement === undefined ? {} : { confinement: versionProbeConfinement }),
-    });
-    if (probe.status === "prepared") {
-      try {
-        const { stdout } = await exec(probe.launch.command, probe.launch.args, {
-          timeout: MAX_PROBE_TIMEOUT_MS,
-          maxBuffer: MAX_PROBE_OUTPUT_BYTES,
-          env: probe.launch.environment,
-          cwd: probe.launch.workingDirectory,
-        });
-        version = extractVersion(stdout);
-      } catch {
-        // Version probe failed; continue without version
-      } finally {
-        probe.launch.release();
-      }
-    }
+    const version = await readConfinedVersion(
+      descriptor,
+      validated.canonicalPath,
+      exec,
+      environment,
+      versionProbeConfinement,
+    );
 
     // Auth readiness probe. This one reads the provider's own credential state
     // out of the user's home, so the confinement above would answer
@@ -342,6 +389,43 @@ async function scanDescriptor(
   }
 
   return { candidates, searchedDirectories: [...searchedDirectories], outOfTime };
+}
+
+/**
+ * Runs the descriptor's version probe under the version-read confinement and
+ * returns the first line it printed. Undefined when the host could not
+ * confine it, or the program failed, timed out, or printed nothing.
+ */
+async function readConfinedVersion(
+  descriptor: ProviderDiscoveryDescriptor,
+  canonicalPath: string,
+  exec: DiscoveryExecPort,
+  environment: NodeJS.ProcessEnv,
+  versionProbeConfinement: SeatbeltConfinementPort | undefined,
+  signal?: AbortSignal,
+): Promise<string | undefined> {
+  if (signal?.aborted) return undefined;
+  const probe = prepareConfinedVersionProbe({
+    binaryPath: canonicalPath,
+    displayName: descriptor.displayName,
+    args: descriptor.versionProbeArgs,
+    environment: () => sanitizeProbeEnvironment(environment),
+    ...(versionProbeConfinement === undefined ? {} : { confinement: versionProbeConfinement }),
+  });
+  if (probe.status !== "prepared") return undefined;
+  try {
+    const { stdout } = await exec(probe.launch.command, probe.launch.args, {
+      timeout: MAX_PROBE_TIMEOUT_MS,
+      maxBuffer: MAX_PROBE_OUTPUT_BYTES,
+      env: probe.launch.environment,
+      cwd: probe.launch.workingDirectory,
+    });
+    return extractVersion(stdout);
+  } catch {
+    return undefined;
+  } finally {
+    probe.launch.release();
+  }
 }
 
 function directoryOf(path: string): string {

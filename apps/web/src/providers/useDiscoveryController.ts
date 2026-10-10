@@ -1,4 +1,4 @@
-import type { DiscoveryCandidate, DiscoverySnapshot } from "@octant/contracts";
+import type { DiscoveryCandidate, DiscoverySnapshot, ProviderInstanceId } from "@octant/contracts";
 import {
   createDiscoveryClient,
   type DiscoveryClient,
@@ -126,6 +126,31 @@ export function useDiscoveryController(options: DiscoveryControllerOptions) {
     [client, scan],
   );
 
+  /**
+   * Redeems a native file-picker receipt for a runtime's binary. The host
+   * checks the file and answers the version it printed, or why it refused.
+   */
+  const locateBinary = useCallback(
+    async (instanceId: ProviderInstanceId, receiptId: string): Promise<LocateBinaryOutcome> => {
+      if (client === undefined) {
+        return { kind: "refused", message: "Discovery is unavailable for this window." };
+      }
+      try {
+        const result = await client.locateBinary({ kind: "locate-binary", instanceId, receiptId });
+        return { kind: "located", version: result.version };
+      } catch (error) {
+        return {
+          kind: "refused",
+          message:
+            typeof error === "object" && error !== null && "message" in error
+              ? String(error.message)
+              : "Octant could not use the chosen binary.",
+        };
+      }
+    },
+    [client],
+  );
+
   return {
     snapshot,
     scanning,
@@ -133,7 +158,14 @@ export function useDiscoveryController(options: DiscoveryControllerOptions) {
     ...(message !== undefined ? { message } : {}),
     scan,
     connect,
+    locateBinary,
   };
 }
 
 export type DiscoveryController = ReturnType<typeof useDiscoveryController>;
+
+/** What a runtime card's Locate binary action came to. */
+export type LocateBinaryOutcome =
+  | { readonly kind: "cancelled" }
+  | { readonly kind: "located"; readonly version: string }
+  | { readonly kind: "refused"; readonly message: string };

@@ -4390,6 +4390,13 @@ export function startOctantServer(
       discoveryService,
       windowAuthorityStore,
       maxRequestBodySize: MAX_JSON_REQUEST_BODY_SIZE,
+      ...(options.desktopBridgeSecret === undefined
+        ? {}
+        : { desktopBridgeSecret: options.desktopBridgeSecret }),
+      binaryReceipts: new LocalPluginImportReceiptStore(),
+      readInstance: (instanceId) => persistence.readProviderInstance(instanceId),
+      applyProviderCommand: (windowId, command) =>
+        providerService.execute(decodeWindowId(windowId), command),
       listInstances: async () => persistence.readProviderInstances(),
       createFromDiscovery: createProviderFromDiscovery,
       readFirstRunOnboarding: () =>

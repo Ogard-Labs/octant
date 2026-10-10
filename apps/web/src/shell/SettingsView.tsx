@@ -14,6 +14,7 @@ import { useDebouncedValue } from "../lib/useDebouncedValue";
 import { ArrowLeft, Check, Menu, Search, X } from "lucide-react";
 import type { ShellSettings } from "@octant/contracts/shell";
 import {
+  type ProviderInstanceId,
   type SettingsDeepLink,
   type SettingsSectionId,
   type SettingsSettingId,
@@ -30,7 +31,7 @@ import { SIDEBAR_BACKGROUND_PRESETS } from "@octant/theme/backgrounds";
 import { isImageProfileDriverKind, resolveAppBackground } from "@octant/domain";
 import { resolveEffectiveThemeMode } from "@octant/domain/theme-policy";
 import type { ProviderController } from "../providers/useProviderController";
-import type { DiscoveryController } from "../providers/useDiscoveryController";
+import type { DiscoveryController, LocateBinaryOutcome } from "../providers/useDiscoveryController";
 import {
   ProviderSettingsView,
   type ProviderSettingsViewProps,
@@ -1252,10 +1253,39 @@ function ProvidersSection(props: {
     void scan();
   }, [scan]);
 
+  // Locate binary needs the desktop's native file picker: a browser or a
+  // paired device has no picker authority, so the action is not offered there.
+  const selectRuntimeBinary = props.hostBridge?.selectRuntimeBinary;
+  const onLocateBinary =
+    selectRuntimeBinary === undefined || discoveryController === undefined
+      ? undefined
+      : async (instanceId: ProviderInstanceId): Promise<LocateBinaryOutcome> => {
+          let picked: Awaited<ReturnType<typeof selectRuntimeBinary>>;
+          try {
+            picked = await selectRuntimeBinary();
+          } catch (error) {
+            return {
+              kind: "refused",
+              message: error instanceof Error ? error.message : "The binary picker failed.",
+            };
+          }
+          if (picked.kind === "cancelled") return { kind: "cancelled" };
+          const outcome = await discoveryController.locateBinary(instanceId, picked.receiptId);
+          if (outcome.kind === "located") {
+            await props.providerController.retry();
+            const instance = props.providerController
+              .readInstances()
+              .find((candidate) => String(candidate.id) === String(instanceId));
+            if (instance?.enabled === true) await props.providerController.probe(instanceId);
+          }
+          return outcome;
+        };
+
   return (
     <div id="settings-providers">
       <ProviderSettingsView
         {...providerSettingsViewProps(props.providerController, props.hostBridge)}
+        {...(onLocateBinary === undefined ? {} : { onLocateBinary })}
         discovery={
           discoveryController === undefined ? null : (
             <ProviderDiscoverySection

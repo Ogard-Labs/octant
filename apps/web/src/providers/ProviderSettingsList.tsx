@@ -9,11 +9,16 @@ import type {
   ProviderModelId,
   ProviderObservedState,
 } from "@octant/contracts";
-import { isImageProfileDriverKind, supportsProviderCliUpdate } from "@octant/domain";
+import {
+  canLocateRuntimeBinary,
+  isImageProfileDriverKind,
+  supportsProviderCliUpdate,
+} from "@octant/domain";
 import { CheckCircle2, ChevronDown, ChevronRight, ChevronUp } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { ProviderToolVerification } from "./ProviderToolVerification";
 import { ModelContextWindowField } from "./ModelContextWindowField";
+import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantInput } from "../ui/base/OctantInput";
@@ -60,6 +65,7 @@ import {
   titleCase,
 } from "./providerSettingsPresentation";
 import type { ProviderSettingsViewProps } from "./ProviderSettingsView";
+import type { LocateBinaryOutcome } from "./useDiscoveryController";
 
 export type ProviderSettingsListProps = Pick<
   ProviderSettingsViewProps,
@@ -73,6 +79,7 @@ export type ProviderSettingsListProps = Pick<
   | "credentialManagementAvailable"
   | "onRename"
   | "onChangeBinary"
+  | "onLocateBinary"
   | "onChangeClaudeConfiguration"
   | "onChangeDevinConfiguration"
   | "onChangeKiloConfiguration"
@@ -241,6 +248,7 @@ export function ProviderSettingsList(props: ProviderSettingsListProps) {
           ? {}
           : { observed: presentationObserved.get(instance.id)! })}
         onChangeBinary={props.onChangeBinary}
+        {...(props.onLocateBinary === undefined ? {} : { onLocateBinary: props.onLocateBinary })}
         onChangeClaudeConfiguration={props.onChangeClaudeConfiguration}
         onChangeMistralVibeConfiguration={props.onChangeMistralVibeConfiguration}
         onChangeGrokConfiguration={props.onChangeGrokConfiguration}
@@ -562,6 +570,7 @@ interface ProviderRowProps {
   readonly onMove: (index: number, direction: -1 | 1) => void;
   readonly onRename: ProviderSettingsViewProps["onRename"];
   readonly onChangeBinary: ProviderSettingsViewProps["onChangeBinary"];
+  readonly onLocateBinary?: ProviderSettingsViewProps["onLocateBinary"];
   readonly onChangeClaudeConfiguration: ProviderSettingsViewProps["onChangeClaudeConfiguration"];
   readonly onChangeDevinConfiguration: ProviderSettingsViewProps["onChangeDevinConfiguration"];
   readonly onChangeKiloConfiguration: ProviderSettingsViewProps["onChangeKiloConfiguration"];
@@ -610,6 +619,8 @@ function ProviderRow(props: ProviderRowProps) {
     () => !props.probing && props.observed?.readiness === "unauthenticated",
   );
   const [renameSaved, setRenameSaved] = useState(false);
+  const [locating, setLocating] = useState(false);
+  const [located, setLocated] = useState<Exclude<LocateBinaryOutcome, { kind: "cancelled" }>>();
   const [modelQuery, setModelQuery] = useState("");
   const hiddenModelIds = useMemo(
     () =>
@@ -736,6 +747,17 @@ function ProviderRow(props: ProviderRowProps) {
       // row-level readiness fact visible without making the page banner say
       // that activation itself failed.
       await props.onProbe(props.instance.id, { quiet: true });
+    }
+  };
+  const locateBinary = async () => {
+    if (props.onLocateBinary === undefined) return;
+    setLocating(true);
+    try {
+      const outcome = await props.onLocateBinary(props.instance.id);
+      // Dismissing the picker changes nothing, so it says nothing either.
+      if (outcome.kind !== "cancelled") setLocated(outcome);
+    } finally {
+      setLocating(false);
     }
   };
   const name = props.instance.displayName;
@@ -912,6 +934,19 @@ function ProviderRow(props: ProviderRowProps) {
                 {props.probing ? "Checking…" : "Check connection"}
               </OctantButton>
             )}
+            {props.onLocateBinary !== undefined &&
+            canLocateRuntimeBinary(props.instance.driverKind) ? (
+              <OctantButton
+                aria-label={`Locate binary for ${name}`}
+                disabled={disabled || locating}
+                onClick={() => void locateBinary()}
+                size="sm"
+                type="button"
+                variant="outline"
+              >
+                {locating ? "Checking binary…" : "Locate binary…"}
+              </OctantButton>
+            ) : null}
             <OctantButton
               aria-controls={`provider-configuration-${props.instance.id}`}
               aria-expanded={configurationOpen}
@@ -951,6 +986,13 @@ function ProviderRow(props: ProviderRowProps) {
               Remove
             </OctantButton>
           </div>
+          {located === undefined ? null : located.kind === "located" ? (
+            <p className="provider-card__guidance" role="status">
+              Octant checked the chosen binary and will use it ({located.version}).
+            </p>
+          ) : (
+            <OctantAlert tone="warning">{located.message}</OctantAlert>
+          )}
           {configurationOpen ? (
             <section
               aria-labelledby={`configuration-${props.instance.id}`}

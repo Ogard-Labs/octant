@@ -164,8 +164,11 @@ flowchart LR
 ```
 
 **Desktop (`apps/desktop`).** The Electron main process owns native windows,
-menus, the macOS Keychain, project-root and plugin-folder pickers, and the
-in-app updater. It attaches to the canonical host at
+menus, the macOS Keychain, project-root, plugin-folder, and runtime-binary
+pickers, and the in-app updater. A picker hands the server the chosen path
+under the desktop bridge secret and gives the renderer only a single-use
+receipt bound to its window, so a renderer can act on a path only the person
+picked. It attaches to the canonical host at
 `http://127.0.0.1:13773`, or starts that independently runnable host when it is
 absent, then probes storage readiness before showing a window. It passes only
 native broker coordinates and the desktop bridge secret that native-only

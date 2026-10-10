@@ -2347,6 +2347,89 @@ describe("ProviderSettingsView", () => {
     expect(control).toHaveAccessibleDescription(/did not find/i);
   });
 
+  it("locates a binary from the native picker on detected and undetected runtime cards", async () => {
+    const user = userEvent.setup();
+    const detected = provider({
+      displayName: "Detected Codex",
+      driverKind: "codex",
+      enabled: false,
+      configuration: { kind: "codex-cli", binaryPath: "/opt/homebrew/bin/codex" },
+    });
+    const missingId = decodeProviderInstanceId("80000000-0000-4000-8000-000000000093");
+    const missing = provider({ id: missingId, displayName: "Missing OpenCode", enabled: false });
+    const onLocateBinary = vi.fn(async (instanceId: ProviderInstance["id"]) =>
+      String(instanceId) === String(id)
+        ? ({ kind: "located", version: "codex-cli 0.48.0" } as const)
+        : ({
+            kind: "refused",
+            message: "The chosen file did not answer OpenCode's version check.",
+          } as const),
+    );
+    renderProviderSettings(
+      <ProviderSettingsView
+        {...fixture({
+          discoverySnapshot: discoverySnapshot({
+            candidates: [codexCandidate()],
+            searchedDirectories: searchedDirectoriesFor("opencode", "/opt/homebrew/bin"),
+          }),
+        })}
+        instances={[detected, missing]}
+        onLocateBinary={onLocateBinary}
+      />,
+    );
+
+    const detectedSection = screen.getByRole("region", { name: "Detected on this host" });
+    const detectedCard = within(detectedSection).getByRole("article", { name: "Detected Codex" });
+    await user.click(
+      within(detectedCard).getByRole("button", { name: "Details for Detected Codex" }),
+    );
+    await user.click(
+      within(detectedCard).getByRole("button", { name: "Locate binary for Detected Codex" }),
+    );
+    expect(onLocateBinary).toHaveBeenLastCalledWith(id);
+    expect(await within(detectedCard).findByRole("status")).toHaveTextContent(
+      "Octant checked the chosen binary and will use it (codex-cli 0.48.0).",
+    );
+
+    const missingSection = screen.getByRole("region", { name: "Supported, not detected" });
+    const missingCard = within(missingSection).getByRole("article", { name: "Missing OpenCode" });
+    await user.click(
+      within(missingCard).getByRole("button", { name: "Details for Missing OpenCode" }),
+    );
+    await user.click(
+      within(missingCard).getByRole("button", { name: "Locate binary for Missing OpenCode" }),
+    );
+    expect(onLocateBinary).toHaveBeenLastCalledWith(missingId);
+    expect(
+      await within(missingCard).findByText(
+        "The chosen file did not answer OpenCode's version check.",
+      ),
+    ).toBeVisible();
+  });
+
+  it("offers Locate binary only with a native picker and only for runtimes it can check", () => {
+    const glm = provider({
+      displayName: "GLM",
+      driverKind: "glm",
+      configuration: {
+        kind: "glm-acp",
+        binaryPath: "/opt/homebrew/bin/glm-acp-agent",
+        authentication: "provider-owned",
+      },
+    });
+    const { unmount } = renderExpanded(<ProviderSettingsView {...fixture()} />);
+    expect(screen.queryByRole("button", { name: /^Locate binary for/ })).toBeNull();
+    unmount();
+
+    renderExpanded(
+      <ProviderSettingsView
+        {...fixture({ instance: glm })}
+        onLocateBinary={vi.fn(async () => ({ kind: "cancelled" }) as const)}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: "Locate binary for GLM" })).toBeNull();
+  });
+
   it("refuses to mark or enable a provider from a failed scan's stale candidates", () => {
     renderProviderSettings(
       <ProviderSettingsView

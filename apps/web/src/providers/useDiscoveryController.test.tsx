@@ -33,6 +33,7 @@ describe("useDiscoveryController", () => {
     const client: DiscoveryClient = {
       scan: vi.fn(() => scanResult.promise),
       connect: vi.fn(),
+      locateBinary: vi.fn(),
     };
     const afterScan = vi.fn(() => refreshComplete.promise);
     const { result } = renderHook(() => useDiscoveryController({ client, afterScan }));
@@ -77,6 +78,7 @@ describe("useDiscoveryController", () => {
         ),
       ),
       connect: vi.fn(),
+      locateBinary: vi.fn(),
     };
     const { result } = renderHook(() => useDiscoveryController({ client }));
 
