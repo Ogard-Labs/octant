@@ -79,7 +79,8 @@ jobs:
     name: Build and publish (${{ matrix.target }})
     needs: decide
     if: needs.decide.outputs.build == 'true'
-    # Holds the Developer ID, the notary profile, the feed signing key, and the
+    # Holds the Developer ID, the notary profile, the preview feed signing key
+    # (never the stable one: unreviewed main runs here and could read it), and the
     # SSH key that publishes the feed. Scoping them to an environment keeps them
     # off every other workflow in the repository.
     environment: preview
@@ -201,7 +202,7 @@ jobs:
       - name: Sign the feed (or dry-run when unsigned)
         id: feed
         env:
-          OCTANT_UPDATE_FEED_PRIVATE_KEY: ${{ secrets.OCTANT_UPDATE_FEED_PRIVATE_KEY }}
+          OCTANT_UPDATE_FEED_PREVIEW_PRIVATE_KEY: ${{ secrets.OCTANT_UPDATE_FEED_PREVIEW_PRIVATE_KEY }}
           VERSION: ${{ needs.decide.outputs.version }}
           RING: ${{ needs.decide.outputs.ring }}
           ARTIFACT_URL: ${{ steps.release.outputs.url }}
@@ -223,12 +224,12 @@ jobs:
             --released-at "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"
             --out "$out"
           )
-          if [ -z "${OCTANT_UPDATE_FEED_PRIVATE_KEY:-}" ]; then
+          if [ -z "${OCTANT_UPDATE_FEED_PREVIEW_PRIVATE_KEY:-}" ]; then
             # macOS Apple Silicon remains a hard require: an unsigned zip at the
             # live feed path would be an unauthenticated channel. Linux matrix
             # scaffolding may dry-run without maintainer feed key material.
             if [ "$APPLE_SIGNING" = "true" ]; then
-              echo "OCTANT_UPDATE_FEED_PRIVATE_KEY is required for darwin-arm64 releases." >&2
+              echo "OCTANT_UPDATE_FEED_PREVIEW_PRIVATE_KEY is required for darwin-arm64 releases." >&2
               exit 1
             fi
             bun scripts/sign-update-feed.ts --dry-run "${args[@]}"

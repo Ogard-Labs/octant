@@ -193,7 +193,8 @@ RINGS=(preview stable)
 # the wizard exists to move these into GitHub, not to keep a second copy.
 ENV_FILE="$(mktemp -d)/unused.env"
 
-# set_env_secret NAME VALUE puts one secret in every release environment.
+# set_env_secret NAME VALUE [RING] puts one secret in every release
+# environment, or only in RING when one is named.
 # The library's set_secret writes a repository secret, which any workflow on
 # any branch can read; these belong to the environments, whose branch and tag
 # policies are what keep a side branch from reading the signing key.
@@ -209,8 +210,10 @@ require_preview_main_policy() {
 
 set_env_secret() {
   local name="$1" value="$2" ring
+  local rings=("${RINGS[@]}")
+  [[ $# -ge 3 ]] && rings=("$3")
   require_preview_main_policy
-  for ring in "${RINGS[@]}"; do
+  for ring in "${rings[@]}"; do
     if printf '%s' "$value" | gh secret set "$name" --repo "$REPO" --env "$ring" >/dev/null 2>&1; then
       printf '  %s✓ set%s %s in the %s environment\n' "$GREEN" "$RESET" "$name" "$ring"
     else
@@ -326,42 +329,57 @@ set_env_secret OCTANT_NOTARY_KEY "$(cat "$NOTARY_KEY_PATH")"
 note "Keep the .p8 somewhere private; Apple will not give it to you again."
 
 # ──────────────────────────────────────────────────────────────────────────
-stage "Octant: mint the update feed signing key"
-say "This key is what makes an update trustworthy. The app verifies every feed"
-say "against the public half compiled into it, so nothing a server sends can"
-say "install without this key having signed it."
-warn "Its loss means re-releasing; its compromise means code execution on every"
-warn "install. Keep the private half only in GitHub and in your own backup."
+stage "Octant: mint the update feed signing keys"
+say "These keys are what make an update trustworthy. The app verifies every feed"
+say "against the public halves compiled into it, so nothing a server sends can"
+say "install without one of these keys having signed it."
+say "Each ring gets its own key. The preview workflow builds unreviewed main, so"
+say "anything that runs there can read its key; the stable key therefore goes"
+say "only to the stable environment, and the app trusts the preview key only for"
+say "preview and candidate feeds."
+warn "Their loss means re-releasing; the stable key's compromise means code"
+warn "execution on every install. Keep the private halves only in GitHub and in"
+warn "your own backup."
 say ""
-FEED_KEY_DIR=$(mktemp -d)
-chmod 700 "$FEED_KEY_DIR"
-# PKCS8 DER for the private half and SPKI DER for the public half: the same
-# encodings scripts/sign-update-feed.ts and the app's verifier expect.
-openssl genpkey -algorithm ed25519 -outform DER -out "${FEED_KEY_DIR}/feed.der" 2>/dev/null
-openssl pkey -inform DER -in "${FEED_KEY_DIR}/feed.der" -pubout -outform DER \
-  -out "${FEED_KEY_DIR}/feed.pub.der" 2>/dev/null
-FEED_PUBLIC_KEY=$(base64 < "${FEED_KEY_DIR}/feed.pub.der" | tr -d '\n')
-set_env_secret OCTANT_UPDATE_FEED_PRIVATE_KEY "$(base64 < "${FEED_KEY_DIR}/feed.der" | tr -d '\n')"
-rm -rf "$FEED_KEY_DIR"
-say ""
-say "Public half (this belongs in the source, and is not secret):"
-say "  ${FEED_PUBLIC_KEY}"
 FEED_SOURCE="apps/desktop/src/appUpdateFeed.ts"
-if [[ -f "$FEED_SOURCE" ]] && confirm "Write it into ${FEED_SOURCE} now?"; then
-  # The writer edits the constant wherever the formatter put it and reads it
-  # back; the grep is a second, independent check. A line-oriented sed once
-  # matched nothing here and still reported success, which ships the old key.
-  if ! bun scripts/write-update-public-key.ts "$FEED_SOURCE" "$FEED_PUBLIC_KEY" \
-    || ! grep -qF "\"${FEED_PUBLIC_KEY}\"" "$FEED_SOURCE"; then
-    printf '  %s✗ OCTANT_UPDATE_PUBLIC_KEY in %s was NOT updated.%s\n' "$RED" "$FEED_SOURCE" "$RESET" >&2
-    warn "The feed signing secret is already set, so the app must ship this public key:"
-    warn "  ${FEED_PUBLIC_KEY}"
-    warn "Set it in ${FEED_SOURCE} by hand before any release; the old key would refuse every update."
-    exit 1
+WRITE_FEED_SOURCE=false
+[[ -f "$FEED_SOURCE" ]] && confirm "Write the public halves into ${FEED_SOURCE} now?" && WRITE_FEED_SOURCE=true
+# ring:secret name:constant the app compiles the public half into
+for FEED_KEY in \
+  "stable:OCTANT_UPDATE_FEED_PRIVATE_KEY:OCTANT_UPDATE_PUBLIC_KEY" \
+  "preview:OCTANT_UPDATE_FEED_PREVIEW_PRIVATE_KEY:OCTANT_UPDATE_PREVIEW_PUBLIC_KEY"; do
+  IFS=: read -r FEED_RING FEED_SECRET FEED_CONSTANT <<< "$FEED_KEY"
+  FEED_KEY_DIR=$(mktemp -d)
+  chmod 700 "$FEED_KEY_DIR"
+  # PKCS8 DER for the private half and SPKI DER for the public half: the same
+  # encodings scripts/sign-update-feed.ts and the app's verifier expect.
+  openssl genpkey -algorithm ed25519 -outform DER -out "${FEED_KEY_DIR}/feed.der" 2>/dev/null
+  openssl pkey -inform DER -in "${FEED_KEY_DIR}/feed.der" -pubout -outform DER \
+    -out "${FEED_KEY_DIR}/feed.pub.der" 2>/dev/null
+  FEED_PUBLIC_KEY=$(base64 < "${FEED_KEY_DIR}/feed.pub.der" | tr -d '\n')
+  set_env_secret "$FEED_SECRET" "$(base64 < "${FEED_KEY_DIR}/feed.der" | tr -d '\n')" "$FEED_RING"
+  rm -rf "$FEED_KEY_DIR"
+  say ""
+  say "${FEED_RING} public half (this belongs in the source, and is not secret):"
+  say "  ${FEED_PUBLIC_KEY}"
+  if [[ "$WRITE_FEED_SOURCE" == true ]]; then
+    # The writer edits the constant wherever the formatter put it and reads it
+    # back; the grep is a second, independent check. A line-oriented sed once
+    # matched nothing here and still reported success, which ships the old key.
+    if ! bun scripts/write-update-public-key.ts "$FEED_SOURCE" "$FEED_PUBLIC_KEY" "$FEED_RING" \
+      || ! grep -qF "\"${FEED_PUBLIC_KEY}\"" "$FEED_SOURCE"; then
+      printf '  %s✗ %s in %s was NOT updated.%s\n' "$RED" "$FEED_CONSTANT" "$FEED_SOURCE" "$RESET" >&2
+      warn "The ${FEED_RING} feed signing secret is already set, so the app must ship this public key:"
+      warn "  ${FEED_PUBLIC_KEY}"
+      warn "Set ${FEED_CONSTANT} in ${FEED_SOURCE} by hand before any release; the old key would refuse every update."
+      exit 1
+    fi
+  else
+    SKIPPED+=("set ${FEED_CONSTANT} in ${FEED_SOURCE} to ${FEED_PUBLIC_KEY}")
   fi
-  say "Written. Commit that change — until it ships, builds verify nothing and offer no updates."
-else
-  SKIPPED+=("set OCTANT_UPDATE_PUBLIC_KEY in ${FEED_SOURCE} to ${FEED_PUBLIC_KEY}")
+done
+if [[ "$WRITE_FEED_SOURCE" == true ]]; then
+  say "Written. Commit that change; until it ships, a ring signed by a new key offers no updates."
 fi
 
 # ──────────────────────────────────────────────────────────────────────────

@@ -1,5 +1,5 @@
 import { createHash, generateKeyPairSync, sign } from "node:crypto";
-import type { AppUpdateRelease, AppVersion } from "@octant/contracts/app-updates";
+import type { AppReleaseRing, AppUpdateRelease, AppVersion } from "@octant/contracts/app-updates";
 import {
   OCTANT_UPDATE_CHECK_DISCLOSURE,
   OCTANT_UPDATE_CHECK_INFERENCE,
@@ -9,7 +9,9 @@ import { describe, expect, it, vi } from "vitest";
 import {
   createFeedVerifier,
   DEFAULT_OCTANT_UPDATE_FEED_BASE_URL,
+  OCTANT_UPDATE_PREVIEW_PUBLIC_KEY,
   OCTANT_UPDATE_PUBLIC_KEY,
+  OCTANT_UPDATE_TRUSTED_KEYS,
   fetchUpdateFeed,
   fetchVerifiedArtifact,
   resolveUpdateFeedBaseUrl,
@@ -25,6 +27,13 @@ import {
 
 const keys = generateKeyPairSync("ed25519");
 const publicKeyBase64 = keys.publicKey.export({ format: "der", type: "spki" }).toString("base64");
+
+type RingKeys = Readonly<Record<AppReleaseRing, ReadonlyArray<string>>>;
+
+/** One key trusted everywhere, for tests about what a feed proves rather than which ring signs it. */
+function onEveryRing(publicKey: string): RingKeys {
+  return { stable: [publicKey], preview: [publicKey], candidate: [publicKey] };
+}
 
 const artifactBytes = Buffer.from("octant-0.3.0-arm64-release");
 const artifactDigest = createHash("sha256").update(artifactBytes).digest("hex");
@@ -77,6 +86,7 @@ function service(
     readonly document?: unknown;
     readonly fetchFails?: boolean;
     readonly publicKey?: string;
+    readonly trust?: RingKeys;
     readonly currentVersion?: string;
     readonly feedBaseUrl?: string;
     readonly ring?: "stable" | "preview";
@@ -113,7 +123,9 @@ function service(
     },
     ...(options.ring === undefined ? {} : { ring: options.ring }),
     automaticChecks: true,
-    verifier: createFeedVerifier(options.publicKey ?? publicKeyBase64),
+    verifier: createFeedVerifier(
+      options.trust ?? onEveryRing(options.publicKey ?? publicKeyBase64),
+    ),
     fetchImpl,
     clock: () => "2026-08-19T10:00:00.000Z",
   });
@@ -284,6 +296,83 @@ describe("update verification", () => {
       status: "refused",
       refusal: "untrusted-signature",
     });
+  });
+});
+
+describe("per-ring signing keys", () => {
+  const stableKeys = generateKeyPairSync("ed25519");
+  const previewKeys = generateKeyPairSync("ed25519");
+  const exported = (pair: typeof stableKeys) =>
+    pair.publicKey.export({ format: "der", type: "spki" }).toString("base64");
+  const trust: RingKeys = {
+    stable: [exported(stableKeys)],
+    preview: [exported(previewKeys), exported(stableKeys)],
+    candidate: [exported(previewKeys), exported(stableKeys)],
+  };
+  const signedBy = (pair: typeof stableKeys, over: Partial<Record<string, unknown>> = {}) => {
+    const payload = { ...release, ...over } as AppUpdateRelease;
+    return {
+      schemaVersion: 1,
+      release: payload,
+      signature: sign(null, canonicalReleaseBytes(payload), pair.privateKey).toString("base64"),
+    };
+  };
+  const previewRelease = { version: "0.3.0-preview.20260828.4", ring: "preview" };
+
+  it("refuses a preview-key signed feed that claims the stable ring", async () => {
+    // What code running in the preview workflow could forge with the key it
+    // can read: a perfectly formed stable release.
+    const forged = signedBy(previewKeys);
+    const stableApp = service({ trust, document: forged });
+    const previewApp = service({ trust, document: forged, ring: "preview" });
+
+    expect(await stableApp.updates.check()).toMatchObject({
+      status: "refused",
+      refusal: "untrusted-signature",
+    });
+    expect(await previewApp.updates.check()).toMatchObject({
+      status: "refused",
+      refusal: "untrusted-signature",
+    });
+  });
+
+  it("offers a stable feed signed by the stable key", async () => {
+    const { updates } = service({ trust, document: signedBy(stableKeys) });
+
+    expect(await updates.check()).toMatchObject({ status: "available" });
+  });
+
+  it("offers a preview feed signed by the preview key", async () => {
+    const { updates } = service({
+      trust,
+      ring: "preview",
+      document: signedBy(previewKeys, previewRelease),
+    });
+
+    expect(await updates.check()).toMatchObject({ status: "available" });
+  });
+
+  it("offers a preview feed signed by the stable key, so older installs can reach the preview key", async () => {
+    const { updates } = service({
+      trust,
+      ring: "preview",
+      document: signedBy(stableKeys, previewRelease),
+    });
+
+    expect(await updates.check()).toMatchObject({ status: "available" });
+  });
+
+  it("refuses everything on a ring that has no usable key", async () => {
+    const { updates } = service({
+      trust: { ...trust, preview: [""] },
+      ring: "preview",
+      document: signedBy(previewKeys, previewRelease),
+    });
+
+    const state = await updates.check();
+
+    expect(state).toMatchObject({ status: "refused", refusal: "untrusted-signature" });
+    expect(state.message).toContain("no update signing key");
   });
 });
 
@@ -471,7 +560,7 @@ describe("download hand-off", () => {
       feedBaseUrl: FEED_BASE_URL,
       app: { version: "0.2.0" as AppVersion, platform: "darwin", arch: "arm64" },
       automaticChecks: false,
-      verifier: createFeedVerifier(publicKeyBase64),
+      verifier: createFeedVerifier(onEveryRing(publicKeyBase64)),
       fetchImpl: (() => {
         let call = 0;
         return async () =>
@@ -653,7 +742,7 @@ describe("portable image updates", () => {
       feedBaseUrl: FEED_BASE_URL,
       app: { version: "0.2.0" as AppVersion, platform: "linux", arch: "x64" },
       automaticChecks: false,
-      verifier: createFeedVerifier(options.publicKey ?? publicKeyBase64),
+      verifier: createFeedVerifier(onEveryRing(options.publicKey ?? publicKeyBase64)),
       fetchImpl,
       clock: () => "2026-08-19T10:00:00.000Z",
     });
@@ -767,7 +856,7 @@ describe("automatic checking", () => {
       feedBaseUrl: FEED_BASE_URL,
       app: { version: "0.2.0" as AppVersion, platform: "darwin", arch: "arm64" },
       automaticChecks,
-      verifier: createFeedVerifier(publicKeyBase64),
+      verifier: createFeedVerifier(onEveryRing(publicKeyBase64)),
       fetchImpl,
       clock: () => "2026-08-19T10:00:00.000Z",
       schedule: (_delayMs, callback) => {
@@ -835,8 +924,19 @@ describe("what an update check discloses", () => {
 
   it("compiles a usable release public key", () => {
     expect(OCTANT_UPDATE_PUBLIC_KEY).not.toBe("");
-    expect(createFeedVerifier().configured).toBe(true);
-    expect(createFeedVerifier("").configured).toBe(false);
+    expect(createFeedVerifier().configured("stable")).toBe(true);
+    expect(createFeedVerifier(onEveryRing("")).configured("stable")).toBe(false);
+  });
+
+  it("trusts only the stable key for the stable ring", () => {
+    // The preview key is reachable from unreviewed main; nothing it signs may
+    // verify as stable.
+    expect(OCTANT_UPDATE_TRUSTED_KEYS.stable).toEqual([OCTANT_UPDATE_PUBLIC_KEY]);
+    expect(OCTANT_UPDATE_TRUSTED_KEYS.stable).not.toContain(OCTANT_UPDATE_PREVIEW_PUBLIC_KEY);
+    for (const ring of ["preview", "candidate"] as const) {
+      expect(OCTANT_UPDATE_TRUSTED_KEYS[ring]).toContain(OCTANT_UPDATE_PREVIEW_PUBLIC_KEY);
+      expect(OCTANT_UPDATE_TRUSTED_KEYS[ring]).toContain(OCTANT_UPDATE_PUBLIC_KEY);
+    }
   });
 
   it("refuses to fetch a feed over plain HTTP", async () => {

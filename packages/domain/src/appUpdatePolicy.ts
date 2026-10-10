@@ -88,12 +88,18 @@ const decodeFeed = Schema.decodeUnknownEither(AppUpdateFeed);
  *
  * `verifySignature` is injected rather than imported so this stays a pure
  * decision. Whether Ed25519 says yes is the host's to answer; what to do about
- * the answer is this.
+ * the answer is this. It is told the ring the document claims, because each
+ * ring trusts its own keys: a key the preview workflow holds must not be able
+ * to sign something that verifies as stable.
  */
 export function resolveUpdateOffer(input: {
   readonly document: unknown;
   readonly app: RunningApp;
-  readonly verifySignature: (message: Uint8Array, signature: string) => boolean;
+  readonly verifySignature: (
+    message: Uint8Array,
+    signature: string,
+    ring: AppReleaseRing,
+  ) => boolean;
 }): UpdateOffer {
   const decoded = decodeFeed(input.document);
   if (decoded._tag === "Left") return { kind: "refuse", refusal: "malformed" };
@@ -101,7 +107,11 @@ export function resolveUpdateOffer(input: {
 
   let verified = false;
   try {
-    verified = input.verifySignature(canonicalReleaseBytes(feed.release), feed.signature);
+    verified = input.verifySignature(
+      canonicalReleaseBytes(feed.release),
+      feed.signature,
+      feed.release.ring,
+    );
   } catch {
     // A verifier that threw told us nothing, which is not the same as telling
     // us yes.
@@ -113,10 +123,10 @@ export function resolveUpdateOffer(input: {
     return { kind: "refuse", refusal: "wrong-platform" };
   }
   if (feed.release.ring !== input.app.ring) {
-    // Both rings are signed by one key, so the signature alone cannot tell a
-    // stable feed from a preview one served at the stable address. Checking
-    // the signed ring against the ring we asked for is what makes the two
-    // streams actually separate.
+    // A stable-signed preview release is genuine and verifies, so the
+    // signature alone cannot tell it from a stable one served at the stable
+    // address. Checking the signed ring against the ring we asked for keeps a
+    // genuine release on the stream it was published to.
     return { kind: "refuse", refusal: "wrong-ring" };
   }
   if (compareAppVersions(feed.release.version, input.app.version) <= 0) {
