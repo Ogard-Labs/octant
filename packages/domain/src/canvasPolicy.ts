@@ -270,7 +270,8 @@ function inspectCanvasPayload(value: unknown): CanvasBudgetInspection {
   return { ...inspection, payloadBytes: payloadBytes(value) };
 }
 
-function sourceIdsForBlock(block: CanvasBlock): ReadonlyArray<CanvasSourceId> {
+/** The manifest sources a block names; each must be in its definition's manifest. */
+export function sourceIdsForBlock(block: CanvasBlock): ReadonlyArray<CanvasSourceId> {
   switch (block.kind) {
     case "citation":
     case "code-excerpt":

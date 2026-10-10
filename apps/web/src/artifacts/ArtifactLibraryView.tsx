@@ -4,7 +4,7 @@ import type {
   ArtifactLibraryListing,
   ArtifactLibraryTab,
 } from "@octant/contracts/artifact-library";
-import type { OctantMode, ProjectId } from "@octant/contracts";
+import type { CanvasId, OctantMode, ProjectId } from "@octant/contracts";
 import { Plus, Search } from "lucide-react";
 import { SurfaceEmpty, SurfaceHeader, SurfaceSection } from "../surface/SurfaceHeader";
 import { OctantButton } from "../ui/base/OctantButton";
@@ -12,6 +12,7 @@ import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantTabs, OctantTabsList, OctantTabsTab } from "../ui/base/OctantTabs";
 import { ArtifactCard } from "./ArtifactCard";
+import { SyncedArtifactCard } from "./SyncedArtifactCard";
 import type { ArtifactLibraryFilters } from "./useArtifactLibrary";
 
 export interface ArtifactLibraryViewProps {
@@ -30,6 +31,14 @@ export interface ArtifactLibraryViewProps {
   readonly onCreate?: () => void;
   /** Leaves the library for the workspace; absent when it is not a route. */
   readonly onClose?: () => void;
+  /**
+   * Opens an artifact's synced versions: which computer wrote each, two
+   * versions to choose between, or the threads it can be opened in here.
+   * Absent on a host without artifact sync.
+   */
+  readonly onSync?: (canvasId: CanvasId) => void;
+  /** Restores an artifact whose deletion on another computer is all that is left. */
+  readonly onRestore?: (canvasId: CanvasId) => void;
 }
 
 const TABS: ReadonlyArray<{ readonly id: ArtifactLibraryTab; readonly label: string }> = [
@@ -61,6 +70,11 @@ const MODES: ReadonlyArray<OctantMode> = ["chat", "work", "code"];
 export function ArtifactLibraryView(props: ArtifactLibraryViewProps) {
   const { filters, listing } = props;
   const entries = listing?.entries ?? [];
+  const synced = listing?.synced ?? [];
+  const syncActions = {
+    ...(props.onSync === undefined ? {} : { onSync: props.onSync }),
+    ...(props.onRestore === undefined ? {} : { onRestore: props.onRestore }),
+  };
   const hasActiveFilters =
     filters.query.trim() !== "" ||
     filters.kind !== undefined ||
@@ -202,8 +216,9 @@ export function ArtifactLibraryView(props: ArtifactLibraryViewProps) {
           observedAt={props.observedAt}
           onOpen={props.onOpen}
           {...(props.onExport === undefined ? {} : { onExport: props.onExport })}
+          {...syncActions}
         />
-      ) : (
+      ) : entries.length === 0 ? null : (
         <ul className="artifact-library__grid">
           {entries.map((entry) => (
             <ArtifactCard
@@ -212,12 +227,29 @@ export function ArtifactLibraryView(props: ArtifactLibraryViewProps) {
               observedAt={props.observedAt}
               onOpen={props.onOpen}
               {...(props.onExport === undefined ? {} : { onExport: props.onExport })}
+              {...syncActions}
             />
           ))}
         </ul>
       )}
 
-      {props.busy || entries.length > 0 ? null : (
+      {synced.length === 0 || props.onSync === undefined || props.onRestore === undefined ? null : (
+        <SurfaceSection label="From your other computers">
+          <ul className="artifact-library__grid artifact-library__grid--grouped">
+            {synced.map((entry) => (
+              <SyncedArtifactCard
+                entry={entry}
+                key={String(entry.canvasId)}
+                observedAt={props.observedAt}
+                onRestore={props.onRestore ?? (() => undefined)}
+                onSelect={props.onSync ?? (() => undefined)}
+              />
+            ))}
+          </ul>
+        </SurfaceSection>
+      )}
+
+      {props.busy || entries.length > 0 || synced.length > 0 ? null : (
         <SurfaceEmpty
           {...(filters.tab === "shared" || hasActiveFilters
             ? {
@@ -265,6 +297,8 @@ function ArtifactsByProject(props: {
   readonly observedAt: string;
   readonly onOpen: (entry: ArtifactLibraryEntry) => void;
   readonly onExport?: (entry: ArtifactLibraryEntry) => void;
+  readonly onSync?: (canvasId: CanvasId) => void;
+  readonly onRestore?: (canvasId: CanvasId) => void;
 }) {
   const grouped = new Map<string, ArtifactLibraryEntry[]>();
   for (const entry of props.entries) {
@@ -286,6 +320,8 @@ function ArtifactsByProject(props: {
                   observedAt={props.observedAt}
                   onOpen={props.onOpen}
                   {...(props.onExport === undefined ? {} : { onExport: props.onExport })}
+                  {...(props.onSync === undefined ? {} : { onSync: props.onSync })}
+                  {...(props.onRestore === undefined ? {} : { onRestore: props.onRestore })}
                 />
               ))}
             </ul>

@@ -203,8 +203,10 @@ export function createSystemdUserServiceManager(
     status: async () => {
       try {
         const [activeResult, enabledResult, session, lingering] = await Promise.all([
-          runSystemctlStatus(["is-active", SYSTEMD_UNIT], [3]),
-          runSystemctlStatus(["is-enabled", SYSTEMD_UNIT], [1, 5]),
+          // Exit 4 is systemd's "no such unit": the unit is not installed yet,
+          // which is stopped and disabled, not a manager failure.
+          runSystemctlStatus(["is-active", SYSTEMD_UNIT], [3, 4]),
+          runSystemctlStatus(["is-enabled", SYSTEMD_UNIT], [1, 4, 5]),
           runner
             .run("/usr/bin/loginctl", [
               "show-user",

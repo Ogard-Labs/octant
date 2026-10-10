@@ -78,7 +78,7 @@ const syncedFromStudio = {
   title: "Pricing notes",
   versionCount: 2,
   headCount: 2,
-  deletedElsewhere: false,
+  status: "two-versions",
   updatedAt: "2026-08-18T08:00:00.000Z",
 } as const;
 

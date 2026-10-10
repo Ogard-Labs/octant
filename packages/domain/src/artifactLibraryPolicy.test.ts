@@ -143,7 +143,7 @@ describe("choosing synced artifacts for a library query", () => {
     title: "Pricing notes",
     versionCount: 1,
     headCount: 1,
-    deletedElsewhere: false,
+    status: "current",
     updatedAt: "2026-08-18T09:00:00.000Z",
   } as unknown as ArtifactLibrarySyncedEntry;
 

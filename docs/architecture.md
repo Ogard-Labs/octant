@@ -1646,28 +1646,73 @@ flowchart LR
     `ReplicaArtifactProjection`, rebuilt from those events on every start;
     a restart part-way through a pull resumes from what was journaled and
     reaches the same state. Heads are versions no version or tombstone names
-    as a parent, plus every tombstone; an artifact is hidden only when every
-    head is a tombstone. The host-wide library lists, for a local window
-    only, each synced artifact this host holds no Canvas for, under the
-    Project name it was filed under and the name of the computer that wrote
-    its newest head, with its head count; a paired device sees none. The
-    library query applies to them: mode, kind, and text match (text also
-    matches the computer's name), and a Project filter or the Shared tab
+    as a parent, plus every tombstone. `replicaArtifactStanding` (domain)
+    derives what the person sees, counting this host's still-queued versions
+    as written here: `current`, `two-versions` (two or more version heads to
+    choose between), or `deleted` (every head is a tombstone). For a Canvas
+    held here, the version standing here is a candidate unless a version from
+    another computer revises it, and a head already in its own history is not
+    one; a single version from elsewhere that revises it is `ahead`. The
+    host-wide library lists, for a local window only, each synced artifact
+    this host holds no Canvas for, under the Project name it was filed under
+    and the name of the computer that wrote the version shown, with its
+    standing; a deleted one shows the version its tombstone named and the
+    computer that deleted it. A paired device sees none. Each held Canvas's
+    card carries the computer that wrote its current version once this host
+    has a replica identity, and its standing when it is not current. The
+    library query applies to synced entries: mode, kind, and text match (text
+    also matches the computer's name), and a Project filter or the Shared tab
     matches none, since they have no Project or share here.
+  - **Binding (0040).** `SyncedArtifactService` serves the host-only
+    `POST /api/artifacts/synced` route; a paired device is refused before the
+    command is decoded. Opening a synced artifact binds it to a thread the
+    person chooses among those `decideReplicaArtifactBinding` finds
+    compatible from the thread's durable state: same mode, active thread,
+    active Project of that mode, a workspace the host resolves now, and not
+    Plan mode. It is checked again at the commit. The content first enters
+    the thread through thread external-content ingestion
+    (`replica-artifact:<canvas>:<version>`, labelled with the writer's name),
+    which taints it, then becomes the Canvas's first version there through
+    `CanvasService.adoptVersion`, which takes the thread, Project, and mode
+    from the authorized context and never from the bundle. The version keeps
+    its id, so the publish hook, which skips a version the replica already
+    holds, does not publish it again. Each source keeps the origin's replica
+    host id, so a refresh or Open here fails closed rather than resolving
+    another computer's references. With nothing compatible the command is
+    refused as `no-compatible-thread`, and the library names the mode to start
+    a thread in (offering to start one only for Chat, the kind it starts) or
+    leaves it unbound. Keep, Merge, and Restore refuse as `sync-off` before
+    committing anything when this computer cannot publish, re-check the bound
+    thread before recording ingestion on it, and report a version the share
+    filter or size bound kept here as refused rather than published. After each pull the sync service makes, a
+    bound Canvas takes in an `ahead` version the same way.
+  - **Resolving.** Keep this one publishes a version with the chosen content
+    whose parents are every candidate; Restore publishes one whose parents
+    are the tombstones' parents. Unbound, it is queued directly; bound, it is
+    the thread's next version through `adoptVersion`, with the parents handed
+    to the publish hook just before the commit. Merge needs a thread:
+    unbound, it binds the newest candidate first, then commits a version
+    through `CanvasService.revise` whose blocks are every candidate's
+    (`mergeReplicaArtifactBlocks`: both sides of a block changed differently
+    are kept, and a block naming a source the merged manifest lacks is left
+    out and counted), with every candidate as parents. None of these
+    overwrites a version or removes a tombstone. Keep and Restore of an
+    unbound artifact need sync on and a replica identity (`sync-off`
+    otherwise).
   - **Erase.** A thread purge or Project erase also erases artifact sync's
     copies of the Canvases it takes: a queued publish is dropped, and a kept
     entry's event is rewritten to a content-free
     `replica.artifact-slot-erased@2` that keeps its slot settled, so a later
     pull does not import the erased content again. Published slots keep
     their content-free record. Copies already in the store are not deleted.
-  - **Not built yet.** An imported artifact is not bound to a thread here:
-    opening or revising it, which selects or creates a compatible thread
-    under 0040 and then records it through thread external-content
-    ingestion, is a follow-up, as is the renderer view of synced library
-    entries, merging two heads, and undoing a hidden deletion. No product
-    surface deletes an artifact today; a local erase or purge stays local
-    and publishes nothing. Versions committed before this host had a
-    replica identity are not published.
+  - **Not built yet.** Binding selects an existing compatible thread; it
+    does not create one. Keep and Merge resolve version heads only: a
+    tombstone beside a revision stays a head, and the artifact stays
+    visible. A pull through the membership route rather than the sync
+    service takes `ahead` versions into bound Canvases on the next interval.
+    No product surface deletes an artifact today; a local erase or purge
+    stays local and publishes nothing. Versions committed before this host
+    had a replica identity are not published.
 - **Artifact replica store selection.** Settings › Sync chooses this host's
   store: a synced folder, an S3-compatible bucket, or none, with a sync switch
   that starts off. It is served on the host-only `/api/replica-store` routes,
@@ -3483,10 +3528,11 @@ bun run verify     # paths:check, wiring:check, decisions:check, fmt:check, lint
   restart of `bun run dev` rather than a manual
   `bun run --cwd apps/desktop build`.
 - A headless Linux station: `octant server run`, then `octant web` (or
-  `octant web --dev` for Vite). Linux requires `bubblewrap`, Git 2.36 or
-  newer, an unlocked
-  freedesktop Secret Service session, and the `secret-tool` client. Without
-  those, the host fails closed. ADE and other boot-managed hosts should run
+  `octant web --dev` for Vite). Linux requires `bubblewrap` and Git 2.36 or
+  newer; without `bubblewrap`, Work and Code fail closed. Stored provider
+  credentials also need an unlocked freedesktop Secret Service session and
+  the `secret-tool` client; without them the host still runs Chat, Work, and
+  Code but reports its secret store unavailable. ADE and other boot-managed hosts should run
   `scripts/ade/start-secret-service-session.sh` on each start so the session
   bus and keyring are live (never a snapshotted socket path alone). The start
   script writes `~/.config/octant-host/session.env`; when `start` and

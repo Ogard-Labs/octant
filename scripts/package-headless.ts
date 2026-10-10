@@ -156,10 +156,8 @@ async function createDeterministicTarball(
   return gzipSync(Buffer.concat(blocks), { level: 9 });
 }
 
-function tarHeader(name: string, size: number, mode: number): Buffer {
-  if (Buffer.byteLength(name) > 100) {
-    throw new Error(`Headless artifact path is too long for a ustar header: ${name}`);
-  }
+function tarHeader(path: string, size: number, mode: number): Buffer {
+  const { name, prefix } = splitUstarPath(path);
   const header = Buffer.alloc(512);
   header.write(name, 0, 100, "utf8");
   writeOctal(header, 100, 8, mode);
@@ -171,10 +169,27 @@ function tarHeader(name: string, size: number, mode: number): Buffer {
   header.write("0", 156, 1, "utf8"); // regular file
   header.write("ustar", 257, 5, "utf8");
   header.write("00", 263, 2, "utf8");
+  header.write(prefix, 345, 155, "utf8");
   let checksum = 0;
   for (const byte of header) checksum += byte;
   header.write(`${checksum.toString(8).padStart(6, "0")}\0 `, 148, 8, "utf8");
   return header;
+}
+
+/**
+ * Fits a path into ustar's 100-byte name and 155-byte prefix fields, split at
+ * a directory separator. The built renderer's hashed font files sit deep
+ * enough that their paths pass 100 bytes, and every tar reader joins the
+ * prefix back on.
+ */
+function splitUstarPath(path: string): { readonly name: string; readonly prefix: string } {
+  if (Buffer.byteLength(path) <= 100) return { name: path, prefix: "" };
+  for (let index = path.indexOf("/"); index !== -1; index = path.indexOf("/", index + 1)) {
+    const prefix = path.slice(0, index);
+    const name = path.slice(index + 1);
+    if (Buffer.byteLength(prefix) <= 155 && Buffer.byteLength(name) <= 100) return { name, prefix };
+  }
+  throw new Error(`Headless artifact path is too long for a ustar header: ${path}`);
 }
 
 function writeOctal(buffer: Buffer, offset: number, length: number, value: number): void {
