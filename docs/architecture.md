@@ -193,7 +193,14 @@ process-local client context on the loopback listener (internally still named
 carrying authenticated remote identity — and runs all mutations through
 services that append to the journal. Providers, tools, Git, terminals,
 subagents, extensions, and recovery live here. A headless host runs the same
-server through `@octant/cli` (`octant server run`, `octant web`). For Code,
+server through `@octant/cli` (`octant server run`, `octant web`). The
+installable headless artifact (`scripts/package-headless.ts`) is self-contained:
+it carries the bundled CLI (`bin/octant`), the bundled server (`lib/server`), the
+web assets, and a top-level `node_modules` holding the third-party and native
+dependencies both bundles leave external, built on the target platform itself.
+An installed CLI starts that server under its own Bun runtime with
+`OCTANT_ARTIFACT_ROOT` set, so the server verifies every listed file before it
+opens the store. For Code,
 verified remote requests carry their principal through an async request scope:
 the paired device may reach existing active Code Projects without a desktop
 workspace, while services retain thread, checkout, provider, and approval checks.

@@ -18,6 +18,8 @@ import {
   buildHeadlessArtifact,
   HEADLESS_ARTIFACT_TARGETS,
   headlessMigrationsMetadata,
+  headlessRuntimeFileRole,
+  isHeadlessRuntimeFile,
   renderHeadlessServiceTemplate,
   type HeadlessComponentSource,
 } from "./package-headless";
@@ -200,6 +202,49 @@ describe("buildHeadlessArtifact", () => {
         outputDirectory: join(base, "out"),
       }),
     ).rejects.toThrow();
+  });
+});
+
+describe("vendored runtime dependencies", () => {
+  const linux = { platform: "linux", arch: "x64" } as const;
+
+  it("keeps the files a vendored package loads at runtime on the target", () => {
+    for (const path of [
+      "effect/dist/esm/index.js",
+      "effect/Schema/package.json",
+      "@opentui/core/index.js",
+      "better-sqlite3/lib/index.js",
+      "better-sqlite3/build/Release/better_sqlite3.node",
+      "node-pty/lib/unixTerminal.js",
+      "node-pty/build/Release/pty.node",
+      "node-pty/prebuilds/linux-x64/pty.node",
+    ]) {
+      expect(isHeadlessRuntimeFile(path, linux), path).toBe(true);
+    }
+  });
+
+  it("leaves out declarations, dotfiles, native build inputs and other targets' binaries", () => {
+    for (const path of [
+      "effect/dist/dts/index.d.ts",
+      "effect/src/Effect.ts",
+      "bl/.travis.yml",
+      "better-sqlite3/deps/sqlite3/sqlite3.c",
+      "better-sqlite3/build/Release/obj.target/better_sqlite3.o",
+      "node-pty/src/unix/pty.cc",
+      "node-pty/prebuilds/darwin-arm64/pty.node",
+      "node-pty/lib/unixTerminal.test.js",
+    ]) {
+      expect(isHeadlessRuntimeFile(path, linux), path).toBe(false);
+    }
+  });
+
+  it("records native binaries as native modules and everything else with the server", () => {
+    expect(headlessRuntimeFileRole("node-pty/build/Release/pty.node")).toBe("native-module");
+    expect(headlessRuntimeFileRole("node-pty/prebuilds/darwin-arm64/spawn-helper")).toBe(
+      "native-module",
+    );
+    expect(headlessRuntimeFileRole("@opentui/core-linux-x64/libopentui.so")).toBe("native-module");
+    expect(headlessRuntimeFileRole("effect/dist/esm/index.js")).toBe("server");
   });
 });
 

@@ -9,6 +9,11 @@ import {
   ServicePolicyStore,
   type HostServicePolicy,
 } from "@octant/host-runtime";
+import {
+  installedArtifactServerStartCommand,
+  resolveInstalledArtifactRoot,
+  type ServerStartCommand,
+} from "./installedArtifact";
 
 const DEFAULT_PORT = 13_773;
 const DEFAULT_HOSTNAME = "127.0.0.1";
@@ -29,10 +34,7 @@ export interface HostLauncherDependencies {
   readonly spawn?: (spec: HostSpawnSpec) => HostChildProcess;
   readonly waitForHost?: (options: WaitForHostOptions) => Promise<HostHealth>;
   readonly readyTimeoutMs?: number;
-  readonly serverStartCommand?: () => {
-    readonly command: string;
-    readonly args: readonly string[];
-  };
+  readonly serverStartCommand?: () => ServerStartCommand;
   readonly resolveAttachedHost?: () => Promise<AttachedHostCandidate | undefined>;
   readonly environment?: NodeJS.ProcessEnv;
   /** Persisted automatic-startup policy. Launch paths inject a real store. */
@@ -149,6 +151,7 @@ export async function attachOrCreateHost(
     env: {
       ...process.env,
       ...dependencies.environment,
+      ...command.env,
       OCTANT_DESKTOP_BRIDGE_SECRET: dependencies.bridgeSecret,
       OCTANT_SERVER_PORT: String(port),
       OCTANT_HOST_SERVICE_MODE: "web",
@@ -279,10 +282,11 @@ async function defaultWaitForHost(options: WaitForHostOptions): Promise<HostHeal
   return { status: "timeout" };
 }
 
-function defaultServerStartCommand(): {
-  readonly command: string;
-  readonly args: readonly string[];
-} {
+function defaultServerStartCommand(): ServerStartCommand {
+  const artifactRoot = resolveInstalledArtifactRoot(import.meta.url);
+  if (artifactRoot !== undefined) {
+    return installedArtifactServerStartCommand(artifactRoot, process.execPath);
+  }
   return { command: "bun", args: ["run", "--cwd", defaultServerRoot(), "start"] };
 }
 

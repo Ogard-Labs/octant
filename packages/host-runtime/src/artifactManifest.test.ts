@@ -91,7 +91,7 @@ describe("headless artifact manifest", () => {
 
   it("rejects invalid JSON and oversized manifests", () => {
     expect(() => decodeHeadlessArtifactManifest("not json")).toThrow(HeadlessArtifactManifestError);
-    const oversized = `${" ".repeat(300_000)}{}`;
+    const oversized = `${" ".repeat(4_200_000)}{}`;
     expect(() => decodeHeadlessArtifactManifest(oversized)).toThrow(HeadlessArtifactManifestError);
   });
 
@@ -148,8 +148,24 @@ describe("headless artifact manifest", () => {
     expect(() => decodeHeadlessArtifactManifest(raw)).toThrow(HeadlessArtifactManifestError);
   });
 
+  it("accepts an artifact that vendors thousands of dependency files, scoped packages included", () => {
+    const manifest = validManifest();
+    const vendored = Array.from({ length: 6_000 }, (_, index) => ({
+      role: "server" as const,
+      path: `node_modules/@scope/package/lib/_internal/module-${index}.js`,
+      sha256: "1".repeat(64),
+      byteLength: index,
+      version: "1.2.3",
+    }));
+    const withDependencies = { ...manifest, components: [...manifest.components, ...vendored] };
+    expect(
+      decodeHeadlessArtifactManifest(encodeHeadlessArtifactManifest(withDependencies)).components,
+    ).toHaveLength(manifest.components.length + vendored.length);
+  });
+
   it("rejects unsafe or duplicate component paths", () => {
     const unsafePaths = [
+      "lib/.hidden",
       "/etc/octant",
       "../escape",
       "lib/../../escape",

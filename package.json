@@ -52,6 +52,7 @@
     "smoke:packaged-code-project-pull-requests": "bun scripts/smoke-packaged-code-project-pull-requests.ts",
     "smoke:packaged-agent-runs": "bun scripts/smoke-packaged-agent-runs.ts",
     "smoke:apple-toolchain": "bun scripts/smoke-apple-toolchain.ts",
+    "smoke:headless-install": "bun scripts/smoke-headless-install.ts",
     "smoke:packaged-claude": "bun scripts/smoke-packaged-claude.ts",
     "smoke:packaged-opencode": "bun scripts/smoke-packaged-opencode.ts",
     "bench:harness": "bun scripts/harness-benchmark.ts",
