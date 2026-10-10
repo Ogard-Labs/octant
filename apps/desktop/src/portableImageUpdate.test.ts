@@ -62,6 +62,10 @@ function recording(inner: PortableImageFiles): {
         events.push(`rename ${basename(from)} -> ${basename(to)}`);
         await inner.rename(from, to);
       },
+      keepCopy: async (from, to) => {
+        events.push(`keep ${basename(from)} -> ${basename(to)}`);
+        await inner.keepCopy(from, to);
+      },
       readFile: (path) => inner.readFile(path),
       readPrefix: (path, length) => inner.readPrefix(path, length),
       unlink: (path) => inner.unlink(path),
@@ -206,6 +210,39 @@ describe("replacing a portable image", () => {
     const mode = await stat(path);
     expect(mode.mode & 0o111).not.toBe(0);
     expect(await inner.lstat(join(path, "..", ".Octant.AppImage.octant-previous"))).toBeUndefined();
+  });
+
+  it("never leaves the launch path without an image while replacing or rolling back", async () => {
+    // A launcher, a desktop entry, or a crash between two renames would find
+    // nothing at the path. Every rename the replace makes is observed here.
+    for (const relaunchFails of [false, true]) {
+      const inner = createNodePortableImageFiles();
+      const { path } = await imageDir();
+      const gaps: string[] = [];
+      const files: PortableImageFiles = {
+        ...inner,
+        rename: async (from, to) => {
+          await inner.rename(from, to);
+          if ((await inner.lstat(path)) === undefined) {
+            gaps.push(`${basename(from)} -> ${basename(to)}`);
+          }
+        },
+      };
+      const next = imageBytes("replacement");
+
+      const result = await replacePortableImage({
+        targetPath: path,
+        bytes: next,
+        expectedSha256: digestOf(next),
+        files,
+        relaunch: async () => {
+          if (relaunchFails) throw new Error("exec failed");
+        },
+      });
+
+      expect(result).toEqual({ kind: relaunchFails ? "rolled-back" : "relaunched" });
+      expect(gaps).toEqual([]);
+    }
   });
 
   it("restores the previous image when relaunch fails", async () => {

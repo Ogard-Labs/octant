@@ -4,6 +4,8 @@ import {
   access,
   chmod,
   constants,
+  copyFile,
+  link,
   lstat,
   open,
   readFile,
@@ -32,7 +34,6 @@ const IMAGE_MAGIC = [0x41, 0x49, 0x02] as const;
 
 const STAGING_SUFFIX = ".octant-new";
 const BACKUP_SUFFIX = ".octant-previous";
-const FAILED_SUFFIX = ".octant-failed";
 
 export type PortableImageLocation =
   | { readonly kind: "portable"; readonly path: string }
@@ -63,6 +64,8 @@ export interface PortableImageFiles {
   chmod(path: string, mode: number): Promise<void>;
   fsync(path: string): Promise<void>;
   rename(from: string, to: string): Promise<void>;
+  /** Keep the bytes at `from` under `to` without moving `from`. */
+  keepCopy(from: string, to: string): Promise<void>;
   readFile(path: string): Promise<Uint8Array>;
   readPrefix(path: string, length: number): Promise<Uint8Array>;
   unlink(path: string): Promise<void>;
@@ -132,9 +135,12 @@ export async function readPortableImageLocation(
  * relaunch it.
  *
  * The write lands beside the image, is flushed, and is hashed again before
- * the rename. The previous image is kept until relaunch succeeds. A failed
- * relaunch puts that previous image back; a failed restore says so rather
- * than claiming the old copy is running.
+ * the rename. The previous image is kept beside it until relaunch succeeds.
+ * Publishing and rolling back are each one rename over the launch path, so
+ * the path always names a complete image: moving the old image aside first
+ * left a moment with nothing there, and a crash in it left a launcher with no
+ * file to start. A failed restore says so rather than claiming the old copy
+ * is running.
  */
 export async function replacePortableImage(input: {
   readonly targetPath: string;
@@ -188,8 +194,9 @@ export async function replacePortableImage(input: {
   }
 
   try {
-    await input.files.rename(targetPath, backup);
+    await input.files.keepCopy(targetPath, backup);
   } catch {
+    await unlinkQuiet(input.files, backup);
     await unlinkQuiet(input.files, staging);
     return { kind: "not-writable" };
   }
@@ -197,9 +204,10 @@ export async function replacePortableImage(input: {
   try {
     await input.files.rename(staging, targetPath);
   } catch {
-    const restored = await restoreBackup(input.files, backup, targetPath);
+    // Nothing was published: the running image is still at the path.
     await unlinkQuiet(input.files, staging);
-    return restored ? { kind: "rolled-back" } : { kind: "restore-failed" };
+    await unlinkQuiet(input.files, backup);
+    return { kind: "not-writable" };
   }
 
   try {
@@ -214,7 +222,6 @@ export async function replacePortableImage(input: {
     await input.relaunch(targetPath);
   } catch {
     const restored = await restoreBackup(input.files, backup, targetPath);
-    await unlinkQuiet(input.files, staging);
     return restored ? { kind: "rolled-back" } : { kind: "restore-failed" };
   }
 
@@ -239,6 +246,21 @@ export function createNodePortableImageFiles(): PortableImageFiles {
       }
     },
     rename: (from, to) => rename(from, to),
+    keepCopy: async (from, to) => {
+      try {
+        await link(from, to);
+      } catch {
+        // Some filesystems an image is carried on (FAT, exFAT) have no hard
+        // links. A flushed copy keeps the same promise at the cost of a write.
+        await copyFile(from, to, constants.COPYFILE_EXCL);
+        const handle = await open(to, "r");
+        try {
+          await handle.sync();
+        } finally {
+          await handle.close();
+        }
+      }
+    },
     readFile: async (path) => new Uint8Array(await readFile(path)),
     readPrefix: async (path, length) => {
       const handle = await open(path, "r");
@@ -408,18 +430,6 @@ async function restoreBackup(
   backup: string,
   targetPath: string,
 ): Promise<boolean> {
-  const aside = sibling(targetPath, FAILED_SUFFIX);
-  if (aside === undefined) return false;
-  try {
-    const current = await files.lstat(targetPath);
-    if (current !== undefined) await files.rename(targetPath, aside);
-  } catch {
-    try {
-      await files.unlink(targetPath);
-    } catch {
-      return false;
-    }
-  }
   try {
     await files.rename(backup, targetPath);
   } catch {
@@ -431,6 +441,5 @@ async function restoreBackup(
     // The previous image is back at the path. The directory flush is
     // durability, not the rollback itself.
   }
-  await unlinkQuiet(files, aside);
   return true;
 }
