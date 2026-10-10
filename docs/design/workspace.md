@@ -704,7 +704,11 @@ owns budget enforcement, provenance, native-session identity, and journal rules.
 
 Under the composer of every thread, in Chat, Work, and Code and for every provider, a
 quiet stats line states what the thread used: input and output tokens, the cache
-hit, output speed, time to first token, and cost. It reads the host's recorded
+hit, output speed, time to first token, and cost. When the provider reported account
+limit windows, the line leads with one bar per window, showing the share left
+(`composerLimitWindows` in `apps/web/src/context`, read from the context snapshot and
+falling back to the Code thread's own report). A provider that reported neither windows
+nor usage shows no line. It reads the host's recorded
 turns and is worded by one shared module in `packages/domain`
 (`turnMetricsDisplay.ts`), which the composer, the usage page, the Octant Harness
 session card, the terminal footer, and the phone's session panel all call, so
