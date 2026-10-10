@@ -21,9 +21,10 @@ export interface WorkProjectStatusReaderOptions {
 
 /**
  * A Work Project's status as the page and the board see it: read from the
- * folder on demand, parsed once, never journaled. Two files are read per
- * Project, which is cheap enough to do on every read; a projection of them
+ * folder on demand, parsed once, never journaled. One small file is read per
+ * Project, which is cheap enough to do on every read; a projection of it
  * would only be a second copy of a file the person may edit at any time.
+ * Callers ask only for Projects that keep a status file.
  */
 export class WorkProjectStatusReader {
   readonly #files: Pick<WorkProjectStatusFiles, "read">;
@@ -39,24 +40,22 @@ export class WorkProjectStatusReader {
   async read(projectId: ProjectId, canonicalRoot: string): Promise<WorkProjectStatus> {
     const today = this.#clock().slice(0, 10);
     if (!isWorkStatusDate(today)) throw new Error("Host clock did not produce a calendar date.");
-    const snapshot = await this.#files.read(canonicalRoot);
-    if (snapshot.status === undefined) {
+    const status = await this.#files.read(canonicalRoot);
+    if (status === undefined) {
       return decodeWorkProjectStatus({
         projectId,
-        hasAgentsFile: snapshot.agents !== undefined,
         hasStatusFile: false,
         stale: true,
         followUps: [],
         deadlines: [],
       });
     }
-    const parsed = parseWorkStatus(snapshot.status.text, today);
+    const parsed = parseWorkStatus(status.text, today);
     return decodeWorkProjectStatus({
       projectId,
-      hasAgentsFile: snapshot.agents !== undefined,
       hasStatusFile: true,
       ...(parsed.lastUpdatedOn === undefined ? {} : { lastUpdatedOn: parsed.lastUpdatedOn }),
-      modifiedAt: snapshot.status.modifiedAt,
+      modifiedAt: status.modifiedAt,
       stale: isWorkStatusStale(parsed, today, this.#staleAfterDays),
       ...(parsed.currentStatus === undefined ? {} : { currentStatus: parsed.currentStatus }),
       followUps: parsed.followUps,

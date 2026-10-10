@@ -10,6 +10,7 @@ import {
   type ProjectId,
   type WindowId,
 } from "@octant/contracts";
+import { workProjectKeepsStatusFile } from "@octant/domain/project-policy";
 import { isLoopbackHostname } from "./shellRoutes";
 import { authenticateRouteWindowId } from "./principalRouteContext";
 import { WindowAuthorityError, type WindowAuthorityStore } from "./windowAuthorityStore";
@@ -38,7 +39,10 @@ export interface WorkOverviewRouteDependencies {
   readonly projects: Pick<ProjectService, "bootstrap">;
   readonly requests: WorkOverviewRequestsPort;
   readonly windowAuthorityStore: WindowAuthorityStore;
-  /** What `STATUS.md` says for a Work Project. Absent means the page shows no status. */
+  /**
+   * What `STATUS.md` says for a Work Project that keeps one. Absent, or a
+   * Project without the setting, means the page shows no status.
+   */
   readonly status?: WorkProjectStatusReader;
   /** The top level of the bound folder. Absent means the page shows no folder. */
   readonly folder?: (canonicalRoot: string) => Promise<ReadonlyArray<WorkOverviewItem>>;
@@ -115,7 +119,9 @@ export function createWorkOverviewRouteHandler(dependencies: WorkOverviewRouteDe
       dependencies.requests.listPending(projectId),
     );
     const [status, folder] = await Promise.all([
-      dependencies.status?.read(projectId, project.binding.canonicalRoot).catch(() => undefined),
+      workProjectKeepsStatusFile(project)
+        ? dependencies.status?.read(projectId, project.binding.canonicalRoot).catch(() => undefined)
+        : undefined,
       dependencies.folder?.(project.binding.canonicalRoot).catch(() => undefined),
     ]);
     return jsonResponse(

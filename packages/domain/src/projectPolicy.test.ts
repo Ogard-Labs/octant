@@ -15,12 +15,14 @@ import {
   changeCodeProjectPullRequestBackgroundRefresh,
   changeProjectColor,
   changeProjectLifecycle,
+  changeWorkProjectStatusFile,
   compareProjectOrder,
   createProject,
   moveProject,
   rankBetween,
   relinkProject,
   renameProject,
+  workProjectKeepsStatusFile,
 } from "./projectPolicy";
 
 const ids = {
@@ -191,6 +193,38 @@ describe("Project creation and lifecycle", () => {
         updatedAt,
       ),
     ).toThrow(ProjectPolicyRejected);
+  });
+
+  it("lets a Work Project opt into a status file, which starts off for every Project", () => {
+    const project = makeProject(ids.work, "0/1", { type: "work" });
+    expect(workProjectKeepsStatusFile(project)).toBe(false);
+    const enabled = changeWorkProjectStatusFile(project, "enabled", updatedAt);
+    expect(enabled).toMatchObject({ type: "work", statusFile: "enabled", version: 2 });
+    expect(workProjectKeepsStatusFile(enabled)).toBe(true);
+    expect(() => changeWorkProjectStatusFile(project, "disabled", updatedAt)).toThrow(
+      ProjectPolicyRejected,
+    );
+    expect(() =>
+      changeWorkProjectStatusFile(
+        makeProject(ids.code, "0/1", { type: "code" }),
+        "enabled",
+        updatedAt,
+      ),
+    ).toThrow(ProjectPolicyRejected);
+  });
+
+  it("refuses to give the default-folder Project a status file", () => {
+    const project = decodeProject({
+      ...makeProject(ids.work, "0/1", { type: "work" }),
+      origin: "default-folder",
+    });
+    expect(() => changeWorkProjectStatusFile(project, "enabled", updatedAt)).toThrow(
+      ProjectPolicyRejected,
+    );
+    // Even a record that somehow carries the setting keeps nothing in the folder.
+    expect(workProjectKeepsStatusFile({ ...project, statusFile: "enabled" } as Project)).toBe(
+      false,
+    );
   });
 
   it("renames and archives/restores without mutating the previous snapshot or type", () => {

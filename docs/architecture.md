@@ -865,16 +865,26 @@ follows the same rules as a rename: an archived Project refuses it, and a change
 that would leave the colour as it is journals nothing. The colour grants no
 authority and carries no status.
 
-A Work Project folder carries `AGENTS.md` (the person's standing brief, seeded
-once and never rewritten) and `STATUS.md` (where the work stands, with dated
-follow-ups and deadlines). Both are read into every Work turn ahead of the
-thread's transcript, with a standing instruction to keep `STATUS.md` current;
-a completed turn that changed files without touching it gets a `Recent
-changes` line appended from the 0083 record. A stale status or a near or passed
-date makes the next task open by taking stock and asking for an update. The
-Work Project page, the Work board's follow-up mark, and the inbox's
-`follow-up-due` attention signal all read the same file on demand; nothing
-about it is journaled. See
+A Work Project may opt into a **status file**: `STATUS.md` at the top of its
+folder, where the work stands, with dated follow-ups and deadlines. The setting
+lives on the Project record as `statusFile` and is journaled as
+`project.work-status-file-changed@1`; absent reads as disabled, so every
+Project, including one created before the setting existed or whose folder
+already holds a `STATUS.md`, starts off. The default-folder Project refuses it
+on the server: it holds what nobody gave a home, so there is no single piece of
+work for a status to describe. Enabling seeds `STATUS.md` if it is missing.
+While enabled, the file is read into every Work turn ahead of the thread's
+transcript with a standing instruction to keep it current; a completed turn
+that changed files without touching it gets a `Recent changes` line appended
+from the 0083 record; and a stale status or a near or passed date makes the next
+task open by taking stock and asking for an update. The Work Project page, the
+Work board's follow-up mark, and the inbox's `follow-up-due` attention signal
+read the same file on demand; nothing about its content is journaled. While
+disabled, Octant reads nothing from the folder for this purpose, adds no
+instruction, and writes nothing there; turning the setting off leaves an
+existing file untouched. Octant never writes an agent brief (`AGENTS.md`,
+`CLAUDE.md`, or similar) into a user folder. This narrows the always-on
+behavior first recorded in
 [decisions/0119-a-work-project-keeps-its-status-in-its-folder.md](decisions/0119-a-work-project-keeps-its-status-in-its-folder.md).
 
 Work never silently becomes Code. When coding work is detected in a Work

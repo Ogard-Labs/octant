@@ -383,6 +383,7 @@ export interface WorkspaceViewProps {
     projectId: ProjectId,
     policy: ProjectProviderPolicy,
   ) => Promise<boolean>;
+  readonly onWorkStatusFileChange?: (projectId: ProjectId, enabled: boolean) => Promise<boolean>;
   /** The theme's ground behind the welcome and draft-thread surfaces, when one is set. */
   readonly welcomeBackdrop?: ReactNode;
   /** The person's name from their profile, for the greeting on every start screen. */
@@ -1973,6 +1974,9 @@ function renderNonCodeTab(
         {...(props.onProviderPolicyChange === undefined
           ? {}
           : { onProviderPolicyChange: props.onProviderPolicyChange })}
+        {...(props.onWorkStatusFileChange === undefined
+          ? {}
+          : { onWorkStatusFileChange: props.onWorkStatusFileChange })}
         providerInstances={props.providerController.instances ?? []}
         onRelink={props.onRelinkProject}
         onRename={props.onRenameProject}

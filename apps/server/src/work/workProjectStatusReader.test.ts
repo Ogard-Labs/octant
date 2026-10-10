@@ -18,10 +18,7 @@ function readerWith(options: {
     files: {
       read: async () => {
         if (options.throws === true) throw new Error("folder refused the read");
-        return {
-          agents: undefined,
-          status: options.statusText === undefined ? undefined : statusFile(options.statusText),
-        };
+        return options.statusText === undefined ? undefined : statusFile(options.statusText);
       },
     },
     clock: () => `${options.today ?? today}T12:00:00.000Z`,

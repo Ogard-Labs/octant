@@ -4,11 +4,12 @@ import type { ProjectAvailability, ProjectId, ProjectSummary } from "@octant/con
 import type { ProjectColor, ProjectProviderPolicy } from "@octant/contracts/projects";
 import type { ProviderInstance } from "@octant/contracts/providers";
 import { ChevronDown, SquarePen } from "lucide-react";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import type { OctantHostBridge } from "../shell/hostBridge";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantMenu } from "../ui/base/OctantMenu";
+import { OctantSwitch } from "../ui/base/OctantSwitch";
 import { FolderPicker } from "./FolderPicker";
 import { ProjectMemorySection } from "./ProjectMemorySection";
 import { ProjectThreadsSection } from "./ProjectThreadsSection";
@@ -46,6 +47,8 @@ export interface ProjectOverviewProps {
     projectId: ProjectId,
     policy: ProjectProviderPolicy,
   ) => Promise<boolean>;
+  /** Absent when the host cannot accept the change; the setting is then not shown. */
+  readonly onWorkStatusFileChange?: (projectId: ProjectId, enabled: boolean) => Promise<boolean>;
   readonly providerInstances?: ReadonlyArray<ProviderInstance>;
   readonly project: ProjectSummary;
   readonly projectClient?: ProjectClient;
@@ -337,6 +340,15 @@ export function ProjectOverview(props: ProjectOverviewProps) {
               />
             </ProjectOverviewInspector>
           ) : null}
+          {props.project.type === "work" &&
+          props.project.origin !== "default-folder" &&
+          props.onWorkStatusFileChange !== undefined ? (
+            <WorkStatusFileSetting
+              disabled={archived || connectionStale}
+              enabled={props.project.statusFile === "enabled"}
+              onChange={(enabled) => props.onWorkStatusFileChange?.(props.project.id, enabled)}
+            />
+          ) : null}
           {props.spendCeilingClient === undefined ? null : (
             <ProjectOverviewInspector
               key={`${String(props.project.id)}-ceiling`}
@@ -360,6 +372,46 @@ export function ProjectOverview(props: ProjectOverviewProps) {
           )}
         </div>
       </section>
+    </section>
+  );
+}
+
+/**
+ * The opt-in for the STATUS.md Octant keeps in a Work folder. Not offered for
+ * the default folder, which the host refuses: it holds what nobody gave a
+ * Project, so there is no single piece of work for a status to describe.
+ */
+function WorkStatusFileSetting(props: {
+  readonly disabled: boolean;
+  readonly enabled: boolean;
+  readonly onChange: (enabled: boolean) => Promise<boolean> | undefined;
+}) {
+  // Each command asserts the Project version it read; a second flip before
+  // the first returns would be refused as a conflict, so the switch waits.
+  const [pending, setPending] = useState(false);
+  const descriptionId = useId();
+  return (
+    <section className="project-overview-inspector">
+      <div className="project-overview-inspector__row">
+        <div>
+          <h2>Status file</h2>
+          <p id={descriptionId}>
+            Keep a STATUS.md in this folder. Every task reads it and updates where the work stands,
+            and its dated follow-ups and deadlines become reminders. When off, Octant writes nothing
+            into the folder.
+          </p>
+        </div>
+        <OctantSwitch
+          checked={props.enabled}
+          describedBy={descriptionId}
+          disabled={props.disabled || pending}
+          label="Keep a status file"
+          onCheckedChange={(enabled) => {
+            setPending(true);
+            void Promise.resolve(props.onChange(enabled)).finally(() => setPending(false));
+          }}
+        />
+      </div>
     </section>
   );
 }
