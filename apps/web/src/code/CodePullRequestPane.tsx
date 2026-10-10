@@ -452,7 +452,7 @@ function CreatePullRequest(
           <span>Pull request</span>
           <h1>New pull request</h1>
         </div>
-        <p>Creation only · no review mutation or merge</p>
+        <p>Creates the pull request · merge from its review, after you confirm</p>
       </header>
       {props.noLinkedPullRequest ? (
         <p className="code-delivery-pane__notice" role="status">

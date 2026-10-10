@@ -12,6 +12,10 @@ and [roadmap Later](roadmap.md#later)). Cross-platform desktop sequencing lives
 in [0058](decisions/0058-cross-platform-desktop.md) and does not reopen these
 holds.
 
+Schedules and pull-request merge are no longer holds: the person's confirmed
+merge from a local window and host-local routines are in scope under the
+[architecture's rules](architecture.md#modes-chat-work-and-code).
+
 ## Connector / OAuth marketplace
 
 **Hold.** Catalogued third-party connectors with OAuth, revocation, publisher

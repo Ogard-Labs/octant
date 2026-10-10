@@ -372,8 +372,10 @@ deliverable, because an updater on an unsigned app is an unauthenticated
 code-delivery channel and macOS refuses the replacement anyway. Cross-platform
 desktop (macOS, Linux, Windows) remains authorized: Linux desktop shell next, Windows Work/Code only after an
 explicitly approved Windows confinement design is documented. Do not add native mobile store distribution, hosted
-relay, schedules, connector/OAuth marketplace, full LSP/extension host, or
-product features that mutate pull requests unless an explicit request authorizes that scope and the current
-specification documents its authority and release boundaries. Existing scoped
-exceptions remain documented in the architecture; this workflow change opens no
-new release scope.
+relay, connector/OAuth marketplace, or full LSP/extension host unless an explicit
+request authorizes that scope and the current specification documents its
+authority and release boundaries. The person's confirmed pull-request merge from
+a local window and host-local routines (Automation Center) are in scope under the
+[architecture's rules](docs/architecture.md#modes-chat-work-and-code); other
+pull-request mutation, agent-initiated merge, and cloud scheduling are not.
+Existing scoped exceptions remain documented in the architecture.

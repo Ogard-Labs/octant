@@ -23,8 +23,8 @@ Everything here is merged or being hardened for it.
   ACP-based drivers (one generic ACP stack with per-provider profiles) behind
   one conformance harness; provider-first model picker; in-thread provider and model changes; Keychain-backed credentials.
 - **Code workspace** — Monaco editor, file explorer, terminals, Git and
-  worktrees, repository test discovery, PR observation and creation, thread
-  board, Environment summary with local-server discovery, external-editor handoff.
+  worktrees, repository test discovery, PR observation and creation, a
+  person's confirmed PR merge from its review, thread board, Environment summary with local-server discovery, external-editor handoff.
 - **Work workspace** — confined document production (docx, pptx, pdf, image),
   research with citations, project overview, secure split-view previews, board.
 - **App-managed, provider-neutral tools** — browser automation, macOS
@@ -41,6 +41,9 @@ Everything here is merged or being hardened for it.
 - **Shell and appearance** — borderless macOS shell, dockable tabs and splits,
   command palette, semantic themes and presets, sidebar materials, Zen focus
   workspace with backgrounds, notes, checklists, and timer.
+- **Routines (Automation Center)** — host-local, Project-bound schedules that
+  start ordinary Work or Code threads under a capped authority, with durable
+  occurrence recovery and no cloud wake.
 - **Operations** — usage dashboard, optional Project and thread token spend
   ceilings with atomic reservation at turn admission, diagnostics export,
   first-run onboarding, packaged desktop smoke scripts, and What's new from
@@ -107,8 +110,6 @@ Hardening in progress for the preview:
     Desktops remain separate follow-up deliveries.
 - **Canvas artifacts** — provider-neutral interactive reports, dashboards, and
   agent controls with journaled lifecycle; sharing only after secure local use.
-- **Automation Center** — host-owned, Project-bound agent schedules that create
-  ordinary Work or Code threads with durable occurrence recovery.
 - **Native agent harness** — Octant-owned agent loop for direct and local
   endpoints with app-managed tools, Goals, roles, session trees, and CLI
   parity with the GUI.
@@ -165,8 +166,10 @@ Intentionally out of scope; changing this requires an approved design change.
   designated Code thread per Code Project that reads the Project's board and
   proposes work the user must explicitly confirm. It launches and redirects
   nothing.
-- **Features that mutate pull requests** (merge, force-push, review approval)
-  from the desktop, unless a specific design authorizes them.
+- **Other pull-request mutation and agent-initiated merge** — force-push,
+  review approval, comments, closing, and any merge an agent or remote client
+  starts. The person's own confirmed merge is the one exception
+  ([architecture](architecture.md#modes-chat-work-and-code)).
 - **Octant-operated cloud accounts or telemetry** — the product stays
   local-first and privacy-preserving by default.
 - **Auto-installing or auto-updating provider runtimes** — Octant detects

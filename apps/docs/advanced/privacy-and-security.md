@@ -151,7 +151,8 @@ native receipts; desktop admin routes are loopback-only.
   selected. A per-message posture may only narrow the thread's grant; the
   server clamps composer intent. Full access is what it says: the provider
   runtime runs without Octant's deny-default sandbox, so keep it for folders
-  and providers you trust. Merge authority is never granted, in any posture.
+  and providers you trust. No posture grants an agent merge authority; only you merge, from a pull
+  request's review on the desktop after confirming.
 - App-managed filesystem and shell tools cross an Octant-owned sandbox
   boundary; path checks alone are insufficient. Most provider runtimes cross it
   too.
