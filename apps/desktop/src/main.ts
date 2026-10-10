@@ -51,9 +51,11 @@ import {
   addApiKey,
   ApiKeyPoolError,
   listApiKeys,
+  moveApiKey,
   removeApiKey,
   renameApiKey,
   replaceApiKeySecret,
+  setActiveApiKey,
   startCredentialBroker,
   writeBridgeSecretProjection,
   type CredentialBroker,
@@ -208,6 +210,8 @@ const IPC_CHANNELS = {
   renameProviderApiKey: "octant:provider-api-key:rename",
   replaceProviderApiKey: "octant:provider-api-key:replace",
   removeProviderApiKey: "octant:provider-api-key:remove",
+  setActiveProviderApiKey: "octant:provider-api-key:set-active",
+  moveProviderApiKey: "octant:provider-api-key:move",
   browserSurfaceAttach: "octant:browser-surface:attach",
   browserSurfaceBounds: "octant:browser-surface:bounds",
   browserSurfaceCommand: "octant:browser-surface:command",
@@ -764,6 +768,25 @@ export function installProviderCredentialIpcHandlers(options: {
       else await options.store.set(providerInstanceId, remaining);
     });
   });
+  options.handle(IPC_CHANNELS.setActiveProviderApiKey, async (event, instanceId, keyId) => {
+    authorize(event);
+    const providerInstanceId = validateProviderInstanceId(instanceId);
+    const validKeyId = validateApiKeyId(keyId);
+    return queueApiKeyOperation(async () => {
+      const stored = await requireStoredApiKeys(options.store, providerInstanceId);
+      await options.store.set(providerInstanceId, setActiveApiKey(stored, validKeyId));
+    });
+  });
+  options.handle(IPC_CHANNELS.moveProviderApiKey, async (event, instanceId, keyId, direction) => {
+    authorize(event);
+    const providerInstanceId = validateProviderInstanceId(instanceId);
+    const validKeyId = validateApiKeyId(keyId);
+    const validDirection = validateApiKeyMoveDirection(direction);
+    return queueApiKeyOperation(async () => {
+      const stored = await requireStoredApiKeys(options.store, providerInstanceId);
+      await options.store.set(providerInstanceId, moveApiKey(stored, validKeyId, validDirection));
+    });
+  });
 }
 
 let apiKeyWriteQueue: Promise<unknown> = Promise.resolve();
@@ -807,6 +830,13 @@ function validateApiKeyId(value: unknown): string {
     typeof value !== "string" ||
     !/^(default|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/.test(value)
   ) {
+    throw new Error("Octant rejected an invalid API key request.");
+  }
+  return value;
+}
+
+function validateApiKeyMoveDirection(value: unknown): "up" | "down" {
+  if (value !== "up" && value !== "down") {
     throw new Error("Octant rejected an invalid API key request.");
   }
   return value;

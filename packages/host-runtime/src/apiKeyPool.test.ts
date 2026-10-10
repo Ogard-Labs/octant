@@ -4,14 +4,17 @@ import {
   QUOTA_COOLDOWN_MS,
   RATE_LIMIT_COOLDOWN_MS,
   addApiKey,
+  apiKeysInUseOrder,
   keyCooldownMs,
   listApiKeys,
+  moveApiKey,
   parseRetryAfterSeconds,
   readApiKeyPool,
   removeApiKey,
   renameApiKey,
   replaceApiKeySecret,
   selectApiKey,
+  setActiveApiKey,
 } from "./apiKeyPool";
 
 const FIRST = "sk-ant-first-0000";
@@ -35,7 +38,7 @@ function poolWithTwoKeys(): { readonly stored: string; readonly ids: readonly st
 
 describe("API key pool", () => {
   it("reads a stored plain key as one key labelled Default", () => {
-    expect(listApiKeys(FIRST)).toEqual([{ id: "default", label: "Default" }]);
+    expect(listApiKeys(FIRST)).toEqual([{ id: "default", label: "Default", active: true }]);
     expect(readApiKeyPool(FIRST)[0]?.secret).toBe(FIRST);
   });
 
@@ -59,8 +62,8 @@ describe("API key pool", () => {
   it("keeps a plain key as the first pool entry when a second key is added", () => {
     const added = addApiKey(FIRST, { secret: SECOND, label: "Team" });
     expect(listApiKeys(added.stored)).toEqual([
-      { id: "default", label: "Default" },
-      { id: added.key.id, label: "Team" },
+      { id: "default", label: "Default", active: true },
+      { id: added.key.id, label: "Team", active: false },
     ]);
     expect(readApiKeyPool(added.stored).map((key) => key.secret)).toEqual([FIRST, SECOND]);
   });
@@ -152,6 +155,81 @@ describe("API key pool", () => {
   it("refuses a stored pool whose JSON is damaged rather than guessing a key", () => {
     const damaged = JSON.stringify({ kind: "api-key-pool", version: 1, keys: [{ id: "x" }] });
     expect(refusalOf(() => readApiKeyPool(damaged))).toBe("corrupt");
+  });
+});
+
+describe("active key and order", () => {
+  function threeKeys(): { readonly stored: string; readonly ids: readonly string[] } {
+    const first = addApiKey(undefined, { secret: FIRST, label: "Work" });
+    const second = addApiKey(first.stored, { secret: SECOND, label: "Personal" });
+    const third = addApiKey(second.stored, { secret: "sk-third-2222", label: "Client" });
+    return { stored: third.stored, ids: [first.key.id, second.key.id, third.key.id] };
+  }
+
+  it("makes the first key active when a pool is created", () => {
+    const { stored, ids } = threeKeys();
+    expect(listApiKeys(stored).map((key) => [key.label, key.active])).toEqual([
+      ["Work", true],
+      ["Personal", false],
+      ["Client", false],
+    ]);
+    expect(apiKeysInUseOrder(stored)[0]?.id).toBe(ids[0]);
+  });
+
+  it("sends the active key first without changing the list order", () => {
+    const { stored, ids } = threeKeys();
+    const active = setActiveApiKey(stored, ids[2] ?? "");
+    expect(apiKeysInUseOrder(active).map((key) => key.label)).toEqual([
+      "Client",
+      "Work",
+      "Personal",
+    ]);
+    expect(listApiKeys(active).map((key) => key.label)).toEqual(["Work", "Personal", "Client"]);
+    expect(listApiKeys(active).find((key) => key.active)?.label).toBe("Client");
+  });
+
+  it("moves a key up and down, and keeps the active key where it was", () => {
+    const { stored, ids } = threeKeys();
+    const movedDown = moveApiKey(stored, ids[0] ?? "", "down");
+    expect(listApiKeys(movedDown).map((key) => key.label)).toEqual(["Personal", "Work", "Client"]);
+    expect(listApiKeys(movedDown).find((key) => key.active)?.label).toBe("Work");
+    const movedUp = moveApiKey(movedDown, ids[2] ?? "", "up");
+    expect(listApiKeys(movedUp).map((key) => key.label)).toEqual(["Personal", "Client", "Work"]);
+  });
+
+  it("leaves the list alone when the first key moves up or the last moves down", () => {
+    const { stored, ids } = threeKeys();
+    expect(listApiKeys(moveApiKey(stored, ids[0] ?? "", "up")).map((key) => key.label)).toEqual([
+      "Work",
+      "Personal",
+      "Client",
+    ]);
+    expect(listApiKeys(moveApiKey(stored, ids[2] ?? "", "down")).map((key) => key.label)).toEqual([
+      "Work",
+      "Personal",
+      "Client",
+    ]);
+  });
+
+  it("makes the first key left active when the active key is removed", () => {
+    const { stored, ids } = threeKeys();
+    const active = setActiveApiKey(stored, ids[1] ?? "");
+    const removed = removeApiKey(active, ids[1] ?? "");
+    expect(listApiKeys(removed ?? "").find((key) => key.active)?.label).toBe("Work");
+  });
+
+  it("keeps the active key when another key is removed", () => {
+    const { stored, ids } = threeKeys();
+    const active = setActiveApiKey(stored, ids[2] ?? "");
+    const removed = removeApiKey(active, ids[0] ?? "");
+    expect(listApiKeys(removed ?? "").find((key) => key.active)?.label).toBe("Client");
+  });
+
+  it("refuses to make an unknown key active", () => {
+    const { stored } = threeKeys();
+    expect(refusalOf(() => setActiveApiKey(stored, "00000000-0000-4000-8000-000000000000"))).toBe(
+      "unknown-key",
+    );
   });
 });
 

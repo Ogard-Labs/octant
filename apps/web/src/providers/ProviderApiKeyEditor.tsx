@@ -162,6 +162,18 @@ export function ProviderApiKeyEditor(props: ProviderApiKeyEditorProps) {
     );
   };
 
+  const makeActive = (keyId: string) => {
+    void change(async () => {
+      await bridge.setActiveProviderApiKey(instanceId, keyId);
+    });
+  };
+
+  const moveKey = (keyId: string, direction: "up" | "down") => {
+    void change(async () => {
+      await bridge.moveProviderApiKey(instanceId, keyId, direction);
+    });
+  };
+
   return (
     <section
       aria-label={`API keys for ${props.displayName}`}
@@ -170,8 +182,8 @@ export function ProviderApiKeyEditor(props: ProviderApiKeyEditorProps) {
       <div>
         <h4 className="oct-section-label">API keys</h4>
         <p className="oct-row-detail">
-          Octant tries the keys in this order. A key that runs out of quota or hits a limit is
-          skipped, and the next one is used.
+          Octant sends the active key first. If it runs out of quota or hits a limit, Octant tries
+          the others in the order shown.
         </p>
       </div>
       {loaded === "failed" ? (
@@ -181,7 +193,7 @@ export function ProviderApiKeyEditor(props: ProviderApiKeyEditorProps) {
         {keys.map((key, index) => (
           <li className="provider-api-keys__key" key={key.id}>
             <span className="provider-api-keys__label">{key.label}</span>
-            {index === 0 ? <span className="oct-row-detail">Tried first</span> : null}
+            {key.active ? <span className="oct-row-detail">Active</span> : null}
             {pending.kind === "rename" && pending.keyId === key.id ? (
               <form
                 noValidate
@@ -267,6 +279,38 @@ export function ProviderApiKeyEditor(props: ProviderApiKeyEditorProps) {
               </span>
             ) : (
               <span className="provider-api-keys__actions">
+                {key.active ? null : (
+                  <OctantButton
+                    aria-label={`Make ${key.label} active`}
+                    disabled={disabled}
+                    onClick={() => makeActive(key.id)}
+                    size="sm"
+                    type="button"
+                    variant="ghost"
+                  >
+                    Make active
+                  </OctantButton>
+                )}
+                <OctantButton
+                  aria-label={`Move ${key.label} up`}
+                  disabled={disabled || index === 0}
+                  onClick={() => moveKey(key.id, "up")}
+                  size="sm"
+                  type="button"
+                  variant="ghost"
+                >
+                  Move up
+                </OctantButton>
+                <OctantButton
+                  aria-label={`Move ${key.label} down`}
+                  disabled={disabled || index === keys.length - 1}
+                  onClick={() => moveKey(key.id, "down")}
+                  size="sm"
+                  type="button"
+                  variant="ghost"
+                >
+                  Move down
+                </OctantButton>
                 <OctantButton
                   aria-label={`Rename ${key.label}`}
                   disabled={disabled}

@@ -2453,7 +2453,7 @@ describe("useProviderController", () => {
       calls.push("credential.set");
       await stored.promise;
       calls.push("credential.settled");
-      return { id: "7d444840-9dc0-11d1-b245-5ffdce74fad2", label: "Key 1" };
+      return { id: "7d444840-9dc0-11d1-b245-5ffdce74fad2", label: "Key 1", active: true };
     });
     const credential = transientCredential("private-value", calls);
     const { result } = renderHook(() => useProviderController({ client: api, hostBridge: host }));
@@ -2819,7 +2819,7 @@ function credentialHost(calls: string[] = []): OctantHostBridge {
     selectProjectRoot: vi.fn(),
     addProviderApiKey: vi.fn(async () => {
       calls.push("credential.set");
-      return { id: "7d444840-9dc0-11d1-b245-5ffdce74fad2", label: "Key 1" };
+      return { id: "7d444840-9dc0-11d1-b245-5ffdce74fad2", label: "Key 1", active: true };
     }),
     setProviderCredential: vi.fn(),
     setSidebarMaterialPreference: vi.fn(),
@@ -2828,6 +2828,8 @@ function credentialHost(calls: string[] = []): OctantHostBridge {
     renameProviderApiKey: vi.fn(),
     replaceProviderApiKey: vi.fn(),
     removeProviderApiKey: vi.fn(),
+    setActiveProviderApiKey: vi.fn(),
+    moveProviderApiKey: vi.fn(),
   };
 }
 

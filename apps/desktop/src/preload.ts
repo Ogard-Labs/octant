@@ -63,6 +63,8 @@ export const IPC_CHANNELS = {
   renameProviderApiKey: "octant:provider-api-key:rename",
   replaceProviderApiKey: "octant:provider-api-key:replace",
   removeProviderApiKey: "octant:provider-api-key:remove",
+  setActiveProviderApiKey: "octant:provider-api-key:set-active",
+  moveProviderApiKey: "octant:provider-api-key:move",
   hostCapabilities: "octant:window:host-capabilities",
   resolvedMaterial: "octant:window:resolved-material",
   resolvedSidebarVibrancy: "octant:window:resolved-sidebar-vibrancy",
@@ -478,6 +480,14 @@ export interface OctantHostBridge {
     credential: string,
   ) => Promise<void>;
   readonly removeProviderApiKey: (providerInstanceId: string, keyId: string) => Promise<void>;
+  /** Makes one key the active key, which a request sends first. */
+  readonly setActiveProviderApiKey: (providerInstanceId: string, keyId: string) => Promise<void>;
+  /** Swaps a key with its neighbour in the list. Edges do nothing. */
+  readonly moveProviderApiKey: (
+    providerInstanceId: string,
+    keyId: string,
+    direction: "up" | "down",
+  ) => Promise<void>;
   readonly setSidebarMaterialPreference: (preference: SidebarMaterialPreference) => Promise<void>;
   readonly setSidebarVibrancyMode: (mode: SidebarVibrancyMode) => Promise<void>;
   /** Reports the window's resolved theme palette for its approval view. */
@@ -926,6 +936,22 @@ export function createHostBridge(
       if (typeof keyId !== "string") throw new TypeError("Invalid API key request.");
       await invokeApiKey(IPC_CHANNELS.removeProviderApiKey, providerInstanceId, keyId);
     },
+    setActiveProviderApiKey: async (providerInstanceId: string, keyId: string) => {
+      validateProviderInstanceId(providerInstanceId);
+      if (typeof keyId !== "string") throw new TypeError("Invalid API key request.");
+      await invokeApiKey(IPC_CHANNELS.setActiveProviderApiKey, providerInstanceId, keyId);
+    },
+    moveProviderApiKey: async (
+      providerInstanceId: string,
+      keyId: string,
+      direction: "up" | "down",
+    ) => {
+      validateProviderInstanceId(providerInstanceId);
+      if (typeof keyId !== "string" || (direction !== "up" && direction !== "down")) {
+        throw new TypeError("Invalid API key request.");
+      }
+      await invokeApiKey(IPC_CHANNELS.moveProviderApiKey, providerInstanceId, keyId, direction);
+    },
     setSidebarMaterialPreference: (preference: SidebarMaterialPreference) => {
       if (preference !== "opaque" && preference !== "system") {
         return Promise.reject(new TypeError("Invalid sidebar material preference."));
@@ -1352,6 +1378,7 @@ function isUtcTimestamp(value: unknown): value is string {
 export interface ProviderApiKeySummary {
   readonly id: string;
   readonly label: string;
+  readonly active: boolean;
 }
 
 function validateProviderApiKeySecret(credential: unknown): void {
@@ -1369,7 +1396,8 @@ function isProviderApiKeySummary(value: unknown): value is ProviderApiKeySummary
     typeof value === "object" &&
     value !== null &&
     typeof (value as { id?: unknown }).id === "string" &&
-    typeof (value as { label?: unknown }).label === "string"
+    typeof (value as { label?: unknown }).label === "string" &&
+    typeof (value as { active?: unknown }).active === "boolean"
   );
 }
 
@@ -1377,14 +1405,14 @@ function decodeProviderApiKeySummary(value: unknown): ProviderApiKeySummary {
   if (!isProviderApiKeySummary(value)) {
     throw new Error("Octant received an invalid API key.");
   }
-  return { id: value.id, label: value.label };
+  return { id: value.id, label: value.label, active: value.active };
 }
 
 function decodeProviderApiKeySummaries(value: unknown): readonly ProviderApiKeySummary[] {
   if (!Array.isArray(value) || !value.every(isProviderApiKeySummary)) {
     throw new Error("Octant received an invalid API key list.");
   }
-  return value.map((key) => ({ id: key.id, label: key.label }));
+  return value.map((key) => ({ id: key.id, label: key.label, active: key.active }));
 }
 
 function knownApiKeyFailure(message: string): string | undefined {

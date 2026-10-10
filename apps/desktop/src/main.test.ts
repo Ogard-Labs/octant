@@ -1035,6 +1035,8 @@ describe("provider credential host operations", () => {
       "octant:provider-api-key:rename",
       "octant:provider-api-key:replace",
       "octant:provider-api-key:remove",
+      "octant:provider-api-key:set-active",
+      "octant:provider-api-key:move",
     ]);
   });
 
@@ -1158,7 +1160,7 @@ describe("provider API key host operations", () => {
   it("lists labels for a plain stored key without returning its secret", async () => {
     const { call } = installKeys(new Map([[providerInstanceId, FIRST]]));
     const listed = await call("list", providerInstanceId);
-    expect(listed).toEqual([{ id: "default", label: "Default" }]);
+    expect(listed).toEqual([{ id: "default", label: "Default", active: true }]);
     expect(JSON.stringify(listed)).not.toContain(FIRST);
   });
 
@@ -1178,7 +1180,7 @@ describe("provider API key host operations", () => {
     const { call, values } = installKeys(new Map([[providerInstanceId, FIRST]]));
     await call("add", providerInstanceId, SECOND, "Team");
     expect(await call("list", providerInstanceId)).toEqual([
-      { id: "default", label: "Default" },
+      { id: "default", label: "Default", active: true },
       expect.objectContaining({ label: "Team" }),
     ]);
     expect(values.get(providerInstanceId)).toContain(FIRST);
@@ -1215,6 +1217,33 @@ describe("provider API key host operations", () => {
     const { call } = installKeys();
     await expect(call("rename", providerInstanceId, "default", "Renamed")).rejects.toThrow(
       "That API key is no longer stored.",
+    );
+  });
+
+  it("makes a chosen key active and reports it as active in the list", async () => {
+    const { call, values } = installKeys();
+    await call("add", providerInstanceId, FIRST, "Work");
+    const second = (await call("add", providerInstanceId, SECOND, "Personal")) as { id: string };
+    await call("set-active", providerInstanceId, second.id);
+    expect(await call("list", providerInstanceId)).toEqual([
+      { id: expect.any(String), label: "Work", active: false },
+      { id: second.id, label: "Personal", active: true },
+    ]);
+    expect(values.get(providerInstanceId)).toContain(FIRST);
+  });
+
+  it("moves a key up or down, and rejects a direction it does not know", async () => {
+    const { call } = installKeys();
+    await call("add", providerInstanceId, FIRST, "Work");
+    const second = (await call("add", providerInstanceId, SECOND, "Personal")) as { id: string };
+    await call("move", providerInstanceId, second.id, "up");
+    expect(
+      ((await call("list", providerInstanceId)) as Array<{ label: string }>).map(
+        (key) => key.label,
+      ),
+    ).toEqual(["Personal", "Work"]);
+    await expect(call("move", providerInstanceId, second.id, "sideways")).rejects.toThrow(
+      "Octant rejected an invalid API key request.",
     );
   });
 

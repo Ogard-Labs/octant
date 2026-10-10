@@ -15,6 +15,8 @@ export type ProviderCredentialStatus = "stored" | "missing" | "unavailable";
 export interface ProviderApiKeySummary {
   readonly id: string;
   readonly label: string;
+  /** The key a request sends first. Exactly one key per provider is active. */
+  readonly active: boolean;
 }
 export type ProjectRootPickerResult =
   | Readonly<{ kind: "cancelled" }>
@@ -463,6 +465,13 @@ export interface OctantHostBridge extends Partial<RemoteAccessAdministrationBrid
     credential: string,
   ) => Promise<void>;
   readonly removeProviderApiKey: (providerInstanceId: string, keyId: string) => Promise<void>;
+  readonly setActiveProviderApiKey: (providerInstanceId: string, keyId: string) => Promise<void>;
+  /** Swaps a key with its neighbour in the list. The first key up and the last key down do nothing. */
+  readonly moveProviderApiKey: (
+    providerInstanceId: string,
+    keyId: string,
+    direction: "up" | "down",
+  ) => Promise<void>;
   readonly setSidebarMaterialPreference: (preference: "opaque" | "system") => Promise<void> | void;
   readonly setSidebarVibrancyMode?: (mode: "off" | "subtle" | "strong") => Promise<void> | void;
   readonly subscribeResolvedMaterial: (

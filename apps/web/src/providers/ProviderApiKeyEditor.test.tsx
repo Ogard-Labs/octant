@@ -6,20 +6,25 @@ import type { OctantHostBridge } from "../shell/hostBridge";
 import { ProviderApiKeyEditor, acceptsApiKeyPool } from "./ProviderApiKeyEditor";
 
 const instanceId = decodeProviderInstanceId("80000000-0000-4000-8000-000000000301");
-const WORK = { id: "7d444840-9dc0-11d1-b245-5ffdce74fad2", label: "Work" };
-const PERSONAL = { id: "8e555951-0ad1-22e2-c356-6ffdce74fad3", label: "Personal" };
+const WORK = { id: "7d444840-9dc0-11d1-b245-5ffdce74fad2", label: "Work", active: true };
+const PERSONAL = { id: "8e555951-0ad1-22e2-c356-6ffdce74fad3", label: "Personal", active: false };
 
-function bridgeWith(keys: ReadonlyArray<{ readonly id: string; readonly label: string }>) {
+function bridgeWith(
+  keys: ReadonlyArray<{ readonly id: string; readonly label: string; readonly active: boolean }>,
+) {
   const listed = [...keys];
   const host = {
     listProviderApiKeys: vi.fn(async () => [...listed]),
     addProviderApiKey: vi.fn(async (_id: string, _secret: string, label?: string) => ({
       id: "9f666062-1bf2-33f3-d467-7ffdce74fad4",
       label: label ?? "Key 3",
+      active: false,
     })),
     renameProviderApiKey: vi.fn(async () => undefined),
     replaceProviderApiKey: vi.fn(async () => undefined),
     removeProviderApiKey: vi.fn(async () => undefined),
+    setActiveProviderApiKey: vi.fn(async () => undefined),
+    moveProviderApiKey: vi.fn(async () => undefined),
   };
   return host;
 }
@@ -48,8 +53,8 @@ describe("ProviderApiKeyEditor", () => {
       expect.stringContaining("Work"),
       expect.stringContaining("Personal"),
     ]);
-    expect(items[0]).toHaveTextContent("Tried first");
-    expect(items[1]).not.toHaveTextContent("Tried first");
+    expect(items[0]).toHaveTextContent("Active");
+    expect(items[1]).not.toHaveTextContent("Active");
     expect(document.body.textContent).not.toContain("sk-");
   });
 
@@ -179,6 +184,47 @@ describe("ProviderApiKeyEditor", () => {
     await user.click(screen.getByRole("button", { name: "Remove Work" }));
 
     await waitFor(() => expect(onChanged).toHaveBeenLastCalledWith("missing"));
+  });
+
+  it("makes a key active from its row", async () => {
+    const user = userEvent.setup();
+    const host = bridgeWith([WORK, PERSONAL]);
+    renderEditor(host);
+    await screen.findByText("Personal");
+
+    expect(screen.queryByRole("button", { name: "Make Work active" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Make Personal active" }));
+
+    await waitFor(() =>
+      expect(host.setActiveProviderApiKey).toHaveBeenCalledWith(instanceId, PERSONAL.id),
+    );
+  });
+
+  it("moves a key down and up through its row buttons", async () => {
+    const user = userEvent.setup();
+    const host = bridgeWith([WORK, PERSONAL]);
+    renderEditor(host);
+    await screen.findByText("Personal");
+
+    await user.click(screen.getByRole("button", { name: "Move Work down" }));
+    await waitFor(() =>
+      expect(host.moveProviderApiKey).toHaveBeenCalledWith(instanceId, WORK.id, "down"),
+    );
+
+    await user.click(screen.getByRole("button", { name: "Move Personal up" }));
+    await waitFor(() =>
+      expect(host.moveProviderApiKey).toHaveBeenCalledWith(instanceId, PERSONAL.id, "up"),
+    );
+  });
+
+  it("disables move up on the first key and move down on the last", async () => {
+    const host = bridgeWith([WORK, PERSONAL]);
+    renderEditor(host);
+    await screen.findByText("Personal");
+
+    expect(screen.getByRole("button", { name: "Move Work up" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Move Personal down" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Move Work down" })).toBeEnabled();
   });
 
   it("explains that keys are managed in the host app when no bridge is present", () => {

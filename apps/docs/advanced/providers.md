@@ -367,15 +367,20 @@ never silently replaced by API-key modes.
 #### Several API keys
 
 A provider that takes an API key can hold several, each with a label you
-choose. Open the provider in Settings to see its **API keys**. Octant tries them in
-the order listed, and the first key that is not used up is the one it sends.
+choose. Open the provider in Settings to see its **API keys**. One key is **active**:
+Octant sends it first. The list order decides which key is tried next if the
+active key runs out.
 
 - **Add key** adds a key to the end of the list. Saving a key from the edit
   form adds it too, so no save removes a key by accident.
-- **Replace key** changes one key's secret and keeps its label and place.
-  **Rename** changes a label. **Remove** asks you to confirm first.
+- **Make active** sends a key first, and the list order stays the same.
+- **Move up** and **Move down** change the order in which the other keys are
+  tried. The first key cannot move up, and the last cannot move down.
+- **Replace key** changes one key's secret and keeps its label, place, and
+  active state. **Rename** changes a label. **Remove** asks you to confirm
+  first. Removing the active key makes the first key left active.
 - When a key is refused because its quota, credit, or spend limit is used up,
-  Octant skips it for an hour and sends the next key. A rate limit skips a key
+  Octant skips it for an hour and sends the next key in the list order. A rate limit skips a key
   for a minute, or for the time the provider asks. A refusal for a bad key
   (401) never skips a key, so fix or remove that key. A restart of the host
   clears every skip, so the first key is tried again.

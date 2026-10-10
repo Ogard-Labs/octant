@@ -723,7 +723,7 @@ describe("ProviderSettingsView", () => {
       const user = userEvent.setup();
       const addProviderApiKey = vi.fn(async () => {
         if (outcome === "failure") throw new Error("private-value raw Keychain diagnostic");
-        return { id: "7d444840-9dc0-11d1-b245-5ffdce74fad2", label: "Key 1" };
+        return { id: "7d444840-9dc0-11d1-b245-5ffdce74fad2", label: "Key 1", active: true };
       });
       const host = controllerHost(addProviderApiKey);
       const client = controllerClient();
@@ -3561,6 +3561,8 @@ function controllerHost(
     renameProviderApiKey: vi.fn(),
     replaceProviderApiKey: vi.fn(),
     removeProviderApiKey: vi.fn(),
+    setActiveProviderApiKey: vi.fn(),
+    moveProviderApiKey: vi.fn(),
   };
 }
 

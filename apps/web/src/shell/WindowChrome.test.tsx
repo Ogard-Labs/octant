@@ -22,6 +22,8 @@ function hostBridge(): OctantHostBridge {
     renameProviderApiKey: vi.fn(),
     replaceProviderApiKey: vi.fn(),
     removeProviderApiKey: vi.fn(),
+    setActiveProviderApiKey: vi.fn(),
+    moveProviderApiKey: vi.fn(),
     setSidebarMaterialPreference: vi.fn(),
     subscribeResolvedMaterial: vi.fn(() => () => undefined),
   };

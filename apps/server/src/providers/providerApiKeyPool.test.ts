@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { addApiKey, listApiKeys, removeApiKey, replaceApiKeySecret } from "@octant/host-runtime";
+import {
+  addApiKey,
+  listApiKeys,
+  removeApiKey,
+  replaceApiKeySecret,
+  setActiveApiKey,
+} from "@octant/host-runtime";
 import {
   makeAnthropicCompatibleEndpoint,
   requestAnthropicGeneration,
@@ -97,6 +103,14 @@ describe("provider API key pool", () => {
     const lease = await pool.lease(instanceId);
     lease.reportRejected({ status: 429, body: SPEND_LIMIT_BODY });
     expect(await pool.resolve(instanceId)).toBe(FIRST);
+  });
+
+  it("sends the active key first even when another key is listed before it", async () => {
+    const store = twoKeyStore();
+    const secondKeyId = listApiKeys(await store.resolve(instanceId))[1]?.id ?? "";
+    await store.set(instanceId, setActiveApiKey(await store.resolve(instanceId), secondKeyId));
+    const pool = makeProviderApiKeyPool(store);
+    expect(await pool.resolve(instanceId)).toBe(SECOND);
   });
 
   it("treats a plain stored key exactly as before the pool existed", async () => {

@@ -101,6 +101,8 @@ export function credentialHostOperations() {
     renameProviderApiKey: vi.fn(),
     replaceProviderApiKey: vi.fn(),
     removeProviderApiKey: vi.fn(),
+    setActiveProviderApiKey: vi.fn(),
+    moveProviderApiKey: vi.fn(),
   };
 }
 

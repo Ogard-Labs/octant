@@ -1,7 +1,7 @@
 import {
+  apiKeysInUseOrder,
   keyCooldownMs,
   parseRetryAfterSeconds,
-  readApiKeyPool,
   selectApiKey,
 } from "@octant/host-runtime";
 import type {
@@ -17,7 +17,8 @@ export type ProviderApiKeyStore = ProviderCredentialStore & {
 /**
  * Lets a provider instance hold several API keys in the host credential store.
  *
- * Each attempt takes a lease on the first key that is not cooling down. A
+ * Each attempt takes a lease on the active key, or the next key in list order
+ * when the active one is cooling down. A
  * refusal for a quota or a limit cools that key, so the next attempt picks
  * the next key without waiting. Cooldowns live in memory: a restart tries the
  * first key again, which costs one refused request at most.
@@ -29,7 +30,7 @@ export function makeProviderApiKeyPool(
   const cooldowns = new Map<string, Map<string, number>>();
 
   const lease = async (providerInstanceId: string): Promise<ProviderCredentialLease> => {
-    const entries = readApiKeyPool(await store.resolve(providerInstanceId));
+    const entries = apiKeysInUseOrder(await store.resolve(providerInstanceId));
     const entry = selectApiKey(
       entries,
       cooldowns.get(providerInstanceId) ?? new Map<string, number>(),
