@@ -1494,6 +1494,8 @@ describe("CodeOperationRuntime", () => {
       threadTitle: "Runtime",
       answer: { threadId, checkoutId },
     });
+    // A provider's own approval is not a Browser site ask.
+    expect(approval.browserOrigin).toBeUndefined();
     expect(question).toMatchObject({
       text: "Which branch should I base this on?",
       options: [{ label: "main" }, { label: "release" }],
@@ -1696,6 +1698,10 @@ describe("CodeOperationRuntime", () => {
           "approval",
         ]),
       );
+      // The listing names the site, so a terminal can tell this ask from a provider's own.
+      expect(await fixture.runtime.pendingRequests?.(windowId)).toMatchObject([
+        { kind: "approval", browserOrigin: "https://example.com" },
+      ]);
       expect(withdrawn).not.toHaveBeenCalled();
       vi.advanceTimersByTime(10 * 60_000);
     } finally {

@@ -771,7 +771,13 @@ async function followTurn(
         stdout: input.stdout,
         stderr: input.stderr,
       });
-      if (outcome.kind === "refused") input.stderr.write(`${outcome.message}\n`);
+      if (outcome.kind === "refused") {
+        input.stderr.write(`${outcome.message}\n`);
+        // The ask may still be waiting (a transient host failure): ask again
+        // on the next read rather than leave the turn waiting unseen. One that
+        // ended is no longer listed, so it is not asked again.
+        answered.delete(site.id);
+      }
     }
     const current = await port.read();
     if (current === undefined) continue;

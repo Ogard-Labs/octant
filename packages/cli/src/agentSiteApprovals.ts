@@ -24,8 +24,7 @@ export type AgentSiteApproval =
       readonly mode: "code";
       readonly id: string;
       readonly threadId: string;
-      /** The host's own words for the ask; they name the site. */
-      readonly summary: string;
+      readonly origin: string;
       readonly checkoutId: string;
     };
 
@@ -37,9 +36,10 @@ export type SiteApprovalOutcome =
  * The site asks this thread's running turn is waiting on. Chat has no Browser,
  * so it never has one.
  *
- * A Code turn lists every approval on its operation. On a harness thread those
- * are its Browser asks: the harness's own tool approvals live on the session
- * and never appear here, so nothing is asked twice.
+ * A Code turn's pending approvals also include a provider's own tool
+ * approvals, which can be far more powerful than opening a site. Only an
+ * entry the host marks with the site it waits on is a site ask; the rest are
+ * never offered as one.
  */
 export async function listAgentSiteApprovals(
   session: OpenedLocalControlSession,
@@ -68,13 +68,14 @@ export async function listAgentSiteApprovals(
     return decodePendingRequestList(response.body).requests.flatMap((request) =>
       request.mode === "code" &&
       request.kind === "approval" &&
+      request.browserOrigin !== undefined &&
       String(request.threadId) === threadId
         ? [
             {
               mode: "code" as const,
               id: String(request.answer.approvalId),
               threadId,
-              summary: request.text,
+              origin: request.browserOrigin,
               checkoutId: String(request.answer.checkoutId),
             },
           ]
@@ -109,10 +110,8 @@ export async function askSiteApproval(input: {
       `${JSON.stringify({ kind: "site-approval", approval: { ...approval, canRemember } })}\n`,
     );
   } else {
-    const ask =
-      approval.mode === "work" ? `Browser wants to open ${approval.origin}` : approval.summary;
     input.stdout.write(
-      `\n! ${ask}\n  allow? [y]es / ${canRemember ? "[a]lways this site / " : ""}[n]o > `,
+      `\n! Browser wants to open ${approval.origin}\n  allow? [y]es / ${canRemember ? "[a]lways this site / " : ""}[n]o > `,
     );
   }
   const line = await input.readLine();

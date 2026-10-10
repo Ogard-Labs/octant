@@ -662,7 +662,7 @@ class AgentScreen {
       this.#panelText.content =
         site.mode === "work"
           ? t`${fg(p.text)(bold("Browser"))} ${fg(p.textSecondary)(`wants to open ${site.origin}`)}\n${fg(p.success)("y")}${fg(p.textSecondary)(" allow · ")}${fg(p.accent)("a")}${fg(p.textSecondary)(" always allow this site · ")}${fg(p.danger)("n")}${fg(p.textSecondary)(" deny — then Enter")}`
-          : t`${fg(p.text)(bold("Browser"))} ${fg(p.textSecondary)(site.summary)}\n${fg(p.success)("y")}${fg(p.textSecondary)(" allow · ")}${fg(p.danger)("n")}${fg(p.textSecondary)(" deny — then Enter")}`;
+          : t`${fg(p.text)(bold("Browser"))} ${fg(p.textSecondary)(`wants to open ${site.origin}`)}\n${fg(p.success)("y")}${fg(p.textSecondary)(" allow · ")}${fg(p.danger)("n")}${fg(p.textSecondary)(" deny — then Enter")}`;
       this.#panel.visible = true;
     } else if (pending !== undefined) {
       this.#panel.title = " Question ";

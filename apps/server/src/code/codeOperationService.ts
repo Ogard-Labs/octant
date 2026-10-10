@@ -671,6 +671,8 @@ export type CodeTurnPendingRequest = {
       readonly kind: "approval";
       readonly approvalId: CodeApprovalId;
       readonly summary: string;
+      /** Set only when a Browser call is waiting on this site. */
+      readonly browserOrigin?: string;
     }
   | {
       readonly kind: "question";
@@ -1395,6 +1397,9 @@ export class CodeOperationService {
               ...shared,
               kind: "approval",
               text: request.summary,
+              ...(request.browserOrigin === undefined
+                ? {}
+                : { browserOrigin: request.browserOrigin }),
               answer: {
                 threadId: scope.thread.id,
                 checkoutId: scope.checkout.id,

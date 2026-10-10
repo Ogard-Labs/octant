@@ -76,7 +76,18 @@ function codeHost(result: unknown = { kind: "provider-turn-state", state: "runni
               threadTitle: "Fix the docs site",
               requestedAt,
               text: "Allow this thread to use an isolated browser session at https://example.com? Shell and file access stay unchanged.",
+              browserOrigin: "https://example.com",
               answer: { threadId, checkoutId, approvalId },
+            },
+            {
+              mode: "code",
+              kind: "approval",
+              projectId,
+              threadId,
+              threadTitle: "Fix the docs site",
+              requestedAt,
+              text: "Run rm -rf build?",
+              answer: { threadId, checkoutId, approvalId: "40000000-0000-4000-8000-000000000009" },
             },
           ],
           truncated: false,
@@ -108,10 +119,11 @@ describe("site approvals in the terminal", () => {
     });
   });
 
-  it("lists a Code turn's site ask from the host's pending requests and none for Chat", async () => {
+  it("lists only a Code turn's site asks from the host's pending requests and none for Chat", async () => {
     const host = codeHost();
+    // The provider's own approval to run a command is never offered as a site ask.
     expect(await listAgentSiteApprovals(host, "code", threadId)).toEqual([
-      expect.objectContaining({ id: approvalId, mode: "code" }),
+      expect.objectContaining({ id: approvalId, mode: "code", origin: "https://example.com" }),
     ]);
     expect(await listAgentSiteApprovals(host, "code", otherThreadId)).toEqual([]);
     expect(await listAgentSiteApprovals(host, "chat", threadId)).toEqual([]);
@@ -169,6 +181,7 @@ describe("site approvals in the terminal", () => {
     });
     expect(outcome).toEqual({ kind: "answered", decision: "denied" });
     // A Code site ask has no always-allow choice.
+    expect(stdout.text()).toContain("Browser wants to open https://example.com");
     expect(stdout.text()).not.toContain("[a]lways");
     expect(host.seen.at(-1)).toMatchObject({
       path: "/api/code/commands",

@@ -260,83 +260,92 @@ describe("octant agent command line", () => {
     expect(stderr.text()).toContain("nothing was revised");
     expect(stderr.text()).toContain("Goal (active): Ship the lexer · 1 of 2 criteria met");
   });
-  it("asks about the site a Work turn's Browser call is waiting on and sends the answer", async () => {
-    const threadId = "00000000-0000-4000-8000-000000000101";
-    const projectId = "20000000-0000-4000-8000-000000000001";
-    const approvalId = "40000000-0000-4000-8000-000000000001";
-    const stdout = sink();
-    const stopped = new AbortController();
-    const decisions: unknown[] = [];
-    const code = await runAgentCliCommand({
-      command: {
-        action: "agent",
-        threadId,
-        prompt: "Check the docs site",
-        json: false,
-        plain: true,
-        last: false,
-        quiet: false,
-        mode: "work",
-      },
-      session: session((request) => {
-        if (request.path === "/api/projects/bootstrap") {
-          return {
-            status: 200,
-            body: {
-              active: [
-                {
-                  id: projectId,
-                  name: "Docs",
-                  type: "work",
-                  lifecycle: "active",
-                  pinned: false,
-                  rank: "1/2",
-                  version: 1,
-                  createdAt: "2026-10-09T12:00:00.000Z",
-                  updatedAt: "2026-10-09T12:00:00.000Z",
-                  binding: { canonicalRoot: "/nonexistent/docs" },
-                  bindingRevisionId: "66666666-6666-4666-8666-666666666666",
-                },
-              ],
-              archived: [],
-              availability: [],
-              memory: [],
-            },
-          };
-        }
-        if (request.path === "/api/shell/bootstrap") {
-          return { status: 200, body: { workspaceVersion: 1 } };
-        }
-        if (request.path === "/api/work/threads/bootstrap") {
-          return {
-            status: 200,
-            body: {
-              threads: [
-                {
-                  id: threadId,
-                  projectId,
-                  title: "Docs check",
-                  lifecycle: "active",
-                  providerInstanceId: "10000000-0000-4000-8000-000000000001",
-                  modelId: "frontier-large",
-                  version: 1,
-                  createdAt: "2026-10-09T12:00:00.000Z",
-                  updatedAt: "2026-10-09T12:00:00.000Z",
-                },
-              ],
-            },
-          };
-        }
-        if (request.path === "/api/browser/approvals") {
-          if ((request.body as { kind?: unknown }).kind === "decide") {
-            decisions.push(request.body);
-            stopped.abort();
-            return { status: 200, body: { accepted: true } };
+  it.each([
+    ["sends the answer", false],
+    ["asks again when the host could not take the first answer", true],
+  ] as const)(
+    "asks about the site a Work turn's Browser call is waiting on and %s",
+    async (_outcome, unavailableFirst) => {
+      const threadId = "00000000-0000-4000-8000-000000000101";
+      const projectId = "20000000-0000-4000-8000-000000000001";
+      const approvalId = "40000000-0000-4000-8000-000000000001";
+      const stdout = sink();
+      const stopped = new AbortController();
+      const decisions: unknown[] = [];
+      let settled = false;
+      const code = await runAgentCliCommand({
+        command: {
+          action: "agent",
+          threadId,
+          prompt: "Check the docs site",
+          json: false,
+          plain: true,
+          last: false,
+          quiet: false,
+          mode: "work",
+        },
+        session: session((request) => {
+          if (request.path === "/api/projects/bootstrap") {
+            return {
+              status: 200,
+              body: {
+                active: [
+                  {
+                    id: projectId,
+                    name: "Docs",
+                    type: "work",
+                    lifecycle: "active",
+                    pinned: false,
+                    rank: "1/2",
+                    version: 1,
+                    createdAt: "2026-10-09T12:00:00.000Z",
+                    updatedAt: "2026-10-09T12:00:00.000Z",
+                    binding: { canonicalRoot: "/nonexistent/docs" },
+                    bindingRevisionId: "66666666-6666-4666-8666-666666666666",
+                  },
+                ],
+                archived: [],
+                availability: [],
+                memory: [],
+              },
+            };
           }
-          return {
-            status: 200,
-            body:
-              decisions.length > 0
+          if (request.path === "/api/shell/bootstrap") {
+            return { status: 200, body: { workspaceVersion: 1 } };
+          }
+          if (request.path === "/api/work/threads/bootstrap") {
+            return {
+              status: 200,
+              body: {
+                threads: [
+                  {
+                    id: threadId,
+                    projectId,
+                    title: "Docs check",
+                    lifecycle: "active",
+                    providerInstanceId: "10000000-0000-4000-8000-000000000001",
+                    modelId: "frontier-large",
+                    version: 1,
+                    createdAt: "2026-10-09T12:00:00.000Z",
+                    updatedAt: "2026-10-09T12:00:00.000Z",
+                  },
+                ],
+              },
+            };
+          }
+          if (request.path === "/api/browser/approvals") {
+            if ((request.body as { kind?: unknown }).kind === "decide") {
+              decisions.push(request.body);
+              if (unavailableFirst && decisions.length === 1) {
+                return { status: 503, body: { message: "Browser approval is unavailable." } };
+              }
+              settled = true;
+              stopped.abort();
+              return { status: 200, body: { accepted: true } };
+            }
+            return {
+              status: 200,
+              body: settled
                 ? []
                 : [
                     {
@@ -347,24 +356,31 @@ describe("octant agent command line", () => {
                       requestedAt: "2026-10-09T12:00:01.000Z",
                     },
                   ],
-          };
-        }
-        if (request.path.startsWith("/api/native-harness/sessions/")) {
-          return { status: 200, body: { view: null } };
-        }
-        if (request.path === "/api/shell/commands" || request.path === "/api/work/turns") {
-          return { status: 200, body: {} };
-        }
-        return { status: 404, body: {} };
-      }),
-      stdin: Readable.from(["y\n"]),
-      stdout,
-      stderr: sink(),
-      pollIntervalMs: 5,
-      signal: stopped.signal,
-    });
-    expect(code).toBe(1);
-    expect(stdout.text()).toContain("! Browser wants to open https://docs.example.com");
-    expect(decisions).toEqual([{ kind: "decide", approvalId, decision: "approved" }]);
-  });
+            };
+          }
+          if (request.path.startsWith("/api/native-harness/sessions/")) {
+            return { status: 200, body: { view: null } };
+          }
+          if (request.path === "/api/shell/commands" || request.path === "/api/work/turns") {
+            return { status: 200, body: {} };
+          }
+          return { status: 404, body: {} };
+        }),
+        stdin: Readable.from(["y\n", "y\n"]),
+        stdout,
+        stderr: sink(),
+        pollIntervalMs: 5,
+        signal: stopped.signal,
+      });
+      expect(code).toBe(1);
+      expect(stdout.text()).toContain("! Browser wants to open https://docs.example.com");
+      expect(decisions).toEqual(
+        Array.from({ length: unavailableFirst ? 2 : 1 }, () => ({
+          kind: "decide",
+          approvalId,
+          decision: "approved",
+        })),
+      );
+    },
+  );
 });
