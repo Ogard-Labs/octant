@@ -2184,6 +2184,13 @@ modelId }`, and the model picker is provider-first. Discovery can find
 - **Credentials.** API keys live in the host credential store — macOS Keychain
   on macOS, freedesktop Secret Service on Linux — and are reached only
   through the host's loopback credential broker by opaque UUID reference.
+  A provider instance holds one stored value: a plain key, or a JSON pool of
+  labelled keys in priority order ([`apiKeyPool.ts`](../packages/host-runtime/src/apiKeyPool.ts)).
+  Labels may reach the renderer; secrets may not, and only the host reads the
+  pool and chooses the key. A quota, credit, or spend refusal cools that key for
+  an hour, and a rate limit for a minute or the provider's `Retry-After`; the next
+  attempt uses the next key. A refusal for a bad key never cools a key. Cooldowns
+  are host memory and are not journaled.
   Provider OAuth has two postures ([0111](decisions/0111-host-driven-provider-oauth.md)).
   **Delegated** (`delegated-oauth`, including CLI `subscription`): login stays
   on the provider's own runtime; Octant never stores, refreshes, or journals

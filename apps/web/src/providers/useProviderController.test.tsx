@@ -1042,7 +1042,7 @@ describe("useProviderController", () => {
     });
 
     expect(calls).toEqual(["provider.create", "field.clear"]);
-    expect(host.setProviderCredential).not.toHaveBeenCalled();
+    expect(host.addProviderApiKey).not.toHaveBeenCalled();
     expect(host.clearProviderCredential).not.toHaveBeenCalled();
   });
 
@@ -1128,7 +1128,7 @@ describe("useProviderController", () => {
       });
 
       expect(calls).toEqual(["provider.create", "field.clear"]);
-      expect(host.setProviderCredential).not.toHaveBeenCalled();
+      expect(host.addProviderApiKey).not.toHaveBeenCalled();
       expect(host.clearProviderCredential).not.toHaveBeenCalled();
     },
   );
@@ -1329,7 +1329,7 @@ describe("useProviderController", () => {
       });
 
       expect(calls).toEqual(["provider.update", "field.clear"]);
-      expect(host.setProviderCredential).not.toHaveBeenCalled();
+      expect(host.addProviderApiKey).not.toHaveBeenCalled();
     },
   );
 
@@ -1452,7 +1452,7 @@ describe("useProviderController", () => {
       });
 
       expect(host.clearProviderCredential).toHaveBeenCalledWith(id);
-      expect(host.setProviderCredential).not.toHaveBeenCalled();
+      expect(host.addProviderApiKey).not.toHaveBeenCalled();
     },
   );
 
@@ -1593,7 +1593,7 @@ describe("useProviderController", () => {
       }),
     });
     const host = credentialHost(calls);
-    vi.mocked(host.setProviderCredential).mockImplementation(async () => {
+    vi.mocked(host.addProviderApiKey).mockImplementation(async () => {
       calls.push("credential.set");
       throw new Error("private-value raw Keychain diagnostic");
     });
@@ -2449,10 +2449,11 @@ describe("useProviderController", () => {
       return { kind: "provider-created", instance: httpProvider() };
     });
     const host = credentialHost();
-    vi.mocked(host.setProviderCredential).mockImplementation(async () => {
+    vi.mocked(host.addProviderApiKey).mockImplementation(async () => {
       calls.push("credential.set");
       await stored.promise;
       calls.push("credential.settled");
+      return { id: "7d444840-9dc0-11d1-b245-5ffdce74fad2", label: "Key 1" };
     });
     const credential = transientCredential("private-value", calls);
     const { result } = renderHook(() => useProviderController({ client: api, hostBridge: host }));
@@ -2487,7 +2488,7 @@ describe("useProviderController", () => {
       instance: httpProvider(),
     });
     const host = credentialHost();
-    vi.mocked(host.setProviderCredential).mockImplementation(async () => {
+    vi.mocked(host.addProviderApiKey).mockImplementation(async () => {
       calls.push("credential.set");
       throw new Error("private-value raw Keychain diagnostic");
     });
@@ -2512,7 +2513,7 @@ describe("useProviderController", () => {
       instance: httpProvider(),
     });
     const host = credentialHost();
-    vi.mocked(host.setProviderCredential).mockRejectedValue(
+    vi.mocked(host.addProviderApiKey).mockRejectedValue(
       new Error("private-value raw Keychain diagnostic"),
     );
     const { result } = renderHook(() => useProviderController({ client: api, hostBridge: host }));
@@ -2554,7 +2555,7 @@ describe("useProviderController", () => {
     });
 
     expect(api.execute).toHaveBeenCalledOnce();
-    expect(host.setProviderCredential).not.toHaveBeenCalled();
+    expect(host.addProviderApiKey).not.toHaveBeenCalled();
     expect(host.clearProviderCredential).not.toHaveBeenCalled();
     expect(calls).toEqual(["field.clear"]);
   });
@@ -2816,9 +2817,17 @@ function credentialHost(calls: string[] = []): OctantHostBridge {
     providerCredentialStatus: vi.fn(async () => "missing" as const),
     resetBounds: vi.fn(),
     selectProjectRoot: vi.fn(),
-    setProviderCredential: vi.fn(async () => void calls.push("credential.set")),
+    addProviderApiKey: vi.fn(async () => {
+      calls.push("credential.set");
+      return { id: "7d444840-9dc0-11d1-b245-5ffdce74fad2", label: "Key 1" };
+    }),
+    setProviderCredential: vi.fn(),
     setSidebarMaterialPreference: vi.fn(),
     subscribeResolvedMaterial: vi.fn(() => vi.fn()),
+    listProviderApiKeys: vi.fn(async () => []),
+    renameProviderApiKey: vi.fn(),
+    replaceProviderApiKey: vi.fn(),
+    removeProviderApiKey: vi.fn(),
   };
 }
 

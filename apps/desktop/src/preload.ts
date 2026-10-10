@@ -58,6 +58,11 @@ export const IPC_CHANNELS = {
   selectLocalPluginFolder: "octant:extensions:select-local-plugin-folder",
   selectRuntimeBinary: "octant:providers:select-runtime-binary",
   setProviderCredential: "octant:provider-credential:set",
+  listProviderApiKeys: "octant:provider-api-key:list",
+  addProviderApiKey: "octant:provider-api-key:add",
+  renameProviderApiKey: "octant:provider-api-key:rename",
+  replaceProviderApiKey: "octant:provider-api-key:replace",
+  removeProviderApiKey: "octant:provider-api-key:remove",
   hostCapabilities: "octant:window:host-capabilities",
   resolvedMaterial: "octant:window:resolved-material",
   resolvedSidebarVibrancy: "octant:window:resolved-sidebar-vibrancy",
@@ -453,6 +458,26 @@ export interface OctantHostBridge {
   /** Native file picker for a runtime's executable; returns an opaque receipt, never the path. */
   readonly selectRuntimeBinary: () => Promise<PickerReceiptResult>;
   readonly setProviderCredential: (providerInstanceId: string, credential: string) => Promise<void>;
+  /** Labels only. A secret is never returned to the renderer. */
+  readonly listProviderApiKeys: (
+    providerInstanceId: string,
+  ) => Promise<readonly ProviderApiKeySummary[]>;
+  readonly addProviderApiKey: (
+    providerInstanceId: string,
+    credential: string,
+    label?: string,
+  ) => Promise<ProviderApiKeySummary>;
+  readonly renameProviderApiKey: (
+    providerInstanceId: string,
+    keyId: string,
+    label: string,
+  ) => Promise<void>;
+  readonly replaceProviderApiKey: (
+    providerInstanceId: string,
+    keyId: string,
+    credential: string,
+  ) => Promise<void>;
+  readonly removeProviderApiKey: (providerInstanceId: string, keyId: string) => Promise<void>;
   readonly setSidebarMaterialPreference: (preference: SidebarMaterialPreference) => Promise<void>;
   readonly setSidebarVibrancyMode: (mode: SidebarVibrancyMode) => Promise<void>;
   /** Reports the window's resolved theme palette for its approval view. */
@@ -505,6 +530,14 @@ export function createHostBridge(
 ): OctantHostBridge {
   const invoke = async (channel: string, ...args: readonly unknown[]): Promise<void> =>
     void (await ipc.invoke(channel, ...args));
+  const invokeApiKey = async (channel: string, ...args: readonly unknown[]): Promise<unknown> => {
+    try {
+      return await ipc.invoke(channel, ...args);
+    } catch (error) {
+      const known = error instanceof Error ? knownApiKeyFailure(error.message) : undefined;
+      throw new Error(known ?? "Octant could not update the provider API keys.");
+    }
+  };
   const invokeRemote = async (channel: string, ...args: readonly unknown[]): Promise<unknown> => {
     try {
       return await ipc.invoke(channel, ...args);
@@ -854,6 +887,44 @@ export function createHostBridge(
       } catch {
         throw new Error("Octant could not store the provider credential.");
       }
+    },
+    listProviderApiKeys: async (providerInstanceId: string) => {
+      validateProviderInstanceId(providerInstanceId);
+      return decodeProviderApiKeySummaries(
+        await invokeApiKey(IPC_CHANNELS.listProviderApiKeys, providerInstanceId),
+      );
+    },
+    addProviderApiKey: async (providerInstanceId: string, credential: string, label?: string) => {
+      validateProviderInstanceId(providerInstanceId);
+      validateProviderApiKeySecret(credential);
+      if (label !== undefined && typeof label !== "string") {
+        throw new TypeError("Invalid API key label.");
+      }
+      return decodeProviderApiKeySummary(
+        await invokeApiKey(IPC_CHANNELS.addProviderApiKey, providerInstanceId, credential, label),
+      );
+    },
+    renameProviderApiKey: async (providerInstanceId: string, keyId: string, label: string) => {
+      validateProviderInstanceId(providerInstanceId);
+      if (typeof keyId !== "string" || typeof label !== "string") {
+        throw new TypeError("Invalid API key request.");
+      }
+      await invokeApiKey(IPC_CHANNELS.renameProviderApiKey, providerInstanceId, keyId, label);
+    },
+    replaceProviderApiKey: async (
+      providerInstanceId: string,
+      keyId: string,
+      credential: string,
+    ) => {
+      validateProviderInstanceId(providerInstanceId);
+      validateProviderApiKeySecret(credential);
+      if (typeof keyId !== "string") throw new TypeError("Invalid API key request.");
+      await invokeApiKey(IPC_CHANNELS.replaceProviderApiKey, providerInstanceId, keyId, credential);
+    },
+    removeProviderApiKey: async (providerInstanceId: string, keyId: string) => {
+      validateProviderInstanceId(providerInstanceId);
+      if (typeof keyId !== "string") throw new TypeError("Invalid API key request.");
+      await invokeApiKey(IPC_CHANNELS.removeProviderApiKey, providerInstanceId, keyId);
     },
     setSidebarMaterialPreference: (preference: SidebarMaterialPreference) => {
       if (preference !== "opaque" && preference !== "system") {
@@ -1278,6 +1349,65 @@ function isUtcTimestamp(value: unknown): value is string {
  * wrapper is stripped, because the wrapped text is not what a person should
  * have to read.
  */
+export interface ProviderApiKeySummary {
+  readonly id: string;
+  readonly label: string;
+}
+
+function validateProviderApiKeySecret(credential: unknown): void {
+  if (
+    typeof credential !== "string" ||
+    credential.length === 0 ||
+    new TextEncoder().encode(credential).byteLength > MAX_PROVIDER_CREDENTIAL_BYTES
+  ) {
+    throw new TypeError("Invalid API key.");
+  }
+}
+
+function isProviderApiKeySummary(value: unknown): value is ProviderApiKeySummary {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    typeof (value as { id?: unknown }).id === "string" &&
+    typeof (value as { label?: unknown }).label === "string"
+  );
+}
+
+function decodeProviderApiKeySummary(value: unknown): ProviderApiKeySummary {
+  if (!isProviderApiKeySummary(value)) {
+    throw new Error("Octant received an invalid API key.");
+  }
+  return { id: value.id, label: value.label };
+}
+
+function decodeProviderApiKeySummaries(value: unknown): readonly ProviderApiKeySummary[] {
+  if (!Array.isArray(value) || !value.every(isProviderApiKeySummary)) {
+    throw new Error("Octant received an invalid API key list.");
+  }
+  return value.map((key) => ({ id: key.id, label: key.label }));
+}
+
+function knownApiKeyFailure(message: string): string | undefined {
+  return API_KEY_FAILURE_MESSAGES.find(
+    (known) => message === known || message.endsWith(`: ${known}`),
+  );
+}
+
+// The host's own refusal texts for API key changes. They describe the request,
+// never a secret, so the renderer may show them.
+const API_KEY_FAILURE_MESSAGES: ReadonlyArray<string> = [
+  "A key label must be 1 to 64 characters with no control characters.",
+  "An API key must be 1 to 1024 characters with no spaces.",
+  "Two keys for this provider cannot have the same label.",
+  "A provider can hold at most 16 API keys.",
+  "The API keys for this provider are too large to store.",
+  "That API key is no longer stored.",
+  "At least one API key is required.",
+  "Octant rejected an invalid API key request.",
+  "Octant rejected an unauthorized credential request.",
+  "Octant rejected an invalid credential request.",
+];
+
 function knownRemoteDeviceFailure(message: string): string | undefined {
   return REMOTE_DEVICE_FAILURE_MESSAGES.find(
     (known) => message === known || message.endsWith(`: ${known}`),

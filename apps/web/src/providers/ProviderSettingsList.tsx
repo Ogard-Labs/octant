@@ -51,6 +51,7 @@ import {
   VibeConfigurationForm,
 } from "./ProviderSettingsConfiguration";
 import { credentialStatusLabel, useCredentialStatus } from "./ProviderSettingsCredentials";
+import { ProviderApiKeyEditor, acceptsApiKeyPool } from "./ProviderApiKeyEditor";
 import {
   capabilityLabels,
   driverLabel,
@@ -896,6 +897,16 @@ function ProviderRow(props: ProviderRowProps) {
                 <p className="provider-card__credential-status">
                   Credential: <strong>{credentialStatusLabel(credential.status)}</strong>
                 </p>
+              ) : null}
+              {usesCredential && acceptsApiKeyPool(props.instance) ? (
+                <ProviderApiKeyEditor
+                  disabled={disabled}
+                  displayName={name}
+                  instanceId={props.instance.id}
+                  onChanged={(status) =>
+                    credential.finishMutation(credential.beginMutation(), true, status)
+                  }
+                />
               ) : null}
             </section>
           ) : null}

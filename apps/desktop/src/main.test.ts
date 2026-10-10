@@ -1030,6 +1030,11 @@ describe("provider credential host operations", () => {
       "octant:provider-credential:set",
       "octant:provider-credential:status",
       "octant:provider-credential:clear",
+      "octant:provider-api-key:list",
+      "octant:provider-api-key:add",
+      "octant:provider-api-key:rename",
+      "octant:provider-api-key:replace",
+      "octant:provider-api-key:remove",
     ]);
   });
 
@@ -1128,6 +1133,108 @@ function credentialStore(values = new Map<string, string>()): CredentialStore {
     delete: vi.fn(async (instanceId) => void values.delete(instanceId)),
   };
 }
+
+describe("provider API key host operations", () => {
+  const providerInstanceId = "7d444840-9dc0-11d1-b245-5ffdce74fad2";
+  const FIRST = "sk-ant-first-0000";
+  const SECOND = "sk-ant-second-1111";
+
+  function installKeys(values = new Map<string, string>()) {
+    const handlers = new Map<string, (event: unknown, ...args: unknown[]) => unknown>();
+    const sender = {};
+    const store = credentialStore(values);
+    installProviderCredentialIpcHandlers({
+      handle: (channel, handler) => void handlers.set(channel, handler),
+      resolveOwnedWindow: (event) => {
+        if (event !== sender) throw new Error("unauthorized");
+      },
+      store,
+    });
+    const call = (channel: string, ...args: unknown[]) =>
+      handlers.get(`octant:provider-api-key:${channel}`)?.(sender, ...args);
+    return { call, store, values };
+  }
+
+  it("lists labels for a plain stored key without returning its secret", async () => {
+    const { call } = installKeys(new Map([[providerInstanceId, FIRST]]));
+    const listed = await call("list", providerInstanceId);
+    expect(listed).toEqual([{ id: "default", label: "Default" }]);
+    expect(JSON.stringify(listed)).not.toContain(FIRST);
+  });
+
+  it("adds keys in order with the labels the person chose", async () => {
+    const { call, values } = installKeys();
+    await call("add", providerInstanceId, FIRST, "Work");
+    await call("add", providerInstanceId, SECOND, "Personal");
+    const listed = await call("list", providerInstanceId);
+    expect(listed).toEqual([
+      expect.objectContaining({ label: "Work" }),
+      expect.objectContaining({ label: "Personal" }),
+    ]);
+    expect(values.get(providerInstanceId)).toContain(SECOND);
+  });
+
+  it("keeps a plain key and adds the new one after it", async () => {
+    const { call, values } = installKeys(new Map([[providerInstanceId, FIRST]]));
+    await call("add", providerInstanceId, SECOND, "Team");
+    expect(await call("list", providerInstanceId)).toEqual([
+      { id: "default", label: "Default" },
+      expect.objectContaining({ label: "Team" }),
+    ]);
+    expect(values.get(providerInstanceId)).toContain(FIRST);
+  });
+
+  it("refuses a duplicate label and changes nothing", async () => {
+    const { call, values } = installKeys();
+    await call("add", providerInstanceId, FIRST, "Work");
+    const before = values.get(providerInstanceId);
+    await expect(call("add", providerInstanceId, SECOND, "work")).rejects.toThrow(
+      "Two keys for this provider cannot have the same label.",
+    );
+    expect(values.get(providerInstanceId)).toBe(before);
+  });
+
+  it("removes the last key by deleting the stored entry", async () => {
+    const { call, store } = installKeys();
+    await call("add", providerInstanceId, FIRST, "Only");
+    const [only] = (await call("list", providerInstanceId)) as Array<{ id: string }>;
+    await call("remove", providerInstanceId, only?.id);
+    expect(store.delete).toHaveBeenCalledWith(providerInstanceId);
+  });
+
+  it("rejects a key id that is not a key id before touching the store", async () => {
+    const { call, store } = installKeys(new Map([[providerInstanceId, FIRST]]));
+    await expect(call("remove", providerInstanceId, "../../etc")).rejects.toThrow(
+      "Octant rejected an invalid API key request.",
+    );
+    expect(store.set).not.toHaveBeenCalled();
+    expect(store.delete).not.toHaveBeenCalled();
+  });
+
+  it("refuses to change a key on an instance with nothing stored", async () => {
+    const { call } = installKeys();
+    await expect(call("rename", providerInstanceId, "default", "Renamed")).rejects.toThrow(
+      "That API key is no longer stored.",
+    );
+  });
+
+  it("rejects foreign senders before reading or writing keys", async () => {
+    const values = new Map([[providerInstanceId, FIRST]]);
+    const store = credentialStore(values);
+    const handlers = new Map<string, (event: unknown, ...args: unknown[]) => unknown>();
+    installProviderCredentialIpcHandlers({
+      handle: (channel, handler) => void handlers.set(channel, handler),
+      resolveOwnedWindow: () => {
+        throw new Error("unauthorized");
+      },
+      store,
+    });
+    await expect(
+      handlers.get("octant:provider-api-key:list")?.({}, providerInstanceId),
+    ).rejects.toThrow("Octant rejected an unauthorized credential request.");
+    expect(store.has).not.toHaveBeenCalled();
+  });
+});
 
 function disabledStatus() {
   return {

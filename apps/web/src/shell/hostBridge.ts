@@ -11,6 +11,11 @@ export interface MenuBarTask {
 export type ResolvedSidebarMaterial = "opaque" | "translucent";
 export type BoundProjectType = "work" | "code";
 export type ProviderCredentialStatus = "stored" | "missing" | "unavailable";
+/** A key's label and id. The secret stays with the host and is never returned. */
+export interface ProviderApiKeySummary {
+  readonly id: string;
+  readonly label: string;
+}
 export type ProjectRootPickerResult =
   | Readonly<{ kind: "cancelled" }>
   | Readonly<{ kind: "selected"; receiptId: string; displayName: string }>;
@@ -438,6 +443,26 @@ export interface OctantHostBridge extends Partial<RemoteAccessAdministrationBrid
    */
   readonly selectRuntimeBinary?: () => Promise<LocalPluginFolderPickerResult>;
   readonly setProviderCredential: (providerInstanceId: string, credential: string) => Promise<void>;
+  readonly listProviderApiKeys: (
+    providerInstanceId: string,
+  ) => Promise<readonly ProviderApiKeySummary[]>;
+  /** Adds a key after the existing ones. Never replaces or removes a key. */
+  readonly addProviderApiKey: (
+    providerInstanceId: string,
+    credential: string,
+    label?: string,
+  ) => Promise<ProviderApiKeySummary>;
+  readonly renameProviderApiKey: (
+    providerInstanceId: string,
+    keyId: string,
+    label: string,
+  ) => Promise<void>;
+  readonly replaceProviderApiKey: (
+    providerInstanceId: string,
+    keyId: string,
+    credential: string,
+  ) => Promise<void>;
+  readonly removeProviderApiKey: (providerInstanceId: string, keyId: string) => Promise<void>;
   readonly setSidebarMaterialPreference: (preference: "opaque" | "system") => Promise<void> | void;
   readonly setSidebarVibrancyMode?: (mode: "off" | "subtle" | "strong") => Promise<void> | void;
   readonly subscribeResolvedMaterial: (
@@ -478,7 +503,9 @@ export function getInjectedHostBridge(
     bridge === null ||
     typeof (bridge as Record<string, unknown>).setProviderCredential !== "function" ||
     typeof (bridge as Record<string, unknown>).providerCredentialStatus !== "function" ||
-    typeof (bridge as Record<string, unknown>).clearProviderCredential !== "function"
+    typeof (bridge as Record<string, unknown>).clearProviderCredential !== "function" ||
+    typeof (bridge as Record<string, unknown>).listProviderApiKeys !== "function" ||
+    typeof (bridge as Record<string, unknown>).addProviderApiKey !== "function"
   ) {
     throw new TypeError("Invalid Octant host bridge.");
   }

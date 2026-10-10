@@ -96,6 +96,11 @@ export function credentialHostOperations() {
     clearProviderCredential: vi.fn(),
     providerCredentialStatus: vi.fn(async () => "missing" as const),
     setProviderCredential: vi.fn(),
+    addProviderApiKey: vi.fn(),
+    listProviderApiKeys: vi.fn(async () => []),
+    renameProviderApiKey: vi.fn(),
+    replaceProviderApiKey: vi.fn(),
+    removeProviderApiKey: vi.fn(),
   };
 }
 

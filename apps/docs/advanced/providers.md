@@ -364,6 +364,25 @@ authentication; anonymous access is accepted only for loopback. OAuth and
 subscription modes work where the official runtime supports them and are
 never silently replaced by API-key modes.
 
+#### Several API keys
+
+A provider that takes an API key can hold several, each with a label you
+choose. Open the provider in Settings to see its **API keys**. Octant tries them in
+the order listed, and the first key that is not used up is the one it sends.
+
+- **Add key** adds a key to the end of the list. Saving a key from the edit
+  form adds it too, so no save removes a key by accident.
+- **Replace key** changes one key's secret and keeps its label and place.
+  **Rename** changes a label. **Remove** asks you to confirm first.
+- When a key is refused because its quota, credit, or spend limit is used up,
+  Octant skips it for an hour and sends the next key. A rate limit skips a key
+  for a minute, or for the time the provider asks. A refusal for a bad key
+  (401) never skips a key, so fix or remove that key. A restart of the host
+  clears every skip, so the first key is tried again.
+- Anthropic-compatible, OpenAI-compatible, Azure AI Foundry, and image endpoints
+  switch keys within a turn. A command-line runtime, such as Claude Code or
+  Codex, uses the first key for now and does not switch.
+
 ### Signing in with a subscription
 
 An **OpenAI-compatible** endpoint can sign in with a subscription instead of
