@@ -320,7 +320,7 @@ function SyncStoreSections(
       >
         <div className="setgroup">
           <SettingRow
-            description="In this preview, sync on lets Octant reach the store; artifact versions are not copied yet."
+            description="Once this computer belongs to a replica, sync on copies artifact versions and comments to the store and brings in your other computers'."
             focused={props.focusedSetting === "sync-enabled"}
             label="Sync artifacts"
             labelledBySection
