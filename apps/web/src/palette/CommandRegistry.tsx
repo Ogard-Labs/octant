@@ -2,7 +2,11 @@ import type { PendingRequest } from "@octant/contracts/pending-requests";
 import { createContext, useContext, type ReactNode } from "react";
 import type { CommandThread } from "./buildOctantCommands";
 import type { OctantCommand } from "./commandModel";
-import type { ApprovalDecision, ApprovalPendingRequest } from "./needsYouCommands";
+import type {
+  ApprovalDecision,
+  ApprovalPendingRequest,
+  DecisionPendingRequest,
+} from "./needsYouCommands";
 
 const NO_COMMANDS: ReadonlyArray<OctantCommand> = [];
 
@@ -36,7 +40,7 @@ export function useOctantCommands(): ReadonlyArray<OctantCommand> {
 
 /**
  * What the palette needs to open on the agents waiting for the person: the
- * last read of the host's pending requests, a way to read it again, and the two
+ * last read of the host's pending requests, a way to read it again, and the
  * callbacks a row runs. It is offered only to the palette — the `/` composer
  * affordance has no use for rows that open a thread or answer a request — and
  * only by a host that can read the list at all, so without a provider the
@@ -48,6 +52,7 @@ export interface NeedsYouSource {
   readonly refresh: () => void;
   readonly onOpenThread: (thread: CommandThread) => void;
   readonly onAnswerApproval: (request: ApprovalPendingRequest, decision: ApprovalDecision) => void;
+  readonly onAnswerDecision: (request: DecisionPendingRequest, option: string) => void;
 }
 
 const NeedsYouContext = createContext<NeedsYouSource | undefined>(undefined);

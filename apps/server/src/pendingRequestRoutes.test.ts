@@ -59,7 +59,57 @@ const chatQuestion = decodePendingRequest({
   },
 });
 
+const codeDecision = decodePendingRequest({
+  mode: "code",
+  kind: "decision",
+  projectId,
+  threadId: "00000000-0000-4000-8000-000000000910",
+  threadTitle: "Ship the parser",
+  text: "Open the pull request now?",
+  options: [
+    { label: "Open it", recommended: true },
+    { label: "Wait", recommended: false },
+  ],
+  requestedAt: "2026-10-06T08:00:30.000Z",
+  answer: {
+    threadId: "00000000-0000-4000-8000-000000000910",
+    checkoutId: "00000000-0000-4000-8000-000000000911",
+    operationId: "00000000-0000-4000-8000-000000000912",
+  },
+});
+
 describe("pending request route", () => {
+  it("lists a finished turn's decision for a local window, oldest first among requests", async () => {
+    const { route } = fixture({ code: [codeApproval, codeDecision] });
+    const response = await route(request());
+    expect(response?.status).toBe(200);
+    expect(await response?.json()).toEqual({
+      requests: [codeDecision, codeApproval, workApproval, chatQuestion],
+      truncated: false,
+    });
+  });
+
+  it("gives a paired device no decision", async () => {
+    const { route, sources } = fixture({ code: [codeDecision] });
+    const remote = new Request("http://127.0.0.1/api/pending-requests");
+    bindPrincipalRouteContext(remote, {
+      principal: createRemoteDevicePrincipal({
+        hostId: "11111111-1111-4111-8111-111111111111" as StableHostId,
+        deviceId: "22222222-2222-4222-8222-222222222222" as DeviceId,
+        credentialGeneration: 1,
+        origin: "https://octant.example",
+        protocolVersion: 1,
+        capabilityDigest: "b".repeat(64),
+        sessionId: "33333333-3333-4333-8333-333333333333" as RemoteSessionId,
+      }),
+      scopeId: decodeWindowId("22222222-2222-4222-8222-222222222222"),
+    });
+    const response = await route(remote);
+    expect(response?.status).toBe(403);
+    expect(JSON.stringify(await response?.json())).not.toContain("Open the pull request");
+    expect(sources.code).not.toHaveBeenCalled();
+  });
+
   it("lists the window's Work, Code, and Chat requests, oldest waiting first", async () => {
     const { route, sources } = fixture();
     const response = await route(request());

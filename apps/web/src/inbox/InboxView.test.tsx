@@ -1,11 +1,12 @@
 import type { LinearIssueRow } from "@octant/contracts/linear-issues";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
+import { codeDecision, pendingIds } from "../palette/pendingRequests.test-fixtures";
 import type { AssignedLinearIssuesList } from "./loadAssignedLinearIssues";
-import { InboxView } from "./InboxView";
+import { InboxView, type InboxDecisionSource } from "./InboxView";
 
 const stylesheet = readFileSync(resolve(import.meta.dirname, "../styles.css"), "utf8");
 
@@ -23,6 +24,108 @@ const linearPage: AssignedLinearIssuesList = {
   hasNextPage: false,
   truncated: false,
 };
+
+function decisionSource(
+  answerClients: ReturnType<typeof decisionClients>,
+  ...reads: ReadonlyArray<ReadonlyArray<ReturnType<typeof codeDecision>>>
+): InboxDecisionSource {
+  let index = 0;
+  return {
+    pendingRequestClient: {
+      list: vi.fn(async () => {
+        const requests = reads[Math.min(index, reads.length - 1)] ?? [];
+        index += 1;
+        return { requests, truncated: false };
+      }),
+    },
+    answerClients: answerClients as unknown as InboxDecisionSource["answerClients"],
+    feedRevision: 0,
+    settings: undefined,
+    workspace: undefined,
+    modes: ["work", "code"],
+    now: Date.parse("2026-10-06T08:10:00.000Z"),
+    projectNames: new Map([[pendingIds.project, "octant"]]),
+    onOpenThread: vi.fn(),
+  };
+}
+
+function decisionClients() {
+  return {
+    chatClient: { execute: vi.fn(async () => ({})) },
+    codeClient: {
+      executeOperation: vi.fn(async () => ({ kind: "provider-turn-state", state: "running" })),
+      putEvidence: vi.fn(async () => ({ evidenceId: "evidence-1" })),
+    },
+    workRequestClient: { execute: vi.fn(async () => ({})) },
+    workTurnClient: { startFirstTurn: vi.fn(async () => ({ kind: "accepted" })) },
+  };
+}
+
+describe("InboxView decisions", () => {
+  it("lists a finished turn's decision once and sends the option whose number is pressed", async () => {
+    const user = userEvent.setup();
+    const clients = decisionClients();
+    render(
+      <InboxView
+        attentionItems={[
+          {
+            signal: {
+              threadId: pendingIds.codeThread,
+              reason: "turn-finished",
+              title: "Fix the parser",
+              source: "code",
+            },
+          },
+        ]}
+        decisions={decisionSource(clients, [codeDecision()], [])}
+        onClose={vi.fn()}
+        onOpenThread={vi.fn()}
+      />,
+    );
+
+    const row = await screen.findByRole("group", { name: "Fix the parser asks you to decide" });
+    expect(within(row).getByText("octant")).toBeInTheDocument();
+    expect(screen.queryByText("Finished a turn")).not.toBeInTheDocument();
+    within(row)
+      .getByRole("button", { name: /Open it/ })
+      .focus();
+    await user.keyboard("1");
+    await waitFor(() =>
+      expect(clients.codeClient.executeOperation).toHaveBeenCalledWith(
+        expect.objectContaining({ kind: "start-provider-turn", threadId: pendingIds.codeThread }),
+      ),
+    );
+    expect(clients.codeClient.putEvidence).toHaveBeenCalledWith(pendingIds.codeThread, "Open it");
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("group", { name: "Fix the parser asks you to decide" }),
+      ).not.toBeInTheDocument(),
+    );
+  });
+
+  it("keeps the row with one quiet line when the host refuses the turn", async () => {
+    const user = userEvent.setup();
+    const clients = decisionClients();
+    clients.codeClient.executeOperation.mockResolvedValueOnce({
+      kind: "provider-turn-state",
+      state: "failed",
+      failure: { category: "invalid", message: "A turn is already running." },
+    } as never);
+    render(
+      <InboxView
+        attentionItems={[]}
+        decisions={decisionSource(clients, [codeDecision()])}
+        onClose={vi.fn()}
+        onOpenThread={vi.fn()}
+      />,
+    );
+
+    const row = await screen.findByRole("group", { name: "Fix the parser asks you to decide" });
+    await user.click(within(row).getByRole("button", { name: /Wait for review/ }));
+    expect(await within(row).findByRole("status")).toHaveTextContent("A turn is already running.");
+    expect(screen.queryByText("No thread is waiting on you.")).not.toBeInTheDocument();
+  });
+});
 
 describe("InboxView", () => {
   it("offers a real button to the Board when nothing is waiting", async () => {

@@ -40,13 +40,16 @@ export interface PendingRequestRowProps {
 }
 
 /**
- * One approval or question a provider is waiting on: who is waiting and for
- * how long, what it asked, and the answers that fit, in the order the shell
- * keeps threads. An approval is Approve or Deny; a question offers its choices
- * as numbered buttons (the matching number key picks one while the row has
- * focus) and Reply…, which opens the thread to type an answer. The row owns
- * only its own busy state and its refusal line; it carries no authority and
- * knows nothing about the card or board that lists it.
+ * One approval, question, or decision waiting on the person: who is waiting
+ * and for how long, what it asked, and the answers that fit, in the order the
+ * shell keeps threads. An approval is Approve or Deny; a question offers its
+ * choices as numbered buttons (the matching number key picks one while the row
+ * has focus) and Reply…, which opens the thread to type an answer. A decision
+ * is the ask a finished turn closed with: its options are numbered the same
+ * way, the recommended one first and marked, and picking one sends those
+ * words as the thread's next turn. The row owns only its own busy state and
+ * its refusal line; it carries no authority and knows nothing about the card
+ * or board that lists it.
  */
 export function PendingRequestRow(props: PendingRequestRowProps) {
   const { request } = props;
@@ -89,7 +92,11 @@ export function PendingRequestRow(props: PendingRequestRowProps) {
   const ModeIcon = modeIcons[request.mode];
   return (
     <div
-      aria-label={`${request.threadTitle} is waiting for you`}
+      aria-label={
+        request.kind === "decision"
+          ? `${request.threadTitle} asks you to decide`
+          : `${request.threadTitle} is waiting for you`
+      }
       className="pending-request"
       data-embedded={embedded ? "true" : "false"}
       data-kind={request.kind}
@@ -170,6 +177,9 @@ export function PendingRequestRow(props: PendingRequestRowProps) {
                     {String(index + 1)}
                   </span>
                   <span className="pending-request__choice-label">{choice.label}</span>
+                  {choice.recommended === true ? (
+                    <span className="oct-meta pending-request__recommended">Recommended</span>
+                  ) : null}
                 </OctantButton>
               ))}
               <OctantButton

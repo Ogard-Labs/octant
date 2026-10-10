@@ -4,7 +4,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CommandPalette } from "./CommandPalette";
 import { NeedsYouProvider, OctantCommandProvider, type NeedsYouSource } from "./CommandRegistry";
 import type { OctantCommand } from "./commandModel";
-import { codeApproval, codeQuestion, pendingIds } from "./pendingRequests.test-fixtures";
+import {
+  codeApproval,
+  codeDecision,
+  codeQuestion,
+  pendingIds,
+} from "./pendingRequests.test-fixtures";
 
 function harness(commands: ReadonlyArray<OctantCommand>, needsYou?: NeedsYouSource) {
   return render(
@@ -285,6 +290,7 @@ describe("CommandPalette", () => {
       refresh,
       onOpenThread,
       onAnswerApproval: vi.fn(),
+      onAnswerDecision: vi.fn(),
     });
 
     await openPalette(user);
@@ -316,6 +322,7 @@ describe("CommandPalette", () => {
       refresh: vi.fn(),
       onOpenThread,
       onAnswerApproval,
+      onAnswerDecision: vi.fn(),
     });
 
     await openPalette(user);
@@ -325,6 +332,31 @@ describe("CommandPalette", () => {
     expect(onOpenThread).not.toHaveBeenCalled();
   });
 
+  it("lists a decision's row, opens its thread on Enter, and finds an option by its words", async () => {
+    const user = userEvent.setup();
+    const onOpenThread = vi.fn();
+    const onAnswerDecision = vi.fn();
+    const request = codeDecision();
+    harness(hostCommands(), {
+      requests: [request],
+      refresh: vi.fn(),
+      onOpenThread,
+      onAnswerApproval: vi.fn(),
+      onAnswerDecision,
+    });
+
+    await openPalette(user);
+    const row = screen.getByRole("option", { name: /^Fix the parser/ });
+    expect(row).toHaveTextContent("Code · waiting on your decision");
+    await user.keyboard("{Enter}");
+    expect(onOpenThread).toHaveBeenCalledOnce();
+    expect(onAnswerDecision).not.toHaveBeenCalled();
+
+    await openPalette(user);
+    await user.keyboard("open it{Enter}");
+    expect(onAnswerDecision).toHaveBeenCalledWith(request, "Open it");
+  });
+
   it("has no Needs you group when nothing is waiting or the host cannot list it", async () => {
     const user = userEvent.setup();
     const empty = harness(hostCommands(), {
@@ -332,6 +364,7 @@ describe("CommandPalette", () => {
       refresh: vi.fn(),
       onOpenThread: vi.fn(),
       onAnswerApproval: vi.fn(),
+      onAnswerDecision: vi.fn(),
     });
 
     await openPalette(user);

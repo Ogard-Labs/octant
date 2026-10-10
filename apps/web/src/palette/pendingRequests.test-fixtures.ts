@@ -79,3 +79,61 @@ export function chatQuestion(): PendingRequest {
     },
   });
 }
+
+export const decisionIds = {
+  operation: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+  workTurn: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+  binding: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+  provider: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+} as const;
+
+/** A finished Code turn that closed by asking; its recommended option is listed second. */
+export function codeDecision(): PendingRequest {
+  return decodePendingRequest({
+    mode: "code",
+    kind: "decision",
+    projectId: pendingIds.project,
+    threadId: pendingIds.codeThread,
+    threadTitle: "Fix the parser",
+    text: "The fix is ready. Should I open the pull request now?",
+    options: [
+      { label: "Wait for review", recommended: false },
+      { label: "Open it", recommended: true },
+    ],
+    requestedAt: "2026-10-06T08:04:00.000Z",
+    answer: {
+      threadId: pendingIds.codeThread,
+      checkoutId: pendingIds.checkout,
+      operationId: decisionIds.operation,
+    },
+  });
+}
+
+export function workDecision(): PendingRequest {
+  return decodePendingRequest({
+    mode: "work",
+    kind: "decision",
+    projectId: pendingIds.project,
+    threadId: pendingIds.workThread,
+    threadTitle: "Quarterly report",
+    text: "Which chart should lead the summary?",
+    options: [
+      { label: "Revenue", recommended: true },
+      { label: "Headcount", recommended: false },
+    ],
+    requestedAt: "2026-10-06T08:05:00.000Z",
+    answer: {
+      threadId: pendingIds.workThread,
+      turnId: decisionIds.workTurn,
+      authority: {
+        hostId: "local",
+        projectId: pendingIds.project,
+        bindingRevisionId: decisionIds.binding,
+        workingDirectory: ".",
+        confinementPosture: "project-root-confined",
+        providerInstanceId: decisionIds.provider,
+        modelId: "model-a",
+      },
+    },
+  });
+}

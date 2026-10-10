@@ -14,6 +14,7 @@ import {
   codeRequest,
   pendingReader,
   workRequest,
+  codeDecisionRequest,
 } from "../threadBoard/boardPendingRequests.test-fixtures";
 import { CodeThreadBoard } from "./CodeThreadBoard";
 import { readFileSync } from "node:fs";
@@ -902,6 +903,56 @@ describe("CodeThreadBoard waiting cards", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Reply…" }));
     expect(onOpenThread).toHaveBeenCalledWith({ threadId: threadTwo, projectId: projectA });
+  });
+
+  it("sends a decision's option from its card as the thread's next turn", async () => {
+    const clients = answerClients();
+    clients.codeClient.executeOperation.mockResolvedValue({
+      kind: "provider-turn-state",
+      state: "running",
+    } as never);
+    const decision = codeDecisionRequest({
+      threadId: threadThree,
+      threadTitle: "Ship the parser",
+      text: "Open the pull request now?",
+      minutesAgo: 3,
+      options: [
+        { label: "Wait", recommended: false },
+        { label: "Open it", recommended: true },
+      ],
+    });
+    renderBoard(
+      [
+        card({
+          id: "03",
+          status: "waiting",
+          title: "Ship the parser",
+          blockingReason: "Asked you to decide how to continue.",
+        }),
+      ],
+      boardPendingSource(pendingReader([decision]), clients),
+    );
+
+    const waiting = await screen.findByRole("region", { name: "Waiting (1)" });
+    const asking = await within(waiting).findByRole("group", {
+      name: "Ship the parser asks you to decide",
+    });
+    expect(within(asking).getByText("Open the pull request now?")).toBeVisible();
+    const recommended = within(asking).getByRole("button", { name: /Open it/ });
+    recommended.focus();
+    fireEvent.keyDown(recommended, { key: "1" });
+
+    await waitFor(() =>
+      expect(clients.codeClient.executeOperation).toHaveBeenCalledWith(
+        expect.objectContaining({
+          kind: "start-provider-turn",
+          threadId: threadThree,
+          checkoutId: "checkout-1",
+          prompt: { evidenceId: "evidence-1" },
+        }),
+      ),
+    );
+    expect(clients.codeClient.putEvidence).toHaveBeenCalledWith(threadThree, "Open it");
   });
 
   it("says on the card that a refused answer was not delivered", async () => {

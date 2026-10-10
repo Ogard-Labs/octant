@@ -29,6 +29,7 @@ import type { CodeBoardProjectRef } from "../code/codeBoardGrouping";
 import type { GithubCatalogueReadResponse } from "@octant/contracts";
 import type { AssignedLinearIssuesList } from "../inbox/loadAssignedLinearIssues";
 import type { InboxAttentionItem } from "../inbox/inboxModel";
+import type { InboxDecisionSource } from "../inbox/InboxView";
 import type { ThreadAttentionSignal } from "../notifications/threadAttention";
 import type { ThreadBoardProjectRef } from "../threadBoard/threadBoardGrouping";
 import type { BoardPendingRequestSource } from "../threadBoard/useBoardPendingRequests";
@@ -162,6 +163,8 @@ export interface WorkspaceRailLayersProps {
   readonly inboxOpen: boolean;
   readonly onCloseInbox: () => void;
   readonly inboxAttentionItems: ReadonlyArray<InboxAttentionItem>;
+  /** Decisions finished turns asked, answered in the Inbox; absent in a remote window. */
+  readonly inboxDecisions?: InboxDecisionSource;
   readonly onOpenInboxThread: (signal: ThreadAttentionSignal) => void;
   /** The Review page, where finished threads are triaged with single keys. */
   readonly reviewPage?: ReviewPageProps;
@@ -193,6 +196,7 @@ export function WorkspaceRailLayers(props: WorkspaceRailLayersProps) {
           <LazyRailSurface label="Inbox">
             <InboxView
               attentionItems={props.inboxAttentionItems}
+              {...(props.inboxDecisions === undefined ? {} : { decisions: props.inboxDecisions })}
               onClose={props.onCloseInbox}
               onOpenThread={props.onOpenInboxThread}
               {...(props.loadAssignedGithubWork === undefined

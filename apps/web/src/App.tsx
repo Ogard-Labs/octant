@@ -473,7 +473,13 @@ import {
   type CommandThread,
 } from "./palette/buildOctantCommands";
 import { answerPendingApproval } from "./palette/answerPendingApproval";
-import type { ApprovalDecision, ApprovalPendingRequest } from "./palette/needsYouCommands";
+import type {
+  ApprovalDecision,
+  ApprovalPendingRequest,
+  DecisionPendingRequest,
+} from "./palette/needsYouCommands";
+import { answerPendingRequest } from "./pendingRequests/pendingRequests";
+import type { InboxDecisionSource } from "./inbox/InboxView";
 import { usePendingRequests } from "./palette/usePendingRequests";
 import { useCommandExtensions } from "./palette/useCommandSkills";
 import { OctantAlert } from "./ui/base/OctantAlert";
@@ -527,6 +533,8 @@ export interface AppProps {
 
 const NO_PROVIDER_INSTANCES: ReadonlyArray<ProviderInstance> = [];
 const NO_VOICE_SETTINGS: VoiceSettings = {};
+/** Only Work and Code turns ask decisions; one array, so a read is not redone per render. */
+const DECISION_MODES: ReadonlyArray<OctantMode> = ["work", "code"];
 
 export function App(props: AppProps) {
   const [locationLaunch] = useState(() =>
@@ -1567,6 +1575,22 @@ function LaunchedShell(
         ),
     );
   };
+  // A decision's option is the thread's next turn, sent the way the Needs you
+  // card sends it; the palette adds no route of its own.
+  const answerNeedsYouDecision = (request: DecisionPendingRequest, option: string): void => {
+    void answerPendingRequest(
+      { chatClient, codeClient, workRequestClient, workTurnClient },
+      request,
+      { kind: "choice", label: option },
+    ).then((outcome) => {
+      setThreadExportNotice(
+        outcome.status === "refused"
+          ? outcome.message
+          : `Sent “${option}” to ${request.threadTitle}`,
+      );
+      pendingRequests.refresh();
+    });
+  };
   const needsYouSource =
     pendingRequestClient === undefined
       ? undefined
@@ -1575,6 +1599,7 @@ function LaunchedShell(
           refresh: pendingRequests.refresh,
           onOpenThread: openCommandThread,
           onAnswerApproval: answerNeedsYouApproval,
+          onAnswerDecision: answerNeedsYouDecision,
         };
   const [updateReadyNotice, dismissUpdateReadyNotice] = useAppUpdateReadyNotice(
     props.hostBridge?.subscribeAppUpdateState,
@@ -4301,9 +4326,30 @@ function LaunchedShell(
       machineChanges.chatNavigation + machineChanges.workNavigation + machineChanges.codeNavigation,
     threads: workingNowThreads,
   };
+  // The Inbox answers the decisions finished turns asked with the same
+  // reader and send clients as the Needs you card; a remote window has none.
+  const inboxDecisions: InboxDecisionSource | undefined =
+    pendingRequestClient === undefined
+      ? undefined
+      : {
+          answerClients: { chatClient, codeClient, workRequestClient, workTurnClient },
+          feedRevision: pendingRequestFeedRevision,
+          modes: DECISION_MODES,
+          now: minuteNow.getTime(),
+          onOpenThread: (request) => {
+            setInboxOpen(false);
+            if (request.mode === "work") selectWorkThread(String(request.threadId));
+            else if (request.mode === "code") selectCodeThread(String(request.threadId));
+            else selectChatThread(String(request.threadId));
+          },
+          pendingRequestClient,
+          projectNames: workingNowProjectNames,
+          settings: controller.settings,
+          workspace: controller.workspace,
+        };
   const homeCards = [
     createNeedsYouCard({
-      answerClients: { chatClient, codeClient, workRequestClient },
+      answerClients: { chatClient, codeClient, workRequestClient, workTurnClient },
       feedRevision: pendingRequestFeedRevision,
       modes: workingNowModes,
       now: minuteNow.getTime(),
@@ -4691,6 +4737,7 @@ function LaunchedShell(
           machineChanges.codeNavigation,
         now: minuteNow.getTime(),
         onClose: () => setReviewOpen(false),
+        ...(inboxDecisions === undefined ? {} : { decisions: inboxDecisions }),
         codeProjectAccess: {
           boundProjectId:
             controller.boundCodeProjectId === undefined
@@ -6936,6 +6983,7 @@ function LaunchedShell(
                 {...(reviewPageProps === undefined ? {} : { reviewPage: reviewPageProps })}
                 onCloseInbox={() => setInboxOpen(false)}
                 inboxAttentionItems={inboxAttentionItems}
+                {...(inboxDecisions === undefined ? {} : { inboxDecisions })}
                 onOpenInboxThread={(signal) => {
                   setInboxOpen(false);
                   const signalProjectId = inboxThreadProjectId(signal);
@@ -7036,7 +7084,7 @@ function LaunchedShell(
                   )
                 }
                 boardPendingRequests={{
-                  answerClients: { chatClient, codeClient, workRequestClient },
+                  answerClients: { chatClient, codeClient, workRequestClient, workTurnClient },
                   feedRevision: pendingRequestFeedRevision,
                   now: minuteNow.getTime(),
                   pendingRequestClient,

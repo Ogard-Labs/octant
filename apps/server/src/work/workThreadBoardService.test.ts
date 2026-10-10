@@ -148,6 +148,20 @@ describe("WorkThreadBoardService derivation", () => {
     expect(view.cards.every((card) => card.pullRequestSummaries.items.length === 0)).toBe(true);
   });
 
+  it("files a Work thread whose finished turn asked a decision under Waiting", async () => {
+    const board = service({
+      threads: allThreads,
+      runtime: () => ({ ...idleRuntime(), decisionPending: true }),
+    });
+
+    const view = await board.query(decodeWorkBoardQuery({ version: 1 }));
+    expect(cardFor(view.cards, ids.ready)).toMatchObject({
+      status: "waiting",
+      statusReason: "decision-pending",
+    });
+    expect(cardFor(view.cards, ids.done).status).toBe("done");
+  });
+
   it("resolves one card per thread in play with a runtime-derived status", async () => {
     const board = service({
       threads: [

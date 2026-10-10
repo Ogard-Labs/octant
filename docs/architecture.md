@@ -3044,7 +3044,8 @@ mechanisms are:
   interrupted, with the reason journaled, so a provider cannot loop a
   person's refusals.
 - **Pending requests across modes.** `GET /api/pending-requests` returns every
-  approval and question the calling window can answer, oldest waiting first,
+  approval, question, and turn decision (next item) the calling window can
+  answer, oldest waiting first,
   at most 128 with a `truncated` flag. It adds no authority: each mode lists
   only what its existing answer command would admit for that window. Work uses
   the Work request service's Project check (an active Work Project) and lists a
@@ -3070,6 +3071,33 @@ mechanisms are:
   answer, and turn end are journaled stream events, and a Code browser-origin
   approval that expires or is abandoned — which journals nothing — publishes
   `code-navigation` itself.
+- **Turn decisions.** A Work or Code turn that cannot continue without the
+  person's choice ends its reply with one closing `octant-decision` block: an
+  ask (one line, at most 110 characters) and one to four options (at most 60
+  characters each), exactly one recommended. Every Work and Code turn on every
+  provider is asked for the block by one fixed instruction beside the
+  follow-up one; Chat is not. The host reads it with the pure domain parser
+  (`parseTurnDecision`) from the normalized reply alone — a Code turn's message
+  content in journal order, a Work turn's `response` — so nothing a provider
+  adapter emits outside that text can raise one, and a missing, mid-reply, or
+  malformed block raises nothing. The pending-requests read lists it as a third
+  kind, `decision`, under the same local-window rule and the same per-mode
+  reach (Code: the window's Code thread list; Work: an active Work Project and
+  the window's Work thread list), oldest first from the turn's end. A decision
+  is derived on read from the latest provider turn and the thread's rest state,
+  so replay rebuilds it and nothing new is journaled: it is open only while
+  that turn is the thread's latest and `completed`, and the thread is not
+  archived, completed, or snoozed. A newer turn (so one per thread), a turn
+  that was interrupted or failed (including one that died with the process),
+  or putting the thread away closes it; a snooze that ends shows it again. Its
+  answer is the thread's ordinary next turn through `start-provider-turn` or
+  `start-work-thread-turn`, with the option's words as the prompt and the
+  authority the composer has; there is no answer route, and an option performs
+  no host action. On the board an open decision files the thread under Waiting
+  with `decision-pending` (after recovering and a live request's
+  `awaiting-input`, before an interrupted turn); Done still requires the
+  delivery target to be satisfied, and a decision blocks neither completing nor
+  snoozing.
 - **Sandbox.** Provider CLIs, Git, terminals, test runners, and extension
   executables launch through one shared confinement port. On macOS that is
   `sandbox-exec` with deny-default Seatbelt profiles; on Linux it is Bubblewrap

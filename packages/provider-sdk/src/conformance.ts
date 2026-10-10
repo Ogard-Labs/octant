@@ -28,6 +28,13 @@ export interface ProviderConformanceFixture {
   readonly unknownApproval: ProviderApprovalAnswer;
   readonly unknownUserInput: ProviderUserInputAnswer;
   readonly expectedEventKinds: ReadonlyArray<ProviderRuntimeEvent["kind"]>;
+  /**
+   * The exact reply the turn's text should normalize to. The host reads the
+   * closing blocks a reply ends with (follow-ups, a decision) from this text
+   * alone, so a driver must carry every character in order, however the
+   * provider chunked it. Absent skips the check.
+   */
+  readonly expectedReply?: string;
   readonly expectedFailureCategories: {
     readonly staleResume: ProviderFailureCategory;
     readonly unknownApproval: ProviderFailureCategory;
@@ -239,6 +246,15 @@ function assertCapabilityFailure<A>(
   );
 }
 
+/**
+ * The normalized reply a turn's events carry: its text deltas, joined in
+ * order. Reasoning, tool, and every other event stay out of it, so nothing a
+ * driver emits beside the reply can put words in it.
+ */
+export function normalizedReplyText(events: ReadonlyArray<ProviderRuntimeEvent>): string {
+  return events.flatMap((event) => (event.kind === "text-delta" ? [event.text] : [])).join("");
+}
+
 export async function runProviderConformance(
   fixture: ProviderConformanceFixture,
 ): Promise<ProviderConformanceEvidence> {
@@ -323,6 +339,12 @@ export async function runProviderConformance(
           [...successfulEvents, ...events].some((event) => event.kind === "text-delta"),
           "streamed-in-order evidence requires normalized text output",
         );
+        if (fixture.expectedReply !== undefined) {
+          assertConformance(
+            normalizedReplyText(events) === fixture.expectedReply,
+            "normalized reply text did not carry the provider's reply whole and in order",
+          );
+        }
 
         // A cancel keeps the session live (a send continues it); resume needs
         // the session released, so stop it before asking to resume.

@@ -470,6 +470,27 @@ describe("CodeThreadBoardService derivation", () => {
     expect(cardFor(view.cards, ids.ready).statusReason).toBe("idle-unmet-delivery");
   });
 
+  it("files a thread with an open decision under Waiting, and keeps a satisfied one Done", async () => {
+    const board = service({
+      threads: allThreads,
+      runtime: () => ({
+        executing: false,
+        awaitingInput: false,
+        interrupted: false,
+        decisionPending: true,
+      }),
+    });
+
+    const view = await board.query(decodeCodeBoardQuery({ version: 1 }));
+    const ready = cardFor(view.cards, ids.ready);
+    expect(ready).toMatchObject({ status: "waiting", statusReason: "decision-pending" });
+    expect(ready.blockingReason).toBe("Asked you to decide how to continue.");
+    expect(cardFor(view.cards, ids.done)).toMatchObject({
+      status: "done",
+      statusReason: "delivery-satisfied",
+    });
+  });
+
   it("does not describe a stopped thread's waiting delivery as a check in progress", async () => {
     const board = service({ threads: allThreads });
 

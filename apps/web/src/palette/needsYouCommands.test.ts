@@ -4,6 +4,7 @@ import { buildNeedsYouCommands, type NeedsYouSources } from "./needsYouCommands"
 import {
   chatQuestion,
   codeApproval,
+  codeDecision,
   codeQuestion,
   pendingIds,
   workApproval,
@@ -17,6 +18,7 @@ function sources(overrides: Partial<NeedsYouSources> = {}): NeedsYouSources {
     nowMs: NOW,
     onOpenThread: vi.fn(),
     onAnswerApproval: vi.fn(),
+    onAnswerDecision: vi.fn(),
     ...overrides,
   };
 }
@@ -91,6 +93,29 @@ describe("the Needs you commands", () => {
     const commands = buildNeedsYouCommands(sources({ requests: [codeQuestion()] }));
 
     expect(commands.map((command) => command.title)).toEqual(["Fix the parser"]);
+  });
+
+  it("lists a decision's row and each option as a command that sends its words", () => {
+    const onAnswerDecision = vi.fn();
+    const decision = codeDecision();
+    const commands = buildNeedsYouCommands(sources({ requests: [decision], onAnswerDecision }));
+
+    expect(commands.map((command) => [command.title, command.detail])).toEqual([
+      ["Fix the parser", "Code · waiting on your decision · <1m"],
+      [
+        "Wait for review: Fix the parser",
+        "Code · The fix is ready. Should I open the pull request now?",
+      ],
+      [
+        "Open it: Fix the parser",
+        "Recommended · Code · The fix is ready. Should I open the pull request now?",
+      ],
+    ]);
+    expect(filterOctantCommands(commands, "open it").map((command) => command.title)[0]).toBe(
+      "Open it: Fix the parser",
+    );
+    run(commands.find((command) => command.title === "Open it: Fix the parser"));
+    expect(onAnswerDecision).toHaveBeenCalledExactlyOnceWith(decision, "Open it");
   });
 
   it("offers nothing when nothing is waiting", () => {

@@ -19,6 +19,7 @@ export const ThreadBoardReason = Schema.Literal(
   "delivery-satisfied",
   "executing",
   "awaiting-input",
+  "decision-pending",
   "interrupted",
   "recovering",
   "delivery-waiting",

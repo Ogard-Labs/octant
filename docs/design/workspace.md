@@ -78,7 +78,10 @@ so the tile's number and the page's rows never disagree. Rows run oldest
 first, by the host's reported finish time where it has one. The detail panel
 reads the thread's last reply, the Code board's check facts, an Octant-run
 check after the last turn where one exists, and the checkout's diff; Chat rows
-show the reply only. Work navigation projects no unread flag, so Work threads
+show the reply only. A thread whose finished turn asked a decision shows the
+ask and its options (the Needs you row, embedded) above the full reply; its
+number keys pick an option while the row has focus, and the option is sent as
+the thread's next turn. Work navigation projects no unread flag, so Work threads
 never count toward To review and never list here; the page's Work wiring
 (send-back refuses and points at the thread's composer) waits for that flag. Complete, Snooze and send-back go through each
 mode's existing commands and show the host's refusal in one line; mark-seen
@@ -277,9 +280,9 @@ meanwhile is reported ("Already finished.") and never cancelled twice, and a
 host refusal shows in the row in the host's words. The tabs and list add no persisted state or authority.
 
 **Needs you** is the card before Working now, on by default. It lists the
-approvals and questions a provider is waiting on, from one host list of every
-approval and question this window can answer across Chat, Work, and Code and
-across Projects, oldest waiting first. Work's start screen shows Chat and Work
+approvals and questions a provider is waiting on, and the decisions finished
+Work and Code turns asked, from one host list of everything this window can
+answer across Chat, Work, and Code and across Projects, oldest waiting first. Work's start screen shows Chat and Work
 requests, Code's shows Code's. A row (`PendingRequestRow`, reused by other
 surfaces) shows the provider mark when the shell knows the thread's provider and
 its mode's glyph when it does not, the thread title (which opens the thread),
@@ -288,7 +291,10 @@ once-a-minute clock), and the text clamped to two lines. An approval offers
 **Approve** and **Deny**. A question offers one numbered button per choice (the
 matching number key picks it while the row has focus) and **Reply…**, which
 opens the thread so the answer is typed in its composer; a question without
-choices offers Reply… alone. At most five rows show, then **+N more**, which
+choices offers Reply… alone. A decision is the ask a finished turn closed with:
+its row shows the ask clamped to two lines, one numbered button per option with
+the recommended option first (first number, first in focus order) and marked
+"Recommended" in words, and **Reply…**. At most five rows show, then **+N more**, which
 opens the Inbox. The card is hidden while nothing waits, and unavailable where
 this window has no reader (a remote window).
 
@@ -296,7 +302,12 @@ The card holds no authority. An answer goes through the mode's own command with
 the handle the host listed: `resolve-work-request`, `answer-provider-approval`,
 `answer-provider-input` (the response is kept as evidence first, with a fresh
 operation id), or `answer-chat-turn-question`, the same calls the open thread
-makes. After an answer the card re-reads and the row leaves with the next read.
+makes. A decision's option is the thread's ordinary next turn: its words go
+through the mode's own send command (`start-provider-turn` with the words kept
+as prompt evidence, or `start-work-thread-turn` with the thread's current
+authority), with the authority the composer has in this window. An option is
+words, never an action: "merge it" is sent to the agent and merges nothing.
+After an answer the card re-reads and the row leaves with the next read.
 A refused answer (a stale version, a turn that ended, a turn that cannot take
 it, such as one in Plan mode, an unreachable host) shows one quiet line in the
 row saying why, and then the card re-reads; a row the host no longer lists stays
@@ -395,14 +406,16 @@ read that takes longer than five seconds is abandoned and leaves that host
 without figures, and leaving the start screen cancels the reads in flight.
 
 **Needs you** surfaces (a start-screen card, answering from Board cards, the
-command palette) each read the same host list described with the Needs you
+command palette, the Inbox, and the Review page for decisions) each read the same host list described with the Needs you
 card above (the `pendingRequests` read); each surface's own paragraph says when
 it reads. Each item names its mode, Project, thread and title, kind, text,
 options where the mode has them, and when it was asked, and carries the handle
 that mode's own answer command takes, so a surface answers in place through the
 commands the open thread already uses. An answered or ended request is gone
-from the host's next list. The list is read at a local window only, so a
-remote window has no Needs you source. What it includes and leaves out is in
+from the host's next list. The Inbox lists each decision as the same row,
+answered in place, above its other waiting threads, and a thread with a
+decision is not listed again as a finished turn. The list is read at a local
+window only, so a remote window has no Needs you source. What it includes and leaves out is in
 [Architecture: pending requests across modes](../architecture.md#security-and-authority).
 
 The command palette opens on a **Needs you** group when this window can read
@@ -412,7 +425,10 @@ thread. Each approval also gets **Approve** and **Deny** commands, so typing
 "approve" finds them; they answer through the mode's own command
 (`resolve-work-request`, `answer-provider-approval`) without opening the thread,
 and a refusal shows as a notice. A question's choices are not listed, so its row
-opens the thread. The palette reads the list each time it opens and never on a
+opens the thread. A decision has one row (Enter opens the thread) and one
+command per option, titled with the option's words and the thread, so typing an
+option finds it; running one sends those words as the thread's next turn, the
+same send the card makes. The palette reads the list each time it opens and never on a
 timer. With nothing waiting, or at a remote window, the group is absent, and the
 composer `/` list never carries it.
 
@@ -596,7 +612,11 @@ the open request (Work) rather than from the turn's running record. Those are
 the requests the `pendingRequests` read lists, so the board read that follows an
 answer already files the thread back under In progress. Other work still running beside a parked turn (a
 terminal, a child run) keeps the thread In progress. A card with no listed
-request is drawn as before. A thread with several requests shows the oldest
+request is drawn as before. A thread whose latest finished turn closed with a
+decision files under Waiting with the `decision-pending` reason and carries the
+decision row; `awaiting-input` keeps meaning a live request on an open turn, and
+a thread with both shows the live request. A decision never moves a thread out
+of Done, changes no priority, and completes nothing. A thread with several requests shows the oldest
 the host still lists (a refused one it has dropped shows only while nothing
 newer waits) and **+N more waiting**, which opens the thread. Answers use each mode's existing command
 through the listed handle and hold no new authority. A refused answer shows one

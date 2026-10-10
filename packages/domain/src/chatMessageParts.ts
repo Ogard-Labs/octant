@@ -1,8 +1,10 @@
 import {
   FOLLOW_UP_BLOCK_LANGUAGE,
+  TURN_DECISION_BLOCK_LANGUAGE,
   type ChatMessagePart,
   type ChatToolPartStatus,
 } from "@octant/contracts";
+import { readTurnDecisionBlock } from "./turnDecisionPolicy";
 
 /**
  * Distilled message-part resolution for Octant clients.
@@ -123,6 +125,30 @@ export function parseChatMessageBody(streamed: string): ReadonlyArray<ChatMessag
       annotated.push({ start, end: start + match[0].length, part: undefined });
       continue;
     }
+    if (lang === TURN_DECISION_BLOCK_LANGUAGE) {
+      // The thread reads the ask as words with its numbered options, the same
+      // ones its cards offer; a block the host could not read shows nothing.
+      const decision = readTurnDecisionBlock(code);
+      annotated.push({
+        start,
+        end: start + match[0].length,
+        part:
+          decision === undefined
+            ? undefined
+            : {
+                kind: "markdown",
+                text: [
+                  decision.ask,
+                  "",
+                  ...decision.options.map(
+                    (option, index) =>
+                      `${String(index + 1)}. ${option.label}${option.recommended ? " (recommended)" : ""}`,
+                  ),
+                ].join("\n"),
+              },
+      });
+      continue;
+    }
     if (lang === "tool") {
       const meta = parseToolMeta(info.slice(lang.length));
       annotated.push({
@@ -191,10 +217,15 @@ export function parseChatMessageBody(streamed: string): ReadonlyArray<ChatMessag
   return parts;
 }
 
-/** A reply cut at a follow-up block whose closing fence has not streamed in yet. */
+/** A reply cut at a follow-up or decision block whose closing fence has not streamed in yet. */
 function withoutOpenFollowUpBlock(body: string): string {
   const openers = Array.from(
-    body.matchAll(new RegExp(`^\`\`\`${FOLLOW_UP_BLOCK_LANGUAGE}[^\n]*$`, "gm")),
+    body.matchAll(
+      new RegExp(
+        `^\`\`\`(?:${FOLLOW_UP_BLOCK_LANGUAGE}|${TURN_DECISION_BLOCK_LANGUAGE})[^\n]*$`,
+        "gm",
+      ),
+    ),
   );
   const last = openers.at(-1);
   if (last === undefined) return body;

@@ -14,6 +14,7 @@ describe("thread board contracts", () => {
       "delivery-satisfied",
       "executing",
       "awaiting-input",
+      "decision-pending",
       "interrupted",
       "recovering",
       "delivery-waiting",
