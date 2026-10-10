@@ -97,6 +97,12 @@ export const PendingRequest = Schema.Union(
     ...CodePendingRequestFields,
     kind: Schema.Literal("approval"),
     text: CodeApprovalSummaryText,
+    /**
+     * The site a Browser call is waiting to open. Present only on a Browser
+     * site ask, so a client can tell it from a provider's own tool approval
+     * and never offer a site answer for a more powerful action.
+     */
+    browserOrigin: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(2048))),
     answer: CodePendingApprovalAnswer,
   })
     .annotations(strict)

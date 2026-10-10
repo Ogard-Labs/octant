@@ -37,6 +37,11 @@ import {
   type AgentBranchResult,
 } from "./agentBranches";
 import { AgentWake, followAgentThread } from "./agentLiveFeed";
+import {
+  decideSiteApproval,
+  listAgentSiteApprovals,
+  type AgentSiteApproval,
+} from "./agentSiteApprovals";
 import { notifyDesktop } from "./agentNotify";
 import {
   defaultCheckpointLabel,
@@ -130,6 +135,8 @@ class AgentScreen {
   #thread: AgentThreadSnapshot | undefined;
   #port: AgentThreadPort;
   #session: NativeHarnessSessionView | null | undefined;
+  /** A Browser call waiting on a site; not a harness approval, so read on its own. */
+  #siteApproval: AgentSiteApproval | undefined;
   #note = "";
   #drawn = "";
   #ticks = 0;
@@ -347,12 +354,14 @@ class AgentScreen {
   }
 
   async refresh(): Promise<void> {
-    const [thread, session] = await Promise.all([
+    const [thread, session, sites] = await Promise.all([
       this.#port.read(),
       readAgentSession(this.#input.session, this.#threadId),
+      listAgentSiteApprovals(this.#input.session, this.#port.mode, this.#threadId).catch(() => []),
     ]);
     this.#thread = thread;
     this.#session = session === "unavailable" ? undefined : session;
+    this.#siteApproval = sites[0];
     const running = isAgentSnapshotRunning(thread);
     if (this.#wasRunning && !running && this.#input.quiet !== true) {
       const outcome = thread?.turns.at(-1)?.outcome ?? "ended";
@@ -591,6 +600,7 @@ class AgentScreen {
     }
 
     const approval = session?.approvals?.find((entry) => entry.status === "pending");
+    const site = this.#siteApproval;
     if (this.#suggestions !== undefined && this.#suggestions.items.length > 0) {
       this.#panel.title = this.#suggestions.kind === "file" ? " Files " : " Threads ";
       this.#panel.borderColor = p.border;
@@ -645,6 +655,14 @@ class AgentScreen {
         approval.singleUse === true
           ? t`${fg(p.text)(bold(approval.toolName))} ${fg(p.textSecondary)(summary)}\n${dim(fg(p.muted)(`needs your say-so (${approval.approvalClass})`))}\n${fg(p.success)("y")}${fg(p.textSecondary)(" allow · ")}${fg(p.danger)("n")}${fg(p.textSecondary)(" deny — then Enter")}`
           : t`${fg(p.text)(bold(approval.toolName))} ${fg(p.textSecondary)(summary)}\n${dim(fg(p.muted)(`needs your say-so (${approval.approvalClass})`))}\n${fg(p.success)("y")}${fg(p.textSecondary)(" allow · ")}${fg(p.accent)("a")}${fg(p.textSecondary)(" allow for this session · ")}${fg(p.danger)("n")}${fg(p.textSecondary)(" deny — then Enter")}`;
+      this.#panel.visible = true;
+    } else if (site !== undefined) {
+      this.#panel.title = " Site approval ";
+      this.#panel.borderColor = p.warning;
+      this.#panelText.content =
+        site.mode === "work"
+          ? t`${fg(p.text)(bold("Browser"))} ${fg(p.textSecondary)(`wants to open ${site.origin}`)}\n${fg(p.success)("y")}${fg(p.textSecondary)(" allow · ")}${fg(p.accent)("a")}${fg(p.textSecondary)(" always allow this site · ")}${fg(p.danger)("n")}${fg(p.textSecondary)(" deny — then Enter")}`
+          : t`${fg(p.text)(bold("Browser"))} ${fg(p.textSecondary)(`wants to open ${site.origin}`)}\n${fg(p.success)("y")}${fg(p.textSecondary)(" allow · ")}${fg(p.danger)("n")}${fg(p.textSecondary)(" deny — then Enter")}`;
       this.#panel.visible = true;
     } else if (pending !== undefined) {
       this.#panel.title = " Question ";
@@ -1091,6 +1109,29 @@ class AgentScreen {
         decision,
       );
       if (result.kind === "approval-refused") this.#note = result.message;
+      await this.refresh();
+      return;
+    }
+    const site = this.#siteApproval;
+    if (site !== undefined) {
+      const lowered = text.toLowerCase();
+      const always = site.mode === "work" && (lowered === "a" || lowered === "always");
+      const decision =
+        lowered === "y" || lowered === "yes" || always
+          ? "approved"
+          : lowered === "n" || lowered === "no"
+            ? "denied"
+            : undefined;
+      if (decision === undefined) {
+        this.#note =
+          site.mode === "work"
+            ? "Answer the site approval first: y, a, or n."
+            : "Answer the site approval first: y or n.";
+        this.#draw();
+        return;
+      }
+      const result = await decideSiteApproval(this.#input.session, site, decision, always);
+      if (result.kind === "refused") this.#note = result.message;
       await this.refresh();
       return;
     }

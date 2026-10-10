@@ -17,6 +17,7 @@ import {
   type AgentBranchResult,
 } from "./agentBranches";
 import { AgentWake, followAgentThread } from "./agentLiveFeed";
+import { askSiteApproval, listAgentSiteApprovals } from "./agentSiteApprovals";
 import {
   attachAgentThread,
   agentThreadPort,
@@ -757,6 +758,26 @@ async function followTurn(
     if (approval !== undefined) {
       answered.add(String(approval.id));
       await decidePendingApproval(input, threadId, approval, lines);
+    }
+    const sites = await listAgentSiteApprovals(input.session, port.mode, threadId).catch(() => []);
+    const site = sites.find((entry) => !answered.has(entry.id));
+    if (site !== undefined) {
+      answered.add(site.id);
+      const outcome = await askSiteApproval({
+        session: input.session,
+        approval: site,
+        json: input.command.json,
+        readLine: () => lines.next(),
+        stdout: input.stdout,
+        stderr: input.stderr,
+      });
+      if (outcome.kind === "refused") {
+        input.stderr.write(`${outcome.message}\n`);
+        // The ask may still be waiting (a transient host failure): ask again
+        // on the next read rather than leave the turn waiting unseen. One that
+        // ended is no longer listed, so it is not asked again.
+        answered.delete(site.id);
+      }
     }
     const current = await port.read();
     if (current === undefined) continue;

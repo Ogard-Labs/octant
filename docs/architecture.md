@@ -2699,7 +2699,14 @@ native harness in `apps/server/src/harness`:
   events — and only uses it as a wake-up: every redraw still reads the
   thread through the mode's routes, so the stream never becomes a second
   source of truth. Harness questions and approvals have no stream and are
-  picked up by a one-second fallback read.
+  picked up by a one-second fallback read. A Browser site ask is not a
+  harness approval, so `agentSiteApprovals.ts` reads it on the same tick
+  from the route the app's thread view uses: `/api/browser/approvals` for
+  Work, and for Code the `/api/pending-requests` approvals that carry
+  `browserOrigin` (answered with `answer-provider-approval`). A Code
+  approval without `browserOrigin` is a provider's own tool approval and is
+  never offered as a site ask. A terminal whose stdin has ended denies the
+  ask instead of leaving the turn waiting.
 - **Surfaces.** `/api/native-harness/routing` and
   `/api/native-harness/sessions/:threadId` serve the web, desktop, phone, and
   `octant agent` / `octant harness` from one `NativeHarnessSessionView`.
@@ -3062,10 +3069,12 @@ mechanisms are:
   Only requests a live turn in this host can deliver are listed: a Code or Chat
   request journaled by a turn that died with the process is left out, because
   answering it settles the turn interrupted. Excluded: Chat approvals (Chat
-  declines every provider approval), hidden Side Chats, browser tool approvals
+  declines every provider approval), hidden Side Chats, Work browser tool approvals
   (`/api/browser/approvals`), Computer Use approvals, extension tool approvals,
   and native-harness session approvals; a native-harness question raised on a
-  Code turn is a Code question and is listed. Text keeps
+  Code turn is a Code question and is listed. A Code turn's Browser site ask
+  is a Code approval and is listed with `browserOrigin`, the site it waits to
+  open, which a provider's own approval never carries. Text keeps
   each mode's own bounds and sanitization. The read is local-window only: its
   path is outside every prefix the remote listener forwards, the remote action
   classifier names no action for it, and the route refuses a paired device's

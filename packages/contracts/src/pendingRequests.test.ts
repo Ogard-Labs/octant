@@ -87,6 +87,30 @@ describe("pending request contract", () => {
     ]);
   });
 
+  it("names the site a Code Browser ask waits on, and only on a Code approval", () => {
+    const browserAsk = {
+      mode: "code",
+      kind: "approval",
+      projectId: ids.project,
+      threadId: ids.codeThread,
+      threadTitle: "Fix the docs site",
+      text: "Allow this thread to use an isolated browser session at https://example.com?",
+      browserOrigin: "https://example.com",
+      requestedAt,
+      answer: { threadId: ids.codeThread, checkoutId: ids.checkout, approvalId: ids.approval },
+    } as const;
+    expect(decodePendingRequest(browserAsk)).toMatchObject({
+      browserOrigin: "https://example.com",
+    });
+    expect(() => decodePendingRequest({ ...browserAsk, browserOrigin: " " })).toThrow();
+    expect(() =>
+      decodePendingRequest({ ...codeQuestion, browserOrigin: "https://example.com" }),
+    ).toThrow();
+    expect(() =>
+      decodePendingRequest({ ...workApproval, browserOrigin: "https://example.com" }),
+    ).toThrow();
+  });
+
   it("keeps a Work request as sanitized as the Work record it came from", () => {
     expect(() =>
       decodePendingRequest({ ...workApproval, text: "Open /Users/me/.ssh/id" }),

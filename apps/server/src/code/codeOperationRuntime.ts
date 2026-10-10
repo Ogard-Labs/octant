@@ -1512,9 +1512,13 @@ interface ActiveTurn {
   readonly secrets: readonly string[];
   readonly abort: AbortController;
   readonly approvals: Map<string, string>;
+  /** Each Browser ask's settle function, with the site it waits to open. */
   readonly browserApprovals: Map<
     string,
-    (outcome: "approved" | "denied" | "cancelled" | "expired") => void
+    {
+      readonly origin: string;
+      readonly finish: (outcome: "approved" | "denied" | "cancelled" | "expired") => void;
+    }
   >;
   readonly browserGrantKeys: Set<string>;
   readonly questions: Set<string>;
@@ -1903,11 +1907,13 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           requestedAt: frame.occurredAt,
         };
         if (event.kind === "approval-requested" && approvals.has(String(event.approvalId))) {
+          const browserOrigin = active.browserApprovals.get(String(event.approvalId))?.origin;
           asked.set(`approval:${String(event.approvalId)}`, {
             ...scope,
             kind: "approval",
             approvalId: event.approvalId,
             summary: event.summary,
+            ...(browserOrigin === undefined ? {} : { browserOrigin }),
           });
         } else if (event.kind === "input-requested" && active.questions.has(event.requestId)) {
           asked.set(`question:${event.requestId}`, {
@@ -1978,7 +1984,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       };
       const abort = () => finish("cancelled");
       const timer = setTimeout(() => finish("expired"), 10 * 60_000);
-      active.browserApprovals.set(String(approvalId), finish);
+      active.browserApprovals.set(String(approvalId), { origin: origin.slice(0, 2048), finish });
       signal?.addEventListener("abort", abort, { once: true });
       active.abort.signal.addEventListener("abort", abort, { once: true });
       try {
@@ -2017,7 +2023,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         active.thread.permissionPersistence !== input.thread.permissionPersistence
       )
         return turnState("failed");
-      browserApproval(input.decision === "approved" ? "approved" : "denied");
+      browserApproval.finish(input.decision === "approved" ? "approved" : "denied");
       if (input.decision === "approved") return answeredTurnState(active.state);
       return this.#countDeniedApproval(active);
     }
