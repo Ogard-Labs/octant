@@ -108,18 +108,18 @@ describe("Claude account isolation source", () => {
       environment.indexOf("const environment = passthroughHostEnvironment"),
     );
     expect(isolatedBranch).toContain("isolatedClaudeAccountEnvironment");
-    expect(isolatedBranch).not.toContain("CLAUDE_CODE_OAUTH_TOKEN");
-    expect(isolatedBranch).not.toContain("oauthToken");
     expect(isolatedBranch).not.toContain("credentials.json");
+    // 0165 is still Proposed, so the current confined helper-token path
+    // stays on isolated accounts. The isolation module never holds it.
+    expect(isolatedBranch).toContain("overrides.oauthToken");
 
-    expect(driver).toMatch(/options\.configDirectory === undefined/);
     expect(driver).toMatch(/connectedHelperToken/);
     const helperGate = driver.slice(
       driver.indexOf("const helperToken ="),
       driver.indexOf("scope = await runSetupEffect(Scope.make(), signal);"),
     );
-    expect(helperGate).toContain("options.configDirectory === undefined");
     expect(helperGate).toContain("connectedHelperToken");
+    expect(helperGate).not.toContain("configDirectory === undefined");
   });
 });
 

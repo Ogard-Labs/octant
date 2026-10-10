@@ -119,6 +119,12 @@ export interface ProviderCreateFormPresentationProps {
   readonly embedded?: boolean;
   /** The submit button's words in place of "Add <kind> provider". */
   readonly submitLabel?: string;
+  /**
+   * Additional Claude accounts get a server-assigned directory. The create
+   * form must not show the default-account sign-in command until that
+   * directory is known.
+   */
+  readonly existingClaudeAccountCount?: number;
 }
 
 export function ProviderCreateForm(
@@ -830,7 +836,11 @@ export function ProviderCreateForm(
                   configDirectory={claudeConfigDirectory}
                   onAccentChange={setClaudeAccent}
                   onConfigDirectoryChange={setClaudeConfigDirectory}
-                  showSignInCommand={claudeAuthentication === "subscription"}
+                  showSignInCommand={
+                    claudeAuthentication === "subscription" &&
+                    (claudeConfigDirectory.trim().length > 0 ||
+                      (props.existingClaudeAccountCount ?? 0) === 0)
+                  }
                 />
               </>
             ) : null}

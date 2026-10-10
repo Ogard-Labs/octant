@@ -601,6 +601,23 @@ describe("ProviderSettingsView", () => {
     );
   });
 
+  it("does not show the default-account sign-in command when adding another Claude account", async () => {
+    const user = userEvent.setup();
+    const props = fixture({ instance: claudeProvider() });
+    renderExpanded(<ProviderSettingsView {...props} />);
+
+    await chooseSelectFieldOption(user, screen.getByLabelText("Provider type"), "Claude Agent SDK");
+    const create = screen.getByRole("form", { name: "Add Claude provider" });
+    expect(within(create).queryByLabelText("Claude sign-in command")).toBeNull();
+    await user.type(
+      within(create).getByLabelText("Claude config directory"),
+      "/Users/example/.claude-accounts/work",
+    );
+    expect(within(create).getByLabelText("Claude sign-in command")).toHaveValue(
+      "CLAUDE_CONFIG_DIR='/Users/example/.claude-accounts/work' CLAUDE_SECURESTORAGE_CONFIG_DIR='/Users/example/.claude-accounts/work' '/usr/local/bin/claude' auth login",
+    );
+  });
+
   it("creates Mistral Vibe with API-key authentication only", async () => {
     const user = userEvent.setup();
     const props = fixture({ instance: vibeProvider() });

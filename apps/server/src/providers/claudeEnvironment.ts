@@ -105,12 +105,18 @@ export function sanitizeClaudeEnvironment(
   overrides: ClaudeEnvironmentOverrides = {},
 ): NodeJS.ProcessEnv {
   if (overrides.configDirectory !== undefined) {
-    return isolatedClaudeAccountEnvironment({
+    const environment = isolatedClaudeAccountEnvironment({
       hostEnvironment,
       configDirectory: overrides.configDirectory,
       authentication,
       ...(overrides.apiKey === undefined ? {} : { apiKey: overrides.apiKey }),
     });
+    // 0165 is still Proposed. Isolated accounts keep the current confined
+    // helper-token path; the isolation module never holds the token.
+    if (authentication === "subscription" && overrides.oauthToken !== undefined) {
+      environment.CLAUDE_CODE_OAUTH_TOKEN = overrides.oauthToken;
+    }
+    return environment;
   }
 
   const environment = passthroughHostEnvironment(hostEnvironment);
@@ -172,6 +178,7 @@ export function makeClaudeEnvironmentScope(
           }),
       );
     }
+    const oauthToken = options.oauthToken;
     return Effect.acquireRelease(
       Effect.tryPromise({
         try: async () => {
@@ -180,13 +187,17 @@ export function makeClaudeEnvironmentScope(
             configDirectory,
             environment: sanitizeClaudeEnvironment(authentication, hostEnvironment, {
               configDirectory,
+              ...(oauthToken === undefined ? {} : { oauthToken }),
             }),
           } satisfies ClaudeEnvironmentScope;
         },
         catch: () =>
           failure("provider-failed", "Claude account configuration could not be prepared."),
       }),
-      () => Effect.void,
+      ({ environment }) =>
+        Effect.sync(() => {
+          delete environment.CLAUDE_CODE_OAUTH_TOKEN;
+        }),
     );
   }
 

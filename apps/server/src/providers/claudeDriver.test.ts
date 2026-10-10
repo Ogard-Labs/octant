@@ -259,6 +259,9 @@ function harness(
                 ...(mode === "api-key" && options.apiKey !== undefined
                   ? { ANTHROPIC_API_KEY: options.apiKey }
                   : {}),
+                ...(mode === "subscription" && options.oauthToken !== undefined
+                  ? { CLAUDE_CODE_OAUTH_TOKEN: options.oauthToken }
+                  : {}),
               }
             : mode === "api-key"
               ? { PATH: "/usr/bin", ANTHROPIC_API_KEY: options?.apiKey }
@@ -4251,7 +4254,7 @@ describe("Claude for helpers", () => {
     expect(f.process.probeSubscription).toHaveBeenCalledOnce();
   });
 
-  it("keeps an isolated Claude account on its own directory and never injects a helper token", async () => {
+  it("keeps an isolated Claude account on its own directory and the connected helper token", async () => {
     const accountDirectory = "/Users/example/.claude-accounts/work";
     const f = harness("subscription", "current-session", { configDirectory: accountDirectory });
     const acquired = await acquire(f.driver, "chat");
@@ -4263,8 +4266,8 @@ describe("Claude for helpers", () => {
       await acquired.close();
     }
 
-    expect(f.helperSignIn.read).not.toHaveBeenCalled();
-    expect(f.opens[0]?.authEnvironment.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
+    expect(f.helperSignIn.read).toHaveBeenCalled();
+    expect(f.opens[0]?.authEnvironment.CLAUDE_CODE_OAUTH_TOKEN).toBe(HELPER_TOKEN);
     expect(f.opens[0]?.authEnvironment.CLAUDE_CONFIG_DIR).toBe(accountDirectory);
   });
 

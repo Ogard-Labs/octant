@@ -1252,7 +1252,6 @@ function makeConnection(
         }
         const helperToken =
           options.authentication === "subscription" &&
-          options.configDirectory === undefined &&
           CONFINED_CLAUDE_EXECUTION_POLICIES.has(input.executionPolicy)
             ? await connectedHelperToken(options)
             : undefined;

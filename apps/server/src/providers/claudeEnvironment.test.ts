@@ -196,28 +196,24 @@ describe("makeClaudeEnvironmentScope", () => {
     expect(heldEnvironment.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
   });
 
-  it("isolates a named Claude account from host Claude directories and helper tokens", async () => {
+  it("keeps an isolated Claude account on its directory and the connected helper token", async () => {
     const accountDirectory = join(await mkdtemp(join(tmpdir(), "octant-claude-account-")), "work");
-    const environment = await Effect.runPromise(
-      Effect.scoped(
-        makeClaudeEnvironmentScope("subscription", {
-          hostEnvironment: hostileHostEnvironment,
-          configDirectory: accountDirectory,
-          oauthToken: "helper-token-must-not-apply",
-        }).pipe(Effect.map((held) => held.environment)),
-      ),
-    );
-
-    expect(environment).toEqual(
-      isolatedClaudeAccountEnvironment({
+    const scope = await Effect.runPromise(Scope.make());
+    const acquired = await Effect.runPromise(
+      makeClaudeEnvironmentScope("subscription", {
         hostEnvironment: hostileHostEnvironment,
         configDirectory: accountDirectory,
-        authentication: "subscription",
-      }),
+        oauthToken: "helper-token-sentinel-0123456789",
+      }).pipe(Effect.provideService(Scope.Scope, scope)),
     );
-    expect(environment.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
-    expect(environment.CLAUDE_CONFIG_DIR).toBe(accountDirectory);
+
+    expect(acquired.environment.CLAUDE_CONFIG_DIR).toBe(accountDirectory);
+    expect(acquired.environment.CLAUDE_SECURESTORAGE_CONFIG_DIR).toBe(accountDirectory);
+    expect(acquired.environment.CLAUDE_CODE_OAUTH_TOKEN).toBe("helper-token-sentinel-0123456789");
+    expect(acquired.environment.ANTHROPIC_API_KEY).toBeUndefined();
     expect(existsSync(accountDirectory)).toBe(true);
+    await Effect.runPromise(Scope.close(scope, Exit.void));
+    expect(acquired.environment.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
   });
 
   it("keeps an API-key account on its stable directory instead of deleting it", async () => {
