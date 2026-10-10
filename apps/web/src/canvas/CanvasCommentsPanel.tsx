@@ -9,6 +9,8 @@ import {
   type CanvasCommentsOutcome,
 } from "@octant/contracts/canvas-board";
 import {
+  canvasTableRowCells,
+  canvasTableRowId,
   decodeCanvasNodeId,
   type CanvasActor,
   type CanvasDefinition,
@@ -17,6 +19,7 @@ import {
 import { decodeUtcTimestamp } from "@octant/contracts/events";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { canvasBlockLabel } from "./CanvasDocument";
+import { canvasTableRowLabel } from "./blocks/TableBlock";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
@@ -37,6 +40,11 @@ export interface CanvasCommentsPanelProps {
    * threads and a new comment lands on it until the reader shows them all.
    */
   readonly focusedBlockId?: string;
+  /**
+   * The table row, inside the focused block, a reader opened comments from.
+   * The list narrows to that row's threads and a new comment lands on it.
+   */
+  readonly focusedRowId?: string;
   readonly onShowAllBlocks?: () => void;
   /** Every journaled thread, reported whenever the host's list is reloaded. */
   readonly onThreadsChange?: (threads: ReadonlyArray<CanvasCommentThread>) => void;
@@ -142,6 +150,19 @@ function anchorChoices(definition: CanvasDefinition): ReadonlyArray<AnchorChoice
         });
       }
     }
+    if (block.kind === "table") {
+      // Only a row that names itself can take a comment: an index would move
+      // the comment to another row when the reader sorts or the agent revises.
+      for (const row of block.rows) {
+        const rowId = canvasTableRowId(row);
+        if (rowId === undefined) continue;
+        choices.push({
+          id: `row:${String(block.blockId)}:${String(rowId)}`,
+          label: `Row · ${canvasTableRowLabel(block, canvasTableRowCells(row))}`,
+          anchor: { kind: "row", blockId: block.blockId, rowId },
+        });
+      }
+    }
     if (block.kind === "comparison-matrix") {
       // A cell has no anchor of its own in the board contract, so a comment on
       // one sits on its option's column or its criterion's row.
@@ -202,6 +223,9 @@ function sameAnchor(left: CanvasCommentAnchor, right: CanvasCommentAnchor): bool
   if (left.kind === "edge" && right.kind === "edge") {
     return String(left.edgeId) === String(right.edgeId);
   }
+  if (left.kind === "row" && right.kind === "row") {
+    return String(left.rowId) === String(right.rowId);
+  }
   return left.kind === "block" || left.kind === "region";
 }
 
@@ -236,7 +260,11 @@ export function CanvasCommentsPanel(props: CanvasCommentsPanelProps) {
   const [anchorId, setAnchorId] = useState<string>();
   const [filter, setFilter] = useState<CommentFilter>("open");
   const focusedChoiceId =
-    props.focusedBlockId === undefined ? undefined : `block:${props.focusedBlockId}`;
+    props.focusedBlockId === undefined
+      ? undefined
+      : props.focusedRowId === undefined
+        ? `block:${props.focusedBlockId}`
+        : `row:${props.focusedBlockId}:${props.focusedRowId}`;
   useEffect(() => {
     if (focusedChoiceId !== undefined) setAnchorId(focusedChoiceId);
   }, [focusedChoiceId]);
@@ -302,9 +330,12 @@ export function CanvasCommentsPanel(props: CanvasCommentsPanelProps) {
     const resolved = thread.comment.resolvedAt !== undefined;
     if (filter === "open" && resolved) return false;
     if (filter === "resolved" && !resolved) return false;
+    const anchor = thread.comment.anchor;
+    if (props.focusedBlockId === undefined) return true;
+    if (String(anchor.blockId) !== props.focusedBlockId) return false;
     return (
-      props.focusedBlockId === undefined ||
-      String(thread.comment.anchor.blockId) === props.focusedBlockId
+      props.focusedRowId === undefined ||
+      (anchor.kind === "row" && String(anchor.rowId) === props.focusedRowId)
     );
   });
 

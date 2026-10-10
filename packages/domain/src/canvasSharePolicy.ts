@@ -9,6 +9,7 @@ import {
   type CanvasStaticExportSourceEntry,
 } from "@octant/contracts/canvas-share";
 import {
+  canvasTableRowCells,
   decodeCanvasVersion,
   type CanvasBarListRow,
   type CanvasBlock,
@@ -180,6 +181,13 @@ function sanitizeBlock(block: CanvasBlock): CanvasStaticExportBlock {
     case "plan": {
       const tasks = block.tasks.map(({ sourceIds: _sourceIds, ...task }) => task);
       const shared = { ...block, tasks };
+      assertNoSecretShape(shared, `block.${block.blockId}`);
+      return shared;
+    }
+    case "table": {
+      // A row id is the identity a comment anchors to. A snapshot carries no
+      // comments, so the rows leave as their cells in the author's order.
+      const shared = { ...block, rows: block.rows.map(canvasTableRowCells) };
       assertNoSecretShape(shared, `block.${block.blockId}`);
       return shared;
     }

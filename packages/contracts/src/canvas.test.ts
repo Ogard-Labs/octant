@@ -31,6 +31,7 @@ import {
   CANVAS_MAX_TABLE_ROWS,
   CANVAS_PRESENTATION_SCHEMA_VERSION,
   CANVAS_SCHEMA_VERSION,
+  CANVAS_TABLE_ROW_ID_SCHEMA_VERSION,
   CANVAS_TREEMAP_SCHEMA_VERSION,
   CANVAS_VERSION_APPENDED,
   CanvasCreated,
@@ -43,6 +44,8 @@ import {
   decodeCanvasSourceManifestEntry,
   decodeCanvasVersion,
   decodeCanvasVersionAppended,
+  canvasTableRowCells,
+  canvasTableRowId,
 } from "./canvas";
 
 const ids = {
@@ -1606,7 +1609,7 @@ describe("mockup catalog", () => {
       blocks: [screen],
     });
     expect(CANVAS_MOCKUP_CATALOG_SCHEMA_VERSION).toBe(12);
-    expect(CANVAS_SCHEMA_VERSION).toBe(12);
+    expect(CANVAS_MOCKUP_CATALOG_SCHEMA_VERSION).toBeLessThan(CANVAS_SCHEMA_VERSION);
   });
 
   it("admits the catalog only under the version that declared it, and keeps a version-3 screen readable", () => {
@@ -1740,5 +1743,53 @@ describe("mockup catalog", () => {
     expect(() =>
       decodeCanvasBlock({ ...screen, device: "custom", size: { width: 100_000, height: 400 } }),
     ).toThrow();
+  });
+});
+
+describe("table row ids", () => {
+  const table = {
+    blockId: "vendors",
+    schemaVersion: CANVAS_SCHEMA_VERSION,
+    kind: "table",
+    columns: [
+      { id: "vendor", label: "Vendor", type: "text" },
+      { id: "price", label: "Price", type: "number" },
+    ],
+    rows: [{ id: "acme", cells: ["Acme", 12] }, ["Globex", 9]],
+  } as const;
+
+  it("decodes a table that mixes rows with a stable id and rows of bare cells", () => {
+    const decoded = decodeCanvasDefinition({ ...definition, blocks: [table] });
+    const block = decoded.blocks[0];
+    if (block?.kind !== "table") throw new Error("expected a table");
+    expect(block.rows.map(canvasTableRowId)).toEqual(["acme", undefined]);
+    expect(block.rows.map(canvasTableRowCells)).toEqual([
+      ["Acme", 12],
+      ["Globex", 9],
+    ]);
+    expect(CANVAS_TABLE_ROW_ID_SCHEMA_VERSION).toBe(13);
+    expect(CANVAS_SCHEMA_VERSION).toBe(13);
+  });
+
+  it("admits a row id only under the version that declared it, and keeps an older table readable", () => {
+    const older = { ...table, schemaVersion: 12 } as const;
+    expect(() =>
+      decodeCanvasDefinition({ ...definition, schemaVersion: 12, blocks: [older] }),
+    ).toThrow();
+    const bare = { ...older, rows: [["Acme", 12]] } as const;
+    expect(
+      decodeCanvasDefinition({ ...definition, schemaVersion: 12, blocks: [bare] }),
+    ).toMatchObject({ blocks: [bare] });
+  });
+
+  it("refuses a row id that is not a bounded token and a keyed row with extra fields", () => {
+    for (const row of [
+      { id: "has space", cells: ["Acme", 12] },
+      { id: "", cells: ["Acme", 12] },
+      { id: "acme", cells: ["Acme", 12], index: 0 },
+      { id: "acme" },
+    ]) {
+      expect(() => decodeCanvasBlock({ ...table, rows: [row] })).toThrow();
+    }
   });
 });

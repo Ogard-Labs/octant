@@ -1,5 +1,10 @@
 import katex from "katex";
-import type { CanvasBlock, CanvasDefinition, CanvasNumberFormat } from "@octant/contracts/canvas";
+import {
+  canvasTableRowCells,
+  type CanvasBlock,
+  type CanvasDefinition,
+  type CanvasNumberFormat,
+} from "@octant/contracts/canvas";
 import {
   CANVAS_EXPORT_BODY_MAX_BYTES,
   canvasExportBodyByteLength,
@@ -298,9 +303,12 @@ function piecesFor(block: CanvasBlock): ReadonlyArray<Piece> {
         {
           kind: "table",
           headers: block.columns.map((column) => reading(column.label)),
-          rows: block.rows.map((row) =>
-            block.columns.map((column, index) => scalar(row[index] ?? null, column.format)),
-          ),
+          rows: block.rows.map((row) => {
+            const cells = canvasTableRowCells(row);
+            return block.columns.map((column, index) =>
+              scalar(cells[index] ?? null, column.format),
+            );
+          }),
         },
       ];
     case "chart":

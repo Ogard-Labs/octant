@@ -82,6 +82,26 @@ describe("rendering a canvas as a document", () => {
     expect(row).toBe("| one\\\\\\|two |");
   });
 
+  it("exports a row that carries an id as its cells, in the author's order", () => {
+    const table = decodeCanvasBlock({
+      blockId: "vendors",
+      schemaVersion: CANVAS_SCHEMA_VERSION,
+      kind: "table",
+      columns: [
+        { id: "vendor", label: "Vendor", type: "text" },
+        { id: "price", label: "Price", type: "number" },
+      ],
+      rows: [{ id: "acme", cells: ["Acme", 12] }, ["Globex", 9]],
+    });
+
+    const rendered = renderArtifactMarkdown(definition([table]));
+
+    expect(rendered.kind).toBe("rendered");
+    if (rendered.kind !== "rendered") return;
+    expect(rendered.body).toContain("| Acme | 12 |\n| Globex | 9 |");
+    expect(rendered.body).not.toContain("acme");
+  });
+
   it("does not emit script or an external reference", () => {
     const html = renderArtifactHtml(definition([], "</title><script>alert(1)</script><title>"));
 

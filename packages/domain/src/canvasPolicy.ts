@@ -46,6 +46,7 @@ import {
   CANVAS_DESIGN_SCHEMA_VERSION,
   CANVAS_COMPARISON_MATRIX_SCHEMA_VERSION,
   CANVAS_MATH_SCHEMA_VERSION,
+  CANVAS_TABLE_ROW_ID_SCHEMA_VERSION,
   CanvasBlock,
   CanvasDefinition,
   canvasMockupUsesCatalog,
@@ -53,6 +54,9 @@ import {
   type CanvasMockupNode,
   CanvasVersion,
   canvasMetricUsesTrendFields,
+  canvasTableRowCells,
+  canvasTableRowId,
+  canvasTableUsesRowIds,
   decodeCanvasDefinition,
   decodeCanvasVersion,
   type CanvasSourceId,
@@ -77,6 +81,7 @@ const SUPPORTED_CANVAS_SCHEMA_VERSIONS: readonly number[] = [
   CANVAS_DESIGN_SCHEMA_VERSION,
   CANVAS_COMPARISON_MATRIX_SCHEMA_VERSION,
   CANVAS_MATH_SCHEMA_VERSION,
+  CANVAS_MOCKUP_CATALOG_SCHEMA_VERSION,
   CANVAS_SCHEMA_VERSION,
 ];
 
@@ -114,6 +119,7 @@ export type CanvasPolicyRejectionCode =
   | "duplicate-source-id"
   | "missing-source"
   | "table-row-shape"
+  | "duplicate-table-row-id"
   | "duplicate-series-id"
   | "duplicate-node-id"
   | "duplicate-edge-id"
@@ -426,7 +432,9 @@ function declaredSchemaRejection(input: unknown): CanvasPolicyRejectionCode | un
           (declared < CANVAS_METRIC_TREND_SCHEMA_VERSION &&
             canvasMetricUsesTrendFields(block as Record<string, unknown>)) ||
           (declared < CANVAS_MOCKUP_CATALOG_SCHEMA_VERSION &&
-            canvasMockupUsesCatalog(block as Record<string, unknown>))),
+            canvasMockupUsesCatalog(block as Record<string, unknown>)) ||
+          (declared < CANVAS_TABLE_ROW_ID_SCHEMA_VERSION &&
+            canvasTableUsesRowIds(block as Record<string, unknown>))),
     )
   ) {
     return "unsupported-schema-version";
@@ -733,13 +741,21 @@ function validateCrossReferences(definition: CanvasDefinition): void {
     }
 
     if (block.kind === "table") {
+      // A row id is what a comment anchors to, so one id may name only one row.
+      const rowIds = new Set<string>();
       for (const row of block.rows) {
-        if (row.length !== block.columns.length) {
+        if (canvasTableRowCells(row).length !== block.columns.length) {
           reject(
             "table-row-shape",
             `Canvas table ${block.blockId} has a row with the wrong width.`,
           );
         }
+        const rowId = canvasTableRowId(row);
+        if (rowId === undefined) continue;
+        if (rowIds.has(rowId)) {
+          reject("duplicate-table-row-id", `Canvas table ${block.blockId} has duplicate row ids.`);
+        }
+        rowIds.add(rowId);
       }
     }
 

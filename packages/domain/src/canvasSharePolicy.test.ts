@@ -196,6 +196,41 @@ describe("Canvas share policy", () => {
     ]);
   });
 
+  it("shares a table's rows as their cells, without the row ids comments anchor to", () => {
+    const table = {
+      blockId: "vendors",
+      schemaVersion: CANVAS_SCHEMA_VERSION,
+      kind: "table",
+      columns: [
+        { id: "vendor", label: "Vendor", type: "text" },
+        { id: "price", label: "Price", type: "number" },
+      ],
+      rows: [{ id: "acme", cells: ["Acme", 12] }, ["Globex", 9]],
+    } as const;
+    const receipt = buildCanvasStaticExportReceipt({
+      request,
+      current: decodeCanvasVersion({
+        ...current,
+        schemaVersion: CANVAS_SCHEMA_VERSION,
+        definition: {
+          ...current.definition,
+          schemaVersion: CANVAS_SCHEMA_VERSION,
+          blocks: [table],
+        },
+      }),
+      context,
+    });
+    expect(receipt.document.blocks).toEqual([
+      {
+        ...table,
+        rows: [
+          ["Acme", 12],
+          ["Globex", 9],
+        ],
+      },
+    ]);
+  });
+
   it("round-trips entity-relationship, swimlane, and mind map blocks through the static export", () => {
     const blocks = [
       {

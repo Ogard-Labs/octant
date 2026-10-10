@@ -311,6 +311,53 @@ describe("Canvas validation policy", () => {
     );
   });
 
+  it("refuses two rows of one table with the same id, and a row id under an older version", () => {
+    const keyed = (rows: ReadonlyArray<unknown>) => ({ ...table("keyed", []), rows });
+    expect(() =>
+      validateCanvasDefinition(
+        withBlocks([
+          keyed([
+            { id: "acme", cells: ["Acme"] },
+            ["Globex"],
+            { id: "initech", cells: ["Initech"] },
+          ]),
+        ]),
+      ),
+    ).not.toThrow();
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            keyed([
+              { id: "acme", cells: ["Acme"] },
+              { id: "acme", cells: ["Again"] },
+            ]),
+          ]),
+        ),
+      "duplicate-table-row-id",
+    );
+    expectPolicyCode(
+      () => validateCanvasDefinition(withBlocks([keyed([{ id: "acme", cells: ["Acme", "x"] }])])),
+      "table-row-shape",
+    );
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition({
+          ...baseDefinition,
+          schemaVersion: 12,
+          blocks: [{ ...keyed([{ id: "acme", cells: ["Acme"] }]), schemaVersion: 12 }],
+        }),
+      "unsupported-schema-version",
+    );
+    expect(() =>
+      validateCanvasDefinition({
+        ...baseDefinition,
+        schemaVersion: 12,
+        blocks: [{ ...table("older", [["Acme"]]), schemaVersion: 12 }],
+      }),
+    ).not.toThrow();
+  });
+
   it("refuses a diagram that groups a node it does not hold", () => {
     expectPolicyCode(
       () =>

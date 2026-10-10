@@ -1605,6 +1605,51 @@
   text-align: center;
 }
 
+/* The comment gutter leads each row, so a marker stays in view while a wide
+   table scrolls sideways. Like a block's marker it shows on hover or focus
+   and always once the row holds an open thread; a row without an id has an
+   empty gutter cell because nothing could keep a comment on it. */
+.canvas-block__table-grid .canvas-block__table-comment {
+  width: 1px;
+  padding-inline: var(--oct-space-1);
+  white-space: nowrap;
+}
+
+.canvas-block__row-comment-marker {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 4px;
+  border: 0;
+  border-radius: var(--oct-radius-sm);
+  background: transparent;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+  cursor: pointer;
+  opacity: 0;
+}
+
+.canvas-block__table-grid tr:hover .canvas-block__row-comment-marker,
+.canvas-block__row-comment-marker:focus-visible,
+.canvas-block__row-comment-marker[data-has-comments="true"] {
+  opacity: 1;
+}
+
+.canvas-block__row-comment-marker[data-has-comments="true"] {
+  color: var(--oct-accent);
+}
+
+.canvas-block__row-comment-marker:hover,
+.canvas-block__row-comment-marker:focus-visible {
+  background: var(--oct-fill-2);
+}
+
+@media (hover: none) {
+  .canvas-block__row-comment-marker {
+    opacity: 1;
+  }
+}
+
 /* System colours: the bar and the tint fall to system ink, and the value text
    is the reading either way. */
 @media (forced-colors: active) {

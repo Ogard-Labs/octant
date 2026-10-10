@@ -902,7 +902,12 @@ column whose values read as a path uses the shared path style, and a number
 column is right-aligned in tabular numerals. Sorting (each sorted header
 announces its direction with `aria-sort`; hiding the sorted column drops the
 sort), a text filter, and hidden columns are view state and revise nothing, so the exported and static forms keep the order
-the author wrote. The header sticks through a scrolling table.
+the author wrote. The header sticks through a scrolling table. Where comments
+are available, a row the author gave an `id` carries a comment marker in a
+leading gutter, so it stays in view while a wide table scrolls sideways. Like a
+block's marker it shows on row hover or keyboard focus, and always with its
+count once the row holds an open thread. A row without an id has an empty
+gutter cell, and a table with no ids draws no gutter.
 
 **Motion.** A chart transitions only on a state change — a legend toggle, a zoom
 — never on entrance. A transition lasts at most 200ms and is off under
