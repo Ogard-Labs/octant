@@ -13,7 +13,7 @@ runtime, filesystem root, or relay.
 
 ## Phases
 
-Each phase needs its own decision records and maintainer request before
+Each phase needs its own architecture update and maintainer request before
 implementation. Earlier phases do not imply later ones.
 
 ### Phase A — Harden remote control

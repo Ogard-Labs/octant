@@ -187,33 +187,21 @@ links from specifications remain useful for rationale and supporting detail.
 | [0163](0163-artifact-replicas-in-storage-the-user-owns.md) | Artifact replicas in storage the user owns | Accepted |
 | [0164](0164-canvas-designs-are-html-in-a-frame-that-runs-nothing.md) | Canvas designs are HTML in a frame that runs nothing | Accepted |
 
-## Recording architectural rationale
+## The archive is closed
 
-Routine layout, defaults, and implementation choices are documented by editing
-the current specification in the implementation PR. Git and the PR retain their
-history. A separate record is optional when a durable architectural tradeoff
-benefits from preserving its context and alternatives, such as journal authority,
-plugin trust, confinement, or signed updates.
+No records are added after 0164. Write a new or changed rule in its owning
+current specification, with a short rationale beside it when its tradeoff,
+rejected alternatives, or measurements need preserving. Git and the PR keep the
+rest of the history.
 
-When adding such a record:
+Existing records stay at their paths and keep their wording so code comments,
+PRs, and external links resolve. Their `Proposed`, `Accepted`, `Superseded`, and
+`Deprecated` labels describe the record's history only. A specification change
+does not edit, supersede, or re-label a record.
 
-- Keep the effective rule in the current specification and link to the rationale.
-  The record does not establish a parallel approval gate.
-- Take the next number (`00NN-short-slug.md`); keep existing identities and paths.
-- Use `# 00NN. Title`, `**Status:**`, `## Context`, `## Decision`,
-  `## Consequences`, and optionally `## Related`; aim for about 90 lines.
-- For new records, `Proposed` means a candidate not yet approved; `Accepted`
-  means the maintainer approved the decision, independently of implementation.
-  `Superseded by 00NN` and `Deprecated` describe retired rationale. Older labels
-  retain their historical meaning and are not reclassified by this convention.
-- Preserve an accepted record's account of the original decision. Add a link or
-  clarification when useful; write a later rationale record only when a new
-  consequential tradeoff merits one. A current-specification edit does not require
-  a superseding record or status change in the archive.
-- Revise a proposal in place while it is being considered. Its presence does not
-  constrain unrelated implementation.
-- Add new records to the index in the same change. `bun run decisions:check`
-  checks archive numbering, sections, index agreement, references, and historical
-  identities. It does not enforce old decisions against current specifications
-  or prove implementation compliance. Its history check explicitly skips when
-  the clone lacks a usable base; `OCTANT_DECISIONS_BASE` selects another base.
+`bun run decisions:check` keeps the archive intact: numbering, sections, index
+agreement, references from current specifications, and the identities of
+accepted records. It refuses a record numbered after 0164. It does not compare
+old decisions with current specifications or prove implementation compliance.
+Its history check explicitly skips when the clone lacks a usable base;
+`OCTANT_DECISIONS_BASE` selects another base.

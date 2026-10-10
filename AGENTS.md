@@ -55,10 +55,10 @@ the resolved rule. Routine implementation choices need no new design approval.
 | Sandbox, approvals, remote access, credentials                   | [Architecture: security and authority](docs/architecture.md#security-and-authority)                                                                                                   |
 | Packaging, updates, platform scope                               | [Current Release Boundary](#current-release-boundary) and [architecture](docs/architecture.md#current-release-boundary)                                                               |
 
-Edit the owning specification in place when approved behavior changes. Ordinary
-layout, defaults, and implementation choices do not require an ADR. Use a separate
-rationale record only for a consequential tradeoff that benefits from preserving
-its alternatives; keep the effective rule in the current specification.
+Edit the owning specification in place when approved behavior changes. Do not add
+ADRs: the decision archive is closed. When a consequential tradeoff needs its
+reasons, rejected alternatives, or measurements preserved, write them as a short
+rationale beside the rule in the owning specification.
 
 ## Implementation Discipline
 
@@ -315,8 +315,8 @@ satisfy it. Ordinary issues do not acquire a blanket human-signoff gate.
 - Update the owning current specification and affected user documentation in the
   same PR as a change to design, architecture, setup, workflow, security,
   deployment, or user-visible behavior. Reconcile conflicting summaries; link to
-  the owner rather than duplicating its rules. Preserve historical ADRs as
-  rationale without creating a superseding record for routine changes.
+  the owner rather than duplicating its rules. Leave historical ADRs unchanged;
+  a specification change never needs a new or superseding record.
 - Ready for review requires: acceptance criteria mapped to evidence, relevant
   checks run, current documentation, a pushed named branch, a non-draft standalone
   or bottom PR to `main` (or a child PR with its parent stack link), and no
