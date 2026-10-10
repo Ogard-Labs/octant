@@ -423,8 +423,8 @@ function codeThreadPort(session: OpenedLocalControlSession, threadId: string): A
 /**
  * A new thread in the asked-for mode, through the same commands the app's
  * composer sends. Work and Code need a Project; a Code thread lands in the
- * current checkout, approval-gated, on the first harness model the host
- * offers unless the caller names one.
+ * current checkout, approval-gated unless the Project remembers Full access,
+ * on the first harness model the host offers unless the caller names one.
  */
 export async function createAgentThread(
   session: OpenedLocalControlSession,
@@ -581,6 +581,13 @@ export async function createAgentThread(
       message: "Create or select a branch before starting a Code thread in the current checkout.",
     };
   }
+  // The app's composer asks for project-default Full access only when the
+  // person chose Remember for this Project, and the host grants that request
+  // without a per-thread confirmation only while the Project still remembers
+  // it. Asking the same way lets a terminal thread follow `octant project
+  // access <name> full-access`; anywhere else it starts approval-gated, and
+  // the host refuses a remembered request the Project no longer backs.
+  const remembered = project.type === "code" && project.codeAccessPersistence === "project-default";
   const now = new Date().toISOString();
   const threadId = randomUUID();
   const response = await session.send({
@@ -598,8 +605,8 @@ export async function createAgentThread(
         lifecycle: "active",
         providerInstanceId: model.instanceId,
         modelId: model.modelId,
-        executionPolicy: "approval-gated",
-        permissionPersistence: "current-session",
+        executionPolicy: remembered ? "full-access" : "approval-gated",
+        permissionPersistence: remembered ? "project-default" : "current-session",
         deliveryTarget: {
           branchIntent: String(checkout.checkout.head.name),
           remoteName: "origin",
