@@ -491,6 +491,14 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
             driverKind={group.instance.driverKind}
             size={20}
           />
+          {group.instance.driverKind === "claude" &&
+          group.instance.configuration.accent !== undefined ? (
+            <span
+              aria-hidden="true"
+              className="composer-model-picker__rail-accent"
+              data-accent={group.instance.configuration.accent}
+            />
+          ) : null}
           <span className="composer-model-picker__rail-label">{group.instance.displayName}</span>
           {status === undefined ? null : (
             <span

@@ -216,6 +216,8 @@ export interface ClaudeDriverOptions {
   readonly instanceId: ProviderInstanceId;
   readonly binaryPath: string;
   readonly authentication: ClaudeAuthentication;
+  /** Claude-owned directory for this account. Isolated launches skip helper tokens. */
+  readonly configDirectory?: string;
   readonly process: ClaudeProcessPort;
   readonly sdk: ClaudeAgentSdkPort;
   readonly credentialResolver?: ProviderCredentialResolver;
@@ -752,7 +754,10 @@ function makeProbe(
       const version = yield* options.process.probeVersion(options.binaryPath);
       let apiKey: string | undefined;
       if (options.authentication === "subscription") {
-        const environment = yield* environmentFactory("subscription");
+        const environment = yield* environmentFactory(
+          "subscription",
+          options.configDirectory === undefined ? {} : { configDirectory: options.configDirectory },
+        );
         const status = yield* options.process.probeSubscription(
           options.binaryPath,
           environment.environment,
@@ -819,7 +824,12 @@ function makeProbe(
       const sdkResult = yield* probeSdk(
         options,
         environmentFactory,
-        apiKey === undefined ? {} : { apiKey },
+        {
+          ...(apiKey === undefined ? {} : { apiKey }),
+          ...(options.configDirectory === undefined
+            ? {}
+            : { configDirectory: options.configDirectory }),
+        },
       ).pipe(
         Effect.map((models) => ({ kind: "ready" as const, models })),
         Effect.catchAll((providerFailure) =>
@@ -1246,6 +1256,7 @@ function makeConnection(
         }
         const helperToken =
           options.authentication === "subscription" &&
+          options.configDirectory === undefined &&
           CONFINED_CLAUDE_EXECUTION_POLICIES.has(input.executionPolicy)
             ? await connectedHelperToken(options)
             : undefined;
@@ -1258,11 +1269,13 @@ function makeConnection(
         const environment = await runSetupEffect(
           environmentFactory(
             options.authentication,
-            apiKey !== undefined
-              ? { apiKey }
-              : helperToken !== undefined
-                ? { oauthToken: helperToken }
-                : {},
+            {
+              ...(apiKey !== undefined ? { apiKey } : {}),
+              ...(helperToken !== undefined ? { oauthToken: helperToken } : {}),
+              ...(options.configDirectory === undefined
+                ? {}
+                : { configDirectory: options.configDirectory }),
+            },
           ).pipe(Effect.provideService(Scope.Scope, scope)),
           signal,
         );

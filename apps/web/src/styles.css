@@ -4995,6 +4995,75 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   box-shadow: none;
 }
 
+.composer-model-picker__rail-accent,
+.claude-account-accent-picker__swatch {
+  --claude-account-accent: var(--octant-text-muted);
+}
+
+.composer-model-picker__rail-accent[data-accent="rust"],
+.claude-account-accent-picker__swatch[data-accent="rust"] {
+  --claude-account-accent: #c45c26;
+}
+
+.composer-model-picker__rail-accent[data-accent="gold"],
+.claude-account-accent-picker__swatch[data-accent="gold"] {
+  --claude-account-accent: #c4922a;
+}
+
+.composer-model-picker__rail-accent[data-accent="green"],
+.claude-account-accent-picker__swatch[data-accent="green"] {
+  --claude-account-accent: #3d8f5a;
+}
+
+.composer-model-picker__rail-accent[data-accent="teal"],
+.claude-account-accent-picker__swatch[data-accent="teal"] {
+  --claude-account-accent: #2a8f8a;
+}
+
+.composer-model-picker__rail-accent[data-accent="blue"],
+.claude-account-accent-picker__swatch[data-accent="blue"] {
+  --claude-account-accent: #3a6ea8;
+}
+
+.composer-model-picker__rail-accent[data-accent="violet"],
+.claude-account-accent-picker__swatch[data-accent="violet"] {
+  --claude-account-accent: #7a4ea8;
+}
+
+.composer-model-picker__rail-accent[data-accent="rose"],
+.claude-account-accent-picker__swatch[data-accent="rose"] {
+  --claude-account-accent: #b44d6a;
+}
+
+.composer-model-picker__rail-accent {
+  position: absolute;
+  left: 2px;
+  bottom: 2px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--claude-account-accent);
+}
+
+.claude-account-accent-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.claude-account-accent-picker__swatch {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid var(--octant-border);
+  border-radius: 50%;
+  background: var(--claude-account-accent);
+}
+
+.claude-account-accent-picker__swatch[data-selected="true"] {
+  box-shadow: 0 0 0 2px var(--octant-focus-edge);
+}
+
 .composer-model-picker__rail-item--favorites {
   color: var(--octant-text-muted);
 }

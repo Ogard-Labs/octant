@@ -1,3 +1,4 @@
+import { assignedClaudeAccountConfigDirectory } from "@octant/domain";
 import {
   decodeProviderCatalogSnapshot,
   decodeProviderInstance,
@@ -11,7 +12,7 @@ import {
   type ProviderInstance,
 } from "@octant/contracts";
 import { existsSync, realpathSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { basename, dirname } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { Effect, Queue, Stream } from "effect";
@@ -1279,6 +1280,53 @@ describe("ProviderService", () => {
     });
     expect(JSON.stringify(fixture.append.mock.calls)).not.toMatch(
       /apiKey|oauthToken|credential|account/,
+    );
+  });
+
+  it("assigns a separate Claude-owned directory to each additional Claude account", async () => {
+    const fixture = serviceFixture();
+    await fixture.service.execute(windowId, {
+      kind: "create-claude-provider",
+      instanceId,
+      expectedVersion: 0,
+      displayName: "Claude personal",
+      configuration: {
+        kind: "claude-agent-sdk",
+        binaryPath: "/opt/homebrew/bin/claude",
+        authentication: "subscription",
+      },
+    });
+    const created = await fixture.service.execute(windowId, {
+      kind: "create-claude-provider",
+      instanceId: otherId,
+      expectedVersion: 0,
+      displayName: "Claude work",
+      configuration: {
+        kind: "claude-agent-sdk",
+        binaryPath: "/opt/homebrew/bin/claude",
+        authentication: "subscription",
+        accent: "teal",
+      },
+    });
+    expect(created).toMatchObject({
+      kind: "provider-created",
+      instance: {
+        id: otherId,
+        displayName: "Claude work",
+        configuration: {
+          configDirectory: assignedClaudeAccountConfigDirectory(homedir(), otherId),
+          accent: "teal",
+          authentication: "subscription",
+        },
+      },
+    });
+    const first = await fixture.service.bootstrap(windowId);
+    const personal = first.instances.find((instance) => instance.id === instanceId);
+    const work = first.instances.find((instance) => instance.id === otherId);
+    expect(personal?.driverKind === "claude" ? personal.configuration.configDirectory : undefined)
+      .toBeUndefined();
+    expect(work?.driverKind === "claude" ? work.configuration.configDirectory : undefined).toBe(
+      assignedClaudeAccountConfigDirectory(homedir(), otherId),
     );
   });
 

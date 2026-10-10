@@ -99,6 +99,9 @@ export function makeProviderDriver(
         instanceId: instance.id,
         binaryPath: instance.configuration.binaryPath,
         authentication: instance.configuration.authentication,
+        ...(instance.configuration.configDirectory === undefined
+          ? {}
+          : { configDirectory: instance.configuration.configDirectory }),
         process: options.claudeProcess,
         sdk: options.claudeSdk,
         runtimeRegistry: options.runtimeRegistry,

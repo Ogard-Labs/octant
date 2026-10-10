@@ -570,6 +570,37 @@ describe("ProviderSettingsView", () => {
     expect(document.body.textContent).not.toContain("private-value");
   });
 
+  it("creates a Claude account with a name, accent, and optional config directory", async () => {
+    const user = userEvent.setup();
+    const props = fixture({ instance: claudeProvider() });
+    renderExpanded(<ProviderSettingsView {...props} />);
+
+    await chooseSelectFieldOption(user, screen.getByLabelText("Provider type"), "Claude Agent SDK");
+    const create = screen.getByRole("form", { name: "Add Claude provider" });
+    await user.type(within(create).getByLabelText("Provider name"), "Work Claude");
+    await user.type(within(create).getByLabelText("Claude binary"), "/opt/homebrew/bin/claude");
+    await user.type(
+      within(create).getByLabelText("Claude config directory"),
+      "/Users/example/.claude-accounts/work",
+    );
+    await user.click(within(create).getByRole("radio", { name: "Teal" }));
+    expect(within(create).getByLabelText("Claude sign-in command")).toHaveValue(
+      "CLAUDE_CONFIG_DIR='/Users/example/.claude-accounts/work' CLAUDE_SECURESTORAGE_CONFIG_DIR='/Users/example/.claude-accounts/work' '/opt/homebrew/bin/claude' auth login",
+    );
+    await user.click(within(create).getByRole("button", { name: "Add Claude" }));
+    expect(props.onCreateClaude).toHaveBeenLastCalledWith(
+      "Work Claude",
+      {
+        kind: "claude-agent-sdk",
+        binaryPath: "/opt/homebrew/bin/claude",
+        authentication: "subscription",
+        configDirectory: "/Users/example/.claude-accounts/work",
+        accent: "teal",
+      },
+      expect.objectContaining({ value: "" }),
+    );
+  });
+
   it("creates Mistral Vibe with API-key authentication only", async () => {
     const user = userEvent.setup();
     const props = fixture({ instance: vibeProvider() });
@@ -1112,6 +1143,9 @@ describe("ProviderSettingsView", () => {
     expect(within(card).getByText(/Remember for this Project/)).toHaveTextContent(/one-shot/i);
     expect(within(card).getByLabelText("Claude authentication for Claude local")).toHaveTextContent(
       "Claude subscription",
+    );
+    expect(within(card).getByLabelText("Claude sign-in command")).toHaveValue(
+      "'/opt/homebrew/bin/claude' auth login",
     );
     expect(
       within(card).queryByLabelText("Anthropic API key for Claude local"),

@@ -56,6 +56,7 @@ import {
   createAzureFoundryProvider,
   createBflImageProvider,
   createIdeogramImageProvider,
+  assignedClaudeAccountConfigDirectory,
   createClaudeProvider,
   createDevinProvider,
   createGeminiImageProvider,
@@ -94,7 +95,7 @@ import {
 } from "@octant/domain";
 import { accessSync, constants, realpathSync, statSync } from "node:fs";
 import { mkdtemp, realpath, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { Cause, Effect, Exit, Fiber, Option, Schema, Stream } from "effect";
 import { admittedBundledProviderDriverKinds } from "@octant/plugin-host/provider-drivers";
@@ -668,12 +669,23 @@ export class ProviderService implements ProviderServiceApi {
             case "create-kimi-code-provider":
               instance = createKimiCodeProvider({ ...common, binaryPath: command.binaryPath });
               break;
-            case "create-claude-provider":
+            case "create-claude-provider": {
+              const existingClaudeCount = instances.filter(
+                (candidate) => candidate.driverKind === "claude",
+              ).length;
+              const assignedDirectory =
+                command.configuration.configDirectory === undefined && existingClaudeCount > 0
+                  ? assignedClaudeAccountConfigDirectory(homedir(), command.instanceId)
+                  : command.configuration.configDirectory;
               instance = createClaudeProvider({
                 ...common,
-                configuration: command.configuration,
+                configuration: {
+                  ...command.configuration,
+                  ...(assignedDirectory === undefined ? {} : { configDirectory: assignedDirectory }),
+                },
               });
               break;
+            }
             case "create-devin-provider":
               instance = createDevinProvider({
                 ...common,

@@ -1,6 +1,6 @@
 import {
+  type ClaudeAccountAccent,
   type ClaudeAuthentication,
-  type ClaudeProviderConfiguration,
   type GrokAuthentication,
   type GrokProviderConfiguration,
   type GeminiAuthentication,
@@ -31,6 +31,8 @@ import {
 } from "../ProviderSettingsCredentials";
 import { driverLabel } from "../providerSettingsPresentation";
 import type { ProviderSettingsViewProps } from "../ProviderSettingsView";
+import { ClaudeAccountSettingsFields } from "./ClaudeAccountFields";
+import { claudeConfigurationFromFields } from "./claudeAccountFields";
 import {
   configurationFrom,
   anthropicConfigurationFrom,
@@ -131,6 +133,9 @@ export function ProviderCreateForm(
   const [providerType, setProviderType] = useState<ProviderCreateProviderType>(initialProviderType);
   const [claudeAuthentication, setClaudeAuthentication] =
     useState<ClaudeAuthentication>("subscription");
+  const [claudeAccent, setClaudeAccent] = useState<ClaudeAccountAccent | "">("");
+  const [claudeBinaryPath, setClaudeBinaryPath] = useState("");
+  const [claudeConfigDirectory, setClaudeConfigDirectory] = useState("");
   const vibeAuthentication: MistralVibeAuthentication = "api-key";
   const [grokAuthentication, setGrokAuthentication] = useState<GrokAuthentication>("subscription");
   const [glmAuthentication, setGlmAuthentication] = useState<GlmAuthentication>("provider-owned");
@@ -286,11 +291,12 @@ export function ProviderCreateForm(
                   String(data.get("binaryPath") ?? ""),
                 );
               } else if (providerType === "claude") {
-                const configuration: ClaudeProviderConfiguration = {
-                  kind: "claude-agent-sdk",
+                const configuration = claudeConfigurationFromFields({
                   binaryPath: String(data.get("binaryPath") ?? ""),
                   authentication: claudeAuthentication,
-                };
+                  configDirectory: String(data.get("configDirectory") ?? ""),
+                  accent: String(data.get("accent") ?? ""),
+                });
                 const enteredCredential = transientCredential(credentialInput.current);
                 operation = props.onCreateClaude(
                   String(data.get("displayName") ?? ""),
@@ -553,8 +559,14 @@ export function ProviderCreateForm(
                   aria-label={`${providerType === "mistral-vibe" ? "vibe-acp" : selectedDriverLabel} binary`}
                   className="settings-view__text-input window-no-drag"
                   name="binaryPath"
+                  onChange={
+                    providerType === "claude"
+                      ? (event) => setClaudeBinaryPath(event.currentTarget.value)
+                      : undefined
+                  }
                   placeholder={`/absolute/path/to/${selectedBinaryName}`}
                   required
+                  {...(providerType === "claude" ? { value: claudeBinaryPath } : {})}
                 />
               </label>
             ) : providerType === "ollama" ? (
@@ -800,17 +812,27 @@ export function ProviderCreateForm(
               </>
             )}
             {providerType === "claude" ? (
-              <ClaudeCreateAuthenticationFields
-                authentication={claudeAuthentication}
-                credentialInput={credentialInput}
-                credentialManagementAvailable={props.credentialManagementAvailable}
-                onAuthenticationChange={(next) => {
-                  if (next === "subscription" && credentialInput.current !== null) {
-                    credentialInput.current.value = "";
-                  }
-                  setClaudeAuthentication(next);
-                }}
-              />
+              <>
+                <ClaudeCreateAuthenticationFields
+                  authentication={claudeAuthentication}
+                  credentialInput={credentialInput}
+                  credentialManagementAvailable={props.credentialManagementAvailable}
+                  onAuthenticationChange={(next) => {
+                    if (next === "subscription" && credentialInput.current !== null) {
+                      credentialInput.current.value = "";
+                    }
+                    setClaudeAuthentication(next);
+                  }}
+                />
+                <ClaudeAccountSettingsFields
+                  accent={claudeAccent}
+                  binaryPath={claudeBinaryPath}
+                  configDirectory={claudeConfigDirectory}
+                  onAccentChange={setClaudeAccent}
+                  onConfigDirectoryChange={setClaudeConfigDirectory}
+                  showSignInCommand={claudeAuthentication === "subscription"}
+                />
+              </>
             ) : null}
             {providerType === "mistral-vibe" ? (
               <VibeCreateAuthenticationFields

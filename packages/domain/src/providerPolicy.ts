@@ -1,4 +1,5 @@
 import type { AggregateVersion, UtcTimestamp } from "@octant/contracts/events";
+import { CLAUDE_ACCOUNT_ACCENTS } from "@octant/contracts/providers";
 import type {
   AnthropicCompatibleProviderConfiguration,
   AnthropicCompatibleProviderInstance,
@@ -6,6 +7,7 @@ import type {
   AzureFoundryProviderInstance,
   BflImageProviderConfiguration,
   BflImageProviderInstance,
+  ClaudeAccountAccent,
   ClaudeAuthentication,
   ClaudeProviderConfiguration,
   ClaudeProviderInstance,
@@ -79,6 +81,8 @@ export type ProviderPolicyRejectionCode =
   | "invalid-model-id"
   | "invalid-model-ids"
   | "invalid-name"
+  | "invalid-config-directory"
+  | "invalid-accent"
   | "invalid-timestamp"
   | "name-conflict";
 
@@ -415,6 +419,68 @@ export interface ClaudeConfigurationInput {
   readonly kind: ClaudeProviderConfiguration["kind"];
   readonly binaryPath: string;
   readonly authentication: ClaudeAuthentication;
+  readonly configDirectory?: string;
+  readonly accent?: ClaudeAccountAccent;
+}
+
+/** Closed accent set mirrored from the contract so Settings can list it. */
+export const CLAUDE_ACCOUNT_ACCENT_VALUES: ReadonlyArray<ClaudeAccountAccent> =
+  CLAUDE_ACCOUNT_ACCENTS;
+
+/**
+ * Directory Claude owns for an additional account. The first/default instance
+ * omits this and keeps Claude's usual `~/.claude` (or host `CLAUDE_CONFIG_DIR`).
+ */
+export function assignedClaudeAccountConfigDirectory(
+  homeDirectory: string,
+  instanceId: ProviderInstanceId,
+): string {
+  const home = homeDirectory.trim().replace(/\/+$/, "");
+  if (!home.startsWith("/")) {
+    reject("invalid-config-directory", "Claude account home must be an absolute directory.");
+  }
+  return `${home}/.claude-accounts/${instanceId}`;
+}
+
+/** Unmodified Claude CLI sign-in. Octant never wraps or replaces this flow. */
+export function claudeAuthLoginArgv(binaryPath: string): ReadonlyArray<string> {
+  return [normalizeBinaryPath(binaryPath), "auth", "login"];
+}
+
+export function formatClaudeAuthLoginCommand(input: {
+  readonly binaryPath: string;
+  readonly configDirectory?: string;
+}): string {
+  const argv = claudeAuthLoginArgv(input.binaryPath);
+  const quoted = argv.map(shellSingleQuote).join(" ");
+  if (input.configDirectory === undefined) return quoted;
+  return `CLAUDE_CONFIG_DIR=${shellSingleQuote(input.configDirectory)} CLAUDE_SECURESTORAGE_CONFIG_DIR=${shellSingleQuote(input.configDirectory)} ${quoted}`;
+}
+
+function shellSingleQuote(value: string): string {
+  return `'${value.replaceAll("'", `'\\''`)}'`;
+}
+
+function pathBasename(path: string): string {
+  const trimmed = path.replace(/\/+$/, "");
+  const slash = trimmed.lastIndexOf("/");
+  return slash === -1 ? trimmed : trimmed.slice(slash + 1);
+}
+
+function normalizeClaudeConfigDirectory(path: string | undefined): string | undefined {
+  if (path === undefined) return undefined;
+  const normalized = path.trim();
+  if (normalized.length === 0) return undefined;
+  if (!normalized.startsWith("/")) {
+    reject("invalid-config-directory", "Claude config directory must be an absolute path.");
+  }
+  if (pathBasename(normalized) === ".credentials.json") {
+    reject(
+      "invalid-config-directory",
+      "Claude config directory cannot be a credential file.",
+    );
+  }
+  return normalized;
 }
 
 export interface MistralVibeConfigurationInput {
@@ -700,10 +766,19 @@ function normalizeClaudeConfiguration(
   ) {
     reject("invalid-authentication", "Claude authentication must be subscription or api-key.");
   }
+  if (
+    configuration.accent !== undefined &&
+    !CLAUDE_ACCOUNT_ACCENT_VALUES.includes(configuration.accent)
+  ) {
+    reject("invalid-accent", "Claude account accent must be one of the named swatches.");
+  }
+  const configDirectory = normalizeClaudeConfigDirectory(configuration.configDirectory);
   return {
     kind: "claude-agent-sdk",
     binaryPath: normalizeBinaryPath(configuration.binaryPath),
     authentication: configuration.authentication,
+    ...(configDirectory === undefined ? {} : { configDirectory }),
+    ...(configuration.accent === undefined ? {} : { accent: configuration.accent }),
   };
 }
 

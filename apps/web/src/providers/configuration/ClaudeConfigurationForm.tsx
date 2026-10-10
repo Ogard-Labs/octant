@@ -1,6 +1,6 @@
 import {
+  type ClaudeAccountAccent,
   type ClaudeAuthentication,
-  type ClaudeProviderConfiguration,
   type ProviderInstance,
 } from "@octant/contracts";
 import { useRef, useState } from "react";
@@ -15,6 +15,8 @@ import {
 } from "../ProviderSettingsCredentials";
 import type { ProviderSettingsViewProps } from "../ProviderSettingsView";
 import { ClaudeHelperSignIn, type RunClaudeHelperCommand } from "../ClaudeHelperSignIn";
+import { ClaudeAccountSettingsFields } from "./ClaudeAccountFields";
+import { claudeConfigurationFromFields } from "./claudeAccountFields";
 
 interface ClaudeConfigurationFormProps {
   readonly instance: Extract<ProviderInstance, { driverKind: "claude" }>;
@@ -30,17 +32,25 @@ export function ClaudeConfigurationForm(props: ClaudeConfigurationFormProps) {
   const [authentication, setAuthentication] = useState<ClaudeAuthentication>(
     props.instance.configuration.authentication,
   );
+  const [accent, setAccent] = useState<ClaudeAccountAccent | "">(
+    props.instance.configuration.accent ?? "",
+  );
+  const [configDirectory, setConfigDirectory] = useState(
+    props.instance.configuration.configDirectory ?? "",
+  );
   return (
     <form
       className="provider-card__edit provider-card__edit--claude"
       noValidate
       onSubmit={(event) => {
         event.preventDefault();
-        const configuration: ClaudeProviderConfiguration = {
-          kind: "claude-agent-sdk",
-          binaryPath: String(new FormData(event.currentTarget).get("binaryPath") ?? ""),
+        const data = new FormData(event.currentTarget);
+        const configuration = claudeConfigurationFromFields({
+          binaryPath: String(data.get("binaryPath") ?? ""),
           authentication,
-        };
+          configDirectory: String(data.get("configDirectory") ?? ""),
+          accent: String(data.get("accent") ?? ""),
+        });
         const enteredCredential = transientCredential(credentialInput.current);
         const key =
           authentication === "api-key"
@@ -78,7 +88,7 @@ export function ClaudeConfigurationForm(props: ClaudeConfigurationFormProps) {
       <SettingRow
         description={
           authentication === "subscription"
-            ? "Authenticate with the official Claude Code app or CLI, then check the connection."
+            ? "Sign in with the official Claude Code CLI using the unmodified claude auth login command in a terminal for this account, then check the connection."
             : undefined
         }
         label="Authentication"
@@ -103,6 +113,15 @@ export function ClaudeConfigurationForm(props: ClaudeConfigurationFormProps) {
           value={authentication}
         />
       </SettingRow>
+      <ClaudeAccountSettingsFields
+        accent={accent}
+        binaryPath={props.instance.configuration.binaryPath}
+        configDirectory={configDirectory}
+        instanceId={props.instance.id}
+        onAccentChange={setAccent}
+        onConfigDirectoryChange={setConfigDirectory}
+        showSignInCommand={authentication === "subscription"}
+      />
       {authentication === "api-key" ? (
         <SettingRow
           label="Anthropic API key (leave blank to preserve)"

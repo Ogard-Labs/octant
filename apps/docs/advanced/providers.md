@@ -163,6 +163,21 @@ available for profiles that support it. Mistral Vibe from Octant requires a
 Mistral API key entered in **Settings → Providers** because its confined launch
 does not read the macOS Keychain.
 
+You can add more than one Claude account. Each account is its own provider
+in **Settings → Providers**: give it a name and an accent color so the model
+picker can tell them apart. The first account uses Claude's default directory
+(`~/.claude`, or `CLAUDE_CONFIG_DIR` if that is already set on the host).
+Each additional account gets its own Claude-owned directory under
+`~/.claude-accounts/`, unless you point it at an existing Claude directory.
+Sign in only with the unmodified `claude auth login` command in a terminal
+for that account — the provider card shows the exact command, including the
+directory variables Claude expects. Octant never reads, copies, or stores
+Claude credentials or tokens. Connection check uses what the Claude CLI or
+SDK reports, not files in that directory. A thread stays on the account it
+started with. Octant does not fail over, rotate, or load-balance between
+Claude accounts. An Anthropic API-key account still uses the key you store
+in Octant for that provider, on its own directory when one is set.
+
 Claude Code on a Claude subscription has one extra step for subagents and Plan
 turns. Those runs are read-only and cannot reach the keychain where your Claude
 sign-in lives, so **Settings → Providers → Claude Code** offers **Connect Claude

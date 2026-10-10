@@ -182,6 +182,7 @@ function harness(
   options: {
     readonly models?: ClaudeQueryPort["initialization"]["models"];
     readonly autoCompactThreshold?: number;
+    readonly configDirectory?: string;
   } = {},
 ) {
   const queries: FakeQuery[] = [];
@@ -241,20 +242,33 @@ function harness(
   const releasedEnvironments: NodeJS.ProcessEnv[] = [];
   const makeEnvironmentScope = (
     mode: ClaudeAuthentication,
-    options?: { readonly apiKey?: string; readonly oauthToken?: string },
+    options?: {
+      readonly apiKey?: string;
+      readonly oauthToken?: string;
+      readonly configDirectory?: string;
+    },
   ): Effect.Effect<ClaudeEnvironmentScope, ProviderFailure, Scope.Scope> =>
     Effect.acquireRelease(
       Effect.sync(() => ({
         environment:
-          mode === "api-key"
-            ? { PATH: "/usr/bin", ANTHROPIC_API_KEY: options?.apiKey }
-            : {
+          options?.configDirectory !== undefined
+            ? {
                 PATH: "/usr/bin",
-                CLAUDE_CONFIG_DIR: "/provider-native",
-                ...(options?.oauthToken === undefined
-                  ? {}
-                  : { CLAUDE_CODE_OAUTH_TOKEN: options.oauthToken }),
-              },
+                CLAUDE_CONFIG_DIR: options.configDirectory,
+                CLAUDE_SECURESTORAGE_CONFIG_DIR: options.configDirectory,
+                ...(mode === "api-key" && options.apiKey !== undefined
+                  ? { ANTHROPIC_API_KEY: options.apiKey }
+                  : {}),
+              }
+            : mode === "api-key"
+              ? { PATH: "/usr/bin", ANTHROPIC_API_KEY: options?.apiKey }
+              : {
+                  PATH: "/usr/bin",
+                  CLAUDE_CONFIG_DIR: "/provider-native",
+                  ...(options?.oauthToken === undefined
+                    ? {}
+                    : { CLAUDE_CODE_OAUTH_TOKEN: options.oauthToken }),
+                },
       })),
       ({ environment }) =>
         Effect.sync(() => {
@@ -305,6 +319,7 @@ function harness(
       instanceId,
       binaryPath: "/opt/homebrew/bin/claude",
       authentication: selectedAuthentication,
+      ...(options.configDirectory === undefined ? {} : { configDirectory: options.configDirectory }),
       process,
       sdk,
       credentialResolver,
@@ -4232,6 +4247,23 @@ describe("Claude for helpers", () => {
     expect(f.opens[1]?.authEnvironment.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
     // The connected token stands in for the keychain probe it could not pass.
     expect(f.process.probeSubscription).toHaveBeenCalledOnce();
+  });
+
+  it("keeps an isolated Claude account on its own directory and never injects a helper token", async () => {
+    const accountDirectory = "/Users/example/.claude-accounts/work";
+    const f = harness("subscription", "current-session", { configDirectory: accountDirectory });
+    const acquired = await acquire(f.driver, "chat");
+    try {
+      await Effect.runPromise(
+        acquired.connection.start({ sessionId, modelId, executionPolicy: "plan" }),
+      );
+    } finally {
+      await acquired.close();
+    }
+
+    expect(f.helperSignIn.read).not.toHaveBeenCalled();
+    expect(f.opens[0]?.authEnvironment.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
+    expect(f.opens[0]?.authEnvironment.CLAUDE_CONFIG_DIR).toBe(accountDirectory);
   });
 
   it("refuses a confined launch with the step that connects Claude for helpers", async () => {
