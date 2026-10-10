@@ -413,7 +413,7 @@ describe("ComposerModelPicker", () => {
   it("marks a Claude account rail with its accent color", async () => {
     const user = userEvent.setup();
     const instances = [
-      instance("opencode", providerA, "Local OpenCode"),
+      instance("opencode", providerA, "Local agent"),
       decodeProviderInstance({
         ...instance("claude", providerB, "Work Claude"),
         configuration: {
@@ -445,7 +445,7 @@ describe("ComposerModelPicker", () => {
     const rail = await screen.findByRole("option", { name: "Work Claude" });
     expect(rail.querySelector("[data-accent='teal']")).not.toBeNull();
     expect(
-      screen.getByRole("option", { name: "Local OpenCode" }).querySelector("[data-accent]"),
+      screen.getByRole("option", { name: "Local agent" }).querySelector("[data-accent]"),
     ).toBeNull();
   });
 
