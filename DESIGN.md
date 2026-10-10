@@ -916,6 +916,23 @@ gutter cell, and a table with no ids draws no gutter.
 `prefers-reduced-motion: reduce` and when the workspace sets
 `data-octant-reduced-motion="true"`.
 
+**Funnel, radar, and sankey.** These draw at the figure's measured width in the
+same system. A funnel centres each stage as a bar whose width is its share of
+the first stage, with a faint neck of the stage hue between neighbours; the
+stage name sits at the left in `--oct-fg-2` and the value with its share of the
+first stage at the right, the share in `--oct-meta`. A funnel is one series and
+draws no legend. A radar draws rings at round values from zero and a spoke per
+axis in the grid ink, each series as an outline in its hue and dash over a 14%
+wash, with a vertex dot per axis; focusing a vertex lists every visible series at
+that axis in the one tooltip, and the legend toggles series. A sankey draws its
+nodes as 10px columns and each flow as a translucent band in the hue of the node
+it leaves, so a source can be followed to its endings; a hovered band, or every
+band through a hovered node, darkens. Node names read into the gap beside their
+column in text ink, and where two columns face across one gap they share it; a
+node's total joins its name only where both fit. The legend toggles nodes.
+Under forced colours the washes fall away: radar areas and funnel necks become
+outlines, and sankey bands become system-ink outlines told apart by their dash.
+
 **Empty and error states.** A chart with no series, a table with no rows, and a
 timeline with no items keep their block's height and say so in `--oct-muted` text
 rather than collapsing, so a document does not jump as data arrives. A block that

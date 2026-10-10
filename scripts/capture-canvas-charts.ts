@@ -93,10 +93,20 @@ if (executable === undefined) {
   process.exit(2);
 }
 
-// `--only=mockup` captures the mockup blocks alone, as `canvas-mockup-*.png`.
-const onlyMockups = process.argv.includes("--only=mockup");
+// `--only=mockup` captures the mockup blocks alone, as `canvas-mockup-*.png`,
+// and `--only=flow` the funnel, radar, and sankey charts, as `canvas-flow-*.png`.
+const ONLY_SETS = ["mockup", "flow"] as const;
+const onlyArg = process.argv.find((arg) => arg.startsWith("--only="))?.slice("--only=".length);
+const only = ONLY_SETS.find((set) => set === onlyArg);
+if (onlyArg !== undefined && only === undefined) {
+  console.error(
+    JSON.stringify({ status: "failed", reason: `--only takes ${ONLY_SETS.join(" or ")}` }),
+  );
+  process.exit(1);
+}
+const onlyMockups = only === "mockup";
 const port = pickPort();
-const harnessUrl = `http://localhost:${String(port)}/chart-visuals-evidence.html${onlyMockups ? "?only=mockup" : ""}`;
+const harnessUrl = `http://localhost:${String(port)}/chart-visuals-evidence.html${only === undefined ? "" : `?only=${only}`}`;
 const serverProcess = Bun.spawn(
   [process.execPath, "run", "dev", "--", "--port", String(port), "--strictPort"],
   { cwd: webDir, stdout: "ignore", stderr: "ignore" },
@@ -132,6 +142,11 @@ try {
     await page.waitForSelector(
       "main[data-canvas-chart-evidence='all'] .canvas-mockup, main[data-canvas-chart-evidence='all'] .canvas-block__chart, main[data-canvas-chart-evidence='all'] .canvas-block__heatmap, main[data-canvas-chart-evidence='all'] .canvas-block__bar-list, main[data-canvas-chart-evidence='all'] .canvas-block__matrix, main[data-canvas-chart-evidence='all'] .canvas-block__math, main[data-canvas-chart-evidence='all'] .canvas-block__table, main[data-canvas-chart-evidence='all'] .canvas-block__kind-diagram",
     );
+    // The dev server injects the stylesheet after the first paint, and a chart
+    // measured before it lands keeps the narrow width it drew at; let the page
+    // settle so every chart measures its real column.
+    await page.waitForLoadState("networkidle");
+    await page.waitForTimeout(300);
 
     // Show the table's sorted state in the capture: the sort mark and the
     // announced direction are what a header control looks like once used.
@@ -148,6 +163,13 @@ try {
       }
     }
 
+    // Open each flow chart's data table so the capture shows its fallback too.
+    if (only === "flow") {
+      for (const summary of await page.locator(".canvas-block__chart-data summary").all()) {
+        await summary.click();
+      }
+    }
+
     for (const scenario of SCENARIOS) {
       await page.emulateMedia({ forcedColors: scenario === "forced" ? "active" : "none" });
       await page.evaluate((value: Scenario) => {
@@ -155,10 +177,7 @@ try {
       }, scenario);
       // Let fonts and any layout settle before the capture.
       await page.waitForTimeout(150);
-      const path = join(
-        evidenceDir,
-        `canvas-${onlyMockups ? "mockup" : "charts"}-${scenario}${suffix}.png`,
-      );
+      const path = join(evidenceDir, `canvas-${only ?? "charts"}-${scenario}${suffix}.png`);
       await page.screenshot({ path, fullPage: true });
       written.push(path);
     }

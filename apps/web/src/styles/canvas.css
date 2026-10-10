@@ -398,6 +398,58 @@
   filter: brightness(1.12);
 }
 
+/* Funnel, radar, and sankey charts. A stage, an axis, or a node is named in
+   text ink beside its mark, never in the mark's hue; its reading follows in
+   the meta ink so the name leads. */
+.canvas-chart__category {
+  fill: var(--oct-fg-2);
+  font-family: inherit;
+  font-size: var(--oct-text-xs);
+}
+
+.canvas-chart__reading {
+  fill: var(--oct-fg-2);
+  font-family: inherit;
+  font-size: var(--oct-text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.canvas-chart__reading-share {
+  fill: var(--oct-meta);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The neck between two funnel stages is a faint wash of the stage hue, so the
+   drop-off reads as one shape without competing with the bars. */
+.canvas-chart__funnel-neck {
+  fill: var(--oct-ser, var(--oct-series-1));
+  opacity: 0.14;
+}
+
+/* A radar series is an outline with a faint wash, so overlapping series stay
+   readable through each other. */
+.canvas-block__chart-mark.canvas-chart__radar-area {
+  fill-opacity: 0.14;
+}
+
+/* A sankey band is a translucent wash of the node it leaves; the hovered or
+   focused band, or every band through a hovered node, darkens. */
+.canvas-block__chart-mark.canvas-chart__flow {
+  opacity: 0.34;
+}
+
+.canvas-block__chart-mark.canvas-chart__flow[data-active="true"] {
+  opacity: 0.62;
+}
+
+.canvas-chart__flow:focus-visible,
+.canvas-chart__node:focus-visible,
+.canvas-chart__dot:focus-visible,
+.canvas-chart__bar:focus-visible {
+  outline: 2px solid var(--octant-focus-ring);
+  outline-offset: 2px;
+}
+
 .canvas-block__chart-mark {
   fill: var(--oct-ser, var(--oct-series-1));
   stroke: none;
@@ -4355,6 +4407,43 @@
   .canvas-chart__dot {
     fill: CanvasText;
     stroke: Canvas;
+  }
+
+  .canvas-chart__category,
+  .canvas-chart__reading,
+  .canvas-chart__reading-share {
+    fill: CanvasText;
+  }
+
+  /* Washes give way to outlines: a filled radar area or funnel neck would
+     cover the rings and the series behind it in a system colour. */
+  .canvas-chart__funnel-neck {
+    fill: none;
+    stroke: GrayText;
+    opacity: 1;
+  }
+
+  .canvas-block__chart-mark.canvas-chart__radar-area[data-series] {
+    fill: none;
+    stroke: none;
+  }
+
+  .canvas-block__chart-mark.canvas-chart__flow[data-series] {
+    fill: Canvas;
+    stroke: CanvasText;
+    stroke-width: 1;
+    opacity: 1;
+  }
+
+  .canvas-block__chart-mark.canvas-chart__flow[data-active="true"] {
+    fill: Highlight;
+  }
+
+  .canvas-chart__flow:focus-visible,
+  .canvas-chart__node:focus-visible,
+  .canvas-chart__dot:focus-visible,
+  .canvas-chart__bar:focus-visible {
+    outline-color: Highlight;
   }
 
   .canvas-block__metric,
