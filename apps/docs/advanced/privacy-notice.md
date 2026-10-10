@@ -93,10 +93,9 @@ see [Sign in on a direct endpoint](#sign-in-on-a-direct-endpoint-only-if-you-cho
 
 ### Claude for helpers, only if you connect it
 
-**Deprecated by decision 0165** (Claude runs inside Anthropic's terms). The
-current build still stores this token if you connect it. A follow-up will
-delete stored helper tokens from Octant and stop offering the button.
-Revoke the token with Anthropic after you disconnect it.
+Decision 0165 proposes dropping this exception. It is still Proposed, so
+this notice describes the current build: Octant still stores the helper
+token if you connect it.
 
 Claude Code on a Claude subscription signs in through Claude's own runtime,
 and Octant never holds that login. A Plan turn, and every Chat subagent, runs

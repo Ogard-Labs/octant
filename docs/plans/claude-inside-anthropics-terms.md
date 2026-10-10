@@ -69,7 +69,12 @@ ordinary CLI login for unconfined turns.
 **Migration, on first launch after the change:**
 
 1. Delete every `claude-helper-sign-in` envelope from the credential
-   broker.
+   broker. The broker today only addresses envelopes by instance ID
+   (`has` / `resolve` / `set` / `delete`). A provider removed while the
+   broker was unreachable can leave an orphaned helper envelope with no
+   instance to name. This step therefore adds a scoped native cleanup
+   that can find helper-token envelopes without listing unrelated API
+   keys, then deletes those envelopes.
 2. Tell the person the stored helper token is gone and that Octant
    cannot revoke it with Anthropic; they revoke it in their Claude
    account.
@@ -193,6 +198,10 @@ HTTP endpoint. Do not add Claude subscription OAuth there.
 - Privacy text no longer says Octant stores a Claude setup token.
 - The Providers guide describes `claude auth login` into a Claude-owned
   config directory, and the optional native-harness API key.
+
+Do not publish that deprecation in the decision PR. 0165 stays Proposed
+until Steps 0–5 land, and the shipped guide must keep describing the
+helper token the current build still needs.
 
 ## Step 5 — Tests that enforce the rule
 

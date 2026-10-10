@@ -178,12 +178,10 @@ Octant, because the approval opens a browser there. The
 [privacy notice](/advanced/privacy-notice#claude-for-helpers-only-if-you-connect-it)
 states what is stored and who receives it.
 
-**Deprecated by decision 0165** (Claude runs inside Anthropic's terms). The
-current build still does the above. A follow-up will stop collecting and
-storing that token. Confined launches will use a Claude-owned config
-directory the unmodified `claude` binary signs in to, or an Anthropic API
-key if that path cannot work. Revoke a stored helper token with Anthropic
-after you disconnect it.
+Decision 0165 proposes replacing this helper-token path. It is still
+Proposed, so this guide describes the current build: confined Plan turns
+and Claude subagents still need the helper token until that decision is
+Accepted and the follow-up lands.
 
 The **Update CLI** action is shown only for providers with a verified native
 update command. It runs that command against the same configured executable,

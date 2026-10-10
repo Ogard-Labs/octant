@@ -107,9 +107,8 @@ for the full lifecycle.
 
 **Claude for helpers** is the one login from a provider's own runtime that
 Octant keeps, and only if you connect it under **Settings → Providers → Claude Code**.
-**Deprecated by decision 0165** (Claude runs inside Anthropic's terms): the
-current build still does this; a follow-up will delete the stored token and
-stop collecting it. A Plan turn and
+Decision 0165 proposes dropping this exception. It is still Proposed, so
+this page describes the current build. A Plan turn and
 every Chat subagent runs confined, away from the keychain where Claude keeps
 its subscription sign-in, so Octant runs Claude's own `claude setup-token` on
 this host after one browser approval and stores the long-lived token it
