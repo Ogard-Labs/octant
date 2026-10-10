@@ -16,6 +16,7 @@ import { resolveProjectCliCommand, runProjectCliCommand } from "./projectCommand
 import { resolveAgentCliCommand, runAgentCliCommand } from "./agentCommand";
 import {
   resolveAuthCliCommand,
+  resolveListenerCliCommand,
   resolvePairCliCommand,
   runRemoteAccessCliCommand,
   type RemoteAccessCliCommand,
@@ -208,11 +209,13 @@ async function main(): Promise<number> {
       }),
     );
   }
-  if (args.command === "pair" || args.command === "auth") {
+  if (args.command === "pair" || args.command === "auth" || args.command === "listener") {
     const command: RemoteAccessCliCommand | undefined =
       args.command === "pair"
         ? resolvePairCliCommand(args.positional, args.flags)
-        : resolveAuthCliCommand(args.positional, args.flags);
+        : args.command === "listener"
+          ? resolveListenerCliCommand(args.positional, args.flags)
+          : resolveAuthCliCommand(args.positional, args.flags);
     if (command === undefined) {
       printUsage();
       return 1;
@@ -319,7 +322,12 @@ function printUsage(): void {
       "  octant project remove <name>",
       "  octant project rename <name> <new name>",
       "  octant project access <name> full-access|approval-gated",
+      "  octant listener [status]",
+      "  octant listener enable --hostname <lan-or-tailscale-address> --port <port> --cert <path> --key <path>",
+      "  octant listener disable",
       "  octant pair [--source loopback|lan-private|tailscale]",
+      "  octant pair requests",
+      "  octant pair approve|deny <ticket-id>",
       "  octant auth list",
       "  octant auth revoke <device-id> | --all",
       "  octant status [--hostname <host>] [--port <port>]",

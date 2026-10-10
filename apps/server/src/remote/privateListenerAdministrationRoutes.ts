@@ -16,6 +16,7 @@ import {
   type PrivateListenerHostStatus,
   type PrivateListenerLifecycleController,
 } from "./privateListenerLifecycleController";
+import type { PrivateListenerSettingPort } from "./privateListenerSetting";
 
 const DEFAULT_BODY_LIMIT = 64 * 1_024;
 
@@ -42,6 +43,12 @@ export interface PrivateListenerAdministrationRouteOptions {
     | PrivateListenerLifecycleController
     | undefined
     | (() => PrivateListenerLifecycleController | undefined);
+  /**
+   * Where a listener enabled here is remembered across server restarts. Only
+   * these routes change it: a server shutdown disables the listener through
+   * the controller without forgetting it.
+   */
+  readonly setting?: Pick<PrivateListenerSettingPort, "save" | "clear">;
   readonly maxRequestBodySize?: number;
   readonly now?: () => number;
 }
@@ -100,7 +107,9 @@ export function createPrivateListenerAdministrationRouteHandler(
     try {
       if (route === ROUTES.disable) {
         await readNoBody(request);
-        return statusResponse(await control.disable());
+        const disabled = await control.disable();
+        options.setting?.clear();
+        return statusResponse(disabled);
       }
       if (request.headers.get("content-type")?.split(";", 1)[0]?.trim() !== "application/json") {
         return failure("invalid", 400);
@@ -112,11 +121,44 @@ export function createPrivateListenerAdministrationRouteHandler(
       const config = decodeListenerConfig(decoded.value);
       const status =
         route === ROUTES.enable ? await control.enable(config) : await control.restart(config);
+      if (!rememberListener(options.setting, config)) {
+        return Response.json(
+          {
+            category: "unavailable",
+            message:
+              "Octant private listener is serving but could not be remembered; it will be off after a restart.",
+          },
+          { status: 503 },
+        );
+      }
       return statusResponse(status);
     } catch (error) {
       return mapError(error);
     }
   };
+}
+
+/**
+ * Remembers the listener just enabled. When that fails, the previously
+ * remembered listener is forgotten too: otherwise a restart would bring back
+ * an address and key the person believed they had moved away from.
+ */
+function rememberListener(
+  setting: PrivateListenerAdministrationRouteOptions["setting"],
+  config: PrivateListenerConfig,
+): boolean {
+  if (setting === undefined) return true;
+  try {
+    setting.save(config);
+    return true;
+  } catch {
+    try {
+      setting.clear();
+    } catch {
+      // Nothing more can be done here; the response already reports the failure.
+    }
+    return false;
+  }
 }
 
 function statusResponse(status: PrivateListenerHostStatus): Response {

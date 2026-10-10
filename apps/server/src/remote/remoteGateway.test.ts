@@ -570,6 +570,55 @@ describe("RemoteGateway — local-only routes fail before auth/product dispatch"
   });
 });
 
+describe("RemoteGateway — host listener and pairing administration stay local", () => {
+  // The `octant listener` and `octant pair` commands reach these routes only
+  // over the loopback administration channel. A request arriving on the
+  // private listener is refused before auth or dispatch even when it carries
+  // the host's local secret and a window capability, so a paired device can
+  // never enable, move, or disable the listener or approve its own pairing.
+  const administration: ReadonlyArray<readonly [string, "GET" | "POST"]> = [
+    ["/api/desktop/private-listener/status", "GET"],
+    ["/api/desktop/private-listener/enable", "POST"],
+    ["/api/desktop/private-listener/restart", "POST"],
+    ["/api/desktop/private-listener/disable", "POST"],
+    ["/api/desktop/remote/pairing-tickets", "POST"],
+    ["/api/desktop/remote/pairing-requests", "GET"],
+    ["/api/desktop/remote/pairing-requests/approve", "POST"],
+    ["/api/desktop/remote/pairing-requests/deny", "POST"],
+  ];
+
+  it("refuses every listener and pairing administration route to a remote client", async () => {
+    const { serve, getFetch } = createCapturingServe();
+    const dispatched = vi.fn(() => Promise.resolve(Response.json({ ok: true })));
+    const { gateway } = setup({ productDispatch: dispatched, serve });
+    await gateway.start();
+    const capturedFetch = getFetch();
+    expect(capturedFetch).toBeDefined();
+    for (const [path, method] of administration) {
+      const response = await capturedFetch!(
+        new Request(`${ORIGIN}${path}`, {
+          method,
+          headers: {
+            host: "192.168.1.20:9443",
+            origin: ORIGIN,
+            "content-type": "application/json",
+            "x-octant-desktop-secret": "desktop-secret",
+            "x-octant-window-capability": "A".repeat(43),
+          },
+          ...(method === "POST"
+            ? { body: JSON.stringify({ ticketId: "77777777-7777-4777-8777-777777777777" }) }
+            : {}),
+        }),
+        lanFacts,
+      );
+      expect(response.status, path).toBe(404);
+    }
+    expect(dispatched).not.toHaveBeenCalled();
+    expect(gateway.facts().state).toBe("ready");
+    await gateway.stop();
+  });
+});
+
 describe("RemoteGateway — authenticated product handling unavailable by default", () => {
   it("returns 401/503 for authenticated product routes when productDispatch is undefined", async () => {
     const { serve, getFetch } = createCapturingServe();

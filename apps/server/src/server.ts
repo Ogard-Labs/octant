@@ -877,6 +877,7 @@ import { ChatAttachmentStore } from "./chat/chatAttachmentStore";
 import { createPrivateListenerLifecycleController } from "./remote/privateListenerLifecycleController";
 import { resolvePrivateListenerHostIdentity } from "./remote/privateListenerHostIdentity";
 import { createPrivateListenerAdministrationRouteHandler } from "./remote/privateListenerAdministrationRoutes";
+import { createPrivateListenerSetting } from "./remote/privateListenerSetting";
 import {
   boundHostRuntimeDiagnostics,
   type HostRuntimeDiagnostics,
@@ -9900,11 +9901,13 @@ export function startOctantServer(
       control: () => currentRemoteGateway?.localDeviceAdministration(),
       maxRequestBodySize: MAX_JSON_REQUEST_BODY_SIZE,
     });
+    const privateListenerSetting = createPrivateListenerSetting(providerDataDirectory);
     const privateListenerAdministrationRoutes = createPrivateListenerAdministrationRouteHandler({
       desktopBridgeSecret: options.desktopBridgeSecret,
       windowAuthorityStore,
       hostIdentityFingerprint: () => readHostIdentity(persistence.connection)?.key_fingerprint,
       control: () => privateListenerController,
+      setting: privateListenerSetting,
       maxRequestBodySize: MAX_JSON_REQUEST_BODY_SIZE,
     });
     // One diagnostics composer is shared by the owner control socket (through
@@ -10443,13 +10446,17 @@ export function startOctantServer(
           // provider process behind, and it is background work: a provider that
           // refuses to start must not delay or fail startup.
           warmingProviders = providerService.warmEnabledProviders().catch(() => undefined);
-          // Startup auto-enable: when a launch-time private listener config is
-          // supplied (test/smoke seam), enable it through the controller after
-          // the loopback listener binds. A failure fails closed with a typed
-          // error code and never prevents the loopback listener from serving.
-          if (options.remoteListener?.config !== undefined) {
+          // Startup auto-enable: a launch-time private listener config (the
+          // test/smoke seam) or else the listener the host last enabled from
+          // its local administration channel is enabled through the controller
+          // after the loopback listener binds. A failure fails closed with a
+          // typed error code, keeps the remembered setting for the next start,
+          // and never prevents the loopback listener from serving.
+          const startupListenerConfig =
+            options.remoteListener?.config ?? privateListenerSetting.load();
+          if (startupListenerConfig !== undefined) {
             try {
-              await privateListenerController.enable(options.remoteListener.config);
+              await privateListenerController.enable(startupListenerConfig);
               remoteListener = currentRemoteGateway?.listener();
             } catch (error) {
               remoteListenerError =

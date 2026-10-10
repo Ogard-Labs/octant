@@ -102,8 +102,43 @@ remote principal.
 - **Paired devices.** Rename, revoke one, or revoke all. Revocation cancels
   that device's sessions and streams immediately.
 
-The `octant pair`, `octant auth list`, and `octant auth revoke` commands remain
-the equivalent path for a headless host.
+A listener enabled here stays enabled across server restarts until you disable
+it. The `octant` commands below are the equivalent path for a headless host.
+
+## Enabling the listener and pairing from the command line
+
+On a host with no desktop app — a headless Linux station, for example — the
+`octant` command administers the same listener and pairing over the host's
+local administration channel. It works only in a shell on the host itself; a
+paired device cannot run it, and the server refuses these routes for a remote
+principal exactly as it refuses Settings.
+
+```sh
+# Turn the listener on with a browser-trusted certificate, e.g. from `tailscale cert`.
+octant listener enable --hostname station.example.ts.net --port 8443 \
+  --cert station.example.ts.net.crt --key station.example.ts.net.key
+octant listener            # status: ready, failed (with its reason), or disabled
+octant listener disable    # turns it off and forgets it
+
+octant pair --source tailscale    # single-use pairing token, five minutes
+octant pair requests              # pending claims: device, origin, comparison code, key fingerprint
+octant pair approve <ticket-id>   # or: octant pair deny <ticket-id>
+
+octant auth list
+octant auth revoke <device-id> | --all
+```
+
+The `--hostname` must be a private LAN or Tailscale address or name, and the
+origin is `https://<hostname>:<port>` as in Settings. The command reads the
+certificate and key files and sends their contents once; the host keeps the
+enabled listener's settings, including that key, owner-only under its data
+directory so the listener comes back after a restart. A renewed certificate
+takes effect when you run `octant listener enable` again. If the listener
+cannot come back — the interface is not up yet, or the certificate expired —
+`octant listener` shows it as failed with the reason, and the host tries again
+on its next start. Pairing commands need the listener on, and say so when it
+is off. Approve only when the comparison code matches the one the device shows.
+The desktop app's Settings → Remote access shows the same listener state.
 
 ## Device management
 
@@ -144,7 +179,8 @@ host-identity signing, and full macOS packaged listener QA remain environment
 gates. Product dispatch to a paired browser is live for Chat, Work, and Code
 threads; the desktop's sidebar, dock, and Settings are not yet served to a
 remote browser. Listener and pairing administration lives in Settings →
-Remote access on the host.
+Remote access on the host and in the `octant listener` and `octant pair`
+commands.
 
 ## Next steps
 
