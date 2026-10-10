@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -15,18 +15,18 @@ async function folder(): Promise<string> {
   return root;
 }
 
-describe("a Work Project's brief files", () => {
-  it("seeds AGENTS.md and STATUS.md once and never rewrites what is there", async () => {
+describe("a Work Project's status file", () => {
+  it("seeds STATUS.md once, never writes AGENTS.md, and never rewrites what is there", async () => {
     const root = await folder();
     const files = new WorkProjectStatusFiles();
 
-    expect(await files.seed(root, "Acme offer", "2026-09-12")).toEqual(["AGENTS.md", "STATUS.md"]);
+    expect(await files.seed(root, "Acme offer", "2026-09-12")).toBe(true);
+    expect(await readdir(root)).toEqual(["STATUS.md"]);
     await writeFile(join(root, "STATUS.md"), "# mine\nLast updated: 2026-09-01\n");
-    expect(await files.seed(root, "Acme offer", "2026-09-12")).toEqual([]);
+    expect(await files.seed(root, "Acme offer", "2026-09-12")).toBe(false);
 
     const snapshot = await files.read(root);
-    expect(snapshot.agents?.text).toContain("# Acme offer");
-    expect(snapshot.status?.text).toBe("# mine\nLast updated: 2026-09-01\n");
+    expect(snapshot?.text).toBe("# mine\nLast updated: 2026-09-01\n");
   });
 
   it("neither writes through nor reads through a symlink under the status name", async () => {
@@ -36,8 +36,8 @@ describe("a Work Project's brief files", () => {
     await symlink(join(elsewhere, "secret.md"), join(root, "STATUS.md"));
     const files = new WorkProjectStatusFiles();
 
-    expect(await files.seed(root, "Acme", "2026-09-12")).toEqual(["AGENTS.md"]);
-    expect((await files.read(root)).status).toBeUndefined();
+    expect(await files.seed(root, "Acme", "2026-09-12")).toBe(false);
+    expect(await files.read(root)).toBeUndefined();
     expect(
       await files.appendRecentChange(root, {
         date: "2026-09-12",

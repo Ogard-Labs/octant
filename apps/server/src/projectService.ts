@@ -37,6 +37,7 @@ import {
   changeCodeProjectPullRequestBackgroundRefresh,
   changeProjectColor,
   changeProjectProviderPolicy,
+  changeWorkProjectStatusFile,
   createMemoryEntry,
   createProject,
   defaultShellSettings,
@@ -48,6 +49,7 @@ import {
   renameProject,
   supersedeMemoryEntry,
   transferMemoryEntry,
+  workProjectKeepsStatusFile,
 } from "@octant/domain";
 import { Schema } from "effect";
 import { mkdir } from "node:fs/promises";
@@ -110,12 +112,11 @@ export interface ProjectServiceOptions {
   /** Creates a directory and its parents; a directory that exists is fine. */
   readonly ensureDirectory?: (path: string) => Promise<void>;
   /**
-   * Seeds a new Work Project's `AGENTS.md` and `STATUS.md`
-   * (`docs/decisions/0119`). Runs after the Project is journaled; a folder
-   * that refuses the files still has its Project, and the first task seeds
-   * again.
+   * Seeds `STATUS.md` when a Work Project opts into a status file. Runs after
+   * the setting is journaled; a folder that refuses the file still has the
+   * setting, and the next task seeds again. Octant writes nothing else there.
    */
-  readonly seedWorkProjectFiles?: (
+  readonly seedWorkProjectStatusFile?: (
     canonicalRoot: string,
     projectName: string,
     today: WorkStatusDate,
@@ -156,7 +157,7 @@ export class ProjectService implements ProjectServiceApi {
   readonly #initializeGitRepository: NonNullable<ProjectServiceOptions["initializeGitRepository"]>;
   readonly #defaultFolder: () => string;
   readonly #ensureDirectory: (path: string) => Promise<void>;
-  readonly #seedWorkProjectFiles: ProjectServiceOptions["seedWorkProjectFiles"];
+  readonly #seedWorkProjectStatusFile: ProjectServiceOptions["seedWorkProjectStatusFile"];
   readonly #archiveListeners = new Set<
     (project: Extract<Project, { readonly type: "work" }>) => void
   >();
@@ -184,7 +185,7 @@ export class ProjectService implements ProjectServiceApi {
       (async (path) => {
         await mkdir(path, { recursive: true });
       });
-    this.#seedWorkProjectFiles = options.seedWorkProjectFiles;
+    this.#seedWorkProjectStatusFile = options.seedWorkProjectStatusFile;
   }
 
   hasActiveProject(projectId: ProjectId, requiredType: ProjectType): boolean {
@@ -695,6 +696,10 @@ export class ProjectService implements ProjectServiceApi {
           project = changeProjectProviderPolicy(current, command.policy, timestamp);
           kind = "project-provider-policy-changed";
           eventName = "project.provider-policy-changed@1";
+        } else if (command.kind === "change-work-project-status-file") {
+          project = changeWorkProjectStatusFile(current, command.statusFile, timestamp);
+          kind = "work-project-status-file-changed";
+          eventName = "project.work-status-file-changed@1";
         } else {
           if (current.type === "chat")
             throw new ProjectServiceError({
@@ -738,10 +743,14 @@ export class ProjectService implements ProjectServiceApi {
       if (authoritative === undefined || authoritative.version !== project.version) {
         throw this.#unavailable();
       }
-      if (eventName === "project.created@1" && authoritative.type === "work") {
+      if (
+        eventName === "project.work-status-file-changed@1" &&
+        workProjectKeepsStatusFile(authoritative) &&
+        authoritative.type === "work"
+      ) {
         const today = timestamp.slice(0, 10);
-        if (this.#seedWorkProjectFiles !== undefined && isWorkStatusDate(today)) {
-          await this.#seedWorkProjectFiles(
+        if (this.#seedWorkProjectStatusFile !== undefined && isWorkStatusDate(today)) {
+          await this.#seedWorkProjectStatusFile(
             authoritative.binding.canonicalRoot,
             authoritative.name,
             today,

@@ -17,6 +17,7 @@ import {
 } from "./persistence/persistenceService";
 import { OCTANT_LOCAL_ACTOR_ID } from "./shellService";
 import { ProjectService } from "./projectService";
+import { WorkProjectStatusFiles } from "./work/workProjectStatusFiles";
 
 const windowId = decodeWindowId("00000000-0000-4000-8000-000000000601");
 const chatId = decodeProjectId("00000000-0000-4000-8000-000000000602");
@@ -1024,6 +1025,57 @@ describe("ProjectService", () => {
     );
   });
 
+  it("writes STATUS.md and never AGENTS.md into the folder when a Work Project opts into a status file", async () => {
+    const folder = mkdtempSync(join(tmpdir(), "octant-status-opt-in-"));
+    try {
+      const files = new WorkProjectStatusFiles();
+      const project = workProject();
+      if (project.type !== "work") throw new Error("Expected Work Project fixture.");
+      const fixture = fixtureService({
+        projects: [{ ...project, binding: { canonicalRoot: folder } }],
+        seedWorkProjectStatusFile: async (root, name, today) => {
+          await files.seed(root, name, today);
+        },
+      });
+      const result = await fixture.service.executeProject(windowId, {
+        kind: "change-work-project-status-file",
+        projectId: workId,
+        expectedVersion: 1,
+        statusFile: "enabled",
+      });
+      expect(result).toMatchObject({
+        kind: "work-project-status-file-changed",
+        project: { statusFile: "enabled", version: 2 },
+      });
+      expect(fixture.append.mock.calls[0]?.[0]?.events?.[0]?.eventName).toBe(
+        "project.work-status-file-changed@1",
+      );
+      expect(readdirSync(folder)).toEqual(["STATUS.md"]);
+    } finally {
+      rmSync(folder, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses to give the default-folder Project a status file and writes nothing", async () => {
+    const project = workProject();
+    if (project.type !== "work") throw new Error("Expected Work Project fixture.");
+    const seedWorkProjectStatusFile = vi.fn(async () => undefined);
+    const fixture = fixtureService({
+      projects: [{ ...project, origin: "default-folder" }],
+      seedWorkProjectStatusFile,
+    });
+    await expect(
+      fixture.service.executeProject(windowId, {
+        kind: "change-work-project-status-file",
+        projectId: workId,
+        expectedVersion: 1,
+        statusFile: "enabled",
+      }),
+    ).rejects.toMatchObject({ failure: { category: "invalid" } });
+    expect(fixture.append).not.toHaveBeenCalled();
+    expect(seedWorkProjectStatusFile).not.toHaveBeenCalled();
+  });
+
   it("changes a bound Project provider policy through one journaled event", async () => {
     const fixture = fixtureService({ projects: [codeProject()] });
     const result = await fixture.service.executeProject(windowId, {
@@ -1331,6 +1383,11 @@ function fixtureService(
     defaultFolder?: () => string;
     ensureDirectory?: (path: string) => Promise<void>;
     codeSettings?: { allowDefaultFolderThreads: boolean };
+    seedWorkProjectStatusFile?: (
+      canonicalRoot: string,
+      projectName: string,
+      today: string,
+    ) => Promise<void>;
   } = {},
 ) {
   const projects = [...(options.projects ?? [])];
@@ -1417,6 +1474,9 @@ function fixtureService(
       ...(options.ensureDirectory === undefined
         ? {}
         : { ensureDirectory: options.ensureDirectory }),
+      ...(options.seedWorkProjectStatusFile === undefined
+        ? {}
+        : { seedWorkProjectStatusFile: options.seedWorkProjectStatusFile }),
     }),
   };
 }
@@ -1435,6 +1495,6 @@ function uuidSequence() {
   let value = 700;
   return () => `00000000-0000-4000-8000-${String(value++).padStart(12, "0")}`;
 }
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";

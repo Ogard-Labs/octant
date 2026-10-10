@@ -17,6 +17,7 @@ import {
   decodeProjectOrderChanged,
   decodeProjectColorChanged,
   decodeProjectRenamed,
+  decodeWorkProjectStatusFileChanged,
   type EventEnvelope,
   type MemoryEntry,
   type MemoryEntryId,
@@ -171,6 +172,8 @@ const projectDecoders = {
     decodeCodeProjectPullRequestBackgroundRefreshChanged(payload).project,
   "project.provider-policy-changed@1": (payload: unknown) =>
     decodeProjectProviderPolicyChanged(payload).project,
+  "project.work-status-file-changed@1": (payload: unknown) =>
+    decodeWorkProjectStatusFileChanged(payload).project,
 } as const;
 
 const memoryDecoders = {

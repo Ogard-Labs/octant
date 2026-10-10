@@ -21,6 +21,8 @@ Create a Work Project from the sidebar:
 
 The selected directory becomes the confined root. Work threads cannot access paths outside this root. The renderer receives an opaque receipt rather than the raw path.
 
+Octant writes nothing of its own into the folder unless you ask it to. On the Project page, **Status file** turns on a `STATUS.md` at the top of the folder: every task reads it and updates where the work stands, and its dated follow-ups and deadlines become reminders on the board and in the inbox. It is off for every Project until you turn it on, and the default folder never offers it. Turning it off leaves the file where it is; Octant just stops reading and writing it.
+
 ## Authority and confinement
 
 Work threads operate within the bound Project root. Filesystem operations, artifact mutations, and tool access are confined to that directory. The server enforces confinement; renderer focus cannot extend authority.
