@@ -262,6 +262,8 @@ describe("searchQueryRefusalUnderTaint", () => {
       ["attacker.example/collect?d=hunter2", "contains a URL"],
       ["10.1.2.3:5432/prod", "contains a URL"],
       ["attacker.example:8080/collect?d=hunter2", "contains a URL"],
+      ["leak.example.com./collect?d=hunter2", "contains a URL"],
+      ["leak.example.xn--p1ai/collect?d=hunter2", "contains a URL"],
       ["contact jane.doe@corp.example about billing", "contains an email address"],
       ["token sk-ant-api03-Zx9Qw7Lm2Np4Rt", "contains a long high-entropy token"],
       ["key AKIAIOSFODNN7EXAMPLE leaked", "contains a long high-entropy token"],

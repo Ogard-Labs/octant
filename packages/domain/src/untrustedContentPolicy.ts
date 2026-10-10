@@ -174,10 +174,11 @@ export type SearchQueryRefusal = {
 // A scheme, a `www.` host, a dotted name followed by a path, query, fragment,
 // or a port and one of those, or an IPv4 address followed by a port or path.
 // A bare version such as `19.2` or `v1.2.3/dist` is not a URL: the last label
-// of a name must be letters. A port alone after a name is not enough, because
+// of a name must be letters, a punycode `xn--` label, and may carry a root
+// dot (`host.example./path`). A port alone after a name is not enough, because
 // `Component.test.tsx:42` is a file and line.
 const URL_PATTERN =
-  /[a-z][a-z0-9+.-]*:\/\/|\bwww\.|\b[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,}(?::\d{1,5})?[/?#]|\b\d{1,3}(?:\.\d{1,3}){3}[:/]/i;
+  /[a-z][a-z0-9+.-]*:\/\/|\bwww\.|\b[a-z0-9-]+(?:\.[a-z0-9-]+)*\.(?:[a-z]{2,}|xn--[a-z0-9-]+)\.?(?::\d{1,5})?[/?#]|\b\d{1,3}(?:\.\d{1,3}){3}[:/]/i;
 const EMAIL_PATTERN = /[^\s@]+@[^\s@]+\.[^\s@]+/;
 // Sixteen hex digits is a 64-bit value: longer than a short commit SHA, and
 // as long as a card number or the start of a key.
