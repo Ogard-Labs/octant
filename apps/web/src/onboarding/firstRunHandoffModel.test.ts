@@ -51,7 +51,7 @@ function project(overrides: Partial<FirstRunHandoffProject> = {}): FirstRunHando
   return {
     id: projectId,
     name: "Ada's notes",
-    type: "chat",
+    type: "code",
     lifecycle: "active",
     ...overrides,
   };
@@ -59,7 +59,7 @@ function project(overrides: Partial<FirstRunHandoffProject> = {}): FirstRunHando
 
 function resolve(overrides: Partial<FirstRunHandoffInput> = {}) {
   return resolveFirstRunHandoff({
-    mode: "chat",
+    mode: "code",
     providerOverall: "none-configured",
     providerHeadline: "No provider is configured",
     projects: [],
@@ -78,8 +78,8 @@ describe("first-run handoff readiness", () => {
       ["model", false],
     ]);
     expect(handoff.facts[0]?.detail).toBe("No provider is configured");
-    expect(handoff.facts[1]?.detail).toContain("No Chat Project yet");
-    expect(handoff.facts[2]?.detail).toContain("No model this host can use in Chat");
+    expect(handoff.facts[1]?.detail).toContain("No Code folder yet");
+    expect(handoff.facts[2]?.detail).toContain("No model this host can use in Code");
     expect(handoff.ready).toBe(false);
     expect(handoff.primary).toEqual({
       kind: "setup",
@@ -103,7 +103,7 @@ describe("first-run handoff readiness", () => {
     expect(handoff.primary).toEqual({
       kind: "setup",
       target: "project",
-      label: "Create a Chat Project",
+      label: "Choose a folder…",
     });
   });
 
@@ -124,7 +124,7 @@ describe("first-run handoff readiness", () => {
     ]);
     expect(handoff.primary).toEqual({
       kind: "start-thread",
-      label: "Start a Chat thread",
+      label: "Start a task",
       projectId,
     });
   });
@@ -139,19 +139,36 @@ describe("first-run handoff readiness", () => {
     ).toBe(false);
     expect(
       resolve({
-        mode: "code",
+        mode: "work",
         providerOverall: "ready",
         groups: [group()],
-        projects: [project()],
+        projects: [project(), project({ type: "chat", name: "Chat notes" })],
       }).primary,
     ).toEqual({
       kind: "setup",
       target: "project",
-      label: "Add a Code folder",
+      label: "Choose a folder…",
     });
   });
 
-  it("ignores a Chat default the selected mode cannot use, and does not offer unusable models", () => {
+  it("starts in the Project the user picked rather than the first one listed", () => {
+    const pickedId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb" as ProjectId;
+    const projects = [project(), project({ id: pickedId, name: "octant" })];
+    const ready = {
+      providerOverall: "ready",
+      groups: [group()],
+      projects,
+    } as const;
+
+    expect(resolve(ready).project?.name).toBe("Ada's notes");
+    expect(resolve({ ...ready, preferredProjectId: pickedId }).primary).toEqual({
+      kind: "start-thread",
+      label: "Start a task",
+      projectId: pickedId,
+    });
+  });
+
+  it("ignores a remembered model the selected mode cannot use, and does not offer unusable models", () => {
     const chatOnly = group({ models: [{ id: String(modelId), unavailable: true }] });
     const handoff = resolve({
       mode: "code",

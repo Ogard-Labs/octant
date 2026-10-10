@@ -1,33 +1,28 @@
 import type { ProviderInstanceId, ProviderModelId } from "@octant/contracts";
-import type { OctantMode } from "@octant/contracts/modes";
-import type { NavigatorAssistantModelRef } from "@octant/contracts/navigator-assistant";
-import type { UserProfile } from "@octant/contracts/user-profile";
+import type { ProjectId } from "@octant/contracts/projects";
 import type { ModelPickerSelection, PickerGroup } from "@octant/domain";
-import { enabledModes, isProfileConfigured } from "@octant/domain";
 import { Check } from "lucide-react";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
-import { ProfileEditor } from "../profile/ProfileEditor";
-import type { AvatarImageEnvironment } from "../profile/avatarImage";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantDialog } from "../ui/base/OctantDialog";
 import {
+  projectsForMode,
   resolveFirstRunHandoff,
   type FirstRunHandoffProject,
   type FirstRunHandoffSetupTarget,
+  type FirstRunTaskMode,
 } from "./firstRunHandoffModel";
 import { FirstRunModelStep } from "./FirstRunModelStep";
+import { FirstRunProjectStep } from "./FirstRunProjectStep";
 import { FirstRunProviderStep } from "./FirstRunProviderStep";
 import { FirstRunReadinessStep } from "./FirstRunReadinessStep";
 import type { FirstRunDiscoveryNotice, FirstRunReadinessSummary } from "./firstRunReadinessModel";
-import { FirstRunWorkspaceStep } from "./FirstRunWorkspaceStep";
 import {
   buildFirstRunSteps,
-  isWorkspaceConfigured,
   nextFirstRunStep,
   previousFirstRunStep,
   type FirstRunStepId,
-  type WorkspaceChoices,
 } from "./firstRunStepModel";
 import type { FirstRunOnboardingController } from "./useFirstRunOnboardingController";
 // The blocks this surface is built from — the section object, the group, the
@@ -39,10 +34,15 @@ import type { FirstRunOnboardingController } from "./useFirstRunOnboardingContro
 import "../styles/settings.css";
 import "./first-run.css";
 
-export interface FirstRunChatDefault {
+export interface FirstRunModelChoice {
   readonly providerInstanceId: ProviderInstanceId;
   readonly modelId: ProviderModelId;
 }
+
+const MODE_LABEL: Record<FirstRunTaskMode, string> = {
+  work: "Work",
+  code: "Code",
+};
 
 export interface FirstRunOnboardingProps {
   readonly controller: FirstRunOnboardingController;
@@ -62,52 +62,37 @@ export interface FirstRunOnboardingProps {
     enabled: boolean,
   ) => Promise<boolean>;
 
-  /** The profile the host currently holds. The step edits a draft of it. */
-  readonly profile: UserProfile;
-  /** Persist the edited profile. Called when the profile step is left, not per keystroke. */
-  readonly onSaveProfile: SetupWrite<UserProfile>;
-  readonly avatarEnvironment?: AvatarImageEnvironment;
+  /** Whether Work is offered. Code is always available. */
+  readonly workEnabled: boolean;
+  readonly workModelGroups: ReadonlyArray<PickerGroup>;
+  readonly codeModelGroups: ReadonlyArray<PickerGroup>;
+  /** The model a new task in each mode starts with today, when one was chosen. */
+  readonly workModel?: FirstRunModelChoice | undefined;
+  readonly codeModel?: FirstRunModelChoice | undefined;
+  readonly onSelectModel: (
+    mode: FirstRunTaskMode,
+    selection: ModelPickerSelection,
+  ) => Promise<boolean>;
 
-  readonly chatModelGroups: ReadonlyArray<PickerGroup>;
-  readonly workModelGroups?: ReadonlyArray<PickerGroup>;
-  readonly codeModelGroups?: ReadonlyArray<PickerGroup>;
-  readonly chatDefault?: FirstRunChatDefault | undefined;
-  readonly onSelectChatDefault: SetupWrite<ModelPickerSelection>;
   readonly projects: ReadonlyArray<FirstRunHandoffProject>;
-  readonly onCreateProject: (mode: OctantMode) => void;
+  /** Open the Project create surface — the same Choose a folder flow the shell uses. */
+  readonly onCreateProject: (mode: FirstRunTaskMode) => void;
+  /** Open the new-task composer for this Project. It creates no thread by itself. */
   readonly onStartThread: (input: {
-    readonly mode: OctantMode;
-    readonly projectId: FirstRunHandoffProject["id"];
+    readonly mode: FirstRunTaskMode;
+    readonly projectId: ProjectId;
   }) => void;
-
-  readonly navigatorModelGroups: ReadonlyArray<PickerGroup>;
-  readonly navigatorDefault?: NavigatorAssistantModelRef | undefined;
-  readonly onSelectNavigatorDefault: SetupWrite<ModelPickerSelection>;
-  readonly onClearNavigatorDefault: () => Promise<boolean>;
-
-  readonly workspace: WorkspaceChoices;
-  readonly onSelectColorScheme: SetupWrite<"system" | "light" | "dark">;
-  readonly onToggleChat: SetupWrite<boolean>;
-  readonly onToggleWork: SetupWrite<boolean>;
-  readonly onSelectModeSwitcher: SetupWrite<"buttons" | "dropdown">;
 }
 
 /**
- * A setup answer written straight through to the settings that own it.
+ * Octant's first-run surface.
  *
- * Each resolves to whether the host accepted the write. First run's own
- * outcome is durable and hides this surface for good, so it may only be
- * recorded once every answer taken here has actually landed.
- */
-type SetupWrite<Answer> = (answer: Answer) => Promise<boolean>;
-
-/**
- * Octant's first-run surface (`BOOT-01`).
- *
- * It exists to get a new user from a clean launch to a real thread without a
- * hidden prerequisite. Five setup steps — profile, workspace, providers,
- * default model, Navigator — then a readiness view that reports provider,
- * Project, and a mode-valid default model separately. Setup steps can be walked past; the handoff does not invent readiness they skipped.
+ * It exists to get a new user from a clean launch to a real task without a
+ * hidden prerequisite. Three setup steps — providers, a Project folder, a
+ * model — then a readiness view that reports provider, Project, and a
+ * mode-valid model separately, and one primary action, Start a task, that
+ * opens the new-task composer in that Project. Every step can be walked past;
+ * the handoff does not invent readiness they skipped.
  *
  * Answers are recorded as they are made, so quitting mid-way keeps what was
  * already chosen; only the first-run *outcome* is recorded at the end.
@@ -122,67 +107,53 @@ type SetupWrite<Answer> = (answer: Answer) => Promise<boolean>;
 export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
   const titleId = useId();
   const { controller } = props;
-  const [step, setStep] = useState<FirstRunStepId>("profile");
+  const [step, setStep] = useState<FirstRunStepId>("providers");
   const [handoffOpen, setHandoffOpen] = useState(false);
-  const [selectedMode, setSelectedMode] = useState<OctantMode>(() =>
-    props.workspace.chatEnabled ? "chat" : "code",
-  );
-  const [profileDraft, setProfileDraft] = useState<UserProfile>(props.profile);
-  const [profileEdited, setProfileEdited] = useState(false);
-  const [syncedProfile, setSyncedProfile] = useState<UserProfile>(props.profile);
-  const [importing, setImporting] = useState(false);
+  const [selectedMode, setSelectedMode] = useState<FirstRunTaskMode>("code");
+  const [chosenProjectId, setChosenProjectId] = useState<ProjectId>();
+  const [knownProjects, setKnownProjects] = useState(props.projects);
   const [resolving, setResolving] = useState(false);
   const unsettledWrites = useRef<Array<Promise<boolean>>>([]);
   const answerLost = useRef(false);
   const [answerRefused, setAnswerRefused] = useState(false);
-  const nameField = useRef<HTMLInputElement>(null);
   const providerAction = useRef<HTMLButtonElement>(null);
   const panel = useRef<HTMLDivElement>(null);
   const blocked = controller.blockedMessage !== undefined;
 
-  // This surface mounts before the host's own settings have arrived, so the
-  // draft it started from can be the empty profile of a store that in fact
-  // holds a name from a launch the user quit part-way through. Adopting the
-  // real one late is what keeps that answer from being overwritten; an edit
-  // already in progress outranks it, because the user is looking at that.
-  if (syncedProfile !== props.profile) {
-    setSyncedProfile(props.profile);
-    if (!profileEdited) setProfileDraft(props.profile);
+  const mode: FirstRunTaskMode = props.workEnabled ? selectedMode : "code";
+
+  // A folder chosen through Project create arrives as a new Project while this
+  // surface is concealed. It is the folder the user just picked, so it becomes
+  // the first task's Project rather than whichever one happens to be listed
+  // first.
+  if (knownProjects !== props.projects) {
+    setKnownProjects(props.projects);
+    const known = new Set(knownProjects.map((project) => String(project.id)));
+    const added = projectsForMode(props.projects, mode).find(
+      (project) => !known.has(String(project.id)),
+    );
+    if (added !== undefined) setChosenProjectId(added.id);
   }
 
-  // An avatar import reports its result as a later change, and the answers
-  // themselves are written by three independent controllers rather than one
-  // queue. Resolving first run while any of that is in flight would drop a
-  // picture or a model the user explicitly chose, so an answer stays busy from
-  // the click until the last of those writes has been accepted.
-  const busy = controller.submitting !== undefined || importing || resolving;
-  const availableModes = enabledModes({
-    chatEnabled: props.workspace.chatEnabled,
-    workEnabled: props.workspace.workEnabled,
-  });
-  const mode = availableModes.includes(selectedMode) ? selectedMode : (availableModes[0] ?? "code");
-  const modeGroups =
-    mode === "chat"
-      ? props.chatModelGroups
-      : mode === "work"
-        ? (props.workModelGroups ?? [])
-        : (props.codeModelGroups ?? []);
+  const busy = controller.submitting !== undefined || resolving;
+  const modeGroups = mode === "work" ? props.workModelGroups : props.codeModelGroups;
+  const modeModel = mode === "work" ? props.workModel : props.codeModel;
   const handoff = useMemo(
     () =>
       resolveFirstRunHandoff({
         mode,
         providerOverall: props.readiness.overall,
         providerHeadline: props.readiness.headline,
-        projects: props.projects ?? [],
+        projects: props.projects,
+        preferredProjectId: chosenProjectId,
         groups: modeGroups,
-        ...(mode === "chat" && props.chatDefault !== undefined
-          ? { preferredDefault: props.chatDefault }
-          : {}),
+        ...(modeModel === undefined ? {} : { preferredDefault: modeModel }),
       }),
     [
       mode,
       modeGroups,
-      props.chatDefault,
+      modeModel,
+      chosenProjectId,
       props.projects,
       props.readiness.headline,
       props.readiness.overall,
@@ -199,11 +170,9 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
 
   const steps = buildFirstRunSteps({
     current: step,
-    profileConfigured: isProfileConfigured(profileDraft),
-    workspaceConfigured: isWorkspaceConfigured(props.workspace),
     providersReady: props.readiness.overall === "ready",
-    chatDefaultConfigured: props.chatDefault !== undefined,
-    navigatorConfigured: props.navigatorDefault !== undefined,
+    projectReady: handoff.project !== undefined,
+    modelChosen: modeModel !== undefined,
   }).map((descriptor) => ({ ...descriptor, current: descriptor.current && !handoffOpen }));
   const currentStepIndex = Math.max(
     0,
@@ -211,13 +180,6 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
   );
   const currentStep = steps[currentStepIndex];
 
-  /**
-   * Collect a setup write so the outcome can be withheld if it does not land.
-   *
-   * Deliberately not held in render state: the blur that settles a field
-   * issues its write in the same gesture as the click on Skip, so a write that
-   * disabled the buttons would swallow the very click it needs to wait for.
-   */
   // Enabling a provider is an answer like any other, so first run waits for
   // it before recording its outcome; a discarded promise let the wizard close
   // against a host that had not accepted the choice yet.
@@ -227,6 +189,12 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
     track(write(instanceId, enabled));
   }
 
+  /**
+   * Collect a setup write so the outcome can be withheld if it does not land.
+   *
+   * Deliberately not held in render state: a write that disabled the buttons
+   * would swallow a click made in the same gesture as the answer.
+   */
   function track(write: Promise<boolean>): void {
     setAnswerRefused(false);
     unsettledWrites.current.push(write.catch(() => false));
@@ -239,7 +207,7 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
    * The list is drained whether or not they did, so a user who answers again
    * after a conflict is not held by the write the conflict discarded. What a
    * rejection leaves behind is the refusal itself: only the footer is disabled
-   * while this runs, so a field settled during the wait appends its write
+   * while this runs, so an answer given during the wait appends its write
    * afterwards, and clicking again without answering again must not read the
    * emptied list as consent until the user has been told (`resolveWith` does
    * that, once).
@@ -258,43 +226,11 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
     return !answerLost.current;
   }
 
-  /**
-   * Commit the draft, once, if there is anything to commit.
-   *
-   * Writing on every keystroke would journal a settings replacement per
-   * character; writing only at the very end would lose the name of someone who
-   * quits on step three. So the draft is flushed whenever the profile step is
-   * left and whenever first run is answered — including when it is *skipped*,
-   * because a name the user typed is a name they gave, and dropping it would
-   * make skipping the rest destroy an answer they already made.
-   */
-  function flushProfile() {
-    if (!profileEdited) return;
-    setProfileEdited(false);
-    track(props.onSaveProfile(profileDraft));
-  }
-
   function goTo(target: FirstRunStepId) {
-    // Leaving the profile step flushes its draft, so walking away mid-import
-    // would flush the profile without the picture and unmount the editor that
-    // was going to report it.
-    if (importing) return;
-    if (step === "profile" && target !== "profile") flushProfile();
     setHandoffOpen(false);
     setStep(target);
   }
 
-  function openHandoff() {
-    if (importing) return;
-    if (step === "profile") flushProfile();
-    setHandoffOpen(true);
-  }
-
-  // Every way out is guarded, not just the buttons. An import reports its
-  // picture as a later change, and once this surface is gone that change has
-  // nowhere to land — so Escape, a backdrop press, and the conceal that sends
-  // the user to provider settings all wait for it too.
-  //
   // The outcome is recorded last, and only once every answer has been
   // accepted. A rejected write is recovered by reloading the host, which
   // leaves the surface able to record an outcome against state that never
@@ -305,7 +241,7 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
   // long as the host kept refusing, with no way out and no reason given.
   function finish() {
     if (!handoffOpen) {
-      openHandoff();
+      setHandoffOpen(true);
       return;
     }
     const primary = handoff.primary;
@@ -323,8 +259,7 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
   }
 
   async function resolveWith(record: () => void, after?: () => void) {
-    if (importing || resolving) return;
-    flushProfile();
+    if (resolving) return;
     setResolving(true);
     const accepted = await settleWrites();
     setResolving(false);
@@ -342,7 +277,6 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
   }
 
   function openSetup(target: FirstRunHandoffSetupTarget) {
-    if (importing) return;
     if (target === "providers") {
       props.onOpenProviderSettings();
       return;
@@ -351,7 +285,7 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
       props.onCreateProject(mode);
       return;
     }
-    goTo("default-model");
+    goTo("model");
   }
 
   function leaveForProviderSettings() {
@@ -364,7 +298,7 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
   return (
     <OctantDialog
       className="first-run"
-      initialFocus={step === "profile" ? nameField : providerAction}
+      initialFocus={providerAction}
       label="Welcome to Octant"
       labelledBy={titleId}
       onClose={skip}
@@ -385,7 +319,6 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
                   data-progress={
                     descriptor.current ? "current" : descriptor.configured ? "completed" : "pending"
                   }
-                  disabled={importing}
                   onClick={() => goTo(descriptor.id)}
                   type="button"
                   variant={descriptor.current ? "secondary" : "ghost"}
@@ -410,11 +343,11 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
 
         <div className="first-run__panel" ref={panel}>
           {handoffOpen ? (
-            // The readiness view follows "Step 5 of 5" and is not a sixth setup
-            // step, so it carries a title and no count. Untitled, it read as a
-            // page the counter had forgotten.
+            // The readiness view follows the last counted step and is not
+            // another setup step, so it carries a title and no count.
+            // Untitled, it read as a page the counter had forgotten.
             <header className="first-run__step-header">
-              <h3 className="first-run__step-title">Your first thread</h3>
+              <h3 className="first-run__step-title">Your first task</h3>
             </header>
           ) : (
             <header className="first-run__step-header">
@@ -424,59 +357,7 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
               </span>
             </header>
           )}
-          {handoffOpen ? (
-            <FirstRunReadinessStep
-              handoff={handoff}
-              onSelectMode={setSelectedMode}
-              onSetup={openSetup}
-              selectedMode={mode}
-              workspace={props.workspace}
-            />
-          ) : null}
-
-          {handoffOpen || step !== "profile" ? null : (
-            <div className="first-run__step">
-              <p className="first-run__intro">
-                Octant has no account and signs you in to nothing. Choose the name and avatar shown
-                inside the app. Everything is optional and stays on this Mac. You can skip setup and
-                change it later in Settings.
-              </p>
-              <ProfileEditor
-                nameRef={nameField}
-                onBusyChange={setImporting}
-                onChange={(next) => {
-                  setProfileEdited(true);
-                  setProfileDraft(next);
-                }}
-                // Quitting the app is not one of this dialog's exits, so an
-                // answer that waited for one would be lost by someone who
-                // typed their name and then closed the window. A settled edit
-                // is a blur or a chosen avatar, not a keystroke, so persisting
-                // it here costs a handful of writes rather than one per
-                // character.
-                onCommit={(next) => {
-                  setProfileEdited(false);
-                  track(props.onSaveProfile(next));
-                }}
-                profile={profileDraft}
-                {...(props.avatarEnvironment === undefined
-                  ? {}
-                  : { environment: props.avatarEnvironment })}
-              />
-            </div>
-          )}
-
-          {handoffOpen || step !== "workspace" ? null : (
-            <FirstRunWorkspaceStep
-              choices={props.workspace}
-              onSelectColorScheme={(scheme) => track(props.onSelectColorScheme(scheme))}
-              onSelectModeSwitcher={(presentation) =>
-                track(props.onSelectModeSwitcher(presentation))
-              }
-              onToggleChat={(enabled) => track(props.onToggleChat(enabled))}
-              onToggleWork={(enabled) => track(props.onToggleWork(enabled))}
-            />
-          )}
+          {handoffOpen ? <FirstRunReadinessStep handoff={handoff} onSetup={openSetup} /> : null}
 
           {handoffOpen || step !== "providers" ? null : (
             <FirstRunProviderStep
@@ -494,38 +375,31 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
             />
           )}
 
-          {handoffOpen || step !== "default-model" ? null : (
-            <FirstRunModelStep
-              ariaLabel="Default model for new Chat threads"
-              groups={props.chatModelGroups}
-              intro="New Chat threads start with this model. Existing threads always keep whatever they were given."
-              onOpenProviderSettings={leaveForProviderSettings}
-              onSelect={(selection) => track(props.onSelectChatDefault(selection))}
-              unsetNote="No default is set. Octant will pick a ready model for each new thread and show you which one it chose."
-              {...(props.chatDefault === undefined
-                ? {}
-                : {
-                    selectedModelId: props.chatDefault.modelId,
-                    selectedProviderInstanceId: props.chatDefault.providerInstanceId,
-                  })}
+          {handoffOpen || step !== "project" ? null : (
+            <FirstRunProjectStep
+              mode={mode}
+              onChooseFolder={() => openSetup("project")}
+              onSelectMode={setSelectedMode}
+              onSelectProject={setChosenProjectId}
+              projects={projectsForMode(props.projects, mode)}
+              selectedProjectId={handoff.project?.id}
+              workEnabled={props.workEnabled}
             />
           )}
 
-          {handoffOpen || step !== "navigator" ? null : (
+          {handoffOpen || step !== "model" ? null : (
             <FirstRunModelStep
-              ariaLabel="Navigator default model"
-              clearLabel="Leave Navigator off"
-              groups={props.navigatorModelGroups}
-              intro="Navigator is the optional assistant from the profile control. It answers questions about Octant itself and never changes anything without asking you first."
-              onClear={() => track(props.onClearNavigatorDefault())}
+              ariaLabel={`Model for new ${MODE_LABEL[mode]} tasks`}
+              groups={modeGroups}
+              intro={`New ${MODE_LABEL[mode]} tasks start with this model. You can change it in the composer for any task, and existing threads keep whatever they were given.`}
               onOpenProviderSettings={leaveForProviderSettings}
-              onSelect={(selection) => track(props.onSelectNavigatorDefault(selection))}
-              unsetNote="Navigator stays unavailable until a model is chosen. Nothing else is affected, and you can turn it on later in Settings."
-              {...(props.navigatorDefault === undefined
+              onSelect={(selection) => track(props.onSelectModel(mode, selection))}
+              unsetNote="No model is chosen. Octant will start with a ready model and show you which one it chose."
+              {...(modeModel === undefined
                 ? {}
                 : {
-                    selectedModelId: props.navigatorDefault.modelId,
-                    selectedProviderInstanceId: props.navigatorDefault.providerInstanceId,
+                    selectedModelId: modeModel.modelId,
+                    selectedProviderInstanceId: modeModel.providerInstanceId,
                   })}
             />
           )}
@@ -552,7 +426,6 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
           <div className="first-run__buttons">
             {handoffOpen || back !== undefined ? (
               <OctantButton
-                disabled={importing}
                 onClick={() => {
                   if (handoffOpen) {
                     setHandoffOpen(false);
@@ -571,17 +444,12 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
             </OctantButton>
             {handoffOpen ? (
               <OctantButton disabled={busy || blocked} onClick={finish} type="button">
-                {controller.submitting === "completed"
-                  ? "Saving…"
-                  : importing
-                    ? "Finishing your picture…"
-                    : handoff.primary.label}
+                {controller.submitting === "completed" ? "Saving…" : handoff.primary.label}
               </OctantButton>
             ) : (
               <OctantButton
-                disabled={importing}
                 onClick={() => {
-                  if (forward === undefined) openHandoff();
+                  if (forward === undefined) setHandoffOpen(true);
                   else goTo(forward);
                 }}
                 type="button"

@@ -470,9 +470,13 @@ Work's Write, Learn, Plan, and Explore starters use the same chip (the outline
 button: hairline, resting fill, hover and focus fill); the prompt rides as the
 chip's tooltip and description and fills the composer when chosen, nothing more.
 
-First-run setup is optional from its first step. Skipping preserves settled answers,
-waits for pending writes, and grants no authority. Profile editing has its own
-Personal settings destination. Continue retains compact recent-task rows and
+First-run setup asks only what a first task needs — a usable provider, a
+Project folder, and a model — and ends in one primary action, Start a task,
+that opens the new-task composer in that Project. Every step is optional from
+the first one. Skipping preserves settled answers, waits for pending writes,
+grants no authority, and creates no thread. Profile, appearance, the mode
+switches, and Navigator are not first-run steps: Profile and Appearance live in
+Settings › Personal, and Navigator in its own Settings section. Continue retains compact recent-task rows and
 their status and Git cues.
 Empty Code entry offers folder setup and a direct route to Code settings.
 A Work or Code pane with no thread and no Project asks one centred question
@@ -1461,11 +1465,21 @@ controls sit above kit sections (overview, token totals, provider limits,
 breakdown), each a label over one card, and the Settings header is the only
 title.
 
-First run is a five-step wizard with a progress rail. Each step is pending,
-current, or completed: the current step is a filled card, completed steps show
-a check, and pending steps show their number. Mode choices on the readiness
-step use `OctantToggleGroup`. Answers still write through to the settings that
-own them. First run records its outcome only after every answer has landed. When
+First run is a three-step wizard with a progress rail: Providers, Project, and
+Model, in that order, followed by an uncounted readiness view titled Your first
+task. Each step is pending, current, or completed: the current step is a filled
+card, completed steps show a check, and pending steps show their number. The
+Project step chooses the first task's mode (Work or Code; Code alone when Work
+is off; Chat Projects have no folder and are not offered) and its folder with
+`OctantToggleGroup`; Choose a folder… opens the same Project create surface as
+the empty Work and Code pages, so making the folder a Git repository stays an
+explicit choice there, and a folder created that way becomes the first task's
+Project. The Model step writes to what a new task in that mode already starts
+from: Work's default model in Work settings, and the composer's remembered
+model for Code. The readiness view reports provider, Project, and model
+separately; a missing fact opens its exact setup surface, and Start a task
+appears only when all three hold. Answers still write through to the settings
+that own them. First run records its outcome only after every answer has landed. When
 the host refused an answer, the first press of Skip setup or the primary action
 says so in a warning notice and records nothing; the next press goes on without
 that answer, so a refusing host can never leave the dialog impossible to leave.
