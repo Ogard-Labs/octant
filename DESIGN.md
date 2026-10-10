@@ -115,14 +115,12 @@ Titles and the hero use `--oct-tracking-tight` (-0.025em); section labels use
 
 ### Colour
 
-Neutral graphite, a monochrome accent, semantic statuses, and quiet keyboard
-focus. That is the default preset; the bundled colour presets lean every
+Neutral graphite, a monochrome accent, semantic statuses, and one neutral
+keyboard focus edge. That is the default preset; the bundled colour presets lean every
 surface toward one hue and keep the accent and focus role available for theme
 compatibility. Text is three greys (primary, secondary, muted) and never a
-fourth. Hairlines separate; fills select. Focus remains in the accessibility
-tree and follows the normal keyboard order, while the app suppresses drawn
-outlines and halos so selected and expanded fills carry the visible state cue
-(0094). See
+fourth. Hairlines separate; fills select. Selected and expanded fills carry
+state; keyboard focus follows the rule in "Accessibility and reliability". See
 "Colour system" for the token table. On the marketing site the same three
 greys and the same hairline carry the hierarchy on a white or graphite ground.
 
@@ -654,8 +652,7 @@ boundary and a compact tab row without a second horizontal divider.
 
 Attachment and model controls sit on the left; access, context usage and send
 stay together at the right edge even when the controls wrap. Menus use compact
-interface text, and model choices stay in a bounded scrollable popup. Focus
-uses fill and text emphasis, without bright outlining of controls or popups.
+interface text, and model choices stay in a bounded scrollable popup.
 Sent messages do not repeat an access caption; the underlying history remains
 authoritative (0114).
 
@@ -1120,7 +1117,7 @@ All six composers use `ComposerAttachButton` for their file chooser. The visible
 button is the only tab stop; an unsupported model keeps the button reachable
 and explains the refusal in the surface's status line. It never opens the file
 chooser or uploads while refused. Model, access, and destination controls keep
-one type scale and quiet keyboard focus. Access labels read "Plan · read-only"
+one type scale. Access labels read "Plan · read-only"
 and "Ask for approvals" in both new and existing threads.
 Under the Code composer the start screen is an agent home rather than a
 blank prompt: suggested prompts as small hairline cards on the card fill (a
@@ -1290,7 +1287,7 @@ label and hover details retain overlapping states; a row never renders a
 second activity dot or a separate "Woke" label. A list longer than eight rows folds behind one quiet "Show
 more (n)" row that becomes "Show less"; the active thread stays visible while
 folded. Under checkout headings each checkout folds its own list, so a worktree's
-threads are never hidden behind the primary checkout's Show more. Keyboard focus uses neutral fill and text emphasis. Project View and
+threads are never hidden behind the primary checkout's Show more. Project View and
 Project Overview are real features, not
 decorative shortcuts.
 
@@ -1830,8 +1827,7 @@ animations without removing state information.
 
 Native Electron title-bar regions are a hard boundary. Interactive controls
 must carry `window-no-drag` and render above the native drag target. Test title-bar
-buttons in the packaged/native surface, not only with React/jsdom. Keyboard
-focus uses the shared quiet fill cue without drawn outlines or halos (0094).
+buttons in the packaged/native surface, not only with React/jsdom.
 
 On macOS the desktop window keeps Electron's native frame and uses
 `titleBarStyle: hiddenInset`; `frame: false` is not combined with that mode.
@@ -1909,6 +1905,20 @@ request from the person.
 - Pointer targets are at least 24px on desktop and 44px on touch.
 - Keyboard users can reach every primary action, open/dismiss every overlay,
   navigate menus/selects, and recover focus after closing a popover or dialog.
+- Keyboard focus draws one indicator, declared once in `octant.css`: a 2px
+  inset outline in `--oct-focus-edge`, the foreground at 62% so it holds about
+  4.5:1 or better against the control's fill and the surface around it in
+  both schemes, and it follows the control's own radius.
+  It is `:focus-visible` only, so a pointer press paints nothing, and it is
+  never the hover fill, so focus and pointer read as different states. A
+  control filled with the accent inverts it to `--oct-focus-edge-on-accent`; an
+  SVG mark or inline text link moves it just outside itself. A container that
+  only holds the keyboard (menu, dialog, listbox, preview card) shows no edge;
+  the item inside it does, and menu items keep their highlighted fill. A text
+  field set inside a frame that is itself the field (the composer, an inline
+  search) shows its caret inside that frame. Feature CSS never suppresses,
+  recolours, or adds a second ring, and the `--octant-focus-ring` theme role is
+  never painted as the indicator.
 - Every app-owned form declares `noValidate`; Octant owns validation copy,
   field association, focus, and recovery instead of browser-specific bubbles.
 - Loading, unavailable, stale, denied, empty, and error states keep stable
@@ -2002,7 +2012,8 @@ saved agent defaults, distinct from the person's identity in General. The
 legacy `--oct-fg-2` alias maps directly to `--octant-text-secondary`; primary,
 secondary, and metadata remain the only text strengths. The theme schema keeps
 its focus compatibility role for imports, but Appearance does not expose a
-Focus ring color control because the product does not draw focus rings.
+Focus ring color control because the focus indicator is the neutral edge,
+never the theme's focus role.
 
 ### Visual-audit corrections
 
@@ -2117,7 +2128,7 @@ Native Code approvals use a compact 216px surface above the composer, with a
 scrollable action and scope description, collapsible authority details, and a
 fixed Cancel/Allow row. Duration remains in the host description; the button
 does not imply a one-shot grant when the action grants access for the session.
-Keyboard focus has a visible outline. Enter never implicitly grants access.
+Enter never implicitly grants access.
 The isolated host document draws the same compact notice anatomy (semantic
 marker, heading, readable detail, quiet border, and dismissive safe action)
 using the owning window's resolved palette. It retains its own host-owned

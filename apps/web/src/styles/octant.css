@@ -423,37 +423,43 @@ h3,
 h4 {
   text-wrap: balance;
 }
-/* Focus uses fill and text emphasis without outlining an entire control or
-   popup (0114). Container focus only hosts keyboard navigation; menu items
-   keep the shared recipe's highlighted fill. */
+/* Keyboard focus draws one neutral edge, declared here and nowhere else. A
+   focus fill alone was the hover fill, so a keyboard user could not tell the
+   control they were on from the one under the pointer (WCAG 2.4.7). The edge
+   is an outline, so it moves no layout and follows the control's own radius;
+   it is inset, so a dense row or a scrolling container cannot clip it; and a
+   pointer press does not match :focus-visible, so clicking paints nothing. */
 :focus-visible {
+  outline: 2px solid var(--oct-focus-edge);
+  outline-offset: -2px;
+}
+
+/* A filled accent control inverts the edge so it stays visible on its own
+   fill: the primary button, a checked switch, a checked checkbox. Declared
+   here rather than in the recipes because the global rule above is unlayered
+   and would otherwise win over a Tailwind focus utility. */
+[data-slot="button"][data-variant="default"]:focus-visible,
+[data-slot="switch"][data-checked]:focus-visible,
+.octant-checkbox:checked:focus-visible {
+  outline-color: var(--oct-focus-edge-on-accent);
+}
+
+/* A drawn SVG mark is a shape, not a box: an inset edge would cover a small
+   dot or a thin band, so the edge sits just outside it instead. */
+svg :focus-visible {
+  outline-offset: 2px;
+}
+
+/* A container that takes focus only to hold the keyboard shows no edge of its
+   own; the item inside it that the user is on shows one. */
+.octant-menu__positioner:focus-visible,
+.octant-menu__popup:focus-visible,
+.octant-dialog__popup:focus-visible,
+.octant-preview-card:focus-visible,
+.model-picker__listbox:focus-visible,
+.settings-search-results:focus-visible,
+.zen-surface:focus-visible {
   outline: none;
-}
-input:focus-visible:not([type="checkbox"], [type="radio"]),
-textarea:focus-visible,
-[role="combobox"]:focus-visible {
-  background-color: var(--octant-control-hover);
-  color: var(--octant-text-primary);
-}
-:where(
-  button,
-  a,
-  summary,
-  [role="button"],
-  [role="tab"],
-  [role="option"],
-  [role="menuitem"],
-  [role="menuitemradio"],
-  [role="menuitemcheckbox"]
-):focus-visible {
-  background-color: var(--octant-control-hover);
-  color: var(--octant-text-primary);
-  text-decoration: underline;
-  text-underline-offset: 0.2em;
-}
-[data-slot="button"][data-variant="default"]:focus-visible {
-  background-color: var(--octant-text-primary);
-  color: var(--octant-surface);
 }
 
 /* ─── layout primitives ─────────────────────────────────────────────── */
