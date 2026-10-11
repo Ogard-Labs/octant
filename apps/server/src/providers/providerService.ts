@@ -998,11 +998,17 @@ export class ProviderService implements ProviderServiceApi {
           if (current.driverKind !== "claude") {
             throw this.#unsupported("This provider does not use Claude configuration.");
           }
+          const previousDirectory = current.configuration.configDirectory;
           instance = changeClaudeConfiguration(current, {
             configuration: command.configuration,
             activeSessionCount: this.#runtime.activeSessionCount(current.id),
             updatedAt,
           });
+          const nextDirectory =
+            instance.driverKind === "claude" ? instance.configuration.configDirectory : undefined;
+          if (nextDirectory !== previousDirectory) {
+            await this.#clearClaudeHelperSignIn?.(current.id);
+          }
           await this.#runtime.invalidateRuntime(current.id);
           eventName = "provider.instance-configuration-changed@1";
         } else if (command.kind === "change-mistral-vibe-configuration") {

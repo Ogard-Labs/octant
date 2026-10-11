@@ -2409,6 +2409,71 @@ describe("ProviderService", () => {
     expect(clearClaudeHelperSignIn).toHaveBeenCalledWith(instanceId);
   });
 
+  it("clears Claude for helpers when an account directory changes", async () => {
+    const clearClaudeHelperSignIn = vi.fn(async () => undefined);
+    const directory = "/Users/example/.claude-accounts/work";
+    const fixture = serviceFixture({
+      instances: [
+        claudeProvider({
+          configuration: {
+            kind: "claude-agent-sdk",
+            binaryPath: "/opt/homebrew/bin/claude",
+            authentication: "subscription",
+            configDirectory: directory,
+            accent: "teal",
+          },
+        }),
+      ],
+      clearClaudeHelperSignIn,
+    });
+    await expect(
+      fixture.service.execute(windowId, {
+        kind: "change-claude-configuration",
+        instanceId,
+        expectedVersion: 1,
+        configuration: {
+          kind: "claude-agent-sdk",
+          binaryPath: "/opt/homebrew/bin/claude",
+          authentication: "subscription",
+          configDirectory: "/Users/example/.claude-accounts/office",
+          accent: "teal",
+        },
+      }),
+    ).resolves.toMatchObject({
+      kind: "provider-updated",
+      instance: {
+        configuration: { configDirectory: "/Users/example/.claude-accounts/office" },
+      },
+    });
+    expect(clearClaudeHelperSignIn).toHaveBeenCalledWith(instanceId);
+
+    clearClaudeHelperSignIn.mockClear();
+    await expect(
+      fixture.service.execute(windowId, {
+        kind: "change-claude-configuration",
+        instanceId,
+        expectedVersion: 2,
+        configuration: {
+          kind: "claude-agent-sdk",
+          binaryPath: "/usr/local/bin/claude",
+          authentication: "subscription",
+          configDirectory: "/Users/example/.claude-accounts/office",
+          accent: "rose",
+        },
+      }),
+    ).resolves.toMatchObject({
+      kind: "provider-updated",
+      instance: {
+        configuration: {
+          binaryPath: "/usr/local/bin/claude",
+          configDirectory: "/Users/example/.claude-accounts/office",
+          accent: "rose",
+        },
+      },
+    });
+    expect(clearClaudeHelperSignIn).not.toHaveBeenCalled();
+  });
+
   it("preserves Claude resume identities when durable provider removal fails", async () => {
     const clearResumeIdentities = vi.fn(async () => undefined);
     const clearClaudeHelperSignIn = vi.fn(async () => undefined);
