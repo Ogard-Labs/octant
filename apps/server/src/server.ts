@@ -422,6 +422,7 @@ import { createLinkedThreadRuntime } from "./linkedThread/linkedThreadRuntime";
 import { FolderBrowseService } from "./folderBrowseService";
 import { ProjectService } from "./projectService";
 import { CodeProjectAccess } from "./codeProjectAccess";
+import { isRoutineHostScope } from "./routineHostScope";
 import { ProjectRootPort } from "./projectRootPort";
 import { ProjectTerminalService } from "./code/projectTerminalService";
 import { ProjectBrowserService } from "./browser/projectBrowserService";
@@ -4618,6 +4619,7 @@ export function startOctantServer(
       },
       rememberOrigin: (origin, windowId) => rememberBrowserOrigin(windowId, origin),
       isOriginRemembered: (origin) => rememberedBrowserOrigins().includes(origin),
+      isHostScope: isRoutineHostScope,
     });
     const headlessBrowserRuntime = createPlaywrightBrowserRuntime({
       receiptDirectory: join(providerDataDirectory, "browser", "runtime-receipts"),

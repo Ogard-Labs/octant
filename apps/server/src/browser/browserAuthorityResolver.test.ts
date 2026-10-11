@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { decodeHostId, LOCAL_HOST_ID } from "@octant/contracts";
+import { ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
 import { ServerBrowserAuthorityResolver, deriveToolHostId } from "./browserAuthorityResolver";
 
 const projectId = "10000000-0000-4000-8000-000000000001";
@@ -240,6 +241,10 @@ describe("ServerBrowserAuthorityResolver", () => {
 
     expect(resolver.canAccessWindow(windowId as any, threadId as any, "work")).toBe(true);
     expect(resolver.canAccessWindow(otherWindowId as any, threadId as any, "work")).toBe(false);
+    // A routine's turn runs as the host and reaches its own live thread, but
+    // no thread whose authority does not resolve (here, no such Code thread).
+    expect(resolver.canAccessWindow(ROUTINE_HOST_SCOPE_ID, threadId as any, "work")).toBe(true);
+    expect(resolver.canAccessWindow(ROUTINE_HOST_SCOPE_ID, threadId as any, "code")).toBe(false);
   });
 
   it("refuses a Work Browser scope when its binding revision is missing or stale", () => {

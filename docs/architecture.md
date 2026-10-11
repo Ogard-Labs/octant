@@ -1485,8 +1485,10 @@ thread it creates could not do.
   Projects of the routine's mode, after the revalidation above, and every
   ceiling here still applies. The thread's creation is journaled as the host's
   `system` actor, so the journal tells a routine's thread from one a person
-  started. Browser-tool approvals are still keyed to the window that started
-  the turn, so one a routine's turn raises is not offered to any window.
+  started. A browser-origin approval a routine's turn raises has no window of
+  its own, so it is offered to every local window that may drive that thread's
+  browser (one bound to the routine's Project); answering settles only that
+  prompt, and an "always allow" is journaled by the answering window.
 - **Journal.** Definitions, revisions, lifecycle changes, occurrence claims and
   skips, runs, dispatch intents and claims, and cancellations are journaled. A
   claim commits the deterministic run before the occurrence ledger, so a crash
