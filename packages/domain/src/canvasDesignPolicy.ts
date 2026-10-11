@@ -28,6 +28,15 @@ import { CANVAS_DESIGN_ASSET_SCHEME } from "@octant/contracts/canvas";
  * and only spelled literally: a reference spelled through a character
  * reference or CSS escape is one the renderer would not replace and the
  * browser would try to load, so it is refused.
+ *
+ * A design that declares `runsScript` is served by the host in a frame
+ * sandboxed to `allow-scripts` alone, under a policy that admits inline script
+ * and still loads nothing. For it, and only for it, inline `<script>` elements
+ * and event handlers are admitted; a script file, every remote load, `meta`,
+ * `base`, embedded documents, and links that leave the design stay refused.
+ * Script text and handler values are not read for loads: a script can build
+ * any address it likes, so reading its text would only refuse honest code
+ * such as `new URL(...)`, and the page's policy refuses the request anyway.
  */
 
 /** Elements that run code, load another document, or navigate on their own. */
@@ -76,30 +85,42 @@ const NO_ASSETS: DeclaredAssets = new Set();
 /**
  * Why a frame's markup cannot be drawn as written, or `undefined` when it can.
  * The reason names the construct so the author can rewrite it.
+ * `runsScript` is the design's own declaration; see the note above.
  */
 export function canvasDesignMarkupRefusal(
   markup: string,
   assets: DeclaredAssets = NO_ASSETS,
+  runsScript = false,
 ): string | undefined {
-  for (const tag of startTags(markup)) {
+  // Script text is not markup, so a tag spelled inside a string is not read.
+  const scanned = runsScript ? withoutScriptText(markup) : markup;
+  for (const tag of startTags(scanned)) {
     const name = elementName(tag.name);
-    if (REFUSED_ELEMENTS.has(name)) {
-      return `uses a <${name}> element; design frames run no script and load no other document.`;
+    if (runsScript && name === "script") {
+      if (/(?:^|[\s"'/])src(?=[\s/>=]|$)/i.test(tag.attributes)) {
+        return "loads a script file; write a running design's script inline.";
+      }
+      continue;
     }
-    const refusal = attributeRefusal(tag.attributes, assets);
+    if (REFUSED_ELEMENTS.has(name)) {
+      return runsScript
+        ? `uses a <${name}> element; a running design loads no other document and sets no page policy.`
+        : `uses a <${name}> element; design frames run no script and load no other document.`;
+    }
+    const refusal = attributeRefusal(tag.attributes, assets, runsScript);
     if (refusal !== undefined) return refusal;
   }
-  if (ANY_OUTSIDE_LINK.test(markup)) {
+  if (ANY_OUTSIDE_LINK.test(scanned)) {
     return 'has a link that leaves the design; a link may only name a frame or a section, such as href="#checkout".';
   }
-  const decoded = withoutCssEscapes(withoutCharacterReferences(markup));
-  const spelled = spelledAssetReferenceRefusal(markup, decoded);
+  const decoded = withoutCssEscapes(withoutCharacterReferences(scanned));
+  const spelled = spelledAssetReferenceRefusal(scanned, decoded);
   if (spelled !== undefined) return spelled;
   const loadRefused = cssLoadRefusal(decoded, assets);
   if (loadRefused !== undefined) return loadRefused;
   // An image-set is read only inside a style element, so a quote in the prose
   // around one cannot hide its candidates. Style attributes are read above.
-  for (const styles of styleElementContents(markup)) {
+  for (const styles of styleElementContents(scanned)) {
     const refused = imageSetRefusal(withoutCharacterReferences(styles), assets);
     if (refused !== undefined) return refused;
   }
@@ -394,13 +415,18 @@ function elementName(raw: string): string {
   return local === -1 ? lower : lower.slice(local + 1);
 }
 
-function attributeRefusal(attributes: string, assets: DeclaredAssets): string | undefined {
+function attributeRefusal(
+  attributes: string,
+  assets: DeclaredAssets,
+  runsScript: boolean,
+): string | undefined {
   for (const attribute of attributes.matchAll(ATTRIBUTE)) {
     const name = (attribute[1] ?? "").toLowerCase();
     const value = (attribute[2] ?? attribute[3] ?? attribute[4] ?? "").trim();
     // `open` (a details element shown expanded) is the one attribute that
     // starts like an event handler and is not one.
     if (/^on[a-z]+$/.test(name) && name !== "open") {
+      if (runsScript) continue;
       return `has an ${name} handler; design frames run no script. Link frames with href="#frameId".`;
     }
     if (LINK_ATTRIBUTES.has(name) && !FRAGMENT.test(value)) {
@@ -430,6 +456,32 @@ function attributeRefusal(attributes: string, assets: DeclaredAssets): string | 
     }
   }
   return undefined;
+}
+
+// An event handler and its value, as an attribute of a start tag.
+const EVENT_HANDLER = /([\s"'/])on[a-z]+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'=<>`]+)/gi;
+
+/**
+ * A running design's markup with the text of each script element and the
+ * value of each event handler taken out, so the load checks read only what a
+ * browser would load as markup. A script element left open runs to the end
+ * of the markup, as a browser reads it.
+ */
+function withoutScriptText(markup: string): string {
+  const lower = markup.toLowerCase();
+  let kept = "";
+  let cursor = 0;
+  while (cursor < markup.length) {
+    const open = lower.indexOf("<script", cursor);
+    if (open === -1) break;
+    const tagEnd = lower.indexOf(">", open);
+    if (tagEnd === -1) break;
+    const close = lower.indexOf("</script", tagEnd);
+    kept += markup.slice(cursor, tagEnd + 1);
+    cursor = close === -1 ? markup.length : close;
+  }
+  kept += markup.slice(cursor);
+  return kept.replace(EVENT_HANDLER, "$1");
 }
 
 function truncated(value: string): string {

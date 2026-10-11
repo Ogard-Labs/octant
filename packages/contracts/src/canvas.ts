@@ -32,8 +32,8 @@ const strict = { parseOptions: { onExcessProperty: "error" as const } };
 // entity-relationship, swimlane, and mind map diagram kinds, version 9 the
 // design block, version 10 the comparison matrix, version 11 the math
 // block, version 12 the mockup catalog, version 13 the design document
-// size and workspace theme, and version 14 a design's declared image assets,
-// which the definition filters below admit only under those declared
+// size and workspace theme, version 14 a design's declared image assets, and
+// version 15 a design that runs script, which the definition filters below admit only under those declared
 // versions.
 
 // These are renderer-facing aggregate limits. Per-field structural limits are
@@ -169,6 +169,8 @@ export const CANVAS_MOCKUP_CATALOG_SCHEMA_VERSION = 12;
 export const CANVAS_DESIGN_DOCUMENT_SCHEMA_VERSION = 13;
 // A design that declares the images its frames show.
 export const CANVAS_DESIGN_ASSET_SCHEMA_VERSION = 14;
+// A design that runs its own script, drawn in a frame the host serves.
+export const CANVAS_DESIGN_RUNNING_SCHEMA_VERSION = 15;
 // The metric's sparkline, goodDirection, and caption arrived with the bar list.
 export const CANVAS_METRIC_TREND_SCHEMA_VERSION = 7;
 
@@ -1772,6 +1774,18 @@ export function canvasDesignUsesAssets(block: {
   return block.kind === "design" && block.assets !== undefined;
 }
 
+/**
+ * Whether a design declares that it runs script, which version 15 introduced.
+ * Reads loose fields so the domain's declared-version check can ask the same
+ * question of a document that did not decode.
+ */
+export function canvasDesignRunsScript(block: {
+  readonly kind?: unknown;
+  readonly runsScript?: unknown;
+}): boolean {
+  return block.kind === "design" && block.runsScript !== undefined;
+}
+
 /** The CSS viewport each device size is drawn at. Authors lay frames out against it. */
 export const CANVAS_DESIGN_VIEWPORT: Readonly<
   Record<CanvasDesignDeviceSize, { readonly width: number; readonly height: number }>
@@ -1841,7 +1855,10 @@ export type CanvasDesignAsset = typeof CanvasDesignAsset.Type;
 /**
  * Screens of an app or site, or the slides of a deck, written as HTML and CSS.
  * `styles` is one stylesheet every frame shares. `assets` declares the images
- * the frames and styles may name with `octant-asset:<assetId>`.
+ * the frames and styles may name with `octant-asset:<assetId>`. `runsScript`
+ * makes the design a running prototype: its inline script and event handlers
+ * run in a frame the host serves with its own policy, which still loads
+ * nothing from the network. A design without it runs nothing.
  */
 export const CanvasDesignBlock = Schema.Struct({
   ...CanvasBlockFields,
@@ -1849,6 +1866,7 @@ export const CanvasDesignBlock = Schema.Struct({
   title: CanvasMockupText,
   size: CanvasDesignSize,
   theme: Schema.optional(CanvasDesignTheme),
+  runsScript: Schema.optional(Schema.Literal(true)),
   styles: Schema.optional(CanvasDesignMarkup),
   assets: Schema.optional(
     Schema.Array(CanvasDesignAsset).pipe(Schema.maxItems(CANVAS_MAX_DESIGN_ASSETS)),
@@ -1928,6 +1946,62 @@ export const CanvasDesignAssetsOutcome = Schema.Union(
   }).annotations(strict),
 );
 export type CanvasDesignAssetsOutcome = typeof CanvasDesignAssetsOutcome.Type;
+
+/**
+ * Where the host serves a running design's page. A reader never names a
+ * design here: the only query is a ticket the host issued for one Canvas
+ * version, design, and start frame.
+ */
+export const CANVAS_DESIGN_PAGE_PATH = "/api/canvas/design-page";
+/**
+ * How long a running design's ticket lasts. The reader loads the page as soon
+ * as it holds the ticket, so a few seconds is enough, and a ticket copied out
+ * of a frame's address is useless almost at once.
+ */
+export const CANVAS_DESIGN_RUN_TICKET_TTL_MS = 10_000;
+/**
+ * The bridge a running page talks to its host through. The host writes the
+ * bridge script first in the page; it posts the page's height, its script
+ * errors, and a heartbeat every interval, and nothing else. Agent script can
+ * post the same messages, so the host treats each one as a claim to bound,
+ * never as a command.
+ */
+export const CANVAS_DESIGN_BRIDGE_CHANNEL = "octant-design-frame@1";
+export const CANVAS_DESIGN_HEARTBEAT_INTERVAL_MS = 1_000;
+export const CANVAS_DESIGN_BRIDGE_MAX_ERROR_LENGTH = 280;
+
+export const CanvasDesignRunRequest = Schema.Struct({
+  canvasId: CanvasId,
+  versionId: CanvasVersionId,
+  blockId: CanvasBlockId,
+  /** The frame the page opens on; the design's first frame when omitted. */
+  frameId: Schema.optional(CanvasDesignFrameId),
+}).annotations(strict);
+export type CanvasDesignRunRequest = typeof CanvasDesignRunRequest.Type;
+
+/**
+ * A running design's page, offered to one reader once. `page` is a path on
+ * the host holding a single-use ticket; the reader loads it in a frame
+ * sandboxed to `allow-scripts` alone, so the page's origin is opaque.
+ */
+export const CanvasDesignRunOutcome = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal("ready"),
+    canvasId: CanvasId,
+    versionId: CanvasVersionId,
+    blockId: CanvasBlockId,
+    page: Schema.String.pipe(
+      Schema.pattern(/^\/api\/canvas\/design-page\?ticket=[A-Za-z0-9_-]{43}$/),
+    ),
+  }).annotations(strict),
+  Schema.Struct({ kind: Schema.Literal("unauthorized"), canvasId: CanvasId }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("unavailable"),
+    canvasId: CanvasId,
+    reason: boundedNonEmptyText(512),
+  }).annotations(strict),
+);
+export type CanvasDesignRunOutcome = typeof CanvasDesignRunOutcome.Type;
 
 export const CanvasPlanBlock = Schema.Struct({
   ...CanvasBlockFields,
@@ -2064,10 +2138,10 @@ export const CanvasDefinition = Schema.Struct({
     // from version 6, a bar list and the metric trend fields from version 7, a
     // design from version 9, a comparison matrix from version 10, math from
     // version 11, the mockup catalog from version 12, a design document
-    // or theme from version 13, and design assets from version 14. A
-    // rolled-back runtime that never learned a kind or hint must see a document
-    // carrying it as a declared future version, not as a document that failed
-    // to decode. Each keeps its own floor so an earlier document stays valid.
+    // or theme from version 13, design assets from version 14, and a design
+    // that runs script from version 15. A rolled-back runtime that never
+    // learned a kind or hint must see a document carrying it as a declared
+    // future version, not as a document that failed to decode. Each keeps its own floor so an earlier document stays valid.
     Schema.filter(
       (definition) =>
         definition.schemaVersion >= CANVAS_MOCKUP_SCHEMA_VERSION ||
@@ -2189,6 +2263,15 @@ export const CanvasDefinition = Schema.Struct({
           `Design assets require Canvas schema version ${String(CANVAS_DESIGN_ASSET_SCHEMA_VERSION)}.`,
       },
     ),
+    Schema.filter(
+      (definition) =>
+        definition.schemaVersion >= CANVAS_DESIGN_RUNNING_SCHEMA_VERSION ||
+        !definition.blocks.some(canvasDesignRunsScript),
+      {
+        message: () =>
+          `A design that runs script requires Canvas schema version ${String(CANVAS_DESIGN_RUNNING_SCHEMA_VERSION)}.`,
+      },
+    ),
   );
 export type CanvasDefinition = typeof CanvasDefinition.Type;
 
@@ -2224,6 +2307,8 @@ export const decodeCanvasDiagramLayoutKind = Schema.decodeUnknownSync(CanvasDiag
 export const decodeCanvasPlanTaskId = Schema.decodeUnknownSync(CanvasPlanTaskId);
 export const decodeCanvasNodeId = Schema.decodeUnknownSync(CanvasNodeId);
 export const decodeCanvasDesignAssetsOutcome = Schema.decodeUnknownSync(CanvasDesignAssetsOutcome);
+export const decodeCanvasDesignRunRequest = Schema.decodeUnknownSync(CanvasDesignRunRequest);
+export const decodeCanvasDesignRunOutcome = Schema.decodeUnknownSync(CanvasDesignRunOutcome);
 
 // ── Journaled lifecycle events ──────────────────────────────────────────────
 //

@@ -48,9 +48,11 @@ import {
   CANVAS_MATH_SCHEMA_VERSION,
   CANVAS_DESIGN_DOCUMENT_SCHEMA_VERSION,
   CANVAS_DESIGN_ASSET_SCHEMA_VERSION,
+  CANVAS_DESIGN_RUNNING_SCHEMA_VERSION,
   CanvasBlock,
   CanvasDefinition,
   canvasDesignUsesAssets,
+  canvasDesignRunsScript,
   canvasDesignUsesDocumentFields,
   canvasMockupUsesCatalog,
   type CanvasMockupComponent,
@@ -84,6 +86,7 @@ const SUPPORTED_CANVAS_SCHEMA_VERSIONS: readonly number[] = [
   CANVAS_MATH_SCHEMA_VERSION,
   CANVAS_MOCKUP_CATALOG_SCHEMA_VERSION,
   CANVAS_DESIGN_DOCUMENT_SCHEMA_VERSION,
+  CANVAS_DESIGN_ASSET_SCHEMA_VERSION,
   CANVAS_SCHEMA_VERSION,
 ];
 
@@ -170,6 +173,7 @@ export type CanvasPolicyRejectionCode =
   | "duplicate-design-frame-id"
   | "design-markup-refused"
   | "design-asset-refused"
+  | "design-run-refused"
   | "bar-list-rows-budget-exceeded"
   | "duplicate-bar-list-label"
   | "bar-list-negative-value"
@@ -397,7 +401,8 @@ function calculateBudgetUsage(
  * seen — either a future schema version or a version-gated field (a mockup
  * block from version 3, a thread presentation from version 4, a treemap from
  * version 5, a heatmap from version 6, a design block from version 9, a design
- * document or theme from version 13, design assets from version 14) inside a
+ * document or theme from version 13, design assets from version 14, a
+ * design that runs script from version 15) inside a
  * document that declares an older version — must fail closed as an
  * unsupported schema version, before any content is read, rather than
  * collapsing into a generic "corrupt" decode failure. Works on both a
@@ -439,7 +444,9 @@ function declaredSchemaRejection(input: unknown): CanvasPolicyRejectionCode | un
           (declared < CANVAS_DESIGN_DOCUMENT_SCHEMA_VERSION &&
             canvasDesignUsesDocumentFields(block as Record<string, unknown>)) ||
           (declared < CANVAS_DESIGN_ASSET_SCHEMA_VERSION &&
-            canvasDesignUsesAssets(block as Record<string, unknown>))),
+            canvasDesignUsesAssets(block as Record<string, unknown>)) ||
+          (declared < CANVAS_DESIGN_RUNNING_SCHEMA_VERSION &&
+            canvasDesignRunsScript(block as Record<string, unknown>))),
     )
   ) {
     return "unsupported-schema-version";
@@ -837,12 +844,20 @@ function validateCrossReferences(definition: CanvasDefinition): void {
  * can show: a unique id, and a Project file only where the mode has a folder
  * and only as a path that stays inside it. The host still resolves every
  * asset under the thread's authority when the design is drawn; this only
- * tells the author early.
+ * tells the author early. A running design is served as the author's own page,
+ * so it cannot take the workspace theme, which the reader's renderer writes.
  */
 function validateDesign(
   block: Extract<CanvasBlock, { readonly kind: "design" }>,
   mode: CanvasDefinition["provenance"]["mode"],
 ): void {
+  const runsScript = block.runsScript === true;
+  if (runsScript && block.theme === "workspace") {
+    reject(
+      "design-run-refused",
+      `Canvas design ${block.blockId} runs script and is drawn as its own page; leave out theme "workspace" and style it in the design.`,
+    );
+  }
   const assetIds = new Set<string>();
   for (const asset of block.assets ?? []) {
     const id = String(asset.assetId);
@@ -886,7 +901,7 @@ function validateDesign(
       );
     }
     frameIds.add(id);
-    const refusal = canvasDesignMarkupRefusal(frame.html, assetIds);
+    const refusal = canvasDesignMarkupRefusal(frame.html, assetIds, runsScript);
     if (refusal !== undefined) {
       reject("design-markup-refused", `Canvas design ${block.blockId} frame ${id} ${refusal}`);
     }

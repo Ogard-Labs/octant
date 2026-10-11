@@ -1430,6 +1430,75 @@ describe("design frames", () => {
     ).not.toThrow();
   });
 
+  it("admits inline script and event handlers only in a design that declares it runs script", () => {
+    const html = [
+      "<p id=count>0</p>",
+      '<button onclick="add()">Add</button>',
+      "<script>let n = 0; function add() { n += 1; count.textContent = String(n); }",
+      "const url = new URL(location.href); if (n<1) { console.log(url) }</script>",
+    ].join("");
+    const running = { ...design([{ frameId: "cart", html }]), runsScript: true };
+    expect(refusalOf(running)).toBe("accepted");
+    // The same markup in a static design still runs nothing.
+    expect(refusalOf(design([{ frameId: "cart", html }]))).toMatch(
+      /^design-markup-refused: .*(onclick handler|<script> element)/,
+    );
+  });
+
+  it("keeps refusing every remote load, page policy, embedded document, and outside link in a running design", () => {
+    const run = (html: string, styles?: string) =>
+      refusalOf({ ...design([{ frameId: "cart", html }], styles), runsScript: true });
+    for (const html of [
+      '<script src="https://cdn.test/app.js"></script>',
+      "<script src=data:text/javascript,alert(1)></script>",
+      '<meta http-equiv="refresh" content="0;url=https://example.test">',
+      '<base href="https://example.test/">',
+      '<link rel="stylesheet" href="https://example.test/a.css">',
+      '<iframe srcdoc="<p>hi</p>"></iframe>',
+      '<object data="x.pdf"></object>',
+      '<embed src="x.swf">',
+      '<a href="https://example.test">Out</a>',
+      '<a href="javascript:alert(1)">Run</a>',
+      '<img src="https://example.test/pixel.png" alt="">',
+      '<div style="background:url(https://example.test/a.png)"></div>',
+      '<form action="https://example.test"><button>Go</button></form>',
+      "<script>1</script><style>@import url(https://example.test/a.css);</style>",
+    ]) {
+      expect(run(html)).toMatch(/^design-markup-refused: /);
+    }
+    expect(run("<p>Hi</p>", ".a { background: url(https://example.test/a.png); }")).toMatch(
+      /^design-markup-refused: .*stylesheet/,
+    );
+  });
+
+  it("refuses a running design drawn in the workspace theme, which only the reader can write", () => {
+    expect(
+      refusalOf({
+        ...design([{ frameId: "cart", html: "<p>Hi</p>" }]),
+        runsScript: true,
+        theme: "workspace",
+      }),
+    ).toMatch(/^design-run-refused: /);
+  });
+
+  it("refuses a running design inside a document declaring version 14", () => {
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition({
+          ...baseDefinition,
+          schemaVersion: 14,
+          blocks: [
+            {
+              ...design([{ frameId: "cart", html: "<p>Hi</p>" }]),
+              schemaVersion: 14,
+              runsScript: true,
+            },
+          ],
+        }),
+      "unsupported-schema-version",
+    );
+  });
+
   it("refuses two frames with one id, since a link could only reach the first", () => {
     expect(
       refusalOf(
