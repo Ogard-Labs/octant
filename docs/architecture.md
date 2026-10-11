@@ -2872,8 +2872,8 @@ handoff.
 
 **Fork handoff (Code).** A fork's first session (no session recorded on the
 fork yet) carries the source's conversation through the fork point, never
-past it. When the fork's provider instance can take up the source's own
-session there (today only the Octant Harness, `seedCodeForkHarnessSession`,
+past it. When the fork's provider instance and model can take up the
+source's own session there (today only the Octant Harness, `seedCodeForkHarnessSession`,
 below), the fork resumes that copy and is sent no text. Otherwise, including
 every fork onto a provider instance other than the one that wrote the fork
 point, it reads the source through the same selector (purpose `fork`,
@@ -3041,7 +3041,8 @@ native harness in `apps/server/src/harness`:
   begins with the one user message `send` journals for it, and the copy is cut
   at the turn after the named one; the copy refuses — and the fork reads the
   journaled text handoff instead (see "Fork handoff (Code)") — unless the
-  transcript holds exactly the turns the
+  copy's binding is the fork's provider instance and model, the turn is
+  still admitted, and the transcript holds exactly the turns the
   source ran on that session, the named turn finished, and its last step
   settled. Copied paths under the source's checkout are rewritten to the
   fork's worktree, and the secret values the fork's turn resolved are
