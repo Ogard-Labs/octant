@@ -182,13 +182,16 @@ exception; the product path above does not create that.
   login can live apart from session files, launches grant that
   credential path plus a durable per-thread session directory on
   every confined and unconfined turn for that thread. Threads that
-  already have history in the account tree keep that session root
-  for every later launch or take an explicit new-thread transition;
-  do not move them onto an empty directory. If login cannot be
-  separated, confined Chat, Work Plan, and Code Plan subscription
-  launches are refused so a bound root cannot read another Project's
-  files. Unconfined turns may still use the CLI login. That is a
-  recorded limit, not a later invention.
+  already have history in the account tree may keep that session
+  root on later unconfined launches. Existing confined Chat or Plan
+  threads take an explicit new-thread transition before the next
+  confined subscription launch; do not grant them the account-wide
+  tree. If login cannot be separated, confined Chat, Work Plan, and
+  Code Plan subscription launches are refused so a bound root cannot
+  read another Project's files. Unconfined turns may still use the
+  CLI login. An instance-wide API-key fallback also grants a durable
+  per-thread session directory so new threads can resume after
+  restart. That is a recorded limit, not a later invention.
 - User-facing copy stops presenting Claude login as an Octant-owned
   connect step.
 

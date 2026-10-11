@@ -168,9 +168,12 @@ per-launch config directory: resume has to find the same session
 files after a restart. Threads that already started under the helper-
 token path still have their history in the account config tree. Do
 not relocate those threads into an empty per-thread directory: that
-makes the saved cursor `stale-resume`. Keep their existing session
-root for every later launch, or require an explicit new-thread
-transition, before changing the storage root.
+makes the saved cursor `stale-resume`. Unconfined later launches may
+keep that account session root. Existing confined Chat or Plan
+threads cannot keep it: granting the account tree on the next
+confined launch would expose another Project's transcripts. Those
+confined threads take an explicit new-thread transition before the
+next confined subscription launch.
 
 Do not grant the shared session tree to a confined Chat subagent or
 Plan turn that would otherwise read another Project's history. If
@@ -187,8 +190,13 @@ credential file.
 
 If Step 0 failed, confined launches require an Anthropic API key instead.
 That is the same instance-wide switch Step 0 recorded, including its
-new-thread transition for existing subscription resume cursors. Say so
-in Settings. Do not reintroduce a setup token.
+new-thread transition for existing subscription resume cursors. New
+API-key threads after that switch still need a durable per-thread
+session directory: the current throwaway `octant-claude-config-*`
+scope deletes history when the connection closes, so a later resume
+fails `findSession`. Grant the same durable session root on those
+fallback launches and cover restart resume. Say so in Settings. Do
+not reintroduce a setup token.
 
 **Files:**
 
