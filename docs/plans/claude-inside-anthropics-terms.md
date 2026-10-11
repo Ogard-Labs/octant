@@ -39,6 +39,15 @@ Anthropic's Authentication page (fetched 10 Oct 2026) says:
   under that directory, including the macOS fallback file, and keys the
   Keychain entry to that directory.
 
+Source status: the three points above were not checked against the official
+page in the 11 Oct 2026 review. Third-party reports agree that Linux keeps
+the login in `~/.claude/.credentials.json` and that macOS uses the Keychain,
+but none confirms the macOS fallback file or its exact lookup order. Treat
+the points as unverified until measurement 1 and 2 below record what the
+build does. The Linux point also matters for the refusal rule in Step 2: on
+Linux the file may be the normal login store, so refusing confined launches
+when it exists would refuse every Linux subscription Plan turn.
+
 Measure:
 
 1. Create an empty directory. Launch unmodified `claude` with

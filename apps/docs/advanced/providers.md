@@ -248,12 +248,6 @@ Octant, because the approval opens a browser there. The
 [privacy notice](/advanced/privacy-notice#claude-for-helpers-only-if-you-connect-it)
 states what is stored and who receives it.
 
-A proposed replacement would sign confined Claude launches in from a
-Claude-owned config directory instead of a token Octant stores. It is
-not accepted, so this guide describes the current build: confined Plan
-turns and Claude subagents still need the helper token until that
-replacement lands.
-
 The **Update CLI** action is shown only for providers with a verified native
 update command. It runs that command against the same configured executable,
 when no active session is using it, and then reports whether the observed

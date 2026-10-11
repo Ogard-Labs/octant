@@ -2631,10 +2631,6 @@ modelId }`, and the model picker is provider-first. Discovery can find
   those tokens, except the opt-in Claude for helpers token that a confined
   Claude launch signs in with, which the credential broker holds as the Sandbox
   paragraph of [security and authority](#security-and-authority) states.
-  A proposed replacement would drop that helper-token exception and sign
-  confined Claude launches in from a Claude-owned config directory; see
-  that same Sandbox paragraph. The replacement is not accepted and is
-  not the current build.
   **Host-driven** (`subscription-oauth`, direct HTTP drivers):
   the host runs a generic authorization-code PKCE runner and a device-code
   runner from a provider descriptor (endpoints, scopes, and a public client
@@ -3784,6 +3780,16 @@ gate. The connector marketplace hold remains in force.
 The full threat model lives in the security documentation; the load-bearing
 mechanisms are:
 
+**Proposed, not accepted: Claude sign-in inside Anthropic's terms.** Octant
+would not mint, store, or inject a Claude setup or OAuth token. Claude
+subscription sign-in would stay in Anthropic's own flow, and confined Claude
+launches would sign in from a Claude-owned config directory. The rule is not
+in force. It needs the Step 0 measurement on a current Claude Code build on
+macOS, and Anthropic's Commercial Terms or an explicit Anthropic exception.
+Until both are recorded, the rules in this document describe the build as it
+ships. The steps, the open questions, and the rejected alternatives live in
+[the remediation plan](plans/claude-inside-anthropics-terms.md).
+
 - **Local authority needs the bridge secret.** Nothing reachable on loopback
   grants window authority by itself. Electron and the CLI present the desktop
   bridge secret, which only the host's OS user can read from the owner-only
@@ -4009,63 +4015,8 @@ mechanisms are:
   connect or disconnect. Disconnecting deletes the token from the broker and
   reports a broker it cannot reach. Removing the Claude Code provider clears
   it best-effort: the removal completes even when the broker is unreachable and
-  the token can remain. Octant has no call that revokes it with Anthropic.
-  **Proposed replacement (not accepted).** Claude subscription sign-in would
-  stay inside Anthropic's own flow. Octant would not run `claude setup-token`,
-  would not keep `CLAUDE_CODE_OAUTH_TOKEN` in the credential broker, and would
-  not set that variable from Octant storage. Confined Plan and
-  Chat-subagent launches would keep that sign-in only when Step 0
-  finds an opaque credential-use path that needs neither a
-  `.credentials.json` directory grant nor the Keychain file.
-  `/usr/bin/security` and the Keychain file stay denied. Granting a
-  filesystem-backed credential directory would expose the OAuth token
-  to Claude file tools. This is not the current product. It stays proposed until Step 0 of
-  [docs/plans/claude-inside-anthropics-terms.md](plans/claude-inside-anthropics-terms.md)
-  is measured on a current Claude Code build on macOS, and until Anthropic's
-  Commercial Terms or an explicit exception cover the path. Consumer Terms
-  alone are not enough. If that measurement shows confined sign-in from
-  Claude-owned storage cannot work, the instance switches to API-key
-  authentication for every launch. Existing subscription threads cannot resume
-  across that switch; they take an explicit new-thread transition. If sign-in
-  works but login cannot be separated from account session history, or the
-  only confined login is a granted `.credentials.json` directory, keep the
-  subscription and refuse confined Chat, Work Plan, and Code Plan launches;
-  that is not the instance-wide API-key fallback. If login can live apart from
-  session files on an opaque path, every launch for a new thread sets
-  `CLAUDE_CONFIG_DIR` to one durable per-thread session directory and
-  points only the measured secure-storage variable at the credential-only
-  path. The confined grant is the session root and the launch temporary
-  directory, not a `.credentials.json` directory. `findSession`
-  receives that root without mutating process-global environment. Ordinary
-  Chat, Work, and Code resume identities are journaled and purgeable, not
-  process-lifetime only. Durable session roots are host-allocated
-  beneath a provider/thread-scoped root and purged through a
-  provider-neutral `@octant/provider-sdk` seam: the host issues a
-  thread-bound receipt before the first session write; the data map and
-  purge sweep only see those receipts, including after restart or while
-  the provider is disabled. A driver cannot register a path outside that
-  allocated root. Confined login is limited to an attested Claude version or
-  inclusive range; a newer unattested build refuses confined subscription
-  until Step 0 is rerun. Ordinary unconfined turns on that unattested
-  binary may still run and use the account session root; persist that
-  root with the thread. A later confined Plan switch of that thread
-  takes an explicit new-thread transition. Subscription launches of the
-  unmodified binary would leave Claude's own telemetry, error reporting,
-  and Claude-owned product checks intact. `DISABLE_GROWTHBOOK` only
-  stops feature-flag fetching. Process-ownership channels stay on
-  dedicated documented switches, including `/feedback`, `/bug`,
-  `/share`, and Claude-drafted feedback. Host
-  `DO_NOT_TRACK` and `CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY` opt-outs keep
-  the documented disable spellings (`1`, `true`, `yes`, `on`). Account
-  `settings.json` disable-only values for those same names are seeded
-  into the per-thread session root without reading credential files.
-  API-key launches may keep the 0005 telemetry guards.
-  Several Claude accounts would use the same config-directory mechanism.
-  Each thread stays on the account it started with. Automatic failover,
-  rotation, and load-balancing are refused. The native harness stays API-key
-  only: Claude subscription OAuth is never offered there. 0111's Anthropic
-  exclusion stands.
-  A bound root a launch may not write is denied in the profile, so a checkout under that launch's own temporary directory is not
+  the token can remain. Octant has no call that revokes it with Anthropic. A
+  bound root a launch may not write is denied in the profile, so a checkout under that launch's own temporary directory is not
   writable through it. The `--version` read every family and the discovery
   scan perform before a runtime starts is wrapped too, with no root, no home, no network and one
   throwaway scratch directory it may write, per
