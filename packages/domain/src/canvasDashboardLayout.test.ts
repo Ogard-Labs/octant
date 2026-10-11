@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { opsDashboardExample } from "./canvasDashboardExamples";
 import {
   canvasDashboardCellSpan,
+  canvasDashboardCellWidth,
   canvasReadingOrder,
   packCanvasDashboardGrid,
 } from "./canvasDashboardLayout";
@@ -60,5 +61,19 @@ describe("dashboard cell spans", () => {
       ["c", 1, 0],
       ["d", 2, 0],
     ]);
+  });
+});
+
+describe("dashboard cell widths", () => {
+  it("draws a cell across the whole grid at dock width and at its span on a wide one", () => {
+    const at = (gridWidth: number, span: number) =>
+      canvasDashboardCellWidth({ gridWidth, columns: 4, span, kind: "chart" });
+    expect(at(400, 1)).toBe(374);
+    expect(at(700, 1)).toBe((700 - 12) / 2 - 26);
+    expect(at(1000, 1)).toBe((1000 - 36) / 4 - 26);
+    expect(at(1000, 4)).toBe(1000 - 26);
+    expect(canvasDashboardCellWidth({ gridWidth: 400, columns: 4, span: 1, kind: "metric" })).toBe(
+      400,
+    );
   });
 });

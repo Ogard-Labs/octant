@@ -146,3 +146,35 @@ export function packCanvasDashboardGrid<B>(
   }
   return packed;
 }
+
+// The grid's width tiers and spacing, in CSS pixels, as the web stylesheet
+// draws them (36rem and 52rem at the 16px root, a 12px gap, and a cell's 12px
+// padding and 1px ring on each side). A measure that must agree with the
+// screen, such as a preview warning, reads them from here.
+const DASHBOARD_ONE_COLUMN_BELOW_PX = 576;
+const DASHBOARD_TWO_COLUMNS_BELOW_PX = 832;
+const DASHBOARD_GAP_PX = 12;
+const DASHBOARD_CELL_FRAME_PX = 26;
+
+/**
+ * The width a placed block is drawn at inside a dashboard `gridWidth` wide:
+ * the columns the grid shows at that width, the cell's span within them, and
+ * the cell's own frame. A metric draws its own tile, so it loses no frame.
+ */
+export function canvasDashboardCellWidth(input: {
+  readonly gridWidth: number;
+  readonly columns: number;
+  readonly span: number;
+  readonly kind: string;
+}): number {
+  const shown =
+    input.gridWidth < DASHBOARD_ONE_COLUMN_BELOW_PX
+      ? 1
+      : input.gridWidth < DASHBOARD_TWO_COLUMNS_BELOW_PX
+        ? Math.min(2, input.columns)
+        : input.columns;
+  const span = Math.max(1, Math.min(input.span, shown));
+  const track = (input.gridWidth - DASHBOARD_GAP_PX * (shown - 1)) / shown;
+  const cell = track * span + DASHBOARD_GAP_PX * (span - 1);
+  return Math.max(0, cell - (input.kind === "metric" ? 0 : DASHBOARD_CELL_FRAME_PX));
+}
