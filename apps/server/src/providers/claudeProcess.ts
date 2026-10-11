@@ -438,7 +438,8 @@ function planStateDirectories(
     // A write grant that is the checkout, sits inside it, or contains it
     // reopens Plan's bound root. Home, its ancestors, `/`, arbitrary home
     // subtrees (Documents, .ssh), the shared `~/.claude-accounts` parent,
-    // and shared host roots such as `/tmp` or `/Users/Shared` are the same class of grant:
+    // and shared host roots such as `/tmp`, `/Users/Shared`, or `/Volumes/<name>`
+    // are the same class of grant:
     // only one dedicated Claude state directory may be writable.
     if (
       claudePlanStateDirectoryReopensHome(path, home) ||
@@ -477,7 +478,9 @@ const SHARED_PLAN_STATE_ROOTS = [
 
 /** Plan must not grant a world-shared temp, IPC, or multi-user root as account state. */
 export function claudePlanStateDirectoryIsSharedRoot(path: string): boolean {
-  if (SHARED_PLAN_STATE_ROOTS.includes(path)) return true;
+  if (SHARED_PLAN_STATE_ROOTS.includes(path) || claudePlanStateDirectoryIsVolumeMount(path)) {
+    return true;
+  }
   for (const root of SHARED_PLAN_STATE_ROOTS) {
     try {
       if (realpathSync(root) === path) return true;
@@ -485,7 +488,19 @@ export function claudePlanStateDirectoryIsSharedRoot(path: string): boolean {
       // This host does not have that directory.
     }
   }
-  return false;
+  try {
+    return claudePlanStateDirectoryIsVolumeMount(realpathSync(path));
+  } catch {
+    return false;
+  }
+}
+
+/** `/Volumes/<name>` is the root of a mounted disk, not a dedicated account leaf. */
+function claudePlanStateDirectoryIsVolumeMount(path: string): boolean {
+  const prefix = "/Volumes/";
+  if (!path.startsWith(prefix)) return false;
+  const rest = path.slice(prefix.length);
+  return rest.length > 0 && !rest.includes("/");
 }
 
 function claudeRuntimeStateDirectories(environment: SpawnOptions["env"]): ReadonlyArray<string> {

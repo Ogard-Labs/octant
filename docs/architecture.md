@@ -2050,7 +2050,8 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   overlaps the checkout, is the user's home, is an ancestor of home,
   is another home subtree such as Documents, `.ssh`, or the shared
   `~/.claude-accounts` parent, or is a shared host root such as
-  `/tmp`, `/var/tmp`, or `/Users/Shared`. The only home paths Plan may write are
+  `/tmp`, `/var/tmp`, `/Users/Shared`, `/Volumes`, or a mounted volume
+  root such as `/Volumes/<name>`. The only home paths Plan may write are
   `~/.claude` and a dedicated `~/.claude-accounts/<account>` directory.
   Two Claude instances cannot share one effective config directory,
   including the default account's implicit `~/.claude` or inherited

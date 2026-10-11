@@ -751,7 +751,31 @@ describe("Claude runtime confinement", () => {
     expect(claudePlanStateDirectoryIsSharedRoot("/var/tmp")).toBe(true);
     expect(claudePlanStateDirectoryIsSharedRoot("/Users/Shared")).toBe(true);
     expect(claudePlanStateDirectoryIsSharedRoot("/Volumes")).toBe(true);
+    expect(claudePlanStateDirectoryIsSharedRoot("/Volumes/WorkDrive")).toBe(true);
     expect(claudePlanStateDirectoryIsSharedRoot("/tmp/claude-accounts/work")).toBe(false);
+    expect(claudePlanStateDirectoryIsSharedRoot("/Volumes/WorkDrive/.claude-accounts/work")).toBe(
+      false,
+    );
+  });
+
+  it("refuses a Plan turn whose account directory is a mounted volume root", () => {
+    const target = fixture();
+    const confinement = recordingConfinement();
+
+    expect(() =>
+      makePort(target, { confinement: confinement.port }).spawn({
+        projectRoot: target.root,
+        executionPolicy: "plan",
+      })({
+        command: target.binaryPath,
+        args: ["sdk-test"],
+        cwd: target.root,
+        env: { ...target.environment, CLAUDE_CONFIG_DIR: "/Volumes/WorkDrive" },
+        signal: new AbortController().signal,
+      }),
+    ).toThrow("shared host directory");
+    expect(confinement.prepared).toEqual([]);
+    expect(pids(target.root)).toEqual([]);
   });
 
   it("refuses a Plan turn whose account directory is a shared temporary root", () => {
