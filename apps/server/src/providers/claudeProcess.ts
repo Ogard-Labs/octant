@@ -444,6 +444,7 @@ function planStateDirectories(
     if (
       claudePlanStateDirectoryReopensHome(path, home) ||
       claudePlanStateDirectoryIsSharedRoot(path) ||
+      !claudePlanStateDirectoryIsDedicatedLeaf(path, home) ||
       path === boundRoot ||
       path.startsWith(`${boundRoot}${sep}`) ||
       boundRoot.startsWith(`${path}${sep}`)
@@ -455,6 +456,15 @@ function planStateDirectories(
     }
   }
   return canonicalDirectories;
+}
+
+/** Plan may write ~/.claude or a .claude-accounts account leaf, not /opt/homebrew. */
+export function claudePlanStateDirectoryIsDedicatedLeaf(path: string, home: string): boolean {
+  if (path === `${home}${sep}.claude`) return true;
+  const marker = `${sep}.claude-accounts${sep}`;
+  const index = path.indexOf(marker);
+  if (index === -1) return false;
+  return path.slice(index + marker.length).length > 0;
 }
 
 /** Plan may write one dedicated Claude state dir, not the rest of home. */

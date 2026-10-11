@@ -27,6 +27,7 @@ import type {
   SeatbeltConfinementPrepareInput,
 } from "../process/seatbeltProfile";
 import {
+  claudePlanStateDirectoryIsDedicatedLeaf,
   claudePlanStateDirectoryIsSharedRoot,
   makeClaudeProcessLive,
   type ClaudeProcessOptions,
@@ -759,6 +760,36 @@ describe("Claude runtime confinement", () => {
     expect(claudePlanStateDirectoryIsSharedRoot("/Volumes/WorkDrive/.claude-accounts/work")).toBe(
       false,
     );
+    expect(claudePlanStateDirectoryIsDedicatedLeaf("/opt/homebrew", "/Users/example")).toBe(false);
+    expect(
+      claudePlanStateDirectoryIsDedicatedLeaf(
+        "/opt/homebrew/.claude-accounts/work",
+        "/Users/example",
+      ),
+    ).toBe(true);
+    expect(
+      claudePlanStateDirectoryIsDedicatedLeaf("/Users/example/.claude", "/Users/example"),
+    ).toBe(true);
+  });
+
+  it("refuses a Plan turn whose account directory is a package-manager prefix", () => {
+    const target = fixture();
+    const confinement = recordingConfinement();
+
+    expect(() =>
+      makePort(target, { confinement: confinement.port }).spawn({
+        projectRoot: target.root,
+        executionPolicy: "plan",
+      })({
+        command: target.binaryPath,
+        args: ["sdk-test"],
+        cwd: target.root,
+        env: { ...target.environment, CLAUDE_CONFIG_DIR: "/opt/homebrew" },
+        signal: new AbortController().signal,
+      }),
+    ).toThrow("shared host directory");
+    expect(confinement.prepared).toEqual([]);
+    expect(pids(target.root)).toEqual([]);
   });
 
   it("refuses a Plan turn whose account directory is an ancestor of a shared root", () => {

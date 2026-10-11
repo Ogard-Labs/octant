@@ -2052,7 +2052,10 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   `~/.claude-accounts` parent, or is a shared host root such as
   `/tmp`, `/var/tmp`, `/Users/Shared`, `/Volumes`, a mounted volume
   root such as `/Volumes/<name>`, or an ancestor of those roots such as
-  `/private` or `/var`. The only home paths Plan may write are
+  `/private` or `/var`. Plan account state must be a dedicated leaf:
+  `~/.claude` or a `**/.claude-accounts/<account>` directory. Broad
+  prefixes such as `/opt/homebrew` are refused even when they are not
+  on the shared-root list. The only home paths Plan may write are
   `~/.claude` and a dedicated `~/.claude-accounts/<account>` directory.
   Two Claude instances cannot share one effective config directory,
   including the default account's implicit `~/.claude` or inherited
