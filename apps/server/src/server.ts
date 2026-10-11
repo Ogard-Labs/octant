@@ -10110,6 +10110,7 @@ export function startOctantServer(
         now: Date.now(),
         computerName: replicaComputerName(hostname(), localHostDisplayName()),
         restore: replicaArtifactSync.service?.restoreProgress(),
+        joinRead: replicaMembershipService.joinReadProgress(),
       });
     const replicaSyncStatusRoutes = createReplicaSyncStatusRouteHandler({
       windowAuthorityStore,
@@ -10278,6 +10279,7 @@ export function startOctantServer(
       state: () => persistence.replicaMembershipProjection.state(),
       localHostId: LOCAL_HOST_ID,
       clock: () => Date.now(),
+      restoreStopped: () => replicaArtifactSync.service?.restoreProgress()?.state === "stopped",
     });
     // Publish and pull for artifacts. With sync off, or no identity in a
     // replica, nothing is queued and no store is called; a Code thread under
