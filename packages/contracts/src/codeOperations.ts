@@ -1371,6 +1371,21 @@ const ProviderSwitchHandoff = Schema.Struct({
   omissions: CodeContextHandoffOmissions,
   /** Whether the thread had taken in outside content when the handoff was read. */
   externalContentIngested: Schema.Boolean,
+  /**
+   * Present when the thread is a fork: the handoff also carried the source's
+   * conversation through the fork point, ahead of the thread's own turns.
+   * `messages` and `omissions` above cover both; these say how much of the
+   * carried text came from the source.
+   */
+  inherited: Schema.optional(
+    Schema.Struct({
+      forkedFrom: CodeThreadForkOrigin,
+      /** Carried messages that came from the source; may be 0 after the budget. */
+      messages: Schema.Int.pipe(Schema.between(0, MAX_AGENT_RUN_ADMITTED_CONTEXT_BLOCKS - 1)),
+      /** Whether the source thread had taken in outside content when it was read. */
+      externalContentIngested: Schema.Boolean,
+    }).annotations(strict),
+  ),
 }).annotations(strict);
 
 /**

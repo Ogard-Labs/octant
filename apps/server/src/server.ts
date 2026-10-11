@@ -3677,7 +3677,7 @@ export function startOctantServer(
       threadId: CodeThreadId,
       options: Pick<
         AdmittedParentCodeContextInput,
-        "purpose" | "excludeOperationId" | "throughOperationId"
+        "purpose" | "excludeOperationId" | "throughOperationId" | "inherited"
       > = {},
     ) =>
       admittedParentCodeContext({
@@ -4892,10 +4892,22 @@ export function startOctantServer(
         supportsModelSwitch: (thread) =>
           providerRuntimeRegistry.observedState(thread.providerInstanceId)?.capabilities
             .modelSwitch === "supported",
-        providerSwitchContext: ({ thread, excludeOperationId }) =>
+        providerSwitchContext: ({ thread, excludeOperationId, inheritedFrom }) =>
           selectCodeConversation(thread.id, {
             purpose: "provider-switch",
             excludeOperationId: String(excludeOperationId),
+            ...(inheritedFrom === undefined
+              ? {}
+              : {
+                  inherited: {
+                    threadId: inheritedFrom.source.id,
+                    throughOperationId: inheritedFrom.throughOperationId,
+                    externalContentIngested: readThreadExternalContentTaint(
+                      persistence.connection,
+                      String(inheritedFrom.source.id),
+                    ).externalContentIngested,
+                  },
+                }),
           }),
         supportsAttachments: (thread) => {
           const observed = providerRuntimeRegistry.observedState(thread.providerInstanceId);
