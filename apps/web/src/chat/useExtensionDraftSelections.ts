@@ -1,6 +1,6 @@
 import { useComputerUseEnabled } from "../computerUse/ComputerUseMention";
-import { computerUseSelection } from "@octant/plugin-host/computer-use";
-import { browserUseSelection } from "@octant/plugin-host/browser-use";
+import { computerUseSelection, isComputerUseSelection } from "@octant/plugin-host/computer-use";
+import { browserUseSelection, isBrowserUseSelection } from "@octant/plugin-host/browser-use";
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
 import type { ChatThread } from "@octant/contracts/chat";
 import type { OctantMode } from "@octant/contracts/modes";
@@ -20,12 +20,13 @@ import {
 import { buildSkillCatalog, filterSkillCatalogForScope } from "@octant/plugin-host/skills";
 import { parseComposerReference } from "@octant/plugin-host/composer";
 import { sourceQualifiedSkillId } from "@octant/plugin-host/model";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { Schema } from "effect";
 import type { ComposerExtensionSelection } from "../composer/composerExtensionSelection";
 
 type DraftSelectionClient = Pick<ExtensionClient, "snapshot" | "effectiveState">;
 const NO_RECEIPTS: ReadonlyArray<ComposerExtensionSelection> = [];
+const NO_OCTANT_TOOLS = "no Octant tools on this runtime";
 
 export function useExtensionDraftSelections(options: {
   readonly client?: DraftSelectionClient;
@@ -59,8 +60,23 @@ export function useExtensionDraftSelections(options: {
     readonly client: DraftSelectionClient | undefined;
     readonly byScope: ReadonlyMap<string, ReadonlyArray<ComposerExtensionSelection>>;
   }>(() => ({ client: options.client, byScope: new Map() }));
-  const receipts =
+  const stagedReceipts =
     state.client === options.client ? (state.byScope.get(scopeKey) ?? NO_RECEIPTS) : NO_RECEIPTS;
+  // Browser or Computer staged before the thread moved to a runtime without
+  // Octant's tools would still ride the next send, which the host refuses, so
+  // it is shown blocked and carries no selection while that runtime is chosen.
+  const receipts = useMemo(
+    () =>
+      providerCarriesTools
+        ? stagedReceipts
+        : stagedReceipts.map((receipt) =>
+            receipt.selection !== undefined &&
+            (isComputerUseSelection(receipt.selection) || isBrowserUseSelection(receipt.selection))
+              ? blockedReceipt(receipt.reference, NO_OCTANT_TOOLS)
+              : receipt,
+          ),
+    [providerCarriesTools, stagedReceipts],
+  );
 
   // A refused send may restore after the user has opened another Project.
   // Keep that receipt with its original draft, never over the current one.
@@ -110,9 +126,7 @@ export function useExtensionDraftSelections(options: {
         (reference.toLowerCase() === "@computer" || reference.toLowerCase() === "@browser")
       ) {
         const label = reference.toLowerCase() === "@computer" ? "@Computer" : "@Browser";
-        commit((current) =>
-          upsertReceipt(current, blockedReceipt(label, "no Octant tools on this runtime")),
-        );
+        commit((current) => upsertReceipt(current, blockedReceipt(label, NO_OCTANT_TOOLS)));
         return true;
       }
       if (reference.toLowerCase() === "@computer") {

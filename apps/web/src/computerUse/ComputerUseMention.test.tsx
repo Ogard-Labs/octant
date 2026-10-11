@@ -76,6 +76,17 @@ describe("Computer plugin mention", () => {
     expect(screen.getByText("none")).toBeVisible();
   });
 
+  it("drops a chosen @Computer once the composer moves to a runtime without Octant tools", () => {
+    const { rerender } = render(<Composer providerCarriesTools />);
+    fireEvent.change(screen.getByRole("textbox"), {
+      target: { value: "Use @Com", selectionStart: 8 },
+    });
+    fireEvent.click(screen.getByRole("option", { name: /Computer/ }));
+    expect(screen.getByText("plugin")).toBeVisible();
+    rerender(<Composer providerCarriesTools={false} />);
+    expect(screen.getByText("none")).toBeVisible();
+  });
+
   it("does not offer @Computer on a runtime that carries no Octant tools", () => {
     render(<Composer providerCarriesTools={false} />);
     fireEvent.change(screen.getByRole("textbox"), {

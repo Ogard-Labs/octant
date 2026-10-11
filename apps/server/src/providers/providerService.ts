@@ -315,7 +315,7 @@ export class ProviderService implements ProviderServiceApi {
         .map((state) => {
           const instance = instanceById.get(String(state.instanceId));
           if (instance === undefined || !this.#isDriverKindAvailable(instance.driverKind)) {
-            return decodeProviderObservedState({
+            const unavailable = decodeProviderObservedState({
               instanceId: state.instanceId,
               readiness: "unavailable",
               processState: "stopped",
@@ -324,6 +324,9 @@ export class ProviderService implements ProviderServiceApi {
               message: "This provider driver is not available.",
               observedAt: state.observedAt,
             });
+            return instance === undefined
+              ? unavailable
+              : withRuntimeIntegration(instance.driverKind, unavailable);
           }
           return withRuntimeIntegration(instance.driverKind, {
             ...state,

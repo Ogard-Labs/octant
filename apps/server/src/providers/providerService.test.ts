@@ -761,6 +761,16 @@ describe("ProviderService", () => {
             appManagedTools: "unavailable",
             citations: "unavailable",
           },
+          // The card still says, honestly, that nothing reaches the runtime.
+          integration: {
+            tools: {
+              status: "unavailable",
+              transport: "session-mcp-bridge",
+              reason: "not-confirmed",
+            },
+            activity: { source: "none" },
+            resume: "none",
+          },
           message: "This provider driver is not available.",
           observedAt: now,
         },

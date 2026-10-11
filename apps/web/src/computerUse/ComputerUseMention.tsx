@@ -89,7 +89,9 @@ function useApplicationMention(
   const computerEnabled = useComputerUseEnabled();
   const enabled = app.kind === "browser" ? input.available === true : computerEnabled;
   const available = enabled && (input.available ?? app.available);
-  const selection = chosen?.scope === input.scopeKey ? chosen.selection : undefined;
+  // A mention chosen before the composer moved to a runtime that cannot carry
+  // it (or before the application went away) must not ride the next send.
+  const selection = available && chosen?.scope === input.scopeKey ? chosen.selection : undefined;
   const scopeKey = input.scopeKey;
   const currentScope = useRef(scopeKey);
   currentScope.current = scopeKey;
