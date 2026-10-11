@@ -11,6 +11,7 @@ import type {
   ProviderFailure,
   ProviderToolDefinition,
 } from "@octant/contracts";
+import { withClaudeAccountDirectory } from "./claudeAccountDirectory";
 import { createManagedMcpTools, type ManagedToolAnswer } from "./managedMcpTools";
 import { Effect, Stream, type Scope } from "effect";
 
@@ -589,39 +590,6 @@ function requestsUnavailableBackgroundTool(toolName: unknown, input: unknown): b
     return false;
   }
   return (input as Readonly<Record<string, unknown>>).run_in_background !== false;
-}
-
-/**
- * `listSessions` reads Claude's account directory from the process
- * environment. Isolated accounts serialize that overlay so two lookups
- * cannot steal each other's `CLAUDE_CONFIG_DIR`.
- */
-let sessionLookup: Promise<void> = Promise.resolve();
-
-function withClaudeAccountDirectory<T>(
-  configDirectory: string | undefined,
-  run: () => Promise<T>,
-): Promise<T> {
-  if (configDirectory === undefined) return run();
-  const next = sessionLookup.then(async () => {
-    const previousConfig = process.env.CLAUDE_CONFIG_DIR;
-    const previousSecure = process.env.CLAUDE_SECURESTORAGE_CONFIG_DIR;
-    process.env.CLAUDE_CONFIG_DIR = configDirectory;
-    process.env.CLAUDE_SECURESTORAGE_CONFIG_DIR = configDirectory;
-    try {
-      return await run();
-    } finally {
-      if (previousConfig === undefined) delete process.env.CLAUDE_CONFIG_DIR;
-      else process.env.CLAUDE_CONFIG_DIR = previousConfig;
-      if (previousSecure === undefined) delete process.env.CLAUDE_SECURESTORAGE_CONFIG_DIR;
-      else process.env.CLAUDE_SECURESTORAGE_CONFIG_DIR = previousSecure;
-    }
-  });
-  sessionLookup = next.then(
-    () => undefined,
-    () => undefined,
-  );
-  return next;
 }
 
 function liveBridge(): ClaudeAgentSdkBridge {

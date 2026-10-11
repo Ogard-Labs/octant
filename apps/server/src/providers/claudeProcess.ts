@@ -713,7 +713,7 @@ function spawnOwnedClaudeProcess(
 
 export function makeClaudeProcessLive(options: ClaudeProcessOptions = {}): ClaudeProcessPort {
   const resolved: ResolvedClaudeProcessOptions = {
-    inheritedEnvironment: options.inheritedEnvironment ?? process.env,
+    inheritedEnvironment: { ...(options.inheritedEnvironment ?? process.env) },
     confinement: options.confinement ?? makeSeatbeltConfinementLive(),
     onDiagnostic: options.onDiagnostic,
     probeOutputBytes: options.probeOutputBytes ?? DEFAULT_PROBE_OUTPUT_BYTES,

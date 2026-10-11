@@ -5,6 +5,7 @@ import { join } from "node:path";
 import type { ClaudeAuthentication, ProviderFailure } from "@octant/contracts";
 import { Effect, type Scope } from "effect";
 
+import { snapshotClaudeHostEnvironment } from "./claudeAccountDirectory";
 import {
   ensureClaudeAccountConfigDirectory,
   isolatedClaudeAccountEnvironment,
@@ -143,7 +144,17 @@ export function makeClaudeEnvironmentScope(
   authentication: ClaudeAuthentication,
   options: ClaudeEnvironmentScopeOptions = {},
 ): Effect.Effect<ClaudeEnvironmentScope, ProviderFailure, Scope.Scope> {
-  const hostEnvironment = options.hostEnvironment ?? process.env;
+  if (options.hostEnvironment === undefined) {
+    return Effect.flatMap(
+      Effect.tryPromise({
+        try: snapshotClaudeHostEnvironment,
+        catch: () => failure("provider-failed", "Claude host environment could not be read."),
+      }),
+      (hostEnvironment) =>
+        makeClaudeEnvironmentScope(authentication, { ...options, hostEnvironment }),
+    );
+  }
+  const hostEnvironment = options.hostEnvironment;
 
   if (options.configDirectory !== undefined) {
     const configDirectory = options.configDirectory;
