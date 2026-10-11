@@ -1654,8 +1654,10 @@ flowchart LR
     `replica.join-read-progress@2` after each batch with the slots it read
     and holds no record for (artifact entries and files that are not
     records), and `replica.join-read-stopped@2`, `replica.join-read-resumed@2`,
-    and `replica.join-read-finished@2`. `stop-join-read` on the same route
-    stops it after the current batch without queueing behind it, and the
+    and `replica.join-read-finished@2`. The read is marked running before
+    the listing, so `stop-join-read` on the same route also ends it there;
+    otherwise it stops after the current batch, without queueing behind
+    the confirmation, and the
     confirmation is refused as `join-stopped`; confirming again, also after
     a restart, re-lists and carries on at the next unread slot, adding what
     the store gained to the total. A read the journal says is running while
@@ -1807,7 +1809,9 @@ flowchart LR
     nothing reads the store until the person resumes it: background sync
     skips its pull, and the membership commands that read the store - pull
     (Check the store), approve a join, preview a revoke, and revoke - are
-    refused as `restore-stopped` before any store call. Settings › Sync
+    refused as `restore-stopped` before any store call, and a restore
+    listing or batch that waited in the command line finds the Stop and
+    reads nothing. Settings › Sync
     turns those controls off and says why. Publishing continues; it only
     writes, and reads back a slot it writes only when that slot is taken.
     Stop and Resume ride the host-only membership commands route

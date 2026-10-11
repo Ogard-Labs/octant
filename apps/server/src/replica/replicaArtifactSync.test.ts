@@ -1561,6 +1561,16 @@ describe("restoring a whole library on a computer that joins", () => {
     );
     expect(await refusedReason({ kind: "revoke", subject: studio.id() })).toBe("restore-stopped");
     await stopped.sync.sync();
+    // A restore's own reads, had they waited in the command line, find the Stop too.
+    expect((await stopped.membership.restoreListing()).status).toBe("stopped");
+    expect(
+      (
+        await stopped.membership.restoreRead({
+          slots: [{ instanceId: studio.id(), sequence: 1 }],
+          listed: [],
+        })
+      ).status,
+    ).toBe("stopped");
     expect(memory.state.calls).toBe(calls);
 
     // Resume, and the store answers again.
@@ -1574,10 +1584,17 @@ describe("restoring a whole library on a computer that joins", () => {
 
   it("shows a join confirmation's read newest first, stops it when asked, and carries on after a restart with nothing read twice", async () => {
     const memory = memoryStore();
-    const hooks: { onGet: (() => void) | undefined } = { onGet: undefined };
+    const hooks: { onGet: (() => void) | undefined; onList: (() => void) | undefined } = {
+      onGet: undefined,
+      onList: undefined,
+    };
     let gets = 0;
     const store: ReplicaStore = {
       ...memory.store,
+      async list(cursor) {
+        hooks.onList?.();
+        return memory.store.list(cursor);
+      },
       async get(key) {
         gets += 1;
         hooks.onGet?.();
@@ -1632,7 +1649,20 @@ describe("restoring a whole library on a computer that joins", () => {
     // The Studio Mac wrote its founding record, 60 versions, and the approval.
     const total = 62;
 
-    // The person presses Stop while the first batch is being read.
+    // The person presses Stop while the store is being listed: nothing is read.
+    hooks.onList = () => {
+      hooks.onList = undefined;
+      expect(laptop.membership.joinReadProgress()?.state).toBe("running");
+      expect(laptop.membership.stopJoinRead().kind).toBe("join-read");
+    };
+    gets = 0;
+    expect(expectKind(await laptop.membership.execute(confirm), "refused").reason).toBe(
+      "join-stopped",
+    );
+    expect(gets).toBe(0);
+    expect(laptop.membership.joinReadProgress()).toEqual({ state: "stopped", done: 0, total });
+
+    // Confirming again, the person presses Stop while the first batch is being read.
     let reads = 0;
     hooks.onGet = () => {
       reads += 1;
@@ -1669,7 +1699,7 @@ describe("restoring a whole library on a computer that joins", () => {
       .events()
       .filter((event) => event.eventName === REPLICA_MEMBERSHIP_EVENT_NAMES.joinReadProgress)
       .map((event) => (event.payload as { done: number }).done);
-    expect(progress).toEqual([25, 50, total]);
+    expect(progress).toEqual([0, 25, 50, total]);
     expect(restarted.membership.stopJoinRead()).toEqual(
       expect.objectContaining({ kind: "refused", reason: "no-join-read" }),
     );

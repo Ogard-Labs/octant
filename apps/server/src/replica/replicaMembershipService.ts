@@ -760,6 +760,15 @@ export class ReplicaMembershipService {
   > {
     this.#joinReading = true;
     try {
+      // The read is marked running before the listing, which can be the
+      // longest step on a large store, so Stop is offered and honoured there.
+      const names = REPLICA_MEMBERSHIP_EVENT_NAMES;
+      const before = this.#ports.state().joinRead;
+      if (before === undefined) {
+        this.#journal(names.joinReadStarted, { instanceId, total: 0 });
+      } else if (before.state !== "running") {
+        this.#journal(names.joinReadResumed, { instanceId });
+      }
       const listing = await this.#listInstances(store);
       if (listing === undefined) return { status: "unavailable" };
       const listed = listedSlots(listing);
@@ -769,22 +778,12 @@ export class ReplicaMembershipService {
           !state.holds(slot.instanceId, slot.sequence) &&
           !state.joinReadPassed(slot.instanceId, slot.sequence),
       );
-      const names = REPLICA_MEMBERSHIP_EVENT_NAMES;
-      const before = state.joinRead;
-      let done: number;
-      let total: number;
-      if (before === undefined) {
-        done = 0;
-        total = unread.length;
-        this.#journal(names.joinReadStarted, { instanceId, total });
-      } else {
-        // What the store gained since the last read counts toward the total.
-        done = Math.max(before.done, before.total - unread.length);
-        total = Math.max(before.total, done + unread.length);
-        if (before.state !== "running") this.#journal(names.joinReadResumed, { instanceId });
-        if (done !== before.done || total !== before.total) {
-          this.#journal(names.joinReadProgress, { instanceId, done, total, passed: [] });
-        }
+      const previous = before ?? { done: 0, total: 0 };
+      // What the store gained since the last read counts toward the total.
+      let done = Math.max(previous.done, previous.total - unread.length);
+      const total = Math.max(previous.total, done + unread.length);
+      if (done !== previous.done || total !== previous.total) {
+        this.#journal(names.joinReadProgress, { instanceId, done, total, passed: [] });
       }
       const running = () => this.#ports.state().joinRead?.state === "running";
       const order = replicaNewestFirst(unread);
@@ -1132,13 +1131,15 @@ export class ReplicaMembershipService {
         readonly listed: ReadonlyArray<Slot>;
         readonly unread: ReadonlyArray<Slot>;
       }
-    | { readonly status: "not-configured" | "unavailable" }
+    | { readonly status: "not-configured" | "unavailable" | "stopped" }
   > {
     return this.#serially(async () => {
       const selection = this.#ports.store();
       if (selection.status === "not-configured" || this.#ports.state().local === undefined) {
         return { status: "not-configured" };
       }
+      // A Stop pressed while this waited in the command line still holds.
+      if (this.#ports.restoreStopped?.() === true) return { status: "stopped" };
       const listing = await this.#listInstances(selection.store);
       if (listing === undefined) return { status: "unavailable" };
       const listed = listedSlots(listing);
@@ -1168,13 +1169,14 @@ export class ReplicaMembershipService {
         readonly kept: ReadonlyArray<ReplicaArtifactReconciled>;
         readonly refused: ReadonlyArray<ReplicaReadRefusal>;
       }
-    | { readonly status: "not-configured" | "unavailable" }
+    | { readonly status: "not-configured" | "unavailable" | "stopped" }
   > {
     return this.#serially(async () => {
       const selection = this.#ports.store();
       if (selection.status === "not-configured" || this.#ports.state().local === undefined) {
         return { status: "not-configured" };
       }
+      if (this.#ports.restoreStopped?.() === true) return { status: "stopped" };
       const read = await this.#readSlots(selection.store, input.slots);
       if (read.status === "unavailable") return read;
       const reconciled = this.#ports.artifacts?.reconcile({

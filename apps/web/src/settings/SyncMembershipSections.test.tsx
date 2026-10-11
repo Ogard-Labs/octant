@@ -293,6 +293,29 @@ describe("SyncMembershipSections", () => {
     expect(screen.getByRole("button", { name: "Stop" })).toBeEnabled();
   });
 
+  it("says it is listing the store, with no count yet, before a join read can count", async () => {
+    const { fake } = client(
+      view({
+        thisComputer: {
+          kind: "joining",
+          instanceId: laptop,
+          displayName: "Laptop",
+          fresh: true,
+          approvers: [],
+        },
+        status: { ...status, joinRead: { state: "running", done: 0, total: 0 } },
+      }),
+    );
+    renderSections(fake);
+    expect(
+      await screen.findByText("Reading the store before joining: listing its entries."),
+    ).toBeVisible();
+    expect(screen.getByRole("progressbar", { name: "Reading the store" })).not.toHaveAttribute(
+      "value",
+    );
+    expect(screen.getByRole("button", { name: "Stop" })).toBeEnabled();
+  });
+
   it("keeps Check the store, Approve, and Revoke off while the restore is stopped, and says why", async () => {
     const request = {
       format: "octant.replica-entry/2",

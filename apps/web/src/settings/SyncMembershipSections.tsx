@@ -951,12 +951,16 @@ function JoinReadRow(props: {
   const { joinRead } = props;
   const progressId = useId();
   const count = `${String(joinRead.done)} of ${String(joinRead.total)} entries read`;
+  // Before the listing ends there is nothing to count yet.
+  const listing = joinRead.state === "running" && joinRead.total === 0;
   return (
     <SettingRow
       description={
-        joinRead.state === "running"
-          ? `Reading the store before joining: ${count}.`
-          : `Stopped: ${count}. Confirm join again to carry on where it stopped.`
+        listing
+          ? "Reading the store before joining: listing its entries."
+          : joinRead.state === "running"
+            ? `Reading the store before joining: ${count}.`
+            : `Stopped: ${count}. Confirm join again to carry on where it stopped.`
       }
       htmlFor={progressId}
       label="Reading the store"
@@ -968,7 +972,7 @@ function JoinReadRow(props: {
           className="sync-settings__progress"
           id={progressId}
           max={Math.max(1, joinRead.total)}
-          value={joinRead.total === 0 ? 1 : joinRead.done}
+          {...(listing ? {} : { value: joinRead.total === 0 ? 1 : joinRead.done })}
         >
           {joinRead.done} of {joinRead.total}
         </progress>
