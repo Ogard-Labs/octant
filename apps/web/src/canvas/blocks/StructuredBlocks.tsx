@@ -1,20 +1,22 @@
 import type { CanvasBlock, CanvasStatusTone } from "@octant/contracts/canvas";
 import { ChartBlock } from "./ChartBlock";
 import { DiagramBoard, type DiagramBoardLayoutRuntime } from "./DiagramBoard";
-import { TableBlock } from "./TableBlock";
+import { TableBlock, type TableRowComments } from "./TableBlock";
 
 type Block = Extract<CanvasBlock, { readonly kind: "table" | "chart" | "timeline" | "diagram" }>;
 
 export function StructuredBlocks({
   block,
   layoutRuntime,
+  rowComments,
 }: {
   readonly block: Block;
   readonly layoutRuntime?: DiagramBoardLayoutRuntime;
+  readonly rowComments?: TableRowComments;
 }) {
   switch (block.kind) {
     case "table":
-      return <TableBlock block={block} />;
+      return <TableBlock block={block} {...(rowComments === undefined ? {} : { rowComments })} />;
     case "chart":
       return <ChartBlock block={block} />;
     case "timeline":

@@ -30,9 +30,10 @@ export interface CanvasDocumentProps {
    */
   readonly designAssetRuntime?: DesignAssetRuntime;
   /**
-   * Comment markers beside each block. Offered only when the host journals
-   * comments; `openCounts` holds the unresolved threads anchored to a block,
-   * including those on its rows or nodes.
+   * Comment markers beside each block and on each table row that carries an
+   * id. Offered only when the host journals comments; `openCounts` holds the
+   * unresolved threads anchored to a block, including those on its rows or
+   * nodes, and `openRowCounts` those on each row, by block then row id.
    */
   readonly comments?: CanvasDocumentComments;
   /**
@@ -44,8 +45,11 @@ export interface CanvasDocumentProps {
 
 export interface CanvasDocumentComments {
   readonly openCounts: ReadonlyMap<string, number>;
-  readonly onOpen: (blockId: string) => void;
+  readonly openRowCounts: ReadonlyMap<string, ReadonlyMap<string, number>>;
+  readonly onOpen: (blockId: string, rowId?: string) => void;
 }
+
+const NO_ROW_COMMENTS: ReadonlyMap<string, number> = new Map();
 
 /** What a reader would call a block, for a marker's accessible name. */
 export function canvasBlockLabel(block: CanvasDefinition["blocks"][number]): string {
@@ -117,6 +121,15 @@ export function CanvasDocument({
                 {...(planRuntime === undefined ? {} : { planRuntime })}
                 {...(actionRuntime === undefined ? {} : { actionRuntime })}
                 {...(designAssetRuntime === undefined ? {} : { designAssetRuntime })}
+                {...(comments === undefined || block.kind !== "table"
+                  ? {}
+                  : {
+                      rowComments: {
+                        openCounts:
+                          comments.openRowCounts.get(String(block.blockId)) ?? NO_ROW_COMMENTS,
+                        onOpen: (rowId: string) => comments.onOpen(String(block.blockId), rowId),
+                      },
+                    })}
               />
               {comments === undefined ? null : (
                 <CommentMarker

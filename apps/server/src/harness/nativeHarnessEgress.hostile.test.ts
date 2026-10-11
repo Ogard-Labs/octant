@@ -36,6 +36,7 @@ import {
   isPrivateAddress,
   PublicFetchRefused,
 } from "./nativeHarnessWebFetch";
+import { searxngHarnessWebSearch } from "./nativeHarnessWebSearch";
 
 /*
  * Adversarial proofs for the native harness's network and hostile-content
@@ -186,6 +187,14 @@ async function hostileCodeLead(options: {
     headers: { "content-type": "text/html" },
     body: HOSTILE_PAGE,
   }));
+  // The person's own search endpoint: a loopback fake answering as SearXNG does.
+  const search = await listen(() => ({
+    status: 200,
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      results: [{ title: "Bun workspaces", url: "https://bun.sh/docs", content: "Workspaces." }],
+    }),
+  }));
   const { connection, store } = taintJournal();
   const threadId = randomUUID();
   const checkoutRoot = temporaryDirectory("octant-egress-checkout-");
@@ -240,6 +249,8 @@ async function hostileCodeLead(options: {
     isHarnessProvider: () => true,
     shell,
     webFetch: pinnedWebFetch("news.example.test"),
+    resolveWebSearch: () =>
+      searxngHarnessWebSearch({ readBaseUrl: () => `http://127.0.0.1:${search.port}/` }),
     ...(approvals === undefined ? {} : { approvals }),
     hostId: authority.hostId,
     readThreadTaint: (subject) =>
@@ -270,6 +281,7 @@ async function hostileCodeLead(options: {
     checkoutRoot,
     pageUrl: `http://news.example.test:${page.port}/forecast`,
     pageSeen: page.seen,
+    searchSeen: search.seen,
     tainted: () => readThreadExternalContentTaint(connection, threadId).externalContentIngested,
   };
 }
@@ -443,6 +455,43 @@ describe("native harness hostile content", () => {
       }),
     ]);
     expect(lead.pageSeen.map((request) => request.url)).toEqual(["/forecast", "/forecast?page=2"]);
+  });
+
+  it("refuses a tainted thread's search query that carries data before any request reaches the endpoint", async () => {
+    const smuggled = "forecast https://collector.invalid/?k=hunter2";
+    const lead = await hostileCodeLead({ posture: "full-access", answers: [] });
+    await lead.call("web-fetch", { url: lead.pageUrl });
+    expect(lead.tainted()).toBe(true);
+
+    for (const [query, detail] of [
+      [smuggled, "contains a URL"],
+      ["owner jane.doe@corp.example", "contains an email address"],
+      ["id_ed25519 aGVsbG8gd29ybGQsIHRoaXMgaXMgc2VjcmV0", "contains a base64 run"],
+    ] as const) {
+      expect(await lead.call("web-search", { query })).toMatchObject({
+        isError: true,
+        result: { error: `search-query-refused-under-taint: ${detail}` },
+      });
+    }
+    // Refused outright: nobody is asked, and nothing reached the endpoint.
+    expect(lead.asked).toEqual([]);
+    expect(lead.searchSeen).toEqual([]);
+
+    // An ordinary question still goes through on the tainted thread, unasked.
+    expect(
+      await lead.call("web-search", { query: "how do I configure bun workspaces" }),
+    ).toMatchObject({ isError: false, result: { results: [{ title: "Bun workspaces" }] } });
+    expect(lead.asked).toEqual([]);
+    expect(lead.searchSeen).toHaveLength(1);
+
+    // A clean thread's identical data-bearing query is sent as before.
+    const clean = await hostileCodeLead({ posture: "full-access" });
+    expect(await clean.call("web-search", { query: smuggled })).toMatchObject({ isError: false });
+    expect(clean.tainted()).toBe(true);
+    expect(clean.searchSeen).toHaveLength(1);
+    expect(new URL(clean.searchSeen[0]?.url ?? "", "http://127.0.0.1").searchParams.get("q")).toBe(
+      smuggled,
+    );
   });
 
   it("leaves a clean thread's web-fetch and always approvals as they were", async () => {

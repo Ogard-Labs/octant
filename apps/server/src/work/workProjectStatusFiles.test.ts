@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -10,23 +10,25 @@ afterEach(async () => {
 });
 
 async function folder(): Promise<string> {
-  const root = await mkdtemp(join(tmpdir(), "octant-work-status-"));
+  // Bound roots are stored canonical, and the system temp directory is itself
+  // behind a symlink on macOS.
+  const root = await realpath(await mkdtemp(join(tmpdir(), "octant-work-status-")));
   roots.push(root);
   return root;
 }
 
-describe("a Work Project's brief files", () => {
-  it("seeds AGENTS.md and STATUS.md once and never rewrites what is there", async () => {
+describe("a Work Project's status file", () => {
+  it("seeds STATUS.md once, never writes AGENTS.md, and never rewrites what is there", async () => {
     const root = await folder();
     const files = new WorkProjectStatusFiles();
 
-    expect(await files.seed(root, "Acme offer", "2026-09-12")).toEqual(["AGENTS.md", "STATUS.md"]);
+    expect(await files.seed(root, "Acme offer", "2026-09-12")).toBe(true);
+    expect(await readdir(root)).toEqual(["STATUS.md"]);
     await writeFile(join(root, "STATUS.md"), "# mine\nLast updated: 2026-09-01\n");
-    expect(await files.seed(root, "Acme offer", "2026-09-12")).toEqual([]);
+    expect(await files.seed(root, "Acme offer", "2026-09-12")).toBe(false);
 
     const snapshot = await files.read(root);
-    expect(snapshot.agents?.text).toContain("# Acme offer");
-    expect(snapshot.status?.text).toBe("# mine\nLast updated: 2026-09-01\n");
+    expect(snapshot?.text).toBe("# mine\nLast updated: 2026-09-01\n");
   });
 
   it("neither writes through nor reads through a symlink under the status name", async () => {
@@ -36,8 +38,8 @@ describe("a Work Project's brief files", () => {
     await symlink(join(elsewhere, "secret.md"), join(root, "STATUS.md"));
     const files = new WorkProjectStatusFiles();
 
-    expect(await files.seed(root, "Acme", "2026-09-12")).toEqual(["AGENTS.md"]);
-    expect((await files.read(root)).status).toBeUndefined();
+    expect(await files.seed(root, "Acme", "2026-09-12")).toBe(false);
+    expect(await files.read(root)).toBeUndefined();
     expect(
       await files.appendRecentChange(root, {
         date: "2026-09-12",
@@ -47,6 +49,29 @@ describe("a Work Project's brief files", () => {
       }),
     ).toBe(false);
     expect(await readFile(join(elsewhere, "secret.md"), "utf8")).toBe("not yours");
+  });
+
+  it("writes nothing when the bound root no longer resolves to itself, such as a renamed folder replaced by a symlink", async () => {
+    const parent = await folder();
+    const elsewhere = await folder();
+    const staleRoot = join(parent, "Acme");
+    await symlink(elsewhere, staleRoot);
+    const files = new WorkProjectStatusFiles();
+
+    expect(await files.seed(staleRoot, "Acme", "2026-09-12")).toBe(false);
+    expect(await files.read(staleRoot)).toBeUndefined();
+    expect(await readdir(elsewhere)).toEqual([]);
+
+    await writeFile(join(elsewhere, "STATUS.md"), "Last updated: 2026-09-01\n");
+    expect(
+      await files.appendRecentChange(staleRoot, {
+        date: "2026-09-12",
+        taskTitle: "t",
+        paths: ["a.md"],
+        truncated: false,
+      }),
+    ).toBe(false);
+    expect(await readFile(join(elsewhere, "STATUS.md"), "utf8")).toBe("Last updated: 2026-09-01\n");
   });
 
   it("appends a turn's changed files to Recent changes in place", async () => {

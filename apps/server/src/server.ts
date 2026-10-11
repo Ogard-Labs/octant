@@ -553,6 +553,7 @@ import { attachProviderRuntimeUsageLimits } from "./providers/providerRuntimeUsa
 import {
   createShellRouteHandler,
   isAllowedRendererOrigin,
+  isForeignLoopbackOrigin,
   isLoopbackHostname,
 } from "./shellRoutes";
 import { OCTANT_LOCAL_ACTOR_ID, ShellService, ShellServiceError } from "./shellService";
@@ -829,6 +830,7 @@ import {
   listHosts,
   type PreviewPosture,
   findWorkspacePresetTarget,
+  workProjectKeepsStatusFile,
 } from "@octant/domain";
 import { ZenThreadCatalog } from "./zen/zenThreadCatalog";
 import { localHostDisplayName } from "./localHostDisplayName";
@@ -2297,6 +2299,14 @@ export function startOctantServer(
           approve: (input) => agentRunInteractions?.approve(input) ?? Promise.resolve(false),
           askUser: (input) => agentRunInteractions?.askUser(input) ?? Promise.resolve(undefined),
         },
+        // A Work or Code child answers to the Project its workspace recorded; a
+        // missing or retyped Project fails closed rather than lifting the policy.
+        isTargetAllowedByProjectPolicy: ({ run, providerInstanceId, modelId }) => {
+          if (run.workspaceReceipt.kind === "chat-virtual") return true;
+          const project = persistence.readProject(run.workspaceReceipt.projectId);
+          if (project?.type !== run.workspaceReceipt.mode) return false;
+          return isProjectPolicyTargetAllowed(project, providerInstanceId, modelId);
+        },
         // `configuredDriverOptions` is declared later in this scope; the closure
         // only runs when a child starts, long after boot, so the reference is safe.
         resolveDriver: (providerInstanceId, run) => {
@@ -2553,23 +2563,20 @@ export function startOctantServer(
       uuid: randomUUID,
     };
     const agentRunEligibleTargets = (projectId: ProjectId | undefined) => {
-      // A Code Project's provider policy binds delegate targets too: the
-      // same list the tool advertises is the one explicit targets are
-      // revalidated against, so filtering here guards both.
+      // A Work or Code Project's provider policy binds delegate targets too:
+      // the same list the tool advertises is the one explicit targets and
+      // resumes are revalidated against, so filtering here guards all three.
+      // Chat Projects carry no provider policy.
       const project = projectId === undefined ? undefined : persistence.readProject(projectId);
       return persistence.readProviderInstances().flatMap((instance) => {
         if (!instance.enabled) return [];
         const observed = providerRuntimeRegistry.observedState(instance.id);
         if (observed?.readiness !== "ready") return [];
         const models =
-          project === undefined || project.type !== "code"
+          project === undefined || project.type === "chat"
             ? observed.models
             : observed.models.filter((model) =>
-                isCodeProviderModelAllowed({
-                  projectId: project.id,
-                  providerInstanceId: instance.id,
-                  modelId: model.id,
-                }),
+                isProjectPolicyTargetAllowed(project, instance.id, model.id),
               );
         if (models.length === 0) return [];
         return [
@@ -3468,7 +3475,7 @@ export function startOctantServer(
         if (remotes === undefined) return undefined;
         return resolveConnectedGitHubRepository(remotes);
       },
-      seedWorkProjectFiles: async (canonicalRoot, name, today) => {
+      seedWorkProjectStatusFile: async (canonicalRoot, name, today) => {
         await workProjectStatusFiles.seed(canonicalRoot, name, today);
       },
     });
@@ -3607,18 +3614,31 @@ export function startOctantServer(
     });
     const canAccessCodeProject = (scopeId: WindowId, projectId: ProjectId) =>
       codeProjectAccess.canAccessProject(scopeId, projectId);
+    // The catalog, not the runtime observation, carries a model's data tags,
+    // so an `eu-zdr` policy is judged against it.
+    const isProjectPolicyTargetAllowed = (
+      project: Exclude<
+        ReturnType<typeof persistence.readProject>,
+        undefined | { readonly type: "chat" }
+      >,
+      providerInstanceId: ProviderInstance["id"],
+      modelId: ProviderModel["id"],
+    ): boolean => {
+      const provider = persistence.readProviderInstance(providerInstanceId);
+      if (provider === undefined) return false;
+      const model = persistence
+        .readProviderCatalog?.(providerInstanceId)
+        ?.models.find((candidate) => String(candidate.id) === String(modelId));
+      return isProviderAllowedByProjectPolicy(project, provider, model);
+    };
     const isCodeProviderModelAllowed = (input: {
       readonly projectId: ProjectId;
       readonly providerInstanceId: ProviderInstance["id"];
       readonly modelId: ProviderModel["id"];
     }): boolean => {
       const project = persistence.readProject(input.projectId);
-      const provider = persistence.readProviderInstance(input.providerInstanceId);
-      if (project?.type !== "code" || provider === undefined) return false;
-      const model = persistence
-        .readProviderCatalog?.(input.providerInstanceId)
-        ?.models.find((candidate) => String(candidate.id) === String(input.modelId));
-      return isProviderAllowedByProjectPolicy(project, provider, model);
+      if (project?.type !== "code") return false;
+      return isProjectPolicyTargetAllowed(project, input.providerInstanceId, input.modelId);
     };
     const codeService =
       options.codeService ??
@@ -4991,6 +5011,12 @@ export function startOctantServer(
             if (context === undefined) return undefined;
             return appleToolchainService.requestPaneOpen(context, simulatorId);
           },
+          inputGrantIsOpen: (windowId, threadId, simulatorId) =>
+            simulatorInputGrants.isOpen({
+              windowId: String(windowId),
+              threadId: String(threadId),
+              simulatorId: String(simulatorId),
+            }),
         },
         androidToolchain: {
           resolveAuthority: (_windowId, thread) => ({
@@ -5068,6 +5094,12 @@ export function startOctantServer(
             if (context === undefined) return undefined;
             return androidToolchainService.requestPaneOpen(context, emulatorId);
           },
+          inputGrantIsOpen: (windowId, threadId, emulatorId) =>
+            androidInputGrants.isOpen({
+              windowId: String(windowId),
+              threadId: String(threadId),
+              simulatorId: String(emulatorId),
+            }),
         },
         credentialResolver: { resolve: async () => undefined },
         resolveThreadMentionContext: threadMentionContextResolver(() => threadMentionService),
@@ -9434,8 +9466,8 @@ export function startOctantServer(
         },
       },
       turns: {
-        startFirstTurn: async (windowId, command) =>
-          workTurnService.startFirstTurn(windowId, command),
+        startFirstTurn: async (windowId, command, options) =>
+          workTurnService.startFirstTurn(windowId, command, options),
       },
       clock: () => new Date().toISOString() as UtcTimestamp,
       uuid: randomUUID,
@@ -9771,8 +9803,8 @@ export function startOctantServer(
           const openThreads = bootstrap.threads.filter(
             (thread) => thread.lifecycle !== "archived" && thread.completedAt === undefined,
           );
-          // A due date in a Project's STATUS.md raises the follow-up mark on
-          // that Project's most recent open thread (decision 0119): the
+          // A due date in the STATUS.md of a Project that keeps one raises the
+          // follow-up mark on that Project's most recent open thread: the
           // reminder belongs to the work, and that thread is where the person
           // would pick it up.
           const dueByProject = new Map<string, boolean>();
@@ -9780,7 +9812,7 @@ export function startOctantServer(
             [...new Set(openThreads.map((thread) => String(thread.projectId)))].map(
               async (projectId) => {
                 const project = projectById.get(projectId);
-                if (project?.type !== "work") return;
+                if (project?.type !== "work" || !workProjectKeepsStatusFile(project)) return;
                 dueByProject.set(
                   projectId,
                   await workProjectStatusReader.hasDueItems(
@@ -10597,6 +10629,22 @@ export function startOctantServer(
                   activeAgentCount: providerRuntimeRegistry.activeSessionTotal(),
                   attentionRequired: providerRuntimeRegistry.attentionRequired(),
                 });
+              }
+              // Every route below trusts a loopback Origin as the renderer, so a
+              // page on another loopback port (a dev server a Code thread
+              // started, say) is refused here before any route can reflect it
+              // into CORS or mint local authority for it.
+              if (
+                isForeignLoopbackOrigin(
+                  request.headers.get("origin"),
+                  url,
+                  options.allowedRendererHttpOrigin,
+                )
+              ) {
+                return Response.json(
+                  { category: "unauthorized", message: "Renderer origin is not allowed." },
+                  { status: 403, headers: { vary: "Origin" } },
+                );
               }
               // Intentionally pre-auth (like /health): returns static, non-sensitive
               // host identity so the UI can render the selector before capability exchange.

@@ -146,6 +146,36 @@ If that Saved environment runs `start` in a separate process from `server run`, 
 
 `bwrap` is the confinement runtime. On a graphical login the session bus and keyring are usually already present; the start script is then a no-op once Secret Service answers. Provider CLIs are ordinary host binaries. Keep `~/.local/bin` on `PATH`, install a CLI there (this host used the official Codex installer), and point the provider instance at that absolute path. Octant reuses the provider's native login profile; a missing `bwrap` reports `incompatible` rather than falling back to an unconfined provider.
 
+### Install a headless artifact
+
+A headless artifact runs the host without a repository checkout. It contains the CLI, the server, the web app, and every runtime dependency, including the native `node-pty` and `better-sqlite3` modules. Bun 1.3.14 or later must be on `PATH`; nothing else is needed. Build the artifact on the platform and architecture it is for, because the native modules come from that machine's install:
+
+```sh
+bun install --frozen-lockfile
+bun run build
+bun scripts/package-headless.ts
+# out/headless/octant-<version>-<platform>-<arch>.tar.gz
+```
+
+Copy the tarball to the host, unpack it, and install it with its own CLI:
+
+```sh
+tar -xzf octant-<version>-linux-x64.tar.gz
+./octant-<version>-linux-x64/bin/octant server install --artifact "$PWD/octant-<version>-linux-x64"
+```
+
+On Linux the install root defaults to `~/.local/state/octant/install` (`state/install` under `OCTANT_DATA_DIR` when that is set; `--install-root` or `OCTANT_INSTALL_ROOT` overrides it). It holds one directory per version plus a `current` link. Run the installed CLI from there:
+
+```sh
+~/.local/state/octant/install/current/bin/octant server start
+~/.local/state/octant/install/current/bin/octant server status
+~/.local/state/octant/install/current/bin/octant server stop
+```
+
+`server start` writes and starts the per-user service (`octant.service` under systemd, `app.octant.server` under launchd).
+
+To check a build end to end, `bun run smoke:headless-install` unpacks the newest artifact for this machine into an empty temporary prefix with no `node_modules` above it, installs it, and runs `server start`, `server status`, and `server stop` with a private data directory and port. Pass `--tarball <path>` and `--prefix <empty directory>` to choose them. It refuses to run if a per-user Octant service is already installed, and removes the service file it wrote when it finishes.
+
 Do not remove or corrupt the default directory. Removing the native window-state file changes the window ID, while removing the SQLite file discards all local journal and shell data.
 
 ## Iterate with the browser client

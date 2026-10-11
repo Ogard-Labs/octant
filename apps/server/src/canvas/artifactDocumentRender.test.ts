@@ -4,7 +4,11 @@ import {
   type CanvasBlock,
 } from "@octant/contracts/canvas";
 import { formatCanvasNumber } from "@octant/domain/canvas-number-format";
-import { notificationStatesExampleBlock, settingsScreenExampleBlock } from "@octant/domain";
+import {
+  chartExampleBlocks,
+  notificationStatesExampleBlock,
+  settingsScreenExampleBlock,
+} from "@octant/domain";
 import { describe, expect, it } from "vitest";
 import { renderArtifactHtml, renderArtifactMarkdown } from "./artifactDocumentRender";
 
@@ -82,6 +86,26 @@ describe("rendering a canvas as a document", () => {
     expect(row).toBe("| one\\\\\\|two |");
   });
 
+  it("exports a row that carries an id as its cells, in the author's order", () => {
+    const table = decodeCanvasBlock({
+      blockId: "vendors",
+      schemaVersion: CANVAS_SCHEMA_VERSION,
+      kind: "table",
+      columns: [
+        { id: "vendor", label: "Vendor", type: "text" },
+        { id: "price", label: "Price", type: "number" },
+      ],
+      rows: [{ id: "acme", cells: ["Acme", 12] }, ["Globex", 9]],
+    });
+
+    const rendered = renderArtifactMarkdown(definition([table]));
+
+    expect(rendered.kind).toBe("rendered");
+    if (rendered.kind !== "rendered") return;
+    expect(rendered.body).toContain("| Acme | 12 |\n| Globex | 9 |");
+    expect(rendered.body).not.toContain("acme");
+  });
+
   it("does not emit script or an external reference", () => {
     const html = renderArtifactHtml(definition([], "</title><script>alert(1)</script><title>"));
 
@@ -128,6 +152,22 @@ describe("rendering a canvas as a document", () => {
     if (formatted.kind !== "rendered") return;
     expect(formatted.body).toContain(`Requests: ${formatCanvasNumber(1_360_000, "compact")}`);
     expect(formatted.body).not.toContain("1360000");
+  });
+
+  it("writes a sankey as its flows and a funnel or radar as every reading", () => {
+    const blocks = ["sankey", "funnel", "radar"].map((chartType) => {
+      const block = chartExampleBlocks.find((candidate) => candidate.chartType === chartType);
+      if (block === undefined) throw new Error(`${chartType} example is missing.`);
+      return block;
+    });
+    const rendered = renderArtifactMarkdown(definition(blocks));
+    if (rendered.kind !== "rendered") throw new Error("expected a rendered document");
+    expect(rendered.body).toContain("- Search → Docs = 5.2K");
+    expect(rendered.body).toContain("- Visitors: Paid = 410");
+    expect(rendered.body).toContain("- Self-hosted: Control = 5");
+    const html = renderArtifactHtml(definition(blocks));
+    if (html.kind !== "rendered") throw new Error("expected a rendered document");
+    expect(html.body).toContain("Search → Docs = 5.2K");
   });
 
   it("writes a treemap as an indented table of every measure", () => {
