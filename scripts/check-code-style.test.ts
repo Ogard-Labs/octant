@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   compareWithBaseline,
+  failsCheck,
   findOxlintFindings,
   findTextFindings,
   isShippedSource,
@@ -103,5 +104,16 @@ describe("code-style check", () => {
     const baseline = JSON.parse(serializeBaseline(findings)) as Record<string, unknown>;
     expect(baseline).toEqual({ "as-unknown-as": { [FILE]: 1 } });
     expect(compareWithBaseline(findings, { "as-unknown-as": { [FILE]: 1 } })).toEqual([]);
+  });
+
+  it("passes when a count fell, so another change's fix never blocks the merge queue", () => {
+    expect(
+      failsCheck([{ kind: "stale", rule: "as-unknown-as", file: FILE, recorded: 2, current: 1 }]),
+    ).toBe(false);
+    expect(
+      failsCheck([
+        { kind: "exceeded", rule: "as-unknown-as", file: FILE, recorded: 1, current: 2 },
+      ]),
+    ).toBe(true);
   });
 });

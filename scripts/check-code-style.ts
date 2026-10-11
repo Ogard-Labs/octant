@@ -162,6 +162,15 @@ export function compareWithBaseline(
   return problems;
 }
 
+/**
+ * Only a rise fails. A count that fell is an improvement another change made;
+ * failing on it would knock every queued pull request out of the merge queue
+ * whenever one of them removes a violation, so it is reported, not refused.
+ */
+export function failsCheck(problems: ReadonlyArray<BaselineProblem>): boolean {
+  return problems.some((problem) => problem.kind === "exceeded");
+}
+
 export function serializeBaseline(findings: ReadonlyArray<CodeStyleFinding>): string {
   const counts = countFindings(findings);
   const baseline: Record<string, Record<string, number>> = {};
@@ -240,7 +249,7 @@ async function main(): Promise<void> {
 
   for (const problem of problems) {
     if (problem.kind === "stale") {
-      console.error(
+      console.log(
         `${problem.file}: ${problem.rule} fell from ${String(problem.recorded)} to ${String(problem.current)}; run \`bun scripts/check-code-style.ts --write-baseline\` to record the improvement.`,
       );
       continue;
@@ -254,7 +263,7 @@ async function main(): Promise<void> {
       }
     }
   }
-  process.exitCode = 1;
+  if (failsCheck(problems)) process.exitCode = 1;
 }
 
 if (import.meta.main) await main();

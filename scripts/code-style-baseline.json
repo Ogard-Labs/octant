@@ -45,7 +45,7 @@
     "apps/server/src/harness/nativeHarnessComposition.ts": 4,
     "apps/server/src/harness/nativeHarnessFileSystem.ts": 6,
     "apps/server/src/harness/nativeHarnessSessionStore.ts": 2,
-    "apps/server/src/harness/nativeHarnessTools.ts": 15,
+    "apps/server/src/harness/nativeHarnessTools.ts": 14,
     "apps/server/src/linkedThread/linkedThreadService.ts": 1,
     "apps/server/src/localServers/localListenerPort.ts": 3,
     "apps/server/src/metrics/turnMetricsStore.ts": 1,
