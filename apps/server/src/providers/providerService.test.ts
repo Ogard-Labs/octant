@@ -1616,6 +1616,69 @@ describe("ProviderService", () => {
     });
   });
 
+  it("refuses to move the implicit Claude owner while a replayed secondary still needs a directory", async () => {
+    const fixture = serviceFixture({
+      instances: [
+        claudeProvider(),
+        claudeProvider({
+          id: otherId,
+          displayName: "Claude work",
+          createdAt: "2026-07-14T11:00:00.000Z",
+          updatedAt: "2026-07-14T11:00:00.000Z",
+        }),
+      ],
+    });
+
+    await expect(
+      fixture.service.execute(windowId, {
+        kind: "change-claude-configuration",
+        instanceId,
+        expectedVersion: 1,
+        configuration: {
+          kind: "claude-agent-sdk",
+          binaryPath: "/opt/homebrew/bin/claude",
+          authentication: "subscription",
+          configDirectory: `${homedir()}/.claude-accounts/personal`,
+          accent: "teal",
+        },
+      }),
+    ).rejects.toMatchObject({
+      failure: {
+        category: "invalid-configuration",
+        message:
+          "Give the other Claude accounts their own config directory before moving this one.",
+      },
+    });
+  });
+
+  it("refuses to remove the implicit Claude owner while a replayed secondary still needs a directory", async () => {
+    const fixture = serviceFixture({
+      instances: [
+        claudeProvider(),
+        claudeProvider({
+          id: otherId,
+          displayName: "Claude work",
+          createdAt: "2026-07-14T11:00:00.000Z",
+          updatedAt: "2026-07-14T11:00:00.000Z",
+        }),
+      ],
+    });
+
+    await expect(
+      fixture.service.execute(windowId, {
+        kind: "remove-provider",
+        instanceId,
+        expectedVersion: 1,
+      }),
+    ).rejects.toMatchObject({
+      failure: {
+        category: "invalid-configuration",
+        message:
+          "Give the other Claude accounts their own config directory before removing this one.",
+      },
+    });
+  });
+
   it("lets a replayed secondary Claude account become usable after it gets its own directory", async () => {
     const fixture = serviceFixture({
       instances: [
