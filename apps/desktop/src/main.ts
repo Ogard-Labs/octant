@@ -189,7 +189,11 @@ import {
   type RemoteDeviceControlService,
 } from "./remoteDeviceControls";
 import { markHostInteraction } from "./interactionTrace";
-import { installCanvasFrameGuards, type CanvasFrameGuardWebContentsPort } from "./canvasFrameGuard";
+import {
+  installCanvasFrameGuards,
+  isolateEachCanvasFrameDocument,
+  type CanvasFrameGuardWebContentsPort,
+} from "./canvasFrameGuard";
 
 const IPC_CHANNELS = {
   nativeMenu: "octant:menu:popup",
@@ -1016,6 +1020,7 @@ function readStoredDesktopBridgeSecret(directory: string): string | undefined {
 }
 
 app.setName("Octant");
+isolateEachCanvasFrameDocument(app.commandLine);
 const desktopHostRuntimePaths = resolveDesktopHostRuntimePaths(
   process.env.OCTANT_DATA_DIR,
   app.getPath("appData"),

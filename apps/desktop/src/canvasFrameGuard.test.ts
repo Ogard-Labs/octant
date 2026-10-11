@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   CANVAS_FRAME_FOCUS_ESCAPE_CHANNEL,
   installCanvasFrameGuards,
+  isolateEachCanvasFrameDocument,
   type CanvasFrameGuardFrame,
   type CanvasFrameKeyInput,
   type CanvasFrameNavigation,
@@ -135,5 +136,23 @@ describe("running Canvas frame guards", () => {
     guard.focus({ frameTreeNodeId: 9, url: page });
     expect(guard.press({ meta: true })).toBe("passed");
     expect(guard.press({ control: true })).toBe("swallowed");
+  });
+
+  it("asks for one process per sandboxed document, keeping features already asked for", () => {
+    const switches = new Map<string, string>();
+    const commandLine = {
+      hasSwitch: (name: string) => switches.has(name),
+      getSwitchValue: (name: string) => switches.get(name) ?? "",
+      appendSwitch: (name: string, value = "") => {
+        switches.set(name, value);
+      },
+    };
+    isolateEachCanvasFrameDocument(commandLine);
+    expect(switches.get("enable-features")).toBe("IsolateSandboxedIframes:grouping/per-document");
+    switches.set("enable-features", "SomethingElse");
+    isolateEachCanvasFrameDocument(commandLine);
+    expect(switches.get("enable-features")).toBe(
+      "SomethingElse,IsolateSandboxedIframes:grouping/per-document",
+    );
   });
 });

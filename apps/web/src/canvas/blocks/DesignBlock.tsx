@@ -747,6 +747,11 @@ function RunningDesignBlock({
       {state.kind === "stopped" ? (
         <p className="canvas-design__notice" role="status">
           {state.why.kind === "refused" ? state.why.reason : STOPPED_TEXT[state.why.kind]}
+          {/* A browser keeps a spinning page's process for the next frame
+              from the same host, so a re-run here can wait behind it. */}
+          {state.why.kind === "unresponsive" && !contained
+            ? " In a browser, it may not start again in this tab; open Octant in a new tab to run it."
+            : null}
         </p>
       ) : null}
       {state.kind === "running" ? (

@@ -17,12 +17,38 @@
  *   macOS, Control-Escape elsewhere. While a running frame holds focus it is
  *   swallowed and the renderer moves focus to that frame's own controls, so a
  *   page that swallows Tab cannot keep the keyboard.
+ *
+ * Electron 43 already runs a sandboxed frame out of the renderer's process, so
+ * a page in an infinite loop leaves Octant responsive. By default, though,
+ * Chromium keeps every sandboxed frame of one site in one process, and
+ * removing a looping frame does not end that process: the next prototype from
+ * the host was put in the same spinning process and never loaded. One process
+ * per sandboxed document lets Run again start clean.
  */
 
 /** The page path a running prototype is served from on the host. */
 const DESIGN_PAGE_PATH = "/api/canvas/design-page";
 
 export const CANVAS_FRAME_FOCUS_ESCAPE_CHANNEL = "octant:canvas:frame-focus-escape";
+
+export const CANVAS_FRAME_PROCESS_FEATURE = "IsolateSandboxedIframes:grouping/per-document";
+
+export interface CommandLinePort {
+  readonly hasSwitch: (name: string) => boolean;
+  readonly getSwitchValue: (name: string) => string;
+  readonly appendSwitch: (name: string, value?: string) => void;
+}
+
+/** Gives each sandboxed document its own process, keeping any features already asked for. */
+export function isolateEachCanvasFrameDocument(commandLine: CommandLinePort): void {
+  const existing = commandLine.hasSwitch("enable-features")
+    ? commandLine.getSwitchValue("enable-features")
+    : "";
+  commandLine.appendSwitch(
+    "enable-features",
+    existing === "" ? CANVAS_FRAME_PROCESS_FEATURE : `${existing},${CANVAS_FRAME_PROCESS_FEATURE}`,
+  );
+}
 
 export interface CanvasFrameGuardFrame {
   readonly frameTreeNodeId: number;
