@@ -3867,8 +3867,11 @@ mechanisms are:
     after removal is reported. `key remove` then accepts that removed
     instance's id to retry, because clearing a secret is never a widening.
     The server serializes credential writes with provider registry commands
-    for the same instance, so a concurrent removal cannot leave a new orphaned
-    secret behind.
+    for the same instance: one critical section covers a `set`'s validation
+    (the instance exists and uses key or bearer authentication) through the
+    credential store, and a `provider remove` from the registry command
+    through the credential clear, so a concurrent removal cannot leave a new
+    orphaned secret behind.
   - **Audit.** Each store, replace, and remove is journaled as a provider
     credential change. The record holds the instance id, the action, the
     outcome category, the local window id, and the time. It holds no key,
