@@ -54,7 +54,7 @@ describe("canvasPreviewWarnings", () => {
   it("names the frames and the id of each design image the host could not draw, never the bytes", () => {
     const design = block({
       blockId: "phone",
-      schemaVersion: 14,
+      schemaVersion: 16,
       kind: "design",
       title: "Onboarding",
       size: "phone",

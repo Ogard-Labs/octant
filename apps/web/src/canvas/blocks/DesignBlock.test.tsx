@@ -52,7 +52,7 @@ describe("design block", () => {
   it("shows a Project screenshot in a phone mockup and a placeholder for an image the host refused, loading nothing", async () => {
     const block = decodeCanvasBlock({
       blockId: "phone",
-      schemaVersion: 14,
+      schemaVersion: 16,
       kind: "design",
       title: "Mockup",
       size: "phone",
@@ -98,7 +98,7 @@ describe("design block", () => {
   it("draws every declared image as a placeholder where no host can resolve it", () => {
     const block = decodeCanvasBlock({
       blockId: "phone",
-      schemaVersion: 14,
+      schemaVersion: 16,
       kind: "design",
       title: "Mockup",
       size: "phone",
