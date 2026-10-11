@@ -229,7 +229,9 @@ opens with Model endpoints, every endpoint Octant calls over an API itself
 by model roles and helper agents; with no endpoint yet it offers three ways
 in instead (Sign in with ChatGPT, Sign in with OpenRouter, Add endpoint), each
 sign-in one click with its terms as a consent line under the button. Image
-generation holds the image profiles and custom image sources. A sign-in
+generation holds the image profiles and custom image sources. Provider catalog lists
+every bundled driver of both kinds and sends each one to the page that
+configures it. A sign-in
 endpoint's row says who is signed in, its detail page offers sign out and
 sign in again, and its configuration fixes the base URL and asks for no key. The
 instances, commands, and credentials are the same on every page. A setting lives
@@ -910,6 +912,25 @@ carry the reading. It may also carry a `sparkline` of at most 256 recent
 readings, drawn as a glance with no axis, and a short `caption`. The value, the
 delta, and the caption are the accessible numbers; the sparkline is decorative.
 
+**KPI dashboards.** A `dashboard` block lays the document's own metric,
+progress, status, chart, and table blocks on a grid. It names each placed block
+by id, so a block keeps one definition and its comments, and the grid is drawn
+where the dashboard sits with the placed blocks drawn there instead of at their
+own positions. The dashboard is a region named by its title, set in
+`--oct-text-base` at the strong weight. A metric keeps its own tile; every other
+cell takes the same face (a faint ring at `--oct-radius-sm` and
+`--oct-space-3` padding), so the grid reads as one surface of tiles, and a
+cell's comment marker sits in its corner rather than past its edge. A one-line
+status or progress keeps its own height beside a taller chart instead of
+stretching into an empty panel. The grid answers its own width rather than the
+window's, because a Canvas in a dock column sits in a wide window: below 36rem
+it is one column (the dock and a phone), below 52rem at most two, and from 52rem
+the declared columns (one to four, four by default) and spans. A tile takes one
+column and a chart or table two unless the author names a span. Cells never
+leave the order the author listed, so the single column and keyboard focus both
+read in that order. Every placed chart keeps its disclosed data table. Under
+forced colours each cell keeps a CanvasText edge.
+
 **Tables.** A table is columns of a declared type and rows in the order the
 author wrote. A column may name a `format` and a `display` of `text` (the plain
 reading, the default), `bar` (an in-cell bar whose length is the value's share
@@ -920,8 +941,23 @@ colours they fall to system ink and the plain value remains the reading. A text
 column whose values read as a path uses the shared path style, and a number
 column is right-aligned in tabular numerals. Sorting (each sorted header
 announces its direction with `aria-sort`; hiding the sorted column drops the
-sort), a text filter, and hidden columns are view state and revise nothing, so the exported and static forms keep the order
-the author wrote. The header sticks through a scrolling table. Where comments
+sort), a text filter, hidden and pinned columns, and grouping are view state
+and revise nothing, so the exported and static forms keep the order the author
+wrote; a table stores no default grouping, because which column to group by is
+the reader's question rather than part of the data. **Group rows** groups by any
+column's value: each group is its own row group whose header row is a
+`rowgroup` header holding a disclosure button (`aria-expanded`), the value, and
+its row count, optionally followed by a **Group summary** — the count, sum, or
+average of a number column's filled cells, where an empty cell is not a zero.
+Groups read in the grouped column's order (empty last) and follow its direction
+when it is also the sort; the sort orders rows within each group, and the
+filter applies first, so a count is what the reader can see and a group the
+filter empties is gone. A collapsed group that holds open row threads shows
+their count in its header. **Pin** in the Columns list moves a column to the
+leading edge, after the comment gutter and in the author's order among pinned
+columns, and keeps it there while the table scrolls sideways; pinned cells take
+the gutter's warm surface and a hairline marks the last pinned edge, which
+forced colours draw as a system-ink border. The header sticks through a scrolling table. Where comments
 are available, a row the author gave an `id` carries a comment marker in a
 leading gutter pinned to the left edge, so it stays in view while a wide table
 scrolls sideways; the gutter takes the header's warm surface so the scrolled
@@ -1120,7 +1156,10 @@ base branch, and Environment sit on the context row above the composer
 on the page ground with no band chrome. Environment is the
 create-facing presentation of Octant's authoritative host federation: its
 dropdown selects This computer, devbox, or another healthy capable host without
-creating a second environment model. Workspace remains on that rear card after the three primary choices;
+creating a second environment model. Every create composer shows Environment
+only when more than one host is known. With one host there is nothing to
+choose, so no Environment control or label appears. With several, an existing
+Project's fixed host reads as a label instead of a dropdown. Workspace remains on that rear card after the three primary choices;
 nothing about delivery is asked up front (see "Language"). The Project
 control is one menu: saved Projects to search, then New Project from folder
 and New Project from GitHub repository. Choosing GitHub swaps the menu's body
@@ -1413,6 +1452,31 @@ exists and only for a runtime whose version probe the host can run. Its
 answer is one quiet line under the actions (the version the host read), or a
 warning box saying why the host refused the file.
 
+Provider catalog, the Models page after Providers & Models, lists every
+bundled provider driver in the Model endpoints row style. Agent runtimes and
+model endpoints are two sections. A row is one link named with its state
+("Codex CLI, off. Open setup") and shows the mark, the name, "Agent runtime ·
+Bundled" or "Model endpoint · Bundled", and the state in words beside the same
+dot shapes. The states are Ready, Sign in to use, Partly working, Checking…,
+Not checked yet, Found, not added, Not looked for yet, Not on this host, Not
+added, Off, Can't start, Version not supported, and Not available. A one-line
+introduction says each driver is already installed and trusted, followed by a
+summary ("21 drivers · 3 ready · 1 need you"). Opening a row replaces the page
+with that driver's setup sub-page: breadcrumb, Back, and Escape as on an
+endpoint's page, and an h1 with the driver's name. It leads with Set up, a
+numbered list of steps (Find it on this host, for runtimes only; Add it to
+Octant or Add the endpoint; Turn it on; Sign in; Check the connection). Done
+steps carry a check. The current step carries one sentence, one action, and a
+polite live region where a refusal shows the host's reason with Try again.
+Next comes the runtime's own Providers & Models card (an endpoint links to its
+Model endpoints page instead). Then come State (Available, Enabled, Signed in,
+and Ready, each in words with its dot), What it can do (Chat, Work, Code, and
+Agent loop in plain sentences), and Package (Bundled with Octant, installed,
+trusted and by whom it was reviewed, and the driver version). It offers no
+install or trust action, because a bundled driver needs neither. Opening the
+page or a setup runs nothing; at phone width a fact's value moves under its
+name.
+
 Octant Harness lists its model endpoints differently: as rows in one list,
 never two-up cards. A row is a single link named with its state ("Team
 gateway, not working, open details") and holds the source mark (the bundled
@@ -1503,7 +1567,8 @@ Project. The Model step writes to what a new task in that mode already starts
 from: Work's default model in Work settings, and the composer's remembered
 model for Code. The readiness view reports provider, Project, and model
 separately; a missing fact opens its exact setup surface, and Start a task
-appears only when all three hold. Answers still write through to the settings
+appears only when all three hold. Its heading reads Ready to start only then and
+otherwise names what is missing (Needs a provider and a model). Answers still write through to the settings
 that own them. First run records its outcome only after every answer has landed. When
 the host refused an answer, the first press of Skip setup or the primary action
 says so in a warning notice and records nothing; the next press goes on without

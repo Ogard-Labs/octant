@@ -10,7 +10,7 @@ import {
   statSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { isAbsolute, join, resolve, sep } from "node:path";
+import { isAbsolute, join, sep } from "node:path";
 
 import type {
   Options as ClaudeAgentSdkOptions,
@@ -31,6 +31,7 @@ import {
   materializeOsNetworkEgress,
   resolveProviderRuntimeEgressPolicy,
 } from "../process/threadEgressPolicy";
+import { canonicalClaudeAccountDirectory } from "./claudeAccountIsolation";
 import { REQUIRED_GUARDS, sanitizeClaudeEnvironment } from "./claudeEnvironment";
 import type { ProviderProcessStartedListener } from "./providerRuntimeRegistry";
 
@@ -419,15 +420,12 @@ function planStateDirectories(
   boundRoot: string,
   stateDirectories: ReadonlyArray<string>,
 ): ReadonlyArray<string> {
-  const canonicalDirectories = stateDirectories.map((path) => {
-    try {
-      return realpathSync(path);
-    } catch {
-      // A provider may create its state directory during launch; resolve the
-      // configured path so `..` cannot slip under the bound root.
-      return resolve(path);
-    }
-  });
+  // A provider may create its state directory during launch. Resolve through
+  // the nearest existing ancestor, so a not-yet-created leaf under a symlinked
+  // prefix (`/tmp` is `/private/tmp` on macOS) cannot dodge the overlap check.
+  const canonicalDirectories = stateDirectories.map(
+    (path) => canonicalClaudeAccountDirectory(path).path,
+  );
   for (const path of canonicalDirectories) {
     // 0145: the checkout must not be the leaf, sit inside it, or be an ancestor.
     if (
@@ -549,11 +547,13 @@ function confineClaudeLaunch(
       allowProcessExec: false,
       allowProcessFork: false,
       allowFileReadStar: true,
-      // Confined Claude signs in with the unmodified binary. That needs exec of
-      // `/usr/bin/security` and the security-server lookup. Keychain files and
-      // every other exec stay denied. Linux confinement cannot take Seatbelt
-      // extra rules, so this carve-out is macOS-only.
-      ...(process.platform === "darwin"
+      // A subscription launch signs in with the unmodified binary, which needs
+      // exec of `/usr/bin/security` and the security-server lookup. Keychain
+      // files and every other exec stay denied. A launch that carries an API key
+      // reads nothing from the store, so it gets no carve-out (the same rule as
+      // `allowProviderCredentialLookup` on main). Linux confinement cannot take
+      // Seatbelt extra rules, so this carve-out is macOS-only.
+      ...(process.platform === "darwin" && spawnOptions.env.ANTHROPIC_API_KEY === undefined
         ? {
             extraRules: [
               seatbeltExecRule("/usr/bin/security"),

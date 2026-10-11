@@ -16,6 +16,7 @@ describe("octantSettingsRegistry", () => {
       "work",
       "code",
       "providers",
+      "provider-catalog",
       "harness",
       "navigator-assistant",
       "voice",

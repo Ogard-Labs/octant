@@ -1656,7 +1656,7 @@ describe("CodeThreadWorkspace", () => {
     );
   });
 
-  it("offers a started thread only the models its next turn will accept", async () => {
+  it("offers a started thread only the models its next turn will accept, plus every other provider", async () => {
     const user = userEvent.setup();
     const execute = vi.fn(async () => undefined) as CodeController["execute"];
     const switching = providerGroup();
@@ -1687,9 +1687,10 @@ describe("CodeThreadWorkspace", () => {
     );
 
     await user.click(screen.getByRole("button", { name: "Provider and model" }));
-    // The conversation lives in this provider's session, so another provider
-    // is never offered; another of its models is, because it can carry over.
-    expect(screen.queryByRole("option", { name: "Remote Provider" })).not.toBeInTheDocument();
+    // Another of this provider's models carries the session over. Another
+    // provider is offered too: it starts a new session with the conversation
+    // handed over as text.
+    expect(screen.getByRole("option", { name: "Remote Provider" })).toBeInTheDocument();
     expect(screen.queryByRole("option", { name: "Model Two" })).not.toBeInTheDocument();
     await user.click(screen.getByRole("option", { name: "Model Three" }));
     expect(execute).toHaveBeenCalledWith({
@@ -2218,6 +2219,236 @@ describe("CodeThreadWorkspace", () => {
     expect(screen.getByRole("separator", { name: /provider handoff/i })).toHaveTextContent(
       "Provider handoff",
     );
+  });
+
+  it("says what a provider switch handed over and that hidden reasoning stayed behind", () => {
+    render(
+      <CodeThreadWorkspace
+        controller={controller({
+          conversation: [
+            {
+              id: "turn:assistant-one",
+              role: "assistant",
+              text: "The first pass is complete.",
+              providerInstanceId: providerId,
+              modelId,
+              status: "completed",
+            },
+            {
+              id: "turn:assistant-two",
+              role: "assistant",
+              text: "The second pass is complete.",
+              providerInstanceId: alternateProviderId,
+              modelId: alternateModelId,
+              status: "completed",
+              handoff: {
+                reason: "provider-switch",
+                previousProviderInstanceId: providerId,
+                previousModelId: modelId,
+                messages: 3,
+                omissions: {
+                  earlierMessages: 4,
+                  unfinishedReplies: 0,
+                  missingBodies: 1,
+                  oversizedBodies: 0,
+                  emptyBodies: 0,
+                  attachments: 0,
+                  truncatedMessages: 0,
+                  truncatedCharacters: 0,
+                  sourceTruncatedMessages: 0,
+                },
+                externalContentIngested: false,
+              },
+            },
+          ],
+        })}
+        providerGroups={[providerGroup(), alternateProviderGroup()]}
+        threadId={threadId}
+      />,
+    );
+
+    const note = screen.getByRole("note");
+    expect(note).toHaveTextContent("Handed over 3 recent messages from");
+    expect(note).toHaveTextContent("Left out: 4 earlier messages, 1 message no longer stored.");
+    expect(note).toHaveTextContent(
+      "Hidden reasoning, tool activity and the previous session did not transfer.",
+    );
+  });
+
+  it.each([
+    {
+      transfer: "as text",
+      handoff: {
+        reason: "fork" as const,
+        forkedFrom: {
+          threadId: anotherThreadId,
+          throughOperationId: "c0000000-0000-4000-8000-0000000000f1",
+        },
+        messages: 2,
+        omissions: {
+          earlierMessages: 0,
+          unfinishedReplies: 0,
+          missingBodies: 0,
+          oversizedBodies: 1,
+          emptyBodies: 0,
+          attachments: 0,
+          truncatedMessages: 0,
+          truncatedCharacters: 0,
+          sourceTruncatedMessages: 0,
+        },
+        externalContentIngested: false,
+      },
+      says: [
+        "Forked with 2 recent messages of the source conversation as text",
+        "Left out: 1 message too large to read.",
+        "Hidden reasoning, tool activity, the source's session and its later replies did not transfer.",
+      ],
+    },
+    {
+      transfer: "by continuing the source's session",
+      handoff: {
+        reason: "fork-native-session" as const,
+        forkedFrom: {
+          threadId: anotherThreadId,
+          throughOperationId: "c0000000-0000-4000-8000-0000000000f1",
+        },
+      },
+      says: [
+        "Forked by continuing the source's own session up to the reply it was forked from",
+        "The source's later replies did not transfer.",
+      ],
+    },
+  ])(
+    "says on a fork's first reply what carried over $transfer and what did not",
+    ({ handoff, says }) => {
+      render(
+        <CodeThreadWorkspace
+          controller={controller({
+            conversation: [
+              {
+                id: "source:assistant",
+                role: "assistant",
+                text: "The source's reply.",
+                providerInstanceId: providerId,
+                modelId,
+                status: "completed",
+                sourceThreadId: anotherThreadId,
+              },
+              {
+                id: "fork:assistant",
+                role: "assistant",
+                text: "The fork's first reply.",
+                providerInstanceId: alternateProviderId,
+                modelId: alternateModelId,
+                status: "completed",
+                handoff,
+              },
+            ],
+          })}
+          providerGroups={[providerGroup(), alternateProviderGroup()]}
+          threadId={threadId}
+        />,
+      );
+
+      const note = screen.getByRole("note");
+      for (const text of says) expect(note).toHaveTextContent(text);
+    },
+  );
+
+  it("warns before sending that a thread moved to another provider starts a new session", () => {
+    const base = controller();
+    const view = base.activeView!;
+    render(
+      <CodeThreadWorkspace
+        controller={{
+          ...base,
+          activeView: {
+            ...view,
+            thread: {
+              ...view.thread,
+              providerInstanceId: alternateProviderId,
+              modelId: alternateModelId,
+            },
+          },
+          conversation: [
+            {
+              id: "turn:assistant-one",
+              role: "assistant",
+              text: "The first pass is complete.",
+              providerInstanceId: providerId,
+              modelId,
+              status: "completed",
+            },
+          ],
+        }}
+        providerGroups={[providerGroup(), alternateProviderGroup()]}
+        threadId={threadId}
+      />,
+    );
+
+    expect(screen.getByText(/Your next message starts a new session on/)).toHaveTextContent(
+      "hidden reasoning and the",
+    );
+  });
+
+  it("does not promise another new session after a switching turn opened one and then stopped", () => {
+    const base = controller();
+    const view = base.activeView!;
+    render(
+      <CodeThreadWorkspace
+        controller={{
+          ...base,
+          activeView: {
+            ...view,
+            thread: {
+              ...view.thread,
+              providerInstanceId: alternateProviderId,
+              modelId: alternateModelId,
+            },
+          },
+          conversation: [
+            {
+              id: "turn:assistant-one",
+              role: "assistant",
+              text: "The first pass is complete.",
+              providerInstanceId: providerId,
+              modelId,
+              status: "completed",
+            },
+            {
+              id: "turn:assistant-two",
+              role: "assistant",
+              text: "Provider turn interrupted.",
+              providerInstanceId: alternateProviderId,
+              modelId: alternateModelId,
+              status: "interrupted",
+              handoff: {
+                reason: "provider-switch",
+                previousProviderInstanceId: providerId,
+                previousModelId: modelId,
+                messages: 1,
+                omissions: {
+                  earlierMessages: 0,
+                  unfinishedReplies: 0,
+                  missingBodies: 0,
+                  oversizedBodies: 0,
+                  emptyBodies: 0,
+                  attachments: 0,
+                  truncatedMessages: 0,
+                  truncatedCharacters: 0,
+                  sourceTruncatedMessages: 0,
+                },
+                externalContentIngested: false,
+              },
+            },
+          ],
+        }}
+        providerGroups={[providerGroup(), alternateProviderGroup()]}
+        threadId={threadId}
+      />,
+    );
+
+    expect(screen.queryByText(/Your next message starts a new session on/)).not.toBeInTheDocument();
   });
 
   it("labels a model-only switch as a model switch rather than a provider handoff", () => {

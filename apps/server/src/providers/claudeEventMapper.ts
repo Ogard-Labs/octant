@@ -52,6 +52,7 @@ const DECODED_MESSAGE_KINDS = new Set([
   "rate-limit",
   "authentication",
   "status",
+  "compaction",
   "ignored",
 ]);
 
@@ -108,6 +109,8 @@ export interface ClaudeEventContext {
    * fill is this and nothing else.
    */
   contextTokens?: number;
+  /** Claude compacted the session's window during this turn. */
+  windowCompacted?: boolean;
   /**
    * Each model call's usage this turn, by Claude message id. An assistant
    * message reports only its own call, so the turn's usage so far is their
@@ -235,6 +238,9 @@ function usageEvent(
       ? {}
       : { autoCompactThreshold: context.autoCompactThreshold }),
     ...(contextBreakdown === undefined ? {} : { contextBreakdown }),
+    // Each prompt is a user message the session sends again with every later
+    // request until Claude Code compacts it.
+    promptRetention: context.windowCompacted === true ? "compacted" : "kept",
   });
 }
 
@@ -1033,6 +1039,19 @@ export function mapClaudeMessage(
           ]
         : [{ kind: "ignored" }];
     case "status":
+      return [{ kind: "ignored" }];
+    case "compaction":
+      // A compacted session keeps a summary and, at most, the messages the
+      // boundary lists as preserved (`compact_metadata.preserved_messages` on
+      // `SDKCompactBoundaryMessage`), so how much of the earlier prompts
+      // survives is Claude Code's own choice. Usage reports for the rest of
+      // the turn say so; the driver opens a fresh context for the next turn.
+      context.windowCompacted = true;
+      // The last request's fill is the window before the cut. Until the next
+      // request measures it, the window holds what the runtime says survived,
+      // or an unknown amount; a stale pre-compaction figure would show it full.
+      if (message.postTokens === undefined) delete context.contextTokens;
+      else context.contextTokens = message.postTokens;
       return [{ kind: "ignored" }];
     case "ignored":
       return [{ kind: "ignored" }];

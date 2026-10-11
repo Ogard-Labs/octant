@@ -1,53 +1,124 @@
+import type {
+  FleetActivity,
+  FleetActivitySource,
+  FleetActivityThread,
+} from "@octant/contracts/fleet-activity";
 import { canRunHostAction, type HostAction, type LocalHostSnapshot } from "./hostLifecycle";
 
-export interface MenuBarTask {
+export type MenuBarThreadMode = FleetActivityThread["mode"];
+
+/** A thread a window shows, or the one a menu-bar row opens. */
+export interface MenuBarOpenThread {
+  readonly mode: MenuBarThreadMode;
   readonly threadId: string;
-  readonly mode: "chat" | "work" | "code";
+}
+
+/** A window's report of the thread it shows; `undefined` when it shows none. */
+export function decodeMenuBarOpenThread(value: unknown): MenuBarOpenThread | undefined {
+  if (value === null) return undefined;
+  if (
+    typeof value !== "object" ||
+    Object.keys(value).length !== 2 ||
+    !("mode" in value) ||
+    (value.mode !== "chat" && value.mode !== "work" && value.mode !== "code") ||
+    !("threadId" in value) ||
+    typeof value.threadId !== "string" ||
+    value.threadId.length === 0 ||
+    value.threadId.length > 128
+  ) {
+    throw new TypeError("Invalid menu thread");
+  }
+  return { mode: value.mode, threadId: value.threadId };
+}
+
+export interface MenuBarFleetThread {
+  readonly mode: MenuBarThreadMode;
+  readonly threadId: string;
   readonly title: string;
-  readonly activity: "working" | "attention" | "unread";
+  readonly projectName?: string;
+  readonly state: "needs-you" | "working" | "done";
+  readonly activitySource: FleetActivitySource;
 }
 
-export interface WindowMenuBarTask extends MenuBarTask {
-  readonly windowId: number;
+const MAX_DONE_THREADS = 32;
+
+function fleetThread(
+  thread: FleetActivityThread,
+  state: MenuBarFleetThread["state"],
+): MenuBarFleetThread {
+  return {
+    mode: thread.mode,
+    threadId: thread.threadId,
+    title: thread.title,
+    ...(thread.projectName === undefined ? {} : { projectName: thread.projectName }),
+    state,
+    activitySource: thread.activitySource,
+  };
 }
 
-export function decodeMenuBarTasks(value: unknown): ReadonlyArray<MenuBarTask> {
-  if (!Array.isArray(value) || value.length > 18) throw new TypeError("Invalid menu tasks");
-  return value.map((task: unknown) => {
-    if (
-      typeof task !== "object" ||
-      task === null ||
-      !("threadId" in task) ||
-      typeof task.threadId !== "string" ||
-      task.threadId.length === 0 ||
-      task.threadId.length > 128 ||
-      !("title" in task) ||
-      typeof task.title !== "string" ||
-      task.title.length > 200 ||
-      !("mode" in task) ||
-      (task.mode !== "chat" && task.mode !== "work" && task.mode !== "code") ||
-      !("activity" in task) ||
-      (task.activity !== "working" && task.activity !== "attention" && task.activity !== "unread")
-    ) {
-      throw new TypeError("Invalid menu task");
+function threadKey(thread: MenuBarOpenThread): string {
+  return `${thread.mode}:${thread.threadId}`;
+}
+
+/**
+ * The menu bar's roster, built from the host's fleet read.
+ *
+ * Needs-you and working are exactly what the host's journal and live sessions
+ * reported on the latest read. Done since you looked is the one thing the host
+ * cannot say, because only this app knows when the person last opened a
+ * thread: a thread that left the host's list between two reads finished, and
+ * it stays done until it is opened or runs again. A cut or failed read proves
+ * nothing about a thread it left out, and a state seen only on a terminal's
+ * screen is a guess, so neither can ever produce a done row.
+ */
+export class MenuBarFleet {
+  #active = new Map<string, FleetActivityThread>();
+  #done = new Map<string, MenuBarFleetThread>();
+
+  /** Fold one successful host read; `watching` are threads a focused window shows. */
+  observe(activity: FleetActivity, watching: ReadonlyArray<MenuBarOpenThread> = []): void {
+    const next = new Map(activity.threads.map((thread) => [threadKey(thread), thread] as const));
+    if (activity.truncated) {
+      for (const [key, thread] of this.#active) if (!next.has(key)) next.set(key, thread);
     }
-    return {
-      threadId: task.threadId,
-      title: task.title.replace(/[\r\n\t]/g, " "),
-      mode: task.mode,
-      activity: task.activity,
-    };
-  });
+    const watched = new Set(watching.map(threadKey));
+    const finished = new Map<string, MenuBarFleetThread>();
+    for (const [key, previous] of this.#active) {
+      if (next.has(key) || watched.has(key) || previous.activitySource === "screen") continue;
+      finished.set(key, fleetThread(previous, "done"));
+    }
+    const done = new Map([...finished, ...this.#done]);
+    for (const key of next.keys()) done.delete(key);
+    this.#done = new Map([...done].slice(0, MAX_DONE_THREADS));
+    this.#active = next;
+  }
+
+  /** The person opened this thread, so whatever finished there has been seen. */
+  looked(thread: MenuBarOpenThread): void {
+    this.#done.delete(threadKey(thread));
+  }
+
+  /** The host stopped or was replaced; nothing it said still holds. */
+  clear(): void {
+    this.#active = new Map();
+    this.#done = new Map();
+  }
+
+  threads(): ReadonlyArray<MenuBarFleetThread> {
+    return [
+      ...[...this.#active.values()].map((thread) => fleetThread(thread, thread.state)),
+      ...this.#done.values(),
+    ];
+  }
 }
 
 export interface MenuBarItem {
   readonly id:
-    | "task"
+    | "thread"
     | "separator"
     | "local-host"
     | "status"
     | "activity"
-    | "attention"
     | "open-app"
     | "open-web"
     | "start-new-agent"
@@ -56,10 +127,53 @@ export interface MenuBarItem {
     | "restart-host"
     | "diagnostics"
     | "fully-quit";
-  readonly task?: WindowMenuBarTask;
+  readonly thread?: MenuBarFleetThread;
+  readonly toolTip?: string;
   readonly submenu?: ReadonlyArray<MenuBarItem>;
   readonly label: string;
   readonly enabled: boolean;
+}
+
+const MODE_LABELS: Record<MenuBarThreadMode, string> = {
+  chat: "Chat",
+  work: "Work",
+  code: "Code",
+};
+
+function threadLabel(thread: MenuBarFleetThread): string {
+  const title = thread.title.length > 44 ? `${thread.title.slice(0, 43)}…` : thread.title;
+  const project =
+    thread.projectName === undefined
+      ? ""
+      : ` · ${thread.projectName.length > 28 ? `${thread.projectName.slice(0, 27)}…` : thread.projectName}`;
+  const screen = thread.activitySource === "screen" ? " · seen in terminal" : "";
+  return `${title} — ${MODE_LABELS[thread.mode]}${project}${screen}`;
+}
+
+function threadToolTip(thread: MenuBarFleetThread): string {
+  if (thread.activitySource === "screen") {
+    return "Looks busy in a terminal pane · Octant does not notify for it";
+  }
+  const source = thread.activitySource === "session" ? "the live session" : "the journal";
+  if (thread.state === "needs-you") return `Waiting on you · read from ${source}`;
+  if (thread.state === "working") return `Running · read from ${source}`;
+  return `Finished since you last opened it · read from ${source}`;
+}
+
+/**
+ * The text beside the menu-bar glyph: `!` while the host itself needs
+ * attention, otherwise how many threads wait on the person. A state seen only
+ * on screen never counts.
+ */
+export function menuBarTitle(
+  snapshot: LocalHostSnapshot,
+  fleet: ReadonlyArray<MenuBarFleetThread>,
+): string {
+  if (snapshot.attentionRequired) return "!";
+  const waiting = fleet.filter(
+    (thread) => thread.state === "needs-you" && thread.activitySource !== "screen",
+  ).length;
+  return waiting === 0 ? "" : String(waiting);
 }
 
 function stateLabel(snapshot: LocalHostSnapshot): string {
@@ -75,32 +189,30 @@ function actionEnabled(snapshot: LocalHostSnapshot, action: HostAction): boolean
 
 export function buildMenuBarItems(
   snapshot: LocalHostSnapshot,
-  tasks: ReadonlyArray<WindowMenuBarTask> = [],
+  fleet: ReadonlyArray<MenuBarFleetThread> = [],
 ): ReadonlyArray<MenuBarItem> {
   const separator: MenuBarItem = { id: "separator", label: "", enabled: false };
   const taskItems: MenuBarItem[] = [];
   if (snapshot.state !== "stopped") {
-    const unique = [
-      ...new Map(tasks.map((task) => [`${task.mode}:${task.threadId}`, task])).values(),
-    ];
-    for (const [activity, label] of [
-      ["attention", "Needs attention"],
-      ["working", "Running"],
-      ["unread", "Unread"],
+    for (const [state, label] of [
+      ["needs-you", "Needs you"],
+      ["working", "Working"],
+      ["done", "Done since you looked"],
     ] as const) {
-      const group = unique.filter((task) => task.activity === activity);
+      const group = fleet.filter((thread) => thread.state === state);
       if (group.length === 0) continue;
       taskItems.push(separator, {
         id: "activity",
         label: `${label} · ${group.length}`,
         enabled: false,
       });
-      for (const task of group.slice(0, 6)) {
+      for (const thread of group.slice(0, 6)) {
         taskItems.push({
-          id: "task",
-          label: task.title.length > 52 ? `${task.title.slice(0, 51)}…` : task.title,
+          id: "thread",
+          label: threadLabel(thread),
+          toolTip: threadToolTip(thread),
           enabled: true,
-          task,
+          thread,
         });
       }
     }

@@ -26,6 +26,7 @@ fork/checkpoint/pause behavior, and CLI/GUI security ownership copy are further 
 [`mobile-remote-control-threat-model.md`](mobile-remote-control-threat-model.md),
 [`canvas-share-authenticated-snapshot-threat-model.md`](canvas-share-authenticated-snapshot-threat-model.md),
 [`canvas-share-static-export-threat-model.md`](canvas-share-static-export-threat-model.md),
+[`canvas-html-frames-threat-model.md`](canvas-html-frames-threat-model.md),
 [`agent-to-agent-messaging-threat-model.md`](agent-to-agent-messaging-threat-model.md)
 
 ## Overview
@@ -83,6 +84,10 @@ implementation backlog this design gates; nothing here weakens an existing contr
   mint local receipts.
 - **Child agents (subagents):** provider-native or Octant-managed. Receive equal-or-narrower
   authority than their parent; a child request is admitted only after server-side clamping.
+- **Another local principal on the loopback path:** another OS user on the same machine, a local
+  service account, an `ssh -L` forward, or a proxy that rewrites `Host`. It reaches the loopback
+  listener and can send any `Host` and `Origin` header, but cannot read the host owner's files. It
+  is not the host user and gets no window authority (AC5).
 - **Local attacker with the same user account or kernel:** out of containment scope, as in the
   companion threat models. Octant must not amplify such a compromise across hosts or expose new
   credentials, but cannot defend against it.
@@ -180,6 +185,25 @@ window, or approves an action class the host policy reserves for the local user.
 | Session lifecycle  | Pairing TTL and attempt limits, session idle/absolute expiry and rotation, device expiry and revocation | `remoteAccessPolicy.ts`, `apps/server/src/remoteCredentialLifecycleService.ts`                               | Exists today |
 | Operation clamps   | Remote Code operations resolve to host-clamped decisions (`host-thread-credential-clamped` for push/PR) | `packages/domain/src/codePolicy.ts` (`authorizeCodeOperation`)                                               | Exists today |
 | Route policy       | Per-route security policy and request-proof validation on remote transports                             | `apps/server/src/remoteRoutePolicy.ts`, `remoteRequestProofService.ts`                                       | Exists today |
+
+### AC5 — Loopback caller claiming the local owner
+
+Another OS user, a local service account, an `ssh -L` forward, or a proxy that rewrites `Host`
+calls the loopback listener with the listener's own `Origin` and asks for a window capability,
+which would read every thread, Project, and setting and could create provider endpoints.
+
+| Layer             | Control                                                                                                                        | Module                                                                         | State        |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------ | ------------ |
+| Owner-only secret | Window authority is minted only on `/api/desktop/*` routes that require the bridge secret, readable only by the host's OS user | `apps/server/src/launchSessionRoutes.ts`, `@octant/host-runtime` runtime paths | Exists today |
+| No loopback mint  | `/api/shell/local-session` refreshes a capability the caller already holds and answers 401 otherwise                           | `apps/server/src/launchSessionRoutes.ts` (`handleLocalBootstrap`)              | Exists today |
+| One-time token    | A browser launch token is single-use, expires in five minutes, and is bound to the renderer origin it was minted for           | `apps/server/src/launchSessionStore.ts`                                        | Exists today |
+| Token hygiene     | The token rides in the URL fragment and the renderer strips it with a history replace before exchanging it                     | `apps/web/src/shell/useLaunchSession.ts`, `shellLaunch.ts`                     | Exists today |
+| Origin pinning    | Only the listener's own origin, the packaged renderer, and `OCTANT_WEB_URL` are admitted; other loopback pages are refused     | `apps/server/src/shellRoutes.ts` (`isLocalRendererOrigin`)                     | Exists today |
+
+Residual risk: the launcher passes the token URL to the system browser as a process argument, which
+another OS user can read while that process runs, and the token is valid until the browser exchanges
+it. A caller that wins that race gets one browser session and the person's browser shows the launch
+guidance instead.
 
 ## Server-Side Tool-Call Policy Engine
 

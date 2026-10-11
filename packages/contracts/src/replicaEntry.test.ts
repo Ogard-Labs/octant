@@ -11,6 +11,8 @@ import {
   decodeReplicaMembershipEntry,
   decodeReplicaMembershipResult,
   decodeReplicaEntryText,
+  decodeReplicaJoinReadCommand,
+  decodeReplicaMembershipCommand,
   decodeReplicaRestoreCommand,
   decodeReplicaSyncStatusView,
   encodeReplicaEntry,
@@ -449,6 +451,15 @@ describe("restoring a library", () => {
       });
     expect(status({ state: "running", done: 25, total: 60 }).status.restore?.done).toBe(25);
     expect(() => status({ state: "running", done: 61, total: 60 })).toThrow();
+  });
+
+  it("decodes Stop for a join confirmation's read apart from every other command", () => {
+    expect(decodeReplicaJoinReadCommand({ kind: "stop-join-read" })).toEqual({
+      kind: "stop-join-read",
+    });
+    expect(() => decodeReplicaRestoreCommand({ kind: "stop-join-read" })).toThrow();
+    expect(() => decodeReplicaMembershipCommand({ kind: "stop-join-read" })).toThrow();
+    expect(() => decodeReplicaJoinReadCommand({ kind: "stop-restore" })).toThrow();
   });
 });
 

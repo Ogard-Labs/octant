@@ -389,6 +389,15 @@ function hasOnlyKeys(value: Record<string, unknown>, allowed: readonly string[])
   return Object.keys(value).every((key) => allowedKeys.has(key));
 }
 
+/** System subtypes `isHarmlessInformational` drops when their fields check out. */
+const INFORMATIONAL_SYSTEM_SUBTYPES: ReadonlySet<string> = new Set([
+  "api_retry",
+  "post_turn_summary",
+  "notification",
+  "thinking_tokens",
+  "informational",
+]);
+
 function isHarmlessInformational(message: Record<string, unknown>): boolean {
   if (message.type === "keep_alive") return hasOnlyKeys(message, ["type"]);
   if (message.type === "prompt_suggestion") {
@@ -1182,6 +1191,30 @@ export function decodeMessage(
         : {}),
     };
   }
+  // Claude Code compacts its own session when the window nears its threshold
+  // (or on `/compact`) and marks the cut with a boundary. It used to end the
+  // turn as an unsupported message the moment a long turn compacted. The
+  // runtime sends fields its published type leaves out (`logical_parent_uuid`,
+  // summary bookkeeping), so only the fields read here are checked.
+  if (message.type === "system" && message.subtype === "compact_boundary") {
+    const metadata = object(message.compact_metadata);
+    if (
+      typeof message.session_id !== "string" ||
+      typeof message.uuid !== "string" ||
+      metadata === undefined ||
+      (metadata.trigger !== "auto" && metadata.trigger !== "manual") ||
+      nonNegativeInteger(metadata.pre_tokens) === undefined ||
+      (metadata.post_tokens !== undefined && nonNegativeInteger(metadata.post_tokens) === undefined)
+    ) {
+      throw protocol("Claude returned an unsupported runtime message.");
+    }
+    const postTokens = nonNegativeInteger(metadata.post_tokens);
+    return {
+      kind: "compaction",
+      sessionId: message.session_id,
+      ...(postTokens === undefined ? {} : { postTokens }),
+    };
+  }
   if (
     message.type === "system" &&
     (message.subtype === "task_started" ||
@@ -1269,6 +1302,17 @@ export function decodeMessage(
   }
 
   if (isHarmlessInformational(message)) return { kind: "ignored" };
+  // A system subtype this decoder does not know says so in a sentence of its
+  // own. The subtype itself is runtime-supplied text and stays out of a
+  // failure the driver journals; a known subtype with refused fields stays
+  // generic.
+  if (
+    message.type === "system" &&
+    typeof message.subtype === "string" &&
+    !INFORMATIONAL_SYSTEM_SUBTYPES.has(message.subtype)
+  ) {
+    throw protocol("Claude returned an unsupported system message.");
+  }
   throw protocol("Claude returned an unsupported runtime message.");
 }
 

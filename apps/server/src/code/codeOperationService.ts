@@ -32,7 +32,6 @@ import {
   type CodeRepositoryTestStatus,
   type CodeReviewFinding,
   type CodeThread,
-  type CodeThreadForkOrigin,
   type CodeThreadId,
   type AgentRun,
   type AgentRunId,
@@ -623,12 +622,6 @@ export interface CodeOperationTurnPort {
      */
     readonly context?: ReadonlyArray<ProviderContextBlock>;
     /**
-     * A fork's first turn: the source's conversation as text. Carried only
-     * when the provider's own session could not start from the source's, so
-     * a fork never reads its history twice.
-     */
-    readonly forkHandoff?: ProviderContextBlock;
-    /**
      * Which of the context blocks are Octant's instructions and skills, so the
      * window of a runtime that reports no categories can count them.
      */
@@ -831,25 +824,6 @@ export interface CodeOperationServiceOptions {
   readonly takeIssueContextFramed?: (threadId: string) => FramedExternalContent | undefined;
   readonly peekIssueContextFramed?: (threadId: string) => FramedExternalContent | undefined;
   readonly consumeIssueContextFramed?: (threadId: string) => void;
-  /**
-   * Reads the conversation a forked thread inherits, for its first turn only.
-   *
-   * A fork's own transcript starts empty, so without this its provider would be
-   * answering from nothing while the user believes it continues a conversation.
-   * The host reads the source thread itself and bounds what it hands over; a
-   * source it cannot read contributes nothing rather than a claimed history.
-   */
-  readonly resolveForkHandoff?: (input: {
-    readonly threadId: CodeThreadId;
-    readonly origin: CodeThreadForkOrigin;
-    readonly windowId: WindowId;
-    /**
-     * The turn asking for the handoff. Its own start event is already in the
-     * journal by the time this runs, so the resolver has to know which turn to
-     * discount before it can tell whether any earlier one exists.
-     */
-    readonly operationId: CodeOperationId;
-  }) => Promise<string | undefined>;
   /**
    * Loads skills named by the thread's snapshotted profile allowlist. Absent
    * on a host that cannot resolve skills, where a profile still injects its
@@ -2827,7 +2801,6 @@ export class CodeOperationService {
     const issueContext =
       this.#options.peekIssueContextFramed?.(String(thread.id)) ??
       this.#options.takeIssueContextFramed?.(String(thread.id));
-    const [forkHandoff] = await this.#resolveForkHandoff(thread, windowId, command.operationId);
     const sentContext: CodeTurnSentContext = {
       instructions: profileContext.sent.instructions,
       skills: [...skillContext, ...profileContext.sent.skills],
@@ -2881,7 +2854,6 @@ export class CodeOperationService {
       ...(sentContext.instructions.length === 0 && sentContext.skills.length === 0
         ? {}
         : { sentContext }),
-      ...(forkHandoff === undefined ? {} : { forkHandoff }),
       ...(attachments.length === 0 ? {} : { attachments }),
       ...(extensionTools === undefined ? {} : { extensionTools }),
       ...(admissionCurrent === undefined ? {} : { admissionCurrent }),
@@ -2992,25 +2964,6 @@ export class CodeOperationService {
       skills,
       uuid: randomUUID,
     });
-  }
-
-  async #resolveForkHandoff(
-    thread: CodeThread,
-    windowId: WindowId,
-    operationId: CodeOperationId,
-  ): Promise<ReadonlyArray<ProviderContextBlock>> {
-    const origin = thread.forkedFrom;
-    const resolve = this.#options.resolveForkHandoff;
-    if (origin === undefined || resolve === undefined) return [];
-    let text: string | undefined;
-    try {
-      text = await resolve({ threadId: thread.id, origin, windowId, operationId });
-    } catch {
-      return [];
-    }
-    return text === undefined || text.trim().length === 0
-      ? []
-      : [{ kind: "user-message", text } as const];
   }
 
   /**
@@ -3406,6 +3359,8 @@ function evidenceReferences(event: CodeOperationEvent): readonly CodeEvidenceRef
     case "terminal-output":
     case "diff":
       return [event.content];
+    case "context-handoff-attached":
+      return event.reason === "fork-native-session" ? [] : [event.content];
     case "operation-result":
       return resultEvidenceReferences(event.result);
     default:

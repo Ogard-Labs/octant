@@ -50,6 +50,7 @@ import {
 } from "../linear/CreateFromLinearIssuePicker";
 import {
   draftThreadModePresentation,
+  pickerGroupCarriesAppManagedTools,
   resolveCodeNewThreadWorkspace,
   type CreateHostViewScope,
   type DraftIntentCard,
@@ -989,6 +990,15 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
     draft: prompt,
     onDraftChange: setPrompt,
     scopeKey: "chat-draft",
+    providerCarriesTools: pickerGroupCarriesAppManagedTools(
+      props.providerGroups,
+      props.selectedProviderInstanceId === undefined || props.selectedModelId === undefined
+        ? undefined
+        : {
+            providerInstanceId: props.selectedProviderInstanceId,
+            modelId: props.selectedModelId,
+          },
+    ),
   });
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   // A Chat draft is a first-message composer like Work's and Code's, so it

@@ -1455,6 +1455,42 @@ describe("mapClaudeMessage", () => {
     });
   });
 
+  it.each([
+    ["the size the runtime says survived", 18_000, 18_000],
+    ["no fill when the runtime does not say", undefined, undefined],
+  ] as const)(
+    "reports a compacted window's fill as %s until the next request measures it",
+    (_, postTokens, contextTokens) => {
+      const ctx = context();
+      mapped(ctx, {
+        kind: "assistant",
+        sessionId: claudeSessionId,
+        messageId: "sdk-message-1",
+        content: [{ kind: "text", text: "Working." }],
+        usage: { ...usage, inputTokens: 160_000 },
+      });
+      mapped(ctx, {
+        kind: "compaction",
+        sessionId: claudeSessionId,
+        ...(postTokens === undefined ? {} : { postTokens }),
+      });
+      const [settled] = eventValues(
+        mapped(ctx, {
+          kind: "result",
+          sessionId: claudeSessionId,
+          outcome: "success",
+          subtype: "success",
+          stopReason: "end_turn",
+          usage,
+          permissionDenials: [],
+        }),
+      );
+      expect(settled).toMatchObject({ kind: "usage", promptRetention: "compacted" });
+      if (contextTokens === undefined) expect(settled).not.toHaveProperty("contextTokens");
+      else expect(settled).toMatchObject({ contextTokens });
+    },
+  );
+
   it("carries the runtime's account of the window on the usage that settles the turn", () => {
     const ctx = context();
     const contextBreakdown = {
