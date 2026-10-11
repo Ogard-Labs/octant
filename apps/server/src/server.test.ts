@@ -475,6 +475,7 @@ describe("startOctantServer", () => {
             port: 0,
             instanceId: "managed-instance",
             desktopBridgeSecret: desktopSecret,
+            allowedRendererHttpOrigin: "http://127.0.0.1:5181",
             serve: (options) => {
               routeHandler = options.fetch;
               maxRequestBodySize = options.maxRequestBodySize;
@@ -515,6 +516,25 @@ describe("startOctantServer", () => {
           expect(hosts.status).toBe(200);
           expect(hosts.headers.get("access-control-allow-origin")).toBe(rendererOrigin);
           expect(hosts.headers.get("vary")).toBe("Origin");
+
+          for (const path of ["/api/hosts", "/api/shell/local-session"]) {
+            const foreign = yield* Effect.promise(() =>
+              Promise.resolve(
+                routeHandler?.(
+                  new Request(new URL(path, server.url), {
+                    method: "POST",
+                    headers: {
+                      origin: "http://127.0.0.1:5182",
+                      "content-type": "application/json",
+                    },
+                    body: "{}",
+                  }),
+                ),
+              ).then(assertResponse),
+            );
+            expect(foreign.status).toBe(403);
+            expect(foreign.headers.get("access-control-allow-origin")).toBeNull();
+          }
 
           const authority = yield* Effect.promise(() =>
             Promise.resolve(
@@ -717,6 +737,7 @@ describe("startOctantServer", () => {
             hostname: "127.0.0.1",
             port: 0,
             desktopBridgeSecret: desktopSecret,
+            allowedRendererHttpOrigin: rendererOrigin,
             serve: (options) => {
               routeHandler = options.fetch;
               return {

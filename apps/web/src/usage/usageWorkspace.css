@@ -309,11 +309,6 @@
   line-height: 1;
 }
 
-.usage-heatmap__cell:focus-visible {
-  outline: 2px solid var(--oct-accent-fg);
-  outline-offset: 1px;
-}
-
 .usage-heatmap__cell[data-state="no-activity"],
 .usage-heatmap__glyph[data-state="no-activity"] {
   color: var(--oct-muted);

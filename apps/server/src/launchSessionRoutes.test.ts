@@ -408,16 +408,50 @@ describe("createLaunchSessionRouteHandler — local client bootstrap", () => {
     expect(authorityStore.size()).toBe(1);
   });
 
-  it("admits another loopback renderer as the same local-user trust class", async () => {
-    const { handler } = makeHandler();
+  it("admits the canonical host under any loopback name on the listener port", async () => {
+    const { handler } = makeHandler({ allowedRendererHttpOrigin: null });
 
     const response = await handler(
-      post("/api/shell/local-session", {}, { origin: "http://127.0.0.1:9999" }),
+      post("/api/shell/local-session", {}, { origin: "http://localhost:13773" }),
     );
 
     expect(response?.status).toBe(200);
-    expect(response?.headers.get("access-control-allow-origin")).toBe("http://127.0.0.1:9999");
+    expect(response?.headers.get("access-control-allow-origin")).toBe("http://localhost:13773");
   });
+
+  it.each([
+    ["no renderer is configured", undefined],
+    ["the packaged renderer is running", null],
+    ["a different Vite renderer is configured", "http://localhost:5173"],
+  ] as const)(
+    "refuses a page on another loopback port when %s, minting no authority",
+    async (_, allowedRendererHttpOrigin) => {
+      const { handler, authorityStore } = makeHandler(
+        allowedRendererHttpOrigin === undefined ? {} : { allowedRendererHttpOrigin },
+      );
+
+      for (const origin of [
+        "http://127.0.0.1:9999",
+        "http://localhost:3000",
+        "http://[::1]:5173",
+      ]) {
+        const preflight = await handler(
+          new Request("http://127.0.0.1:13773/api/shell/local-session", {
+            method: "OPTIONS",
+            headers: { origin, "access-control-request-method": "POST" },
+          }),
+        );
+        const response = await handler(post("/api/shell/local-session", {}, { origin }));
+
+        expect(preflight?.status).toBe(400);
+        expect(preflight?.headers.get("access-control-allow-origin")).toBeNull();
+        expect(response?.status).toBe(400);
+        expect(response?.headers.get("access-control-allow-origin")).toBeNull();
+        expect(await response?.json()).not.toHaveProperty("capability");
+      }
+      expect(authorityStore.size()).toBe(0);
+    },
+  );
 
   it("rejects a non-loopback request host and a disallowed renderer origin", async () => {
     const { handler } = makeHandler();

@@ -97,8 +97,8 @@ Start from the [current design index](docs/design/README.md). Architecture owns
 system boundaries, Workspace owns navigation and interaction, and DESIGN.md
 owns presentation. Update the owning specification in place alongside an
 approved implementation change, and reconcile any conflicting summaries.
-Historical ADRs explain rationale; ordinary changes do not require a new ADR or
-supersession ceremony. A clear maintainer request to change the design authorizes
+Historical ADRs explain earlier rationale; the archive is closed, so no change
+adds or supersedes one. A clear maintainer request to change the design authorizes
 the corresponding specification update. Ask about unresolved consequential scope,
 not merely because an old document says something different.
 

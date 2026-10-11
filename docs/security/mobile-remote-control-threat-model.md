@@ -25,8 +25,10 @@
 
 1. The host remains authoritative for mode, Project, thread, and approval policy.
 2. The phone is a remote principal; revoke removes only that device registration.
-3. High-risk mutations (merge, revoke; future approve/reject if ever remote) require
+3. High-risk mutations (revoke; future approve/reject if ever remote) require
    biometric or device-credential confirmation on the phone in addition to host checks.
+   Pull-request merge is not a remote mutation: the host refuses it from every paired
+   device.
 4. Lock-screen and recents/screenshot surfaces must never show secrets, absolute
    paths, or full prompts — hosts build redacted payloads via domain policy.
 5. Stale or unhealthy hosts present honest read-only state; the phone must not
@@ -37,7 +39,7 @@
 
 | ID  | Threat                                           | Mitigation                                                                                                                                |
 | --- | ------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| T1  | Lost/stolen phone with unlocked vault access     | SecureStore-backed keys; biometric gate for merge/revoke; host revoke-self removes device; other clients stay up                          |
+| T1  | Lost/stolen phone with unlocked vault access     | SecureStore-backed keys; biometric gate for revoke; host refuses remote merge; host revoke-self removes device; other clients stay up     |
 | T2  | Lost phone with lock-screen push previews        | Redacted push payloads only (`buildRedactedPushNotification`); no secrets/paths/prompts                                                   |
 | T3  | Jailbroken/rooted device exfiltrates SecureStore | Fail-soft integrity heuristic + soft warn UI; do not brick pairing; host revoke remains available                                         |
 | T4  | Screenshots / app switcher leak thread detail    | Native capture blocking unavailable in the current client; scrub UI strings for secretish/path content and disclose the limit in Settings |
