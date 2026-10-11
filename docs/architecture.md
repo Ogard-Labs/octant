@@ -1068,7 +1068,11 @@ the worktree and creates nothing. The fork starts approval-gated with
 current-session persistence and inherits no profile, pending outcome proposal,
 running turn, or session grant. Every Code thread creation checks a
 `forkedFrom` origin on the server: it must name another thread of the same
-Project.
+Project, and the fork's text handoff (below, "Fork handoff (Code)") must be
+selectable from that thread through the named turn right now. A fork or
+Restore from here whose handoff cannot be built is refused with the reason
+before any worktree is prepared, because the text handoff is the one
+conversation transfer every fork can fall back to.
 
 A child AgentRun starts only when the thread's agent delegates through the
 Octant Harness `delegate` tool or a provider harness's `octant_agents` tool.
@@ -2866,6 +2870,42 @@ whose handoff was journaled, which happens only once the new session is
 ready), the composer says the next message starts a new session with a
 handoff.
 
+**Fork handoff (Code).** A fork's first session (no session recorded on the
+fork yet) carries the source's conversation through the fork point, never
+past it. When the fork's provider instance can take up the source's own
+session there (today only the Octant Harness, `seedCodeForkHarnessSession`,
+below), the fork resumes that copy and is sent no text. Otherwise, including
+every fork onto a provider instance other than the one that wrote the fork
+point, it reads the source through the same selector (purpose `fork`,
+bounded `throughOperationId`): the source's accepted prompts and completed
+replies up to and including the named turn, with the same bounds,
+attribution, taint and omission counts. The named turn must be found or the
+read refuses (`source-point-unavailable`); a whole-thread read refuses when
+the thread moved during the read, but a read through a fork point covers only
+settled turns, so the source running a later turn does not refuse it. The
+host re-reads the source's record, authorizes the sending window against the
+source's Project, and requires the source to be in the fork's Project before
+reading, then checks that what came back is that thread's.
+
+Either way the turn journals `context-handoff-attached` before the prompt is
+sent, with the fork origin and the fork's provider and model: reason `fork`
+with the counts, taint and a content reference to the exact blocks sent, and
+fixed `false` native-session and hidden-reasoning values; or reason
+`fork-native-session` with `nativeSessionTransferred: true` and no content.
+A recovered start reads that record back like a provider switch's: a text
+record is sent again without reading the source, and a native record whose
+copy cannot be taken up again refuses rather than sending text it did not
+disclose. The handoff is given once: a later turn has its own session. A first
+turn that can neither resume nor build the text handoff refuses with a named
+reason (the source unreadable to this window, in another Project, removed, its
+fork point gone, nothing readable left, history beyond the bounded scan, or a
+handoff that could not be saved). The conversation page carries the summary
+as the turn's `handoff`, and the transcript says what carried over and that
+the source's later replies (and, for text, its session, hidden reasoning and
+tool activity) did not. Other runtimes that can fork a session natively
+(Claude, Codex) still use the text handoff until a driver seam reports a
+fork-at-point capability.
+
 A switch that cannot hand over refuses before the new provider is acquired,
 naming why: no host selector, an unavailable or foreign thread or Project,
 no recorded or readable conversation (for example every body purged), a
@@ -3000,7 +3040,8 @@ native harness in `apps/server/src/harness`:
   own messages, tool calls, and results instead of a text summary. A turn
   begins with the one user message `send` journals for it, and the copy is cut
   at the turn after the named one; the copy refuses — and the fork reads the
-  text handoff instead — unless the transcript holds exactly the turns the
+  journaled text handoff instead (see "Fork handoff (Code)") — unless the
+  transcript holds exactly the turns the
   source ran on that session, the named turn finished, and its last step
   settled. Copied paths under the source's checkout are rewritten to the
   fork's worktree, and the secret values the fork's turn resolved are
