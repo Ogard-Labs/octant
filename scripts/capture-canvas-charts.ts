@@ -174,7 +174,14 @@ try {
     }
 
     for (const scenario of SCENARIOS) {
-      await page.emulateMedia({ forcedColors: scenario === "forced" ? "active" : "none" });
+      // The app's Contrast theme is the system's increased-contrast
+      // preference: `styles.css` swaps the text roles for their
+      // high-contrast values under `prefers-contrast: more`. The harness
+      // attribute alone changes no colour, so emulate the preference too.
+      await page.emulateMedia({
+        forcedColors: scenario === "forced" ? "active" : "none",
+        contrast: scenario === "contrast" ? "more" : "no-preference",
+      });
       await page.evaluate((value: Scenario) => {
         window.__applyChartTheme?.(value === "forced" ? "default-light" : value);
       }, scenario);
