@@ -206,6 +206,16 @@ export interface AgentRunSessionRuntimeOptions {
   readonly supportsResume?: (providerInstanceId: ProviderInstanceId) => boolean;
   /** Maps the admitted reasoning choice to the current model's declared option key. */
   readonly resolveModelOptionValues?: (run: AgentRun) => ProviderModelOptionValues | undefined;
+  /**
+   * Whether the Project the run recorded still allows its execution target.
+   * Read when the child starts or resumes, not only at admission, because a
+   * queued or saved child can outlive a policy change that drops its provider.
+   */
+  readonly isTargetAllowedByProjectPolicy?: (input: {
+    readonly run: AgentRun;
+    readonly providerInstanceId: ProviderInstanceId;
+    readonly modelId: ProviderModelId;
+  }) => boolean;
   /** Resolves the configured driver for a provider instance, or undefined. */
   readonly resolveDriver: (
     providerInstanceId: ProviderInstanceId,
@@ -363,6 +373,23 @@ export function createAgentRunSessionRuntime(
     return values;
   };
 
+  const refuseTargetOutsideProjectPolicy = (
+    run: AgentRun,
+    target: ReturnType<typeof effectiveAgentRunExecutionTarget>,
+  ) => {
+    if (
+      options.isTargetAllowedByProjectPolicy?.({
+        run,
+        providerInstanceId: target.providerInstanceId,
+        modelId: target.modelId,
+      }) === false
+    )
+      throw new AgentRunSessionError(
+        "provider-unavailable",
+        "The Project's provider policy does not allow this child's provider or model. Delegate a new child on an allowed provider.",
+      );
+  };
+
   const savedConversation = (run: AgentRun): AgentRunSessionRecord => {
     const previous = options.sessionStore?.read(run);
     if (previous === undefined || previous.resumeCursor === undefined) {
@@ -376,6 +403,7 @@ export function createAgentRunSessionRuntime(
       );
     }
     const target = effectiveAgentRunExecutionTarget(run.routingReceipt);
+    refuseTargetOutsideProjectPolicy(run, target);
     const driver = options.resolveDriver(target.providerInstanceId, run);
     clampAgentRunSessionAuthority(run);
     const projectRoot = resolveProjectRoot(run, options.scratchRoot);
@@ -428,6 +456,7 @@ export function createAgentRunSessionRuntime(
     // widened since admission, and a child must never gain from that.
     const authority = clampAgentRunSessionAuthority(run);
     const target = effectiveAgentRunExecutionTarget(run.routingReceipt);
+    refuseTargetOutsideProjectPolicy(run, target);
     const driver = options.resolveDriver(target.providerInstanceId, run);
     if (driver === undefined) {
       throw new AgentRunSessionError(

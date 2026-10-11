@@ -2287,6 +2287,14 @@ export function startOctantServer(
           approve: (input) => agentRunInteractions?.approve(input) ?? Promise.resolve(false),
           askUser: (input) => agentRunInteractions?.askUser(input) ?? Promise.resolve(undefined),
         },
+        // A Work or Code child answers to the Project its workspace recorded; a
+        // missing or retyped Project fails closed rather than lifting the policy.
+        isTargetAllowedByProjectPolicy: ({ run, providerInstanceId, modelId }) => {
+          if (run.workspaceReceipt.kind === "chat-virtual") return true;
+          const project = persistence.readProject(run.workspaceReceipt.projectId);
+          if (project?.type !== run.workspaceReceipt.mode) return false;
+          return isProjectPolicyTargetAllowed(project, providerInstanceId, modelId);
+        },
         // `configuredDriverOptions` is declared later in this scope; the closure
         // only runs when a child starts, long after boot, so the reference is safe.
         resolveDriver: (providerInstanceId, run) => {
@@ -2543,23 +2551,20 @@ export function startOctantServer(
       uuid: randomUUID,
     };
     const agentRunEligibleTargets = (projectId: ProjectId | undefined) => {
-      // A Code Project's provider policy binds delegate targets too: the
-      // same list the tool advertises is the one explicit targets are
-      // revalidated against, so filtering here guards both.
+      // A Work or Code Project's provider policy binds delegate targets too:
+      // the same list the tool advertises is the one explicit targets and
+      // resumes are revalidated against, so filtering here guards all three.
+      // Chat Projects carry no provider policy.
       const project = projectId === undefined ? undefined : persistence.readProject(projectId);
       return persistence.readProviderInstances().flatMap((instance) => {
         if (!instance.enabled) return [];
         const observed = providerRuntimeRegistry.observedState(instance.id);
         if (observed?.readiness !== "ready") return [];
         const models =
-          project === undefined || project.type !== "code"
+          project === undefined || project.type === "chat"
             ? observed.models
             : observed.models.filter((model) =>
-                isCodeProviderModelAllowed({
-                  projectId: project.id,
-                  providerInstanceId: instance.id,
-                  modelId: model.id,
-                }),
+                isProjectPolicyTargetAllowed(project, instance.id, model.id),
               );
         if (models.length === 0) return [];
         return [
@@ -3597,18 +3602,31 @@ export function startOctantServer(
     });
     const canAccessCodeProject = (scopeId: WindowId, projectId: ProjectId) =>
       codeProjectAccess.canAccessProject(scopeId, projectId);
+    // The catalog, not the runtime observation, carries a model's data tags,
+    // so an `eu-zdr` policy is judged against it.
+    const isProjectPolicyTargetAllowed = (
+      project: Exclude<
+        ReturnType<typeof persistence.readProject>,
+        undefined | { readonly type: "chat" }
+      >,
+      providerInstanceId: ProviderInstance["id"],
+      modelId: ProviderModel["id"],
+    ): boolean => {
+      const provider = persistence.readProviderInstance(providerInstanceId);
+      if (provider === undefined) return false;
+      const model = persistence
+        .readProviderCatalog?.(providerInstanceId)
+        ?.models.find((candidate) => String(candidate.id) === String(modelId));
+      return isProviderAllowedByProjectPolicy(project, provider, model);
+    };
     const isCodeProviderModelAllowed = (input: {
       readonly projectId: ProjectId;
       readonly providerInstanceId: ProviderInstance["id"];
       readonly modelId: ProviderModel["id"];
     }): boolean => {
       const project = persistence.readProject(input.projectId);
-      const provider = persistence.readProviderInstance(input.providerInstanceId);
-      if (project?.type !== "code" || provider === undefined) return false;
-      const model = persistence
-        .readProviderCatalog?.(input.providerInstanceId)
-        ?.models.find((candidate) => String(candidate.id) === String(input.modelId));
-      return isProviderAllowedByProjectPolicy(project, provider, model);
+      if (project?.type !== "code") return false;
+      return isProjectPolicyTargetAllowed(project, input.providerInstanceId, input.modelId);
     };
     const codeService =
       options.codeService ??
