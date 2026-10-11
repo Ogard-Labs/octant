@@ -346,7 +346,12 @@ export function createNativeHarnessTools(
       arguments: args,
     });
     if (decision.kind === "deny") {
-      return refused(decision.reason, `The ${name} tool was refused by policy.`);
+      return refused(
+        decision.reason,
+        decision.reason.startsWith("search-query-refused-under-taint")
+          ? "This thread has taken in outside content, so a search may not carry data. Search with a short question in plain words, without URLs, addresses, keys, or encoded text."
+          : `The ${name} tool was refused by policy.`,
+      );
     }
     if (decision.kind === "prompt") {
       if (options.ports.approvals === undefined) {

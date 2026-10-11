@@ -7,7 +7,7 @@ import type {
   CanvasCommentThread,
   CanvasCommentsOutcome,
 } from "@octant/contracts/canvas-board";
-import { decodeCanvasDefinition } from "@octant/contracts/canvas";
+import { CANVAS_SCHEMA_VERSION, decodeCanvasDefinition } from "@octant/contracts/canvas";
 import { settingsScreenExample, stateStoreDecisionExample } from "@octant/domain";
 import { CanvasCommentsPanel } from "./CanvasCommentsPanel";
 import { canvasFixture } from "./test-fixtures";
@@ -164,6 +164,126 @@ describe("CanvasCommentsPanel", () => {
     );
     const threads = await screen.findByRole("list", { name: "Comment threads" });
     expect(within(threads).getByText("Callout 2 · Save")).toBeInTheDocument();
+  });
+
+  it("names a row comment by its row, keeps one whose row is gone as outdated, and adds to the focused row", async () => {
+    const user = userEvent.setup();
+    const definition = decodeCanvasDefinition({
+      ...canvasFixture,
+      blocks: [
+        {
+          blockId: "vendors",
+          schemaVersion: CANVAS_SCHEMA_VERSION,
+          kind: "table",
+          columns: [
+            { id: "vendor", label: "Vendor", type: "text" },
+            { id: "price", label: "Price", type: "number" },
+          ],
+          rows: [
+            { id: "acme", cells: ["Acme", 12] },
+            { id: "globex", cells: ["Globex", 9] },
+            ["Initech", 30],
+          ],
+        },
+      ],
+    });
+    const onRow = (rowId: string, id: string, body: string): CanvasCommentThread => ({
+      comment: {
+        ...existing.comment,
+        commentId: id as never,
+        anchor: { kind: "row", blockId: "vendors" as never, rowId: rowId as never },
+        body,
+      },
+      replies: [],
+    });
+    const load = vi.fn(async () =>
+      ready([
+        onRow("acme", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaab1", "Is this the list price?"),
+        onRow("globex", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaab2", "Globex is cheaper"),
+        onRow("hooli", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaab3", "Hooli dropped out"),
+      ]),
+    );
+    const send = vi.fn<(command: CanvasCommentCommand) => Promise<CanvasCommentCommandResult>>(
+      async () => ({ kind: "accepted", canvasId, sequence: 4 }),
+    );
+    const { rerender } = render(
+      <CanvasCommentsPanel
+        author={author}
+        canvasId={canvasId}
+        definition={definition}
+        load={load}
+        send={send}
+      />,
+    );
+    const threads = await screen.findByRole("list", { name: "Comment threads" });
+    expect(within(threads).getByText("Row · Acme")).toBeInTheDocument();
+    const gone = within(threads).getByText("Hooli dropped out").closest("li");
+    expect(gone).toHaveAttribute("data-outdated", "true");
+    expect(within(gone as HTMLElement).getByText("No longer on the canvas")).toBeInTheDocument();
+    // A row without an id is not offered as an anchor.
+    expect(screen.queryByRole("option", { name: "Row · Initech" })).toBeNull();
+
+    rerender(
+      <CanvasCommentsPanel
+        author={author}
+        canvasId={canvasId}
+        definition={definition}
+        focusedBlockId="vendors"
+        focusedRowId="globex"
+        load={load}
+        send={send}
+      />,
+    );
+    expect(screen.getByText("On Row · Globex")).toBeInTheDocument();
+    expect(screen.getByText("Globex is cheaper")).toBeInTheDocument();
+    expect(screen.queryByText("Is this the list price?")).toBeNull();
+    await user.type(screen.getByLabelText("New comment"), "Ask for a quote");
+    await user.click(screen.getByRole("button", { name: "Comment" }));
+    await waitFor(() => expect(send).toHaveBeenCalledTimes(1));
+    expect(send.mock.calls[0]?.[0]).toMatchObject({
+      kind: "canvas-comment-add",
+      anchor: { kind: "row", blockId: "vendors", rowId: "globex" },
+    });
+  });
+
+  it("withholds the composer when the focused row left the canvas instead of commenting elsewhere", async () => {
+    const definition = decodeCanvasDefinition({
+      ...canvasFixture,
+      blocks: [
+        {
+          blockId: "vendors",
+          schemaVersion: CANVAS_SCHEMA_VERSION,
+          kind: "table",
+          columns: [{ id: "vendor", label: "Vendor", type: "text" }],
+          rows: [{ id: "acme", cells: ["Acme"] }],
+        },
+      ],
+    });
+    const { rerender } = render(
+      <CanvasCommentsPanel
+        author={author}
+        canvasId={canvasId}
+        definition={definition}
+        focusedBlockId="vendors"
+        focusedRowId="hooli"
+        load={async () => ready()}
+        send={vi.fn()}
+      />,
+    );
+    await screen.findByText("No comments yet.");
+    expect(screen.getByText("On No longer on the canvas")).toBeInTheDocument();
+    expect(screen.queryByLabelText("New comment")).toBeNull();
+
+    rerender(
+      <CanvasCommentsPanel
+        author={author}
+        canvasId={canvasId}
+        definition={definition}
+        load={async () => ready()}
+        send={vi.fn()}
+      />,
+    );
+    expect(screen.getByLabelText("New comment")).toBeInTheDocument();
   });
 
   it("adds a comment on the chosen anchor against the sequence it saw, then reloads", async () => {

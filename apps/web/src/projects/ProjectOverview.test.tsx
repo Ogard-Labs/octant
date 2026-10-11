@@ -77,6 +77,49 @@ describe("ProjectOverview", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("offers a Work Project an off-by-default status file switch, but not the default folder", async () => {
+    const user = userEvent.setup();
+    const onWorkStatusFileChange = vi.fn(async () => true);
+    const workProject = {
+      id: "20000000-0000-4000-8000-000000000003",
+      name: "Acme offer",
+      lifecycle: "active",
+      pinned: false,
+      rank: "0/1",
+      version: 1,
+      createdAt: "2026-07-21T12:00:00.000Z",
+      updatedAt: "2026-07-21T12:00:00.000Z",
+      type: "work",
+      binding: { canonicalRoot: "/opaque/acme" },
+    } as unknown as ProjectSummary;
+    const { rerender } = render(
+      <ProjectOverview
+        onArchive={vi.fn()}
+        onRelink={vi.fn()}
+        onRename={vi.fn()}
+        onWorkStatusFileChange={onWorkStatusFileChange}
+        project={workProject}
+      />,
+    );
+
+    const toggle = screen.getByRole("switch", { name: "Keep a status file" });
+    expect(toggle).not.toBeChecked();
+    expect(toggle).toHaveAccessibleDescription(/When off, Octant writes nothing into the folder/);
+    await user.click(toggle);
+    expect(onWorkStatusFileChange).toHaveBeenCalledWith(workProject.id, true);
+
+    rerender(
+      <ProjectOverview
+        onArchive={vi.fn()}
+        onRelink={vi.fn()}
+        onRename={vi.fn()}
+        onWorkStatusFileChange={onWorkStatusFileChange}
+        project={{ ...workProject, origin: "default-folder" } as ProjectSummary}
+      />,
+    );
+    expect(screen.queryByRole("switch", { name: "Keep a status file" })).not.toBeInTheDocument();
+  });
+
   it("opens an archived Project and dismisses the collection pane", async () => {
     const user = userEvent.setup();
     const onDismiss = vi.fn();

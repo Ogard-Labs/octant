@@ -328,6 +328,19 @@ describe("DevicePane", () => {
     expect(screen.queryByText(/Allow input on/)).not.toBeInTheDocument();
   });
 
+  it("offers Resume while live view is off even though input is not allowed yet", () => {
+    const { onAction } = pane({
+      platform: "android",
+      view: { kind: "live", device: pixel, screen: { kind: "none" }, liveView: "stopped" },
+      devices: [pixel],
+      inputAllowed: false,
+      needsApproval: true,
+    });
+    expect(screen.getByRole("status")).toHaveTextContent("Live view is off.");
+    fireEvent.click(screen.getByRole("button", { name: "Resume" }));
+    expect(onAction).toHaveBeenCalledWith({ kind: "reconnect" });
+  });
+
   it("offers Reconnect when the live view stops, with the last frame dimmed", () => {
     const { onAction } = pane({
       view: {

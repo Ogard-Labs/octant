@@ -306,7 +306,7 @@ describe("createCanvasAgentTools", () => {
     );
   });
 
-  it("lets an agent create a pie, a donut, stacked and grouped bars, and a bar and line chart from the examples describe returns", async () => {
+  it("lets an agent create a pie, a donut, stacked and grouped bars, a bar and line chart, a funnel, a radar, and a sankey from the examples describe returns", async () => {
     const { create, set } = tools();
     const described = await set.execute({
       name: CANVAS_TOOL_NAME,
@@ -325,12 +325,23 @@ describe("createCanvasAgentTools", () => {
       "stacked-bar",
       "grouped-bar",
       "bar-line",
+      "funnel",
+      "radar",
+      "sankey",
     ]);
     expect(result.blockSchema?.properties?.chartType?.enum).toEqual(
-      expect.arrayContaining(["pie", "donut", "stacked-bar", "grouped-bar", "bar-line"]),
+      expect.arrayContaining([
+        "pie",
+        "donut",
+        "stacked-bar",
+        "grouped-bar",
+        "bar-line",
+        "funnel",
+        "radar",
+        "sankey",
+      ]),
     );
     expect(JSON.stringify(described.result)).not.toContain("heatmap");
-    expect(JSON.stringify(described.result)).not.toContain("sankey");
     const blocks = examples.map((example) => decodeCanvasBlock(example));
     expect(blocks.every((block) => block.kind === "chart")).toBe(true);
 

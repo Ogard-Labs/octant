@@ -137,6 +137,12 @@ export it.
   **Show in thread** unfolds it. This window remembers your choice.
 - Hover a line or bar chart to read the value under the pointer. **View chart
   data** lists every reading.
+- Charts also include a funnel (how many make it through each stage), a radar
+  (a few things compared on the same qualities), and a sankey (where a quantity
+  flows, drawn as bands between named steps). Hover or Tab to a stage, a point,
+  or a band to read it; a funnel's table also gives each stage's share of the
+  first and of the one before. In a radar or sankey legend, click a name to hide
+  that series or step.
 - A tall Canvas is cut off at a fixed height and fades out. Its button opens
   the whole Canvas in the sidebar, or in its own tab in Chat. Scrolling always
   moves the thread, never the Canvas.
@@ -297,13 +303,17 @@ block and select its comment marker to read or add comments on that block;
 blocks with open threads always show their marker and count. The panel filters
 open, resolved, or all threads. A comment is anchored to a
 block, to a board node, to a sequence participant or message, or to a state
-or its transition, or to a comparison matrix's option or criterion; replies,
+or its transition, to a comparison matrix's option or criterion, or to a table
+row the agent gave an id. Hover a table row, or move to it with Tab, to comment
+on that row; the comment stays on the row when you sort or filter the table
+and when the agent revises it. Replies,
 resolving, and deleting are journaled by the
 host, so they survive restart and reload. Every comment is authored as you,
 with the device it came through noted ("paired device" when it arrived from a
 paired phone or browser). A comment whose block has since left the canvas is
-kept and marked rather than dropped. Shared snapshots never include comments.
-A shared snapshot keeps every block, including charts, tables, treemaps,
+kept and marked rather than dropped, and so is one whose table row was removed. Shared snapshots never include comments.
+A shared snapshot keeps every block, including charts (funnels, radars, and
+sankeys too), tables, treemaps,
 heatmaps, bar lists, comparison matrices, and formulas, with their number formats. A design, or an action block
 that runs a command on this Mac, stops a share: Share then says the canvas
 cannot be shared safely.

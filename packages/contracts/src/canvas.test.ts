@@ -8,6 +8,13 @@ import {
   CANVAS_DESIGN_SCHEMA_VERSION,
   CANVAS_DIAGRAM_KINDS_SCHEMA_VERSION,
   CANVAS_EVENT_NAMES,
+  CANVAS_FLOW_CHARTS_SCHEMA_VERSION,
+  CANVAS_MAX_CHART_CATEGORY_LABEL_LENGTH,
+  CANVAS_MAX_FUNNEL_STAGES,
+  CANVAS_MAX_RADAR_AXES,
+  CANVAS_MAX_SANKEY_LINKS,
+  CANVAS_MAX_SANKEY_NODES,
+  CANVAS_MIN_RADAR_AXES,
   CANVAS_HEATMAP_SCHEMA_VERSION,
   CANVAS_MAX_BAR_LIST_ROWS,
   CANVAS_MAX_BLOCKS,
@@ -32,6 +39,7 @@ import {
   CANVAS_MAX_TABLE_ROWS,
   CANVAS_PRESENTATION_SCHEMA_VERSION,
   CANVAS_SCHEMA_VERSION,
+  CANVAS_TABLE_ROW_ID_SCHEMA_VERSION,
   CANVAS_TREEMAP_SCHEMA_VERSION,
   CANVAS_VERSION_APPENDED,
   CanvasCreated,
@@ -44,6 +52,8 @@ import {
   decodeCanvasSourceManifestEntry,
   decodeCanvasVersion,
   decodeCanvasVersionAppended,
+  canvasTableRowCells,
+  canvasTableRowId,
 } from "./canvas";
 
 const ids = {
@@ -206,21 +216,21 @@ describe("Canvas contracts", () => {
       expect(() =>
         decodeCanvasDefinition({
           ...definition,
-          schemaVersion: CANVAS_MOCKUP_CATALOG_SCHEMA_VERSION,
-          blocks: [{ ...block, schemaVersion: CANVAS_MOCKUP_CATALOG_SCHEMA_VERSION }],
+          schemaVersion: CANVAS_FLOW_CHARTS_SCHEMA_VERSION,
+          blocks: [{ ...block, schemaVersion: CANVAS_FLOW_CHARTS_SCHEMA_VERSION }],
         }),
       ).toThrow();
     }
-    // A version-12 phone design without a theme stays readable.
-    const phone = { ...article, schemaVersion: 12, size: "phone" } as const;
+    // A version-14 phone design without a theme stays readable.
+    const phone = { ...article, schemaVersion: 14, size: "phone" } as const;
     expect(
-      decodeCanvasDefinition({ ...definition, schemaVersion: 12, blocks: [phone] }),
+      decodeCanvasDefinition({ ...definition, schemaVersion: 14, blocks: [phone] }),
     ).toMatchObject({ blocks: [phone] });
     expect(() =>
       decodeCanvasDefinition({ ...definition, blocks: [{ ...article, theme: "brand" }] }),
     ).toThrow();
-    expect(CANVAS_DESIGN_DOCUMENT_SCHEMA_VERSION).toBe(13);
-    expect(CANVAS_SCHEMA_VERSION).toBe(13);
+    expect(CANVAS_DESIGN_DOCUMENT_SCHEMA_VERSION).toBe(15);
+    expect(CANVAS_SCHEMA_VERSION).toBe(15);
   });
 
   it("admits a thread presentation only under the version that declared it", () => {
@@ -1650,6 +1660,7 @@ describe("mockup catalog", () => {
       blocks: [screen],
     });
     expect(CANVAS_MOCKUP_CATALOG_SCHEMA_VERSION).toBe(12);
+    expect(CANVAS_MOCKUP_CATALOG_SCHEMA_VERSION).toBeLessThan(CANVAS_SCHEMA_VERSION);
   });
 
   it("admits the catalog only under the version that declared it, and keeps a version-3 screen readable", () => {
@@ -1783,5 +1794,191 @@ describe("mockup catalog", () => {
     expect(() =>
       decodeCanvasBlock({ ...screen, device: "custom", size: { width: 100_000, height: 400 } }),
     ).toThrow();
+  });
+});
+
+describe("table row ids", () => {
+  const table = {
+    blockId: "vendors",
+    schemaVersion: CANVAS_SCHEMA_VERSION,
+    kind: "table",
+    columns: [
+      { id: "vendor", label: "Vendor", type: "text" },
+      { id: "price", label: "Price", type: "number" },
+    ],
+    rows: [{ id: "acme", cells: ["Acme", 12] }, ["Globex", 9]],
+  } as const;
+
+  it("decodes a table that mixes rows with a stable id and rows of bare cells", () => {
+    const decoded = decodeCanvasDefinition({ ...definition, blocks: [table] });
+    const block = decoded.blocks[0];
+    if (block?.kind !== "table") throw new Error("expected a table");
+    expect(block.rows.map(canvasTableRowId)).toEqual(["acme", undefined]);
+    expect(block.rows.map(canvasTableRowCells)).toEqual([
+      ["Acme", 12],
+      ["Globex", 9],
+    ]);
+    expect(CANVAS_TABLE_ROW_ID_SCHEMA_VERSION).toBe(13);
+    expect(CANVAS_SCHEMA_VERSION).toBeGreaterThanOrEqual(13);
+  });
+
+  it("admits a row id only under the version that declared it, and keeps an older table readable", () => {
+    const older = { ...table, schemaVersion: 12 } as const;
+    expect(() =>
+      decodeCanvasDefinition({ ...definition, schemaVersion: 12, blocks: [older] }),
+    ).toThrow();
+    const bare = { ...older, rows: [["Acme", 12]] } as const;
+    expect(
+      decodeCanvasDefinition({ ...definition, schemaVersion: 12, blocks: [bare] }),
+    ).toMatchObject({ blocks: [bare] });
+  });
+
+  it("refuses a row id that is not a bounded token and a keyed row with extra fields", () => {
+    for (const row of [
+      { id: "has space", cells: ["Acme", 12] },
+      { id: "", cells: ["Acme", 12] },
+      { id: "acme", cells: ["Acme", 12], index: 0 },
+      { id: "acme" },
+    ]) {
+      expect(() => decodeCanvasBlock({ ...table, rows: [row] })).toThrow();
+    }
+  });
+});
+
+describe("funnel, radar, and sankey charts", () => {
+  const funnel = {
+    blockId: "signup-funnel",
+    schemaVersion: CANVAS_SCHEMA_VERSION,
+    kind: "chart",
+    chartType: "funnel",
+    series: [
+      {
+        seriesId: "visitors",
+        label: "Visitors",
+        points: [
+          { x: "Visited", y: 1200 },
+          { x: "Signed up", y: 480 },
+          { x: "Paid", y: 96 },
+        ],
+      },
+    ],
+  } as const;
+  const radar = {
+    blockId: "service-profile",
+    schemaVersion: CANVAS_SCHEMA_VERSION,
+    kind: "chart",
+    chartType: "radar",
+    series: ["api", "web"].map((seriesId, index) => ({
+      seriesId,
+      label: seriesId.toUpperCase(),
+      points: ["Speed", "Cost", "Uptime"].map((x, axis) => ({ x, y: axis + index + 1 })),
+    })),
+  } as const;
+  const sankey = {
+    blockId: "traffic",
+    schemaVersion: CANVAS_SCHEMA_VERSION,
+    kind: "chart",
+    chartType: "sankey",
+    series: [],
+    links: [
+      { source: "Search", target: "Landing", value: 60 },
+      { source: "Landing", target: "Signup", value: 25 },
+    ],
+  } as const;
+
+  it("decodes each flow chart at the version that introduced them", () => {
+    expect(CANVAS_FLOW_CHARTS_SCHEMA_VERSION).toBe(14);
+    expect(CANVAS_SCHEMA_VERSION).toBeGreaterThanOrEqual(14);
+    const decoded = decodeCanvasDefinition({ ...definition, blocks: [funnel, radar, sankey] });
+    expect(decoded.blocks).toEqual([funnel, radar, sankey]);
+  });
+
+  it("refuses a flow chart in a document that declares an earlier version", () => {
+    for (const block of [funnel, radar, sankey]) {
+      const older = { ...block, schemaVersion: 13 };
+      expect(() =>
+        decodeCanvasDefinition({ ...definition, schemaVersion: 13, blocks: [older] }),
+      ).toThrow();
+    }
+  });
+
+  it("refuses links on any chart but a sankey, and a sankey that plots series", () => {
+    expect(() => decodeCanvasBlock({ ...funnel, links: sankey.links })).toThrow();
+    expect(() => decodeCanvasBlock({ ...sankey, series: funnel.series })).toThrow();
+    expect(() => decodeCanvasBlock({ ...sankey, links: [] })).toThrow();
+    expect(() => decodeCanvasBlock({ ...sankey, links: undefined })).toThrow();
+  });
+
+  it("bounds a sankey's links, nodes, and node labels", () => {
+    const tooMany = Array.from({ length: CANVAS_MAX_SANKEY_LINKS + 1 }, (_value, index) => ({
+      source: `s${String(index % 8)}`,
+      target: `t${String(index)}`,
+      value: 1,
+    }));
+    expect(() => decodeCanvasBlock({ ...sankey, links: tooMany })).toThrow();
+    const wide = Array.from({ length: CANVAS_MAX_SANKEY_NODES }, (_value, index) => ({
+      source: "Hub",
+      target: `n${String(index)}`,
+      value: 1,
+    }));
+    expect(() => decodeCanvasBlock({ ...sankey, links: wide })).toThrow();
+    const longLabel = "x".repeat(CANVAS_MAX_CHART_CATEGORY_LABEL_LENGTH + 1);
+    expect(() =>
+      decodeCanvasBlock({
+        ...sankey,
+        links: [{ source: longLabel, target: "Landing", value: 1 }],
+      }),
+    ).toThrow();
+  });
+
+  it("asks a funnel for one series of labeled stages within the stage budget", () => {
+    expect(() => decodeCanvasBlock({ ...funnel, series: radar.series })).toThrow();
+    const unlabeled = [
+      {
+        ...funnel.series[0],
+        points: [
+          { x: 1, y: 5 },
+          { x: 2, y: 3 },
+        ],
+      },
+    ];
+    expect(() => decodeCanvasBlock({ ...funnel, series: unlabeled })).toThrow();
+    const repeated = [
+      {
+        ...funnel.series[0],
+        points: [
+          { x: "Visited", y: 5 },
+          { x: "Visited", y: 3 },
+        ],
+      },
+    ];
+    expect(() => decodeCanvasBlock({ ...funnel, series: repeated })).toThrow();
+    const long = [
+      {
+        ...funnel.series[0],
+        points: Array.from({ length: CANVAS_MAX_FUNNEL_STAGES + 1 }, (_value, index) => ({
+          x: `Stage ${String(index)}`,
+          y: 100 - index,
+        })),
+      },
+    ];
+    expect(() => decodeCanvasBlock({ ...funnel, series: long })).toThrow();
+  });
+
+  it("asks a radar for shared labeled axes within the axis bounds", () => {
+    const axes = (count: number) =>
+      Array.from({ length: count }, (_value, index) => ({ x: `Axis ${String(index)}`, y: 1 }));
+    const withAxes = (count: number) => ({
+      ...radar,
+      series: [{ seriesId: "only", label: "Only", points: axes(count) }],
+    });
+    expect(decodeCanvasBlock(withAxes(CANVAS_MIN_RADAR_AXES))).toBeDefined();
+    expect(decodeCanvasBlock(withAxes(CANVAS_MAX_RADAR_AXES))).toBeDefined();
+    expect(() => decodeCanvasBlock(withAxes(CANVAS_MIN_RADAR_AXES - 1))).toThrow();
+    expect(() => decodeCanvasBlock(withAxes(CANVAS_MAX_RADAR_AXES + 1))).toThrow();
+    const [first, second] = radar.series;
+    if (first === undefined || second === undefined) throw new Error("expected two series");
+    const misaligned = [first, { ...second, points: [...second.points].reverse() }];
+    expect(() => decodeCanvasBlock({ ...radar, series: misaligned })).toThrow();
   });
 });

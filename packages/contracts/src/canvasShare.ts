@@ -1,6 +1,7 @@
 import { Schema } from "effect";
 import {
   CANVAS_MAX_BAR_LIST_ROWS,
+  CANVAS_MAX_CHART_CATEGORY_LABEL_LENGTH,
   CANVAS_MAX_HEATMAP_CELLS,
   CANVAS_MAX_HEATMAP_COLUMNS,
   CANVAS_MAX_HEATMAP_DAYS,
@@ -16,6 +17,7 @@ import {
   CANVAS_MAX_MATH_RUNS,
   CANVAS_MAX_MATH_SOURCE_LENGTH,
   CANVAS_MAX_METRIC_SPARKLINE_POINTS,
+  CANVAS_MAX_SANKEY_LINKS,
   CANVAS_MAX_TREEMAP_LEAVES,
   CANVAS_MAX_TREEMAP_MEASURES,
   CanvasActor,
@@ -35,6 +37,7 @@ import {
   CanvasTreemapScale,
   CanvasVersionId,
   canvasChartSeriesIssue,
+  canvasChartUsesFlowTypes,
   canvasMockupUsesCatalog,
   decodeCanvasDefinition,
   type CanvasDefinition,
@@ -81,8 +84,27 @@ export const CANVAS_SHARE_MATH_SCHEMA_VERSION = 5;
 // Version 6 accompanies Canvas schema version 12: a shared mockup may use the
 // catalog (devices, fidelity, components, node fields, variants, callouts).
 export const CANVAS_SHARE_MOCKUP_CATALOG_SCHEMA_VERSION = 6;
-export const CANVAS_SHARE_SCHEMA_VERSION = 6 as const;
-export const CanvasShareSchemaVersion = Schema.Literal(1, 2, 3, 4, 5, CANVAS_SHARE_SCHEMA_VERSION);
+// Version 7 accompanies Canvas schema version 14: a share may carry a funnel,
+// a radar, or a sankey chart, and a sankey's links.
+export const CANVAS_SHARE_FLOW_CHARTS_SCHEMA_VERSION = 7;
+export const CANVAS_SHARE_SCHEMA_VERSION = 7 as const;
+// The newest Canvas block version a share at this version names. Canvas
+// version 13 added only the table row id, which a share drops, so share
+// version 6 named a block authored at 13 as 12. Version 14 adds chart types a
+// share carries, so share version 7 names blocks up to 14. Canvas version 15
+// adds only the design document size and theme, and a share refuses a design,
+// so it names a block authored at 15 as 14. A later Canvas bump that adds
+// something a share carries bumps the share version again.
+export const CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION = 14 as const;
+export const CanvasShareSchemaVersion = Schema.Literal(
+  1,
+  2,
+  3,
+  4,
+  5,
+  6,
+  CANVAS_SHARE_SCHEMA_VERSION,
+);
 export type CanvasShareSchemaVersion = typeof CanvasShareSchemaVersion.Type;
 
 export const CanvasExportId = brandedUuid("CanvasExportId");
@@ -397,6 +419,9 @@ export const CanvasStaticExportBlock = Schema.Union(
       "stacked-bar",
       "grouped-bar",
       "bar-line",
+      "funnel",
+      "radar",
+      "sankey",
     ),
     series: Schema.Array(
       Schema.Struct({
@@ -411,6 +436,15 @@ export const CanvasStaticExportBlock = Schema.Union(
         mark: Schema.optional(Schema.Literal("bar", "line")),
       }).annotations(strict),
     ).pipe(Schema.maxItems(64)),
+    links: Schema.optional(
+      Schema.Array(
+        Schema.Struct({
+          source: ExportLabel.pipe(Schema.maxLength(CANVAS_MAX_CHART_CATEGORY_LABEL_LENGTH)),
+          target: ExportLabel.pipe(Schema.maxLength(CANVAS_MAX_CHART_CATEGORY_LABEL_LENGTH)),
+          value: Schema.Number,
+        }).annotations(strict),
+      ).pipe(Schema.maxItems(CANVAS_MAX_SANKEY_LINKS)),
+    ),
     format: Schema.optional(CanvasNumberFormat),
   })
     .annotations(strict)
@@ -930,6 +964,12 @@ export const CanvasStaticExportDocument = Schema.Struct({
         document.schemaVersion >= CANVAS_SHARE_MOCKUP_CATALOG_SCHEMA_VERSION ||
         !document.blocks.some(canvasMockupUsesCatalog),
       { message: () => "A mockup that uses the catalog requires Canvas share version 6." },
+    ),
+    Schema.filter(
+      (document) =>
+        document.schemaVersion >= CANVAS_SHARE_FLOW_CHARTS_SCHEMA_VERSION ||
+        !document.blocks.some(canvasChartUsesFlowTypes),
+      { message: () => "Funnel, radar, and sankey charts require Canvas share version 7." },
     ),
   );
 export type CanvasStaticExportDocument = typeof CanvasStaticExportDocument.Type;

@@ -201,6 +201,29 @@ describe("RemoteAccessSettingsSection", () => {
     expect(screen.getByLabelText("Private key (PEM)")).toHaveValue("");
   });
 
+  it.each([
+    ["192.168.1.20", "https://192.168.1.20:13774"],
+    ["fd7a:115c:a1e0::7033:4105", "https://[fd7a:115c:a1e0::7033:4105]:13774"],
+    ["mac.tailnet.ts.net", "https://mac.tailnet.ts.net:13774"],
+  ])("builds the listener origin for %s as a valid URL authority", async (hostname, origin) => {
+    const user = userEvent.setup();
+    const host = bridge(off);
+    render(<RemoteAccessSettingsSection bridge={host} />);
+
+    expect(await screen.findByText("Off")).toBeInTheDocument();
+    await user.type(screen.getByLabelText("Hostname"), hostname);
+    await user.type(screen.getByLabelText("Certificate (PEM)"), "certificate");
+    await user.type(screen.getByLabelText("Private key (PEM)"), "private-key");
+    await user.click(screen.getByRole("button", { name: "Enable listener…" }));
+    await user.click(screen.getByRole("button", { name: "Confirm enable" }));
+
+    await waitFor(() =>
+      expect(host.enablePrivateListener).toHaveBeenCalledWith(
+        expect.objectContaining({ hostname, origin }),
+      ),
+    );
+  });
+
   it("confirms a listener move with the same host confirmation payload", async () => {
     const user = userEvent.setup();
     const host = bridge(listening);

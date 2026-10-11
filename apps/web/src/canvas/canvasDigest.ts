@@ -53,13 +53,17 @@ export function canvasDigest(definition: CanvasDefinition): CanvasDigest {
   );
   if (chart !== undefined) {
     const series = chart.series;
+    // A sankey plots flows rather than series, so it counts those.
+    const flows = chart.links?.length ?? 0;
     return {
       kind: "chart",
       label: "Chart",
       facts:
-        series.length === 1
-          ? [series[0]?.label ?? ""].filter((fact) => fact !== "")
-          : [`${String(series.length)} series`],
+        chart.chartType === "sankey"
+          ? [`${String(flows)} ${flows === 1 ? "flow" : "flows"}`]
+          : series.length === 1
+            ? [series[0]?.label ?? ""].filter((fact) => fact !== "")
+            : [`${String(series.length)} series`],
     };
   }
   const metrics = blocks.filter((block) => block.kind === "metric").length;
