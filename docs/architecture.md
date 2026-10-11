@@ -330,7 +330,7 @@ version and does not report it corrupt.
 A treemap block is gated the same way at Canvas schema version 5, a heatmap
 block at version 6, a comparison matrix at version 10, a math block at
 version 11, the mockup catalog at version 12, a table row's `id` at
-version 13, the funnel, radar, and sankey chart types at version 14, and a
+version 13, the funnel, radar, and sankey chart types at version 14, a
 design's `document` size or `theme` at version 15, a design's image `assets`
 at version 16, and a design's `runsScript` at version 17, so a
 document that declares an earlier version and carries one is

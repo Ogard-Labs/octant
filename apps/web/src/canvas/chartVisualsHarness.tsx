@@ -352,7 +352,7 @@ const articleBlock = decodeCanvasBlock({
  */
 const assetMockupBlock = decodeCanvasBlock({
   ...base,
-  schemaVersion: 14,
+  schemaVersion: 16,
   blockId: "asset-mockup",
   kind: "design",
   title: "Release notes app",

@@ -68,7 +68,7 @@ describe("createCanvasPreviewService", () => {
   it("resolves a design's images before drawing it and warns about each it could not draw", async () => {
     const design = decodeCanvasBlock({
       blockId: "phone",
-      schemaVersion: 14,
+      schemaVersion: 16,
       kind: "design",
       title: "Onboarding",
       size: "phone",
