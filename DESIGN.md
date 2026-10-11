@@ -1525,7 +1525,8 @@ Project. The Model step writes to what a new task in that mode already starts
 from: Work's default model in Work settings, and the composer's remembered
 model for Code. The readiness view reports provider, Project, and model
 separately; a missing fact opens its exact setup surface, and Start a task
-appears only when all three hold. Answers still write through to the settings
+appears only when all three hold. Its heading reads Ready to start only then and
+otherwise names what is missing (Needs a provider and a model). Answers still write through to the settings
 that own them. First run records its outcome only after every answer has landed. When
 the host refused an answer, the first press of Skip setup or the primary action
 says so in a warning notice and records nothing; the next press goes on without
