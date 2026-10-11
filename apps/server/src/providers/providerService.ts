@@ -686,8 +686,7 @@ export class ProviderService implements ProviderServiceApi {
                 await snapshotClaudeHostEnvironment(),
               );
               const claimedDirectory =
-                assignedDirectory ??
-                implicitClaudeAccountDirectory(homedir(), hostConfigDirectory);
+                assignedDirectory ?? implicitClaudeAccountDirectory(homedir(), hostConfigDirectory);
               this.#refuseTakenClaudeAccountDirectory(
                 this.#persistence.readProviderInstances(),
                 claimedDirectory,
@@ -2114,11 +2113,7 @@ function claudeAccountDirectoryTaken(
   return instances.some((instance) => {
     if (instance.driverKind !== "claude") return false;
     if (exceptId !== undefined && String(instance.id) === String(exceptId)) return false;
-    const existing = effectiveClaudeAccountDirectory(
-      instance,
-      homeDirectory,
-      hostConfigDirectory,
-    );
+    const existing = effectiveClaudeAccountDirectory(instance, homeDirectory, hostConfigDirectory);
     return existing !== undefined && claudeAccountDirectoryKey(existing) === key;
   });
 }
