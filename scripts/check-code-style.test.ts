@@ -15,6 +15,9 @@ describe("code-style check", () => {
     expect(isShippedSource("packages/domain/src/policy.ts")).toBe(true);
     expect(isShippedSource("apps/mobile/design-system/theme.tsx")).toBe(true);
     expect(isShippedSource("apps/server/src/feature.test.ts")).toBe(false);
+    expect(isShippedSource("apps/server/src/feature.test.mts")).toBe(false);
+    expect(isShippedSource("packages/cli/src/launcher.spec.cts")).toBe(false);
+    expect(isShippedSource("packages/cli/src/types.d.mts")).toBe(false);
     expect(isShippedSource("apps/web/src/App.test-fixtures.ts")).toBe(false);
     expect(isShippedSource("apps/server/src/providers/fixtures/fakeClaudeCli.ts")).toBe(false);
     expect(isShippedSource("apps/server/src/preview/previewTestFixtures.ts")).toBe(false);

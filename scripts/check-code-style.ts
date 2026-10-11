@@ -55,15 +55,15 @@ const SOURCE_EXTENSION = /\.(?:ts|tsx|mts|cts)$/;
 export function isShippedSource(path: string): boolean {
   if (!/^(?:apps|packages)\//.test(path) || !SOURCE_EXTENSION.test(path)) return false;
   if (/(?:^|\/)node_modules\/|(?:^|\/)dist\//.test(path)) return false;
-  if (path.endsWith(".d.ts")) return false;
-  if (/\.(?:test|spec|smoke)\.(?:ts|tsx)$/.test(path)) return false;
-  if (/\.test-[\w-]+\.(?:ts|tsx)$/.test(path)) return false;
-  if (/\.integration-fixture\.(?:ts|tsx)$/.test(path)) return false;
+  if (/\.d\.[mc]?ts$/.test(path)) return false;
+  if (/\.(?:test|spec|smoke)\.(?:ts|tsx|mts|cts)$/.test(path)) return false;
+  if (/\.test-[\w-]+\.(?:ts|tsx|mts|cts)$/.test(path)) return false;
+  if (/\.integration-fixture\.(?:ts|tsx|mts|cts)$/.test(path)) return false;
   if (/(?:^|\/)(?:__fixtures__|fixtures)\//.test(path)) return false;
-  if (/[Ff]ixtures?\.(?:ts|tsx)$/.test(path)) return false;
-  if (/[Tt]est(?:Fixtures|Helpers|Model|Support)\.(?:ts|tsx)$/.test(path)) return false;
-  if (/(?:^|\/)fake[A-Z][^/]*\.(?:ts|tsx)$/.test(path)) return false;
-  if (/(?:^|\/)testSetup\.(?:ts|tsx)$/.test(path)) return false;
+  if (/[Ff]ixtures?\.(?:ts|tsx|mts|cts)$/.test(path)) return false;
+  if (/[Tt]est(?:Fixtures|Helpers|Model|Support)\.(?:ts|tsx|mts|cts)$/.test(path)) return false;
+  if (/(?:^|\/)fake[A-Z][^/]*\.(?:ts|tsx|mts|cts)$/.test(path)) return false;
+  if (/(?:^|\/)testSetup\.(?:ts|tsx|mts|cts)$/.test(path)) return false;
   return true;
 }
 
