@@ -1748,6 +1748,9 @@ function makeConnection(
               options.sdk.findSession({
                 sessionId: input.resumeCursor.value,
                 projectRoot,
+                ...(options.configDirectory === undefined
+                  ? {}
+                  : { configDirectory: options.configDirectory }),
               }),
               signal,
             );

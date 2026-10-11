@@ -640,6 +640,41 @@ describe("Claude Agent SDK port", () => {
     ).resolves.toBeUndefined();
   });
 
+  test("looks up an isolated account's sessions under that account directory", async () => {
+    const harness = makeHarness();
+    harness.listSessions.mockImplementation(async () => {
+      expect(process.env.CLAUDE_CONFIG_DIR).toBe("/Users/example/.claude-accounts/work");
+      expect(process.env.CLAUDE_SECURESTORAGE_CONFIG_DIR).toBe(
+        "/Users/example/.claude-accounts/work",
+      );
+      return [
+        {
+          sessionId: "session-1",
+          summary: "private prompt summary",
+          lastModified: 123,
+          cwd: "/repo",
+          createdAt: 100,
+        },
+      ];
+    });
+    await expect(
+      Effect.runPromise(
+        harness.port.findSession({
+          sessionId: "session-1",
+          projectRoot: "/repo",
+          configDirectory: "/Users/example/.claude-accounts/work",
+        }),
+      ),
+    ).resolves.toEqual({
+      sessionId: "session-1",
+      projectRoot: "/repo",
+      lastModified: 123,
+      createdAt: 100,
+    });
+    expect(process.env.CLAUDE_CONFIG_DIR).toBeUndefined();
+    expect(process.env.CLAUDE_SECURESTORAGE_CONFIG_DIR).toBeUndefined();
+  });
+
   test("rejects a resumed runtime whose initialized session identity does not match", async () => {
     const harness = makeHarness([
       { ...safeRuntimeInitialization, session_id: "different-session" },

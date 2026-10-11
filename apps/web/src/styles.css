@@ -5052,8 +5052,8 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 }
 
 .claude-account-accent-picker__swatch {
-  width: 20px;
-  height: 20px;
+  width: 24px;
+  height: 24px;
   padding: 0;
   border: 1px solid var(--octant-border);
   border-radius: 50%;

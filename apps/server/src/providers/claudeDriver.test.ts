@@ -4271,6 +4271,31 @@ describe("Claude for helpers", () => {
     expect(f.opens[0]?.authEnvironment.CLAUDE_CONFIG_DIR).toBe(accountDirectory);
   });
 
+  it("resumes an isolated Claude account from that account's directory", async () => {
+    const accountDirectory = "/Users/example/.claude-accounts/work";
+    const f = harness("subscription", "current-session", { configDirectory: accountDirectory });
+    const acquired = await acquire(f.driver, "chat");
+    const started = await Effect.runPromise(
+      acquired.connection.start({ sessionId, modelId, executionPolicy: "plan" }),
+    );
+    await Effect.runPromise(acquired.connection.stop(sessionId));
+    await acquired.close();
+    const recreated = await acquire(f.makeDriver(), "chat");
+    await Effect.runPromise(
+      recreated.connection.resume({
+        sessionId,
+        resumeCursor: started.resumeCursor!,
+        executionPolicy: "plan",
+      }),
+    );
+    expect(f.sdk.findSession).toHaveBeenCalledWith({
+      sessionId: "sdk-session-1",
+      projectRoot,
+      configDirectory: accountDirectory,
+    });
+    await recreated.close();
+  });
+
   it("refuses a confined launch with the step that connects Claude for helpers", async () => {
     for (const [state, message] of [
       [{ kind: "not-connected" }, CLAUDE_HELPER_NOT_CONNECTED_MESSAGE],
