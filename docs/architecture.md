@@ -2056,7 +2056,7 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   `CLAUDE_CONFIG_DIR`, and one instance cannot claim a directory
   nested under another instance. An API-key instance with no stored
   directory uses a temporary launch directory and does not claim the
-  host default.
+  host default, including when that instance is later edited.
   A thread stays on the instance it started with; there is no
   automatic failover, rotation, or load-balancing between accounts. Discovery can find
   installed runtimes and auto-register them. On first run, a detected Claude

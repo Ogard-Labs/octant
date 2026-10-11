@@ -685,14 +685,6 @@ export class ProviderService implements ProviderServiceApi {
               const hostEnvironment = await snapshotClaudeHostEnvironment();
               const hostConfigDirectory = hostClaudeConfigDirectory(hostEnvironment);
               const hostSecureDirectory = hostClaudeSecureStorageDirectory(hostEnvironment);
-              const claimedDirectory =
-                assignedDirectory ?? implicitClaudeAccountDirectory(homedir(), hostConfigDirectory);
-              this.#refuseTakenClaudeAccountDirectory(
-                this.#persistence.readProviderInstances(),
-                claimedDirectory,
-                hostConfigDirectory,
-                hostSecureDirectory,
-              );
               instance = createClaudeProvider({
                 ...common,
                 configuration: {
@@ -702,6 +694,12 @@ export class ProviderService implements ProviderServiceApi {
                     : { configDirectory: assignedDirectory }),
                 },
               });
+              this.#refuseTakenClaudeAccountDirectories(
+                this.#persistence.readProviderInstances(),
+                instance,
+                hostConfigDirectory,
+                hostSecureDirectory,
+              );
               break;
             }
             case "create-devin-provider":
@@ -1026,11 +1024,9 @@ export class ProviderService implements ProviderServiceApi {
           const hostEnvironment = await snapshotClaudeHostEnvironment();
           const hostConfigDirectory = hostClaudeConfigDirectory(hostEnvironment);
           const hostSecureDirectory = hostClaudeSecureStorageDirectory(hostEnvironment);
-          const claimedDirectory =
-            nextDirectory ?? implicitClaudeAccountDirectory(homedir(), hostConfigDirectory);
-          this.#refuseTakenClaudeAccountDirectory(
+          this.#refuseTakenClaudeAccountDirectories(
             this.#persistence.readProviderInstances(),
-            claimedDirectory,
+            instance,
             hostConfigDirectory,
             hostSecureDirectory,
             current.id,
@@ -1050,9 +1046,9 @@ export class ProviderService implements ProviderServiceApi {
           await this.#runtime.invalidateRuntime(current.id);
           // Recheck after the awaits. Create/change on another instance can
           // claim the same directory while helpers are being cleared.
-          this.#refuseTakenClaudeAccountDirectory(
+          this.#refuseTakenClaudeAccountDirectories(
             this.#persistence.readProviderInstances(),
-            claimedDirectory,
+            instance,
             hostConfigDirectory,
             hostSecureDirectory,
             current.id,
@@ -1773,6 +1769,29 @@ export class ProviderService implements ProviderServiceApi {
       if (!("binaryPath" in instance.configuration)) return false;
       return resolveProviderExecutableKey(instance.configuration.binaryPath) === executableKey;
     });
+  }
+
+  #refuseTakenClaudeAccountDirectories(
+    instances: ReadonlyArray<ProviderInstance>,
+    instance: ProviderInstance,
+    hostConfigDirectory: string | undefined,
+    hostSecureDirectory: string | undefined,
+    exceptId?: ProviderInstanceId,
+  ): void {
+    for (const directory of effectiveClaudeAccountDirectories(
+      instance,
+      homedir(),
+      hostConfigDirectory,
+      hostSecureDirectory,
+    )) {
+      this.#refuseTakenClaudeAccountDirectory(
+        instances,
+        directory,
+        hostConfigDirectory,
+        hostSecureDirectory,
+        exceptId,
+      );
+    }
   }
 
   #refuseTakenClaudeAccountDirectory(

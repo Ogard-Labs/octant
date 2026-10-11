@@ -1573,6 +1573,54 @@ describe("ProviderService", () => {
     });
   });
 
+  it("keeps a temporary API-key instance editable after another account claims the host directory", async () => {
+    const fixture = serviceFixture();
+    await fixture.service.execute(windowId, {
+      kind: "create-claude-provider",
+      instanceId,
+      expectedVersion: 0,
+      displayName: "Claude API",
+      configuration: {
+        kind: "claude-agent-sdk",
+        binaryPath: "/opt/homebrew/bin/claude",
+        authentication: "api-key",
+      },
+    });
+    await fixture.service.execute(windowId, {
+      kind: "create-claude-provider",
+      instanceId: otherId,
+      expectedVersion: 0,
+      displayName: "Claude subscription",
+      configuration: {
+        kind: "claude-agent-sdk",
+        binaryPath: "/opt/homebrew/bin/claude",
+        authentication: "subscription",
+        configDirectory: `${homedir()}/.claude`,
+        accent: "teal",
+      },
+    });
+    await expect(
+      fixture.service.execute(windowId, {
+        kind: "change-claude-configuration",
+        instanceId,
+        expectedVersion: 1,
+        configuration: {
+          kind: "claude-agent-sdk",
+          binaryPath: "/usr/local/bin/claude",
+          authentication: "api-key",
+        },
+      }),
+    ).resolves.toMatchObject({
+      kind: "provider-updated",
+      instance: {
+        configuration: {
+          authentication: "api-key",
+          binaryPath: "/usr/local/bin/claude",
+        },
+      },
+    });
+  });
+
   it("refuses a Claude account directory that resolves to another account's directory", async () => {
     const fixture = serviceFixture();
     await fixture.service.execute(windowId, {
