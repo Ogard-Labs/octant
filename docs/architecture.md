@@ -3448,8 +3448,11 @@ On Apple Silicon macOS, Electron main owns the official CuaDriver SDK and its
 private embedded child. The authenticated loopback broker is available only
 to Octant's host process; its credentials never enter provider children.
 Settings exposes plugin enablement, macOS permission setup, the driver version,
-and update controls. The app bundles a pinned, publisher-verified driver and
-checks upstream daily by default. Verified updates stage privately, activate
+and update controls. The app bundles a pinned, publisher-verified driver. The
+driver runs under Octant's macOS permissions, so it checks upstream daily only
+when the person turns automatic updates on in Settings › Computer use; it is
+off by default, a saved choice is kept, and a manual Check for updates still
+works. Verified updates stage privately, activate
 only while idle, and retain the previous version if startup fails. The driver
 never uses a standalone CuaDriver installation. See
 [decisions/0113-computer-use-plugin-and-driver-updates.md](decisions/0113-computer-use-plugin-and-driver-updates.md).
