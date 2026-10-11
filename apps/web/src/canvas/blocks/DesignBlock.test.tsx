@@ -111,6 +111,40 @@ describe("design block", () => {
     expect(drawn).not.toContain("octant-asset:");
   });
 
+  it("replaces an asset reference only where an image is loaded, leaving prose and other attributes as written", () => {
+    const block = decodeCanvasBlock({
+      blockId: "phone",
+      schemaVersion: 17,
+      kind: "design",
+      title: "Mockup",
+      size: "phone",
+      styles: '.hero { background: image-set("octant-asset:shot" 1x); }',
+      assets: [{ assetId: "shot", source: { kind: "project-file", path: "a.png" } }],
+      frames: [
+        {
+          frameId: "home",
+          title: "Home",
+          html: [
+            "<p>Name it <code>octant-asset:shot</code>.</p>",
+            '<img src="octant-asset:shot" alt="octant-asset:shot" data-note="octant-asset:shot"',
+            ' srcset="data:image/png;base64,AA 1x, octant-asset:shot 2x">',
+            "<div style=\"background: url('octant-asset:shot')\"></div>",
+          ].join(""),
+        },
+      ],
+    });
+    render(<CanvasDocument definition={{ ...canvasFixture, blocks: [block] }} />);
+    const drawn = frames(document.body)[0]?.srcdoc ?? "";
+    const image = designAssetPlaceholder("shot", "not-loaded");
+    expect(drawn).toContain("<code>octant-asset:shot</code>");
+    expect(drawn).toContain(
+      `<img src="${image}" alt="octant-asset:shot" data-note="octant-asset:shot"`,
+    );
+    expect(drawn).toContain(`srcset="data:image/png;base64,AA 1x, ${image} 2x"`);
+    expect(drawn).toContain(`url('${image}')`);
+    expect(drawn).toContain(`image-set("${image}" 1x)`);
+  });
+
   it("plays the whole flow from the screen a person picks, so its links work", () => {
     render(
       <CanvasDocument definition={{ ...canvasFixture, blocks: [onboardingFlowExampleBlock] }} />,
