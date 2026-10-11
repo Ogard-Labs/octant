@@ -33,7 +33,9 @@ export interface MenuBarFleetReaderOptions {
  */
 export function createMenuBarFleetReader(options: MenuBarFleetReaderOptions) {
   let authority: (MenuBarFleetAuthority & { readonly instanceId: string }) | undefined;
-  let inFlight: Promise<FleetActivity | undefined> | undefined;
+  let inFlight:
+    | { readonly instanceId: string; readonly read: Promise<FleetActivity | undefined> }
+    | undefined;
 
   const drop = async (): Promise<void> => {
     const current = authority;
@@ -75,10 +77,17 @@ export function createMenuBarFleetReader(options: MenuBarFleetReaderOptions) {
 
   return {
     read(host: MenuBarFleetHost): Promise<FleetActivity | undefined> {
-      inFlight ??= readOnce(host).finally(() => {
-        inFlight = undefined;
-      });
-      return inFlight;
+      // Only a read for the same host instance is shared. A read for a
+      // replaced instance finishes first, so the two never share an authority.
+      if (inFlight?.instanceId === host.instanceId) return inFlight.read;
+      const previous = inFlight?.read.catch(() => undefined) ?? Promise.resolve(undefined);
+      const read: Promise<FleetActivity | undefined> = previous
+        .then(() => readOnce(host))
+        .finally(() => {
+          if (inFlight?.read === read) inFlight = undefined;
+        });
+      inFlight = { instanceId: host.instanceId, read };
+      return read;
     },
     revoke: drop,
   };

@@ -4,6 +4,7 @@ import {
   decodeWindowId,
   type PendingRequest,
   type ProductSurfaceSettings,
+  type WindowId,
 } from "@octant/contracts";
 import type { DeviceId, RemoteSessionId, StableHostId } from "@octant/contracts/remote-access";
 import { defaultShellSettings } from "@octant/domain";
@@ -107,6 +108,26 @@ describe("fleet activity route", () => {
     });
   });
 
+  it("lists a Code request a bound local window could answer, and none from a Project no window binds", async () => {
+    const boundWindow = decodeWindowId("00000000-0000-4000-8000-000000000802");
+    const { route, sources } = fixture({
+      pending: [],
+      boundCodeWindows: [boundWindow],
+      codePending: async (scope) => (String(scope) === String(boundWindow) ? [codeApproval] : []),
+    });
+    const body = await (await route(request()))?.json();
+    expect(body.threads).toEqual([
+      expect.objectContaining({
+        mode: "code",
+        threadId: codeThread,
+        state: "needs-you",
+        activitySource: "session",
+      }),
+    ]);
+    // Code reach is per bound window; the menu bar's own unbound window is never asked for it.
+    expect(sources.codePending).toHaveBeenCalledExactlyOnceWith(boundWindow);
+  });
+
   it("asks a disabled mode for nothing", async () => {
     const { route, sources } = fixture({
       settings: { ...defaultShellSettings(), chatEnabled: false, workEnabled: false },
@@ -186,6 +207,8 @@ function fixture(
     readonly code?:
       | ReadonlyArray<FleetRunningThread>
       | (() => Promise<ReadonlyArray<FleetRunningThread>>);
+    readonly boundCodeWindows?: ReadonlyArray<WindowId>;
+    readonly codePending?: (windowId: WindowId) => Promise<ReadonlyArray<PendingRequest>>;
   } = {},
 ) {
   const store = new WindowAuthorityStore();
@@ -200,6 +223,8 @@ function fixture(
     chat: vi.fn(() => options.chat ?? []),
     work: vi.fn(async () => []),
     code: vi.fn(typeof code === "function" ? code : async () => code ?? []),
+    boundCodeWindows: () => options.boundCodeWindows ?? [],
+    codePending: vi.fn(options.codePending ?? (async () => [])),
     projectName: (id) => (String(id) === String(projectId) ? "Reports" : undefined),
   } satisfies FleetActivitySources;
   const route = createFleetActivityRouteHandler({

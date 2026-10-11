@@ -21,10 +21,18 @@ export function useMenuBarThread(options: {
   const threadId = options.open?.threadId;
   const onSelect = useRef(options.onSelect);
   onSelect.current = options.onSelect;
+  const readyNow = useRef(ready);
+  readyNow.current = ready;
+  // A pick that lands while the window cannot open threads (its host
+  // connection dropped without a reload) waits here instead of being lost.
+  const waiting = useRef<MenuBarOpenThread | undefined>(undefined);
   // Declared first so the listener exists before the first report: the shell
   // treats that report as this window being ready for a row it was asked to open.
   useEffect(() => {
-    const unsubscribe = bridge?.subscribeMenuBarTask?.((target) => onSelect.current(target));
+    const unsubscribe = bridge?.subscribeMenuBarTask?.((target) => {
+      if (readyNow.current) onSelect.current(target);
+      else waiting.current = target;
+    });
     return () => {
       unsubscribe?.();
       void bridge?.setMenuBarOpenThread?.(null).catch(() => undefined);
@@ -32,6 +40,9 @@ export function useMenuBarThread(options: {
   }, [bridge]);
   useEffect(() => {
     if (!ready) return;
+    const pending = waiting.current;
+    waiting.current = undefined;
+    if (pending !== undefined) onSelect.current(pending);
     const thread = mode === undefined || threadId === undefined ? null : { mode, threadId };
     void bridge?.setMenuBarOpenThread?.(thread).catch(() => undefined);
   }, [bridge, ready, mode, threadId]);

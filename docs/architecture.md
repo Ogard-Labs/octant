@@ -57,8 +57,11 @@ probe (every 2 s while a window is visible, 10 s otherwise). Every row names its
 - **Needs you** is the pending-requests read
   ([pending requests across modes](#security-and-authority)): a Work request or
   any turn decision is `journal`; a Code approval or question, or a Chat
-  question, is `session`, the live provider session parked on it. A thread that
-  is both waiting and running is listed once, as needs you.
+  question, is `session`, the live provider session parked on it. Code reach is
+  per bound window and the menu bar's own window binds no Code Project, so its
+  Code rows are the requests and decisions each local window with a persisted
+  Code binding could answer; a Code Project no local window binds stays out. A
+  thread that is both waiting and running is listed once, as needs you.
 - **Working** is each mode's own navigation run state, the journaled fold the
   sidebar and board already use, so it is `journal`.
 - **Done since you looked** is the one state the host cannot know, because only
@@ -3349,7 +3352,9 @@ mechanisms are:
   first, at most 64 with a `truncated` flag, each naming its mode, title,
   Project name, and `activitySource` (`journal`, `session`, or the reserved
   `screen`, which can never say needs you). It composes the pending-requests
-  read and each mode's own navigation run state and adds no authority or state.
+  read, the Code requests and decisions each local window with a persisted Code
+  binding could answer, and each mode's own navigation run state, and adds no
+  authority or state.
   It is local-window only under the same rules as pending requests: outside
   every forwarded prefix, no remote action, and a paired device's principal is
   refused. The [desktop menu bar](#desktop-menu-bar) is its reader.

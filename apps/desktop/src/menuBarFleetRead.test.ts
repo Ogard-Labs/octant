@@ -65,4 +65,29 @@ describe("menu-bar fleet read", () => {
     expect(register).toHaveBeenCalledTimes(2);
     expect(await reader.read(host)).toBeUndefined();
   });
+
+  it("never hands one host instance's roster to a read for another", async () => {
+    let releaseFirst: (response: Response) => void = () => undefined;
+    const register = vi.fn(async () => ({ capability: "c", revoke: async () => undefined }));
+    const fetch = vi
+      .fn<(input: string, init: RequestInit) => Promise<Response>>()
+      .mockImplementationOnce(
+        () =>
+          new Promise<Response>((resolve) => {
+            releaseFirst = resolve;
+          }),
+      )
+      .mockImplementationOnce(async () => Response.json({ threads: [], truncated: false }));
+    const reader = createMenuBarFleetReader({ register, fetch });
+    const first = reader.read({ url: "http://127.0.0.1:4100", instanceId: "one" });
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
+    const second = reader.read({ url: "http://127.0.0.1:4200", instanceId: "two" });
+    releaseFirst(Response.json(roster));
+    expect(await first).toEqual(roster);
+    expect(await second).toEqual({ threads: [], truncated: false });
+    expect(fetch).toHaveBeenLastCalledWith("http://127.0.0.1:4200/api/fleet-activity", {
+      method: "GET",
+      headers: { "x-octant-window-capability": "c" },
+    });
+  });
 });

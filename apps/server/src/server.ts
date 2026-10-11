@@ -9667,6 +9667,15 @@ export function startOctantServer(
       service: new FleetActivityService({
         readSettings: () => persistence.readShellSettings()?.settings ?? defaultShellSettings(),
         pending: (windowId) => pendingRequestService.list(windowId),
+        boundCodeWindows: () =>
+          persistence
+            .readWindowWorkspaces()
+            .filter(({ workspace }) => workspace.contextByMode.code.projectId != null)
+            .map(({ workspace }) => workspace.windowId),
+        codePending: async (windowId) => [
+          ...((await codeOperationRuntime?.pendingRequests?.(windowId)) ?? []),
+          ...(await codeTurnDecisions.listForWindow(windowId)),
+        ],
         chat: () =>
           chatService
             .navigation()

@@ -39,6 +39,14 @@ export interface FleetActivitySources {
   readonly chat: () => ReadonlyArray<FleetRunningThread>;
   readonly work: (windowId: WindowId) => Promise<ReadonlyArray<FleetRunningThread>>;
   readonly code: (windowId: WindowId) => Promise<ReadonlyArray<FleetRunningThread>>;
+  /**
+   * Local windows whose persisted workspace binds a Code Project. Code reach is
+   * per bound window, and the menu bar's own window binds none, so its Code
+   * needs-you rows are what each of these windows could answer.
+   */
+  readonly boundCodeWindows: () => ReadonlyArray<WindowId>;
+  /** Code approvals, questions, and decisions this window could answer. */
+  readonly codePending: (windowId: WindowId) => Promise<ReadonlyArray<PendingRequest>>;
   readonly projectName: (projectId: ProjectId) => string | undefined;
 }
 
@@ -58,15 +66,18 @@ export class FleetActivityService {
 
   async list(windowId: WindowId): Promise<FleetActivity> {
     const modes = enabledModes(this.#sources.readSettings());
-    const [pending, work, code] = await Promise.all([
+    const [pending, boundCode, work, code] = await Promise.all([
       this.#sources.pending(windowId),
+      Promise.all(
+        this.#sources.boundCodeWindows().map((bound) => this.#sources.codePending(bound)),
+      ),
       modes.includes("work") ? this.#sources.work(windowId) : [],
       this.#sources.code(windowId),
     ]);
     const chat = modes.includes("chat") ? this.#sources.chat() : [];
 
     const rows = new Map<string, FleetRow>();
-    for (const request of pending.requests) {
+    for (const request of [...pending.requests, ...boundCode.flat()]) {
       const key = `${request.mode}:${String(request.threadId)}`;
       if (rows.has(key)) continue;
       rows.set(

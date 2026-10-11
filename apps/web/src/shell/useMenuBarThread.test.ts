@@ -41,3 +41,27 @@ it("listens before it reports the open thread, opens what the menu bar picks, an
   expect(setMenuBarOpenThread).toHaveBeenLastCalledWith(null);
   expect(unsubscribe).toHaveBeenCalled();
 });
+
+it("keeps a pick that arrives while the window cannot open threads, and opens it once it can", () => {
+  let select: ((target: MenuBarOpenThread) => void) | undefined;
+  const bridge = {
+    setMenuBarOpenThread: vi.fn(async () => {}),
+    subscribeMenuBarTask: (listener: (target: MenuBarOpenThread) => void) => {
+      select = listener;
+      return () => {};
+    },
+  } satisfies Partial<OctantHostBridge>;
+  const onSelect = vi.fn();
+  const initialProps: { readonly ready: boolean } = { ready: true };
+  const { rerender } = renderHook(
+    (props: typeof initialProps) =>
+      useMenuBarThread({ bridge, ready: props.ready, open: undefined, onSelect }),
+    { initialProps },
+  );
+  // The host connection dropped without a reload: the pick must wait, not vanish.
+  rerender({ ready: false });
+  act(() => select?.({ mode: "code", threadId: "late" }));
+  expect(onSelect).not.toHaveBeenCalled();
+  rerender({ ready: true });
+  expect(onSelect).toHaveBeenCalledExactlyOnceWith({ mode: "code", threadId: "late" });
+});
