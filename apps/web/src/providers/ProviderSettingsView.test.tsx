@@ -635,8 +635,26 @@ describe("ProviderSettingsView", () => {
       within(create).getByLabelText("Claude config directory"),
       "/Users/example/.claude-accounts/work",
     );
+    expect(within(create).queryByLabelText("Claude sign-in command")).toBeNull();
+    await user.type(within(create).getByLabelText("Claude binary"), "/usr/local/bin/claude");
     expect(within(create).getByLabelText("Claude sign-in command")).toHaveValue(
       "CLAUDE_CONFIG_DIR='/Users/example/.claude-accounts/work' CLAUDE_SECURESTORAGE_CONFIG_DIR='/Users/example/.claude-accounts/work' '/usr/local/bin/claude' auth login",
+    );
+  });
+
+  it("hides the Claude sign-in command until the binary path is absolute", async () => {
+    const user = userEvent.setup();
+    renderExpanded(<ProviderSettingsView {...fixture()} />);
+
+    await chooseSelectFieldOption(user, screen.getByLabelText("Provider type"), "Claude Agent SDK");
+    const create = screen.getByRole("form", { name: "Add Claude provider" });
+    expect(within(create).queryByLabelText("Claude sign-in command")).toBeNull();
+    await user.type(within(create).getByLabelText("Claude binary"), "claude");
+    expect(within(create).queryByLabelText("Claude sign-in command")).toBeNull();
+    await user.clear(within(create).getByLabelText("Claude binary"));
+    await user.type(within(create).getByLabelText("Claude binary"), "/opt/homebrew/bin/claude");
+    expect(within(create).getByLabelText("Claude sign-in command")).toHaveValue(
+      "'/opt/homebrew/bin/claude' auth login",
     );
   });
 

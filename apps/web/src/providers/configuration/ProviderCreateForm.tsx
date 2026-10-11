@@ -122,7 +122,7 @@ export interface ProviderCreateFormPresentationProps {
   /**
    * Additional Claude accounts get a server-assigned directory. The create
    * form must not show the default-account sign-in command until that
-   * directory is known.
+   * directory is known, and must not invent a binary path.
    */
   readonly existingClaudeAccountCount?: number;
 }

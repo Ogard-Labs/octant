@@ -44,12 +44,18 @@ export function ClaudeAccountSettingsFields(props: {
 }) {
   const settingPrefix =
     props.instanceId === undefined ? "provider-create-claude" : `provider-${props.instanceId}`;
-  const signInCommand = formatClaudeAuthLoginCommand({
-    binaryPath: props.binaryPath.trim() || "/usr/local/bin/claude",
-    ...(props.configDirectory.trim().length === 0
-      ? {}
-      : { configDirectory: props.configDirectory.trim() }),
-  });
+  const binaryPath = props.binaryPath.trim();
+  const configDirectory = props.configDirectory.trim();
+  // formatClaudeAuthLoginCommand rejects a non-absolute binary. A live
+  // preview must not invent `/usr/local/bin/claude` or throw while the
+  // person is still typing `claude` or `~`.
+  const signInCommand =
+    props.showSignInCommand !== false && binaryPath.startsWith("/")
+      ? formatClaudeAuthLoginCommand({
+          binaryPath,
+          ...(configDirectory.length === 0 ? {} : { configDirectory }),
+        })
+      : undefined;
   return (
     <>
       {props.includeConfigDirectoryInput === false ? null : (
@@ -95,7 +101,7 @@ export function ClaudeAccountSettingsFields(props: {
           value={props.accent}
         />
       </SettingRow>
-      {props.showSignInCommand === false ? null : (
+      {signInCommand === undefined ? null : (
         <SettingRow
           description="Sign in only with this unmodified Claude command in a terminal for this account. Octant never reads Claude credential files."
           label="Sign in"
