@@ -174,8 +174,9 @@ API-key launches may keep the 0005 telemetry guards.
 
 ## Step 4 — Docs and Settings copy
 
-User-facing docs already mark the helper token as deprecated by 0165.
-When the code lands, replace that deprecated behavior with the
+The shipped pages currently describe the helper-token path the build
+still uses, and they note that 0165 proposes replacing it. When Steps
+0–5 land, replace that current-behavior guidance with the
 config-directory rule. Architecture and the threat model change in the
 same implementation PR.
 
