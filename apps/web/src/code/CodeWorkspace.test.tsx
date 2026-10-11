@@ -549,19 +549,9 @@ describe("CodeWorkspace", () => {
       snapshot: vi.fn(async () => ({ sequence: 1, active: [], recentEvidence: [], simulators })),
       execute,
       cancel: vi.fn(),
-      // The live view stays connecting. A view that fails turns into the
-      // "live view stopped" notice, which takes the line ahead of the input
-      // approval, so the Allow prompt would vanish once the failure landed.
-      watchScreen: vi.fn(
-        (_request: unknown, signal: AbortSignal) =>
-          new Promise((resolve) => {
-            signal.addEventListener(
-              "abort",
-              () => resolve({ status: "failed", message: "The live view was given up." }),
-              { once: true },
-            );
-          }),
-      ),
+      // A failed live view puts Reconnect ahead of the input approval, so
+      // a stream that never settles keeps the approval line on screen.
+      watchScreen: vi.fn(() => new Promise<never>(() => undefined)),
     };
     render(
       <CodeWorkspace
