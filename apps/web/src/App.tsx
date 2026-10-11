@@ -1,4 +1,4 @@
-import { useMenuBarTasks } from "./shell/useMenuBarTasks";
+import { useMenuBarThread } from "./shell/useMenuBarThread";
 import { MODEL_CHOICE_CHANGED, readLastModelChoice } from "./providers/modelChoiceMemory";
 import { createNewTaskDrafts, NewTaskDraftsContext } from "./composer/useNewTaskPrompt";
 import { StreamRepliesContext } from "./transcript/AssistantMessageBody";
@@ -3983,12 +3983,11 @@ function LaunchedShell(
           onSwitch: switchWorkKind,
         };
 
-  useMenuBarTasks({
+  useMenuBarThread({
     bridge: props.hostBridge,
     ready: controller.status === "ready",
-    chat: navigationModel.markedChatNavigation,
-    work: navigationModel.workProjectThreads,
-    code: navigationModel.codeProjectThreads,
+    open:
+      watchedThreadId === undefined ? undefined : { mode: activeMode, threadId: watchedThreadId },
     onSelect: (target) => {
       if (controller.status !== "ready") return;
       if (target.mode === "chat") selectChatThread(target.threadId);
