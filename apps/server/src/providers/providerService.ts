@@ -2135,9 +2135,16 @@ function effectiveClaudeAccountDirectories(
   if (instance.configuration.configDirectory !== undefined) {
     return [instance.configuration.configDirectory];
   }
+  // An API-key instance with no stored directory uses a temporary
+  // isolated directory per launch. It never opens the host default.
+  if (instance.configuration.authentication === "api-key") return [];
   const directories = [implicitClaudeAccountDirectory(homeDirectory, hostConfigDirectory)];
   if (hostSecureDirectory !== undefined) directories.push(hostSecureDirectory);
   return directories;
+}
+
+function claudeAccountDirectoriesOverlap(left: string, right: string): boolean {
+  return left === right || left.startsWith(`${right}/`) || right.startsWith(`${left}/`);
 }
 
 function claudeAccountDirectoryTaken(
@@ -2157,7 +2164,7 @@ function claudeAccountDirectoryTaken(
       homeDirectory,
       hostConfigDirectory,
       hostSecureDirectory,
-    ).some((existing) => claudeAccountDirectoryKey(existing) === key);
+    ).some((existing) => claudeAccountDirectoriesOverlap(claudeAccountDirectoryKey(existing), key));
   });
 }
 

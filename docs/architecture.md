@@ -2053,7 +2053,10 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   `~/.claude` and a dedicated `~/.claude-accounts/<account>` directory.
   Two Claude instances cannot share one effective config directory,
   including the default account's implicit `~/.claude` or inherited
-  `CLAUDE_CONFIG_DIR`.
+  `CLAUDE_CONFIG_DIR`, and one instance cannot claim a directory
+  nested under another instance. An API-key instance with no stored
+  directory uses a temporary launch directory and does not claim the
+  host default.
   A thread stays on the instance it started with; there is no
   automatic failover, rotation, or load-balancing between accounts. Discovery can find
   installed runtimes and auto-register them. On first run, a detected Claude
