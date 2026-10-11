@@ -247,7 +247,7 @@ if ! gh api "repos/${REPO}" --jq '.permissions.admin' | grep -q true; then
   warn "This account is not an admin of ${REPO}, so it cannot write environment secrets."
   exit 1
 fi
-for tool in bun openssl ssh-keygen security base64; do
+for tool in bun ssh-keygen security base64; do
   command -v "$tool" >/dev/null 2>&1 || { warn "missing required tool: $tool"; exit 1; }
 done
 say "GitHub CLI is authenticated and this account administers ${REPO}."
@@ -342,23 +342,38 @@ warn "execution on every install. Keep the private halves only in GitHub and in"
 warn "your own backup."
 say ""
 FEED_SOURCE="apps/desktop/src/appUpdateFeed.ts"
+if [[ ! -f "$FEED_SOURCE" ]]; then
+  warn "Run this from the repository root: ${FEED_SOURCE} says which keys already ship."
+  exit 1
+fi
 WRITE_FEED_SOURCE=false
-[[ -f "$FEED_SOURCE" ]] && confirm "Write the public halves into ${FEED_SOURCE} now?" && WRITE_FEED_SOURCE=true
+confirm "Write any new public half into ${FEED_SOURCE} now?" && WRITE_FEED_SOURCE=true
 # ring:secret name:constant the app compiles the public half into
 for FEED_KEY in \
   "stable:OCTANT_UPDATE_FEED_PRIVATE_KEY:OCTANT_UPDATE_PUBLIC_KEY" \
   "preview:OCTANT_UPDATE_FEED_PREVIEW_PRIVATE_KEY:OCTANT_UPDATE_PREVIEW_PUBLIC_KEY"; do
   IFS=: read -r FEED_RING FEED_SECRET FEED_CONSTANT <<< "$FEED_KEY"
-  FEED_KEY_DIR=$(mktemp -d)
-  chmod 700 "$FEED_KEY_DIR"
-  # PKCS8 DER for the private half and SPKI DER for the public half: the same
-  # encodings scripts/sign-update-feed.ts and the app's verifier expect.
-  openssl genpkey -algorithm ed25519 -outform DER -out "${FEED_KEY_DIR}/feed.der" 2>/dev/null
-  openssl pkey -inform DER -in "${FEED_KEY_DIR}/feed.der" -pubout -outform DER \
-    -out "${FEED_KEY_DIR}/feed.pub.der" 2>/dev/null
-  FEED_PUBLIC_KEY=$(base64 < "${FEED_KEY_DIR}/feed.pub.der" | tr -d '\n')
-  set_env_secret "$FEED_SECRET" "$(base64 < "${FEED_KEY_DIR}/feed.der" | tr -d '\n')" "$FEED_RING"
-  rm -rf "$FEED_KEY_DIR"
+  # A key the app already ships is kept, never replaced. Installs trust only
+  # the keys compiled into them, so a fresh key here would strand every one of
+  # them; rotating a deployed key needs a staged overlap this wizard does not do.
+  if ! SHIPPED_KEY=$(bun scripts/write-update-public-key.ts --print "$FEED_SOURCE" "$FEED_RING"); then
+    warn "Could not read ${FEED_CONSTANT} from ${FEED_SOURCE}; refusing to mint a ${FEED_RING} key blind."
+    exit 1
+  fi
+  if [[ -n "$SHIPPED_KEY" ]]; then
+    say ""
+    say "${FEED_RING}: the app already ships ${FEED_CONSTANT}; keeping it and ${FEED_SECRET}."
+    say "  ${SHIPPED_KEY}"
+    continue
+  fi
+  # Minted by the same code that signs, in memory only. The macOS openssl is
+  # LibreSSL, which has no ed25519 and failed here without a word.
+  FEED_PAIR=$(bun -e 'import { generateFeedKeyPair } from "./scripts/sign-update-feed";
+const pair = generateFeedKeyPair();
+console.log(`${pair.publicKey}\n${pair.privateKey}`);')
+  FEED_PUBLIC_KEY=$(head -n 1 <<< "$FEED_PAIR")
+  set_env_secret "$FEED_SECRET" "$(tail -n 1 <<< "$FEED_PAIR")" "$FEED_RING"
+  FEED_PAIR=""
   say ""
   say "${FEED_RING} public half (this belongs in the source, and is not secret):"
   say "  ${FEED_PUBLIC_KEY}"

@@ -12,7 +12,13 @@
  *
  *   bun scripts/write-update-public-key.ts <path to appUpdateFeed.ts> <base64 SPKI key> [stable|preview]
  *
- * The ring defaults to stable, which is the key the release wizard mints.
+ * The ring defaults to stable.
+ *
+ *   bun scripts/write-update-public-key.ts --print <path to appUpdateFeed.ts> [stable|preview]
+ *
+ * prints the key a ring currently ships with (empty when none), and exits
+ * non-zero when the constant cannot be read. The release wizard asks before
+ * minting: replacing a shipped key strands every install that trusts it.
  */
 
 import { createPublicKey } from "node:crypto";
@@ -99,7 +105,31 @@ export async function writeUpdatePublicKey(
   return { status: "written" };
 }
 
-if (import.meta.main) {
+/**
+ * The key a ring ships with today: `""` when none is set, `undefined` when the
+ * declaration cannot be found exactly once, which a caller must treat as
+ * unknown rather than as absent.
+ */
+export function compiledUpdatePublicKey(source: string, ring: UpdateKeyRing): string | undefined {
+  const declarations = [...source.matchAll(declaration(UPDATE_PUBLIC_KEY_CONSTANTS[ring]))];
+  return declarations.length === 1 ? declarations[0]?.[2] : undefined;
+}
+
+if (import.meta.main && process.argv[2] === "--print") {
+  const [, path, ring = "stable"] = process.argv.slice(2);
+  if (path === undefined || (ring !== "stable" && ring !== "preview")) {
+    console.error(
+      "usage: bun scripts/write-update-public-key.ts --print <appUpdateFeed.ts> [stable|preview]",
+    );
+    process.exit(2);
+  }
+  const key = compiledUpdatePublicKey(await readFile(path, "utf8"), ring);
+  if (key === undefined) {
+    console.error(`Could not read ${UPDATE_PUBLIC_KEY_CONSTANTS[ring]} from ${path}.`);
+    process.exit(1);
+  }
+  console.log(key);
+} else if (import.meta.main) {
   const [path, publicKey, ring = "stable"] = process.argv.slice(2);
   if (path === undefined || publicKey === undefined || (ring !== "stable" && ring !== "preview")) {
     console.error(

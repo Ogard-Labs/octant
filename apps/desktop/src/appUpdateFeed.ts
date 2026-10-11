@@ -115,9 +115,28 @@ export function updateFeedUrl(
   baseUrl: string,
   target: { readonly ring: string; readonly platform: string; readonly arch: string },
 ): string {
-  const ring = encodeURIComponent(target.ring);
-  const file = `${encodeURIComponent(target.platform)}-${encodeURIComponent(target.arch)}.json`;
-  return `${baseUrl.replace(/\/+$/, "")}/${ring}/${file}`;
+  return `${baseUrl.replace(/\/+$/, "")}/${updateFeedRelativePath(target)}`;
+}
+
+/**
+ * Where a ring's feed sits under the base: `<ring>/<platform>-<arch>.json` for
+ * stable, `<ring>/<platform>-<arch>.preview-key.json` for preview and candidate.
+ *
+ * Preview and candidate moved to a new name when they got their own signing
+ * key. Installs built before that know only the stable key and keep reading
+ * the old name, so the old name holds a stable-signed bridge feed that the
+ * preview workflow never overwrites. However long such an install stays
+ * offline, it still finds a release it can verify, and that release reads the
+ * new name from then on.
+ */
+export function updateFeedRelativePath(target: {
+  readonly ring: string;
+  readonly platform: string;
+  readonly arch: string;
+}): string {
+  const machine = `${encodeURIComponent(target.platform)}-${encodeURIComponent(target.arch)}`;
+  const file = target.ring === "stable" ? `${machine}.json` : `${machine}.preview-key.json`;
+  return `${encodeURIComponent(target.ring)}/${file}`;
 }
 
 function isHttpsUrl(value: string): boolean {

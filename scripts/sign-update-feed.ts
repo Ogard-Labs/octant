@@ -38,7 +38,10 @@ import {
   isAppReleaseRing,
 } from "@octant/contracts/app-updates";
 import { canonicalReleaseBytes } from "@octant/domain";
-import { OCTANT_UPDATE_TRUSTED_KEYS } from "../apps/desktop/src/appUpdateFeed";
+import {
+  OCTANT_UPDATE_TRUSTED_KEYS,
+  updateFeedRelativePath,
+} from "../apps/desktop/src/appUpdateFeed";
 
 export const FEED_PRIVATE_KEY_ENVIRONMENT_VARIABLE = "OCTANT_UPDATE_FEED_PRIVATE_KEY";
 export const FEED_PREVIEW_PRIVATE_KEY_ENVIRONMENT_VARIABLE =
@@ -89,14 +92,12 @@ export function buildRelease(input: ReleaseInput): AppUpdateRelease {
   });
 }
 
-/** The name a ring's feed is served under, matching what the app asks for. */
-export function feedFileName(platform: string, arch: string): string {
-  return `${platform}-${arch}.json`;
-}
-
-/** Where a feed sits under the published base: `<ring>/<platform>-<arch>.json`. */
+/**
+ * Where a feed sits under the published base. The app's own addressing, so the
+ * publisher cannot drift from what installs ask for.
+ */
 export function feedRelativePath(release: ReleaseInput | AppUpdateRelease): string {
-  return `${release.ring}/${feedFileName(release.platform, release.arch)}`;
+  return updateFeedRelativePath(release);
 }
 
 /**

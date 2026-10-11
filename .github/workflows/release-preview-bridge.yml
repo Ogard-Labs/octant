@@ -1,0 +1,144 @@
+# One-time bridge for installs that predate the preview signing key.
+#
+# Those installs trust only the stable key and read
+# `<base>/<ring>/<platform>-<arch>.json`. The preview workflow now signs with
+# the preview key and publishes under `<platform>-<arch>.preview-key.json`, so
+# without this they would never see another release. This job signs one
+# already-published preview or candidate build with the stable key and puts it
+# at the old name, where nothing overwrites it: an install that comes back
+# online months later still finds a release it can verify, and that release
+# reads the new name from then on.
+#
+# It runs in the approval-gated `stable` environment because only that holds
+# the stable key. A stable-key signature on a preview release grants nothing
+# the stable key cannot already do, and the app refuses it for the stable ring.
+# Nothing is built here; the bytes are the published release asset, hashed
+# into the signature as for any feed.
+name: Release (preview bridge)
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Published preview or candidate tag to bridge to, e.g. v0.2.0-preview.20261012.57"
+        required: true
+        type: string
+
+concurrency:
+  group: release-preview-bridge
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  bridge:
+    name: Bridge (${{ matrix.target }})
+    # Required reviewers live on this environment; nothing below can read the
+    # stable key until a person approves this run.
+    environment: stable
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: darwin-arm64
+            platform: darwin
+            arch: arm64
+            asset_suffix: "-darwin-arm64.zip"
+          - target: linux-x64
+            platform: linux
+            arch: x64
+            asset_suffix: "-linux-x64.AppImage"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - run: bun install --frozen-lockfile
+
+      - name: Refuse a tag that is not a key-aware preview or candidate build
+        id: tag
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          case "$TAG" in
+            v*-preview.*) ring="preview" ;;
+            v*-candidate.*) ring="candidate" ;;
+            *) echo "${TAG} is not a preview or candidate tag." >&2; exit 1 ;;
+          esac
+          source="${RUNNER_TEMP}/bridged-appUpdateFeed.ts"
+          git show "${TAG}:apps/desktop/src/appUpdateFeed.ts" > "$source"
+          # The bridged build must already trust the preview key and read the
+          # new feed name. A build that reads the old name would find this same
+          # release there, call it not newer, and never move again.
+          shipped=$(bun scripts/write-update-public-key.ts --print "$source" preview)
+          expected=$(bun scripts/write-update-public-key.ts --print apps/desktop/src/appUpdateFeed.ts preview)
+          if [ -z "$shipped" ] || [ "$shipped" != "$expected" ]; then
+            echo "${TAG} does not ship the preview public key that main signs with." >&2
+            exit 1
+          fi
+          if ! grep -qF '.preview-key.json' "$source"; then
+            echo "${TAG} still reads the bridge feed name; bridging to it would strand installs." >&2
+            exit 1
+          fi
+          echo "ring=${ring}" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Sign the bridge feed with the stable key
+        env:
+          # The signer reads preview and candidate keys from this name. Here it
+          # holds the stable key, which those rings also trust; the signer still
+          # refuses any key the app does not trust for the ring.
+          OCTANT_UPDATE_FEED_PREVIEW_PRIVATE_KEY: ${{ secrets.OCTANT_UPDATE_FEED_PRIVATE_KEY }}
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+          RING: ${{ steps.tag.outputs.ring }}
+          VERSION: ${{ steps.tag.outputs.version }}
+          PLATFORM: ${{ matrix.platform }}
+          ARCH: ${{ matrix.arch }}
+          TARGET: ${{ matrix.target }}
+          ASSET_SUFFIX: ${{ matrix.asset_suffix }}
+        run: |
+          set -euo pipefail
+          downloads="${RUNNER_TEMP}/assets"
+          mkdir -p "$downloads"
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern "Octant-*${ASSET_SUFFIX}" --dir "$downloads"
+          archive=$(ls "$downloads"/*"${ASSET_SUFFIX}")
+          # The bare `${TARGET}.json` name on purpose: it is the name installs
+          # that predate the preview key ask for.
+          bun scripts/sign-update-feed.ts \
+            --version "$VERSION" \
+            --ring "$RING" \
+            --platform "$PLATFORM" \
+            --arch "$ARCH" \
+            --url "https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/$(basename "$archive")" \
+            --artifact "$archive" \
+            --released-at "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" \
+            --out "${RUNNER_TEMP}/feed/${RING}/${TARGET}.json"
+
+      - name: Publish the bridge feed
+        env:
+          SSH_KEY: ${{ secrets.OCTANT_FEED_SSH_KEY }}
+          SSH_HOST: ${{ vars.OCTANT_FEED_SSH_HOST }}
+          SSH_USER: ${{ vars.OCTANT_FEED_SSH_USER }}
+          SSH_KNOWN_HOSTS: ${{ vars.OCTANT_FEED_SSH_KNOWN_HOSTS }}
+          REMOTE_PATH: ${{ vars.OCTANT_FEED_REMOTE_PATH }}
+          RING: ${{ steps.tag.outputs.ring }}
+        run: |
+          set -euo pipefail
+          umask 077
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/octant_feed
+          # Pinned rather than accepted on first use, as in the release workflows.
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/octant_feed ~/.ssh/known_hosts
+          rsync --archive --compress \
+            --rsh "ssh -i ~/.ssh/octant_feed -o IdentitiesOnly=yes" \
+            "${RUNNER_TEMP}/feed/${RING}" \
+            "${SSH_USER}@${SSH_HOST}:${REMOTE_PATH}/"

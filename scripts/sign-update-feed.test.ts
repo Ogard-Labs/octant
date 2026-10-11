@@ -113,7 +113,12 @@ describe("signing an update feed", () => {
   });
 
   it("names the file a ring is published under", () => {
-    expect(feedRelativePath(release({ ring: "preview" }))).toBe("preview/darwin-arm64.json");
+    expect(feedRelativePath(release({ ring: "stable" }))).toBe("stable/darwin-arm64.json");
+    // Not the name installs that predate the preview key read: that one holds
+    // the stable-signed bridge feed and is never overwritten by a preview.
+    expect(feedRelativePath(release({ ring: "preview" }))).toBe(
+      "preview/darwin-arm64.preview-key.json",
+    );
   });
 
   it("names the linux-x64 dogfood feed the same way as macOS", () => {
@@ -121,7 +126,7 @@ describe("signing an update feed", () => {
       "stable/linux-x64.json",
     );
     expect(feedRelativePath(release({ ring: "preview", platform: "linux", arch: "x64" }))).toBe(
-      "preview/linux-x64.json",
+      "preview/linux-x64.preview-key.json",
     );
   });
 
@@ -135,7 +140,7 @@ describe("signing an update feed", () => {
       sha256: sha256Hex(ARTIFACT),
       releasedAt: "2026-08-28T09:00:00.000Z",
     });
-    expect(feedPath).toBe("preview/linux-x64.json");
+    expect(feedPath).toBe("preview/linux-x64.preview-key.json");
     expect(document.platform).toBe("linux");
     expect(document.arch).toBe("x64");
     expect(document.ring).toBe("preview");

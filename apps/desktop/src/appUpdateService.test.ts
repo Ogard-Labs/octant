@@ -385,7 +385,7 @@ describe("release rings", () => {
     const [requested] = vi.mocked(fetchImpl).mock.calls[0] as [string];
 
     expect(updates.state().ring).toBe("preview");
-    expect(requested).toContain("/preview/darwin-arm64.json");
+    expect(requested).toContain("/preview/darwin-arm64.preview-key.json");
   });
 
   it("refuses a stable feed's release while following preview", async () => {
@@ -426,6 +426,8 @@ describe("where the feed is", () => {
   });
 
   it("addresses a feed by ring and machine, so a ring is a directory rather than a rewrite", () => {
+    // Preview and candidate read a name the stable-signed bridge feed never
+    // occupies; the old name is left to installs that predate the preview key.
     // The shape the publisher writes and the app reads. Adding a platform is a
     // new file at a known path, not a change to how anything is addressed.
     expect(
@@ -434,7 +436,7 @@ describe("where the feed is", () => {
         platform: "darwin",
         arch: "arm64",
       }),
-    ).toBe("https://octant.sh/updates/preview/darwin-arm64.json");
+    ).toBe("https://octant.sh/updates/preview/darwin-arm64.preview-key.json");
     expect(
       updateFeedUrl("https://octant.sh/updates/", {
         ring: "stable",
@@ -448,7 +450,14 @@ describe("where the feed is", () => {
         platform: "linux",
         arch: "x64",
       }),
-    ).toBe("https://octant.sh/updates/preview/linux-x64.json");
+    ).toBe("https://octant.sh/updates/preview/linux-x64.preview-key.json");
+    expect(
+      updateFeedUrl("https://octant.sh/updates", {
+        ring: "candidate",
+        platform: "darwin",
+        arch: "arm64",
+      }),
+    ).toBe("https://octant.sh/updates/candidate/darwin-arm64.preview-key.json");
   });
 
   it("refuses a configured endpoint it cannot reach securely rather than falling back", () => {

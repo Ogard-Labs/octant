@@ -2,8 +2,10 @@
 #
 # Scheduled runs build what is on `main`, sign and notarize darwin-arm64,
 # package the linux-x64 AppImage dogfood artifact, and publish signed feeds at
-# `<base>/preview/<platform>-<arch>.json` when feed signing material is
-# present. A manual run does the same for whatever ref it was started on and
+# `<base>/preview/<platform>-<arch>.preview-key.json` when feed signing
+# material is present. Signed with the preview key only; the old
+# `<platform>-<arch>.json` name belongs to the stable-signed bridge that
+# `release-preview-bridge.yml` publishes for installs predating that key. A manual run does the same for whatever ref it was started on and
 # publishes to `<base>/candidate/…` instead, so a test install can follow the
 # candidate ring without the live preview feed being disturbed.
 # Per `docs/decisions/0034` an updater fed by unsigned builds is an
@@ -213,7 +215,11 @@ jobs:
           APPLE_SIGNING: ${{ matrix.apple_signing }}
         run: |
           set -euo pipefail
-          out="${RUNNER_TEMP}/feed/${RING}/${TARGET}.json"
+          # The name `updateFeedRelativePath` gives preview and candidate. Never
+          # the bare `${TARGET}.json`: that one is the bridge feed, and
+          # overwriting it with a preview-key signature would strand installs
+          # that know only the stable key.
+          out="${RUNNER_TEMP}/feed/${RING}/${TARGET}.preview-key.json"
           args=(
             --version "$VERSION"
             --ring "$RING"

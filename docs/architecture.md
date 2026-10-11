@@ -3738,7 +3738,17 @@ mechanisms are:
   that code sign a `ring: "stable"` feed and make the stable approval
   meaningless. The stable key may sign previews because its holder can already
   sign stable, and it is how installs that predate the preview key reach a
-  build that knows it. The private halves are environment secrets:
+  build that knows it. Those installs read `<ring>/<platform>-<arch>.json`;
+  key-aware builds read preview and candidate feeds at
+  `<ring>/<platform>-<arch>.preview-key.json`, which is all the preview
+  workflow writes. The old name holds a bridge feed that the
+  approval-gated `release-preview-bridge.yml` signs once with the stable key,
+  pointing at a published build that ships the preview key and reads the new
+  name. Nothing overwrites it, so an install offline for any length of time
+  still finds a release it can verify. The release wizard mints a ring's key
+  only when the app ships none for it: replacing a deployed key strands every
+  install that trusts it, and rotation would need a staged overlap. The private
+  halves are environment secrets:
   `OCTANT_UPDATE_FEED_PRIVATE_KEY` only in `stable`,
   `OCTANT_UPDATE_FEED_PREVIEW_PRIVATE_KEY` only in `preview`.
   `scripts/sign-update-feed.ts` reads the secret for the ring it signs and
