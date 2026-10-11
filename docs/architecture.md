@@ -3257,7 +3257,14 @@ native harness in `apps/server/src/harness`:
   results return in one message in call order. A request that outgrows the
   endpoint is shrunk in the request only — older tool results first, then
   whole earlier exchanges behind a note — and refused if the latest message
-  alone does not fit. When the endpoint still rejects a request as too large,
+  alone does not fit. The lead has no tool to read a cut exchange back: the
+  note tells it that its task list and the files on disk still reflect that
+  work, and the journal keeps the full conversation for people, replay, and
+  export. A journal lookup tool was specified once but never wired to a store,
+  so it only ever reported itself unavailable and was removed; the note names
+  no turn or sequence the model could ask for, and Chat and Work start a fresh
+  session each turn, so a lookup needs those handles and a thread-scoped read
+  of the rebuilt history before it can return. When the endpoint still rejects a request as too large,
   the loop recognises the refusal as a filled context window (OpenAI's
   `context_length_exceeded`, Anthropic's "prompt is too long", or the 400 or
   413 shape from an OpenAI-compatible host), shrinks it one further ladder
