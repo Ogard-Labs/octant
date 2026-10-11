@@ -202,6 +202,36 @@
   accent-color: var(--oct-accent);
 }
 
+.canvas-block__progress-detail {
+  display: block;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+  overflow-wrap: anywhere;
+}
+
+/* Forced colours reset `accent-color`, and Chromium then paints the native
+   bar with neither track nor fill. Drawing both parts in system colours keeps
+   the reading, the way the bar lists and matrix meters fall back. */
+@media (forced-colors: active) {
+  .canvas-block__progress progress {
+    appearance: none;
+    border: 1px solid GrayText;
+    background: Canvas;
+  }
+
+  .canvas-block__progress progress::-webkit-progress-bar {
+    background: Canvas;
+  }
+
+  .canvas-block__progress progress::-webkit-progress-value {
+    background: Highlight;
+  }
+
+  .canvas-block__progress progress::-moz-progress-bar {
+    background: Highlight;
+  }
+}
+
 .canvas-block__chart-fallback,
 .canvas-block__diagram-fallback {
   margin: var(--oct-space-2) 0;
