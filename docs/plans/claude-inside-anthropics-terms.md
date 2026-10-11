@@ -6,8 +6,11 @@ archive closed at 0164, so that rule lives in the owning specification
 rather than a numbered record. This plan is product work, not legal
 advice. It does not authorize merging.
 
-The helper-token path stays in the tree until a later implementation PR
-lands these steps. This document is the order of that work.
+Helper-token removal and the confined `/usr/bin/security` carve-out land
+in PR 1142. This document is the remaining order of work after that
+rebuild: Step 0 must-verify on a real Mac, then the terms-rule
+acceptance and the leftover session-root / telemetry steps. It does
+not re-open a helper-token path.
 
 ## Goal
 
@@ -47,15 +50,17 @@ Measure:
    elsewhere. Octant must not read the file or the Keychain item to
    learn this; watch Claude's own documented locations and `/status`.
 3. Launch the same binary under Octant's Plan confinement with
-   read/write on only that directory (and the launch's temporary
-   directory). Do not grant `/usr/bin/security` or the Keychain file.
-   Report whether the binary is signed in.
-4. If it is signed out, try only the scoped security-server lookup
-   0145 already described, scoped to this launch. Never grant
-   `/usr/bin/security` or the Keychain file: the threat model records
-   that the tool can return unrelated programs' trusted tokens. If
-   that lookup is not enough, this step fails and the instance takes
-   the API-key fallback.
+   read/write on only that assigned directory (and the launch's
+   temporary directory). PR 1142 grants exec of exactly
+   `/usr/bin/security` plus the security-server lookup. Keychain
+   files and `/bin/sh` stay denied. Report whether the binary is
+   signed in for the default account (`~/.claude`) and for an extra
+   assigned leaf (`~/.claude-accounts/<id>`).
+4. Confirm the profile still blocks `~/Library/Keychains` and
+   `/bin/sh`. Residual risk: `/usr/bin/security` can return any
+   item that trusts that tool. If the binary stays signed out with
+   that carve-out, this step fails and the instance takes the
+   API-key fallback.
 5. Record what `CLAUDE_SECURESTORAGE_CONFIG_DIR` does on this build. It
    is already threaded in `claudeEnvironment.ts` and is not listed in
    Anthropic's public environment-variable table fetched on 10 Oct 2026.
@@ -127,10 +132,12 @@ implementing it.
 **Touches (notes only):** a short evidence note on the implementation
 PR. No product code in this step.
 
-## Step 1 — Remove Connect Claude for helpers
+## Step 1 — Remove Connect Claude for helpers (lands in PR 1142)
 
-Stop minting, storing, and injecting the helper token. Keep the person's
-ordinary CLI login for unconfined turns.
+Done in the 1142 rebuild: Octant no longer mints, stores, or injects a
+helper token. Sign-in is the unmodified CLI command in the assigned
+account directory. The remaining work below is the upgrade cleanup
+already shipped there and the leftover terms-rule steps.
 
 **Migration, on first launch after the change:**
 
