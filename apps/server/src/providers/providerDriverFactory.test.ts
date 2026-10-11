@@ -129,6 +129,19 @@ describe("makeProviderDriver", () => {
     expect(fixture.claudeProbeVersion).not.toHaveBeenCalled();
   });
 
+  it("refuses a Claude driver whose host overlay is a relative directory", () => {
+    const fixture = factoryFixture();
+    const owner = provider("claude");
+    expect(() =>
+      makeProviderDriver(owner, {
+        ...fixture.options,
+        claudeInstances: [owner],
+        claudeHostEnvironment: { CLAUDE_CONFIG_DIR: "relative-claude" },
+      }),
+    ).toThrow(/must be absolute/);
+    expect(fixture.claudeProbeVersion).not.toHaveBeenCalled();
+  });
+
   it("refuses a Claude driver whose host overlay now matches another account directory", () => {
     const fixture = factoryFixture();
     const owner = provider("claude");

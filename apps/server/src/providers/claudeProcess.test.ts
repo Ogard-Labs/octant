@@ -10,6 +10,7 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -769,6 +770,18 @@ describe("Claude runtime confinement", () => {
     ).toBe(true);
     expect(
       claudePlanStateDirectoryIsDedicatedLeaf("/Users/example/.claude", "/Users/example"),
+    ).toBe(true);
+  });
+
+  it("treats a symlink home's default Claude directory as a dedicated leaf", () => {
+    const parent = mkdtempSync(join(tmpdir(), "octant-claude-home-"));
+    directories.push(parent);
+    const realHome = join(parent, "real");
+    const aliasHome = join(parent, "alias");
+    mkdirSync(realHome);
+    symlinkSync(realHome, aliasHome);
+    expect(
+      claudePlanStateDirectoryIsDedicatedLeaf(join(realpathSync(aliasHome), ".claude"), aliasHome),
     ).toBe(true);
   });
 

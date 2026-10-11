@@ -427,13 +427,7 @@ function planStateDirectories(
       return resolve(path);
     }
   });
-  const home = (() => {
-    try {
-      return realpathSync(homedir());
-    } catch {
-      return homedir();
-    }
-  })();
+  const home = canonicalClaudeHomeDirectory();
   for (const path of canonicalDirectories) {
     // A write grant that is the checkout, sits inside it, or contains it
     // reopens Plan's bound root. Home, its ancestors, `/`, arbitrary home
@@ -458,9 +452,18 @@ function planStateDirectories(
   return canonicalDirectories;
 }
 
+/** Plan compares account state to the real home, not a symlink spelling. */
+export function canonicalClaudeHomeDirectory(home = homedir()): string {
+  try {
+    return realpathSync(home);
+  } catch {
+    return home;
+  }
+}
+
 /** Plan may write ~/.claude or a .claude-accounts account leaf, not /opt/homebrew. */
 export function claudePlanStateDirectoryIsDedicatedLeaf(path: string, home: string): boolean {
-  if (path === `${home}${sep}.claude`) return true;
+  if (path === `${canonicalClaudeHomeDirectory(home)}${sep}.claude`) return true;
   const marker = `${sep}.claude-accounts${sep}`;
   const index = path.indexOf(marker);
   if (index === -1) return false;

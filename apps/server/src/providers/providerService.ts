@@ -96,7 +96,7 @@ import {
 import { accessSync, constants, realpathSync, statSync } from "node:fs";
 import { mkdtemp, realpath, rm } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { Cause, Effect, Exit, Fiber, Option, Schema, Stream } from "effect";
 import { admittedBundledProviderDriverKinds } from "@octant/plugin-host/provider-drivers";
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
@@ -2192,7 +2192,21 @@ function claudeAccountDirectoryKey(directory: string): string {
 
 function hostDirectoryClaim(directory: string | undefined): string | undefined {
   const trimmed = directory?.trim();
-  return trimmed !== undefined && trimmed.length > 0 ? trimmed : undefined;
+  // A relative overlay resolves against the server cwd here and against
+  // the thread project root at launch. Refuse it rather than claim the
+  // wrong directory.
+  if (trimmed === undefined || trimmed.length === 0 || !isAbsolute(trimmed)) return undefined;
+  return trimmed;
+}
+
+/** Host Claude directory overlays must be absolute or the default account is refused. */
+export function hostClaudeDirectoryOverlayIsRelative(environment: NodeJS.ProcessEnv): boolean {
+  return [environment.CLAUDE_CONFIG_DIR, environment.CLAUDE_SECURESTORAGE_CONFIG_DIR].some(
+    (value) => {
+      const trimmed = value?.trim();
+      return trimmed !== undefined && trimmed.length > 0 && !isAbsolute(trimmed);
+    },
+  );
 }
 
 function hostClaudeConfigDirectory(environment: NodeJS.ProcessEnv): string | undefined {

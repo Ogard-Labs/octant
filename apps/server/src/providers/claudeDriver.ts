@@ -63,6 +63,7 @@ import {
   type ClaudeEnvironmentScopeOptions,
 } from "./claudeEnvironment";
 import {
+  canonicalClaudeHomeDirectory,
   claudePlanStateDirectoryIsDedicatedLeaf,
   claudePlanStateDirectoryIsSharedRoot,
   claudePlanStateDirectoryReopensHome,
@@ -180,7 +181,7 @@ function claudeSandboxSettings(
 
 function claudeAccountDirectoryRefusesPlanState(configDirectory: string): boolean {
   const directory = canonicalClaudeAccountDirectory(configDirectory).path;
-  const home = homedir();
+  const home = canonicalClaudeHomeDirectory();
   return (
     claudePlanStateDirectoryReopensHome(directory, home) ||
     claudePlanStateDirectoryIsSharedRoot(directory) ||

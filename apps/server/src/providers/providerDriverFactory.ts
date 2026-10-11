@@ -10,6 +10,7 @@ import { lastClaudeHostEnvironmentSnapshot } from "./claudeAccountDirectory";
 import {
   claudeAccountNeedsOwnConfigDirectory,
   claudeAccountOverlapsPeerLaunchDirectory,
+  hostClaudeDirectoryOverlayIsRelative,
 } from "./providerService";
 import type { ClaudeAgentSdkPort } from "./claudeAgentSdkPort";
 import { makeClaudeDriver, type ClaudeResumeIdentityPort } from "./claudeDriver";
@@ -115,12 +116,18 @@ export function makeProviderDriver(
           "This Claude account needs its own config directory.",
         );
       }
+      const hostEnvironment = options.claudeHostEnvironment ?? lastClaudeHostEnvironmentSnapshot();
+      if (hostClaudeDirectoryOverlayIsRelative(hostEnvironment)) {
+        throw new ProviderDriverConfigurationError(
+          "Claude host config directories must be absolute.",
+        );
+      }
       if (
         claudeAccountOverlapsPeerLaunchDirectory(
           options.claudeInstances,
           instance,
           homedir(),
-          options.claudeHostEnvironment ?? lastClaudeHostEnvironmentSnapshot(),
+          hostEnvironment,
         )
       ) {
         throw new ProviderDriverConfigurationError(
