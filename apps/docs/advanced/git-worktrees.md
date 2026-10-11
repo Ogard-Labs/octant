@@ -88,9 +88,12 @@ receives an explicit normalized path set.
   no GitHub token** and strips ambient token variables from ordinary Git
   commands. It never creates a fork automatically; you select an already
   configured writable head remote and the intended base repo and branch.
-- **PR interaction is read-only plus creation.** Comments, approvals,
-  request-changes, editing, closing, reopening, and **merge are denied under
-  every posture**. Durable local review findings stay thread-owned; publishing
+- **Agents never merge or change a pull request.** Comments, approvals,
+  request-changes, editing, closing, reopening, and **merge are denied to the
+  agent under every posture**. You can merge an open pull request yourself
+  from its review on the desktop: choose a method, then **Confirm merge**.
+  Octant merges only the head you reviewed, refuses if it moved, and uses your
+  signed-in `gh`. A paired device cannot merge. Durable local review findings stay thread-owned; publishing
   them to GitHub is a later phase.
 
 ## Authority matrix
@@ -135,8 +138,9 @@ actionable data. The journal never stores the list or detail cache. It retains
 only exact PR identities produced by Code operations, so after restart a Code
 card can show an identity as **Unknown** and stale until a user refreshes.
 
-Thread-scoped create and observe remain on the thread. This workspace does
-not merge, approve, comment, close, or force-push.
+Thread-scoped create and observe remain on the thread. A pull request's review
+can merge it after you confirm; nothing here approves, comments, closes, or
+force-pushes.
 
 A Code thread's right sidebar can also host **Pull requests**: it lists the
 active Project's active rows from the same cached snapshot and opens a selected

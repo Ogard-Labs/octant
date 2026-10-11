@@ -28,9 +28,43 @@ interface ManagedToolInstance {
   readonly state: { active: StagedManagedTool; running: number };
 }
 
+/**
+ * The variables a managed tool may read from the desktop's environment. These
+ * tools come from npm with integrity but no publisher signature and run
+ * unconfined, so they get what `xcrun simctl`, `adb`, and Node need to start,
+ * never the provider keys, tokens, or broker secrets the desktop process holds.
+ */
+const TOOL_ENVIRONMENT_ALLOWLIST: ReadonlyArray<string> = [
+  "PATH",
+  "HOME",
+  "USER",
+  "LOGNAME",
+  "SHELL",
+  "TMPDIR",
+  "LANG",
+  "LC_ALL",
+  "LC_CTYPE",
+  "DEVELOPER_DIR",
+  "ANDROID_HOME",
+  "ANDROID_SDK_ROOT",
+  "ANDROID_USER_HOME",
+  "ANDROID_AVD_HOME",
+  "ANDROID_EMULATOR_HOME",
+  "ANDROID_ADB_SERVER_PORT",
+];
+
+function allowlistedEnvironment(): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {};
+  for (const name of TOOL_ENVIRONMENT_ALLOWLIST) {
+    const value = process.env[name];
+    if (value !== undefined) env[name] = value;
+  }
+  return env;
+}
+
 /** Tool executions run under the desktop's own runtime, never a system node. */
 function toolEnvironment(): NodeJS.ProcessEnv {
-  return { ...process.env, ELECTRON_RUN_AS_NODE: "1" };
+  return { ...allowlistedEnvironment(), ELECTRON_RUN_AS_NODE: "1" };
 }
 
 export function createManagedToolService(options: {
@@ -48,7 +82,9 @@ export function createManagedToolService(options: {
   const rootDirectory = join(options.dataDirectory, "managed-tools");
   const settingsPath = join(rootDirectory, "settings.json");
   const supported = process.platform === "darwin" || process.platform === "linux";
-  let settingsAutomaticUpdates = true;
+  // npm proves integrity, not publisher, so a new release waits for a person
+  // unless they turned automatic updates on.
+  let settingsAutomaticUpdates = false;
   let initializing: Promise<void> | undefined;
   let closed = false;
 
@@ -75,9 +111,9 @@ export function createManagedToolService(options: {
         typeof (value as { automaticUpdates: unknown }).automaticUpdates === "boolean"
       )
         return (value as { automaticUpdates: boolean }).automaticUpdates;
-      return true;
+      return false;
     } catch {
-      return true;
+      return false;
     }
   }
 
@@ -147,7 +183,10 @@ export function createManagedToolService(options: {
         settled = true;
         resolvePromise(value);
       };
-      const child = spawn(entrypoint, ["--version"], { stdio: "ignore" });
+      const child = spawn(entrypoint, ["--version"], {
+        env: allowlistedEnvironment(),
+        stdio: "ignore",
+      });
       child.once("error", () => finish(false));
       child.once("exit", (code, signal) => {
         finish(code === 0 && signal === null);
@@ -261,9 +300,11 @@ export function createManagedToolService(options: {
       if (instance === undefined || closed || !existsSync(instance.state.active.entrypoint))
         return undefined;
       if (instance.descriptor.runtime === "executable") {
-        const env = { ...process.env };
-        delete env.ELECTRON_RUN_AS_NODE;
-        return { command: instance.state.active.entrypoint, args, env };
+        return {
+          command: instance.state.active.entrypoint,
+          args,
+          env: allowlistedEnvironment(),
+        };
       }
       return {
         command: options.execPath,
