@@ -468,10 +468,17 @@ no dock, so there the frame holds **Open Canvas**, and the frame and a row open
 the Canvas as a content tab. Accepted but not yet built: a person may expand
 any Canvas of the thread in place, including one shown as a row; the expanded
 frame grows with its content up to about the thread viewport instead of
-fading, the thread keeps the wheel until the person focuses a region inside
-it, and a running design frame starts there only when the person presses
-**Run**. Until that ships, the fixed-height fade above is the behavior (see
-[decisions/0165-canvas-artifacts-are-documents-designs-and-prototypes.md](../decisions/0165-canvas-artifacts-are-documents-designs-and-prototypes.md)). An
+fading, and the thread keeps the wheel until the person focuses a region
+inside it. Until that ships, the fixed-height fade above is the behavior (see
+[decisions/0165-canvas-artifacts-are-documents-designs-and-prototypes.md](../decisions/0165-canvas-artifacts-are-documents-designs-and-prototypes.md)). A design that
+runs script is a prototype: wherever it is drawn, its header shows a
+**Running** label and **Stop** while it runs, and **Run again** with the reason
+once it stops (stopped responding, loaded another page, or kept taking the
+keyboard back). In the thread it starts only when the person presses **Run**;
+the sidebar runs it when it is shown, and the frame takes no focus until the
+person presses Run or clicks into it. On desktop, Command-Escape
+(Control-Escape elsewhere) moves focus from a running prototype to its Stop.
+In a browser the Run control says the prototype is not network-contained. An
 agent-authored Canvas belongs to the thread's own scope as the host resolves
 it: the active Chat Project, the Work thread's confined root, or the Code
 thread's checkout; a thread whose binding the host cannot resolve is refused

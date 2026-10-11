@@ -1047,6 +1047,16 @@ describe("createCanvasAgentTools", () => {
       expect(chat).toContain("a file path is refused");
     });
 
+    it("teaches every agent how to declare a running prototype, what stays refused, and that it has no network", () => {
+      for (const mode of ["chat", "work", "code"] as const) {
+        const description =
+          (mode === "chat" ? tools() : boundTools(mode)).set.definitions[0]?.description ?? "";
+        expect(description).toContain('"runsScript": true');
+        expect(description).toContain("<script src>");
+        expect(description).toContain("It has no network at all");
+      }
+    });
+
     it("tells the agent to deliver substantial work as a Canvas bound to the thread's checkout", () => {
       const description = boundTools("code").set.definitions[0]?.description ?? "";
       expect(description).toContain("deliver it as a Canvas rather than as a long reply");

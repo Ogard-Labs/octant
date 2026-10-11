@@ -597,13 +597,14 @@ policy (`font-src 'self'`) refuses a `data:` font the page could name. A
 themed page also receives the workspace's computed `--oct-*` tokens and
 light or dark scheme, redrawn when the root's theme attributes change, and the
 frame kit stylesheet, all ahead of the author's own; `DESIGN.md` names the
-kit. A test renders every size and theme and asserts no frame is given
-`allow-scripts`. No script runs, nothing submits, and the page can use none
-of Octant's origin. Frames link by fragment; Play draws every frame in one page so a link
+kit. A test renders every size and theme and asserts no static frame is given
+`allow-scripts`, and that no frame of any tier has both `allow-scripts` and
+`allow-same-origin`. In a static frame no script runs, nothing submits, and
+the page can use none of Octant's origin. Frames link by fragment; Play draws every frame in one page so a link
 shows its frame through `:target`, and the renderer writes each fragment
 against the page's own address because a `srcdoc` page resolves a bare one
-against its parent. The pure `canvasDesignMarkupRefusal` policy refuses a
-script, an event handler, an embedded document, a remote image, stylesheet,
+against its parent. The pure `canvasDesignMarkupRefusal` policy refuses, in a
+static design, a script, an event handler, and, in every design, an embedded document, a remote image, stylesheet,
 or font (in a `url()`, an `@import`, or an `image-set()` candidate, however a
 character reference or CSS escape spells it), and any link that is not a
 fragment, naming the frame and the
@@ -646,12 +647,58 @@ gain a design; a version append never moves a Canvas back. Agents writing
 a design can be silent for minutes while composing the tool call, so Chat and Work
 wait five minutes for a provider event before cutting a turn off, as Code does
 ([decisions/0164-canvas-designs-are-html-in-a-frame-that-runs-nothing.md](decisions/0164-canvas-designs-are-html-in-a-frame-that-runs-nothing.md)).
-The static, measured, themed, and asset-bearing frames described here are the
-shipped tiers. Frames that run script in an opaque-origin sandbox with no
-network are accepted but not yet built; they replace the matching sentence
-above when they ship, under the
-[Canvas HTML frames threat model](security/canvas-html-frames-threat-model.md)
-([decisions/0165-canvas-artifacts-are-documents-designs-and-prototypes.md](decisions/0165-canvas-artifacts-are-documents-designs-and-prototypes.md)).
+Version 15 lets a design declare `runsScript: true`, which makes it a running
+prototype. For it alone, the markup policy admits inline `<script>` elements
+and event handlers; a script file, every remote load, `meta`, `base`,
+embedded documents, and links that leave the design stay refused, and it
+cannot take the `workspace` theme, which only the reader's renderer can
+write. A `srcdoc` page inherits the app policy (`script-src 'self'`), so the
+host serves the page itself. `POST /api/canvas/design-run` names the
+version, block, and optional start frame; it runs the same window
+authorization as `get` (mode, Project, window, and a paired device's Canvas
+read grant) and returns a path holding a single-use ticket of 32 random bytes
+that expires in 10 seconds and authorizes that one page. The ticket is held in
+memory only and is forgotten when redeemed, so a replayed or expired one is
+refused; the window credential never enters the address. `GET
+/api/canvas/design-page?ticket=` redeems it only for a frame load
+(`Sec-Fetch-Dest: iframe` when the browser sends it) and serves the page with
+`Content-Security-Policy: sandbox allow-scripts; default-src 'none';
+script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:;
+font-src data:; media-src data: blob:; connect-src 'none'; frame-src 'none';
+form-action 'none'; base-uri 'none'`, `Referrer-Policy: no-referrer`, and
+`Cache-Control: no-store`; a refusal carries the same headers. Declared
+images are resolved under the version's provenance and written in as `data:`
+images. The remote gateway forwards that one path as a pre-auth route,
+because a frame's load carries neither the session proof nor Octant's
+headers and the ticket is its whole authority, and keeps the page's policy in
+place of its own; its document policy adds `frame-src` for that path on its
+own origin. The renderer's policy adds `frame-src 'self'` and the loopback
+design-page path, which the packaged `file://` and Vite renderers reach on the
+loopback host. The host writes a bridge script first in the page; it posts the
+page's height, uncaught errors cut to 280 characters, and a heartbeat every
+second on the `octant-design-frame@1` channel and grants nothing. The
+renderer draws the page in a frame sandboxed to `allow-scripts` alone and
+reads only typed, bounded messages whose `source` is that frame's window and
+whose origin is opaque, clamps height to 48–12,000px, and shows errors as text.
+A frame with no heartbeat for 5 seconds (10 for the first) while the window is
+visible is removed and shown as stopped with **Run again**, as is a frame
+whose `load` fires a second time, which is a page it navigated to. Host
+chrome holds a running label and **Stop**. In the thread a prototype starts
+only on **Run**; the sidebar runs it on open, and the frame is out of the tab
+order until the person pressed Run. On desktop the main process cancels every
+navigation of a running frame except its first load of a ticketed page
+(`will-frame-navigate`, keyed by frame tree node and by an address on the
+host, so a `history` rewrite does not hide it), sets the renderer's WebRTC
+policy to `disable_non_proxied_udp`, reads Command-Escape (Control-Escape
+elsewhere) through `before-input-event` before a running frame sees it and
+moves focus to that frame's Stop, stopping a page that takes focus straight
+back, and enables `IsolateSandboxedIframes` with per-document grouping:
+Electron 43 already runs sandboxed frames out of process, but grouped one
+site's frames into one process, so a page spinning in a loop held the next
+prototype. In a browser the Run control says the prototype is not
+network-contained, because a self-navigated page can reach the network before
+the parent removes it, under the
+[Canvas HTML frames threat model](security/canvas-html-frames-threat-model.md).
 
 The local-server provider adapter owns a separate process for each acquired
 connection and allows one live session per connection. Its MCP protocol does
