@@ -3384,7 +3384,12 @@ mechanisms are:
   A provider runtime launch is wrapped when the process carries exactly one
   thread's authority. The goal is that every runtime below Full access is
   wrapped; the current state, which `providerProcessConfinement.test.ts` pins
-  against this table, is below. Full access is never wrapped for any runtime.
+  against this table, is below. Full access never gets the deny-default
+  profile. The one wrapper it can get is deny-only: an ACP profile with
+  extension or host-auth paths to deny (Kimi, for example) launches Full access
+  under an allow-default `sandbox-exec` profile or a Bubblewrap host-root bind
+  that denies only those paths (`makeAcpConfinementLive`). That wrapper
+  confines nothing else.
 
   | Runtime (module)                                                          | Plan                            | Approval-gated, auto-accept-edits                   | OS egress below Full access                      | Plan's read-only enforced by                   |
   | ------------------------------------------------------------------------- | ------------------------------- | --------------------------------------------------- | ------------------------------------------------ | ---------------------------------------------- |
@@ -3394,7 +3399,10 @@ mechanisms are:
   | Oh My Pi (`ohMyPiProcess.ts`), readiness probe only                       | Unwrapped                       | Unwrapped                                           | Not limited by Octant                            | No turn runs                                   |
 
   Codex is unwrapped because one app-server carries every thread on a provider
-  instance, so it has no one root to bind. Oh My Pi's probe is a held gap, not
+  instance, so it has no one root to bind. The ACP/OpenCode/Pi row has one
+  carve-out from "no exec or fork". On macOS, an OpenCode 2 Chat, Plan or Work
+  launch may fork and may exec exactly `/usr/bin/false`, which is its Git
+  stand-in (described below). Oh My Pi's probe is a held gap, not
   an exception. Octant-owned tools those threads reach stay confined either
   way. A runtime's own built-in tools (Codex's shell, Claude's Bash on the
   postures that write) run under that runtime's sandbox, not Octant's.
