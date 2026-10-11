@@ -1,4 +1,5 @@
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { mkdir, mkdtemp, rm, rmdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -112,6 +113,7 @@ export function sanitizeClaudeEnvironment(
       authentication,
       ...(overrides.apiKey === undefined ? {} : { apiKey: overrides.apiKey }),
     });
+    Object.assign(environment, packagedSmokeObserverEnvironment(hostEnvironment));
     // 0165 is still Proposed. Isolated accounts keep the current confined
     // helper-token path; the isolation module never holds the token.
     if (authentication === "subscription" && overrides.oauthToken !== undefined) {
@@ -241,6 +243,8 @@ export function makeClaudeEnvironmentScope(
     );
   }
   const apiKey = options.apiKey;
+  const parent = join(homedir(), ".claude-accounts");
+  let createdParent = false;
 
   return Effect.acquireRelease(
     Effect.tryPromise({
@@ -248,7 +252,7 @@ export function makeClaudeEnvironmentScope(
         // Plan only grants ~/.claude or a **/.claude-accounts/<account> leaf.
         // A /tmp/octant-claude-config-* directory is neither, so confinement
         // would refuse the launch after this scope handed it CLAUDE_CONFIG_DIR.
-        const parent = join(homedir(), ".claude-accounts");
+        createdParent = !existsSync(parent);
         await mkdir(parent, { recursive: true, mode: 0o700 });
         const configDirectory = await mkdtemp(join(parent, "octant-claude-config-"));
         return {
@@ -268,7 +272,14 @@ export function makeClaudeEnvironmentScope(
       }).pipe(
         Effect.zipRight(
           Effect.tryPromise({
-            try: () => rm(configDirectory, { recursive: true, force: true }),
+            try: async () => {
+              await rm(configDirectory, { recursive: true, force: true });
+              // A refused Plan launch can run after we created the parent
+              // inside a checkout that is $HOME. Remove that unused parent
+              // so a readiness or confinement failure does not leave
+              // `.claude-accounts` in the bound tree.
+              if (createdParent) await rmdir(parent).catch(() => undefined);
+            },
             catch: () => new Error("Claude isolated configuration cleanup failed."),
           }).pipe(Effect.orDie),
         ),

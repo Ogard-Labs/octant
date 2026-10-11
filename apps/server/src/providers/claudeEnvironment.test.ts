@@ -78,6 +78,28 @@ describe("sanitizeClaudeEnvironment", () => {
     }
   });
 
+  it("routes the packaged-smoke observer through a loopback HTTP proxy for an isolated API-key launch", () => {
+    expect(
+      sanitizeClaudeEnvironment(
+        "api-key",
+        {
+          PATH: "/usr/bin",
+          HOME: "/Users/provider-user",
+          OCTANT_PACKAGED_PROVIDER_SMOKE_CONTROL: "1",
+          OCTANT_CLAUDE_CONNECT_OBSERVER_URL: "http://127.0.0.1:43123",
+        },
+        {
+          apiKey: "broker-resolved-api-key-sentinel",
+          configDirectory: "/Users/provider-user/.claude-accounts/api",
+        },
+      ),
+    ).toMatchObject({
+      HTTP_PROXY: "http://127.0.0.1:43123",
+      HTTPS_PROXY: "http://127.0.0.1:43123",
+      CLAUDE_CONFIG_DIR: "/Users/provider-user/.claude-accounts/api",
+    });
+  });
+
   it("allows only subscription runtime context and preserves the provider-native config location", () => {
     const environment = sanitizeClaudeEnvironment("subscription", hostileHostEnvironment);
 
@@ -129,6 +151,8 @@ describe("makeClaudeEnvironmentScope", () => {
   });
 
   it("owns an empty mode-0700 API config directory and deletes it on release", async () => {
+    const parent = join(homedir(), ".claude-accounts");
+    const createdParent = !existsSync(parent);
     const scope = await Effect.runPromise(Scope.make());
     const acquired = await Effect.runPromise(
       makeClaudeEnvironmentScope("api-key", {
@@ -161,6 +185,7 @@ describe("makeClaudeEnvironmentScope", () => {
 
     await Effect.runPromise(Scope.close(scope, Exit.void));
     expect(existsSync(configDirectory)).toBe(false);
+    if (createdParent) expect(existsSync(parent)).toBe(false);
   });
 
   it("redacts a held API environment object when its scope is released", async () => {
