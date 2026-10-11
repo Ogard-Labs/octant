@@ -4132,11 +4132,6 @@
   overscroll-behavior: contain;
 }
 
-.thread-canvas[data-shown-as="expanded"] .thread-canvas__body:focus-visible {
-  outline: 2px solid var(--octant-focus-ring);
-  outline-offset: -2px;
-}
-
 .thread-canvas__body[data-clipped="true"]:not([data-wheel="canvas"]) {
   /* A mask reads only alpha, so any opaque ink draws the visible part. */
   mask-image: linear-gradient(
