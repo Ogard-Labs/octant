@@ -15,6 +15,8 @@ import {
   orderSchemaBlock,
   supportFlowBlock,
   releaseMindmapBlock,
+  opsDashboardExampleBlocks,
+  releaseHealthBoardExampleBlocks,
 } from "@octant/domain";
 import { DEFAULT_DARK_TOKENS, DEFAULT_LIGHT_TOKENS, getThemePreset } from "@octant/theme";
 import { CanvasDocument } from "./CanvasDocument";
@@ -367,6 +369,8 @@ const longFunnel = chart({
   ],
 });
 
+const dashboardBlocks = [...opsDashboardExampleBlocks, ...releaseHealthBoardExampleBlocks];
+
 const flowBlocks = [
   ...chartExampleBlocks.filter(
     (block) =>
@@ -377,8 +381,9 @@ const flowBlocks = [
   longFunnel,
 ];
 
-// `?only=mockup` draws the mockups alone and `?only=flow` the funnel, radar,
-// and sankey charts alone, so their capture is not a page of every chart.
+// `?only=mockup` draws the mockups alone, `?only=flow` the funnel, radar, and
+// sankey charts alone, and `?only=dashboard` the two example dashboards, so
+// their capture is not a page of every chart.
 const only = new URLSearchParams(window.location.search).get("only");
 
 const definition =
@@ -386,34 +391,37 @@ const definition =
     ? { ...canvasFixture, blocks: mockupBlocks }
     : only === "flow"
       ? { ...canvasFixture, blocks: flowBlocks }
-      : {
-          ...canvasFixture,
-          blocks: [
-            line,
-            bar,
-            area,
-            scatter,
-            distribution,
-            ...chartExampleBlocks,
-            budgetSankey,
-            loneRadar,
-            longFunnel,
-            ...treemapExampleBlocks,
-            ...heatmapExampleBlocks,
-            ...barListExampleBlocks,
-            hotFiles,
-            ...comparisonMatrixExampleBlocks,
-            ...mathExampleBlocks,
-            ...metricExampleBlocks,
-            metric,
-            table,
-            timeline,
-            orderSchemaBlock,
-            supportFlowBlock,
-            releaseMindmapBlock,
-            ...mockupBlocks,
-          ],
-        };
+      : only === "dashboard"
+        ? { ...canvasFixture, blocks: dashboardBlocks }
+        : {
+            ...canvasFixture,
+            blocks: [
+              line,
+              bar,
+              area,
+              scatter,
+              distribution,
+              ...chartExampleBlocks,
+              budgetSankey,
+              loneRadar,
+              longFunnel,
+              ...treemapExampleBlocks,
+              ...heatmapExampleBlocks,
+              ...barListExampleBlocks,
+              hotFiles,
+              ...comparisonMatrixExampleBlocks,
+              ...mathExampleBlocks,
+              ...metricExampleBlocks,
+              metric,
+              table,
+              timeline,
+              orderSchemaBlock,
+              supportFlowBlock,
+              releaseMindmapBlock,
+              ...mockupBlocks,
+              ...dashboardBlocks,
+            ],
+          };
 
 type ChartThemeScenario = "default-light" | "default-dark" | "vivid" | "contrast";
 
