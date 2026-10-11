@@ -49,6 +49,14 @@ Measure:
 5. Record what `CLAUDE_SECURESTORAGE_CONFIG_DIR` does on this build. It
    is already threaded in `claudeEnvironment.ts` and is not listed in
    Anthropic's public environment-variable table fetched on 10 Oct 2026.
+6. Observe whether the login can live in a credential-only path
+   distinct from session history. Anthropic documents
+   `CLAUDE_CONFIG_DIR` as settings, session history, and login
+   together. If `CLAUDE_SECURESTORAGE_CONFIG_DIR` (or another
+   documented location) holds the login independently of session
+   files, record that split. If they cannot be separated, record that
+   the account directory remains the isolation unit: same-account
+   threads share Claude session history.
 
 **Pass.** The unmodified binary signs in on a confined Plan launch from
 Claude-owned storage, and Octant never reads or sets a token.
@@ -140,6 +148,16 @@ does not grant `/usr/bin/security` or the Keychain file unless Step 0
 proved a narrowly scoped lookup is required and still never exposes the
 token to Octant.
 
+If Step 0 showed the login can live in a credential-only directory
+distinct from session history, grant only that credential path plus a
+per-launch config directory. Do not grant the shared session tree to a
+confined Chat subagent or Plan turn that would otherwise read another
+Project's history. If the login is inseparable from the account config
+tree, the account directory remains the isolation unit. Same-account
+threads then share Claude session history; write that limit into 0165
+before implementing it. Do not invent a split the unmodified binary
+does not support.
+
 The person signs in once with unmodified `claude auth login` (Anthropic's
 flow) against that directory. Octant does not read the directory's
 credential file.
@@ -167,6 +185,10 @@ Say so in Settings. Do not reintroduce a setup token.
   store an API key if this is the fallback).
 - The Keychain file and `/usr/bin/security` stay denied unless Step 0
   recorded a scoped exception.
+- A confined grant follows Step 0's credential/session split. If the
+  login is separable, the launch does not receive another Project's
+  session files. If it is not, the account directory is the recorded
+  isolation unit.
 
 ## Step 3 — Telemetry on subscription launches
 

@@ -162,7 +162,12 @@ exception; the product path above does not create that.
   with Anthropic. A test or lint refuses any Octant path that sets
   `CLAUDE_CODE_OAUTH_TOKEN` from Octant storage.
 - Several Claude accounts may land later on the same config-directory
-  mechanism. They are not part of the helper-token remediation.
+  mechanism. They are not part of the helper-token remediation. The
+  isolation unit is the account. If the macOS must-verify shows the
+  login can live apart from session files, confined launches grant
+  only that credential path. If it cannot, same-account threads share
+  Claude session history; that is a recorded limit, not a later
+  invention.
 - User-facing copy stops presenting Claude login as an Octant-owned
   connect step.
 
