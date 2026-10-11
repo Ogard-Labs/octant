@@ -143,6 +143,14 @@ export it.
   or a band to read it; a funnel's table also gives each stage's share of the
   first and of the one before. In a radar or sankey legend, click a name to hide
   that series or step.
+- A table sorts when you click a column header and narrows with **Filter
+  rows**. **Group rows** gathers rows that share a column's value under a
+  header with the row count; click the header, or press Enter or Space on it,
+  to fold or unfold the group, and pick a **Group summary** to add the count,
+  sum, or average of a number column to each header. In **Columns**, hide a
+  column or pin it so it stays at the left while you scroll sideways. None of
+  this changes the Canvas: the agent, exports, and shares keep the table as it
+  was written.
 - A tall Canvas is cut off at a fixed height and fades out. Its button opens
   the whole Canvas in the sidebar, or in its own tab in Chat. Scrolling always
   moves the thread, never the Canvas.
@@ -297,8 +305,8 @@ open, resolved, or all threads. A comment is anchored to a
 block, to a board node, to a sequence participant or message, or to a state
 or its transition, to a comparison matrix's option or criterion, or to a table
 row the agent gave an id. Hover a table row, or move to it with Tab, to comment
-on that row; the comment stays on the row when you sort or filter the table
-and when the agent revises it. Replies,
+on that row; the comment stays on the row when you sort, filter, or group the
+table and when the agent revises it. Replies,
 resolving, and deleting are journaled by the
 host, so they survive restart and reload. Every comment is authored as you,
 with the device it came through noted ("paired device" when it arrived from a

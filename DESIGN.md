@@ -901,8 +901,23 @@ colours they fall to system ink and the plain value remains the reading. A text
 column whose values read as a path uses the shared path style, and a number
 column is right-aligned in tabular numerals. Sorting (each sorted header
 announces its direction with `aria-sort`; hiding the sorted column drops the
-sort), a text filter, and hidden columns are view state and revise nothing, so the exported and static forms keep the order
-the author wrote. The header sticks through a scrolling table. Where comments
+sort), a text filter, hidden and pinned columns, and grouping are view state
+and revise nothing, so the exported and static forms keep the order the author
+wrote; a table stores no default grouping, because which column to group by is
+the reader's question rather than part of the data. **Group rows** groups by any
+column's value: each group is its own row group whose header row is a
+`rowgroup` header holding a disclosure button (`aria-expanded`), the value, and
+its row count, optionally followed by a **Group summary** — the count, sum, or
+average of a number column's filled cells, where an empty cell is not a zero.
+Groups read in the grouped column's order (empty last) and follow its direction
+when it is also the sort; the sort orders rows within each group, and the
+filter applies first, so a count is what the reader can see and a group the
+filter empties is gone. A collapsed group that holds open row threads shows
+their count in its header. **Pin** in the Columns list moves a column to the
+leading edge, after the comment gutter and in the author's order among pinned
+columns, and keeps it there while the table scrolls sideways; pinned cells take
+the gutter's warm surface and a hairline marks the last pinned edge, which
+forced colours draw as a system-ink border. The header sticks through a scrolling table. Where comments
 are available, a row the author gave an `id` carries a comment marker in a
 leading gutter pinned to the left edge, so it stays in view while a wide table
 scrolls sideways; the gutter takes the header's warm surface so the scrolled
