@@ -2178,6 +2178,148 @@ describe("the planner board and proposal as agent tools", () => {
   });
 });
 
+describe("Code tool families", () => {
+  function familyTools(threadOverrides: Partial<CodeThread> = {}) {
+    const ports = {
+      executeOperation: vi.fn(async () => ({}) as never),
+      terminalRead: vi.fn(async () => ({}) as never),
+      browserAct: vi.fn(async () => browserSnapshot(browserAuthority())),
+      browserCreate: vi.fn(async () => browserSnapshot(browserAuthority())),
+      appleExecute: vi.fn(async () => appleEvidence()),
+      appleDiscover: vi.fn(async () => appleDiscovery()),
+      androidExecute: vi.fn(async () => androidEvidence()),
+      androidDiscover: vi.fn(async () => androidDiscovery()),
+    };
+    const device = (execute: unknown, discover: unknown, snapshot: unknown) =>
+      ({
+        resolveAuthority: () => appleAuthority,
+        discover,
+        execute,
+        snapshot: async () => snapshot,
+        requestPaneOpen: async () => snapshot,
+        inputGrantIsOpen: () => false,
+      }) as never;
+    const tools = createCodeAppManagedTools({
+      windowId,
+      thread: thread(threadOverrides),
+      readThread: () => thread(threadOverrides),
+      uuid: uuidFactory(),
+      executeOperation: ports.executeOperation,
+      terminal: { read: ports.terminalRead },
+      browser: {
+        resolveAuthority: () => browserAuthority(),
+        inspectThread: () => browserSnapshot(browserAuthority()),
+        create: ports.browserCreate,
+        act: ports.browserAct,
+        releaseThread: vi.fn(),
+      },
+      apple: device(ports.appleExecute, ports.appleDiscover, appleSnapshot()),
+      android: device(ports.androidExecute, ports.androidDiscover, androidSnapshot()),
+    });
+    return { tools, ports };
+  }
+
+  it("keeps the always-visible Code tool prefix smaller than the catalogue it replaced", () => {
+    const { tools } = familyTools();
+    const families = tools.definitions.filter((definition) =>
+      ["octant_browser", "octant_terminal", "octant_apple", "octant_android"].includes(
+        definition.name,
+      ),
+    );
+    expect(families).toHaveLength(4);
+    // These four definitions serialized to 6,580 bytes before their detailed
+    // usage moved behind help. The budget catches a description growing back.
+    expect(JSON.stringify(families).length).toBeLessThanOrEqual(4_400);
+  });
+
+  it.each(["octant_browser", "octant_terminal", "octant_apple", "octant_android"])(
+    "returns %s's full usage from help without touching the host",
+    async (name) => {
+      const { tools, ports } = familyTools({ executionPolicy: "plan" });
+      const definition = tools.definitions.find((candidate) => candidate.name === name);
+      if (definition === undefined) throw new Error(`Expected ${name} to be offered.`);
+      const operations = (
+        definition.inputSchema as { properties: { operation: { enum: ReadonlyArray<string> } } }
+      ).properties.operation.enum;
+      expect(operations).toContain("help");
+
+      const outcome = await tools.execute({ name, inputJson: '{"operation":"help"}' });
+
+      expect(outcome.isError).toBe(false);
+      const help = (outcome.result as { help: string }).help;
+      expect(help.length).toBeGreaterThan(definition.description?.length ?? 0);
+      for (const port of Object.values(ports)) expect(port).not.toHaveBeenCalled();
+    },
+  );
+
+  it("still refuses an effect under a denied posture after help answered", async () => {
+    const { tools, ports } = familyTools({ executionPolicy: "plan" });
+
+    await tools.execute({ name: "octant_browser", inputJson: '{"operation":"help"}' });
+    const navigated = await tools.execute({
+      name: "octant_browser",
+      inputJson: JSON.stringify({ operation: "navigate", url: "https://example.com" }),
+    });
+    const booted = await tools.execute({
+      name: "octant_apple",
+      inputJson: JSON.stringify({ operation: "boot", simulatorId }),
+    });
+    const ran = await tools.execute({
+      name: CODE_TERMINAL_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "run", command: "ls" }),
+    });
+
+    expect(navigated).toEqual({ result: { error: "plan-mode-read-only" }, isError: true });
+    expect(booted.result).toMatchObject({ error: "plan-mode-read-only" });
+    expect(ran.isError).toBe(true);
+    expect(ports.browserCreate).not.toHaveBeenCalled();
+    expect(ports.browserAct).not.toHaveBeenCalled();
+    expect(ports.appleExecute).not.toHaveBeenCalled();
+    expect(ports.executeOperation).not.toHaveBeenCalled();
+  });
+
+  it("records no external content when help answers on a tainting thread", async () => {
+    const record = vi.fn();
+    const tools = createCodeAppManagedTools({
+      windowId,
+      thread: thread(),
+      readThread: () => thread(),
+      uuid: uuidFactory(),
+      executeOperation: vi.fn(),
+      terminal: { read: vi.fn() },
+      recordExternalContentIngestion: record,
+    });
+
+    const outcome = await tools.execute({
+      name: CODE_TERMINAL_TOOL_NAME,
+      inputJson: '{"operation":"help"}',
+    });
+
+    expect(outcome.isError).toBe(false);
+    expect(record).not.toHaveBeenCalled();
+  });
+
+  it("omits the browser family when the host lends no browser", async () => {
+    const tools = createCodeAppManagedTools({
+      windowId,
+      thread: thread(),
+      readThread: () => thread(),
+      uuid: uuidFactory(),
+      executeOperation: vi.fn(),
+      terminal: { read: vi.fn() },
+    });
+
+    expect(tools.definitions.map((definition) => definition.name)).not.toContain(
+      CODE_BROWSER_TOOL_NAME,
+    );
+    const outcome = await tools.execute({
+      name: CODE_BROWSER_TOOL_NAME,
+      inputJson: '{"operation":"help"}',
+    });
+    expect(outcome.isError).toBe(true);
+  });
+});
+
 function thread(overrides: Partial<CodeThread> = {}): CodeThread {
   return {
     id: threadId,

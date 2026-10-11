@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import type { ExternalContentIngestionResult } from "../context/externalContentIngestionStore";
 import { taintAppManagedToolResults } from "./appManagedToolTaint";
-import type { AppManagedToolSet } from "./appManagedToolSet";
+import { withToolFamilyHelp, type AppManagedToolSet } from "./appManagedToolSet";
+import { COMPUTER_USE_TOOL_HELP } from "../plugins/computerUse/computerUsePlugin";
 
 const threadId = "20000000-0000-4000-8000-000000000001";
 const correlationId = "30000000-0000-4000-8000-000000000001";
@@ -95,5 +96,41 @@ describe("taintAppManagedToolResults", () => {
       isError: true,
     });
     expect(record).not.toHaveBeenCalled();
+  });
+
+  it("records no external content for family help answered outside the taint wrapper", async () => {
+    // The host composes Computer use as help around taint, so host-authored
+    // guidance never marks the thread and forces fresh app confirmations.
+    const record = vi.fn(
+      (): ExternalContentIngestionResult => ({
+        kind: "recorded",
+        taint: { externalContentIngested: true, ingestedSources: ["octant_computer"] },
+      }),
+    );
+    const execute = vi.fn(async () => ({ result: { kind: "apps", apps: [] }, isError: false }));
+    const composed = withToolFamilyHelp(
+      taintAppManagedToolResults({
+        tools: {
+          definitions: [{ name: "octant_computer", inputSchema: { type: "object" } }],
+          execute,
+        },
+        threadId,
+        recordExternalContentIngestion: record,
+        uuid: () => correlationId,
+      }),
+      COMPUTER_USE_TOOL_HELP,
+    );
+
+    const help = await composed.execute({
+      name: "octant_computer",
+      inputJson: '{"operation":"help"}',
+    });
+    expect(help.isError).toBe(false);
+    expect((help.result as { help: string }).help).toContain("observationId");
+    expect(record).not.toHaveBeenCalled();
+    expect(execute).not.toHaveBeenCalled();
+
+    await composed.execute({ name: "octant_computer", inputJson: '{"operation":"apps"}' });
+    expect(record).toHaveBeenCalledOnce();
   });
 });

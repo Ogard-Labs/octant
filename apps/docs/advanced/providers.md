@@ -448,6 +448,18 @@ turn. Readiness is validated before the change is recorded, thread identity
 and history are preserved with change provenance, and an active provider turn
 ends with the honest state **"Provider turn interrupted."**
 
+In a Code thread that has already had a reply, the same provider keeps its
+session: you can pick another of its models only when that provider can carry
+the session over. Choosing a **different provider** starts a new session on
+the next message. Octant hands over up to 23 recent messages from the thread
+as text, each labelled with the provider and model it came from, and says so
+under the composer before you send. The previous provider's session and its
+hidden reasoning, tool activity and attachments do not transfer. The reply
+then shows how many messages were handed over and which were left out, for
+example older messages, messages no longer stored, or messages too large to
+read. If nothing readable is left to hand over, the message is refused with
+the reason, and you can switch back or start a new task.
+
 ## Effort, reasoning and speed
 
 Chat also offers these levels on its start screen, before the first message.

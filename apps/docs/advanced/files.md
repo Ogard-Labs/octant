@@ -143,6 +143,12 @@ export it.
   or a band to read it; a funnel's table also gives each stage's share of the
   first and of the one before. In a radar or sankey legend, click a name to hide
   that series or step.
+- A dashboard lays headline numbers, status lights, progress, charts, and
+  tables out as a grid of tiles under its own title. On a wide Canvas the tiles
+  sit side by side; in the sidebar or on a phone they stack in one column, in
+  the same order you read and Tab through them. Every chart in a dashboard
+  still has **View chart data**, and you can comment on the dashboard or on any
+  tile in it.
 - A table sorts when you click a column header and narrows with **Filter
   rows**. **Group rows** gathers rows that share a column's value under a
   header with the row count; click the header, or press Enter or Space on it,
@@ -313,7 +319,7 @@ with the device it came through noted ("paired device" when it arrived from a
 paired phone or browser). A comment whose block has since left the canvas is
 kept and marked rather than dropped, and so is one whose table row was removed. Shared snapshots never include comments.
 A shared snapshot keeps every block, including charts (funnels, radars, and
-sankeys too), tables, treemaps,
+sankeys too), dashboards, tables, treemaps,
 heatmaps, bar lists, comparison matrices, and formulas, with their number formats. A design, or an action block
 that runs a command on this Mac, stops a share: Share then says the canvas
 cannot be shared safely.

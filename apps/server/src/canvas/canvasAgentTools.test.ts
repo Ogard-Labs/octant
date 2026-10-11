@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { decodeCanvasBlock } from "@octant/contracts";
+import { CANVAS_SCHEMA_VERSION, decodeCanvasBlock } from "@octant/contracts";
+import { validateCanvasDefinition } from "@octant/domain/canvas-policy";
 import { createManagedMcpTools } from "../providers/managedMcpTools";
 import {
   CANVAS_TOOL_NAME,
@@ -591,6 +592,46 @@ describe("createCanvasAgentTools", () => {
     const blocks = examples.map((example) => decodeCanvasBlock(example));
     expect(blocks.every((block) => block.kind === "metric")).toBe(true);
     expect(examples[1]).toMatchObject({ kind: "metric", goodDirection: "up", format: "compact" });
+  });
+
+  it("describes a dashboard with an ops dashboard and a release health board that validate as written", async () => {
+    const { set } = tools();
+    const described = await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "describe", blockKinds: ["dashboard"] }),
+    });
+
+    expect(described.isError).not.toBe(true);
+    const result = described.result as {
+      examples?: ReadonlyArray<Record<string, unknown>>;
+    };
+    const examples = result.examples ?? [];
+    const dashboards = examples.filter((example) => example.kind === "dashboard");
+    expect(dashboards.map((example) => example.title)).toEqual([
+      "Service health",
+      "Release 4.2 health",
+    ]);
+    // Each dashboard arrives with the blocks it places, so the examples
+    // validate as one document an agent can copy.
+    const blocks = examples.map((example) => decodeCanvasBlock(example));
+    expect(() =>
+      validateCanvasDefinition({
+        schemaVersion: CANVAS_SCHEMA_VERSION,
+        title: "Dashboards",
+        provenance: {
+          mode: "chat",
+          hostId: "local",
+          projectId: "22222222-2222-4222-8222-222222222222",
+          threadId: "33333333-3333-4333-8333-333333333333",
+          actor: { kind: "local-user", actorId: "55555555-5555-4555-8555-555555555555" },
+          providerInstanceId: "44444444-4444-4444-8444-444444444444",
+          modelId: "octant-test-model",
+          createdAt: "2026-08-01T21:00:00.000Z",
+        },
+        sourceManifest: [],
+        blocks,
+      }),
+    ).not.toThrow();
   });
 
   it("lets an agent create and then revise a settings screen mockup from the example describe returns", async () => {

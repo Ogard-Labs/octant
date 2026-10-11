@@ -22,6 +22,7 @@ import {
   decodeBrowserAutomationSnapshot,
   decodeToolActionAuthority,
   type CodeOperationEventFrame as OperationFrame,
+  type CodeOperationId,
   type CodeRuntimeWork,
   type CodeThread,
   type CodeThreadId,
@@ -55,7 +56,9 @@ import {
   CodeProjection,
   readCodeRuntimeWorks,
   readCodeRuntimeWorkAggregateVersion,
+  readCodeThreadActivity,
 } from "../persistence/codeProjection";
+import { admittedParentCodeContext } from "../agentRun/agentRunParentContext";
 import {
   CODE_OPERATION_EVENT_RECORDED,
   CodeOperationEventStore,
@@ -3578,6 +3581,386 @@ describe("managed Code creation approval", () => {
   });
 });
 
+describe("provider switch handoff", () => {
+  const providerInstance = thread().providerInstanceId;
+  const harnessInstance = decodeCodeThread({
+    ...thread(),
+    providerInstanceId: "90000000-0000-4000-8000-000000000010",
+  }).providerInstanceId;
+
+  function onProvider(instanceId: CodeThread["providerInstanceId"], modelId: string, version = 1) {
+    return decodeCodeThread({ ...thread(), providerInstanceId: instanceId, modelId, version });
+  }
+
+  function eventOn(
+    instanceId: CodeThread["providerInstanceId"],
+    value: { kind: ProviderRuntimeEvent["kind"] } & Record<string, unknown>,
+  ): ProviderRuntimeEvent {
+    return { ...providerEvent(value), instanceId } as ProviderRuntimeEvent;
+  }
+
+  /** A provider-owned session and an Octant Harness session, each behind its own fake driver. */
+  function twoHarnesses() {
+    const providerQueue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const harnessQueue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const provider = providerConnection(providerQueue);
+    const harness = {
+      ...providerConnection(harnessQueue),
+      start: vi.fn((input: ProviderSessionStart) =>
+        Effect.succeed<ProviderSessionHandle>({
+          sessionId: input.sessionId,
+          resumeCursor: { driverKind: "openai-compatible", value: "harness-transcript" },
+        }),
+      ),
+    } as ProviderConnection;
+    const queues = new Map([
+      [String(providerInstance), providerQueue],
+      [String(harnessInstance), harnessQueue],
+    ]);
+    const connections = new Map([
+      [String(providerInstance), provider],
+      [String(harnessInstance), harness],
+    ]);
+    return {
+      provider,
+      harness,
+      connection: (instanceId: CodeThread["providerInstanceId"]) =>
+        connections.get(String(instanceId))!,
+      offer: (instanceId: CodeThread["providerInstanceId"], event: ProviderRuntimeEvent) =>
+        Effect.runPromise(Queue.offer(queues.get(String(instanceId))!, event)),
+      resolveProviderDriver: async (current: CodeThread) =>
+        providerDriver(connections.get(String(current.providerInstanceId))!),
+    };
+  }
+
+  /** One finished turn on the thread's current provider, with a reply. */
+  async function finishFirstTurn(
+    fixture: ReturnType<typeof runtimeFixture>,
+    drivers: ReturnType<typeof twoHarnesses>,
+    instanceId: CodeThread["providerInstanceId"],
+  ) {
+    await fixture.runtime.execute(windowId, {
+      kind: "start-provider-turn",
+      operationId: operationId(84),
+      threadId,
+      checkoutId,
+      sessionId,
+      prompt: fixture.prompt,
+    });
+    const connection = drivers.connection(instanceId);
+    await vi.waitFor(() => expect(connection.send).toHaveBeenCalledTimes(1));
+    await drivers.offer(
+      instanceId,
+      eventOn(instanceId, { kind: "text-delta", text: "First reply." }),
+    );
+    await drivers.offer(instanceId, eventOn(instanceId, { kind: "completed" }));
+    await vi.waitFor(() => expect(connection.stop).toHaveBeenCalledOnce());
+  }
+
+  const switchSession = decodeProviderSessionId("90000000-0000-4000-8000-000000000085");
+
+  async function sendAfterSwitch(fixture: ReturnType<typeof runtimeFixture>) {
+    const nextPrompt = storedEvidence(86, "Carry on.");
+    fixture.evidenceValues.set(nextPrompt.contentId, "Carry on.");
+    return fixture.runtime.execute(windowId, {
+      kind: "start-provider-turn",
+      operationId: operationId(85),
+      threadId,
+      checkoutId,
+      sessionId: switchSession,
+      prompt: nextPrompt,
+    });
+  }
+
+  it.each([
+    {
+      direction: "from a provider's session to the Octant Harness",
+      from: providerInstance,
+      fromModel: "model-a",
+      to: harnessInstance,
+      toModel: "harness-model",
+    },
+    {
+      direction: "from the Octant Harness to a provider's session",
+      from: harnessInstance,
+      fromModel: "harness-model",
+      to: providerInstance,
+      toModel: "model-a",
+    },
+  ])(
+    "starts a new session with a journaled, disclosed handoff $direction",
+    async ({ from, fromModel, to, toModel }) => {
+      const drivers = twoHarnesses();
+      const fixture = runtimeFixture({
+        resolveProviderDriver: drivers.resolveProviderDriver,
+        externalContentIngested: true,
+      });
+      fixture.setThread(onProvider(from, fromModel));
+      try {
+        await finishFirstTurn(fixture, drivers, from);
+        fixture.setThread(onProvider(to, toModel, 2));
+
+        await sendAfterSwitch(fixture);
+        const next = drivers.connection(to);
+        await vi.waitFor(() => expect(next.send).toHaveBeenCalledOnce());
+
+        // A new session: the previous provider's session is never resumed on
+        // another provider, and its identity is not handed to the new one.
+        expect(next.resume).not.toHaveBeenCalled();
+        expect(next.start).toHaveBeenCalledOnce();
+        expect(next.start).toHaveBeenCalledWith(
+          expect.not.objectContaining({ resumeCursor: expect.anything() }),
+        );
+        const context = vi.mocked(next.send).mock.calls[0]![0].context ?? [];
+        const texts = context.map((block) => block.text);
+        expect(texts[0]).toContain("handed over because the thread moved to a different provider");
+        expect(texts[0]).toContain("hidden reasoning were not transferred");
+        expect(texts[0]).toContain('"externalContentIngested":true');
+        expect(context.slice(1, 3)).toEqual([
+          expect.objectContaining({
+            kind: "user-message",
+            text: expect.stringContaining("Implement this."),
+          }),
+          expect.objectContaining({
+            kind: "assistant-message",
+            text: expect.stringContaining("First reply."),
+          }),
+        ]);
+        // Each message names the provider and model it came from.
+        expect(texts[2]).toContain(`"providerInstanceId":"${String(from)}"`);
+        // The switching turn's own prompt is the prompt, never also history.
+        expect(texts.some((text) => text.includes("Carry on."))).toBe(false);
+
+        const frames = await fixture.runtime.subscribe(windowId, threadId, operationId(85), 0, 50);
+        const kinds = frames.map((frame) => frame.event.kind);
+        expect(kinds.indexOf("context-handoff-attached")).toBeGreaterThan(-1);
+        expect(kinds.indexOf("context-handoff-attached")).toBeLessThan(
+          kinds.indexOf("provider-session-ready"),
+        );
+        const handoff = frames.find((frame) => frame.event.kind === "context-handoff-attached");
+        expect(handoff?.event).toMatchObject({
+          reason: "provider-switch",
+          previousProviderInstanceId: from,
+          previousModelId: fromModel,
+          previousSessionId: sessionId,
+          providerInstanceId: to,
+          modelId: toModel,
+          messages: 2,
+          externalContentIngested: true,
+          nativeSessionTransferred: false,
+          hiddenReasoningTransferred: false,
+        });
+        // The journal names the handed-over text by content reference, and
+        // that text is exactly what the provider was sent.
+        const reference =
+          handoff?.event.kind === "context-handoff-attached" ? handoff.event.content : undefined;
+        expect(JSON.parse(fixture.evidenceValues.get(reference!.contentId) ?? "[]")).toEqual(
+          context.slice(0, 3),
+        );
+
+        const page = fixture.conversation();
+        expect(page.turns[0]?.handoff).toBeUndefined();
+        expect(page.turns[1]?.handoff).toMatchObject({
+          previousProviderInstanceId: from,
+          messages: 2,
+          omissions: { missingBodies: 0, oversizedBodies: 0 },
+        });
+      } finally {
+        await fixture.runtime.close();
+        fixture.close();
+      }
+    },
+  );
+
+  it("discloses a purged reply as left out rather than handing over a shorter history", async () => {
+    const drivers = twoHarnesses();
+    const fixture = runtimeFixture({ resolveProviderDriver: drivers.resolveProviderDriver });
+    try {
+      await finishFirstTurn(fixture, drivers, providerInstance);
+      const reply = fixture.conversation().turns[0]?.assistant[0];
+      fixture.evidenceValues.delete(reply!.contentId);
+      fixture.setThread(onProvider(harnessInstance, "harness-model", 2));
+
+      await sendAfterSwitch(fixture);
+      await vi.waitFor(() => expect(drivers.harness.send).toHaveBeenCalledOnce());
+      const context = vi.mocked(drivers.harness.send).mock.calls[0]![0].context ?? [];
+      expect(context[0]?.text).toContain('"missingBodies":1');
+      expect(fixture.conversation().turns[1]?.handoff).toMatchObject({
+        messages: 1,
+        omissions: { missingBodies: 1 },
+      });
+    } finally {
+      await fixture.runtime.close();
+      fixture.close();
+    }
+  });
+
+  it.each([
+    {
+      reason: "a host that cannot read the conversation",
+      providerSwitchContext: "none" as const,
+      message: "cannot hand a task's conversation to another provider",
+    },
+    {
+      reason: "a read that returned another thread's conversation",
+      providerSwitchContext: () => ({
+        status: "available" as const,
+        blocks: [{ kind: "conversation-summary" as const, text: "other" }],
+        source: {
+          mode: "code" as const,
+          threadId: "90000000-0000-4000-8000-000000000099",
+          projectId: String(thread().projectId),
+          threadVersion: 1,
+          externalContentIngested: false,
+          point: {},
+        },
+        omissions: {
+          earlierMessages: 0,
+          unfinishedReplies: 0,
+          missingBodies: 0,
+          oversizedBodies: 0,
+          emptyBodies: 0,
+          attachments: 0,
+          truncatedMessages: 0,
+          truncatedCharacters: 0,
+          sourceTruncatedMessages: 0,
+        },
+      }),
+      message: "does not belong to this task",
+    },
+    {
+      reason: "a read refused for another Project",
+      providerSwitchContext: () => ({
+        status: "unavailable" as const,
+        reason: "foreign-project" as const,
+      }),
+      message: "does not belong to this task's Project",
+    },
+  ])(
+    "refuses the switch with a named reason, sending nothing, for $reason",
+    async ({ providerSwitchContext, message }) => {
+      const drivers = twoHarnesses();
+      const fixture = runtimeFixture({
+        resolveProviderDriver: drivers.resolveProviderDriver,
+        providerSwitchContext,
+      });
+      try {
+        await finishFirstTurn(fixture, drivers, providerInstance);
+        fixture.setThread(onProvider(harnessInstance, "harness-model", 2));
+
+        const result = await sendAfterSwitch(fixture);
+        expect(result).toMatchObject({
+          state: "failed",
+          failure: { message: expect.stringContaining(message) },
+        });
+        expect(drivers.harness.start).not.toHaveBeenCalled();
+        expect(drivers.harness.send).not.toHaveBeenCalled();
+        const frames = await fixture.runtime.subscribe(windowId, threadId, operationId(85), 0, 50);
+        expect(frames.some((frame) => frame.event.kind === "context-handoff-attached")).toBe(false);
+      } finally {
+        await fixture.runtime.close();
+        fixture.close();
+      }
+    },
+  );
+
+  it("refuses the switch when every earlier message has been purged", async () => {
+    const drivers = twoHarnesses();
+    const fixture = runtimeFixture({ resolveProviderDriver: drivers.resolveProviderDriver });
+    try {
+      await finishFirstTurn(fixture, drivers, providerInstance);
+      const first = fixture.conversation().turns[0];
+      fixture.evidenceValues.delete(first!.prompt.contentId);
+      fixture.evidenceValues.delete(first!.assistant[0]!.contentId);
+      fixture.setThread(onProvider(harnessInstance, "harness-model", 2));
+
+      const result = await sendAfterSwitch(fixture);
+      expect(result).toMatchObject({
+        state: "failed",
+        failure: { message: expect.stringContaining("no readable messages to hand") },
+      });
+      expect(drivers.harness.send).not.toHaveBeenCalled();
+    } finally {
+      await fixture.runtime.close();
+      fixture.close();
+    }
+  });
+
+  it("reads a journaled handoff back after a restart instead of choosing it again", async () => {
+    const drivers = twoHarnesses();
+    // The new session opens and the handoff is journaled, but the prompt never
+    // goes out and nothing streams back: what a host exit at that moment leaves.
+    const stalledQueue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const stalledConnection = {
+      ...providerConnection(stalledQueue),
+      send: vi.fn(() => Effect.never),
+    } as ProviderConnection;
+    const stalled = providerDriver(stalledConnection);
+    const firstSelection = vi.fn((input: Parameters<typeof selectThreadConversation>[1]) =>
+      selectThreadConversation(fixture, input),
+    );
+    const fixture = runtimeFixture({
+      resolveProviderDriver: async (current) =>
+        String(current.providerInstanceId) === String(harnessInstance)
+          ? stalled
+          : drivers.resolveProviderDriver(current),
+      providerSwitchContext: (input) => firstSelection(input),
+    });
+    const restartedDrivers = twoHarnesses();
+    const restartedSelection = vi.fn(() => ({
+      status: "unavailable" as const,
+      reason: "source-changed" as const,
+    }));
+    let restarted: ReturnType<typeof runtimeFixture> | undefined;
+    try {
+      await finishFirstTurn(fixture, drivers, providerInstance);
+      fixture.setThread(onProvider(harnessInstance, "harness-model", 2));
+      await sendAfterSwitch(fixture);
+      await vi.waitFor(async () => {
+        const frames = await fixture.runtime.subscribe(windowId, threadId, operationId(85), 0, 50);
+        expect(frames.some((frame) => frame.event.kind === "context-handoff-attached")).toBe(true);
+      });
+      expect(firstSelection).toHaveBeenCalledOnce();
+      const journaled = vi.mocked(firstSelection).mock.results[0]?.value;
+
+      restarted = runtimeFixture({
+        resolveProviderDriver: restartedDrivers.resolveProviderDriver,
+        providerSwitchContext: restartedSelection,
+        restartOf: { directory: fixture.directory, evidenceValues: fixture.evidenceValues },
+      });
+      restarted.setThread(onProvider(harnessInstance, "harness-model", 2));
+      await sendAfterSwitch(restarted);
+      await vi.waitFor(() => expect(restartedDrivers.harness.send).toHaveBeenCalledOnce());
+
+      // The recovered start sends the handoff first disclosed, without reading
+      // the conversation again, and journals no second handoff.
+      expect(restartedSelection).not.toHaveBeenCalled();
+      const context = vi.mocked(restartedDrivers.harness.send).mock.calls[0]![0].context ?? [];
+      expect(context.slice(0, journaled.blocks.length)).toEqual(journaled.blocks);
+      const frames = await restarted.runtime.subscribe(windowId, threadId, operationId(85), 0, 50);
+      expect(
+        frames.filter((frame) => frame.event.kind === "context-handoff-attached"),
+      ).toHaveLength(1);
+      expect(
+        restarted.conversation().turns.filter((turn) => turn.handoff !== undefined),
+      ).toHaveLength(1);
+    } finally {
+      await restarted?.runtime.close();
+      restarted?.close();
+      await fixture.runtime.close();
+      fixture.close();
+    }
+  });
+});
+
+/** The host's own selector over a fixture's journal, as a provider switch reads it. */
+function selectThreadConversation(
+  fixture: ReturnType<typeof runtimeFixture>,
+  input: { readonly thread: CodeThread; readonly excludeOperationId: CodeOperationId },
+) {
+  return fixture.selectConversation(input);
+}
+
 function runtimeFixture(options: {
   provider?: ProviderDriver | undefined;
   browserAutomation?: Parameters<typeof createCodeOperationRuntime>[0]["browserAutomation"];
@@ -3645,9 +4028,21 @@ function runtimeFixture(options: {
     content: string,
     metadata?: { readonly truncated?: boolean },
   ) => ReturnType<typeof storedEvidence>;
+  /**
+   * How a provider switch reads the thread's conversation: the host's own
+   * selector over this journal (the default), a stand-in, or nothing.
+   */
+  providerSwitchContext?:
+    | Parameters<typeof createCodeOperationRuntime>[0]["providerSwitchContext"]
+    | "none";
+  /** Whether the selector reports the thread as having taken in outside content. */
+  externalContentIngested?: boolean;
+  /** Reopen another fixture's journal and content, the way a restarted host does. */
+  restartOf?: { readonly directory: string; readonly evidenceValues: Map<string, string> };
 }) {
-  const directory = mkdtempSync(join(tmpdir(), "octant-code-runtime-"));
-  directories.push(directory);
+  const directory =
+    options.restartOf?.directory ?? mkdtempSync(join(tmpdir(), "octant-code-runtime-"));
+  if (options.restartOf === undefined) directories.push(directory);
   const connection = openSqlite(join(directory, "events.sqlite3"));
   applyMigrations(connection, MIGRATIONS, () => now);
   const journal = new Journal({
@@ -3693,12 +4088,15 @@ function runtimeFixture(options: {
   const access = vi.fn(async () => options.projectAccess ?? true);
   const prompt = evidence(40);
   const response = evidence(41);
-  const evidenceValues = new Map([
-    [prompt.contentId, "Implement this."],
-    [response.contentId, "A"],
-  ]);
+  const evidenceValues =
+    options.restartOf?.evidenceValues ??
+    new Map([
+      [prompt.contentId, "Implement this."],
+      [response.contentId, "A"],
+    ]);
   let evidenceCounter = 50;
-  let uuidCounter = 100;
+  // A restarted host mints new event identities, never the first host's again.
+  let uuidCounter = options.restartOf === undefined ? 100 : 10_000;
   const feedbackCrop = `data:image/png;base64,${Buffer.from("captured image").toString("base64")}`;
   const feedback = new ProductFeedbackService({
     journal,
@@ -3722,6 +4120,29 @@ function runtimeFixture(options: {
   });
   const runtimeWorkFailures: string[] = [];
   let exitTerminal: (() => void) | undefined;
+  const conversationReader = new CodeOperationEventStore({
+    journal,
+    uuid: () => "",
+    clock: () => now,
+    actor,
+  });
+  const selectConversation = (input: {
+    readonly thread: CodeThread;
+    readonly excludeOperationId: CodeOperationId;
+  }) =>
+    admittedParentCodeContext({
+      threadId: input.thread.id,
+      purpose: "provider-switch",
+      excludeOperationId: String(input.excludeOperationId),
+      externalContentIngested: options.externalContentIngested ?? false,
+      readThread: (id) => (id === threadId ? activeThread : undefined),
+      readActivity: (id) =>
+        readCodeThreadActivity(connection).find(
+          (activity) => String(activity.threadId) === String(id),
+        ),
+      conversation: (page) => conversationReader.conversation(page),
+      readEvidence: (reference) => evidenceValues.get(reference.contentId),
+    });
   const runtime = createCodeOperationRuntime({
     persistence: {
       journal,
@@ -3774,6 +4195,9 @@ function runtimeFixture(options: {
     ...(options.supportsModelSwitch === undefined
       ? {}
       : { supportsModelSwitch: () => options.supportsModelSwitch ?? false }),
+    ...(options.providerSwitchContext === "none"
+      ? {}
+      : { providerSwitchContext: options.providerSwitchContext ?? selectConversation }),
     credentialResolver: options.credentialResolver ?? { resolve: async () => options.credential },
     supportsAttachments: () => true,
     takeProductFeedbackForTurn: createProductFeedbackTurnPort({ service: feedback }),
@@ -3899,6 +4323,9 @@ function runtimeFixture(options: {
     prompt,
     response,
     evidenceValues,
+    directory,
+    selectConversation,
+    conversation: () => conversationReader.conversation({ threadId, afterCursor: 0, limit: 100 }),
     setThread: (next: CodeThread) => {
       activeThread = next;
     },

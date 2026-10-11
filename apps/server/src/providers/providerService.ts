@@ -199,6 +199,12 @@ export interface ProviderServiceOptions {
   readonly clearResumeIdentities?: (instanceId: ProviderInstanceId) => Promise<void>;
   /** Removes the long-lived Claude for helpers token a removed Claude provider held. */
   readonly clearClaudeHelperSignIn?: (instanceId: ProviderInstanceId) => Promise<void>;
+  /**
+   * Deletes the API key stored for a provider instance. Called before an
+   * endpoint's base URL changes, because the key is stored by instance and
+   * would otherwise be sent to whatever server the new URL names.
+   */
+  readonly clearProviderCredential?: (instanceId: ProviderInstanceId) => Promise<void>;
   /** Clears process-local provider limit evidence when identity/configuration changes. */
   readonly clearRuntimeUsageLimits?: (instanceId: ProviderInstanceId) => void;
   readonly runCliUpdate?: (input: ProviderCliUpdateInput) => Promise<ProviderCliUpdateOutput>;
@@ -232,6 +238,7 @@ export class ProviderService implements ProviderServiceApi {
   readonly #clearResumeIdentities: ProviderServiceOptions["clearResumeIdentities"];
   readonly #clearClaudeHelperSignIn: ProviderServiceOptions["clearClaudeHelperSignIn"];
   readonly #clearRuntimeUsageLimits: ProviderServiceOptions["clearRuntimeUsageLimits"];
+  readonly #clearProviderCredential: ProviderServiceOptions["clearProviderCredential"];
   readonly #runCliUpdate: (input: ProviderCliUpdateInput) => Promise<ProviderCliUpdateOutput>;
   readonly #isProviderExecutableAvailable: (instance: ProviderInstance) => boolean;
 
@@ -267,6 +274,7 @@ export class ProviderService implements ProviderServiceApi {
     this.#clearResumeIdentities = options.clearResumeIdentities;
     this.#clearClaudeHelperSignIn = options.clearClaudeHelperSignIn;
     this.#clearRuntimeUsageLimits = options.clearRuntimeUsageLimits;
+    this.#clearProviderCredential = options.clearProviderCredential;
     this.#runCliUpdate = options.runCliUpdate ?? runProviderCliUpdate;
     this.#isProviderExecutableAvailable = options.isProviderExecutableAvailable ?? (() => true);
   }
@@ -1175,6 +1183,9 @@ export class ProviderService implements ProviderServiceApi {
           }
           eventName = "provider.instance-enabled-changed@1";
         }
+        if (credentialEndpoint(current) !== credentialEndpoint(instance)) {
+          await this.#forgetCredentialForOldEndpoint(current.id);
+        }
         this.#appendInstance(command.expectedVersion, eventName, instance);
         const authoritative = this.#authoritativeInstance(instance);
         if (
@@ -1822,6 +1833,24 @@ export class ProviderService implements ProviderServiceApi {
     return this.#unavailable();
   }
 
+  /**
+   * A key is entered for one server. Changing the base URL kept it, so the
+   * next probe or turn sent it to the new server. It is deleted before the
+   * change is journaled: if it cannot be deleted the change is refused, and
+   * if the change then fails the person enters the key again.
+   */
+  async #forgetCredentialForOldEndpoint(instanceId: ProviderInstanceId): Promise<void> {
+    if (this.#clearProviderCredential === undefined) return;
+    try {
+      await this.#clearProviderCredential(instanceId);
+    } catch {
+      throw new ProviderServiceError({
+        category: "unavailable",
+        message: "The stored key could not be removed, so the base URL was not changed. Try again.",
+      });
+    }
+  }
+
   #invalid(message: string): ProviderServiceError {
     return new ProviderServiceError({ category: "invalid-configuration", message });
   }
@@ -1835,6 +1864,21 @@ export class ProviderService implements ProviderServiceApi {
       category: "unavailable",
       message: "Octant Provider service is unavailable.",
     });
+  }
+}
+
+/**
+ * The base URL a stored key is sent to, for the endpoint profiles whose key the
+ * host keeps by instance. Ollama also has a base URL but sends no key.
+ */
+function credentialEndpoint(instance: ProviderInstance): string | undefined {
+  switch (instance.driverKind) {
+    case "openai-compatible":
+    case "anthropic-compatible":
+    case "azure-foundry":
+      return instance.configuration.baseUrl;
+    default:
+      return undefined;
   }
 }
 
