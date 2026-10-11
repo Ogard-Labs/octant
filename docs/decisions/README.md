@@ -200,8 +200,9 @@ PRs, and external links resolve. Their `Proposed`, `Accepted`, `Superseded`, and
 does not edit, supersede, or re-label a record.
 
 `bun run decisions:check` keeps the archive intact: numbering, sections, index
-agreement, references from current specifications, and the identities of
-accepted records. It refuses a record numbered after 0164. It does not compare
+agreement, and references from current specifications. It refuses a record
+numbered outside 0001–0164, and an archived record that was edited, renamed, or
+removed. It does not compare
 old decisions with current specifications or prove implementation compliance.
 Its history check explicitly skips when the clone lacks a usable base;
 `OCTANT_DECISIONS_BASE` selects another base.

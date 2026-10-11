@@ -73,8 +73,8 @@ accounts for TestFlight / Play internal tracks in Phase B stay allowed.
 
 Implementation of any phase may leave Backlog only when that phase has:
 
-1. A Proposed or Accepted decision (or a scoped extension of 0013) for its
-   controls.
+1. An architecture update that documents its controls, extending the
+   remote-access rules.
 2. Threat-model coverage for new device sensors or push.
 3. An explicit maintainer request naming the phase.
 

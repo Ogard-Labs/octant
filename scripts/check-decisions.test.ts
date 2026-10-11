@@ -137,9 +137,17 @@ describe("findDecisionViolations", () => {
       {
         path: "docs/decisions/0165-a-new-rule.md",
         reason:
-          "the decision archive closed at 0164; put the rule and its rationale in the owning specification",
+          "the decision archive closed at 0164 and holds only 0001 to that number; put the rule and its rationale in the owning specification",
       },
     ]);
+  });
+  it("refuses a record numbered 0000, which the numbering never used", () => {
+    expect(
+      findDecisionViolations([
+        record("0000", "a-new-rule", wellFormed("0000", "A new rule")),
+        index(row("0000", "a-new-rule", "A new rule")),
+      ]).filter((violation) => violation.path === "docs/decisions/0000-a-new-rule.md"),
+    ).toHaveLength(1);
   });
 });
 

@@ -1,7 +1,6 @@
-import { readdir, readFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { linesOutsideFences } from "./check-decisions";
 
 /**
  * Decision record history gate.
@@ -18,11 +17,11 @@ import { linesOutsideFences } from "./check-decisions";
  * Answering that needs the repository, not the tree, so it lives here rather
  * than widening `findDecisionViolations` into something that reads git.
  *
- * Rule G: a number that held an `Accepted` record still holds that record.
- *
- * The record may be renamed, and it may be retired by declaring a supersession
- * that resolves. It may not quietly become a different document, move to another
- * number, or disappear.
+ * Rule G: the archive is closed, so a record present at the base commit is
+ * still present at the same path with the same bytes. Wording, status, title,
+ * and filename are all frozen; a rule that changes goes in its owning current
+ * specification instead. Records added after the base are the tree gate's
+ * business (Rule H there refuses them).
  *
  * A gate that reads history can only be as good as the history it is given, and
  * the common CI checkout is a depth-1 clone that has none. Answering from a
@@ -32,17 +31,9 @@ import { linesOutsideFences } from "./check-decisions";
  * blocks every shallow clone gets deleted.
  */
 
-export interface RecordIdentity {
-  readonly number: string;
+export interface ArchivedRecord {
   readonly path: string;
-  readonly title: string | undefined;
-  readonly status: string | undefined;
-}
-
-/** One `old -> new` pair as git's own similarity detection saw it. */
-export interface RecordRename {
-  readonly from: string;
-  readonly to: string;
+  readonly content: string;
 }
 
 export interface HistoryViolation {
@@ -79,16 +70,6 @@ const BASE_OVERRIDE = "OCTANT_DECISIONS_BASE";
 const DEFAULT_BASE_REFS = ["origin/main", "main"] as const;
 
 /**
- * Git's default similarity threshold, named rather than left implicit.
- *
- * Records share a skeleton — a heading, a status line, and three fixed section
- * titles — so two unrelated records score far below this, while a record whose
- * slug or title was tidied scores far above it. Anything git calls a rename here
- * is the same document under a new name.
- */
-const RENAME_SIMILARITY = "50%";
-
-/**
  * Which commit to compare against, or why no honest comparison is available.
  *
  * The order matters. A shallow clone is rejected before any candidate is
@@ -122,93 +103,34 @@ export function resolveBase(state: RepositoryState): BaseResolution {
 }
 
 /**
- * Rule G, over the two record sets and git's view of what moved between them.
- *
- * Identity is the filename and the title together, because those are what a
- * reader uses to decide a number still means what the index says it means. A
- * changed identity is then read against the rename list: git already knows how
- * to tell a document that was renamed from one that was replaced, and it is
- * better at it than a comparison of titles would be.
+ * Rule G over the records at the base commit and what the working tree now
+ * holds at each of their paths (`undefined` when the path is gone).
  */
 export function findHistoryViolations(
-  base: ReadonlyArray<RecordIdentity>,
-  head: ReadonlyArray<RecordIdentity>,
-  renames: ReadonlyArray<RecordRename>,
+  base: ReadonlyArray<ArchivedRecord>,
+  readCurrent: (path: string) => string | undefined,
 ): ReadonlyArray<HistoryViolation> {
-  const current = new Map(head.map((record) => [record.number, record]));
-  const numbers = new Set(head.map((record) => record.number));
-  const movedTo = new Map(renames.map((rename) => [rename.from, rename.to]));
-  return base
-    .filter((record) => record.status === "Accepted")
-    .flatMap((was): ReadonlyArray<HistoryViolation> => {
-      const now = current.get(was.number);
-      const moved = movedTo.get(was.path);
-      if (now === undefined) {
-        return [
-          {
-            path: was.path,
-            reason:
-              moved === undefined
-                ? "was Accepted and is gone; an accepted record is superseded, never removed"
-                : `was Accepted and became ${moved}; a record keeps its number for as long as it exists`,
-          },
-        ];
-      }
-      if (now.path === was.path && now.title === was.title) return [];
-      if (moved === now.path) return [];
-      if (supersedes(now, numbers)) return [];
+  return base.flatMap((was): ReadonlyArray<HistoryViolation> => {
+    const now = readCurrent(was.path);
+    if (now === undefined) {
       return [
         {
-          path: now.path,
-          reason: describeReplacement(was, now, moved),
+          path: was.path,
+          reason: "is gone; the decision archive is closed, so its records keep their paths",
         },
       ];
-    });
-}
-
-/**
- * A record retiring in place, which is the one identity change the conventions
- * invite.
- *
- * Restating a decision as history reasonably rewrites it far enough that git
- * stops calling it the same document, so the supersession itself is the
- * evidence. It has to point somewhere real: `Superseded by 0042` with no 0042 is
- * how a replacement would dress itself up, and that is already a violation the
- * tree gate reports.
- */
-function supersedes(record: RecordIdentity, numbers: ReadonlySet<string>): boolean {
-  const superseded = /^Superseded by (\d{4})$/.exec(record.status ?? "");
-  return superseded !== null && numbers.has(superseded[1] ?? "");
-}
-
-function describeReplacement(
-  was: RecordIdentity,
-  now: RecordIdentity,
-  moved: string | undefined,
-): string {
-  const wasTitle = was.title ?? was.path;
-  const nowTitle = now.title ?? now.path;
-  if (moved !== undefined) {
-    return `held "${wasTitle}", which became ${moved}; ${now.number} now holds "${nowTitle}" instead`;
-  }
-  if (now.path !== was.path) {
-    return `held "${wasTitle}" in ${was.path} and now holds "${nowTitle}"; supersede the accepted record instead of replacing it, or stage the rename so git can see it is the same record`;
-  }
-  return `held "${wasTitle}" and now holds "${nowTitle}"; supersede the accepted record instead of retitling it`;
-}
-
-function identify(path: string, content: string): RecordIdentity | undefined {
-  const named = RECORD_PATH.exec(path);
-  if (named === null) return undefined;
-  // Read past fenced examples exactly as the tree gate does, so a record that
-  // documents the conventions is not identified by its own sample heading.
-  const outside = linesOutsideFences(content).join("\n");
-  return {
-    number: named[1] ?? "",
-    path,
-    title: /^# \d{4}\. (.+)$/m.exec(outside)?.[1]?.trim(),
-    status: /^\*\*Status:\*\* (.+)$/m.exec(outside)?.[1]?.trim(),
-  };
+    }
+    if (now !== was.content) {
+      return [
+        {
+          path: was.path,
+          reason:
+            "was edited; the decision archive is closed, so its records keep their wording and status. Change the owning specification instead",
+        },
+      ];
+    }
+    return [];
+  });
 }
 
 function git(root: string, args: ReadonlyArray<string>): string | undefined {
@@ -234,7 +156,7 @@ function readRepositoryState(root: string, requested: string | undefined): Repos
   };
 }
 
-function readBaseRecords(root: string, commit: string): ReadonlyArray<RecordIdentity> {
+function readBaseRecords(root: string, commit: string): ReadonlyArray<ArchivedRecord> {
   const listed = git(root, [
     "ls-tree",
     "-r",
@@ -248,66 +170,30 @@ function readBaseRecords(root: string, commit: string): ReadonlyArray<RecordIden
   return listed
     .split("\0")
     .filter((path) => RECORD_PATH.test(path))
-    .flatMap((path): ReadonlyArray<RecordIdentity> => {
+    .flatMap((path): ReadonlyArray<ArchivedRecord> => {
       const content = git(root, ["show", `${commit}:${path}`]);
-      if (content === undefined) return [];
-      const identity = identify(path, content);
-      return identity === undefined ? [] : [identity];
+      return content === undefined ? [] : [{ path, content }];
     });
 }
 
 /**
- * What git considers a rename between the base commit and the working tree.
- *
- * Comparing against the working tree rather than `HEAD` is deliberate: a record
- * swap is caught while it is still uncommitted, which is when `bun run verify`
- * runs. The cost is that an unstaged rename reads as a delete and an untracked
- * add, so the replacement message says how to make git see it.
+ * The working tree rather than `HEAD`, so an edit is caught while it is still
+ * uncommitted, which is when `bun run verify` runs.
  */
-function readRenames(root: string, commit: string): ReadonlyArray<RecordRename> {
-  const diff = git(root, [
-    "diff",
-    `--find-renames=${RENAME_SIMILARITY}`,
-    "--name-status",
-    "-z",
-    commit,
-    "--",
-    DECISIONS_DIRECTORY,
-  ]);
-  if (diff === undefined) return [];
-  // `-z` writes a rename as three fields (`R100`, old, new) and everything else
-  // as two, so the record count is only knowable from the status field itself.
-  const fields = diff.split("\0");
-  const renames: Array<RecordRename> = [];
-  for (let index = 0; index < fields.length; index += 1) {
-    const status = fields[index];
-    if (status === undefined || status === "") continue;
-    if (status.startsWith("R") || status.startsWith("C")) {
-      const from = fields[index + 1];
-      const to = fields[index + 2];
-      if (from !== undefined && to !== undefined) renames.push({ from, to });
-      index += 2;
-      continue;
-    }
-    index += 1;
-  }
-  return renames;
-}
-
-async function readHeadRecords(root: string): Promise<ReadonlyArray<RecordIdentity>> {
-  const names = await readdir(resolve(root, DECISIONS_DIRECTORY));
-  const records = await Promise.all(
-    names.map(async (name): Promise<ReadonlyArray<RecordIdentity>> => {
-      const path = `${DECISIONS_DIRECTORY}/${name}`;
-      if (!RECORD_PATH.test(path)) return [];
-      const identity = identify(
-        path,
-        await readFile(resolve(root, DECISIONS_DIRECTORY, name), "utf8"),
-      );
-      return identity === undefined ? [] : [identity];
+async function readWorkingTree(
+  root: string,
+  base: ReadonlyArray<ArchivedRecord>,
+): Promise<ReadonlyMap<string, string>> {
+  const entries = await Promise.all(
+    base.map(async (record): Promise<ReadonlyArray<readonly [string, string]>> => {
+      try {
+        return [[record.path, await readFile(resolve(root, record.path), "utf8")]];
+      } catch {
+        return [];
+      }
     }),
   );
-  return records.flat();
+  return new Map(entries.flat());
 }
 
 export async function checkDecisionHistory(
@@ -316,14 +202,12 @@ export async function checkDecisionHistory(
 ): Promise<HistoryCheck> {
   const base = resolveBase(readRepositoryState(root, requested));
   if (base.status === "unanswerable") return { status: "skipped", reason: base.reason };
+  const records = readBaseRecords(root, base.commit);
+  const current = await readWorkingTree(root, records);
   return {
     status: "checked",
     base: `${base.ref} (${base.commit.slice(0, 12)})`,
-    violations: findHistoryViolations(
-      readBaseRecords(root, base.commit),
-      await readHeadRecords(root),
-      readRenames(root, base.commit),
-    ),
+    violations: findHistoryViolations(records, (path) => current.get(path)),
   };
 }
 

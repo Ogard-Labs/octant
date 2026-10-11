@@ -60,8 +60,8 @@ Leave Later until:
 
 1. Written dogfood evidence names the concrete reachability failure and why
    LAN, Tailscale, and SSH each failed or were unavailable.
-2. A Proposed ADR lists the six invariants above (or a tighter set) and how
-   the design meets them.
-3. An explicit maintainer request authorizes scoped work against that ADR.
+2. A proposed architecture and Current Release Boundary update lists the six
+   invariants above (or a tighter set) and how the design meets them.
+3. An explicit maintainer request authorizes scoped work against that update.
 
 Absent that evidence, the answer is: **no gap — keep Later.**
