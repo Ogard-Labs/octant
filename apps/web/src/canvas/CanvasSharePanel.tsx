@@ -23,7 +23,9 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
+import { canvasReadingOrder } from "@octant/domain/canvas-dashboard-layout";
 import { CanvasBlockRenderer } from "./blocks/CanvasBlock";
+import { DashboardBlock } from "./blocks/DashboardBlock";
 
 /**
  * Canvas sharing.
@@ -341,12 +343,35 @@ function SharedSnapshotView(props: {
       </p>
       <article className="canvas-share__snapshot-document" aria-label={props.document.title}>
         <h5 className="canvas-share__snapshot-document-title">{props.document.title}</h5>
-        {props.document.blocks.map((block) => (
-          <section key={block.blockId} className="canvas-block" data-block-kind={block.kind}>
-            <CanvasBlockRenderer block={block as CanvasBlock} />
-          </section>
-        ))}
+        {canvasReadingOrder(props.document.blocks).map((item) =>
+          item.kind === "block" ? (
+            <SnapshotBlock block={item.block} key={item.block.blockId} />
+          ) : (
+            <section
+              key={item.dashboard.blockId}
+              className="canvas-block"
+              data-block-kind="dashboard"
+            >
+              <DashboardBlock
+                title={item.dashboard.title}
+                columns={item.columns}
+                cells={item.cells}
+                cellKey={(block) => block.blockId}
+                cellKind={(block) => block.kind}
+                renderCell={(block) => <SnapshotBlock block={block} />}
+              />
+            </section>
+          ),
+        )}
       </article>
+    </section>
+  );
+}
+
+function SnapshotBlock(props: { readonly block: CanvasStaticExportDocument["blocks"][number] }) {
+  return (
+    <section className="canvas-block" data-block-kind={props.block.kind}>
+      <CanvasBlockRenderer block={props.block as CanvasBlock} />
     </section>
   );
 }

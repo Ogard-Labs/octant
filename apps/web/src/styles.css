@@ -22,6 +22,7 @@
 @import "./styles/preview.css";
 @import "./styles/zen.css";
 @import "./styles/canvas.css";
+@import "./styles/canvas-dashboard.css";
 @import "./styles/remote-pairing.css";
 @import "./styles/remote-shell.css";
 @import "./styles/artifacts.css";
