@@ -14,7 +14,8 @@ lands these steps. This document is the order of that work.
 Octant never collects, stores, scrapes, or forwards Claude.ai OAuth or
 setup tokens. The person signs in through the unmodified `claude` binary.
 Confined Plan and subagent launches keep that same sign-in by granting
-the sandbox the account's Claude-owned config directory. Several accounts
+the sandbox the Claude-owned credential path and, when Step 0 finds
+a split, a durable per-thread session directory. Several accounts
 may come later on that same mechanism; they are not this remediation.
 
 ## Step 0 — Must-verify macOS login storage
@@ -169,21 +170,29 @@ partial, or the destructive response is lost.
 Primary path, only after Step 0 passes.
 
 Each Claude account (the default account first) has a Claude-owned
-config directory. A confined Plan or subagent launch sets
-`CLAUDE_CONFIG_DIR` and, when needed, `CLAUDE_SECURESTORAGE_CONFIG_DIR`
-to that directory. The shared confinement builder grants read and write
-on exactly those directories and the launch's temporary directory. It
-never grants `/usr/bin/security` or the Keychain file. Those denials
-are unconditional. The 0145 scoped security-server lookup may stay if
-Step 0 recorded that it is required; it still never exposes the token
-to Octant.
+config directory. When login and session history cannot be
+separated, a confined Plan or subagent launch is refused, and
+unconfined turns may still set `CLAUDE_CONFIG_DIR` and, when
+needed, `CLAUDE_SECURESTORAGE_CONFIG_DIR` to that account
+directory. The shared confinement builder never grants
+`/usr/bin/security` or the Keychain file. Those denials are
+unconditional. The 0145 scoped security-server lookup may stay if
+Step 0 recorded that it is required; it still never exposes the
+token to Octant.
 
 If Step 0 showed the login can live in a credential-only directory
-distinct from session history, grant that credential path plus a
-durable per-thread session directory on every launch for that
-thread, confined or not. A later Plan or ordinary turn has to find
-the same session files; mixing the per-thread root with the account
-root makes the saved cursor `stale-resume`. Do not use a throwaway
+distinct from session history, set `CLAUDE_CONFIG_DIR` to the
+durable per-thread session root on every launch for that thread,
+confined or not. Point only the measured secure-storage variable
+(`CLAUDE_SECURESTORAGE_CONFIG_DIR` if that is the credential-only
+path Step 0 recorded) at the account credential directory. Grant
+those two paths and the launch's temporary directory. Anthropic
+documents `CLAUDE_CONFIG_DIR` as the session-history store, so
+leaving both variables on the account tree while also granting a
+per-thread directory still writes and reads account-wide history.
+A later Plan or ordinary turn has to find the same session files;
+mixing the per-thread root with the account root makes the saved
+cursor `stale-resume`. Do not use a throwaway
 per-launch config directory: resume has to find the same session
 files after a restart. That session directory is thread-owned. The
 host allocates it beneath a host-owned, provider/thread-scoped
@@ -207,12 +216,22 @@ host-issued receipts. Claude consumes that seam. Report deletion
 or failure, and cover purge after restart with the provider
 disabled. Leaving the transcript on disk after a successful purge
 is a privacy defect.
+
 Resume lookup must use that same per-thread root. `findSession`
 today calls `listSessions` against the project
 directory and the server's default Claude store unless it receives
 the launch session root. Pass that root into the lookup without
 mutating process-global environment: threads can resume concurrently.
-Cover restart resume for subscription and API-key roots. Threads that already started under the helper-
+A root-aware lookup is still not enough for ordinary Chat, Work,
+or Code resume after restart. `ClaudeResumeIdentityStore` keeps
+identities in a process-lifetime `Map` and clears them on close.
+The driver returns `stale-resume` before calling `findSession`
+when that identity is missing. Persist the ordinary resume
+identity the same way the agent-run child provider identity
+already is: journaled host data, reloadable after restart, and
+deleted with confirmed thread purge. Cover that persistence in
+the restart-resume test. Cover restart resume for subscription
+and API-key roots. Threads that already started under the helper-
 token path, and ordinary threads started on an unattested binary,
 still have their history in the account config tree. Persist that
 chosen root with the thread so a later Plan switch can see it. Do
@@ -256,6 +275,7 @@ not reintroduce a setup token.
 - `apps/server/src/providers/claudeProcess.ts`
   (`claudeRuntimeStateDirectories`, `allowProviderCredentialLookup`)
 - `apps/server/src/providers/claudeDriver.ts`
+- `apps/server/src/providers/claudeResumeIdentityStore.ts`
 - `apps/server/src/providers/claudeAgentSdkPort.ts` (`findSession`)
 - `@octant/provider-sdk` thread-owned storage/lifecycle seam, then the
   host allocation root, durable receipt, and purge sweep that consume
@@ -279,13 +299,17 @@ not reintroduce a setup token.
 - The Keychain file and `/usr/bin/security` stay denied. Step 0 cannot
   add an exception for either.
 - A confined grant follows Step 0's credential/session split. If the
-  login is separable, every launch for that thread uses the same
-  durable per-thread session directory, and the launch does not
-  receive another Project's session files. If it is not, confined
-  subscription launches are refused.
+  login is separable, every launch for that thread sets
+  `CLAUDE_CONFIG_DIR` to the same durable per-thread session
+  directory and points only the measured secure-storage variable at
+  the credential-only path. The launch does not receive another
+  Project's session files. If it is not, confined subscription
+  launches are refused.
 - Resume after restart looks up that per-thread session root for
   subscription and API-key threads. The lookup receives the root
-  without mutating process-global Claude directory variables.
+  without mutating process-global Claude directory variables. The
+  ordinary Chat, Work, and Code resume identity is journaled and
+  purgeable, not process-lifetime only.
 - The thread records the session root it actually used. An
   account-root thread started on an unattested binary takes the
   same new-thread transition before a later confined subscription

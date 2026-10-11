@@ -3479,11 +3479,9 @@ mechanisms are:
   stay inside Anthropic's own flow. Octant would not run `claude setup-token`,
   would not keep `CLAUDE_CODE_OAUTH_TOKEN` in the credential broker, and would
   not set that variable from Octant storage. Confined Plan and Chat-subagent
-  launches would grant the account's Claude-owned config directory
-  (`CLAUDE_CONFIG_DIR`, and `CLAUDE_SECURESTORAGE_CONFIG_DIR` when distinct)
-  and let the unmodified binary read its own login there. `/usr/bin/security`
-  and the Keychain file stay denied. This is not the current product. It stays
-  proposed until Step 0 of
+  launches would grant Claude-owned storage and let the unmodified binary
+  read its own login there. `/usr/bin/security` and the Keychain file stay
+  denied. This is not the current product. It stays proposed until Step 0 of
   [docs/plans/claude-inside-anthropics-terms.md](plans/claude-inside-anthropics-terms.md)
   is measured on a current Claude Code build on macOS, and until Anthropic's
   Commercial Terms or an explicit exception cover the path. Consumer Terms
@@ -3494,10 +3492,13 @@ mechanisms are:
   works but login cannot be separated from account session history, keep the
   subscription and refuse confined Chat, Work Plan, and Code Plan launches;
   that is not the instance-wide API-key fallback. If login can live apart from
-  session files, every launch for a new thread uses the credential path plus
-  one durable per-thread session directory. `findSession` receives that root
-  without mutating process-global environment. Durable session roots are
-  host-allocated beneath a provider/thread-scoped root and purged through a
+  session files, every launch for a new thread sets `CLAUDE_CONFIG_DIR` to
+  one durable per-thread session directory and points only the measured
+  secure-storage variable at the credential-only path. `findSession`
+  receives that root without mutating process-global environment. Ordinary
+  Chat, Work, and Code resume identities are journaled and purgeable, not
+  process-lifetime only. Durable session roots are host-allocated
+  beneath a provider/thread-scoped root and purged through a
   provider-neutral `@octant/provider-sdk` seam: the host issues a
   thread-bound receipt before the first session write; the data map and
   purge sweep only see those receipts, including after restart or while
