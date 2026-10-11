@@ -16,6 +16,7 @@ import {
   type ProviderInstance,
   type ProviderInstanceId,
   type ProviderCatalogSnapshot,
+  type ClaudeProviderConfiguration,
   type ProviderObservedState,
   type ProviderProbeResult,
   type ProviderRegistryCommandResult,
@@ -1037,8 +1038,13 @@ export class ProviderService implements ProviderServiceApi {
               throw this.#unsupported("This provider does not use Claude configuration.");
             }
             const previousDirectory = current.configuration.configDirectory;
+            const configuration = this.#assignedClaudeConfigurationForChange(
+              instances,
+              current,
+              command.configuration,
+            );
             instance = changeClaudeConfiguration(current, {
-              configuration: command.configuration,
+              configuration,
               activeSessionCount: this.#runtime.activeSessionCount(current.id),
               updatedAt,
             });
@@ -1865,6 +1871,28 @@ export class ProviderService implements ProviderServiceApi {
     if (taken) {
       throw this.#invalid("Another Claude account already uses that config directory.");
     }
+  }
+
+  #assignedClaudeConfigurationForChange(
+    instances: ReadonlyArray<ProviderInstance>,
+    current: Extract<ProviderInstance, { readonly driverKind: "claude" }>,
+    configuration: ClaudeProviderConfiguration,
+  ): ClaudeProviderConfiguration {
+    if (configuration.authentication !== "subscription") return configuration;
+    if (configuration.configDirectory !== undefined) return configuration;
+    if (current.configuration.configDirectory !== undefined) return configuration;
+    const preview = {
+      ...current,
+      configuration,
+    };
+    const previewInstances = instances.map((candidate) =>
+      String(candidate.id) === String(current.id) ? preview : candidate,
+    );
+    if (!claudeAccountNeedsOwnConfigDirectory(previewInstances, preview)) return configuration;
+    return {
+      ...configuration,
+      configDirectory: assignedClaudeAccountConfigDirectory(homedir(), current.id),
+    };
   }
 
   #refuseVacatingImplicitClaudeOwner(

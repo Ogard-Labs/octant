@@ -2162,6 +2162,44 @@ describe("ProviderService", () => {
     );
   });
 
+  it("assigns a directory when a secondary API-key instance switches to subscription", async () => {
+    const fixture = serviceFixture({
+      instances: [
+        claudeProvider(),
+        claudeProvider({
+          id: otherId,
+          displayName: "Claude API",
+          configuration: {
+            kind: "claude-agent-sdk",
+            binaryPath: "/opt/homebrew/bin/claude",
+            authentication: "api-key",
+          },
+        }),
+      ],
+    });
+
+    await expect(
+      fixture.service.execute(windowId, {
+        kind: "change-claude-configuration",
+        instanceId: otherId,
+        expectedVersion: 1,
+        configuration: {
+          kind: "claude-agent-sdk",
+          binaryPath: "/opt/homebrew/bin/claude",
+          authentication: "subscription",
+        },
+      }),
+    ).resolves.toMatchObject({
+      kind: "provider-updated",
+      instance: {
+        configuration: {
+          authentication: "subscription",
+          configDirectory: assignedClaudeAccountConfigDirectory(homedir(), otherId),
+        },
+      },
+    });
+  });
+
   it("keeps a Claude account on its directory after rename, disable, and removal of another account", async () => {
     const fixture = serviceFixture();
     await fixture.service.execute(windowId, {
