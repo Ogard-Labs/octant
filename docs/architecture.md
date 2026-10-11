@@ -2060,7 +2060,10 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   Two Claude instances cannot share one effective config directory,
   including the default account's implicit `~/.claude` or inherited
   `CLAUDE_CONFIG_DIR`, and one instance cannot claim a directory
-  nested under another instance. An API-key instance with no stored
+  nested under another instance. A relative inherited overlay refuses
+  only that implicit directory-less subscription account; isolated and
+  directory-less API-key launches overwrite both directory variables
+  with absolute paths and do not inherit it. An API-key instance with no stored
   directory uses a temporary launch directory and does not claim the
   host default, including when that instance is later edited. A
   replayed secondary Claude instance that still omits

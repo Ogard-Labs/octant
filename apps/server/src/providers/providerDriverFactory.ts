@@ -117,7 +117,13 @@ export function makeProviderDriver(
         );
       }
       const hostEnvironment = options.claudeHostEnvironment ?? lastClaudeHostEnvironmentSnapshot();
-      if (hostClaudeDirectoryOverlayIsRelative(hostEnvironment)) {
+      // Isolated and directory-less API-key launches overwrite both
+      // directory variables with absolute paths. Only the implicit
+      // directory-less subscription account inherits the host overlay.
+      const inheritsHostOverlay =
+        instance.configuration.authentication === "subscription" &&
+        instance.configuration.configDirectory === undefined;
+      if (inheritsHostOverlay && hostClaudeDirectoryOverlayIsRelative(hostEnvironment)) {
         throw new ProviderDriverConfigurationError(
           "Claude host config directories must be absolute.",
         );

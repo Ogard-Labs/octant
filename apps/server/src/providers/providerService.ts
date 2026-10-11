@@ -2221,7 +2221,7 @@ function hostDirectoryClaim(directory: string | undefined): string | undefined {
   return trimmed;
 }
 
-/** Host Claude directory overlays must be absolute or the default account is refused. */
+/** Host Claude directory overlays must be absolute or the implicit default account is refused. */
 export function hostClaudeDirectoryOverlayIsRelative(environment: NodeJS.ProcessEnv): boolean {
   return [environment.CLAUDE_CONFIG_DIR, environment.CLAUDE_SECURESTORAGE_CONFIG_DIR].some(
     (value) => {

@@ -129,7 +129,7 @@ describe("makeProviderDriver", () => {
     expect(fixture.claudeProbeVersion).not.toHaveBeenCalled();
   });
 
-  it("refuses a Claude driver whose host overlay is a relative directory", () => {
+  it("refuses the implicit Claude account when the host overlay is a relative directory", () => {
     const fixture = factoryFixture();
     const owner = provider("claude");
     expect(() =>
@@ -140,6 +140,61 @@ describe("makeProviderDriver", () => {
       }),
     ).toThrow(/must be absolute/);
     expect(fixture.claudeProbeVersion).not.toHaveBeenCalled();
+  });
+
+  it("builds an isolated Claude driver when the host overlay is relative", () => {
+    const fixture = factoryFixture();
+    const isolated = decodeProviderInstance({
+      id: "80000000-0000-4000-8000-000000000063",
+      displayName: "Claude isolated",
+      driverKind: "claude",
+      configuration: {
+        kind: "claude-agent-sdk",
+        binaryPath: "/missing/claude",
+        authentication: "subscription",
+        configDirectory: "/tmp/octant-claude-isolated",
+      },
+      enabled: true,
+      environmentPolicy: "inherit-host",
+      version: 1,
+      createdAt: "2026-07-16T11:00:00.000Z",
+      updatedAt: "2026-07-16T11:00:00.000Z",
+    });
+
+    expect(() =>
+      makeProviderDriver(isolated, {
+        ...fixture.options,
+        claudeInstances: [isolated],
+        claudeHostEnvironment: { CLAUDE_CONFIG_DIR: "relative-claude" },
+      }),
+    ).not.toThrow();
+  });
+
+  it("builds a directory-less API-key Claude driver when the host overlay is relative", () => {
+    const fixture = factoryFixture();
+    const apiKey = decodeProviderInstance({
+      id: "80000000-0000-4000-8000-000000000064",
+      displayName: "Claude API key",
+      driverKind: "claude",
+      configuration: {
+        kind: "claude-agent-sdk",
+        binaryPath: "/missing/claude",
+        authentication: "api-key",
+      },
+      enabled: true,
+      environmentPolicy: "inherit-host",
+      version: 1,
+      createdAt: "2026-07-16T11:00:00.000Z",
+      updatedAt: "2026-07-16T11:00:00.000Z",
+    });
+
+    expect(() =>
+      makeProviderDriver(apiKey, {
+        ...fixture.options,
+        claudeInstances: [apiKey],
+        claudeHostEnvironment: { CLAUDE_SECURESTORAGE_CONFIG_DIR: "relative-secure" },
+      }),
+    ).not.toThrow();
   });
 
   it("refuses a Claude driver whose host overlay now matches another account directory", () => {
