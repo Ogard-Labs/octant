@@ -53,8 +53,9 @@ read so far. The newest versions arrive first, so every artifact shows up in
 the library early and older versions keep arriving in the background.
 
 - **Stop** pauses it after the batch it is reading. While it is stopped,
-  Octant reads nothing more from the store in the background, even after a
-  restart; versions you make on this computer are still copied out.
+  Octant reads nothing from the store, even after a restart: background sync
+  waits, and **Check the store**, **Approve…**, and **Revoke…** stay off
+  until you resume. Versions you make on this computer are still copied out.
 - **Resume** carries on where it stopped. Nothing it already read is read
   or imported again, and the same is true if Octant quits or the computer
   restarts in the middle.
@@ -223,6 +224,13 @@ not a password, and nothing secret passes through the store.
 The new computer then confirms. It signs a record saying which approval it
 accepted, so the computer that approved it is the one that brought it in,
 and nobody else can claim that place later.
+
+Before it signs, confirming reads the store, newest entries first, and
+**Reading the store** under **This computer** shows how many entries it has
+read. Select **Stop** to cancel; the computer does not join. Select **Confirm
+join** again to carry on where it stopped, also after Octant quits or the
+computer restarts. Nothing it already read is read again before it joins; the
+restore that follows reads your artifacts.
 
 Revoking a computer writes a signed record that marks the last of its entries
 you accept. You can revoke a computer that yours brought in, directly or

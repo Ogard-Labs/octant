@@ -470,3 +470,32 @@ describe("a Code parent's context during its own turn", () => {
     connection.close();
   });
 });
+
+describe("a provider switch reading its own thread's conversation", () => {
+  it("frames the excerpts as this thread's history and leaves out the switching turn", () => {
+    const switching = codeTurn(3, "incomplete");
+    const oversized = evidence(502, { byteLength: MAX_PARENT_CONTEXT_SOURCE_BYTES + 1 });
+    const input = codeInput([codeTurn(1), { ...codeTurn(2), assistant: [oversized] }, switching]);
+    const result = admittedParentCodeContext({
+      ...input,
+      purpose: "provider-switch",
+      excludeOperationId: String(switching.operationId),
+    });
+    expect(result.status).toBe("available");
+    if (result.status !== "available") return;
+    expect(result.blocks[0]?.text).toContain("this thread's earlier conversation");
+    expect(result.blocks[0]?.text).not.toContain("parent conversation");
+    expect(
+      result.blocks
+        .slice(1)
+        .every((block) => block.text.startsWith("Earlier conversation source:")),
+    ).toBe(true);
+    // The switching turn's prompt goes to the provider as the prompt; its
+    // unfinished reply is not history either, so neither is counted.
+    expect(
+      input.readEvidence.mock.calls.some(([ref]) => ref.contentId === switching.prompt.contentId),
+    ).toBe(false);
+    expect(result.omissions).toMatchObject({ oversizedBodies: 1, unfinishedReplies: 0 });
+    expect(result.blocks).toHaveLength(4);
+  });
+});

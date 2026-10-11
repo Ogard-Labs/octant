@@ -367,6 +367,46 @@ describe("Canvas share contracts", () => {
     }
   });
 
+  it("round-trips a dashboard and the blocks it places only under the share version that declared it", () => {
+    const blocks = [
+      {
+        blockId: "board",
+        schemaVersion: 15,
+        kind: "dashboard",
+        title: "Service health",
+        columns: 3,
+        cells: [{ blockId: "api" }, { blockId: "latency", span: 2 }],
+      },
+      {
+        blockId: "api",
+        schemaVersion: 15,
+        kind: "status",
+        label: "API",
+        value: "Healthy",
+        tone: "success",
+      },
+      {
+        blockId: "latency",
+        schemaVersion: 15,
+        kind: "metric",
+        label: "p95 latency",
+        value: 212,
+      },
+    ];
+    const exported = { ...document, schemaVersion: 8, blocks };
+    expect(decodeCanvasStaticExportDocument(exported)).toEqual(exported);
+    expect(() =>
+      decodeCanvasStaticExportDocument({ ...document, schemaVersion: 7, blocks }),
+    ).toThrow();
+    expect(() =>
+      decodeCanvasStaticExportDocument({
+        ...document,
+        schemaVersion: 8,
+        blocks: [{ ...blocks[0], title: "token sk-live-0123456789abcdef0123456789" }],
+      }),
+    ).toThrow();
+  });
+
   it("round-trips entity-relationship, swimlane, and mind map blocks in a static export document", () => {
     const blocks = [
       {

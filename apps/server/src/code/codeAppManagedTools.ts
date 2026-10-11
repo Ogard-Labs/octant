@@ -1,5 +1,5 @@
 import { browserToolImage } from "../browser/browserToolImage";
-import { BROWSER_TOOL_DEFINITION } from "../browser/browserToolDefinition";
+import { BROWSER_TOOL_DEFINITION, BROWSER_TOOL_HELP } from "../browser/browserToolDefinition";
 import type {
   BrowserActionRequest,
   BrowserAutomationSnapshot,
@@ -47,7 +47,7 @@ import type {
   ExternalContentIngestionResult,
   RecordExternalContentIngestionInput,
 } from "../context/externalContentIngestionStore";
-import type { AppManagedToolSet } from "../providers/appManagedToolSet";
+import { withToolFamilyHelp, type AppManagedToolSet } from "../providers/appManagedToolSet";
 import { taintAppManagedToolResults } from "../providers/appManagedToolTaint";
 import type { CodeOperationTerminalSnapshot } from "./codeOperationService";
 
@@ -107,11 +107,11 @@ const proposeThreadDefinition = {
 const terminalDefinition = {
   name: CODE_TERMINAL_TOOL_NAME,
   description:
-    "Use Octant's terminal for this Code task: run starts a command, write supplies input to the running terminal, read checks its output, and stop terminates it. command is required for run or write. Check commandCompleted and commandExitCode; a running terminal is not proof that its command succeeded. For document artifacts, create files within the bound checkout and report their real relative paths. Octant's Files and Document tools provide host-authorized previews; never invent an artifact URL or claim a preview opened based on a write alone. Ordinary terminal permissions still apply.",
+    "Use Octant's terminal for this Code task: run starts a command, write sends input, read checks output, and stop terminates it. Check commandCompleted and commandExitCode; a running terminal is not proof that its command succeeded. Ordinary terminal permissions still apply. Call operation help for full usage.",
   inputSchema: {
     type: "object",
     properties: {
-      operation: { type: "string", enum: ["run", "write", "read", "stop"] },
+      operation: { type: "string", enum: ["run", "write", "read", "stop", "help"] },
       command: { type: "string" },
     },
     required: ["operation"],
@@ -121,7 +121,7 @@ const terminalDefinition = {
 const appleDefinition = {
   name: CODE_APPLE_TOOL_NAME,
   description:
-    "Build, test, run, and inspect Apple apps through Octant's in-app Simulator pane and Apple workbench. Begin with discover or status and use the returned project, scheme, and destination identifiers for later operations. boot, run, and open show the selected Simulator in Octant's iOS Simulator pane — never launch Simulator.app, never run open -a Simulator, and never start serve-sim or another out-of-app simulator. open boots the destination if it is shut down, otherwise only opens the pane. shutdown stops it; screenshot returns its current screen as an image when it fits the provider image limit. tap takes a point (x, y) in the pixels of the latest screenshot; swipe goes from (x, y) to (toX, toY) in the same pixels, over durationMs when given — a short one flings a list, a long one drags. Use only supported operations and inspect returned build, test, or runtime evidence before claiming success. discover, status, screenshot, and open of a destination that is already running are reads; every other operation is an effect, which Plan mode refuses and an approval-gated thread runs only after the person allows it. An unavailable operation is not a successful action or permission to bypass the host's validation and approval policy.",
+    "Build, test, run, and drive Apple apps through Octant's in-app iOS Simulator pane and Apple workbench. Begin with discover or status and reuse the returned identifiers. Show a Simulator only in that pane: never launch Simulator.app, run open -a Simulator, or start serve-sim. discover, status, screenshot, and open of a running Simulator are reads under any posture; every other operation is an effect that Plan mode refuses and an approval-gated thread runs only after the person allows it. Inspect returned evidence before claiming success. Call operation help for full usage.",
   inputSchema: {
     type: "object",
     properties: {
@@ -141,6 +141,7 @@ const appleDefinition = {
           "swipe",
           "type-text",
           "key-press",
+          "help",
         ],
       },
       projectPath: { type: "string" },
@@ -163,7 +164,7 @@ const appleDefinition = {
 const androidDefinition = {
   name: CODE_ANDROID_TOOL_NAME,
   description:
-    "Boot, inspect, and drive Android emulators through Octant's in-app Android emulator pane. Begin with discover or status and use the returned AVD names for later operations. boot, open, install, and launch show the selected emulator in Octant's Android emulator pane — never start an external emulator window as the place to look. open boots the destination if it is shut down, otherwise only opens the pane. shutdown stops it; screenshot returns its current screen as an image when it fits the provider image limit. tap takes a point (x, y) in the pixels of the live screen; swipe goes from (x, y) to (toX, toY) over durationMs when given. install takes a checkout-relative APK; launch takes a package name. Use only supported operations and inspect returned evidence before claiming success. discover, status, screenshot, and open of a destination that is already running are reads; every other operation is an effect, which Plan mode refuses and an approval-gated thread runs only after the person allows it. An unavailable operation is not a successful action or permission to bypass the host's validation and approval policy.",
+    "Boot, inspect, and drive Android emulators through Octant's in-app Android emulator pane. Begin with discover or status and reuse the returned AVD names; never start an external emulator window as the place to look. discover, status, screenshot, and open of a running emulator are reads under any posture; every other operation is an effect that Plan mode refuses and an approval-gated thread runs only after the person allows it. Inspect returned evidence before claiming success. Call operation help for full usage.",
   inputSchema: {
     type: "object",
     properties: {
@@ -182,6 +183,7 @@ const androidDefinition = {
           "key-press",
           "install",
           "launch",
+          "help",
         ],
       },
       emulatorId: { type: "string" },
@@ -198,6 +200,21 @@ const androidDefinition = {
     required: ["operation"],
   },
 } as const;
+
+/**
+ * Full usage for each Code family, returned by its `help` operation. The
+ * always-visible descriptions above keep only what an agent must know before
+ * its first call (decision 0067).
+ */
+const CODE_TOOL_HELP: Readonly<Record<string, string>> = {
+  ...BROWSER_TOOL_HELP,
+  [CODE_TERMINAL_TOOL_NAME]:
+    "Use Octant's terminal for this Code task: run starts a command, write supplies input to the running terminal, read checks its output, and stop terminates it. command is required for run or write. Check commandCompleted and commandExitCode; a running terminal is not proof that its command succeeded. For document artifacts, create files within the bound checkout and report their real relative paths. Octant's Files and Document tools provide host-authorized previews; never invent an artifact URL or claim a preview opened based on a write alone. Ordinary terminal permissions still apply.",
+  [CODE_APPLE_TOOL_NAME]:
+    "Build, test, run, and inspect Apple apps through Octant's in-app Simulator pane and Apple workbench. Begin with discover or status and use the returned project, scheme, and destination identifiers for later operations. boot, run, and open show the selected Simulator in Octant's iOS Simulator pane — never launch Simulator.app, never run open -a Simulator, and never start serve-sim or another out-of-app simulator. open boots the destination if it is shut down, otherwise only opens the pane. shutdown stops it; screenshot returns its current screen as an image when it fits the provider image limit. tap takes a point (x, y) in the pixels of the latest screenshot; swipe goes from (x, y) to (toX, toY) in the same pixels, over durationMs when given — a short one flings a list, a long one drags. Use only supported operations and inspect returned build, test, or runtime evidence before claiming success. discover, status, screenshot, and open of a destination that is already running are reads; every other operation is an effect, which Plan mode refuses and an approval-gated thread runs only after the person allows it. An unavailable operation is not a successful action or permission to bypass the host's validation and approval policy.",
+  [CODE_ANDROID_TOOL_NAME]:
+    "Boot, inspect, and drive Android emulators through Octant's in-app Android emulator pane. Begin with discover or status and use the returned AVD names for later operations. boot, open, install, and launch show the selected emulator in Octant's Android emulator pane — never start an external emulator window as the place to look. open boots the destination if it is shut down, otherwise only opens the pane. shutdown stops it; screenshot returns its current screen as an image when it fits the provider image limit. tap takes a point (x, y) in the pixels of the live screen; swipe goes from (x, y) to (toX, toY) over durationMs when given. install takes a checkout-relative APK; launch takes a package name. Use only supported operations and inspect returned evidence before claiming success. discover, status, screenshot, and open of a destination that is already running are reads; every other operation is an effect, which Plan mode refuses and an approval-gated thread runs only after the person allows it. An unavailable operation is not a successful action or permission to bypass the host's validation and approval policy.",
+};
 
 /**
  * What the Apple capability lends one Code thread's agent.
@@ -439,7 +456,9 @@ export function createCodeAppManagedTools(options: CodeAppManagedToolsOptions): 
   const allowlist = options.thread.toolConstraints ?? [];
   const tools: AppManagedToolSet = {
     definitions: [
-      BROWSER_TOOL_DEFINITION,
+      // A family whose capability this host did not lend is omitted, not
+      // advertised only to be refused on every call.
+      ...(options.browser === undefined ? [] : [BROWSER_TOOL_DEFINITION]),
       terminalDefinition,
       ...(options.apple === undefined ? [] : [appleDefinition]),
       ...(options.android === undefined ? [] : [androidDefinition]),
@@ -489,14 +508,20 @@ export function createCodeAppManagedTools(options: CodeAppManagedToolsOptions): 
       return failure("tool-unavailable");
     },
   };
+  // Help is the family's own static text, not external content, so it is
+  // answered outside the taint wrapper.
   const record = options.recordExternalContentIngestion;
-  if (record === undefined) return tools;
-  return taintAppManagedToolResults({
-    tools,
-    threadId: options.thread.id,
-    recordExternalContentIngestion: record,
-    uuid: options.uuid,
-  });
+  return withToolFamilyHelp(
+    record === undefined
+      ? tools
+      : taintAppManagedToolResults({
+          tools,
+          threadId: options.thread.id,
+          recordExternalContentIngestion: record,
+          uuid: options.uuid,
+        }),
+    CODE_TOOL_HELP,
+  );
 }
 
 async function plannerBoardTool(

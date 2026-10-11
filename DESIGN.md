@@ -910,6 +910,25 @@ carry the reading. It may also carry a `sparkline` of at most 256 recent
 readings, drawn as a glance with no axis, and a short `caption`. The value, the
 delta, and the caption are the accessible numbers; the sparkline is decorative.
 
+**KPI dashboards.** A `dashboard` block lays the document's own metric,
+progress, status, chart, and table blocks on a grid. It names each placed block
+by id, so a block keeps one definition and its comments, and the grid is drawn
+where the dashboard sits with the placed blocks drawn there instead of at their
+own positions. The dashboard is a region named by its title, set in
+`--oct-text-base` at the strong weight. A metric keeps its own tile; every other
+cell takes the same face (a faint ring at `--oct-radius-sm` and
+`--oct-space-3` padding), so the grid reads as one surface of tiles, and a
+cell's comment marker sits in its corner rather than past its edge. A one-line
+status or progress keeps its own height beside a taller chart instead of
+stretching into an empty panel. The grid answers its own width rather than the
+window's, because a Canvas in a dock column sits in a wide window: below 36rem
+it is one column (the dock and a phone), below 52rem at most two, and from 52rem
+the declared columns (one to four, four by default) and spans. A tile takes one
+column and a chart or table two unless the author names a span. Cells never
+leave the order the author listed, so the single column and keyboard focus both
+read in that order. Every placed chart keeps its disclosed data table. Under
+forced colours each cell keeps a CanvasText edge.
+
 **Tables.** A table is columns of a declared type and rows in the order the
 author wrote. A column may name a `format` and a `display` of `text` (the plain
 reading, the default), `bar` (an in-cell bar whose length is the value's share

@@ -48,6 +48,8 @@ import {
   CANVAS_MATH_SCHEMA_VERSION,
   CANVAS_TABLE_ROW_ID_SCHEMA_VERSION,
   CANVAS_FLOW_CHARTS_SCHEMA_VERSION,
+  CANVAS_DASHBOARD_SCHEMA_VERSION,
+  CANVAS_MAX_DASHBOARD_CELLS,
   CANVAS_MAX_CHART_CATEGORY_LABEL_LENGTH,
   CANVAS_MAX_FUNNEL_STAGES,
   CANVAS_MAX_RADAR_AXES,
@@ -71,6 +73,7 @@ import {
 } from "@octant/contracts/canvas";
 import { canvasDesignMarkupRefusal, canvasDesignStylesheetRefusal } from "./canvasDesignPolicy";
 import { canvasMathSourceRefusal } from "./canvasMathPolicy";
+import { canvasDashboardColumns, isCanvasDashboardCellKind } from "./canvasDashboardLayout";
 
 const encoder = new TextEncoder();
 
@@ -91,6 +94,7 @@ const SUPPORTED_CANVAS_SCHEMA_VERSIONS: readonly number[] = [
   CANVAS_MATH_SCHEMA_VERSION,
   CANVAS_MOCKUP_CATALOG_SCHEMA_VERSION,
   CANVAS_TABLE_ROW_ID_SCHEMA_VERSION,
+  CANVAS_FLOW_CHARTS_SCHEMA_VERSION,
   CANVAS_SCHEMA_VERSION,
 ];
 
@@ -109,6 +113,7 @@ const VERSION_GATED_BLOCK_KINDS: ReadonlyArray<{ readonly kind: string; readonly
     { kind: "design", since: CANVAS_DESIGN_SCHEMA_VERSION },
     { kind: "comparison-matrix", since: CANVAS_COMPARISON_MATRIX_SCHEMA_VERSION },
     { kind: "math", since: CANVAS_MATH_SCHEMA_VERSION },
+    { kind: "dashboard", since: CANVAS_DASHBOARD_SCHEMA_VERSION },
   ];
 
 export type CanvasPolicyRejectionCode =
@@ -212,7 +217,12 @@ export type CanvasPolicyRejectionCode =
   | "sankey-links-budget-exceeded"
   | "sankey-flow-not-positive"
   | "duplicate-sankey-link"
-  | "sankey-cycle";
+  | "sankey-cycle"
+  | "dashboard-cells-budget-exceeded"
+  | "dangling-dashboard-cell"
+  | "dashboard-cell-kind-refused"
+  | "duplicate-dashboard-cell"
+  | "dashboard-span-exceeds-columns";
 
 export class CanvasPolicyRejected extends Error {
   override readonly name = "CanvasPolicyRejected";
@@ -741,6 +751,13 @@ function inferStructuralBudgetCode(input: unknown): CanvasPolicyRejectionCode | 
     ) {
       return "metric-sparkline-budget-exceeded";
     }
+    if (
+      block.kind === "dashboard" &&
+      Array.isArray(block.cells) &&
+      block.cells.length > CANVAS_MAX_DASHBOARD_CELLS
+    ) {
+      return "dashboard-cells-budget-exceeded";
+    }
   }
   if (imageCount > CANVAS_MAX_IMAGES) return "image-budget-exceeded";
   return undefined;
@@ -1003,6 +1020,59 @@ function validateCrossReferences(definition: CanvasDefinition): void {
     if (block.kind === "comparison-matrix") validateComparisonMatrix(block);
     if (block.kind === "math") validateMath(block);
     if (block.kind === "metric") validateMetric(block);
+  }
+  validateDashboards(definition);
+}
+
+/**
+ * A dashboard places blocks the document already holds, so every cell must
+ * name one, of a kind a dashboard draws at a glance. A dashboard is not one
+ * of those kinds, so a grid never nests. A block sits in one cell of one
+ * dashboard: drawn twice it would carry two comment markers for one thread
+ * and read twice in the export.
+ */
+function validateDashboards(definition: CanvasDefinition): void {
+  const kinds = new Map<string, string>();
+  for (const block of definition.blocks) kinds.set(String(block.blockId), block.kind);
+  const placed = new Set<string>();
+  for (const block of definition.blocks) {
+    if (block.kind !== "dashboard") continue;
+    if (block.cells.length > CANVAS_MAX_DASHBOARD_CELLS) {
+      reject(
+        "dashboard-cells-budget-exceeded",
+        `Canvas dashboard ${block.blockId} places more than ${String(CANVAS_MAX_DASHBOARD_CELLS)} blocks.`,
+      );
+    }
+    const columns = canvasDashboardColumns(block);
+    for (const cell of block.cells) {
+      const id = String(cell.blockId);
+      const kind = kinds.get(id);
+      if (kind === undefined) {
+        reject(
+          "dangling-dashboard-cell",
+          `Canvas dashboard ${block.blockId} places block ${id}, which the Canvas does not hold.`,
+        );
+      }
+      if (!isCanvasDashboardCellKind(kind)) {
+        reject(
+          "dashboard-cell-kind-refused",
+          `Canvas dashboard ${block.blockId} cannot place a ${kind} block; it places metric, progress, status, chart, and table blocks.`,
+        );
+      }
+      if (placed.has(id)) {
+        reject(
+          "duplicate-dashboard-cell",
+          `Canvas block ${id} is placed in more than one dashboard cell.`,
+        );
+      }
+      placed.add(id);
+      if (cell.span !== undefined && cell.span > columns) {
+        reject(
+          "dashboard-span-exceeds-columns",
+          `Canvas dashboard ${block.blockId} spans ${String(cell.span)} columns on a grid of ${String(columns)}.`,
+        );
+      }
+    }
   }
 }
 

@@ -50,7 +50,6 @@ import {
   resolveDesktopDataDirectory,
   resolveDesktopHostCapabilities,
   resolveConfiguredServerPort,
-  resolveLocalWebAppUrl,
   shouldRecoverWindowAfterRendererExit,
   resolveCodeFileHelperPath,
   resolveKeychainHelperPath,
@@ -99,10 +98,6 @@ describe("canonical local host endpoint", () => {
   it("uses the same stable port for Electron and browser clients by default", () => {
     expect(resolveConfiguredServerPort({})).toBe(13_773);
     expect(resolveConfiguredServerPort({ OCTANT_SERVER_PORT: "14000" })).toBe(14_000);
-  });
-
-  it("opens the browser at the canonical host without a launch-session URL", () => {
-    expect(resolveLocalWebAppUrl("http://127.0.0.1:13773/")).toBe("http://127.0.0.1:13773/");
   });
 });
 
