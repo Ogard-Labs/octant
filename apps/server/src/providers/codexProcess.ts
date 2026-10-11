@@ -31,6 +31,7 @@ export interface CodexAppServerConnection {
 export interface CodexProcessPort {
   readonly start: (input: {
     readonly binaryPath: string;
+    readonly environment?: NodeJS.ProcessEnv;
     readonly onProcessStarted?: ProviderProcessStartedListener;
   }) => Effect.Effect<CodexAppServerConnection, ProviderFailure, Scope.Scope>;
 }
@@ -307,6 +308,39 @@ export function codexProcessEnvironment(
   };
 }
 
+const ACCOUNT_AUTH_VARIABLES = [
+  "AWS_BEARER_TOKEN_BEDROCK",
+  "CODEX_ACCESS_TOKEN",
+  "CODEX_API_KEY",
+  "OPENAI_API_KEY",
+] as const;
+
+/**
+ * Per-account app-server environment. Inherited auth variables are stripped so
+ * one account cannot use another account's host key. A broker-resolved API key
+ * is the only value Octant injects, and only for that instance.
+ *
+ * Octant never reads `auth.json` or the keyring, and never writes
+ * `cli_auth_credentials_store` into the user's config. Codex keys the keyring
+ * entry on `CODEX_HOME`, so isolation holds without forcing file storage.
+ */
+export function codexAccountProcessEnvironment(input: {
+  readonly binaryPath: string;
+  readonly hostEnvironment: NodeJS.ProcessEnv;
+  readonly codexHome: string;
+  readonly brokerApiKey?: string;
+}): NodeJS.ProcessEnv {
+  const environment = codexProcessEnvironment(input.binaryPath, input.hostEnvironment);
+  for (const name of ACCOUNT_AUTH_VARIABLES) {
+    delete environment[name];
+  }
+  environment.CODEX_HOME = input.codexHome;
+  if (input.brokerApiKey !== undefined && input.brokerApiKey.trim() !== "") {
+    environment.OPENAI_API_KEY = input.brokerApiKey;
+  }
+  return environment;
+}
+
 function wait(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
@@ -519,11 +553,13 @@ function acquireCodexAppServer(
   version: string,
   options: ResolvedCodexProcessOptions,
   onProcessStarted?: ProviderProcessStartedListener,
+  launchEnvironment?: NodeJS.ProcessEnv,
 ): Effect.Effect<ManagedCodexConnection, ProviderFailure> {
   return Effect.async<ManagedCodexConnection, ProviderFailure>((resume) => {
     const child = spawn(binaryPath, codexAppServerArgs(version), {
       detached: process.platform !== "win32",
-      env: codexProcessEnvironment(binaryPath, options.inheritedEnvironment ?? process.env),
+      env: launchEnvironment ??
+        codexProcessEnvironment(binaryPath, options.inheritedEnvironment ?? process.env),
       stdio: ["pipe", "pipe", "pipe"],
     });
     const terminateGroup = makeProcessTerminator(child, options.shutdownTimeoutMs);
@@ -674,15 +710,18 @@ export function makeCodexProcessLive(options: CodexProcessOptions = {}): CodexPr
   };
 
   return {
-    start: ({ binaryPath, onProcessStarted }) =>
+    start: ({ binaryPath, environment, onProcessStarted }) =>
       Effect.suspend(() => {
         let terminate: (() => Promise<void>) | undefined;
+        const launchEnvironment =
+          environment ??
+          (resolved.inheritedEnvironment === undefined
+            ? undefined
+            : codexProcessEnvironment(binaryPath, resolved.inheritedEnvironment));
         return Effect.acquireReleaseInterruptible(
           Effect.gen(function* () {
             const probe = yield* probeCodexBinary(binaryPath, {
-              ...(resolved.inheritedEnvironment === undefined
-                ? {}
-                : { inheritedEnvironment: resolved.inheritedEnvironment }),
+              ...(launchEnvironment === undefined ? {} : { inheritedEnvironment: launchEnvironment }),
               shutdownTimeoutMs: resolved.shutdownTimeoutMs,
               ...(onProcessStarted === undefined ? {} : { onProcessStarted }),
               ...(resolved.versionProbeConfinement === undefined
@@ -692,8 +731,9 @@ export function makeCodexProcessLive(options: CodexProcessOptions = {}): CodexPr
             const managed = yield* acquireCodexAppServer(
               binaryPath,
               probe.version,
-              resolved,
+              { ...resolved, inheritedEnvironment: launchEnvironment },
               onProcessStarted,
+              launchEnvironment,
             );
             terminate = managed.terminate;
             return managed.connection;

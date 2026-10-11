@@ -8,6 +8,7 @@ import { Effect, Either, Exit, Fiber, Scope } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
+  codexAccountProcessEnvironment,
   codexAppServerArgs,
   codexProcessEnvironment,
   makeCodexProcessLive,
@@ -192,6 +193,41 @@ describe("sanitizeCodexEnvironment", () => {
         STRIPE_SECRET_KEY: "must-not-cross",
       }),
     ).toEqual({ PATH: "/usr/bin" });
+  });
+
+  it("strips inherited auth variables and pins CODEX_HOME for one account", () => {
+    const environment = codexAccountProcessEnvironment({
+      binaryPath: "/opt/homebrew/bin/codex",
+      hostEnvironment: {
+        PATH: "/usr/bin",
+        CODEX_HOME: "/Users/test/.codex",
+        OPENAI_API_KEY: "inherited-must-not-cross",
+        CODEX_ACCESS_TOKEN: "inherited-must-not-cross",
+        CODEX_API_KEY: "inherited-must-not-cross",
+        AWS_BEARER_TOKEN_BEDROCK: "inherited-must-not-cross",
+      },
+      codexHome: "/Users/test/.codex-accounts/work",
+    });
+    expect(environment.CODEX_HOME).toBe("/Users/test/.codex-accounts/work");
+    expect(environment.OPENAI_API_KEY).toBeUndefined();
+    expect(environment.CODEX_ACCESS_TOKEN).toBeUndefined();
+    expect(environment.CODEX_API_KEY).toBeUndefined();
+    expect(environment.AWS_BEARER_TOKEN_BEDROCK).toBeUndefined();
+    expect(JSON.stringify(environment)).not.toMatch(/cli_auth_credentials_store|auth\.json/i);
+  });
+
+  it("injects only a broker-resolved API key after stripping inherited auth", () => {
+    const environment = codexAccountProcessEnvironment({
+      binaryPath: "/opt/homebrew/bin/codex",
+      hostEnvironment: {
+        PATH: "/usr/bin",
+        OPENAI_API_KEY: "inherited-must-not-cross",
+      },
+      codexHome: "/Users/test/.codex-accounts/api",
+      brokerApiKey: "broker-resolved-key",
+    });
+    expect(environment.OPENAI_API_KEY).toBe("broker-resolved-key");
+    expect(environment.CODEX_HOME).toBe("/Users/test/.codex-accounts/api");
   });
 
   it("prepends the configured binary directory for env-based interpreters", () => {

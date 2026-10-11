@@ -18,11 +18,12 @@ export function createLocalUsageHistorySourceForDriver(input: {
   readonly driverKind: ProviderDriverKind;
   readonly home: string;
   readonly claudeConfigDirectory?: string;
+  readonly codexHome?: string;
   readonly checkpointStore?: LocalUsageHistoryCheckpointStore;
 }): ProviderLocalUsageHistorySource | undefined {
   if (input.driverKind === "codex") {
     return createCodexLocalUsageHistorySource({
-      root: join(input.home, ".codex"),
+      root: input.codexHome ?? join(input.home, ".codex"),
       ...(input.checkpointStore === undefined
         ? {}
         : { checkpointStore: input.checkpointStore, checkpointRevision: LOCAL_PRICING_REVISION }),

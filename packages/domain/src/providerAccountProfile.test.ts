@@ -3,6 +3,7 @@ import { decodeProviderInstanceId, type ProviderInstance } from "@octant/contrac
 import {
   assignedProviderAccountDirectory,
   CLAUDE_ACCOUNT_PROFILE,
+  CODEX_ACCOUNT_PROFILE,
   defaultProviderAccountDirectory,
   formatProviderAccountSignInCommand,
   formatProviderAccountStatusCommand,
@@ -14,10 +15,12 @@ import {
 const instanceId = decodeProviderInstanceId("11111111-1111-4111-8111-111111111111");
 
 describe("provider account profile", () => {
-  it("declares Claude as the only multi-account driver", () => {
+  it("declares Claude and Codex as the multi-account drivers", () => {
     expect(providerAccountProfile("claude")).toEqual(CLAUDE_ACCOUNT_PROFILE);
+    expect(providerAccountProfile("codex")).toEqual(CODEX_ACCOUNT_PROFILE);
     expect(CLAUDE_ACCOUNT_PROFILE.supportsMultipleAccounts).toBe(true);
-    expect(providerAccountProfile("codex")).toBeUndefined();
+    expect(CODEX_ACCOUNT_PROFILE.supportsMultipleAccounts).toBe(true);
+    expect(providerAccountProfile("opencode")).toBeUndefined();
   });
 
   it("assigns extra Claude accounts under ~/.claude-accounts/<instanceId>", () => {
@@ -53,6 +56,33 @@ describe("provider account profile", () => {
       }),
     ).toBe(
       `CLAUDE_CONFIG_DIR='/Users/example/.claude-accounts/${instanceId}' CLAUDE_SECURESTORAGE_CONFIG_DIR='/Users/example/.claude-accounts/${instanceId}' '/opt/homebrew/bin/claude' auth status`,
+    );
+  });
+
+  it("assigns extra Codex accounts under ~/.codex-accounts/<instanceId>", () => {
+    expect(assignedProviderAccountDirectory(CODEX_ACCOUNT_PROFILE, "/Users/example/", instanceId)).toBe(
+      `/Users/example/.codex-accounts/${instanceId}`,
+    );
+    expect(defaultProviderAccountDirectory(CODEX_ACCOUNT_PROFILE, "/Users/example")).toBe(
+      "/Users/example/.codex",
+    );
+    expect(
+      formatProviderAccountSignInCommand({
+        profile: CODEX_ACCOUNT_PROFILE,
+        binaryPath: "/opt/homebrew/bin/codex",
+        stateDirectory: `/Users/example/.codex-accounts/${instanceId}`,
+      }),
+    ).toBe(
+      `CODEX_HOME='/Users/example/.codex-accounts/${instanceId}' '/opt/homebrew/bin/codex' login`,
+    );
+    expect(
+      formatProviderAccountStatusCommand({
+        profile: CODEX_ACCOUNT_PROFILE,
+        binaryPath: "/opt/homebrew/bin/codex",
+        stateDirectory: `/Users/example/.codex-accounts/${instanceId}`,
+      }),
+    ).toBe(
+      `CODEX_HOME='/Users/example/.codex-accounts/${instanceId}' '/opt/homebrew/bin/codex' login status`,
     );
   });
 

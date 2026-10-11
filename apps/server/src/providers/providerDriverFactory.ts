@@ -1,17 +1,26 @@
+import { isAbsolute } from "node:path";
 import { homedir } from "node:os";
 import {
   type PermissionPersistence,
   type ProviderFailure,
   type ProviderInstance,
 } from "@octant/contracts";
-import { isImageProfileDriverKind } from "@octant/domain";
+import {
+  CODEX_ACCOUNT_PROFILE,
+  defaultProviderAccountDirectory,
+  isImageProfileDriverKind,
+} from "@octant/domain";
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
 import { lastClaudeHostEnvironmentSnapshot } from "./claudeAccountDirectory";
 import {
   claudeAccountNeedsOwnConfigDirectory,
   claudeAccountOverlapsPeerLaunchDirectory,
+  codexAccountNeedsOwnHome,
+  codexAccountOverlapsPeerHome,
   hostClaudeDirectoryOverlayIsRelative,
+  hostCodexHomeOverlayIsRelative,
 } from "./providerService";
+import { codexAccountProcessEnvironment } from "./codexProcess";
 import type { ClaudeAgentSdkPort } from "./claudeAgentSdkPort";
 import { makeClaudeDriver, type ClaudeResumeIdentityPort } from "./claudeDriver";
 import type { ClaudeProcessPort } from "./claudeProcess";
@@ -53,6 +62,8 @@ export interface ProviderDriverFactoryOptions {
   readonly claudeInstances?: ReadonlyArray<ProviderInstance>;
   /** Host Claude env from the snapshot gate. Omit to use the last gated copy. */
   readonly claudeHostEnvironment?: NodeJS.ProcessEnv;
+  readonly codexInstances?: ReadonlyArray<ProviderInstance>;
+  readonly codexHostEnvironment?: NodeJS.ProcessEnv;
 }
 
 export class ProviderDriverConfigurationError extends Error {
@@ -87,14 +98,52 @@ export function makeProviderDriver(
         runtimeRegistry: options.runtimeRegistry,
         permissionPersistence: options.permissionPersistence,
       });
-    case "codex":
+    case "codex": {
+      if (options.codexInstances === undefined) {
+        throw new ProviderDriverConfigurationError();
+      }
+      if (codexAccountNeedsOwnHome(options.codexInstances, instance)) {
+        throw new ProviderDriverConfigurationError(
+          "This Codex account needs its own home directory.",
+        );
+      }
+      const hostEnvironment = options.codexHostEnvironment ?? process.env;
+      const inheritsHostOverlay = instance.configuration.codexHome === undefined;
+      if (inheritsHostOverlay && hostCodexHomeOverlayIsRelative(hostEnvironment)) {
+        throw new ProviderDriverConfigurationError("Codex host home must be an absolute directory.");
+      }
+      if (
+        codexAccountOverlapsPeerHome(
+          options.codexInstances,
+          instance,
+          homedir(),
+          hostEnvironment,
+        )
+      ) {
+        throw new ProviderDriverConfigurationError(
+          "Another Codex account already uses that home directory.",
+        );
+      }
+      const codexHome =
+        instance.configuration.codexHome ??
+        (hostDirectoryOrDefault(hostEnvironment.CODEX_HOME) ??
+          defaultProviderAccountDirectory(CODEX_ACCOUNT_PROFILE, homedir()));
       return makeCodexDriver({
         instanceId: instance.id,
         binaryPath: instance.configuration.binaryPath,
         process: options.codexProcess,
         runtimeRegistry: options.runtimeRegistry,
         permissionPersistence: options.permissionPersistence,
+        environment: codexAccountProcessEnvironment({
+          binaryPath: instance.configuration.binaryPath,
+          hostEnvironment,
+          codexHome,
+        }),
+        ...(options.credentialResolver === undefined
+          ? {}
+          : { credentialResolver: options.credentialResolver }),
       });
+    }
     case "claude":
       if (
         options.claudeProcess === undefined ||
@@ -228,4 +277,10 @@ export function makeProviderDriver(
     default:
       throw new ProviderDriverConfigurationError();
   }
+}
+
+function hostDirectoryOrDefault(directory: string | undefined): string | undefined {
+  const trimmed = directory?.trim();
+  if (trimmed === undefined || trimmed.length === 0 || !isAbsolute(trimmed)) return undefined;
+  return trimmed;
 }

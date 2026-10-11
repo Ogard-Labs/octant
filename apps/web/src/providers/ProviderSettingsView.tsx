@@ -5,6 +5,7 @@ import type {
   AzureFoundryProviderConfiguration,
   BflImageProviderConfiguration,
   ClaudeProviderConfiguration,
+  CodexProviderConfiguration,
   DevinProviderConfiguration,
   DiscoverySnapshot,
   GrokProviderConfiguration,
@@ -85,6 +86,7 @@ export interface ProviderSettingsViewProps {
       | "copilot",
     displayName: string,
     binaryPath: string,
+    accent?: string,
   ) => Promise<boolean>;
   readonly onCreateOpenAiCompatible: (
     displayName: string,
@@ -207,6 +209,11 @@ export interface ProviderSettingsViewProps {
     instanceId: ProviderInstanceId,
     configuration: IdeogramImageProviderConfiguration,
     credential: TransientProviderCredential,
+  ) => Promise<boolean>;
+  readonly onChangeCodexConfiguration: (
+    instanceId: ProviderInstanceId,
+    configuration: CodexProviderConfiguration,
+    options?: { readonly reassignAccountDirectory?: boolean },
   ) => Promise<boolean>;
   readonly onChangeClaudeConfiguration: (
     instanceId: ProviderInstanceId,
@@ -410,6 +417,9 @@ export function ProviderSettingsView(props: ProviderSettingsViewProps) {
             existingClaudeAccountCount={
               props.instances.filter((instance) => instance.driverKind === "claude").length
             }
+            existingCodexAccountCount={
+              props.instances.filter((instance) => instance.driverKind === "codex").length
+            }
             heading="Agent runtime"
             hint="Installed runtimes are detected automatically. Use this for an unusual executable location or a runtime the scan missed. Model endpoints such as OpenAI-compatible APIs are added under Octant Harness › Model endpoints."
             credentialManagementAvailable={props.credentialManagementAvailable}
@@ -462,6 +472,7 @@ export function ProviderSettingsView(props: ProviderSettingsViewProps) {
         onChangeBinary={props.onChangeBinary}
         {...(props.onLocateBinary === undefined ? {} : { onLocateBinary: props.onLocateBinary })}
         onChangeClaudeConfiguration={props.onChangeClaudeConfiguration}
+        onChangeCodexConfiguration={props.onChangeCodexConfiguration}
         onChangeDevinConfiguration={props.onChangeDevinConfiguration}
         onChangeGrokConfiguration={props.onChangeGrokConfiguration}
         onChangeGooseConfiguration={props.onChangeGooseConfiguration}

@@ -1,4 +1,7 @@
-import { assignedClaudeAccountConfigDirectory } from "@octant/domain";
+import {
+  assignedClaudeAccountConfigDirectory,
+  assignedCodexHome,
+} from "@octant/domain";
 import {
   decodeProviderCatalogSnapshot,
   decodeProviderInstance,
@@ -1164,6 +1167,52 @@ describe("ProviderService", () => {
         events: [expect.objectContaining({ eventName: "provider.instance-created@1" })],
       }),
     );
+  });
+
+  it("assigns an extra Codex account its own home and refuses a colliding home", async () => {
+    const fixture = serviceFixture();
+    const otherId = decodeProviderInstanceId("80000000-0000-4000-8000-000000000062");
+    await fixture.service.execute(windowId, {
+      kind: "create-codex-provider",
+      instanceId,
+      expectedVersion: 0,
+      displayName: "Codex personal",
+      binaryPath: "/opt/homebrew/bin/codex",
+    });
+    const created = await fixture.service.execute(windowId, {
+      kind: "create-codex-provider",
+      instanceId: otherId,
+      expectedVersion: 0,
+      displayName: "Codex work",
+      binaryPath: "/opt/homebrew/bin/codex",
+    });
+    expect(created).toMatchObject({
+      kind: "provider-created",
+      instance: {
+        id: otherId,
+        configuration: {
+          kind: "codex-cli",
+          codexHome: assignedCodexHome(homedir(), otherId),
+        },
+      },
+    });
+    await expect(
+      fixture.service.execute(windowId, {
+        kind: "change-codex-configuration",
+        instanceId: otherId,
+        expectedVersion: 1,
+        configuration: {
+          kind: "codex-cli",
+          binaryPath: "/opt/homebrew/bin/codex",
+          codexHome: `${homedir()}/.codex`,
+        },
+      }),
+    ).rejects.toMatchObject({
+      failure: {
+        category: "invalid-configuration",
+        message: "Another Codex account already uses that home directory.",
+      },
+    });
   });
 
   it("creates disabled providers when the create command requests enabled false", async () => {

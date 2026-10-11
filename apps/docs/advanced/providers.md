@@ -179,6 +179,18 @@ fail over, rotate, or load-balance between accounts. An Anthropic API-key
 account still uses the key you store in Octant for that provider, on its
 assigned directory.
 
+You can add more than one Codex account the same way. Octant assigns the
+first account Codex's default directory (`~/.codex`). Each additional
+account gets its own directory under `~/.codex-accounts/`. Sign in only
+with the unmodified `codex login` command in a terminal for that account;
+check status with `codex login status`. The provider card shows the exact
+command, including `CODEX_HOME` for an extra account. Octant never reads
+`auth.json` or the keyring, and never writes Codex credential-store
+settings into your config. An API key you store in Octant for that
+provider still reaches only that account. Each account runs its own
+Codex app-server. A thread stays on the account it started with. Octant
+does not fail over, rotate, or load-balance between accounts.
+
 If you previously connected Claude for helpers, Octant no longer stores that
 token. Revoke the leftover token with Anthropic.
 

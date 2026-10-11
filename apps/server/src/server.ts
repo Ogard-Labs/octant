@@ -975,6 +975,7 @@ interface ConfiguredProviderDriverOptions {
   readonly claudeResumeIdentityPort?: ClaudeResumeIdentityPort;
   readonly isProjectConfinedPath?: (projectRoot: string, absolutePath: string) => boolean;
   readonly claudeInstances?: ReadonlyArray<ProviderInstance>;
+  readonly codexInstances?: ReadonlyArray<ProviderInstance>;
   readonly runtimeRegistry: ProviderRuntimeRegistry;
   readonly permissionPersistence: () => PermissionPersistence;
   readonly credentialResolver?: ProviderCredentialResolver;
@@ -1078,7 +1079,8 @@ export function makeConfiguredProviderDriver(
       ...(options.claudeInstances === undefined
         ? {}
         : { claudeInstances: options.claudeInstances }),
-      ...(options.credentialResolver === undefined
+      ...(options.codexInstances === undefined ? {} : { codexInstances: options.codexInstances }),
+      ...(options.credentialResolver === undefined)
         ? {}
         : { credentialResolver: options.credentialResolver }),
       ...(options.ollamaHistoryStore === undefined
@@ -4306,6 +4308,7 @@ export function startOctantServer(
             claudeResumeIdentityPort: claudeResumeIdentityStore,
             isProjectConfinedPath,
             claudeInstances: persistence.readProviderInstances(),
+            codexInstances: persistence.readProviderInstances(),
             runtimeRegistry: providerRuntimeRegistry,
             permissionPersistence: () => persistence.readProviderDefaults().permissionPersistence,
             onRuntimeEvent: (event) => providerRuntimeUsageLimitsStore.record(event),
@@ -4441,11 +4444,17 @@ export function startOctantServer(
           instance.configuration.configDirectory !== undefined
             ? { claudeConfigDirectory: instance.configuration.configDirectory }
             : {}),
+          ...(instance.driverKind === "codex" && instance.configuration.codexHome !== undefined
+            ? { codexHome: instance.configuration.codexHome }
+            : {}),
           checkpointStore: createLocalUsageHistoryCheckpointStore(
             join(persistence.dataDirectory, "local-usage-cache.sqlite3"),
           ),
         }),
       get claudeInstances() {
+        return persistence.readProviderInstances();
+      },
+      get codexInstances() {
         return persistence.readProviderInstances();
       },
     };

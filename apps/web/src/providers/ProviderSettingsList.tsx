@@ -12,6 +12,7 @@ import type {
 import {
   canLocateRuntimeBinary,
   claudeAccountUsesAssignedDirectory,
+  codexAccountUsesAssignedDirectory,
   isImageProfileDriverKind,
   supportsProviderCliUpdate,
 } from "@octant/domain";
@@ -30,6 +31,7 @@ import {
   AnthropicConfigurationForm,
   BflImageConfigurationForm,
   ClaudeConfigurationForm,
+  CodexConfigurationForm,
   DevinConfigurationForm,
   FoundryConfigurationForm,
   GeminiImageConfigurationForm,
@@ -82,6 +84,7 @@ export type ProviderSettingsListProps = Pick<
   | "onChangeBinary"
   | "onLocateBinary"
   | "onChangeClaudeConfiguration"
+  | "onChangeCodexConfiguration"
   | "onChangeDevinConfiguration"
   | "onChangeKiloConfiguration"
   | "onChangePiConfiguration"
@@ -240,6 +243,7 @@ export function ProviderSettingsList(props: ProviderSettingsListProps) {
         credentialManagementAvailable={props.credentialManagementAvailable}
         index={index}
         extraClaudeAccount={claudeAccountUsesAssignedDirectory(ordered, instance)}
+        extraCodexAccount={codexAccountUsesAssignedDirectory(ordered, instance)}
         instance={instance}
         key={instance.id}
         {...(props.discoverySnapshot === undefined
@@ -251,6 +255,7 @@ export function ProviderSettingsList(props: ProviderSettingsListProps) {
         onChangeBinary={props.onChangeBinary}
         {...(props.onLocateBinary === undefined ? {} : { onLocateBinary: props.onLocateBinary })}
         onChangeClaudeConfiguration={props.onChangeClaudeConfiguration}
+        onChangeCodexConfiguration={props.onChangeCodexConfiguration}
         onChangeMistralVibeConfiguration={props.onChangeMistralVibeConfiguration}
         onChangeGrokConfiguration={props.onChangeGrokConfiguration}
         onChangeGooseConfiguration={props.onChangeGooseConfiguration}
@@ -558,6 +563,7 @@ function AgentEligibleModelsControls(props: {
 
 interface ProviderRowProps {
   readonly extraClaudeAccount: boolean;
+  readonly extraCodexAccount: boolean;
   readonly instance: ProviderInstance;
   readonly observed?: ProviderObservedState;
   readonly discoverySnapshot?: DiscoverySnapshot;
@@ -573,6 +579,7 @@ interface ProviderRowProps {
   readonly onChangeBinary: ProviderSettingsViewProps["onChangeBinary"];
   readonly onLocateBinary?: ProviderSettingsViewProps["onLocateBinary"];
   readonly onChangeClaudeConfiguration: ProviderSettingsViewProps["onChangeClaudeConfiguration"];
+  readonly onChangeCodexConfiguration: ProviderSettingsViewProps["onChangeCodexConfiguration"];
   readonly onChangeDevinConfiguration: ProviderSettingsViewProps["onChangeDevinConfiguration"];
   readonly onChangeKiloConfiguration: ProviderSettingsViewProps["onChangeKiloConfiguration"];
   readonly onChangePiConfiguration: ProviderSettingsViewProps["onChangePiConfiguration"];
@@ -672,9 +679,8 @@ function ProviderRow(props: ProviderRowProps) {
         : "The latest scan did not check this provider — you can still enable it; the host checks the binary first."
       : undefined;
   const isCli =
-    props.instance.driverKind === "codex" ||
-    props.instance.driverKind === "opencode" ||
-    props.instance.driverKind === "kimi-code";
+    props.instance.driverKind === "opencode" || props.instance.driverKind === "kimi-code";
+  const isCodex = props.instance.driverKind === "codex";
   const isClaude = props.instance.driverKind === "claude";
   const isVibe = props.instance.driverKind === "mistral-vibe";
   const isGrok = props.instance.driverKind === "grok";
@@ -1104,6 +1110,14 @@ function ProviderRow(props: ProviderRowProps) {
                   instance={props.instance}
                   key={`claude:${props.instance.version}`}
                   onChange={props.onChangeClaudeConfiguration}
+                />
+              ) : isCodex ? (
+                <CodexConfigurationForm
+                  disabled={disabled}
+                  extraAccount={props.extraCodexAccount}
+                  instance={props.instance}
+                  key={`codex:${props.instance.version}`}
+                  onChange={props.onChangeCodexConfiguration}
                 />
               ) : isVibe ? (
                 <VibeConfigurationForm

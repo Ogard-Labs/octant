@@ -58,7 +58,10 @@ import {
   createBflImageProvider,
   createIdeogramImageProvider,
   assignedClaudeAccountConfigDirectory,
+  assignedCodexHome,
+  changeCodexConfiguration,
   implicitClaudeAccountOwnerId,
+  implicitCodexAccountOwnerId,
   createClaudeProvider,
   createDevinProvider,
   createGeminiImageProvider,
@@ -226,6 +229,7 @@ export class ProviderService implements ProviderServiceApi {
   readonly #probeProvider: NonNullable<ProviderServiceOptions["probe"]>;
   readonly #instanceOperationTails = new Map<ProviderInstanceId, Promise<void>>();
   #claudeAccountClaimTail: Promise<void> = Promise.resolve();
+  #codexAccountClaimTail: Promise<void> = Promise.resolve();
   readonly #probesInFlight = new Map<
     ProviderInstanceId,
     { readonly result: Promise<ProviderProbeResult>; readonly tail: Promise<void> }
@@ -631,6 +635,11 @@ export class ProviderService implements ProviderServiceApi {
           command.kind === "change-claude-configuration"
             ? await this.#acquireClaudeAccountClaim()
             : undefined;
+        const releaseCodexClaim =
+          command.kind === "create-codex-provider" ||
+          command.kind === "change-codex-configuration"
+            ? await this.#acquireCodexAccountClaim()
+            : undefined;
         try {
           this.#assertReady();
           const current = this.#persistence.readProviderInstance(command.instanceId);
@@ -679,9 +688,21 @@ export class ProviderService implements ProviderServiceApi {
               case "create-opencode-provider":
                 instance = createOpenCodeProvider({ ...common, binaryPath: command.binaryPath });
                 break;
-              case "create-codex-provider":
-                instance = createCodexProvider({ ...common, binaryPath: command.binaryPath });
+              case "create-codex-provider": {
+                const existingCodexCount = instances.filter(
+                  (candidate) => candidate.driverKind === "codex",
+                ).length;
+                const assignedHome =
+                  existingCodexCount > 0 ? assignedCodexHome(homedir(), command.instanceId) : undefined;
+                instance = createCodexProvider({
+                  ...common,
+                  binaryPath: command.binaryPath,
+                  ...(command.accent === undefined ? {} : { accent: command.accent }),
+                  ...(assignedHome === undefined ? {} : { codexHome: assignedHome }),
+                });
+                this.#refuseTakenCodexHomes(this.#persistence.readProviderInstances(), instance);
                 break;
+              }
               case "create-kimi-code-provider":
                 instance = createKimiCodeProvider({ ...common, binaryPath: command.binaryPath });
                 break;
@@ -857,6 +878,7 @@ export class ProviderService implements ProviderServiceApi {
           const updatedAt = decodeTimestamp(this.#clock());
           if (command.kind === "remove-provider") {
             this.#refuseVacatingImplicitClaudeOwner(instances, current);
+            this.#refuseVacatingImplicitCodexOwner(instances, current);
             const removed = removeProvider(current, {
               activeSessionCount: this.#runtime.activeSessionCount(current.id),
               updatedAt,
@@ -1063,6 +1085,40 @@ export class ProviderService implements ProviderServiceApi {
               instance,
               hostConfigDirectory,
               hostSecureDirectory,
+              current.id,
+            );
+            eventName = "provider.instance-configuration-changed@1";
+          } else if (command.kind === "change-codex-configuration") {
+            if (current.driverKind !== "codex") {
+              throw this.#unsupported("This provider does not use Codex configuration.");
+            }
+            const requestedConfiguration =
+              command.reassignAccountDirectory === true
+                ? {
+                    ...command.configuration,
+                    codexHome: assignedCodexHome(homedir(), current.id),
+                  }
+                : command.configuration;
+            const configuration = this.#assignedCodexConfigurationForChange(
+              instances,
+              current,
+              requestedConfiguration,
+            );
+            instance = changeCodexConfiguration(current, {
+              configuration,
+              activeSessionCount: this.#runtime.activeSessionCount(current.id),
+              updatedAt,
+            });
+            this.#refuseVacatingImplicitCodexOwner(instances, current, instance);
+            this.#refuseTakenCodexHomes(
+              this.#persistence.readProviderInstances(),
+              instance,
+              current.id,
+            );
+            await this.#runtime.invalidateRuntime(current.id);
+            this.#refuseTakenCodexHomes(
+              this.#persistence.readProviderInstances(),
+              instance,
               current.id,
             );
             eventName = "provider.instance-configuration-changed@1";
@@ -1286,6 +1342,7 @@ export class ProviderService implements ProviderServiceApi {
           });
         } finally {
           releaseClaudeClaim?.();
+          releaseCodexClaim?.();
         }
       });
       this.reconcileConfiguredProviders();
@@ -1920,6 +1977,68 @@ export class ProviderService implements ProviderServiceApi {
     return release;
   }
 
+  async #acquireCodexAccountClaim(): Promise<() => void> {
+    const previous = this.#codexAccountClaimTail;
+    let release!: () => void;
+    this.#codexAccountClaimTail = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await previous.catch(() => undefined);
+    return release;
+  }
+
+  #assignedCodexConfigurationForChange(
+    instances: ReadonlyArray<ProviderInstance>,
+    current: Extract<ProviderInstance, { readonly driverKind: "codex" }>,
+    configuration: Extract<ProviderInstance, { readonly driverKind: "codex" }>["configuration"],
+  ): Extract<ProviderInstance, { readonly driverKind: "codex" }>["configuration"] {
+    if (configuration.codexHome !== undefined) return configuration;
+    if (current.configuration.codexHome !== undefined) return configuration;
+    const ownerId = implicitCodexAccountOwnerId(instances);
+    if (ownerId === undefined || String(ownerId) === String(current.id)) return configuration;
+    return {
+      ...configuration,
+      codexHome: assignedCodexHome(homedir(), current.id),
+    };
+  }
+
+  #refuseVacatingImplicitCodexOwner(
+    instances: ReadonlyArray<ProviderInstance>,
+    current: ProviderInstance,
+    next?: ProviderInstance,
+  ): void {
+    if (current.driverKind !== "codex") return;
+    if (current.configuration.codexHome !== undefined) return;
+    if (codexAccountNeedsOwnHome(instances, current)) return;
+    const stillImplicit =
+      next !== undefined &&
+      next.driverKind === "codex" &&
+      next.configuration.codexHome === undefined;
+    if (stillImplicit) return;
+    if (!instances.some((candidate) => codexAccountNeedsOwnHome(instances, candidate))) {
+      return;
+    }
+    throw this.#invalid(
+      next === undefined
+        ? "Give the other Codex accounts their own home directory before removing this one."
+        : "Give the other Codex accounts their own home directory before moving this one.",
+    );
+  }
+
+  #refuseTakenCodexHomes(
+    instances: ReadonlyArray<ProviderInstance>,
+    instance: ProviderInstance,
+    exceptId?: ProviderInstanceId,
+  ): void {
+    if (instance.driverKind !== "codex") return;
+    const hostHome = hostDirectoryClaim(process.env.CODEX_HOME);
+    for (const directory of effectiveCodexHomes(instance, homedir(), hostHome, instances)) {
+      if (codexHomeTaken(instances, directory, homedir(), hostHome, exceptId ?? instance.id)) {
+        throw this.#invalid("Another Codex account already uses that home directory.");
+      }
+    }
+  }
+
   async #withInstanceOperation<T>(instanceId: ProviderInstanceId, operation: () => Promise<T>) {
     const previous = this.#instanceOperationTails.get(instanceId) ?? Promise.resolve();
     let release!: () => void;
@@ -2230,6 +2349,73 @@ function implicitClaudeAccountDirectory(
   // inherited host overlay when present; uniqueness has to use that
   // same effective path.
   return hostConfigDirectory ?? `${accountDirectoryIdentity(homeDirectory)}/.claude`;
+}
+
+function implicitCodexAccountDirectory(
+  homeDirectory: string,
+  hostHome: string | undefined,
+): string {
+  return hostHome ?? `${accountDirectoryIdentity(homeDirectory)}/.codex`;
+}
+
+export function hostCodexHomeOverlayIsRelative(environment: NodeJS.ProcessEnv): boolean {
+  const trimmed = environment.CODEX_HOME?.trim();
+  return trimmed !== undefined && trimmed.length > 0 && !isAbsolute(trimmed);
+}
+
+export function codexAccountNeedsOwnHome(
+  instances: ReadonlyArray<ProviderInstance>,
+  instance: ProviderInstance,
+): boolean {
+  if (instance.driverKind !== "codex") return false;
+  if (instance.configuration.codexHome !== undefined) return false;
+  const ownerId = implicitCodexAccountOwnerId(instances);
+  return ownerId !== undefined && String(instance.id) !== String(ownerId);
+}
+
+export function codexAccountOverlapsPeerHome(
+  instances: ReadonlyArray<ProviderInstance>,
+  instance: ProviderInstance,
+  homeDirectory: string,
+  hostEnvironment: NodeJS.ProcessEnv,
+): boolean {
+  const hostHome = hostDirectoryClaim(hostEnvironment.CODEX_HOME);
+  return effectiveCodexHomes(instance, homeDirectory, hostHome, instances).some((directory) =>
+    codexHomeTaken(instances, directory, homeDirectory, hostHome, instance.id),
+  );
+}
+
+function effectiveCodexHomes(
+  instance: ProviderInstance,
+  homeDirectory: string,
+  hostHome: string | undefined,
+  instances: ReadonlyArray<ProviderInstance>,
+): ReadonlyArray<string> {
+  if (instance.driverKind !== "codex") return [];
+  if (instance.configuration.codexHome !== undefined) {
+    return [instance.configuration.codexHome];
+  }
+  if (codexAccountNeedsOwnHome(instances, instance)) {
+    return [assignedCodexHome(homeDirectory, instance.id)];
+  }
+  return [implicitCodexAccountDirectory(homeDirectory, hostHome)];
+}
+
+function codexHomeTaken(
+  instances: ReadonlyArray<ProviderInstance>,
+  directory: string,
+  homeDirectory: string,
+  hostHome: string | undefined,
+  exceptId?: ProviderInstanceId,
+): boolean {
+  const key = accountDirectoryIdentity(directory);
+  return instances.some((instance) => {
+    if (instance.driverKind !== "codex") return false;
+    if (exceptId !== undefined && String(instance.id) === String(exceptId)) return false;
+    return effectiveCodexHomes(instance, homeDirectory, hostHome, instances).some(
+      (claimed) => accountDirectoryIdentity(claimed) === key,
+    );
+  });
 }
 
 export function claudeAccountNeedsOwnConfigDirectory(

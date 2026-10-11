@@ -547,14 +547,9 @@ export const IdeogramImageProviderConfiguration = Schema.Struct({
   .pipe(Schema.filter(imageAllowlistContainsDefault))
   .annotations(strict);
 export type IdeogramImageProviderConfiguration = typeof IdeogramImageProviderConfiguration.Type;
-export const CodexProviderConfiguration = Schema.Struct({
-  kind: Schema.Literal("codex-cli"),
-  binaryPath: Schema.NonEmptyTrimmedString,
-}).annotations(strict);
-export type CodexProviderConfiguration = typeof CodexProviderConfiguration.Type;
 export const ClaudeAuthentication = Schema.Literal("subscription", "api-key");
 export type ClaudeAuthentication = typeof ClaudeAuthentication.Type;
-/** Closed swatch set so Claude accounts stay distinguishable in the picker. */
+/** Closed swatch set so multi-account drivers stay distinguishable in the picker. */
 export const CLAUDE_ACCOUNT_ACCENTS = [
   "rust",
   "gold",
@@ -566,6 +561,30 @@ export const CLAUDE_ACCOUNT_ACCENTS = [
 ] as const;
 export const ClaudeAccountAccent = Schema.Literal(...CLAUDE_ACCOUNT_ACCENTS);
 export type ClaudeAccountAccent = typeof ClaudeAccountAccent.Type;
+function codexHomeBasename(path: string): string {
+  let end = path.length;
+  while (end > 0 && path.charAt(end - 1) === "/") {
+    end -= 1;
+  }
+  const slash = path.lastIndexOf("/", end - 1);
+  return slash === -1 ? path.slice(0, end) : path.slice(slash + 1, end);
+}
+
+const CodexHomeDirectory = Schema.NonEmptyTrimmedString.pipe(
+  Schema.filter((path) => {
+    if (!path.startsWith("/")) return false;
+    const leaf = codexHomeBasename(path);
+    return leaf !== "auth.json" && leaf !== ".auth.json";
+  }),
+);
+export const CodexProviderConfiguration = Schema.Struct({
+  kind: Schema.Literal("codex-cli"),
+  binaryPath: Schema.NonEmptyTrimmedString,
+  /** Codex-owned directory for this account. Absent uses Codex's default. */
+  codexHome: Schema.optional(CodexHomeDirectory),
+  accent: Schema.optional(ClaudeAccountAccent),
+}).annotations(strict);
+export type CodexProviderConfiguration = typeof CodexProviderConfiguration.Type;
 /** Linear scan. A `/+$` replace is polynomial in the trailing slashes. */
 function claudeConfigDirectoryBasename(path: string): string {
   let end = path.length;
@@ -1393,6 +1412,7 @@ export const ProviderRegistryCommand = Schema.Union(
     ...CreateProviderCommandFields,
     displayName: Schema.NonEmptyTrimmedString,
     binaryPath: Schema.NonEmptyTrimmedString,
+    accent: Schema.optional(ClaudeAccountAccent),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("create-kimi-code-provider"),
@@ -1540,6 +1560,13 @@ export const ProviderRegistryCommand = Schema.Union(
     ...ProviderInstanceCommandFields,
     configuration: ClaudeProviderConfiguration,
     /** Replaces a legacy custom directory with Octant's assigned leaf. */
+    reassignAccountDirectory: Schema.optional(Schema.Boolean),
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("change-codex-configuration"),
+    ...ProviderInstanceCommandFields,
+    configuration: CodexProviderConfiguration,
+    /** Replaces a leftover custom directory with Octant's assigned leaf. */
     reassignAccountDirectory: Schema.optional(Schema.Boolean),
   }).annotations(strict),
   Schema.Struct({

@@ -851,11 +851,12 @@ describe("ProviderSettingsView", () => {
     const card = screen.getByRole("article", { name: "Codex local" });
     expect(within(card).getByText("Codex CLI")).toBeVisible();
     expect(within(card).getByText(/codex login/i)).toBeVisible();
+    expect(within(card).getByLabelText("Account directory")).toHaveValue("~/.codex");
     expect(within(card).getByText(/Remember for this Project/)).toHaveTextContent(/one-shot/i);
     expect(within(card).getByText(/Remember for this Project/)).toHaveTextContent(
       /Current session only/i,
     );
-    expect(card.textContent).not.toMatch(/account identity|CODEX_HOME|config\.toml|access token/i);
+    expect(card.textContent).not.toMatch(/account identity|config\.toml|access token/i);
   });
 
   it("renders Kimi Code identity, provider-native login guidance, and no credential surface", () => {
@@ -3603,6 +3604,7 @@ function ControllerBackedProviderSettings(props: {
       onHiddenModelsChange={controller.updateHiddenModels}
       onChangeBinary={controller.changeBinary}
       onChangeClaudeConfiguration={controller.changeClaudeConfiguration}
+      onChangeCodexConfiguration={controller.changeCodexConfiguration}
       onChangeDevinConfiguration={controller.changeDevinConfiguration}
       onChangeKiloConfiguration={controller.changeKiloConfiguration}
       onChangePiConfiguration={controller.changePiConfiguration}
@@ -3805,6 +3807,7 @@ function fixture(
       credential.clear();
       return true;
     }),
+    onChangeCodexConfiguration: vi.fn(async () => true),
     onChangeDevinConfiguration: vi.fn(async () => true),
     onChangeKiloConfiguration: vi.fn(async () => true),
     onChangePiConfiguration: vi.fn(async () => true),

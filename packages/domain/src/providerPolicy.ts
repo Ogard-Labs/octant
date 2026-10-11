@@ -3,6 +3,7 @@ import { CLAUDE_ACCOUNT_ACCENTS } from "@octant/contracts/providers";
 import {
   assignedProviderAccountDirectory,
   CLAUDE_ACCOUNT_PROFILE,
+  CODEX_ACCOUNT_PROFILE,
   formatProviderAccountSignInCommand,
 } from "./providerAccountProfile";
 import type {
@@ -16,6 +17,7 @@ import type {
   ClaudeAuthentication,
   ClaudeProviderConfiguration,
   ClaudeProviderInstance,
+  CodexProviderConfiguration,
   CodexProviderInstance,
   DevinProviderConfiguration,
   DevinProviderInstance,
@@ -445,6 +447,17 @@ export function assignedClaudeAccountConfigDirectory(
     reject("invalid-config-directory", "Claude account home must be an absolute directory.");
   }
   return assignedProviderAccountDirectory(CLAUDE_ACCOUNT_PROFILE, home, instanceId);
+}
+
+export function assignedCodexHome(
+  homeDirectory: string,
+  instanceId: ProviderInstanceId,
+): string {
+  const home = stripTrailingSlashes(homeDirectory.trim());
+  if (!isPosixAbsolutePath(home)) {
+    reject("invalid-config-directory", "Codex account home must be an absolute directory.");
+  }
+  return assignedProviderAccountDirectory(CODEX_ACCOUNT_PROFILE, home, instanceId);
 }
 
 /** Unmodified Claude CLI sign-in. Octant never wraps or replaces this flow. */
@@ -1700,7 +1713,12 @@ export function createOpenCodeProvider(input: CreateProviderInput): ProviderInst
   };
 }
 
-export function createCodexProvider(input: CreateProviderInput): ProviderInstance {
+export function createCodexProvider(
+  input: CreateProviderInput & {
+    readonly accent?: ClaudeAccountAccent;
+    readonly codexHome?: string;
+  },
+): ProviderInstance {
   const { binaryPath, ...normalized } = normalizeProviderCreation(input);
   return {
     ...normalized,
@@ -1708,6 +1726,8 @@ export function createCodexProvider(input: CreateProviderInput): ProviderInstanc
     configuration: {
       kind: "codex-cli",
       binaryPath,
+      ...(input.accent === undefined ? {} : { accent: input.accent }),
+      ...(input.codexHome === undefined ? {} : { codexHome: input.codexHome }),
     },
   };
 }
@@ -1876,6 +1896,46 @@ interface ChangeClaudeConfigurationInput {
   readonly configuration: ClaudeConfigurationInput;
   readonly activeSessionCount: number;
   readonly updatedAt: UtcTimestamp;
+}
+
+export interface CodexConfigurationInput {
+  readonly kind: CodexProviderConfiguration["kind"];
+  readonly binaryPath: string;
+  readonly codexHome?: string | undefined;
+  readonly accent?: ClaudeAccountAccent | undefined;
+}
+
+interface ChangeCodexConfigurationInput {
+  readonly configuration: CodexConfigurationInput;
+  readonly activeSessionCount: number;
+  readonly updatedAt: UtcTimestamp;
+}
+
+export function changeCodexConfiguration(
+  current: CodexProviderInstance,
+  input: ChangeCodexConfigurationInput,
+): CodexProviderInstance {
+  if (input.activeSessionCount > 0) {
+    reject("active-sessions", "Stop active sessions before reconfiguring this provider.");
+  }
+  const configuration =
+    input.configuration.codexHome === undefined && current.configuration.codexHome !== undefined
+      ? {
+          ...input.configuration,
+          codexHome: current.configuration.codexHome,
+        }
+      : input.configuration;
+  return {
+    ...current,
+    configuration: {
+      kind: "codex-cli",
+      binaryPath: normalizeBinaryPath(configuration.binaryPath),
+      ...(configuration.accent === undefined ? {} : { accent: configuration.accent }),
+      ...(configuration.codexHome === undefined ? {} : { codexHome: configuration.codexHome }),
+    },
+    version: nextVersion(current.version),
+    updatedAt: input.updatedAt,
+  };
 }
 
 export function changeClaudeConfiguration(

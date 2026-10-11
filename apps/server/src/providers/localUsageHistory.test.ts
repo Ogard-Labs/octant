@@ -127,6 +127,42 @@ describe("local provider usage history", () => {
     expect(result.coverage.status).toBe("ready");
   });
 
+  it("reads Codex usage from the account home rather than the host default", async () => {
+    const root = await codexFixtureRoot("octant-codex-account-home-");
+    await writeFile(
+      join(
+        root,
+        "sessions",
+        "rollout-2026-09-09T10-00-00-00000000-0000-4000-8000-000000000009.jsonl",
+      ),
+      JSON.stringify({
+        timestamp: "2026-09-09T10:00:00.000Z",
+        type: "event_msg",
+        payload: {
+          type: "token_count",
+          info: {
+            last_token_usage: { input_tokens: 7, output_tokens: 2 },
+          },
+        },
+      }),
+    );
+    const source = createLocalUsageHistorySourceForDriver({
+      driverKind: "codex",
+      home: join(tmpdir(), "unused-codex-home"),
+      codexHome: root,
+    });
+    if (source === undefined) {
+      throw new Error("expected a Codex usage source");
+    }
+    const result = await Effect.runPromise(source.read(request));
+    expect(result.records).toEqual([
+      expect.objectContaining({
+        inputTokens: 7,
+        outputTokens: 2,
+      }),
+    ]);
+  });
+
   it("scans only Codex sessions and archived_sessions directories", async () => {
     const root = await codexFixtureRoot("octant-codex-scope-");
     await mkdir(join(root, "worktrees", "repo", "node_modules"), { recursive: true });
