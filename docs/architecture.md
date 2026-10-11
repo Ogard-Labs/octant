@@ -322,21 +322,21 @@ exception: they only change how a value is drawn, so they carry no schema
 version, but the strict definition schema refuses an unknown field, so a
 runtime rolled back past them refuses a document that uses them rather than
 drawing it as plain text.
-The pure `canvasInlineRefusal` policy admits `inline` only for at most 12 blocks
-with no `diagram`, `plan`, `mockup` or `design`. When an author asks for `inline` over
-that bound, the host records `sidebar` and returns the reason as
-`presentationNote`. Accepted but not yet built: the 12-block cap goes for
-reading blocks and static design frames within the ordinary block budget, the
-refusal applies only to the author's unprompted request, and a person's expand
-in the thread may show any Canvas; until that ships, the bound above holds
+The pure `canvasInlineRefusal` policy admits an author's `inline` request for
+reading blocks at any length within the ordinary block budget, and refuses one
+that holds a `diagram`, `plan`, `mockup` or `design`. When an author asks for
+`inline` with such a block, the host records `sidebar` and returns the reason as
+`presentationNote`. The refusal bounds only the author's unprompted request: a
+person may expand any Canvas in its thread, and that view preference never
+reaches the server
 ([decisions/0165-canvas-artifacts-are-documents-designs-and-prototypes.md](decisions/0165-canvas-artifacts-are-documents-designs-and-prototypes.md)).
 A revise without a choice keeps the current presentation.
 `preview` returns a picture and a layout reading of one shipped version. Its
 input is the `canvasId`, an optional `version` (a sequence), a `width`
 (`inline`, `sidebar`, or 320–1200 px) and a `theme` (`light` or `dark`). The
 layout warnings are computed from the document and the target width alone and
-are typed values — a clipped label, a legend over its row, an empty series, an
-inline document past the block cap, and ink below its contrast target — so a
+are typed values — a clipped label, a legend over its row, an empty series,
+and ink below its contrast target — so a
 build reports them whether or not a browser rendered the picture. The picture is
 a screenshot of the web app's own Canvas renderer: the host's headless Chromium,
 found through the same executable list the browser runtime and the Canvas

@@ -4011,9 +4011,10 @@
 /* A Canvas drawn in the conversation that wrote it. It is the work the turn
    produced, so it wears the reply's one card: the changed-files card's fill,
    hairline and radius, with a code block's 32px header strip naming it and
-   ghost icon controls at its end. The body is capped instead of scrolled, so
-   the wheel always belongs to the thread; what runs past the cap fades into
-   an offer to open the whole Canvas. */
+   ghost icon controls at its end. At rest the body is capped instead of
+   scrolled, so the wheel belongs to the thread; what runs past the cap fades
+   into an offer to expand it. Expanded, it grows with its content up to
+   about the thread viewport, and scrolls only after the person focuses it. */
 .thread-canvas-list {
   display: grid;
   gap: var(--oct-space-3);
@@ -4080,7 +4081,25 @@
   overflow: hidden;
 }
 
-.thread-canvas__body[data-clipped="true"] {
+/* Tall enough to read a long document whole, short enough that the frame's
+   header and the composer stay in view around it. */
+.thread-canvas[data-shown-as="expanded"] .thread-canvas__body {
+  max-height: max(20rem, calc(100dvh - 14rem));
+  overscroll-behavior: contain;
+}
+
+/* A focused region takes the wheel; an unfocused one is not a scroll
+   container for it, so the wheel passes through to the thread. */
+.thread-canvas[data-shown-as="expanded"] .thread-canvas__body[data-wheel="canvas"] {
+  overflow-y: auto;
+}
+
+.thread-canvas[data-shown-as="expanded"] .thread-canvas__body:focus-visible {
+  outline: 2px solid var(--octant-focus-ring);
+  outline-offset: -2px;
+}
+
+.thread-canvas__body[data-clipped="true"]:not([data-wheel="canvas"]) {
   /* A mask reads only alpha, so any opaque ink draws the visible part. */
   mask-image: linear-gradient(
     to bottom,
@@ -4269,6 +4288,16 @@
 .canvas-ref__meta {
   color: var(--oct-meta);
   font-size: var(--oct-text-xs);
+}
+
+/* Above the row's open control, which covers the whole row. */
+.canvas-ref__expand {
+  position: relative;
+  z-index: 2;
+  flex: none;
+  width: 24px;
+  height: 24px;
+  min-height: 24px;
 }
 
 .canvas-ref__chevron {

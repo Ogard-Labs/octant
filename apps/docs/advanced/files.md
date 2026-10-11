@@ -119,35 +119,45 @@ tasks are done. With Settings › Appearance › Style set to Vivid, each Canvas
 takes a colour from what it holds. Octant can also offer newly authored documents
 beside the conversation.
 
-### Small Canvases inside the thread
+### Canvases inside the thread
 
-When you ask for something small, such as a chart, a few numbers, a short table,
-or a diagram such as a sequence, state, entity-relationship, swimlane, or mind
-map, the agent can ask for it to be shown in the thread
-(`"presentation": "inline"`). The Canvas then appears at the end of the turn
-that made it, drawn with the same blocks it has in the sidebar. It is still one
-Canvas: it keeps its versions, it appears in your library, and you can share or
-export it.
+When you ask for a chart, a few numbers, a table, a diagram such as a
+sequence, state, entity-relationship, swimlane, or mind map, or a document you
+read, such as a brief or an article, the agent can ask for it to be shown in
+the thread (`"presentation": "inline"`). The Canvas then appears at the end of
+the turn that made it, drawn with the same blocks it has in the sidebar. It is
+still one Canvas: it keeps its versions, it appears in your library, and you
+can share or export it. Any other Canvas appears there as a row that opens it.
 
 - **Open in sidebar** (the panel icon) opens the same Canvas in the sidebar next to a Work or
   Code thread. There you can comment, edit a board or plan, and see its
   history. Chat has no sidebar, so in Chat the button says **Open Canvas** and
   opens the Canvas in its own tab.
-- **Show as card** (the fold icon in its header) folds it to a single row.
-  **Show in thread** unfolds it. This window remembers your choice.
+- **Expand in thread** (the expand icon, on the frame or on a row) shows the
+  whole Canvas in place, including a board, a plan, or a mockup. It grows
+  with its content up to about the height of the thread. **Collapse** returns
+  it to its faded frame; on a Canvas that started as a row, **Show as card**
+  returns it to the row. This window remembers your choice.
+- **Show as card** (the fold icon in its header) folds an inline Canvas to a
+  single row. **Show in thread** unfolds it. This window remembers that too.
+- Scrolling moves the thread while the pointer passes over a Canvas. Click
+  inside an expanded Canvas (or Tab to it) and scrolling moves only the
+  Canvas; press Escape to give scrolling back to the thread. On a board, drag
+  to pan and hold Ctrl or Command while scrolling to zoom.
 - Hover a line or bar chart to read the value under the pointer. **View chart
   data** lists every reading.
-- A tall Canvas is cut off at a fixed height and fades out. Its button opens
-  the whole Canvas in the sidebar, or in its own tab in Chat. Scrolling always
-  moves the thread, never the Canvas.
+- A tall inline Canvas starts cut off at a fixed height and fades out. **Show
+  the whole Canvas** expands it in place.
 
-Inside the thread a Canvas holds at most 12 blocks. A Canvas with a diagram
-board (the generic diagram you can drag), a plan, or a mockup always appears as
-a row that opens it in the sidebar, or in its own tab in Chat, because you work
-on those there. Sequence, state, entity-relationship, swimlane, and mind map
-diagrams can be shown inline. If a Canvas grows
-past that, later or through your own edits, it turns back into a card. The
-agent is told when that happens.
+What you see in the thread is read-only, even expanded: dragging a board node
+or changing a plan's task happens in the sidebar, or in the Canvas tab in Chat,
+where comments and sharing are too. The agent can show a document of any length
+inline, but a Canvas with a diagram board (the generic diagram you can drag), a
+plan, a mockup, or a design always first appears as a row, because you work on
+those in the sidebar. Sequence, state, entity-relationship, swimlane, and mind
+map diagrams can be shown inline. If an inline Canvas gains one of those
+blocks, later or through your own edits, it turns back into a row. The agent is
+told when that happens.
 
 ### The agent looks at a Canvas before it replies
 
@@ -165,8 +175,7 @@ can name a `version` sequence to look at an earlier version instead of the
 current one. Preview returns a screenshot of the Canvas drawn by the same
 renderer the thread uses, at that width and in that theme, and a list of layout
 warnings: a label too long for its slot, a legend that overflows its row,
-a chart with an empty series, an inline document past its height cap, and text
-or marks below their contrast target. The agent fixes what the warnings name
+a chart with an empty series, and text or marks below their contrast target. The agent fixes what the warnings name
 with a revision, then replies.
 
 Preview is bounded so a loop cannot spend your machine or the model's attention

@@ -3,9 +3,10 @@ import type {
   CanvasCardStatus,
   CanvasThreadReferenceCard as Card,
 } from "@octant/contracts/canvas-cards";
-import { ChevronRight, FileStack } from "lucide-react";
+import { ChevronRight, FileStack, Maximize2 } from "lucide-react";
 import { absoluteTimeFormatter, relativeTimeLabel } from "../lib/relativeTime";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantTooltip } from "../ui/base/OctantTooltip";
 import { CanvasView } from "./CanvasView";
 import { canvasDigest } from "./canvasDigest";
 import { useCanvasDefinition } from "./useCanvasDefinition";
@@ -19,6 +20,8 @@ export interface CanvasThreadReferenceCardProps {
   readonly client?: CanvasClient;
   /** Opens the Canvas; without it the row only names the document. */
   readonly onOpen?: (card: Card) => void;
+  /** Draws the whole Canvas in place of the row; offered only inside a thread. */
+  readonly onExpand?: () => void;
 }
 
 /** What a person reads for a card that is not simply ready to open. */
@@ -45,6 +48,7 @@ export function CanvasThreadReferenceCard({
   card,
   client,
   onOpen,
+  onExpand,
 }: CanvasThreadReferenceCardProps) {
   const loaded = useCanvasDefinition(client, card, client !== undefined);
   const digest = loaded.kind === "ready" ? canvasDigest(loaded.definition) : undefined;
@@ -102,6 +106,21 @@ export function CanvasThreadReferenceCard({
           </span>
         )}
       </span>
+      {onExpand === undefined ? null : (
+        // Above the row's open control, so this one press expands rather than opens.
+        <OctantTooltip label="Expand in thread" side="top">
+          <OctantButton
+            aria-label="Expand in thread"
+            className="canvas-ref__expand"
+            onClick={onExpand}
+            size="icon"
+            type="button"
+            variant="ghost"
+          >
+            <Maximize2 aria-hidden="true" size={14} strokeWidth={1.8} />
+          </OctantButton>
+        </OctantTooltip>
+      )}
       {onOpen === undefined ? null : (
         <ChevronRight aria-hidden="true" className="canvas-ref__chevron" size={16} />
       )}
