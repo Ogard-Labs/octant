@@ -99,6 +99,17 @@ describe("Canvas tabs and columns", () => {
     expect(within(panel).getByRole("button", { name: "Comment on Launch metrics" })).toBeVisible();
   });
 
+  it("shows the open comments anchored to a tabs or columns block on the group itself", async () => {
+    const user = userEvent.setup();
+    const comments = commentRuntime();
+    comments.openCounts.set("brief", 2);
+    render(<CanvasDocument definition={brief()} comments={comments} />);
+    await user.click(screen.getByRole("button", { name: "2 open comments on Tabs" }));
+    expect(comments.onOpen).toHaveBeenCalledWith("brief");
+    await user.click(screen.getByRole("button", { name: "Comment on Columns" }));
+    expect(comments.onOpen).toHaveBeenCalledWith("sign-off");
+  });
+
   it("switches tabs without a network call or a journaled revision", async () => {
     const fetchSpy = vi.fn();
     vi.stubGlobal("fetch", fetchSpy);
