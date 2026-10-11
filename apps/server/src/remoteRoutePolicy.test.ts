@@ -114,6 +114,47 @@ describe("remote route policy", () => {
     await response.arrayBuffer();
   });
 
+  it("frames only a running design's page, which a frame loads by its ticket under the page's own policy", async () => {
+    const page = `/api/canvas/design-page?ticket=${"a".repeat(43)}`;
+    const preAuth = vi.fn(async () => new Response("<p>page</p>"));
+    const fixture = handler({ policy: policy({ maxResponseBytes: 1024 }), preAuth });
+
+    const document = await fixture.route(request("/"));
+    const appPolicy = document.headers.get("content-security-policy") ?? "";
+    expect(appPolicy).toContain("frame-ancestors 'none'");
+    expect(appPolicy).toContain(`frame-src ${origin}/api/canvas/design-page`);
+    await document.arrayBuffer();
+
+    // A frame's navigation sends no Origin and none of our headers.
+    const served = await fixture.route(
+      request(page, { headers: { "sec-fetch-site": "same-origin", "sec-fetch-dest": "iframe" } }),
+    );
+    expect(served.status).toBe(200);
+    expect(preAuth).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ id: "canvas-design-page" }),
+      undefined,
+    );
+    expect(served.headers.get("content-security-policy")).toBe(
+      "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'",
+    );
+    expect(served.headers.get("referrer-policy")).toBe("no-referrer");
+    await served.arrayBuffer();
+
+    // Another site cannot load it, and nothing but a GET reaches it.
+    expect(
+      (await fixture.route(request(page, { headers: { "sec-fetch-site": "cross-site" } }))).status,
+    ).toBe(403);
+    expect(
+      (
+        await fixture.route(
+          request(page, { method: "POST", headers: { origin, "content-type": "text/plain" } }),
+        )
+      ).status,
+    ).toBe(405);
+    expect(preAuth).toHaveBeenCalledOnce();
+  });
+
   it("admits bounded Code prompt evidence uploads to the authenticated product surface", async () => {
     const fixture = handler();
     const response = await fixture.route(
