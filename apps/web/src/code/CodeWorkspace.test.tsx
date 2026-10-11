@@ -549,10 +549,9 @@ describe("CodeWorkspace", () => {
       snapshot: vi.fn(async () => ({ sequence: 1, active: [], recentEvidence: [], simulators })),
       execute,
       cancel: vi.fn(),
-      watchScreen: vi.fn(async () => ({
-        status: "failed",
-        message: "The live Simulator view is not available in this test.",
-      })),
+      // A failed live view puts Reconnect ahead of the input approval, so
+      // a stream that never settles keeps the approval line on screen.
+      watchScreen: vi.fn(() => new Promise<never>(() => undefined)),
     };
     render(
       <CodeWorkspace

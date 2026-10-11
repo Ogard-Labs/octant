@@ -8,14 +8,12 @@ import {
 } from "@octant/contracts/work-project-status";
 
 /**
- * The two files every Work Project folder carries (`docs/decisions/0119`).
- *
- * `AGENTS.md` is the person's standing brief for anyone working in the folder;
- * Octant seeds it once and never touches it again. `STATUS.md` is where the
- * work stands: the agent keeps it current, and Octant backfills the one
- * section it can know about on its own — what changed — when a turn forgets.
+ * The one file Octant keeps in a Work Project folder, and only for a Project
+ * that opted in. `STATUS.md` is where the work stands: the agent keeps it
+ * current, and Octant backfills the one section it can know about on its own —
+ * what changed — when a turn forgets. Octant never writes an agent brief such
+ * as `AGENTS.md` into the folder; that file belongs to the person.
  */
-export const WORK_AGENTS_FILE_NAME = "AGENTS.md";
 export const WORK_STATUS_FILE_NAME = "STATUS.md";
 
 /** Status older than this, or undated, is stale and earns a resume brief. */
@@ -26,32 +24,12 @@ export const WORK_STATUS_DUE_SOON_DAYS = 3;
 const LAST_UPDATED_PREFIX = "Last updated:";
 const DATED_LINE = /^-\s*(\d{4}-\d{2}-\d{2})\b[\s:–—-]*(.*)$/;
 
-export function workAgentsTemplate(projectName: string): string {
-  return [
-    `# ${projectName}`,
-    "",
-    "Standing brief for anyone — person or agent — working in this folder.",
-    "Octant reads this file at the start of every task here and never edits it.",
-    "",
-    "## About this work",
-    "",
-    "- Who this is for (client, team, or purpose):",
-    "- What we are trying to achieve:",
-    "- Conventions, tone, file naming, anything to always respect:",
-    "",
-    "## Working here",
-    "",
-    "- Keep `STATUS.md` current: update **Current status**, **Follow-ups**, and",
-    "  **Deadlines** before finishing a task, and set the `Last updated:` line.",
-    "- Dates are written `YYYY-MM-DD` so Octant can remind about them.",
-    "- Put produced documents in this folder or a subfolder; name them clearly.",
-    "",
-  ].join("\n");
-}
-
 export function workStatusTemplate(projectName: string, today: WorkStatusDate): string {
   return [
     `# ${projectName} — status`,
+    "",
+    "Where this work stands, kept current by each task in Octant. Write dates as",
+    "`YYYY-MM-DD` so Octant can remind about them.",
     "",
     `${LAST_UPDATED_PREFIX} ${today}`,
     "",

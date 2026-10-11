@@ -15,6 +15,7 @@ import {
   type CodeProjectPullRequestBackgroundRefresh,
   type ProjectColor,
   type ProjectProviderPolicy,
+  type WorkProjectStatusFile,
 } from "@octant/contracts/projects";
 import type { AggregateVersion } from "@octant/contracts/events";
 import { LOCAL_HOST_ID, type HostId } from "@octant/contracts/host";
@@ -260,6 +261,28 @@ export function useProjectController(options: ProjectControllerOptions) {
       pullRequestBackgroundRefresh === "enabled"
         ? "Background pull-request refresh enabled."
         : "Background pull-request refresh disabled.",
+    );
+  }
+
+  /**
+   * Opt a Work Project into (or out of) the STATUS.md Octant keeps in its
+   * folder. The server refuses it for the default-folder Project.
+   */
+  async function setWorkStatusFile(
+    projectId: ProjectId,
+    statusFile: WorkProjectStatusFile,
+  ): Promise<boolean> {
+    const project = projectById.get(projectId);
+    if (project?.type !== "work") return false;
+    if ((project.statusFile ?? "disabled") === statusFile) return true;
+    return execute(
+      {
+        kind: "change-work-project-status-file",
+        projectId,
+        expectedVersion: project.version,
+        statusFile,
+      },
+      statusFile === "enabled" ? "Status file turned on." : "Status file turned off.",
     );
   }
 
@@ -624,6 +647,7 @@ export function useProjectController(options: ProjectControllerOptions) {
     setCodeNewThreadWorkspace,
     setCodePullRequestBackgroundRefresh,
     setProviderPolicy,
+    setWorkStatusFile,
     setArchived,
     status,
     supersedeMemory,

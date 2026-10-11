@@ -130,6 +130,7 @@ describe("WorkThreadService", () => {
     }));
     const fixture = serviceFixture({
       threads: [older, newest, completed],
+      project: { ...workProject(), statusFile: "enabled" } as Project,
       projectDueReminder,
     });
 
@@ -154,9 +155,22 @@ describe("WorkThreadService", () => {
     expect(projectDueReminder).toHaveBeenCalledTimes(1);
   });
 
-  it("leaves the reminder off when the status read fails or nothing is due", async () => {
+  it("leaves the reminder off when the Project keeps no status file, the read fails, or nothing is due", async () => {
+    const unread = vi.fn(async () => ({
+      date: "2026-07-20" as const,
+      text: "Left over from before the setting",
+      state: "overdue" as const,
+    }));
+    const optedOut = serviceFixture({ threads: [thread()], projectDueReminder: unread });
+    await expect(optedOut.service.navigation(ids.window)).resolves.toMatchObject({
+      runtime: [{ threadId: ids.thread, executing: false }],
+    });
+    expect(unread).not.toHaveBeenCalled();
+
+    const enabled = { ...workProject(), statusFile: "enabled" } as Project;
     const failing = serviceFixture({
       threads: [thread()],
+      project: enabled,
       projectDueReminder: vi.fn(async () => {
         throw new Error("folder refused the read");
       }),
@@ -167,6 +181,7 @@ describe("WorkThreadService", () => {
 
     const quiet = serviceFixture({
       threads: [thread()],
+      project: enabled,
       projectDueReminder: vi.fn(async () => undefined),
     });
     await expect(quiet.service.navigation(ids.window)).resolves.toMatchObject({

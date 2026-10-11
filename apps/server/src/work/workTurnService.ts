@@ -73,6 +73,7 @@ import {
   ProjectProviderPolicyRejected,
   FILE_MENTION_UNREADABLE_CONTEXT,
   THREAD_MENTION_UNREADABLE_CONTEXT,
+  workProjectKeepsStatusFile,
 } from "@octant/domain";
 import {
   planWorkTurnContext,
@@ -91,7 +92,6 @@ import type { WorkTurnFileObserver } from "./workTurnFileObserver";
 import type { WorkProjectStatusFiles } from "./workProjectStatusFiles";
 import {
   DEFAULT_WORK_STATUS_STALE_AFTER_DAYS,
-  WORK_AGENTS_FILE_NAME,
   WORK_STATUS_FILE_NAME,
   decideWorkResumeBrief,
   isWorkStatusDate,
@@ -120,12 +120,13 @@ const decodeProviderSessionId = Schema.decodeUnknownSync(ProviderSessionId);
 const decodeTimestamp = Schema.decodeUnknownSync(UtcTimestamp);
 
 /**
- * The standing rule for every Work turn, plus the resume brief when the
+ * The standing rule for every turn in a Work Project that keeps a status
+ * file, plus the resume brief when the
  * status has gone quiet or a date is close. Says what to do with `STATUS.md`,
  * never what the status is; the file itself is in the context beside it.
  */
 function statusUpkeepInstruction(reasons: ReadonlyArray<WorkResumeBriefReason>): string {
-  const standing = `This Project keeps its standing brief in ${WORK_AGENTS_FILE_NAME} and its current state in ${WORK_STATUS_FILE_NAME} at the top of the folder; both are in your context. Before you finish this task, update ${WORK_STATUS_FILE_NAME}: revise "Current status", add or resolve dated lines under "Follow-ups" and "Deadlines" (one per line, "- YYYY-MM-DD what"), and set the "Last updated:" line to today. Do not rewrite ${WORK_AGENTS_FILE_NAME}.`;
+  const standing = `This Project keeps its current state in ${WORK_STATUS_FILE_NAME} at the top of the folder; it is in your context. Before you finish this task, update ${WORK_STATUS_FILE_NAME}: revise "Current status", add or resolve dated lines under "Follow-ups" and "Deadlines" (one per line, "- YYYY-MM-DD what"), and set the "Last updated:" line to today.`;
   if (reasons.length === 0) return standing;
   const why = [
     reasons.includes("stale") ? "the status has not been updated for a while" : undefined,
@@ -1348,7 +1349,12 @@ export class WorkTurnService {
         this.#liveTasks.get(String(input.command.requestId)),
       );
       if (outcome.kind === "completed" && wroteFiles !== undefined) {
-        await this.#backfillStatus(input.projectCanonicalRoot, input.thread, wroteFiles);
+        await this.#backfillStatus(
+          input.command.authority.projectId,
+          input.projectCanonicalRoot,
+          input.thread,
+          wroteFiles,
+        );
       }
       const settled = this.#projection.lookup(input.command.requestId);
       if (settled !== undefined) this.#liveUpdates.settle(input.command.threadId, settled);
@@ -1448,22 +1454,23 @@ export class WorkTurnService {
   }
 
   /**
-   * The Project's brief, ahead of everything the thread itself remembers.
+   * The Project's status, ahead of everything the thread itself remembers,
+   * for a Project that opted into a status file; any other Project gets
+   * nothing here and nothing written into its folder.
    *
-   * `AGENTS.md` and `STATUS.md` are read from the bound root on every turn, so
-   * a task started two weeks later knows where the work stands without the
-   * person re-explaining. A Project that has neither file gets them seeded
-   * here, on its first task, so an older Project joins without a migration.
-   * When the status is stale or a dated line is overdue or near, the turn is
-   * also told to take stock first — summarize, ask what happened, update the
-   * file — before doing what it was asked.
+   * `STATUS.md` is read from the bound root on every turn, so a task started
+   * two weeks later knows where the work stands without the person
+   * re-explaining. A missing file is seeded here. When the status is stale or
+   * a dated line is overdue or near, the turn is also told to take stock
+   * first — summarize, ask what happened, update the file — before doing what
+   * it was asked.
    */
   async #projectBriefContributions(
     project: Extract<Project, { readonly type: "work" }>,
     threadId: WorkThreadId,
   ): Promise<ReadonlyArray<WorkTurnContextContribution>> {
     const files = this.#projectStatusFiles;
-    if (files === undefined) return [];
+    if (files === undefined || !workProjectKeepsStatusFile(project)) return [];
     const root = project.binding.canonicalRoot;
     const today = this.#today();
     try {
@@ -1471,35 +1478,31 @@ export class WorkTurnService {
     } catch {
       // A folder that refuses the seed still gets whatever it already has.
     }
-    let snapshot;
+    let status;
     try {
-      snapshot = await files.read(root);
+      status = await files.read(root);
     } catch {
       return [];
     }
     const contributions: WorkTurnContextContribution[] = [];
-    const fileBlock = (name: string, text: string): WorkTurnContextContribution => ({
-      text,
-      sourceKind: "file",
-      referenceId: `project-brief:${name}:${String(threadId)}`,
-      category: "workspace-context",
-      posture: "compressible",
-      block: {
-        kind: "user-message",
-        text: `Contents of ${name} at the top of this Project's folder:\n\n${text}`,
-      },
-    });
-    if (snapshot.agents !== undefined) {
-      contributions.push(fileBlock(WORK_AGENTS_FILE_NAME, snapshot.agents.text));
-    }
-    if (snapshot.status !== undefined) {
-      contributions.push(fileBlock(WORK_STATUS_FILE_NAME, snapshot.status.text));
+    if (status !== undefined) {
+      contributions.push({
+        text: status.text,
+        sourceKind: "file",
+        referenceId: `project-brief:${WORK_STATUS_FILE_NAME}:${String(threadId)}`,
+        category: "workspace-context",
+        posture: "compressible",
+        block: {
+          kind: "user-message",
+          text: `Contents of ${WORK_STATUS_FILE_NAME} at the top of this Project's folder:\n\n${status.text}`,
+        },
+      });
     }
     const instruction = statusUpkeepInstruction(
-      snapshot.status === undefined
+      status === undefined
         ? []
         : decideWorkResumeBrief(
-            parseWorkStatus(snapshot.status.text, today),
+            parseWorkStatus(status.text, today),
             today,
             this.#statusStaleAfterDays,
           ),
@@ -1522,12 +1525,17 @@ export class WorkTurnService {
    * person's to write.
    */
   async #backfillStatus(
+    projectId: ProjectId,
     canonicalRoot: string,
     thread: WorkThread | undefined,
     wroteFiles: WorkTurnWrittenFiles,
   ): Promise<void> {
     const files = this.#projectStatusFiles;
     if (files === undefined) return;
+    // Read the setting again: a person who turned the status file off while
+    // the turn ran has asked Octant to stop writing into the folder.
+    const project = this.#persistence.readProject(projectId);
+    if (project === undefined || !workProjectKeepsStatusFile(project)) return;
     const changed = wroteFiles.paths.filter((path) => path !== WORK_STATUS_FILE_NAME);
     if (changed.length === 0 || wroteFiles.paths.includes(WORK_STATUS_FILE_NAME)) return;
     try {

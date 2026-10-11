@@ -4,9 +4,9 @@ import type { ComponentProps } from "react";
 import { cn } from "./utils";
 
 /*
- * Focus stays free of outline and ring utilities. Ghost and outline controls
- * use a quiet focus fill so keyboard navigation remains visible without a
- * drawn halo (0094).
+ * Focus stays free of outline and ring utilities: the shared keyboard focus
+ * edge in octant.css is the indicator, and a recipe ring would draw a second
+ * one. The ghost and outline focus fill is emphasis, not the indicator.
  *
  * A press moves the button down a pixel, except where it opens something — a
  * menu trigger that sinks while its menu appears reads as a glitch, not a
