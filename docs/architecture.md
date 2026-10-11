@@ -3478,10 +3478,13 @@ mechanisms are:
   **Proposed replacement (not accepted).** Claude subscription sign-in would
   stay inside Anthropic's own flow. Octant would not run `claude setup-token`,
   would not keep `CLAUDE_CODE_OAUTH_TOKEN` in the credential broker, and would
-  not set that variable from Octant storage. Confined Plan and Chat-subagent
-  launches would grant Claude-owned storage and let the unmodified binary
-  read its own login there. `/usr/bin/security` and the Keychain file stay
-  denied. This is not the current product. It stays proposed until Step 0 of
+  not set that variable from Octant storage. Confined Plan and
+  Chat-subagent launches would keep that sign-in only when Step 0
+  finds an opaque credential-use path that needs neither a
+  `.credentials.json` directory grant nor the Keychain file.
+  `/usr/bin/security` and the Keychain file stay denied. Granting a
+  filesystem-backed credential directory would expose the OAuth token
+  to Claude file tools. This is not the current product. It stays proposed until Step 0 of
   [docs/plans/claude-inside-anthropics-terms.md](plans/claude-inside-anthropics-terms.md)
   is measured on a current Claude Code build on macOS, and until Anthropic's
   Commercial Terms or an explicit exception cover the path. Consumer Terms
@@ -3489,12 +3492,15 @@ mechanisms are:
   Claude-owned storage cannot work, the instance switches to API-key
   authentication for every launch. Existing subscription threads cannot resume
   across that switch; they take an explicit new-thread transition. If sign-in
-  works but login cannot be separated from account session history, keep the
+  works but login cannot be separated from account session history, or the
+  only confined login is a granted `.credentials.json` directory, keep the
   subscription and refuse confined Chat, Work Plan, and Code Plan launches;
   that is not the instance-wide API-key fallback. If login can live apart from
-  session files, every launch for a new thread sets `CLAUDE_CONFIG_DIR` to
-  one durable per-thread session directory and points only the measured
-  secure-storage variable at the credential-only path. `findSession`
+  session files on an opaque path, every launch for a new thread sets
+  `CLAUDE_CONFIG_DIR` to one durable per-thread session directory and
+  points only the measured secure-storage variable at the credential-only
+  path. The confined grant is the session root and the launch temporary
+  directory, not a `.credentials.json` directory. `findSession`
   receives that root without mutating process-global environment. Ordinary
   Chat, Work, and Code resume identities are journaled and purgeable, not
   process-lifetime only. Durable session roots are host-allocated
@@ -3515,8 +3521,10 @@ mechanisms are:
   dedicated documented switches, including `/feedback`, `/bug`,
   `/share`, and Claude-drafted feedback. Host
   `DO_NOT_TRACK` and `CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY` opt-outs keep
-  the documented disable spellings (`1`, `true`, `yes`, `on`). API-key
-  launches may keep the 0005 telemetry guards.
+  the documented disable spellings (`1`, `true`, `yes`, `on`). Account
+  `settings.json` disable-only values for those same names are seeded
+  into the per-thread session root without reading credential files.
+  API-key launches may keep the 0005 telemetry guards.
   Several Claude accounts would use the same config-directory mechanism.
   Each thread stays on the account it started with. Automatic failover,
   rotation, and load-balancing are refused. The native harness stays API-key

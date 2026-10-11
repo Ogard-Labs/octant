@@ -13,10 +13,14 @@ lands these steps. This document is the order of that work.
 
 Octant never collects, stores, scrapes, or forwards Claude.ai OAuth or
 setup tokens. The person signs in through the unmodified `claude` binary.
-Confined Plan and subagent launches keep that same sign-in by granting
-the sandbox the Claude-owned credential path and, when Step 0 finds
-a split, a durable per-thread session directory. Several accounts
-may come later on that same mechanism; they are not this remediation.
+Confined Plan and subagent launches keep that same sign-in only when
+Step 0 finds an opaque credential-use path that needs neither a
+`.credentials.json` directory grant nor the Keychain file. When that
+path exists, grant the sandbox a durable per-thread session directory
+and that opaque credential path. Granting a filesystem-backed
+credential directory would expose the OAuth token to Claude file tools.
+Several accounts may come later on that same mechanism; they are not
+this remediation.
 
 ## Step 0 — Must-verify macOS login storage
 
@@ -60,9 +64,18 @@ Measure:
    `CLAUDE_CONFIG_DIR` as settings, session history, and login
    together. If `CLAUDE_SECURESTORAGE_CONFIG_DIR` (or another
    documented location) holds the login independently of session
-   files, record that split. If they cannot be separated, record that
-   confined subscription launches are refused: a bound root cannot
-   receive another Project's session files.
+   files, record that split. Then record whether that credential
+   path is opaque: `/usr/bin/security` and the Keychain file stay
+   denied, and the launch must not grant a directory that contains
+   `.credentials.json` as a read or write root, because Plan file
+   tools receive those roots. A separable-but-filesystem-backed
+   login is still refuse-confined. Only an opaque credential-use
+   that needs neither a credential-file grant nor the Keychain
+   file may proceed. If they cannot be separated, or the only
+   login is a granted credential file, record that confined
+   subscription launches are refused: a bound root cannot
+   receive another Project's session files, and a granted
+   `.credentials.json` directory is a token leak.
 
 **Pass.** The unmodified binary signs in on a confined Plan launch from
 Claude-owned storage, and Octant never reads or sets a token.
@@ -94,9 +107,10 @@ instance-wide API-key fallback.
 Claude-owned storage at all (the binary stays signed out after the
 scoped 0145 lookup). That is the only path that switches the instance
 to Anthropic API-key authentication for every launch, including
-ordinary unconfined turns. Inseparable login and session history is
-not this failure: record it in measurement 6 and refuse only confined
-subscription launches. The current
+ordinary unconfined turns. Inseparable login and session history, or
+a login that only works by granting a `.credentials.json` directory,
+is not this failure: record it in measurement 6 and refuse only
+confined subscription launches. The current
 provider model has one `authentication` value per instance, so mixed
 "CLI login when unconfined, API key when confined" is not available.
 A stored Claude resume cursor records that instance's
@@ -171,22 +185,31 @@ Primary path, only after Step 0 passes.
 
 Each Claude account (the default account first) has a Claude-owned
 config directory. When login and session history cannot be
-separated, a confined Plan or subagent launch is refused, and
-unconfined turns may still set `CLAUDE_CONFIG_DIR` and, when
-needed, `CLAUDE_SECURESTORAGE_CONFIG_DIR` to that account
+separated, or the only confined login is a granted
+`.credentials.json` directory, a confined Plan or subagent launch
+is refused, and unconfined turns may still set `CLAUDE_CONFIG_DIR`
+and, when needed, `CLAUDE_SECURESTORAGE_CONFIG_DIR` to that account
 directory. The shared confinement builder never grants
 `/usr/bin/security` or the Keychain file. Those denials are
 unconditional. The 0145 scoped security-server lookup may stay if
 Step 0 recorded that it is required; it still never exposes the
 token to Octant.
 
-If Step 0 showed the login can live in a credential-only directory
-distinct from session history, set `CLAUDE_CONFIG_DIR` to the
+If Step 0 showed the login can live in an opaque credential-only
+path distinct from session history, set `CLAUDE_CONFIG_DIR` to the
 durable per-thread session root on every launch for that thread,
 confined or not. Point only the measured secure-storage variable
 (`CLAUDE_SECURESTORAGE_CONFIG_DIR` if that is the credential-only
 path Step 0 recorded) at the account credential directory. Grant
-those two paths and the launch's temporary directory. Anthropic
+the per-thread session root and the launch's temporary directory.
+Do not grant a directory that contains `.credentials.json` as a
+read root or write root: confinement passes those state directories
+as `readRoots` and `additionalWriteRoots`, so Claude file tools
+could read or overwrite the OAuth token even though Octant never
+opens it. `/usr/bin/security` and the Keychain file stay denied.
+If the only confined login is that filesystem-backed file, refuse
+confined Chat, Work Plan, and Code Plan. That is not the
+instance-wide API-key fallback. Anthropic
 documents `CLAUDE_CONFIG_DIR` as the session-history store, so
 leaving both variables on the account tree while also granting a
 per-thread directory still writes and reads account-wide history.
@@ -246,12 +269,13 @@ transition before the next confined subscription launch.
 
 Do not grant the shared session tree to a confined Chat subagent or
 Plan turn that would otherwise read another Project's history. If
-the login is inseparable from the account config tree, refuse
+the login is inseparable from the account config tree, or only
+works by granting a `.credentials.json` directory, refuse
 confined subscription launches (Chat, Work Plan, and Code Plan).
 Unconfined turns may still use the CLI login. Do not invent a split
 the unmodified binary does not support, and do not switch the whole
 instance to an API key only because confined launches cannot share
-history.
+history or cannot receive a credential file.
 
 The person signs in once with unmodified `claude auth login` (Anthropic's
 flow) against that directory. Octant does not read the directory's
@@ -288,10 +312,11 @@ not reintroduce a setup token.
 
 - A confined Plan turn on a subscription instance signs in without
   `CLAUDE_CODE_OAUTH_TOKEN` in the launch environment only when
-  Step 0 found a credential directory that can be granted without
-  the shared session tree; otherwise confined Chat, Work Plan, and
-  Code Plan subscription launches are refused. A Chat subagent
-  follows the same grant-or-refuse rule.
+  Step 0 found an opaque credential-use path that does not grant
+  a `.credentials.json` directory or the Keychain file; otherwise
+  confined Chat, Work Plan, and Code Plan subscription launches
+  are refused. A Chat subagent follows the same grant-or-refuse
+  rule.
 - Octant never reads `.credentials.json` or a Keychain item.
 - A launch whose config directory is missing or unsigned-in refuses with
   a step the person can take (`claude auth login` in that directory, or
@@ -299,12 +324,14 @@ not reintroduce a setup token.
 - The Keychain file and `/usr/bin/security` stay denied. Step 0 cannot
   add an exception for either.
 - A confined grant follows Step 0's credential/session split. If the
-  login is separable, every launch for that thread sets
+  login is separable and opaque, every launch for that thread sets
   `CLAUDE_CONFIG_DIR` to the same durable per-thread session
   directory and points only the measured secure-storage variable at
   the credential-only path. The launch does not receive another
-  Project's session files. If it is not, confined subscription
-  launches are refused.
+  Project's session files and does not receive a `.credentials.json`
+  directory as a read or write root. If login is inseparable or
+  only filesystem-backed, confined subscription launches are
+  refused.
 - Resume after restart looks up that per-thread session root for
   subscription and API-key threads. The lookup receives the root
   without mutating process-global Claude directory variables. The
@@ -379,6 +406,19 @@ booleans: pass through every disabling spelling (`1`, `true`, `yes`,
 (`0`, `false`, `no`, `off`, empty, or unset). Do not invent an enable
 flag or pass through any other value.
 
+When Step 2 points `CLAUDE_CONFIG_DIR` at a new per-thread session
+root, Claude reads `settings.json` from that root. Anthropic
+documents that environment variables may live under `settings.json`.
+An account-level disable-only value in the account `settings.json`
+would otherwise disappear when the config directory relocates.
+Seed validated disable-only settings into the thread root: read
+only that account `settings.json`, never `.credentials.json` or
+another credential file; copy only the same disable-only names
+and spellings this step already preserves from the host
+environment; write those into the thread root's `settings.json`.
+Do not copy credentials, session files, unknown keys, or values
+that leave telemetry or surveys on.
+
 API-key launches may keep the 0005 telemetry guards.
 
 **Files:**
@@ -387,6 +427,7 @@ API-key launches may keep the 0005 telemetry guards.
 - `apps/server/src/providers/claudeEnvironment.test.ts`
 - `apps/server/src/providers/claudeProcess.ts` / its test if they assert
   the subscription guards
+- the per-thread `settings.json` disable-only seeder and its test
 
 **Acceptance:**
 
@@ -411,6 +452,13 @@ API-key launches may keep the 0005 telemetry guards.
   documented disabling spelling (`1`, `true`, `yes`, `on`, any casing)
   and is dropped when it is a documented enabling spelling or any
   other value.
+- An account `settings.json` disable-only value for
+  `DISABLE_TELEMETRY`, `DISABLE_ERROR_REPORTING`,
+  `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`,
+  `DISABLE_GROWTHBOOK=1`, `DO_NOT_TRACK`, or
+  `CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY` survives relocation of
+  `CLAUDE_CONFIG_DIR` into the per-thread root. Credential files
+  are never read. Enable spellings and unknown keys are not copied.
 - An API-key launch still sets the 0005 telemetry guards.
 - Tests name each re-enabled channel and each channel that stays off.
   They also cover `DO_NOT_TRACK` and
