@@ -2355,6 +2355,141 @@ describe("CodeThreadWorkspace", () => {
     },
   );
 
+  it("merges a fork's own finished reply back into its source on request and says what happens next", async () => {
+    const user = userEvent.setup();
+    const mergeForkContext = vi.fn(async () => ({
+      status: "merged" as const,
+      sourceThreadId: anotherThreadId,
+      messages: 2,
+    }));
+    const base = controller({
+      mergeForkContext,
+      conversation: [
+        {
+          id: "source:assistant",
+          role: "assistant",
+          text: "The source's reply.",
+          operationId: "c0000000-0000-4000-8000-0000000000f1",
+          status: "completed",
+          sourceThreadId: anotherThreadId,
+        },
+        {
+          id: "fork:assistant",
+          role: "assistant",
+          text: "The fork's reply.",
+          operationId: "c0000000-0000-4000-8000-0000000000f2",
+          status: "completed",
+        },
+      ],
+    } as never);
+    const view = base.activeView!;
+    render(
+      <CodeThreadWorkspace
+        controller={{
+          ...base,
+          activeView: {
+            ...view,
+            thread: {
+              ...view.thread,
+              forkedFrom: {
+                threadId: anotherThreadId,
+                throughOperationId: "c0000000-0000-4000-8000-0000000000f1",
+              },
+            },
+          },
+        }}
+        threadId={threadId}
+      />,
+    );
+
+    // The inherited reply is the source's own; it offers no merge back.
+    await user.click(
+      within(turnArticle("The source's reply.")).getByRole("button", { name: "More actions" }),
+    );
+    expect(screen.queryByRole("menuitemradio", { name: "Merge back to source" })).toBeNull();
+    await user.keyboard("{Escape}");
+
+    await chooseTurnAction(user, "Merge back to source", "The fork's reply.");
+    await waitFor(() =>
+      expect(mergeForkContext).toHaveBeenCalledWith({
+        threadId,
+        throughOperationId: "c0000000-0000-4000-8000-0000000000f2",
+      }),
+    );
+    expect(
+      await screen.findByText(
+        "Merged 2 messages back into the thread this was forked from. Its next message carries them; nothing runs until then.",
+      ),
+    ).toBeVisible();
+  });
+
+  it("offers no merge back on a thread that is not a fork", async () => {
+    const user = userEvent.setup();
+    render(
+      <CodeThreadWorkspace
+        controller={controller({
+          conversation: [
+            {
+              id: "turn-1:assistant",
+              role: "assistant",
+              text: "done",
+              operationId: "50000000-0000-4000-8000-000000000001",
+              status: "completed",
+            },
+          ],
+        })}
+        threadId={threadId}
+      />,
+    );
+    await user.click(within(turnArticle("done")).getByRole("button", { name: "More actions" }));
+    expect(screen.queryByRole("menuitemradio", { name: "Merge back to source" })).toBeNull();
+  });
+
+  it("says on the source's reply what a merged fork carried, what it left out, and that code did not move", () => {
+    render(
+      <CodeThreadWorkspace
+        controller={controller({
+          conversation: [
+            {
+              id: "turn-2:assistant",
+              role: "assistant",
+              text: "Picked up the fork's idea.",
+              status: "completed",
+              forkMergeBacks: [
+                {
+                  forkThreadId: anotherThreadId,
+                  throughOperationId: "c0000000-0000-4000-8000-0000000000f2",
+                  messages: 2,
+                  omissions: {
+                    earlierMessages: 0,
+                    unfinishedReplies: 0,
+                    missingBodies: 0,
+                    oversizedBodies: 0,
+                    emptyBodies: 0,
+                    attachments: 0,
+                    truncatedMessages: 1,
+                    truncatedCharacters: 5_072,
+                    sourceTruncatedMessages: 0,
+                  },
+                  externalContentIngested: true,
+                },
+              ],
+            },
+          ],
+        })}
+        threadId={threadId}
+      />,
+    );
+
+    const note = screen.getByRole("note");
+    expect(note).toHaveTextContent("Merged back 2 messages as text from a fork of this thread.");
+    expect(note).toHaveTextContent("1 message was shortened by 5072 characters.");
+    expect(note).toHaveTextContent("The fork has taken in outside content.");
+    expect(note).toHaveTextContent(
+      "Hidden reasoning, tool activity and the fork's file changes did not transfer; code reaches this thread only through Git review.",
+    );
+  });
+
   it("warns before sending that a thread moved to another provider starts a new session", () => {
     const base = controller();
     const view = base.activeView!;
