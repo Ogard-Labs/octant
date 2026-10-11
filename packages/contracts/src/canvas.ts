@@ -8,6 +8,7 @@ import {
   CanvasNodeId,
   CanvasSchemaVersion,
   CanvasSourceId,
+  CanvasTableRowId,
   CanvasVersionId,
 } from "./canvasIdentity";
 import { CanvasActionBlock } from "./canvasActionBlock";
@@ -31,10 +32,11 @@ const strict = { parseOptions: { onExcessProperty: "error" as const } };
 // block, version 7 the ranked bar-list block, version 8 the
 // entity-relationship, swimlane, and mind map diagram kinds, version 9 the
 // design block, version 10 the comparison matrix, version 11 the math
-// block, version 12 the mockup catalog, version 13 the design document
-// size and workspace theme, version 14 a design's declared image assets, and
-// version 15 a design that runs script, which the definition filters below admit only under those declared
-// versions.
+// block, version 12 the mockup catalog, version 13 the stable table row
+// id, version 14 the funnel, radar, and sankey chart types, version 15 the
+// design document size and workspace theme, version 16 a design's declared
+// image assets, and version 17 a design that runs script, which the
+// definition filters below admit only under those declared versions.
 
 // These are renderer-facing aggregate limits. Per-field structural limits are
 // also applied below; the domain policy re-checks the aggregate values before
@@ -146,6 +148,22 @@ export const CANVAS_MAX_MATH_SOURCE_LENGTH = 1_000;
 export const CANVAS_MAX_MATH_RUNS = 48;
 export const CANVAS_MAX_MATH_PARAGRAPH_LENGTH = 4_000;
 export const CANVAS_MAX_MATH_CAPTION_LENGTH = 240;
+// A funnel is read stage by stage down one column: a dozen and a half stages
+// is already a long process, and past that the drop-off between neighbours is
+// too thin to see.
+export const CANVAS_MAX_FUNNEL_STAGES = 16;
+// A radar's spokes share one circle. Fewer than three is a line, not a shape;
+// past sixteen the axis labels collide at the rim even in a wide column.
+export const CANVAS_MIN_RADAR_AXES = 3;
+export const CANVAS_MAX_RADAR_AXES = 16;
+// A sankey is a picture of where a whole goes. Sixty-four nodes and a few
+// hundred flows still lay out in columns a reader can follow; past that the
+// bands are hairlines and the flows want a table.
+export const CANVAS_MAX_SANKEY_NODES = 64;
+export const CANVAS_MAX_SANKEY_LINKS = 256;
+// A funnel stage, a radar axis, and a sankey node are drawn as labels beside
+// their marks, so they are names rather than sentences.
+export const CANVAS_MAX_CHART_CATEGORY_LABEL_LENGTH = 80;
 
 // The schema version that introduced each version-gated block kind or hint. A
 // document carrying one below the version that introduced it is a declared
@@ -164,13 +182,18 @@ export const CANVAS_MATH_SCHEMA_VERSION = 11;
 // The mockup catalog: more devices, fidelity, the wider component set, node
 // fields, variants, and callouts, and the larger node budget.
 export const CANVAS_MOCKUP_CATALOG_SCHEMA_VERSION = 12;
+// A table row may carry a stable id, the identity a row comment anchors to.
+export const CANVAS_TABLE_ROW_ID_SCHEMA_VERSION = 13;
+// The funnel, radar, and sankey chart types shipped as one slice and share a
+// floor, as the three diagram kinds do.
+export const CANVAS_FLOW_CHARTS_SCHEMA_VERSION = 14;
 // A design drawn as a document that grows to its content, and a design drawn
 // in the workspace theme.
-export const CANVAS_DESIGN_DOCUMENT_SCHEMA_VERSION = 13;
+export const CANVAS_DESIGN_DOCUMENT_SCHEMA_VERSION = 15;
 // A design that declares the images its frames show.
-export const CANVAS_DESIGN_ASSET_SCHEMA_VERSION = 14;
+export const CANVAS_DESIGN_ASSET_SCHEMA_VERSION = 16;
 // A design that runs its own script, drawn in a frame the host serves.
-export const CANVAS_DESIGN_RUNNING_SCHEMA_VERSION = 15;
+export const CANVAS_DESIGN_RUNNING_SCHEMA_VERSION = 17;
 // The metric's sparkline, goodDirection, and caption arrived with the bar list.
 export const CANVAS_METRIC_TREND_SCHEMA_VERSION = 7;
 
@@ -607,10 +630,51 @@ export type CanvasTableColumn = typeof CanvasTableColumn.Type;
 
 export const CanvasTableCell = CanvasScalar;
 export type CanvasTableCell = typeof CanvasTableCell.Type;
-export const CanvasTableRow = Schema.Array(CanvasTableCell).pipe(
+export const CanvasTableRowCells = Schema.Array(CanvasTableCell).pipe(
   Schema.maxItems(CANVAS_MAX_TABLE_COLUMNS),
 );
+export type CanvasTableRowCells = typeof CanvasTableRowCells.Type;
+
+/**
+ * A row that names itself, so a comment can stay on it.
+ *
+ * A bare list of cells has only its position, which a sort, a filter, or a
+ * revision that inserts a row changes; the id is the author's and outlives
+ * all three. A row without one cannot be commented on by itself. Ids are
+ * unique within the table, which the domain policy checks.
+ */
+export const CanvasTableKeyedRow = Schema.Struct({
+  id: CanvasTableRowId,
+  cells: CanvasTableRowCells,
+}).annotations(strict);
+export type CanvasTableKeyedRow = typeof CanvasTableKeyedRow.Type;
+
+export const CanvasTableRow = Schema.Union(CanvasTableRowCells, CanvasTableKeyedRow);
 export type CanvasTableRow = typeof CanvasTableRow.Type;
+
+/** A table row's values in column order, whether or not the row names itself. */
+export function canvasTableRowCells(row: CanvasTableRow): CanvasTableRowCells {
+  return "cells" in row ? row.cells : row;
+}
+
+/** The row's stable id, or undefined for a row that is only a list of cells. */
+export function canvasTableRowId(row: CanvasTableRow): CanvasTableRowId | undefined {
+  return "cells" in row ? row.id : undefined;
+}
+
+/** Whether a block is a table with a row that carries a stable id. */
+export function canvasTableUsesRowIds(block: {
+  readonly kind?: unknown;
+  readonly rows?: unknown;
+}): boolean {
+  return (
+    block.kind === "table" &&
+    Array.isArray(block.rows) &&
+    block.rows.some(
+      (row: unknown) => typeof row === "object" && row !== null && !Array.isArray(row),
+    )
+  );
+}
 
 export const CanvasTableBlock = Schema.Struct({
   ...CanvasBlockFields,
@@ -631,8 +695,39 @@ export const CanvasChartType = Schema.Literal(
   "stacked-bar",
   "grouped-bar",
   "bar-line",
+  "funnel",
+  "radar",
+  "sankey",
 );
 export type CanvasChartType = typeof CanvasChartType.Type;
+
+/** Whether a block is a chart of a type introduced at the flow-charts version. */
+export function canvasChartUsesFlowTypes(block: {
+  readonly kind?: unknown;
+  readonly chartType?: unknown;
+}): boolean {
+  return (
+    block.kind === "chart" &&
+    (block.chartType === "funnel" || block.chartType === "radar" || block.chartType === "sankey")
+  );
+}
+
+const CanvasChartCategoryLabel = boundedNonEmptyText(CANVAS_MAX_CHART_CATEGORY_LABEL_LENGTH);
+
+/**
+ * One flow in a sankey: a quantity that moves from one named node to another.
+ *
+ * Nodes are named by their labels rather than declared apart, so a flow can
+ * never point at a node the chart does not hold. Whether the flows form a
+ * cycle, and whether each quantity is positive, is the domain policy's to
+ * judge, so a refusal names the reason.
+ */
+export const CanvasChartLink = Schema.Struct({
+  source: CanvasChartCategoryLabel,
+  target: CanvasChartCategoryLabel,
+  value: FiniteNumber,
+}).annotations(strict);
+export type CanvasChartLink = typeof CanvasChartLink.Type;
 
 export const CanvasChartPoint = Schema.Struct({
   x: Schema.Union(FiniteNumber, CanvasText),
@@ -658,6 +753,10 @@ export type CanvasChartSeries = typeof CanvasChartSeries.Type;
  * A pie or donut is one series of labeled, non-negative slices. Stacked and
  * grouped bars, and a bar-and-line chart, compare series across one shared
  * category order. Only a bar-and-line chart names each series as a bar or a line.
+ * A funnel is one series of labeled stages, a radar compares series across the
+ * same labeled axes, and a sankey draws flows between named nodes instead of
+ * series. Values a reader could still draw (a negative flow, a funnel that
+ * widens) are left to the domain policy, which refuses them with a reason.
  */
 export function canvasChartSeriesIssue(block: {
   readonly chartType: string;
@@ -665,14 +764,19 @@ export function canvasChartSeriesIssue(block: {
     readonly points: ReadonlyArray<{ readonly x: number | string; readonly y: number }>;
     readonly mark?: CanvasChartMark | undefined;
   }>;
+  readonly links?: ReadonlyArray<{ readonly source: string; readonly target: string }> | undefined;
 }): string | undefined {
   const marked = block.series.some((item) => item.mark !== undefined);
   if (block.chartType !== "bar-line" && marked) {
     return "Only a bar and line chart names a mark on its series.";
   }
+  if (block.chartType === "sankey") return sankeyIssue(block.series.length, block.links);
+  if (block.links !== undefined) return "Only a sankey chart carries links.";
   if (block.chartType === "pie" || block.chartType === "donut") {
     return partToWholeIssue(block.series);
   }
+  if (block.chartType === "funnel") return funnelIssue(block.series);
+  if (block.chartType === "radar") return radarIssue(block.series);
   if (
     block.chartType === "stacked-bar" ||
     block.chartType === "grouped-bar" ||
@@ -685,6 +789,81 @@ export function canvasChartSeriesIssue(block: {
 
 function categoryKey(x: number | string): string {
   return typeof x === "number" ? `n:${String(x)}` : `s:${x}`;
+}
+
+function sankeyIssue(
+  seriesCount: number,
+  links: ReadonlyArray<{ readonly source: string; readonly target: string }> | undefined,
+): string | undefined {
+  if (seriesCount > 0) return "A sankey chart draws links, not series.";
+  if (links === undefined || links.length === 0) return "A sankey chart needs at least one link.";
+  const nodes = new Set<string>();
+  for (const link of links) {
+    nodes.add(link.source);
+    nodes.add(link.target);
+  }
+  if (nodes.size > CANVAS_MAX_SANKEY_NODES) {
+    return `A sankey chart names at most ${String(CANVAS_MAX_SANKEY_NODES)} nodes.`;
+  }
+  return undefined;
+}
+
+/** Why a category label cannot name a funnel stage or a radar axis. */
+function categoryLabelIssue(x: number | string, what: string): string | undefined {
+  if (typeof x !== "string" || x.trim() === "") return `A ${what} needs a label.`;
+  if (x.length > CANVAS_MAX_CHART_CATEGORY_LABEL_LENGTH) {
+    return `A ${what} label is at most ${String(CANVAS_MAX_CHART_CATEGORY_LABEL_LENGTH)} characters.`;
+  }
+  return undefined;
+}
+
+function funnelIssue(
+  series: ReadonlyArray<{
+    readonly points: ReadonlyArray<{ readonly x: number | string; readonly y: number }>;
+  }>,
+): string | undefined {
+  const only = series[0];
+  if (series.length !== 1 || only === undefined) {
+    return "A funnel chart needs one series of labeled stages.";
+  }
+  if (only.points.length > CANVAS_MAX_FUNNEL_STAGES) {
+    return `A funnel chart has at most ${String(CANVAS_MAX_FUNNEL_STAGES)} stages.`;
+  }
+  const labels = new Set<string>();
+  for (const point of only.points) {
+    const issue = categoryLabelIssue(point.x, "funnel stage");
+    if (issue !== undefined) return issue;
+    if (labels.has(String(point.x))) return "A funnel chart lists each stage once.";
+    labels.add(String(point.x));
+  }
+  return undefined;
+}
+
+function radarIssue(
+  series: ReadonlyArray<{
+    readonly points: ReadonlyArray<{ readonly x: number | string; readonly y: number }>;
+  }>,
+): string | undefined {
+  const first = series[0];
+  if (first === undefined) return "A radar chart needs at least one series.";
+  if (first.points.length < CANVAS_MIN_RADAR_AXES || first.points.length > CANVAS_MAX_RADAR_AXES) {
+    return `A radar chart has ${String(CANVAS_MIN_RADAR_AXES)} to ${String(CANVAS_MAX_RADAR_AXES)} axes.`;
+  }
+  const labels = new Set<string>();
+  for (const point of first.points) {
+    const issue = categoryLabelIssue(point.x, "radar axis");
+    if (issue !== undefined) return issue;
+    if (labels.has(String(point.x))) return "A radar chart lists each axis once.";
+    labels.add(String(point.x));
+  }
+  const keys = first.points.map((point) => categoryKey(point.x));
+  for (const item of series) {
+    const itemKeys = item.points.map((point) => categoryKey(point.x));
+    if (itemKeys.length !== keys.length || itemKeys.some((key, index) => key !== keys[index])) {
+      return "Every radar series lists the same axes in the same order.";
+    }
+  }
+  return undefined;
 }
 
 function partToWholeIssue(
@@ -754,6 +933,10 @@ export const CanvasChartBlock = Schema.Struct({
   kind: Schema.Literal("chart"),
   chartType: CanvasChartType,
   series: Schema.Array(CanvasChartSeries).pipe(Schema.maxItems(CANVAS_MAX_SERIES)),
+  /** A sankey's flows; every other chart type omits it. */
+  links: Schema.optional(
+    Schema.Array(CanvasChartLink).pipe(Schema.maxItems(CANVAS_MAX_SANKEY_LINKS)),
+  ),
   /** How numeric axis values and readings read; absent groups by locale. */
   format: Schema.optional(CanvasNumberFormat),
 })
@@ -1763,7 +1946,7 @@ export function canvasDesignUsesDocumentFields(block: {
 }
 
 /**
- * Whether a design declares image assets, which version 14 introduced. Reads
+ * Whether a design declares image assets, which version 16 introduced. Reads
  * loose fields so the domain's declared-version check can ask the same
  * question of a document that did not decode.
  */
@@ -1775,7 +1958,7 @@ export function canvasDesignUsesAssets(block: {
 }
 
 /**
- * Whether a design declares that it runs script, which version 15 introduced.
+ * Whether a design declares that it runs script, which version 17 introduced.
  * Reads loose fields so the domain's declared-version check can ask the same
  * question of a document that did not decode.
  */
@@ -2137,11 +2320,13 @@ export const CanvasDefinition = Schema.Struct({
     // thread presentation from version 4, a treemap from version 5, a heatmap
     // from version 6, a bar list and the metric trend fields from version 7, a
     // design from version 9, a comparison matrix from version 10, math from
-    // version 11, the mockup catalog from version 12, a design document
-    // or theme from version 13, design assets from version 14, and a design
-    // that runs script from version 15. A rolled-back runtime that never
-    // learned a kind or hint must see a document carrying it as a declared
-    // future version, not as a document that failed to decode. Each keeps its own floor so an earlier document stays valid.
+    // version 11, the mockup catalog from version 12, table row ids from
+    // version 13, the funnel, radar, and sankey charts from version 14, a
+    // design document or theme from version 15, design assets from version
+    // 16, and a design that runs script from version 17. A rolled-back runtime
+    // that never learned a kind or hint must see a document
+    // carrying it as a declared future version, not as a document that failed
+    // to decode. Each keeps its own floor so an earlier document stays valid.
     Schema.filter(
       (definition) =>
         definition.schemaVersion >= CANVAS_MOCKUP_SCHEMA_VERSION ||
@@ -2243,6 +2428,24 @@ export const CanvasDefinition = Schema.Struct({
       {
         message: () =>
           `A mockup's catalog components, devices, fidelity, variants, callouts, or more than ${String(CANVAS_MOCKUP_LEGACY_MAX_NODES)} nodes require Canvas schema version ${String(CANVAS_MOCKUP_CATALOG_SCHEMA_VERSION)}.`,
+      },
+    ),
+    Schema.filter(
+      (definition) =>
+        definition.schemaVersion >= CANVAS_TABLE_ROW_ID_SCHEMA_VERSION ||
+        !definition.blocks.some(canvasTableUsesRowIds),
+      {
+        message: () =>
+          `A table row id requires Canvas schema version ${String(CANVAS_TABLE_ROW_ID_SCHEMA_VERSION)}.`,
+      },
+    ),
+    Schema.filter(
+      (definition) =>
+        definition.schemaVersion >= CANVAS_FLOW_CHARTS_SCHEMA_VERSION ||
+        !definition.blocks.some(canvasChartUsesFlowTypes),
+      {
+        message: () =>
+          `Funnel, radar, and sankey charts require Canvas schema version ${String(CANVAS_FLOW_CHARTS_SCHEMA_VERSION)}.`,
       },
     ),
     Schema.filter(

@@ -14,6 +14,7 @@ import {
 import { DesignBlock } from "./DesignBlock";
 import { MockupBlock } from "./MockupBlock";
 import { StructuredBlocks } from "./StructuredBlocks";
+import type { TableRowComments } from "./TableBlock";
 import { TextBlocks } from "./TextBlocks";
 import { TreemapBlock } from "./TreemapBlock";
 import { HeatmapBlock } from "./HeatmapBlock";
@@ -31,6 +32,7 @@ export function CanvasBlockRenderer({
   actionRuntime,
   designAssetRuntime,
   designRunRuntime,
+  rowComments,
 }: {
   readonly block: CanvasBlock;
   /** Lets a diagram journal a drag; absent on surfaces that cannot. */
@@ -46,6 +48,8 @@ export function CanvasBlockRenderer({
   readonly designAssetRuntime?: DesignAssetRuntime;
   /** Reaches the host to run a prototype; absent, a prototype cannot run here. */
   readonly designRunRuntime?: DesignRunRuntime;
+  /** Comment markers on a table's rows that carry an id; absent where comments are not journaled. */
+  readonly rowComments?: TableRowComments;
 }) {
   switch (block.kind) {
     case "heading":
@@ -68,6 +72,7 @@ export function CanvasBlockRenderer({
         <StructuredBlocks
           block={block}
           {...(layoutRuntime === undefined ? {} : { layoutRuntime })}
+          {...(rowComments === undefined ? {} : { rowComments })}
         />
       );
     case "sequence":

@@ -21,7 +21,7 @@ const PAGE = `http://127.0.0.1:3773/api/canvas/design-page?ticket=${"a".repeat(4
 function prototype(size: CanvasDesignBlock["size"] = "phone"): CanvasDesignBlock {
   const block = decodeCanvasBlock({
     blockId: "checkout",
-    schemaVersion: 15,
+    schemaVersion: 17,
     kind: "design",
     title: "Checkout",
     size,

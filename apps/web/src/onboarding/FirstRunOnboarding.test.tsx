@@ -8,13 +8,11 @@ import type {
   UtcTimestamp,
 } from "@octant/contracts";
 import type { ProjectId } from "@octant/contracts/projects";
-import type { UserProfile } from "@octant/contracts/user-profile";
 import { buildModelPickerGroups, type PickerGroup } from "@octant/domain";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
-import type { AvatarImageEnvironment } from "../profile/avatarImage";
 import { FirstRunOnboarding, type FirstRunOnboardingProps } from "./FirstRunOnboarding";
 import { summarizeFirstRunReadiness } from "./firstRunReadinessModel";
 import {
@@ -41,8 +39,8 @@ const instance = {
 
 const modelId = "llama-test" as ProviderModelId;
 
-function readyGroups(): ReadonlyArray<PickerGroup> {
-  const model = {
+function readyModel(): ProviderModel {
+  return {
     id: modelId,
     displayName: "Llama Test",
     orderHint: undefined,
@@ -52,34 +50,25 @@ function readyGroups(): ReadonlyArray<PickerGroup> {
     source: "discovered",
     verification: "verified",
   } as ProviderModel;
-  const observed = {
-    instanceId,
-    readiness: "ready",
-    processState: "running",
-    models: [model],
-    capabilities: {},
-    observedAt: now,
-  } as unknown as ProviderObservedState;
-  return buildModelPickerGroups({
-    instances: [instance],
-    observedByInstance: new Map([[instanceId, observed]]),
-    mode: "chat",
-  });
 }
 
-/** An enabled provider the host reached, which offered nothing usable. */
-function readyGroupsWithoutModels(): ReadonlyArray<PickerGroup> {
-  const observed = {
+function readyObserved(models: ReadonlyArray<ProviderModel> = [readyModel()]) {
+  return {
     instanceId,
     readiness: "ready",
     processState: "running",
-    models: [],
+    models,
     capabilities: {},
     observedAt: now,
   } as unknown as ProviderObservedState;
+}
+
+function groupsFor(models: ReadonlyArray<ProviderModel>): ReadonlyArray<PickerGroup> {
   return buildModelPickerGroups({
     instances: [instance],
-    observedByInstance: new Map([[instanceId, observed]]),
+    observedByInstance: new Map([[instanceId, readyObserved(models)]]),
+    // The surface offers whatever groups App built for the mode; how the
+    // picker policy decides tool capability is covered with that policy.
     mode: "chat",
   });
 }
@@ -100,26 +89,13 @@ function controller(
   };
 }
 
-const emptyProfile: UserProfile = { accent: "indigo", avatar: { kind: "initials" } };
-/**
- * Tests that exercise saving an existing profile start
- * from a host that already has one.
- */
-const namedProfile: UserProfile = { ...emptyProfile, displayName: "Ada Lovelace" };
-const encodedAvatar = "data:image/webp;base64,AAAA";
-const chatProjectId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" as ProjectId;
-const chatProject = {
-  id: chatProjectId,
-  name: "Ada's notes",
-  type: "chat" as const,
+const codeProjectId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" as ProjectId;
+const codeProject = {
+  id: codeProjectId,
+  name: "octant",
+  type: "code" as const,
   lifecycle: "active" as const,
 };
-const defaultWorkspace = {
-  colorScheme: "system",
-  chatEnabled: true,
-  workEnabled: true,
-  modeSwitcher: "buttons",
-} as const;
 
 // A scan that ran to completion: only then may the surface claim this Mac has
 // no provider on it.
@@ -128,35 +104,34 @@ const searchedThisMac = {
   snapshot: { status: "completed", candidates: [] } as unknown as DiscoverySnapshot,
 } as const;
 
-function mount(overrides: Partial<FirstRunOnboardingProps> = {}) {
-  const props: FirstRunOnboardingProps = {
+function cleanReadiness() {
+  return summarizeFirstRunReadiness({
+    providerStatus: "ready",
+    instances: [instance],
+    observedByInstance: new Map(),
+    discovery: searchedThisMac,
+  });
+}
+
+function baseProps(): FirstRunOnboardingProps {
+  return {
     controller: controller(),
-    readiness: summarizeFirstRunReadiness({
-      providerStatus: "ready",
-      instances: [instance],
-      observedByInstance: new Map(),
-      discovery: searchedThisMac,
-    }),
+    readiness: cleanReadiness(),
     onOpenProviderSettings: vi.fn(),
     onRescan: vi.fn(),
     scanning: false,
-    profile: namedProfile,
-    onSaveProfile: vi.fn(async () => true),
-    chatModelGroups: [],
-    onSelectChatDefault: vi.fn(async () => true),
-    navigatorModelGroups: [],
-    onSelectNavigatorDefault: vi.fn(async () => true),
-    onClearNavigatorDefault: vi.fn(async () => true),
-    workspace: defaultWorkspace,
-    onSelectColorScheme: vi.fn(async () => true),
-    onToggleChat: vi.fn(async () => true),
-    onToggleWork: vi.fn(async () => true),
-    onSelectModeSwitcher: vi.fn(async () => true),
+    workEnabled: true,
+    workModelGroups: [],
+    codeModelGroups: [],
+    onSelectModel: vi.fn(async () => true),
     projects: [],
     onCreateProject: vi.fn(),
     onStartThread: vi.fn(),
-    ...overrides,
   };
+}
+
+function mount(overrides: Partial<FirstRunOnboardingProps> = {}) {
+  const props: FirstRunOnboardingProps = { ...baseProps(), ...overrides };
   const view = render(<FirstRunOnboarding {...props} />);
   return {
     ...props,
@@ -165,54 +140,22 @@ function mount(overrides: Partial<FirstRunOnboardingProps> = {}) {
   };
 }
 
-function avatarEnvironment(
-  overrides: Partial<AvatarImageEnvironment> = {},
-): AvatarImageEnvironment {
-  return {
-    decode: vi.fn(async () => ({ width: 200, height: 200 })),
-    encode: vi.fn(async () => ({ dataUrl: encodedAvatar })),
-    fetch: vi.fn(async () => new Response("binary", { status: 200 })),
-    digest: vi.fn(async () => "hashed"),
-    ...overrides,
-  };
-}
-
-async function goToStep(user: ReturnType<typeof userEvent.setup>, name: string) {
-  await user.click(screen.getByRole("button", { name: new RegExp(name) }));
+function railStep(title: "Providers" | "Project" | "Model") {
+  // The rail step reads as its title followed by its summary; a bare title is
+  // the readiness view's fact button, not the rail.
+  return screen.getByRole("button", { name: (name) => name.startsWith(title) && name !== title });
 }
 
 async function openHandoff(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(screen.getByRole("button", { name: /Navigator/ }));
+  await user.click(railStep("Model"));
   await user.click(screen.getByRole("button", { name: "Continue" }));
-}
-
-function readyObserved(): ProviderObservedState {
-  return {
-    instanceId,
-    readiness: "ready",
-    processState: "running",
-    models: [
-      {
-        id: modelId,
-        displayName: "Llama Test",
-        orderHint: undefined,
-        reasoning: "unavailable",
-        inputModalities: ["text"],
-        options: [],
-        source: "discovered",
-        verification: "verified",
-      } as ProviderModel,
-    ],
-    capabilities: {},
-    observedAt: now,
-  } as unknown as ProviderObservedState;
 }
 
 function readyHandoff(): Partial<FirstRunOnboardingProps> {
   return {
-    chatModelGroups: readyGroups(),
-    chatDefault: { providerInstanceId: instanceId, modelId },
-    projects: [chatProject],
+    codeModelGroups: groupsFor([readyModel()]),
+    codeModel: { providerInstanceId: instanceId, modelId },
+    projects: [codeProject],
     readiness: summarizeFirstRunReadiness({
       providerStatus: "ready",
       instances: [instance],
@@ -229,164 +172,115 @@ describe("FirstRunOnboarding", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
-  it("opens on the profile step with the first field focused", async () => {
+  it("asks for a provider, a Project, and a model, and leaves profile and Navigator to Settings", async () => {
     mount();
 
     const dialog = screen.getByRole("dialog", { name: "Welcome to Octant" });
     const heading = screen.getByRole("heading", { name: "Welcome to Octant" });
     expect(dialog).toHaveAttribute("aria-labelledby", heading.id);
-    expect(heading).toBeVisible();
-    await waitFor(() => expect(screen.getByLabelText("Name")).toHaveFocus());
-    // No account, no sign-in: the surface has to say so, because every other
-    // app that asks for a name and an address is asking for an account.
-    expect(screen.getByText(/no account and signs you in to nothing/)).toBeVisible();
-  });
-
-  it("lets an unnamed person skip setup without creating a profile or starting work", async () => {
-    const user = userEvent.setup();
-    const props = mount({ profile: emptyProfile });
-
-    expect(screen.queryByText("Enter a name to continue.")).toBeNull();
-    await user.click(screen.getByRole("button", { name: "Skip setup" }));
-
-    await waitFor(() => expect(props.controller.skip).toHaveBeenCalledOnce());
-    expect(props.onSaveProfile).not.toHaveBeenCalled();
-    expect(props.onStartThread).not.toHaveBeenCalled();
-  });
-
-  it("allows setup steps and dismissal without a display name", async () => {
-    const user = userEvent.setup();
-    const props = mount({ profile: emptyProfile });
-
-    await user.click(screen.getByRole("button", { name: /Providers/ }));
-    expect(screen.getByRole("button", { name: "Set up a provider" })).toBeVisible();
-    await user.keyboard("{Escape}");
-    await waitFor(() => expect(props.controller.skip).toHaveBeenCalledOnce());
-    expect(props.onSaveProfile).not.toHaveBeenCalled();
-  });
-
-  it("saves the profile when the step is left, not on every keystroke", async () => {
-    const user = userEvent.setup();
-    const props = mount({ profile: emptyProfile });
-
-    await user.type(screen.getByLabelText("Name"), "Ada");
-    expect(props.onSaveProfile).not.toHaveBeenCalled();
-
-    await goToStep(user, "Continue");
-
-    expect(props.onSaveProfile).toHaveBeenCalledWith(
-      expect.objectContaining({ displayName: "Ada" }),
+    expect(screen.getByText("Step 1 of 3")).toBeVisible();
+    expect(railStep("Providers")).toHaveAttribute("aria-current", "step");
+    expect(railStep("Project")).toBeVisible();
+    expect(railStep("Model")).toBeVisible();
+    expect(screen.queryByRole("button", { name: /About you|Workspace|Navigator/ })).toBeNull();
+    expect(screen.queryByLabelText("Name")).toBeNull();
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Set up a provider" })).toHaveFocus(),
     );
   });
 
-  it("keeps a settled answer for someone who quits the app on the first step", async () => {
-    const user = userEvent.setup();
-    const props = mount({ profile: emptyProfile });
-
-    await user.type(screen.getByLabelText("Name"), "Ada");
-    await user.tab();
-
-    // Quitting the app is not one of this dialog's exits, so waiting for
-    // Continue or Skip would lose a name the user had already finished giving.
-    expect(props.onSaveProfile).toHaveBeenCalledWith(
-      expect.objectContaining({ displayName: "Ada" }),
-    );
-  });
-
-  it("never saves a name the user typed past and can no longer see", async () => {
-    const user = userEvent.setup();
-    const props = mount({ profile: emptyProfile });
-
-    // Typed one character at a time, the 64th character makes a storable name
-    // and the 65th makes the field invalid.
-    await user.type(screen.getByLabelText("Name"), "A".repeat(65));
-    expect(screen.getByRole("alert")).toBeVisible();
-    await user.click(screen.getByRole("button", { name: "Skip setup" }));
-    await waitFor(() => expect(props.controller.skip).toHaveBeenCalledOnce());
-
-    // The 64-character prefix is not an answer: the user never settled on it
-    // and the field stopped showing it. Saving it here would journal a name
-    // that exists nowhere on screen.
-    expect(props.onSaveProfile).not.toHaveBeenCalledWith(
-      expect.objectContaining({ displayName: expect.anything() }),
-    );
-  });
-
-  it("keeps the saved name when an invalid replacement is skipped", async () => {
-    const user = userEvent.setup();
-    const props = mount({ profile: namedProfile });
-    await user.clear(screen.getByLabelText("Name"));
-    await user.type(screen.getByLabelText("Name"), "A".repeat(65));
-    await user.click(screen.getByRole("button", { name: "Skip setup" }));
-    await waitFor(() => expect(props.controller.skip).toHaveBeenCalledOnce());
-    expect(props.onSaveProfile).toHaveBeenLastCalledWith(namedProfile);
-  });
-
-  it("walks forward and back without losing the draft", async () => {
-    const user = userEvent.setup();
-    mount({ profile: emptyProfile });
-
-    await user.type(screen.getByLabelText("Name"), "Ada");
-    await goToStep(user, "Continue");
-    await goToStep(user, "Continue");
-    expect(screen.getByRole("button", { name: "Set up a provider" })).toBeVisible();
-
-    await user.click(screen.getByRole("button", { name: "Back" }));
-    await user.click(screen.getByRole("button", { name: "Back" }));
-    expect(screen.getByLabelText("Name")).toHaveValue("Ada");
-  });
-
-  it("writes each workspace choice straight through to the setting that owns it", async () => {
-    const user = userEvent.setup();
-    const props = mount();
-
-    await user.click(screen.getByRole("button", { name: /Workspace/ }));
-    await user.click(screen.getByRole("radio", { name: "Dark" }));
-    await user.click(screen.getByRole("switch", { name: "Enable Work" }));
-
-    expect(props.onSelectColorScheme).toHaveBeenCalledWith("dark");
-    expect(props.onToggleWork).toHaveBeenCalledWith(false);
-    // Code has no switch: it is always available, and offering one that cannot
-    // be turned off would say otherwise.
-    expect(screen.queryByRole("switch", { name: /Code/ })).toBeNull();
-    expect(screen.getByRole("note")).toHaveTextContent(/Hiding Chat or Work never deletes/);
-  });
-
-  it("asks its answers in the same section object and rows Settings uses", async () => {
+  it("walks providers, then Project, then model with Continue and back again", async () => {
     const user = userEvent.setup();
     mount();
 
-    await user.click(screen.getByRole("button", { name: /Workspace/ }));
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    expect(screen.getByRole("heading", { name: "Project" })).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    expect(screen.getByRole("heading", { name: "Model" })).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    expect(screen.getByRole("heading", { name: "Your first task" })).toBeVisible();
 
-    const section = screen.getByRole("region", { name: "Workspace defaults" });
-    expect(section).toHaveClass("settings-card-section");
-    // Four answers, each asked in the row Settings asks a setting in.
-    expect(within(section).getAllByTestId("setting-row")).toHaveLength(4);
-    // The guarantee reads as the section's own line rather than as a fifth
-    // row: it speaks for the whole group, not for one answer in it.
-    const group = section.querySelector(".setgroup");
-    expect(group).not.toBeNull();
-    expect(group).not.toContainElement(screen.getByRole("note"));
+    await user.click(screen.getByRole("button", { name: "Back" }));
+    await user.click(screen.getByRole("button", { name: "Back" }));
+    expect(screen.getByRole("heading", { name: "Project" })).toBeVisible();
   });
 
-  it("does not claim a colour scheme while appearance settings are still loading", async () => {
+  it("lets setup be skipped from the first step without starting work", async () => {
     const user = userEvent.setup();
-    mount({ workspace: { ...defaultWorkspace, colorScheme: undefined } });
+    const props = mount();
 
-    await user.click(screen.getByRole("button", { name: /Workspace/ }));
+    await user.click(screen.getByRole("button", { name: "Skip setup" }));
 
-    expect(screen.queryByRole("radiogroup")).toBeNull();
-    expect(screen.getByRole("status")).toHaveTextContent("Loading…");
+    await waitFor(() => expect(props.controller.skip).toHaveBeenCalledOnce());
+    expect(props.onStartThread).not.toHaveBeenCalled();
+    expect(props.onCreateProject).not.toHaveBeenCalled();
   });
 
-  it("records the default Chat model from what the host actually found", async () => {
+  it("records the same durable skip when the dialog is dismissed", async () => {
     const user = userEvent.setup();
-    const props = mount({ chatModelGroups: readyGroups() });
+    const props = mount();
 
-    await user.click(screen.getByRole("button", { name: /Default model/ }));
+    await user.keyboard("{Escape}");
+
+    await waitFor(() => expect(props.controller.skip).toHaveBeenCalledOnce());
+  });
+
+  it("chooses the first task's folder through the same Project create flow as the shell", async () => {
+    const user = userEvent.setup();
+    const props = mount();
+
+    await user.click(railStep("Project"));
+    expect(screen.getByRole("radio", { name: "Code" })).toHaveAttribute("aria-checked", "true");
+    await user.click(screen.getByRole("button", { name: "Choose a folder…" }));
+    expect(props.onCreateProject).toHaveBeenLastCalledWith("code");
+
+    await user.click(screen.getByRole("radio", { name: "Work" }));
+    await user.click(screen.getByRole("button", { name: "Choose a folder…" }));
+    expect(props.onCreateProject).toHaveBeenLastCalledWith("work");
+    // Opening Project create is a prerequisite round-trip, not an answer.
+    expect(props.controller.complete).not.toHaveBeenCalled();
+    expect(props.controller.skip).not.toHaveBeenCalled();
+  });
+
+  it("offers only Code when Work is turned off", async () => {
+    const user = userEvent.setup();
+    const props = mount({ workEnabled: false });
+
+    await user.click(railStep("Project"));
+
+    expect(screen.queryByRole("radiogroup", { name: "First task mode" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Choose a folder…" }));
+    expect(props.onCreateProject).toHaveBeenCalledWith("code");
+  });
+
+  it("starts in the folder the user just chose rather than the first one listed", async () => {
+    const user = userEvent.setup();
+    const chosenId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb" as ProjectId;
+    const props = mount(readyHandoff());
+
+    await user.click(railStep("Project"));
+    await user.click(screen.getByRole("button", { name: "Add another folder" }));
+    // Project create resolves while first run is concealed; the new Project
+    // arrives as one more row from the host.
+    props.rerender({ projects: [codeProject, { ...codeProject, id: chosenId, name: "site" }] });
+
+    expect(screen.getByRole("radio", { name: "site" })).toHaveAttribute("aria-checked", "true");
+    await openHandoff(user);
+    await user.click(screen.getByRole("button", { name: "Start a task" }));
+
+    await waitFor(() =>
+      expect(props.onStartThread).toHaveBeenCalledWith({ mode: "code", projectId: chosenId }),
+    );
+  });
+
+  it("records the model for the mode the first task starts in", async () => {
+    const user = userEvent.setup();
+    const props = mount({ codeModelGroups: groupsFor([readyModel()]) });
+
+    await user.click(railStep("Model"));
     await user.click(screen.getByRole("option", { name: /Llama Test/ }));
 
-    expect(props.onSelectChatDefault).toHaveBeenCalledWith({
+    expect(props.onSelectModel).toHaveBeenCalledWith("code", {
       providerInstanceId: instanceId,
       modelId,
     });
@@ -394,9 +288,9 @@ describe("FirstRunOnboarding", () => {
 
   it("points back at providers instead of showing an empty picker", async () => {
     const user = userEvent.setup();
-    const props = mount({ chatModelGroups: [] });
+    const props = mount();
 
-    await user.click(screen.getByRole("button", { name: /Default model/ }));
+    await user.click(railStep("Model"));
 
     expect(screen.getByRole("status")).toHaveTextContent(
       "No provider on this Mac is ready, so there is nothing to choose from yet.",
@@ -410,63 +304,39 @@ describe("FirstRunOnboarding", () => {
 
   it("points back at providers when a reachable provider offered no models", async () => {
     const user = userEvent.setup();
-    const props = mount({ chatModelGroups: readyGroupsWithoutModels() });
+    mount({ codeModelGroups: groupsFor([]) });
 
-    await user.click(screen.getByRole("button", { name: /Default model/ }));
+    await user.click(railStep("Model"));
 
     // The provider is enabled and answered, so it still gets a picker group.
-    // What decides this step is whether there is a model to choose — and the
-    // provider is ready, so saying otherwise would send the user after a
-    // readiness problem that is not there.
+    // What decides this step is whether there is a model to choose.
     expect(screen.getByRole("status")).toHaveTextContent(
       "No provider on this Mac offered a model, so there is nothing to choose from yet.",
     );
     expect(screen.queryByRole("listbox")).toBeNull();
-    await user.click(screen.getByRole("button", { name: "Open provider settings" }));
-    expect(props.onOpenProviderSettings).toHaveBeenCalledOnce();
-  });
-
-  it("keeps first run pending when a settled profile answer is discarded", async () => {
-    const user = userEvent.setup();
-    // Another window changed shell settings, so the profile write conflicts.
-    // The host recovers by reloading, which would leave the queued outcome
-    // free to succeed against state that never took the name.
-    const props = mount({ onSaveProfile: vi.fn(async () => false), profile: emptyProfile });
-
-    await user.type(screen.getByLabelText("Name"), "Ada");
-    await user.click(screen.getByRole("button", { name: "Skip setup" }));
-
-    expect(props.onSaveProfile).toHaveBeenCalledWith(
-      expect.objectContaining({ displayName: "Ada" }),
-    );
-    // Recording the outcome here would hide first run for good, and the name
-    // would be gone with no way to give it again.
-    await waitFor(() => expect(screen.getByRole("dialog")).toBeVisible());
-    expect(props.controller.skip).not.toHaveBeenCalled();
   });
 
   it("waits for a model choice to land before recording completion", async () => {
     const user = userEvent.setup();
     let acceptSelection!: (accepted: boolean) => void;
-    const onSelectChatDefault = vi.fn(
+    const onSelectModel = vi.fn(
       () =>
         new Promise<boolean>((resolve) => {
           acceptSelection = resolve;
         }),
     );
-    const props = mount({ ...readyHandoff(), onSelectChatDefault });
+    const props = mount({ ...readyHandoff(), onSelectModel });
 
-    await user.click(screen.getByRole("button", { name: /Default model/ }));
+    await user.click(railStep("Model"));
     await user.click(screen.getByRole("option", { name: /Llama Test/ }));
-    // Chat settings are a separate controller, so this write is still running.
-    await openHandoff(user);
-    await user.click(screen.getByRole("button", { name: "Start a Chat thread" }));
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    await user.click(screen.getByRole("button", { name: "Start a task" }));
 
     expect(props.controller.complete).not.toHaveBeenCalled();
 
     acceptSelection(true);
     await waitFor(() => expect(props.controller.complete).toHaveBeenCalledOnce());
-    expect(props.onStartThread).toHaveBeenCalledWith({ mode: "chat", projectId: chatProjectId });
+    expect(props.onStartThread).toHaveBeenCalledWith({ mode: "code", projectId: codeProjectId });
   });
 
   it("waits for a provider switch to land before recording completion", async () => {
@@ -480,7 +350,6 @@ describe("FirstRunOnboarding", () => {
     );
     const props = mount({ ...readyHandoff(), onSetProviderEnabled });
 
-    await user.click(screen.getByRole("button", { name: /Providers/ }));
     // The discovered provider is on, so this switch turns it off; the wizard
     // waits on the write either way, and asserting the direction keeps the
     // fixture from drifting out from under the test.
@@ -488,9 +357,8 @@ describe("FirstRunOnboarding", () => {
     expect(onSetProviderEnabled).toHaveBeenCalledWith(instanceId, false);
 
     await openHandoff(user);
-    await user.click(screen.getByRole("button", { name: "Start a Chat thread" }));
+    await user.click(screen.getByRole("button", { name: "Start a task" }));
 
-    // Providers are a separate controller, so this write is still running.
     expect(props.controller.complete).not.toHaveBeenCalled();
 
     acceptEnable(true);
@@ -499,15 +367,12 @@ describe("FirstRunOnboarding", () => {
 
   it("keeps first run pending when a model choice is rejected", async () => {
     const user = userEvent.setup();
-    const props = mount({
-      ...readyHandoff(),
-      onSelectChatDefault: vi.fn(async () => false),
-    });
+    const props = mount({ ...readyHandoff(), onSelectModel: vi.fn(async () => false) });
 
-    await user.click(screen.getByRole("button", { name: /Default model/ }));
+    await user.click(railStep("Model"));
     await user.click(screen.getByRole("option", { name: /Llama Test/ }));
-    await openHandoff(user);
-    await user.click(screen.getByRole("button", { name: "Start a Chat thread" }));
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    await user.click(screen.getByRole("button", { name: "Start a task" }));
 
     await waitFor(() => expect(screen.getByRole("dialog")).toBeVisible());
     expect(props.controller.complete).not.toHaveBeenCalled();
@@ -515,20 +380,20 @@ describe("FirstRunOnboarding", () => {
 
   it("lets the user answer again after a rejected write, without being held by it", async () => {
     const user = userEvent.setup();
-    const onSelectColorScheme = vi
-      .fn<(scheme: "system" | "light" | "dark") => Promise<boolean>>()
+    const onSelectModel = vi
+      .fn<FirstRunOnboardingProps["onSelectModel"]>()
       .mockResolvedValueOnce(false)
       .mockResolvedValue(true);
-    const props = mount({ onSelectColorScheme });
+    const props = mount({ codeModelGroups: groupsFor([readyModel()]), onSelectModel });
 
-    await user.click(screen.getByRole("button", { name: /Workspace/ }));
-    await user.click(screen.getByRole("radio", { name: "Dark" }));
+    await user.click(railStep("Model"));
+    await user.click(screen.getByRole("option", { name: /Llama Test/ }));
     await user.click(screen.getByRole("button", { name: "Skip setup" }));
     expect(props.controller.skip).not.toHaveBeenCalled();
 
     // The discarded write must not hold the surface shut for the rest of the
     // session; answering again has to be able to resolve first run.
-    await user.click(screen.getByRole("radio", { name: "Light" }));
+    await user.click(screen.getByRole("option", { name: /Llama Test/ }));
     await user.click(screen.getByRole("button", { name: "Skip setup" }));
 
     await waitFor(() => expect(props.controller.skip).toHaveBeenCalledOnce());
@@ -536,10 +401,13 @@ describe("FirstRunOnboarding", () => {
 
   it("says a refused answer was not kept, then lets the next press continue without it", async () => {
     const user = userEvent.setup();
-    const props = mount({ onSelectColorScheme: vi.fn(async () => false) });
+    const props = mount({
+      codeModelGroups: groupsFor([readyModel()]),
+      onSelectModel: vi.fn(async () => false),
+    });
 
-    await user.click(screen.getByRole("button", { name: /Workspace/ }));
-    await user.click(screen.getByRole("radio", { name: "Dark" }));
+    await user.click(railStep("Model"));
+    await user.click(screen.getByRole("option", { name: /Llama Test/ }));
     await user.click(screen.getByRole("button", { name: "Skip setup" }));
 
     // The first press records nothing, because the answer the user just gave
@@ -554,24 +422,21 @@ describe("FirstRunOnboarding", () => {
     await waitFor(() => expect(props.controller.skip).toHaveBeenCalledOnce());
   });
 
-  it("finishes with a thread after a refused answer has been acknowledged", async () => {
+  it("finishes with a task after a refused answer has been acknowledged", async () => {
     const user = userEvent.setup();
-    const props = mount({
-      ...readyHandoff(),
-      onSelectChatDefault: vi.fn(async () => false),
-    });
+    const props = mount({ ...readyHandoff(), onSelectModel: vi.fn(async () => false) });
 
-    await user.click(screen.getByRole("button", { name: /Default model/ }));
+    await user.click(railStep("Model"));
     await user.click(screen.getByRole("option", { name: /Llama Test/ }));
-    await openHandoff(user);
-    await user.click(screen.getByRole("button", { name: "Start a Chat thread" }));
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    await user.click(screen.getByRole("button", { name: "Start a task" }));
     expect(await screen.findByText(/did not keep one of your answers/)).toBeVisible();
     expect(props.controller.complete).not.toHaveBeenCalled();
 
-    await user.click(screen.getByRole("button", { name: "Start a Chat thread" }));
+    await user.click(screen.getByRole("button", { name: "Start a task" }));
 
     await waitFor(() => expect(props.controller.complete).toHaveBeenCalledOnce());
-    expect(props.onStartThread).toHaveBeenCalledWith({ mode: "chat", projectId: chatProjectId });
+    expect(props.onStartThread).toHaveBeenCalledWith({ mode: "code", projectId: codeProjectId });
   });
 
   it("says when the host did not record the outcome itself", () => {
@@ -582,157 +447,44 @@ describe("FirstRunOnboarding", () => {
 
   it("waits for an answer given while the first ones are still settling", async () => {
     const user = userEvent.setup();
-    let acceptScheme!: (accepted: boolean) => void;
-    const onSelectColorScheme = vi.fn(
+    let acceptEnable!: (accepted: boolean) => void;
+    const onSetProviderEnabled = vi.fn(
       () =>
         new Promise<boolean>((resolve) => {
-          acceptScheme = resolve;
+          acceptEnable = resolve;
         }),
     );
-    const onSelectChatDefault = vi.fn(async () => false);
-    const props = mount({
-      ...readyHandoff(),
-      onSelectChatDefault,
-      onSelectColorScheme,
-    });
+    const onSelectModel = vi.fn(async () => false);
+    const props = mount({ ...readyHandoff(), onSelectModel, onSetProviderEnabled });
 
-    await user.click(screen.getByRole("button", { name: /Workspace/ }));
-    await user.click(screen.getByRole("radio", { name: "Dark" }));
+    await user.click(screen.getByRole("switch", { name: "Enable Ollama" }));
     await openHandoff(user);
-    await user.click(screen.getByRole("button", { name: "Start a Chat thread" }));
+    await user.click(screen.getByRole("button", { name: "Start a task" }));
 
     // Only the footer is disabled while this settles, so the rail and the
-    // pickers still answer. A choice made here is written after the wait
+    // picker still answer. A choice made here is written after the wait
     // started, and completing without it would lose it for good.
-    await user.click(screen.getByRole("button", { name: /Default model/ }));
+    await user.click(railStep("Model"));
     await user.click(screen.getByRole("option", { name: /Llama Test/ }));
-    acceptScheme(true);
+    acceptEnable(true);
 
-    await waitFor(() => expect(onSelectChatDefault).toHaveBeenCalledOnce());
+    await waitFor(() => expect(onSelectModel).toHaveBeenCalledOnce());
     expect(props.controller.complete).not.toHaveBeenCalled();
   });
 
-  it("says what staying without Navigator costs, and lets the user turn it off", async () => {
-    const user = userEvent.setup();
-    const props = mount({
-      navigatorModelGroups: readyGroups(),
-      navigatorDefault: { providerInstanceId: instanceId, modelId },
-    });
-
-    await user.click(screen.getByRole("button", { name: /Navigator/ }));
-    await user.click(screen.getByRole("button", { name: "Leave Navigator off" }));
-
-    expect(props.onClearNavigatorDefault).toHaveBeenCalledOnce();
-  });
-
-  it("offers the thread handoff only after the setup steps, and starts a thread when ready", async () => {
+  it("offers Start a task only after the setup steps, and opens that Project's composer", async () => {
     const user = userEvent.setup();
     const props = mount(readyHandoff());
 
-    expect(screen.queryByRole("button", { name: "Start a Chat thread" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Start a task" })).toBeNull();
 
     await openHandoff(user);
-    expect(screen.getByRole("button", { name: "Start a Chat thread" })).toBeVisible();
-    await user.click(screen.getByRole("button", { name: "Start a Chat thread" }));
+    expect(screen.getByText("octant")).toBeVisible();
+    expect(screen.getByText("Llama Test on Ollama")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Start a task" }));
 
-    expect(props.controller.complete).toHaveBeenCalledOnce();
-    expect(props.onStartThread).toHaveBeenCalledWith({ mode: "chat", projectId: chatProjectId });
-  });
-
-  it("keeps the current setup step when the host returns an unnamed profile", async () => {
-    const user = userEvent.setup();
-    const view = mount({ profile: namedProfile });
-    await user.click(screen.getByRole("button", { name: "Continue" }));
-    view.rerender({ profile: emptyProfile });
-    await user.click(screen.getByRole("button", { name: "Continue" }));
-
-    expect(screen.queryByLabelText("Name")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Set up a provider" })).toBeVisible();
-  });
-
-  it("keeps a name the user typed even when they skip the rest of first run", async () => {
-    const user = userEvent.setup();
-    const props = mount({ profile: emptyProfile });
-
-    await user.type(screen.getByLabelText("Name"), "Ada");
-    await user.click(screen.getByRole("button", { name: "Skip setup" }));
-
-    // Skipping declines the remaining setup; it does not throw away an answer
-    // the user already gave.
-    expect(props.onSaveProfile).toHaveBeenCalledWith(
-      expect.objectContaining({ displayName: "Ada" }),
-    );
-    // The outcome waits for that save, so it lands a turn later than the click.
-    await waitFor(() => expect(props.controller.skip).toHaveBeenCalledOnce());
-  });
-
-  it("shows the profile the host turns out to hold, not the one it started with", () => {
-    const stored: UserProfile = {
-      displayName: "Ada",
-      accent: "indigo",
-      avatar: { kind: "initials" },
-    };
-    const view = mount();
-
-    // This surface can be up before the store has answered. Someone who filled
-    // in a name, quit part-way, and relaunched would otherwise be shown an
-    // empty field, and their next edit would overwrite the journaled answer.
-    view.rerender({ profile: stored });
-
-    expect(screen.getByLabelText("Name")).toHaveValue("Ada");
-  });
-
-  it("waits for an avatar import before letting first run be answered", async () => {
-    const user = userEvent.setup();
-    let release: (response: Response) => void = () => undefined;
-    const props = mount({
-      avatarEnvironment: avatarEnvironment({
-        fetch: vi.fn(
-          async () => await new Promise<Response>((resolve) => (release = resolve)),
-        ) as unknown as typeof fetch,
-      }),
-    });
-
-    await user.type(screen.getByLabelText("Email (optional)"), "ada@example.com");
-    await user.click(screen.getByRole("button", { name: "Use Gravatar" }));
-
-    // The import reports its picture as a later change. Answering first run
-    // now would hide this surface before that change ever arrived.
-    await waitFor(() => expect(screen.getByRole("button", { name: "Skip setup" })).toBeDisabled());
-
-    // Escape reaches the same answer without touching a button, so guarding
-    // only the footer would still lose the picture.
-    await user.keyboard("{Escape}");
-    expect(props.controller.skip).not.toHaveBeenCalled();
-
-    // So does walking the rail to a step that hands the user to Settings: it
-    // flushes the profile on the way out and unmounts the editor that was
-    // about to report the picture.
-    await user.click(screen.getByRole("button", { name: /Providers/ }));
-    expect(screen.getByLabelText("Email (optional)")).toBeVisible();
-    expect(props.controller.defer).not.toHaveBeenCalled();
-
-    release(new Response("binary", { status: 200 }));
-    await waitFor(() => expect(screen.getByRole("button", { name: "Skip setup" })).toBeEnabled());
-    await user.click(screen.getByRole("button", { name: "Skip setup" }));
-
-    expect(props.onSaveProfile).toHaveBeenCalledWith(
-      expect.objectContaining({
-        avatar: { kind: "image", source: "gravatar", dataUrl: encodedAvatar },
-      }),
-    );
-  });
-
-  it("does not write a profile the user never touched", async () => {
-    const user = userEvent.setup();
-    const props = mount();
-
-    await openHandoff(user);
-    await user.click(screen.getByRole("button", { name: "Set up a provider" }));
-
-    expect(props.onSaveProfile).not.toHaveBeenCalled();
-    expect(props.controller.complete).not.toHaveBeenCalled();
-    expect(props.onOpenProviderSettings).toHaveBeenCalledOnce();
+    await waitFor(() => expect(props.controller.complete).toHaveBeenCalledOnce());
+    expect(props.onStartThread).toHaveBeenCalledWith({ mode: "code", projectId: codeProjectId });
   });
 
   it("releases the modal when it sends the user to provider settings", async () => {
@@ -750,41 +502,17 @@ describe("FirstRunOnboarding", () => {
       });
       return (
         <FirstRunOnboarding
-          chatModelGroups={[]}
+          {...baseProps()}
           controller={live}
-          navigatorModelGroups={[]}
-          onClearNavigatorDefault={vi.fn(async () => true)}
-          onCreateProject={vi.fn()}
           onOpenProviderSettings={() => {
             onOpenProviderSettings();
             setConcealed(true);
           }}
-          onRescan={vi.fn()}
-          onSaveProfile={vi.fn(async () => true)}
-          onSelectChatDefault={vi.fn(async () => true)}
-          onSelectColorScheme={vi.fn(async () => true)}
-          onSelectModeSwitcher={vi.fn(async () => true)}
-          onSelectNavigatorDefault={vi.fn(async () => true)}
-          onStartThread={vi.fn()}
-          onToggleChat={vi.fn(async () => true)}
-          onToggleWork={vi.fn(async () => true)}
-          profile={namedProfile}
-          projects={[]}
-          readiness={summarizeFirstRunReadiness({
-            providerStatus: "ready",
-            instances: [instance],
-            observedByInstance: new Map(),
-            discovery: searchedThisMac,
-          })}
-          scanning={false}
-          workspace={defaultWorkspace}
         />
       );
     }
     render(<Harness />);
 
-    await user.click(screen.getByRole("button", { name: /Providers/ }));
-    expect(screen.getByRole("button", { name: "Set up a provider" })).toBeVisible();
     await user.click(screen.getByRole("button", { name: "Set up a provider" }));
 
     expect(onOpenProviderSettings).toHaveBeenCalledOnce();
@@ -795,7 +523,7 @@ describe("FirstRunOnboarding", () => {
     // first run as pending, so backing out of Settings does not lose it.
     expect(resolve).not.toHaveBeenCalled();
     // Focus is released to a live element rather than stranded on the removed
-    // dialog (`SHELL-03`).
+    // dialog.
     expect(document.activeElement?.isConnected).toBe(true);
   });
 
@@ -812,31 +540,10 @@ describe("FirstRunOnboarding", () => {
       return (
         <>
           <FirstRunOnboarding
-            chatModelGroups={[]}
+            {...baseProps()}
             controller={live}
-            navigatorModelGroups={[]}
-            onClearNavigatorDefault={vi.fn(async () => true)}
             onCreateProject={() => setConcealed(true)}
             onOpenProviderSettings={() => setConcealed(true)}
-            onRescan={vi.fn()}
-            onSaveProfile={vi.fn(async () => true)}
-            onSelectChatDefault={vi.fn(async () => true)}
-            onSelectColorScheme={vi.fn(async () => true)}
-            onSelectModeSwitcher={vi.fn(async () => true)}
-            onSelectNavigatorDefault={vi.fn(async () => true)}
-            onStartThread={vi.fn()}
-            onToggleChat={vi.fn(async () => true)}
-            onToggleWork={vi.fn(async () => true)}
-            profile={namedProfile}
-            projects={[]}
-            readiness={summarizeFirstRunReadiness({
-              providerStatus: "ready",
-              instances: [instance],
-              observedByInstance: new Map(),
-              discovery: searchedThisMac,
-            })}
-            scanning={false}
-            workspace={defaultWorkspace}
           />
           {concealed ? (
             <button onClick={() => setConcealed(false)} type="button">
@@ -849,50 +556,41 @@ describe("FirstRunOnboarding", () => {
     render(<Harness />);
 
     await openHandoff(user);
-    expect(screen.getByText("No Chat Project yet. A thread starts in a Project.")).toBeVisible();
-    await user.click(screen.getByRole("button", { name: "Set up a provider" }));
+    expect(screen.getByText("No Code folder yet. A task starts in a Project.")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Project" }));
     expect(screen.queryByRole("dialog")).toBeNull();
 
     await user.click(screen.getByRole("button", { name: "Close setup" }));
     expect(screen.getByRole("dialog", { name: "Welcome to Octant" })).toBeVisible();
-    expect(screen.getByText("No Chat Project yet. A thread starts in a Project.")).toBeVisible();
+    expect(screen.getByText("No Code folder yet. A task starts in a Project.")).toBeVisible();
   });
 
-  it("titles the readiness view and does not count it as a sixth setup step", async () => {
+  it("titles the readiness view and does not count it as a fourth setup step", async () => {
     const user = userEvent.setup();
     mount(readyHandoff());
 
-    await user.click(screen.getByRole("button", { name: /Navigator/ }));
-    expect(screen.getByText("Step 5 of 5")).toBeVisible();
+    await user.click(railStep("Model"));
+    expect(screen.getByText("Step 3 of 3")).toBeVisible();
 
     await user.click(screen.getByRole("button", { name: "Continue" }));
-    expect(screen.getByRole("heading", { name: "Your first thread" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Your first task" })).toBeVisible();
     expect(screen.queryByText(/^Step \d of \d$/)).toBeNull();
   });
 
-  it("does not start a thread or fabricate readiness when first run is skipped", async () => {
+  it("does not start a task or fabricate readiness when first run is skipped", async () => {
     const user = userEvent.setup();
     const props = mount(readyHandoff());
 
     await openHandoff(user);
     await user.click(screen.getByRole("button", { name: "Skip setup" }));
 
-    expect(props.controller.skip).toHaveBeenCalledOnce();
+    await waitFor(() => expect(props.controller.skip).toHaveBeenCalledOnce());
     expect(props.controller.complete).not.toHaveBeenCalled();
     expect(props.onStartThread).not.toHaveBeenCalled();
   });
 
-  it("records the same durable skip when the dialog is dismissed", async () => {
-    const user = userEvent.setup();
-    const props = mount();
-
-    await user.keyboard("{Escape}");
-
-    expect(props.controller.skip).toHaveBeenCalledOnce();
-  });
-
   describe("against a host that keeps the outcome it is sent", () => {
-    function renderAgainstHost(overrides: Partial<FirstRunOnboardingProps> = {}) {
+    function renderAgainstHost() {
       const recorded: Array<"completed" | "skipped"> = [];
       const onStartThread = vi.fn();
       function Harness() {
@@ -910,33 +608,10 @@ describe("FirstRunOnboarding", () => {
         });
         return (
           <FirstRunOnboarding
-            chatModelGroups={[]}
-            controller={live}
-            navigatorModelGroups={[]}
-            onClearNavigatorDefault={vi.fn(async () => true)}
-            onCreateProject={vi.fn()}
-            onOpenProviderSettings={vi.fn()}
-            onRescan={vi.fn()}
-            onSaveProfile={vi.fn(async () => true)}
-            onSelectChatDefault={vi.fn(async () => true)}
-            onSelectColorScheme={vi.fn(async () => true)}
-            onSelectModeSwitcher={vi.fn(async () => true)}
-            onSelectNavigatorDefault={vi.fn(async () => true)}
-            onStartThread={onStartThread}
-            onToggleChat={vi.fn(async () => true)}
-            onToggleWork={vi.fn(async () => true)}
-            profile={namedProfile}
-            projects={[]}
-            readiness={summarizeFirstRunReadiness({
-              providerStatus: "ready",
-              instances: [instance],
-              observedByInstance: new Map(),
-              discovery: searchedThisMac,
-            })}
-            scanning={false}
-            workspace={defaultWorkspace}
+            {...baseProps()}
             {...readyHandoff()}
-            {...overrides}
+            controller={live}
+            onStartThread={onStartThread}
           />
         );
       }
@@ -944,16 +619,16 @@ describe("FirstRunOnboarding", () => {
       return { recorded, onStartThread };
     }
 
-    it("closes and records completion when the final action starts the first thread", async () => {
+    it("closes and records completion when Start a task opens the first task", async () => {
       const user = userEvent.setup();
       const { recorded, onStartThread } = renderAgainstHost();
 
       await openHandoff(user);
-      await user.click(screen.getByRole("button", { name: "Start a Chat thread" }));
+      await user.click(screen.getByRole("button", { name: "Start a task" }));
 
       await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
       expect(recorded).toEqual(["completed"]);
-      expect(onStartThread).toHaveBeenCalledWith({ mode: "chat", projectId: chatProjectId });
+      expect(onStartThread).toHaveBeenCalledWith({ mode: "code", projectId: codeProjectId });
     });
 
     it("closes and records the skip from the final step", async () => {
@@ -994,59 +669,49 @@ describe("FirstRunOnboarding", () => {
 
   it("marks a step configured only once the host holds a real answer", async () => {
     const user = userEvent.setup();
-    mount({ profile: namedProfile });
+    mount({ ...readyHandoff(), codeModel: undefined, projects: [] });
 
-    const profileStep = screen.getByRole("button", { name: /About you/ });
-    expect(profileStep).toHaveAttribute("data-configured", "true");
+    expect(railStep("Providers")).toHaveAttribute("data-configured", "true");
     // Walking past a step is not the same fact as answering it.
-    expect(screen.getByRole("button", { name: /Navigator/ })).toHaveAttribute(
-      "data-configured",
-      "false",
-    );
-
-    await user.click(screen.getByRole("button", { name: /Navigator/ }));
-    expect(screen.getByRole("button", { name: /Navigator/ })).toHaveAttribute(
-      "data-configured",
-      "false",
-    );
+    await user.click(railStep("Project"));
+    await user.click(railStep("Model"));
+    expect(railStep("Project")).toHaveAttribute("data-configured", "false");
+    expect(railStep("Model")).toHaveAttribute("data-configured", "false");
   });
 
   it("marks the current setup step and leaves unanswered steps pending", async () => {
     const user = userEvent.setup();
-    mount({ profile: namedProfile });
+    mount(readyHandoff());
 
-    const profileStep = screen.getByRole("button", { name: /About you/ });
-    const workspaceStep = screen.getByRole("button", { name: /Workspace/ });
-    const navigatorStep = screen.getByRole("button", { name: /Navigator/ });
-    expect(profileStep).toHaveAttribute("data-progress", "current");
-    expect(workspaceStep).toHaveAttribute("data-progress", "pending");
-    expect(navigatorStep).toHaveAttribute("data-progress", "pending");
-    expect(profileStep).toHaveAttribute("aria-current", "step");
-    expect(profileStep.querySelector(".sr-only")).toBeNull();
+    const providers = railStep("Providers");
+    const project = railStep("Project");
+    expect(providers).toHaveAttribute("data-progress", "current");
+    expect(providers).toHaveAttribute("aria-current", "step");
+    expect(providers.querySelector(".sr-only")).toBeNull();
 
-    await user.click(workspaceStep);
+    await user.click(project);
 
-    expect(profileStep).toHaveAttribute("data-progress", "completed");
-    expect(workspaceStep).toHaveAttribute("data-progress", "current");
-    expect(navigatorStep).toHaveAttribute("data-progress", "pending");
-    expect(workspaceStep).toHaveAttribute("aria-current", "step");
-    expect(profileStep).not.toHaveAttribute("aria-current");
-    expect(profileStep.querySelector(".sr-only")).toHaveTextContent("Configured");
+    expect(providers).toHaveAttribute("data-progress", "completed");
+    expect(project).toHaveAttribute("data-progress", "current");
+    expect(project).toHaveAttribute("aria-current", "step");
+    expect(providers).not.toHaveAttribute("aria-current");
+    expect(providers.querySelector(".sr-only")).toHaveTextContent("Configured");
   });
 
-  it("reports provider, Project, and default model separately on a clean host", async () => {
+  it("reports provider, Project, and model separately on a clean host", async () => {
     const user = userEvent.setup();
     const props = mount();
 
     await openHandoff(user);
 
-    expect(screen.getByRole("radiogroup", { name: "First thread mode" })).toBeVisible();
-    expect(screen.getByRole("radio", { name: "Chat" })).toHaveAttribute("aria-checked", "true");
     expect(screen.getByText("No provider is ready yet")).toBeVisible();
-    expect(screen.getByText("No Chat Project yet. A thread starts in a Project.")).toBeVisible();
-    expect(screen.getByText("No model this host can use in Chat yet.")).toBeVisible();
+    expect(screen.getByText("No Code folder yet. A task starts in a Project.")).toBeVisible();
+    expect(screen.getByText("No model this host can use in Code yet.")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Set up a provider" })).toBeVisible();
     await user.click(screen.getByRole("button", { name: "Project" }));
-    expect(props.onCreateProject).toHaveBeenCalledWith("chat");
+    expect(props.onCreateProject).toHaveBeenCalledWith("code");
+    await user.click(screen.getByRole("button", { name: "Model" }));
+    expect(screen.getByRole("heading", { name: "Model" })).toBeVisible();
     expect(props.controller.complete).not.toHaveBeenCalled();
     expect(props.onStartThread).not.toHaveBeenCalled();
   });

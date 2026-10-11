@@ -74,5 +74,3 @@ boards, and Mermaid or PlantUML import.
 - 0010 Secure file preview and canvas artifacts
 - 0002 Durable event journal and rebuildable projections
 - 0028 The artifact library
-- [0165](0165-canvas-artifacts-are-documents-designs-and-prototypes.md) — proposes
-  Mermaid import into typed diagrams; Mermaid stays a non-renderer

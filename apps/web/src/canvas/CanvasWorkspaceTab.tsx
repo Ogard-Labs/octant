@@ -103,6 +103,7 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
   });
   const [commentsOpen, setCommentsOpen] = useState(false);
   const [focusedBlockId, setFocusedBlockId] = useState<string | undefined>(undefined);
+  const [focusedRowId, setFocusedRowId] = useState<string | undefined>(undefined);
   const [commentThreads, setCommentThreads] = useState<ReadonlyArray<CanvasCommentThread>>([]);
   const [versionsOpen, setVersionsOpen] = useState(false);
   const [dialog, setDialog] = useState<CanvasToolDialog | undefined>(undefined);
@@ -240,7 +241,7 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
 
   useEffect(() => {
     if (commentsOpen) closeCommentsButton.current?.focus();
-  }, [commentsOpen, focusedBlockId]);
+  }, [commentsOpen, focusedBlockId, focusedRowId]);
   useEffect(() => {
     let alive = true;
     if (props.client === undefined) {
@@ -637,9 +638,16 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
   const viewingOlderVersion = String(selectedVersionId) !== tipVersionId;
   const openThreads = commentThreads.filter((thread) => thread.comment.resolvedAt === undefined);
   const openCounts = new Map<string, number>();
+  const openRowCounts = new Map<string, Map<string, number>>();
   for (const thread of openThreads) {
-    const blockId = String(thread.comment.anchor.blockId);
+    const anchor = thread.comment.anchor;
+    const blockId = String(anchor.blockId);
     openCounts.set(blockId, (openCounts.get(blockId) ?? 0) + 1);
+    if (anchor.kind === "row") {
+      const rows = openRowCounts.get(blockId) ?? new Map<string, number>();
+      rows.set(String(anchor.rowId), (rows.get(String(anchor.rowId)) ?? 0) + 1);
+      openRowCounts.set(blockId, rows);
+    }
   }
   const overflowItems = [
     ...(reviseBase !== null && reviseBase.mode === "chat"
@@ -698,10 +706,11 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
       : []),
   ];
 
-  const openCommentsOn = (blockId: string | undefined) => {
+  const openCommentsOn = (blockId: string | undefined, rowId?: string) => {
     commentsReturnFocus.current =
       document.activeElement instanceof HTMLElement ? document.activeElement : null;
     setFocusedBlockId(blockId);
+    setFocusedRowId(rowId);
     setCommentsOpen(true);
   };
   const closeComments = () => {
@@ -837,7 +846,9 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
             {...(planRuntime === undefined ? {} : { planRuntime })}
             {...(designAssetRuntime === undefined ? {} : { designAssetRuntime })}
             {...(designRunRuntime === undefined ? {} : { designRunRuntime })}
-            {...(commentsAvailable ? { comments: { openCounts, onOpen: openCommentsOn } } : {})}
+            {...(commentsAvailable
+              ? { comments: { openCounts, openRowCounts, onOpen: openCommentsOn } }
+              : {})}
           />
         </div>
         {commentsClient !== undefined && reviseBase !== null ? (
@@ -871,10 +882,14 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
               canvasId={props.tab.canvasId}
               definition={definition}
               load={commentsClient.load}
-              onShowAllBlocks={() => setFocusedBlockId(undefined)}
+              onShowAllBlocks={() => {
+                setFocusedBlockId(undefined);
+                setFocusedRowId(undefined);
+              }}
               onThreadsChange={setCommentThreads}
               send={commentsClient.send}
               {...(focusedBlockId === undefined ? {} : { focusedBlockId })}
+              {...(focusedRowId === undefined ? {} : { focusedRowId })}
             />
           </aside>
         ) : null}

@@ -1,4 +1,4 @@
-import { classifyRemoteListenerAddress } from "@octant/domain";
+import { classifyRemoteListenerAddress, remoteListenerOrigin } from "@octant/domain";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { failureMessage } from "../lib/failureMessage";
 import {
@@ -142,7 +142,7 @@ export function RemoteAccessSettingsSection({ bridge, now }: RemoteAccessSetting
   const draftOrigin =
     draft.hostname.trim() === "" || !Number.isSafeInteger(draftPort)
       ? undefined
-      : `https://${draft.hostname.trim()}${draftPort === 443 ? "" : `:${draftPort}`}`;
+      : remoteListenerOrigin(draft.hostname.trim(), draftPort);
   const draftExposure = classifyRemoteListenerAddress(draft.hostname);
   const draftComplete =
     draftOrigin !== undefined &&

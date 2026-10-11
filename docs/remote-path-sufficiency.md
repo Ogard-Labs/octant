@@ -1,8 +1,8 @@
 # Research: LAN / Tailscale / SSH remote paths for dogfood
 
 Research and design only. Does not authorize a hosted relay. The Current
-Release Boundary still excludes hosted relay unless a decision record and an
-explicit maintainer request open it.
+Release Boundary still excludes hosted relay unless an explicit maintainer
+request opens it and the architecture documents its authority.
 
 [0013](decisions/0013-remote-access-and-mobile.md) already defines remote
 access: authenticated HTTPS over LAN or a user-controlled private mesh;
@@ -50,9 +50,9 @@ Any relay must not break these invariants (ciphertext-only, no authority):
 5. **Fail closed when the relay is gone.** Disconnected clients stay stale
    read-only; they never queue authority-bearing mutations for the relay to
    deliver later.
-6. **Decision record first.** Opening a relay requires superseding or extending
-   0013 and the Current Release Boundary in the same change that authorizes
-   implementation.
+6. **Specification first.** Opening a relay requires updating the architecture's
+   remote-access rules and the Current Release Boundary in the same change that
+   authorizes implementation.
 
 ## Start gate (parent Later item)
 
@@ -60,8 +60,8 @@ Leave Later until:
 
 1. Written dogfood evidence names the concrete reachability failure and why
    LAN, Tailscale, and SSH each failed or were unavailable.
-2. A Proposed ADR lists the six invariants above (or a tighter set) and how
-   the design meets them.
-3. An explicit maintainer request authorizes scoped work against that ADR.
+2. A proposed architecture and Current Release Boundary update lists the six
+   invariants above (or a tighter set) and how the design meets them.
+3. An explicit maintainer request authorizes scoped work against that update.
 
 Absent that evidence, the answer is: **no gap — keep Later.**
