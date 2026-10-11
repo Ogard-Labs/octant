@@ -391,6 +391,7 @@ import type { AgentRunControlAdmissionDependencies } from "./agentRun/agentRunCo
 import {
   admittedParentWorkContext,
   admittedParentCodeContext,
+  type AdmittedParentCodeContextInput,
 } from "./agentRun/agentRunParentContext";
 import { agentResultDeliveryReceipt } from "./agentRun/agentResultDeliveryBatch";
 import { NATIVE_HARNESS_BUILT_IN_SLOTS, type AgentRunResultDeliveryMark } from "@octant/contracts";
@@ -2533,17 +2534,7 @@ export function startOctantServer(
                     readThread: (id) => workThreadProjection.read(id),
                     readTurns: (id) => workTurnProjection.listForThread(id),
                   })
-                : admittedParentCodeContext({
-                    threadId: decodeCodeThreadId(String(parentThreadId)),
-                    externalContentIngested,
-                    readThread: (id) => persistence.readCodeThread(id),
-                    readActivity: (id) =>
-                      persistence
-                        .readCodeThreadActivity()
-                        .find((activity) => String(activity.threadId) === String(id)),
-                    conversation: (input) => codeBoardEventStore.conversation(input),
-                    readEvidence: (reference) => codeEvidence.read(reference),
-                  });
+                : selectCodeConversation(decodeCodeThreadId(String(parentThreadId)));
             return selection.status === "available"
               ? selection.blocks
               : { unavailable: selection.reason };
@@ -3720,6 +3711,28 @@ export function startOctantServer(
       clock: () => new Date().toISOString(),
       actor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
     });
+    // A child's parent context and a provider switch's handoff read a Code
+    // thread through one selector, so both carry the same bounds, attribution,
+    // taint and omissions.
+    const selectCodeConversation = (
+      threadId: CodeThreadId,
+      options: Pick<AdmittedParentCodeContextInput, "purpose" | "excludeOperationId"> = {},
+    ) =>
+      admittedParentCodeContext({
+        threadId,
+        externalContentIngested: readThreadExternalContentTaint(
+          persistence.connection,
+          String(threadId),
+        ).externalContentIngested,
+        readThread: (id) => persistence.readCodeThread(id),
+        readActivity: (id) =>
+          persistence
+            .readCodeThreadActivity()
+            .find((activity) => String(activity.threadId) === String(id)),
+        conversation: (input) => codeBoardEventStore.conversation(input),
+        readEvidence: (reference) => codeEvidence.read(reference),
+        ...options,
+      });
     const projectPullRequestPorts = createProjectPullRequestPorts(options.ghExecutable);
     // Late-bound because the follow-up service that consumes refreshed
     // snapshots is constructed further down, alongside the other Code thread
@@ -4911,6 +4924,11 @@ export function startOctantServer(
         supportsModelSwitch: (thread) =>
           providerRuntimeRegistry.observedState(thread.providerInstanceId)?.capabilities
             .modelSwitch === "supported",
+        providerSwitchContext: ({ thread, excludeOperationId }) =>
+          selectCodeConversation(thread.id, {
+            purpose: "provider-switch",
+            excludeOperationId: String(excludeOperationId),
+          }),
         supportsAttachments: (thread) => {
           const observed = providerRuntimeRegistry.observedState(thread.providerInstanceId);
           if (observed?.capabilities.nativeAttachments !== "supported") return false;

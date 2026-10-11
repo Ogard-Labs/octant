@@ -640,6 +640,15 @@ export class CodeOperationEventStore {
               ...(frame.event.resetsAt === undefined ? {} : { resetsAt: frame.event.resetsAt }),
             },
           });
+        } else if (frame.event.kind === "context-handoff-attached") {
+          builder.handoff = {
+            reason: frame.event.reason,
+            previousProviderInstanceId: frame.event.previousProviderInstanceId,
+            previousModelId: frame.event.previousModelId,
+            messages: frame.event.messages,
+            omissions: frame.event.omissions,
+            externalContentIngested: frame.event.externalContentIngested,
+          };
         } else if (frame.event.kind === "conversation-turn-changed-files") {
           builder.changedFiles = frame.event.changedFiles;
         } else if (frame.event.kind === "operation-state") {
@@ -696,6 +705,7 @@ type CodeConversationBuilder = {
   checkpoint?: CodeConversationTurn["checkpoint"];
   executionPolicy?: CodeConversationTurn["executionPolicy"];
   usage?: CodeConversationTurn["usage"];
+  handoff?: CodeConversationTurn["handoff"];
   assistant: Array<CodeConversationTurn["assistant"][number]>;
   steps: Array<CodeConversationStep>;
   stepsTruncated: boolean;
