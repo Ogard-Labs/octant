@@ -8,8 +8,9 @@ import {
   type ProviderRuntimeEvent,
 } from "@octant/contracts";
 import { Effect, Exit, Fiber, PubSub, Scope, Stream } from "effect";
-import { existsSync, readdirSync } from "node:fs";
-import { homedir } from "node:os";
+import { existsSync, readdirSync, rmSync } from "node:fs";
+import { mkdtemp } from "node:fs/promises";
+import { homedir, tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
@@ -23,7 +24,11 @@ import type {
 } from "./claudeAgentSdkPort";
 import { claudeExecutionOptions, makeClaudeDriver } from "./claudeDriver";
 import type { ClaudeResumeIdentity, ClaudeResumeIdentityPort } from "./claudeDriver";
-import type { ClaudeEnvironmentScope } from "./claudeEnvironment";
+import {
+  makeClaudeEnvironmentScope,
+  type ClaudeEnvironmentScope,
+  type ClaudeEnvironmentScopeOptions,
+} from "./claudeEnvironment";
 import {
   CLAUDE_HELPER_EXPIRED_MESSAGE,
   CLAUDE_HELPER_NOT_CONNECTED_MESSAGE,
@@ -184,6 +189,10 @@ function harness(
     readonly models?: ClaudeQueryPort["initialization"]["models"];
     readonly autoCompactThreshold?: number;
     readonly configDirectory?: string;
+    readonly makeEnvironmentScope?: (
+      authentication: ClaudeAuthentication,
+      options?: ClaudeEnvironmentScopeOptions,
+    ) => Effect.Effect<ClaudeEnvironmentScope, ProviderFailure, Scope.Scope>;
   } = {},
 ) {
   const queries: FakeQuery[] = [];
@@ -333,7 +342,7 @@ function harness(
       runtimeRegistry,
       resumeIdentityPort,
       permissionPersistence: () => permissionPersistence,
-      makeEnvironmentScope,
+      makeEnvironmentScope: options.makeEnvironmentScope ?? makeEnvironmentScope,
       isProjectConfinedPath: (root, absolutePath) => absolutePath.startsWith(`${root}/`),
       clock: () => observedAt,
       correlationId: () => "80000000-0000-4000-8000-000000000710",
@@ -4392,6 +4401,30 @@ describe("Claude for helpers", () => {
       await acquired.close();
     }
     expect(f.opens).toHaveLength(0);
+  });
+
+  it("refuses a Plan turn whose account directory is not a dedicated Claude leaf before creating it", async () => {
+    const parent = await mkdtemp(join(tmpdir(), "octant-claude-state-"));
+    const accountDirectory = join(parent, "octant-state");
+    try {
+      const f = harness("subscription", "current-session", {
+        configDirectory: accountDirectory,
+        makeEnvironmentScope: makeClaudeEnvironmentScope,
+      });
+      const acquired = await acquire(f.driver, "chat");
+      try {
+        const exit = await Effect.runPromiseExit(
+          acquired.connection.start({ sessionId, modelId, executionPolicy: "plan" }),
+        );
+        expect(String(exit)).toContain("dedicated Claude account directory");
+      } finally {
+        await acquired.close();
+      }
+      expect(existsSync(accountDirectory)).toBe(false);
+      expect(f.opens).toHaveLength(0);
+    } finally {
+      rmSync(parent, { recursive: true, force: true });
+    }
   });
 
   it("resumes an isolated Claude account from that account's directory", async () => {
