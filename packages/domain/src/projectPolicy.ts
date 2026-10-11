@@ -9,6 +9,7 @@ import {
   type CodeProjectPullRequestBackgroundRefresh,
   type CodeAccessPersistence,
   type WorkProject,
+  type WorkProjectStatusFile,
   type Project,
   type ProjectActor,
   type ProjectColor,
@@ -277,6 +278,43 @@ export function changeCodeProjectPullRequestBackgroundRefresh(
     version: nextVersion(project),
     updatedAt,
   };
+}
+
+/**
+ * Opt a Work Project into, or out of, the `STATUS.md` Octant keeps in its
+ * folder. Absence reads as disabled, so every Project starts with Octant
+ * writing nothing there. The default-folder Project collects what nobody gave
+ * a home; a status for "everything else" means nothing, so it refuses.
+ */
+export function changeWorkProjectStatusFile(
+  project: Project,
+  statusFile: WorkProjectStatusFile,
+  updatedAt: UtcTimestamp,
+): WorkProject {
+  if (project.type !== "work") {
+    reject("binding-not-allowed", "Only Work Projects have a status file setting");
+  }
+  if (statusFile === "enabled" && project.origin === "default-folder") {
+    reject("binding-not-allowed", "The default folder cannot keep a status file");
+  }
+  if ((project.statusFile ?? "disabled") === statusFile) {
+    reject("invalid-lifecycle", "Work Project status file setting is already selected");
+  }
+  return { ...project, statusFile, version: nextVersion(project), updatedAt };
+}
+
+/** Whether Octant reads, seeds, and asks tasks to keep this Project's `STATUS.md`. */
+export function workProjectKeepsStatusFile(
+  project: Pick<Project, "type"> & {
+    readonly origin?: ProjectOrigin | undefined;
+    readonly statusFile?: WorkProjectStatusFile | undefined;
+  },
+): boolean {
+  return (
+    project.type === "work" &&
+    project.origin !== "default-folder" &&
+    project.statusFile === "enabled"
+  );
 }
 
 export function changeProjectLifecycle(

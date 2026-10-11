@@ -114,9 +114,12 @@ test count.
   server keeps both domains and their authority unchanged. A thread keeps the
   kind it was created with; the choice never converts or widens a thread.
 - Chat Projects are virtual, memory-scoped containers with no implicit filesystem
-  or shell authority. Work binds one OS-confined project root. Code binds one
-  OS-confined directory and starts approval-gated unless Full access was explicitly
-  remembered; Plan mode is always read-only.
+  or shell authority. Work binds one project root and Code binds one directory,
+  each meant to be OS-confined; Code starts approval-gated unless Full access was
+  explicitly remembered, and Plan mode is always read-only. Below Full access,
+  Octant's own tool launches are OS-confined; some provider runtimes are not yet
+  (Codex in every posture, Claude outside Plan) and rely on the runtime's own
+  sandbox, per the confinement matrix in `docs/architecture.md`.
 - Work never silently becomes Code. Coding work promotes to a linked Code
   thread only with explicit user approval.
 - Every supported provider reports capabilities honestly in every mode and
