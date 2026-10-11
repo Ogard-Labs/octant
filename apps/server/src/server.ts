@@ -3619,6 +3619,14 @@ export function startOctantServer(
         // read now, through the same selector its first turn uses.
         forkConversation: ({ source, throughOperationId }) =>
           selectCodeConversation(source.id, { purpose: "fork", throughOperationId }),
+        // Late-bound for the same reason: the runtime owns the journal a merge
+        // is recorded in and the turns that carry it.
+        forkMergeBack: {
+          merge: async (windowId, forkThreadId, throughOperationId) =>
+            codeOperationRuntime?.mergeForkContext === undefined
+              ? { status: "refused", reason: "unsupported" }
+              : codeOperationRuntime.mergeForkContext(windowId, forkThreadId, throughOperationId),
+        },
         managedThreadCreation: {
           prepare: (input, signal) => managedCodeThreadCreation.prepare(input, signal),
           commit: (input, preparation, signal) =>
@@ -3677,7 +3685,7 @@ export function startOctantServer(
       threadId: CodeThreadId,
       options: Pick<
         AdmittedParentCodeContextInput,
-        "purpose" | "excludeOperationId" | "throughOperationId" | "inherited"
+        "purpose" | "excludeOperationId" | "throughOperationId" | "afterOperationId" | "inherited"
       > = {},
     ) =>
       admittedParentCodeContext({
@@ -5119,6 +5127,12 @@ export function startOctantServer(
         },
         forkContext: ({ source, throughOperationId }) =>
           selectCodeConversation(source.id, { purpose: "fork", throughOperationId }),
+        forkMergeBackContext: ({ fork, afterOperationId, throughOperationId }) =>
+          selectCodeConversation(fork.id, {
+            purpose: "fork-merge-back",
+            throughOperationId,
+            ...(afterOperationId === undefined ? {} : { afterOperationId }),
+          }),
         forkProviderSession: (input) =>
           seedCodeForkHarnessSession(
             {

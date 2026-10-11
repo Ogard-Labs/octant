@@ -3230,6 +3230,44 @@ switch, refusing if the thread's fork origin no longer matches it. The source
 read covers only the source's own turns: a fork of a fork does not also carry
 what its source inherited.
 
+**Merge-back (Code).** A person can merge a fork's conversation back into
+the thread it was forked from with the `merge-code-fork-context` command,
+naming one of the fork's finished turns. It is an explicit action on the fork
+and approval-free, because it only adds context: nothing runs, no model
+summarises anything, and the fork's file changes reach the source only through
+Git review (the existing worktree merge-back). The host authorizes the window
+against the fork and the source, requires both in one Project, and reads the
+fork's own turns through the same selector (purpose `fork-merge-back`), after
+the fork's previous merge back (`afterOperationId`, which must be found) or
+from the fork point, through the named turn, with the same bounds,
+attribution, taint and omission counts. The fork's inherited copy of the
+source is never sent back. The result is journaled on the source as
+`fork-context-merged`, under an operation of its own, with a content reference
+to the exact blocks and fixed `false` native-session and hidden-reasoning
+values. Merges are deduplicated by fork and end turn: a merge through the
+fork's last merged turn is refused (`already-merged`), and one with no new
+readable turn is refused (`nothing-new`); the check and the append run without
+yielding, so two merges cannot both pass. At most 64 merges may wait for the
+source's next turn (`merges-pending` beyond that), so the bounded journal read
+that finds waiting merges always holds them all. Outside content the fork took in
+taints the source (`external-content`, label `fork-merge-back`) before the
+merge is appended. Refusals are values on the command result
+(`fork-context-merge`): unsupported, not a fork, source unavailable or
+unauthorized, another Project, a missing or unfinished end turn, already
+merged, nothing new, too many merges waiting, an unreadable fork, or a merge that could not be saved.
+
+The source's next turn carries the oldest merges no turn has carried yet, at
+most two (`MAX_CODE_FORK_MERGE_BACKS_PER_TURN`; later ones wait), after any
+provider-switch or fork handoff and before the turn's own context, and
+journals one `fork-context-delivered` per merge on its operation before the
+prompt is sent, beside the handoff. Merges are carried in order, so the newest
+delivered record says which merges are still pending. A recovered start reads
+its own delivered records back instead of choosing again; a merge whose text
+cannot be read refuses the turn rather than dropping it. The conversation page
+carries the summaries as the turn's `forkMergeBacks`, and the transcript says
+how many messages came from a fork, what was left out, and that hidden
+reasoning, tool activity and file changes did not transfer.
+
 A switch that cannot hand over refuses before the new provider is acquired,
 naming why: no host selector, an unavailable or foreign thread or Project
 (for a fork, its own or the inherited source's),

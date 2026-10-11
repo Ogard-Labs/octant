@@ -25,6 +25,7 @@ import {
   type CodeOperationCommand,
   type CodeOperationFailure,
   type CodeConversationPage,
+  type CodeForkMergeBackOutcome,
   type ProviderSessionId,
   type CodeEvidenceBatchRequest,
   type CodeEvidenceBatchResponse,
@@ -67,6 +68,12 @@ import {
   MAX_CODE_OPERATION_REPLAY_LIMIT,
 } from "./codeOperationEventStore";
 import { chooseCodeForkPoint, codeThreadTurns } from "./codeForkPoint";
+import {
+  forkMergeDelivery,
+  mergeForkConversation,
+  type CodeForkMergeBackReader,
+  type ForkContextDelivered,
+} from "./codeForkMergeBack";
 import {
   CodeRuntimeWorkRecorder,
   codeRuntimeWorkObserved,
@@ -465,6 +472,12 @@ export interface CodeOperationRuntimeOptions {
    */
   readonly forkContext?: CodeForkConversationReader;
   /**
+   * Reads a fork's own turns for a merge back into the thread it was forked
+   * from, through the same selector. Absent means this host cannot merge a
+   * fork's conversation back, so a merge is refused as unsupported.
+   */
+  readonly forkMergeBackContext?: CodeForkMergeBackReader;
+  /**
    * Starts a fork's first provider session from the source's own
    * conversation through the fork point, returning the cursor that resumes
    * it. Undefined when the provider cannot take that up exactly, in which
@@ -518,6 +531,15 @@ export interface CodeOperationRuntime {
     afterCursor: number,
     limit: number,
   ): Promise<CodeConversationPage>;
+  /**
+   * Merge a fork's conversation back into the thread it was forked from, for
+   * that thread's next turn to carry. Refusals are values.
+   */
+  mergeForkContext?(
+    windowId: WindowId,
+    forkThreadId: CodeThreadId,
+    throughOperationId: string,
+  ): Promise<CodeForkMergeBackOutcome>;
   /** The files a fork of `source` at `throughOperationId` starts from. */
   forkPoint(
     windowId: WindowId,
@@ -1211,6 +1233,22 @@ export function createCodeOperationRuntime(
         providerInstanceId: thread.providerInstanceId,
       });
     },
+    mergeForkContext: (windowId, forkThreadId, throughOperationId) =>
+      mergeForkConversation(
+        {
+          read: options.forkMergeBackContext,
+          readThread: (id) => options.persistence.readCodeThread(id),
+          canAccessProject: (id, projectId) => options.windowAccess.canAccessProject(id, projectId),
+          forkTurns: (id) => codeThreadTurns((page) => events.conversation(page), id),
+          events,
+          putEvidence: (content) => options.evidence.put(content),
+          ...(options.recordExternalContentIngestion === undefined
+            ? {}
+            : { recordExternalContentIngestion: options.recordExternalContentIngestion }),
+          uuid: options.uuid,
+        },
+        { windowId, forkThreadId, throughOperationId },
+      ),
     forkPoint: async (windowId, source, throughOperationId) => {
       if (!(await options.windowAccess.canAccessProject(windowId, source.projectId))) {
         return { status: "refused", reason: "unavailable" };
@@ -1568,6 +1606,11 @@ interface ActiveTurn {
     readonly blocks: ReadonlyArray<ProviderContextBlock>;
     readonly record: PendingHandoffRecord;
   };
+  /**
+   * Merged fork conversations this turn carries and has not journaled as
+   * carried yet. Journaled with the handoff, before the prompt is sent.
+   */
+  pendingForkMerges?: ReadonlyArray<ForkContextDelivered>;
   readonly computerUseSelection?: import("@octant/contracts/extensions").ExtensionSelection;
   /** The selected MCP servers' tools, resolved when the turn was accepted. */
   readonly extensionTools?: AppManagedToolSet;
@@ -1618,6 +1661,10 @@ interface ActiveTurn {
   changedFilesRecording?: Promise<void>;
   launch?: () => void;
 }
+
+/** Why a turn carrying conversation merged back from a fork did not start. */
+const FORK_MERGE_UNREADABLE =
+  "Conversation merged back from a fork of this thread could not be read, so the message was not sent. Send it again.";
 
 class HandoffUnsaved extends Error {
   readonly fork: boolean;
@@ -1996,6 +2043,31 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       await input.extensionTools?.close?.().catch(() => undefined);
       return failStart(CODE_FORK_HANDOFF_REFUSALS["handoff-unreadable"]);
     }
+    // Conversation a person merged back from a fork of this thread goes with
+    // its next turn, disclosed and journaled before the prompt is sent. A turn
+    // that cannot read it refuses rather than dropping it silently.
+    let forkMerges: Awaited<ReturnType<typeof forkMergeDelivery>>;
+    try {
+      const replay = this.#events.replay({
+        threadId: input.thread.id,
+        operationId: command.operationId,
+        afterCursor: 0,
+        limit: MAX_CODE_OPERATION_REPLAY_LIMIT,
+      });
+      forkMerges =
+        replay.status === "ok"
+          ? await forkMergeDelivery(
+              { events: this.#events, readEvidence: this.#options.evidence.read },
+              { threadId: input.thread.id, frames: replay.frames },
+            )
+          : { status: "refused" };
+    } catch {
+      forkMerges = { status: "refused" };
+    }
+    if (forkMerges.status === "refused") {
+      await input.extensionTools?.close?.().catch(() => undefined);
+      return failStart(FORK_MERGE_UNREADABLE);
+    }
     // Driver, credentials, and fork preparation may outlive the host's admission.
     if (input.admissionCurrent?.() === false) return refuseRevokedAdmission();
     // Feedback stays pending through every preparation refusal. Consuming it
@@ -2009,6 +2081,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     const context = [
       ...(switchHandoff?.blocks ?? []),
       ...(forkHandoff?.blocks ?? []),
+      ...forkMerges.blocks,
       ...(input.context ?? []),
       ...(feedback?.context === undefined || feedback.context.trim().length === 0
         ? []
@@ -2021,6 +2094,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         : forkHandoff?.record !== undefined
           ? { pendingHandoff: { blocks: forkHandoff.blocks, record: forkHandoff.record } }
           : {}),
+      ...(forkMerges.records.length === 0 ? {} : { pendingForkMerges: forkMerges.records }),
       ...(command.computerUseSelection === undefined
         ? {}
         : { computerUseSelection: command.computerUseSelection }),
@@ -2979,6 +3053,16 @@ class RuntimeTurnController implements CodeOperationTurnPort {
                   active.cursor = handoff.cursor;
                   delete active.pendingHandoff;
                 }
+                for (const record of active.pendingForkMerges ?? []) {
+                  const delivered = this.#events.append({
+                    threadId: active.thread.id,
+                    operationId: active.operationId,
+                    expectedCursor: active.cursor,
+                    event: record,
+                  });
+                  active.cursor = delivered.cursor;
+                }
+                delete active.pendingForkMerges;
                 const resumeCursor = handle.resumeCursor ?? active.resumeCursor;
                 const frame = this.#events.append({
                   threadId: active.thread.id,
