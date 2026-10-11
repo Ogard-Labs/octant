@@ -1229,6 +1229,17 @@ read through:
 Its tint, stroke, and highlight are theme roles. Reduced transparency and
 unsupported `backdrop-filter` resolve every one of them to an opaque surface.
 
+The translucent workspace is the `workspaceMaterial` shell setting
+(`"system" | "opaque"`, default and absent value `"opaque"`), shown as
+the Window section's Glass cards switch, disabled until Glass is on. It takes effect only
+when the sidebar's own material already resolved translucent
+(`resolveWorkspaceMaterial`), so every accessibility, performance, and
+host-support gate on the sidebar applies to it too; it requests no second
+native material and frosts at the sidebar's vibrancy tier (subtle or strong).
+It repaints only the workspace layer and the Projects pane background; menus,
+dialogs, popovers, and other controls drawn on them stay opaque semantic
+surfaces.
+
 Shadow tokens are `--octant-shadow-hairline`, `--octant-shadow-xs`,
 `--octant-shadow-sm`, `--octant-shadow-md`, `--octant-shadow-lg`,
 `--octant-shadow-overlay`, and `--octant-shadow-pop`. Use the smallest level

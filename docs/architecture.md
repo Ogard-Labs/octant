@@ -2,7 +2,8 @@
 
 Octant is a local-first desktop workspace for Chat, Work, and Code across many AI
 providers. The first shipping surface is Apple Silicon macOS; Linux and Windows
-desktop are the same product under [decisions/0058-cross-platform-desktop.md](decisions/0058-cross-platform-desktop.md).
+desktop are the same product, sequenced in the
+[Current Release Boundary](#current-release-boundary).
 This is the current architecture specification. Read the relevant section for
 system boundaries; use the [design index](design/README.md) for topic owners.
 Edit the current rule with an approved change in the same PR. Historical links
@@ -287,6 +288,23 @@ fetch sends the proof-bound session cookie explicitly and disables the shared
 cookie jar to prevent duplicate or stale cookies. Browser cookie ownership is
 unchanged, and native remote requests refuse redirects.
 
+Internal TestFlight distributes this same client and grants the phone no new
+authority. The bundle is `app.octant.mobile` (installed name Octant) at source
+version `0.1.0`; EAS Build signs and archives it, with build numbers from EAS
+remote version state, and the `production` EAS profile means store
+distribution, never a public release or App Review submission. The manually
+dispatched `Mobile (TestFlight)` workflow builds only from `main` in the
+protected `mobile-testflight` environment and uploads only when its `submit`
+input is set; pull requests get no release credential. GitHub holds only the
+revocable Expo token; Apple certificates, profiles, and the App Store Connect
+key stay in EAS's credential service. The App ID enables no optional Apple
+capability (push, associated domains, Sign in with Apple, iCloud), testers are
+maintainer-controlled App Store Connect users, and external groups, public
+links, and store listing stay closed under the
+[mobile store hold](mobile-store-v1-hold.md). A build counts only after the
+device pass in the [TestFlight runbook](mobile-testflight.md), not when EAS or
+Apple finishes processing it.
+
 **Local client context.** The local trust class is "holds a secret only the
 host's OS user can read", not "is on loopback". Loopback plus an admitted
 Origin says nothing about who is calling: another OS user on the same machine,
@@ -353,7 +371,8 @@ an existing context to a different model or authority still asks, because the
 remembered grant covers the page, not who drives it. The remembered set grows
 only through that approval answer: `replace-settings` may remove an origin but
 rejects additions, so a client cannot grant itself origins the prompt never
-showed. See
+showed. Plan refuses every Code browser operation except stopping the
+thread's own browser (`plan-mode-read-only`). See
 [decision 0093](decisions/0093-app-owned-tools-use-managed-runtime-transports.md).
 
 Tool definitions carry the agent's usage guidance alongside their argument
@@ -902,7 +921,9 @@ selection, `xcodebuild -license check`, Simulator listing, or project listing �
 so the setup checklist marks that row and treats earlier rows as passed; a host
 that omits it leaves every row unchecked. An agent's
 `octant_apple` `boot`, `run`, or `open` raises that pane once per request
-instead of launching Simulator.app (see
+instead of launching Simulator.app. That request lives only in server memory,
+keyed by thread and served only to the same thread and checkout; it is never
+journaled and dies with the process (see
 [decisions/0151-the-agent-opens-the-in-app-simulator-pane.md](decisions/0151-the-agent-opens-the-in-app-simulator-pane.md)).
 Apple artifact and restart-receipt reads validate regular-file identity and size
 on an open handle before allocation. Reads reject linked files and size changes,
@@ -923,6 +944,8 @@ host's real temporary and cache roots
 An Android emulator is a separate dock destination and `octant_android` tool,
 not an iOS helper feature
 ([decisions/0153-android-emulator-is-a-separate-device-destination.md](decisions/0153-android-emulator-is-a-separate-device-destination.md)).
+`octant_android` installs only a checkout-relative APK; an absolute path or
+one that resolves outside the checkout is refused (`invalid-destination`).
 Android commands are one-shot `adb` clients. The shared `adb` server that a
 client forks puts itself in its own session, so Octant's group cleanup of a
 finished command never reaches it, and Octant never stops a server. Each
@@ -965,7 +988,13 @@ shell commands, which an approval-gated thread already reaches through its
 provider's own per-command approvals.
 Under the desktop app that injection is the native device helper of 0137: a
 tap is a point on the captured screen, typed text is letters, digits, spaces
-and new lines, and every refusal names the helper's own reason. Without that
+and new lines, and every refusal names the helper's own reason. Typed text is
+sent only when the guest keyboard is a QWERTY software layout with an
+Automatic hardware layout in a supported Latin-script language; any other or
+unreadable layout refuses the whole string. Evidence for a failed typing keeps
+only the helper's refusal code, never a message that could quote the text. A
+point outside the screen is refused (`point-off-screen`), never clamped.
+Without that
 helper every input kind is unavailable; Octant does not script Simulator.app
 to inject a tap, swipe, typed text, or key
 ([decisions/0151-the-agent-opens-the-in-app-simulator-pane.md](decisions/0151-the-agent-opens-the-in-app-simulator-pane.md)). A swipe is a
@@ -1023,11 +1052,11 @@ reaches its own kind's commands, and nothing in the renderer can turn a Chat
 into Work or a Work thread into Chat. Settings' Chat and Work switches still
 gate their domains: with one off, the composer offers only the other kind.
 
-| Mode     | Binds to                                                                                                                            | Authority                                                                                                                                                                                                                                                                                                                                                                                          |
-| -------- | ----------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Chat** | A virtual, memory-scoped Project, or no Project at all                                                                              | No filesystem or shell authority. Optional safe research tools; scratch space is isolated per thread.                                                                                                                                                                                                                                                                                              |
-| **Work** | Exactly one OS-confined project root                                                                                                | Confined reads and bounded writes inside that root, approval-gated unless the thread's access is auto-accept-edits; no shell and no Git; document adapters (docx, pptx, pdf, image); research with citations; server-authoritative board.                                                                                                                                                          |
-| **Code** | Exactly one directory, ideally a repository root; Code threads select a checkout (current checkout or a managed worktree) inside it | Starts approval-gated; Full access only when explicitly remembered for that Project. Plan mode is always read-only. Git, terminals, tests, PR observation, and managed subagents run inside the bound root. Creating a Code Project may explicitly initialize Git in that folder (`docs/decisions/0079`) so a Code thread can prepare a checkout immediately; binding without Git remains allowed. |
+| Mode     | Binds to                                                                                                                            | Authority                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| -------- | ----------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Chat** | A virtual, memory-scoped Project, or no Project at all                                                                              | No filesystem or shell authority. Optional safe research tools; scratch space is isolated per thread.                                                                                                                                                                                                                                                                                                                                                                             |
+| **Work** | Exactly one OS-confined project root                                                                                                | Confined reads and bounded writes inside that root, approval-gated unless the thread's access is auto-accept-edits; no shell and no Git; document adapters (docx, pptx, pdf, image); research with citations; server-authoritative board.                                                                                                                                                                                                                                         |
+| **Code** | Exactly one directory, ideally a repository root; Code threads select a checkout (current checkout or a managed worktree) inside it | Starts approval-gated; Full access only when explicitly remembered for that Project. Plan mode is always read-only. Git, terminals, tests, PR observation, and managed subagents run inside the bound root. Creating a Code Project may explicitly initialize Git in that folder (`docs/decisions/0079`) so a Code thread can prepare a checkout immediately; if that initialization fails, creation is refused and no Project is journaled. Binding without Git remains allowed. |
 
 Work's missing shell and Git are withheld, not approval-gated: a person is
 never asked to approve a command in Work, because approving one would give the
@@ -1631,7 +1660,11 @@ maintainer's explicit direction. The built shape follows the record: the host
 admits, clamps, journals, and delivers; bodies stay out of the journal, are
 stored under opaque references, and taint the recipient as untrusted external
 content; messaging grants no authority, starts no turn, and purged threads
-leave no resurrectable bodies. 0049 remains the Chat mention path.
+leave no resurrectable bodies. Admission is not delivery: before a message is
+delivered the server rechecks the sender's live grant and the recipient's
+lifecycle, and a revocation, close, or purge in between refuses it. Bounds are
+depth 2, eight open messages per sender, four recipients per send, and a
+64 KiB body. 0049 remains the Chat mention path.
 
 ## Agent task display
 
@@ -1781,20 +1814,31 @@ flowchart LR
   which Project scopes were deleted.
   The tombstone, other threads, Projects, credentials, external
   repositories, and SQLite free pages are named retained scopes rather
-  than hidden leftovers. A remote principal cannot purge. See
+  than hidden leftovers. The effective window is the most specific one set
+  (thread, then Project, then host, else forever). A thread-scoped purge
+  erases the named thread; a Project- or host-scoped purge erases only threads
+  whose last update is older than their effective window; purging an
+  already-purged thread succeeds idempotently. A remote principal can neither
+  set a window nor purge. See
   `docs/decisions/0035`. The one self-applying
   exception is startup journal compaction, which removes a
   `code.checkout-observed@1` event only when the next event of the same
   checkout observes the identical state; it preserves every answer a
   projection, rebuild, subscription, or export can give and reports how many
-  events it removed. See `docs/decisions/0039`. The other self-applying
+  events it removed. It runs in one transaction per store, renumbers each
+  aggregate's surviving versions contiguously with its heads and checkout
+  projection, skips any aggregate with quarantined events, version gaps, or a
+  head or projection that disagrees with the journal tail, and keeps every
+  event another names as its cause. See `docs/decisions/0039`. The other self-applying
   exception files rather than erases: the completed-thread sweep archives a
   thread the person completed once the Settings window has passed, keeping
   its transcript, checkout, and journal in place (`docs/decisions/0088`).
   A thread the caller
   may already Open can be exported as an `octant.thread-bundle/1` JSON cut
   of the journal — transcript, evidence, and provenance, named with the
-  instant it was taken. Secrets, raw provider payloads, and filesystem
+  instant it was taken. A missing thread and one the caller cannot read get
+  the same `not-found` refusal, so an export never reveals a hidden thread.
+  Secrets, raw provider payloads, and filesystem
   paths never appear; attachment bytes and other bulk content outside the
   journal are listed as omissions. A local owner can also take one
   `octant.host-export/1` cut of what this host holds: a thread bundle for
@@ -1816,6 +1860,18 @@ flowchart LR
   controller footing for small teams lives in
   `docs/legal/shared-host-controller.md` and aligns with
   `docs/decisions/0040` without shipping the shared team host.
+- **Artifact mirror.** After each committed artifact version the host
+  rewrites that artifact's mirrored files in place (removing old names on
+  rename) and journals every outcome as a receipt, including skipped and
+  refused; a write failure never unwinds the version. Plan, an unbound or
+  unavailable destination, and an unauthorized one are refused. A repository
+  destination writes the working tree only; optional auto-commit (off by
+  default, refused without a repository destination) commits only the files
+  it just wrote, refuses when other work is staged, and never pushes.
+  Settings changes need the current `expectedVersion`. An external edit comes
+  back only through an explicit re-import that appends a version. The
+  `/api/artifacts/mirror` route is loopback-only and refuses a paired device.
+  See [0029](decisions/0029-artifact-storage-mirror.md).
 - **Artifact replicas.** A replica is an append-only log in a store the user
   owns — a synced folder, or an S3-compatible bucket. Each host writes only
   its own write-once entries, one per committed artifact version or deletion,
@@ -2555,15 +2611,25 @@ modelId }`, and the model picker is provider-first. Discovery can find
   every capability unsupported, and no turn is offered. fx runs in a per-instance managed
   home because its ACP entrypoint exposes no profile-path variable; see
   [fx-acp-compatibility.md](fx-acp-compatibility.md) and
-  [0130](decisions/0130-fx-runs-in-a-managed-home.md). Image profiles are
+  [0130](decisions/0130-fx-runs-in-a-managed-home.md). fx is refused in Chat
+  and Plan before any process starts, runs its `ask` mode below Full access
+  and `code` only on Full access, authenticates only with a broker-held AI
+  Gateway API key, and cannot read or write the Project root's `AGENTS.md`,
+  `.mcp.json`, `.fx.json`, or `.agents`. Image profiles are
   recorded in [decisions/0055-image-generation-provider-profiles.md](decisions/0055-image-generation-provider-profiles.md).
   Generation itself is a journaled job with OpenAI and Gemini adapters, a
   bounded generated-image attachment scope, and usage rows attributed as
-  `image-generation`; see
+  `image-generation`. A job uses exactly one profile; a safety refusal ends it
+  and is never retried elsewhere; a job found queued or running after a
+  restart fails as interrupted and is never resent. Adapters accept only
+  inline image bytes, and the journal holds attachment references and a
+  prompt hash, never image bytes or prompt text. See
   [decisions/0056-image-generation-jobs-and-adapters.md](decisions/0056-image-generation-jobs-and-adapters.md).
   The **Image generator** surface (profile menu, host-wide `image-library`
   scope; see
-  [decisions/0081-image-generation-is-its-own-surface.md](decisions/0081-image-generation-is-its-own-surface.md))
+  [decisions/0081-image-generation-is-its-own-surface.md](decisions/0081-image-generation-is-its-own-surface.md);
+  any registered window may use the `image-library` scope, while thread scopes
+  keep thread authority and the agent tool generates only into its own thread)
   and an app-managed `octant_create_image` tool invoke that job service
   through `/api/image/` when an enabled image profile exists (a dedicated
   image provider, or a custom image source named in Settings › Image
@@ -2868,7 +2934,11 @@ task binding, and resume supplies the currently allowed tool catalogue without
 reconstructing native history. Chat and Work reuse provider-owned sessions across
 follow-ups; Chat retries retain that identity and native scratch files. Native
 Chat editing refuses where rollback is unavailable, so it cannot replace the
-conversation behind the user's back ([0157](decisions/0157-native-resume-keeps-a-durable-identity.md)). A separate replay checkpoint imports existing Code reports on
+conversation behind the user's back. Resume refuses as `stale-resume` when the
+cursor's binding names another provider instance, Octant session, Project
+root, mode, or native id, and at most one live or starting process may own a
+native session per provider instance, refused before spawn otherwise
+([0157](decisions/0157-native-resume-keeps-a-durable-identity.md)). A separate replay checkpoint imports existing Code reports on
 upgrade without replaying unrelated purged usage. The provider and model are
 those recorded when the turn started, including after a later handoff. These
 turns have no Octant planning estimate or variance: APIs omit those fields and
@@ -3655,7 +3725,8 @@ when the person turns automatic updates on in Settings › Computer use; it is
 off by default, a saved choice is kept, and a manual Check for updates still
 works. Verified updates stage privately, activate
 only while idle, and retain the previous version if startup fails. The driver
-never uses a standalone CuaDriver installation. See
+never uses a standalone CuaDriver installation. Plan refuses computer-use
+control. See
 [decisions/0113-computer-use-plugin-and-driver-updates.md](decisions/0113-computer-use-plugin-and-driver-updates.md).
 
 **Managed device tools.** The iOS Simulator and Android emulator panes ride
@@ -3822,9 +3893,24 @@ mechanisms are:
   remembering, and the terminal has no way to ask for more. A composer
   turn may
   request a narrower posture; the server clamps it to the thread's grant
-  and records the posture the turn ran under. Compatible harnesses may
-  answer those prompts themselves when the thread opts in
-  (`docs/decisions/0104`); categories and confinement stay Octant's.
+  and records the posture the turn ran under. A Code thread's `autoApprove`
+  flag lets a compatible harness's own reviewer answer the prompts Octant
+  would otherwise surface. It says who answers, not what is permitted:
+  categories, the sandbox, egress, and credential reach stay Octant's. It is
+  effective only on approval-gated or auto-accept-edits, only when the
+  provider reports `harnessAutoReview: "supported"`, and only while the thread
+  has not ingested untrusted content (unknown taint counts as ingested); it is
+  set with the posture through `change-code-thread-access` and clamped and
+  inherited with it. Claude runs `permissionMode: "auto"` with Octant's
+  callbacks still registered. Codex sends `approvalsReviewer: "auto_review"`
+  on approval-gated only (`codexExecutionSettings`): both prompting postures
+  run Codex `read-only`, so an in-root patch edit escalates, and Codex's
+  reviewer is thread-wide and keeps those requests from the host, so on
+  auto-accept-edits it would answer — and could deny — the edit the posture
+  waives. The waiver outranks the delegation, so a Codex auto-accept-edits
+  thread with `autoApprove` still asks the person about commands and network.
+  Octant never classifies a command as in-root-only from its text instead:
+  Codex reports `commandActions` as `unknown` for a plain `> file` redirect.
   One provider-owned exception is accepted: on OpenCode 2.x, approval-gated
   honours permission grants the person saved in OpenCode itself for the same
   repository, so such an action runs without an Octant prompt. Octant's
@@ -3928,10 +4014,17 @@ mechanisms are:
   `sandbox-exec` with deny-default Seatbelt profiles; on Linux it is Bubblewrap
   (`bwrap`) with private `/tmp`, bound roots, and no unconfined fallback,
   recorded in [decisions/0057-linux-confinement-bubblewrap.md](decisions/0057-linux-confinement-bubblewrap.md).
+  The child runs `--unshare-all`, regains the network only when egress
+  resolves to `allow`, dies with its parent, and gets a new session except for
+  interactive terminals. The synthetic root is read-only, deny paths are
+  covered by empty read-only tmpfs mounts, and a launch carrying Seatbelt
+  `extraRules` is refused as `incompatible`.
   Plan and Chat also load a seccomp filter that denies process-creating
   fork/clone (while allowing `clone` with `CLONE_THREAD` for pthreads) and
   `execveat` after start, because Bubblewrap cannot block the first `execve`
   ([decisions/0068-linux-plan-process-deny.md](decisions/0068-linux-plan-process-deny.md)).
+  A launch that needs that filter fails closed as `incompatible` on a CPU
+  other than x64 or arm64 or without an executable `/bin/sh`.
   Sensitive system roots remain denied even where runtime compatibility
   requires a broad file-read rule; each launch's exact roots are re-allowed
   after those denials. On macOS every launch, in both egress modes, can read
@@ -3974,8 +4067,17 @@ mechanisms are:
   | Codex app-server (`codexProcess.ts`)                                      | Unwrapped                       | Unwrapped                                           | Not limited by Octant                            | Codex's own `read-only` sandbox                |
   | Oh My Pi (`ohMyPiProcess.ts`), readiness probe only                       | Unwrapped                       | Unwrapped                                           | Not limited by Octant                            | No turn runs                                   |
 
-  Codex is unwrapped because one app-server carries every thread on a provider
-  instance, so it has no one root to bind. The ACP/OpenCode/Pi row has one
+  Codex is unwrapped because its app-server is leased once per provider
+  instance: `providerRuntimeRegistry` keys runtimes by `instanceId`, so one
+  process carries every thread on that instance, each choosing its own root
+  and `sandbox` at `thread/start`. No profile is exact for all of them, and one
+  wide enough for all of them is not a boundary. That exception closes when
+  the lease is keyed by the thread's root and execution policy, as an OpenCode
+  connection is. Claude is a gap, not an exception: one process per query
+  already carries one thread's authority, and its remaining postures close as
+  its per-query spawn callback prepares a confined launch for them.
+  `providerProcessConfinement.test.ts` refuses a new module that launches
+  without the shared builder unless it is named here. The ACP/OpenCode/Pi row has one
   carve-out from "no exec or fork". On macOS, an OpenCode 2 Chat, Plan or Work
   launch may fork and may exec exactly `/usr/bin/false`, which is its Git
   stand-in (described below). Oh My Pi's probe is a held gap, not
@@ -4016,6 +4118,13 @@ mechanisms are:
   scan perform before a runtime starts is wrapped too, with no root, no home, no network and one
   throwaway scratch directory it may write, per
   [decisions/0146-a-version-read-launches-confined.md](decisions/0146-a-version-read-launches-confined.md).
+  Its environment is an allowlist (path, locale, user, terminal, time zone,
+  its scratch directory, and the family's guards), so provider credentials
+  and config-home variables are dropped; its process group is killed when the
+  read settles. Credential-reading readiness probes are not version reads and
+  still run unconfined: Claude's `auth status --json` and discovery's
+  `authProbeArgs` read the person's own sign-in state, a standing gap like
+  Oh My Pi's probe.
   OpenCode 2 runs `git rev-parse` at startup to resolve its project, and the
   Chat, Plan, and Work jail denies fork and exec outright. Rather than widen
   the jail to a real Git binary, a macOS 2.x launch gets a private stand-in: a
@@ -4032,6 +4141,46 @@ mechanisms are:
   exists to close, so a 2.x Chat, Plan, or Work launch on Linux keeps fork
   and exec denied. The probe fails closed and the runtime stays listing-only
   there until Linux confinement can express the narrow per-path exec grant.
+  Discovery re-allowances — a runtime asking whether a path exists and what it
+  resolves to, not to read it — follow one rule. Each names an exact literal
+  node, never a subpath, so entries inside it stay denied; a subpath grant is
+  admissible only for a system-owned tree with no user content (the Simulator
+  cryptex mount under `/private/var/run`). The verb is the weakest measured to
+  work: `file-read-metadata` by default, `file-read-data` on a directory node
+  only where metadata was measured insufficient, never on a file whose contents
+  are not needed. The set is closed: only nodes the runtime actually probes and
+  that exist are granted. Each rides the launch that needs it (`extraRules` or
+  an explicit input flag), never the shared profile default, and is emitted
+  after the denials because Seatbelt applies the last matching rule. OpenCode
+  2's tool-home probe (`openCodeDiscoveryRules`) is the shape: literal
+  metadata and read-data on `~/.claude` and `~/.agents`, metadata on
+  `~/.claude.json`, while `~/.claude/settings.json` stays unreadable and
+  unprobed homes such as `~/.codex` stay denied. Reading a person's
+  configuration content or reaching outside the bound root is not discovery.
+  A denial in this class usually surfaces as an empty result with exit 0, not
+  an error, so a fix is proven from the runtime's own output, not its exit code.
+  Confined Git reads no configuration from the person's home: every launch sets
+  `GIT_CONFIG_GLOBAL=/dev/null` and `GIT_CONFIG_NOSYSTEM=1`, and a commit takes
+  its author from the host's recorded identity when the checkout names none. In a
+  linked worktree it may read the metadata its own worktree names — the
+  `gitdir` the bound root's `.git` file points at and that directory's
+  `commondir` — and nothing else outside the bound root
+  (`gitLinkedWorktreeMetadataPaths`). Because the `.git` file is writable by
+  anyone who can write the checkout, the grant requires Git's reciprocal
+  record: the `gitdir` sits in a `worktrees` directory, its `gitdir` file
+  points back at this marker, and its `commondir` resolves to the main
+  repository's `.git`. On macOS each ancestor of the two paths gets literal
+  `file-read-metadata` only, for Git's component-by-component walk, plus
+  literal reads of the two xcode-select links the `/usr/bin/git` shim needs;
+  on Linux the same paths are bound, and only when they exist. Write on that
+  metadata is off by default and requested per launch (`writable`), only by a
+  mutation launch whose policy in force is not Plan: the rules are appended
+  last and would otherwise outrank the launch's own read-only posture.
+  Observation stays read-only for every caller; mergeability runs
+  `merge-tree --write-tree` against a quarantined object directory that reads
+  the real objects through an alternate. A launch names every directory it
+  writes outside the bound root, since on Linux an unnamed one under the
+  private tmpfs does not exist for the confined process.
   Toolchain commands the Android workbench issues keep their own deliberate
   carve-out: `~/.android` — the AVD store, adb keys, and emulator lock files —
   plus a non-empty `ANDROID_AVD_HOME` when configured are bound read-write even
@@ -4262,7 +4411,10 @@ mechanisms are:
   not a new trust boundary. Conflicting facts stay under their owning host;
   create and mutation routing name one destination and refuse when that host is
   not routable — they never queue offline work or convert one host's read model
-  into authority on another.
+  into authority on another. An all-hosts list keeps every registered host;
+  an unreachable host's cached items stay listed as stale and read-only, and
+  an authority-bearing mutation is allowed only on a host whose read model is
+  ready.
 - **Local servers and Running services.** Listener observation is ephemeral,
   scoped to listening sockets of the current user, and never journaled. One
   classifier decides what may be listed at all: a system daemon, another user's
@@ -4299,7 +4451,9 @@ mechanisms are:
   consent times out. Tokens stay in the credential broker. The journal records
   the terms acknowledgment (who and when) and the public sign-in state, never
   an access token, refresh token, authorization code, or verifier. A remote
-  principal cannot acknowledge terms, start the flow, or refresh. A revoked,
+  principal cannot acknowledge terms, start the flow, or refresh. Starting a
+  sign-in without a recorded acknowledgment of that descriptor's terms is
+  refused (`terms-required`). A revoked,
   expired, or reused refresh token is a typed sign-in-again state and drops the
   stored grant. The API-key path remains available beside that sign-in.
   [0111](decisions/0111-host-driven-provider-oauth.md) stays a Proposed
@@ -4389,9 +4543,66 @@ nothing first-party.
 
 The agent contract in `AGENTS.md` owns the Current Release Boundary wording.
 The first shipping surface is the Apple Silicon technical preview with the
-provider-neutral plugin and skill marketplace, signed and self-updating per
-[0034](decisions/0034-signed-updates.md). Cross-platform desktop is authorized
-and sequenced by [0058](decisions/0058-cross-platform-desktop.md).
+provider-neutral plugin and skill marketplace. Developer ID signing,
+notarization, and in-app update are one deliverable: an updater on an unsigned
+macOS app is an unauthenticated code-delivery channel, and Squirrel.Mac
+refuses a replacement that does not satisfy the running app's designated
+requirement anyway.
+
+Desktop is one product on macOS, Linux, and Windows; platform differences are
+fail-closed posture, never a second app. The desktop process owns its local
+server on every OS. The sequence is the Linux desktop shell, then the Linux
+AppImage with its signed feed, then Windows. Windows packaging, installers,
+feeds, and packaging CI wait for an explicit maintainer decision after Linux
+parity. Windows Work and Code stay unavailable until an approved Windows
+confinement design is documented: the confinement port supports only macOS
+and Linux and refuses every other platform, so Work and Code fail closed
+there. Simulator, the Apple workbench, and vibrancy stay macOS-only.
+
+**Updates** (`apps/desktop/src/appUpdateService.ts`, `appUpdateFeed.ts`,
+`packages/domain` `appUpdatePolicy`):
+
+- Trust comes from the feed signature, never the host. Octant verifies an
+  Ed25519 signature over the canonical encoding of the feed's `release`
+  object (the wrapper's `schemaVersion` is validated, not signed) against a
+  public key compiled into the app, then requires the offered release to be strictly newer and to name
+  this platform, architecture, and the ring the app asked for. The artifact's
+  SHA-256 is inside the signature and the downloaded bytes are hashed before
+  anything installs.
+- On macOS the platform updater is then handed the verified bytes through a
+  loopback feed Octant serves for the install, never the public feed, and
+  checks the code signature as an independent second gate. A Linux AppImage
+  is not code-signed, so the feed signature and artifact hash are its whole
+  trust root: Octant replaces only the image it was launched from (`APPIMAGE`)
+  atomically, and refuses a package or archive launch before any request. A
+  platform with no signed channel (`supportsSignedDesktopUpdateChannel`:
+  macOS and Linux today) refuses with "untrusted-signature".
+- Unverifiable is refused, never downgraded: an unparseable feed, unknown key,
+  version that is not strictly newer, wrong platform or ring, unreachable
+  service, or mismatched artifact yields no install, no override, and a
+  refusal naming the check. The exact two-field empty document
+  (`"status": "empty"`, schema version 1) means no release in this channel,
+  not that the build is current.
+- Rings are `stable` (tags), `preview` (scheduled `main` builds), and
+  `candidate` (on-demand builds of a chosen ref, so a test install exercises
+  the real update path) at `<base>/<ring>/<platform>-<arch>.json`. A build's default ring is read from
+  its version; the signed ring field is what separates the streams. The base
+  is overridable but must be HTTPS.
+- Release notes for an offered update ride inside the signed release (at
+  most 4,096 characters) and fail with it; notes for the running build are a
+  bundled file read from disk, so What's New never adds a request.
+- The person controls application: an update is staged and applied on a
+  relaunch they start, and install waits while agents are active or a thread
+  needs attention. Automatic checks are a setting; the host starts with them
+  off until the persisted choice arrives, then checks daily. A check is a
+  plain GET carrying only version, platform, and architecture (the ring is in
+  the path); it is not a telemetry channel.
+
+Historical rationale: [0034](decisions/0034-signed-updates.md) and
+[0058](decisions/0058-cross-platform-desktop.md). 0058's ban on any updater
+for an unsigned build predates the Linux AppImage feed; the rule above, where
+the signed feed is the trust root for an image that has no platform signing,
+is current.
 
 Artifact replicas, when the person turns sync on, go only to a store that
 person owns — a synced folder or an S3-compatible bucket. Octant operates no
