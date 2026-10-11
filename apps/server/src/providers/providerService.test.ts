@@ -2474,6 +2474,67 @@ describe("ProviderService", () => {
     expect(clearClaudeHelperSignIn).not.toHaveBeenCalled();
   });
 
+  it("refuses a Claude directory change when Claude for helpers cannot be cleared", async () => {
+    const directory = "/Users/example/.claude-accounts/work";
+    const clearClaudeHelperSignIn = vi.fn(async () => {
+      throw new Error("credential store unavailable");
+    });
+    const fixture = serviceFixture({
+      instances: [
+        claudeProvider({
+          configuration: {
+            kind: "claude-agent-sdk",
+            binaryPath: "/opt/homebrew/bin/claude",
+            authentication: "subscription",
+            configDirectory: directory,
+            accent: "teal",
+          },
+        }),
+      ],
+      clearClaudeHelperSignIn,
+    });
+
+    await expect(
+      fixture.service.execute(windowId, {
+        kind: "change-claude-configuration",
+        instanceId,
+        expectedVersion: 1,
+        configuration: {
+          kind: "claude-agent-sdk",
+          binaryPath: "/opt/homebrew/bin/claude",
+          authentication: "subscription",
+          configDirectory: "/Users/example/.claude-accounts/office",
+          accent: "teal",
+        },
+      }),
+    ).rejects.toMatchObject({
+      failure: {
+        category: "unavailable",
+        message:
+          "Octant could not clear Claude for helpers for the new account directory. Try again.",
+      },
+    });
+    expect(fixture.persistence.readProviderInstance(instanceId)).toMatchObject({
+      configuration: { configDirectory: directory },
+    });
+  });
+
+  it("still removes a Claude provider when Claude for helpers cannot be cleared", async () => {
+    const clearClaudeHelperSignIn = vi.fn(async () => {
+      throw new Error("credential store unavailable");
+    });
+    const fixture = serviceFixture({ instances: [claudeProvider()], clearClaudeHelperSignIn });
+
+    await expect(
+      fixture.service.execute(windowId, {
+        kind: "remove-provider",
+        instanceId,
+        expectedVersion: 1,
+      }),
+    ).resolves.toMatchObject({ kind: "provider-removed", instanceId });
+    expect(fixture.persistence.readProviderInstance(instanceId)).toBeUndefined();
+  });
+
   it("preserves Claude resume identities when durable provider removal fails", async () => {
     const clearResumeIdentities = vi.fn(async () => undefined);
     const clearClaudeHelperSignIn = vi.fn(async () => undefined);

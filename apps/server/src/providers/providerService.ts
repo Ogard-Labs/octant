@@ -198,7 +198,11 @@ export interface ProviderServiceOptions {
   readonly driver?: (instance: ProviderInstance) => ProviderDriver;
   readonly isDriverPluginEffective?: (driverKind: ProviderDriverKind) => boolean;
   readonly clearResumeIdentities?: (instanceId: ProviderInstanceId) => Promise<void>;
-  /** Removes the long-lived Claude for helpers token a removed Claude provider held. */
+  /**
+   * Deletes the long-lived Claude for helpers token. Removal swallows
+   * failure after the instance is already gone. A directory change must
+   * see the rejection so the old token cannot follow the new account.
+   */
   readonly clearClaudeHelperSignIn?: (instanceId: ProviderInstanceId) => Promise<void>;
   /** Clears process-local provider limit evidence when identity/configuration changes. */
   readonly clearRuntimeUsageLimits?: (instanceId: ProviderInstanceId) => void;
@@ -851,8 +855,9 @@ export class ProviderService implements ProviderServiceApi {
             await this.#clearResumeIdentities?.(current.id);
             // The renderer clears a removed provider's API key, but nothing
             // else names this token once the instance is gone, and it stays
-            // valid for a year.
-            await this.#clearClaudeHelperSignIn?.(current.id);
+            // valid for a year. A store that cannot be reached leaves the
+            // token behind rather than reporting the removal as failed.
+            await this.#clearClaudeHelperSignIn?.(current.id).catch(() => undefined);
           }
           this.#invalidateCatalog(current.id, { kind: "all" }, "provider removed", updatedAt);
           this.#clearRuntimeUsageLimits?.(current.id);
@@ -1007,7 +1012,16 @@ export class ProviderService implements ProviderServiceApi {
           const nextDirectory =
             instance.driverKind === "claude" ? instance.configuration.configDirectory : undefined;
           if (nextDirectory !== previousDirectory) {
-            await this.#clearClaudeHelperSignIn?.(current.id);
+            try {
+              await this.#clearClaudeHelperSignIn?.(current.id);
+            } catch (error) {
+              if (error instanceof ProviderServiceError) throw error;
+              throw new ProviderServiceError({
+                category: "unavailable",
+                message:
+                  "Octant could not clear Claude for helpers for the new account directory. Try again.",
+              });
+            }
           }
           await this.#runtime.invalidateRuntime(current.id);
           eventName = "provider.instance-configuration-changed@1";
