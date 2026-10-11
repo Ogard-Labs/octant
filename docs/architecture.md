@@ -2886,8 +2886,10 @@ native harness in `apps/server/src/harness`:
   `edit`, `write`, and `goal-check` results do not, so local work keeps its
   ordinary approvals; the catalog's `resultTaintsThread` marks each tool and
   `nativeHarnessResultTaintsThread` decides, failing closed for a name it does
-  not know. A command can still reach the network under the thread's OS-level
-  egress, and its output does not taint. Once tainted, `bash`, `edit`,
+  not know. A command under OS-level `allow` egress keeps today's posture and
+  its output does not taint; under the proposed `proxied` level a `bash` call
+  taints when its launch received bytes from an outside host, as the
+  [egress rules](#harness-tool-egress-rules) describe. Once tainted, `bash`, `edit`,
   `write`, `goal-check`, and `web-fetch` need a person's confirmation for every
   call even under Full access, and refuse when no approval surface exists;
   `web-fetch` is included because a GET can carry data out in its URL. That
@@ -3264,6 +3266,20 @@ listener per confined launch:
   so an injected command cannot inherit a host allowed before the injection,
   and an allowed host that accepts anonymous or attacker-supplied writes
   cannot carry data out without a person seeing that host for that command.
+- **Output taints.** Bytes a command receives from an outside host are
+  untrusted content, so a `proxied` `bash` call whose launch received any
+  taints the thread, consistent with the rule that a harness result bringing in
+  outside content taints. The proxy counts bytes received per launch, from
+  every allowed destination, including entries beyond the summary's 64-entry
+  cap, and the launch summary carries that total. The server appends the
+  thread's taint event from the total, before the tool result returns to the
+  model and in the same step as the summary; when the taint cannot be
+  recorded the call reports `unavailable`, so the model never reads output
+  the journal has not marked. A refused request, and a launch that received
+  nothing, do not taint. The taint is the thread-lifetime one and never
+  clears, so a package install or a clone taints the thread and later `bash`
+  calls need the single-use confirmation above; that is the accepted cost of
+  letting a command read from the network.
 
 **Learn mode.** A per-thread setting, on by default for `proxied` threads.
 With it on, a request the proxy refuses for `no-rule` or `expired` records a
@@ -3292,11 +3308,27 @@ or body:
   `project.egress-rule-revoked@1`. A grant is journal-first: a rule whose event
   cannot be appended is not in force.
 - `thread.egress-proposal-raised@1` and `thread.egress-proposal-declined@1`.
-- `thread.egress-launch-summarized@1` when a `proxied` launch ends: each
-  distinct host and port with its decision, reason, request count, and bytes
-  each way, at most 64 entries with a `truncated` flag. It is appended before
+- `thread.egress-launch-started@1` before a `proxied` launch's listener
+  accepts a connection: launch identity and time. When it cannot be appended
+  the launch refuses before the command runs.
+- `thread.egress-decisions-recorded@1` while the launch runs: each distinct
+  host and port first decided, or whose counts changed, with its decision,
+  reason, request count, and bytes each way. The proxy flushes a batch at 16
+  entries or every 5 seconds, whichever comes first, so a crash loses at most
+  that tail of decisions and counts, never more. When a batch cannot be
+  appended the proxy refuses new requests for that launch
+  (`audit-unavailable`) and keeps existing tunnels until they end.
+- `thread.egress-launch-summarized@1` when the launch ends: the final totals,
+  including the bytes received that taint the thread, and each distinct host
+  and port, at most 64 entries with a `truncated` flag. It is appended before
   the tool result returns to the model; when it cannot be, the call reports
   `unavailable`, so the model never acts on egress the journal does not hold.
+- `thread.egress-launch-incomplete@1`, appended at startup for every launch
+  that has a start event and no summary, because the server exited first.
+  Its record holds what the batches captured and says the tail is unknown.
+  Because the bytes received are then unknown too, recovery taints the thread
+  unless the recorded batches show the launch received none and ended before
+  its first allowed connection.
 
 **Failure modes.** Each fails closed:
 
@@ -3310,6 +3342,9 @@ or body:
 | Client ignores the proxy variables                             | Its direct connection is denied by the OS rules                            |
 | Concurrency limit reached (128 tunnels, 16 pending per launch) | Further requests refuse (`limit`)                                          |
 | Grant or launch summary cannot be journaled                    | The rule is not in force; the call reports `unavailable`                   |
+| Launch start cannot be journaled                               | The launch refuses before the command runs                                 |
+| Decision batch cannot be journaled                             | New requests refuse (`audit-unavailable`); open tunnels run to their end   |
+| Server exits mid-launch                                        | Recovery marks the launch incomplete and taints the thread                 |
 
 **Inference stays separate.** Harness inference leaves from the server
 process to the configured base URL with the credential, as today; it never
@@ -3345,30 +3380,38 @@ proofs that suite already holds:
    parent's live rules; the decision takes no proposal input.
 2. **Host proxy.** The listener, token, `CONNECT` and plain-HTTP paths,
    resolution with pinning, private refusal, server-name check, limits, and
-   launch summary, tested against fixture origins through an injected
+   batched decision records, launch summary, and bytes-received count, tested against fixture origins through an injected
    resolver. Accepted when integration tests show: an allowed host connects;
    an unruled host, a rule for another thread, an expired rule, a missing or
    forged token, a private answer, a name that is public then private, an IP
    literal, the Octant server's port, and a mismatched server name all refuse
    with their reason and a summary entry; a tunnel closes when its rule
    expires or is revoked; and the benchmark budget holds.
-3. **Confinement wiring.** The `proxied` OS level in the Seatbelt builder
-   and the bubblewrap capsule with its forwarder, and the harness ports that
-   launch with it. Accepted when native probes under real Seatbelt on macOS
-   and real `bwrap` on Linux show: a direct connection to a public fixture
-   fails; a name lookup fails; another loopback listener is unreachable; the
-   proxy is reachable and an allowed host works; a client that ignores the
-   proxy variables fails; and a launch whose listener cannot bind never runs.
-   This phase changes approval-gated Code harness commands from open network
-   to ruled network, so the user guide changes with it.
-4. **Grants, expiry, learn mode.** The `network-access` grant flow,
+3. **Grants, expiry, learn mode.** The `network-access` grant flow,
    learn-mode proposals, the thread and Project rules lists with revoke, and
-   the journal events. Accepted when server integration tests show: learn mode
-   refuses and proposes but never connects, however often it is asked; an
-   unanswered or declined proposal grants nothing; a paired device cannot grant
-   a Project rule; a tainted thread can grant only `call` rules and its
-   standing rules stop applying; a grant that cannot be journaled is not in
-   force; and rendered QA covers the proposal card and the rules lists.
+   the journal events, run against phase 2 launches with fixture origins so
+   commands are not yet on the proxy. Accepted when server integration tests
+   show: learn mode refuses and proposes but never connects, however often it
+   is asked; an unanswered or declined proposal grants nothing; a paired
+   device cannot grant a Project rule; a tainted thread can grant only `call`
+   rules and its standing rules stop applying; a grant that cannot be
+   journaled is not in force; output received through the proxy taints the
+   thread before the result returns; a crash mid-launch loses at most one
+   decision batch and recovery marks the launch incomplete; and rendered QA
+   covers the proposal card and the rules lists.
+4. **Confinement wiring and the switch.** The `proxied` OS level in the
+   Seatbelt builder and the bubblewrap capsule with its forwarder, and the
+   harness ports that launch with it. This phase is what changes approval-gated
+   Code harness commands from open network to ruled network, and it lands only
+   after phases 2 and 3 are in, so no release has those commands on `proxied`
+   without a way to grant a host; until it lands they stay on `allow`, and
+   the user guide changes with it. Accepted when native probes under real
+   Seatbelt on macOS and real `bwrap` on Linux show: a direct connection to a
+   public fixture fails; a name lookup fails; another loopback listener is
+   unreachable; the proxy is reachable and an allowed host works; a client
+   that ignores the proxy variables fails; and a launch whose listener cannot
+   bind never runs. It also shows end to end that a refused install proposes a
+   host, the person grants it, and the retry succeeds.
 5. **Escape-suite gate.** An `egress-rule-bypass` fixture row in the threat
    model's escape suite drives phases 1–4 end to end, and the layer-3 native
    probes join the pre-release check.
