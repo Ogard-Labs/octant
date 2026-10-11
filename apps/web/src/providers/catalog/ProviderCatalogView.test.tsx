@@ -213,6 +213,44 @@ describe("ProviderCatalogView", () => {
     await waitFor(() => expect(onProbe).toHaveBeenCalledTimes(2));
   });
 
+  it("says why looking on the host failed and offers Try again", async () => {
+    const onScan = vi.fn(async () => undefined);
+    const view = props();
+    render(
+      <ProviderCatalogView
+        {...view}
+        discovery={{
+          ...view.discovery!,
+          message: "Discovery service is unavailable.",
+          onScan,
+        }}
+      />,
+    );
+    openSetup(/^Codex CLI, /);
+    fireEvent.click(screen.getByRole("button", { name: "Look on this host" }));
+    expect(await screen.findByText("Discovery service is unavailable.")).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    await waitFor(() => expect(onScan).toHaveBeenCalledTimes(2));
+  });
+
+  it("treats a scan that came back failed as a failure rather than success", async () => {
+    const failed = {
+      ...snapshot([]),
+      status: "failed",
+      message: "Discovery scan exceeded its time budget.",
+    } as DiscoverySnapshot;
+    const view = props();
+    render(
+      <ProviderCatalogView
+        {...view}
+        discovery={{ ...view.discovery!, onScan: vi.fn(async () => failed) }}
+      />,
+    );
+    openSetup(/^Codex CLI, /);
+    fireEvent.click(screen.getByRole("button", { name: "Look on this host" }));
+    expect(await screen.findByText("Octant could not look on this host.")).toBeDefined();
+  });
+
   it("sends an endpoint driver to Add endpoint rather than adding one itself", () => {
     const view = props();
     render(<ProviderCatalogView {...view} />);

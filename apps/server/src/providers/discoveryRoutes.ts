@@ -225,16 +225,13 @@ export function createDiscoveryRouteHandler(dependencies: DiscoveryRouteDependen
         );
       }
 
-      // Connecting a runtime that already has a provider answers with that
-      // provider instead of adding a second one for the same executable. It
-      // does not switch the existing provider on: discovery never toggles an
-      // instance someone configured.
+      // Discovery manages one provider per driver family, as auto-registration
+      // does: connecting a driver that already has a provider answers with that
+      // provider instead of adding a second one, whatever path or address it
+      // uses. It does not switch the existing provider on: discovery never
+      // toggles an instance someone configured.
       const configured = (await dependencies.listInstances?.(windowId))?.find(
-        (instance) =>
-          instance.driverKind === match.driverKind &&
-          "binaryPath" in instance.configuration &&
-          (instance.configuration.binaryPath === match.binaryPath ||
-            instance.configuration.binaryPath === match.discoveredPath),
+        (instance) => instance.driverKind === match.driverKind,
       );
       if (configured !== undefined) {
         return response({ kind: "candidate-connected", instanceId: configured.id }, 200, origin);

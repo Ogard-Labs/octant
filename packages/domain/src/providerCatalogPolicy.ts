@@ -151,7 +151,9 @@ function presence(
   setup: ProviderCatalogSetupKind,
   snapshot: DiscoverySnapshot | undefined,
 ): ProviderCatalogPresence {
-  if (setup === "endpoint" && driverKind !== "ollama") return { kind: "not-applicable" };
+  // An endpoint is added with its address, never found on the host, so the
+  // scan says nothing about it (Ollama included: it is set up as an endpoint).
+  if (setup === "endpoint") return { kind: "not-applicable" };
   if (!canAutoDetectDriverKind(driverKind)) return { kind: "not-applicable" };
   if (!scanCompleted(snapshot)) return { kind: "not-checked" };
   const candidate = snapshot.candidates.find((entry) => entry.driverKind === driverKind);

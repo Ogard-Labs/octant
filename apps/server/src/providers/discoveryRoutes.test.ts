@@ -532,11 +532,13 @@ describe("locate binary", () => {
   });
 });
 
-it("connects a detected runtime to the provider already configured for it instead of adding a second", async () => {
+it("connects a detected runtime to the provider its driver already has instead of adding a second", async () => {
   const existing = createCodexProvider({
     id: decodeProviderInstanceId("00000000-0000-4000-8000-000000000777"),
     displayName: "Codex CLI",
-    binaryPath: "/usr/local/bin/codex",
+    // A different path than the candidate's: discovery keeps one provider per
+    // driver family, so a second executable still reuses this provider.
+    binaryPath: "/opt/homebrew/bin/codex",
     existingInstances: [],
     expectedVersion: 0 as AggregateVersion,
     createdAt: "2026-07-25T10:00:00.000Z" as UtcTimestamp,

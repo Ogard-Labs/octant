@@ -2310,9 +2310,10 @@ modelId }`, and the model picker is provider-first. Discovery can find
   configured instance when one exists. Opening the catalog starts nothing. A
   scan, connect, enable, or connection check runs only from its step's button,
   and sign-in, Locate binary, and credentials stay on the runtime's own card.
-  A discovery connect for an executable that already has a provider returns
-  that provider instead of creating a second one, and leaves its switch
-  unchanged.
+  Discovery keeps one provider per driver family, as auto-registration does:
+  a discovery connect for a driver that already has a provider returns that
+  provider instead of creating a second one, and leaves its switch unchanged.
+  Ollama is set up as an endpoint, never from the scan.
 - **Driver families.** Direct HTTP drivers (OpenAI-compatible, Anthropic-
   compatible, Azure AI Foundry API-key, Ollama), image HTTP profiles
   (OpenAI Image and Gemini native image — never selectable as Chat, Work, or

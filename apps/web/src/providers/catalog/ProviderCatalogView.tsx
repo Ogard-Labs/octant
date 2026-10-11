@@ -45,7 +45,11 @@ export interface ProviderCatalogDiscovery {
   readonly scanning: boolean;
   readonly message?: string;
   readonly connectingPaths: ReadonlySet<string>;
-  readonly onScan: () => Promise<unknown>;
+  /**
+   * Looks on the host. Resolves to the scan's snapshot, or `undefined` when the
+   * request itself failed; a failed or cancelled snapshot is a failure too.
+   */
+  readonly onScan: () => Promise<DiscoverySnapshot | undefined>;
   readonly onConnect: (candidate: DiscoveryCandidate) => Promise<boolean>;
 }
 
@@ -512,7 +516,14 @@ function CurrentStep(
     discovery === undefined ? null : (
       <OctantButton
         disabled={disabled || discovery.scanning}
-        onClick={() => void run(discovery.onScan, "Octant could not look on this host.")}
+        onClick={() =>
+          void run(async () => {
+            const scanned = await discovery.onScan();
+            return (
+              scanned !== undefined && scanned.status !== "failed" && scanned.status !== "cancelled"
+            );
+          }, "Octant could not look on this host.")
+        }
         size="sm"
         type="button"
         variant="default"
@@ -635,7 +646,7 @@ function CurrentStep(
     failure === undefined
       ? undefined
       : ((next.kind === "check-host" || next.kind === "install" || next.kind === "add-detected"
-          ? discovery?.message
+          ? (discovery?.message ?? discovery?.snapshot?.message)
           : props.message) ?? failure);
 
   return (

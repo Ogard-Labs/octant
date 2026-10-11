@@ -243,6 +243,19 @@ describe("provider catalog state", () => {
     });
     const state = resolveProviderCatalogState(bundled("ollama"), host({ instances: [ollama] }));
     expect(state.authenticated).toBe("not-needed");
+
+    // A local Ollama server the scan found is still added as an endpoint.
+    const ollamaCandidate = {
+      ...codexCandidate,
+      driverKind: "ollama",
+      displayName: "Ollama",
+    } as DiscoverySnapshot["candidates"][number];
+    const unconfigured = resolveProviderCatalogState(
+      bundled("ollama"),
+      host({ discovery: snapshot([ollamaCandidate]) }),
+    );
+    expect(unconfigured.presence).toEqual({ kind: "not-applicable" });
+    expect(unconfigured.next).toEqual({ kind: "add-endpoint" });
   });
 
   it("states each driver's modes and agent loop as the send gates apply them", () => {
