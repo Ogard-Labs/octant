@@ -499,3 +499,59 @@ describe("a provider switch reading its own thread's conversation", () => {
     expect(result.blocks).toHaveLength(4);
   });
 });
+
+describe("a fork reading the thread it was forked from", () => {
+  it("selects only through the reply the fork was made at", () => {
+    const later = codeTurn(3);
+    const input = codeInput([codeTurn(1), codeTurn(2), later]);
+    const result = admittedParentCodeContext({
+      ...input,
+      purpose: "fork",
+      throughOperationId: String(codeTurn(2).operationId),
+    });
+    expect(result.status).toBe("available");
+    if (result.status !== "available") return;
+    expect(result.blocks[0]?.text).toContain("forked from, through the reply it was forked at");
+    expect(
+      result.blocks.slice(1).every((block) => block.text.startsWith("Forked conversation source:")),
+    ).toBe(true);
+    // A later turn of the source is a direction the fork did not take.
+    expect(
+      input.readEvidence.mock.calls.some(
+        ([ref]) =>
+          ref.contentId === later.prompt.contentId ||
+          ref.contentId === later.assistant[0]?.contentId,
+      ),
+    ).toBe(false);
+    expect(result.blocks).toHaveLength(5);
+    expect(result.source.point).toMatchObject({
+      throughOperationId: String(codeTurn(2).operationId),
+    });
+  });
+
+  it("refuses a fork point the source no longer holds rather than handing over a different window", () => {
+    const result = admittedParentCodeContext({
+      ...codeInput([codeTurn(1), codeTurn(2)]),
+      purpose: "fork",
+      throughOperationId: id(399),
+    });
+    expect(result).toEqual({ status: "unavailable", reason: "source-point-unavailable" });
+  });
+
+  it("keeps a read through the fork point while the source runs a later turn", () => {
+    let sequence = 20;
+    const input = {
+      ...codeInput([codeTurn(1), codeTurn(2, "incomplete")]),
+      readActivity: () => ({ threadId: codeThreadId, lastSequence: sequence++ as never }),
+    };
+    expect(
+      admittedParentCodeContext({ ...input, throughOperationId: String(codeTurn(1).operationId) })
+        .status,
+    ).toBe("available");
+    // The same moving source refuses a whole-thread read.
+    expect(admittedParentCodeContext(input)).toEqual({
+      status: "unavailable",
+      reason: "source-changed",
+    });
+  });
+});

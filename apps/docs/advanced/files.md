@@ -79,11 +79,14 @@ for something substantial, the agent builds it as a Canvas and replies with a
 short pointer; brief answers stay in the conversation. A follow-up such as "add
 a risks section" revises the existing Canvas: the read-only `list` operation
 returns the thread's Canvases and `read` returns one's current blocks and
-sequence. Its read-only `describe` operation lists the
-supported block kinds, the document recipes an agent should start from, and a
-creation example. Asking to write a plan, review a pull request, or summarise
-research starts from the matching recipe. Requesting up to three
-`blockKinds` returns their exact schemas from the host's block contracts:
+sequence. The tool's always-visible description stays short; its read-only
+`describe` operation carries the detail. Without block kinds it lists the
+supported kinds and when to use the structured ones, the document recipes an agent should
+start from, and a creation example. Asking to write a plan, review a pull
+request, or summarise research starts from the matching recipe. Requesting up
+to three `blockKinds` returns their exact schemas from the host's block
+contracts, plus how to author and worked examples for the kinds that carry
+them (plain kinds such as `rich-text` return their schema alone):
 
 ```json
 { "operation": "describe", "blockKinds": ["rich-text", "diagram"] }
@@ -149,6 +152,14 @@ export it.
   the same order you read and Tab through them. Every chart in a dashboard
   still has **View chart data**, and you can comment on the dashboard or on any
   tile in it.
+- A table sorts when you click a column header and narrows with **Filter
+  rows**. **Group rows** gathers rows that share a column's value under a
+  header with the row count; click the header, or press Enter or Space on it,
+  to fold or unfold the group, and pick a **Group summary** to add the count,
+  sum, or average of a number column to each header. In **Columns**, hide a
+  column or pin it so it stays at the left while you scroll sideways. None of
+  this changes the Canvas: the agent, exports, and shares keep the table as it
+  was written.
 - A tall Canvas is cut off at a fixed height and fades out. Its button opens
   the whole Canvas in the sidebar, or in its own tab in Chat. Scrolling always
   moves the thread, never the Canvas.
@@ -311,8 +322,8 @@ open, resolved, or all threads. A comment is anchored to a
 block, to a board node, to a sequence participant or message, or to a state
 or its transition, to a comparison matrix's option or criterion, or to a table
 row the agent gave an id. Hover a table row, or move to it with Tab, to comment
-on that row; the comment stays on the row when you sort or filter the table
-and when the agent revises it. Replies,
+on that row; the comment stays on the row when you sort, filter, or group the
+table and when the agent revises it. Replies,
 resolving, and deleting are journaled by the
 host, so they survive restart and reload. Every comment is authored as you,
 with the device it came through noted ("paired device" when it arrived from a

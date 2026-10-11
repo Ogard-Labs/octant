@@ -561,7 +561,7 @@ export const ShellSettings = Schema.Struct({
    */
   automaticUpdateChecks: Schema.optionalWith(Schema.Boolean, { default: () => true }),
   computerUse: Schema.optionalWith(ComputerUseSettings, {
-    default: () => ({ enabled: true, automaticUpdates: true }),
+    default: () => ({ enabled: true, automaticUpdates: false }),
   }),
   /**
    * Whether Skills & Extensions marketplace search, inspect, and install may

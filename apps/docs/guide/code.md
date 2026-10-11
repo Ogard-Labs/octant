@@ -110,6 +110,15 @@ model, and delivery outcome, not its access. Octant refuses a fork from a
 reply that is still running, or from a point where it did not record the
 files, and says which.
 
+The fork's first message carries the conversation up to that reply, never the
+replies after it. On the Octant Harness it continues the source's own session,
+tool activity included. Otherwise, and whenever the fork runs on a different
+provider, Octant hands over up to 23 recent messages as text, each labelled
+with the provider and model that wrote it; hidden reasoning, tool activity and
+the source's session stay behind. The fork's first reply says which happened
+and what was left out. If no readable conversation is left to hand over,
+Octant refuses to create the fork, or refuses its first message, and says why.
+
 **Restore from here** starts a second thread at the marked checkpoint and
 leaves this one untouched. The restored thread's sidebar row — and the Project
 Overview list, which shares those rows — carries a fork mark, as does the
