@@ -316,9 +316,10 @@ const ACCOUNT_AUTH_VARIABLES = [
 ] as const;
 
 /**
- * Per-account app-server environment. Inherited auth variables are stripped so
- * one account cannot use another account's host key. A broker-resolved API key
- * is the only value Octant injects, and only for that instance.
+ * Per-account app-server environment. Extra assigned homes strip inherited
+ * auth so they cannot share the host key. The host-overlay first account
+ * keeps those variables: existing installs authenticate that way, and
+ * Settings has no Codex API-key field to populate the broker.
  *
  * Octant never reads `auth.json` or the keyring, and never writes
  * `cli_auth_credentials_store` into the user's config. Codex keys the keyring
@@ -328,11 +329,14 @@ export function codexAccountProcessEnvironment(input: {
   readonly binaryPath: string;
   readonly hostEnvironment: NodeJS.ProcessEnv;
   readonly codexHome: string;
+  readonly inheritHostAuth?: boolean;
   readonly brokerApiKey?: string;
 }): NodeJS.ProcessEnv {
   const environment = codexProcessEnvironment(input.binaryPath, input.hostEnvironment);
-  for (const name of ACCOUNT_AUTH_VARIABLES) {
-    delete environment[name];
+  if (input.inheritHostAuth !== true) {
+    for (const name of ACCOUNT_AUTH_VARIABLES) {
+      delete environment[name];
+    }
   }
   environment.CODEX_HOME = input.codexHome;
   if (input.brokerApiKey !== undefined && input.brokerApiKey.trim() !== "") {

@@ -195,6 +195,26 @@ describe("sanitizeCodexEnvironment", () => {
     ).toEqual({ PATH: "/usr/bin" });
   });
 
+  it("keeps inherited auth on the host-overlay account", () => {
+    const environment = codexAccountProcessEnvironment({
+      binaryPath: "/opt/homebrew/bin/codex",
+      hostEnvironment: {
+        PATH: "/usr/bin",
+        OPENAI_API_KEY: "host-key",
+        CODEX_ACCESS_TOKEN: "host-token",
+        CODEX_API_KEY: "host-codex-key",
+        AWS_BEARER_TOKEN_BEDROCK: "host-bedrock",
+      },
+      codexHome: "/Users/test/.codex",
+      inheritHostAuth: true,
+    });
+    expect(environment.CODEX_HOME).toBe("/Users/test/.codex");
+    expect(environment.OPENAI_API_KEY).toBe("host-key");
+    expect(environment.CODEX_ACCESS_TOKEN).toBe("host-token");
+    expect(environment.CODEX_API_KEY).toBe("host-codex-key");
+    expect(environment.AWS_BEARER_TOKEN_BEDROCK).toBe("host-bedrock");
+  });
+
   it("strips inherited auth variables and pins CODEX_HOME for one account", () => {
     const environment = codexAccountProcessEnvironment({
       binaryPath: "/opt/homebrew/bin/codex",

@@ -551,7 +551,10 @@ import { createSpendCeilingRouteHandler } from "./spendCeilingRoutes";
 import { CacheStatsProjection } from "./cacheStatsProjection";
 import { createUsageDashboardRouteHandler } from "./usageDashboardRoutes";
 import { createLocalUsageHistoryRouteHandler } from "./localUsageHistoryRoutes";
-import { createLocalUsageHistorySourceForDriver } from "./providers/providerUsageHistorySources";
+import {
+  createLocalUsageHistorySourceForDriver,
+  localUsageHistorySourceKey,
+} from "./providers/providerUsageHistorySources";
 import { resolveWindowProjectScope, type UsageProjectScope } from "./usageProjectScope";
 import { SideChatSidecarStore } from "./chat/sideChatSidecarStore";
 import {
@@ -4482,10 +4485,11 @@ export function startOctantServer(
           }
           const source = driver.localUsageHistory;
           if (source === undefined) continue;
-          const sourceKey =
-            instance.driverKind === "claude"
-              ? `${source.sourceKind}:${String(instance.id)}`
-              : source.sourceKind;
+          const sourceKey = localUsageHistorySourceKey({
+            driverKind: instance.driverKind,
+            instanceId: instance.id,
+            sourceKind: source.sourceKind,
+          });
           if (seen.has(sourceKey)) continue;
           seen.add(sourceKey);
           sources.push(source);

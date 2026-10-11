@@ -135,6 +135,7 @@ export function makeProviderDriver(
           binaryPath: instance.configuration.binaryPath,
           hostEnvironment,
           codexHome,
+          ...(inheritsHostOverlay ? { inheritHostAuth: true } : {}),
         }),
         ...(options.credentialResolver === undefined
           ? {}

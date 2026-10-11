@@ -2204,10 +2204,12 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   `codex login status`). Octant never reads Codex `auth.json` or
   the keyring, and never writes `cli_auth_credentials_store` into
   the user's config: the keyring entry is keyed on `CODEX_HOME`,
-  so isolation holds without forcing file storage. Inherited
-  `OPENAI_API_KEY` and the other Codex auth variables are stripped
-  per account; an explicit API-key instance still receives only
-  the broker-resolved key. Each Codex account has its own
+  so isolation holds without forcing file storage. The first
+  account keeps inherited `OPENAI_API_KEY` and the other Codex
+  auth variables (existing installs authenticate that way). Extra
+  assigned homes strip those variables so they cannot share the
+  host key. An explicit API-key instance still receives only the
+  broker-resolved key. Each Codex account has its own
   long-lived app-server and never shares that process with another
   account. Codex Plan uses Codex's own read-only sandbox, not an
   OS wrap; the account `CODEX_HOME` is the only extra path that

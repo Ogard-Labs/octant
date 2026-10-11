@@ -159,10 +159,10 @@ describe("makeProviderDriver", () => {
       readonly environment?: NodeJS.ProcessEnv;
     };
     expect(ownerLaunch.environment?.CODEX_HOME).toBe("/Users/test/.codex");
-    expect(ownerLaunch.environment?.OPENAI_API_KEY).toBeUndefined();
-    expect(ownerLaunch.environment?.CODEX_ACCESS_TOKEN).toBeUndefined();
-    expect(ownerLaunch.environment?.CODEX_API_KEY).toBeUndefined();
-    expect(ownerLaunch.environment?.AWS_BEARER_TOKEN_BEDROCK).toBeUndefined();
+    expect(ownerLaunch.environment?.OPENAI_API_KEY).toBe("inherited-must-not-cross");
+    expect(ownerLaunch.environment?.CODEX_ACCESS_TOKEN).toBe("inherited-must-not-cross");
+    expect(ownerLaunch.environment?.CODEX_API_KEY).toBe("inherited-must-not-cross");
+    expect(ownerLaunch.environment?.AWS_BEARER_TOKEN_BEDROCK).toBe("inherited-must-not-cross");
 
     fixture.codexStart.mockClear();
     await expect(

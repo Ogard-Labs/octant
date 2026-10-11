@@ -4,10 +4,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
+import type { ProviderInstanceId } from "@octant/contracts";
 import {
   createClaudeLocalUsageHistorySource,
   createCodexLocalUsageHistorySource,
   createLocalUsageHistorySourceForDriver,
+  localUsageHistorySourceKey,
 } from "./providerUsageHistorySources";
 import { readLocalUsageHistory } from "./localUsageHistoryReader";
 
@@ -785,5 +787,28 @@ describe("local provider usage history", () => {
     expect(unchanged.coverage.status).toBe("partial");
     expect(unchanged.coverage.omittedRecordCount).toBe(result.coverage.omittedRecordCount);
     expect(unchanged.coverage.scannedFileCount).toBe(0);
+  });
+
+  it("keeps a local usage source for each Codex account", () => {
+    const first = "11111111-1111-4111-8111-111111111111" as ProviderInstanceId;
+    const second = "22222222-2222-4222-8222-222222222222" as ProviderInstanceId;
+    const seen = new Set<string>();
+    for (const instanceId of [first, second]) {
+      seen.add(
+        localUsageHistorySourceKey({
+          driverKind: "codex",
+          instanceId,
+          sourceKind: "codex",
+        }),
+      );
+    }
+    expect(seen.size).toBe(2);
+    expect(
+      localUsageHistorySourceKey({
+        driverKind: "opencode",
+        instanceId: first,
+        sourceKind: "opencode",
+      }),
+    ).toBe("opencode");
   });
 });
