@@ -4345,8 +4345,9 @@ there. Simulator, the Apple workbench, and vibrancy stay macOS-only.
 `packages/domain` `appUpdatePolicy`):
 
 - Trust comes from the feed signature, never the host. Octant verifies an
-  Ed25519 signature over the feed document against a public key compiled into
-  the app, then requires the offered release to be strictly newer and to name
+  Ed25519 signature over the canonical encoding of the feed's `release`
+  object (the wrapper's `schemaVersion` is validated, not signed) against a
+  public key compiled into the app, then requires the offered release to be strictly newer and to name
   this platform, architecture, and the ring the app asked for. The artifact's
   SHA-256 is inside the signature and the downloaded bytes are hashed before
   anything installs.
@@ -4364,8 +4365,9 @@ there. Simulator, the Apple workbench, and vibrancy stay macOS-only.
   refusal naming the check. The exact two-field empty document
   (`"status": "empty"`, schema version 1) means no release in this channel,
   not that the build is current.
-- Rings are `stable` (tags) and `preview` (scheduled `main` builds) at
-  `<base>/<ring>/<platform>-<arch>.json`. A build's default ring is read from
+- Rings are `stable` (tags), `preview` (scheduled `main` builds), and
+  `candidate` (on-demand builds of a chosen ref, so a test install exercises
+  the real update path) at `<base>/<ring>/<platform>-<arch>.json`. A build's default ring is read from
   its version; the signed ring field is what separates the streams. The base
   is overridable but must be HTTPS.
 - Release notes for an offered update ride inside the signed release (at
