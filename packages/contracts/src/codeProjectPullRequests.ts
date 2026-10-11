@@ -255,6 +255,15 @@ export const CodeProjectPullRequestMergeRecorded = Schema.Struct({
       status: Schema.Literal("unavailable"),
       reason: CodeProjectPullRequestMergeUnavailable,
     }).annotations(strict),
+    /**
+     * The merge call threw instead of answering, so whether GitHub merged is
+     * unknown. Only the category is kept: raw error text can carry a remote
+     * URL with credentials.
+     */
+    Schema.Struct({
+      status: Schema.Literal("failed"),
+      reason: Schema.Literal("aborted", "error"),
+    }).annotations(strict),
   ),
 }).annotations(strict);
 export type CodeProjectPullRequestMergeRecorded = typeof CodeProjectPullRequestMergeRecorded.Type;

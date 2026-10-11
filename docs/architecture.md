@@ -1313,8 +1313,10 @@ The rules:
   `code.project-pull-request-merge-recorded@1` event, as its own aggregate,
   before the outcome returns: the local user as actor, the Project, the
   repository, the number, the method, the approved head SHA, and the result
-  (merged, refused with its reason, or unavailable with its reason). The
-  payload carries no credential, title, or body, and no projection reads it;
+  (merged, refused with its reason, unavailable with its reason, or failed as
+  `aborted` or `error` when the merge call throws and the effect is unknown;
+  the error is rethrown and its text is never journaled). The payload carries
+  no credential, title, or body, and no projection reads it;
   it is Octant's own record beside GitHub's history. A failed local append
   fails the request even when GitHub already merged; the next refresh still
   observes Merged. The outcome also drops the cached detail and list rows. A

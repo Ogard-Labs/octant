@@ -324,6 +324,32 @@ describe("CodeProjectPullRequestService", () => {
       }
     });
 
+    it("records a failed merge when GitHub's merge call throws", async () => {
+      const store = openJournal();
+      try {
+        const fixture = serviceFixture({
+          merge: {
+            mergeByIdentity: async () => {
+              throw new Error("gh: https://user:ghp_secret@github.com unreachable");
+            },
+          },
+          mergeJournal: store.journal,
+        });
+
+        await expect(
+          fixture.service.merge(windowId, mergeCommand, new AbortController().signal),
+        ).rejects.toThrow("unreachable");
+
+        const events = store.recorded();
+        expect(events.map((event) => event.payload)).toEqual([
+          { ...mergeCommand, result: { status: "failed", reason: "error" } },
+        ]);
+        expect(JSON.stringify(events)).not.toContain("ghp_secret");
+      } finally {
+        store.close();
+      }
+    });
+
     it("journals a refusal for a Project this window cannot merge in, without reaching GitHub", async () => {
       const store = openJournal();
       try {

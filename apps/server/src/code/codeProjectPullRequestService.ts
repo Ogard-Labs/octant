@@ -473,21 +473,40 @@ export class CodeProjectPullRequestService {
   ): Promise<CodeProjectPullRequestMergeOutcome> {
     const projects = await this.#resolveProjects(windowId);
     const authorized = this.#authorizedConnection(projects, command);
-    const result: CodeProjectPullRequestMergeRecorded["result"] =
-      authorized === undefined
-        ? { status: "refused", reason: "not-authorized" }
-        : this.#githubRevoked
-          ? { status: "unavailable", reason: "disconnected" }
-          : await this.#merge.mergeByIdentity(
-              {
-                owner: command.repositoryOwner,
-                name: command.repositoryName,
-                number: command.number,
-                method: command.method,
-                headSha: command.headSha,
-              },
-              signal,
-            );
+    const record = (result: CodeProjectPullRequestMergeRecorded["result"]) =>
+      this.#recordMerge?.({
+        projectId: command.projectId,
+        repositoryOwner: command.repositoryOwner,
+        repositoryName: command.repositoryName,
+        number: command.number,
+        method: command.method,
+        headSha: command.headSha,
+        result,
+      });
+    let result: GhPullRequestMergeResult | { status: "refused"; reason: "not-authorized" };
+    if (authorized === undefined) {
+      result = { status: "refused", reason: "not-authorized" };
+    } else if (this.#githubRevoked) {
+      result = { status: "unavailable", reason: "disconnected" };
+    } else {
+      try {
+        result = await this.#merge.mergeByIdentity(
+          {
+            owner: command.repositoryOwner,
+            name: command.repositoryName,
+            number: command.number,
+            method: command.method,
+            headSha: command.headSha,
+          },
+          signal,
+        );
+      } catch (error) {
+        // The attempt still reached GitHub's merge path, so it is recorded;
+        // the error itself is rethrown unchanged and never journaled.
+        record({ status: "failed", reason: signal.aborted ? "aborted" : "error" });
+        throw error;
+      }
+    }
     if (result.status === "merged") {
       // Dropped before the record is appended: if that append fails, GitHub
       // has still merged, and a cached row must not keep showing it open.
@@ -502,15 +521,7 @@ export class CodeProjectPullRequestService {
     // Recorded before the outcome returns, so no answer reaches the person
     // for an attempt the journal lacks. A failed local append surfaces as the
     // route's failure; GitHub's state is still observed on the next refresh.
-    this.#recordMerge?.({
-      projectId: command.projectId,
-      repositoryOwner: command.repositoryOwner,
-      repositoryName: command.repositoryName,
-      number: command.number,
-      method: command.method,
-      headSha: command.headSha,
-      result,
-    });
+    record(result);
     if (result.status === "merged") {
       return {
         status: "merged",
