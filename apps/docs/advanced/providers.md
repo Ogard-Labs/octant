@@ -67,12 +67,50 @@ filtering is only a convenience; it cannot bypass the server check. A provider
 must still be installed, enabled, authenticated, and ready regardless of its
 labels or whitelist entry.
 
+### Integration: Octant tools, activity, and resume
+
+Each runtime's details open with an **Integration** section of three facts.
+The host derives them from the runtime's driver and its last Connection Check;
+the page never infers them from what a picker can mention.
+
+- **Octant tools** says whether Octant's own tools, including Browser,
+  Computer, and selected MCP servers, reach the runtime's session, and through
+  which transport. When they do not, it says **Not available on this
+  runtime** with the reason: the check did not confirm them, the runtime's
+  version, platform, or setup did not confirm its transport, Octant has no way
+  to offer tools to it, or (for a direct endpoint) no model has been verified
+  yet. A direct endpoint with verified models shows **Verified models only**
+  and how many.
+- **Activity** is **Session events** with what the live session reports
+  (replies, tool calls, approvals, file changes, task progress), or **Nothing
+  observed** when no session runs on that runtime here.
+- **Resume** is **Precise** when a follow-up reopens the runtime's own
+  session, **Best effort** when the endpoint keeps no session and Octant sends
+  the thread's history again fitted to the model's context window, or **None**
+  when the runtime cannot reopen an earlier session.
+
+| Runtime                                               | Transport for Octant tools                                     |
+| ----------------------------------------------------- | -------------------------------------------------------------- |
+| OpenAI-compatible, Anthropic-compatible, Azure        | Tool definitions in each request; the model answers with calls |
+| Claude Code                                           | A tool server inside the Claude Agent SDK connection           |
+| Codex                                                 | Dynamic tools registered on the app-server thread              |
+| OpenCode and the ACP agents (Gemini, Kilo, and so on) | A loopback MCP server registered for that one session          |
+| Pi                                                    | A loopback bridge Pi's extension calls for that one session    |
+| Ollama, Oh My Pi                                      | None                                                           |
+
+Every transport belongs to one provider connection and ends with it. Octant
+never writes a runtime's MCP or hook configuration to offer its tools. A
+runtime whose transport is not confirmed by its check reports Octant tools as
+not available, and the composers then do not offer **@Browser** or
+**@Computer** for it; a typed reference is shown as blocked.
+
 ### App-managed browser tools
 
 The Browser view and an agent's browser access are separate capabilities.
 A tool-capable model can still lack an adapter for Octant's app-managed tools;
-check the provider's capability details before relying on agent browser control.
-Manual browser controls remain governed by the thread's normal policy.
+check **Octant tools** under the provider's Integration before relying on agent
+browser control. Manual browser controls remain governed by the thread's normal
+policy.
 
 Supported app-tool adapters can request an isolated browser session under
 **Ask for approvals** without changing the task to Full access. The request

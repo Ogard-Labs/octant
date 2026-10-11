@@ -2320,7 +2320,32 @@ modelId }`, and the model picker is provider-first. Discovery can find
   app-managed tools, images, resume, approvals, and subagents are supported.
   The server disables what is unsupported instead of emulating it, and a
   composer reads the same probe before offering an app-managed tool — an
-  incapable provider never shows the offer it would refuse on send. Bounded
+  incapable provider never shows the offer it would refuse on send. Whenever
+  the host reports a runtime to a client (the registry snapshot and a
+  Connection Check result) it attaches an `integration` derived in
+  `@octant/domain/provider-runtime-integration` from the driver kind and that
+  observation; drivers never set it and it is not stored. It states three
+  facts. **Octant tools** is `available` with its transport, or `unavailable`
+  with a reason (`not-confirmed`, `model-verification-required`,
+  `runtime-not-confirmed`, `no-transport`). The transport per runtime:
+  direct endpoints (OpenAI-compatible, Anthropic-compatible, Azure AI Foundry)
+  use `request-tool-calls`; Claude uses `sdk-tool-server`, the in-process tool
+  server its Agent SDK connection owns; Codex uses `app-server-dynamic-tools`;
+  OpenCode and every ACP driver use `session-mcp-bridge`, a loopback HTTP MCP
+  server registered with one session; Pi uses `session-tool-bridge`, a
+  loopback bridge its extension calls; Ollama, Oh My Pi, and image profiles
+  have none. Each transport is owned by the provider connection, so none writes
+  provider MCP or hook configuration ([0006](decisions/0006-acp-agent-drivers.md),
+  [0093](decisions/0093-app-owned-tools-use-managed-runtime-transports.md),
+  [0121](decisions/0121-provider-owned-cli-runtime-and-updates.md)).
+  **Activity** reuses the fleet `activitySource` vocabulary: `session` with the
+  event kinds the live session reports, or `none` when no session runs here.
+  **Resume** is `precise` for a provider-owned conversation whose driver
+  resumes its session, `best-effort` for a host-owned conversation whose
+  history Octant plans again from the journal, and `none` otherwise. Settings ›
+  Providers & Models shows the three facts on each runtime card, and the
+  composers offer neither `@Browser` nor `@Computer` for a selection whose
+  runtime does not carry Octant's tools. Bounded
   provider subprocesses run under a deny-default profile: Seatbelt via
   `sandbox-exec` on macOS, Bubblewrap (`bwrap`) on Linux. Missing the backend
   selected for the host platform fails closed as incompatible.
