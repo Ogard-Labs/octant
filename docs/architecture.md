@@ -2327,8 +2327,8 @@ modelId }`, and the model picker is provider-first. Discovery can find
 - **Credentials.** API keys live in the host credential store — macOS Keychain
   on macOS, freedesktop Secret Service on Linux — and are reached only
   through the host's loopback credential broker by opaque UUID reference.
-  The desktop saves a key from its own renderer; a host without the desktop
-  app takes it only from the host-local CLI, as
+  The desktop saves a key from its own renderer; a Linux host without the
+  desktop app takes it only from the host-local CLI, as
   [security and authority](#security-and-authority) states.
   Provider OAuth has two postures ([0111](decisions/0111-host-driven-provider-oauth.md)).
   **Delegated** (`delegated-oauth`, including CLI `subscription`): login stays
@@ -3797,7 +3797,7 @@ mechanisms are:
   built._ The desktop saves an endpoint's API key or bearer token over
   native IPC from its own renderer, so a browser client — local or paired —
   has no way to save one and says provider credential management is
-  unavailable. On a headless host the key is entered with the host-local
+  unavailable. On a headless Linux host the key is entered with the host-local
   `octant` CLI, and only there:
   - **Commands.** `octant provider key set <instance>`,
     `octant provider key status <instance>`, and
@@ -3824,7 +3824,7 @@ mechanisms are:
     user can call these routes, and no browser page can: a browser always
     sends `Origin` and never holds the secret. The server passes the key to
     the credential broker's provider routes, which store it with
-    `secret-tool` on standard input (Keychain on macOS). It is never in a
+    `secret-tool` on standard input. It is never in a
     process argument, the environment, the journal, logs, diagnostics, a
     provider child, or a response; the routes answer only `stored`,
     `missing`, `removed`, or a typed refusal.
@@ -3850,6 +3850,11 @@ mechanisms are:
     bus) and `/usr/bin/secret-tool` are present at start. Without a broker the
     routes refuse as `credential-store-unavailable`, and the CLI names both
     requirements and says to restart the server after starting the keyring.
+    This workflow is Linux-only: the macOS Keychain broker and its helper are
+    owned by the desktop app, so `octant server run` on a macOS host without
+    it starts no broker, the routes refuse as `credential-store-unavailable`,
+    and the CLI says to save the key in the desktop app. Octant adds no
+    server-owned Keychain path for that case, and nothing else stores the key.
     A locked collection, or one that would need an unlock prompt a headless
     session cannot show, fails the store as unavailable. Nothing is written
     in either case, and there is no fallback to a file, the data directory,
@@ -3872,8 +3877,19 @@ mechanisms are:
     credential store, and a `provider remove` from the registry command
     through the credential clear, so a concurrent removal cannot leave a new
     orphaned secret behind.
-  - **Audit.** Each store, replace, and remove is journaled as a provider
-    credential change. The record holds the instance id, the action, the
+  - **Audit.** Secret Service and the journal cannot be updated atomically,
+    so each store, replace, and remove is journaled as two provider credential
+    events around the write. The server appends `requested` before it calls
+    the broker, then `completed` or `failed` with the outcome category once
+    the broker answers. If the journal append for `requested` fails, nothing
+    is written. At startup the server closes every `requested` event that has
+    no outcome by asking the broker whether the instance holds a key: a
+    `set` or replace that finds one is closed `completed-unverified`, a
+    `remove` that finds none is closed `completed`, and any other answer is
+    closed `indeterminate`. Replace cannot be confirmed any further because
+    the journal holds no value or fingerprint, so a crash mid-replace stays
+    `indeterminate`; the old or new key is in use and the next connection
+    check reports which. An event holds the instance id, the action, the
     outcome category, the local window id, and the time. It holds no key,
     length, prefix, or hash, because a hash of a short key can be guessed
     offline. Refusals carry only their category.
