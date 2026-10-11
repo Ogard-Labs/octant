@@ -64,7 +64,7 @@ const BLOCKED_COPY: Partial<Record<ShellControllerStatus, string>> = {
 };
 
 /**
- * Drive the first-run surface from host state (`BOOT-01`).
+ * Drive the first-run surface from host state.
  *
  * Whether first run is *answered* is derived from the projected shell settings
  * alone, never from renderer storage, so a store that has recorded an answer
