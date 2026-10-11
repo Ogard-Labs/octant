@@ -30,6 +30,7 @@
     "./canvas-treemap-layout": "./src/canvasTreemapLayout.ts",
     "./canvas-diagram-layout": "./src/canvasDiagramLayout.ts",
     "./canvas-plan-gantt-layout": "./src/canvasPlanGanttLayout.ts",
+    "./canvas-mermaid-import": "./src/canvasMermaidImport.ts",
     "./canvas-heatmap-layout": "./src/canvasHeatmapLayout.ts",
     "./canvas-bar-list-layout": "./src/canvasBarListLayout.ts",
     "./canvas-sankey-layout": "./src/canvasSankeyLayout.ts",

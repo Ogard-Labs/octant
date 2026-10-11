@@ -637,6 +637,25 @@ that board), the artifact SVG sidecar and thumbnail (the layout scaled into the
 band), and the HTML export (the layout drawn inline as plain SVG elements with
 no script, id, or external reference) place the same nodes; the Markdown
 export names a shaped node by its role.
+Mermaid is never rendered. The pure `importCanvasMermaid` translates a bounded
+subset into the typed blocks above: a `flowchart` or `graph` (TD/TB or LR;
+`[ ]` process, `{ }` decision, `([ ])` terminator, `( )` the plain box;
+`-->`, `---`, and `-.->` links with a piped or inline label; one level of
+`subgraph`) into a `diagram`; a `sequenceDiagram` (participants and actors
+with aliases, `->>`, `-->>`, `->`, `-->` messages, notes, activate and
+deactivate) into a `sequence`; a `stateDiagram` (transitions, `[*]` as a start
+and an end, `state "…" as`, composite states) into a `state`; an `erDiagram`
+(relationships with cardinalities, attribute blocks, `PK`) into an `er`; and a
+`mindmap` (tree by indentation) into a `mindmap`. Anything else — another
+diagram type, styling, classes, `click`, loops and alternatives, other shapes
+and links, a nested subgraph, two ids that would collide, a source over 32,768
+characters, or a translation the block catalog refuses — returns a typed
+refusal (`unsupported-diagram`, `unsupported-construct` with its line, `empty`,
+`too-large`, `invalid-result`). The one entry point is the agent's Canvas
+`create` and `revise`: a `code-excerpt` block with language `mermaid` and no
+source id is replaced by its translation under the same block id before the
+document is validated, and the result lists each such block as `imported` or
+`kept-as-code` with the reason. A refused source stays the code block it was.
 Beside that generic node-and-edge diagram, a `sequence` block is participants,
 ordered messages, activations, and notes, and a `state` block is states that
 may nest by parent id, labeled transitions, and initial and final roles. Three
@@ -749,10 +768,10 @@ document as a future version. Frames follow the
   them, and shares keep their structure. Shipped at schema version 18 (see the
   catalog above): `tabs` and `columns`, which name existing child blocks one
   level deep; closed diagram node roles (process, decision, terminator), edge
-  styles, and group tones drawn by the one deterministic layout; and a Gantt
-  view of `plan`. Accepted, not yet shipped: import of a bounded Mermaid subset
-  into typed diagram blocks. Mermaid never renders; an unknown construct fails
-  closed and stays a code block.
+  styles, and group tones drawn by the one deterministic layout; a Gantt
+  view of `plan`; and import of a bounded Mermaid subset into typed diagram
+  blocks. Mermaid never renders; an unknown construct fails closed and stays a
+  code block.
 - **Static frames carry the look.** A `design` keeps a frame that runs
   nothing and gains a `document` size whose height the host measures, which
   needs `allow-same-origin` and therefore never `allow-scripts`; an opt-in

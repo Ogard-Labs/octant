@@ -26,6 +26,11 @@ import type {
 } from "./canvasPreviewService";
 import { inTreeCanvasDocumentRecipes } from "./canvasDocumentRecipes";
 import {
+  importCanvasMermaid,
+  isCanvasMermaidLanguage,
+  type CanvasMermaidRefusalReason,
+} from "@octant/domain/canvas-mermaid-import";
+import {
   loginSequenceExample,
   orderStateExample,
   orderSchemaExample,
@@ -360,7 +365,7 @@ function toolDescription(
     scope === "run"
       ? "When the request iterates on earlier work, revise the existing Canvas instead of creating another: list returns this run's Canvases, and read returns one's current blocks and sequence."
       : "When the request iterates on earlier work, revise the thread's existing Canvas instead of creating another: list returns this thread's Canvases, and read returns one's current blocks and sequence.",
-    "Start with describe to see the block kinds, the document recipes, and a create example, then describe the kinds you need for their exact schemas. Author the content in blocks, not in prompt. Use structured blocks rather than HTML, JavaScript, CSS, or Mermaid; only a design block's frames are HTML and CSS. Text renders as plain text, not Markdown: give each section its own heading block (the Canvas title is already shown, so do not repeat it), and use key-value, table, status, or callout blocks instead of Markdown lists, bold, or code spans.",
+    "Start with describe to see the block kinds, the document recipes, and a create example, then describe the kinds you need for their exact schemas. Author the content in blocks, not in prompt. Use structured blocks rather than HTML, JavaScript, or CSS; only a design block's frames are HTML and CSS. Mermaid is never drawn, but a Mermaid diagram you already have may be passed as a code-excerpt block with language mermaid: the host translates a flowchart or graph (TD or LR; [ ] process, { } decision, ([ ]) terminator, ( ) plain; -->, ---, and -.-> links with labels; one level of subgraph), a sequenceDiagram (participants, actors, messages, notes, activate and deactivate), a stateDiagram (transitions, [*] start and end, aliases, composite states), an erDiagram (relationships with cardinalities, attributes, PK), or a mindmap into the matching typed block under the same blockId. Anything else, such as styling, click, loops, or another diagram type, keeps the code block, and the result's mermaid list says which blocks were imported and why any were not. Text renders as plain text, not Markdown: give each section its own heading block (the Canvas title is already shown, so do not repeat it), and use key-value, table, status, or callout blocks instead of Markdown lists, bold, or code spans.",
     'Match the request to a document recipe before inventing a shape: "write a plan" uses implementation-plan, "review this PR" uses code-review, "summarise research" uses research-brief, and "decide between designs" uses architecture-review. Describe with no block kinds lists every offered recipe and its skeleton; fill those roles from block kinds that exist today, and do not invent a block kind the catalogue does not have.',
     "For a plan, use a plan block: phases, and tasks that name their phase, with a status (todo, doing, blocked, done), and optional owner, estimate, acceptance notes, dates, and dependsOn. Give tasks startAt and dueAt and set view to gantt to open the plan as bars on days with its dependency arrows; a task without dates is listed under the chart. Describe plan to get a launch plan in the Gantt view. The person can work the plan too, so read the Canvas before revising it and keep their progress.",
     "A login or request flow is a sequence block: participants, ordered messages, activations, and notes. A lifecycle such as an order is a state block: states that may nest, labeled transitions, and an initial and a final state. A data model is an er block: entities with named, typed attributes, and relationships with a cardinality at each end. A process handed between people or teams is a swimlane block: ordered lanes, the steps each lane owns (a decision step is flagged), and labeled connections. A topic and its branches is a mindmap block: one root topic, children that name their parent, and an optional note per topic. Use diagram for a generic graph of nodes and edges, such as a flowchart or a zone map: a node's role is process (a box), decision (a diamond), or terminator (a pill), or left out for a plain box; an edge's style is line, arrow, or dashed (a dashed arrow, for an optional or asynchronous step); an edge or a group may take a tone of neutral, accent, success, warning, or danger, and a toned group reads as a region. Tones are theme roles, never colours, and a label still says what the tone means. Describe diagram to get a flowchart and a zone map; describe sequence, state, er, swimlane, or mindmap to get an example of each.",
@@ -382,8 +387,20 @@ function toolDescription(
   ].join(" ");
 }
 
+/** What became of each Mermaid code block an authoring call carried. */
+type CanvasMermaidOutcome =
+  | { readonly blockId: string; readonly status: "imported"; readonly kind: string }
+  | {
+      readonly blockId: string;
+      readonly status: "kept-as-code";
+      readonly reason: CanvasMermaidRefusalReason;
+      readonly line?: number;
+      readonly detail: string;
+    };
+
 interface CanvasAuthoringInput {
   readonly operation: "create" | "revise";
+  readonly mermaid?: ReadonlyArray<CanvasMermaidOutcome>;
   readonly title?: string;
   readonly canvasId?: string;
   readonly expectedSequence?: number;
@@ -541,14 +558,40 @@ function parseInput(inputJson: string): CanvasToolInput | { readonly error: stri
     };
   }
   const decoded: CanvasBlock[] = [];
+  const mermaid: CanvasMermaidOutcome[] = [];
   for (const [index, block] of blocks.entries()) {
+    let typed: CanvasBlock;
     try {
-      decoded.push(decodeCanvasBlock(block));
+      typed = decodeCanvasBlock(block);
     } catch {
       // Naming the block that failed is what lets an author fix it; the
       // catalog itself is what refuses anything outside it.
       return { error: `Block ${String(index + 1)} is not a Canvas block this host accepts.` };
     }
+    // A Mermaid code block is translated into the typed diagram it describes,
+    // under the same block id, when it stays inside the imported subset. A
+    // source that does not keeps its code block, and the author is told why.
+    // Mermaid itself is never drawn.
+    if (
+      typed.kind === "code-excerpt" &&
+      typed.sourceId === undefined &&
+      isCanvasMermaidLanguage(typed.language)
+    ) {
+      const outcome = importCanvasMermaid(typed.code, typed.blockId);
+      if (outcome.status === "imported") {
+        typed = outcome.block;
+        mermaid.push({ blockId: String(typed.blockId), status: "imported", kind: typed.kind });
+      } else {
+        mermaid.push({
+          blockId: String(typed.blockId),
+          status: "kept-as-code",
+          reason: outcome.reason,
+          ...(outcome.line === undefined ? {} : { line: outcome.line }),
+          detail: outcome.detail,
+        });
+      }
+    }
+    decoded.push(typed);
   }
   const presentation = record["presentation"];
   if (presentation !== undefined && presentation !== "inline" && presentation !== "sidebar") {
@@ -561,6 +604,7 @@ function parseInput(inputJson: string): CanvasToolInput | { readonly error: stri
   return {
     operation,
     blocks: decoded,
+    ...(mermaid.length === 0 ? {} : { mermaid }),
     ...(presentation === undefined ? {} : { presentation }),
     ...(typeof title === "string" ? { title: title.slice(0, MAX_TITLE_CHARS) } : {}),
     ...(typeof canvasId === "string" ? { canvasId } : {}),
@@ -888,6 +932,7 @@ function canvasToolSet(options: {
             sequence: 1,
             blocks: input.blocks.length,
             presentation: result.card.presentation ?? "sidebar",
+            ...(input.mermaid === undefined ? {} : { mermaid: input.mermaid }),
             ...(placed.note === undefined ? {} : { presentationNote: placed.note }),
             ...(result.card.presentation === "inline" ? { whereShown: INLINE_WHERE_SHOWN } : {}),
           },
@@ -955,6 +1000,7 @@ function canvasToolSet(options: {
           canvasId: input.canvasId,
           versionId: result.receipt.versionId,
           sequence: result.receipt.sequence,
+          ...(input.mermaid === undefined ? {} : { mermaid: input.mermaid }),
           ...(effective === undefined ? {} : { presentation: effective }),
           ...(note === undefined ? {} : { presentationNote: note }),
           ...(effective === "inline" ? { whereShown: INLINE_WHERE_SHOWN } : {}),

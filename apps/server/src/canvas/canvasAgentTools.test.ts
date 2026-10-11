@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { decodeCanvasBlock } from "@octant/contracts";
+import { CANVAS_SCHEMA_VERSION, decodeCanvasBlock } from "@octant/contracts";
 import { createManagedMcpTools } from "../providers/managedMcpTools";
 import {
   CANVAS_TOOL_NAME,
@@ -289,6 +289,55 @@ describe("createCanvasAgentTools", () => {
     expect(JSON.stringify(examples)).toContain('"tone":"danger"');
     expect(examples[2]).toMatchObject({ view: "gantt" });
     for (const example of examples) expect(() => decodeCanvasBlock(example)).not.toThrow();
+  });
+
+  it("imports a Mermaid flowchart as a typed diagram and keeps an unsupported one as code", async () => {
+    const { create, set } = tools();
+    const created = await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({
+        operation: "create",
+        title: "Flows",
+        blocks: [
+          {
+            blockId: "loop",
+            schemaVersion: CANVAS_SCHEMA_VERSION,
+            kind: "code-excerpt",
+            language: "mermaid",
+            code: "flowchart TD\n  a([Start]) --> b{Ready?}\n  b -->|yes| c[Ship]",
+          },
+          {
+            blockId: "styled",
+            schemaVersion: CANVAS_SCHEMA_VERSION,
+            kind: "code-excerpt",
+            language: "mermaid",
+            code: 'flowchart TD\n  a --> b\n  click a href "https://example.com"',
+          },
+        ],
+      }),
+    });
+    expect(created.isError).not.toBe(true);
+    expect(created.result).toMatchObject({
+      mermaid: [
+        { blockId: "loop", status: "imported", kind: "diagram" },
+        { blockId: "styled", status: "kept-as-code", reason: "unsupported-construct", line: 3 },
+      ],
+    });
+    const blocks = create.mock.calls[0]?.[3] as ReadonlyArray<Record<string, unknown>>;
+    expect(blocks[0]).toMatchObject({
+      blockId: "loop",
+      kind: "diagram",
+      nodes: [
+        { nodeId: "a", role: "terminator" },
+        { nodeId: "b", role: "decision" },
+        { nodeId: "c", role: "process" },
+      ],
+    });
+    expect(blocks[1]).toMatchObject({
+      blockId: "styled",
+      kind: "code-excerpt",
+      language: "mermaid",
+    });
   });
 
   it("lets an agent create an entity-relationship, a swimlane, and a mind map from the examples describe returns", async () => {
