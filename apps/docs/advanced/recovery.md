@@ -44,9 +44,11 @@ tombstone rather than leaving a hole with no explanation.
   sentence is Octant's, taken from a bounded code on the attempt, and the
   support correlation stays beside it. A call the app itself is running does
   not hang the turn past the turn's own deadline.
-- **Local clients**: reopening Electron or the canonical browser URL after
-  sleep or a host restart renews process-local client context automatically.
-  It does not create another store or require a recovery workflow.
+- **Local clients**: reopening Electron after sleep or a host restart renews
+  its client context automatically. A browser tab keeps its session across a
+  reload; after a host restart it asks you to open Octant from the desktop app
+  or run `octant web` again, because a browser session starts only from that
+  one-time link. Neither creates another store or needs a recovery workflow.
 - **Connection lost**: a Chat thread that cannot reach the host shows one notice,
   **Can't reach the host**, with **Retry now**, and changes to **Reconnected** for a
   moment when the host answers. The subagent card and the message queue only dim

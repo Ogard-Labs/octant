@@ -28,17 +28,23 @@ export function useComputerUseMention(input: {
   readonly onDraftChange: (draft: string, caret?: number) => void;
   readonly scopeKey: string;
   readonly available?: boolean;
+  /**
+   * Whether the selected runtime carries Octant's tools, as its reported
+   * capabilities say. Computer reaches the agent only as an Octant tool, so a
+   * runtime without them is never offered the mention it would refuse.
+   */
+  readonly providerCarriesTools?: boolean;
   readonly onChoose?: () => void;
   readonly onSelectionEdited?: () => void;
   readonly textarea?: () => HTMLTextAreaElement | null;
 }) {
-  return useApplicationMention(input, {
-    kind: "computer",
-    label: "Computer",
-    available:
-      typeof window !== "undefined" &&
-      typeof window.octantHost?.getComputerUseStatus === "function",
-  });
+  const { providerCarriesTools, ...mention } = input;
+  const hostScreen =
+    typeof window !== "undefined" && typeof window.octantHost?.getComputerUseStatus === "function";
+  return useApplicationMention(
+    providerCarriesTools === false ? { ...mention, available: false } : mention,
+    { kind: "computer", label: "Computer", available: hostScreen },
+  );
 }
 
 /** The same explicit mention surface for Octant's host-owned Browser. */
@@ -83,7 +89,9 @@ function useApplicationMention(
   const computerEnabled = useComputerUseEnabled();
   const enabled = app.kind === "browser" ? input.available === true : computerEnabled;
   const available = enabled && (input.available ?? app.available);
-  const selection = chosen?.scope === input.scopeKey ? chosen.selection : undefined;
+  // A mention chosen before the composer moved to a runtime that cannot carry
+  // it (or before the application went away) must not ride the next send.
+  const selection = available && chosen?.scope === input.scopeKey ? chosen.selection : undefined;
   const scopeKey = input.scopeKey;
   const currentScope = useRef(scopeKey);
   currentScope.current = scopeKey;

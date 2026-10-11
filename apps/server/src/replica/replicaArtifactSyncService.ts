@@ -89,23 +89,19 @@ import type {
   ReplicaMembershipJournal,
   ReplicaMembershipState,
 } from "./replicaMembershipProjection";
-import type {
-  ReplicaArtifactRead,
-  ReplicaArtifactReconciler,
-  ReplicaMembershipOutcome,
-  ReplicaMembershipService,
-  ReplicaStoreSelection,
-  Slot,
+import {
+  REPLICA_READ_BATCH,
+  replicaNewestFirst,
+  type ReplicaArtifactRead,
+  type ReplicaArtifactReconciler,
+  type ReplicaMembershipOutcome,
+  type ReplicaMembershipService,
+  type ReplicaStoreSelection,
+  type Slot,
 } from "./replicaMembershipService";
 
 /** How often a host with sync on pulls and retries its queue on its own. */
 export const REPLICA_SYNC_INTERVAL_MS = 5 * 60_000;
-
-/**
- * How many store slots one restore batch reads before it journals its
- * progress and checks whether the person stopped it.
- */
-export const REPLICA_RESTORE_BATCH = 25;
 
 /** Whether a comment change's text may leave this host, or come into it. */
 export function replicaCommentTextLeavesSafely(change: ReplicaCommentChange): boolean {
@@ -687,10 +683,10 @@ export class ReplicaArtifactSyncService {
         payload: { restoreId, done, total },
       });
     }
-    const order = newestFirst(listing.unread);
-    for (let start = 0; start < order.length; start += REPLICA_RESTORE_BATCH) {
+    const order = replicaNewestFirst(listing.unread);
+    for (let start = 0; start < order.length; start += REPLICA_READ_BATCH) {
       if (this.#ports.artifactState().restore(local.instanceId)?.state !== "running") return;
-      const batch = order.slice(start, start + REPLICA_RESTORE_BATCH);
+      const batch = order.slice(start, start + REPLICA_READ_BATCH);
       const read = await this.#ports.membership.restoreRead({
         slots: batch,
         listed: listing.listed,
@@ -979,30 +975,6 @@ function commentChangeOf(event: CanvasCommentEvent): ReplicaCommentChange {
         deletedAt: event.event.deletedAt,
       };
   }
-}
-
-/**
- * A restore's reading order: each computer's slots newest first, taking one
- * from each computer in turn, so every computer's newest versions arrive
- * before anyone's older history.
- */
-function newestFirst(slots: ReadonlyArray<Slot>): ReadonlyArray<Slot> {
-  const byWriter = new Map<string, Slot[]>();
-  for (const slot of slots) {
-    const key = String(slot.instanceId);
-    byWriter.set(key, [...(byWriter.get(key) ?? []), slot]);
-  }
-  const queues = [...byWriter.entries()]
-    .sort(([left], [right]) => left.localeCompare(right))
-    .map(([, writer]) => writer.sort((left, right) => right.sequence - left.sequence));
-  const ordered: Slot[] = [];
-  for (let index = 0; ordered.length < slots.length; index += 1) {
-    for (const writer of queues) {
-      const slot = writer[index];
-      if (slot !== undefined) ordered.push(slot);
-    }
-  }
-  return ordered;
 }
 
 /** The entry a queued artifact becomes at one slot. Rebuilt at the same slot it is the same bytes. */

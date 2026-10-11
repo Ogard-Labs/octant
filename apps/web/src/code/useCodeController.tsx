@@ -19,6 +19,7 @@ import type {
 import { decodeCodeThreadId } from "@octant/contracts/code";
 import { decodeUtcTimestamp, type ProviderContextBreakdown } from "@octant/contracts";
 import { waitForReconnect } from "../lib/waitForReconnect";
+import { handoffSummary } from "./providerSwitchHandoff";
 import {
   decodeCodeOperationId,
   decodeProviderSessionId,
@@ -994,6 +995,16 @@ export function useCodeController(options: CodeControllerOptions) {
                       current.map((message) =>
                         message.id === `${operationId}:assistant`
                           ? { ...message, changedFiles }
+                          : message,
+                      ),
+                    );
+                  }
+                  if (event.kind === "context-handoff-attached") {
+                    const handoff = handoffSummary(event);
+                    setConversation((current) =>
+                      current.map((message) =>
+                        message.id === `${operationId}:assistant`
+                          ? { ...message, handoff }
                           : message,
                       ),
                     );
@@ -2172,6 +2183,16 @@ export function useCodeController(options: CodeControllerOptions) {
               setConversation((current) =>
                 current.map((message) =>
                   message.id === assistantId ? { ...message, changedFiles } : message,
+                ),
+              );
+            }
+            // Journaled before the provider is sent anything, so the reply
+            // says what was handed over while it is still being written.
+            if (event.kind === "context-handoff-attached") {
+              const handoff = handoffSummary(event);
+              setConversation((current) =>
+                current.map((message) =>
+                  message.id === assistantId ? { ...message, handoff } : message,
                 ),
               );
             }

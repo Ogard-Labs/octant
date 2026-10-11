@@ -37,6 +37,8 @@ import {
   type ProviderSettingsViewProps,
 } from "../providers/ProviderSettingsView";
 import { ProviderDiscoverySection } from "../providers/ProviderDiscoverySection";
+import { ProviderCatalogView } from "../providers/catalog/ProviderCatalogView";
+import { ProviderSettingsList } from "../providers/ProviderSettingsList";
 import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
 import { OctantDialog } from "../ui/base/OctantDialog";
 import { OctantInput } from "../ui/base/OctantInput";
@@ -242,6 +244,8 @@ const SECTION_DESCRIPTIONS: Readonly<Partial<Record<SettingsSectionId, string>>>
   "computer-use": "Control applications through the bundled Computer use plugin.",
   "device-tools": "Bundled simulator and emulator streaming tools and their updates.",
   providers: "Connect providers, manage authentication, and pick default models.",
+  "provider-catalog":
+    "Every provider driver bundled with Octant, what this host has of each, and how to set it up.",
   harness: "Octant's own agent loop for API-key and local models: which model does which job.",
   skills:
     "Skills extend what agents can do. Review the source, then trust and enable only what you want.",
@@ -336,6 +340,8 @@ export function SettingsView(props: SettingsViewProps) {
   const [searchOpen, setSearchOpen] = useState(false);
   // An Octant Harness endpoint's detail sub-page, named for the breadcrumb.
   const [harnessEndpoint, setHarnessEndpoint] = useState<string>();
+  // A Provider catalog entry's setup sub-page, named for the breadcrumb.
+  const [catalogEntry, setCatalogEntry] = useState<string>();
   const resetAppearanceButton = useRef<HTMLButtonElement>(null);
   const [outline, setOutline] = useState<ReadonlyArray<SettingsOutlineEntry>>([]);
   const registerSection = useCallback((entry: SettingsOutlineEntry) => {
@@ -458,7 +464,13 @@ export function SettingsView(props: SettingsViewProps) {
   // already typed keeps the field open so the results never lose their input.
   const searchVisible = searchOpen || hasQuery;
   const PageIcon = hasQuery ? Search : settingsSectionIcon(route.activeSection);
-  const subPage = !hasQuery && route.activeSection === "harness" ? harnessEndpoint : undefined;
+  const subPage = hasQuery
+    ? undefined
+    : route.activeSection === "harness"
+      ? harnessEndpoint
+      : route.activeSection === "provider-catalog"
+        ? catalogEntry
+        : undefined;
   const currentSectionLabel = hasQuery
     ? "Search settings"
     : (SECTION_LABELS[route.activeSection] ?? "Settings");
@@ -680,6 +692,7 @@ export function SettingsView(props: SettingsViewProps) {
                     focusedSetting={route.focusedSetting}
                     onApplyDeepLink={route.applyDeepLink}
                     onHarnessEndpointChange={setHarnessEndpoint}
+                    onCatalogEntryChange={setCatalogEntry}
                     harnessEndpointOpen={subPage !== undefined}
                     pluginSettingsEntryPoints={pluginSettingsEntryPoints}
                     props={savingProps}
@@ -785,6 +798,7 @@ interface ActiveSectionContentProps {
   readonly focusedSetting: SettingsSettingId | undefined;
   readonly onApplyDeepLink: (link: SettingsDeepLink) => void;
   readonly onHarnessEndpointChange: (endpointName: string | undefined) => void;
+  readonly onCatalogEntryChange: (entryName: string | undefined) => void;
   readonly harnessEndpointOpen: boolean;
   readonly pluginSettingsEntryPoints: ReadonlyMap<string, string>;
   readonly props: SettingsViewProps;
@@ -796,6 +810,7 @@ function ActiveSectionContent({
   focusedSetting,
   onApplyDeepLink,
   onHarnessEndpointChange,
+  onCatalogEntryChange,
   harnessEndpointOpen,
   pluginSettingsEntryPoints,
   props,
@@ -985,6 +1000,17 @@ function ActiveSectionContent({
         <ProvidersSection
           discoveryController={props.discoveryController}
           {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
+          providerController={props.providerController}
+        />
+      ) : null;
+    case "provider-catalog":
+      return props.providerController !== undefined ? (
+        <ProviderCatalogSection
+          discoveryController={props.discoveryController}
+          {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
+          onDetailChange={onCatalogEntryChange}
+          onOpenModelEndpoints={openModelEndpoints}
+          onOpenProviders={() => onApplyDeepLink({ section: "providers" })}
           providerController={props.providerController}
         />
       ) : null;
@@ -1253,33 +1279,11 @@ function ProvidersSection(props: {
     void scan();
   }, [scan]);
 
-  // Locate binary needs the desktop's native file picker: a browser or a
-  // paired device has no picker authority, so the action is not offered there.
-  const selectRuntimeBinary = props.hostBridge?.selectRuntimeBinary;
-  const onLocateBinary =
-    selectRuntimeBinary === undefined || discoveryController === undefined
-      ? undefined
-      : async (instanceId: ProviderInstanceId): Promise<LocateBinaryOutcome> => {
-          let picked: Awaited<ReturnType<typeof selectRuntimeBinary>>;
-          try {
-            picked = await selectRuntimeBinary();
-          } catch (error) {
-            return {
-              kind: "refused",
-              message: error instanceof Error ? error.message : "The binary picker failed.",
-            };
-          }
-          if (picked.kind === "cancelled") return { kind: "cancelled" };
-          const outcome = await discoveryController.locateBinary(instanceId, picked.receiptId);
-          if (outcome.kind === "located") {
-            await props.providerController.retry();
-            const instance = props.providerController
-              .readInstances()
-              .find((candidate) => String(candidate.id) === String(instanceId));
-            if (instance?.enabled === true) await props.providerController.probe(instanceId);
-          }
-          return outcome;
-        };
+  const onLocateBinary = locateRuntimeBinary(
+    props.providerController,
+    discoveryController,
+    props.hostBridge,
+  );
 
   return (
     <div id="settings-providers">
@@ -1306,6 +1310,104 @@ function ProvidersSection(props: {
         {...(props.discoveryController?.snapshot === undefined
           ? {}
           : { discoverySnapshot: props.discoveryController.snapshot })}
+      />
+    </div>
+  );
+}
+
+/**
+ * Locate binary needs the desktop's native file picker: a browser or a paired
+ * device has no picker authority, so the action is not offered there.
+ */
+function locateRuntimeBinary(
+  providerController: ProviderController,
+  discoveryController: DiscoveryController | undefined,
+  hostBridge: OctantHostBridge | undefined,
+): ((instanceId: ProviderInstanceId) => Promise<LocateBinaryOutcome>) | undefined {
+  const selectRuntimeBinary = hostBridge?.selectRuntimeBinary;
+  if (selectRuntimeBinary === undefined || discoveryController === undefined) return undefined;
+  return async (instanceId) => {
+    let picked: Awaited<ReturnType<typeof selectRuntimeBinary>>;
+    try {
+      picked = await selectRuntimeBinary();
+    } catch (error) {
+      return {
+        kind: "refused",
+        message: error instanceof Error ? error.message : "The binary picker failed.",
+      };
+    }
+    if (picked.kind === "cancelled") return { kind: "cancelled" };
+    const outcome = await discoveryController.locateBinary(instanceId, picked.receiptId);
+    if (outcome.kind === "located") {
+      await providerController.retry();
+      const instance = providerController
+        .readInstances()
+        .find((candidate) => String(candidate.id) === String(instanceId));
+      if (instance?.enabled === true) await providerController.probe(instanceId);
+    }
+    return outcome;
+  };
+}
+
+/**
+ * Settings › Provider catalog. It reads the registry and the last discovery
+ * scan and never starts a scan by being opened: looking on the host, adding,
+ * turning on, and checking are each a step someone chooses. A configured
+ * runtime's setup shows its own Providers & Models card, so sign-in, Locate
+ * binary, and credentials (which stay in the host's keychain) are that card's.
+ */
+function ProviderCatalogSection(props: {
+  readonly providerController: ProviderController;
+  readonly discoveryController: DiscoveryController | undefined;
+  readonly hostBridge?: OctantHostBridge;
+  readonly onDetailChange: (entryName: string | undefined) => void;
+  readonly onOpenModelEndpoints: () => void;
+  readonly onOpenProviders: () => void;
+}) {
+  const controller = props.providerController;
+  const discoveryController = props.discoveryController;
+  const onLocateBinary = locateRuntimeBinary(controller, discoveryController, props.hostBridge);
+  const cardProps = providerSettingsViewProps(controller, props.hostBridge);
+  return (
+    <div id="settings-provider-catalog">
+      <ProviderCatalogView
+        busy={controller.busy}
+        {...(discoveryController === undefined
+          ? {}
+          : {
+              discovery: {
+                snapshot: discoveryController.snapshot,
+                scanning: discoveryController.scanning,
+                ...(discoveryController.message === undefined
+                  ? {}
+                  : { message: discoveryController.message }),
+                connectingPaths: discoveryController.connectingPaths,
+                onScan: discoveryController.scan,
+                onConnect: discoveryController.connect,
+              },
+            })}
+        instances={controller.instances}
+        {...(controller.message === undefined ? {} : { message: controller.message })}
+        observedByInstance={controller.observedByInstance}
+        onDetailChange={props.onDetailChange}
+        onOpenModelEndpoints={props.onOpenModelEndpoints}
+        onOpenProviders={props.onOpenProviders}
+        onProbe={(instanceId) => controller.probe(instanceId)}
+        onSetEnabled={controller.setEnabled}
+        probingIds={controller.probingIds}
+        renderRuntimeCard={(instance) => (
+          <ProviderSettingsList
+            {...cardProps}
+            {...(onLocateBinary === undefined ? {} : { onLocateBinary })}
+            discoverySnapshot={discoveryController?.snapshot}
+            heading="Its provider card"
+            instances={[instance]}
+            note="The same card as on Providers & Models: sign-in, Locate binary, and what its last check found."
+            showAgentEligibleModels={false}
+            showReorder={false}
+          />
+        )}
+        status={controller.status}
       />
     </div>
   );
