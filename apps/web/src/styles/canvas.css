@@ -4120,13 +4120,16 @@
    header and the composer stay in view around it. */
 .thread-canvas[data-shown-as="expanded"] .thread-canvas__body {
   max-height: max(20rem, calc(100dvh - 14rem));
-  overscroll-behavior: contain;
 }
 
 /* A focused region takes the wheel; an unfocused one is not a scroll
-   container for it, so the wheel passes through to the thread. */
+   container for it, so the wheel passes through to the thread. Containment
+   stays on the focused rule only: the unfocused body is overflow: hidden, still
+   a scroll container, and Chromium 150 stops the wheel there when it is
+   contained, so the thread would not scroll. */
 .thread-canvas[data-shown-as="expanded"] .thread-canvas__body[data-wheel="canvas"] {
   overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .thread-canvas[data-shown-as="expanded"] .thread-canvas__body:focus-visible {

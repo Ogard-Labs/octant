@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
@@ -771,11 +774,35 @@ describe("Canvas create panel and card list", () => {
       expect(surface).not.toBeNull();
       if (surface === null) return;
 
-      fireEvent.wheel(surface, { deltaY: -100 });
+      // A plain wheel is left for the thread to scroll.
+      expect(fireEvent.wheel(surface, { deltaY: -100 })).toBe(true);
       expect(within(board).getByText("100%")).toBeInTheDocument();
-      fireEvent.wheel(surface, { deltaY: -100, ctrlKey: true });
+      // A zoom wheel is consumed: in Electron an unconsumed ctrl+wheel also
+      // scrolls the thread, so the board would zoom and the thread jump at once.
+      expect(fireEvent.wheel(surface, { deltaY: -100, ctrlKey: true })).toBe(false);
       expect(within(board).getByText("120%")).toBeInTheDocument();
+      expect(fireEvent.wheel(surface, { deltaY: -100, metaKey: true })).toBe(false);
+      expect(within(board).getByText("144%")).toBeInTheDocument();
       localStorage.clear();
+    });
+
+    it("lets the wheel chain to the thread while the expanded Canvas is unfocused", () => {
+      // An unfocused body is overflow: hidden, which is still a scroll
+      // container; Electron 43 (Chromium 150) stops the wheel at it when it
+      // also carries overscroll-behavior: contain, so the thread never scrolls.
+      const css = readFileSync(
+        join(dirname(fileURLToPath(import.meta.url)), "../styles/canvas.css"),
+        "utf8",
+      );
+      const containing = [...css.matchAll(/([^{}]+)\{([^}]*)\}/g)].filter((rule) =>
+        /overscroll-behavior[^:]*:\s*contain/.test(rule[2] ?? ""),
+      );
+      const bodyRules = containing.filter((match) =>
+        (match[1] ?? "").includes("thread-canvas__body"),
+      );
+      // The focused Canvas still keeps its own scroll from chaining to the thread.
+      expect(bodyRules.length).toBeGreaterThan(0);
+      for (const rule of bodyRules) expect(rule[1]).toContain('[data-wheel="canvas"]');
     });
 
     it("remembers an expanded Canvas, and folding it to a card ends the expansion", async () => {
