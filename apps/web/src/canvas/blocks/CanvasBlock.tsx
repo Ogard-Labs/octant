@@ -22,6 +22,7 @@ import { ComparisonMatrixBlock } from "./ComparisonMatrixBlock";
 import { MathBlock } from "./MathBlock";
 import type { CanvasActionRuntime } from "../canvasActionRuntime";
 import type { DesignAssetRuntime } from "./designDocument";
+import type { DesignRunRuntime } from "./designRunningFrame";
 
 export function CanvasBlockRenderer({
   block,
@@ -29,6 +30,7 @@ export function CanvasBlockRenderer({
   planRuntime,
   actionRuntime,
   designAssetRuntime,
+  designRunRuntime,
 }: {
   readonly block: CanvasBlock;
   /** Lets a diagram journal a drag; absent on surfaces that cannot. */
@@ -42,6 +44,8 @@ export function CanvasBlockRenderer({
   readonly actionRuntime?: CanvasActionRuntime;
   /** Reaches the host for a design's images; absent, they draw as placeholders. */
   readonly designAssetRuntime?: DesignAssetRuntime;
+  /** Reaches the host to run a prototype; absent, a prototype cannot run here. */
+  readonly designRunRuntime?: DesignRunRuntime;
 }) {
   switch (block.kind) {
     case "heading":
@@ -89,6 +93,7 @@ export function CanvasBlockRenderer({
         <DesignBlock
           block={block}
           {...(designAssetRuntime === undefined ? {} : { assetRuntime: designAssetRuntime })}
+          {...(designRunRuntime === undefined ? {} : { runRuntime: designRunRuntime })}
         />
       );
     case "bar-list":

@@ -450,6 +450,11 @@ export interface OctantHostBridge extends Partial<RemoteAccessAdministrationBrid
    * translucency without host vibrancy shows the desktop behind sharp. Absent
    * on hosts that never apply vibrancy.
    */
+  /**
+   * The desktop's reserved shortcut for leaving a running Canvas prototype,
+   * read before the frame sees the key. Absent outside the desktop app.
+   */
+  readonly subscribeCanvasFrameFocusEscape?: (listener: () => void) => () => void;
   readonly subscribeResolvedSidebarVibrancy?: (
     listener: (vibrancy: "sidebar" | null) => void,
   ) => () => void;

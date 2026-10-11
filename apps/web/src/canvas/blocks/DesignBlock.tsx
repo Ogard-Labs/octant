@@ -1,14 +1,17 @@
 import {
+  useCallback,
   useEffect,
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type KeyboardEvent,
   type RefObject,
   type SyntheticEvent,
 } from "react";
-import { ChevronLeft, ChevronRight, Play, RotateCcw, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Play, RotateCcw, Square, X } from "lucide-react";
 import {
+  CANVAS_DESIGN_HEARTBEAT_INTERVAL_MS,
   CANVAS_DESIGN_VIEWPORT,
   type CanvasDesignAssetResolution,
   type CanvasDesignBlock,
@@ -27,6 +30,16 @@ import {
   type DesignFrameThemeValues,
 } from "./designDocument";
 import { installFrameFonts } from "./designFrameFonts";
+import {
+  readDesignBridgeMessage,
+  RUNNING_DESIGN_FIRST_HEARTBEAT_MS,
+  RUNNING_DESIGN_HEARTBEAT_TIMEOUT_MS,
+  RUNNING_DESIGN_MAX_ERRORS,
+  RUNNING_DESIGN_MIN_HEIGHT,
+  RUNNING_DESIGN_SANDBOX,
+  type DesignRunRuntime,
+} from "./designRunningFrame";
+import { getInjectedHostBridge } from "../../shell/hostBridge";
 
 const SIZE_NAME: Record<CanvasDesignSize, string> = {
   phone: "Phone",
@@ -61,9 +74,32 @@ const DESIGN_DOCUMENT_MIN_HEIGHT = 48;
 export function DesignBlock({
   block,
   assetRuntime,
+  runRuntime,
 }: {
   readonly block: CanvasDesignBlock;
   /** Reaches the host for the design's images; without it they draw as placeholders. */
+  readonly assetRuntime?: DesignAssetRuntime;
+  /** Reaches the host to run a design that runs script; without it, it cannot run here. */
+  readonly runRuntime?: DesignRunRuntime;
+}) {
+  if (block.runsScript === true) {
+    return (
+      <RunningDesignBlock
+        block={block}
+        {...(runRuntime === undefined ? {} : { runtime: runRuntime })}
+      />
+    );
+  }
+  return (
+    <StaticDesignBlock block={block} {...(assetRuntime === undefined ? {} : { assetRuntime })} />
+  );
+}
+
+function StaticDesignBlock({
+  block,
+  assetRuntime,
+}: {
+  readonly block: CanvasDesignBlock;
   readonly assetRuntime?: DesignAssetRuntime;
 }) {
   const theme = useWorkspaceFrameTheme(designFrameTheme(block) === "workspace");
@@ -502,6 +538,306 @@ function DocumentFrame({
       style={{ height }}
       title={`${block.title}, document`}
     />
+  );
+}
+
+/** Why a running prototype is not running. */
+type RunStopReason =
+  | { readonly kind: "stopped" }
+  | { readonly kind: "unresponsive" }
+  | { readonly kind: "navigated" }
+  | { readonly kind: "refused"; readonly reason: string };
+
+type RunState =
+  | { readonly kind: "idle" }
+  | { readonly kind: "starting"; readonly byPerson: boolean }
+  | {
+      readonly kind: "running";
+      readonly url: string;
+      /** Whether the person asked for this run, which lets the frame take focus. */
+      readonly byPerson: boolean;
+    }
+  | { readonly kind: "stopped"; readonly why: RunStopReason };
+
+const STOPPED_TEXT: Record<Exclude<RunStopReason["kind"], "refused">, string> = {
+  stopped: "Stopped.",
+  unresponsive: "Stopped because the prototype stopped responding.",
+  navigated: "Stopped because the prototype tried to load another page.",
+};
+
+/**
+ * A design that runs its own script: a prototype a person can click through
+ * with state. Its page is served by the host for a single-use ticket and
+ * drawn in a frame sandboxed to `allow-scripts` alone. Octant's chrome around
+ * the frame says it is running and holds Stop, which the frame cannot reach.
+ * The frame is removed and shown as stopped when it misses its heartbeat or
+ * loads a second page. In the thread it starts only when the person presses
+ * Run; the sidebar may start it when it is shown.
+ */
+function RunningDesignBlock({
+  block,
+  runtime,
+}: {
+  readonly block: CanvasDesignBlock;
+  readonly runtime?: DesignRunRuntime;
+}) {
+  const [state, setState] = useState<RunState>({ kind: "idle" });
+  const [errors, setErrors] = useState<ReadonlyArray<string>>([]);
+  const stopButton = useRef<HTMLButtonElement>(null);
+  const runButton = useRef<HTMLButtonElement>(null);
+  const frameRef = useRef<HTMLIFrameElement>(null);
+  // Each start or stop is a new generation, so a page asked for earlier
+  // never replaces what the person did since.
+  const generation = useRef(0);
+
+  const run = useCallback(
+    async (byPerson: boolean) => {
+      if (runtime === undefined) return;
+      generation.current += 1;
+      const asked = generation.current;
+      setErrors([]);
+      setState({ kind: "starting", byPerson });
+      let next: RunState;
+      try {
+        const started = await runtime.start(String(block.blockId));
+        next =
+          started.kind === "ready"
+            ? { kind: "running", url: started.url, byPerson }
+            : { kind: "stopped", why: { kind: "refused", reason: started.reason } };
+      } catch {
+        next = {
+          kind: "stopped",
+          why: { kind: "refused", reason: "Octant could not reach the host to run this." },
+        };
+      }
+      if (asked === generation.current) setState(next);
+    },
+    [block.blockId, runtime],
+  );
+
+  // A new version is a new page; the sidebar starts it again on its own.
+  const runsOnOpen = runtime?.runsOnOpen === true;
+  useEffect(() => {
+    generation.current += 1;
+    setState({ kind: "idle" });
+    setErrors([]);
+    if (runsOnOpen) void run(false);
+  }, [block, run, runsOnOpen]);
+
+  const stop = useCallback((why: RunStopReason) => {
+    generation.current += 1;
+    setState((current) =>
+      current.kind === "running" || current.kind === "starting"
+        ? { kind: "stopped", why }
+        : current,
+    );
+  }, []);
+  const reportError = useCallback((message: string) => {
+    setErrors((current) => [...current, message].slice(-RUNNING_DESIGN_MAX_ERRORS));
+  }, []);
+
+  // The desktop's reserved shortcut reaches Octant before the frame sees the
+  // key. A frame that holds focus here gives it up to its own Stop control.
+  const running = state.kind === "running";
+  useEffect(() => {
+    if (!running) return;
+    let bridge;
+    try {
+      bridge = getInjectedHostBridge();
+    } catch {
+      return;
+    }
+    const subscribe = bridge?.subscribeCanvasFrameFocusEscape;
+    if (subscribe === undefined) return;
+    return subscribe(() => {
+      if (document.activeElement === frameRef.current) stopButton.current?.focus();
+    });
+  }, [running]);
+
+  const contained = runtime?.contained === true;
+  return (
+    <section
+      aria-label={`${block.title}, ${SIZE_NAME[block.size]} prototype`}
+      aria-roledescription="design"
+      className="canvas-design"
+    >
+      <header className="canvas-design__header">
+        <div className="canvas-design__heading">
+          <h3 className="canvas-design__title">{block.title}</h3>
+          <span className="canvas-design__meta">{`${SIZE_NAME[block.size]} · prototype`}</span>
+        </div>
+        <div className="canvas-design__run">
+          {state.kind === "running" ? (
+            <>
+              <span className="canvas-design__running" role="status">
+                <span aria-hidden="true" className="canvas-design__running-dot" />
+                Running
+              </span>
+              <OctantButton
+                onClick={() => {
+                  stop({ kind: "stopped" });
+                  runButton.current?.focus();
+                }}
+                ref={stopButton}
+                size="sm"
+                type="button"
+                variant="secondary"
+              >
+                <Square aria-hidden="true" size={12} strokeWidth={2} />
+                Stop
+              </OctantButton>
+            </>
+          ) : runtime === undefined ? null : (
+            <OctantButton
+              disabled={state.kind === "starting"}
+              onClick={() => void run(true)}
+              ref={runButton}
+              size="sm"
+              type="button"
+              variant="secondary"
+            >
+              <Play aria-hidden="true" size={12} strokeWidth={2} />
+              {state.kind === "stopped" ? "Run again" : "Run"}
+            </OctantButton>
+          )}
+        </div>
+      </header>
+      {runtime === undefined ? (
+        <p className="canvas-design__notice">
+          This prototype runs its own script, which runs only in Octant.
+        </p>
+      ) : null}
+      {runtime !== undefined && !contained && state.kind !== "running" ? (
+        <p className="canvas-design__notice">
+          In a browser, a running prototype is not network-contained: if it loads another page, that
+          page can reach the network before Octant stops it.
+        </p>
+      ) : null}
+      {state.kind === "stopped" ? (
+        <p className="canvas-design__notice" role="status">
+          {state.why.kind === "refused" ? state.why.reason : STOPPED_TEXT[state.why.kind]}
+        </p>
+      ) : null}
+      {state.kind === "running" ? (
+        <RunningFrame
+          block={block}
+          focusable={state.byPerson}
+          frameRef={frameRef}
+          key={state.url}
+          onError={reportError}
+          onStop={stop}
+          url={state.url}
+        />
+      ) : null}
+      {errors.length === 0 ? null : (
+        <ul aria-label="Prototype script errors" className="canvas-design__errors">
+          {errors.map((message, index) => (
+            <li key={`${String(index)}:${message}`}>{message}</li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+/**
+ * The frame a running page is drawn in, and its watchdog. A device size is
+ * drawn at its viewport and scaled to the column; a document is as wide as
+ * the column and as tall as the page says, within bounds. The page's first
+ * load is its own; any later load is a page it navigated to, which is removed.
+ */
+function RunningFrame({
+  block,
+  url,
+  focusable,
+  frameRef,
+  onStop,
+  onError,
+}: {
+  readonly block: CanvasDesignBlock;
+  readonly url: string;
+  readonly focusable: boolean;
+  readonly frameRef: RefObject<HTMLIFrameElement | null>;
+  readonly onStop: (why: RunStopReason) => void;
+  readonly onError: (message: string) => void;
+}) {
+  const [height, setHeight] = useState(RUNNING_DESIGN_MIN_HEIGHT);
+  const loads = useRef(0);
+  const [stageRef, stage] = useSize();
+
+  useEffect(() => {
+    let lastBeat = Date.now();
+    let beating = false;
+    const onMessage = (event: MessageEvent) => {
+      const message = readDesignBridgeMessage(event, frameRef.current?.contentWindow);
+      if (message === undefined) return;
+      if (message.type === "heartbeat") {
+        lastBeat = Date.now();
+        beating = true;
+      } else if (message.type === "size") {
+        setHeight(message.height);
+      } else {
+        onError(message.message);
+      }
+    };
+    window.addEventListener("message", onMessage);
+    // A hidden tab slows every timer, the page's and this one, so a page is
+    // only judged while it can be seen, and gets a full allowance on return.
+    const watchdog = window.setInterval(() => {
+      if (document.visibilityState === "hidden") {
+        lastBeat = Date.now();
+        return;
+      }
+      const allowance = beating
+        ? RUNNING_DESIGN_HEARTBEAT_TIMEOUT_MS
+        : RUNNING_DESIGN_FIRST_HEARTBEAT_MS;
+      if (Date.now() - lastBeat > allowance) onStop({ kind: "unresponsive" });
+    }, CANVAS_DESIGN_HEARTBEAT_INTERVAL_MS);
+    return () => {
+      window.removeEventListener("message", onMessage);
+      window.clearInterval(watchdog);
+    };
+  }, [frameRef, onError, onStop]);
+
+  const onLoad = () => {
+    loads.current += 1;
+    if (loads.current > 1) onStop({ kind: "navigated" });
+  };
+  const frame = (style: CSSProperties, className: string) => (
+    <iframe
+      className={className}
+      onLoad={onLoad}
+      ref={frameRef}
+      referrerPolicy="no-referrer"
+      sandbox={RUNNING_DESIGN_SANDBOX}
+      src={url}
+      style={style}
+      tabIndex={focusable ? undefined : -1}
+      title={`${block.title}, running prototype`}
+    />
+  );
+
+  if (block.size === "document") {
+    return frame({ height }, "canvas-design__document");
+  }
+  const viewport = CANVAS_DESIGN_VIEWPORT[block.size];
+  const scale = stage === undefined ? 1 : Math.min(1, stage.width / viewport.width);
+  return (
+    <div className="canvas-design__stage" ref={stageRef}>
+      <div
+        className="canvas-design__preview"
+        style={{ width: viewport.width * scale, height: viewport.height * scale }}
+      >
+        {frame(
+          {
+            width: viewport.width,
+            height: viewport.height,
+            transform: `scale(${String(scale)})`,
+          },
+          "canvas-design__page",
+        )}
+      </div>
+    </div>
   );
 }
 
