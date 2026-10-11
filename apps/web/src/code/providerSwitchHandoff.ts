@@ -49,15 +49,21 @@ export function providerSwitchHandoffDisclosure(
       ? count(omissions.attachments, "attachment", "attachments")
       : undefined,
   ].filter((part): part is string => part !== undefined);
-  const shortened =
+  const shortened = [
     omissions.truncatedMessages > 0
-      ? ` ${count(omissions.truncatedMessages, "message was", "messages were")} shortened.`
-      : "";
+      ? ` ${count(omissions.truncatedMessages, "message was", "messages were")} shortened by ${count(omissions.truncatedCharacters, "character", "characters")}.`
+      : "",
+    omissions.sourceTruncatedMessages > 0
+      ? ` ${count(omissions.sourceTruncatedMessages, "message was", "messages were")} already cut short when recorded.`
+      : "",
+  ].join("");
   return [
     `Handed over ${count(handoff.messages, "recent message", "recent messages")} from ${previousLabel} as text.`,
     left.length === 0 ? "" : ` Left out: ${left.join(", ")}.`,
     shortened,
-    handoff.externalContentIngested ? " Some of it came from outside content." : "",
+    // The taint is the thread's, not the excerpts': the outside content that
+    // set it may be tool output or an attachment the handoff never carried.
+    handoff.externalContentIngested ? " This thread has taken in outside content." : "",
     " Hidden reasoning, tool activity and the previous session did not transfer.",
   ].join("");
 }

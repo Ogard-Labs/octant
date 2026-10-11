@@ -2576,9 +2576,11 @@ session was recorded sends the journaled handoff again with the prompt, since
 the provider may never have received it. A selection that changed since the
 record refuses. The conversation page carries a summary of the record on the
 turn (`handoff`), and the transcript shows what was handed over and that hidden
-reasoning, tool activity and the previous session did not transfer. While the
-thread's selection names a provider other than the one its last reply came
-from, the composer says the next message starts a new session with a handoff.
+reasoning, tool activity and the previous session did not transfer. While the thread's selection names a provider other than the one its session
+is on (the provider of its last finished reply, or of a later switching turn
+whose handoff was journaled, which happens only once the new session is
+ready), the composer says the next message starts a new session with a
+handoff.
 
 A switch that cannot hand over refuses before the new provider is acquired,
 naming why: no host selector, an unavailable or foreign thread or Project,

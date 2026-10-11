@@ -2311,6 +2311,66 @@ describe("CodeThreadWorkspace", () => {
     );
   });
 
+  it("does not promise another new session after a switching turn opened one and then stopped", () => {
+    const base = controller();
+    const view = base.activeView!;
+    render(
+      <CodeThreadWorkspace
+        controller={{
+          ...base,
+          activeView: {
+            ...view,
+            thread: {
+              ...view.thread,
+              providerInstanceId: alternateProviderId,
+              modelId: alternateModelId,
+            },
+          },
+          conversation: [
+            {
+              id: "turn:assistant-one",
+              role: "assistant",
+              text: "The first pass is complete.",
+              providerInstanceId: providerId,
+              modelId,
+              status: "completed",
+            },
+            {
+              id: "turn:assistant-two",
+              role: "assistant",
+              text: "Provider turn interrupted.",
+              providerInstanceId: alternateProviderId,
+              modelId: alternateModelId,
+              status: "interrupted",
+              handoff: {
+                reason: "provider-switch",
+                previousProviderInstanceId: providerId,
+                previousModelId: modelId,
+                messages: 1,
+                omissions: {
+                  earlierMessages: 0,
+                  unfinishedReplies: 0,
+                  missingBodies: 0,
+                  oversizedBodies: 0,
+                  emptyBodies: 0,
+                  attachments: 0,
+                  truncatedMessages: 0,
+                  truncatedCharacters: 0,
+                  sourceTruncatedMessages: 0,
+                },
+                externalContentIngested: false,
+              },
+            },
+          ],
+        }}
+        providerGroups={[providerGroup(), alternateProviderGroup()]}
+        threadId={threadId}
+      />,
+    );
+
+    expect(screen.queryByText(/Your next message starts a new session on/)).not.toBeInTheDocument();
+  });
+
   it("labels a model-only switch as a model switch rather than a provider handoff", () => {
     render(
       <CodeThreadWorkspace

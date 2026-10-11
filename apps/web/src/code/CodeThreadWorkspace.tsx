@@ -684,13 +684,15 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
       })
     : providerGroups;
   // The provider the conversation's session lives on is the one the last
-  // finished reply came from. A thread now pointed elsewhere starts a new
-  // session on its next message, and the host hands the conversation over as
-  // text; the person is told so before they send, not after.
+  // finished reply came from, or the one a switching turn's journaled handoff
+  // opened a session on even if that turn then stopped: the host records the
+  // handoff only once the new session is ready. A thread now pointed
+  // elsewhere starts a new session on its next message, and the person is
+  // told so before they send, not after.
   const sessionReply = messages.findLast(
     (message) =>
       message.role === "assistant" &&
-      message.status === "completed" &&
+      (message.status === "completed" || message.handoff !== undefined) &&
       message.providerInstanceId !== undefined,
   );
   const pendingSwitchNotice =
