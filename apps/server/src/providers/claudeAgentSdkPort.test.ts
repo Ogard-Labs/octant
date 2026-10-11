@@ -1082,59 +1082,74 @@ describe("Claude Agent SDK port", () => {
   });
 
   test.each([
-    { type: "future_information", detail: "not allowlisted" },
-    {
-      type: "system",
-      subtype: "permission_denied",
-      tool_name: "Read",
-      tool_use_id: "tool-1",
-      message: "denied",
-      uuid: "5",
-      session_id: "session-1",
-    },
-    {
-      type: "system",
-      subtype: "worker_shutting_down",
-      reason: "host_exit",
-      uuid: "6",
-      session_id: "session-1",
-    },
-    {
-      type: "system",
-      subtype: "informational",
-      content: "blocking",
-      level: "warning",
-      prevent_continuation: true,
-      uuid: "7",
-      session_id: "session-1",
-    },
+    [
+      { type: "future_information", detail: "not allowlisted" },
+      "Claude returned an unsupported runtime message.",
+    ],
+    [
+      {
+        type: "system",
+        subtype: "permission_denied",
+        tool_name: "Read",
+        tool_use_id: "tool-1",
+        message: "denied",
+        uuid: "5",
+        session_id: "session-1",
+      },
+      "Claude returned an unsupported system message (permission_denied).",
+    ],
+    [
+      {
+        type: "system",
+        subtype: "worker_shutting_down",
+        reason: "host_exit",
+        uuid: "6",
+        session_id: "session-1",
+      },
+      "Claude returned an unsupported system message (worker_shutting_down).",
+    ],
+    [
+      {
+        type: "system",
+        subtype: "informational",
+        content: "blocking",
+        level: "warning",
+        prevent_continuation: true,
+        uuid: "7",
+        session_id: "session-1",
+      },
+      "Claude returned an unsupported runtime message.",
+    ],
     // A retry note whose counters are not whole non-negative numbers is not
     // the frame this allowlist recognizes, so it is reported rather than
     // silently dropped.
-    {
-      type: "system",
-      subtype: "api_retry",
-      attempt: -1,
-      max_retries: 10.5,
-      retry_delay_ms: 581,
-      uuid: "8",
-      session_id: "session-1",
+    [
+      {
+        type: "system",
+        subtype: "api_retry",
+        attempt: -1,
+        max_retries: 10.5,
+        retry_delay_ms: 581,
+        uuid: "8",
+        session_id: "session-1",
+      },
+      "Claude returned an unsupported runtime message.",
+    ],
+  ])(
+    "protocol-fails every non-allowlisted message after initialization",
+    async (message, reason) => {
+      const failed = await failureOf(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const harness = makeHarness([safeRuntimeInitialization, message]);
+            const query = yield* harness.port.openQuery(openInput);
+            return yield* Stream.runDrain(query.messages);
+          }),
+        ),
+      );
+      expect(failed).toEqual({ category: "protocol", message: reason });
     },
-  ])("protocol-fails every non-allowlisted message after initialization", async (message) => {
-    const failed = await failureOf(
-      Effect.scoped(
-        Effect.gen(function* () {
-          const harness = makeHarness([safeRuntimeInitialization, message]);
-          const query = yield* harness.port.openQuery(openInput);
-          return yield* Stream.runDrain(query.messages);
-        }),
-      ),
-    );
-    expect(failed).toEqual({
-      category: "protocol",
-      message: "Claude returned an unsupported runtime message.",
-    });
-  });
+  );
 
   test("decodes supported assistant and stream variants without forwarding SDK payload objects", async () => {
     const rawToolInput = { path: "/repo/file.ts", nested: { line: 7 } };

@@ -329,6 +329,11 @@ export type ClaudeDecodedMessage =
       readonly status: "compacting" | "requesting" | null;
       readonly permissionMode?: ClaudePermissionMode;
     }
+  | {
+      /** The runtime compacted the session's window by itself. */
+      readonly kind: "compaction";
+      readonly sessionId: string;
+    }
   | { readonly kind: "ignored" };
 
 export interface ClaudeUserMessage {
