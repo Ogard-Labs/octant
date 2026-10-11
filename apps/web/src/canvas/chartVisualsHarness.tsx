@@ -1,7 +1,12 @@
 import "../styles.css";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { CANVAS_SCHEMA_VERSION, decodeCanvasBlock } from "@octant/contracts/canvas";
+import { Schema } from "effect";
+import {
+  CANVAS_SCHEMA_VERSION,
+  CanvasDesignAssetResolution,
+  decodeCanvasBlock,
+} from "@octant/contracts/canvas";
 import {
   chartExampleBlocks,
   treemapExampleBlocks,
@@ -20,6 +25,9 @@ import {
 } from "@octant/domain";
 import { DEFAULT_DARK_TOKENS, DEFAULT_LIGHT_TOKENS, getThemePreset } from "@octant/theme";
 import { CanvasDocument } from "./CanvasDocument";
+import type { DesignAssetRuntime } from "./blocks/designDocument";
+
+const decodeCanvasDesignAssetResolution = Schema.decodeUnknownSync(CanvasDesignAssetResolution);
 import { canvasFixture } from "./test-fixtures";
 
 /**
@@ -336,7 +344,65 @@ const articleBlock = decodeCanvasBlock({
   ],
 });
 
-const designBlocks = [articleBlock, searchSpecExampleBlock, onboardingFlowExampleBlock];
+/**
+ * A phone mockup that shows a Project screenshot by asset id beside one the
+ * host refused, so a capture shows the inlined image and the placeholder.
+ * The harness stands in for the host: it answers with fixture bytes, and the
+ * frame still loads nothing.
+ */
+const assetMockupBlock = decodeCanvasBlock({
+  ...base,
+  schemaVersion: 14,
+  blockId: "asset-mockup",
+  kind: "design",
+  title: "Release notes app",
+  size: "phone",
+  theme: "workspace",
+  styles: [
+    "body { margin: 0; font-family: var(--oct-font-body); color: var(--oct-fg); }",
+    ".screen { padding: 28px 24px; }",
+    ".screen h1 { font-size: 26px; margin: 0 0 8px; }",
+    ".screen p { margin: 0 0 18px; color: var(--oct-muted); }",
+    ".shot { display: block; width: 100%; border-radius: 18px; border: 1px solid var(--oct-border); }",
+    ".hero { height: 220px; border-radius: 18px; background: url(octant-asset:hero) center / cover; }",
+  ].join("\n"),
+  assets: [
+    { assetId: "home-shot", source: { kind: "project-file", path: "screens/home.png" } },
+    { assetId: "hero", source: { kind: "project-file", path: "../outside/hero.png" } },
+  ],
+  frames: [
+    {
+      frameId: "home",
+      title: "Home screenshot",
+      html: '<div class="screen"><h1>What shipped</h1><p>The home screen, as it runs today.</p><img class="shot" src="octant-asset:home-shot" alt="Home screen"></div>',
+    },
+    {
+      frameId: "hero",
+      title: "Refused hero",
+      html: '<div class="screen"><h1>Launch hero</h1><p>An image outside the folder draws a placeholder.</p><div class="hero" role="img" aria-label="Hero"></div></div>',
+    },
+  ],
+});
+
+const HOME_SHOT_PNG =
+  "iVBORw0KGgoAAAANSUhEUgAAASwAAAIwCAIAAACz48FfAAAHZklEQVR42u3cwQ2CQBCGUUqhGmsgnijNIijCs0V4Moaz4QC0sBtgZ3zJd/8Tx3dcun4cJF1Y5yeQIJQglAShBKEkCCUIJUEoQSgJQglCSRBKEEqCUIJQEoQShJIglCCUBKEEoSQIJQglQShBKAlCCUJJEEoQSoJQglAShBKEkiCUIJQEoQShJAglCCVBKEEoCUIJQkkQShBKglCCUBKEEoSSIJQglAShBKEkCCUIJUEoQSgJQglCSRBKEEqCUIJQEoQShBKEfgUJQglCSRBKf4twWX6SLgxCCUIJQkkQShBKglCCUBKEEoSSIJQglAShBKEkCCUIJUEoQSgJQglCSRBKEEqCUIJQEoQShJIglCCUBKEEoSQIJQj35ule1vtxK6541K7dg3YhtGsXQkeyCyGEdu1C6Eh2IYTQrl0IHckuhBDatQuhI9mFEEK7diF0JLsQQmjXLoSOZBdCCO3ahdCR7EIIoV27EDqSXQghtGsXQkeyC+FRCB3Yrt0tCO3ahdCR7EIIoV27EDqSXQghtGsXQkeyCyGEdu1C6Eh2IYTQrl0IHckuhBDatQuhI9mFEEK7diF0JLsQQmjXLoSOZBdCCO3ahdCR7EIIoV27SRE6sF27vrZm1y6EjmQXQgjt2oXQkexCCKFduxA6kl0IIbRrF0JHsgshhHbtQuhIdiGE0K5dCB3JLoQQ2rULoSPZhRBCu3YhdCS7EEJo1y6EjmQXQgjt2s2L0IHt2vW1Nbt2IXQkuxBCaNcuhI5kF0II7dqF0JHsQgihXbsQOpJdCCG0axdCR7ILIYR27ULoSHYhhNCuXQgdyS6EENq1C6Ej2YUQQrt2IXQkuxBCaNduXoQObNeur63ZtQuhI9mFEEK7diF0JLsQQmjXLoSOZBdCCO3ahdCR7EIIoV27EDqSXQghtGsXQkeyCyGEdu1C6Eh2IYTQrl0IHckuhBDatQuhI9mFEEK7dvMidGC7dn1tza5dCB3JLoQQ2rULoSPZhRBCu3YhdCS7EEJo1y6EjmQXQgjt2oXQkexCCKFduxA6kl0IIbRrF0JHsgshhHbtQuhIdiGE0K5dCB3JLoQQ2rWbF6ED27Xra2t27ULoSHYhhNCuXQgdyS6EENq1C6Ej2YUQQrt2IXQkuxBCaNcuhI5kF0II7dqF0JHsQgihXbsQOpJdCCG0axdCR7ILIYR27ULoSHYhhNCu3bwIHdiuXV9bs2sXQkeyCyGEdu1C6Eh2IYTQrl0IHckuhBDatQuhI9mFEEK7diF0JLsQQmjXLoSOZBdCCO3ahdCR7EIIoV27EDqSXQghtGsXQkeyCyGEdu3mRSipMgglCCUIJUEoQSgJQglCSRBKEEqCUIJQEoQShJIglCCUBKEEoSQIJQglQShBKAlCCUJJEEoQSoJQglAShBKEkhpBOD1fDfb5ztKZQQihIIRQEEIIoSCEUBBCCKEghFAQQgihIIRQEELoPyEIIRSEEEoQQigIIZQghFAQQihBCKEghFCCEEJBCKEEIYSCEEIJQggFIYQShBAKQgglCCEUhBBKEEIoCCGUIIRQEEIoQQihIIRQghBCQQihBCGEghBCCUIIBSGEEoQQCkIIJQghFIQQSkEQSqoMQglCCUJJEEoQSoJQglAShBKEkiCUIJQEoQShJAglCCUFQOhRr+RlPYSCEEJBCCGEghBCQQghhIIQQkEIIYSCEEJBCCGEghBCQQihv4UghFAQQihBCKEghFCCEEJBCKEEIYSCEEIJQggFIYQShBAKQgglCCEUhBBKEEIoCCGUIIRQEEIoQQihIIRQghBCQQihBCGEghBCCUIIBSGEEoQQCkIIJQghFIQQShBCKAghlOIglFQZhBKEEoSSIJQglAShBKEkCCUIJUEoQSgJQglCSRBKEEoKgNCjXsnLeggFIYSCEEIIBSGEghBCCAUhhIIQQggFIYSCEEIIBSGEghBCfwtBCKEghFCCEEJBCKEEIYSCEEIJQggFIYQShBAKQgglCCEUhBBKEEIoCCGUIIRQEEIoQQihIIRQghBCQQihBCGEghBCCUIIBSGEEoQQCkIIJQghFIQQShBCKAghlCCEUBBCKMVBKKkyCCUIJQglQShBKAlCCUJJEEoQSoJQglAShBKEkiCUIJQUAKFHvZKX9RAKQggFIYQQCkIIBSGEEApCCAUhhBAKQggFIYQQCkIIBSGE/haCEEJBCKEEIYSCEEIJQggFIYQShBAKQgglCCEUhBBKEEIoCCGUIIRQEEIoQQihIIRQghBCQQihBCGEgnBH2I9DTRBKWzWIIJQghFAQQihBCKEghFCCEEJBCKEEIYSCEEIJQggFIYQShBAKQkknBaEEoQShJAglCCVBKEEoCUIJQkkQShBKglCCUBKEEoSSAiD0qFfysh5CQQihIIQQQkEIoSCEEEJBCKEghBBCQQihIIQQQkEIoSCE0N9CEEIoCCGUIIRQEEIoQQihIIRQghBCQQihBCGEghBCCUIIBSGEEoQQCkIIJQghFIQQShBCKAghlNpAuAKms9ZySSh1nAAAAABJRU5ErkJggg==";
+
+const harnessDesignAssets: DesignAssetRuntime = {
+  resolve: async (blockId) =>
+    blockId === "asset-mockup"
+      ? [
+          { assetId: "home-shot", status: "resolved", mediaType: "image/png", data: HOME_SHOT_PNG },
+          { assetId: "hero", status: "unavailable", reason: "refused" },
+        ].map((entry) => decodeCanvasDesignAssetResolution(entry))
+      : undefined,
+};
+
+const designBlocks = [
+  articleBlock,
+  searchSpecExampleBlock,
+  onboardingFlowExampleBlock,
+  assetMockupBlock,
+];
 
 const mockupBlocks = [
   settingsScreenExampleBlock,
@@ -427,7 +493,7 @@ if (!rootElement) throw new Error("Chart visuals evidence root is missing");
 createRoot(rootElement).render(
   <StrictMode>
     <main data-canvas-chart-evidence="all">
-      <CanvasDocument definition={definition} />
+      <CanvasDocument definition={definition} designAssetRuntime={harnessDesignAssets} />
     </main>
   </StrictMode>,
 );
