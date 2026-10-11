@@ -60,11 +60,11 @@ export interface EndpointStatusInput {
    */
   readonly keysHere?: boolean;
   /**
-   * The host deleted the stored key when the address was saved, and no check
-   * has run since. A keyed endpoint then reads as needing its key rather than
-   * as not checked, since the check would only report the key missing.
+   * The host's credential store has no key for it and no check has run since,
+   * as after an address change deleted the key. The endpoint then reads as
+   * needing its key rather than as not checked, since a check would only say so.
    */
-  readonly keyRemoved?: boolean;
+  readonly keyMissing?: boolean;
 }
 
 /**
@@ -93,11 +93,8 @@ export function endpointStatus(input: EndpointStatusInput): EndpointStatus {
     if (input.signIn?.kind === "signed-out") return signInToUse(offer);
   }
   if (failure !== undefined) return failureStatus(input, failure);
-  if (observed === undefined && input.keyRemoved === true && endpointTakesKey(instance)) {
-    return keyNeeded(
-      input,
-      "The address changed, so its saved API key was removed. Add the key again.",
-    );
+  if (observed === undefined && input.keyMissing === true && endpointTakesKey(instance)) {
+    return keyNeeded(input);
   }
   if (observed === undefined) {
     return {
@@ -226,7 +223,7 @@ function signedOut(offer: { readonly accountLabel: string; readonly action: stri
 /** The label of an endpoint that has no key saved, which other steps can recognise. */
 export const NEEDS_KEY_LABEL = "Needs key";
 
-function keyNeeded(input: EndpointStatusInput, sentence?: string): EndpointStatus {
+function keyNeeded(input: EndpointStatusInput): EndpointStatus {
   if (input.keysHere === false) {
     return {
       tone: "needs-you",
@@ -237,7 +234,7 @@ function keyNeeded(input: EndpointStatusInput, sentence?: string): EndpointStatu
   return {
     tone: "needs-you",
     label: NEEDS_KEY_LABEL,
-    sentence: sentence ?? "No API key is saved for it.",
+    sentence: "No API key is saved for it.",
     fix: { kind: "add-key", label: "Add key" },
   };
 }

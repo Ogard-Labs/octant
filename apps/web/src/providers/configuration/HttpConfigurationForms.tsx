@@ -1,5 +1,5 @@
 import { type ProviderInstance, type ProviderInstanceId } from "@octant/contracts";
-import { subscriptionOAuthOffers } from "@octant/domain";
+import { normalizeOpenAiCompatibleBaseUrl, subscriptionOAuthOffers } from "@octant/domain";
 import type { SubscriptionOAuthOffer } from "@octant/contracts/host-oauth";
 import { useRef, useState } from "react";
 import { OctantButton } from "../../ui/base/OctantButton";
@@ -609,7 +609,7 @@ function BaseUrlField(props: {
 }) {
   const [value, setValue] = useState(props.savedBaseUrl);
   const noteId = `endpoint-base-url-key-note-${props.instanceId}`;
-  const changed = props.takesKey && value !== props.savedBaseUrl;
+  const changed = props.takesKey && !sameAddress(value, props.savedBaseUrl);
   return (
     <>
       <SettingRow
@@ -640,4 +640,18 @@ function BaseUrlField(props: {
       ) : null}
     </>
   );
+}
+
+/**
+ * The host compares the addresses it stores after normalising them, so a
+ * spelling that normalises to the saved one (a missing trailing slash) keeps
+ * the key. An address that cannot be normalised is treated as different.
+ */
+function sameAddress(entered: string, saved: string): boolean {
+  if (entered === saved) return true;
+  try {
+    return normalizeOpenAiCompatibleBaseUrl(entered) === normalizeOpenAiCompatibleBaseUrl(saved);
+  } catch {
+    return false;
+  }
 }

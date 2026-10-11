@@ -2059,6 +2059,17 @@ or execution. Saved Chat/Code revisions reconcile untouched fields without
 remounting the form. Keep deliberate section expansion, text growth, and manual
 resizing distinct from unsolicited layout movement.
 
+### Endpoint address and stored key
+
+A model endpoint's API key belongs to the address it was entered for, so the
+host deletes it when the saved address changes. The address field says so
+while it differs from the saved one, in calm guidance text beneath the field
+that is also the field's accessible description: saving removes the stored
+key and it must be entered again. A spelling that normalises to the saved
+address (such as a missing trailing slash) shows nothing. Until a check runs,
+a keyed endpoint whose host credential store holds no key reads Needs key with
+Add key on its row, in the same state a refused or missing key uses.
+
 ### Optional Settings details
 
 Keep common preferences and host health visible. Use the shared

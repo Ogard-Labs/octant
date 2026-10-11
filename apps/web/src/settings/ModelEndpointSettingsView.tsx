@@ -11,10 +11,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { boundSubscriptionOffer } from "../providers/configuration/HttpConfigurationForms";
 import { isModelEndpointDriverKind } from "../providers/providerSettingsPresentation";
 import type { ProviderSettingsViewProps } from "../providers/ProviderSettingsView";
-import type {
-  ProviderProbeFailure,
-  TransientProviderCredential,
-} from "../providers/useProviderController";
+import type { ProviderProbeFailure } from "../providers/useProviderController";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
 import { SettingsSection } from "./primitives";
@@ -23,6 +20,7 @@ import { AddEndpointDialog, EndpointChoices, SIGN_IN_ENDPOINTS } from "./harness
 import {
   endpointModelCount,
   endpointStatus,
+  endpointTakesKey,
   endpointSubLine,
   type EndpointFixKind,
   type EndpointStatus,
@@ -91,36 +89,42 @@ export function ModelEndpointSettingsView(props: ModelEndpointSettingsViewProps)
       }),
     [endpoints],
   );
-  // Endpoints whose saved address moved and whose stored key the host deleted
-  // with it, by the address they had. An endpoint reads as needing its key
-  // only while its address is still different and no check has run since.
-  const [keysRemoved, setKeysRemoved] = useState<ReadonlyMap<string, string>>(new Map());
-  const keepsKeyAcross =
-    <Configuration extends { readonly baseUrl: string }>(
-      change: (
-        instanceId: ProviderInstanceId,
-        configuration: Configuration,
-        credential: TransientProviderCredential,
-      ) => Promise<boolean>,
-    ) =>
-    async (
-      instanceId: ProviderInstanceId,
-      configuration: Configuration,
-      credential: TransientProviderCredential,
-    ): Promise<boolean> => {
-      const prior = endpoints.find((instance) => String(instance.id) === String(instanceId));
-      const keyEntered = credential.value.length > 0;
-      const saved = await change(instanceId, configuration, credential);
-      const moved = prior !== undefined && prior.configuration.baseUrl !== configuration.baseUrl;
-      setKeysRemoved((current) => {
-        const next = new Map(current);
-        if (moved && !(keyEntered && saved))
-          next.set(String(instanceId), prior.configuration.baseUrl);
-        else if (keyEntered && saved) next.delete(String(instanceId));
-        return next;
-      });
-      return saved;
+  // A keyed endpoint nothing has checked yet, as the host's credential store
+  // sees it: the host deletes the key when an address changes, and the check
+  // that would say so has not run. Read again after each change settles, so a
+  // key just added stops reading as missing, and after a remount.
+  const [missingKeys, setMissingKeys] = useState<ReadonlySet<string>>(new Set());
+  const { credentialManagementAvailable, onProviderCredentialStatus } = props;
+  const unchecked = endpoints.filter(
+    (instance) =>
+      instance.enabled &&
+      endpointTakesKey(instance) &&
+      signInOfferOf(instance) === undefined &&
+      props.observedByInstance.get(instance.id) === undefined,
+  );
+  const uncheckedIds = unchecked.map((instance) => String(instance.id)).join(" ");
+  const settled = !props.busy;
+  useEffect(() => {
+    if (!credentialManagementAvailable || !settled || uncheckedIds === "") return undefined;
+    let current = true;
+    for (const id of uncheckedIds.split(" ")) {
+      void onProviderCredentialStatus(decodeProviderInstanceId(id)).then(
+        (status) => {
+          if (!current) return;
+          setMissingKeys((known) => {
+            const next = new Set(known);
+            if (status === "missing") next.add(id);
+            else next.delete(id);
+            return next;
+          });
+        },
+        () => undefined,
+      );
+    }
+    return () => {
+      current = false;
     };
+  }, [credentialManagementAvailable, onProviderCredentialStatus, settled, uncheckedIds]);
   const { signIns, record } = useEndpointSignIns(signInTargets, props.onProviderOAuth);
   const presentation = props.presentationObservedByInstance ?? props.observedByInstance;
   const hiddenModels = props.defaults.hiddenModels ?? [];
@@ -142,12 +146,9 @@ export function ModelEndpointSettingsView(props: ModelEndpointSettingsViewProps)
     const failure = props.probeFailures?.get(instance.id);
     const checking =
       props.probingIds.has(instance.id) || props.updatingIds?.has(instance.id) === true;
-    const keyRemoved =
-      keysRemoved.has(String(instance.id)) &&
-      keysRemoved.get(String(instance.id)) !== instance.configuration.baseUrl;
     const status = endpointStatus({
       instance,
-      keyRemoved,
+      keyMissing: missingKeys.has(String(instance.id)),
       observed: props.observedByInstance.get(instance.id),
       checking,
       keysHere: props.credentialManagementAvailable,
@@ -308,15 +309,6 @@ export function ModelEndpointSettingsView(props: ModelEndpointSettingsViewProps)
           key={String(openInstance.id)}
           observed={described.observed}
           onBack={closeDetail}
-          onChangeAnthropicCompatibleConfiguration={keepsKeyAcross(
-            props.onChangeAnthropicCompatibleConfiguration,
-          )}
-          onChangeAzureFoundryConfiguration={keepsKeyAcross(
-            props.onChangeAzureFoundryConfiguration,
-          )}
-          onChangeOpenAiCompatibleConfiguration={keepsKeyAcross(
-            props.onChangeOpenAiCompatibleConfiguration,
-          )}
           onSignInState={(state) => {
             const prior = signIns.get(String(openInstance.id));
             record(String(openInstance.id), state);

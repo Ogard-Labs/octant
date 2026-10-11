@@ -1257,6 +1257,11 @@ describe("ProviderSettingsView", () => {
       await user.type(address, "{Backspace}");
       expect(within(page).queryByText(note)).toBeNull();
 
+      // The trailing slash is spelling only: the host keeps the key for it.
+      await user.type(address, "{Backspace}");
+      expect(within(page).queryByText(note)).toBeNull();
+      await user.type(address, "/");
+
       await user.clear(address);
       await user.type(address, "http://127.0.0.1:9/v1/");
       expect(within(page).getByText(note)).toBeVisible();
@@ -1273,29 +1278,23 @@ describe("ProviderSettingsView", () => {
 
       // The host saved the address and deleted the key with it; nothing has
       // been checked since, so the row says what is needed rather than "Not checked yet".
-      rerender(
-        <ModelEndpointSettingsView
-          {...props}
-          instances={[
-            {
-              ...instance,
-              configuration: { ...instance.configuration, baseUrl: "http://127.0.0.1:9/v1/" },
-              version: 2 as never,
-            } as ProviderInstance,
-          ]}
-        />,
-      );
+      vi.mocked(props.onProviderCredentialStatus).mockResolvedValue("missing");
+      const saved = [
+        {
+          ...instance,
+          configuration: { ...instance.configuration, baseUrl: "http://127.0.0.1:9/v1/" },
+          version: 2 as never,
+        } as ProviderInstance,
+      ];
+      rerender(<ModelEndpointSettingsView {...props} busy instances={saved} />);
+      rerender(<ModelEndpointSettingsView {...props} instances={saved} />);
       await user.click(screen.getByRole("button", { name: "Back to Octant Harness" }));
       expect(
         await screen.findByRole("link", {
           name: new RegExp(`^${instance.displayName}, needs key`),
         }),
       ).toBeVisible();
-      expect(
-        screen.getByText(
-          "The address changed, so its saved API key was removed. Add the key again.",
-        ),
-      ).toBeVisible();
+      expect(screen.getByText("No API key is saved for it.")).toBeVisible();
       expect(
         screen.getByRole("button", { name: `Add key for ${instance.displayName}` }),
       ).toBeVisible();
