@@ -185,8 +185,11 @@ Say so in Settings. Do not reintroduce a setup token.
 
 **Acceptance:**
 
-- A confined Plan turn and a Chat subagent on a subscription instance
-  sign in without `CLAUDE_CODE_OAUTH_TOKEN` in the launch environment.
+- A confined Plan turn on a subscription instance signs in without
+  `CLAUDE_CODE_OAUTH_TOKEN` in the launch environment. A Chat
+  subagent does the same only when Step 0 found a credential
+  directory that can be granted without the shared session tree;
+  otherwise confined Chat subscription launches are refused.
 - Octant never reads `.credentials.json` or a Keychain item.
 - A launch whose config directory is missing or unsigned-in refuses with
   a step the person can take (`claude auth login` in that directory, or
