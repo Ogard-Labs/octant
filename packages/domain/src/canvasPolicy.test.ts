@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   CANVAS_MAX_BLOCKS,
+  CANVAS_MAX_DASHBOARD_CELLS,
   CANVAS_MAX_CHART_CATEGORY_LABEL_LENGTH,
   CANVAS_MAX_FUNNEL_STAGES,
   CANVAS_MAX_RADAR_AXES,
@@ -44,6 +45,7 @@ import {
   onboardingFlowExample,
   searchSpecExample,
 } from "./canvasDesignExamples";
+import { opsDashboardExample, releaseHealthBoardExample } from "./canvasDashboardExamples";
 import { mathExamples } from "./canvasMathExamples";
 import { mockupExamples } from "./canvasMockupExamples";
 import {
@@ -995,7 +997,7 @@ describe("design frames", () => {
     ).not.toThrow();
   });
 
-  it("refuses a design document or theme inside a document declaring version 14", () => {
+  it("refuses a design document or theme inside a document declaring version 15", () => {
     // An older runtime must read these as a newer document, not draw an
     // article as a phone screen or a themed screen without its theme.
     for (const block of [
@@ -1007,8 +1009,8 @@ describe("design frames", () => {
         () =>
           validateCanvasDefinition({
             ...baseDefinition,
-            schemaVersion: 14,
-            blocks: [{ ...block, schemaVersion: 14 }],
+            schemaVersion: 15,
+            blocks: [{ ...block, schemaVersion: 15 }],
           }),
         "unsupported-schema-version",
       );
@@ -1016,8 +1018,8 @@ describe("design frames", () => {
     expect(() =>
       validateCanvasDefinition({
         ...baseDefinition,
-        schemaVersion: 14,
-        blocks: [{ ...onboardingFlowExample, schemaVersion: 14 }],
+        schemaVersion: 15,
+        blocks: [{ ...onboardingFlowExample, schemaVersion: 15 }],
       }),
     ).not.toThrow();
   });
@@ -1456,16 +1458,16 @@ describe("design frames", () => {
     ).toBe("accepted");
   });
 
-  it("refuses design assets inside a document declaring version 15", () => {
+  it("refuses design assets inside a document declaring version 16", () => {
     expectPolicyCode(
       () =>
         validateCanvasDefinition({
           ...baseDefinition,
-          schemaVersion: 15,
+          schemaVersion: 16,
           blocks: [
             {
               ...design([{ frameId: "home", html: '<img src="octant-asset:hero" alt="">' }]),
-              schemaVersion: 15,
+              schemaVersion: 16,
               assets: [
                 { assetId: "hero", source: { kind: "generated-image", imageId: ids.source } },
               ],
@@ -1477,7 +1479,7 @@ describe("design frames", () => {
     expect(() =>
       validateCanvasDefinition({
         ...baseDefinition,
-        schemaVersion: 15,
+        schemaVersion: 16,
         blocks: [{ ...design([{ frameId: "home", html: "<p>Hi</p>" }]), schemaVersion: 15 }],
       }),
     ).not.toThrow();
@@ -2719,6 +2721,118 @@ describe("funnel, radar, and sankey chart policy", () => {
           ...baseDefinition,
           schemaVersion: 13,
           blocks: [{ ...funnel([10, 5]), schemaVersion: 13 }],
+        }),
+      "unsupported-schema-version",
+    );
+  });
+});
+
+describe("dashboard policy", () => {
+  const tile = (blockId: string) => ({
+    blockId,
+    schemaVersion: CANVAS_SCHEMA_VERSION,
+    kind: "status",
+    label: blockId,
+    value: "Healthy",
+    tone: "success",
+  });
+  const dashboard = (cells: ReadonlyArray<unknown>, overrides: Record<string, unknown> = {}) => ({
+    blockId: "board",
+    schemaVersion: CANVAS_SCHEMA_VERSION,
+    kind: "dashboard",
+    title: "Board",
+    cells,
+    ...overrides,
+  });
+
+  it("accepts the ops dashboard and the release health board", () => {
+    expect(() => validateCanvasDefinition(withBlocks(opsDashboardExample))).not.toThrow();
+    expect(() => validateCanvasDefinition(withBlocks(releaseHealthBoardExample))).not.toThrow();
+    expect(() =>
+      validateCanvasDefinition(withBlocks([...opsDashboardExample, ...releaseHealthBoardExample])),
+    ).not.toThrow();
+  });
+
+  it("refuses a cell that names a block the document does not hold", () => {
+    expectPolicyCode(
+      () => validateCanvasDefinition(withBlocks([dashboard([{ blockId: "missing" }])])),
+      "dangling-dashboard-cell",
+    );
+  });
+
+  it("refuses a grid inside a grid and a block kind a dashboard does not place", () => {
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            dashboard([{ blockId: "inner" }]),
+            dashboard([{ blockId: "a" }], { blockId: "inner" }),
+            tile("a"),
+          ]),
+        ),
+      "dashboard-cell-kind-refused",
+    );
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([dashboard([{ blockId: "heading" }]), ...baseDefinition.blocks]),
+        ),
+      "dashboard-cell-kind-refused",
+    );
+  });
+
+  it("refuses a block placed twice, in one dashboard or across two", () => {
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([dashboard([{ blockId: "a" }, { blockId: "a" }]), tile("a")]),
+        ),
+      "duplicate-dashboard-cell",
+    );
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            dashboard([{ blockId: "a" }]),
+            dashboard([{ blockId: "a" }], { blockId: "board-2" }),
+            tile("a"),
+          ]),
+        ),
+      "duplicate-dashboard-cell",
+    );
+  });
+
+  it("refuses a span wider than the grid", () => {
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([dashboard([{ blockId: "a", span: 3 }], { columns: 2 }), tile("a")]),
+        ),
+      "dashboard-span-exceeds-columns",
+    );
+  });
+
+  it("names the cell budget when a dashboard places too many blocks", () => {
+    const tiles = Array.from({ length: CANVAS_MAX_DASHBOARD_CELLS + 1 }, (_value, index) =>
+      tile(`t${String(index)}`),
+    );
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([dashboard(tiles.map((block) => ({ blockId: block.blockId }))), ...tiles]),
+        ),
+      "dashboard-cells-budget-exceeded",
+    );
+  });
+
+  it("refuses a dashboard in a document that declares an earlier version", () => {
+    const older = (block: Record<string, unknown>) => ({ ...block, schemaVersion: 14 });
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition({
+          ...baseDefinition,
+          schemaVersion: 14,
+          blocks: [older(dashboard([{ blockId: "a" }])), older(tile("a"))],
         }),
       "unsupported-schema-version",
     );

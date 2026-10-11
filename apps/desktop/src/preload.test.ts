@@ -230,7 +230,7 @@ describe("desktop preload bridge", () => {
       "setAttentionBadge",
       "setAutomaticAppUpdateChecks",
       "setManagedToolAutomaticUpdates",
-      "setMenuBarTasks",
+      "setMenuBarOpenThread",
       "setProviderCredential",
       "setSidebarMaterialPreference",
       "setSidebarVibrancyMode",
@@ -780,14 +780,13 @@ describe("desktop preload bridge", () => {
       removeListener: vi.fn(),
     };
     const bridge = createHostBridge(ipc, projectWindowCapability);
-    const task = {
+    await bridge.setMenuBarOpenThread({ mode: "work", threadId: "thread-a" });
+    expect(ipc.invoke).toHaveBeenCalledWith(IPC_CHANNELS.menuBarOpenThread, {
+      mode: "work",
       threadId: "thread-a",
-      title: "Review plan",
-      mode: "work" as const,
-      activity: "attention" as const,
-    };
-    await bridge.setMenuBarTasks([task]);
-    expect(ipc.invoke).toHaveBeenCalledWith(IPC_CHANNELS.menuBarTasks, [task]);
+    });
+    await bridge.setMenuBarOpenThread(null);
+    expect(ipc.invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.menuBarOpenThread, null);
     const listener = vi.fn();
     const unsubscribe = bridge.subscribeMenuBarTask(listener);
     receive?.({}, { mode: "unknown", threadId: "a" });
@@ -795,7 +794,7 @@ describe("desktop preload bridge", () => {
     expect(listener).toHaveBeenCalledExactlyOnceWith({ mode: "work", threadId: "thread-a" });
     unsubscribe();
     expect(ipc.removeListener).toHaveBeenCalledWith(IPC_CHANNELS.menuBarTask, receive);
-    await expect(bridge.setMenuBarTasks(Array.from({ length: 19 }, () => task))).rejects.toThrow();
+    await expect(bridge.setMenuBarOpenThread({ mode: "work", threadId: "" })).rejects.toThrow();
   });
 
   it("forwards native Settings menu events without exposing IPC", () => {

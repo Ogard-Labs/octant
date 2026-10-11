@@ -1,7 +1,9 @@
 import type { CanvasDefinition } from "@octant/contracts/canvas";
 import { MessageSquare } from "lucide-react";
 import type { CanvasActionBlock } from "@octant/contracts/canvas-actions";
+import { canvasReadingOrder, type CanvasReadingItem } from "@octant/domain/canvas-dashboard-layout";
 import { CanvasBlockRenderer } from "./blocks/CanvasBlock";
+import { DashboardBlock } from "./blocks/DashboardBlock";
 import type { DiagramBoardLayoutRuntime } from "./blocks/DiagramBoard";
 import type { PlanTaskRuntime } from "./blocks/PlanBlock";
 import { OctantButton } from "../ui/base/OctantButton";
@@ -76,6 +78,7 @@ export function canvasBlockLabel(block: CanvasDefinition["blocks"][number]): str
     case "design":
       return block.title;
     case "plan":
+    case "dashboard":
       return block.title;
     case "callout":
       return block.title ?? "Callout";
@@ -101,6 +104,33 @@ export function CanvasDocument({
   );
   const content = definition.blocks.filter((block) => block.kind !== "action");
 
+  const blockSection = (block: CanvasDefinition["blocks"][number]) => (
+    <section key={block.blockId} className="canvas-block" data-block-kind={block.kind}>
+      <CanvasBlockRenderer
+        block={block}
+        {...(layoutRuntime === undefined ? {} : { layoutRuntime })}
+        {...(planRuntime === undefined ? {} : { planRuntime })}
+        {...(actionRuntime === undefined ? {} : { actionRuntime })}
+        {...(designAssetRuntime === undefined ? {} : { designAssetRuntime })}
+        {...(comments === undefined || block.kind !== "table"
+          ? {}
+          : {
+              rowComments: {
+                openCounts: comments.openRowCounts.get(String(block.blockId)) ?? NO_ROW_COMMENTS,
+                onOpen: (rowId: string) => comments.onOpen(String(block.blockId), rowId),
+              },
+            })}
+      />
+      {comments === undefined ? null : (
+        <CommentMarker
+          count={comments.openCounts.get(String(block.blockId)) ?? 0}
+          label={canvasBlockLabel(block)}
+          onOpen={() => comments.onOpen(String(block.blockId))}
+        />
+      )}
+    </section>
+  );
+
   return (
     <article
       className={placement === "thread" ? "canvas-view canvas-view--thread" : "canvas-view"}
@@ -112,37 +142,38 @@ export function CanvasDocument({
         </header>
       )}
       <div className="canvas-view__body">
-        {runsOfMetrics(content).map((run) => {
-          const sections = run.map((block) => (
-            <section key={block.blockId} className="canvas-block" data-block-kind={block.kind}>
-              <CanvasBlockRenderer
-                block={block}
-                {...(layoutRuntime === undefined ? {} : { layoutRuntime })}
-                {...(planRuntime === undefined ? {} : { planRuntime })}
-                {...(actionRuntime === undefined ? {} : { actionRuntime })}
-                {...(designAssetRuntime === undefined ? {} : { designAssetRuntime })}
-                {...(comments === undefined || block.kind !== "table"
-                  ? {}
-                  : {
-                      rowComments: {
-                        openCounts:
-                          comments.openRowCounts.get(String(block.blockId)) ?? NO_ROW_COMMENTS,
-                        onOpen: (rowId: string) => comments.onOpen(String(block.blockId), rowId),
-                      },
-                    })}
-              />
-              {comments === undefined ? null : (
-                <CommentMarker
-                  count={comments.openCounts.get(String(block.blockId)) ?? 0}
-                  label={canvasBlockLabel(block)}
-                  onOpen={() => comments.onOpen(String(block.blockId))}
-                />
-              )}
-            </section>
-          ));
+        {runsOfMetrics(canvasReadingOrder(content)).map((run) => {
           const first = run[0];
-          return first?.kind === "metric" ? (
-            <div className="canvas-metrics" key={`metrics-${first.blockId}`}>
+          if (first?.kind === "dashboard") {
+            return (
+              <section
+                key={first.dashboard.blockId}
+                className="canvas-block"
+                data-block-kind="dashboard"
+              >
+                <DashboardBlock
+                  title={first.dashboard.title}
+                  columns={first.columns}
+                  cells={first.cells}
+                  cellKey={(block) => String(block.blockId)}
+                  cellKind={(block) => block.kind}
+                  renderCell={(block) => blockSection(block)}
+                />
+                {comments === undefined ? null : (
+                  <CommentMarker
+                    count={comments.openCounts.get(String(first.dashboard.blockId)) ?? 0}
+                    label={canvasBlockLabel(first.dashboard)}
+                    onOpen={() => comments.onOpen(String(first.dashboard.blockId))}
+                  />
+                )}
+              </section>
+            );
+          }
+          const sections = run.map((item) =>
+            item.kind === "block" ? blockSection(item.block) : null,
+          );
+          return first?.kind === "block" && first.block.kind === "metric" ? (
+            <div className="canvas-metrics" key={`metrics-${first.block.blockId}`}>
               {sections}
             </div>
           ) : (
@@ -162,18 +193,22 @@ export function CanvasDocument({
   );
 }
 
+type ReadingItem = CanvasReadingItem<CanvasDefinition["blocks"][number]>;
+
 /**
- * The document's blocks in order, with each run of consecutive metrics
+ * The document in reading order, with each run of consecutive metrics
  * gathered so they sit side by side as tiles instead of one number per line.
+ * A dashboard is its own run; the metrics it places are tiles in its grid.
  */
 function runsOfMetrics(
-  blocks: ReadonlyArray<CanvasDefinition["blocks"][number]>,
-): ReadonlyArray<ReadonlyArray<CanvasDefinition["blocks"][number]>> {
-  const runs: Array<Array<CanvasDefinition["blocks"][number]>> = [];
-  for (const block of blocks) {
-    const last = runs.at(-1);
-    if (block.kind === "metric" && last?.[0]?.kind === "metric") last.push(block);
-    else runs.push([block]);
+  items: ReadonlyArray<ReadingItem>,
+): ReadonlyArray<ReadonlyArray<ReadingItem>> {
+  const runs: Array<Array<ReadingItem>> = [];
+  for (const item of items) {
+    const last = runs.at(-1)?.[0];
+    const isMetric = item.kind === "block" && item.block.kind === "metric";
+    if (isMetric && last?.kind === "block" && last.block.kind === "metric") runs.at(-1)?.push(item);
+    else runs.push([item]);
   }
   return runs;
 }
