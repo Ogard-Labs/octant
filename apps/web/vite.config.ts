@@ -8,10 +8,10 @@ import { keepFontsAsFiles } from "./vite.fonts";
 const rootDir = path.dirname(fileURLToPath(import.meta.url));
 
 // OCTANT_TEST_ASYNC_STRESS=1 makes tests that read async-rendered state too
-// early fail far more often; see src/testAsyncStress.ts. Diagnostic only.
+// early fail far more often; see src/asyncStress.test-support.ts. Diagnostic only.
 const domSetupFiles =
   process.env.OCTANT_TEST_ASYNC_STRESS === "1"
-    ? ["./src/testSetup.ts", "./src/testAsyncStress.ts"]
+    ? ["./src/testSetup.ts", "./src/asyncStress.test-support.ts"]
     : ["./src/testSetup.ts"];
 
 const domTestFilesWithoutJsx = [
