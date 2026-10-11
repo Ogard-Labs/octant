@@ -262,7 +262,11 @@ into the owner-only runtime directory. Electron windows and every CLI command
 `/api/desktop/*` routes. A browser gets a session only through a one-time
 launch token: the launcher (`octant web`, `octant web --dev`, or the desktop's
 "Open in browser" action) mints it through `/api/desktop/launch-sessions` with
-the bridge secret and opens a URL carrying it in the fragment. The token is
+the bridge secret and opens a URL carrying it in the fragment. `octant web`
+sends the secret only to the host that this OS user's owner-only host receipt
+names (same address and instance), never to an endpoint that merely answers
+`/health`, because another OS user can bind the port while the real host is
+stopped. The token is
 single-use, expires after five minutes, and is bound to the renderer origin it
 was minted for, which must be one this listener serves (below). The renderer
 strips it from the address bar with a history replace before it exchanges it at

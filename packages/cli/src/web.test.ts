@@ -1,7 +1,7 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { describe, expect, it, vi } from "vitest";
+import { dirname, join } from "node:path";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import {
   resolveWebRoot,
   runWebCommand,
@@ -9,6 +9,7 @@ import {
   type WebCommandOutput,
 } from "./web";
 import type { HostLauncherDependencies } from "./hostLauncher";
+import { resolveHostInfoFilePath, type BridgeSecretFileInput } from "./bridgeSecretFile";
 
 it("resolves the Vite root as a filesystem path", () => {
   expect(resolveWebRoot()).not.toMatch(/^file:/);
@@ -17,6 +18,28 @@ it("resolves the Vite root as a filesystem path", () => {
 
 const bridgeSecret = `${"S".repeat(42)}A`;
 const launchToken = `${"T".repeat(42)}A`;
+
+/** The owner-only receipt a host writes when it starts; the CLI sends its secret only there. */
+async function writeOwnerReceipt(directory: string, url: string, instanceId = "instance-1") {
+  await writeFile(join(directory, "octant-host.json"), JSON.stringify({ url, instanceId }), {
+    mode: 0o600,
+  });
+}
+
+// The default input names no OCTANT_DATA_DIR, so development mode keeps the
+// canonical Machine store; the receipt sits where that store's runtime reads it.
+let ownerDirectory = "";
+let ownerInput: BridgeSecretFileInput = { env: {}, platform: "linux", home: "/home/user" };
+beforeAll(async () => {
+  ownerDirectory = await mkdtemp(join(tmpdir(), "octant-web-owner-"));
+  ownerInput = { env: { XDG_DATA_HOME: ownerDirectory }, platform: "linux", home: "/home/user" };
+  const receiptPath = resolveHostInfoFilePath(ownerInput);
+  await mkdir(dirname(receiptPath), { recursive: true, mode: 0o700 });
+  await writeOwnerReceipt(dirname(receiptPath), "http://127.0.0.1:13773");
+});
+afterAll(async () => {
+  await rm(ownerDirectory, { recursive: true, force: true });
+});
 
 /** A host that admits the renderer and mints a launch token for the bridge secret. */
 function hostFetch(hostBridgeSecret = bridgeSecret) {
@@ -50,6 +73,7 @@ function baseOptions(overrides: Partial<WebCommandOptions> = {}): WebCommandOpti
     startDevServer: vi.fn(async () => "http://127.0.0.1:5173"),
     stdout: { write: vi.fn((chunk: string) => chunk.length > 0) },
     stderr: { write: vi.fn((chunk: string) => chunk.length > 0) },
+    bridgeSecretInput: ownerInput,
     ...overrides,
   } as unknown as WebCommandOptions;
 }
@@ -130,6 +154,33 @@ describe("runWebCommand", () => {
     expect(stdout.write).toHaveBeenCalledWith(
       `Octant web client ready at http://127.0.0.1:13773/?serverUrl=http%3A%2F%2F127.0.0.1%3A13773%2F#launchToken=${launchToken}\n`,
     );
+  });
+
+  it.each([
+    ["answers on a port the receipt does not name", "http://127.0.0.1:13999", "instance-1"],
+    ["claims a different instance than the receipt", "http://127.0.0.1:13773", "impostor"],
+  ])("never sends the bridge secret to a host that %s", async (_, hostUrl, instanceId) => {
+    const fetch = hostFetch();
+    const openBrowser = vi.fn();
+    const stderr = { write: vi.fn((chunk: string) => chunk.length > 0) };
+    const result = await runWebCommand(
+      baseOptions({
+        fetch,
+        openBrowser,
+        stderr,
+        attachOrCreateHost: vi.fn(async () => ({
+          kind: "attached" as const,
+          url: new URL(hostUrl),
+          instanceId,
+        })),
+      }),
+    );
+    expect(result.kind).toBe("auth-failed");
+    expect(openBrowser).not.toHaveBeenCalled();
+    expect(fetch.mock.calls.some(([url]) => url.pathname === "/api/desktop/launch-sessions")).toBe(
+      false,
+    );
+    expect(stderr.write).toHaveBeenCalledWith(expect.stringContaining("host receipt"));
   });
 
   it("opens no browser when the host refuses to mint a launch token for this bridge secret", async () => {
@@ -255,6 +306,7 @@ describe("runWebCommand", () => {
     const directory = await mkdtemp(join(tmpdir(), "octant-web-secret-"));
     try {
       await writeFile(join(directory, "octant-bridge-secret"), bridgeSecret);
+      await writeOwnerReceipt(directory, "http://127.0.0.1:13773");
       const result = await runWebCommand(
         baseOptions({
           bridgeSecret: undefined,
@@ -274,13 +326,17 @@ describe("runWebCommand", () => {
   });
 
   it("uses the stable endpoint instead of restarting on a stale receipt port", async () => {
-    const attachOrCreateHost = vi.fn(async () => ({
-      kind: "started" as const,
-      url: new URL("http://127.0.0.1:13773"),
-      instanceId: "instance-1",
-      version: "0.0.0-dev",
-    }));
     const directory = await mkdtemp(join(tmpdir(), "octant-web-host-"));
+    const attachOrCreateHost = vi.fn(async () => {
+      // The host this command starts rewrites the stale receipt.
+      await writeOwnerReceipt(directory, "http://127.0.0.1:13773");
+      return {
+        kind: "started" as const,
+        url: new URL("http://127.0.0.1:13773"),
+        instanceId: "instance-1",
+        version: "0.0.0-dev",
+      };
+    });
     try {
       await writeFile(
         join(directory, "octant-host.json"),
@@ -314,6 +370,7 @@ describe("runWebCommand", () => {
     const directory = await mkdtemp(join(tmpdir(), "octant-web-explicit-port-"));
     const attachOrCreateHost = vi.fn(async (options: HostLauncherDependencies) => {
       expect(options.resolveAttachedHost).toBeUndefined();
+      await writeOwnerReceipt(directory, "http://127.0.0.1:14000");
       return {
         kind: "started" as const,
         url: new URL("http://127.0.0.1:14000"),
@@ -337,7 +394,10 @@ describe("runWebCommand", () => {
         }),
       );
 
-      expect(result).toMatchObject({ kind: "opened", url: new URL("http://127.0.0.1:14000/") });
+      expect(result.kind).toBe("opened");
+      expect(result.kind === "opened" ? result.url.origin : undefined).toBe(
+        "http://127.0.0.1:14000",
+      );
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
@@ -357,11 +417,7 @@ describe("runWebCommand", () => {
         attachOrCreateHost,
         fetch: hostFetch(generatedSecret),
         generateBridgeSecret: () => generatedSecret,
-        bridgeSecretInput: {
-          env: {},
-          platform: "darwin",
-          home: "/nonexistent-home",
-        },
+        bridgeSecretInput: ownerInput,
       }),
     );
     expect(result.kind).toBe("opened");
@@ -380,6 +436,7 @@ describe("runWebCommand", () => {
     }));
     try {
       await writeFile(join(directory, "octant-bridge-secret"), staleSecret, { mode: 0o600 });
+      await writeOwnerReceipt(directory, "http://127.0.0.1:13773");
       const result = await runWebCommand(
         baseOptions({
           bridgeSecret: explicitSecret,

@@ -129,9 +129,9 @@ export async function runWebCommand(options: WebCommandOptions): Promise<WebComm
     const devUrl = await startDevServer({ hostname: devHostname, port: devPort });
     const devUrlObject = new URL(devUrl);
     const launchUrl = await mintLaunchUrl(host.url, devUrlObject);
-    if (launchUrl === undefined) {
-      stderr.write(`${LAUNCH_REFUSED_REASON}\n`);
-      return { kind: "auth-failed", reason: LAUNCH_REFUSED_REASON };
+    if (typeof launchUrl === "string") {
+      stderr.write(`${launchUrl}\n`);
+      return { kind: "auth-failed", reason: launchUrl };
     }
     if (!options.noOpen) {
       await openBrowserSafely(options.openBrowser ?? defaultOpenBrowser, launchUrl, stdout);
@@ -152,9 +152,9 @@ export async function runWebCommand(options: WebCommandOptions): Promise<WebComm
   }
 
   const launchUrl = await mintLaunchUrl(host.url);
-  if (launchUrl === undefined) {
-    stderr.write(`${LAUNCH_REFUSED_REASON}\n`);
-    return { kind: "auth-failed", reason: LAUNCH_REFUSED_REASON };
+  if (typeof launchUrl === "string") {
+    stderr.write(`${launchUrl}\n`);
+    return { kind: "auth-failed", reason: launchUrl };
   }
   if (options.noOpen) {
     // The one-time link is the only way in, so it is printed here. It works
@@ -171,7 +171,22 @@ export async function runWebCommand(options: WebCommandOptions): Promise<WebComm
    * the bridge secret, which this OS user read from the owner-only runtime
    * directory. The token is bound to the renderer origin the browser opens.
    */
-  async function mintLaunchUrl(serverUrl: URL, rendererUrl?: URL): Promise<URL | undefined> {
+  async function mintLaunchUrl(serverUrl: URL, rendererUrl?: URL): Promise<URL | string> {
+    // The bridge secret goes only to the host this OS user's owner-only
+    // receipt names. A health probe proves nothing: while the real host is
+    // stopped, another OS user can bind its port and answer `/health`, and
+    // `--hostname` can name any server at all.
+    const owned = await readHostInfoFile(bridgeSecretInput);
+    if (
+      owned === undefined ||
+      new URL(owned.url).origin !== serverUrl.origin ||
+      (host.kind !== "disabled" &&
+        host.kind !== "start-failed" &&
+        host.instanceId !== undefined &&
+        owned.instanceId !== host.instanceId)
+    ) {
+      return `Octant did not send its bridge secret to ${serverUrl.toString()}: this OS user's host receipt does not name that host. Start the host as this user from the Octant desktop application or \`octant server\`, then run this command again.`;
+    }
     // A host that won a start race owns a different secret than the one this
     // command generated; its owner projected that secret into the runtime
     // directory, so it is read again once the host is known.
@@ -187,7 +202,7 @@ export async function runWebCommand(options: WebCommandOptions): Promise<WebComm
       origin: (rendererUrl ?? serverUrl).origin,
       ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
     });
-    if (receipt === undefined) return undefined;
+    if (receipt === undefined) return LAUNCH_REFUSED_REASON;
     return buildWebClientUrl({
       serverUrl,
       launchToken: receipt.launchToken,
