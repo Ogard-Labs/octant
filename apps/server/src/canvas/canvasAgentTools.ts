@@ -42,7 +42,6 @@ import {
   mathExamples,
   metricExamples,
   dashboardExamples,
-  CANVAS_INLINE_MAX_BLOCKS,
   canvasInlineRefusal,
   effectiveCanvasPresentation,
 } from "@octant/domain";
@@ -139,7 +138,8 @@ const canvasDefinitionSchema = {
     presentation: {
       type: "string",
       enum: ["inline", "sidebar"],
-      description: `For create and revise: inline draws a small Canvas (at most ${String(CANVAS_INLINE_MAX_BLOCKS)} blocks, no diagram board, plan, mockup, or design) inside the conversation; sidebar, the default, shows a card that opens it beside the thread. Revise keeps the current choice when omitted.`,
+      description:
+        "For create and revise: inline draws the Canvas inside the conversation (any number of reading blocks; no diagram board, plan, mockup, or design); sidebar, the default, shows a card that opens it beside the thread. Revise keeps the current choice when omitted.",
     },
   },
   required: ["operation"],
@@ -476,7 +476,7 @@ function toolDescription(
     "Operations: describe, list, read, create, revise, preview. Before you author, call describe: with no block kinds it lists every kind, when to use the structured ones, the document recipes to start from, and a create example; with up to three blockKinds it returns their exact schemas, plus authoring guidance and examples for the kinds that have them. Start from a document recipe before inventing a shape.",
     "Author the content in blocks, not in prompt. Use structured blocks rather than HTML, JavaScript, CSS, or Mermaid; only a design block's frames are HTML and CSS, and they run no script and load nothing. Text renders as plain text, not Markdown: give each section its own heading block (the Canvas title is already shown, so do not repeat it), and use key-value, table, status, or callout blocks instead of Markdown lists, bold, or code spans.",
     "A Canvas is a document: it grants no file, shell, Git, or network access. Creation adds a card to this thread and offers the Canvas in the thread's dock the first time it appears; the user can also select Open Canvas. Do not claim the user has read it or invent a download URL.",
-    `Choose where the thread shows it. Use presentation inline for one small visual that answers the question, such as a chart, a few metrics, a short table, or a sequence or state diagram; it is drawn in the conversation just below your reply to this turn, so refer to it as below, and the user can still open it in the sidebar. Leave presentation out (sidebar) for reports, plans, boards, mockups, designs, and anything the user will keep working on. Inline holds at most ${String(CANVAS_INLINE_MAX_BLOCKS)} blocks; when the host shows a card instead, the result says so in presentationNote.`,
+    "Choose where the thread shows it. Use presentation inline for a visual or a reading document that answers the question in place, such as a chart, a few metrics, a short table, a sequence or state diagram, or an article or brief made of reading blocks; it is drawn in the conversation just below your reply to this turn, so refer to it as below. A long one starts as a faded teaser the user can expand in place, and the user can still open it in the sidebar. Leave presentation out (sidebar) for plans, boards, mockups, designs, and anything the user will keep working on. Inline never holds a diagram board, plan, mockup, or design; when the host shows a card instead, the result says so in presentationNote.",
     "Revise with the canvasId, the last observed expectedSequence, and the complete replacement blocks; people edit Canvases too, so read before revising and keep their changes. Reference blocks require source ids already in the Canvas source manifest; create attaches no sources. Never invent file or artifact references.",
     "Preview once after you create or revise a chart, treemap, or inline Canvas, fix what its warnings or picture show with a revise, then reply. Look once per change: previewing an unchanged document only spends the host's browser and your context.",
   ].join(" ");
