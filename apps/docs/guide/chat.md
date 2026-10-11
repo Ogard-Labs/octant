@@ -159,7 +159,9 @@ when the pointer leaves. Keyboard focus can still reveal the action buttons.
 Chat and Code offer Copy and Fork below the reply; Chat also offers Regenerate.
 Fork creates a new thread with history through the selected response and leaves
 the original unchanged; a Code fork also gets its own worktree and branch with
-the files as they were at that response. Failures, interruptions, and requests for
+the files as they were at that response. A Chat thread on a provider that keeps
+the conversation in its own session (such as a CLI agent) cannot be forked:
+Octant says so instead of creating a thread that could not continue. Failures, interruptions, and requests for
 input remain visible. Chat, Work, and Code share this history treatment and fold
 inline reasoning into an expandable Thinking disclosure. Code also keeps its
 provider-reported reasoning channel in the turn’s existing disclosure.
