@@ -141,10 +141,12 @@ Whether a confined launch that can read that directory, and cannot run
   also re-enables release-note, PR/MR badge, and availability checks;
   those stay allowed as Claude's own traffic. Process ownership stays
   off: auto-update, marketplace autoinstall, built-in agents, auto
-  memory, feature-flag evaluation (`DISABLE_GROWTHBOOK`), Remote
-  Control, advisor, artifact access, account plugin/skill sync, and
-  background plugin `command` runs. Use a dedicated documented switch
-  for each of those. If background plugin `command` runs have no
+  memory, Remote Control, advisor, artifact access, account
+  plugin/skill sync, and background plugin `command` runs. Use a
+  dedicated documented switch for each of those. `DISABLE_GROWTHBOOK`
+  only stops feature-flag fetching; it is not the off switch for
+  Remote Control or the other flag-dependent capabilities. If
+  background plugin `command` runs have no
   dedicated switch on the verified build, keep
   `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` until one exists; do not
   drop the umbrella only to re-enable telemetry. API-key launches may

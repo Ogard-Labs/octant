@@ -165,7 +165,12 @@ thread, confined or not. A later Plan or ordinary turn has to find
 the same session files; mixing the per-thread root with the account
 root makes the saved cursor `stale-resume`. Do not use a throwaway
 per-launch config directory: resume has to find the same session
-files after a restart. Threads that already started under the helper-
+files after a restart. Resume lookup must use that same per-thread
+root. `findSession` today calls `listSessions` against the project
+directory and the server's default Claude store unless it receives
+the launch session root. Pass that root into the lookup without
+mutating process-global environment: threads can resume concurrently.
+Cover restart resume for subscription and API-key roots. Threads that already started under the helper-
 token path still have their history in the account config tree. Do
 not relocate those threads into an empty per-thread directory: that
 makes the saved cursor `stale-resume`. Unconfined later launches may
@@ -204,6 +209,7 @@ not reintroduce a setup token.
 - `apps/server/src/providers/claudeProcess.ts`
   (`claudeRuntimeStateDirectories`, `allowProviderCredentialLookup`)
 - `apps/server/src/providers/claudeDriver.ts`
+- `apps/server/src/providers/claudeAgentSdkPort.ts` (`findSession`)
 - `apps/server/src/process/seatbeltProfile.ts` and the Linux builder
 - Settings copy that today asks the person to Connect Claude for helpers
 - `docs/architecture.md` (0145 / confined Claude launch)
@@ -227,6 +233,9 @@ not reintroduce a setup token.
   durable per-thread session directory, and the launch does not
   receive another Project's session files. If it is not, confined
   subscription launches are refused.
+- Resume after restart looks up that per-thread session root for
+  subscription and API-key threads. The lookup receives the root
+  without mutating process-global Claude directory variables.
 
 ## Step 3 — Telemetry on subscription launches
 
@@ -249,11 +258,16 @@ checks, PR/MR badge checks, and availability checks.
 
 Keep off with dedicated documented switches, not the umbrella:
 `DISABLE_AUTOUPDATER`, `CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL`,
-`CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS`, `CLAUDE_CODE_DISABLE_AUTO_MEMORY`,
-and `DISABLE_GROWTHBOOK=1`. The GrowthBook switch is process ownership:
-it keeps Remote Control, advisor, artifact access, and account
-plugin/skill sync off. Octant sets it; a host disable-only value of
-`1` is already that setting. Do not pass through any other value.
+`CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS`, and
+`CLAUDE_CODE_DISABLE_AUTO_MEMORY`. `DISABLE_GROWTHBOOK=1` only stops
+feature-flag fetching. Anthropic says flags then use their code
+defaults, so that switch does not keep Remote Control, advisor,
+artifact access, or account plugin/skill sync off if a verified
+build defaults those on. Require a dedicated disable switch for
+each of those capabilities, or refuse the build when Step 0 cannot
+independently disable them. Octant still sets `DISABLE_GROWTHBOOK=1`
+so flags stay at code defaults; a host disable-only value of `1` is
+already that setting. Do not pass through any other value.
 
 Background plugin `command` runs stay off. If the verified Claude
 build documents a dedicated disable switch, set it. If the umbrella
@@ -287,9 +301,11 @@ API-key launches may keep the 0005 telemetry guards.
 - A subscription launch's environment does not contain
   `DISABLE_TELEMETRY` or `DISABLE_ERROR_REPORTING` unless the host
   already set a disable-only value.
-- A subscription launch sets `DISABLE_GROWTHBOOK=1` and the other
-  process-ownership switches, including a dedicated background-plugin
-  `command` guard when the verified build documents one.
+- A subscription launch sets `DISABLE_GROWTHBOOK=1` and a dedicated
+  documented off switch for Remote Control, advisor, artifact access,
+  account plugin/skill sync, and background plugin `command` runs. If
+  Step 0 cannot independently disable one of those on the verified
+  build, that build is refused or the umbrella stays.
 - `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` is absent on a
   subscription launch only when those dedicated guards cover every
   non-telemetry channel the umbrella blocked; otherwise it stays.
