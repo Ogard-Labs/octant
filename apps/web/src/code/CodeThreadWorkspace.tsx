@@ -263,10 +263,17 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   // an acknowledged message leaves the composer, so an async mention lookup cannot
   // erase a newer draft typed while that lookup is pending.
   const draftRevisionRef = useRef(0);
+  const runtimeCarriesTools = pickerGroupCarriesAppManagedTools(
+    props.providerGroups ?? [],
+    view === undefined
+      ? undefined
+      : { providerInstanceId: view.thread.providerInstanceId, modelId: view.thread.modelId },
+  );
   const computer = useComputerUseMention({
     textarea: () => textareaRef.current,
     draft,
     scopeKey: String(props.threadId),
+    providerCarriesTools: runtimeCarriesTools,
     onDraftChange: (next) => {
       draftRevisionRef.current += 1;
       setDraft(next);
@@ -283,6 +290,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   const extensionDraft = useExtensionDraftSelections({
     ...(props.extensionClient === undefined ? {} : { client: props.extensionClient }),
     mode: "code",
+    providerCarriesTools: runtimeCarriesTools,
     projectId: view?.thread.projectId ?? null,
     threadId: view === undefined ? props.threadId : view.thread.id,
     ...(providerFamily === undefined ? {} : { providerFamily }),
@@ -296,17 +304,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
       props.controller.setPendingDraft?.(next);
     },
     scopeKey: String(props.threadId),
-    available:
-      props.browserAvailable === true &&
-      pickerGroupCarriesAppManagedTools(
-        props.providerGroups ?? [],
-        view === undefined
-          ? undefined
-          : {
-              providerInstanceId: view.thread.providerInstanceId,
-              modelId: view.thread.modelId,
-            },
-      ),
+    available: props.browserAvailable === true && runtimeCarriesTools,
     onChoose: () => void extensionDraft.resolveReference("@browser"),
     onSelectionEdited: () => {
       draftRevisionRef.current += 1;

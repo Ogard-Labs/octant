@@ -2276,7 +2276,10 @@ describe("provider registry contracts", () => {
       }),
     ).toThrow();
     expect(() =>
-      decodeProviderObservedState({ ...observed, integration: { ...integration, resume: "maybe" } }),
+      decodeProviderObservedState({
+        ...observed,
+        integration: { ...integration, resume: "maybe" },
+      }),
     ).toThrow();
   });
 });

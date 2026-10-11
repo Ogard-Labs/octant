@@ -44,7 +44,10 @@ describe("provider runtime integration", () => {
   });
 
   it("says a runtime that did not confirm its transport has no Octant tools, with the reason", () => {
-    const refused = { ...ready, capabilities: { ...capabilities, appManagedTools: "unsupported" } };
+    const refused = {
+      ...ready,
+      capabilities: { ...capabilities, appManagedTools: "unsupported" },
+    } as const;
     expect(describeProviderRuntimeIntegration("opencode", refused)?.tools).toEqual({
       status: "unavailable",
       transport: "session-mcp-bridge",

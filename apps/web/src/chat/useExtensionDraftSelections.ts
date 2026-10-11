@@ -34,8 +34,16 @@ export function useExtensionDraftSelections(options: {
   readonly mode?: OctantMode;
   readonly projectId?: string | null;
   readonly threadId?: string | null;
+  /**
+   * Whether the thread's runtime carries Octant's tools, from its reported
+   * capabilities. Browser and Computer reach the agent only as Octant tools,
+   * so a typed reference on a runtime without them is blocked rather than
+   * selected for a send the host would refuse.
+   */
+  readonly providerCarriesTools?: boolean;
 }) {
   const computerEnabled = useComputerUseEnabled();
+  const providerCarriesTools = options.providerCarriesTools !== false;
   const mode = options.mode ?? "chat";
   const projectId = options.thread?.projectId ?? options.projectId ?? null;
   const threadId = options.thread?.id ?? options.threadId ?? null;
@@ -97,6 +105,16 @@ export function useExtensionDraftSelections(options: {
       ) => {
         if (isCurrent()) updateReceipts((current) => (isCurrent() ? update(current) : current));
       };
+      if (
+        !providerCarriesTools &&
+        (reference.toLowerCase() === "@computer" || reference.toLowerCase() === "@browser")
+      ) {
+        const label = reference.toLowerCase() === "@computer" ? "@Computer" : "@Browser";
+        commit((current) =>
+          upsertReceipt(current, blockedReceipt(label, "no Octant tools on this runtime")),
+        );
+        return true;
+      }
       if (reference.toLowerCase() === "@computer") {
         if (!computerEnabled) {
           commit((current) =>
@@ -200,6 +218,7 @@ export function useExtensionDraftSelections(options: {
     [
       computerEnabled,
       mode,
+      providerCarriesTools,
       options.client,
       options.providerFamily,
       projectId,
