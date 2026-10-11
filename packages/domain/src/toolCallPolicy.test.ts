@@ -379,6 +379,36 @@ describe("resolveToolCall fail-closed order", () => {
     }
   });
 
+  it("7a. web-search refuses a data-bearing query on a tainted thread under every posture, without asking", () => {
+    const search = (
+      query: string,
+      externalContentIngested: boolean,
+      executionPolicy: "approval-gated" | "full-access",
+    ) =>
+      resolveToolCall(
+        baseInput({
+          capability: decodeToolActionCapability({ id: "harness-web-search", version: 1 }),
+          arguments: { query },
+          thread: {
+            executionPolicy,
+            approvalSatisfied: executionPolicy === "full-access",
+            externalContentIngested,
+          },
+        }),
+      );
+    for (const posture of ["approval-gated", "full-access"] as const) {
+      expect(search("forecast https://attacker.example/?k=secret", true, posture)).toMatchObject({
+        kind: "deny",
+        step: "thread-elevation",
+        reason: "search-query-refused-under-taint: contains a URL",
+      });
+      expect(search("how do I configure bun workspaces", true, posture).kind).toBe("allow");
+      expect(search("forecast https://attacker.example/?k=secret", false, posture).kind).toBe(
+        "allow",
+      );
+    }
+  });
+
   it("7b. auto-accept edits waives only project file writes", () => {
     const validation = (executionPolicy: "approval-gated" | "auto-accept-edits") =>
       resolveToolCall(

@@ -6,6 +6,7 @@ import {
 } from "@octant/contracts/canvas";
 import { describe, expect, it } from "vitest";
 import {
+  chartExampleBlocks,
   notificationStatesExampleBlock,
   releaseMindmapBlock,
   settingsScreenExampleBlock,
@@ -16,6 +17,15 @@ import { renderArtifactSidecarSvg, renderArtifactThumbnail } from "./artifactRen
 function definition(blocks: ReadonlyArray<CanvasBlock>, title = "Launch plan") {
   return { title, blocks };
 }
+
+function exampleChart(chartType: string) {
+  const block = chartExampleBlocks.find((candidate) => candidate.chartType === chartType);
+  if (block === undefined) throw new Error(`${chartType} example is missing.`);
+  return block;
+}
+const signupFunnelBlock = exampleChart("funnel");
+const serviceProfileRadarBlock = exampleChart("radar");
+const trafficSankeyBlock = exampleChart("sankey");
 
 const chart = {
   blockId: "chart-1",
@@ -199,6 +209,30 @@ describe("drawing a preview of an artifact", () => {
     expect(donutMarkup).toContain("<circle");
     expect(donutMarkup).not.toBe(pieMarkup);
     expect(pieMarkup).not.toBe(barMarkup);
+  });
+
+  it("draws a funnel as narrowing centred stages, a radar as outlines on a rim, and a sankey as bands", () => {
+    const funnelMarkup = renderArtifactThumbnail(definition([signupFunnelBlock], "Signups"));
+    const radarMarkup = renderArtifactThumbnail(definition([serviceProfileRadarBlock], "Services"));
+    const sankeyMarkup = renderArtifactThumbnail(definition([trafficSankeyBlock], "Traffic"));
+
+    // The four stages draw as centred columns, each no wider than the one above.
+    const widths = [
+      ...funnelMarkup.matchAll(/<rect x="\d+" y="\d+" width="(\d+)" height="\d+" rx=/g),
+    ]
+      .map((match) => Number(match[1]))
+      .slice(-4);
+    expect(widths).toHaveLength(4);
+    for (let index = 1; index < widths.length; index += 1) {
+      expect(widths[index]).toBeLessThanOrEqual(widths[index - 1] ?? 0);
+    }
+    // One rim plus one outline per series.
+    expect(radarMarkup.match(/<polygon/g)).toHaveLength(3);
+    // A band per flow from the shared layout, and a column per node.
+    expect(sankeyMarkup.match(/<path d="M/g)).toHaveLength(trafficSankeyBlock.links?.length ?? 0);
+    for (const markup of [funnelMarkup, radarMarkup, sankeyMarkup]) {
+      expect(markup).not.toContain("<script");
+    }
   });
 
   it("draws a bar and line chart with columns and a polyline", () => {

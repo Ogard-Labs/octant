@@ -6,7 +6,8 @@ import type { DeviceProblem } from "./deviceModel";
 
 /**
  * The one line under the toolbar. At most one shows at a time, in this order:
- * an error, the input approval, typing, then a notice. Each is one sentence
+ * an error, a notice that the live view is off, the input approval, typing,
+ * then any other notice. Each is one sentence
  * with at most one action, plus a way to put it away where that makes sense.
  */
 export type DeviceLineContent =

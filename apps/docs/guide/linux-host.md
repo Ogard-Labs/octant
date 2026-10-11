@@ -64,10 +64,8 @@ work on SIGINT or SIGTERM.
 `octant server install --artifact <directory>` installs an unpacked headless
 artifact built by `bun scripts/package-headless.ts linux-x64` under
 `~/.local/state/octant/install`, keeping versions side by side for
-`octant server upgrade` and rollback. The artifact does not yet include the
-packages its CLI and server import, so its `bin/octant` stops with
-`Cannot find module '@octant/contracts'`. Use `octant server start` from a
-checkout until that is fixed.
+`octant server upgrade` and rollback. The artifact carries the packages its
+CLI and server import, so it runs without a checkout.
 
 ## Pair a laptop over Tailscale
 
@@ -130,7 +128,6 @@ Each item is a known gap on a Linux host, not a permanent limit.
 | Enabling the remote listener and approving pairing        | No command exists, and Settings → Remote access, which does both, is only in the desktop app.                                                                                                                               |
 | The listener after a server restart                       | It comes back disabled.                                                                                                                                                                                                     |
 | Saving an API key or bearer token for an endpoint         | The browser client says `Provider credential management is unavailable on this host.` A Secret Service session does not change that yet.                                                                                    |
-| `octant server install` from a headless artifact          | `bin/octant` stops with `Cannot find module '@octant/contracts'`.                                                                                                                                                           |
 | Terminals and other Full-access tools from `octant agent` | `octant agent` opens Code threads approval-gated, so the tool answers `This tool needs Full access for the thread.` Remembered Full access (`octant project access <name> full-access`) applies to threads that ask for it. |
 | Raising a thread to Full access for one session           | Refused by design on a host with no native confirmation; use the remembered Project decision above.                                                                                                                         |
 | Browser tool from `octant agent`                          | The site approval is not shown in the terminal, so the turn waits.                                                                                                                                                          |

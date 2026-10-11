@@ -158,7 +158,8 @@ export function resolveReleaseVersion(
 const ELECTRON_VERSION = "43.1.0";
 const STAGE_DIRECTORY = ".desktop-stage";
 const PACKAGER_DIRECTORY = ".packager";
-const EXTERNAL_RUNTIME_PACKAGES = [
+/** Server dependencies the server bundle leaves external; packaging copies them beside it. */
+export const EXTERNAL_RUNTIME_PACKAGES = [
   "effect",
   "better-sqlite3",
   "node-pty",
@@ -1353,11 +1354,34 @@ export async function stageExternalRuntimePackages(
   packageNames: ReadonlyArray<string> = EXTERNAL_RUNTIME_PACKAGES,
   application: "desktop" | "server" = "server",
 ): Promise<void> {
-  const destinationNodeModules = resolve(stageRoot, `apps/${application}/node_modules`);
-  const rootRequire = createRequire(resolve(repositoryRoot, `apps/${application}/package.json`));
-  const stagedVersions = new Map<string, string>();
-  for (const packageName of packageNames) {
-    await stageExternalPackage(packageName, rootRequire, destinationNodeModules, stagedVersions);
+  await stageRuntimePackages({
+    requesterManifest: resolve(repositoryRoot, `apps/${application}/package.json`),
+    destinationNodeModules: resolve(stageRoot, `apps/${application}/node_modules`),
+    packageNames,
+  });
+}
+
+/**
+ * Copies each named package and its transitive runtime dependencies, resolved
+ * the way `requesterManifest` resolves them, into one flat node_modules.
+ * Callers staging several requesters into the same directory share
+ * `stagedVersions` so a version collision between them still refuses.
+ */
+export async function stageRuntimePackages(input: {
+  readonly requesterManifest: string;
+  readonly destinationNodeModules: string;
+  readonly packageNames: ReadonlyArray<string>;
+  readonly stagedVersions?: Map<string, string>;
+}): Promise<void> {
+  const requester = createRequire(input.requesterManifest);
+  const stagedVersions = input.stagedVersions ?? new Map<string, string>();
+  for (const packageName of input.packageNames) {
+    await stageExternalPackage(
+      packageName,
+      requester,
+      input.destinationNodeModules,
+      stagedVersions,
+    );
   }
 }
 

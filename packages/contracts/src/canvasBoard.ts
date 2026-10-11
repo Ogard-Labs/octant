@@ -7,6 +7,7 @@ import {
   CanvasNodeId,
   CANVAS_SCHEMA_VERSION,
   CanvasSchemaVersion,
+  CanvasTableRowId,
   CanvasVersionId,
 } from "./canvasIdentity";
 import { CanvasPlanTaskId, CanvasPlanTaskStatus } from "./canvas";
@@ -57,6 +58,20 @@ export const CanvasCommentEdgeAnchor = Schema.Struct({
 }).annotations(strict);
 export type CanvasCommentEdgeAnchor = typeof CanvasCommentEdgeAnchor.Type;
 
+// A row anchor names a table row by the stable id its author gave it, never
+// by position: the reader's sort and filter reorder rows on screen, and a
+// revision may insert or remove rows, yet the comment stays on its row. A row
+// that is gone from the current version leaves its comment outdated, shown
+// and never dropped. Only rows with an id (Canvas schema version 13) can be
+// anchored, so a rolled-back runtime refuses both the document and its row
+// comments rather than misplacing them.
+export const CanvasCommentRowAnchor = Schema.Struct({
+  kind: Schema.Literal("row"),
+  blockId: CanvasBlockId,
+  rowId: CanvasTableRowId,
+}).annotations(strict);
+export type CanvasCommentRowAnchor = typeof CanvasCommentRowAnchor.Type;
+
 const FiniteNumber = Schema.Number.pipe(
   Schema.filter(Number.isFinite, { message: () => "Canvas board numbers must be finite." }),
 );
@@ -77,6 +92,7 @@ export const CanvasCommentAnchor = Schema.Union(
   CanvasCommentBlockAnchor,
   CanvasCommentNodeAnchor,
   CanvasCommentEdgeAnchor,
+  CanvasCommentRowAnchor,
   CanvasCommentRegionAnchor,
 );
 export type CanvasCommentAnchor = typeof CanvasCommentAnchor.Type;

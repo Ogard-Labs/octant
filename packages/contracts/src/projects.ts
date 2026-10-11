@@ -170,10 +170,20 @@ export const ChatProject = Schema.Struct({
 }).annotations(strict);
 export type ChatProject = typeof ChatProject.Type;
 
+/**
+ * Whether Octant keeps a `STATUS.md` at the top of this Work Project's folder:
+ * seeding it, asking every task to keep it current, and reading its dates for
+ * reminders. Absent means disabled, so Octant writes nothing into the folder.
+ * The default-folder Project can never enable it.
+ */
+export const WorkProjectStatusFile = Schema.Literal("enabled", "disabled");
+export type WorkProjectStatusFile = typeof WorkProjectStatusFile.Type;
+
 export const WorkProject = Schema.Struct({
   ...ProjectFields,
   type: Schema.Literal("work"),
   ...BoundProjectFields,
+  statusFile: Schema.optional(WorkProjectStatusFile),
 }).annotations(strict);
 export type WorkProject = typeof WorkProject.Type;
 
@@ -215,6 +225,7 @@ const WorkProjectSummary = Schema.Struct({
   bindingRevisionId: BindingRevisionId,
   origin: Schema.optional(ProjectOrigin),
   providerPolicy: Schema.optional(ProjectProviderPolicy),
+  statusFile: Schema.optional(WorkProjectStatusFile),
 }).annotations(strict);
 
 const CodeProjectSummary = Schema.Struct({
@@ -431,6 +442,11 @@ export const ProjectCommand = Schema.Union(
     ...ProjectCommandFields,
     policy: ProjectProviderPolicy,
   }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("change-work-project-status-file"),
+    ...ProjectCommandFields,
+    statusFile: WorkProjectStatusFile,
+  }).annotations(strict),
 );
 export type ProjectCommand = typeof ProjectCommand.Type;
 
@@ -477,6 +493,10 @@ export const ProjectCommandResult = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("project-provider-policy-changed"),
     project: BoundProject,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("work-project-status-file-changed"),
+    project: WorkProject,
   }).annotations(strict),
 );
 export type ProjectCommandResult = typeof ProjectCommandResult.Type;
@@ -595,6 +615,10 @@ export const ProjectProviderPolicyChanged = Schema.Struct({
   project: BoundProject,
 }).annotations(strict);
 export type ProjectProviderPolicyChanged = typeof ProjectProviderPolicyChanged.Type;
+export const WorkProjectStatusFileChanged = Schema.Struct({
+  project: WorkProject,
+}).annotations(strict);
+export type WorkProjectStatusFileChanged = typeof WorkProjectStatusFileChanged.Type;
 
 export const MemoryEntryCreated = Schema.Struct({ entry: ActiveMemoryEntry }).annotations(strict);
 export type MemoryEntryCreated = typeof MemoryEntryCreated.Type;
@@ -623,6 +647,7 @@ export const PROJECT_EVENT_NAMES = [
   "project.code-new-thread-workspace-changed@1",
   "project.code-pull-request-background-refresh-changed@1",
   "project.provider-policy-changed@1",
+  "project.work-status-file-changed@1",
   "memory.entry-created@1",
   "memory.entry-superseded@1",
   "memory.entry-retracted@1",
@@ -661,6 +686,9 @@ export const decodeCodeProjectPullRequestBackgroundRefreshChanged = Schema.decod
 );
 export const decodeProjectProviderPolicyChanged = Schema.decodeUnknownSync(
   ProjectProviderPolicyChanged,
+);
+export const decodeWorkProjectStatusFileChanged = Schema.decodeUnknownSync(
+  WorkProjectStatusFileChanged,
 );
 export const decodeMemoryEntryCreated = Schema.decodeUnknownSync(MemoryEntryCreated);
 export const decodeMemoryEntrySuperseded = Schema.decodeUnknownSync(MemoryEntrySuperseded);

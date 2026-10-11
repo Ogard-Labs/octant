@@ -301,37 +301,119 @@ const mockupBlocks = [
   dashboardMockup,
 ];
 
-// `?only=mockup` draws the mockups alone, so their capture is not a page of
-// every chart.
-const onlyMockups = new URLSearchParams(window.location.search).get("only") === "mockup";
+// Flow charts beyond the describe examples: a deeper sankey whose flows skip a
+// column, a lone radar series, and a funnel with long stage names.
+const budgetSankey = chart({
+  ...base,
+  blockId: "chart-sankey-budget",
+  kind: "chart",
+  chartType: "sankey",
+  format: "compact",
+  series: [],
+  links: [
+    { source: "Revenue", target: "Product", value: 6_400_000 },
+    { source: "Revenue", target: "Services", value: 2_100_000 },
+    { source: "Product", target: "Engineering", value: 3_200_000 },
+    { source: "Product", target: "Hosting", value: 1_400_000 },
+    { source: "Product", target: "Margin", value: 1_800_000 },
+    { source: "Services", target: "Support staff", value: 1_500_000 },
+    { source: "Services", target: "Margin", value: 600_000 },
+    { source: "Engineering", target: "Salaries", value: 2_700_000 },
+    { source: "Engineering", target: "Tools", value: 500_000 },
+    { source: "Hosting", target: "Compute", value: 1_000_000 },
+    { source: "Hosting", target: "Storage", value: 400_000 },
+  ],
+});
 
-const definition = onlyMockups
-  ? { ...canvasFixture, blocks: mockupBlocks }
-  : {
-      ...canvasFixture,
-      blocks: [
-        line,
-        bar,
-        area,
-        scatter,
-        distribution,
-        ...chartExampleBlocks,
-        ...treemapExampleBlocks,
-        ...heatmapExampleBlocks,
-        ...barListExampleBlocks,
-        hotFiles,
-        ...comparisonMatrixExampleBlocks,
-        ...mathExampleBlocks,
-        ...metricExampleBlocks,
-        metric,
-        table,
-        timeline,
-        orderSchemaBlock,
-        supportFlowBlock,
-        releaseMindmapBlock,
-        ...mockupBlocks,
+const loneRadar = chart({
+  ...base,
+  blockId: "chart-radar-lone",
+  kind: "chart",
+  chartType: "radar",
+  format: "percent",
+  series: [
+    {
+      seriesId: "coverage",
+      label: "Coverage",
+      points: [
+        { x: "Contracts", y: 0.92 },
+        { x: "Domain", y: 0.88 },
+        { x: "Server", y: 0.71 },
+        { x: "Web renderer", y: 0.64 },
+        { x: "Desktop", y: 0.42 },
+        { x: "Mobile", y: 0.35 },
+        { x: "Scripts", y: 0.55 },
       ],
-    };
+    },
+  ],
+});
+
+const longFunnel = chart({
+  ...base,
+  blockId: "chart-funnel-long",
+  kind: "chart",
+  chartType: "funnel",
+  series: [
+    {
+      seriesId: "review",
+      label: "Pull requests",
+      points: [
+        { x: "Opened against main", y: 240 },
+        { x: "Passed required checks on the first run", y: 168 },
+        { x: "Approved without changes requested", y: 96 },
+        { x: "Merged through the queue", y: 90 },
+      ],
+    },
+  ],
+});
+
+const flowBlocks = [
+  ...chartExampleBlocks.filter(
+    (block) =>
+      block.chartType === "funnel" || block.chartType === "radar" || block.chartType === "sankey",
+  ),
+  budgetSankey,
+  loneRadar,
+  longFunnel,
+];
+
+// `?only=mockup` draws the mockups alone and `?only=flow` the funnel, radar,
+// and sankey charts alone, so their capture is not a page of every chart.
+const only = new URLSearchParams(window.location.search).get("only");
+
+const definition =
+  only === "mockup"
+    ? { ...canvasFixture, blocks: mockupBlocks }
+    : only === "flow"
+      ? { ...canvasFixture, blocks: flowBlocks }
+      : {
+          ...canvasFixture,
+          blocks: [
+            line,
+            bar,
+            area,
+            scatter,
+            distribution,
+            ...chartExampleBlocks,
+            budgetSankey,
+            loneRadar,
+            longFunnel,
+            ...treemapExampleBlocks,
+            ...heatmapExampleBlocks,
+            ...barListExampleBlocks,
+            hotFiles,
+            ...comparisonMatrixExampleBlocks,
+            ...mathExampleBlocks,
+            ...metricExampleBlocks,
+            metric,
+            table,
+            timeline,
+            orderSchemaBlock,
+            supportFlowBlock,
+            releaseMindmapBlock,
+            ...mockupBlocks,
+          ],
+        };
 
 type ChartThemeScenario = "default-light" | "default-dark" | "vivid" | "contrast";
 

@@ -4,6 +4,7 @@ import {
   classifyRemoteAction,
   listRemoteActionCatalog,
   classifyRemoteListenerAddress,
+  remoteListenerOrigin,
   DEVICE_ABSOLUTE_TTL_MS,
   DEVICE_INACTIVITY_TTL_MS,
   evaluateDeviceRegistration,
@@ -68,6 +69,14 @@ describe("remote access policy", () => {
     expect(classifyRemoteListenerAddress("0.0.0.0")).toBe("invalid");
     expect(classifyRemoteListenerAddress("fc-not-an-ip")).toBe("invalid");
     expect(classifyRemoteListenerAddress("100.64.999.999")).toBe("public");
+  });
+
+  it("builds a listener origin that brackets IPv6 and drops the default port", () => {
+    expect(remoteListenerOrigin("192.168.1.20", 13774)).toBe("https://192.168.1.20:13774");
+    expect(remoteListenerOrigin("fd7a:115c:a1e0::7033:4105", 8455)).toBe(
+      "https://[fd7a:115c:a1e0::7033:4105]:8455",
+    );
+    expect(remoteListenerOrigin("mac.tailnet.ts.net", 443)).toBe("https://mac.tailnet.ts.net");
   });
 
   it("denies unknown actions and classifies high-risk work locally", () => {

@@ -310,6 +310,63 @@ describe("Canvas share contracts", () => {
     ).toThrow();
   });
 
+  it("round-trips funnel, radar, and sankey charts only under the share version that declared them", () => {
+    const blocks = [
+      {
+        blockId: "funnel",
+        schemaVersion: 14,
+        kind: "chart",
+        chartType: "funnel",
+        series: [
+          {
+            seriesId: "visitors",
+            label: "Visitors",
+            points: [
+              { x: "Visited", y: 100 },
+              { x: "Paid", y: 10 },
+            ],
+          },
+        ],
+      },
+      {
+        blockId: "radar",
+        schemaVersion: 14,
+        kind: "chart",
+        chartType: "radar",
+        series: [
+          {
+            seriesId: "api",
+            label: "API",
+            points: [
+              { x: "Speed", y: 4 },
+              { x: "Cost", y: 2 },
+              { x: "Uptime", y: 5 },
+            ],
+          },
+        ],
+      },
+      {
+        blockId: "sankey",
+        schemaVersion: 14,
+        kind: "chart",
+        chartType: "sankey",
+        series: [],
+        links: [{ source: "Search", target: "Signup", value: 12 }],
+      },
+    ];
+    for (const block of blocks) {
+      const exported = { ...document, schemaVersion: 7, blocks: [block] };
+      expect(decodeCanvasStaticExportDocument(exported)).toEqual(exported);
+      expect(() =>
+        decodeCanvasStaticExportDocument({
+          ...document,
+          schemaVersion: 6,
+          blocks: [{ ...block, schemaVersion: 12 }],
+        }),
+      ).toThrow();
+    }
+  });
+
   it("round-trips entity-relationship, swimlane, and mind map blocks in a static export document", () => {
     const blocks = [
       {
@@ -627,9 +684,13 @@ describe("Canvas share contracts", () => {
     const shared = fieldPathsByKind(CanvasStaticExportBlock.ast);
     // A design's markup draws only inside Octant and an action names a command
     // only this host runs, so a share refuses both. A source id resolves only
-    // against the host that wrote it, so a share drops every one.
+    // against the host that wrote it, so a share drops every one. A table
+    // row's id is what a comment anchors to and a share carries no comments,
+    // so a keyed row leaves as its cells.
     const refusedKinds = new Set(["design", "action"]);
-    const dropped = (path: string) => /(?:^|\.)sourceIds?$/.test(path);
+    const flattened = new Set(["table.rows[].id", "table.rows[].cells"]);
+    const dropped = (kind: string, path: string) =>
+      /(?:^|\.)sourceIds?$/.test(path) || flattened.has(`${kind}.${path}`);
     const missing: string[] = [];
     for (const [kind, paths] of live) {
       const sharedPaths = shared.get(kind);
@@ -642,7 +703,7 @@ describe("Canvas share contracts", () => {
         continue;
       }
       for (const path of paths) {
-        if (!dropped(path) && !sharedPaths.has(path)) missing.push(`${kind}.${path}`);
+        if (!dropped(kind, path) && !sharedPaths.has(path)) missing.push(`${kind}.${path}`);
       }
     }
     expect(missing).toEqual([]);

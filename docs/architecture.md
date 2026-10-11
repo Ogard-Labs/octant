@@ -102,7 +102,8 @@ The design rests on a small set of invariants that every package obeys:
   catalog. All have a Settings off switch: marketplace off means no catalog
   request; Updates off disables automatic update checks (manual Check for
   updates may still contact the signed feed); device tools' automatic updates
-  off means no registry request (a manual check may still contact it). An in-app
+  start off, and off means no registry request (a manual check may still
+  contact it). An in-app
   changelog rides that update path and bundled notes rather than adding a
   separate call ([decisions/0061-in-app-changelog.md](decisions/0061-in-app-changelog.md)).
   Opening Updates reads the desktop's current local update state so the installed
@@ -193,7 +194,14 @@ process-local client context on the loopback listener (internally still named
 carrying authenticated remote identity — and runs all mutations through
 services that append to the journal. Providers, tools, Git, terminals,
 subagents, extensions, and recovery live here. A headless host runs the same
-server through `@octant/cli` (`octant server run`, `octant web`). For Code,
+server through `@octant/cli` (`octant server run`, `octant web`). The
+installable headless artifact (`scripts/package-headless.ts`) is self-contained:
+it carries the bundled CLI (`bin/octant`), the bundled server (`lib/server`), the
+web assets, and a top-level `node_modules` holding the third-party and native
+dependencies both bundles leave external, built on the target platform itself.
+An installed CLI starts that server under its own Bun runtime with
+`OCTANT_ARTIFACT_ROOT` set, so the server verifies every listed file before it
+opens the store. For Code,
 verified remote requests carry their principal through an async request scope:
 the paired device may reach existing active Code Projects without a desktop
 workspace, while services retain thread, checkout, provider, and approval checks.
@@ -315,7 +323,9 @@ schema version 4. An older runtime refuses a version-4 document as a future
 version and does not report it corrupt.
 A treemap block is gated the same way at Canvas schema version 5, a heatmap
 block at version 6, a comparison matrix at version 10, a math block at
-version 11, and the mockup catalog at version 12, so a document that declares an earlier version and carries one is
+version 11, the mockup catalog at version 12, a table row's `id` at
+version 13, and the funnel, radar, and sankey chart types at version 14, so a
+document that declares an earlier version and carries one is
 refused as a declared future version. The optional table column
 `display` and the chart, table, and metric `format` fields are the one ungated
 exception: they only change how a value is drawn, so they carry no schema
@@ -368,12 +378,32 @@ it gets no layout, plan, comment or action runtime, so nothing drawn inline can
 journal a version. Any other is a row that opens it. A card from an older host,
 or one no loaded turn can place, stays in the thread's card list.
 A chart is a closed type: line, area, bar, scatter, distribution, pie, donut,
-stacked bar, grouped bar, or bar-and-line. Pie and donut are one series of
-labeled non-negative slices. Stacked, grouped, and bar-and-line charts share
-categories across series; a bar-and-line series names itself as a bar or a line.
-The accessible table lists every reading. A pie or donut legend toggles at most
-24 slices; the rest stay in the picture and the table. A shared snapshot keeps
-the chart, its number format, and every series mark.
+stacked bar, grouped bar, bar-and-line, funnel, radar, or sankey. Pie and donut
+are one series of labeled non-negative slices. Stacked, grouped, and
+bar-and-line charts share categories across series; a bar-and-line series names
+itself as a bar or a line. A funnel is one series of at most 16 labeled stages,
+each no larger than the one before. A radar compares series on 3 to 16 shared,
+labeled axes with readings that are not negative. A sankey carries no series:
+its `links` are flows of a positive value from one named node to another (at
+most 256 flows between 64 nodes); a flow listed twice or a set of flows that
+returns to a node it left is refused. Stage, axis, and node labels are at most
+80 characters. The domain policy names each refusal (`funnel-not-narrowing`,
+`funnel-negative-value`, `funnel-stages-budget-exceeded`, `radar-axis-count`,
+`radar-negative-value`, `sankey-cycle`, `sankey-flow-not-positive`,
+`duplicate-sankey-link`, `sankey-nodes-budget-exceeded`,
+`sankey-links-budget-exceeded`, `chart-label-budget-exceeded`). The sankey
+layout is pure and deterministic in `packages/domain`
+(`canvasSankeyLayout`): a node sits one column right of the furthest node that
+feeds it, every ending lines up in the last column, and one scale sizes every
+band, so the screen and the artifact preview SVG draw the same picture. The
+three types arrive together with Canvas schema version 14.
+The accessible table lists every reading: a funnel's stages with their share of
+the first stage and of the stage before, a radar's axes by series, and a
+sankey's flows with each one's share of its source. A pie or donut legend
+toggles at most 24 slices, and a sankey legend at most 24 nodes (hiding a node
+hides every flow through it); the rest stay in the picture and the table. A
+shared snapshot keeps the chart, its number format, every series mark, and a
+sankey's links.
 A treemap is a hierarchy drawn as squarified rectangles: nodes name a parent,
 one root, values sit on leaves, and a group's reading is the sum of its
 children. A leaf carries a value for every declared measure and may name a
@@ -502,12 +532,18 @@ block whole. The catalog arrives with Canvas schema version 12 and share
 version 6.
 A share carries every block kind and field a Canvas holds except source ids
 and the design and action blocks it refuses (see the `design` block). A table
-column keeps its number format and display, and a board keeps its own layout.
+column keeps its number format and display, a table row leaves as its cells
+without the `id` comments anchor to, and a board keeps its own layout. Because
+the row id is the only Canvas version 13 field and a share drops it, a share at
+version 6 named a block authored at version 13 as version 12. Share version 7
+carries the version-14 chart types, so it names blocks up to version 14
+(`CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION`).
 Share documents version independently of Canvas documents: a treemap, a
 heatmap, a bar list, a chart's or a table column's number format, a table
 column's display, and a board's layout arrive with share version 3, and a
-comparison matrix with share version 4, math with share version 5, and the
-mockup catalog with share version 6, so a share that declares an older version
+comparison matrix with share version 4, math with share version 5, the
+mockup catalog with share version 6, and the funnel, radar, and sankey charts
+with share version 7 (whose blocks may name Canvas version 14), so a share that declares an older version
 and carries one is refused as a future version.
 The catalogue includes a `plan` block: phases, and one list of tasks that each
 name their phase, carry a status (todo, doing, blocked, done), and may carry an
@@ -573,7 +609,18 @@ service rebuilds them with the pure `applyCanvasCommentEvent` reducer, refuses
 unauthorized reads with no bodies, and stamps each comment's origin (`host` or
 the authenticated `remote-device`) beside its `local-user` author. The host
 stamps that author (and a resolve's or delete's actor) itself and ignores the
-actor the request names, so a renderer can never author a comment as an agent. Shared
+actor the request names, so a renderer can never author a comment as an agent.
+A table row is either a list of cells or `{ id, cells }`; the id is the
+author's, unique within the table (the domain policy refuses a repeat as
+`duplicate-table-row-id`), and arrives with Canvas schema version 13. A `row`
+comment anchor names a table block and that id, never a position, so a comment
+stays on its row through the reader's sort and filter and through a revision
+that inserts, removes, or edits rows. A row without an id cannot be anchored
+and the renderer offers it no marker. A comment whose row is gone from the
+version on screen is shown as no longer on the canvas and is never dropped; the
+comment service does not check anchors against a version, because comments
+belong to the Canvas rather than one version. A comparison matrix does not use
+the table row model; its criteria already anchor through node ids. Shared
 snapshots serialise the definition and so never carry comments
 ([decisions/0052-canvas-boards.md](decisions/0052-canvas-boards.md)).
 
@@ -605,7 +652,12 @@ revision declares the current schema version on the version and its
 definition, so a Canvas written under an earlier version moves forward and can
 gain a design; a version append never moves a Canvas back. Agents writing
 a design can be silent for minutes while composing the tool call, so Chat and Work
-wait five minutes for a provider event before cutting a turn off, as Code does
+wait five minutes for a provider event before cutting a turn off, as Code does.
+Chromium stops painting sandboxed frames that are `inert` or have
+`pointer-events: none`, so a frame shown as a picture stays hit-testable and a
+cover over it takes the pointer. Frames that run script were set aside: they
+need their own serving origin, a network policy the renderer lacks, and a
+threat model of their own
 ([decisions/0164-canvas-designs-are-html-in-a-frame-that-runs-nothing.md](decisions/0164-canvas-designs-are-html-in-a-frame-that-runs-nothing.md)).
 The frame described here is the shipped tier. Themed frames measured to their
 content, frames that show Project assets, and frames that run script in an
@@ -651,7 +703,12 @@ A screenshot's raw capture lands in a host-private directory under the data root
 denies outright to every launch except the one taking the capture — the deny is
 emitted after the broad launch-root grants, so a checkout bound to an ancestor
 of the directory cannot read another thread's screen either, and only the
-capture launch re-allows it through its own write root
+capture launch re-allows it through its own write root. A subtree grant is
+acceptable here because the directory holds only host-minted, per-attempt UUID
+names, re-read with no-follow, single-link, size-bound, and PNG-signature checks
+before becoming an artifact. Redirecting the whole Apple temporary directory
+instead was measured and reverted: `xcrun` and the Simulator services need the
+host's real temporary and cache roots
 ([decisions/0160-an-apple-screen-capture-lands-in-a-directory-only-its-launch-can-write.md](decisions/0160-an-apple-screen-capture-lands-in-a-directory-only-its-launch-can-write.md)).
 An Android emulator is a separate dock destination and `octant_android` tool,
 not an iOS helper feature
@@ -829,16 +886,26 @@ follows the same rules as a rename: an archived Project refuses it, and a change
 that would leave the colour as it is journals nothing. The colour grants no
 authority and carries no status.
 
-A Work Project folder carries `AGENTS.md` (the person's standing brief, seeded
-once and never rewritten) and `STATUS.md` (where the work stands, with dated
-follow-ups and deadlines). Both are read into every Work turn ahead of the
-thread's transcript, with a standing instruction to keep `STATUS.md` current;
-a completed turn that changed files without touching it gets a `Recent
-changes` line appended from the 0083 record. A stale status or a near or passed
-date makes the next task open by taking stock and asking for an update. The
-Work Project page, the Work board's follow-up mark, and the inbox's
-`follow-up-due` attention signal all read the same file on demand; nothing
-about it is journaled. See
+A Work Project may opt into a **status file**: `STATUS.md` at the top of its
+folder, where the work stands, with dated follow-ups and deadlines. The setting
+lives on the Project record as `statusFile` and is journaled as
+`project.work-status-file-changed@1`; absent reads as disabled, so every
+Project, including one created before the setting existed or whose folder
+already holds a `STATUS.md`, starts off. The default-folder Project refuses it
+on the server: it holds what nobody gave a home, so there is no single piece of
+work for a status to describe. Enabling seeds `STATUS.md` if it is missing.
+While enabled, the file is read into every Work turn ahead of the thread's
+transcript with a standing instruction to keep it current; a completed turn
+that changed files without touching it gets a `Recent changes` line appended
+from the 0083 record; and a stale status or a near or passed date makes the next
+task open by taking stock and asking for an update. The Work Project page, the
+Work board's follow-up mark, and the inbox's `follow-up-due` attention signal
+read the same file on demand; nothing about its content is journaled. While
+disabled, Octant reads nothing from the folder for this purpose, adds no
+instruction, and writes nothing there; turning the setting off leaves an
+existing file untouched. Octant never writes an agent brief (`AGENTS.md`,
+`CLAUDE.md`, or similar) into a user folder. This narrows the always-on
+behavior first recorded in
 [decisions/0119-a-work-project-keeps-its-status-in-its-folder.md](decisions/0119-a-work-project-keeps-its-status-in-its-folder.md).
 
 Work never silently becomes Code. When coding work is detected in a Work
@@ -2715,8 +2782,27 @@ native harness in `apps/server/src/harness`:
   confirmation is single-use: a remembered "always" approval stops covering
   its class the moment the thread is tainted, and an "always" answered then
   covers only that call, so surfaces offer no "for this session" choice
-  (`singleUse` on the approval). A tool the thread was not offered refuses as
-  `tool-unavailable` without reaching policy or a person. The harness has no
+  (`singleUse` on the approval). `web-search` does not ask under taint: it
+  reaches only the search endpoint the person configured, so the tool-call
+  policy instead refuses a tainted thread's query that looks like it carries
+  data, under every posture and before any request leaves, with a named
+  reason such as `search-query-refused-under-taint: contains a URL`. A query
+  is refused when it is longer than 200 characters; contains a URL (a scheme,
+  `www.`, a dotted name ending in letters or a punycode `xn--` label, with or
+  without a trailing root dot, followed by a path, query, or fragment,
+  optionally after a port, or an IPv4 address followed by a port or
+  path); contains an email address; contains a run of 16 or more hex digits;
+  contains three or more `%XX` or `\xXX` escaped bytes in a row; contains a
+  base64 run (24 or more base64
+  characters mixing upper case, lower case, and digits, or 16 or more ending
+  in `=` padding); or contains a token of 20 or more characters, split on
+  whitespace and path punctuation, that mixes letters and digits at 3.5 or more
+  bits of Shannon entropy per character. `searchQueryRefusalUnderTaint` in
+  `packages/domain/src/untrustedContentPolicy.ts` decides; untainted threads
+  are unchanged. Residual risk: a short plain-word query can still carry a few
+  words, but only to the endpoint the person chose. Revisit if a default
+  hosted third-party search provider ships. A tool the thread was not offered
+  refuses as `tool-unavailable` without reaching policy or a person. The harness has no
   per-host network rules, rule expiry, or learn mode: a tool process gets the
   thread's OS-level `none` or `allow`. `nativeHarnessEgress.hostile.test.ts` holds the
   adversarial proofs; `nativeHarnessShell.test.ts` runs both shells under real
@@ -3073,13 +3159,28 @@ the Computer-use driver: each release is a pinned npm tarball the packager
 verifies against the registry's published `dist.integrity` (sha512) and lands
 in `Resources/managed-tools/<tool>` with its license. Electron main owns the
 per-tool instances; tools launch under the desktop runtime
-(`ELECTRON_RUN_AS_NODE` with `process.execPath`), never a system Node. The
-same updater state machine as the driver checks `registry.npmjs.org` daily by
-default; a newer release stages with its dependency closure resolved
+(`ELECTRON_RUN_AS_NODE` with `process.execPath`), never a system Node. Tools
+run unconfined under Octant's signed identity: no sandbox profile limits them,
+and macOS may attribute their access to Octant's privacy (TCC) grants. They
+need `simctl`, the Simulator's frameworks, and the shared `adb` server, and
+Octant has no confinement profile for them yet. Octant narrows what they
+inherit instead: each
+launch receives only an allowlisted environment (`PATH`, `HOME`, user and
+locale variables, `TMPDIR`, `DEVELOPER_DIR`, and the Android SDK and `adb`
+variables), never provider keys, tokens, broker credentials, or other `OCTANT_*`
+values. The same updater state machine as the driver checks
+`registry.npmjs.org` daily only when the person turns automatic updates on in
+Settings › Device tools; it is off by default, a saved choice is kept, and a
+manual check or Update still works. A newer release stages with its dependency closure resolved
 in-app (no npm or Bun is available inside the packaged app), each package
 integrity-verified, and activates only while idle and after its entrypoint
 survives a smoke launch. A staged tree that cannot start keeps the previous
-release. Settings shows each tool's channel, version, and update state.
+release. Extraction accepts only allowlisted tar entries (no absolute path, no
+`..`, no `:`) and never runs an upstream installer or lifecycle script. The
+in-app resolver handles only `^`, `~`, and exact ranges, nests a conflicting
+version under its owner, and stops at 64 packages; an upstream release that
+needs anything else fails honestly and keeps the previous version. Settings
+shows each tool's channel, version, and update state.
 Verification is the registry's package-level integrity hash — npm publishes
 no per-package signature — so the design pins URL plus hash and reports
 honestly when they disagree. OpenCode is a descriptor on this same channel,
@@ -3283,8 +3384,17 @@ mechanisms are:
   `awaiting-input`, before an interrupted turn); Done still requires the
   delivery target to be satisfied, and a decision blocks neither completing nor
   snoozing.
-- **Sandbox.** Provider CLIs, Git, terminals, test runners, and extension
-  executables launch through one shared confinement port. On macOS that is
+- **Fail-closed refusals name a recovery.** A refusal that fails closed on
+  authority must name a recovery a person can perform: a user action, a
+  restart, or elapsed time. A posture none of those can clear is not an
+  acceptable resting state. Recovery is a deliberate act by the machine's
+  owner, never a widening of the automatic admission rule, and the refusal
+  says what clears it where the person is, not only in a log. "Connect Claude
+  for helpers in Settings › Claude Code." is the shape.
+- **Sandbox.** Git, terminals, test runners, extension executables, and every
+  provider `--version` read launch through one shared confinement port, and so
+  do provider runtimes except where the confinement matrix below says a
+  runtime is unwrapped. On macOS that is
   `sandbox-exec` with deny-default Seatbelt profiles; on Linux it is Bubblewrap
   (`bwrap`) with private `/tmp`, bound roots, and no unconfined fallback,
   recorded in [decisions/0057-linux-confinement-bubblewrap.md](decisions/0057-linux-confinement-bubblewrap.md).
@@ -3310,15 +3420,39 @@ mechanisms are:
   and extended by
   [decisions/0145-a-plan-turn-is-confined-by-octant.md](decisions/0145-a-plan-turn-is-confined-by-octant.md):
   the process producing a plan still has to ask the model for it, while the
-  tools that thread reaches keep `none`.
+  tools that thread reaches keep `none`. Seatbelt and Bubblewrap cannot express
+  a host allowlist, so `provider-endpoints-only` materializes as plain OS
+  network `allow` for the runtime process (`materializeOsNetworkEgress`): the
+  runtime, Plan included, can reach any host. The endpoint restriction the name
+  promises holds only for Octant-brokered tools (browser origin allowlists,
+  research backends). The persisted value keeps its name for journal
+  compatibility.
   A provider runtime launch is wrapped when the process carries exactly one
-  thread's authority, which is why the ACP, OpenCode, and Pi runtimes are below
-  Full access, and the Claude Agent SDK launch is on Plan; the Codex app-server
-  and the two Claude postures that write are not. That set is named and pinned
-  by
-  [decisions/0143-confinement-wraps-a-runtime-that-carries-one-thread.md](decisions/0143-confinement-wraps-a-runtime-that-carries-one-thread.md)
-  and narrowed by 0145, and the tools those threads reach stay confined either
-  way. A confined Claude launch never reaches the keychain itself: the runtime
+  thread's authority. The goal is that every runtime below Full access is
+  wrapped; the current state, which `providerProcessConfinement.test.ts` pins
+  against this table, is below. Full access never gets the deny-default
+  profile. The one wrapper it can get is deny-only: an ACP profile with
+  extension or host-auth paths to deny (Kimi, for example) launches Full access
+  under an allow-default `sandbox-exec` profile or a Bubblewrap host-root bind
+  that denies only those paths (`makeAcpConfinementLive`). That wrapper
+  confines nothing else.
+
+  | Runtime (module)                                                          | Plan                            | Approval-gated, auto-accept-edits                   | OS egress below Full access                      | Plan's read-only enforced by                   |
+  | ------------------------------------------------------------------------- | ------------------------------- | --------------------------------------------------- | ------------------------------------------------ | ---------------------------------------------- |
+  | ACP, OpenCode, Pi (`acpProcess.ts`, `openCodeProcess.ts`, `piProcess.ts`) | Wrapped                         | Wrapped                                             | `allow`                                          | Octant sandbox: no root write, no exec or fork |
+  | Claude Agent SDK (`claudeProcess.ts`)                                     | Wrapped; Chat children run here | Unwrapped; runtime's own sandbox, project root only | `allow` on Plan; not limited by Octant otherwise | Octant sandbox: no root write, no exec or fork |
+  | Codex app-server (`codexProcess.ts`)                                      | Unwrapped                       | Unwrapped                                           | Not limited by Octant                            | Codex's own `read-only` sandbox                |
+  | Oh My Pi (`ohMyPiProcess.ts`), readiness probe only                       | Unwrapped                       | Unwrapped                                           | Not limited by Octant                            | No turn runs                                   |
+
+  Codex is unwrapped because one app-server carries every thread on a provider
+  instance, so it has no one root to bind. The ACP/OpenCode/Pi row has one
+  carve-out from "no exec or fork". On macOS, an OpenCode 2 Chat, Plan or Work
+  launch may fork and may exec exactly `/usr/bin/false`, which is its Git
+  stand-in (described below). Oh My Pi's probe is a held gap, not
+  an exception. Octant-owned tools those threads reach stay confined either
+  way. A runtime's own built-in tools (Codex's shell, Claude's Bash on the
+  postures that write) run under that runtime's sandbox, not Octant's.
+  A confined Claude launch never reaches the keychain itself: the runtime
   reads its subscription sign-in by running `/usr/bin/security`, which would
   return any keychain item that trusts that tool, including other command-line
   programs' tokens, so the profile runs neither the tool nor reads the keychain
@@ -3334,6 +3468,11 @@ mechanisms are:
   switched to an API key is discarded, never kept.
   A confined launch receives it as `CLAUDE_CODE_OAUTH_TOKEN`
   and no keychain lookup; unconfined launches keep the runtime's own sign-in.
+  The one confined Claude launch with no credential of its own is the
+  subscription readiness probe, which runs under Plan; only it keeps the
+  security-server lookup (`allowProviderCredentialLookup`), with the keychain
+  files and `/usr/bin/security` still denied. That lookup signs no turn in;
+  whether the probe's account read depends on it has not been measured.
   Without a connected token the launch refuses with "Connect Claude for helpers
   in Settings › Claude Code.", which a parent's `wait` and `status` carry. The
   runtime never refreshes a handed-in token, so one it refuses is marked
@@ -3373,19 +3512,35 @@ mechanisms are:
   builder refuse every Android command.
   The Apple `test` action stays confined too, and splits so the extra reach
   touches only the phase that needs it: `build-for-testing` runs under the
-  ordinary profile while `test-without-building` carries a closed set of
-  measured per-launch grants through `extraRules` — literal reads of the SDK
-  index plist and the launchd socket's ancestors, read-write over the
-  per-boot launchd session socket family, four named `mach-lookup` services,
-  the pseudo-terminal pair it allocates, `job-creation`, and `signal` for
-  the session's stale-app teardown — recorded with each measurement in
-  [decisions/0159-a-confined-apple-test-carries-its-measured-grants.md](decisions/0159-a-confined-apple-test-carries-its-measured-grants.md).
-  No other Apple launch receives any of them.
+  ordinary profile, which keeps the project's Run Script phases away from the
+  widened reach, while `test-without-building` carries a closed set of
+  per-launch grants through `extraRules`, never the shared profile default:
+  literal `file-read*` on `~/Library/Developer/Xcode/SDKToSimulatorIndexMapping.plist`;
+  literal `file-read-metadata` on `/private`, `/private/var`, and
+  `/private/var/tmp`; `file-read* file-write*` over
+  `^/private/var/tmp/com\.apple\.launchd\.[^/]+(/.*)?$`, the per-boot launchd
+  session socket family; `mach-lookup` on `com.apple.PowerManagement.control`,
+  `com.apple.testmanagerd.control`, `com.apple.dt.instruments.dtarbiter.xpc`,
+  and `com.apple.dt.instruments.dtsecurity.xpc`; `pseudo-tty` with
+  `file-write*`/`file-ioctl` on `/dev/ptmx` and `/dev/ttys<N>`;
+  `job-creation`; and untargeted `signal`. No other Apple launch receives any
+  of them. Xcode's `IDETestProgressNotification` post stays denied: it is
+  cosmetic to a CLI run.
+  _Rationale:_ each grant is the weakest spelling that cleared a measured,
+  fatal refusal — an empty destination list, an aborted power assertion, an
+  unreachable session socket, "Pseudo Terminal Setup Error", a runner that
+  could not launch, and hangs at `testmanagerd`, the DT arbiter, and "Testing
+  started" — and no single grant unblocks the run alone. `signal` is the
+  broadest: the session kills a stale app copy it did not fork, and denying it
+  hangs every later session; the launch still cannot read user files, open the
+  network, or leave its root. A future xcodebuild refusal is measured and added
+  to this list, never to the shared profile.
   Apple builds prepare a private derived-data directory per action and grant
   writes to that directory only for its `xcodebuild` phases. Run installation
   reads its product from the same directory without write access; XCTest
   results also land inside it. Simulator captures remain isolated in their own
   private directory and are writable only by the capture launch.
+
 - **ACP client capabilities.** ACP client filesystem and terminal effects are
   executed by Octant inside the Code confinement, with bounded reads, writes,
   terminal lifetimes, and output. Terminal requests with direct `args` use

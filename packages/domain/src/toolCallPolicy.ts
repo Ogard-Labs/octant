@@ -10,10 +10,12 @@ import type {
 } from "@octant/contracts";
 import {
   lookupClosedToolCatalogEntry,
+  nativeHarnessToolCapabilityId,
   nativeHarnessToolNameForCapability,
 } from "@octant/contracts";
 import { decideProfileToolConstraint } from "./agentProfilePolicy";
 import { authorizePrincipalAction, type PrincipalKind } from "./remoteAccessPolicy";
+import { searchQueryRefusalUnderTaint } from "./untrustedContentPolicy";
 
 export type ToolCallPolicyStep =
   | "tool-identity"
@@ -202,6 +204,19 @@ export function resolveToolCall(input: ToolCallPolicyInput): ToolCallPolicyDecis
   }
 
   // 8. Thread elevation / approval / taint (untrusted-content taint hook)
+  // A tainted thread's web search does not ask a person; it reaches only the
+  // endpoint the person configured, so a query that looks like it carries
+  // data is refused outright, under every posture.
+  if (
+    input.thread.externalContentIngested &&
+    String(catalogEntry.capabilityId) === nativeHarnessToolCapabilityId("web-search")
+  ) {
+    const query = searchQueryOf(input.arguments);
+    const refusal = query === undefined ? undefined : searchQueryRefusalUnderTaint(query);
+    if (refusal !== undefined) {
+      return deny("thread-elevation", `${refusal.reason}: ${refusal.detail}`);
+    }
+  }
   const elevation = resolveThreadElevation({
     entry: catalogEntry,
     executionPolicy: input.thread.executionPolicy,
@@ -275,6 +290,15 @@ function profileToolIdForCapability(capabilityId: string): string {
   if (capabilityId === "browser-automation") return "octant_browser";
   if (capabilityId === "computer-use") return "octant_computer";
   return nativeHarnessToolNameForCapability(capabilityId) ?? capabilityId;
+}
+
+function searchQueryOf(args: unknown): string | undefined {
+  return typeof args === "object" &&
+    args !== null &&
+    "query" in args &&
+    typeof (args as { readonly query?: unknown }).query === "string"
+    ? (args as { readonly query: string }).query
+    : undefined;
 }
 
 function requiredCapabilityClassForExtension(
