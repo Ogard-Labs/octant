@@ -3574,7 +3574,12 @@ never uses a standalone CuaDriver installation. See
 upstream streaming tools (`serve-sim`, `serve-avd`) that Octant vendors like
 the Computer-use driver: each release is a pinned npm tarball the packager
 verifies against the registry's published `dist.integrity` (sha512) and lands
-in `Resources/managed-tools/<tool>` with its license. Electron main owns the
+in `Resources/managed-tools/<tool>` with its license. A release build re-signs
+every Mach-O file found there with Octant's Developer ID, hardened runtime, and a
+secure timestamp, and none of Octant's entitlements, before sealing the app,
+because notarization rejects the upstream ad-hoc signatures. Camera passthrough
+from the bundled helper would need its own camera entitlement and a camera usage
+description, which the app does not declare. Electron main owns the
 per-tool instances; tools launch under the desktop runtime
 (`ELECTRON_RUN_AS_NODE` with `process.execPath`), never a system Node. Tools
 run unconfined under Octant's signed identity: no sandbox profile limits them,
