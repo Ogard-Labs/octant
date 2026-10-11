@@ -128,6 +128,42 @@ describe("makeProviderDriver", () => {
     expect(fixture.claudeProbeVersion).not.toHaveBeenCalled();
   });
 
+  it("refuses a Claude driver whose host overlay now matches another account directory", () => {
+    const fixture = factoryFixture();
+    const owner = provider("claude");
+    const directory = "/tmp/octant-claude-peer-dir";
+    const secondary = decodeProviderInstance({
+      id: "80000000-0000-4000-8000-000000000062",
+      displayName: "Claude secondary",
+      driverKind: "claude",
+      configuration: {
+        kind: "claude-agent-sdk",
+        binaryPath: "/missing/claude",
+        authentication: "subscription",
+        configDirectory: directory,
+      },
+      enabled: true,
+      environmentPolicy: "inherit-host",
+      version: 1,
+      createdAt: "2026-07-16T11:00:00.000Z",
+      updatedAt: "2026-07-16T11:00:00.000Z",
+    });
+    const previous = process.env.CLAUDE_CONFIG_DIR;
+    process.env.CLAUDE_CONFIG_DIR = directory;
+    try {
+      expect(() =>
+        makeProviderDriver(owner, { ...fixture.options, claudeInstances: [owner, secondary] }),
+      ).toThrow(/already uses that config directory/);
+      expect(fixture.claudeProbeVersion).not.toHaveBeenCalled();
+    } finally {
+      if (previous === undefined) {
+        delete process.env.CLAUDE_CONFIG_DIR;
+      } else {
+        process.env.CLAUDE_CONFIG_DIR = previous;
+      }
+    }
+  });
+
   it.each([
     ["kimi-code", "/missing/kimi"],
     ["mistral-vibe", "/missing/vibe-acp"],

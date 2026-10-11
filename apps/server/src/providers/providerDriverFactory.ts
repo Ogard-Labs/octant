@@ -1,3 +1,4 @@
+import { homedir } from "node:os";
 import {
   type PermissionPersistence,
   type ProviderFailure,
@@ -5,7 +6,10 @@ import {
 } from "@octant/contracts";
 import { isImageProfileDriverKind } from "@octant/domain";
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
-import { claudeAccountNeedsOwnConfigDirectory } from "./providerService";
+import {
+  claudeAccountNeedsOwnConfigDirectory,
+  claudeAccountOverlapsPeerLaunchDirectory,
+} from "./providerService";
 import type { ClaudeAgentSdkPort } from "./claudeAgentSdkPort";
 import { makeClaudeDriver, type ClaudeResumeIdentityPort } from "./claudeDriver";
 import type { ClaudeHelperSignInPort } from "./claudeHelperSignIn";
@@ -106,6 +110,18 @@ export function makeProviderDriver(
       if (claudeAccountNeedsOwnConfigDirectory(options.claudeInstances, instance)) {
         throw new ProviderDriverConfigurationError(
           "This Claude account needs its own config directory.",
+        );
+      }
+      if (
+        claudeAccountOverlapsPeerLaunchDirectory(
+          options.claudeInstances,
+          instance,
+          homedir(),
+          process.env,
+        )
+      ) {
+        throw new ProviderDriverConfigurationError(
+          "Another Claude account already uses that config directory.",
         );
       }
       return makeClaudeDriver({

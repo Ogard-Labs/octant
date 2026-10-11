@@ -2239,6 +2239,32 @@ export function claudeAccountNeedsOwnConfigDirectory(
   return ownerId !== undefined && String(instance.id) !== String(ownerId);
 }
 
+export function claudeAccountOverlapsPeerLaunchDirectory(
+  instances: ReadonlyArray<ProviderInstance>,
+  instance: ProviderInstance,
+  homeDirectory: string,
+  hostEnvironment: NodeJS.ProcessEnv,
+): boolean {
+  const hostConfigDirectory = hostClaudeConfigDirectory(hostEnvironment);
+  const hostSecureDirectory = hostClaudeSecureStorageDirectory(hostEnvironment);
+  return effectiveClaudeAccountDirectories(
+    instance,
+    homeDirectory,
+    hostConfigDirectory,
+    hostSecureDirectory,
+    instances,
+  ).some((directory) =>
+    claudeAccountDirectoryTaken(
+      instances,
+      directory,
+      homeDirectory,
+      hostConfigDirectory,
+      hostSecureDirectory,
+      instance.id,
+    ),
+  );
+}
+
 function effectiveClaudeAccountDirectories(
   instance: ProviderInstance,
   homeDirectory: string,
