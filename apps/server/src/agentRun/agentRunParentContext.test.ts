@@ -557,6 +557,59 @@ describe("a fork reading the thread it was forked from", () => {
   });
 });
 
+describe("a fork's conversation merged back into the thread it was forked from", () => {
+  it("selects only the fork's turns after its previous merge, through the named turn", () => {
+    const input = codeInput([codeTurn(1), codeTurn(2), codeTurn(3), codeTurn(4)]);
+    const result = admittedParentCodeContext({
+      ...input,
+      purpose: "fork-merge-back",
+      afterOperationId: String(codeTurn(1).operationId),
+      throughOperationId: String(codeTurn(3).operationId),
+    });
+    expect(result.status).toBe("available");
+    if (result.status !== "available") return;
+    expect(result.blocks[0]?.text).toContain("merged back here because the person asked");
+    expect(result.blocks[0]?.text).toContain("unless they were merged through Git review");
+    expect(
+      result.blocks
+        .slice(1)
+        .every((block) => block.text.startsWith("Merged fork conversation source:")),
+    ).toBe(true);
+    const read = input.readEvidence.mock.calls.map(([reference]) => reference.contentId);
+    expect(read).toEqual([
+      codeTurn(2).prompt.contentId,
+      codeTurn(2).assistant[0]?.contentId,
+      codeTurn(3).prompt.contentId,
+      codeTurn(3).assistant[0]?.contentId,
+    ]);
+    // Already-merged turns are neither carried nor counted as left out.
+    expect(result.omissions.earlierMessages).toBe(0);
+  });
+
+  it("finds nothing new when the end point is not after the previous merge", () => {
+    const input = codeInput([codeTurn(1), codeTurn(2)]);
+    expect(
+      admittedParentCodeContext({
+        ...input,
+        purpose: "fork-merge-back",
+        afterOperationId: String(codeTurn(2).operationId),
+        throughOperationId: String(codeTurn(1).operationId),
+      }),
+    ).toEqual({ status: "unavailable", reason: "source-empty" });
+    expect(input.readEvidence).not.toHaveBeenCalled();
+  });
+
+  it("refuses a previous merge point the fork no longer holds rather than repeating turns", () => {
+    expect(
+      admittedParentCodeContext({
+        ...codeInput([codeTurn(1), codeTurn(2)]),
+        purpose: "fork-merge-back",
+        afterOperationId: id(399),
+      }),
+    ).toEqual({ status: "unavailable", reason: "source-point-unavailable" });
+  });
+});
+
 describe("a forked thread reading its conversation for a provider switch", () => {
   const sourceThreadId = decodeCodeThreadId(id(7));
   const sourceThread = { ...codeThread, id: sourceThreadId };
