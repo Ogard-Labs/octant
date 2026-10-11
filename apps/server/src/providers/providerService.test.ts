@@ -2200,6 +2200,53 @@ describe("ProviderService", () => {
     });
   });
 
+  it("keeps the existing implicit Claude owner when an older API-key instance switches to subscription", async () => {
+    const fixture = serviceFixture({
+      instances: [
+        claudeProvider({
+          configuration: {
+            kind: "claude-agent-sdk",
+            binaryPath: "/opt/homebrew/bin/claude",
+            authentication: "api-key",
+          },
+          createdAt: "2026-07-14T09:00:00.000Z",
+        }),
+        claudeProvider({
+          id: otherId,
+          displayName: "Claude work",
+          createdAt: "2026-07-14T11:00:00.000Z",
+          updatedAt: "2026-07-14T11:00:00.000Z",
+        }),
+      ],
+    });
+
+    await expect(
+      fixture.service.execute(windowId, {
+        kind: "change-claude-configuration",
+        instanceId,
+        expectedVersion: 1,
+        configuration: {
+          kind: "claude-agent-sdk",
+          binaryPath: "/opt/homebrew/bin/claude",
+          authentication: "subscription",
+        },
+      }),
+    ).resolves.toMatchObject({
+      kind: "provider-updated",
+      instance: {
+        configuration: {
+          authentication: "subscription",
+          configDirectory: assignedClaudeAccountConfigDirectory(homedir(), instanceId),
+        },
+      },
+    });
+    const snapshot = await fixture.service.bootstrap(windowId);
+    const owner = snapshot.instances.find((instance) => instance.id === otherId);
+    expect(owner?.driverKind === "claude" ? owner.configuration.configDirectory : "missing").toBe(
+      undefined,
+    );
+  });
+
   it("keeps a Claude account on its directory after rename, disable, and removal of another account", async () => {
     const fixture = serviceFixture();
     await fixture.service.execute(windowId, {

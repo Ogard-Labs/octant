@@ -1881,14 +1881,8 @@ export class ProviderService implements ProviderServiceApi {
     if (configuration.authentication !== "subscription") return configuration;
     if (configuration.configDirectory !== undefined) return configuration;
     if (current.configuration.configDirectory !== undefined) return configuration;
-    const preview = {
-      ...current,
-      configuration,
-    };
-    const previewInstances = instances.map((candidate) =>
-      String(candidate.id) === String(current.id) ? preview : candidate,
-    );
-    if (!claudeAccountNeedsOwnConfigDirectory(previewInstances, preview)) return configuration;
+    const ownerId = implicitClaudeAccountOwnerId(instances);
+    if (ownerId === undefined || String(ownerId) === String(current.id)) return configuration;
     return {
       ...configuration,
       configDirectory: assignedClaudeAccountConfigDirectory(homedir(), current.id),
