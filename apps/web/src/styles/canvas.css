@@ -1906,11 +1906,6 @@
   cursor: move;
 }
 
-.canvas-board__node:focus-visible rect {
-  stroke: var(--oct-accent);
-  stroke-width: 2;
-}
-
 /* Every grid here takes the drawer's width rather than its content's: the
    anchor picker names a block by its heading, and an unbreakable heading
    pushed the picker, the composer and its Comment button past the drawer. */

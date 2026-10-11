@@ -254,10 +254,46 @@ describe("the public-block visual language", () => {
           /outline:\s*(?:none|0)\b/,
         );
         expect(block[2], `${where} draws its own focus ring`).not.toMatch(
-          /outline(?:-color)?:[^;]*(?:solid|focus-ring)|box-shadow:[^;]*focus-ring/,
+          /outline(?:-color)?:[^;]*(?:solid|focus-ring)|box-shadow:[^;]*focus-ring|stroke:/,
         );
       }
     }
+
+    // An unconditional reset in a feature stylesheet loads after octant.css at
+    // the same specificity, so it removes the edge as surely as a focus rule
+    // does: the dock and sidebar resize handles lost it that way. Only these
+    // may reset it: containers that hold the keyboard for the item inside
+    // them, and text fields set inside a frame that is itself the field.
+    const mayReset = new Set([
+      ".octant-menu__positioner",
+      ".octant-menu__popup",
+      ".octant-menu__item",
+      ".model-picker__listbox",
+      ".settings-search-results",
+      ".review-page__body",
+      ".zen-surface",
+      ".browser-workspace__remote",
+      ".octant-dialog__popup",
+      ".folder-picker__search input",
+      ".composer-model-picker__search input",
+      ".code-branch-selector__search input",
+      ".artifact-library__search-input",
+      ".browser-workspace__omnibox input",
+    ]);
+    const resets: string[] = [];
+    for (const file of cssFiles(webRoot)) {
+      if (file.endsWith(join("styles", "octant.css"))) continue;
+      const source = readFileSync(file, "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+      for (const block of source.matchAll(/([^{}]*)\{([^{}]*)\}/g)) {
+        const selector = (block[1] ?? "").trim();
+        if (selector.includes(":focus-visible") || selector.startsWith("@")) continue;
+        if (!/(?:^|;|\s)outline:\s*(?:none|0)\s*;/.test(block[2] ?? "")) continue;
+        for (const part of selector.split(",").map((each) => each.trim())) {
+          if (!mayReset.has(part)) resets.push(`${relative(webRoot, file)}: ${part}`);
+        }
+      }
+    }
+    expect(resets).toEqual([]);
   });
 
   it("keeps one transcript rhythm across Chat, Work, and Code", () => {
