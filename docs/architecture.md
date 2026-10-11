@@ -3060,8 +3060,33 @@ tool activity) did not. Other runtimes that can fork a session natively
 (Claude, Codex) still use the text handoff until a driver seam reports a
 fork-at-point capability.
 
+**A fork that later switches providers (Code).** A forked thread's
+provider-switch handoff also carries the conversation the fork inherited,
+whichever way its first turn received it: the selector (`inherited`) reads the
+source through the fork point first, then the fork's own turns, into one window
+under the same 24-block bound. The oldest inherited messages are the first left
+out, counted in `earlierMessages`; the fork's own newest turns are kept.
+Inherited messages are labelled as forked-conversation excerpts and name the
+source thread, the summary says the thread is a fork, and the summary metadata
+attributes both reads with their own taint. The host authorizes the sending
+window against the source's Project and requires the source to be in the
+fork's Project before reading it, exactly as for a fork's first turn, then
+checks that what came back is that source's. A source that is unreadable,
+removed, moved to another Project, missing its fork point or changed during the
+read refuses the switch with a named reason that says the source is the
+cause; it is never silently dropped, because the transcript shows the inherited
+turns and the new provider must not answer as if it had seen them. The
+journaled `provider-switch` record gains `inherited` (the fork origin, how many
+carried messages came from the source, and the source's taint); its
+top-level `messages` and `omissions` cover both reads and its top-level taint
+stays the thread's own. A recovered start reads the record back as for any
+switch, refusing if the thread's fork origin no longer matches it. The source
+read covers only the source's own turns: a fork of a fork does not also carry
+what its source inherited.
+
 A switch that cannot hand over refuses before the new provider is acquired,
-naming why: no host selector, an unavailable or foreign thread or Project,
+naming why: no host selector, an unavailable or foreign thread or Project
+(for a fork, its own or the inherited source's),
 no recorded or readable conversation (for example every body purged), a
 conversation that changed during the read, an inconsistent page, a history
 beyond the bounded scan, or a journaled handoff that can no longer be read or
