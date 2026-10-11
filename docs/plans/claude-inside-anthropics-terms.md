@@ -180,8 +180,10 @@ On subscription launches of the unmodified binary, stop setting
 `sanitizeClaudeEnvironment()` copies only `PASSTHROUGH_VARIABLES` today,
 so merely dropping those three names from `REQUIRED_GUARDS` also discards
 a user's own disable-only values. Preserve a disable-only setting the
-person already exported in the host environment. Do not invent an enable
-flag or pass through any other value.
+person already exported in the host environment, including the documented
+Claude opt-outs `DO_NOT_TRACK=1`, `DISABLE_GROWTHBOOK=1`, and
+`CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY=1`. Do not invent an enable flag or
+pass through any other value.
 
 API-key launches may keep the 0005 telemetry guards.
 
@@ -196,9 +198,10 @@ API-key launches may keep the 0005 telemetry guards.
 
 - A subscription launch's environment does not contain those three
   switches unless the host already set a disable-only value.
-- A host `DISABLE_TELEMETRY`, `DISABLE_ERROR_REPORTING`, or
-  `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` disable-only value survives
-  sanitization on a subscription launch.
+- A host `DISABLE_TELEMETRY`, `DISABLE_ERROR_REPORTING`,
+  `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`, `DO_NOT_TRACK=1`,
+  `DISABLE_GROWTHBOOK=1`, or `CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY=1`
+  disable-only value survives sanitization on a subscription launch.
 - An API-key launch still sets them.
 - The other process-ownership switches remain on every launch.
 
