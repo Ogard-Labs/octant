@@ -31,6 +31,33 @@ describe("plan Gantt view", () => {
     );
   });
 
+  it("names each tick and bar by its calendar day in a time zone far ahead of UTC", () => {
+    const zone = process.env.TZ;
+    process.env.TZ = "Pacific/Kiritimati";
+    try {
+      const { container } = render(<PlanBlock block={plan()} />);
+      const day = (iso: string) =>
+        new Date(`${iso}T00:00:00.000Z`).toLocaleDateString(undefined, {
+          month: "short",
+          day: "numeric",
+          timeZone: "UTC",
+        });
+      const layout = layoutCanvasPlanGantt(plan());
+      expect(
+        [...container.querySelectorAll(".canvas-plan__gantt-tick text")].map(
+          (text) => text.textContent,
+        ),
+      ).toEqual(layout.ticks.map((tick) => day(tick.day)));
+      const first = layout.bars[0];
+      expect(container.querySelector(".canvas-plan__gantt-row title")?.textContent).toContain(
+        `${day(first?.startDay ?? "")} to ${day(first?.endDay ?? "")}`,
+      );
+    } finally {
+      if (zone === undefined) delete process.env.TZ;
+      else process.env.TZ = zone;
+    }
+  });
+
   it("switches to the Gantt view and back without asking the host for anything", async () => {
     const onSetStatus = vi.fn();
     const user = userEvent.setup();

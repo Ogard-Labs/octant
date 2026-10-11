@@ -71,6 +71,14 @@ const MARGIN = 8;
 const TRACK_WIDTH = 640;
 const MAX_DAY_WIDTH = 32;
 const MIN_DAY_WIDTH = 2;
+/**
+ * The widest the track grows. A plan may span any dates the contract accepts,
+ * and at two pixels a day a millennia-long plan drew a chart millions of
+ * pixels wide; past this width the days narrow further instead.
+ */
+const MAX_TRACK_WIDTH = 4_096;
+/** Ticks sit at least a date label's width apart. */
+const MIN_TICK_GAP = 56;
 const DAY_MS = 86_400_000;
 /** A link steps this far right of a bar's end before turning toward the next. */
 const LINK_STEP = 6;
@@ -142,7 +150,10 @@ export function layoutCanvasPlanGantt(block: CanvasPlanBlock): CanvasPlanGanttLa
   const dayWidth =
     days === 0
       ? MAX_DAY_WIDTH
-      : Math.max(MIN_DAY_WIDTH, Math.min(MAX_DAY_WIDTH, TRACK_WIDTH / days));
+      : Math.min(
+          Math.max(MIN_DAY_WIDTH, Math.min(MAX_DAY_WIDTH, TRACK_WIDTH / days)),
+          MAX_TRACK_WIDTH / days,
+        );
   const chartX = MARGIN + CANVAS_GANTT_LABEL_GUTTER;
   const top = MARGIN + AXIS_HEIGHT;
   const bars = rows.map((row, rowIndex): CanvasPlanGanttBar => {
@@ -157,7 +168,9 @@ export function layoutCanvasPlanGantt(block: CanvasPlanBlock): CanvasPlanGanttLa
       endDay: dayString(row.end),
       x: chartX + offset * dayWidth,
       y,
-      width: (row.end - row.start + 1) * dayWidth,
+      // A day can be narrower than a pixel on a very long plan; a bar stays
+      // wide enough to see.
+      width: Math.max(MIN_DAY_WIDTH, (row.end - row.start + 1) * dayWidth),
       height: BAR_HEIGHT,
       labelY: y + BAR_HEIGHT / 2,
     };
@@ -188,9 +201,10 @@ export function layoutCanvasPlanGantt(block: CanvasPlanBlock): CanvasPlanGanttLa
   );
   const ticks: CanvasPlanGanttTick[] = [];
   if (first !== undefined && last !== undefined) {
-    // A tick a week on a short plan, and one every four weeks once a week is
-    // narrower than a date label; the first day always carries one.
-    const step = dayWidth * 7 >= 56 ? 7 : 28;
+    // A tick a week on a short plan, and one every four weeks, or a multiple
+    // of four weeks, once a week is narrower than a date label; the first day
+    // always carries one. The gap bounds the count by the track's width.
+    const step = dayWidth * 7 >= MIN_TICK_GAP ? 7 : 28 * Math.ceil(MIN_TICK_GAP / (28 * dayWidth));
     for (let day = first; day <= last; day += step) {
       ticks.push({ day: dayString(day), x: chartX + (day - first) * dayWidth });
     }

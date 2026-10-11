@@ -80,6 +80,8 @@ export function canvasBlockLabel(block: CanvasDefinition["blocks"][number]): str
       return block.title ?? "Callout";
     case "tabs":
       return "Tabs";
+    case "columns":
+      return "Columns";
     default:
       return block.kind.replace("-", " ");
   }
@@ -153,12 +155,26 @@ export function CanvasDocument({
       const first = run[0];
       if (first?.kind === "dashboard") return dashboardSection(first);
       if (first?.kind === "group") {
+        // The group is a block a comment can anchor to, so it carries its own
+        // marker just as a dashboard does; its children keep theirs.
         return (
-          <CanvasLayoutGroup
-            block={first.group}
+          <section
             key={first.group.blockId}
-            renderSection={(index) => flow(first.sections[index] ?? [])}
-          />
+            className="canvas-block canvas-block--group"
+            data-block-kind={first.group.kind}
+          >
+            <CanvasLayoutGroup
+              block={first.group}
+              renderSection={(index) => flow(first.sections[index] ?? [])}
+            />
+            {comments === undefined ? null : (
+              <CommentMarker
+                count={comments.openCounts.get(String(first.group.blockId)) ?? 0}
+                label={canvasBlockLabel(first.group)}
+                onOpen={() => comments.onOpen(String(first.group.blockId))}
+              />
+            )}
+          </section>
         );
       }
       const sections = run.map((item) => (item.kind === "block" ? blockSection(item.block) : null));
