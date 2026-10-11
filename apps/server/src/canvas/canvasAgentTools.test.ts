@@ -1033,6 +1033,20 @@ describe("createCanvasAgentTools", () => {
       expect(create).not.toHaveBeenCalled();
     });
 
+    it("teaches a Work or Code agent to show a Project file in a design, and a Chat agent only generated images", () => {
+      for (const mode of ["work", "code"] as const) {
+        const description = boundTools(mode).set.definitions[0]?.description ?? "";
+        expect(description).toContain("octant-asset:home-shot");
+        expect(description).toContain('"kind": "project-file"');
+        expect(description).toContain('"kind": "generated-image"');
+        expect(description).toContain("3 MB each and 5 MB per design");
+      }
+      const chat = tools().set.definitions[0]?.description ?? "";
+      expect(chat).toContain('"kind": "generated-image"');
+      expect(chat).not.toContain('"kind": "project-file"');
+      expect(chat).toContain("a file path is refused");
+    });
+
     it("tells the agent to deliver substantial work as a Canvas bound to the thread's checkout", () => {
       const description = boundTools("code").set.definitions[0]?.description ?? "";
       expect(description).toContain("deliver it as a Canvas rather than as a long reply");

@@ -459,6 +459,16 @@ import { CanvasExportEventStore } from "./canvas/canvasExportEventStore";
 import { CanvasExportService } from "./canvas/canvasExportService";
 import { createCanvasRefreshSourceResolver } from "./canvas/canvasRefreshSourceResolver";
 import { readCanvasRefreshFile, resolveCanvasRefreshFile } from "./canvas/canvasRefreshFileRead";
+import type {
+  CanvasDesignAssetResolution,
+  CanvasDesignBlock,
+  CanvasProvenance,
+} from "@octant/contracts/canvas";
+import {
+  readCanvasDesignAssetFile,
+  resolveCanvasDesignAssets,
+  type CanvasDesignAssetPorts,
+} from "./canvas/canvasDesignAssets";
 import { createCanvasSkillContributionResolver } from "./canvas/canvasSkillContributionResolver";
 import {
   createCanvasSkillContributionLookup,
@@ -8479,6 +8489,114 @@ export function startOctantServer(
       };
     };
 
+    /**
+     * The checkout an active Code thread is bound to now: the Project's own
+     * repository for an existing worktree, or a managed worktree only while
+     * its ownership receipt still names this thread, checkout, and repository.
+     * Undefined refuses.
+     */
+    const codeThreadCheckoutRoot = async (
+      threadId: string,
+      projectId: string,
+    ): Promise<string | undefined> => {
+      const thread = persistence.readCodeThread(threadId as never);
+      if (
+        thread === undefined ||
+        String(thread.projectId) !== projectId ||
+        thread.lifecycle !== "active"
+      ) {
+        return undefined;
+      }
+      const project = persistence.readProject(thread.projectId);
+      if (project?.type !== "code" || project.lifecycle !== "active") return undefined;
+      const checkout = persistence.readCodeCheckout(thread.checkoutId);
+      if (checkout === undefined) return undefined;
+      if (checkout.kind === "existing-worktree") return project.binding.canonicalRoot;
+      if (checkout.kind !== "managed-worktree") return undefined;
+      const receipt = await managedWorktreeReceipts.load(String(checkout.ownershipReceiptId));
+      if (
+        receipt === undefined ||
+        receipt.state !== "ready" ||
+        receipt.receiptId !== checkout.ownershipReceiptId ||
+        receipt.threadId !== thread.id ||
+        receipt.checkoutId !== checkout.id ||
+        receipt.repositoryId !== thread.repositoryId ||
+        receipt.repositoryId !== checkout.repositoryId ||
+        receipt.canonicalRepositoryPath !== project.binding.canonicalRoot
+      ) {
+        return undefined;
+      }
+      return receipt.canonicalWorktreePath;
+    };
+
+    /**
+     * Where a Canvas design's declared images are read from. Every call
+     * re-derives authority from the Canvas version's provenance and durable
+     * host state: a generated image only from a thread of the same Project,
+     * a Work file only under the Project root while the thread is bound to its
+     * current revision, and a Code file only under the thread's checkout.
+     */
+    const canvasDesignAssetPorts: CanvasDesignAssetPorts = {
+      generatedImage: async ({ imageId, projectId, maximumBytes }) => {
+        const job = imageJobService.completedJobFor(imageId);
+        if (job === undefined) return { status: "unavailable", reason: "missing" };
+        const artifact = job.artifacts.find(
+          (candidate) => String(candidate.attachmentId) === String(imageId),
+        );
+        if (artifact === undefined) return { status: "unavailable", reason: "missing" };
+        const owner =
+          job.threadKind === "chat-thread"
+            ? persistence.readChatThread(job.scopeId as never)
+            : job.threadKind === "work-thread"
+              ? workThreadProjection.read(job.scopeId as never)
+              : job.threadKind === "code-thread"
+                ? persistence.readCodeThread(job.scopeId as never)
+                : undefined;
+        // The host-wide image library belongs to no Project, so no Canvas
+        // reaches it through a design.
+        if (owner === undefined) return { status: "unavailable", reason: "refused" };
+        if (owner.lifecycle === "deleted" || owner.lifecycle === "deleting") {
+          return { status: "unavailable", reason: "missing" };
+        }
+        if (owner.projectId === undefined || String(owner.projectId) !== projectId) {
+          return { status: "unavailable", reason: "refused" };
+        }
+        if (artifact.size > maximumBytes) return { status: "unavailable", reason: "too-large" };
+        const read = await imageJobService.readArtifact(job.id, artifact.attachmentId);
+        return read === undefined
+          ? { status: "unavailable", reason: "missing" }
+          : { status: "read", bytes: read.bytes };
+      },
+      projectFile: async ({ mode, projectId, threadId, path, maximumBytes }) => {
+        let root: string | undefined;
+        if (mode === "code") {
+          root = await codeThreadCheckoutRoot(threadId, projectId);
+        } else {
+          const workspace = resolveCanvasWorkspace({ mode: "work", threadId });
+          const project = persistence.readProject(projectId as never);
+          root =
+            workspace?.kind === "work-root" &&
+            String(workspace.projectId) === projectId &&
+            project?.type === "work" &&
+            project.lifecycle === "active"
+              ? project.binding.canonicalRoot
+              : undefined;
+        }
+        if (root === undefined) return { status: "unavailable", reason: "refused" };
+        return await readCanvasDesignAssetFile({
+          filesystem: liveWorkFilesystem,
+          root,
+          path,
+          maximumBytes,
+        });
+      },
+    };
+    const resolveDesignAssets = (
+      block: CanvasDesignBlock,
+      provenance: CanvasProvenance,
+    ): Promise<ReadonlyArray<CanvasDesignAssetResolution>> =>
+      resolveCanvasDesignAssets(block, provenance, canvasDesignAssetPorts);
+
     const artifactMirrorEvents = new ArtifactMirrorEventStore({
       journal: persistence.journal,
       uuid: randomUUID,
@@ -8749,29 +8867,8 @@ export function startOctantServer(
                     reference.state !== "completed")
                 )
                   return undefined;
-                let checkoutRoot = project.binding.canonicalRoot;
-                const checkout = persistence.readCodeCheckout(thread.checkoutId);
-                if (checkout === undefined) return undefined;
-                if (checkout?.kind === "managed-worktree") {
-                  const receipt = await managedWorktreeReceipts.load(
-                    String(checkout.ownershipReceiptId),
-                  );
-                  if (
-                    receipt === undefined ||
-                    receipt.state !== "ready" ||
-                    receipt.receiptId !== checkout.ownershipReceiptId ||
-                    receipt.threadId !== thread.id ||
-                    receipt.checkoutId !== checkout.id ||
-                    receipt.repositoryId !== thread.repositoryId ||
-                    receipt.repositoryId !== checkout.repositoryId ||
-                    receipt.canonicalRepositoryPath !== project.binding.canonicalRoot
-                  ) {
-                    return undefined;
-                  }
-                  checkoutRoot = receipt.canonicalWorktreePath;
-                } else if (checkout.kind !== "existing-worktree") {
-                  return undefined;
-                }
+                const checkoutRoot = await codeThreadCheckoutRoot(thread.id, projectId);
+                if (checkoutRoot === undefined) return undefined;
                 const resolved = resolveConfinedPath(checkoutRoot, reference.relativePath);
                 if (!resolved.ok) return undefined;
                 return await resolveCanvasRefreshFile(liveWorkFilesystem, {
@@ -8920,6 +9017,7 @@ export function startOctantServer(
       canvas: canvasService,
       preview: createCanvasPreviewService({
         canvas: canvasService,
+        resolveDesignAssets,
         renderer: createPlaywrightCanvasPreviewRenderer({
           // The preview page ships beside the web build, so it follows the
           // same folder a host injects for the app; otherwise every preview
@@ -9201,6 +9299,7 @@ export function startOctantServer(
     const canvasRoutes = createCanvasRouteHandler({
       canvasProjection: persistence.canvasProjection,
       canvasService,
+      resolveDesignAssets,
       canvasShareService,
       canvasExportService,
       // A host with no usable `gh` has no GitHub state to read; the gist

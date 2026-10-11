@@ -1,9 +1,11 @@
 import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Schema } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   CANVAS_DESIGN_ASSET_MAX_BYTES,
+  CanvasDesignAssetId,
   decodeImageArtifactId,
   type CanvasDesignBlock,
 } from "@octant/contracts";
@@ -16,6 +18,7 @@ import {
 
 const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3, 4]);
 const SVG = new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg"></svg>');
+const decodeCanvasDesignAssetId = Schema.decodeUnknownSync(CanvasDesignAssetId);
 const imageId = decodeImageArtifactId("11111111-1111-4111-8111-111111111111");
 const projectId = "22222222-2222-4222-8222-222222222222";
 const threadId = "33333333-3333-4333-8333-333333333333";
@@ -112,7 +115,9 @@ describe("resolveCanvasDesignAssets", () => {
         ? ({ status: "read", bytes: PNG } as const)
         : ({ status: "unavailable", reason: "refused" } as const),
     );
-    const block = design([{ assetId: "hero", source: { kind: "generated-image", imageId } }]);
+    const block = design([
+      { assetId: decodeCanvasDesignAssetId("hero"), source: { kind: "generated-image", imageId } },
+    ]);
     const ours = await resolveCanvasDesignAssets(
       block,
       { mode: "chat", projectId: projectId as never, threadId: threadId as never },
