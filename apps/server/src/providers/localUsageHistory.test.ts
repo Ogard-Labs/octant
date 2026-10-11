@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import {
   createClaudeLocalUsageHistorySource,
   createCodexLocalUsageHistorySource,
+  createLocalUsageHistorySourceForDriver,
 } from "./providerUsageHistorySources";
 import { readLocalUsageHistory } from "./localUsageHistoryReader";
 
@@ -302,6 +303,40 @@ describe("local provider usage history", () => {
           kind: "provider-recorded",
           currency: "USD",
         }),
+      }),
+    ]);
+  });
+
+  it("reads isolated Claude account usage from that account directory", async () => {
+    const account = await mkdtemp(join(tmpdir(), "octant-claude-account-"));
+    const root = join(account, "projects");
+    await mkdir(root, { recursive: true });
+    await writeFile(
+      join(root, "session.jsonl"),
+      JSON.stringify({
+        type: "assistant",
+        session_id: "claude-session-isolated",
+        timestamp: "2026-09-09T12:00:00.000Z",
+        message: {
+          id: "message-isolated",
+          model: "claude-sonnet-4-6",
+          usage: { input_tokens: 3, output_tokens: 2 },
+        },
+      }),
+    );
+    const source = createLocalUsageHistorySourceForDriver({
+      driverKind: "claude",
+      home: join(tmpdir(), "unused-home"),
+      claudeConfigDirectory: account,
+    });
+    if (source === undefined) {
+      throw new Error("expected a Claude usage source");
+    }
+    const result = await Effect.runPromise(source.read(request));
+    expect(result.records).toEqual([
+      expect.objectContaining({
+        inputTokens: 3,
+        outputTokens: 2,
       }),
     ]);
   });

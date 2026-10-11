@@ -4462,6 +4462,10 @@ export function startOctantServer(
         createLocalUsageHistorySourceForDriver({
           driverKind: instance.driverKind,
           home: homedir(),
+          ...(instance.driverKind === "claude" &&
+          instance.configuration.configDirectory !== undefined
+            ? { claudeConfigDirectory: instance.configuration.configDirectory }
+            : {}),
           checkpointStore: createLocalUsageHistoryCheckpointStore(
             join(persistence.dataDirectory, "local-usage-cache.sqlite3"),
           ),
@@ -4493,8 +4497,13 @@ export function startOctantServer(
             continue;
           }
           const source = driver.localUsageHistory;
-          if (source === undefined || seen.has(source.sourceKind)) continue;
-          seen.add(source.sourceKind);
+          if (source === undefined) continue;
+          const sourceKey =
+            instance.driverKind === "claude"
+              ? `${source.sourceKind}:${String(instance.id)}`
+              : source.sourceKind;
+          if (seen.has(sourceKey)) continue;
+          seen.add(sourceKey);
           sources.push(source);
         }
         return sources;
