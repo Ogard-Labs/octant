@@ -172,10 +172,14 @@ exception; the product path above does not create that.
   mechanism. They are not part of the helper-token remediation. The
   isolation unit is the account. If the macOS must-verify shows the
   login can live apart from session files, confined launches grant
-  only that credential path. If it cannot, same-account Work and Code
-  threads share Claude session history; confined Chat subscription
-  launches are refused so Chat cannot read another Project's files.
-  That is a recorded limit, not a later invention.
+  that credential path plus a durable per-thread session directory.
+  Threads that already have history in the account tree keep that
+  session root or take an explicit new-thread transition; do not move
+  them onto an empty directory. If login cannot be separated, same-
+  account Work and Code threads share Claude session history;
+  confined Chat subscription launches are refused so Chat cannot read
+  another Project's files. That is a recorded limit, not a later
+  invention.
 - User-facing copy stops presenting Claude login as an Octant-owned
   connect step.
 
