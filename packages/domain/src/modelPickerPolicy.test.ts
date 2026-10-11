@@ -19,6 +19,7 @@ import {
   pickerCatalogs,
   pickerGroupCarriesAppManagedTools,
   startedConversationPickerGroups,
+  startedCodeThreadPickerGroups,
   startedThreadPickerGroups,
   type ModelPickerInput,
 } from "./modelPickerPolicy";
@@ -944,6 +945,28 @@ describe("model picker policy", () => {
           }),
         ),
       ).toEqual(["Fixed:m-b"]);
+    });
+
+    it("keeps every other provider for a started Code thread, since a switch hands its conversation over", () => {
+      expect(
+        modelIds(
+          startedCodeThreadPickerGroups(groups, {
+            providerInstanceId: fixed.id,
+            modelId: decodeProviderModelId("m-b"),
+          }),
+        ),
+      ).toEqual(["Fixed:m-b", "Switching:m-a", "Switching:m-b"]);
+    });
+
+    it("still offers the other providers when the Code thread's own provider is gone", () => {
+      expect(
+        modelIds(
+          startedCodeThreadPickerGroups(groups, {
+            providerInstanceId: "00000000-0000-4000-8000-000000000199" as never,
+            modelId: decodeProviderModelId("m-a"),
+          }),
+        ),
+      ).toEqual(["Fixed:m-a", "Fixed:m-b", "Switching:m-a", "Switching:m-b"]);
     });
   });
 

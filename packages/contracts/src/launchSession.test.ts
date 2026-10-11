@@ -24,17 +24,21 @@ describe("isCanonicalLaunchSessionToken", () => {
 
 describe("decodeLaunchSessionRequest", () => {
   it("decodes an admin launch-session creation request", () => {
-    expect(decodeLaunchSessionRequest({ windowId, capability: token })).toEqual({
+    expect(
+      decodeLaunchSessionRequest({ windowId, capability: token, origin: "http://127.0.0.1:13773" }),
+    ).toEqual({
       windowId,
       capability: token,
+      origin: "http://127.0.0.1:13773",
     });
   });
 
   it.each<[unknown, string]>([
-    [{ windowId, capability: "short" }, "capability"],
-    [{ windowId: "not-a-uuid", capability: token }, "windowId"],
-    [{ capability: token }, "windowId"],
-    [{ windowId, capability: token, extra: 1 }, "excess"],
+    [{ windowId, capability: "short", origin: "http://127.0.0.1:13773" }, "capability"],
+    [{ windowId: "not-a-uuid", capability: token, origin: "http://127.0.0.1:13773" }, "windowId"],
+    [{ capability: token, origin: "http://127.0.0.1:13773" }, "windowId"],
+    [{ windowId, capability: token }, "origin"],
+    [{ windowId, capability: token, origin: "http://127.0.0.1:13773", extra: 1 }, "excess"],
   ])("rejects an invalid request %#", (input) => {
     expect(() => decodeLaunchSessionRequest(input)).toThrow();
   });

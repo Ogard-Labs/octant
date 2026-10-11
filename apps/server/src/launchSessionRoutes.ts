@@ -1,4 +1,4 @@
-import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
+import { createHash, timingSafeEqual } from "node:crypto";
 import {
   decodeWindowId,
   decodeLaunchSessionExchangeRequest,
@@ -6,7 +6,7 @@ import {
   type LaunchSessionFailure,
   type WindowId,
 } from "@octant/contracts";
-import { isLoopbackHostname, isAllowedRendererOrigin } from "./shellRoutes";
+import { isAllowedRendererOrigin, isLocalRendererOrigin, isLoopbackHostname } from "./shellRoutes";
 import { LaunchSessionError, type LaunchSessionStore } from "./launchSessionStore";
 import { WindowAuthorityError, type WindowAuthorityStore } from "./windowAuthorityStore";
 
@@ -21,10 +21,6 @@ export interface LaunchSessionRouteDependencies {
   readonly now?: () => number;
   readonly maxRequestBodySize?: number;
   readonly allowedRendererHttpOrigin?: string | null;
-  readonly generateLocalAuthority?: () => {
-    readonly windowId: WindowId;
-    readonly capability: string;
-  };
 }
 
 export function createLaunchSessionRouteHandler(dependencies: LaunchSessionRouteDependencies) {
@@ -64,7 +60,7 @@ async function handleLocalBootstrap(
   }
   if (
     origin === null ||
-    !isAllowedLocalRendererOrigin(origin, dependencies.allowedRendererHttpOrigin)
+    !isAllowedLocalRendererOrigin(origin, url, dependencies.allowedRendererHttpOrigin)
   ) {
     return failureResponse(
       { category: "invalid", message: "Renderer origin is not allowed." },
@@ -97,6 +93,11 @@ async function handleLocalBootstrap(
       400,
     );
   }
+  // This route refreshes a window capability the caller already holds; it
+  // never mints one. Being on loopback with an admitted Origin proves nothing
+  // about who the caller is: another OS user, an SSH forward, or a proxy that
+  // rewrites Host all arrive that way. A capability comes only from a launch
+  // token minted with the bridge secret, which only the host's OS user can read.
   const previous = localAuthorityCandidate(decoded.value);
   if (previous !== undefined) {
     try {
@@ -108,23 +109,26 @@ async function handleLocalBootstrap(
         dependencies.windowAuthorityStore.registerOrRefresh({ ...previous, now: now() });
         return jsonResponse({ ...previous, authentication: "local-session" as const }, 200, origin);
       }
-    } catch {
-      // A restarted host owns no matching capability. Fall through and mint a
-      // fresh client context while the Machine-owned data remains unchanged.
+    } catch (error) {
+      if (error instanceof WindowAuthorityError && error.category === "unavailable") {
+        return failureResponse(
+          { category: "unavailable", message: "Local client session refresh is unavailable." },
+          origin,
+          503,
+        );
+      }
+      // A restarted host owns no matching capability; the browser must be
+      // launched again from the desktop application or `octant web`.
     }
   }
-  const generate = dependencies.generateLocalAuthority ?? defaultLocalAuthority;
-  try {
-    const authority = generate();
-    dependencies.windowAuthorityStore.register({ ...authority, now: now() });
-    return jsonResponse({ ...authority, authentication: "local-session" as const }, 200, origin);
-  } catch {
-    return failureResponse(
-      { category: "unavailable", message: "Local client bootstrap failed." },
-      origin,
-      503,
-    );
-  }
+  return failureResponse(
+    {
+      category: "unauthorized",
+      message: "Open Octant from the desktop app or run `octant web`.",
+    },
+    origin,
+    401,
+  );
 }
 
 function localAuthorityCandidate(
@@ -142,23 +146,19 @@ function localAuthorityCandidate(
   }
 }
 
-function isAllowedLocalRendererOrigin(origin: string, allowedHttpOrigin?: string | null): boolean {
-  if (!isAllowedRendererOrigin(origin, allowedHttpOrigin)) return false;
+// Launch tokens are bound to, and capabilities refreshed for, only renderers
+// this listener serves; any other loopback page is refused first.
+function isAllowedLocalRendererOrigin(
+  origin: string,
+  listenerUrl: URL,
+  allowedHttpOrigin?: string | null,
+): boolean {
+  if (!isLocalRendererOrigin(origin, listenerUrl, allowedHttpOrigin)) return false;
   try {
     return new URL(origin).protocol === "http:";
   } catch {
     return false;
   }
-}
-
-function defaultLocalAuthority(): {
-  readonly windowId: WindowId;
-  readonly capability: string;
-} {
-  return {
-    windowId: decodeWindowId(randomUUID()),
-    capability: randomBytes(32).toString("base64url"),
-  };
 }
 
 async function handleAdminCreate(
@@ -227,10 +227,20 @@ async function handleAdminCreate(
       400,
     );
   }
+  // The token is bound to the page the launcher opens, so that page must be a
+  // renderer this listener serves.
+  if (!isAllowedLocalRendererOrigin(body.origin, url, dependencies.allowedRendererHttpOrigin)) {
+    return failureResponse(
+      { category: "invalid", message: "Renderer origin is not allowed." },
+      null,
+      400,
+    );
+  }
   try {
     const receipt = dependencies.launchSessionStore.create({
       windowId: body.windowId,
       capability: body.capability,
+      origin: body.origin,
     });
     return Response.json(receipt, { status: 201 });
   } catch (error) {
@@ -302,7 +312,7 @@ async function handleRendererExchange(
   }
   try {
     const exchange = dependencies.launchSessionStore.exchangeAtomically(
-      { launchToken: body.launchToken, now: now() },
+      { launchToken: body.launchToken, origin, now: now() },
       (candidate) => {
         dependencies.windowAuthorityStore.registerOrRefresh({
           windowId: candidate.windowId,

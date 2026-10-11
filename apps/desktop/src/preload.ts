@@ -1,5 +1,5 @@
 import type { NativeMenuRequest, NativeMenuOutcome } from "@octant/contracts/shell";
-import { decodeMenuBarTasks, type MenuBarTask } from "./menuBar";
+import { decodeMenuBarOpenThread, type MenuBarOpenThread } from "./menuBar";
 import { contextBridge, ipcRenderer } from "electron";
 import type { CodeApprovalId, CodeOperationApprovalRequest } from "@octant/contracts";
 import type { OpenInApplicationId } from "@octant/contracts/shell";
@@ -9,7 +9,7 @@ export const HOST_BRIDGE_KEY = "octantHost";
 
 export const IPC_CHANNELS = {
   nativeMenu: "octant:menu:popup",
-  menuBarTasks: "octant:menu:tasks",
+  menuBarOpenThread: "octant:menu:open-thread",
   menuBarTask: "octant:menu:task",
   attentionBadge: "octant:attention:badge",
   attentionNotify: "octant:attention:notify",
@@ -387,10 +387,8 @@ export interface AttentionNotificationBridgeRequest {
 
 export interface OctantHostBridge {
   readonly popupNativeMenu: (request: NativeMenuRequest) => Promise<NativeMenuOutcome>;
-  readonly setMenuBarTasks: (tasks: ReadonlyArray<MenuBarTask>) => Promise<void>;
-  readonly subscribeMenuBarTask: (
-    listener: (target: Pick<MenuBarTask, "mode" | "threadId">) => void,
-  ) => () => void;
+  readonly setMenuBarOpenThread: (thread: MenuBarOpenThread | null) => Promise<void>;
+  readonly subscribeMenuBarTask: (listener: (target: MenuBarOpenThread) => void) => () => void;
   readonly getComputerUseStatus: () => Promise<unknown>;
   readonly requestComputerUsePermissions: () => Promise<unknown>;
   readonly openComputerUsePermissionSettings: () => Promise<void>;
@@ -582,10 +580,10 @@ export function createHostBridge(
       }
       return { kind: "refused" };
     },
-    setMenuBarTasks: async (tasks: ReadonlyArray<MenuBarTask>) => {
-      await invoke(IPC_CHANNELS.menuBarTasks, decodeMenuBarTasks(tasks));
+    setMenuBarOpenThread: async (thread: MenuBarOpenThread | null) => {
+      await invoke(IPC_CHANNELS.menuBarOpenThread, decodeMenuBarOpenThread(thread) ?? null);
     },
-    subscribeMenuBarTask: (listener: (target: Pick<MenuBarTask, "mode" | "threadId">) => void) => {
+    subscribeMenuBarTask: (listener: (target: MenuBarOpenThread) => void) => {
       const receive: DeepLinkListener = (_event, target) => {
         if (
           typeof target !== "object" ||

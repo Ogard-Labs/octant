@@ -22,6 +22,7 @@
 @import "./styles/preview.css";
 @import "./styles/zen.css";
 @import "./styles/canvas.css";
+@import "./styles/canvas-dashboard.css";
 @import "./styles/remote-pairing.css";
 @import "./styles/remote-shell.css";
 @import "./styles/artifacts.css";
@@ -2300,11 +2301,6 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   background: var(--oct-fg-soft);
 }
 
-.endpoint-row__link:focus-visible {
-  outline: none;
-  box-shadow: var(--oct-focus-ring);
-}
-
 .endpoint-mark {
   display: grid;
   place-items: center;
@@ -2558,11 +2554,6 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   font-weight: var(--oct-weight-display);
 }
 
-.endpoint-flow__title:focus-visible {
-  outline: none;
-  box-shadow: var(--oct-focus-ring);
-}
-
 .endpoint-flow__detail,
 .endpoint-flow__note {
   margin: 0;
@@ -2671,11 +2662,6 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 
 .endpoint-kind:hover {
   background: var(--oct-fg-soft);
-}
-
-.endpoint-kind:focus-visible {
-  outline: none;
-  box-shadow: var(--oct-focus-ring);
 }
 
 .endpoint-kind__text {
@@ -2820,11 +2806,6 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   font-size: var(--oct-text-xl);
   font-weight: var(--oct-weight-display);
   overflow-wrap: anywhere;
-}
-
-.endpoint-detail__name:focus-visible {
-  outline: none;
-  box-shadow: var(--oct-focus-ring);
 }
 
 .endpoint-detail__state {
@@ -3329,6 +3310,61 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 
 .provider-details__section--capabilities dd {
   color: var(--octant-text-secondary);
+}
+
+/* Integration states what reaches the runtime's session, so each fact keeps
+   its value and its reason together instead of a bare capability word. */
+.provider-details__section--integration {
+  padding-top: var(--oct-space-3);
+  border-top: 1px solid var(--oct-hairline);
+}
+
+.provider-details__section--integration h4,
+.provider-details__section--integration > .oct-row-detail {
+  margin: 0;
+}
+
+.provider-details__section--integration dl {
+  display: grid;
+  grid-template-columns: minmax(7rem, max-content) minmax(0, 1fr);
+  gap: var(--oct-space-2) var(--oct-space-3);
+  margin: 0;
+}
+
+.provider-details__section--integration dl div {
+  display: contents;
+}
+
+.provider-details__section--integration dt {
+  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-detail);
+}
+
+.provider-details__section--integration dd {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  margin: 0;
+}
+
+.provider-integration__value {
+  color: var(--octant-text-primary);
+  font-size: var(--oct-text-detail);
+}
+
+.provider-integration__detail {
+  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-detail);
+}
+
+@media (max-width: 520px) {
+  .provider-details__section--integration dl {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .provider-details__section--integration dd {
+    margin-bottom: var(--oct-space-1);
+  }
 }
 
 .shell-boundary {

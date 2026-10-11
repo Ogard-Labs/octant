@@ -417,6 +417,10 @@ answered in place, above its other waiting threads, and a thread with a
 decision is not listed again as a finished turn. The list is read at a local
 window only, so a remote window has no Needs you source. What it includes and leaves out is in
 [Architecture: pending requests across modes](../architecture.md#security-and-authority).
+With every window closed, the desktop menu bar carries the same waiting threads
+as its **Needs you** section, beside **Working** and **Done since you looked**;
+a row opens the thread. It is described in
+[Architecture: desktop menu bar](../architecture.md#desktop-menu-bar).
 
 The command palette opens on a **Needs you** group when this window can read
 that list. It has one row per waiting thread, titled with the thread and
@@ -447,7 +451,8 @@ or a valid launchable tool. An available empty dock opens on a thread overview (
 changes; see [DESIGN.md](../../DESIGN.md#shell-and-layout))
 above a grid of tool tiles; an open dock shows a tool strip. Direct tools are Side Chat, Browser, Files,
 Document, Canvas, artifact-gated Plan, conditional Delivery, Review, Terminal,
-Tests, iOS Simulator, and Android emulator, as mode and capability allow. Side
+Tests, iOS Simulator, and Android emulator, as mode and capability allow; Chat
+has no dock and no bottom panel. Side
 Chat is a Chat conversation about the pane's thread: it reads that thread's
 conversation, current state, files, and subagent results, and changes none of
 them ([authority](../architecture.md#security-and-authority)). Its notice says
@@ -465,7 +470,13 @@ line of facts) that opens it. The inline frame holds **Show as card**, a fold
 the window remembers. In Work and Code it also holds **Open in sidebar**, which
 opens the same Canvas in the dock tool, and a row opens it there too. Chat has
 no dock, so there the frame holds **Open Canvas**, and the frame and a row open
-the Canvas as a content tab. An
+the Canvas as a content tab beside the thread. Accepted but not yet built: a person may expand
+any Canvas of the thread in place, including one shown as a row; the expanded
+frame grows with its content up to about the thread viewport instead of
+fading, the thread keeps the wheel until the person focuses a region inside
+it, and a running design frame starts there only when the person presses
+**Run**. Until that ships, the fixed-height fade above is the behavior (see
+[Canvas documents, designs, and prototypes](../architecture.md#canvas-documents-designs-and-prototypes)). An
 agent-authored Canvas belongs to the thread's own scope as the host resolves
 it: the active Chat Project, the Work thread's confined root, or the Code
 thread's checkout; a thread whose binding the host cannot resolve is refused

@@ -9,6 +9,7 @@ import type {
   ProviderModelId,
   ProviderObservedState,
 } from "@octant/contracts";
+import { ProviderRuntimeIntegrationFacts } from "./ProviderRuntimeIntegrationFacts";
 import {
   canLocateRuntimeBinary,
   isImageProfileDriverKind,
@@ -1694,6 +1695,12 @@ function ProviderRow(props: ProviderRowProps) {
                     Project” does not extend provider authority.
                   </p>
                 ) : null}
+                {props.observed === undefined ? null : (
+                  <ProviderRuntimeIntegrationFacts
+                    instanceId={String(props.instance.id)}
+                    observed={props.observed}
+                  />
+                )}
                 {props.observed === undefined ? null : (
                   <section
                     aria-labelledby={`capabilities-${props.instance.id}`}

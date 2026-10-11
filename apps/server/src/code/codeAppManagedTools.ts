@@ -1,5 +1,5 @@
 import { browserToolImage } from "../browser/browserToolImage";
-import { BROWSER_TOOL_DEFINITION } from "../browser/browserToolDefinition";
+import { BROWSER_TOOL_DEFINITION, BROWSER_TOOL_HELP } from "../browser/browserToolDefinition";
 import type {
   BrowserActionRequest,
   BrowserAutomationSnapshot,
@@ -11,8 +11,10 @@ import type {
   CodeTerminalId,
   CodeThread,
   EventActor,
+  ToolActionApproval,
   ToolActionAuthority,
   ToolActionRequest,
+  ToolApprovalId,
   WindowId,
 } from "@octant/contracts";
 import { MAX_BROWSER_TABS_PER_CONTEXT } from "@octant/contracts";
@@ -34,6 +36,9 @@ import {
 import {
   clampTurnAccessPosture,
   decideProfileToolConstraint,
+  decidesCodeEffectsByApproval,
+  isAndroidEmulatorInputKind,
+  isAppleSimulatorInputKind,
   isToolAllowedByAllowlist,
 } from "@octant/domain";
 import type { AppleDiscoveryResult } from "../apple/appleToolchainService";
@@ -42,7 +47,7 @@ import type {
   ExternalContentIngestionResult,
   RecordExternalContentIngestionInput,
 } from "../context/externalContentIngestionStore";
-import type { AppManagedToolSet } from "../providers/appManagedToolSet";
+import { withToolFamilyHelp, type AppManagedToolSet } from "../providers/appManagedToolSet";
 import { taintAppManagedToolResults } from "../providers/appManagedToolTaint";
 import type { CodeOperationTerminalSnapshot } from "./codeOperationService";
 
@@ -102,11 +107,11 @@ const proposeThreadDefinition = {
 const terminalDefinition = {
   name: CODE_TERMINAL_TOOL_NAME,
   description:
-    "Use Octant's terminal for this Code task: run starts a command, write supplies input to the running terminal, read checks its output, and stop terminates it. command is required for run or write. Check commandCompleted and commandExitCode; a running terminal is not proof that its command succeeded. For document artifacts, create files within the bound checkout and report their real relative paths. Octant's Files and Document tools provide host-authorized previews; never invent an artifact URL or claim a preview opened based on a write alone. Ordinary terminal permissions still apply.",
+    "Use Octant's terminal for this Code task: run starts a command, write sends input, read checks output, and stop terminates it. Check commandCompleted and commandExitCode; a running terminal is not proof that its command succeeded. Ordinary terminal permissions still apply. Call operation help for full usage.",
   inputSchema: {
     type: "object",
     properties: {
-      operation: { type: "string", enum: ["run", "write", "read", "stop"] },
+      operation: { type: "string", enum: ["run", "write", "read", "stop", "help"] },
       command: { type: "string" },
     },
     required: ["operation"],
@@ -116,7 +121,7 @@ const terminalDefinition = {
 const appleDefinition = {
   name: CODE_APPLE_TOOL_NAME,
   description:
-    "Build, test, run, and inspect Apple apps through Octant's in-app Simulator pane and Apple workbench. Begin with discover or status and use the returned project, scheme, and destination identifiers for later operations. boot, run, and open show the selected Simulator in Octant's iOS Simulator pane — never launch Simulator.app, never run open -a Simulator, and never start serve-sim or another out-of-app simulator. open boots the destination if it is shut down, otherwise only opens the pane. shutdown stops it; screenshot returns its current screen as an image when it fits the provider image limit. tap takes a point (x, y) in the pixels of the latest screenshot; swipe goes from (x, y) to (toX, toY) in the same pixels, over durationMs when given — a short one flings a list, a long one drags. Use only supported operations and inspect returned build, test, or runtime evidence before claiming success. An unavailable operation is not a successful action or permission to bypass the host's validation and approval policy.",
+    "Build, test, run, and drive Apple apps through Octant's in-app iOS Simulator pane and Apple workbench. Begin with discover or status and reuse the returned identifiers. Show a Simulator only in that pane: never launch Simulator.app, run open -a Simulator, or start serve-sim. discover, status, screenshot, and open of a running Simulator are reads under any posture; every other operation is an effect that Plan mode refuses and an approval-gated thread runs only after the person allows it. Inspect returned evidence before claiming success. Call operation help for full usage.",
   inputSchema: {
     type: "object",
     properties: {
@@ -136,6 +141,7 @@ const appleDefinition = {
           "swipe",
           "type-text",
           "key-press",
+          "help",
         ],
       },
       projectPath: { type: "string" },
@@ -158,7 +164,7 @@ const appleDefinition = {
 const androidDefinition = {
   name: CODE_ANDROID_TOOL_NAME,
   description:
-    "Boot, inspect, and drive Android emulators through Octant's in-app Android emulator pane. Begin with discover or status and use the returned AVD names for later operations. boot, open, install, and launch show the selected emulator in Octant's Android emulator pane — never start an external emulator window as the place to look. open boots the destination if it is shut down, otherwise only opens the pane. shutdown stops it; screenshot returns its current screen as an image when it fits the provider image limit. tap takes a point (x, y) in the pixels of the live screen; swipe goes from (x, y) to (toX, toY) over durationMs when given. install takes a checkout-relative APK; launch takes a package name. Use only supported operations and inspect returned evidence before claiming success. An unavailable operation is not a successful action or permission to bypass the host's validation and approval policy.",
+    "Boot, inspect, and drive Android emulators through Octant's in-app Android emulator pane. Begin with discover or status and reuse the returned AVD names; never start an external emulator window as the place to look. discover, status, screenshot, and open of a running emulator are reads under any posture; every other operation is an effect that Plan mode refuses and an approval-gated thread runs only after the person allows it. Inspect returned evidence before claiming success. Call operation help for full usage.",
   inputSchema: {
     type: "object",
     properties: {
@@ -177,6 +183,7 @@ const androidDefinition = {
           "key-press",
           "install",
           "launch",
+          "help",
         ],
       },
       emulatorId: { type: "string" },
@@ -193,6 +200,21 @@ const androidDefinition = {
     required: ["operation"],
   },
 } as const;
+
+/**
+ * Full usage for each Code family, returned by its `help` operation. The
+ * always-visible descriptions above keep only what an agent must know before
+ * its first call (decision 0067).
+ */
+const CODE_TOOL_HELP: Readonly<Record<string, string>> = {
+  ...BROWSER_TOOL_HELP,
+  [CODE_TERMINAL_TOOL_NAME]:
+    "Use Octant's terminal for this Code task: run starts a command, write supplies input to the running terminal, read checks its output, and stop terminates it. command is required for run or write. Check commandCompleted and commandExitCode; a running terminal is not proof that its command succeeded. For document artifacts, create files within the bound checkout and report their real relative paths. Octant's Files and Document tools provide host-authorized previews; never invent an artifact URL or claim a preview opened based on a write alone. Ordinary terminal permissions still apply.",
+  [CODE_APPLE_TOOL_NAME]:
+    "Build, test, run, and inspect Apple apps through Octant's in-app Simulator pane and Apple workbench. Begin with discover or status and use the returned project, scheme, and destination identifiers for later operations. boot, run, and open show the selected Simulator in Octant's iOS Simulator pane — never launch Simulator.app, never run open -a Simulator, and never start serve-sim or another out-of-app simulator. open boots the destination if it is shut down, otherwise only opens the pane. shutdown stops it; screenshot returns its current screen as an image when it fits the provider image limit. tap takes a point (x, y) in the pixels of the latest screenshot; swipe goes from (x, y) to (toX, toY) in the same pixels, over durationMs when given — a short one flings a list, a long one drags. Use only supported operations and inspect returned build, test, or runtime evidence before claiming success. discover, status, screenshot, and open of a destination that is already running are reads; every other operation is an effect, which Plan mode refuses and an approval-gated thread runs only after the person allows it. An unavailable operation is not a successful action or permission to bypass the host's validation and approval policy.",
+  [CODE_ANDROID_TOOL_NAME]:
+    "Boot, inspect, and drive Android emulators through Octant's in-app Android emulator pane. Begin with discover or status and use the returned AVD names for later operations. boot, open, install, and launch show the selected emulator in Octant's Android emulator pane — never start an external emulator window as the place to look. open boots the destination if it is shut down, otherwise only opens the pane. shutdown stops it; screenshot returns its current screen as an image when it fits the provider image limit. tap takes a point (x, y) in the pixels of the live screen; swipe goes from (x, y) to (toX, toY) over durationMs when given. install takes a checkout-relative APK; launch takes a package name. Use only supported operations and inspect returned evidence before claiming success. discover, status, screenshot, and open of a destination that is already running are reads; every other operation is an effect, which Plan mode refuses and an approval-gated thread runs only after the person allows it. An unavailable operation is not a successful action or permission to bypass the host's validation and approval policy.",
+};
 
 /**
  * What the Apple capability lends one Code thread's agent.
@@ -244,6 +266,16 @@ export interface CodeAppleToolPort extends CodeDeviceScreenshotPort {
     },
     simulatorId: AppleSimulatorId,
   ) => Promise<AppleRuntimeSnapshot | undefined>;
+  /**
+   * Whether this window already holds the Simulator open to input on this
+   * thread. The host still decides every input; this only spares the person a
+   * second question for input their Allow input already covers.
+   */
+  readonly inputGrantIsOpen: (
+    windowId: WindowId,
+    threadId: CodeThread["id"],
+    simulatorId: AppleSimulatorId,
+  ) => boolean;
 }
 
 export interface CodeAndroidToolPort extends CodeDeviceScreenshotPort {
@@ -276,7 +308,18 @@ export interface CodeAndroidToolPort extends CodeDeviceScreenshotPort {
     },
     emulatorId: AndroidEmulatorId,
   ) => Promise<AndroidRuntimeSnapshot | undefined>;
+  /** The Android counterpart of {@link CodeAppleToolPort.inputGrantIsOpen}. */
+  readonly inputGrantIsOpen: (
+    windowId: WindowId,
+    threadId: CodeThread["id"],
+    emulatorId: AndroidEmulatorId,
+  ) => boolean;
 }
+
+/** A device effect the thread's agent asks for, exactly as it will reach the host. */
+export type CodeDeviceApprovalEffect =
+  | { readonly kind: "apple-action"; readonly request: AppleActionRequest }
+  | { readonly kind: "android-action"; readonly request: AndroidEmulatorRequest };
 
 export interface CodeAppManagedToolsOptions {
   readonly windowId: WindowId;
@@ -294,6 +337,20 @@ export interface CodeAppManagedToolsOptions {
     readonly isOriginRemembered?: (origin: string) => boolean;
     readonly remember: (contextId: string) => void;
     readonly forget: (contextId: string) => void;
+  };
+  /**
+   * Asks the person, in the thread, to allow one device effect, and on approval
+   * returns the host's one-use approval for exactly that request. The host's
+   * Apple and Android policy validates it like a workbench click's.
+   */
+  readonly deviceApproval?: {
+    readonly request: (
+      effect: CodeDeviceApprovalEffect,
+      signal?: AbortSignal,
+    ) => Promise<
+      | { readonly status: "approved"; readonly approvalId: ToolApprovalId }
+      | { readonly status: "denied" | "cancelled" | "expired" | "unavailable" }
+    >;
   };
   readonly executeOperation: (
     windowId: WindowId,
@@ -399,7 +456,9 @@ export function createCodeAppManagedTools(options: CodeAppManagedToolsOptions): 
   const allowlist = options.thread.toolConstraints ?? [];
   const tools: AppManagedToolSet = {
     definitions: [
-      BROWSER_TOOL_DEFINITION,
+      // A family whose capability this host did not lend is omitted, not
+      // advertised only to be refused on every call.
+      ...(options.browser === undefined ? [] : [BROWSER_TOOL_DEFINITION]),
       terminalDefinition,
       ...(options.apple === undefined ? [] : [appleDefinition]),
       ...(options.android === undefined ? [] : [androidDefinition]),
@@ -430,6 +489,15 @@ export function createCodeAppManagedTools(options: CodeAppManagedToolsOptions): 
       if (name === CODE_BROWSER_TOOL_NAME && options.browser !== undefined) {
         return browserTool(options, parseBrowserInput(inputJson), signal);
       }
+      // The device tools decide per operation: reads run under any posture,
+      // effects ask the person under an approval-gated one. See
+      // `deviceEffectApproval`.
+      if (name === CODE_APPLE_TOOL_NAME && options.apple !== undefined) {
+        return appleTool(options, parseAppleInput(inputJson), signal);
+      }
+      if (name === CODE_ANDROID_TOOL_NAME && options.android !== undefined) {
+        return androidTool(options, parseAndroidInput(inputJson), signal);
+      }
       const postureFailure = currentAuthorityFailure(options);
       if (postureFailure !== undefined) {
         return failure(postureFailure, postureRefusal(postureFailure));
@@ -437,23 +505,23 @@ export function createCodeAppManagedTools(options: CodeAppManagedToolsOptions): 
       if (name === CODE_TERMINAL_TOOL_NAME) {
         return terminalTool(options, parseTerminalInput(inputJson), signal);
       }
-      if (name === CODE_APPLE_TOOL_NAME && options.apple !== undefined) {
-        return appleTool(options, parseAppleInput(inputJson), signal);
-      }
-      if (name === CODE_ANDROID_TOOL_NAME && options.android !== undefined) {
-        return androidTool(options, parseAndroidInput(inputJson), signal);
-      }
       return failure("tool-unavailable");
     },
   };
+  // Help is the family's own static text, not external content, so it is
+  // answered outside the taint wrapper.
   const record = options.recordExternalContentIngestion;
-  if (record === undefined) return tools;
-  return taintAppManagedToolResults({
-    tools,
-    threadId: options.thread.id,
-    recordExternalContentIngestion: record,
-    uuid: options.uuid,
-  });
+  return withToolFamilyHelp(
+    record === undefined
+      ? tools
+      : taintAppManagedToolResults({
+          tools,
+          threadId: options.thread.id,
+          recordExternalContentIngestion: record,
+          uuid: options.uuid,
+        }),
+    CODE_TOOL_HELP,
+  );
 }
 
 async function plannerBoardTool(
@@ -784,12 +852,12 @@ async function browserTool(
 /**
  * The Apple capability, driven by the thread's own agent.
  *
- * Every request carries the thread and checkout the tool is bound to and an
- * approval of `not-required`: the host decides. Under a posture that decides
- * effects by approval, the shared authority gate above has already refused the
- * call, so a request that reaches Apple is one the thread's posture already
- * permits. Reading the toolchain, the runtime, or the Simulator's screen is not
- * an effect and stays available wherever the tool itself is.
+ * Every request carries the thread and checkout the tool is bound to, and the
+ * host decides. Reading the toolchain, the runtime, or the Simulator's screen
+ * is not an effect and stays available wherever the tool itself is, Plan mode
+ * included, as is showing the pane of a Simulator already running. Every other
+ * operation is an effect and passes
+ * `deviceEffectApproval` first, before the pane opens or the host is asked.
  */
 async function appleTool(
   options: CodeAppManagedToolsOptions,
@@ -872,6 +940,9 @@ async function appleTool(
     if (destination.state === "unavailable") {
       return failure("unavailable", "That Simulator destination is unavailable.");
     }
+    // Showing a destination that is already running changes nothing on it, so
+    // it is a read under every posture and has no host action an approval
+    // could bind to. Only opening a shut-down one boots, and that is gated below.
     if (destination.state === "booted" || destination.state === "booting") {
       await apple.requestPaneOpen(options.windowId, scope, destination.simulatorId);
       return {
@@ -887,15 +958,40 @@ async function appleTool(
     const request = appleActionRequest({ ...input, operation: "boot" }, scope, options.uuid);
     if (request === undefined) return failure("invalid-apple-input");
     if (signal?.aborted) return failure("tool-interrupted");
+    const decision = await deviceEffectApproval(
+      options,
+      { kind: "apple-action", request },
+      () => false,
+      signal,
+    );
+    if (decision.kind === "refused") return failure(decision.reason, decision.message);
     await apple.requestPaneOpen(options.windowId, scope, destination.simulatorId);
-    const evidence = await apple.execute(options.windowId, request);
+    const evidence = await apple.execute(options.windowId, {
+      ...request,
+      approval: decision.approval,
+    });
     if (evidence === undefined) return failure("apple-unavailable");
     return appleEvidenceResult(evidence, true);
   }
 
   if (signal?.aborted) return failure("tool-interrupted");
-  const request = appleActionRequest(input, scope, options.uuid);
-  if (request === undefined) return failure("invalid-apple-input");
+  const prepared = appleActionRequest(input, scope, options.uuid);
+  if (prepared === undefined) return failure("invalid-apple-input");
+  let request = prepared;
+  if (!isDeviceRead(input.operation)) {
+    const decision = await deviceEffectApproval(
+      options,
+      { kind: "apple-action", request: prepared },
+      () =>
+        isAppleSimulatorInputKind(prepared.kind) &&
+        "simulatorId" in prepared &&
+        prepared.simulatorId !== undefined &&
+        apple.inputGrantIsOpen(options.windowId, options.thread.id, prepared.simulatorId),
+      signal,
+    );
+    if (decision.kind === "refused") return failure(decision.reason, decision.message);
+    request = { ...prepared, approval: decision.approval };
+  }
   const opensPane =
     (input.operation === "boot" || input.operation === "run") && input.simulatorId !== undefined;
   if (opensPane && input.simulatorId !== undefined) {
@@ -1016,15 +1112,38 @@ async function androidTool(
     const request = androidActionRequest({ ...input, operation: "boot" }, scope, options.uuid);
     if (request === undefined) return failure("invalid-android-input");
     if (signal?.aborted) return failure("tool-interrupted");
+    const decision = await deviceEffectApproval(
+      options,
+      { kind: "android-action", request },
+      () => false,
+      signal,
+    );
+    if (decision.kind === "refused") return failure(decision.reason, decision.message);
     await android.requestPaneOpen(options.windowId, scope, destination.emulatorId);
-    const evidence = await android.execute(options.windowId, request);
+    const evidence = await android.execute(options.windowId, {
+      ...request,
+      approval: decision.approval,
+    });
     if (evidence === undefined) return failure("android-unavailable");
     return androidEvidenceResult(evidence, true);
   }
 
   if (signal?.aborted) return failure("tool-interrupted");
-  const request = androidActionRequest(input, scope, options.uuid);
-  if (request === undefined) return failure("invalid-android-input");
+  const prepared = androidActionRequest(input, scope, options.uuid);
+  if (prepared === undefined) return failure("invalid-android-input");
+  let request = prepared;
+  if (!isDeviceRead(input.operation)) {
+    const decision = await deviceEffectApproval(
+      options,
+      { kind: "android-action", request: prepared },
+      () =>
+        isAndroidEmulatorInputKind(prepared.kind) &&
+        android.inputGrantIsOpen(options.windowId, options.thread.id, prepared.emulatorId),
+      signal,
+    );
+    if (decision.kind === "refused") return failure(decision.reason, decision.message);
+    request = { ...prepared, approval: decision.approval };
+  }
   const opensPane =
     (input.operation === "boot" || input.operation === "install" || input.operation === "launch") &&
     input.emulatorId !== undefined;
@@ -1923,12 +2042,70 @@ function browserAuthorityFailure(options: CodeAppManagedToolsOptions): string | 
 function currentAuthorityFailure(options: CodeAppManagedToolsOptions): string | undefined {
   const staleness = currentThreadIdentityFailure(options);
   if (staleness !== undefined) return staleness;
+  return currentPosture(options) === "full-access" ? undefined : "full-access-required";
+}
+
+function currentPosture(options: CodeAppManagedToolsOptions) {
   const current = options.readThread(options.windowId, options.thread.id);
-  const posture = clampTurnAccessPosture({
+  return clampTurnAccessPosture({
     requested: options.thread.executionPolicy,
     thread: current?.executionPolicy ?? options.thread.executionPolicy,
   });
-  return posture === "full-access" ? undefined : "full-access-required";
+}
+
+type DeviceEffectDecision =
+  | { readonly kind: "allowed"; readonly approval: ToolActionApproval }
+  | { readonly kind: "refused"; readonly reason: string; readonly message?: string };
+
+const NOT_REQUIRED: ToolActionApproval = { kind: "not-required" };
+
+/**
+ * Whether a device effect the agent asked for may reach the host, and with
+ * which approval.
+ *
+ * Code threads start approval-gated, so requiring Full access here left an
+ * agent unable to boot, build, or tap at all, and the Allow input grant
+ * unreachable. Instead an approval-gated or auto-accept-edits posture asks the
+ * person in the thread, once per effect, and the host receives a one-use
+ * approval bound to exactly that request — the same approval a workbench click
+ * carries, checked by the same Apple or Android policy. Input to a destination
+ * this window already holds open rides the live Allow input grant without
+ * asking again, as a pane click does. Plan mode refuses every effect; Full
+ * access runs them without asking.
+ */
+async function deviceEffectApproval(
+  options: CodeAppManagedToolsOptions,
+  effect: CodeDeviceApprovalEffect,
+  coveredByInputGrant: () => boolean,
+  signal?: AbortSignal,
+): Promise<DeviceEffectDecision> {
+  const posture = currentPosture(options);
+  if (posture === "plan") {
+    return { kind: "refused", reason: "plan-mode-read-only", message: postureRefusal("plan") };
+  }
+  if (!decidesCodeEffectsByApproval(posture) || coveredByInputGrant()) {
+    return { kind: "allowed", approval: NOT_REQUIRED };
+  }
+  if (options.deviceApproval === undefined) {
+    return { kind: "refused", reason: "device-approval-required" };
+  }
+  const outcome = await options.deviceApproval.request(effect, signal);
+  if (outcome.status !== "approved") {
+    return { kind: "refused", reason: `device-approval-${outcome.status}` };
+  }
+  // The person answered while the thread could have moved on; an approval
+  // given to a thread that is now stale or in Plan speaks for nothing.
+  const changed =
+    currentThreadIdentityFailure(options) ??
+    (currentPosture(options) === "plan" ? "plan-mode-read-only" : undefined);
+  if (changed !== undefined) return { kind: "refused", reason: changed };
+  if (signal?.aborted === true) return { kind: "refused", reason: "tool-interrupted" };
+  return { kind: "allowed", approval: { kind: "approved", approvalId: outcome.approvalId } };
+}
+
+/** Whether an operation only reads the toolchain, the runtime, or a screen. */
+function isDeviceRead(operation: string): boolean {
+  return operation === "status" || operation === "discover" || operation === "screenshot";
 }
 
 /**

@@ -22,6 +22,9 @@ import {
   CodeProjectAccessChanged,
   CodeProjectNewThreadWorkspaceChanged,
   CodeProjectPullRequestBackgroundRefreshChanged,
+  CODE_PROJECT_PULL_REQUEST_MERGE_RECORDED,
+  CodeProjectPullRequestMergeRecorded,
+  WorkProjectStatusFileChanged,
   CodeCheckoutObserved,
   CodeCheckoutRemoved,
   CodeFileReferenceUpdated,
@@ -288,7 +291,9 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
       1,
       CodeProjectPullRequestBackgroundRefreshChanged,
     )
+    .register(CODE_PROJECT_PULL_REQUEST_MERGE_RECORDED, 1, CodeProjectPullRequestMergeRecorded)
     .register("project.provider-policy-changed@1", 1, ProjectProviderPolicyChanged)
+    .register("project.work-status-file-changed@1", 1, WorkProjectStatusFileChanged)
     .register("memory.entry-created@1", 1, MemoryEntryCreated)
     .register("memory.entry-superseded@1", 1, MemoryEntrySuperseded)
     .register("memory.entry-retracted@1", 1, MemoryEntryRetracted)

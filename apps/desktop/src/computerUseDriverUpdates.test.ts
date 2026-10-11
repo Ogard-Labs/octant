@@ -1,3 +1,5 @@
+import { decodeComputerUseSettings } from "@octant/contracts/computer-use-plugin";
+import { defaultShellSettings } from "@octant/domain/shell-policy";
 import { describe, expect, it, vi } from "vitest";
 import { createComputerUseDriverUpdates } from "./computerUseDriverUpdates";
 
@@ -50,6 +52,31 @@ describe("Computer use driver updates", () => {
     await f.updates.applyWhenIdle();
     expect(f.activate).toHaveBeenCalledOnce();
     expect(f.updates.state()).toMatchObject({ status: "current", currentVersion: "0.25.0" });
+  });
+
+  it("does not check for driver updates until the person turns updates on", async () => {
+    const f = fixture();
+    f.idle();
+    // A new install and a store saved before the switch existed both decode to off:
+    // the driver is an upstream binary that runs under Octant's macOS permissions.
+    for (const settings of [
+      defaultShellSettings().computerUse,
+      decodeComputerUseSettings({}),
+      decodeComputerUseSettings({ enabled: true }),
+    ]) {
+      expect(settings.automaticUpdates).toBe(false);
+      f.updates.configure({
+        enabled: settings.enabled,
+        automaticUpdates: settings.automaticUpdates,
+      });
+    }
+    expect(f.scheduled).toHaveLength(0);
+    expect(f.check).not.toHaveBeenCalled();
+
+    f.updates.configure({ enabled: true, automaticUpdates: true });
+    expect(f.scheduled).toHaveLength(1);
+    f.scheduled[0]?.();
+    expect(f.check).toHaveBeenCalledOnce();
   });
 
   it("keeps the current driver when verification or replacement startup fails", async () => {

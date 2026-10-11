@@ -1,11 +1,9 @@
-import { constants, lstat, open, readFile } from "node:fs/promises";
+import { constants, lstat, open, readFile, realpath } from "node:fs/promises";
 import { join } from "node:path";
 import type { UtcTimestamp } from "@octant/contracts";
 import {
-  WORK_AGENTS_FILE_NAME,
   WORK_STATUS_FILE_NAME,
   appendWorkRecentChange,
-  workAgentsTemplate,
   workStatusTemplate,
   type WorkRecentChange,
 } from "@octant/domain/work-project-status-policy";
@@ -19,12 +17,9 @@ export interface WorkProjectFileText {
   readonly modifiedAt: UtcTimestamp;
 }
 
-export interface WorkProjectFilesSnapshot {
-  readonly agents: WorkProjectFileText | undefined;
-  readonly status: WorkProjectFileText | undefined;
-}
-
 export interface WorkProjectStatusFilesystem {
+  /** The path with every symlink resolved, the same check that marks a Project unavailable. */
+  readonly realpath: (path: string) => Promise<string>;
   readonly lstat: (path: string) => Promise<{
     readonly isFile: boolean;
     readonly isSymbolicLink: boolean;
@@ -39,6 +34,7 @@ export interface WorkProjectStatusFilesystem {
 }
 
 const liveFilesystem: WorkProjectStatusFilesystem = {
+  realpath: (path) => realpath(path),
   lstat: async (path) => {
     const details = await lstat(path);
     return {
@@ -71,14 +67,19 @@ const liveFilesystem: WorkProjectStatusFilesystem = {
 };
 
 /**
- * The two brief files at the top of a Work Project folder.
+ * The `STATUS.md` at the top of a Work Project folder that opted into one.
  *
- * Only these two fixed names directly under the canonical root are ever
- * touched, and a name that is a symlink is treated as absent rather than
- * followed: the folder is the person's, and a link they planted must not
- * turn "seed a status file" into a write somewhere else. Reading is bounded
- * so a status that grew into a document is left to the person rather than
- * poured into every turn.
+ * Only this one fixed name directly under the canonical root is ever touched,
+ * and a name that is a symlink is treated as absent rather than followed: the
+ * folder is the person's, and a link they planted must not turn "seed a
+ * status file" into a write somewhere else. Reading is bounded so a status
+ * that grew into a document is left to the person rather than poured into
+ * every turn. Callers check the Project's setting before reaching here.
+ *
+ * The stored root is trusted only while it still resolves to itself. A bound
+ * folder that was renamed and replaced by a symlink leaves the stored path
+ * pointing somewhere else; the final-name check cannot see a link above it, so
+ * every read and write first confirms the root is still canonical.
  */
 export class WorkProjectStatusFiles {
   readonly #fs: WorkProjectStatusFilesystem;
@@ -87,36 +88,23 @@ export class WorkProjectStatusFiles {
     this.#fs = filesystem;
   }
 
-  /** Create whichever of the two files is missing. Existing files are never rewritten. */
-  async seed(
-    canonicalRoot: string,
-    projectName: string,
-    today: WorkStatusDate,
-  ): Promise<ReadonlyArray<string>> {
-    const created: string[] = [];
-    for (const [name, text] of [
-      [WORK_AGENTS_FILE_NAME, workAgentsTemplate(projectName)],
-      [WORK_STATUS_FILE_NAME, workStatusTemplate(projectName, today)],
-    ] as const) {
-      const path = join(canonicalRoot, name);
-      if ((await this.#regularFile(path)) !== "missing") continue;
-      try {
-        await this.#fs.createFile(path, text);
-        created.push(name);
-      } catch {
-        // Someone else created it between the check and the write, or the
-        // folder refuses writes. Either way the file is not ours to force.
-      }
+  /** Create `STATUS.md` when it is missing; true when this call created it. */
+  async seed(canonicalRoot: string, projectName: string, today: WorkStatusDate): Promise<boolean> {
+    const path = await this.#statusPath(canonicalRoot);
+    if (path === undefined || (await this.#regularFile(path)) !== "missing") return false;
+    try {
+      await this.#fs.createFile(path, workStatusTemplate(projectName, today));
+      return true;
+    } catch {
+      // Someone else created it between the check and the write, or the
+      // folder refuses writes. Either way the file is not ours to force.
+      return false;
     }
-    return created;
   }
 
-  async read(canonicalRoot: string): Promise<WorkProjectFilesSnapshot> {
-    const [agents, status] = await Promise.all([
-      this.#readText(join(canonicalRoot, WORK_AGENTS_FILE_NAME)),
-      this.#readText(join(canonicalRoot, WORK_STATUS_FILE_NAME)),
-    ]);
-    return { agents, status };
+  async read(canonicalRoot: string): Promise<WorkProjectFileText | undefined> {
+    const path = await this.#statusPath(canonicalRoot);
+    return path === undefined ? undefined : this.#readText(path);
   }
 
   /**
@@ -125,7 +113,8 @@ export class WorkProjectStatusFiles {
    * Project without the file has chosen not to have one.
    */
   async appendRecentChange(canonicalRoot: string, change: WorkRecentChange): Promise<boolean> {
-    const path = join(canonicalRoot, WORK_STATUS_FILE_NAME);
+    const path = await this.#statusPath(canonicalRoot);
+    if (path === undefined) return false;
     const current = await this.#readText(path);
     if (current === undefined) return false;
     try {
@@ -134,6 +123,16 @@ export class WorkProjectStatusFiles {
     } catch {
       return false;
     }
+  }
+
+  /** `STATUS.md` under the root, or undefined when the root no longer resolves to itself. */
+  async #statusPath(canonicalRoot: string): Promise<string | undefined> {
+    try {
+      if ((await this.#fs.realpath(canonicalRoot)) !== canonicalRoot) return undefined;
+    } catch {
+      return undefined;
+    }
+    return join(canonicalRoot, WORK_STATUS_FILE_NAME);
   }
 
   /**

@@ -2166,6 +2166,61 @@ describe("Claude execution policy", () => {
     await acquired.close();
   });
 
+  it("keeps a turn running when Claude compacts its session, and says each later report follows a compaction", async () => {
+    const f = harness("subscription", "current-session");
+    const acquired = await acquire(f.driver);
+    await Effect.runPromise(
+      acquired.connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+    );
+    const events: ProviderRuntimeEvent[] = [];
+    const subscription = Effect.runFork(
+      Stream.runForEach(Stream.unwrapScoped(acquired.connection.subscribe), (event) =>
+        Effect.sync(() => {
+          events.push(event);
+        }),
+      ),
+    );
+    const settle = () => new Promise((done) => setTimeout(done, 20));
+    const query = f.queries[0]!;
+    const request = (id: string): ClaudeDecodedMessage => ({
+      kind: "assistant",
+      sessionId: "sdk-session-1",
+      messageId: id,
+      content: [{ kind: "text", text: "ok" }],
+      usage: {
+        inputTokens: 1,
+        outputTokens: 1,
+        cacheCreationInputTokens: 0,
+        cacheReadInputTokens: 0,
+      },
+    });
+
+    await Effect.runPromise(
+      acquired.connection.send({ sessionId, prompt: "first", attachments: [], tools: [] }),
+    );
+    await query.emit(request("message-1"));
+    await query.emit({ kind: "compaction", sessionId: "sdk-session-1" });
+    await query.emit(request("message-2"));
+    await query.emit(completed("sdk-session-1"));
+    await settle();
+    // A compaction belongs to the turn it happened in; the next turn's prompt
+    // is kept until the runtime compacts again.
+    await Effect.runPromise(
+      acquired.connection.send({ sessionId, prompt: "second", attachments: [], tools: [] }),
+    );
+    await query.emit(request("message-3"));
+    await query.emit(completed("sdk-session-1"));
+    await settle();
+
+    expect(events.filter((event) => event.kind === "failed")).toEqual([]);
+    expect(events.filter((event) => event.kind === "completed")).toHaveLength(2);
+    expect(
+      events.flatMap((event) => (event.kind === "usage" ? [event.promptRetention] : [])),
+    ).toEqual(["kept", "compacted", "compacted", "kept", "kept"]);
+    await Effect.runPromise(Fiber.interrupt(subscription));
+    await acquired.close();
+  });
+
   it("reports the runtime's compaction point and the window's fill with each turn's usage", async () => {
     const f = harness("subscription", "current-session", { autoCompactThreshold: 167_000 });
     const acquired = await acquire(f.driver);
