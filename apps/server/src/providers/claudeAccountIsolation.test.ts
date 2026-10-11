@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import {
+  canonicalClaudeAccountDirectory,
   ensureClaudeAccountConfigDirectory,
   isolatedClaudeAccountEnvironment,
 } from "./claudeAccountIsolation";
@@ -120,6 +121,17 @@ describe("Claude account isolation source", () => {
     );
     expect(helperGate).toContain("connectedHelperToken");
     expect(helperGate).not.toContain("configDirectory === undefined");
+  });
+});
+
+describe("canonicalClaudeAccountDirectory", () => {
+  it("resolves parent references through the nearest existing ancestor", async () => {
+    const parent = await mkdtemp(join(tmpdir(), "octant-claude-account-canonical-"));
+    const nested = join(parent, "accounts", "work", "..", "..", "new-state");
+    expect(canonicalClaudeAccountDirectory(nested)).toEqual({
+      path: join(parent, "new-state"),
+      existed: false,
+    });
   });
 });
 

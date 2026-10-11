@@ -1,4 +1,6 @@
+import { realpathSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
+import { basename, dirname, join, resolve } from "node:path";
 
 import type { ClaudeAuthentication } from "@octant/contracts";
 
@@ -79,6 +81,40 @@ export function isolatedClaudeAccountEnvironment(
     environment.ANTHROPIC_API_KEY = input.apiKey;
   }
   return { ...environment, ...ISOLATED_CLAUDE_LAUNCH_GUARDS };
+}
+
+/**
+ * Resolve one Claude account directory through existing ancestors.
+ *
+ * Settings and replay can store `..` or a not-yet-created leaf. Plan
+ * isolation and uniqueness have to see the same path `mkdir` will create.
+ */
+export function canonicalClaudeAccountDirectory(directory: string): {
+  readonly path: string;
+  readonly existed: boolean;
+} {
+  let end = directory.length;
+  while (end > 0 && directory.charAt(end - 1) === "/") {
+    end -= 1;
+  }
+  const resolved = resolve(directory.slice(0, end) || "/");
+  try {
+    return { path: realpathSync(resolved), existed: true };
+  } catch {
+    const parts: string[] = [];
+    let current = resolved;
+    let canonical = resolved;
+    while (current !== dirname(current)) {
+      try {
+        canonical = parts.reduce((parent, part) => join(parent, part), realpathSync(current));
+        break;
+      } catch {
+        parts.unshift(basename(current));
+        current = dirname(current);
+      }
+    }
+    return { path: canonical, existed: false };
+  }
 }
 
 /** Create the account directory if needed. Never inspects its contents. */

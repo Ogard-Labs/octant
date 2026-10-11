@@ -4288,6 +4288,22 @@ describe("Claude for helpers", () => {
     expect(f.opens).toHaveLength(0);
   });
 
+  it("refuses a Plan turn whose account directory uses .. to land inside the checkout", async () => {
+    const f = harness("subscription", "current-session", {
+      configDirectory: `${projectRoot}/.claude-accounts/work/../../new-state`,
+    });
+    const acquired = await acquire(f.driver, "chat");
+    try {
+      const exit = await Effect.runPromiseExit(
+        acquired.connection.start({ sessionId, modelId, executionPolicy: "plan" }),
+      );
+      expect(String(exit)).toContain("overlaps the checkout");
+    } finally {
+      await acquired.close();
+    }
+    expect(f.opens).toHaveLength(0);
+  });
+
   it("refuses a Plan turn whose isolated account directory is an ancestor of the checkout", async () => {
     const f = harness("subscription", "current-session", { configDirectory: "/tmp" });
     const acquired = await acquire(f.driver, "chat");

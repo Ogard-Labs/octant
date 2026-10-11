@@ -56,6 +56,7 @@ import {
   type ClaudePendingApproval,
   type ClaudePendingQuestion,
 } from "./claudeEventMapper";
+import { canonicalClaudeAccountDirectory } from "./claudeAccountIsolation";
 import {
   makeClaudeEnvironmentScope,
   type ClaudeEnvironmentScope,
@@ -181,7 +182,7 @@ function claudeAccountDirectoryBroadensPlan(
   configDirectory: string,
   isProjectConfinedPath: (projectRoot: string, absolutePath: string) => boolean,
 ): boolean {
-  const directory = configDirectory.replace(/\/+$/, "") || "/";
+  const directory = canonicalClaudeAccountDirectory(configDirectory).path;
   if (
     claudePlanStateDirectoryReopensHome(directory, homedir()) ||
     claudePlanStateDirectoryIsSharedRoot(directory) ||

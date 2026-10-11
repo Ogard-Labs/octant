@@ -96,7 +96,7 @@ import {
 import { accessSync, constants, realpathSync, statSync } from "node:fs";
 import { mkdtemp, realpath, rm } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
-import { basename, dirname, join, resolve } from "node:path";
+import { join } from "node:path";
 import { Cause, Effect, Exit, Fiber, Option, Schema, Stream } from "effect";
 import { admittedBundledProviderDriverKinds } from "@octant/plugin-host/provider-drivers";
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
@@ -105,6 +105,7 @@ import type { PersistenceService } from "../persistence/persistenceService";
 import { ProjectionApplicationFailed } from "../persistence/projection";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import { snapshotClaudeHostEnvironment } from "./claudeAccountDirectory";
+import { canonicalClaudeAccountDirectory } from "./claudeAccountIsolation";
 import { PROVIDER_DEFAULTS_AGGREGATE_ID } from "./providerProjection";
 import {
   carryModelContextWindowFacts,
@@ -860,6 +861,7 @@ export class ProviderService implements ProviderServiceApi {
           this.#assertVersion(current.version, command.expectedVersion);
           const updatedAt = decodeTimestamp(this.#clock());
           if (command.kind === "remove-provider") {
+            this.#refuseVacatingImplicitClaudeOwner(instances, current);
             const removed = removeProvider(current, {
               activeSessionCount: this.#runtime.activeSessionCount(current.id),
               updatedAt,
@@ -1040,6 +1042,7 @@ export class ProviderService implements ProviderServiceApi {
               activeSessionCount: this.#runtime.activeSessionCount(current.id),
               updatedAt,
             });
+            this.#refuseVacatingImplicitClaudeOwner(instances, current, instance);
             const nextDirectory =
               instance.driverKind === "claude" ? instance.configuration.configDirectory : undefined;
             const hostEnvironment = await snapshotClaudeHostEnvironment();
@@ -1864,6 +1867,33 @@ export class ProviderService implements ProviderServiceApi {
     }
   }
 
+  #refuseVacatingImplicitClaudeOwner(
+    instances: ReadonlyArray<ProviderInstance>,
+    current: ProviderInstance,
+    next?: ProviderInstance,
+  ): void {
+    if (current.driverKind !== "claude") return;
+    if (current.configuration.configDirectory !== undefined) return;
+    if (current.configuration.authentication !== "subscription") return;
+    if (claudeAccountNeedsOwnConfigDirectory(instances, current)) return;
+    const stillImplicit =
+      next !== undefined &&
+      next.driverKind === "claude" &&
+      next.configuration.configDirectory === undefined &&
+      next.configuration.authentication === "subscription";
+    if (stillImplicit) return;
+    if (
+      !instances.some((candidate) => claudeAccountNeedsOwnConfigDirectory(instances, candidate))
+    ) {
+      return;
+    }
+    throw this.#invalid(
+      next === undefined
+        ? "Give the other Claude accounts their own config directory before removing this one."
+        : "Give the other Claude accounts their own config directory before moving this one.",
+    );
+  }
+
   #claudeAccountNeedsOwnConfigDirectory(instance: ProviderInstance): boolean {
     return claudeAccountNeedsOwnConfigDirectory(
       this.#persistence.readProviderInstances(),
@@ -2149,34 +2179,14 @@ export async function runPackagedProviderSmokeTurn(
 }
 
 function claudeAccountDirectoryKey(directory: string): string {
-  let end = directory.length;
-  while (end > 0 && directory.charAt(end - 1) === "/") {
-    end -= 1;
-  }
-  const resolved = resolve(directory.slice(0, end));
-  let canonical: string;
-  try {
-    canonical = realpathSync(resolved);
-  } catch {
-    // The leaf may not exist yet. Walk up to the nearest existing
-    // ancestor so two symlink spellings of the same future directory
-    // still compare as one claim.
-    const parts: string[] = [];
-    let current = resolved;
-    canonical = resolved;
-    while (current !== dirname(current)) {
-      try {
-        canonical = parts.reduce((parent, part) => join(parent, part), realpathSync(current));
-        break;
-      } catch {
-        parts.unshift(basename(current));
-        current = dirname(current);
-      }
-    }
-  }
+  const canonical = canonicalClaudeAccountDirectory(directory);
   // macOS's default volume is case-insensitive. Two not-yet-created
   // leaves that differ only by case open the same directory after mkdir.
-  return process.platform === "darwin" ? canonical.toLowerCase() : canonical;
+  // An existing realpath result already distinguished two case-different
+  // directories on a case-sensitive volume.
+  return process.platform === "darwin" && !canonical.existed
+    ? canonical.path.toLowerCase()
+    : canonical.path;
 }
 
 function hostDirectoryClaim(directory: string | undefined): string | undefined {
