@@ -1868,11 +1868,26 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         ? previous.resumeCursor
         : undefined;
     let forkSeeded = false;
+    const refuseRevokedAdmission = async () => {
+      this.settleSpendReservation(key);
+      await input.extensionTools?.close?.().catch(() => undefined);
+      return {
+        state: "failed" as const,
+        admission: "refused" as const,
+        failure: {
+          category: "unauthorized" as const,
+          message: "Code turn admission is no longer current.",
+        },
+      };
+    };
     // A fork's first session: no session of its own yet. One whose text
     // handoff is already journaled keeps that record rather than switching to
     // the source's session on a recovered start.
     const forkOrigin = previous === undefined ? input.thread.forkedFrom : undefined;
     if (forkOrigin !== undefined && switchHandoff?.journaled !== "text") {
+      // Seeding durably copies the source's session, so a turn whose admission
+      // lapsed during driver and credential preparation copies nothing.
+      if (input.admissionCurrent?.() === false) return refuseRevokedAdmission();
       const seeded = await this.#options
         .forkProviderSession?.({
           fork: input.thread,
@@ -1929,18 +1944,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       return failStart(CODE_FORK_HANDOFF_REFUSALS["handoff-unreadable"]);
     }
     // Driver, credentials, and fork preparation may outlive the host's admission.
-    if (input.admissionCurrent?.() === false) {
-      this.settleSpendReservation(key);
-      await input.extensionTools?.close?.().catch(() => undefined);
-      return {
-        state: "failed" as const,
-        admission: "refused" as const,
-        failure: {
-          category: "unauthorized" as const,
-          message: "Code turn admission is no longer current.",
-        },
-      };
-    }
+    if (input.admissionCurrent?.() === false) return refuseRevokedAdmission();
     // Feedback stays pending through every preparation refusal. Consuming it
     // here does not yield between the final admission check and owning the turn.
     let feedback: ReturnType<NonNullable<typeof input.takeProductFeedback>> | undefined;

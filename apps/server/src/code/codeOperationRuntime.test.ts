@@ -4136,6 +4136,48 @@ describe("provider switch handoff", () => {
       }
     });
 
+    it("copies no session for a fork whose admission lapsed while it was being prepared", async () => {
+      const drivers = twoHarnesses();
+      const forkProviderSession = vi.fn(async () => ({
+        driverKind: "codex" as const,
+        value: "seeded-fork-session",
+      }));
+      let current = true;
+      const fixture = runtimeFixture({
+        // Admission lapses while the fork's driver is being resolved.
+        resolveProviderDriver: async (resolving) => {
+          if (String(resolving.id) === String(forkThreadId)) current = false;
+          return drivers.resolveProviderDriver(resolving);
+        },
+        forkProviderSession,
+      });
+      try {
+        await finishFirstTurn(fixture, drivers, providerInstance);
+        fixture.setOtherThread(forkOn(providerInstance, "model-a"));
+        const prompt = storedEvidence(91, "Try it another way.");
+        fixture.evidenceValues.set(prompt.contentId, "Try it another way.");
+
+        const result = await fixture.runtime.execute(
+          windowId,
+          {
+            kind: "start-provider-turn",
+            operationId: operationId(90),
+            threadId: forkThreadId,
+            checkoutId,
+            sessionId: forkSession,
+            prompt,
+          },
+          { admissionCurrent: () => current },
+        );
+        expect(result).toMatchObject({ state: "failed", admission: "refused" });
+        expect(forkProviderSession).not.toHaveBeenCalled();
+        expect(drivers.provider.send).toHaveBeenCalledOnce();
+      } finally {
+        await fixture.runtime.close();
+        fixture.close();
+      }
+    });
+
     it("falls back to the text handoff when the same provider cannot take up the source's session", async () => {
       const drivers = twoHarnesses();
       const fixture = runtimeFixture({
