@@ -177,7 +177,13 @@ function claudeAccountDirectoryBroadensPlan(
   isProjectConfinedPath: (projectRoot: string, absolutePath: string) => boolean,
 ): boolean {
   const directory = configDirectory.replace(/\/+$/, "") || "/";
-  if (directory === "/" || directory === homedir() || directory === projectRoot) return true;
+  if (
+    directory === "/" ||
+    directory === homedir() ||
+    homedir().startsWith(`${directory}/`) ||
+    directory === projectRoot
+  )
+    return true;
   if (projectRoot.startsWith(`${directory}/`)) return true;
   try {
     if (isProjectConfinedPath(projectRoot, directory) === true) return true;

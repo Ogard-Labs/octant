@@ -172,6 +172,7 @@ export const spawnSetupTokenOnHostPty: SpawnSetupTokenTerminal = (input) => {
 export async function runInstalledClaudeSetupToken(
   binaryPath: string,
   signal: AbortSignal,
+  configDirectory?: string,
 ): Promise<ClaudeSetupTokenOutcome> {
   let cwd: string;
   try {
@@ -183,7 +184,11 @@ export async function runInstalledClaudeSetupToken(
     return await runClaudeSetupToken({
       binaryPath,
       cwd,
-      environment: sanitizeClaudeEnvironment("subscription", await snapshotClaudeHostEnvironment()),
+      environment: sanitizeClaudeEnvironment(
+        "subscription",
+        await snapshotClaudeHostEnvironment(),
+        configDirectory === undefined ? {} : { configDirectory },
+      ),
       spawn: spawnSetupTokenOnHostPty,
       signal,
     });

@@ -36,6 +36,7 @@ export function createClaudeHelperSignInService(dependencies: {
   readonly runSetupToken: (
     binaryPath: string,
     signal: AbortSignal,
+    configDirectory?: string,
   ) => Promise<ClaudeSetupTokenOutcome>;
 }): ClaudeHelperSignInService & {
   /** Stops a waiting connect for a removed provider, then deletes the token it held. */
@@ -81,8 +82,16 @@ export function createClaudeHelperSignInService(dependencies: {
       if (attempts.has(key)) return { kind: "connecting" };
       refusals.delete(key);
       const controller = new AbortController();
-      const settled = dependencies
-        .runSetupToken(instance.configuration.binaryPath, controller.signal)
+      const directory = instance.configuration.configDirectory;
+      const settled = (
+        directory === undefined
+          ? dependencies.runSetupToken(instance.configuration.binaryPath, controller.signal)
+          : dependencies.runSetupToken(
+              instance.configuration.binaryPath,
+              controller.signal,
+              directory,
+            )
+      )
         .then(async (outcome) => {
           if (outcome.kind === "refused") {
             refusals.set(key, outcome.reason);

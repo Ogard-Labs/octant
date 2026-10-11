@@ -79,6 +79,31 @@ describe("Claude for helpers sign-in", () => {
     expect(entries.has(String(instanceId))).toBe(false);
   });
 
+  it("runs helper setup in the isolated account directory", async () => {
+    const { broker } = memoryBroker();
+    const seen: Array<string | undefined> = [];
+    const isolated = {
+      ...claudeInstance("subscription"),
+      configuration: {
+        kind: "claude-agent-sdk" as const,
+        binaryPath: "/usr/local/bin/claude",
+        authentication: "subscription" as const,
+        configDirectory: "/Users/example/.claude-accounts/work",
+      },
+    } as unknown as ProviderInstance;
+    const service = createClaudeHelperSignInService({
+      store: claudeHelperSignInFromBroker(broker),
+      readInstance: () => isolated,
+      runSetupToken: async (_binaryPath, _signal, configDirectory) => {
+        seen.push(configDirectory);
+        return { kind: "captured", token: TOKEN };
+      },
+    });
+    await service.connect(instanceId);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(seen).toEqual(["/Users/example/.claude-accounts/work"]);
+  });
+
   it("says why a connect attempt failed and keeps nothing", async () => {
     const { broker, entries } = memoryBroker();
     const service = createClaudeHelperSignInService({

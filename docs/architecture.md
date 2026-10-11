@@ -2047,8 +2047,9 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   and stay ready only from what the CLI or SDK reports. Octant never reads
   Claude credential files or stores Claude subscription tokens for those
   accounts. A confined Plan launch refuses an account directory that
-  overlaps the checkout or is the user's home, so the write grant for that
-  directory cannot reopen the bound root or the rest of the home tree.
+  overlaps the checkout, is the user's home, or is an ancestor of home,
+  so the write grant for that directory cannot reopen the bound root or
+  the rest of the home tree.
   Two Claude instances cannot share one effective config directory,
   including the default account's implicit `~/.claude` or inherited
   `CLAUDE_CONFIG_DIR`.

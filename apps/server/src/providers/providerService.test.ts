@@ -11,9 +11,9 @@ import {
   type ProviderCatalogSnapshot,
   type ProviderInstance,
 } from "@octant/contracts";
-import { existsSync, realpathSync } from "node:fs";
+import { existsSync, mkdirSync, realpathSync, rmSync, symlinkSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { basename, dirname } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { Effect, Queue, Stream } from "effect";
 import { ConcurrencyConflict } from "../persistence/journalErrors";
@@ -1400,6 +1400,52 @@ describe("ProviderService", () => {
     }
   });
 
+  it("refuses a Claude account directory that matches the default account's host secure-storage overlay", async () => {
+    const previousConfig = process.env.CLAUDE_CONFIG_DIR;
+    const previousSecure = process.env.CLAUDE_SECURESTORAGE_CONFIG_DIR;
+    delete process.env.CLAUDE_CONFIG_DIR;
+    process.env.CLAUDE_SECURESTORAGE_CONFIG_DIR = "/Users/example/.claude-secure";
+    try {
+      const fixture = serviceFixture();
+      await fixture.service.execute(windowId, {
+        kind: "create-claude-provider",
+        instanceId,
+        expectedVersion: 0,
+        displayName: "Claude personal",
+        configuration: {
+          kind: "claude-agent-sdk",
+          binaryPath: "/opt/homebrew/bin/claude",
+          authentication: "subscription",
+        },
+      });
+      await expect(
+        fixture.service.execute(windowId, {
+          kind: "create-claude-provider",
+          instanceId: otherId,
+          expectedVersion: 0,
+          displayName: "Claude work",
+          configuration: {
+            kind: "claude-agent-sdk",
+            binaryPath: "/opt/homebrew/bin/claude",
+            authentication: "subscription",
+            configDirectory: "/Users/example/.claude-secure",
+            accent: "teal",
+          },
+        }),
+      ).rejects.toMatchObject({
+        failure: {
+          category: "invalid-configuration",
+          message: "Another Claude account already uses that config directory.",
+        },
+      });
+    } finally {
+      if (previousConfig === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+      else process.env.CLAUDE_CONFIG_DIR = previousConfig;
+      if (previousSecure === undefined) delete process.env.CLAUDE_SECURESTORAGE_CONFIG_DIR;
+      else process.env.CLAUDE_SECURESTORAGE_CONFIG_DIR = previousSecure;
+    }
+  });
+
   it("refuses a Claude account directory that resolves to another account's directory", async () => {
     const fixture = serviceFixture();
     await fixture.service.execute(windowId, {
@@ -1445,6 +1491,61 @@ describe("ProviderService", () => {
         message: "Another Claude account already uses that config directory.",
       },
     });
+  });
+
+  it("refuses a Claude account directory that shares a symlink ancestor with another account", async () => {
+    const parent = join(tmpdir(), `octant-claude-dir-${crypto.randomUUID()}`);
+    const realAccounts = join(parent, "real");
+    const linkedAccounts = join(parent, "link");
+    mkdirSync(realAccounts, { recursive: true });
+    symlinkSync(realAccounts, linkedAccounts);
+    try {
+      const fixture = serviceFixture();
+      await fixture.service.execute(windowId, {
+        kind: "create-claude-provider",
+        instanceId,
+        expectedVersion: 0,
+        displayName: "Claude personal",
+        configuration: {
+          kind: "claude-agent-sdk",
+          binaryPath: "/opt/homebrew/bin/claude",
+          authentication: "subscription",
+        },
+      });
+      await fixture.service.execute(windowId, {
+        kind: "create-claude-provider",
+        instanceId: otherId,
+        expectedVersion: 0,
+        displayName: "Claude work",
+        configuration: {
+          kind: "claude-agent-sdk",
+          binaryPath: "/opt/homebrew/bin/claude",
+          authentication: "subscription",
+          configDirectory: join(realAccounts, "work"),
+          accent: "teal",
+        },
+      });
+      await expect(
+        fixture.service.execute(windowId, {
+          kind: "change-claude-configuration",
+          instanceId,
+          expectedVersion: 1,
+          configuration: {
+            kind: "claude-agent-sdk",
+            binaryPath: "/opt/homebrew/bin/claude",
+            authentication: "subscription",
+            configDirectory: join(linkedAccounts, "work"),
+          },
+        }),
+      ).rejects.toMatchObject({
+        failure: {
+          category: "invalid-configuration",
+          message: "Another Claude account already uses that config directory.",
+        },
+      });
+    } finally {
+      rmSync(parent, { recursive: true, force: true });
+    }
   });
 
   it("refuses a Claude directory another account claims while helpers are being cleared", async () => {

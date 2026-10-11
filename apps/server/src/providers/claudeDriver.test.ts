@@ -10,7 +10,7 @@ import {
 import { Effect, Exit, Fiber, PubSub, Scope, Stream } from "effect";
 import { existsSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
-import { basename, isAbsolute, resolve } from "node:path";
+import { basename, dirname, isAbsolute, resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
 import type { ProviderCredentialResolver } from "./credentialBrokerClient";
@@ -4290,6 +4290,22 @@ describe("Claude for helpers", () => {
 
   it("refuses a Plan turn whose isolated account directory is an ancestor of the checkout", async () => {
     const f = harness("subscription", "current-session", { configDirectory: "/tmp" });
+    const acquired = await acquire(f.driver, "chat");
+    try {
+      const exit = await Effect.runPromiseExit(
+        acquired.connection.start({ sessionId, modelId, executionPolicy: "plan" }),
+      );
+      expect(String(exit)).toContain("overlaps the checkout or the user's home");
+    } finally {
+      await acquired.close();
+    }
+    expect(f.opens).toHaveLength(0);
+  });
+
+  it("refuses a Plan turn whose isolated account directory is an ancestor of the user's home", async () => {
+    const ancestor = dirname(homedir());
+    if (ancestor === "/") throw new Error("Expected a home directory with a parent besides /.");
+    const f = harness("subscription", "current-session", { configDirectory: ancestor });
     const acquired = await acquire(f.driver, "chat");
     try {
       const exit = await Effect.runPromiseExit(

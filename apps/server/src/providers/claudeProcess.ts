@@ -442,6 +442,7 @@ function planStateDirectories(
     if (
       path === "/" ||
       path === home ||
+      home.startsWith(`${path}${sep}`) ||
       path === boundRoot ||
       path.startsWith(`${boundRoot}${sep}`) ||
       boundRoot.startsWith(`${path}${sep}`)

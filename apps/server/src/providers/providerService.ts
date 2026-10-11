@@ -96,7 +96,7 @@ import {
 import { accessSync, constants, realpathSync, statSync } from "node:fs";
 import { mkdtemp, realpath, rm } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { Cause, Effect, Exit, Fiber, Option, Schema, Stream } from "effect";
 import { admittedBundledProviderDriverKinds } from "@octant/plugin-host/provider-drivers";
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
@@ -682,15 +682,16 @@ export class ProviderService implements ProviderServiceApi {
                 command.configuration.configDirectory === undefined && existingClaudeCount > 0
                   ? assignedClaudeAccountConfigDirectory(homedir(), command.instanceId)
                   : command.configuration.configDirectory;
-              const hostConfigDirectory = hostClaudeConfigDirectory(
-                await snapshotClaudeHostEnvironment(),
-              );
+              const hostEnvironment = await snapshotClaudeHostEnvironment();
+              const hostConfigDirectory = hostClaudeConfigDirectory(hostEnvironment);
+              const hostSecureDirectory = hostClaudeSecureStorageDirectory(hostEnvironment);
               const claimedDirectory =
                 assignedDirectory ?? implicitClaudeAccountDirectory(homedir(), hostConfigDirectory);
               this.#refuseTakenClaudeAccountDirectory(
                 this.#persistence.readProviderInstances(),
                 claimedDirectory,
                 hostConfigDirectory,
+                hostSecureDirectory,
               );
               instance = createClaudeProvider({
                 ...common,
@@ -1022,15 +1023,16 @@ export class ProviderService implements ProviderServiceApi {
           });
           const nextDirectory =
             instance.driverKind === "claude" ? instance.configuration.configDirectory : undefined;
-          const hostConfigDirectory = hostClaudeConfigDirectory(
-            await snapshotClaudeHostEnvironment(),
-          );
+          const hostEnvironment = await snapshotClaudeHostEnvironment();
+          const hostConfigDirectory = hostClaudeConfigDirectory(hostEnvironment);
+          const hostSecureDirectory = hostClaudeSecureStorageDirectory(hostEnvironment);
           const claimedDirectory =
             nextDirectory ?? implicitClaudeAccountDirectory(homedir(), hostConfigDirectory);
           this.#refuseTakenClaudeAccountDirectory(
             this.#persistence.readProviderInstances(),
             claimedDirectory,
             hostConfigDirectory,
+            hostSecureDirectory,
             current.id,
           );
           if (nextDirectory !== previousDirectory) {
@@ -1052,6 +1054,7 @@ export class ProviderService implements ProviderServiceApi {
             this.#persistence.readProviderInstances(),
             claimedDirectory,
             hostConfigDirectory,
+            hostSecureDirectory,
             current.id,
           );
           eventName = "provider.instance-configuration-changed@1";
@@ -1776,16 +1779,24 @@ export class ProviderService implements ProviderServiceApi {
     instances: ReadonlyArray<ProviderInstance>,
     directory: string,
     hostConfigDirectory: string | undefined,
+    hostSecureDirectory: string | undefined,
     exceptId?: ProviderInstanceId,
   ): void {
     const taken =
       exceptId === undefined
-        ? claudeAccountDirectoryTaken(instances, directory, homedir(), hostConfigDirectory)
+        ? claudeAccountDirectoryTaken(
+            instances,
+            directory,
+            homedir(),
+            hostConfigDirectory,
+            hostSecureDirectory,
+          )
         : claudeAccountDirectoryTaken(
             instances,
             directory,
             homedir(),
             hostConfigDirectory,
+            hostSecureDirectory,
             exceptId,
           );
     if (taken) {
@@ -2065,19 +2076,38 @@ function claudeAccountDirectoryKey(directory: string): string {
   while (end > 0 && directory.charAt(end - 1) === "/") {
     end -= 1;
   }
-  const trimmed = directory.slice(0, end);
-  // Two absolute spellings can be one filesystem directory. Uniqueness
-  // must follow the path Claude's process will open.
+  const resolved = resolve(directory.slice(0, end));
   try {
-    return realpathSync(resolve(trimmed));
+    return realpathSync(resolved);
   } catch {
-    return resolve(trimmed);
+    // The leaf may not exist yet. Walk up to the nearest existing
+    // ancestor so two symlink spellings of the same future directory
+    // still compare as one claim.
+    const parts: string[] = [];
+    let current = resolved;
+    while (current !== dirname(current)) {
+      try {
+        return parts.reduce((parent, part) => join(parent, part), realpathSync(current));
+      } catch {
+        parts.unshift(basename(current));
+        current = dirname(current);
+      }
+    }
+    return resolved;
   }
 }
 
+function hostDirectoryClaim(directory: string | undefined): string | undefined {
+  const trimmed = directory?.trim();
+  return trimmed !== undefined && trimmed.length > 0 ? trimmed : undefined;
+}
+
 function hostClaudeConfigDirectory(environment: NodeJS.ProcessEnv): string | undefined {
-  const directory = environment.CLAUDE_CONFIG_DIR?.trim();
-  return directory !== undefined && directory.length > 0 ? directory : undefined;
+  return hostDirectoryClaim(environment.CLAUDE_CONFIG_DIR);
+}
+
+function hostClaudeSecureStorageDirectory(environment: NodeJS.ProcessEnv): string | undefined {
+  return hostDirectoryClaim(environment.CLAUDE_SECURESTORAGE_CONFIG_DIR);
 }
 
 function implicitClaudeAccountDirectory(
@@ -2090,16 +2120,19 @@ function implicitClaudeAccountDirectory(
   return hostConfigDirectory ?? `${claudeAccountDirectoryKey(homeDirectory)}/.claude`;
 }
 
-function effectiveClaudeAccountDirectory(
+function effectiveClaudeAccountDirectories(
   instance: ProviderInstance,
   homeDirectory: string,
   hostConfigDirectory: string | undefined,
-): string | undefined {
-  if (instance.driverKind !== "claude") return undefined;
-  return (
-    instance.configuration.configDirectory ??
-    implicitClaudeAccountDirectory(homeDirectory, hostConfigDirectory)
-  );
+  hostSecureDirectory: string | undefined,
+): ReadonlyArray<string> {
+  if (instance.driverKind !== "claude") return [];
+  if (instance.configuration.configDirectory !== undefined) {
+    return [instance.configuration.configDirectory];
+  }
+  const directories = [implicitClaudeAccountDirectory(homeDirectory, hostConfigDirectory)];
+  if (hostSecureDirectory !== undefined) directories.push(hostSecureDirectory);
+  return directories;
 }
 
 function claudeAccountDirectoryTaken(
@@ -2107,14 +2140,19 @@ function claudeAccountDirectoryTaken(
   directory: string,
   homeDirectory: string,
   hostConfigDirectory: string | undefined,
+  hostSecureDirectory: string | undefined,
   exceptId?: ProviderInstanceId,
 ): boolean {
   const key = claudeAccountDirectoryKey(directory);
   return instances.some((instance) => {
     if (instance.driverKind !== "claude") return false;
     if (exceptId !== undefined && String(instance.id) === String(exceptId)) return false;
-    const existing = effectiveClaudeAccountDirectory(instance, homeDirectory, hostConfigDirectory);
-    return existing !== undefined && claudeAccountDirectoryKey(existing) === key;
+    return effectiveClaudeAccountDirectories(
+      instance,
+      homeDirectory,
+      hostConfigDirectory,
+      hostSecureDirectory,
+    ).some((existing) => claudeAccountDirectoryKey(existing) === key);
   });
 }
 
