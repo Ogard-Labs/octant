@@ -1177,9 +1177,12 @@ thread it creates could not do.
   and fits under the profile. Work routines get no shell or Git authority. Full
   access is never eligible, whether or not it was remembered elsewhere: the
   contract refuses it on the snapshot and dispatch blocks it as
-  `full-access-ineligible`. Code runs are always created approval-gated; Work
-  runs bind the Project's confined root like an interactive Work thread. The
-  first turn runs with the `agent` initiator, so approvals wait for a person.
+  `full-access-ineligible`. Code runs are always created approval-gated. Work
+  runs bind the Project's confined root like an interactive Work thread, and
+  their unattended first turn runs ask-first even when the host's Work default
+  is auto-accept-edits, unless the routine's captured effective authority is
+  itself auto-accept-edits; the hold only narrows. A Code first turn runs with
+  the `agent` initiator, so approvals wait for a person.
 - **Revalidation at every occurrence.** Before creating a thread the dispatcher
   re-reads live host facts and blocks with a typed reason when the host, the
   Project (active, same mode, same version), the binding revision, the Code
