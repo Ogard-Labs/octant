@@ -2437,7 +2437,7 @@ describe("CodeThreadWorkspace", () => {
               status: "completed",
             },
           ],
-        })}
+        } as never)}
         threadId={threadId}
       />,
     );
@@ -2476,7 +2476,7 @@ describe("CodeThreadWorkspace", () => {
               ],
             },
           ],
-        })}
+        } as never)}
         threadId={threadId}
       />,
     );
