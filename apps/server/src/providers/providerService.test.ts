@@ -1347,12 +1347,13 @@ describe("ProviderService", () => {
         message: "Another Claude account already uses that config directory.",
       },
     });
-    expect(fixture.persistence.readProviderInstance(instanceId)).toMatchObject({
+    const defaultAccount = fixture.persistence.readProviderInstance(instanceId);
+    expect(defaultAccount).toMatchObject({
       configuration: { authentication: "subscription" },
     });
     expect(
-      fixture.persistence.readProviderInstance(instanceId)?.driverKind === "claude"
-        ? fixture.persistence.readProviderInstance(instanceId)?.configuration.configDirectory
+      defaultAccount?.driverKind === "claude"
+        ? defaultAccount.configuration.configDirectory
         : undefined,
     ).toBeUndefined();
   });
