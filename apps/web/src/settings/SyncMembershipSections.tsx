@@ -276,7 +276,8 @@ export function SyncMembershipSections(props: SyncMembershipSectionsProps) {
                     <MatchingCode code={approver.matchingCode} />
                     {approver.approvedThisComputer ? (
                       <OctantButton
-                        disabled={busy}
+                        // A read another window started is still confirming.
+                        disabled={busy || joinRead?.state === "running"}
                         onClick={() => {
                           setConfirming(true);
                           void run({

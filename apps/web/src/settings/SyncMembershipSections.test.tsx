@@ -268,6 +268,31 @@ describe("SyncMembershipSections", () => {
     expect(screen.queryByText(/Confirm again to carry on/)).not.toBeInTheDocument();
   });
 
+  it("keeps Confirm join off while a read another window started is still confirming", async () => {
+    const { fake } = client(
+      view({
+        thisComputer: {
+          kind: "joining",
+          instanceId: laptop,
+          displayName: "Laptop",
+          fresh: true,
+          approvers: [
+            {
+              instanceId: studio,
+              displayName: "Studio Mac",
+              matchingCode: "482913",
+              approvedThisComputer: true,
+            },
+          ],
+        },
+        status: { ...status, joinRead: { state: "running", done: 50, total: 62 } },
+      }),
+    );
+    renderSections(fake);
+    expect(await screen.findByRole("button", { name: "Confirm join" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Stop" })).toBeEnabled();
+  });
+
   it("keeps Check the store, Approve, and Revoke off while the restore is stopped, and says why", async () => {
     const request = {
       format: "octant.replica-entry/2",
