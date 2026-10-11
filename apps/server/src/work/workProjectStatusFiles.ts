@@ -1,4 +1,4 @@
-import { constants, lstat, open, readFile } from "node:fs/promises";
+import { constants, lstat, open, readFile, realpath } from "node:fs/promises";
 import { join } from "node:path";
 import type { UtcTimestamp } from "@octant/contracts";
 import {
@@ -18,6 +18,8 @@ export interface WorkProjectFileText {
 }
 
 export interface WorkProjectStatusFilesystem {
+  /** The path with every symlink resolved, the same check that marks a Project unavailable. */
+  readonly realpath: (path: string) => Promise<string>;
   readonly lstat: (path: string) => Promise<{
     readonly isFile: boolean;
     readonly isSymbolicLink: boolean;
@@ -32,6 +34,7 @@ export interface WorkProjectStatusFilesystem {
 }
 
 const liveFilesystem: WorkProjectStatusFilesystem = {
+  realpath: (path) => realpath(path),
   lstat: async (path) => {
     const details = await lstat(path);
     return {
@@ -72,6 +75,11 @@ const liveFilesystem: WorkProjectStatusFilesystem = {
  * status file" into a write somewhere else. Reading is bounded so a status
  * that grew into a document is left to the person rather than poured into
  * every turn. Callers check the Project's setting before reaching here.
+ *
+ * The stored root is trusted only while it still resolves to itself. A bound
+ * folder that was renamed and replaced by a symlink leaves the stored path
+ * pointing somewhere else; the final-name check cannot see a link above it, so
+ * every read and write first confirms the root is still canonical.
  */
 export class WorkProjectStatusFiles {
   readonly #fs: WorkProjectStatusFilesystem;
@@ -82,8 +90,8 @@ export class WorkProjectStatusFiles {
 
   /** Create `STATUS.md` when it is missing; true when this call created it. */
   async seed(canonicalRoot: string, projectName: string, today: WorkStatusDate): Promise<boolean> {
-    const path = join(canonicalRoot, WORK_STATUS_FILE_NAME);
-    if ((await this.#regularFile(path)) !== "missing") return false;
+    const path = await this.#statusPath(canonicalRoot);
+    if (path === undefined || (await this.#regularFile(path)) !== "missing") return false;
     try {
       await this.#fs.createFile(path, workStatusTemplate(projectName, today));
       return true;
@@ -95,7 +103,8 @@ export class WorkProjectStatusFiles {
   }
 
   async read(canonicalRoot: string): Promise<WorkProjectFileText | undefined> {
-    return this.#readText(join(canonicalRoot, WORK_STATUS_FILE_NAME));
+    const path = await this.#statusPath(canonicalRoot);
+    return path === undefined ? undefined : this.#readText(path);
   }
 
   /**
@@ -104,7 +113,8 @@ export class WorkProjectStatusFiles {
    * Project without the file has chosen not to have one.
    */
   async appendRecentChange(canonicalRoot: string, change: WorkRecentChange): Promise<boolean> {
-    const path = join(canonicalRoot, WORK_STATUS_FILE_NAME);
+    const path = await this.#statusPath(canonicalRoot);
+    if (path === undefined) return false;
     const current = await this.#readText(path);
     if (current === undefined) return false;
     try {
@@ -113,6 +123,16 @@ export class WorkProjectStatusFiles {
     } catch {
       return false;
     }
+  }
+
+  /** `STATUS.md` under the root, or undefined when the root no longer resolves to itself. */
+  async #statusPath(canonicalRoot: string): Promise<string | undefined> {
+    try {
+      if ((await this.#fs.realpath(canonicalRoot)) !== canonicalRoot) return undefined;
+    } catch {
+      return undefined;
+    }
+    return join(canonicalRoot, WORK_STATUS_FILE_NAME);
   }
 
   /**

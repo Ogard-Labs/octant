@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -10,7 +10,9 @@ afterEach(async () => {
 });
 
 async function folder(): Promise<string> {
-  const root = await mkdtemp(join(tmpdir(), "octant-work-status-"));
+  // Bound roots are stored canonical, and the system temp directory is itself
+  // behind a symlink on macOS.
+  const root = await realpath(await mkdtemp(join(tmpdir(), "octant-work-status-")));
   roots.push(root);
   return root;
 }
@@ -47,6 +49,29 @@ describe("a Work Project's status file", () => {
       }),
     ).toBe(false);
     expect(await readFile(join(elsewhere, "secret.md"), "utf8")).toBe("not yours");
+  });
+
+  it("writes nothing when the bound root no longer resolves to itself, such as a renamed folder replaced by a symlink", async () => {
+    const parent = await folder();
+    const elsewhere = await folder();
+    const staleRoot = join(parent, "Acme");
+    await symlink(elsewhere, staleRoot);
+    const files = new WorkProjectStatusFiles();
+
+    expect(await files.seed(staleRoot, "Acme", "2026-09-12")).toBe(false);
+    expect(await files.read(staleRoot)).toBeUndefined();
+    expect(await readdir(elsewhere)).toEqual([]);
+
+    await writeFile(join(elsewhere, "STATUS.md"), "Last updated: 2026-09-01\n");
+    expect(
+      await files.appendRecentChange(staleRoot, {
+        date: "2026-09-12",
+        taskTitle: "t",
+        paths: ["a.md"],
+        truncated: false,
+      }),
+    ).toBe(false);
+    expect(await readFile(join(elsewhere, "STATUS.md"), "utf8")).toBe("Last updated: 2026-09-01\n");
   });
 
   it("appends a turn's changed files to Recent changes in place", async () => {

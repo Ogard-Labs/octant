@@ -2381,6 +2381,7 @@ function serviceFixture(
 /** The status file on a pretend disk keyed by absolute path. */
 function inMemoryStatusFiles(disk: Map<string, string>): WorkProjectStatusFiles {
   return new WorkProjectStatusFiles({
+    realpath: async (path) => path,
     lstat: async (path) => {
       const text = disk.get(path);
       if (text === undefined) throw new Error("ENOENT");

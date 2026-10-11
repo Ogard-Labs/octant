@@ -749,7 +749,14 @@ export class ProjectService implements ProjectServiceApi {
         authoritative.type === "work"
       ) {
         const today = timestamp.slice(0, 10);
-        if (this.#seedWorkProjectStatusFile !== undefined && isWorkStatusDate(today)) {
+        // Seed only into a binding bootstrap would call available: a stale root
+        // (renamed, or replaced by a symlink) must not receive a write.
+        const root = authoritative.binding.canonicalRoot;
+        const available = await this.#roots.validate("work", root).then(
+          (binding) => binding.canonicalRoot === root,
+          () => false,
+        );
+        if (available && this.#seedWorkProjectStatusFile !== undefined && isWorkStatusDate(today)) {
           await this.#seedWorkProjectStatusFile(
             authoritative.binding.canonicalRoot,
             authoritative.name,

@@ -1026,7 +1026,7 @@ describe("ProjectService", () => {
   });
 
   it("writes STATUS.md and never AGENTS.md into the folder when a Work Project opts into a status file", async () => {
-    const folder = mkdtempSync(join(tmpdir(), "octant-status-opt-in-"));
+    const folder = realpathSync(mkdtempSync(join(tmpdir(), "octant-status-opt-in-")));
     try {
       const files = new WorkProjectStatusFiles();
       const project = workProject();
@@ -1054,6 +1054,25 @@ describe("ProjectService", () => {
     } finally {
       rmSync(folder, { recursive: true, force: true });
     }
+  });
+
+  it("writes no status file when the bound folder no longer resolves to its stored root", async () => {
+    const seedWorkProjectStatusFile = vi.fn(async () => undefined);
+    const fixture = fixtureService({
+      projects: [workProject()],
+      // The folder was renamed and its old path now links elsewhere.
+      validate: async () => ({ canonicalRoot: "/somewhere/else" }),
+      seedWorkProjectStatusFile,
+    });
+    await expect(
+      fixture.service.executeProject(windowId, {
+        kind: "change-work-project-status-file",
+        projectId: workId,
+        expectedVersion: 1,
+        statusFile: "enabled",
+      }),
+    ).resolves.toMatchObject({ kind: "work-project-status-file-changed" });
+    expect(seedWorkProjectStatusFile).not.toHaveBeenCalled();
   });
 
   it("refuses to give the default-folder Project a status file and writes nothing", async () => {
@@ -1495,6 +1514,6 @@ function uuidSequence() {
   let value = 700;
   return () => `00000000-0000-4000-8000-${String(value++).padStart(12, "0")}`;
 }
-import { mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { mkdtempSync, readdirSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
