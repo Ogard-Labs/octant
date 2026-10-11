@@ -178,9 +178,10 @@ export function isLoopbackHostname(hostname: string): boolean {
 
 /**
  * Packaged Electron file pages send Origin: null (opaque) or file://.
- * The local listener trusts canonical loopback HTTP clients independently of
- * which loopback renderer Electron currently uses. `allowedHttpOrigin` only
- * distinguishes whether the opaque packaged renderer is also admitted.
+ * This judges only the shape of a renderer origin: the opaque packaged
+ * renderer (unless a development renderer is configured) or a canonical
+ * loopback HTTP origin on any port. Which loopback port may act is pinned by
+ * `isLocalRendererOrigin`, which the local listener applies before dispatch.
  */
 export function isAllowedRendererOrigin(
   origin: string,
@@ -204,6 +205,48 @@ export function isAllowedRendererOrigin(
   } catch {
     return false;
   }
+}
+
+/**
+ * Whether `origin` is a renderer this listener serves: the opaque packaged
+ * renderer (when admitted), the explicitly configured development renderer,
+ * or the listener's own loopback origin under any loopback name. Another
+ * loopback port is any page the person opened — a dev server an agent started
+ * in a Code project, for instance — and must not reach local authority.
+ */
+export function isLocalRendererOrigin(
+  origin: string,
+  listenerUrl: URL,
+  allowedHttpOrigin?: string | null,
+): boolean {
+  if (isPackagedRendererOrigin(origin)) {
+    return allowedHttpOrigin === null || allowedHttpOrigin === undefined;
+  }
+  if (typeof allowedHttpOrigin === "string" && origin === allowedHttpOrigin) return true;
+  if (!isAllowedRendererOrigin(origin) || listenerUrl.protocol !== "http:") return false;
+  return new URL(origin).port === listenerUrl.port;
+}
+
+/**
+ * A request whose Origin names a loopback host but is not a renderer this
+ * listener serves. The local listener refuses it before any route runs, so no
+ * route can reflect that origin into CORS or local authority.
+ */
+export function isForeignLoopbackOrigin(
+  origin: string | null,
+  listenerUrl: URL,
+  allowedHttpOrigin?: string | null,
+): boolean {
+  if (origin === null) return false;
+  let hostname: string;
+  try {
+    hostname = new URL(origin).hostname;
+  } catch {
+    return false;
+  }
+  return (
+    isLoopbackHostname(hostname) && !isLocalRendererOrigin(origin, listenerUrl, allowedHttpOrigin)
+  );
 }
 
 export function resolveAllowedRendererHttpOrigin(input: {

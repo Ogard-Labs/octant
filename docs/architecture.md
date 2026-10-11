@@ -255,7 +255,9 @@ unchanged, and native remote requests refuse redirects.
 process-local client context through `/api/shell/local-session`; no launcher
 token, persisted clock posture, or alternate profile is required. Electron,
 ordinary browsers, and Vite therefore read the same Machine-owned Projects,
-threads, settings, and journal. The context id scopes window-local presentation
+threads, settings, and journal; a Vite renderer qualifies only when the host
+was started with its origin in `OCTANT_WEB_URL` (the desktop dev loop and
+`octant web --dev` set it for the host they start). The context id scopes window-local presentation
 and guards against accidental cross-window commands, but it is not a separate
 Machine or durable authentication epoch. The packaged renderer additionally
 proves its native renderer identity for desktop-only integration. When the host
@@ -263,9 +265,13 @@ instance changes, Electron re-registers every live Project window, replaces the
 main-process authority and renderer identity, and publishes the new capability
 so the renderer rebuilds its clients before snapshot recovery. The loopback
 transport still validates the actual Host header, rejects non-loopback origins,
-and removes process-local registration when its owning client closes. Loopback
-renderer ports share the local-user trust class; the listener never reflects a
-non-loopback web origin into local authority. The renderer holds the matching
+and removes process-local registration when its owning client closes. The
+listener admits only its own loopback origin (under any loopback name), the
+packaged renderer, and the development renderer origin named by
+`OCTANT_WEB_URL`; a page on any other loopback port is refused before dispatch,
+gets no CORS grant, and cannot mint a client context, because agents start
+local dev servers whose pages the person opens in an ordinary browser. The
+listener never reflects a non-loopback web origin into local authority. The renderer holds the matching
 line before its first request: a launch address that is plain HTTP to a
 non-loopback host is refused with an explanation and never used
 (`docs/decisions/0103`). Requests that send the window capability set
@@ -724,6 +730,25 @@ attach gate (see
 On an approval-gated thread, **Allow input** is the confirmation that opens
 that destination; clicks, typing, Home, and Lock never raise it
 ([decisions/0152-allow-input-opens-a-device-to-clicks.md](decisions/0152-allow-input-opens-a-device-to-clicks.md)).
+The agent's `octant_apple` and `octant_android` tools follow the thread's
+turn posture per operation, not a Full-access gate on the whole tool:
+`discover`, `status`, and `screenshot` are reads and run under every posture,
+Plan included, as is `open` of a destination already booted or booting: it only
+shows the pane, changes nothing on the device, and has no host action an
+approval could bind to. Every other operation is an effect, including `open` of
+a shut-down destination, which boots it. Plan refuses it; Full access
+sends it with no approval; under approval-gated and auto-accept-edits the
+server asks in the thread (an `approval-requested` turn event, answered like a
+Browser session ask) before the pane opens or the host is called, and an
+approval mints the host's one-use, five-minute approval bound to exactly that
+request and its checkout context — the same receipt a workbench confirmation
+yields, validated by the same Apple or Android policy. A denial, expiry, or
+thread that went stale or into Plan while waiting refuses the call. Input to a
+destination the turn's window already holds open under Allow input rides that
+grant without asking; an approved agent input opens or renews it as a pane
+input does. `octant_terminal` still requires Full access: it runs arbitrary
+shell commands, which an approval-gated thread already reaches through its
+provider's own per-command approvals.
 Under the desktop app that injection is the native device helper of 0137: a
 tap is a point on the captured screen, typed text is letters, digits, spaces
 and new lines, and every refusal names the helper's own reason. Without that
@@ -1146,6 +1171,96 @@ thread-owned PR status onto Code board cards. A Work or Code thread is Done
 only when its user-confirmed delivery target is objectively satisfied;
 ambiguous state resolves to Waiting.
 
+**Pull-request merge.** The person at a local desktop window may merge one
+open pull request from its review (`POST /api/code/project-pull-requests/merge`).
+That is the only pull-request mutation Octant performs; approving, commenting,
+requesting changes, editing, closing, reopening, and force-pushing stay absent.
+The rules:
+
+- **Who.** Only a `local-window` principal. The route answers 403 to a paired
+  remote device before decoding the command, and the server service refuses
+  any initiator other than `user` as `not-authorized`. No provider, agent tool,
+  plugin, routine, or Code posture (Full access included) can reach it.
+- **Confirmation.** The review enables Merge only for a fresh, unambiguous,
+  open, mergeable observation. Merge opens an inline confirmation that names the reviewed head
+  and focuses Cancel; nothing merges until the person chooses Confirm merge.
+- **Server checks before the effect.** The command names the Project, the
+  repository, the number, a method (merge, squash, or rebase), and the head SHA
+  the person reviewed. The server refuses unless that Project is connected on
+  this window and resolves to exactly that github.com repository, and refuses
+  while GitHub access is revoked. It then re-reads the pull request and refuses
+  `not-open`, `not-mergeable`, or `stale` (head moved), and passes
+  `--match-head-commit` so GitHub also refuses a head that moves in between.
+- **Credential.** The host's installed `gh` CLI with its own stored login.
+  Octant stores no GitHub token; ambient `GH_TOKEN`, `GITHUB_TOKEN`, and
+  `GH_ENTERPRISE_TOKEN` are stripped and prompts are disabled.
+- **Record.** The outcome returns to the person and drops the cached detail
+  and list rows; the next refresh observes Merged. The merge is not journaled
+  as its own event: GitHub's history is its record, and a thread linked to the
+  pull request reaches Done only through the ordinary observed-state rule.
+
+**Delivery (publishing to a user-owned target) is dormant.** The ship service
+and its journaled events exist, but the host wires no target source, no
+artifact observer that saw a build produced, and no issuer of the per-act
+approval bound to the exact target, revision, and build (`server.ts` passes an
+empty target list, `observedArtifact` and `approval` that return nothing, and a
+publish path that fails). The renderer shows Delivery only when a thread has an
+enabled target (`hasActionableDelivery`), so it stays absent. It stays absent
+until all three exist; a standing grant never substitutes for the per-act
+approval.
+
+**Routines (Automation Center).** A routine is a host-owned, Project-bound
+definition that starts an ordinary Work or Code thread with a fixed task prompt
+on a trigger: once, every N minutes (15 minutes to 30 days), or weekly at a
+local time in an IANA time zone. Chat has no routines. Each occurrence creates
+at most one new thread (target policy `new-thread`) and runs its first turn
+through the ordinary thread and turn services; a routine cannot do anything the
+thread it creates could not do.
+
+- **Authority ceiling.** A definition captures an execution profile (an existing
+  agent profile: provider, model, policy, permission persistence) and an
+  authority snapshot whose effective authority never widens the requested one
+  and fits under the profile. Work routines get no shell or Git authority. Full
+  access is never eligible, whether or not it was remembered elsewhere: the
+  contract refuses it on the snapshot and dispatch blocks it as
+  `full-access-ineligible`. Code runs are always created approval-gated. Work
+  runs bind the Project's confined root like an interactive Work thread, and
+  their unattended first turn runs ask-first even when the host's Work default
+  is auto-accept-edits, unless the routine's captured effective authority is
+  itself auto-accept-edits; the hold only narrows. A Code first turn runs with
+  the `agent` initiator, so approvals wait for a person.
+- **Revalidation at every occurrence.** Before creating a thread the dispatcher
+  re-reads live host facts and blocks with a typed reason when the host, the
+  Project (active, same mode, same version), the binding revision, the Code
+  checkout, the execution profile version and policy, the provider and model,
+  the authority digest, or the confirmed delivery-target template no longer
+  matches. A stale definition never adopts replacement authority.
+- **Who may author.** Routes accept only an authenticated principal from the
+  transport; a body cannot supply principal or origin. A create must target a
+  Project of the same mode that principal can reach, and every other command
+  must address a routine whose Project it can reach. A paired remote device may
+  author only on its own host and within those Projects; its routines get the
+  same ceiling. Automation-origin execution cannot create, edit, run, pause, or
+  archive a routine (`automation-recursion`), and no agent or provider tool
+  reaches the routes.
+- **Asleep or offline.** The scheduler is an in-process timer in the running
+  host over journaled definitions. Nothing wakes the computer or runs in a
+  cloud. On return it reconciles missed occurrences by the routine's policy:
+  `skip` records them as skipped; `run-once` records all but the newest as
+  skipped and runs the newest once. No catch-up burst. More than the missed-run
+  cap blocks the routine as `missed-run-cap-exceeded`. A routine with an active
+  run never overlaps itself. A run that needs a registered local window to
+  create its thread fails with that reason when none is open.
+- **Journal.** Definitions, revisions, lifecycle changes, occurrence claims and
+  skips, runs, dispatch intents and claims, and cancellations are journaled. A
+  claim commits the deterministic run before the occurrence ledger, so a crash
+  repairs forward to the same run and never dispatches twice. Run-now and
+  cancel are idempotent by request id.
+- **Turning one off.** Pause stops future occurrences; Resume restarts from the
+  next occurrence; Archive ends the routine and keeps its history (there is no
+  delete). Cancel stops a run before its first turn starts; afterwards the
+  thread's own interrupt applies.
+
 A `#thread` mention points at another thread the sender can already Open. The
 host resolves a bounded, read-only title, status, and transcript window at send
 time. Dragging a sidebar thread onto a composer, or choosing Attach as context
@@ -1237,11 +1352,11 @@ it fire against newer state; a dispatch the admission path refuses settles as
 `failed`. A dispatch that cannot yet reach its admission path — the mode has
 no window registered on this host to carry the continuation — is deferred
 rather than settled: the opt-in stays armed and re-evaluates on a bounded
-retry cadence until it dispatches, invalidates, or is cancelled. The scheduler
-is deliberately narrow under the release boundary: an
-in-process host timer over journaled opt-ins, not a scheduling product — no
-cloud wake, no background claim beyond the host's own running process, and no
-billing automation. A host that was down or unreachable at the reset instant
+retry cadence until it dispatches, invalidates, or is cancelled. This resume
+timer is deliberately narrow and separate from
+[routines](#modes-chat-work-and-code): an in-process host timer over journaled
+opt-ins that only continues a stopped turn — no cloud wake, no background claim
+beyond the host's own running process, and no billing automation. A host that was down or unreachable at the reset instant
 rescans `status = scheduled` rows on return and dispatches the still-valid
 ones; a record that cannot be re-validated settles `invalidated` and never
 re-arms.
@@ -2010,6 +2125,13 @@ flowchart LR
 
 The provider layer is defined by `@octant/provider-sdk` and implemented in
 `apps/server/src/providers`.
+
+- **Project provider policy.** A Project allows all providers (the default),
+  an explicit list of provider instances, or `eu-zdr`: a provider instance or
+  its selected model must carry an `eu` or a `zdr` data tag. Either tag
+  suffices, as the Project page says; `eu-zdr` does not by itself guarantee
+  zero retention. The host checks the policy before every Work and Code turn
+  and handoff, including child runs, and refuses a disallowed provider.
 
 - **Driver interface.** A `ProviderDriver` exposes `probe` (readiness and
   capability report without side effects), `acquire` (a `ProviderConnection`
@@ -3722,6 +3844,11 @@ mechanisms are:
   remembered owner-only under the data directory (the boundary that holds the
   host identity key), including its TLS key, and re-enabled when the server
   starts; a server shutdown keeps it and only a local disable forgets it.
+  A paired client may click, scroll, and press keys in the host's agent
+  browser, but may not navigate it, type into it, or close a tab. Those clicks
+  and keys can still follow a link or submit a form within the context's
+  approved origins; the host's navigation guards refuse any page outside them,
+  so a paired client cannot take the host browser to a new origin.
 - **Artifact replica membership.** Each replica entry carries a detached
   Ed25519 signature from the device signing key the writing host holds for its
   replica instance, in a credential namespace of its own that provider
@@ -3912,6 +4039,12 @@ person owns — a synced folder or an S3-compatible bucket. Octant operates no
 storage and no relay for them. The storage provider can read the files. That
 does not open a hosted relay or an Octant cloud account. See
 [0163](decisions/0163-artifact-replicas-in-storage-the-user-owns.md).
+
+Two shipped capabilities are in scope under their rules above: the person's
+confirmed [pull-request merge](#modes-chat-work-and-code) from a local window,
+and host-local [routines](#modes-chat-work-and-code) in the Automation Center.
+Neither opens other pull-request mutation, agent-initiated merge, cloud
+scheduling, or a hosted wake service.
 
 Two holds stay Later until documented approved designs, published seams, and an
 explicit maintainer request open them:
