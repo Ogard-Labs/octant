@@ -1045,8 +1045,6 @@ export class ProviderService implements ProviderServiceApi {
               updatedAt,
             });
             this.#refuseVacatingImplicitClaudeOwner(instances, current, instance);
-            const nextDirectory =
-              instance.driverKind === "claude" ? instance.configuration.configDirectory : undefined;
             const hostEnvironment = await snapshotClaudeHostEnvironment();
             const hostConfigDirectory = hostClaudeConfigDirectory(hostEnvironment);
             const hostSecureDirectory = hostClaudeSecureStorageDirectory(hostEnvironment);

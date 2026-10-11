@@ -581,12 +581,10 @@ describe("ProviderSettingsView", () => {
     await user.type(within(create).getByLabelText("Claude binary"), "/opt/homebrew/bin/claude");
     const directory = within(create).getByLabelText("Account directory");
     expect(directory).toHaveAttribute("readonly");
-    expect(directory).toHaveValue("~/.claude");
+    expect(directory).toHaveValue("~/.claude-accounts/<assigned on create>");
     expect(within(create).queryByLabelText("Claude config directory")).toBeNull();
     await user.click(within(create).getByRole("radio", { name: "Teal" }));
-    expect(within(create).getByLabelText("Account sign-in command")).toHaveValue(
-      "'/opt/homebrew/bin/claude' auth login",
-    );
+    expect(within(create).queryByLabelText("Account sign-in command")).toBeNull();
     await user.click(within(create).getByRole("button", { name: "Add Claude" }));
     expect(props.onCreateClaude).toHaveBeenLastCalledWith(
       "Work Claude",
@@ -614,7 +612,9 @@ describe("ProviderSettingsView", () => {
     await waitFor(() => {
       expect(within(create).getByLabelText("Claude binary")).toHaveValue("");
     });
-    expect(within(create).getByLabelText("Account directory")).toHaveValue("~/.claude");
+    expect(within(create).getByLabelText("Account directory")).toHaveValue(
+      "~/.claude-accounts/<assigned on create>",
+    );
     expect(within(create).queryByLabelText("Account sign-in command")).toBeNull();
   });
 
@@ -627,12 +627,11 @@ describe("ProviderSettingsView", () => {
     const create = screen.getByRole("form", { name: "Add Claude provider" });
     const directory = within(create).getByLabelText("Account directory");
     expect(directory).toHaveAttribute("readonly");
+    expect(directory).toHaveValue("~/.claude-accounts/<assigned on create>");
     expect(within(create).queryByLabelText("Claude config directory")).toBeNull();
     expect(within(create).queryByLabelText("Account sign-in command")).toBeNull();
     await user.type(within(create).getByLabelText("Claude binary"), "/usr/local/bin/claude");
-    expect(within(create).getByLabelText("Account sign-in command")).toHaveValue(
-      "'/usr/local/bin/claude' auth login",
-    );
+    expect(within(create).queryByLabelText("Account sign-in command")).toBeNull();
   });
 
   it("hides the Claude sign-in command until the binary path is absolute", async () => {
@@ -1270,7 +1269,9 @@ describe("ProviderSettingsView", () => {
       "CLAUDE_CONFIG_DIR='/Users/example/.claude-accounts/work' CLAUDE_SECURESTORAGE_CONFIG_DIR='/Users/example/.claude-accounts/work' '/opt/homebrew/bin/claude' auth login",
     );
     expect(within(card).queryByRole("button", { name: /Connect Claude for helpers/ })).toBeNull();
-    expect(within(card).getByRole("button", { name: "Use Octant's assigned directory" })).toBeVisible();
+    expect(
+      within(card).getByRole("button", { name: "Use Octant's assigned directory" }),
+    ).toBeVisible();
   });
 
   it("shows a read-only default account directory and the unmodified sign-in command", async () => {

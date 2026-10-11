@@ -186,7 +186,8 @@ describe("makeClaudeEnvironmentScope", () => {
       expect(existsSync(configDirectory)).toBe(true);
     } finally {
       rmSync(configDirectory, { recursive: true, force: true });
-      if (createdParent) rmSync(join(homedir(), ".claude-accounts"), { recursive: true, force: true });
+      if (createdParent)
+        rmSync(join(homedir(), ".claude-accounts"), { recursive: true, force: true });
     }
   });
 
@@ -210,7 +211,8 @@ describe("makeClaudeEnvironmentScope", () => {
       expect(heldEnvironment.ANTHROPIC_API_KEY).toBeUndefined();
     } finally {
       rmSync(configDirectory, { recursive: true, force: true });
-      if (createdParent) rmSync(join(homedir(), ".claude-accounts"), { recursive: true, force: true });
+      if (createdParent)
+        rmSync(join(homedir(), ".claude-accounts"), { recursive: true, force: true });
     }
   });
 

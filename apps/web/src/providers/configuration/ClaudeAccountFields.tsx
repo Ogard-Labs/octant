@@ -59,9 +59,12 @@ export function displayAssignedAccountDirectory(input: {
       kind: stored.endsWith("/.claude") ? "assigned-default" : "assigned-extra",
     };
   }
-  if (input.extraAccount && input.instanceId !== undefined) {
+  if (input.extraAccount) {
     return {
-      path: `~/${CLAUDE_ACCOUNT_PROFILE.extraAccountsDirectoryName}/${input.instanceId}`,
+      path:
+        input.instanceId === undefined
+          ? `~/${CLAUDE_ACCOUNT_PROFILE.extraAccountsDirectoryName}/<assigned on create>`
+          : `~/${CLAUDE_ACCOUNT_PROFILE.extraAccountsDirectoryName}/${input.instanceId}`,
       kind: "assigned-extra",
     };
   }
@@ -89,6 +92,10 @@ export function ClaudeAccountSettingsFields(props: {
     ...(props.instanceId === undefined ? {} : { instanceId: props.instanceId }),
     ...(props.storedDirectory === undefined ? {} : { storedDirectory: props.storedDirectory }),
   });
+  const commandReady =
+    props.showSignInCommand !== false &&
+    binaryPath.startsWith("/") &&
+    !(props.extraAccount && props.instanceId === undefined);
   const commandDirectory =
     displayed.kind === "assigned-default" &&
     (props.storedDirectory === undefined || props.storedDirectory.length === 0)
@@ -96,22 +103,20 @@ export function ClaudeAccountSettingsFields(props: {
       : displayed.path.startsWith("~")
         ? `$HOME/${displayed.path.slice(2)}`
         : displayed.path;
-  const signInCommand =
-    props.showSignInCommand !== false && binaryPath.startsWith("/")
-      ? formatProviderAccountSignInCommand({
-          profile: CLAUDE_ACCOUNT_PROFILE,
-          binaryPath,
-          ...(commandDirectory === undefined ? {} : { stateDirectory: commandDirectory }),
-        })
-      : undefined;
-  const statusCommand =
-    props.showSignInCommand !== false && binaryPath.startsWith("/")
-      ? formatProviderAccountStatusCommand({
-          profile: CLAUDE_ACCOUNT_PROFILE,
-          binaryPath,
-          ...(commandDirectory === undefined ? {} : { stateDirectory: commandDirectory }),
-        })
-      : undefined;
+  const signInCommand = commandReady
+    ? formatProviderAccountSignInCommand({
+        profile: CLAUDE_ACCOUNT_PROFILE,
+        binaryPath,
+        ...(commandDirectory === undefined ? {} : { stateDirectory: commandDirectory }),
+      })
+    : undefined;
+  const statusCommand = commandReady
+    ? formatProviderAccountStatusCommand({
+        profile: CLAUDE_ACCOUNT_PROFILE,
+        binaryPath,
+        ...(commandDirectory === undefined ? {} : { stateDirectory: commandDirectory }),
+      })
+    : undefined;
   return (
     <>
       <SettingRow

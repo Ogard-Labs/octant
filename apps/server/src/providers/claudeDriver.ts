@@ -1,7 +1,7 @@
 import type { ManagedToolAnswer } from "./managedMcpTools";
 import { randomUUID } from "node:crypto";
 import { mkdtemp, realpath, rm } from "node:fs/promises";
-import { homedir, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 
 import {
