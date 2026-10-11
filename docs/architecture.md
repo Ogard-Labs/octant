@@ -2966,8 +2966,13 @@ native harness in `apps/server/src/harness`:
 - **Egress and hostile content.** Inference and tool egress are separate
   paths. A direct-endpoint request goes from the server process to the
   configured base URL only, carries the credential, and refuses any redirect
-  without following it. `web-fetch` sends no credential and no model-chosen
-  header, method, or body (its arguments are a URL and a size), so a public
+  without following it. The stored key belongs to the base URL it was entered
+  for: changing an OpenAI-compatible, Anthropic-compatible, or Azure AI Foundry
+  endpoint's base URL deletes its stored key before the change is journaled,
+  and refuses the change if the key cannot be deleted, so the person enters a
+  key again for the new server. Changing only other settings keeps the key.
+  `web-fetch` sends no credential and no model-chosen header, method, or body
+  (its arguments are a URL and a size), so a public
   inference host sees an anonymous GET and a local one (Ollama, LM Studio) is a
   private destination it refuses. Private means loopback, unspecified, RFC 1918,
   CGNAT, link-local (including cloud metadata), multicast, and reserved IPv4;
