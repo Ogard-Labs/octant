@@ -236,6 +236,21 @@ export function TableBlock({
       ? undefined
       : columnViews.find((view) => String(view.column.id) === String(summary.columnId))?.index;
   const numberColumns = columnViews.filter(({ column }) => column.type === "number");
+  // A revision, or a switch to another version, can remove the grouped or the
+  // summarised column while this block stays mounted. The reader's choice then
+  // has nothing to read, so it is dropped here rather than left in a select
+  // whose value matches no option.
+  if (groupBy !== undefined && groupIndex === undefined) {
+    setGroupBy(undefined);
+    setSummary(undefined);
+    setCollapsed(new Set());
+  }
+  if (
+    summary !== undefined &&
+    !numberColumns.some(({ column }) => String(column.id) === String(summary.columnId))
+  ) {
+    setSummary(undefined);
+  }
   const groupOptions: ReadonlyArray<OctantSelectOption> = [
     { id: NO_GROUP, label: "No grouping" },
     ...columnViews.map(({ column }) => ({ id: String(column.id), label: column.label })),

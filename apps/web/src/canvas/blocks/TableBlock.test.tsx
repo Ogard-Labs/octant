@@ -301,6 +301,29 @@ describe("grouped table", () => {
     await choose(user, "Group summary", "Count of Errors");
     expect(groups()[1]?.header).toContain("Count of Errors 2");
   });
+
+  it("drops a grouping and its summary when a revision removes their column", async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(<CanvasView input={definition()} />);
+    await choose(user, "Group rows", "State");
+    await choose(user, "Group summary", "Sum of Requests");
+
+    const revised = {
+      ...tableFixture,
+      columns: tableFixture.columns.slice(0, 2),
+      rows: tableFixture.rows.map((row) => row.slice(0, 2)),
+    };
+    rerender(<CanvasView input={{ ...canvasFixture, blocks: [revised] }} />);
+
+    expect(screen.getByRole("combobox", { name: "Group rows" })).toHaveTextContent("No grouping");
+    expect(screen.queryByRole("combobox", { name: "Group summary" })).toBeNull();
+    expect(screen.queryByRole("rowgroup", { name: /State:/ })).toBeNull();
+    expect(firstColumn()).toEqual([
+      "apps/web/src/Table.tsx",
+      "packages/domain/canvas.ts",
+      "README.md",
+    ]);
+  });
 });
 
 describe("pinned table columns", () => {
