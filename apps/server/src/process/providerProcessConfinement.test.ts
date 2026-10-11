@@ -16,8 +16,8 @@ import { CONFINED_CLAUDE_EXECUTION_POLICIES } from "../providers/claudeProcess";
  * 0143 settles.
  *
  * What this proves: a provider process module either uses the shared builder or
- * appears in {@link UNWRAPPED} with a reason, and 0143 names each one that does
- * not. What it does not prove: that every launch inside a wrapped module goes
+ * appears in {@link UNWRAPPED} with a reason, and the confinement matrix in the
+ * architecture's security section names each one that does not. What it does not prove: that every launch inside a wrapped module goes
  * through the builder. A module drops the deny-default profile on Full access
  * by design, so a per-launch claim would need each module to declare its
  * launches in a manifest this gate could read rather than a source scan. The
@@ -28,10 +28,10 @@ import { CONFINED_CLAUDE_EXECUTION_POLICIES } from "../providers/claudeProcess";
  * does not read, and `discoveryService` runs candidate executables this never
  * sees.
  *
- * {@link UNWRAPPED}, not 0143, is the live set. An accepted record keeps its
- * history — a later ADR supersedes it rather than editing it — so reading the
- * live set out of 0143 would make confining Codex fail this suite until someone
- * deleted that history. Confining a runtime deletes its entry here instead.
+ * {@link UNWRAPPED} is the live set, and the architecture matrix is where a
+ * person reads it. The archived decision records are history, not a design
+ * authority, so nothing here reads them. Confining a runtime deletes its entry
+ * here and its unwrapped row there.
  *
  * An exception may also narrow to the postures a module still launches
  * unwrapped, which is how the Claude exception closes one posture at a time
@@ -62,16 +62,7 @@ const UNWRAPPED: ReadonlyArray<{
 
 const here = dirname(fileURLToPath(import.meta.url));
 const providersDirectory = join(here, "..", "providers");
-const decisionPath = join(
-  here,
-  "..",
-  "..",
-  "..",
-  "..",
-  "docs",
-  "decisions",
-  "0143-confinement-wraps-a-runtime-that-carries-one-thread.md",
-);
+const architecturePath = join(here, "..", "..", "..", "..", "docs", "architecture.md");
 
 function providerProcessModules(): ReadonlyArray<string> {
   return readdirSync(providersDirectory)
@@ -115,10 +106,11 @@ describe("provider runtime confinement", () => {
     >(["approval-gated", "auto-accept-edits", "plan"]);
   });
 
-  it("keeps the decision record naming every runtime the exception set still covers", () => {
-    const record = readFileSync(decisionPath, "utf8");
+  it("keeps the architecture's confinement matrix naming every runtime launched unwrapped", () => {
+    const architecture = readFileSync(architecturePath, "utf8");
+    const security = architecture.slice(architecture.indexOf("\n## Security and authority\n"));
     const unnamed = UNWRAPPED.map(({ file }) => file).filter(
-      (file) => !record.includes(`\`${file}\``),
+      (file) => !security.includes(`\`${file}\``),
     );
     expect(unnamed).toEqual([]);
   });
