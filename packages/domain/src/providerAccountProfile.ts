@@ -121,8 +121,9 @@ export function formatProviderAccountStatusCommand(input: {
  * Claude is the only driver that stores an accent today.
  */
 export function providerAccountAccent(instance: ProviderInstance): string | undefined {
-  if (!("accent" in instance.configuration)) return undefined;
-  const accent = instance.configuration.accent;
+  const configuration = instance.configuration;
+  if (configuration === undefined || !("accent" in configuration)) return undefined;
+  const accent = configuration.accent;
   return typeof accent === "string" ? accent : undefined;
 }
 

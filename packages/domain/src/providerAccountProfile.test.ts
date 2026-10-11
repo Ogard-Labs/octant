@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { decodeProviderInstanceId } from "@octant/contracts";
+import { decodeProviderInstanceId, type ProviderInstance } from "@octant/contracts";
 import {
   assignedProviderAccountDirectory,
   CLAUDE_ACCOUNT_PROFILE,
@@ -7,6 +7,7 @@ import {
   formatProviderAccountSignInCommand,
   formatProviderAccountStatusCommand,
   isAssignedProviderAccountDirectory,
+  providerAccountAccent,
   providerAccountProfile,
 } from "./providerAccountProfile";
 
@@ -72,5 +73,11 @@ describe("provider account profile", () => {
         directory: "/Users/example/.claude-accounts/work",
       }),
     ).toBe(false);
+  });
+
+  it("returns no accent when a picker instance has no configuration", () => {
+    expect(
+      providerAccountAccent({ configuration: undefined } as unknown as ProviderInstance),
+    ).toBeUndefined();
   });
 });
