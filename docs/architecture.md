@@ -1309,10 +1309,17 @@ The rules:
 - **Credential.** The host's installed `gh` CLI with its own stored login.
   Octant stores no GitHub token; ambient `GH_TOKEN`, `GITHUB_TOKEN`, and
   `GH_ENTERPRISE_TOKEN` are stripped and prompts are disabled.
-- **Record.** The outcome returns to the person and drops the cached detail
-  and list rows; the next refresh observes Merged. The merge is not journaled
-  as its own event: GitHub's history is its record, and a thread linked to the
-  pull request reaches Done only through the ordinary observed-state rule.
+- **Record.** Every attempt that reaches the server merge path appends one
+  `code.project-pull-request-merge-recorded@1` event, as its own aggregate,
+  before the outcome returns: the local user as actor, the Project, the
+  repository, the number, the method, the approved head SHA, and the result
+  (merged, refused with its reason, or unavailable with its reason). The
+  payload carries no credential, title, or body, and no projection reads it;
+  it is Octant's own record beside GitHub's history. A failed local append
+  fails the request even when GitHub already merged; the next refresh still
+  observes Merged. The outcome also drops the cached detail and list rows. A
+  thread linked to the pull request reaches Done only through the ordinary
+  observed-state rule, never from this record.
 
 **Delivery (publishing to a user-owned target) is dormant.** The ship service
 and its journaled events exist, but the host wires no target source, no

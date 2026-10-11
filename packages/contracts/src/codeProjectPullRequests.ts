@@ -228,6 +228,40 @@ export const CodeProjectPullRequestMergeOutcome = Schema.Union(
 );
 export type CodeProjectPullRequestMergeOutcome = typeof CodeProjectPullRequestMergeOutcome.Type;
 
+export const CODE_PROJECT_PULL_REQUEST_MERGE_RECORDED =
+  "code.project-pull-request-merge-recorded@1";
+
+/**
+ * Journal record of one merge attempt that reached the server merge path:
+ * which pull request, the head the person approved, the method, and how it
+ * ended. The envelope's actor names the local user. It carries no
+ * credential, title, or body; GitHub's history stays the record of what the
+ * merge changed.
+ */
+export const CodeProjectPullRequestMergeRecorded = Schema.Struct({
+  projectId: ProjectId,
+  repositoryOwner: GithubRepositoryOwner,
+  repositoryName: GithubRepositoryName,
+  number: Schema.Int.pipe(Schema.positive()),
+  method: CodeProjectPullRequestMergeMethod,
+  headSha: boundedNonEmptyText(64),
+  result: Schema.Union(
+    Schema.Struct({ status: Schema.Literal("merged") }).annotations(strict),
+    Schema.Struct({
+      status: Schema.Literal("refused"),
+      reason: CodeProjectPullRequestMergeRefusal,
+    }).annotations(strict),
+    Schema.Struct({
+      status: Schema.Literal("unavailable"),
+      reason: CodeProjectPullRequestMergeUnavailable,
+    }).annotations(strict),
+  ),
+}).annotations(strict);
+export type CodeProjectPullRequestMergeRecorded = typeof CodeProjectPullRequestMergeRecorded.Type;
+export const decodeCodeProjectPullRequestMergeRecorded = Schema.decodeUnknownSync(
+  CodeProjectPullRequestMergeRecorded,
+);
+
 export const CodeProjectPullRequestLinkedThread = Schema.Struct({
   threadId: CodeThreadId,
   title: boundedNonEmptyText(512),

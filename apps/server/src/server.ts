@@ -267,6 +267,7 @@ import {
   type CodeProjectPullRequestDetailPort,
   type CodeProjectPullRequestListPort,
   type CodeProjectPullRequestMergePort,
+  journalPullRequestMerge,
 } from "./code/codeProjectPullRequestService";
 import { CodeProjectPullRequestCadence } from "./code/codeProjectPullRequestCadence";
 import { CodeProjectPullRequestSnapshotStore } from "./code/codeProjectPullRequestSnapshotStore";
@@ -3785,6 +3786,11 @@ export function startOctantServer(
       list: projectPullRequestPorts.list,
       detail: projectPullRequestPorts.detail,
       merge: projectPullRequestPorts.merge,
+      recordMerge: (record) =>
+        journalPullRequestMerge(persistence.journal, record, {
+          uuid: randomUUID,
+          clock: () => new Date().toISOString(),
+        }),
       cacheStats,
       snapshotStore: new CodeProjectPullRequestSnapshotStore(
         join(persistence.dataDirectory, "code", "pull-request-snapshot.json"),

@@ -6,9 +6,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { CacheStatsProjection, type CacheStatsRecorder } from "../cacheStatsProjection";
+import { Journal } from "../persistence/journal";
+import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
+import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
+import { openSqlite } from "../persistence/sqlitePort";
 import { CodeProjectPullRequestSnapshotStore } from "./codeProjectPullRequestSnapshotStore";
 import {
   CodeProjectPullRequestService,
+  journalPullRequestMerge,
   type CodeProjectPullRequestAuthorizedProject,
   type CodeProjectPullRequestMergePort,
 } from "./codeProjectPullRequestService";
@@ -95,6 +100,7 @@ function serviceFixture(options: {
     readonly observedAt: string;
   }>;
   readonly merge?: CodeProjectPullRequestMergePort;
+  readonly mergeJournal?: Journal;
   readonly clock?: () => string;
   readonly cacheStats?: CacheStatsRecorder;
   readonly snapshotStore?: CodeProjectPullRequestSnapshotStore;
@@ -112,6 +118,7 @@ function serviceFixture(options: {
     options.detail ?? (async () => ({ status: "unavailable" }) satisfies GhPullRequestReviewResult),
   );
   const journal = options.journal ?? { append: vi.fn() };
+  const mergeJournal = options.mergeJournal;
   const listThreads = vi.fn(
     async () =>
       options.threads ?? [
@@ -154,6 +161,15 @@ function serviceFixture(options: {
     list: { listActive },
     detail: { observeReviewByIdentity },
     ...(options.merge === undefined ? {} : { merge: options.merge }),
+    ...(mergeJournal === undefined
+      ? {}
+      : {
+          recordMerge: (record) =>
+            journalPullRequestMerge(mergeJournal, record, {
+              uuid: () => crypto.randomUUID(),
+              clock: () => now,
+            }),
+        }),
     threads: {
       list: listThreads,
     },
@@ -218,6 +234,114 @@ describe("CodeProjectPullRequestService", () => {
     // The stale snapshot is gone: a query can no longer return the row as open.
     const after = await fixture.service.query(windowId, { version: 1 });
     expect(after.rows.filter((row) => row.number === 12 && row.state === "open")).toEqual([]);
+  });
+
+  describe("merge journal", () => {
+    const mergeCommand = {
+      projectId: projectA,
+      repositoryOwner: "octant",
+      repositoryName: "octant",
+      number: 12,
+      method: "squash",
+      headSha: "9".repeat(40),
+    } as const;
+
+    function openJournal() {
+      const directory = mkdtempSync(join(tmpdir(), "octant-pull-request-merges-"));
+      const connection = openSqlite(join(directory, "octant.sqlite3"));
+      applyMigrations(connection, MIGRATIONS, () => now);
+      const runtime = createPhase1RuntimeRegistries();
+      const journal = new Journal({
+        connection,
+        registry: runtime.events,
+        projections: runtime.projections,
+        clock: () => now,
+      });
+      return {
+        journal,
+        recorded: () =>
+          journal
+            .replay({ afterSequence: 0 as never, limit: 1000 })
+            .filter((event) => event.eventName === "code.project-pull-request-merge-recorded@1"),
+        close: () => {
+          connection.close();
+          rmSync(directory, { recursive: true, force: true });
+        },
+      };
+    }
+
+    it("journals a confirmed merge once, by the local user, with the approved head", async () => {
+      const store = openJournal();
+      try {
+        const fixture = serviceFixture({
+          merge: { mergeByIdentity: async () => ({ status: "merged" }) },
+          mergeJournal: store.journal,
+        });
+
+        const outcome = await fixture.service.merge(
+          windowId,
+          mergeCommand,
+          new AbortController().signal,
+        );
+
+        expect(outcome.status).toBe("merged");
+        const events = store.recorded();
+        expect(events).toHaveLength(1);
+        expect(events[0]?.actor.kind).toBe("local-user");
+        expect(events[0]?.payload).toEqual({ ...mergeCommand, result: { status: "merged" } });
+      } finally {
+        store.close();
+      }
+    });
+
+    it("journals a refused merge with its reason when the head moved after review", async () => {
+      const store = openJournal();
+      try {
+        const fixture = serviceFixture({
+          merge: { mergeByIdentity: async () => ({ status: "refused", reason: "stale" }) },
+          mergeJournal: store.journal,
+        });
+
+        const outcome = await fixture.service.merge(
+          windowId,
+          mergeCommand,
+          new AbortController().signal,
+        );
+
+        expect(outcome).toEqual({ status: "refused", reason: "stale" });
+        expect(store.recorded().map((event) => event.payload)).toEqual([
+          { ...mergeCommand, result: { status: "refused", reason: "stale" } },
+        ]);
+      } finally {
+        store.close();
+      }
+    });
+
+    it("journals a refusal for a Project this window cannot merge in, without reaching GitHub", async () => {
+      const store = openJournal();
+      try {
+        const mergeByIdentity = vi.fn(async () => ({ status: "merged" }) as const);
+        const fixture = serviceFixture({ merge: { mergeByIdentity }, mergeJournal: store.journal });
+
+        const outcome = await fixture.service.merge(
+          windowId,
+          { ...mergeCommand, projectId: projectC },
+          new AbortController().signal,
+        );
+
+        expect(outcome).toEqual({ status: "refused", reason: "not-authorized" });
+        expect(mergeByIdentity).not.toHaveBeenCalled();
+        expect(store.recorded().map((event) => event.payload)).toEqual([
+          {
+            ...mergeCommand,
+            projectId: projectC,
+            result: { status: "refused", reason: "not-authorized" },
+          },
+        ]);
+      } finally {
+        store.close();
+      }
+    });
   });
 
   it("restores a successful snapshot after restart without contacting GitHub", async () => {
