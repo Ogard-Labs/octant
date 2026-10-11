@@ -532,7 +532,9 @@ describe("Chat host queue", () => {
       expect(screen.getByRole("button", { name: "Queue message" })).toBeEnabled(),
     );
     await user.click(screen.getByRole("button", { name: "Queue message" }));
-    expect(screen.getByLabelText("Message")).toHaveValue("");
+    // The draft clears only once the queue acknowledges the message, which
+    // lands after the click returns.
+    await waitFor(() => expect(screen.getByLabelText("Message")).toHaveValue(""));
     await user.type(screen.getByLabelText("Message"), "Second");
     expect(host.execute).toHaveBeenCalledOnce();
     await user.click(screen.getByRole("button", { name: "Queue message" }));
