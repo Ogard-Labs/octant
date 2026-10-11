@@ -60,8 +60,11 @@ export const SIGNING_ORDER = [
  */
 export const MANAGED_TOOLS_PATH = "Contents/Resources/managed-tools";
 
-// Thin 64-bit Mach-O in either byte order, and universal (fat) binaries.
-const MACH_O_MAGIC = new Set([0xfeedfacf, 0xcffaedfe, 0xcafebabe, 0xbebafeca]);
+// Thin 64-bit Mach-O and universal (fat, 32- and 64-bit offset) binaries, in
+// either byte order.
+const MACH_O_MAGIC = new Set([
+  0xfeedfacf, 0xcffaedfe, 0xcafebabe, 0xbebafeca, 0xcafebabf, 0xbfbafeca,
+]);
 
 /** Every Mach-O file under `root`, deepest first; none when `root` is absent. */
 export async function findMachOFiles(root: string): Promise<ReadonlyArray<string>> {
@@ -144,7 +147,8 @@ export function requireSigned(environment: Record<string, string | undefined>): 
 export function createCodesignArgv(input: {
   readonly identity: string;
   readonly target: string;
-  readonly entitlements: string;
+  /** Omitted for vendored tools, which get no exceptions to the hardened runtime. */
+  readonly entitlements?: string;
 }): ReadonlyArray<string> {
   return [
     "/usr/bin/codesign",
@@ -154,8 +158,7 @@ export function createCodesignArgv(input: {
     "--options",
     "runtime",
     "--timestamp",
-    "--entitlements",
-    input.entitlements,
+    ...(input.entitlements === undefined ? [] : ["--entitlements", input.entitlements]),
     "--sign",
     input.identity,
     input.target,
@@ -272,10 +275,11 @@ export async function signAndNotarizeDesktop(input: {
   readonly runForOutput: CommandOutputRunner;
 }): Promise<void> {
   const entitlements = resolve(input.repositoryRoot, ENTITLEMENTS_PATH);
+  // Vendored tools are signed without Octant's entitlements: JIT, unsigned
+  // executable memory, and audio input are exceptions Electron and dictation
+  // need, not these helpers.
   for (const target of await findMachOFiles(`${input.appPath}/${MANAGED_TOOLS_PATH}`)) {
-    await input.run(
-      createCodesignArgv({ identity: input.credentials.identity, target, entitlements }),
-    );
+    await input.run(createCodesignArgv({ identity: input.credentials.identity, target }));
   }
   for (const relativePath of SIGNING_ORDER) {
     await input.run(

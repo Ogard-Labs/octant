@@ -270,6 +270,8 @@ describe("vendored managed-tool binaries", () => {
       join(tool, "simcam/libSimCameraInjector.dylib"),
       Buffer.from([0xca, 0xfe, 0xba, 0xbe, 0]),
     );
+    await mkdir(join(tool, "native"), { recursive: true });
+    await writeFile(join(tool, "native/fat64.node"), Buffer.from([0xca, 0xfe, 0xba, 0xbf, 0]));
     await writeFile(join(tool, "serve-sim.js"), "console.log('not a binary');\n");
     return app;
   }
@@ -279,6 +281,7 @@ describe("vendored managed-tool binaries", () => {
     try {
       const found = await findMachOFiles(join(app, MANAGED_TOOLS_PATH));
       expect(found.map((path) => path.slice(app.length + 1)).sort()).toEqual([
+        `${MANAGED_TOOLS_PATH}/serve-sim/dist/native/fat64.node`,
         `${MANAGED_TOOLS_PATH}/serve-sim/dist/simcam/libSimCameraInjector.dylib`,
         `${MANAGED_TOOLS_PATH}/serve-sim/dist/simcam/serve-sim-camera-helper`,
       ]);
@@ -288,7 +291,7 @@ describe("vendored managed-tool binaries", () => {
     }
   });
 
-  it("signs a vendored helper with the hardened runtime before sealing the app", async () => {
+  it("signs a vendored helper with the hardened runtime and no entitlements before sealing the app", async () => {
     // Notarization rejected the preview build because these kept their
     // upstream ad-hoc signatures: no Developer ID, runtime, or timestamp.
     const app = await appWithManagedTool();
@@ -315,6 +318,9 @@ describe("vendored managed-tool binaries", () => {
       expect(signed[targets.indexOf(helper)]).toEqual(
         expect.arrayContaining(["runtime", "--timestamp"]),
       );
+      // No JIT, unsigned-memory, or audio exceptions for a vendored helper.
+      expect(signed[targets.indexOf(helper)]).not.toContain("--entitlements");
+      expect(signed[targets.indexOf(app)]).toContain("--entitlements");
     } finally {
       await rm(join(app, ".."), { recursive: true, force: true });
     }
