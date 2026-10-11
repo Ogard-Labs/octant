@@ -1684,7 +1684,7 @@ const INHERITED_HANDOFF_REFUSALS: Record<InheritedHandoffRefusal, string> = {
   "source-point-unavailable":
     "The reply this was forked from is no longer in its thread's recorded conversation, so nothing was handed to the new provider. Restore the previous provider or start a new task.",
   "source-empty":
-    "This task has no readable messages to hand to the new provider; earlier messages may have been removed. Restore the previous provider or start a new task.",
+    "The conversation this was forked from has no readable messages left to hand to the new provider; they may have been removed. Restore the previous provider or start a new task.",
   "source-changed":
     "The thread this was forked from changed while it was being read for the handoff. Send the message again.",
   "source-unavailable":

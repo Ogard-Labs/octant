@@ -681,4 +681,23 @@ describe("a forked thread reading its conversation for a provider switch", () =>
       }),
     ).toEqual({ status: "unavailable", reason: "source-point-unavailable", part: "inherited" });
   });
+
+  it("refuses rather than hand over only the fork's own turns when no inherited message is readable", () => {
+    const input = forkedInput([codeTurn(1)]);
+    const result = admittedParentCodeContext({
+      ...input,
+      readEvidence: vi.fn((reference: CodeEvidenceReference) =>
+        String(reference.contentId) === String(codeTurn(1).prompt.contentId) ||
+        String(reference.contentId) === String(codeTurn(1).assistant[0]?.contentId)
+          ? undefined
+          : `body ${reference.contentId}`,
+      ),
+      inherited: {
+        threadId: sourceThreadId,
+        throughOperationId: String(codeTurn(1).operationId),
+        externalContentIngested: false,
+      },
+    });
+    expect(result).toEqual({ status: "unavailable", reason: "source-empty", part: "inherited" });
+  });
 });

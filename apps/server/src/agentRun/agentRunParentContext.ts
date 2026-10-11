@@ -201,6 +201,16 @@ function recentMessages(purpose: ConversationSelectionPurpose = "child-delegatio
         selected.push({ kind: message.kind, text: `${prefix}${text}` });
       }
       if (selected.length === 0) return { status: "unavailable", reason: "source-empty" };
+      // Inherited messages the budget kept, none of them readable: handing
+      // over only the fork's own turns would drop the pre-fork conversation
+      // the transcript shows. Inherited messages the budget left out are
+      // disclosed as earlier messages instead.
+      if (
+        inheritedSource !== undefined &&
+        inheritedMessages === 0 &&
+        messages.some((message) => message.inherited)
+      )
+        return { status: "unavailable", reason: "source-empty", part: "inherited" };
       const inherited =
         inheritedSource === undefined
           ? undefined

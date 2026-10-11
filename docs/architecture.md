@@ -3072,8 +3072,8 @@ attributes both reads with their own taint. The host authorizes the sending
 window against the source's Project and requires the source to be in the
 fork's Project before reading it, exactly as for a fork's first turn, then
 checks that what came back is that source's. A source that is unreadable,
-removed, moved to another Project, missing its fork point or changed during the
-read refuses the switch with a named reason that says the source is the
+removed, moved to another Project, missing its fork point, changed during the
+read, or with no readable message among those the budget kept refuses the switch with a named reason that says the source is the
 cause; it is never silently dropped, because the transcript shows the inherited
 turns and the new provider must not answer as if it had seen them. The
 journaled `provider-switch` record gains `inherited` (the fork origin, how many
