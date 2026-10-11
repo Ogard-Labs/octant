@@ -58,6 +58,7 @@ import {
   createBflImageProvider,
   createIdeogramImageProvider,
   assignedClaudeAccountConfigDirectory,
+  implicitClaudeAccountOwnerId,
   createClaudeProvider,
   createDevinProvider,
   createGeminiImageProvider,
@@ -106,7 +107,6 @@ import type { PersistenceService } from "../persistence/persistenceService";
 import { ProjectionApplicationFailed } from "../persistence/projection";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import { snapshotClaudeHostEnvironment } from "./claudeAccountDirectory";
-import { canonicalClaudeAccountDirectory } from "./claudeAccountIsolation";
 import { PROVIDER_DEFAULTS_AGGREGATE_ID } from "./providerProjection";
 import {
   carryModelContextWindowFacts,
@@ -203,12 +203,6 @@ export interface ProviderServiceOptions {
   readonly driver?: (instance: ProviderInstance) => ProviderDriver;
   readonly isDriverPluginEffective?: (driverKind: ProviderDriverKind) => boolean;
   readonly clearResumeIdentities?: (instanceId: ProviderInstanceId) => Promise<void>;
-  /**
-   * Deletes the long-lived Claude for helpers token. Removal swallows
-   * failure after the instance is already gone. A directory change must
-   * see the rejection so the old token cannot follow the new account.
-   */
-  readonly clearClaudeHelperSignIn?: (instanceId: ProviderInstanceId) => Promise<void>;
   /** Clears process-local provider limit evidence when identity/configuration changes. */
   readonly clearRuntimeUsageLimits?: (instanceId: ProviderInstanceId) => void;
   readonly runCliUpdate?: (input: ProviderCliUpdateInput) => Promise<ProviderCliUpdateOutput>;
@@ -241,7 +235,6 @@ export class ProviderService implements ProviderServiceApi {
   readonly #driverProvider: ProviderServiceOptions["driver"];
   readonly #isDriverPluginEffective: (driverKind: ProviderDriverKind) => boolean;
   readonly #clearResumeIdentities: ProviderServiceOptions["clearResumeIdentities"];
-  readonly #clearClaudeHelperSignIn: ProviderServiceOptions["clearClaudeHelperSignIn"];
   readonly #clearRuntimeUsageLimits: ProviderServiceOptions["clearRuntimeUsageLimits"];
   readonly #runCliUpdate: (input: ProviderCliUpdateInput) => Promise<ProviderCliUpdateOutput>;
   readonly #isProviderExecutableAvailable: (instance: ProviderInstance) => boolean;
@@ -276,7 +269,6 @@ export class ProviderService implements ProviderServiceApi {
       options.isDriverPluginEffective ??
       ((driverKind) => admittedBundledProviderDriverKinds().has(driverKind));
     this.#clearResumeIdentities = options.clearResumeIdentities;
-    this.#clearClaudeHelperSignIn = options.clearClaudeHelperSignIn;
     this.#clearRuntimeUsageLimits = options.clearRuntimeUsageLimits;
     this.#runCliUpdate = options.runCliUpdate ?? runProviderCliUpdate;
     this.#isProviderExecutableAvailable = options.isProviderExecutableAvailable ?? (() => true);
@@ -698,9 +690,11 @@ export class ProviderService implements ProviderServiceApi {
                   (candidate) => candidate.driverKind === "claude",
                 ).length;
                 const assignedDirectory =
-                  command.configuration.configDirectory === undefined && existingClaudeCount > 0
-                    ? assignedClaudeAccountConfigDirectory(homedir(), command.instanceId)
-                    : command.configuration.configDirectory;
+                  command.configuration.configDirectory !== undefined
+                    ? command.configuration.configDirectory
+                    : command.configuration.authentication === "api-key" || existingClaudeCount > 0
+                      ? assignedClaudeAccountConfigDirectory(homedir(), command.instanceId)
+                      : undefined;
                 const hostEnvironment = await snapshotClaudeHostEnvironment();
                 const hostConfigDirectory = hostClaudeConfigDirectory(hostEnvironment);
                 const hostSecureDirectory = hostClaudeSecureStorageDirectory(hostEnvironment);
@@ -883,11 +877,6 @@ export class ProviderService implements ProviderServiceApi {
             }
             if (current.driverKind === "claude") {
               await this.#clearResumeIdentities?.(current.id);
-              // The renderer clears a removed provider's API key, but nothing
-              // else names this token once the instance is gone, and it stays
-              // valid for a year. A store that cannot be reached leaves the
-              // token behind rather than reporting the removal as failed.
-              await this.#clearClaudeHelperSignIn?.(current.id).catch(() => undefined);
             }
             this.#invalidateCatalog(current.id, { kind: "all" }, "provider removed", updatedAt);
             this.#clearRuntimeUsageLimits?.(current.id);
@@ -1037,11 +1026,18 @@ export class ProviderService implements ProviderServiceApi {
             if (current.driverKind !== "claude") {
               throw this.#unsupported("This provider does not use Claude configuration.");
             }
-            const previousDirectory = current.configuration.configDirectory;
+            const requestedConfiguration =
+              command.kind === "change-claude-configuration" &&
+              command.reassignAccountDirectory === true
+                ? {
+                    ...command.configuration,
+                    configDirectory: assignedClaudeAccountConfigDirectory(homedir(), current.id),
+                  }
+                : command.configuration;
             const configuration = this.#assignedClaudeConfigurationForChange(
               instances,
               current,
-              command.configuration,
+              requestedConfiguration,
             );
             instance = changeClaudeConfiguration(current, {
               configuration,
@@ -1071,18 +1067,6 @@ export class ProviderService implements ProviderServiceApi {
               hostSecureDirectory,
               current.id,
             );
-            if (nextDirectory !== previousDirectory) {
-              try {
-                await this.#clearClaudeHelperSignIn?.(current.id);
-              } catch (error) {
-                if (error instanceof ProviderServiceError) throw error;
-                throw new ProviderServiceError({
-                  category: "unavailable",
-                  message:
-                    "Octant could not clear Claude for helpers for the new account directory. Try again.",
-                });
-              }
-            }
             eventName = "provider.instance-configuration-changed@1";
           } else if (command.kind === "change-mistral-vibe-configuration") {
             if (current.driverKind !== "mistral-vibe") {
@@ -1878,9 +1862,14 @@ export class ProviderService implements ProviderServiceApi {
     current: Extract<ProviderInstance, { readonly driverKind: "claude" }>,
     configuration: ClaudeProviderConfiguration,
   ): ClaudeProviderConfiguration {
-    if (configuration.authentication !== "subscription") return configuration;
     if (configuration.configDirectory !== undefined) return configuration;
     if (current.configuration.configDirectory !== undefined) return configuration;
+    if (configuration.authentication === "api-key") {
+      return {
+        ...configuration,
+        configDirectory: assignedClaudeAccountConfigDirectory(homedir(), current.id),
+      };
+    }
     const ownerId = implicitClaudeAccountOwnerId(instances);
     if (ownerId === undefined || String(ownerId) === String(current.id)) return configuration;
     return {
@@ -2200,16 +2189,12 @@ export async function runPackagedProviderSmokeTurn(
   }
 }
 
-function claudeAccountDirectoryKey(directory: string): string {
-  const canonical = canonicalClaudeAccountDirectory(directory);
-  // macOS's default volume is case-insensitive and Unicode-normalization
-  // insensitive. Fold every uniqueness key the same way so an existing
-  // `Work` still overlaps a missing `work/child`, and `é` overlaps `é`.
-  // A case-sensitive Darwin volume may then refuse two distinct
-  // spellings; that is safer than missing a nested claim.
-  return process.platform === "darwin"
-    ? canonical.path.normalize("NFC").toLowerCase()
-    : canonical.path;
+function accountDirectoryIdentity(directory: string): string {
+  let end = directory.length;
+  while (end > 0 && directory.charAt(end - 1) === "/") {
+    end -= 1;
+  }
+  return directory.slice(0, end);
 }
 
 function hostDirectoryClaim(directory: string | undefined): string | undefined {
@@ -2246,25 +2231,7 @@ function implicitClaudeAccountDirectory(
   // A default instance with no stored directory launches against the
   // inherited host overlay when present; uniqueness has to use that
   // same effective path.
-  return hostConfigDirectory ?? `${claudeAccountDirectoryKey(homeDirectory)}/.claude`;
-}
-
-function implicitClaudeAccountOwnerId(
-  instances: ReadonlyArray<ProviderInstance>,
-): ProviderInstanceId | undefined {
-  const candidates = instances.filter(
-    (instance) =>
-      instance.driverKind === "claude" &&
-      instance.configuration.configDirectory === undefined &&
-      instance.configuration.authentication === "subscription",
-  );
-  if (candidates.length === 0) return undefined;
-  const [owner] = [...candidates].sort((left, right) => {
-    const created = left.createdAt.localeCompare(right.createdAt);
-    if (created !== 0) return created;
-    return String(left.id).localeCompare(String(right.id));
-  });
-  return owner?.id;
+  return hostConfigDirectory ?? `${accountDirectoryIdentity(homeDirectory)}/.claude`;
 }
 
 export function claudeAccountNeedsOwnConfigDirectory(
@@ -2315,19 +2282,15 @@ function effectiveClaudeAccountDirectories(
   if (instance.configuration.configDirectory !== undefined) {
     return [instance.configuration.configDirectory];
   }
-  // An API-key instance with no stored directory uses a temporary
-  // isolated directory per launch. It never opens the host default.
-  if (instance.configuration.authentication === "api-key") return [];
-  // A replayed secondary subscription without a stored directory must
-  // not inherit the default account's login.
-  if (claudeAccountNeedsOwnConfigDirectory(instances, instance)) return [];
+  if (instance.configuration.authentication === "api-key") {
+    return [assignedClaudeAccountConfigDirectory(homeDirectory, instance.id)];
+  }
+  if (claudeAccountNeedsOwnConfigDirectory(instances, instance)) {
+    return [assignedClaudeAccountConfigDirectory(homeDirectory, instance.id)];
+  }
   const directories = [implicitClaudeAccountDirectory(homeDirectory, hostConfigDirectory)];
   if (hostSecureDirectory !== undefined) directories.push(hostSecureDirectory);
   return directories;
-}
-
-function claudeAccountDirectoriesOverlap(left: string, right: string): boolean {
-  return left === right || left.startsWith(`${right}/`) || right.startsWith(`${left}/`);
 }
 
 function claudeAccountDirectoryTaken(
@@ -2338,7 +2301,7 @@ function claudeAccountDirectoryTaken(
   hostSecureDirectory: string | undefined,
   exceptId?: ProviderInstanceId,
 ): boolean {
-  const key = claudeAccountDirectoryKey(directory);
+  const key = accountDirectoryIdentity(directory);
   return instances.some((instance) => {
     if (instance.driverKind !== "claude") return false;
     if (exceptId !== undefined && String(instance.id) === String(exceptId)) return false;
@@ -2348,7 +2311,7 @@ function claudeAccountDirectoryTaken(
       hostConfigDirectory,
       hostSecureDirectory,
       instances,
-    ).some((existing) => claudeAccountDirectoriesOverlap(claudeAccountDirectoryKey(existing), key));
+    ).some((existing) => accountDirectoryIdentity(existing) === key);
   });
 }
 

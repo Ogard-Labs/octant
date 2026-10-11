@@ -113,13 +113,9 @@ describe("Claude account isolation source", () => {
     expect(isolatedBranch).not.toContain("oauthToken");
     expect(isolatedBranch).not.toContain("CLAUDE_CODE_OAUTH_TOKEN");
 
-    expect(driver).toMatch(/connectedHelperToken/);
-    const helperGate = driver.slice(
-      driver.indexOf("const helperToken ="),
-      driver.indexOf("scope = await runSetupEffect(Scope.make(), signal);"),
-    );
-    expect(helperGate).toContain("connectedHelperToken");
-    expect(helperGate).toContain("configDirectory === undefined");
+    expect(driver).not.toMatch(/connectedHelperToken|helperSignIn|oauthToken/);
+    expect(environment).not.toMatch(/oauthToken|connectedHelperToken|helperSignIn/);
+    expect(isolation).not.toMatch(/oauthToken|connectedHelperToken|helperSignIn/);
   });
 });
 

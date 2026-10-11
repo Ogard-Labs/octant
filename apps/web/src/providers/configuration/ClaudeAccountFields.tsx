@@ -1,5 +1,10 @@
-import type { ClaudeAccountAccent } from "@octant/contracts";
-import { CLAUDE_ACCOUNT_ACCENT_VALUES, formatClaudeAuthLoginCommand } from "@octant/domain";
+import type { ClaudeAccountAccent, ProviderInstanceId } from "@octant/contracts";
+import {
+  CLAUDE_ACCOUNT_ACCENT_VALUES,
+  CLAUDE_ACCOUNT_PROFILE,
+  formatProviderAccountSignInCommand,
+  formatProviderAccountStatusCommand,
+} from "@octant/domain";
 import { OctantButton } from "../../ui/base/OctantButton";
 import { OctantInput } from "../../ui/base/OctantInput";
 import { SettingRow } from "../../settings/primitives";
@@ -31,67 +36,114 @@ export function ClaudeAccountAccentPicker(props: {
   );
 }
 
+export function displayAssignedAccountDirectory(input: {
+  readonly instanceId?: ProviderInstanceId;
+  readonly storedDirectory?: string;
+  readonly extraAccount: boolean;
+}): {
+  readonly path: string;
+  readonly kind: "assigned-default" | "assigned-extra" | "legacy-custom";
+} {
+  const stored = input.storedDirectory?.trim() ?? "";
+  if (
+    stored.length > 0 &&
+    input.instanceId !== undefined &&
+    !stored.endsWith(`/.claude-accounts/${input.instanceId}`) &&
+    !stored.endsWith("/.claude")
+  ) {
+    return { path: stored, kind: "legacy-custom" };
+  }
+  if (stored.length > 0) {
+    return {
+      path: stored,
+      kind: stored.endsWith("/.claude") ? "assigned-default" : "assigned-extra",
+    };
+  }
+  if (input.extraAccount && input.instanceId !== undefined) {
+    return {
+      path: `~/${CLAUDE_ACCOUNT_PROFILE.extraAccountsDirectoryName}/${input.instanceId}`,
+      kind: "assigned-extra",
+    };
+  }
+  return {
+    path: `~/${CLAUDE_ACCOUNT_PROFILE.defaultHostDirectoryName}`,
+    kind: "assigned-default",
+  };
+}
+
 export function ClaudeAccountSettingsFields(props: {
-  readonly instanceId?: string;
+  readonly instanceId?: ProviderInstanceId;
   readonly binaryPath: string;
-  readonly configDirectory: string;
   readonly accent: ClaudeAccountAccent | "";
   readonly onAccentChange: (accent: ClaudeAccountAccent) => void;
-  readonly onConfigDirectoryChange?: (directory: string) => void;
-  readonly includeConfigDirectoryInput?: boolean;
+  readonly storedDirectory?: string;
+  readonly extraAccount: boolean;
   readonly showSignInCommand?: boolean;
-  readonly preservedConfigDirectory?: string;
+  readonly onReassignDirectory?: () => void;
 }) {
   const settingPrefix =
     props.instanceId === undefined ? "provider-create-claude" : `provider-${props.instanceId}`;
   const binaryPath = props.binaryPath.trim();
-  const configDirectory = props.configDirectory.trim();
-  const preservedDirectory = props.preservedConfigDirectory?.trim() ?? "";
-  // A blank edit field still keeps the stored isolated directory on
-  // save. The command must advertise that same directory, not the
-  // default-account login.
-  const previewDirectory = configDirectory.length > 0 ? configDirectory : preservedDirectory;
-  // formatClaudeAuthLoginCommand rejects a non-absolute binary. A live
-  // preview must not invent `/usr/local/bin/claude` or throw while the
-  // person is still typing `claude` or `~`.
+  const displayed = displayAssignedAccountDirectory({
+    extraAccount: props.extraAccount,
+    ...(props.instanceId === undefined ? {} : { instanceId: props.instanceId }),
+    ...(props.storedDirectory === undefined ? {} : { storedDirectory: props.storedDirectory }),
+  });
+  const commandDirectory =
+    displayed.kind === "assigned-default" &&
+    (props.storedDirectory === undefined || props.storedDirectory.length === 0)
+      ? undefined
+      : displayed.path.startsWith("~")
+        ? `$HOME/${displayed.path.slice(2)}`
+        : displayed.path;
   const signInCommand =
     props.showSignInCommand !== false && binaryPath.startsWith("/")
-      ? formatClaudeAuthLoginCommand({
+      ? formatProviderAccountSignInCommand({
+          profile: CLAUDE_ACCOUNT_PROFILE,
           binaryPath,
-          ...(previewDirectory.length === 0 ? {} : { configDirectory: previewDirectory }),
+          ...(commandDirectory === undefined ? {} : { stateDirectory: commandDirectory }),
+        })
+      : undefined;
+  const statusCommand =
+    props.showSignInCommand !== false && binaryPath.startsWith("/")
+      ? formatProviderAccountStatusCommand({
+          profile: CLAUDE_ACCOUNT_PROFILE,
+          binaryPath,
+          ...(commandDirectory === undefined ? {} : { stateDirectory: commandDirectory }),
         })
       : undefined;
   return (
     <>
-      {props.includeConfigDirectoryInput === false ? null : (
-        <SettingRow
-          description={
-            props.instanceId === undefined
-              ? "Leave blank to use Claude's default directory for the first account. Additional accounts get their own directory automatically."
-              : preservedDirectory.length > 0
-                ? "Leave blank to keep this account's current directory."
-                : "Leave blank to keep Claude's default directory for this account."
-          }
-          label="Claude config directory"
-          scope="host"
-          settingId={`${settingPrefix}-config-directory`}
-        >
-          <OctantInput
-            aria-label="Claude config directory"
-            className="settings-view__text-input"
-            name="configDirectory"
-            onChange={
-              props.onConfigDirectoryChange === undefined
-                ? undefined
-                : (event) => props.onConfigDirectoryChange?.(event.currentTarget.value)
-            }
-            placeholder="/absolute/path/to/claude-account"
-            {...(props.onConfigDirectoryChange === undefined
-              ? { defaultValue: props.configDirectory }
-              : { value: props.configDirectory })}
-          />
-        </SettingRow>
-      )}
+      <SettingRow
+        description={
+          displayed.kind === "legacy-custom"
+            ? "This account still uses a directory you chose, so it keeps that login. Re-assign to Octant's directory only if you want a new login on the assigned path."
+            : displayed.kind === "assigned-default"
+              ? "Octant assigns the first subscription account Claude's default directory."
+              : "Octant assigns this account its own directory. Sign in only with the command below."
+        }
+        label="Account directory"
+        scope="host"
+        settingId={`${settingPrefix}-config-directory`}
+      >
+        <OctantInput
+          aria-label="Account directory"
+          className="settings-view__text-input"
+          name="configDirectory"
+          readOnly
+          value={displayed.path}
+        />
+        {displayed.kind === "legacy-custom" && props.onReassignDirectory !== undefined ? (
+          <OctantButton
+            onClick={props.onReassignDirectory}
+            size="sm"
+            type="button"
+            variant="outline"
+          >
+            Use Octant's assigned directory
+          </OctantButton>
+        ) : null}
+      </SettingRow>
       <SettingRow
         description="Shown as a color on this account in the model picker."
         label="Account accent"
@@ -108,16 +160,31 @@ export function ClaudeAccountSettingsFields(props: {
       </SettingRow>
       {signInCommand === undefined ? null : (
         <SettingRow
-          description="Sign in only with this unmodified Claude command in a terminal for this account. Octant never reads Claude credential files."
+          description="Sign in only with this unmodified command in a terminal for this account. Octant never reads, stores, or injects provider credentials. If you previously connected Claude for helpers, revoke that leftover token with Anthropic."
           label="Sign in"
           scope="host"
           settingId={`${settingPrefix}-auth-login`}
         >
           <OctantInput
-            aria-label="Claude sign-in command"
+            aria-label="Account sign-in command"
             className="settings-view__text-input"
             readOnly
             value={signInCommand}
+          />
+        </SettingRow>
+      )}
+      {statusCommand === undefined ? null : (
+        <SettingRow
+          description="Check this account's sign-in with the unmodified CLI."
+          label="Status"
+          scope="host"
+          settingId={`${settingPrefix}-auth-status`}
+        >
+          <OctantInput
+            aria-label="Account status command"
+            className="settings-view__text-input"
+            readOnly
+            value={statusCommand}
           />
         </SettingRow>
       )}

@@ -9,7 +9,7 @@ import {
   rmSync,
   statSync,
 } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
 import { isAbsolute, join, resolve, sep } from "node:path";
 
 import type {
@@ -24,6 +24,7 @@ import { prepareConfinedVersionProbe } from "../process/confinedVersionProbe";
 import {
   makeSeatbeltConfinementLive,
   SeatbeltConfinementError,
+  seatbeltExecRule,
   type SeatbeltConfinementPort,
 } from "../process/seatbeltProfile";
 import {
@@ -427,113 +428,20 @@ function planStateDirectories(
       return resolve(path);
     }
   });
-  const home = canonicalClaudeHomeDirectory();
   for (const path of canonicalDirectories) {
-    // A write grant that is the checkout, sits inside it, or contains it
-    // reopens Plan's bound root. Home, its ancestors, `/`, arbitrary home
-    // subtrees (Documents, .ssh), the shared `~/.claude-accounts` parent,
-    // and shared host roots such as `/tmp`, `/Users/Shared`, or `/Volumes/<name>`
-    // are the same class of grant:
-    // only one dedicated Claude state directory may be writable.
+    // 0145: the checkout must not be the leaf, sit inside it, or be an ancestor.
     if (
-      claudePlanStateDirectoryReopensHome(path, home) ||
-      claudePlanStateDirectoryIsSharedRoot(path) ||
-      !claudePlanStateDirectoryIsDedicatedLeaf(path, home) ||
       path === boundRoot ||
       path.startsWith(`${boundRoot}${sep}`) ||
       boundRoot.startsWith(`${path}${sep}`)
     ) {
       throw new SeatbeltConfinementError(
         "invalid-configuration",
-        "Claude Plan confinement cannot grant a runtime state directory that overlaps the checkout, the user's home, or a shared host directory.",
+        "Claude Plan confinement cannot grant a runtime state directory that overlaps the checkout.",
       );
     }
   }
   return canonicalDirectories;
-}
-
-/** Plan compares account state to the real home, not a symlink spelling. */
-export function canonicalClaudeHomeDirectory(home = homedir()): string {
-  try {
-    return realpathSync(home);
-  } catch {
-    return home;
-  }
-}
-
-/** Plan may write ~/.claude or a .claude-accounts account leaf, not /opt/homebrew. */
-export function claudePlanStateDirectoryIsDedicatedLeaf(path: string, home: string): boolean {
-  if (path === `${canonicalClaudeHomeDirectory(home)}${sep}.claude`) return true;
-  const marker = `${sep}.claude-accounts${sep}`;
-  const index = path.indexOf(marker);
-  if (index === -1) return false;
-  return path.slice(index + marker.length).length > 0;
-}
-
-/** Plan may write one dedicated Claude state dir, not the rest of home. */
-export function claudePlanStateDirectoryReopensHome(path: string, home: string): boolean {
-  if (path === "/" || path === home || home.startsWith(`${path}${sep}`)) return true;
-  if (!path.startsWith(`${home}${sep}`)) return false;
-  if (path === `${home}${sep}.claude`) return false;
-  // The shared parent would let one Plan turn write every sibling account.
-  return !path.startsWith(`${home}${sep}.claude-accounts${sep}`);
-}
-
-const SHARED_PLAN_STATE_ROOTS = [
-  "/tmp",
-  "/var/tmp",
-  "/private/tmp",
-  "/private/var/tmp",
-  "/dev/shm",
-  "/Users/Shared",
-  "/Volumes",
-];
-
-/** Plan must not grant a world-shared temp, IPC, or multi-user root as account state. */
-export function claudePlanStateDirectoryIsSharedRoot(path: string): boolean {
-  if (claudePlanStateDirectoryMatchesSharedRoot(path)) return true;
-  try {
-    return claudePlanStateDirectoryMatchesSharedRoot(realpathSync(path));
-  } catch {
-    return false;
-  }
-}
-
-function claudePlanStateDirectoryMatchesSharedRoot(path: string): boolean {
-  if (SHARED_PLAN_STATE_ROOTS.includes(path) || claudePlanStateDirectoryIsVolumeMount(path)) {
-    return true;
-  }
-  if (path !== "/" && claudePlanStateDirectoryContainsSharedRoot(path)) return true;
-  for (const root of SHARED_PLAN_STATE_ROOTS) {
-    try {
-      if (realpathSync(root) === path) return true;
-    } catch {
-      // This host does not have that directory.
-    }
-  }
-  return false;
-}
-
-/** `/private` contains `/private/tmp`; granting the ancestor reopens the shared root. */
-function claudePlanStateDirectoryContainsSharedRoot(path: string): boolean {
-  const prefix = `${path}/`;
-  for (const root of SHARED_PLAN_STATE_ROOTS) {
-    if (root.startsWith(prefix)) return true;
-    try {
-      if (realpathSync(root).startsWith(prefix)) return true;
-    } catch {
-      // This host does not have that directory.
-    }
-  }
-  return false;
-}
-
-/** `/Volumes/<name>` is the root of a mounted disk, not a dedicated account leaf. */
-function claudePlanStateDirectoryIsVolumeMount(path: string): boolean {
-  const prefix = "/Volumes/";
-  if (!path.startsWith(prefix)) return false;
-  const rest = path.slice(prefix.length);
-  return rest.length > 0 && !rest.includes("/");
 }
 
 function claudeRuntimeStateDirectories(environment: SpawnOptions["env"]): ReadonlyArray<string> {
@@ -641,16 +549,19 @@ function confineClaudeLaunch(
       allowProcessExec: false,
       allowProcessFork: false,
       allowFileReadStar: true,
-      // The store's files stay denied either way; only the lookup opens (0145),
-      // and the lookup alone does not sign the runtime in, because it reads its
-      // sign-in by running `/usr/bin/security`, which this profile never runs.
-      // A launch that carries its credential, an API key or the connected
-      // helper token, resolves nothing from the store, and the same binary may
-      // be trusted for a stored subscription item it has no use for, so the
-      // lookup stays closed there.
-      allowProviderCredentialLookup:
-        spawnOptions.env.ANTHROPIC_API_KEY === undefined &&
-        spawnOptions.env.CLAUDE_CODE_OAUTH_TOKEN === undefined,
+      // Confined Claude signs in with the unmodified binary. That needs exec of
+      // `/usr/bin/security` and the security-server lookup. Keychain files and
+      // every other exec stay denied. Linux confinement cannot take Seatbelt
+      // extra rules, so this carve-out is macOS-only.
+      ...(process.platform === "darwin"
+        ? {
+            extraRules: [
+              seatbeltExecRule("/usr/bin/security"),
+              '(allow mach-lookup (global-name "com.apple.SecurityServer"))',
+              '(allow mach-lookup (global-name "com.apple.securityd.xpc"))',
+            ],
+          }
+        : {}),
     });
     return {
       spawnOptions: {

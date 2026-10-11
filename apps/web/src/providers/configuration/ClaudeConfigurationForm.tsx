@@ -14,17 +14,16 @@ import {
   type CredentialStatusController,
 } from "../ProviderSettingsCredentials";
 import type { ProviderSettingsViewProps } from "../ProviderSettingsView";
-import { ClaudeHelperSignIn, type RunClaudeHelperCommand } from "../ClaudeHelperSignIn";
 import { ClaudeAccountSettingsFields } from "./ClaudeAccountFields";
 import { claudeConfigurationFromFields } from "./claudeAccountValues";
 
 interface ClaudeConfigurationFormProps {
   readonly instance: Extract<ProviderInstance, { driverKind: "claude" }>;
+  readonly extraAccount: boolean;
   readonly disabled: boolean;
   readonly credentialManagementAvailable: boolean;
   readonly credential: CredentialStatusController;
   readonly onChange: ProviderSettingsViewProps["onChangeClaudeConfiguration"];
-  readonly onClaudeHelpers?: RunClaudeHelperCommand;
 }
 
 export function ClaudeConfigurationForm(props: ClaudeConfigurationFormProps) {
@@ -36,9 +35,6 @@ export function ClaudeConfigurationForm(props: ClaudeConfigurationFormProps) {
     props.instance.configuration.accent ?? "",
   );
   const [binaryPath, setBinaryPath] = useState(props.instance.configuration.binaryPath);
-  const [configDirectory, setConfigDirectory] = useState(
-    props.instance.configuration.configDirectory ?? "",
-  );
   return (
     <form
       className="provider-card__edit provider-card__edit--claude"
@@ -46,14 +42,9 @@ export function ClaudeConfigurationForm(props: ClaudeConfigurationFormProps) {
       onSubmit={(event) => {
         event.preventDefault();
         const data = new FormData(event.currentTarget);
-        const enteredDirectory = String(data.get("configDirectory") ?? "").trim();
         const configuration = claudeConfigurationFromFields({
           binaryPath: String(data.get("binaryPath") ?? ""),
           authentication,
-          configDirectory:
-            enteredDirectory.length > 0
-              ? enteredDirectory
-              : (props.instance.configuration.configDirectory ?? ""),
           accent: String(data.get("accent") ?? ""),
         });
         const enteredCredential = transientCredential(credentialInput.current);
@@ -94,7 +85,7 @@ export function ClaudeConfigurationForm(props: ClaudeConfigurationFormProps) {
       <SettingRow
         description={
           authentication === "subscription"
-            ? "Sign in with the official Claude Code CLI using the unmodified claude auth login command in a terminal for this account, then check the connection."
+            ? "Sign in with the official Claude Code CLI using the unmodified command shown below, then check the connection."
             : undefined
         }
         label="Authentication"
@@ -122,14 +113,24 @@ export function ClaudeConfigurationForm(props: ClaudeConfigurationFormProps) {
       <ClaudeAccountSettingsFields
         accent={accent}
         binaryPath={binaryPath}
-        configDirectory={configDirectory}
+        extraAccount={props.extraAccount}
         instanceId={props.instance.id}
         onAccentChange={setAccent}
-        onConfigDirectoryChange={setConfigDirectory}
+        onReassignDirectory={() => {
+          const configuration = claudeConfigurationFromFields({
+            binaryPath,
+            authentication,
+            accent,
+            reassignDirectory: true,
+          });
+          void props.onChange(props.instance.id, configuration, emptyTransientCredential(), {
+            reassignAccountDirectory: true,
+          });
+        }}
         showSignInCommand={authentication === "subscription"}
         {...(props.instance.configuration.configDirectory === undefined
           ? {}
-          : { preservedConfigDirectory: props.instance.configuration.configDirectory })}
+          : { storedDirectory: props.instance.configuration.configDirectory })}
       />
       {authentication === "api-key" ? (
         <SettingRow
@@ -148,17 +149,6 @@ export function ClaudeConfigurationForm(props: ClaudeConfigurationFormProps) {
             type="password"
           />
         </SettingRow>
-      ) : null}
-      {props.onClaudeHelpers !== undefined &&
-      authentication === "subscription" &&
-      props.instance.configuration.authentication === "subscription" &&
-      props.instance.configuration.configDirectory === undefined ? (
-        <ClaudeHelperSignIn
-          disabled={props.disabled}
-          displayName={props.instance.displayName}
-          instanceId={props.instance.id}
-          run={props.onClaudeHelpers}
-        />
       ) : null}
       <div className="provider-card__edit-actions">
         <OctantButton

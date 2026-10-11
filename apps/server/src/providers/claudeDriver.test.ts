@@ -8,10 +8,8 @@ import {
   type ProviderRuntimeEvent,
 } from "@octant/contracts";
 import { Effect, Exit, Fiber, PubSub, Scope, Stream } from "effect";
-import { existsSync, readdirSync, rmSync } from "node:fs";
-import { mkdtemp } from "node:fs/promises";
-import { homedir, tmpdir } from "node:os";
-import { basename, dirname, isAbsolute, join, resolve } from "node:path";
+import { existsSync, readdirSync } from "node:fs";
+import { basename, isAbsolute, resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
 import type { ProviderCredentialResolver } from "./credentialBrokerClient";
@@ -25,17 +23,9 @@ import type {
 import { claudeExecutionOptions, makeClaudeDriver } from "./claudeDriver";
 import type { ClaudeResumeIdentity, ClaudeResumeIdentityPort } from "./claudeDriver";
 import {
-  makeClaudeEnvironmentScope,
   type ClaudeEnvironmentScope,
   type ClaudeEnvironmentScopeOptions,
 } from "./claudeEnvironment";
-import {
-  CLAUDE_HELPER_EXPIRED_MESSAGE,
-  CLAUDE_HELPER_NOT_CONNECTED_MESSAGE,
-  CLAUDE_ISOLATED_PLAN_UNAVAILABLE_MESSAGE,
-  encodeClaudeHelperSignIn,
-  type ClaudeHelperSignInPort,
-} from "./claudeHelperSignIn";
 import type { ClaudeProcessPort } from "./claudeProcess";
 import { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
 
@@ -45,7 +35,6 @@ const sessionId = decodeProviderSessionId("80000000-0000-4000-8000-000000000703"
 const otherSessionId = decodeProviderSessionId("80000000-0000-4000-8000-000000000704");
 const modelId = "claude-sonnet" as ProviderModelId;
 const projectRoot = "/tmp/octant-claude-project";
-const HELPER_TOKEN = "helper-token-sentinel-0123456789";
 const observedAt = "2026-07-16T12:00:00.000Z";
 const readyCapabilities = {
   streaming: "supported",
@@ -241,21 +230,11 @@ function harness(
     has: vi.fn(async () => true),
     resolve: vi.fn(async () => "api-key-secret-sentinel"),
   };
-  // Confined subscription launches sign in with the connected helper token;
-  // most cases here are about something else, so it starts connected.
-  const helperSignIn = {
-    read: vi.fn<ClaudeHelperSignInPort["read"]>(async () => ({
-      kind: "connected",
-      token: HELPER_TOKEN,
-    })),
-    markExpired: vi.fn<ClaudeHelperSignInPort["markExpired"]>(async () => undefined),
-  };
   const releasedEnvironments: NodeJS.ProcessEnv[] = [];
   const makeEnvironmentScope = (
     mode: ClaudeAuthentication,
     options?: {
       readonly apiKey?: string;
-      readonly oauthToken?: string;
       readonly configDirectory?: string;
     },
   ): Effect.Effect<ClaudeEnvironmentScope, ProviderFailure, Scope.Scope> =>
@@ -270,18 +249,12 @@ function harness(
                 ...(mode === "api-key" && options.apiKey !== undefined
                   ? { ANTHROPIC_API_KEY: options.apiKey }
                   : {}),
-                ...(mode === "subscription" && options.oauthToken !== undefined
-                  ? { CLAUDE_CODE_OAUTH_TOKEN: options.oauthToken }
-                  : {}),
               }
             : mode === "api-key"
               ? { PATH: "/usr/bin", ANTHROPIC_API_KEY: options?.apiKey }
               : {
                   PATH: "/usr/bin",
                   CLAUDE_CONFIG_DIR: "/provider-native",
-                  ...(options?.oauthToken === undefined
-                    ? {}
-                    : { CLAUDE_CODE_OAUTH_TOKEN: options.oauthToken }),
                 },
       })),
       ({ environment }) =>
@@ -339,7 +312,6 @@ function harness(
       process,
       sdk,
       credentialResolver,
-      helperSignIn,
       runtimeRegistry,
       resumeIdentityPort,
       permissionPersistence: () => permissionPersistence,
@@ -356,7 +328,6 @@ function harness(
   const driver = makeDriver();
   return {
     credentialResolver,
-    helperSignIn,
     driver,
     makeEnvironmentScope,
     makeDriver,
@@ -2661,26 +2632,6 @@ function collectTerminal(
 }
 
 describe("Claude driver probe", () => {
-  it("refuses a probe whose account directory is not a dedicated Claude leaf before creating it", async () => {
-    const parent = await mkdtemp(join(tmpdir(), "octant-claude-probe-state-"));
-    const accountDirectory = join(parent, "octant-state");
-    try {
-      const f = harness("subscription", "current-session", {
-        configDirectory: accountDirectory,
-        makeEnvironmentScope: makeClaudeEnvironmentScope,
-      });
-      const exit = await Effect.runPromise(
-        Effect.scoped(Effect.exit(f.driver.probe({ instanceId }))),
-      );
-      expect(String(exit)).toContain("dedicated Claude account directory");
-      expect(existsSync(accountDirectory)).toBe(false);
-      expect(f.process.probeSubscription).not.toHaveBeenCalled();
-      expect(f.opens).toHaveLength(0);
-    } finally {
-      rmSync(parent, { recursive: true, force: true });
-    }
-  });
-
   it("rejects the wrong instance without probing any authentication source", async () => {
     const f = harness();
     const exit = await Effect.runPromise(
@@ -4242,11 +4193,11 @@ describe("Claude exact resume", () => {
   });
 });
 
-describe("Claude for helpers", () => {
-  it("never hands a stored helper token to an API-key launch as its key", async () => {
+describe("Claude account sign-in", () => {
+  it("never hands a leftover helper envelope to an API-key launch as its key", async () => {
     const f = harness("api-key");
     vi.mocked(f.credentialResolver.resolve).mockResolvedValue(
-      encodeClaudeHelperSignIn({ state: "connected", token: HELPER_TOKEN }),
+      JSON.stringify({ kind: "claude-helper-sign-in" }),
     );
     const acquired = await acquire(f.driver);
     try {
@@ -4260,32 +4211,22 @@ describe("Claude for helpers", () => {
     expect(f.opens).toHaveLength(0);
   });
 
-  it("signs a confined subscription launch in with the connected helper token and nothing else", async () => {
+  it("never sets CLAUDE_CODE_OAUTH_TOKEN on a default subscription confined Plan launch", async () => {
     const f = harness("subscription");
     const acquired = await acquire(f.driver, "chat");
     try {
       await Effect.runPromise(
         acquired.connection.start({ sessionId, modelId, executionPolicy: "plan" }),
       );
-      await Effect.runPromise(
-        acquired.connection.start({
-          sessionId: otherSessionId,
-          modelId,
-          executionPolicy: "approval-gated",
-        }),
-      );
     } finally {
       await acquired.close();
     }
 
-    expect(f.opens[0]?.authEnvironment.CLAUDE_CODE_OAUTH_TOKEN).toBe(HELPER_TOKEN);
-    // An unconfined launch keeps the runtime's own sign-in.
-    expect(f.opens[1]?.authEnvironment.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
-    // The connected token stands in for the keychain probe it could not pass.
-    expect(f.process.probeSubscription).toHaveBeenCalledOnce();
+    expect(f.opens[0]?.authEnvironment.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
+    expect(JSON.stringify(f.opens[0]?.authEnvironment)).not.toContain("CLAUDE_CODE_OAUTH_TOKEN");
   });
 
-  it("never sets a helper token on an isolated Claude account launch", async () => {
+  it("never sets CLAUDE_CODE_OAUTH_TOKEN on an isolated account launch", async () => {
     const accountDirectory = "/Users/example/.claude-accounts/work";
     const f = harness("subscription", "current-session", { configDirectory: accountDirectory });
     const acquired = await acquire(f.driver, "chat");
@@ -4297,7 +4238,6 @@ describe("Claude for helpers", () => {
       await acquired.close();
     }
 
-    expect(f.helperSignIn.read).not.toHaveBeenCalled();
     expect(f.opens[0]?.authEnvironment.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
     expect(f.opens[0]?.authEnvironment.CLAUDE_CONFIG_DIR).toBe(accountDirectory);
   });
@@ -4311,11 +4251,10 @@ describe("Claude for helpers", () => {
       const exit = await Effect.runPromiseExit(
         acquired.connection.start({ sessionId, modelId, executionPolicy: "plan" }),
       );
-      expect(String(exit)).toContain(CLAUDE_ISOLATED_PLAN_UNAVAILABLE_MESSAGE);
+      expect(String(exit)).toContain("Claude authentication is required.");
     } finally {
       await acquired.close();
     }
-    expect(f.helperSignIn.read).not.toHaveBeenCalled();
     expect(f.opens).toHaveLength(0);
   });
 
@@ -4365,106 +4304,6 @@ describe("Claude for helpers", () => {
     expect(f.opens).toHaveLength(0);
   });
 
-  it("refuses a Plan turn whose isolated account directory is the shared accounts parent", async () => {
-    const f = harness("subscription", "current-session", {
-      configDirectory: join(homedir(), ".claude-accounts"),
-    });
-    const acquired = await acquire(f.driver, "chat");
-    try {
-      const exit = await Effect.runPromiseExit(
-        acquired.connection.start({ sessionId, modelId, executionPolicy: "plan" }),
-      );
-      expect(String(exit)).toContain("overlaps the checkout");
-    } finally {
-      await acquired.close();
-    }
-    expect(f.opens).toHaveLength(0);
-  });
-
-  it("refuses a Plan turn whose isolated account directory is a sensitive home subtree", async () => {
-    const f = harness("subscription", "current-session", {
-      configDirectory: join(homedir(), ".ssh"),
-    });
-    const acquired = await acquire(f.driver, "chat");
-    try {
-      const exit = await Effect.runPromiseExit(
-        acquired.connection.start({ sessionId, modelId, executionPolicy: "plan" }),
-      );
-      expect(String(exit)).toContain("overlaps the checkout");
-    } finally {
-      await acquired.close();
-    }
-    expect(f.opens).toHaveLength(0);
-  });
-
-  it("refuses a Plan turn whose isolated account directory is an ancestor of the user's home", async () => {
-    const ancestor = dirname(homedir());
-    if (ancestor === "/") throw new Error("Expected a home directory with a parent besides /.");
-    const f = harness("subscription", "current-session", { configDirectory: ancestor });
-    const acquired = await acquire(f.driver, "chat");
-    try {
-      const exit = await Effect.runPromiseExit(
-        acquired.connection.start({ sessionId, modelId, executionPolicy: "plan" }),
-      );
-      expect(String(exit)).toContain("overlaps the checkout");
-    } finally {
-      await acquired.close();
-    }
-    expect(f.opens).toHaveLength(0);
-  });
-
-  it("refuses a Plan turn whose isolated account directory is a shared temporary root", async () => {
-    const f = harness("subscription", "current-session", { configDirectory: "/Users/Shared" });
-    const acquired = await acquire(f.driver, "chat");
-    try {
-      const exit = await Effect.runPromiseExit(
-        acquired.connection.start({ sessionId, modelId, executionPolicy: "plan" }),
-      );
-      expect(String(exit)).toContain("shared host directory");
-    } finally {
-      await acquired.close();
-    }
-    expect(f.opens).toHaveLength(0);
-  });
-
-  it("refuses a Plan turn whose isolated account directory is the user's home", async () => {
-    const f = harness("subscription", "current-session", { configDirectory: homedir() });
-    const acquired = await acquire(f.driver, "chat");
-    try {
-      const exit = await Effect.runPromiseExit(
-        acquired.connection.start({ sessionId, modelId, executionPolicy: "plan" }),
-      );
-      expect(String(exit)).toContain("overlaps the checkout");
-    } finally {
-      await acquired.close();
-    }
-    expect(f.opens).toHaveLength(0);
-  });
-
-  it("refuses a Plan turn whose account directory is not a dedicated Claude leaf before creating it", async () => {
-    const parent = await mkdtemp(join(tmpdir(), "octant-claude-state-"));
-    const accountDirectory = join(parent, "octant-state");
-    try {
-      const f = harness("subscription", "current-session", {
-        configDirectory: accountDirectory,
-        makeEnvironmentScope: makeClaudeEnvironmentScope,
-      });
-      const acquired = await acquire(f.driver, "chat");
-      try {
-        const exit = await Effect.runPromiseExit(
-          acquired.connection.start({ sessionId, modelId, executionPolicy: "plan" }),
-        );
-        expect(String(exit)).toContain("dedicated Claude account directory");
-      } finally {
-        await acquired.close();
-      }
-      expect(existsSync(accountDirectory)).toBe(false);
-      expect(f.opens).toHaveLength(0);
-    } finally {
-      rmSync(parent, { recursive: true, force: true });
-    }
-  });
-
   it("resumes an isolated Claude account from that account's directory", async () => {
     const accountDirectory = "/Users/example/.claude-accounts/work";
     const f = harness("subscription", "current-session", { configDirectory: accountDirectory });
@@ -4488,56 +4327,5 @@ describe("Claude for helpers", () => {
       configDirectory: accountDirectory,
     });
     await recreated.close();
-  });
-
-  it("refuses a confined launch with the step that connects Claude for helpers", async () => {
-    for (const [state, message] of [
-      [{ kind: "not-connected" }, CLAUDE_HELPER_NOT_CONNECTED_MESSAGE],
-      [{ kind: "expired" }, CLAUDE_HELPER_EXPIRED_MESSAGE],
-    ] as const) {
-      const f = harness("subscription");
-      f.helperSignIn.read.mockResolvedValue(state);
-      const acquired = await acquire(f.driver, "chat");
-      try {
-        const exit = await Effect.runPromiseExit(
-          acquired.connection.start({ sessionId, modelId, executionPolicy: "plan" }),
-        );
-        expect(String(exit)).toContain(message);
-      } finally {
-        await acquired.close();
-      }
-      expect(f.opens).toHaveLength(0);
-    }
-  });
-
-  it("retires a helper token the runtime refuses and says to reconnect", async () => {
-    const f = harness("subscription");
-    const acquired = await acquire(f.driver, "chat");
-    try {
-      await Effect.runPromise(
-        acquired.connection.start({ sessionId, modelId, executionPolicy: "plan" }),
-      );
-      const terminalEvent = Effect.runPromise(
-        collectTerminal(Stream.unwrapScoped(acquired.connection.subscribe)),
-      );
-      await Effect.runPromise(
-        acquired.connection.send({ sessionId, prompt: "hello", attachments: [], tools: [] }),
-      );
-      await f.queries[0]!.emit({
-        kind: "authentication",
-        sessionId: "sdk-session-1",
-        authenticating: false,
-        failed: true,
-      } as ClaudeDecodedMessage);
-      await expect(terminalEvent).resolves.toMatchObject({
-        value: {
-          kind: "failed",
-          failure: { category: "unauthenticated", message: CLAUDE_HELPER_EXPIRED_MESSAGE },
-        },
-      });
-    } finally {
-      await acquired.close();
-    }
-    expect(f.helperSignIn.markExpired).toHaveBeenCalledWith(String(instanceId), HELPER_TOKEN);
   });
 });

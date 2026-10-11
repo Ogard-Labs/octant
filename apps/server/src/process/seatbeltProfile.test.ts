@@ -270,35 +270,32 @@ describe("shared Seatbelt profile builder", () => {
     );
   });
 
-  it("opens a provider's credential lookup without opening the keychain files", () => {
+  it("lets extraRules exec /usr/bin/security without opening the keychain files", () => {
     const root = temporaryRoot();
-    const input = {
+    const profile = buildDenyDefaultSeatbeltProfile({
       boundRoot: root,
       temporaryDirectory: root,
       networkEgress: "allow",
       allowFileReadStar: true,
+      allowProcessExec: false,
       privateHomeAllowPaths: [],
-    } as const;
-
-    const withLookup = buildDenyDefaultSeatbeltProfile({
-      ...input,
-      allowProviderCredentialLookup: true,
+      extraRules: [
+        seatbeltExecRule("/usr/bin/security"),
+        '(allow mach-lookup (global-name "com.apple.SecurityServer"))',
+        '(allow mach-lookup (global-name "com.apple.securityd.xpc"))',
+      ],
     });
 
-    expect(withLookup).toContain('(allow mach-lookup (global-name "com.apple.SecurityServer"))');
-    // The daemon opens the store; this process may never read it off disk.
-    expect(withLookup).toContain(seatbeltDenyRule("file-read*", "/Library/Keychains"));
-    expect(withLookup).not.toContain(seatbeltAllowRule("file-read*", "/Library/Keychains"));
-    expect(buildDenyDefaultSeatbeltProfile(input)).not.toContain("com.apple.SecurityServer");
+    expect(profile).toContain(seatbeltExecRule("/usr/bin/security"));
+    expect(profile).toContain('(allow mach-lookup (global-name "com.apple.SecurityServer"))');
+    expect(profile).toContain(seatbeltDenyRule("file-read*", "/Library/Keychains"));
+    expect(profile).not.toContain(seatbeltAllowRule("file-read*", "/Library/Keychains"));
+    expect(profile).not.toContain(seatbeltExecRule("/bin/sh"));
   });
 
   it.skipIf(process.platform !== "darwin" || !existsSync("/usr/bin/security"))(
-    "keeps a credential-lookup launch away from the login keychain and the security tool",
+    "allows /usr/bin/security while still denying the login keychain and /bin/sh",
     () => {
-      // The Claude runtime reads its sign-in by running `/usr/bin/security`,
-      // which would hand back any item that trusts the tool, including other
-      // command-line programs' tokens. A confined launch may run neither the
-      // tool nor read the keychain file, even with the lookup open.
       const root = temporaryRoot();
       const home = join(root, "home");
       const keychains = join(home, "Library", "Keychains");
@@ -316,6 +313,7 @@ describe("shared Seatbelt profile builder", () => {
           `IFS= read -r login < '${join(keychains, "login.keychain-db")}' && echo login=read`,
           "echo reached-security-step",
           "/usr/bin/security help >/dev/null 2>&1 && echo security=ran",
+          "/bin/sh -c 'echo shell=ran' >/dev/null 2>&1 && echo shell=ran",
           "",
         ].join("\n"),
         { mode: 0o700 },
@@ -329,12 +327,17 @@ describe("shared Seatbelt profile builder", () => {
         allowProcessExec: false,
         allowProcessFork: false,
         execAllowPaths: ["/bin/bash", script],
-        allowProviderCredentialLookup: true,
+        extraRules: [
+          seatbeltExecRule("/usr/bin/security"),
+          '(allow mach-lookup (global-name "com.apple.SecurityServer"))',
+          '(allow mach-lookup (global-name "com.apple.securityd.xpc"))',
+        ],
         homeDirectory: home,
         usersDirectory: root,
       });
 
-      expect(profile).not.toContain("/usr/bin/security");
+      expect(profile).toContain(seatbeltExecRule("/usr/bin/security"));
+      expect(profile).not.toContain(seatbeltExecRule("/bin/sh"));
       expect(profile).not.toContain("(allow process-fork)");
       expect(profile).not.toContain("login.keychain-db");
       const output = spawnSync("/usr/bin/sandbox-exec", ["-p", profile, script], {
@@ -342,8 +345,9 @@ describe("shared Seatbelt profile builder", () => {
         encoding: "utf8",
       }).stdout;
       expect(output).toContain("reached-security-step");
+      expect(output).toContain("security=ran");
       expect(output).not.toContain("login=read");
-      expect(output).not.toContain("security=ran");
+      expect(output).not.toContain("shell=ran");
     },
   );
 

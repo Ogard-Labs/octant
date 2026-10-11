@@ -1,14 +1,16 @@
-import { existsSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readdirSync, rmSync, statSync } from "node:fs";
 import { mkdtemp } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
-import { basename, join } from "node:path";
+import { join } from "node:path";
 
-import type { ProviderFailure } from "@octant/contracts";
+import { decodeProviderInstanceId, type ProviderFailure } from "@octant/contracts";
+import { assignedClaudeAccountConfigDirectory } from "@octant/domain";
 import { Effect, Either, Exit, Scope } from "effect";
 import { describe, expect, it } from "vitest";
 
 import { makeClaudeEnvironmentScope, sanitizeClaudeEnvironment } from "./claudeEnvironment";
-import { claudePlanStateDirectoryIsDedicatedLeaf } from "./claudeProcess";
+
+const instanceId = decodeProviderInstanceId("80000000-0000-4000-8000-000000000801");
 
 const requiredGuards = {
   CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
@@ -150,79 +152,66 @@ describe("makeClaudeEnvironmentScope", () => {
     expect(environment.ANTHROPIC_API_KEY).toBeUndefined();
   });
 
-  it("owns an empty mode-0700 API config directory and deletes it on release", async () => {
-    const parent = join(homedir(), ".claude-accounts");
-    const createdParent = !existsSync(parent);
+  it("assigns an API-key launch ~/.claude-accounts/<instanceId> when no directory is stored", async () => {
+    const configDirectory = assignedClaudeAccountConfigDirectory(homedir(), instanceId);
+    const createdParent = !existsSync(join(homedir(), ".claude-accounts"));
     const scope = await Effect.runPromise(Scope.make());
-    const acquired = await Effect.runPromise(
-      makeClaudeEnvironmentScope("api-key", {
-        hostEnvironment: hostileHostEnvironment,
-        apiKey: "broker-resolved-api-key-sentinel",
-      }).pipe(Effect.provideService(Scope.Scope, scope)),
-    );
-    const configDirectory = acquired.configDirectory;
+    try {
+      const acquired = await Effect.runPromise(
+        makeClaudeEnvironmentScope("api-key", {
+          hostEnvironment: hostileHostEnvironment,
+          apiKey: "broker-resolved-api-key-sentinel",
+          instanceId,
+        }).pipe(Effect.provideService(Scope.Scope, scope)),
+      );
 
-    expect(configDirectory).toBeDefined();
-    if (configDirectory === undefined) throw new Error("Expected an isolated config directory.");
-    expect(basename(configDirectory)).toMatch(/^octant-claude-config-/);
-    expect(configDirectory.includes("/.claude-accounts/")).toBe(true);
-    expect(claudePlanStateDirectoryIsDedicatedLeaf(configDirectory, homedir())).toBe(true);
-    expect(configDirectory.startsWith(tmpdir())).toBe(false);
-    expect(statSync(configDirectory).mode & 0o777).toBe(0o700);
-    expect(readdirSync(configDirectory)).toEqual([]);
-    expect(acquired.environment).toEqual({
-      PATH: "/usr/bin:/bin",
-      HOME: "/Users/provider-user",
-      LANG: "en_US.UTF-8",
-      CLAUDE_CONFIG_DIR: configDirectory,
-      CLAUDE_SECURESTORAGE_CONFIG_DIR: configDirectory,
-      ANTHROPIC_API_KEY: "broker-resolved-api-key-sentinel",
-      ...requiredGuards,
-    });
-    expect(JSON.stringify(acquired.environment)).not.toMatch(
-      /ambient-|broker-token|desktop-token|smoke-|otel-sentinel|unrelated-secret|private\/injector/,
-    );
+      expect(acquired.configDirectory).toBe(configDirectory);
+      expect(statSync(configDirectory).mode & 0o777).toBe(0o700);
+      expect(readdirSync(configDirectory)).toEqual([]);
+      expect(acquired.environment).toEqual({
+        PATH: "/usr/bin:/bin",
+        HOME: "/Users/provider-user",
+        LANG: "en_US.UTF-8",
+        CLAUDE_CONFIG_DIR: configDirectory,
+        CLAUDE_SECURESTORAGE_CONFIG_DIR: configDirectory,
+        ANTHROPIC_API_KEY: "broker-resolved-api-key-sentinel",
+        ...requiredGuards,
+      });
+      expect(JSON.stringify(acquired.environment)).not.toMatch(
+        /ambient-|broker-token|desktop-token|smoke-|otel-sentinel|unrelated-secret|private\/injector/,
+      );
 
-    await Effect.runPromise(Scope.close(scope, Exit.void));
-    expect(existsSync(configDirectory)).toBe(false);
-    if (createdParent) expect(existsSync(parent)).toBe(false);
+      await Effect.runPromise(Scope.close(scope, Exit.void));
+      expect(acquired.environment.ANTHROPIC_API_KEY).toBeUndefined();
+      expect(existsSync(configDirectory)).toBe(true);
+    } finally {
+      rmSync(configDirectory, { recursive: true, force: true });
+      if (createdParent) rmSync(join(homedir(), ".claude-accounts"), { recursive: true, force: true });
+    }
   });
 
   it("redacts a held API environment object when its scope is released", async () => {
+    const configDirectory = assignedClaudeAccountConfigDirectory(homedir(), instanceId);
+    const createdParent = !existsSync(join(homedir(), ".claude-accounts"));
     const scope = await Effect.runPromise(Scope.make());
-    const acquired = await Effect.runPromise(
-      makeClaudeEnvironmentScope("api-key", {
-        hostEnvironment: { PATH: "/usr/bin", HOME: "/Users/provider-user" },
-        apiKey: "held-api-key-sentinel",
-      }).pipe(Effect.provideService(Scope.Scope, scope)),
-    );
-    const heldEnvironment = acquired.environment;
+    try {
+      const acquired = await Effect.runPromise(
+        makeClaudeEnvironmentScope("api-key", {
+          hostEnvironment: { PATH: "/usr/bin", HOME: "/Users/provider-user" },
+          apiKey: "held-api-key-sentinel",
+          instanceId,
+        }).pipe(Effect.provideService(Scope.Scope, scope)),
+      );
+      const heldEnvironment = acquired.environment;
 
-    expect(heldEnvironment.ANTHROPIC_API_KEY).toBe("held-api-key-sentinel");
-    await Effect.runPromise(Scope.close(scope, Exit.void));
+      expect(heldEnvironment.ANTHROPIC_API_KEY).toBe("held-api-key-sentinel");
+      await Effect.runPromise(Scope.close(scope, Exit.void));
 
-    expect(heldEnvironment.ANTHROPIC_API_KEY).toBeUndefined();
-  });
-
-  it("hands a subscription launch the helper token only, and takes it back on release", async () => {
-    const scope = await Effect.runPromise(Scope.make());
-    const acquired = await Effect.runPromise(
-      makeClaudeEnvironmentScope("subscription", {
-        hostEnvironment: {
-          PATH: "/usr/bin",
-          HOME: "/Users/provider-user",
-          CLAUDE_CODE_OAUTH_TOKEN: "ambient-token-must-not-pass",
-        },
-        oauthToken: "helper-token-sentinel-0123456789",
-      }).pipe(Effect.provideService(Scope.Scope, scope)),
-    );
-    const heldEnvironment = acquired.environment;
-
-    expect(heldEnvironment.CLAUDE_CODE_OAUTH_TOKEN).toBe("helper-token-sentinel-0123456789");
-    expect(heldEnvironment.ANTHROPIC_API_KEY).toBeUndefined();
-    await Effect.runPromise(Scope.close(scope, Exit.void));
-
-    expect(heldEnvironment.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
+      expect(heldEnvironment.ANTHROPIC_API_KEY).toBeUndefined();
+    } finally {
+      rmSync(configDirectory, { recursive: true, force: true });
+      if (createdParent) rmSync(join(homedir(), ".claude-accounts"), { recursive: true, force: true });
+    }
   });
 
   it("keeps an isolated Claude account on its directory and never sets a helper token", async () => {
@@ -242,20 +231,6 @@ describe("makeClaudeEnvironmentScope", () => {
     expect(existsSync(accountDirectory)).toBe(true);
     await Effect.runPromise(Scope.close(scope, Exit.void));
     expect(acquired.environment.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
-  });
-
-  it("refuses a helper token on an isolated Claude account", async () => {
-    const accountDirectory = join(await mkdtemp(join(tmpdir(), "octant-claude-account-")), "work");
-    const exit = await Effect.runPromiseExit(
-      Effect.scoped(
-        makeClaudeEnvironmentScope("subscription", {
-          hostEnvironment: hostileHostEnvironment,
-          configDirectory: accountDirectory,
-          oauthToken: "helper-token-sentinel-0123456789",
-        }),
-      ),
-    );
-    expect(String(exit)).toContain("do not use a helper token");
   });
 
   it("keeps an API-key account on its stable directory instead of deleting it", async () => {

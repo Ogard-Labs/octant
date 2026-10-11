@@ -10,7 +10,6 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
-  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -23,13 +22,12 @@ import { Effect, Either, Fiber } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { createFakeSandboxConfinement } from "../process/fakeSandboxConfinement";
-import type {
-  SeatbeltConfinementPort,
-  SeatbeltConfinementPrepareInput,
+import {
+  seatbeltExecRule,
+  type SeatbeltConfinementPort,
+  type SeatbeltConfinementPrepareInput,
 } from "../process/seatbeltProfile";
 import {
-  claudePlanStateDirectoryIsDedicatedLeaf,
-  claudePlanStateDirectoryIsSharedRoot,
   makeClaudeProcessLive,
   type ClaudeProcessOptions,
   type ClaudeRuntimeConfinement,
@@ -569,9 +567,14 @@ describe("Claude runtime confinement", () => {
     expect(readdirSync(ambient)).toEqual([]);
   });
 
-  it("opens the credential-store lookup only for a launch that carries no credential of its own", () => {
+  it("includes Darwin security extraRules for confined Plan launches and never sets allowProviderCredentialLookup", () => {
     const target = fixture();
     const confinement = recordingConfinement();
+    const expectedExtraRules = [
+      seatbeltExecRule("/usr/bin/security"),
+      '(allow mach-lookup (global-name "com.apple.SecurityServer"))',
+      '(allow mach-lookup (global-name "com.apple.securityd.xpc"))',
+    ];
 
     for (const environment of [
       target.environment,
@@ -591,13 +594,46 @@ describe("Claude runtime confinement", () => {
       child.kill("SIGTERM");
     }
 
-    expect(confinement.prepared.map((launch) => launch.allowProviderCredentialLookup)).toEqual([
-      true,
-      false,
-      false,
-    ]);
-    // The helper token reaches the runtime through its environment, never its arguments.
+    expect(confinement.prepared).toHaveLength(3);
+    for (const launch of confinement.prepared) {
+      expect(launch.allowProviderCredentialLookup).toBeUndefined();
+      if (process.platform === "darwin") {
+        expect(launch.extraRules).toEqual(expectedExtraRules);
+      } else {
+        expect(launch.extraRules).toBeUndefined();
+      }
+    }
+    expect(confinement.prepared[0]?.extraRules).toEqual(confinement.prepared[1]?.extraRules);
     expect(JSON.stringify(confinement.prepared)).not.toContain("helper-token-sentinel");
+  });
+
+  it("confined Plan prepare input includes security extraRules on Darwin and omits allowProviderCredentialLookup", () => {
+    const target = fixture();
+    const confinement = recordingConfinement();
+    const child = makePort(target, { confinement: confinement.port }).spawn({
+      projectRoot: target.root,
+      executionPolicy: "plan",
+    })({
+      command: target.binaryPath,
+      args: ["sdk-test"],
+      cwd: target.root,
+      env: target.environment,
+      signal: new AbortController().signal,
+    });
+    child.kill("SIGTERM");
+
+    const launch = confinement.prepared[0];
+    if (launch === undefined) throw new Error("Expected the Plan launch to be confined.");
+    expect(launch.allowProviderCredentialLookup).toBeUndefined();
+    if (process.platform === "darwin") {
+      expect(launch.extraRules).toContain(seatbeltExecRule("/usr/bin/security"));
+      expect(launch.extraRules).toContain(
+        '(allow mach-lookup (global-name "com.apple.SecurityServer"))',
+      );
+      expect(launch.extraRules).toContain(
+        '(allow mach-lookup (global-name "com.apple.securityd.xpc"))',
+      );
+    }
   });
 
   it("refuses a launch whose arguments carry the helper token", () => {
@@ -680,193 +716,6 @@ describe("Claude runtime confinement", () => {
     expect(pids(target.root)).toEqual([]);
   });
 
-  it("refuses a Plan turn whose account directory is the shared accounts parent", () => {
-    const target = fixture();
-    const home = process.env.HOME;
-    if (home === undefined) throw new Error("Expected HOME for the shared-parent refusal.");
-    const confinement = recordingConfinement();
-
-    expect(() =>
-      makePort(target, { confinement: confinement.port }).spawn({
-        projectRoot: target.root,
-        executionPolicy: "plan",
-      })({
-        command: target.binaryPath,
-        args: ["sdk-test"],
-        cwd: target.root,
-        env: { ...target.environment, CLAUDE_CONFIG_DIR: join(home, ".claude-accounts") },
-        signal: new AbortController().signal,
-      }),
-    ).toThrow("overlaps the checkout");
-    expect(confinement.prepared).toEqual([]);
-    expect(pids(target.root)).toEqual([]);
-  });
-
-  it("refuses a Plan turn whose account directory is a sensitive home subtree", () => {
-    const target = fixture();
-    const home = process.env.HOME;
-    if (home === undefined) throw new Error("Expected HOME for the home-subtree refusal.");
-    const confinement = recordingConfinement();
-
-    expect(() =>
-      makePort(target, { confinement: confinement.port }).spawn({
-        projectRoot: target.root,
-        executionPolicy: "plan",
-      })({
-        command: target.binaryPath,
-        args: ["sdk-test"],
-        cwd: target.root,
-        env: { ...target.environment, CLAUDE_CONFIG_DIR: join(home, ".ssh") },
-        signal: new AbortController().signal,
-      }),
-    ).toThrow("overlaps the checkout");
-    expect(confinement.prepared).toEqual([]);
-    expect(pids(target.root)).toEqual([]);
-  });
-
-  it("refuses a Plan turn whose account directory is an ancestor of the user's home", () => {
-    const target = fixture();
-    const home = process.env.HOME;
-    if (home === undefined) throw new Error("Expected HOME for the home-ancestor refusal.");
-    const ancestor = dirname(home);
-    if (ancestor === "/") throw new Error("Expected a home directory with a parent besides /.");
-    const confinement = recordingConfinement();
-
-    expect(() =>
-      makePort(target, { confinement: confinement.port }).spawn({
-        projectRoot: target.root,
-        executionPolicy: "plan",
-      })({
-        command: target.binaryPath,
-        args: ["sdk-test"],
-        cwd: target.root,
-        env: { ...target.environment, CLAUDE_CONFIG_DIR: ancestor },
-        signal: new AbortController().signal,
-      }),
-    ).toThrow("overlaps the checkout");
-    expect(confinement.prepared).toEqual([]);
-    expect(pids(target.root)).toEqual([]);
-  });
-
-  it("treats shared temporary roots as Plan-forbidden account directories", () => {
-    expect(claudePlanStateDirectoryIsSharedRoot("/tmp")).toBe(true);
-    expect(claudePlanStateDirectoryIsSharedRoot("/var/tmp")).toBe(true);
-    expect(claudePlanStateDirectoryIsSharedRoot("/Users/Shared")).toBe(true);
-    expect(claudePlanStateDirectoryIsSharedRoot("/Volumes")).toBe(true);
-    expect(claudePlanStateDirectoryIsSharedRoot("/Volumes/WorkDrive")).toBe(true);
-    expect(claudePlanStateDirectoryIsSharedRoot("/private")).toBe(true);
-    expect(claudePlanStateDirectoryIsSharedRoot("/var")).toBe(true);
-    expect(claudePlanStateDirectoryIsSharedRoot("/Users")).toBe(true);
-    expect(claudePlanStateDirectoryIsSharedRoot("/tmp/claude-accounts/work")).toBe(false);
-    expect(claudePlanStateDirectoryIsSharedRoot("/Volumes/WorkDrive/.claude-accounts/work")).toBe(
-      false,
-    );
-    expect(claudePlanStateDirectoryIsDedicatedLeaf("/opt/homebrew", "/Users/example")).toBe(false);
-    expect(
-      claudePlanStateDirectoryIsDedicatedLeaf(
-        "/opt/homebrew/.claude-accounts/work",
-        "/Users/example",
-      ),
-    ).toBe(true);
-    expect(
-      claudePlanStateDirectoryIsDedicatedLeaf("/Users/example/.claude", "/Users/example"),
-    ).toBe(true);
-  });
-
-  it("treats a symlink home's default Claude directory as a dedicated leaf", () => {
-    const parent = mkdtempSync(join(tmpdir(), "octant-claude-home-"));
-    directories.push(parent);
-    const realHome = join(parent, "real");
-    const aliasHome = join(parent, "alias");
-    mkdirSync(realHome);
-    symlinkSync(realHome, aliasHome);
-    expect(
-      claudePlanStateDirectoryIsDedicatedLeaf(join(realpathSync(aliasHome), ".claude"), aliasHome),
-    ).toBe(true);
-  });
-
-  it("refuses a Plan turn whose account directory is a package-manager prefix", () => {
-    const target = fixture();
-    const confinement = recordingConfinement();
-
-    expect(() =>
-      makePort(target, { confinement: confinement.port }).spawn({
-        projectRoot: target.root,
-        executionPolicy: "plan",
-      })({
-        command: target.binaryPath,
-        args: ["sdk-test"],
-        cwd: target.root,
-        env: { ...target.environment, CLAUDE_CONFIG_DIR: "/opt/homebrew" },
-        signal: new AbortController().signal,
-      }),
-    ).toThrow("shared host directory");
-    expect(confinement.prepared).toEqual([]);
-    expect(pids(target.root)).toEqual([]);
-  });
-
-  it("refuses a Plan turn whose account directory is an ancestor of a shared root", () => {
-    const target = fixture();
-    const confinement = recordingConfinement();
-
-    expect(() =>
-      makePort(target, { confinement: confinement.port }).spawn({
-        projectRoot: target.root,
-        executionPolicy: "plan",
-      })({
-        command: target.binaryPath,
-        args: ["sdk-test"],
-        cwd: target.root,
-        env: { ...target.environment, CLAUDE_CONFIG_DIR: "/private" },
-        signal: new AbortController().signal,
-      }),
-    ).toThrow("shared host directory");
-    expect(confinement.prepared).toEqual([]);
-    expect(pids(target.root)).toEqual([]);
-  });
-
-  it("refuses a Plan turn whose account directory is a mounted volume root", () => {
-    const target = fixture();
-    const confinement = recordingConfinement();
-
-    expect(() =>
-      makePort(target, { confinement: confinement.port }).spawn({
-        projectRoot: target.root,
-        executionPolicy: "plan",
-      })({
-        command: target.binaryPath,
-        args: ["sdk-test"],
-        cwd: target.root,
-        env: { ...target.environment, CLAUDE_CONFIG_DIR: "/Volumes/WorkDrive" },
-        signal: new AbortController().signal,
-      }),
-    ).toThrow("shared host directory");
-    expect(confinement.prepared).toEqual([]);
-    expect(pids(target.root)).toEqual([]);
-  });
-
-  it("refuses a Plan turn whose account directory is a temporary /tmp API-key config leaf", () => {
-    const target = fixture();
-    const configDirectory = mkdtempSync(join(tmpdir(), "octant-claude-config-"));
-    directories.push(configDirectory);
-    const confinement = recordingConfinement();
-
-    expect(() =>
-      makePort(target, { confinement: confinement.port }).spawn({
-        projectRoot: target.root,
-        executionPolicy: "plan",
-      })({
-        command: target.binaryPath,
-        args: ["sdk-test"],
-        cwd: target.root,
-        env: { ...target.environment, CLAUDE_CONFIG_DIR: configDirectory },
-        signal: new AbortController().signal,
-      }),
-    ).toThrow("shared host directory");
-    expect(confinement.prepared).toEqual([]);
-    expect(pids(target.root)).toEqual([]);
-  });
-
   it("grants a Plan turn a dedicated temporary API-key account leaf", () => {
     const target = fixture();
     const home = process.env.HOME;
@@ -892,70 +741,6 @@ describe("Claude runtime confinement", () => {
     const launch = confinement.prepared[0];
     if (launch === undefined) throw new Error("Expected the Plan launch to be confined.");
     expect(launch.additionalWriteRoots).toContain(realpathSync(configDirectory));
-  });
-
-  it("refuses a Plan turn whose account directory is a shared temporary root", () => {
-    const target = fixture();
-    const confinement = recordingConfinement();
-
-    expect(() =>
-      makePort(target, { confinement: confinement.port }).spawn({
-        projectRoot: target.root,
-        executionPolicy: "plan",
-      })({
-        command: target.binaryPath,
-        args: ["sdk-test"],
-        cwd: target.root,
-        env: { ...target.environment, CLAUDE_CONFIG_DIR: "/var/tmp" },
-        signal: new AbortController().signal,
-      }),
-    ).toThrow("shared host directory");
-    expect(confinement.prepared).toEqual([]);
-    expect(pids(target.root)).toEqual([]);
-  });
-
-  it("removes the Plan temporary directory when the account directory is refused", () => {
-    const target = fixture();
-    const scratch = mkdtempSync(join(tmpdir(), "octant-claude-plan-scratch-"));
-    directories.push(scratch);
-    const confinement = recordingConfinement();
-
-    expect(() =>
-      makePort(target, { confinement: confinement.port }).spawn({
-        projectRoot: target.root,
-        executionPolicy: "plan",
-      })({
-        command: target.binaryPath,
-        args: ["sdk-test"],
-        cwd: target.root,
-        env: { ...target.environment, TMPDIR: scratch, CLAUDE_CONFIG_DIR: "/var/tmp" },
-        signal: new AbortController().signal,
-      }),
-    ).toThrow("shared host directory");
-    expect(readdirSync(scratch)).toEqual([]);
-    expect(confinement.prepared).toEqual([]);
-  });
-
-  it("refuses a Plan turn whose account directory is the user's home", () => {
-    const target = fixture();
-    const home = process.env.HOME;
-    if (home === undefined) throw new Error("Expected HOME for the home-directory refusal.");
-    const confinement = recordingConfinement();
-
-    expect(() =>
-      makePort(target, { confinement: confinement.port }).spawn({
-        projectRoot: target.root,
-        executionPolicy: "plan",
-      })({
-        command: target.binaryPath,
-        args: ["sdk-test"],
-        cwd: target.root,
-        env: { ...target.environment, CLAUDE_CONFIG_DIR: home },
-        signal: new AbortController().signal,
-      }),
-    ).toThrow("overlaps the checkout");
-    expect(confinement.prepared).toEqual([]);
-    expect(pids(target.root)).toEqual([]);
   });
 
   it("refuses a Plan turn whose temporary directory is inside the checkout", () => {

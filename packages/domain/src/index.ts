@@ -97,6 +97,7 @@ export * from "./providerCapacityPolicy";
 export * from "./modelCatalogPolicy";
 export * from "./modelPickerPolicy";
 export * from "./navigatorAssistantPolicy";
+export * from "./providerAccountProfile";
 export * from "./providerPolicy";
 export * from "./researchPolicy";
 export * from "./shellPolicy";

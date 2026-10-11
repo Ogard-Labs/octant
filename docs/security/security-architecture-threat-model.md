@@ -51,10 +51,9 @@ implementation backlog this design gates; nothing here weakens an existing contr
 - The bound Work project root and Code repository root (filesystem contents and integrity).
 - Provider credentials and OAuth sessions (Keychain / secret-store material as
   opaque broker refs; never journaled, never rendered). Delegated provider-runtime
-  OAuth stays out of Octant storage (0005), except the opt-in Claude for helpers
-  token held as a broker ref for the default Claude account only (see the
-  confined-runtime notes below). Isolated Claude accounts never receive that
-  token. Host-driven `subscription-oauth`
+  OAuth stays out of Octant storage (0005). Octant never reads, stores, or
+  injects a provider CLI's credentials, including Claude OAuth tokens.
+  Host-driven `subscription-oauth`
   refresh and access live only as 0054 broker refs (0111).
 - Host identity keys, remote device credentials, and pairing secrets.
 - The append-only event journal: integrity of recorded tool calls, approvals, and authority
@@ -351,42 +350,14 @@ window, or approves an action class the host policy reserves for the local user.
   - _Consequence._ A model-generated shell command inside either runtime reads that environment
     and those files with no Octant-owned OS boundary in the way, and a write the runtime's own sandbox permits
     without announcing is not one Octant's approvals can prompt for.
-- **A confined runtime may look up its own subscription credential.** The Claude runtime keeps
-  that credential in the macOS Keychain rather than in its provider home, so the confined Plan
-  launch opens a mach-lookup to the security server (0145). The keychain files stay denied, so the
-  process cannot read the store off disk and the daemon returns only what that binary is already
-  trusted for. This is the one launch flag that reaches private credential material; no tool
-  launch sets it, and the severity table's "reading Keychain material" still describes reading the
-  store rather than this lookup. Which service name a given runtime takes was not measured on the
-  authoring host, so both the modern and legacy entry points are opened.
-- **The keychain stays closed to a confined runtime.** Measured on macOS 27, the Claude runtime
-  reads its subscription sign-in by running `/usr/bin/security`, which opens the login keychain
-  file itself, so the lookup above does not sign a confined launch in: without Claude for helpers
-  (below), a Claude Plan launch on subscription sign-in, Chat children included, reports itself
-  signed out. Opening the tool and
-  the keychain file was rejected, because the tool returns any item whose access list trusts it,
-  such as tokens other command-line programs store through it. A confined launch may run neither.
-- **Claude for helpers is a host-held, inference-only token for the default account.** A confined launch of the default (directory-less) Claude account on
-  subscription sign-in signs in with a long-lived token minted by the runtime's own
-  `claude setup-token` after one browser approval the person gives. The host runs that command
-  on a host-owned pseudo-terminal outside any sandbox, holds its output in memory only, never logs
-  it or writes it to the journal, and stores the token in the credential broker under that Claude
-  Code instance, in an envelope that never reads as the instance's API key. The token reaches a
-  confined launch only as `CLAUDE_CODE_OAUTH_TOKEN` in that launch's environment, removed when the
-  launch scope closes; argv carrying it is refused, and such a launch opens no keychain lookup at
-  all. Unconfined launches never receive it. The settings route returns state only, never the
-  token, and refuses a remote device for connect and disconnect. A model-generated command inside
-  the confined launch can read the token from the runtime's environment, which is the same reach
-  an API-key launch already gives its key; the token is scoped to inference, and a refused token
-  is marked expired rather than retried. Disconnect deletes it from the broker and reports a broker
-  it cannot reach; removing that Claude Code provider clears it best-effort, so an unreachable
-  broker leaves it behind while the removal completes. Octant has no call that revokes it with
-  Anthropic, so a copy taken from a launch's environment stays valid there until it expires or is
-  revoked outside Octant. An API-key launch never reads the envelope as its key.
-  Isolated Claude accounts never receive this token: Octant does not mint,
-  store, or inject `CLAUDE_CODE_OAUTH_TOKEN` for them. A confined isolated
-  launch signs in from that account's Claude-owned directory, or refuses and
-  tells the person to use the default account or an API-key account for Plan.
+- **A confined Claude launch may exec only `/usr/bin/security` and look up the security server.** The Claude runtime keeps
+  its subscription credential in the macOS Keychain rather than in its provider home, so a confined Plan
+  launch adds Seatbelt `extraRules` for `(allow process-exec (literal "/usr/bin/security"))` and
+  the security-server mach-lookup. Keychain files stay denied, as does every other exec including
+  `/bin/sh`. Residual risk: `/usr/bin/security` can return any item whose access list trusts that
+  tool. Linux confinement cannot take Seatbelt extra rules, so this carve-out is macOS-only.
+  Octant never reads, stores, or injects `CLAUDE_CODE_OAUTH_TOKEN`. A leftover helper-token
+  envelope is deleted on upgrade.
 - Vibe disables its keyring lookup in the confined launch and receives its Mistral API key through
   Octant's `api-key` authentication instead.
 - **Version reads are confined; three readiness probes are not.** Every `--version` read prepares

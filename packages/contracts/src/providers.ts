@@ -1539,6 +1539,8 @@ export const ProviderRegistryCommand = Schema.Union(
     kind: Schema.Literal("change-claude-configuration"),
     ...ProviderInstanceCommandFields,
     configuration: ClaudeProviderConfiguration,
+    /** Replaces a legacy custom directory with Octant's assigned leaf. */
+    reassignAccountDirectory: Schema.optional(Schema.Boolean),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("change-mistral-vibe-configuration"),

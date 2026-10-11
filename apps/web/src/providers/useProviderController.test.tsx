@@ -1654,6 +1654,44 @@ describe("useProviderController", () => {
     expect(calls).toEqual(["provider.update", "credential.clear", "field.clear"]);
   });
 
+  it("sends reassignAccountDirectory when changing a leftover custom Claude directory", async () => {
+    const leftover = claudeProvider({
+      configuration: {
+        kind: "claude-agent-sdk",
+        binaryPath: "/opt/homebrew/bin/claude",
+        authentication: "subscription",
+        configDirectory: "/Users/example/.claude-accounts/work",
+        accent: "teal",
+      },
+    });
+    const api = client(snapshot([leftover]));
+    vi.mocked(api.execute).mockResolvedValue({
+      kind: "provider-updated",
+      instance: leftover,
+    });
+    const { result } = renderHook(() => useProviderController({ client: api }));
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    await act(async () => {
+      await expect(
+        result.current.changeClaudeConfiguration(
+          id,
+          leftover.configuration,
+          transientCredential(""),
+          { reassignAccountDirectory: true },
+        ),
+      ).resolves.toBe(true);
+    });
+
+    expect(api.execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "change-claude-configuration",
+        instanceId: id,
+        reassignAccountDirectory: true,
+      }),
+    );
+  });
+
   // A clear that fails once the instance has stopped using the key leaves a
   // secret behind rather than an unusable provider, so the change stands and
   // cleanup is retried later.

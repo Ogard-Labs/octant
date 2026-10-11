@@ -40,14 +40,12 @@ A child that fails, is interrupted, or is cancelled tells its parent why, for
 example that its provider is signed out. The reason is short, and Octant
 removes private paths and secrets from it before the parent's agent sees it.
 
-A Chat subagent runs read-only, and a read-only Claude Code run cannot reach
-your keychain, where your Claude subscription sign-in is kept. Before Claude
-Code subagents can sign in, choose **Connect Claude for helpers** under
-**Settings → Providers → Claude Code** and approve once in the browser. Until
-you do, a Claude Code subagent stops and its parent is told to "Connect Claude
-for helpers in Settings › Claude Code." See [Providers](/advanced/providers).
-Claude Code with an Anthropic API key, and the other providers, need no extra
-step.
+A Chat subagent runs read-only. Claude Code subscription accounts sign in
+with the unmodified `claude auth login` command for that account. Sign in
+from **Settings → Providers** before a confined Plan or Chat-child turn;
+until you do, the child stops and its parent is told to sign in. See
+[Providers](/advanced/providers). Claude Code with an Anthropic API key, and
+the other providers, need no extra step.
 
 For writable Code children, **Review changes** opens the host's saved comparison
 for that generation in **Review**. It includes committed changes and non-ignored

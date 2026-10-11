@@ -14,7 +14,6 @@ import {
 } from "./providerService";
 import type { ClaudeAgentSdkPort } from "./claudeAgentSdkPort";
 import { makeClaudeDriver, type ClaudeResumeIdentityPort } from "./claudeDriver";
-import type { ClaudeHelperSignInPort } from "./claudeHelperSignIn";
 import type { ClaudeProcessPort } from "./claudeProcess";
 import { makeCodexDriver } from "./codexDriver";
 import type { CodexProcessPort } from "./codexProcess";
@@ -49,7 +48,6 @@ export interface ProviderDriverFactoryOptions {
   readonly claudeSdk?: ClaudeAgentSdkPort;
   readonly credentialResolver?: ProviderCredentialResolver;
   readonly claudeResumeIdentityPort?: ClaudeResumeIdentityPort;
-  readonly claudeHelperSignIn?: ClaudeHelperSignInPort;
   readonly isProjectConfinedPath?: (projectRoot: string, absolutePath: string) => boolean;
   readonly permissionPersistence: () => PermissionPersistence;
   readonly claudeInstances?: ReadonlyArray<ProviderInstance>;
@@ -156,9 +154,6 @@ export function makeProviderDriver(
         ...(options.credentialResolver === undefined
           ? {}
           : { credentialResolver: options.credentialResolver }),
-        ...(options.claudeHelperSignIn === undefined
-          ? {}
-          : { helperSignIn: options.claudeHelperSignIn }),
       });
     case "pi":
       if (options.piProcess === undefined || options.piHome === undefined) {

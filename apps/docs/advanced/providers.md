@@ -165,38 +165,22 @@ does not read the macOS Keychain.
 
 You can add more than one Claude account. Each account is its own provider
 in **Settings → Providers**: give it a name and an accent color so the model
-picker can tell them apart. The first account uses Claude's default directory
-(`~/.claude`, or `CLAUDE_CONFIG_DIR` if that is already set on the host).
-Each additional account gets its own Claude-owned directory under
-`~/.claude-accounts/`, unless you point it at an existing Claude directory.
-Sign in only with the unmodified `claude auth login` command in a terminal
-for that account — the provider card shows the exact command, including the
-directory variables Claude expects. Octant never reads, copies, or stores
-Claude credentials or tokens. Connection check uses what the Claude CLI or
-SDK reports, not files in that directory. A thread stays on the account it
-started with. Octant does not fail over, rotate, or load-balance between
-Claude accounts. An Anthropic API-key account still uses the key you store
-in Octant for that provider, on its own directory when one is set.
+picker can tell them apart. Octant assigns the first subscription account
+Claude's default directory (`~/.claude`). Each additional account, and every
+API-key account, gets its own directory under `~/.claude-accounts/`. A
+directory you chose earlier keeps working until you re-assign it. Sign in
+only with the unmodified `claude auth login` command in a terminal for that
+account — the provider card shows the exact command, including the
+directory variables Claude expects. Check status with `claude auth status`.
+Octant never reads, copies, stores, or injects Claude credentials or tokens.
+Connection check uses what the Claude CLI or SDK reports, not files in that
+directory. A thread stays on the account it started with. Octant does not
+fail over, rotate, or load-balance between accounts. An Anthropic API-key
+account still uses the key you store in Octant for that provider, on its
+assigned directory.
 
-Claude Code on the default Claude subscription has one extra step for
-subagents and Plan turns. Those runs are read-only and cannot reach the
-keychain where your Claude sign-in lives, so **Settings → Providers → Claude
-Code** offers **Connect Claude for helpers** on that default account only.
-Octant runs Claude's own `claude setup-token` on this Mac, you
-approve once in the browser window it opens, and Octant keeps the long-lived
-token it prints in its own credential store for that default Claude Code
-provider. You never copy the token. Ordinary Claude turns keep using your
-normal sign-in. Additional Claude accounts never use that helper token. They
-sign in from their own Claude-owned directory. If a Plan or subagent turn
-on one of those accounts cannot sign in that way, Octant refuses and asks
-you to use the default account or an API-key account for Plan.
-**Disconnect** removes the token from Octant, and removing the provider tries
-to; disconnect first, because removal completes even if the credential store
-cannot be reached. Neither revokes it with Anthropic. If Claude later refuses it, Settings shows it as
-expired and asks you to connect again. Connect only from the Mac that runs
-Octant, because the approval opens a browser there. The
-[privacy notice](/advanced/privacy-notice#claude-for-helpers-only-if-you-connect-it)
-states what is stored and who receives it.
+If you previously connected Claude for helpers, Octant no longer stores that
+token. Revoke the leftover token with Anthropic.
 
 The **Update CLI** action is shown only for providers with a verified native
 update command. It runs that command against the same configured executable,

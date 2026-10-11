@@ -1357,9 +1357,6 @@ function providerSettingsViewProps(
     ...(controller.providerOAuth === undefined
       ? {}
       : { onProviderOAuth: controller.providerOAuth }),
-    ...(controller.claudeHelpers === undefined
-      ? {}
-      : { onClaudeHelpers: controller.claudeHelpers }),
     onBeginProviderAuthentication: controller.beginProviderAuthentication,
     onCompleteProviderAuthentication: controller.completeProviderAuthentication,
     onUpdateProviderCli: controller.updateProviderCli,

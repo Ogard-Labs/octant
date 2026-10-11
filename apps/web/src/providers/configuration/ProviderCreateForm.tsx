@@ -141,7 +141,6 @@ export function ProviderCreateForm(
     useState<ClaudeAuthentication>("subscription");
   const [claudeAccent, setClaudeAccent] = useState<ClaudeAccountAccent | "">("");
   const [claudeBinaryPath, setClaudeBinaryPath] = useState("");
-  const [claudeConfigDirectory, setClaudeConfigDirectory] = useState("");
   const vibeAuthentication: MistralVibeAuthentication = "api-key";
   const [grokAuthentication, setGrokAuthentication] = useState<GrokAuthentication>("subscription");
   const [glmAuthentication, setGlmAuthentication] = useState<GlmAuthentication>("provider-owned");
@@ -300,7 +299,6 @@ export function ProviderCreateForm(
                 const configuration = claudeConfigurationFromFields({
                   binaryPath: String(data.get("binaryPath") ?? ""),
                   authentication: claudeAuthentication,
-                  configDirectory: String(data.get("configDirectory") ?? ""),
                   accent: String(data.get("accent") ?? ""),
                 });
                 const enteredCredential = transientCredential(credentialInput.current);
@@ -475,7 +473,6 @@ export function ProviderCreateForm(
                     setClaudeAuthentication("subscription");
                     setClaudeAccent("");
                     setClaudeBinaryPath("");
-                    setClaudeConfigDirectory("");
                   }
                 })
                 .finally(() => setCreating(false));
@@ -839,14 +836,9 @@ export function ProviderCreateForm(
                 <ClaudeAccountSettingsFields
                   accent={claudeAccent}
                   binaryPath={claudeBinaryPath}
-                  configDirectory={claudeConfigDirectory}
+                  extraAccount={(props.existingClaudeAccountCount ?? 0) > 0}
                   onAccentChange={setClaudeAccent}
-                  onConfigDirectoryChange={setClaudeConfigDirectory}
-                  showSignInCommand={
-                    claudeAuthentication === "subscription" &&
-                    (claudeConfigDirectory.trim().length > 0 ||
-                      (props.existingClaudeAccountCount ?? 0) === 0)
-                  }
+                  showSignInCommand={claudeAuthentication === "subscription"}
                 />
               </>
             ) : null}

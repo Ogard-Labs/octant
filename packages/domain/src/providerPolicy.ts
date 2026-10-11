@@ -1,5 +1,10 @@
 import type { AggregateVersion, UtcTimestamp } from "@octant/contracts/events";
 import { CLAUDE_ACCOUNT_ACCENTS } from "@octant/contracts/providers";
+import {
+  assignedProviderAccountDirectory,
+  CLAUDE_ACCOUNT_PROFILE,
+  formatProviderAccountSignInCommand,
+} from "./providerAccountProfile";
 import type {
   AnthropicCompatibleProviderConfiguration,
   AnthropicCompatibleProviderInstance,
@@ -439,27 +444,23 @@ export function assignedClaudeAccountConfigDirectory(
   if (!isPosixAbsolutePath(home)) {
     reject("invalid-config-directory", "Claude account home must be an absolute directory.");
   }
-  return `${home}/.claude-accounts/${instanceId}`;
+  return assignedProviderAccountDirectory(CLAUDE_ACCOUNT_PROFILE, home, instanceId);
 }
 
 /** Unmodified Claude CLI sign-in. Octant never wraps or replaces this flow. */
 export function claudeAuthLoginArgv(binaryPath: string): ReadonlyArray<string> {
-  return [normalizeBinaryPath(binaryPath), "auth", "login"];
+  return [normalizeBinaryPath(binaryPath), ...CLAUDE_ACCOUNT_PROFILE.signInArgv];
 }
 
 export function formatClaudeAuthLoginCommand(input: {
   readonly binaryPath: string;
   readonly configDirectory?: string;
 }): string {
-  const argv = claudeAuthLoginArgv(input.binaryPath);
-  const [binary, ...rest] = argv;
-  const command = `${shellSingleQuote(binary ?? "")} ${rest.join(" ")}`;
-  if (input.configDirectory === undefined) return command;
-  return `CLAUDE_CONFIG_DIR=${shellSingleQuote(input.configDirectory)} CLAUDE_SECURESTORAGE_CONFIG_DIR=${shellSingleQuote(input.configDirectory)} ${command}`;
-}
-
-function shellSingleQuote(value: string): string {
-  return `'${value.replaceAll("'", `'\\''`)}'`;
+  return formatProviderAccountSignInCommand({
+    profile: CLAUDE_ACCOUNT_PROFILE,
+    binaryPath: normalizeBinaryPath(input.binaryPath),
+    ...(input.configDirectory === undefined ? {} : { stateDirectory: input.configDirectory }),
+  });
 }
 
 /** Linear scan. A `/+$` replace is polynomial in the trailing slashes. */

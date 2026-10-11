@@ -547,7 +547,7 @@ export function agentRunStopReason(run: AgentRun): string | undefined {
   if (run.recoveryReason === undefined) return undefined;
   // Orchestration journals a provider failure as `category: message`. The
   // category is for the host; the parent's agent relays the message, which
-  // already says what to do, such as connecting Claude for helpers.
+  // already says what to do, such as signing in from the account directory.
   const separator = run.recoveryReason.indexOf(": ");
   const spoken =
     separator > 0 &&
