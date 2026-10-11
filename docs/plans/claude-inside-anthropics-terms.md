@@ -63,16 +63,19 @@ Measure:
 **Pass.** The unmodified binary signs in on a confined Plan launch from
 Claude-owned storage, and Octant never reads or sets a token.
 
-**Version.** Record the exact Claude Code version that passed. The
-secure-storage variable is undocumented and build-specific, and the
-driver records `probeVersion` without a floor today. A pass on one
-current build therefore does not cover every installed binary. The
-implementation must keep that version as the confined-login floor:
-probe each configured `claude` executable and refuse confined
-subscription (or take the instance-wide API-key fallback) when the
-binary is older or fails the same capability check. Ordinary
-unconfined turns on an older binary may still run; confined login
-after helper-token removal must not assume they work.
+**Version.** Record the exact Claude Code version, or an attested
+inclusive range, that passed the full storage-isolation measurement.
+The secure-storage variable is undocumented and build-specific, and
+the driver records `probeVersion` without a floor today. A pass on
+one current build therefore does not cover every installed binary,
+including a newer build the person installed later. Probe each
+configured `claude` executable. Refuse confined subscription (or take
+the instance-wide API-key fallback) when the binary is outside that
+attested range or fails the same capability check. Do not treat a
+newer unattested version as compatible only because it is above a
+floor; rerun this Step 0 measurement first. Ordinary unconfined turns
+on an unattested binary may still run; confined login after
+helper-token removal must not assume they work.
 
 **Fail.** Confined subscription launches cannot sign in that way. The
 fallback is to switch that instance to Anthropic API-key authentication
@@ -165,7 +168,11 @@ thread, confined or not. A later Plan or ordinary turn has to find
 the same session files; mixing the per-thread root with the account
 root makes the saved cursor `stale-resume`. Do not use a throwaway
 per-launch config directory: resume has to find the same session
-files after a restart. Resume lookup must use that same per-thread
+files after a restart. That session directory is thread-owned. Confirmed
+purge must delete it with the thread: add a host data-map location,
+include it in the purge sweep, report deletion or failure, and cover
+it with a purge test. Leaving the transcript on disk after a
+successful purge is a privacy defect. Resume lookup must use that same per-thread
 root. `findSession` today calls `listSessions` against the project
 directory and the server's default Claude store unless it receives
 the launch session root. Pass that root into the lookup without
@@ -210,6 +217,7 @@ not reintroduce a setup token.
   (`claudeRuntimeStateDirectories`, `allowProviderCredentialLookup`)
 - `apps/server/src/providers/claudeDriver.ts`
 - `apps/server/src/providers/claudeAgentSdkPort.ts` (`findSession`)
+- `apps/server/src/hostDataMap.ts` (thread-owned Claude session root)
 - `apps/server/src/process/seatbeltProfile.ts` and the Linux builder
 - Settings copy that today asks the person to Connect Claude for helpers
 - `docs/architecture.md` (0145 / confined Claude launch)
@@ -236,6 +244,9 @@ not reintroduce a setup token.
 - Resume after restart looks up that per-thread session root for
   subscription and API-key threads. The lookup receives the root
   without mutating process-global Claude directory variables.
+- Confirmed thread purge deletes that session directory, lists it on
+  the host data map, and has a purge test. A successful purge does
+  not leave the Claude transcript on disk.
 
 ## Step 3 — Telemetry on subscription launches
 
