@@ -6,6 +6,7 @@ import {
 } from "@octant/contracts";
 import { isImageProfileDriverKind } from "@octant/domain";
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
+import { lastClaudeHostEnvironmentSnapshot } from "./claudeAccountDirectory";
 import {
   claudeAccountNeedsOwnConfigDirectory,
   claudeAccountOverlapsPeerLaunchDirectory,
@@ -51,6 +52,8 @@ export interface ProviderDriverFactoryOptions {
   readonly isProjectConfinedPath?: (projectRoot: string, absolutePath: string) => boolean;
   readonly permissionPersistence: () => PermissionPersistence;
   readonly claudeInstances?: ReadonlyArray<ProviderInstance>;
+  /** Host Claude env from the snapshot gate. Omit to use the last gated copy. */
+  readonly claudeHostEnvironment?: NodeJS.ProcessEnv;
 }
 
 export class ProviderDriverConfigurationError extends Error {
@@ -117,7 +120,7 @@ export function makeProviderDriver(
           options.claudeInstances,
           instance,
           homedir(),
-          process.env,
+          options.claudeHostEnvironment ?? lastClaudeHostEnvironmentSnapshot(),
         )
       ) {
         throw new ProviderDriverConfigurationError(

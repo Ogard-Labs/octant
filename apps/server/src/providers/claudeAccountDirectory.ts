@@ -7,6 +7,8 @@
  */
 
 let gate: Promise<void> = Promise.resolve();
+// Taken before any isolated overlay, then refreshed only through the gate.
+let lastHostEnvironment: NodeJS.ProcessEnv = { ...process.env };
 
 export function withClaudeAccountDirectory<T>(
   configDirectory: string | undefined,
@@ -36,5 +38,13 @@ export function withClaudeAccountDirectory<T>(
 
 /** Copy `process.env` when no isolated lookup is overlaying Claude's directory. */
 export function snapshotClaudeHostEnvironment(): Promise<NodeJS.ProcessEnv> {
-  return withClaudeAccountDirectory(undefined, async () => ({ ...process.env }));
+  return withClaudeAccountDirectory(undefined, async () => {
+    lastHostEnvironment = { ...process.env };
+    return { ...lastHostEnvironment };
+  });
+}
+
+/** Last gated host environment. Sync factory checks use this, not live `process.env`. */
+export function lastClaudeHostEnvironmentSnapshot(): NodeJS.ProcessEnv {
+  return { ...lastHostEnvironment };
 }

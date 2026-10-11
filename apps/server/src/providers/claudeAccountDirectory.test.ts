@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  lastClaudeHostEnvironmentSnapshot,
   snapshotClaudeHostEnvironment,
   withClaudeAccountDirectory,
 } from "./claudeAccountDirectory";
@@ -38,5 +39,7 @@ describe("withClaudeAccountDirectory", () => {
     expect(defaultEnv).toEqual({ config: hostConfig, secure: hostSecure });
     expect(process.env.CLAUDE_CONFIG_DIR).toBe(hostConfig);
     expect(process.env.CLAUDE_SECURESTORAGE_CONFIG_DIR).toBe(hostSecure);
+    expect(lastClaudeHostEnvironmentSnapshot().CLAUDE_CONFIG_DIR).toBe(hostConfig);
+    expect(lastClaudeHostEnvironmentSnapshot().CLAUDE_SECURESTORAGE_CONFIG_DIR).toBe(hostSecure);
   });
 });

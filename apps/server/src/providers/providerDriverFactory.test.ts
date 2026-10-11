@@ -9,6 +9,7 @@ import { isAcpHostProfileDriver } from "@octant/provider-sdk/driver-plugins";
 import { providerKeepsConversation } from "@octant/domain";
 import { Effect } from "effect";
 import { describe, expect, it, vi } from "vitest";
+import { snapshotClaudeHostEnvironment } from "./claudeAccountDirectory";
 import type { ClaudeAgentSdkPort } from "./claudeAgentSdkPort";
 import type { ClaudeProcessPort } from "./claudeProcess";
 import type { CodexProcessPort } from "./codexProcess";
@@ -152,7 +153,11 @@ describe("makeProviderDriver", () => {
     process.env.CLAUDE_CONFIG_DIR = directory;
     try {
       expect(() =>
-        makeProviderDriver(owner, { ...fixture.options, claudeInstances: [owner, secondary] }),
+        makeProviderDriver(owner, {
+          ...fixture.options,
+          claudeInstances: [owner, secondary],
+          claudeHostEnvironment: { ...process.env },
+        }),
       ).toThrow(/already uses that config directory/);
       expect(fixture.claudeProbeVersion).not.toHaveBeenCalled();
     } finally {
@@ -160,6 +165,50 @@ describe("makeProviderDriver", () => {
         delete process.env.CLAUDE_CONFIG_DIR;
       } else {
         process.env.CLAUDE_CONFIG_DIR = previous;
+      }
+    }
+  });
+
+  it("does not treat a resume overlay as the host Claude directory", async () => {
+    const fixture = factoryFixture();
+    const owner = provider("claude");
+    const directory = "/tmp/octant-claude-overlay-dir";
+    const secondary = decodeProviderInstance({
+      id: "80000000-0000-4000-8000-000000000062",
+      displayName: "Claude secondary",
+      driverKind: "claude",
+      configuration: {
+        kind: "claude-agent-sdk",
+        binaryPath: "/missing/claude",
+        authentication: "subscription",
+        configDirectory: directory,
+      },
+      enabled: true,
+      environmentPolicy: "inherit-host",
+      version: 1,
+      createdAt: "2026-07-16T11:00:00.000Z",
+      updatedAt: "2026-07-16T11:00:00.000Z",
+    });
+    const previousConfig = process.env.CLAUDE_CONFIG_DIR;
+    const previousSecure = process.env.CLAUDE_SECURESTORAGE_CONFIG_DIR;
+    delete process.env.CLAUDE_CONFIG_DIR;
+    delete process.env.CLAUDE_SECURESTORAGE_CONFIG_DIR;
+    await snapshotClaudeHostEnvironment();
+    process.env.CLAUDE_CONFIG_DIR = directory;
+    try {
+      expect(() =>
+        makeProviderDriver(owner, { ...fixture.options, claudeInstances: [owner, secondary] }),
+      ).not.toThrow();
+    } finally {
+      if (previousConfig === undefined) {
+        delete process.env.CLAUDE_CONFIG_DIR;
+      } else {
+        process.env.CLAUDE_CONFIG_DIR = previousConfig;
+      }
+      if (previousSecure === undefined) {
+        delete process.env.CLAUDE_SECURESTORAGE_CONFIG_DIR;
+      } else {
+        process.env.CLAUDE_SECURESTORAGE_CONFIG_DIR = previousSecure;
       }
     }
   });
