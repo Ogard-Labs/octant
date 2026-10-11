@@ -51,10 +51,12 @@ path this record chooses: the unmodified binary and a Claude-owned
 config directory, not an Octant-held token.
 
 The unmodified-binary permission is necessary for that path. It is not
-by itself a compliance conclusion. Whether Octant may offer this path
-stays conditional on the applicable Anthropic agreement (Consumer or
-Commercial Terms) or an explicit Anthropic exception. This record does
-not claim that agreement exists.
+by itself a compliance conclusion. Anthropic's "Can customers offer
+Claude Code in their products?" section requires agreement to its
+Commercial Terms unless mutually agreed otherwise. Whether Octant may
+offer this path stays conditional on those Commercial Terms or an
+explicit Anthropic exception. Consumer Terms alone are not enough.
+This record does not claim that agreement exists.
 
 It diverges at **Connect Claude for helpers**. A confined Plan or
 subagent launch cannot reach the macOS Keychain the runtime uses for
@@ -145,8 +147,8 @@ Whether a confined launch that can read that directory, and cannot run
 Claude and retires the helper-token exception #1058 introduced. 0111
 stays Proposed; its Anthropic exclusion is confirmed and extended as
 above. No earlier record authorized the helper token. Accepting this
-record still requires the applicable Anthropic agreement or an
-explicit exception; the product path above does not create that.
+record still requires Anthropic's Commercial Terms or an explicit
+exception; the product path above does not create that.
 
 ## Consequences
 

@@ -177,6 +177,12 @@ On subscription launches of the unmodified binary, stop setting
 `CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS`, and
 `CLAUDE_CODE_DISABLE_AUTO_MEMORY`.
 
+`sanitizeClaudeEnvironment()` copies only `PASSTHROUGH_VARIABLES` today,
+so merely dropping those three names from `REQUIRED_GUARDS` also discards
+a user's own disable-only values. Preserve a disable-only setting the
+person already exported in the host environment. Do not invent an enable
+flag or pass through any other value.
+
 API-key launches may keep the 0005 telemetry guards.
 
 **Files:**
@@ -189,7 +195,10 @@ API-key launches may keep the 0005 telemetry guards.
 **Acceptance:**
 
 - A subscription launch's environment does not contain those three
-  switches.
+  switches unless the host already set a disable-only value.
+- A host `DISABLE_TELEMETRY`, `DISABLE_ERROR_REPORTING`, or
+  `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` disable-only value survives
+  sanitization on a subscription launch.
 - An API-key launch still sets them.
 - The other process-ownership switches remain on every launch.
 
@@ -223,6 +232,13 @@ HTTP endpoint. Do not add Claude subscription OAuth there.
 - Privacy text no longer says Octant stores a Claude setup token.
 - The Providers guide describes `claude auth login` into a Claude-owned
   config directory, and the optional native-harness API key.
+- Architecture and the privacy pages name the Claude telemetry
+  destinations, data categories, conditions, and opt-out that Step 3
+  newly enables on subscription launches (usage metrics, error reports,
+  feature-flag traffic, and session-quality surveys, including
+  third-party logging or error tracking Anthropic documents). The
+  current "no telemetry" and enumerated-destination promises cannot
+  remain after that traffic is allowed.
 
 Do not publish that deprecation in the decision PR. 0165 stays Proposed
 until Steps 0–5 land, and the shipped guide must keep describing the
