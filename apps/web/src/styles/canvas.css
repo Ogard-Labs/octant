@@ -141,11 +141,6 @@
   padding-top: var(--oct-space-3);
 }
 
-.canvas-tabs__panel:focus-visible {
-  outline: 2px solid var(--oct-accent);
-  outline-offset: 2px;
-}
-
 /* Columns: two to four equal tracks that fold into one when the Canvas
    itself is narrow. The query reads the Canvas's width, not the window's,
    because a sidebar Canvas is narrow on a wide display. */
