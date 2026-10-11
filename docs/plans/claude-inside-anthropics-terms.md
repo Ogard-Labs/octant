@@ -54,9 +54,12 @@ Measure:
 Claude-owned storage, and Octant never reads or sets a token.
 
 **Fail.** Confined subscription launches cannot sign in that way. The
-fallback is an Anthropic API key for confined launches only. Ordinary
-unconfined turns keep the person's CLI login. Write the failure into
-0165 before implementing the fallback.
+fallback is to switch that instance to Anthropic API-key authentication
+for every launch, including ordinary unconfined turns. The current
+provider model has one `authentication` value per instance, so mixed
+"CLI login when unconfined, API key when confined" is not available.
+Write the failure and that instance-wide switch into 0165 before
+implementing it.
 
 **Touches (notes only):** a short evidence note on the implementation
 PR. No product code in this step.
