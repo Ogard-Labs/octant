@@ -4,6 +4,10 @@ import { resolveEffectiveTokens } from "@octant/theme/fallback";
 import { createContext, useContext, useLayoutEffect, type ReactNode } from "react";
 import { getInjectedHostBridge } from "../shell/hostBridge";
 import { approvalSurfacePalette } from "./approvalSurfacePalette";
+import {
+  publishIncreasedContrastSetting,
+  SYSTEM_INCREASED_CONTRAST,
+} from "./increasedContrastAttribute";
 import { useMediaQueryMatches } from "./useMediaQueryMatches";
 
 const VARIABLE_ALIASES: Readonly<Record<string, ReadonlyArray<string>>> = {
@@ -25,8 +29,6 @@ const HIGH_CONTRAST_TEXT_ROLES: ReadonlySet<string> = new Set([
   "text-secondary",
   "text-muted",
 ]);
-
-const SYSTEM_INCREASED_CONTRAST = "(prefers-contrast: more)";
 
 const IncreasedContrastContext = createContext<boolean | undefined>(undefined);
 
@@ -50,15 +52,15 @@ export function ThemeSettingsProvider(props: {
   // off, so the in-app toggle and the system preference draw the same rules.
   // The setting alone used to set the attribute while the rules sat under the
   // media query, and the toggle changed no colours.
-  const increasedContrast = systemIncreasedContrast || props.settings?.increasedContrast === true;
+  const settingIncreasedContrast = props.settings?.increasedContrast === true;
+  const increasedContrast = systemIncreasedContrast || settingIncreasedContrast;
 
   useLayoutEffect(() => {
-    const root = document.documentElement;
-    root.dataset.octantIncreasedContrast = String(increasedContrast);
-    return () => {
-      delete root.dataset.octantIncreasedContrast;
-    };
-  }, [increasedContrast]);
+    // Republishes when the system changes too, so the attribute follows it
+    // even where the entry module's listener is not running.
+    publishIncreasedContrastSetting(settingIncreasedContrast);
+    return () => publishIncreasedContrastSetting(false);
+  }, [settingIncreasedContrast, increasedContrast]);
 
   useLayoutEffect(() => {
     const root = document.documentElement;

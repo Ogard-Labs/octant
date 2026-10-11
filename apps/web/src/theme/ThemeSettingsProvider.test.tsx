@@ -3,6 +3,7 @@ import { act, render } from "@testing-library/react";
 import { readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
+import { followSystemIncreasedContrast } from "./increasedContrastAttribute";
 import { ThemeSettingsProvider } from "./ThemeSettingsProvider";
 
 describe("ThemeSettingsProvider", () => {
@@ -220,6 +221,47 @@ describe("ThemeSettingsProvider", () => {
       expect(root.style.getPropertyValue("--octant-text-primary")).not.toBe("");
       result.unmount();
     } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("draws the system's increased contrast before the settings load and after they unmount", () => {
+    const listeners = new Set<() => void>();
+    let systemMore = true;
+    vi.stubGlobal("matchMedia", (query: string) => ({
+      get matches() {
+        return query === "(prefers-contrast: more)" && systemMore;
+      },
+      media: query,
+      addEventListener: (_type: string, listener: () => void) => listeners.add(listener),
+      removeEventListener: (_type: string, listener: () => void) => listeners.delete(listener),
+    }));
+    const root = document.documentElement;
+    const stopFollowing = followSystemIncreasedContrast();
+    try {
+      // Loading, pairing, and disconnected screens render before any settings
+      // provider mounts; the system preference must already reach them.
+      expect(root.getAttribute("data-octant-increased-contrast")).toBe("true");
+
+      const result = render(
+        <ThemeSettingsProvider settings={{ ...DEFAULT_THEME_SETTINGS, increasedContrast: false }}>
+          <div>Theme content</div>
+        </ThemeSettingsProvider>,
+      );
+      expect(root.getAttribute("data-octant-increased-contrast")).toBe("true");
+      // Returning to the disconnected screen unmounts the provider.
+      result.unmount();
+      expect(root.getAttribute("data-octant-increased-contrast")).toBe("true");
+
+      systemMore = false;
+      for (const listener of listeners) listener();
+      expect(root.getAttribute("data-octant-increased-contrast")).toBe("false");
+      systemMore = true;
+      for (const listener of listeners) listener();
+      expect(root.getAttribute("data-octant-increased-contrast")).toBe("true");
+    } finally {
+      stopFollowing();
+      expect(listeners.size).toBe(0);
       vi.unstubAllGlobals();
     }
   });
