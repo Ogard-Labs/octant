@@ -638,657 +638,661 @@ export class ProviderService implements ProviderServiceApi {
             ? await this.#acquireClaudeAccountClaim()
             : undefined;
         try {
-        this.#assertReady();
-        const current = this.#persistence.readProviderInstance(command.instanceId);
-        const instances = this.#persistence.readProviderInstances();
-        if (
-          command.kind === "create-opencode-provider" ||
-          command.kind === "create-codex-provider" ||
-          command.kind === "create-kimi-code-provider" ||
-          command.kind === "create-claude-provider" ||
-          command.kind === "create-devin-provider" ||
-          command.kind === "create-kilo-provider" ||
-          command.kind === "create-pi-provider" ||
-          command.kind === "create-oh-my-pi-provider" ||
-          command.kind === "create-ollama-provider" ||
-          command.kind === "create-mistral-vibe-provider" ||
-          command.kind === "create-grok-provider" ||
-          command.kind === "create-goose-provider" ||
-          command.kind === "create-glm-provider" ||
-          command.kind === "create-gemini-provider" ||
-          command.kind === "create-copilot-provider" ||
-          command.kind === "create-cline-provider" ||
-          command.kind === "create-qwen-provider" ||
-          command.kind === "create-fx-provider" ||
-          command.kind === "create-openai-compatible-provider" ||
-          command.kind === "create-anthropic-compatible-provider" ||
-          command.kind === "create-azure-foundry-provider" ||
-          command.kind === "create-openai-image-provider" ||
-          command.kind === "create-gemini-native-image-provider" ||
-          command.kind === "create-bfl-image-provider" ||
-          command.kind === "create-ideogram-image-provider"
-        ) {
-          if (current !== undefined || command.expectedVersion !== 0) {
-            throw this.#invalid("Provider configuration changed; reload and retry.");
-          }
-          const enabled = "enabled" in command ? command.enabled : undefined;
-          const common = {
-            id: command.instanceId,
-            displayName: command.displayName,
-            existingInstances: instances,
-            expectedVersion: command.expectedVersion,
-            createdAt: decodeTimestamp(this.#clock()),
-            ...(enabled === undefined ? {} : { enabled }),
-          };
-          let instance: ProviderInstance;
-          switch (command.kind) {
-            case "create-opencode-provider":
-              instance = createOpenCodeProvider({ ...common, binaryPath: command.binaryPath });
-              break;
-            case "create-codex-provider":
-              instance = createCodexProvider({ ...common, binaryPath: command.binaryPath });
-              break;
-            case "create-kimi-code-provider":
-              instance = createKimiCodeProvider({ ...common, binaryPath: command.binaryPath });
-              break;
-            case "create-claude-provider": {
-              const existingClaudeCount = instances.filter(
-                (candidate) => candidate.driverKind === "claude",
-              ).length;
-              const assignedDirectory =
-                command.configuration.configDirectory === undefined && existingClaudeCount > 0
-                  ? assignedClaudeAccountConfigDirectory(homedir(), command.instanceId)
-                  : command.configuration.configDirectory;
-              const hostEnvironment = await snapshotClaudeHostEnvironment();
-              const hostConfigDirectory = hostClaudeConfigDirectory(hostEnvironment);
-              const hostSecureDirectory = hostClaudeSecureStorageDirectory(hostEnvironment);
-              instance = createClaudeProvider({
-                ...common,
-                configuration: {
-                  ...command.configuration,
-                  ...(assignedDirectory === undefined
-                    ? {}
-                    : { configDirectory: assignedDirectory }),
-                },
-              });
-              this.#refuseTakenClaudeAccountDirectories(
-                this.#persistence.readProviderInstances(),
-                instance,
-                hostConfigDirectory,
-                hostSecureDirectory,
-              );
-              break;
+          this.#assertReady();
+          const current = this.#persistence.readProviderInstance(command.instanceId);
+          const instances = this.#persistence.readProviderInstances();
+          if (
+            command.kind === "create-opencode-provider" ||
+            command.kind === "create-codex-provider" ||
+            command.kind === "create-kimi-code-provider" ||
+            command.kind === "create-claude-provider" ||
+            command.kind === "create-devin-provider" ||
+            command.kind === "create-kilo-provider" ||
+            command.kind === "create-pi-provider" ||
+            command.kind === "create-oh-my-pi-provider" ||
+            command.kind === "create-ollama-provider" ||
+            command.kind === "create-mistral-vibe-provider" ||
+            command.kind === "create-grok-provider" ||
+            command.kind === "create-goose-provider" ||
+            command.kind === "create-glm-provider" ||
+            command.kind === "create-gemini-provider" ||
+            command.kind === "create-copilot-provider" ||
+            command.kind === "create-cline-provider" ||
+            command.kind === "create-qwen-provider" ||
+            command.kind === "create-fx-provider" ||
+            command.kind === "create-openai-compatible-provider" ||
+            command.kind === "create-anthropic-compatible-provider" ||
+            command.kind === "create-azure-foundry-provider" ||
+            command.kind === "create-openai-image-provider" ||
+            command.kind === "create-gemini-native-image-provider" ||
+            command.kind === "create-bfl-image-provider" ||
+            command.kind === "create-ideogram-image-provider"
+          ) {
+            if (current !== undefined || command.expectedVersion !== 0) {
+              throw this.#invalid("Provider configuration changed; reload and retry.");
             }
-            case "create-devin-provider":
-              instance = createDevinProvider({
-                ...common,
-                configuration: command.configuration,
-              });
-              break;
-            case "create-kilo-provider":
-              instance = createKiloProvider({
-                ...common,
-                configuration: command.configuration,
-              });
-              break;
-            case "create-pi-provider":
-              instance = createPiProvider({
-                ...common,
-                configuration: command.configuration,
-              });
-              break;
-            case "create-oh-my-pi-provider":
-              instance = createOhMyPiProvider({
-                ...common,
-                configuration: command.configuration,
-              });
-              break;
-            case "create-ollama-provider":
-              instance = createOllamaProvider({
-                ...common,
-                configuration: command.configuration,
-              });
-              break;
-            case "create-mistral-vibe-provider":
-              instance = createMistralVibeProvider({
-                ...common,
-                configuration: command.configuration,
-              });
-              break;
-            case "create-grok-provider":
-              instance = createGrokProvider({
-                ...common,
-                configuration: command.configuration,
-              });
-              break;
-            case "create-goose-provider":
-              instance = createGooseProvider({
-                ...common,
-                configuration: command.configuration,
-              });
-              break;
-            case "create-glm-provider":
-              instance = createGlmProvider({
-                ...common,
-                configuration: command.configuration,
-              });
-              break;
-            case "create-gemini-provider":
-              instance = createGeminiProvider({
-                ...common,
-                configuration: command.configuration,
-              });
-              break;
-            case "create-copilot-provider":
-              instance = createCopilotProvider({
-                ...common,
-                configuration: command.configuration,
-              });
-              break;
-            case "create-cline-provider":
-              instance = createClineProvider({
-                ...common,
-                configuration: command.configuration,
-              });
-              break;
-            case "create-qwen-provider":
-              instance = createQwenProvider({
-                ...common,
-                configuration: command.configuration,
-              });
-              break;
-            case "create-fx-provider":
-              instance = createFxProvider({
-                ...common,
-                configuration: command.configuration,
-              });
-              break;
-            case "create-openai-compatible-provider":
-              instance = createOpenAiCompatibleProvider({
-                ...common,
-                configuration: command.configuration,
-              });
-              break;
-            case "create-anthropic-compatible-provider":
-              instance = createAnthropicCompatibleProvider({
-                ...common,
-                configuration: command.configuration,
-              });
-              break;
-            case "create-azure-foundry-provider":
-              instance = createAzureFoundryProvider({
-                ...common,
-                configuration: command.configuration,
-              });
-              break;
-            case "create-openai-image-provider":
-              instance = createOpenAiImageProvider({
-                ...common,
-                configuration: command.configuration,
-              });
-              break;
-            case "create-gemini-native-image-provider":
-              instance = createGeminiImageProvider({
-                ...common,
-                configuration: command.configuration,
-              });
-              break;
-            case "create-bfl-image-provider":
-              instance = createBflImageProvider({
-                ...common,
-                configuration: command.configuration,
-              });
-              break;
-            case "create-ideogram-image-provider":
-              instance = createIdeogramImageProvider({
-                ...common,
-                configuration: command.configuration,
-              });
-              break;
+            const enabled = "enabled" in command ? command.enabled : undefined;
+            const common = {
+              id: command.instanceId,
+              displayName: command.displayName,
+              existingInstances: instances,
+              expectedVersion: command.expectedVersion,
+              createdAt: decodeTimestamp(this.#clock()),
+              ...(enabled === undefined ? {} : { enabled }),
+            };
+            let instance: ProviderInstance;
+            switch (command.kind) {
+              case "create-opencode-provider":
+                instance = createOpenCodeProvider({ ...common, binaryPath: command.binaryPath });
+                break;
+              case "create-codex-provider":
+                instance = createCodexProvider({ ...common, binaryPath: command.binaryPath });
+                break;
+              case "create-kimi-code-provider":
+                instance = createKimiCodeProvider({ ...common, binaryPath: command.binaryPath });
+                break;
+              case "create-claude-provider": {
+                const existingClaudeCount = instances.filter(
+                  (candidate) => candidate.driverKind === "claude",
+                ).length;
+                const assignedDirectory =
+                  command.configuration.configDirectory === undefined && existingClaudeCount > 0
+                    ? assignedClaudeAccountConfigDirectory(homedir(), command.instanceId)
+                    : command.configuration.configDirectory;
+                const hostEnvironment = await snapshotClaudeHostEnvironment();
+                const hostConfigDirectory = hostClaudeConfigDirectory(hostEnvironment);
+                const hostSecureDirectory = hostClaudeSecureStorageDirectory(hostEnvironment);
+                instance = createClaudeProvider({
+                  ...common,
+                  configuration: {
+                    ...command.configuration,
+                    ...(assignedDirectory === undefined
+                      ? {}
+                      : { configDirectory: assignedDirectory }),
+                  },
+                });
+                this.#refuseTakenClaudeAccountDirectories(
+                  this.#persistence.readProviderInstances(),
+                  instance,
+                  hostConfigDirectory,
+                  hostSecureDirectory,
+                );
+                break;
+              }
+              case "create-devin-provider":
+                instance = createDevinProvider({
+                  ...common,
+                  configuration: command.configuration,
+                });
+                break;
+              case "create-kilo-provider":
+                instance = createKiloProvider({
+                  ...common,
+                  configuration: command.configuration,
+                });
+                break;
+              case "create-pi-provider":
+                instance = createPiProvider({
+                  ...common,
+                  configuration: command.configuration,
+                });
+                break;
+              case "create-oh-my-pi-provider":
+                instance = createOhMyPiProvider({
+                  ...common,
+                  configuration: command.configuration,
+                });
+                break;
+              case "create-ollama-provider":
+                instance = createOllamaProvider({
+                  ...common,
+                  configuration: command.configuration,
+                });
+                break;
+              case "create-mistral-vibe-provider":
+                instance = createMistralVibeProvider({
+                  ...common,
+                  configuration: command.configuration,
+                });
+                break;
+              case "create-grok-provider":
+                instance = createGrokProvider({
+                  ...common,
+                  configuration: command.configuration,
+                });
+                break;
+              case "create-goose-provider":
+                instance = createGooseProvider({
+                  ...common,
+                  configuration: command.configuration,
+                });
+                break;
+              case "create-glm-provider":
+                instance = createGlmProvider({
+                  ...common,
+                  configuration: command.configuration,
+                });
+                break;
+              case "create-gemini-provider":
+                instance = createGeminiProvider({
+                  ...common,
+                  configuration: command.configuration,
+                });
+                break;
+              case "create-copilot-provider":
+                instance = createCopilotProvider({
+                  ...common,
+                  configuration: command.configuration,
+                });
+                break;
+              case "create-cline-provider":
+                instance = createClineProvider({
+                  ...common,
+                  configuration: command.configuration,
+                });
+                break;
+              case "create-qwen-provider":
+                instance = createQwenProvider({
+                  ...common,
+                  configuration: command.configuration,
+                });
+                break;
+              case "create-fx-provider":
+                instance = createFxProvider({
+                  ...common,
+                  configuration: command.configuration,
+                });
+                break;
+              case "create-openai-compatible-provider":
+                instance = createOpenAiCompatibleProvider({
+                  ...common,
+                  configuration: command.configuration,
+                });
+                break;
+              case "create-anthropic-compatible-provider":
+                instance = createAnthropicCompatibleProvider({
+                  ...common,
+                  configuration: command.configuration,
+                });
+                break;
+              case "create-azure-foundry-provider":
+                instance = createAzureFoundryProvider({
+                  ...common,
+                  configuration: command.configuration,
+                });
+                break;
+              case "create-openai-image-provider":
+                instance = createOpenAiImageProvider({
+                  ...common,
+                  configuration: command.configuration,
+                });
+                break;
+              case "create-gemini-native-image-provider":
+                instance = createGeminiImageProvider({
+                  ...common,
+                  configuration: command.configuration,
+                });
+                break;
+              case "create-bfl-image-provider":
+                instance = createBflImageProvider({
+                  ...common,
+                  configuration: command.configuration,
+                });
+                break;
+              case "create-ideogram-image-provider":
+                instance = createIdeogramImageProvider({
+                  ...common,
+                  configuration: command.configuration,
+                });
+                break;
+            }
+            this.#assertDriverPluginEffective(instance);
+            this.#appendInstance(command.expectedVersion, "provider.instance-created@1", instance);
+            const authoritative = this.#authoritativeInstance(instance);
+            this.#publishSelectedAuthenticationObservation(authoritative);
+            return decodeProviderRegistryCommandResult({
+              kind: "provider-created",
+              instance: authoritative,
+            });
           }
-          this.#assertDriverPluginEffective(instance);
-          this.#appendInstance(command.expectedVersion, "provider.instance-created@1", instance);
+
+          if (current === undefined) throw this.#invalid("Provider instance was not found.");
+          this.#assertVersion(current.version, command.expectedVersion);
+          const updatedAt = decodeTimestamp(this.#clock());
+          if (command.kind === "remove-provider") {
+            const removed = removeProvider(current, {
+              activeSessionCount: this.#runtime.activeSessionCount(current.id),
+              updatedAt,
+            });
+            await this.#runtime.invalidateRuntime(current.id);
+            this.#persistence.journal.append({
+              aggregate: { aggregateType: "provider-instance", aggregateId: current.id },
+              expectedVersion: command.expectedVersion,
+              events: [
+                this.#pendingEvent("provider.instance-removed@1", {
+                  instanceId: current.id,
+                  version: removed.version,
+                }),
+              ],
+            });
+            if (this.#persistence.readProviderInstance(current.id) !== undefined) {
+              throw this.#unavailable();
+            }
+            if (current.driverKind === "claude") {
+              await this.#clearResumeIdentities?.(current.id);
+              // The renderer clears a removed provider's API key, but nothing
+              // else names this token once the instance is gone, and it stays
+              // valid for a year. A store that cannot be reached leaves the
+              // token behind rather than reporting the removal as failed.
+              await this.#clearClaudeHelperSignIn?.(current.id).catch(() => undefined);
+            }
+            this.#invalidateCatalog(current.id, { kind: "all" }, "provider removed", updatedAt);
+            this.#clearRuntimeUsageLimits?.(current.id);
+            return decodeProviderRegistryCommandResult({
+              kind: "provider-removed",
+              instanceId: current.id,
+              version: removed.version,
+            });
+          }
+
+          if (command.kind === "set-provider-model-context-window") {
+            return decodeProviderRegistryCommandResult({
+              kind: "provider-model-updated",
+              snapshot: this.#updateCatalogModel(
+                current.id,
+                command.modelId,
+                updatedAt,
+                ({ contextWindowOverride: _cleared, ...model }) =>
+                  command.contextWindow === undefined
+                    ? model
+                    : { ...model, contextWindowOverride: command.contextWindow },
+              ),
+            });
+          }
+
+          if (command.kind === "set-provider-model-data-tags") {
+            if (this.#persistence.readProviderCatalog === undefined) {
+              throw this.#unavailable();
+            }
+            const catalog = this.#persistence.readProviderCatalog(current.id);
+            if (catalog === undefined) throw this.#invalid("Provider model catalog was not found.");
+            const model = catalog.models.find(
+              (candidate) => String(candidate.id) === String(command.modelId),
+            );
+            if (model === undefined) throw this.#invalid("Provider model was not found.");
+            const snapshot = decodeProviderCatalogSnapshot({
+              ...catalog,
+              version: (catalog.version + 1) as typeof catalog.version,
+              models: catalog.models.map((candidate) =>
+                String(candidate.id) === String(command.modelId)
+                  ? setProviderModelDataTags(candidate, command.dataTags)
+                  : candidate,
+              ),
+              updatedAt,
+            });
+            this.#persistence.journal.append({
+              aggregate: { aggregateType: "provider-catalog", aggregateId: current.id },
+              expectedVersion: catalog.version,
+              events: [this.#pendingEvent("provider.catalog-updated@1", { snapshot })],
+            });
+            const authoritative = this.#persistence.readProviderCatalog(current.id);
+            if (authoritative?.version !== snapshot.version) throw this.#unavailable();
+            return decodeProviderRegistryCommandResult({
+              kind: "provider-model-tags-updated",
+              snapshot: authoritative,
+            });
+          }
+
+          let instance: ProviderInstance;
+          let eventName: string;
+          if (command.kind === "set-provider-data-tags") {
+            instance = setProviderDataTags(current, command.dataTags, updatedAt);
+            eventName = "provider.instance-data-tags-changed@1";
+          } else if (command.kind === "rename-provider") {
+            instance = renameProvider(current, {
+              displayName: command.displayName,
+              existingInstances: instances,
+              updatedAt,
+            });
+            eventName = "provider.instance-renamed@1";
+          } else if (command.kind === "change-provider-binary") {
+            if (
+              current.driverKind !== "opencode" &&
+              current.driverKind !== "codex" &&
+              current.driverKind !== "kimi-code"
+            ) {
+              throw this.#unsupported("This provider does not use a CLI binary.");
+            }
+            if (this.#runtime.activeSessionCount(current.id) !== 0) {
+              throw this.#invalid("Stop active sessions before changing this provider runtime.");
+            }
+            instance = changeProviderBinary(current, {
+              binaryPath: command.binaryPath,
+              activeSessionCount: 0,
+              updatedAt,
+            });
+            await this.#runtime.invalidateRuntime(current.id);
+            eventName = "provider.instance-binary-changed@1";
+          } else if (command.kind === "change-openai-compatible-configuration") {
+            if (current.driverKind !== "openai-compatible") {
+              throw this.#unsupported("This provider does not use HTTP configuration.");
+            }
+            instance = changeOpenAiCompatibleConfiguration(
+              current,
+              command.configuration,
+              updatedAt,
+            );
+            await this.#runtime.invalidateRuntime(current.id);
+            eventName = "provider.instance-configuration-changed@1";
+          } else if (command.kind === "change-anthropic-compatible-configuration") {
+            if (current.driverKind !== "anthropic-compatible") {
+              throw this.#unsupported("This provider does not use HTTP configuration.");
+            }
+            instance = changeAnthropicCompatibleConfiguration(
+              current,
+              command.configuration,
+              updatedAt,
+            );
+            await this.#runtime.invalidateRuntime(current.id);
+            eventName = "provider.instance-configuration-changed@1";
+          } else if (command.kind === "change-azure-foundry-configuration") {
+            if (current.driverKind !== "azure-foundry") {
+              throw this.#unsupported("This provider does not use Azure AI Foundry configuration.");
+            }
+            instance = changeAzureFoundryConfiguration(current, command.configuration, updatedAt);
+            await this.#runtime.invalidateRuntime(current.id);
+            eventName = "provider.instance-configuration-changed@1";
+          } else if (command.kind === "change-openai-image-configuration") {
+            if (current.driverKind !== "openai-image") {
+              throw this.#unsupported("This provider does not use OpenAI image configuration.");
+            }
+            instance = changeOpenAiImageConfiguration(current, command.configuration, updatedAt);
+            await this.#runtime.invalidateRuntime(current.id);
+            eventName = "provider.instance-configuration-changed@1";
+          } else if (command.kind === "change-gemini-native-image-configuration") {
+            if (current.driverKind !== "gemini-native-image") {
+              throw this.#unsupported("This provider does not use Gemini image configuration.");
+            }
+            instance = changeGeminiImageConfiguration(current, command.configuration, updatedAt);
+            await this.#runtime.invalidateRuntime(current.id);
+            eventName = "provider.instance-configuration-changed@1";
+          } else if (command.kind === "change-bfl-image-configuration") {
+            if (current.driverKind !== "bfl-image") {
+              throw this.#unsupported("This provider does not use BFL image configuration.");
+            }
+            instance = changeBflImageConfiguration(current, command.configuration, updatedAt);
+            await this.#runtime.invalidateRuntime(current.id);
+            eventName = "provider.instance-configuration-changed@1";
+          } else if (command.kind === "change-ideogram-image-configuration") {
+            if (current.driverKind !== "ideogram-image") {
+              throw this.#unsupported("This provider does not use Ideogram image configuration.");
+            }
+            instance = changeIdeogramImageConfiguration(current, command.configuration, updatedAt);
+            await this.#runtime.invalidateRuntime(current.id);
+            eventName = "provider.instance-configuration-changed@1";
+          } else if (command.kind === "change-claude-configuration") {
+            if (current.driverKind !== "claude") {
+              throw this.#unsupported("This provider does not use Claude configuration.");
+            }
+            const previousDirectory = current.configuration.configDirectory;
+            instance = changeClaudeConfiguration(current, {
+              configuration: command.configuration,
+              activeSessionCount: this.#runtime.activeSessionCount(current.id),
+              updatedAt,
+            });
+            const nextDirectory =
+              instance.driverKind === "claude" ? instance.configuration.configDirectory : undefined;
+            const hostEnvironment = await snapshotClaudeHostEnvironment();
+            const hostConfigDirectory = hostClaudeConfigDirectory(hostEnvironment);
+            const hostSecureDirectory = hostClaudeSecureStorageDirectory(hostEnvironment);
+            this.#refuseTakenClaudeAccountDirectories(
+              this.#persistence.readProviderInstances(),
+              instance,
+              hostConfigDirectory,
+              hostSecureDirectory,
+              current.id,
+            );
+            await this.#runtime.invalidateRuntime(current.id);
+            // Recheck after the await. Create/change on another instance can
+            // claim the same directory while this runtime is invalidated.
+            this.#refuseTakenClaudeAccountDirectories(
+              this.#persistence.readProviderInstances(),
+              instance,
+              hostConfigDirectory,
+              hostSecureDirectory,
+              current.id,
+            );
+            if (nextDirectory !== previousDirectory) {
+              try {
+                await this.#clearClaudeHelperSignIn?.(current.id);
+              } catch (error) {
+                if (error instanceof ProviderServiceError) throw error;
+                throw new ProviderServiceError({
+                  category: "unavailable",
+                  message:
+                    "Octant could not clear Claude for helpers for the new account directory. Try again.",
+                });
+              }
+            }
+            eventName = "provider.instance-configuration-changed@1";
+          } else if (command.kind === "change-mistral-vibe-configuration") {
+            if (current.driverKind !== "mistral-vibe") {
+              throw this.#unsupported("This provider does not use Mistral Vibe configuration.");
+            }
+            instance = changeMistralVibeConfiguration(
+              current,
+              command.configuration,
+              updatedAt,
+              this.#runtime.activeSessionCount(current.id),
+            );
+            await this.#runtime.invalidateRuntime(current.id);
+            eventName = "provider.instance-configuration-changed@1";
+          } else if (command.kind === "change-grok-configuration") {
+            if (current.driverKind !== "grok") {
+              throw this.#unsupported("This provider does not use Grok Build configuration.");
+            }
+            instance = changeGrokConfiguration(
+              current,
+              command.configuration,
+              updatedAt,
+              this.#runtime.activeSessionCount(current.id),
+            );
+            await this.#runtime.invalidateRuntime(current.id);
+            eventName = "provider.instance-configuration-changed@1";
+          } else if (command.kind === "change-goose-configuration") {
+            if (current.driverKind !== "goose") {
+              throw this.#unsupported("This provider does not use Goose configuration.");
+            }
+            instance = changeGooseConfiguration(
+              current,
+              command.configuration,
+              updatedAt,
+              this.#runtime.activeSessionCount(current.id),
+            );
+            await this.#runtime.invalidateRuntime(current.id);
+            eventName = "provider.instance-configuration-changed@1";
+          } else if (command.kind === "change-glm-configuration") {
+            if (current.driverKind !== "glm") {
+              throw this.#unsupported("This provider does not use GLM Agent configuration.");
+            }
+            instance = changeGlmConfiguration(
+              current,
+              command.configuration,
+              updatedAt,
+              this.#runtime.activeSessionCount(current.id),
+            );
+            await this.#runtime.invalidateRuntime(current.id);
+            eventName = "provider.instance-configuration-changed@1";
+          } else if (command.kind === "change-gemini-configuration") {
+            if (current.driverKind !== "gemini") {
+              throw this.#unsupported("This provider does not use Gemini CLI configuration.");
+            }
+            instance = changeGeminiConfiguration(
+              current,
+              command.configuration,
+              updatedAt,
+              this.#runtime.activeSessionCount(current.id),
+            );
+            await this.#runtime.invalidateRuntime(current.id);
+            eventName = "provider.instance-configuration-changed@1";
+          } else if (command.kind === "change-copilot-configuration") {
+            if (current.driverKind !== "copilot") {
+              throw this.#unsupported("This provider does not use GitHub Copilot configuration.");
+            }
+            instance = changeCopilotConfiguration(
+              current,
+              command.configuration,
+              updatedAt,
+              this.#runtime.activeSessionCount(current.id),
+            );
+            await this.#runtime.invalidateRuntime(current.id);
+            eventName = "provider.instance-configuration-changed@1";
+          } else if (command.kind === "change-cline-configuration") {
+            if (current.driverKind !== "cline") {
+              throw this.#unsupported("This provider does not use Cline configuration.");
+            }
+            instance = changeClineConfiguration(
+              current,
+              command.configuration,
+              updatedAt,
+              this.#runtime.activeSessionCount(current.id),
+            );
+            await this.#runtime.invalidateRuntime(current.id);
+            eventName = "provider.instance-configuration-changed@1";
+          } else if (command.kind === "change-qwen-configuration") {
+            if (current.driverKind !== "qwen") {
+              throw this.#unsupported("This provider does not use Qwen Code configuration.");
+            }
+            instance = changeQwenConfiguration(
+              current,
+              command.configuration,
+              updatedAt,
+              this.#runtime.activeSessionCount(current.id),
+            );
+            await this.#runtime.invalidateRuntime(current.id);
+            eventName = "provider.instance-configuration-changed@1";
+          } else if (command.kind === "change-fx-configuration") {
+            if (current.driverKind !== "fx") {
+              throw this.#unsupported("This provider does not use fx configuration.");
+            }
+            instance = changeFxConfiguration(
+              current,
+              command.configuration,
+              updatedAt,
+              this.#runtime.activeSessionCount(current.id),
+            );
+            await this.#runtime.invalidateRuntime(current.id);
+            eventName = "provider.instance-configuration-changed@1";
+          } else if (command.kind === "change-devin-configuration") {
+            if (current.driverKind !== "devin") {
+              throw this.#unsupported("This provider does not use Devin configuration.");
+            }
+            instance = changeDevinConfiguration(
+              current,
+              command.configuration,
+              updatedAt,
+              this.#runtime.activeSessionCount(current.id),
+            );
+            await this.#runtime.invalidateRuntime(current.id);
+            eventName = "provider.instance-configuration-changed@1";
+          } else if (command.kind === "change-kilo-configuration") {
+            if (current.driverKind !== "kilo") {
+              throw this.#unsupported("This provider does not use Kilo configuration.");
+            }
+            instance = changeKiloConfiguration(
+              current,
+              command.configuration,
+              updatedAt,
+              this.#runtime.activeSessionCount(current.id),
+            );
+            await this.#runtime.invalidateRuntime(current.id);
+            eventName = "provider.instance-configuration-changed@1";
+          } else if (command.kind === "change-pi-configuration") {
+            if (current.driverKind !== "pi") {
+              throw this.#unsupported("This provider does not use Pi configuration.");
+            }
+            instance = changePiConfiguration(
+              current,
+              command.configuration,
+              updatedAt,
+              this.#runtime.activeSessionCount(current.id),
+            );
+            await this.#runtime.invalidateRuntime(current.id);
+            eventName = "provider.instance-configuration-changed@1";
+          } else if (command.kind === "change-oh-my-pi-configuration") {
+            if (current.driverKind !== "oh-my-pi") {
+              throw this.#unsupported("This provider does not use Oh My Pi configuration.");
+            }
+            instance = changeOhMyPiConfiguration(
+              current,
+              command.configuration,
+              updatedAt,
+              this.#runtime.activeSessionCount(current.id),
+            );
+            await this.#runtime.invalidateRuntime(current.id);
+            eventName = "provider.instance-configuration-changed@1";
+          } else if (command.kind === "change-ollama-configuration") {
+            if (current.driverKind !== "ollama") {
+              throw this.#unsupported("This provider does not use Ollama configuration.");
+            }
+            instance = changeOllamaConfiguration(
+              current,
+              command.configuration,
+              updatedAt,
+              this.#runtime.activeSessionCount(current.id),
+            );
+            await this.#runtime.invalidateRuntime(current.id);
+            eventName = "provider.instance-configuration-changed@1";
+          } else {
+            if (
+              command.kind === "set-provider-enabled" &&
+              command.enabled &&
+              !this.#isProviderExecutableAvailable(current)
+            ) {
+              throw this.#invalid(
+                "This provider CLI is not available on this host. Run discovery again or update its binary path before enabling it.",
+              );
+            }
+            instance = setProviderEnabled(current, { enabled: command.enabled, updatedAt });
+            if (!instance.enabled && this.#runtime.activeSessionCount(instance.id) === 0) {
+              await this.#runtime.invalidateRuntime(instance.id);
+            }
+            eventName = "provider.instance-enabled-changed@1";
+          }
+          this.#appendInstance(command.expectedVersion, eventName, instance);
           const authoritative = this.#authoritativeInstance(instance);
-          this.#publishSelectedAuthenticationObservation(authoritative);
+          if (
+            eventName !== "provider.instance-renamed@1" &&
+            eventName !== "provider.instance-data-tags-changed@1"
+          ) {
+            this.#invalidateCatalog(
+              instance.id,
+              describeProviderConfigurationChange(current, instance),
+              "provider configuration changed",
+              updatedAt,
+            );
+            this.#clearRuntimeUsageLimits?.(instance.id);
+          }
+          if (
+            command.kind === "change-claude-configuration" ||
+            command.kind === "change-mistral-vibe-configuration" ||
+            command.kind === "change-grok-configuration" ||
+            command.kind === "change-glm-configuration" ||
+            command.kind === "change-gemini-configuration" ||
+            command.kind === "change-cline-configuration" ||
+            command.kind === "change-qwen-configuration" ||
+            command.kind === "change-fx-configuration" ||
+            command.kind === "change-devin-configuration"
+          ) {
+            this.#publishSelectedAuthenticationObservation(authoritative);
+          }
+          if (command.kind === "set-provider-enabled" && instance.enabled) {
+            this.#runtime.clearObservedState(instance.id);
+          }
           return decodeProviderRegistryCommandResult({
-            kind: "provider-created",
+            kind: "provider-updated",
             instance: authoritative,
           });
-        }
-
-        if (current === undefined) throw this.#invalid("Provider instance was not found.");
-        this.#assertVersion(current.version, command.expectedVersion);
-        const updatedAt = decodeTimestamp(this.#clock());
-        if (command.kind === "remove-provider") {
-          const removed = removeProvider(current, {
-            activeSessionCount: this.#runtime.activeSessionCount(current.id),
-            updatedAt,
-          });
-          await this.#runtime.invalidateRuntime(current.id);
-          this.#persistence.journal.append({
-            aggregate: { aggregateType: "provider-instance", aggregateId: current.id },
-            expectedVersion: command.expectedVersion,
-            events: [
-              this.#pendingEvent("provider.instance-removed@1", {
-                instanceId: current.id,
-                version: removed.version,
-              }),
-            ],
-          });
-          if (this.#persistence.readProviderInstance(current.id) !== undefined) {
-            throw this.#unavailable();
-          }
-          if (current.driverKind === "claude") {
-            await this.#clearResumeIdentities?.(current.id);
-            // The renderer clears a removed provider's API key, but nothing
-            // else names this token once the instance is gone, and it stays
-            // valid for a year. A store that cannot be reached leaves the
-            // token behind rather than reporting the removal as failed.
-            await this.#clearClaudeHelperSignIn?.(current.id).catch(() => undefined);
-          }
-          this.#invalidateCatalog(current.id, { kind: "all" }, "provider removed", updatedAt);
-          this.#clearRuntimeUsageLimits?.(current.id);
-          return decodeProviderRegistryCommandResult({
-            kind: "provider-removed",
-            instanceId: current.id,
-            version: removed.version,
-          });
-        }
-
-        if (command.kind === "set-provider-model-context-window") {
-          return decodeProviderRegistryCommandResult({
-            kind: "provider-model-updated",
-            snapshot: this.#updateCatalogModel(
-              current.id,
-              command.modelId,
-              updatedAt,
-              ({ contextWindowOverride: _cleared, ...model }) =>
-                command.contextWindow === undefined
-                  ? model
-                  : { ...model, contextWindowOverride: command.contextWindow },
-            ),
-          });
-        }
-
-        if (command.kind === "set-provider-model-data-tags") {
-          if (this.#persistence.readProviderCatalog === undefined) {
-            throw this.#unavailable();
-          }
-          const catalog = this.#persistence.readProviderCatalog(current.id);
-          if (catalog === undefined) throw this.#invalid("Provider model catalog was not found.");
-          const model = catalog.models.find(
-            (candidate) => String(candidate.id) === String(command.modelId),
-          );
-          if (model === undefined) throw this.#invalid("Provider model was not found.");
-          const snapshot = decodeProviderCatalogSnapshot({
-            ...catalog,
-            version: (catalog.version + 1) as typeof catalog.version,
-            models: catalog.models.map((candidate) =>
-              String(candidate.id) === String(command.modelId)
-                ? setProviderModelDataTags(candidate, command.dataTags)
-                : candidate,
-            ),
-            updatedAt,
-          });
-          this.#persistence.journal.append({
-            aggregate: { aggregateType: "provider-catalog", aggregateId: current.id },
-            expectedVersion: catalog.version,
-            events: [this.#pendingEvent("provider.catalog-updated@1", { snapshot })],
-          });
-          const authoritative = this.#persistence.readProviderCatalog(current.id);
-          if (authoritative?.version !== snapshot.version) throw this.#unavailable();
-          return decodeProviderRegistryCommandResult({
-            kind: "provider-model-tags-updated",
-            snapshot: authoritative,
-          });
-        }
-
-        let instance: ProviderInstance;
-        let eventName: string;
-        if (command.kind === "set-provider-data-tags") {
-          instance = setProviderDataTags(current, command.dataTags, updatedAt);
-          eventName = "provider.instance-data-tags-changed@1";
-        } else if (command.kind === "rename-provider") {
-          instance = renameProvider(current, {
-            displayName: command.displayName,
-            existingInstances: instances,
-            updatedAt,
-          });
-          eventName = "provider.instance-renamed@1";
-        } else if (command.kind === "change-provider-binary") {
-          if (
-            current.driverKind !== "opencode" &&
-            current.driverKind !== "codex" &&
-            current.driverKind !== "kimi-code"
-          ) {
-            throw this.#unsupported("This provider does not use a CLI binary.");
-          }
-          if (this.#runtime.activeSessionCount(current.id) !== 0) {
-            throw this.#invalid("Stop active sessions before changing this provider runtime.");
-          }
-          instance = changeProviderBinary(current, {
-            binaryPath: command.binaryPath,
-            activeSessionCount: 0,
-            updatedAt,
-          });
-          await this.#runtime.invalidateRuntime(current.id);
-          eventName = "provider.instance-binary-changed@1";
-        } else if (command.kind === "change-openai-compatible-configuration") {
-          if (current.driverKind !== "openai-compatible") {
-            throw this.#unsupported("This provider does not use HTTP configuration.");
-          }
-          instance = changeOpenAiCompatibleConfiguration(current, command.configuration, updatedAt);
-          await this.#runtime.invalidateRuntime(current.id);
-          eventName = "provider.instance-configuration-changed@1";
-        } else if (command.kind === "change-anthropic-compatible-configuration") {
-          if (current.driverKind !== "anthropic-compatible") {
-            throw this.#unsupported("This provider does not use HTTP configuration.");
-          }
-          instance = changeAnthropicCompatibleConfiguration(
-            current,
-            command.configuration,
-            updatedAt,
-          );
-          await this.#runtime.invalidateRuntime(current.id);
-          eventName = "provider.instance-configuration-changed@1";
-        } else if (command.kind === "change-azure-foundry-configuration") {
-          if (current.driverKind !== "azure-foundry") {
-            throw this.#unsupported("This provider does not use Azure AI Foundry configuration.");
-          }
-          instance = changeAzureFoundryConfiguration(current, command.configuration, updatedAt);
-          await this.#runtime.invalidateRuntime(current.id);
-          eventName = "provider.instance-configuration-changed@1";
-        } else if (command.kind === "change-openai-image-configuration") {
-          if (current.driverKind !== "openai-image") {
-            throw this.#unsupported("This provider does not use OpenAI image configuration.");
-          }
-          instance = changeOpenAiImageConfiguration(current, command.configuration, updatedAt);
-          await this.#runtime.invalidateRuntime(current.id);
-          eventName = "provider.instance-configuration-changed@1";
-        } else if (command.kind === "change-gemini-native-image-configuration") {
-          if (current.driverKind !== "gemini-native-image") {
-            throw this.#unsupported("This provider does not use Gemini image configuration.");
-          }
-          instance = changeGeminiImageConfiguration(current, command.configuration, updatedAt);
-          await this.#runtime.invalidateRuntime(current.id);
-          eventName = "provider.instance-configuration-changed@1";
-        } else if (command.kind === "change-bfl-image-configuration") {
-          if (current.driverKind !== "bfl-image") {
-            throw this.#unsupported("This provider does not use BFL image configuration.");
-          }
-          instance = changeBflImageConfiguration(current, command.configuration, updatedAt);
-          await this.#runtime.invalidateRuntime(current.id);
-          eventName = "provider.instance-configuration-changed@1";
-        } else if (command.kind === "change-ideogram-image-configuration") {
-          if (current.driverKind !== "ideogram-image") {
-            throw this.#unsupported("This provider does not use Ideogram image configuration.");
-          }
-          instance = changeIdeogramImageConfiguration(current, command.configuration, updatedAt);
-          await this.#runtime.invalidateRuntime(current.id);
-          eventName = "provider.instance-configuration-changed@1";
-        } else if (command.kind === "change-claude-configuration") {
-          if (current.driverKind !== "claude") {
-            throw this.#unsupported("This provider does not use Claude configuration.");
-          }
-          const previousDirectory = current.configuration.configDirectory;
-          instance = changeClaudeConfiguration(current, {
-            configuration: command.configuration,
-            activeSessionCount: this.#runtime.activeSessionCount(current.id),
-            updatedAt,
-          });
-          const nextDirectory =
-            instance.driverKind === "claude" ? instance.configuration.configDirectory : undefined;
-          const hostEnvironment = await snapshotClaudeHostEnvironment();
-          const hostConfigDirectory = hostClaudeConfigDirectory(hostEnvironment);
-          const hostSecureDirectory = hostClaudeSecureStorageDirectory(hostEnvironment);
-          this.#refuseTakenClaudeAccountDirectories(
-            this.#persistence.readProviderInstances(),
-            instance,
-            hostConfigDirectory,
-            hostSecureDirectory,
-            current.id,
-          );
-          await this.#runtime.invalidateRuntime(current.id);
-          // Recheck after the await. Create/change on another instance can
-          // claim the same directory while this runtime is invalidated.
-          this.#refuseTakenClaudeAccountDirectories(
-            this.#persistence.readProviderInstances(),
-            instance,
-            hostConfigDirectory,
-            hostSecureDirectory,
-            current.id,
-          );
-          if (nextDirectory !== previousDirectory) {
-            try {
-              await this.#clearClaudeHelperSignIn?.(current.id);
-            } catch (error) {
-              if (error instanceof ProviderServiceError) throw error;
-              throw new ProviderServiceError({
-                category: "unavailable",
-                message:
-                  "Octant could not clear Claude for helpers for the new account directory. Try again.",
-              });
-            }
-          }
-          eventName = "provider.instance-configuration-changed@1";
-        } else if (command.kind === "change-mistral-vibe-configuration") {
-          if (current.driverKind !== "mistral-vibe") {
-            throw this.#unsupported("This provider does not use Mistral Vibe configuration.");
-          }
-          instance = changeMistralVibeConfiguration(
-            current,
-            command.configuration,
-            updatedAt,
-            this.#runtime.activeSessionCount(current.id),
-          );
-          await this.#runtime.invalidateRuntime(current.id);
-          eventName = "provider.instance-configuration-changed@1";
-        } else if (command.kind === "change-grok-configuration") {
-          if (current.driverKind !== "grok") {
-            throw this.#unsupported("This provider does not use Grok Build configuration.");
-          }
-          instance = changeGrokConfiguration(
-            current,
-            command.configuration,
-            updatedAt,
-            this.#runtime.activeSessionCount(current.id),
-          );
-          await this.#runtime.invalidateRuntime(current.id);
-          eventName = "provider.instance-configuration-changed@1";
-        } else if (command.kind === "change-goose-configuration") {
-          if (current.driverKind !== "goose") {
-            throw this.#unsupported("This provider does not use Goose configuration.");
-          }
-          instance = changeGooseConfiguration(
-            current,
-            command.configuration,
-            updatedAt,
-            this.#runtime.activeSessionCount(current.id),
-          );
-          await this.#runtime.invalidateRuntime(current.id);
-          eventName = "provider.instance-configuration-changed@1";
-        } else if (command.kind === "change-glm-configuration") {
-          if (current.driverKind !== "glm") {
-            throw this.#unsupported("This provider does not use GLM Agent configuration.");
-          }
-          instance = changeGlmConfiguration(
-            current,
-            command.configuration,
-            updatedAt,
-            this.#runtime.activeSessionCount(current.id),
-          );
-          await this.#runtime.invalidateRuntime(current.id);
-          eventName = "provider.instance-configuration-changed@1";
-        } else if (command.kind === "change-gemini-configuration") {
-          if (current.driverKind !== "gemini") {
-            throw this.#unsupported("This provider does not use Gemini CLI configuration.");
-          }
-          instance = changeGeminiConfiguration(
-            current,
-            command.configuration,
-            updatedAt,
-            this.#runtime.activeSessionCount(current.id),
-          );
-          await this.#runtime.invalidateRuntime(current.id);
-          eventName = "provider.instance-configuration-changed@1";
-        } else if (command.kind === "change-copilot-configuration") {
-          if (current.driverKind !== "copilot") {
-            throw this.#unsupported("This provider does not use GitHub Copilot configuration.");
-          }
-          instance = changeCopilotConfiguration(
-            current,
-            command.configuration,
-            updatedAt,
-            this.#runtime.activeSessionCount(current.id),
-          );
-          await this.#runtime.invalidateRuntime(current.id);
-          eventName = "provider.instance-configuration-changed@1";
-        } else if (command.kind === "change-cline-configuration") {
-          if (current.driverKind !== "cline") {
-            throw this.#unsupported("This provider does not use Cline configuration.");
-          }
-          instance = changeClineConfiguration(
-            current,
-            command.configuration,
-            updatedAt,
-            this.#runtime.activeSessionCount(current.id),
-          );
-          await this.#runtime.invalidateRuntime(current.id);
-          eventName = "provider.instance-configuration-changed@1";
-        } else if (command.kind === "change-qwen-configuration") {
-          if (current.driverKind !== "qwen") {
-            throw this.#unsupported("This provider does not use Qwen Code configuration.");
-          }
-          instance = changeQwenConfiguration(
-            current,
-            command.configuration,
-            updatedAt,
-            this.#runtime.activeSessionCount(current.id),
-          );
-          await this.#runtime.invalidateRuntime(current.id);
-          eventName = "provider.instance-configuration-changed@1";
-        } else if (command.kind === "change-fx-configuration") {
-          if (current.driverKind !== "fx") {
-            throw this.#unsupported("This provider does not use fx configuration.");
-          }
-          instance = changeFxConfiguration(
-            current,
-            command.configuration,
-            updatedAt,
-            this.#runtime.activeSessionCount(current.id),
-          );
-          await this.#runtime.invalidateRuntime(current.id);
-          eventName = "provider.instance-configuration-changed@1";
-        } else if (command.kind === "change-devin-configuration") {
-          if (current.driverKind !== "devin") {
-            throw this.#unsupported("This provider does not use Devin configuration.");
-          }
-          instance = changeDevinConfiguration(
-            current,
-            command.configuration,
-            updatedAt,
-            this.#runtime.activeSessionCount(current.id),
-          );
-          await this.#runtime.invalidateRuntime(current.id);
-          eventName = "provider.instance-configuration-changed@1";
-        } else if (command.kind === "change-kilo-configuration") {
-          if (current.driverKind !== "kilo") {
-            throw this.#unsupported("This provider does not use Kilo configuration.");
-          }
-          instance = changeKiloConfiguration(
-            current,
-            command.configuration,
-            updatedAt,
-            this.#runtime.activeSessionCount(current.id),
-          );
-          await this.#runtime.invalidateRuntime(current.id);
-          eventName = "provider.instance-configuration-changed@1";
-        } else if (command.kind === "change-pi-configuration") {
-          if (current.driverKind !== "pi") {
-            throw this.#unsupported("This provider does not use Pi configuration.");
-          }
-          instance = changePiConfiguration(
-            current,
-            command.configuration,
-            updatedAt,
-            this.#runtime.activeSessionCount(current.id),
-          );
-          await this.#runtime.invalidateRuntime(current.id);
-          eventName = "provider.instance-configuration-changed@1";
-        } else if (command.kind === "change-oh-my-pi-configuration") {
-          if (current.driverKind !== "oh-my-pi") {
-            throw this.#unsupported("This provider does not use Oh My Pi configuration.");
-          }
-          instance = changeOhMyPiConfiguration(
-            current,
-            command.configuration,
-            updatedAt,
-            this.#runtime.activeSessionCount(current.id),
-          );
-          await this.#runtime.invalidateRuntime(current.id);
-          eventName = "provider.instance-configuration-changed@1";
-        } else if (command.kind === "change-ollama-configuration") {
-          if (current.driverKind !== "ollama") {
-            throw this.#unsupported("This provider does not use Ollama configuration.");
-          }
-          instance = changeOllamaConfiguration(
-            current,
-            command.configuration,
-            updatedAt,
-            this.#runtime.activeSessionCount(current.id),
-          );
-          await this.#runtime.invalidateRuntime(current.id);
-          eventName = "provider.instance-configuration-changed@1";
-        } else {
-          if (
-            command.kind === "set-provider-enabled" &&
-            command.enabled &&
-            !this.#isProviderExecutableAvailable(current)
-          ) {
-            throw this.#invalid(
-              "This provider CLI is not available on this host. Run discovery again or update its binary path before enabling it.",
-            );
-          }
-          instance = setProviderEnabled(current, { enabled: command.enabled, updatedAt });
-          if (!instance.enabled && this.#runtime.activeSessionCount(instance.id) === 0) {
-            await this.#runtime.invalidateRuntime(instance.id);
-          }
-          eventName = "provider.instance-enabled-changed@1";
-        }
-        this.#appendInstance(command.expectedVersion, eventName, instance);
-        const authoritative = this.#authoritativeInstance(instance);
-        if (
-          eventName !== "provider.instance-renamed@1" &&
-          eventName !== "provider.instance-data-tags-changed@1"
-        ) {
-          this.#invalidateCatalog(
-            instance.id,
-            describeProviderConfigurationChange(current, instance),
-            "provider configuration changed",
-            updatedAt,
-          );
-          this.#clearRuntimeUsageLimits?.(instance.id);
-        }
-        if (
-          command.kind === "change-claude-configuration" ||
-          command.kind === "change-mistral-vibe-configuration" ||
-          command.kind === "change-grok-configuration" ||
-          command.kind === "change-glm-configuration" ||
-          command.kind === "change-gemini-configuration" ||
-          command.kind === "change-cline-configuration" ||
-          command.kind === "change-qwen-configuration" ||
-          command.kind === "change-fx-configuration" ||
-          command.kind === "change-devin-configuration"
-        ) {
-          this.#publishSelectedAuthenticationObservation(authoritative);
-        }
-        if (command.kind === "set-provider-enabled" && instance.enabled) {
-          this.#runtime.clearObservedState(instance.id);
-        }
-        return decodeProviderRegistryCommandResult({
-          kind: "provider-updated",
-          instance: authoritative,
-        });
         } finally {
           releaseClaudeClaim?.();
         }

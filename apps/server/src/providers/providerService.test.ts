@@ -1859,7 +1859,7 @@ describe("ProviderService", () => {
     }
   });
 
-  it("refuses a Claude directory another account claims while helpers are being cleared", async () => {
+  it("holds a concurrent Claude directory claim until helper cleanup finishes", async () => {
     let release!: () => void;
     const held = new Promise<void>((resolve) => {
       release = resolve;
@@ -1906,32 +1906,41 @@ describe("ProviderService", () => {
     await vi.waitFor(() => {
       expect(clearClaudeHelperSignIn).toHaveBeenCalledWith(instanceId);
     });
+    const second = fixture.service.execute(windowId, {
+      kind: "change-claude-configuration",
+      instanceId: otherId,
+      expectedVersion: 1,
+      configuration: {
+        kind: "claude-agent-sdk",
+        binaryPath: "/opt/homebrew/bin/claude",
+        authentication: "subscription",
+        configDirectory: claimed,
+        accent: "teal",
+      },
+    });
     await expect(
-      fixture.service.execute(windowId, {
-        kind: "change-claude-configuration",
-        instanceId: otherId,
-        expectedVersion: 1,
-        configuration: {
-          kind: "claude-agent-sdk",
-          binaryPath: "/opt/homebrew/bin/claude",
-          authentication: "subscription",
-          configDirectory: claimed,
-          accent: "teal",
-        },
-      }),
-    ).resolves.toMatchObject({
+      Promise.race([
+        second.then(() => "second-finished" as const),
+        new Promise<"still-waiting">((resolve) => {
+          setTimeout(() => resolve("still-waiting"), 25);
+        }),
+      ]),
+    ).resolves.toBe("still-waiting");
+    expect(clearClaudeHelperSignIn).toHaveBeenCalledTimes(1);
+    release();
+    await expect(first).resolves.toMatchObject({
       kind: "provider-updated",
       instance: { configuration: { configDirectory: claimed } },
     });
-    release();
-    await expect(first).rejects.toMatchObject({
+    await expect(second).rejects.toMatchObject({
       failure: {
         category: "invalid-configuration",
         message: "Another Claude account already uses that config directory.",
       },
     });
-    expect(fixture.persistence.readProviderInstance(instanceId)).toMatchObject({
-      configuration: { configDirectory: "/Users/example/.claude-accounts/personal" },
+    expect(clearClaudeHelperSignIn).not.toHaveBeenCalledWith(otherId);
+    expect(fixture.persistence.readProviderInstance(otherId)).toMatchObject({
+      configuration: { configDirectory: "/Users/example/.claude-accounts/work" },
     });
   });
 

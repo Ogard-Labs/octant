@@ -2046,7 +2046,7 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   the unmodified `claude auth login` command in a terminal for that directory,
   and stay ready only from what the CLI or SDK reports. Octant never reads
   Claude credential files or stores Claude subscription tokens for those
-  accounts.   A confined Plan launch refuses an account directory that
+  accounts. A confined Plan launch refuses an account directory that
   overlaps the checkout, is the user's home, is an ancestor of home,
   is another home subtree such as Documents, `.ssh`, or the shared
   `~/.claude-accounts` parent, or is a shared host root such as

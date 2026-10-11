@@ -465,7 +465,13 @@ export function claudePlanStateDirectoryReopensHome(path: string, home: string):
   return !path.startsWith(`${home}${sep}.claude-accounts${sep}`);
 }
 
-const SHARED_PLAN_STATE_ROOTS = ["/tmp", "/var/tmp", "/private/tmp", "/private/var/tmp", "/dev/shm"];
+const SHARED_PLAN_STATE_ROOTS = [
+  "/tmp",
+  "/var/tmp",
+  "/private/tmp",
+  "/private/var/tmp",
+  "/dev/shm",
+];
 
 /** Plan must not grant a world-shared temp or IPC root as account state. */
 export function claudePlanStateDirectoryIsSharedRoot(path: string): boolean {
