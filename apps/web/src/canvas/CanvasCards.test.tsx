@@ -827,9 +827,10 @@ describe("Canvas create panel and card list", () => {
         "utf8",
       );
       const resting = /\.thread-canvas__body\s*\{[^}]*max-height:\s*(\d+)px/.exec(css)?.[1];
-      const expanded = /data-shown-as="expanded"\]\s*\.thread-canvas__body\s*\{[^}]*max-height:\s*max\((\d+)px,/.exec(
-        css,
-      )?.[1];
+      const expanded =
+        /data-shown-as="expanded"\]\s*\.thread-canvas__body\s*\{[^}]*max-height:\s*max\((\d+)px,/.exec(
+          css,
+        )?.[1];
       expect(resting).toBeDefined();
       expect(Number(expanded)).toBeGreaterThanOrEqual(Number(resting));
     });
