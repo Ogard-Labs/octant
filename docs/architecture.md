@@ -385,7 +385,8 @@ before authoring. Per-block guidance is answered by `describe`. Unscoped
 describe lists the closed block catalogue with one line on when to use each
 guided kind, how common requests map to recipes, what preview measures, and a
 creation example; describe for up to three block kinds returns their canonical
-schemas, each kind's authoring guidance, and worked examples. Unscoped
+schemas, plus authoring guidance and worked examples for the kinds that carry
+them; a plain kind such as `rich-text` returns its schema alone. Unscoped
 describe also lists document recipes: an id, a title, when to use one, and a
 skeleton of block kinds that already exist. The
 host offers an implementation plan, a design spec, an architecture review (its

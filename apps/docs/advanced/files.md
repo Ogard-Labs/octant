@@ -81,11 +81,12 @@ a risks section" revises the existing Canvas: the read-only `list` operation
 returns the thread's Canvases and `read` returns one's current blocks and
 sequence. The tool's always-visible description stays short; its read-only
 `describe` operation carries the detail. Without block kinds it lists the
-supported kinds and when to use each, the document recipes an agent should
+supported kinds and when to use the structured ones, the document recipes an agent should
 start from, and a creation example. Asking to write a plan, review a pull
 request, or summarise research starts from the matching recipe. Requesting up
 to three `blockKinds` returns their exact schemas from the host's block
-contracts, how to author each kind, and worked examples:
+contracts, plus how to author and worked examples for the kinds that carry
+them (plain kinds such as `rich-text` return their schema alone):
 
 ```json
 { "operation": "describe", "blockKinds": ["rich-text", "diagram"] }

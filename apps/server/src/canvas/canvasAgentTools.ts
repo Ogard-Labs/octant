@@ -92,7 +92,7 @@ const canvasDefinitionSchema = {
       minItems: 1,
       maxItems: MAX_DESCRIBED_BLOCK_KINDS,
       description:
-        "For describe: up to three block kinds whose schemas, guidance, and examples to return. Omit to list every kind, the recipes, and a create example.",
+        "For describe: up to three block kinds whose schemas to return, with guidance and examples for the kinds that have them. Omit to list every kind, the recipes, and a create example.",
     },
     title: { type: "string", maxLength: MAX_TITLE_CHARS, description: "Title of a new Canvas." },
     canvasId: {
@@ -473,7 +473,7 @@ function toolDescription(
     scope === "run"
       ? "When the request iterates on earlier work, revise the existing Canvas instead of creating another: list returns this run's Canvases, and read returns one's current blocks and sequence."
       : "When the request iterates on earlier work, revise the thread's existing Canvas instead of creating another: list returns this thread's Canvases, and read returns one's current blocks and sequence.",
-    "Operations: describe, list, read, create, revise, preview. Before you author, call describe: with no block kinds it lists every kind and when to use it, the document recipes to start from, and a create example; with up to three blockKinds it returns their exact schemas, authoring guidance, and examples. Start from a document recipe before inventing a shape.",
+    "Operations: describe, list, read, create, revise, preview. Before you author, call describe: with no block kinds it lists every kind, when to use the structured ones, the document recipes to start from, and a create example; with up to three blockKinds it returns their exact schemas, plus authoring guidance and examples for the kinds that have them. Start from a document recipe before inventing a shape.",
     "Author the content in blocks, not in prompt. Use structured blocks rather than HTML, JavaScript, CSS, or Mermaid; only a design block's frames are HTML and CSS, and they run no script and load nothing. Text renders as plain text, not Markdown: give each section its own heading block (the Canvas title is already shown, so do not repeat it), and use key-value, table, status, or callout blocks instead of Markdown lists, bold, or code spans.",
     "A Canvas is a document: it grants no file, shell, Git, or network access. Creation adds a card to this thread and offers the Canvas in the thread's dock the first time it appears; the user can also select Open Canvas. Do not claim the user has read it or invent a download URL.",
     `Choose where the thread shows it. Use presentation inline for one small visual that answers the question, such as a chart, a few metrics, a short table, or a sequence or state diagram; it is drawn in the conversation just below your reply to this turn, so refer to it as below, and the user can still open it in the sidebar. Leave presentation out (sidebar) for reports, plans, boards, mockups, designs, and anything the user will keep working on. Inline holds at most ${String(CANVAS_INLINE_MAX_BLOCKS)} blocks; when the host shows a card instead, the result says so in presentationNote.`,
