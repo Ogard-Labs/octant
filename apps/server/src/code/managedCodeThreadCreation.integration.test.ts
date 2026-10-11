@@ -227,12 +227,10 @@ function harness(
         ? {}
         : { applySourceFiles: options.applySourceFiles }),
     }),
+    forkConversation: options.forkConversation ?? readableForkConversation,
     ...(options.forkPoint === undefined
       ? {}
-      : {
-          forkPoints: { resolve: vi.fn(async () => options.forkPoint as CodeForkPoint) },
-          forkConversation: options.forkConversation ?? readableForkConversation,
-        }),
+      : { forkPoints: { resolve: vi.fn(async () => options.forkPoint as CodeForkPoint) } }),
   });
   return { codeService, git, receipts, journal, repository };
 }

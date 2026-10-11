@@ -70,6 +70,7 @@ import {
   type CodeSettings,
   type CodeThread,
   type CodeThreadActivity,
+  type CodeThreadForkOrigin,
   type CodeThreadId,
   type CodeThreadView,
   type CodeOperationEventFrame,
@@ -3449,22 +3450,6 @@ export class CodeService {
         FORK_REFUSALS[point.reason],
       );
     }
-    // The provider the fork starts on may not be able to take up the source's
-    // own session at this point, and which can is only known once its first
-    // turn runs. The text handoff is what every fork can fall back to, so a
-    // fork whose handoff cannot be built now is refused before a worktree or
-    // thread exists, rather than created to answer from nothing.
-    const handoff = selectCodeForkHandoff(this.#forkConversation, {
-      source,
-      origin: { threadId: command.sourceThreadId, throughOperationId: command.throughOperationId },
-      projectId: source.projectId,
-    });
-    if (handoff.status === "refused") {
-      throw this.#failure(
-        handoff.reason === "unsupported" ? "unavailable" : "conflict",
-        CODE_FORK_HANDOFF_REFUSALS[handoff.reason],
-      );
-    }
     const { proposedOutcome: _pending, ...deliveryTarget } = source.deliveryTarget;
     let managed: CodeCommand;
     try {
@@ -3509,11 +3494,17 @@ export class CodeService {
    * A fork origin names a thread the host holds, in the same Project, other
    * than the new thread itself. The renderer supplies it; the host must not
    * take it on trust, because the first turn reads the named thread's history.
+   *
+   * The provider the new thread starts on may not be able to take up the
+   * source's own session at the fork point, and which can is only known once
+   * its first turn runs. The text handoff is what every fork can fall back to,
+   * so a fork whose handoff cannot be built now is refused here, before a
+   * worktree or thread exists, rather than created to answer from nothing.
    */
   #requireForkOrigin(
     projectId: string,
     threadId: string,
-    forkedFrom: { readonly threadId: CodeThreadId } | undefined,
+    forkedFrom: CodeThreadForkOrigin | undefined,
   ): void {
     if (forkedFrom === undefined) return;
     if (String(forkedFrom.threadId) === String(threadId)) {
@@ -3522,6 +3513,17 @@ export class CodeService {
     const parent = this.#persistence.readCodeThread(forkedFrom.threadId);
     if (parent === undefined || String(parent.projectId) !== String(projectId)) {
       throw this.#failure("invalid", "A fork must come from a thread in the same Project.");
+    }
+    const handoff = selectCodeForkHandoff(this.#forkConversation, {
+      source: parent,
+      origin: forkedFrom,
+      projectId: parent.projectId,
+    });
+    if (handoff.status === "refused") {
+      throw this.#failure(
+        handoff.reason === "unsupported" ? "unavailable" : "conflict",
+        CODE_FORK_HANDOFF_REFUSALS[handoff.reason],
+      );
     }
   }
 
