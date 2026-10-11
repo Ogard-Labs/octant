@@ -87,6 +87,7 @@ export * from "./settings";
 export * from "./providers";
 export * from "./hostOAuth";
 export * from "./providerDiscovery";
+export * from "./providerDriverCatalog";
 export * from "./providerUsageLimits";
 export * from "./shell";
 export * from "./speech";
