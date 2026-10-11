@@ -6,7 +6,7 @@ import type { ProviderFailure } from "@octant/contracts";
 import { Effect, type Scope } from "effect";
 
 import { prepareConfinedVersionProbe } from "../process/confinedVersionProbe";
-import type { SeatbeltConfinementPort } from "../process/seatbeltProfile";
+import type { ProcessConfinementPort } from "../process/seatbeltProfile";
 import { decodeInitializeResult } from "./codexProtocol";
 import {
   CodexRpcClientFailure,
@@ -40,7 +40,7 @@ export interface CodexProbeOptions {
   readonly shutdownTimeoutMs?: number;
   readonly timeoutMs?: number;
   readonly onProcessStarted?: ProviderProcessStartedListener;
-  readonly confinement?: SeatbeltConfinementPort;
+  readonly confinement?: ProcessConfinementPort;
 }
 
 export interface CodexProcessOptions {
@@ -54,7 +54,7 @@ export interface CodexProcessOptions {
    * Confinement for the version read only. 0142 records that the app-server
    * itself is not wrapped, so this never names the runtime's confinement.
    */
-  readonly versionProbeConfinement?: SeatbeltConfinementPort;
+  readonly versionProbeConfinement?: ProcessConfinementPort;
 }
 
 const DEFAULT_OCTANT_VERSION = "0.0.0";

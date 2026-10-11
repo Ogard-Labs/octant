@@ -6,7 +6,7 @@ import { admittedBundledProviderDriverKinds } from "@octant/plugin-host/provider
 import type { ProviderDiscoveryDescriptor } from "@octant/provider-sdk/discovery";
 import { discoverableDescriptorsForAdmittedDrivers } from "@octant/provider-sdk/driver-plugins";
 import { execVersionRead, prepareConfinedVersionProbe } from "../process/confinedVersionProbe";
-import type { SeatbeltConfinementPort } from "../process/seatbeltProfile";
+import type { ProcessConfinementPort } from "../process/seatbeltProfile";
 
 // ── Budgets ─────────────────────────────────────────────────────────────────
 
@@ -81,7 +81,7 @@ export interface DiscoveryFsPort {
 export interface DiscoveryServiceOptions {
   readonly exec?: DiscoveryExecPort;
   /** Confinement for the version read of a candidate found on the host. */
-  readonly versionProbeConfinement?: SeatbeltConfinementPort;
+  readonly versionProbeConfinement?: ProcessConfinementPort;
   readonly fs?: DiscoveryFsPort;
   readonly environment?: NodeJS.ProcessEnv;
   readonly now?: () => number;
@@ -293,7 +293,7 @@ async function scanDescriptor(
   environment: NodeJS.ProcessEnv,
   now: () => number,
   startTime: number,
-  versionProbeConfinement: SeatbeltConfinementPort | undefined,
+  versionProbeConfinement: ProcessConfinementPort | undefined,
   signal?: AbortSignal,
 ): Promise<{
   readonly candidates: DiscoveryCandidate[];
@@ -401,7 +401,7 @@ async function readConfinedVersion(
   canonicalPath: string,
   exec: DiscoveryExecPort,
   environment: NodeJS.ProcessEnv,
-  versionProbeConfinement: SeatbeltConfinementPort | undefined,
+  versionProbeConfinement: ProcessConfinementPort | undefined,
   signal?: AbortSignal,
 ): Promise<string | undefined> {
   if (signal?.aborted) return undefined;

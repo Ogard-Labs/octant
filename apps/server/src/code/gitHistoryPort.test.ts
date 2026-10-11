@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { decodeGitHistoryQuery } from "@octant/contracts/git-history";
 import { createFakeSandboxConfinement } from "../process/fakeSandboxConfinement";
-import type { SeatbeltConfinementPort } from "../process/seatbeltProfile";
+import type { ProcessConfinementPort } from "../process/seatbeltProfile";
 import { GitHistoryPort } from "./gitHistoryPort";
 
 const directories: string[] = [];
@@ -181,7 +181,7 @@ describe("local Git history", () => {
     directories.push(sibling);
     const worktree = join(sibling, "checkout");
     git(root, "worktree", "add", "-qb", "linked", worktree);
-    const captured: Parameters<SeatbeltConfinementPort["prepare"]>[0][] = [];
+    const captured: Parameters<ProcessConfinementPort["prepare"]>[0][] = [];
     const sandbox = createFakeSandboxConfinement();
     directories.push(sandbox.root);
     // The launch runs the same git the port resolved; the confinement shim is
