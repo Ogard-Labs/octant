@@ -2,7 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import { decodeProviderInstanceId, type ProviderInstance } from "@octant/contracts";
 
-import { claudeHelperSignInFromBroker, readClaudeHelperSignIn } from "./claudeHelperSignIn";
+import {
+  CLAUDE_ISOLATED_PLAN_UNAVAILABLE_MESSAGE,
+  claudeHelperSignInFromBroker,
+  readClaudeHelperSignIn,
+} from "./claudeHelperSignIn";
 import { createClaudeHelperSignInService } from "./claudeHelperSignInRoutes";
 import type { ClaudeSetupTokenOutcome } from "./claudeSetupToken";
 import type { ProviderCredentialStore } from "./credentialBrokerClient";
@@ -79,8 +83,8 @@ describe("Claude for helpers sign-in", () => {
     expect(entries.has(String(instanceId))).toBe(false);
   });
 
-  it("runs helper setup in the isolated account directory", async () => {
-    const { broker } = memoryBroker();
+  it("refuses helper connect on an isolated Claude account", async () => {
+    const { broker, entries } = memoryBroker();
     const seen: Array<string | undefined> = [];
     const isolated = {
       ...claudeInstance("subscription"),
@@ -99,9 +103,16 @@ describe("Claude for helpers sign-in", () => {
         return { kind: "captured", token: TOKEN };
       },
     });
-    await service.connect(instanceId);
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(seen).toEqual(["/Users/example/.claude-accounts/work"]);
+    expect(await service.status(instanceId)).toEqual({
+      kind: "refused",
+      reason: CLAUDE_ISOLATED_PLAN_UNAVAILABLE_MESSAGE,
+    });
+    expect(await service.connect(instanceId)).toEqual({
+      kind: "refused",
+      reason: CLAUDE_ISOLATED_PLAN_UNAVAILABLE_MESSAGE,
+    });
+    expect(seen).toEqual([]);
+    expect(entries.size).toBe(0);
   });
 
   it("says why a connect attempt failed and keeps nothing", async () => {
@@ -147,17 +158,9 @@ describe("Claude for helpers sign-in", () => {
     expect(await store.read(String(instanceId))).toEqual({ kind: "expired" });
   });
 
-  it("keeps no token when the account directory changes while Connect waits", async () => {
+  it("keeps no token when the default account gains a directory while Connect waits", async () => {
     const { broker, entries } = memoryBroker();
-    let instance: ProviderInstance = {
-      ...claudeInstance("subscription"),
-      configuration: {
-        kind: "claude-agent-sdk",
-        binaryPath: "/usr/local/bin/claude",
-        authentication: "subscription",
-        configDirectory: "/Users/example/.claude-accounts/personal",
-      },
-    } as unknown as ProviderInstance;
+    let instance: ProviderInstance = claudeInstance("subscription");
     let finish: (outcome: ClaudeSetupTokenOutcome) => void = () => undefined;
     const service = createClaudeHelperSignInService({
       store: claudeHelperSignInFromBroker(broker),
@@ -185,7 +188,7 @@ describe("Claude for helpers sign-in", () => {
     expect(entries.size).toBe(0);
     expect(await service.status(instanceId)).toEqual({
       kind: "refused",
-      reason: "This Claude account's config directory changed while connecting. Connect again.",
+      reason: CLAUDE_ISOLATED_PLAN_UNAVAILABLE_MESSAGE,
     });
   });
 

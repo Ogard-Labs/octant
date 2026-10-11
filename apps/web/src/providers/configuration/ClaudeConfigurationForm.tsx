@@ -151,7 +151,8 @@ export function ClaudeConfigurationForm(props: ClaudeConfigurationFormProps) {
       ) : null}
       {props.onClaudeHelpers !== undefined &&
       authentication === "subscription" &&
-      props.instance.configuration.authentication === "subscription" ? (
+      props.instance.configuration.authentication === "subscription" &&
+      props.instance.configuration.configDirectory === undefined ? (
         <ClaudeHelperSignIn
           disabled={props.disabled}
           displayName={props.instance.displayName}

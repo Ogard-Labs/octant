@@ -225,24 +225,37 @@ describe("makeClaudeEnvironmentScope", () => {
     expect(heldEnvironment.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
   });
 
-  it("keeps an isolated Claude account on its directory and the connected helper token", async () => {
+  it("keeps an isolated Claude account on its directory and never sets a helper token", async () => {
     const accountDirectory = join(await mkdtemp(join(tmpdir(), "octant-claude-account-")), "work");
     const scope = await Effect.runPromise(Scope.make());
     const acquired = await Effect.runPromise(
       makeClaudeEnvironmentScope("subscription", {
         hostEnvironment: hostileHostEnvironment,
         configDirectory: accountDirectory,
-        oauthToken: "helper-token-sentinel-0123456789",
       }).pipe(Effect.provideService(Scope.Scope, scope)),
     );
 
     expect(acquired.environment.CLAUDE_CONFIG_DIR).toBe(accountDirectory);
     expect(acquired.environment.CLAUDE_SECURESTORAGE_CONFIG_DIR).toBe(accountDirectory);
-    expect(acquired.environment.CLAUDE_CODE_OAUTH_TOKEN).toBe("helper-token-sentinel-0123456789");
+    expect(acquired.environment.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
     expect(acquired.environment.ANTHROPIC_API_KEY).toBeUndefined();
     expect(existsSync(accountDirectory)).toBe(true);
     await Effect.runPromise(Scope.close(scope, Exit.void));
     expect(acquired.environment.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
+  });
+
+  it("refuses a helper token on an isolated Claude account", async () => {
+    const accountDirectory = join(await mkdtemp(join(tmpdir(), "octant-claude-account-")), "work");
+    const exit = await Effect.runPromiseExit(
+      Effect.scoped(
+        makeClaudeEnvironmentScope("subscription", {
+          hostEnvironment: hostileHostEnvironment,
+          configDirectory: accountDirectory,
+          oauthToken: "helper-token-sentinel-0123456789",
+        }),
+      ),
+    );
+    expect(String(exit)).toContain("do not use a helper token");
   });
 
   it("keeps an API-key account on its stable directory instead of deleting it", async () => {

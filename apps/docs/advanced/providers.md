@@ -178,13 +178,18 @@ started with. Octant does not fail over, rotate, or load-balance between
 Claude accounts. An Anthropic API-key account still uses the key you store
 in Octant for that provider, on its own directory when one is set.
 
-Claude Code on a Claude subscription has one extra step for subagents and Plan
-turns. Those runs are read-only and cannot reach the keychain where your Claude
-sign-in lives, so **Settings → Providers → Claude Code** offers **Connect Claude
-for helpers**. Octant runs Claude's own `claude setup-token` on this Mac, you
+Claude Code on the default Claude subscription has one extra step for
+subagents and Plan turns. Those runs are read-only and cannot reach the
+keychain where your Claude sign-in lives, so **Settings → Providers → Claude
+Code** offers **Connect Claude for helpers** on that default account only.
+Octant runs Claude's own `claude setup-token` on this Mac, you
 approve once in the browser window it opens, and Octant keeps the long-lived
-token it prints in its own credential store for that Claude Code provider. You
-never copy the token. Ordinary Claude turns keep using your normal sign-in.
+token it prints in its own credential store for that default Claude Code
+provider. You never copy the token. Ordinary Claude turns keep using your
+normal sign-in. Additional Claude accounts never use that helper token. They
+sign in from their own Claude-owned directory. If a Plan or subagent turn
+on one of those accounts cannot sign in that way, Octant refuses and asks
+you to use the default account or an API-key account for Plan.
 **Disconnect** removes the token from Octant, and removing the provider tries
 to; disconnect first, because removal completes even if the credential store
 cannot be reached. Neither revokes it with Anthropic. If Claude later refuses it, Settings shows it as

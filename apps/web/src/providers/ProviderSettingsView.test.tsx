@@ -1291,6 +1291,39 @@ describe("ProviderSettingsView", () => {
     );
   });
 
+  it("does not offer Connect Claude for helpers on an isolated account", async () => {
+    const props = {
+      ...fixture({
+        instance: decodeProviderInstance({
+          ...claudeProvider(),
+          displayName: "Claude work",
+          configuration: {
+            kind: "claude-agent-sdk",
+            binaryPath: "/opt/homebrew/bin/claude",
+            authentication: "subscription",
+            configDirectory: "/Users/example/.claude-accounts/work",
+          },
+        }),
+      }),
+      onClaudeHelpers: vi.fn(async () => ({ kind: "not-connected" as const })),
+    };
+    renderExpanded(<ProviderSettingsView {...props} />);
+    const card = screen.getByRole("article", { name: "Claude work" });
+    expect(within(card).queryByRole("button", { name: /Connect Claude for helpers/ })).toBeNull();
+  });
+
+  it("still offers Connect Claude for helpers on the default account", async () => {
+    const props = {
+      ...fixture({ instance: claudeProvider() }),
+      onClaudeHelpers: vi.fn(async () => ({ kind: "not-connected" as const })),
+    };
+    renderExpanded(<ProviderSettingsView {...props} />);
+    const card = screen.getByRole("article", { name: "Claude local" });
+    expect(
+      await within(card).findByRole("button", { name: /Connect Claude for helpers/ }),
+    ).toBeVisible();
+  });
+
   it("edits Claude authentication with a write-only key and constrains remote key management", async () => {
     const user = userEvent.setup();
     const props = fixture({ instance: claudeProvider() });

@@ -32,6 +32,7 @@ import {
 import {
   CLAUDE_HELPER_EXPIRED_MESSAGE,
   CLAUDE_HELPER_NOT_CONNECTED_MESSAGE,
+  CLAUDE_ISOLATED_PLAN_UNAVAILABLE_MESSAGE,
   encodeClaudeHelperSignIn,
   type ClaudeHelperSignInPort,
 } from "./claudeHelperSignIn";
@@ -4284,7 +4285,7 @@ describe("Claude for helpers", () => {
     expect(f.process.probeSubscription).toHaveBeenCalledOnce();
   });
 
-  it("keeps an isolated Claude account on its own directory and the connected helper token", async () => {
+  it("never sets a helper token on an isolated Claude account launch", async () => {
     const accountDirectory = "/Users/example/.claude-accounts/work";
     const f = harness("subscription", "current-session", { configDirectory: accountDirectory });
     const acquired = await acquire(f.driver, "chat");
@@ -4296,9 +4297,26 @@ describe("Claude for helpers", () => {
       await acquired.close();
     }
 
-    expect(f.helperSignIn.read).toHaveBeenCalled();
-    expect(f.opens[0]?.authEnvironment.CLAUDE_CODE_OAUTH_TOKEN).toBe(HELPER_TOKEN);
+    expect(f.helperSignIn.read).not.toHaveBeenCalled();
+    expect(f.opens[0]?.authEnvironment.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
     expect(f.opens[0]?.authEnvironment.CLAUDE_CONFIG_DIR).toBe(accountDirectory);
+  });
+
+  it("refuses an isolated Plan launch that cannot sign in from its directory", async () => {
+    const accountDirectory = "/Users/example/.claude-accounts/work";
+    const f = harness("subscription", "current-session", { configDirectory: accountDirectory });
+    vi.mocked(f.process.probeSubscription).mockReturnValue(Effect.succeed("unauthenticated"));
+    const acquired = await acquire(f.driver, "chat");
+    try {
+      const exit = await Effect.runPromiseExit(
+        acquired.connection.start({ sessionId, modelId, executionPolicy: "plan" }),
+      );
+      expect(String(exit)).toContain(CLAUDE_ISOLATED_PLAN_UNAVAILABLE_MESSAGE);
+    } finally {
+      await acquired.close();
+    }
+    expect(f.helperSignIn.read).not.toHaveBeenCalled();
+    expect(f.opens).toHaveLength(0);
   });
 
   it("refuses a Plan turn whose isolated account directory is inside the checkout", async () => {

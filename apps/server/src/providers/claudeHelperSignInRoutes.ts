@@ -8,7 +8,10 @@ import { authenticateProjectRequest } from "../projectBindingRoutes";
 import { readPrincipalRouteContext } from "../principalRouteContext";
 import { isAllowedRendererOrigin, isLoopbackHostname } from "../shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "../windowAuthorityStore";
-import type { ClaudeHelperSignInStore } from "./claudeHelperSignIn";
+import {
+  CLAUDE_ISOLATED_PLAN_UNAVAILABLE_MESSAGE,
+  type ClaudeHelperSignInStore,
+} from "./claudeHelperSignIn";
 import type { ClaudeSetupTokenOutcome } from "./claudeSetupToken";
 
 /** What Settings shows for "Connect Claude for helpers". Never carries the token. */
@@ -59,8 +62,12 @@ export function createClaudeHelperSignInService(dependencies: {
     return instance;
   };
   const status = async (instanceId: ProviderInstanceId): Promise<ClaudeHelperSignInView> => {
-    if (subscriptionInstance(instanceId) === undefined) {
+    const instance = subscriptionInstance(instanceId);
+    if (instance === undefined) {
       return { kind: "refused", reason: "Helpers connect only to a Claude subscription." };
+    }
+    if (instance.configuration.configDirectory !== undefined) {
+      return { kind: "refused", reason: CLAUDE_ISOLATED_PLAN_UNAVAILABLE_MESSAGE };
     }
     if (attempts.has(String(instanceId))) return { kind: "connecting" };
     const stored = await dependencies.store.read(String(instanceId));
@@ -78,6 +85,7 @@ export function createClaudeHelperSignInService(dependencies: {
     connect: async (instanceId) => {
       const instance = subscriptionInstance(instanceId);
       if (instance === undefined) return status(instanceId);
+      if (instance.configuration.configDirectory !== undefined) return status(instanceId);
       const key = String(instanceId);
       if (attempts.has(key)) return { kind: "connecting" };
       refusals.delete(key);

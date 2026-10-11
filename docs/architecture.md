@@ -2184,12 +2184,22 @@ The provider layer is defined by `@octant/provider-sdk` and implemented in
   driver kind, configuration, readiness state, model list, capability report,
   and environment policy. A selected model is `{ hostId, providerInstanceId,
 modelId }`, and the model picker is provider-first. Each Claude instance is
-  one account: isolated accounts set `CLAUDE_CONFIG_DIR` and
-  `CLAUDE_SECURESTORAGE_CONFIG_DIR` to a Claude-owned directory, sign in with
-  the unmodified `claude auth login` command in a terminal for that directory,
-  and stay ready only from what the CLI or SDK reports. Octant never reads
-  Claude credential files or stores Claude subscription tokens for those
-  accounts. A confined Plan launch refuses an account directory that
+  one account. Extra Claude accounts deliberately use their own Claude-owned
+  config directory and their own `claude auth login`. That is a
+  maintainer-approved exception to the rule that a CLI uses its documented
+  host profile and does not take a second login
+  ([0121](decisions/0121-provider-owned-cli-runtime-and-updates.md)): two
+  Claude logins cannot share one profile without sharing credentials and
+  session history. The default account keeps the host profile unchanged
+  (`~/.claude`, or the inherited host overlay). Isolated accounts set
+  `CLAUDE_CONFIG_DIR` and `CLAUDE_SECURESTORAGE_CONFIG_DIR` to that
+  Claude-owned directory, sign in with the unmodified `claude auth login`
+  command in a terminal for that directory, and stay ready only from what
+  the CLI or SDK reports. Octant never reads, stores, or injects Claude
+  OAuth tokens for isolated accounts
+  ([0005](decisions/0005-provider-sdk-contract.md)). The default account's
+  confined helper-token path is unchanged; its removal is a separate
+  remediation. A confined Plan launch refuses an account directory that
   overlaps the checkout, is the user's home, is an ancestor of home,
   is another home subtree such as Documents, `.ssh`, or the shared
   `~/.claude-accounts` parent, or is a shared host root such as
@@ -2198,8 +2208,11 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   `/private` or `/var`. Plan account state must be a dedicated leaf:
   `~/.claude` or a `**/.claude-accounts/<account>` directory. Broad
   prefixes such as `/opt/homebrew` are refused even when they are not
-  on the shared-root list. The only home paths Plan may write are
-  `~/.claude` and a dedicated `~/.claude-accounts/<account>` directory.
+  on the shared-root list. Plan stays read-only for the project and
+  checkout. The only write a confined Plan Claude launch receives is
+  the dedicated leaf under that account's Claude state directory that
+  the runtime needs (`~/.claude` or `**/.claude-accounts/<account>`),
+  plus the launch temporary directory.
   Two Claude instances cannot share one effective config directory,
   including the default account's implicit `~/.claude` or inherited
   `CLAUDE_CONFIG_DIR`, and one instance cannot claim a directory
@@ -2363,8 +2376,10 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   **Delegated** (`delegated-oauth`, including CLI `subscription`): login stays
   on the provider's own runtime; Octant never stores, refreshes, or journals
   those tokens, except the opt-in Claude for helpers token that a confined
-  Claude launch signs in with, which the credential broker holds as the Sandbox
-  paragraph of [security and authority](#security-and-authority) states.
+  launch of the default (directory-less) Claude account signs in with, which
+  the credential broker holds as the Sandbox paragraph of
+  [security and authority](#security-and-authority) states. Isolated Claude
+  accounts never receive that token.
   **Host-driven** (`subscription-oauth`, direct HTTP drivers):
   the host runs a generic authorization-code PKCE runner and a device-code
   runner from a provider descriptor (endpoints, scopes, and a public client
@@ -3581,12 +3596,12 @@ mechanisms are:
   that denies only those paths (`makeAcpConfinementLive`). That wrapper
   confines nothing else.
 
-  | Runtime (module)                                                          | Plan                            | Approval-gated, auto-accept-edits                   | OS egress below Full access                      | Plan's read-only enforced by                   |
-  | ------------------------------------------------------------------------- | ------------------------------- | --------------------------------------------------- | ------------------------------------------------ | ---------------------------------------------- |
-  | ACP, OpenCode, Pi (`acpProcess.ts`, `openCodeProcess.ts`, `piProcess.ts`) | Wrapped                         | Wrapped                                             | `allow`                                          | Octant sandbox: no root write, no exec or fork |
-  | Claude Agent SDK (`claudeProcess.ts`)                                     | Wrapped; Chat children run here | Unwrapped; runtime's own sandbox, project root only | `allow` on Plan; not limited by Octant otherwise | Octant sandbox: no root write, no exec or fork |
-  | Codex app-server (`codexProcess.ts`)                                      | Unwrapped                       | Unwrapped                                           | Not limited by Octant                            | Codex's own `read-only` sandbox                |
-  | Oh My Pi (`ohMyPiProcess.ts`), readiness probe only                       | Unwrapped                       | Unwrapped                                           | Not limited by Octant                            | No turn runs                                   |
+  | Runtime (module)                                                          | Plan                            | Approval-gated, auto-accept-edits                   | OS egress below Full access                      | Plan's read-only enforced by                                                                 |
+  | ------------------------------------------------------------------------- | ------------------------------- | --------------------------------------------------- | ------------------------------------------------ | -------------------------------------------------------------------------------------------- |
+  | ACP, OpenCode, Pi (`acpProcess.ts`, `openCodeProcess.ts`, `piProcess.ts`) | Wrapped                         | Wrapped                                             | `allow`                                          | Octant sandbox: no root write, no exec or fork                                               |
+  | Claude Agent SDK (`claudeProcess.ts`)                                     | Wrapped; Chat children run here | Unwrapped; runtime's own sandbox, project root only | `allow` on Plan; not limited by Octant otherwise | Octant sandbox: project and checkout read-only; write only the dedicated Claude account leaf |
+  | Codex app-server (`codexProcess.ts`)                                      | Unwrapped                       | Unwrapped                                           | Not limited by Octant                            | Codex's own `read-only` sandbox                                                              |
+  | Oh My Pi (`ohMyPiProcess.ts`), readiness probe only                       | Unwrapped                       | Unwrapped                                           | Not limited by Octant                            | No turn runs                                                                                 |
 
   Codex is unwrapped because one app-server carries every thread on a provider
   instance, so it has no one root to bind. The ACP/OpenCode/Pi row has one
@@ -3596,29 +3611,40 @@ mechanisms are:
   an exception. Octant-owned tools those threads reach stay confined either
   way. A runtime's own built-in tools (Codex's shell, Claude's Bash on the
   postures that write) run under that runtime's sandbox, not Octant's.
+  A confined Claude Plan launch may write only the dedicated leaf of that
+  account's Claude state directory (`~/.claude` or
+  `**/.claude-accounts/<account>`) and the launch temporary directory. Shared,
+  temporary, volume, home, checkout, and overlapping paths are refused, so
+  Plan cannot reopen the project or checkout through the account grant.
   A confined Claude launch never reaches the keychain itself: the runtime
   reads its subscription sign-in by running `/usr/bin/security`, which would
   return any keychain item that trusts that tool, including other command-line
   programs' tokens, so the profile runs neither the tool nor reads the keychain
   file. Measured on macOS 27, the security-server lookup alone leaves such a
-  launch signed out, so a confined Claude launch on subscription sign-in, Chat
-  children included, signs in with "Claude for helpers" instead: a long-lived
+  launch signed out, so a confined launch of the default (directory-less)
+  Claude account on subscription sign-in, Chat children included, signs in
+  with "Claude for helpers" instead: a long-lived
   token the runtime's own `claude setup-token` mints after one browser approval.
   The host runs that command on a host-owned pseudo-terminal outside any
   sandbox, reads the printed token from memory, and keeps it in the credential
-  broker under the Claude Code instance, wrapped so it never reads as that
+  broker under the default Claude Code instance, wrapped so it never reads as that
   instance's API key. Removing the provider stops a connect still waiting for
   that approval, and a token that arrives after the instance was removed or
   switched to an API key is discarded, never kept.
-  A confined launch receives it as `CLAUDE_CODE_OAUTH_TOKEN`
+  A confined launch of the default account receives it as `CLAUDE_CODE_OAUTH_TOKEN`
   and no keychain lookup; unconfined launches keep the runtime's own sign-in.
+  Isolated Claude accounts never receive that token. They sign in from their
+  own Claude-owned directory under the same narrow grant. If that cannot sign
+  in, the launch refuses and tells the person to use the default account or an
+  API-key account for Plan.
   The one confined Claude launch with no credential of its own is the
   subscription readiness probe, which runs under Plan; only it keeps the
   security-server lookup (`allowProviderCredentialLookup`), with the keychain
   files and `/usr/bin/security` still denied. That lookup signs no turn in;
   whether the probe's account read depends on it has not been measured.
-  Without a connected token the launch refuses with "Connect Claude for helpers
-  in Settings › Claude Code.", which a parent's `wait` and `status` carry. The
+  Without a connected token a confined default-account launch refuses with
+  "Connect Claude for helpers in Settings › Claude Code.", which a parent's
+  `wait` and `status` carry. The
   runtime never refreshes a handed-in token, so one it refuses is marked
   expired and the same reconnect step is reported. Only a local window may
   connect or disconnect. Disconnecting deletes the token from the broker and

@@ -7,11 +7,12 @@ import type { ProviderCredentialStore } from "./credentialBrokerClient";
  * A Plan launch, which is how every Chat subagent runs, may not reach the
  * login keychain: the runtime reads its own sign-in by running
  * `/usr/bin/security`, which would also hand back any other item that trusts
- * the tool. So a confined launch is given a long-lived token instead, minted
- * once by the runtime's own `claude setup-token` and passed as
- * `CLAUDE_CODE_OAUTH_TOKEN`, the variable the runtime documents for it. The
- * runtime never refreshes such a token, so a token that stops working is
- * marked expired rather than retried.
+ * the tool. So a confined launch of the default account is given a
+ * long-lived token instead, minted once by the runtime's own
+ * `claude setup-token` and passed as `CLAUDE_CODE_OAUTH_TOKEN`, the
+ * variable the runtime documents for it. Isolated accounts never receive
+ * that token. The runtime never refreshes such a token, so a token that
+ * stops working is marked expired rather than retried.
  *
  * The broker keeps one entry per provider instance, which in API-key mode is
  * the raw key. The envelope keeps the two apart: a raw key never reads as a
@@ -21,6 +22,8 @@ export const CLAUDE_HELPER_NOT_CONNECTED_MESSAGE =
   "Connect Claude for helpers in Settings › Claude Code.";
 export const CLAUDE_HELPER_EXPIRED_MESSAGE =
   "Claude for helpers expired. Connect Claude for helpers in Settings › Claude Code.";
+export const CLAUDE_ISOLATED_PLAN_UNAVAILABLE_MESSAGE =
+  "Isolated Claude accounts sign in from their own directory and do not use a helper token. Use the default Claude account or an API-key account for Plan.";
 
 const ENVELOPE_KIND = "claude-helper-sign-in";
 const MAX_TOKEN_CHARACTERS = 4_096;

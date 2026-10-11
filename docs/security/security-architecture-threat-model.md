@@ -52,7 +52,9 @@ implementation backlog this design gates; nothing here weakens an existing contr
 - Provider credentials and OAuth sessions (Keychain / secret-store material as
   opaque broker refs; never journaled, never rendered). Delegated provider-runtime
   OAuth stays out of Octant storage (0005), except the opt-in Claude for helpers
-  token held as a broker ref (see the confined-runtime notes below); host-driven `subscription-oauth`
+  token held as a broker ref for the default Claude account only (see the
+  confined-runtime notes below). Isolated Claude accounts never receive that
+  token. Host-driven `subscription-oauth`
   refresh and access live only as 0054 broker refs (0111).
 - Host identity keys, remote device credentials, and pairing secrets.
 - The append-only event journal: integrity of recorded tool calls, approvals, and authority
@@ -364,7 +366,7 @@ window, or approves an action class the host policy reserves for the local user.
   signed out. Opening the tool and
   the keychain file was rejected, because the tool returns any item whose access list trusts it,
   such as tokens other command-line programs store through it. A confined launch may run neither.
-- **Claude for helpers is a host-held, inference-only token.** A confined Claude launch on
+- **Claude for helpers is a host-held, inference-only token for the default account.** A confined launch of the default (directory-less) Claude account on
   subscription sign-in signs in with a long-lived token minted by the runtime's own
   `claude setup-token` after one browser approval the person gives. The host runs that command
   on a host-owned pseudo-terminal outside any sandbox, holds its output in memory only, never logs
@@ -381,6 +383,10 @@ window, or approves an action class the host policy reserves for the local user.
   broker leaves it behind while the removal completes. Octant has no call that revokes it with
   Anthropic, so a copy taken from a launch's environment stays valid there until it expires or is
   revoked outside Octant. An API-key launch never reads the envelope as its key.
+  Isolated Claude accounts never receive this token: Octant does not mint,
+  store, or inject `CLAUDE_CODE_OAUTH_TOKEN` for them. A confined isolated
+  launch signs in from that account's Claude-owned directory, or refuses and
+  tells the person to use the default account or an API-key account for Plan.
 - Vibe disables its keyring lookup in the confined launch and receives its Mistral API key through
   Octant's `api-key` authentication instead.
 - **Version reads are confined; three readiness probes are not.** Every `--version` read prepares

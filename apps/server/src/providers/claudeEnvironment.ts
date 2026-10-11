@@ -114,11 +114,8 @@ export function sanitizeClaudeEnvironment(
       ...(overrides.apiKey === undefined ? {} : { apiKey: overrides.apiKey }),
     });
     Object.assign(environment, packagedSmokeObserverEnvironment(hostEnvironment));
-    // 0165 is still Proposed. Isolated accounts keep the current confined
-    // helper-token path; the isolation module never holds the token.
-    if (authentication === "subscription" && overrides.oauthToken !== undefined) {
-      environment.CLAUDE_CODE_OAUTH_TOKEN = overrides.oauthToken;
-    }
+    // Isolated accounts sign in from this directory. They never receive a
+    // helper token; the default account keeps that confined path.
     return environment;
   }
 
@@ -191,7 +188,11 @@ export function makeClaudeEnvironmentScope(
           }),
       );
     }
-    const oauthToken = options.oauthToken;
+    if (options.oauthToken !== undefined) {
+      return Effect.fail(
+        failure("invalid-configuration", "Isolated Claude accounts do not use a helper token."),
+      );
+    }
     return Effect.acquireRelease(
       Effect.tryPromise({
         try: async () => {
@@ -200,17 +201,13 @@ export function makeClaudeEnvironmentScope(
             configDirectory,
             environment: sanitizeClaudeEnvironment(authentication, hostEnvironment, {
               configDirectory,
-              ...(oauthToken === undefined ? {} : { oauthToken }),
             }),
           } satisfies ClaudeEnvironmentScope;
         },
         catch: () =>
           failure("provider-failed", "Claude account configuration could not be prepared."),
       }),
-      ({ environment }) =>
-        Effect.sync(() => {
-          delete environment.CLAUDE_CODE_OAUTH_TOKEN;
-        }),
+      () => Effect.void,
     );
   }
 

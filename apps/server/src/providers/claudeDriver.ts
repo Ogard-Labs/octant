@@ -73,6 +73,7 @@ import {
 import {
   CLAUDE_HELPER_EXPIRED_MESSAGE,
   CLAUDE_HELPER_NOT_CONNECTED_MESSAGE,
+  CLAUDE_ISOLATED_PLAN_UNAVAILABLE_MESSAGE,
   readClaudeHelperSignIn,
   type ClaudeHelperSignInPort,
 } from "./claudeHelperSignIn";
@@ -269,7 +270,7 @@ export interface ClaudeDriverOptions {
   readonly instanceId: ProviderInstanceId;
   readonly binaryPath: string;
   readonly authentication: ClaudeAuthentication;
-  /** Claude-owned directory for this account. Isolated launches skip helper tokens. */
+  /** Claude-owned directory for this account. Isolated launches never receive a helper token. */
   readonly configDirectory?: string;
   readonly process: ClaudeProcessPort;
   readonly sdk: ClaudeAgentSdkPort;
@@ -1307,6 +1308,7 @@ function makeConnection(
         }
         const helperToken =
           options.authentication === "subscription" &&
+          options.configDirectory === undefined &&
           CONFINED_CLAUDE_EXECUTION_POLICIES.has(input.executionPolicy)
             ? await connectedHelperToken(options)
             : undefined;
@@ -1350,7 +1352,12 @@ function makeConnection(
             signal,
           );
           if (status === "unauthenticated") {
-            throw failure("unauthenticated", "Claude authentication is required.");
+            throw failure(
+              "unauthenticated",
+              options.configDirectory === undefined
+                ? "Claude authentication is required."
+                : CLAUDE_ISOLATED_PLAN_UNAVAILABLE_MESSAGE,
+            );
           }
         }
         const executionOptions = claudeExecutionOptions(
