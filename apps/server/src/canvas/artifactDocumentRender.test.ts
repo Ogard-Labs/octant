@@ -603,11 +603,13 @@ describe("rendering a canvas as a document", () => {
 
     const html = renderArtifactHtml(source);
     if (html.kind !== "rendered") throw new Error("expected html");
-    expect(html.body.indexOf("<h2>Service health</h2>")).toBeLessThan(
-      html.body.indexOf("Requests per second:"),
-    );
-    expect(html.body.indexOf("Slow search in eu-west")).toBeLessThan(
-      html.body.indexOf("<h2>Scope</h2>"),
-    );
+    const htmlOrder = [
+      "<h2>Service health</h2>",
+      "Requests per second:",
+      "Slow search in eu-west",
+      "<h2>Scope</h2>",
+    ].map((needle) => html.body.indexOf(needle));
+    expect(htmlOrder.every((index) => index >= 0)).toBe(true);
+    expect([...htmlOrder].sort((a, b) => a - b)).toEqual(htmlOrder);
   });
 });

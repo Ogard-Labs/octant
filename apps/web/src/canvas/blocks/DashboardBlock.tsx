@@ -1,4 +1,4 @@
-import { useId, type ReactNode } from "react";
+import { createElement, useId, type ReactNode } from "react";
 import type { CanvasDashboardPlacedCell } from "@octant/domain/canvas-dashboard-layout";
 
 /**
@@ -13,6 +13,11 @@ import type { CanvasDashboardPlacedCell } from "@octant/domain/canvas-dashboard-
  */
 export function DashboardBlock<B>(props: {
   readonly title: string;
+  /**
+   * The title's heading level in its surface's outline: the document puts it
+   * under the Canvas title, a shared snapshot under its own deeper heading.
+   */
+  readonly headingLevel?: 2 | 3 | 4 | 5 | 6;
   readonly columns: number;
   readonly cells: ReadonlyArray<CanvasDashboardPlacedCell<B>>;
   readonly renderCell: (block: B) => ReactNode;
@@ -22,9 +27,11 @@ export function DashboardBlock<B>(props: {
   const titleId = useId();
   return (
     <section aria-labelledby={titleId} className="canvas-dashboard">
-      <h2 className="canvas-dashboard__title" id={titleId}>
-        {props.title}
-      </h2>
+      {createElement(
+        `h${String(props.headingLevel ?? 2)}`,
+        { className: "canvas-dashboard__title", id: titleId },
+        props.title,
+      )}
       <div className="canvas-dashboard__grid" data-columns={String(props.columns)}>
         {props.cells.map((cell) => (
           <div

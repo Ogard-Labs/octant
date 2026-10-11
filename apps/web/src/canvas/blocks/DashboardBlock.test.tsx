@@ -4,6 +4,7 @@ import { CANVAS_SCHEMA_VERSION, decodeCanvasBlock } from "@octant/contracts/canv
 import { opsDashboardExampleBlocks, releaseHealthBoardExampleBlocks } from "@octant/domain";
 import { describe, expect, it, vi } from "vitest";
 import { CanvasDocument } from "../CanvasDocument";
+import { DashboardBlock } from "./DashboardBlock";
 import { canvasFixture } from "../test-fixtures";
 
 const prose = decodeCanvasBlock({
@@ -88,5 +89,26 @@ describe("dashboard layout", () => {
       ".canvas-dashboard__cell > .canvas-block > .canvas-block__comment-marker",
     );
     expect(blockMarkers).toHaveLength(releaseHealthBoardExampleBlocks.length - 1);
+  });
+
+  it("titles the region at the heading level its surface asks for", () => {
+    const { unmount } = render(
+      <CanvasDocument definition={{ ...canvasFixture, blocks: releaseHealthBoardExampleBlocks }} />,
+    );
+    expect(screen.getByRole("heading", { level: 2, name: "Release 4.2 health" })).toBeVisible();
+    unmount();
+    // A shared snapshot nests the document under deeper headings of its own.
+    render(
+      <DashboardBlock
+        cellKey={(block: string) => block}
+        cellKind={() => "status"}
+        cells={[{ block: "api", span: 1 }]}
+        columns={2}
+        headingLevel={6}
+        renderCell={(block) => <p>{block}</p>}
+        title="Snapshot board"
+      />,
+    );
+    expect(screen.getByRole("heading", { level: 6, name: "Snapshot board" })).toBeVisible();
   });
 });

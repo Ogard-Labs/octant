@@ -353,6 +353,7 @@ function SharedSnapshotView(props: {
               data-block-kind="dashboard"
             >
               <DashboardBlock
+                headingLevel={6}
                 title={item.dashboard.title}
                 columns={item.columns}
                 cells={item.cells}
