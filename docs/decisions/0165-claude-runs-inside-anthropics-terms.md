@@ -111,15 +111,18 @@ Whether a confined launch that can read that directory, and cannot run
   a file under the config directory, or only as a Keychain entry keyed
   to it, and what minimum sandbox access does the binary need to sign
   in without `/usr/bin/security` and without the Keychain file? Those
-  two denials are unconditional. If that verification shows the
-  config-directory path cannot work, that instance switches to API-key
-  authentication for every launch. Mixed CLI-plus-API-key is not
-  available. Existing subscription threads cannot resume across that
-  switch: a stored Claude resume cursor records `authentication`, and
-  rewriting it would claim API-key identity for session files the
-  subscription login still owns. The switch is refused, or those
-  threads are marked as requiring a new thread, before
-  `authentication` changes.
+  two denials are unconditional. If that verification shows confined
+  sign-in from Claude-owned storage cannot work, that instance
+  switches to API-key authentication for every launch. Mixed
+  CLI-plus-API-key is not available. Existing subscription threads
+  cannot resume across that switch: a stored Claude resume cursor
+  records `authentication`, and rewriting it would claim API-key
+  identity for session files the subscription login still owns. The
+  switch is refused, or those threads are marked as requiring a new
+  thread, before `authentication` changes. If sign-in works but login
+  cannot be separated from account session history, keep the
+  subscription and refuse confined Chat, Work Plan, and Code Plan
+  launches; that is not the instance-wide API-key fallback.
 - **Several Claude accounts are allowed, later, on this same
   mechanism.** Each account has its own Claude-owned config directory.
   The person signs in once per account with unmodified
@@ -169,11 +172,16 @@ exception; the product path above does not create that.
 ## Consequences
 
 - Confined Plan and subagent launches keep working on the person's
-  subscription only if the macOS must-verify succeeds. If it fails, that
+  subscription only if the macOS must-verify shows confined sign-in
+  from Claude-owned storage. If that sign-in cannot work, the
   instance switches to an Anthropic API key for every launch until a
   later change finds a Claude-owned storage path that does not require
   Octant to hold a token. Existing subscription threads do not resume
-  after that switch; the person starts a new thread.
+  after that switch; the person starts a new thread. If sign-in works
+  but login cannot be separated from account session history, keep
+  the subscription: refuse confined Chat, Work Plan, and Code Plan
+  launches, and leave unconfined turns on the CLI login. That
+  measured case is not the instance-wide API-key fallback.
 - Settings loses **Connect Claude for helpers**. Stored helper tokens
   are deleted from the broker, and the person is told to revoke them
   with Anthropic. A test or lint refuses any Octant path that sets
