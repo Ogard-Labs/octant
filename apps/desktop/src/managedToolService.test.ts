@@ -100,7 +100,8 @@ describe("managed tool service", () => {
     try {
       const status = await service.status();
       expect(status.supported).toBe(true);
-      expect(status.automaticUpdates).toBe(true);
+      // npm verifies integrity, not a publisher, so a new release waits for a person.
+      expect(status.automaticUpdates).toBe(false);
       expect(status.tools.map((tool) => tool.tool)).toEqual(
         platformTools.map((descriptor) => descriptor.tool),
       );
@@ -135,17 +136,35 @@ describe("managed tool service", () => {
     }
   });
 
+  it("launches a tool without the desktop's provider keys or tokens", async () => {
+    const descriptor = platformTools[0];
+    if (descriptor === undefined) throw new Error("expected a platform tool");
+    const previous = process.env.OCTANT_TEST_PROVIDER_API_KEY;
+    process.env.OCTANT_TEST_PROVIDER_API_KEY = "sk-test-not-for-tools";
+    const service = makeService();
+    try {
+      const spec = await service.launchSpec(descriptor.tool, []);
+      expect(spec?.env.OCTANT_TEST_PROVIDER_API_KEY).toBeUndefined();
+      expect(spec?.env.PATH).toBe(process.env.PATH);
+      expect(spec?.env.HOME).toBe(process.env.HOME);
+    } finally {
+      await service.close();
+      if (previous === undefined) delete process.env.OCTANT_TEST_PROVIDER_API_KEY;
+      else process.env.OCTANT_TEST_PROVIDER_API_KEY = previous;
+    }
+  });
+
   it("remembers the update preference across restarts", async () => {
     let service = makeService();
     try {
-      await service.configure({ automaticUpdates: false });
+      await service.configure({ automaticUpdates: true });
     } finally {
       await service.close();
     }
     service = makeService();
     try {
       const status = await service.status();
-      expect(status.automaticUpdates).toBe(false);
+      expect(status.automaticUpdates).toBe(true);
     } finally {
       await service.close();
     }
