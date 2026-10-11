@@ -105,16 +105,6 @@ command definition. Cancellation during discovery prevents process launch; runti
 shutdown also cancels pending discovery and waits for it to settle. Thread and
 checkout authority checks still precede both run and cancellation.
 
-The Code composer's attached checkout strip keeps its height and border when
-checkout metadata is unavailable. Missing project, branch and diff values stay
-blank; unavailable checkout actions are not shown.
-
-Work follow-up composers use the same attached context strip for their project and
-working folder. Full paths require a matching project binding revision; Work has
-no branch controls. Pane headers show thread titles without repeated project
-labels. Workspace and dock tabs share one compact recipe for geometry, selection,
-and close controls.
-
 ## Overview and principles
 
 Octant is one Electron application that hosts a Bun HTTP server, a React
@@ -1008,8 +998,12 @@ Under the desktop app that injection is the native device helper of 0137: a
 tap is a point on the captured screen, typed text is letters, digits, spaces
 and new lines, and every refusal names the helper's own reason. Typed text is
 sent only when the guest keyboard is a QWERTY software layout with an
-Automatic hardware layout in a supported Latin-script language; any other or
-unreadable layout refuses the whole string. Evidence for a failed typing keeps
+Automatic hardware layout in English, Norwegian (`nb`, `nn`, `no`), Danish,
+Swedish, Finnish, Dutch, Spanish, or Portuguese
+(`apps/desktop/native/device-helper/KeyUsages.swift`). The list was derived
+from Apple's QWERTY hardware layouts, where A–Z and the unshifted digit row sit
+on US key positions; AZERTY (French), QWERTZ (German), Turkish, and every other
+or unreadable layout refuse the whole string rather than type the wrong text. Evidence for a failed typing keeps
 only the helper's refusal code, never a message that could quote the text. A
 point outside the screen is refused (`point-off-screen`), never clamped.
 Without that
@@ -2680,7 +2674,9 @@ modelId }`, and the model picker is provider-first. Discovery can find
   Gateway API key, and cannot read or write the Project root's `AGENTS.md`,
   `.mcp.json`, `.fx.json`, or `.agents`. Image profiles are
   recorded in [decisions/0055-image-generation-provider-profiles.md](decisions/0055-image-generation-provider-profiles.md).
-  Generation itself is a journaled job with OpenAI and Gemini adapters, a
+  Generation itself is a journaled job with adapters for the dedicated image
+  kinds `openai-image`, `gemini-native-image`, `bfl-image` (Black Forest Labs),
+  and `ideogram-image`, and for an OpenAI-compatible custom image source, a
   bounded generated-image attachment scope, and usage rows attributed as
   `image-generation`. A job uses exactly one profile; a safety refusal ends it
   and is never retried elsewhere; a job found queued or running after a
@@ -3910,9 +3906,6 @@ Simulator.app, `serve-sim`, or `serve-avd`.
 The approved design bounds a feature's reach through public, provider-neutral
 ports. New providers and tools use `@octant/provider-sdk`, `@octant/plugin-api`,
 and `@octant/plugin-host`; they do not gain direct access to host internals.
-A replica-store contribution offers list, get, and put-if-absent. The
-synced-folder store ships in-tree on that seam and writes only under the
-folder the person picked.
 Integration and board modules receive typed, capability-scoped ports, without raw
 filesystem, shell, or credential handles. OAuth access and refresh tokens remain
 in the host credential service; plugin state contains only opaque references.
@@ -3931,6 +3924,7 @@ feature is already an independently packaged plugin:
 | Browser/computer use, agent hierarchy, remote/mobile, Apple workbench | Only presentation and optional adapters are extraction candidates; core capability, lifecycle, and security remain app-managed |
 | Marketplace and plugin registry                                       | Stay in the host because they admit and activate other components                                                              |
 | Provider drivers                                                      | Bundled vendor plugins through provider-sdk; generic ACP transport and honest-capability enforcement stay host-owned           |
+| Image adapters (OpenAI, Gemini, BFL, Ideogram)                        | In-tree adapters the image job service picks directly; move behind the provider seam, image jobs stay host-owned               |
 
 The schema API, renderer contribution registry, vendor driver admission,
 Integration port, and plugin-module Settings/sidebar seams exist. The API is a
@@ -4665,13 +4659,11 @@ nothing first-party.
 
 ## Current Release Boundary
 
-The agent contract in `AGENTS.md` owns the Current Release Boundary wording.
-The first shipping surface is the Apple Silicon technical preview with the
-provider-neutral plugin and skill marketplace. Developer ID signing,
-notarization, and in-app update are one deliverable: an updater on an unsigned
-macOS app is an unauthenticated code-delivery channel, and Squirrel.Mac
-refuses a replacement that does not satisfy the running app's designated
-requirement anyway.
+The [Current Release Boundary in `AGENTS.md`](../AGENTS.md#current-release-boundary)
+is the one statement of what the first release includes and defers. This
+section owns the architectural rules behind it. On macOS, Squirrel.Mac refuses
+a replacement that does not satisfy the running app's designated requirement,
+so signing, notarization, and update ship as one deliverable.
 
 Desktop is one product on macOS, Linux, and Windows; platform differences are
 fail-closed posture, never a second app. The desktop process owns its local
@@ -4734,18 +4726,10 @@ storage and no relay for them. The storage provider can read the files. That
 does not open a hosted relay or an Octant cloud account. See
 [0163](decisions/0163-artifact-replicas-in-storage-the-user-owns.md).
 
-Two shipped capabilities are in scope under their rules above: the person's
-confirmed [pull-request merge](#modes-chat-work-and-code) from a local window,
-and host-local [routines](#modes-chat-work-and-code) in the Automation Center.
-Neither opens other pull-request mutation, agent-initiated merge, cloud
-scheduling, or a hosted wake service.
-
-Two holds stay Later until documented approved designs, published seams, and an
-explicit maintainer request open them:
-[connector / OAuth marketplace and full LSP / extension host / debugger](release-boundary-holds.md).
-The [roadmap Later](roadmap.md#later) list names the same deferrals among
-others. Neither hold is opened by plugin work, a first-party Integration, or
-Monaco and external-editor handoff.
+The start gates for the connector / OAuth marketplace and full LSP /
+extension host / debugger holds are in
+[release-boundary holds](release-boundary-holds.md). Neither hold is opened by
+plugin work, a first-party Integration, or Monaco and external-editor handoff.
 
 ## Development loop
 
