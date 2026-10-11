@@ -1493,6 +1493,56 @@ describe("ProviderService", () => {
     });
   });
 
+  it.skipIf(process.platform !== "darwin")(
+    "refuses a Claude account directory that differs only by case",
+    async () => {
+      const fixture = serviceFixture();
+      await fixture.service.execute(windowId, {
+        kind: "create-claude-provider",
+        instanceId,
+        expectedVersion: 0,
+        displayName: "Claude personal",
+        configuration: {
+          kind: "claude-agent-sdk",
+          binaryPath: "/opt/homebrew/bin/claude",
+          authentication: "subscription",
+        },
+      });
+      const directory = `${homedir()}/.claude-accounts/Work`;
+      await fixture.service.execute(windowId, {
+        kind: "create-claude-provider",
+        instanceId: otherId,
+        expectedVersion: 0,
+        displayName: "Claude work",
+        configuration: {
+          kind: "claude-agent-sdk",
+          binaryPath: "/opt/homebrew/bin/claude",
+          authentication: "subscription",
+          configDirectory: directory,
+          accent: "teal",
+        },
+      });
+      await expect(
+        fixture.service.execute(windowId, {
+          kind: "change-claude-configuration",
+          instanceId,
+          expectedVersion: 1,
+          configuration: {
+            kind: "claude-agent-sdk",
+            binaryPath: "/opt/homebrew/bin/claude",
+            authentication: "subscription",
+            configDirectory: `${homedir()}/.claude-accounts/work`,
+          },
+        }),
+      ).rejects.toMatchObject({
+        failure: {
+          category: "invalid-configuration",
+          message: "Another Claude account already uses that config directory.",
+        },
+      });
+    },
+  );
+
   it("refuses a Claude account directory that shares a symlink ancestor with another account", async () => {
     const parent = join(tmpdir(), `octant-claude-dir-${crypto.randomUUID()}`);
     const realAccounts = join(parent, "real");

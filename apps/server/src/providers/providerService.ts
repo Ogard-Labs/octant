@@ -2077,24 +2077,29 @@ function claudeAccountDirectoryKey(directory: string): string {
     end -= 1;
   }
   const resolved = resolve(directory.slice(0, end));
+  let canonical: string;
   try {
-    return realpathSync(resolved);
+    canonical = realpathSync(resolved);
   } catch {
     // The leaf may not exist yet. Walk up to the nearest existing
     // ancestor so two symlink spellings of the same future directory
     // still compare as one claim.
     const parts: string[] = [];
     let current = resolved;
+    canonical = resolved;
     while (current !== dirname(current)) {
       try {
-        return parts.reduce((parent, part) => join(parent, part), realpathSync(current));
+        canonical = parts.reduce((parent, part) => join(parent, part), realpathSync(current));
+        break;
       } catch {
         parts.unshift(basename(current));
         current = dirname(current);
       }
     }
-    return resolved;
   }
+  // macOS's default volume is case-insensitive. Two not-yet-created
+  // leaves that differ only by case open the same directory after mkdir.
+  return process.platform === "darwin" ? canonical.toLowerCase() : canonical;
 }
 
 function hostDirectoryClaim(directory: string | undefined): string | undefined {

@@ -61,7 +61,11 @@ import {
   type ClaudeEnvironmentScope,
   type ClaudeEnvironmentScopeOptions,
 } from "./claudeEnvironment";
-import { CONFINED_CLAUDE_EXECUTION_POLICIES, type ClaudeProcessPort } from "./claudeProcess";
+import {
+  claudePlanStateDirectoryReopensHome,
+  CONFINED_CLAUDE_EXECUTION_POLICIES,
+  type ClaudeProcessPort,
+} from "./claudeProcess";
 import {
   CLAUDE_HELPER_EXPIRED_MESSAGE,
   CLAUDE_HELPER_NOT_CONNECTED_MESSAGE,
@@ -177,12 +181,7 @@ function claudeAccountDirectoryBroadensPlan(
   isProjectConfinedPath: (projectRoot: string, absolutePath: string) => boolean,
 ): boolean {
   const directory = configDirectory.replace(/\/+$/, "") || "/";
-  if (
-    directory === "/" ||
-    directory === homedir() ||
-    homedir().startsWith(`${directory}/`) ||
-    directory === projectRoot
-  )
+  if (claudePlanStateDirectoryReopensHome(directory, homedir()) || directory === projectRoot)
     return true;
   if (projectRoot.startsWith(`${directory}/`)) return true;
   try {

@@ -436,13 +436,11 @@ function planStateDirectories(
   })();
   for (const path of canonicalDirectories) {
     // A write grant that is the checkout, sits inside it, or contains it
-    // reopens Plan's bound root. Home and `/` are the same class of grant
-    // even when this checkout lives somewhere else: the runtime would then
-    // write the rest of the tree (0145).
+    // reopens Plan's bound root. Home, its ancestors, `/`, and arbitrary
+    // home subtrees (Documents, .ssh) are the same class of grant: only
+    // Claude's own state directories under home may be writable.
     if (
-      path === "/" ||
-      path === home ||
-      home.startsWith(`${path}${sep}`) ||
+      claudePlanStateDirectoryReopensHome(path, home) ||
       path === boundRoot ||
       path.startsWith(`${boundRoot}${sep}`) ||
       boundRoot.startsWith(`${path}${sep}`)
@@ -454,6 +452,17 @@ function planStateDirectories(
     }
   }
   return canonicalDirectories;
+}
+
+/** Plan may write Claude's own state dirs, not the rest of the home tree. */
+export function claudePlanStateDirectoryReopensHome(path: string, home: string): boolean {
+  if (path === "/" || path === home || home.startsWith(`${path}${sep}`)) return true;
+  if (!path.startsWith(`${home}${sep}`)) return false;
+  if (path === `${home}${sep}.claude`) return false;
+  return !(
+    path === `${home}${sep}.claude-accounts` ||
+    path.startsWith(`${home}${sep}.claude-accounts${sep}`)
+  );
 }
 
 function claudeRuntimeStateDirectories(environment: SpawnOptions["env"]): ReadonlyArray<string> {
