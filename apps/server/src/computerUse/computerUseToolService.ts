@@ -16,8 +16,11 @@ import {
 } from "@octant/contracts";
 import { validateComputerUseSelection } from "@octant/plugin-host/computer-use";
 import { isToolAllowedByAllowlist } from "@octant/domain";
-import type { AppManagedToolSet } from "../providers/appManagedToolSet";
-import { createComputerUsePlugin } from "../plugins/computerUse/computerUsePlugin";
+import { withToolFamilyHelp, type AppManagedToolSet } from "../providers/appManagedToolSet";
+import {
+  COMPUTER_USE_TOOL_HELP,
+  createComputerUsePlugin,
+} from "../plugins/computerUse/computerUsePlugin";
 import { createComputerUseRuntime, type ComputerUseEvidenceEvent } from "./computerUseRuntime";
 import type { DesktopComputerUsePort } from "./desktopComputerUsePort";
 import { ToolCallAuthorityService } from "../toolCallAuthorityService";
@@ -484,7 +487,7 @@ export function createComputerUseToolService(options: {
       const lifetime = new AbortController();
       const inFlight = new Set<Promise<ComputerControlResult>>();
       let closing: Promise<void> | undefined;
-      return {
+      const tools: AppManagedToolSet = {
         definitions: plugin.definitions,
         close: () => {
           closing ??= (async () => {
@@ -519,6 +522,7 @@ export function createComputerUseToolService(options: {
           return { result, isError: result.kind === "refused" || result.kind === "failed" };
         },
       };
+      return withToolFamilyHelp(tools, COMPUTER_USE_TOOL_HELP);
     },
     close: async () => {
       grants.clear();
