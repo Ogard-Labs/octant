@@ -266,22 +266,32 @@ export function designAssetUrls(
   return urls;
 }
 
+// What stands right before an address the browser loads, in the positions the
+// host's markup policy admits a reference: a `url()`, a `src`, `srcset`,
+// `poster`, or `background` value (or a later srcset candidate), and a quoted
+// `image-set()` candidate. The same token in prose, `alt`, or any other
+// attribute is the author's text and is left as written.
+const ADDRESS_LEAD = String.raw`(?:url\(\s*["']?\s*|(?:^|[\s"'/])(?:src|srcset|poster|background)\s*=\s*["']?\s*|(?:^|[\s"'/])srcset\s*=\s*(?:"[^"]*?,\s*|'[^']*?,\s*)|image-set\((?:[^()]|\([^()]*\))*?["']\s*)`;
 const ASSET_REFERENCE = new RegExp(
-  `${CANVAS_DESIGN_ASSET_SCHEME.replace(/[-:]/g, "\\$&")}([A-Za-z0-9][A-Za-z0-9._-]{0,63})`,
-  "g",
+  `(?<=${ADDRESS_LEAD})${CANVAS_DESIGN_ASSET_SCHEME.replace(/[-:]/g, "\\$&")}([A-Za-z0-9][A-Za-z0-9._-]{0,63})`,
+  "gi",
 );
 
 /**
- * Every literal `octant-asset:<id>` in markup or styles, replaced with the
- * address it is drawn from. The host's markup policy admits only literal
- * references to declared ids, so an id with no address here was not declared
- * and is drawn as a placeholder rather than left for the browser to request.
+ * Every literal `octant-asset:<id>` in an address position of markup or
+ * styles, replaced with the address it is drawn from. The host's markup policy
+ * admits only literal references to declared ids, so an id with no address
+ * here was not declared and is drawn as a placeholder rather than left for the
+ * browser to request. The lead is matched without regard to case, as a browser
+ * reads it, but only the scheme as written is replaced, the one spelling the
+ * policy admits.
  */
 function withAssets(markup: string, urls: ReadonlyMap<string, string> | undefined): string {
   if (!markup.includes(CANVAS_DESIGN_ASSET_SCHEME)) return markup;
-  return markup.replace(
-    ASSET_REFERENCE,
-    (_reference, id: string) => urls?.get(id) ?? designAssetPlaceholder(id, "refused"),
+  return markup.replace(ASSET_REFERENCE, (reference: string, id: string) =>
+    reference.startsWith(CANVAS_DESIGN_ASSET_SCHEME)
+      ? (urls?.get(id) ?? designAssetPlaceholder(id, "refused"))
+      : reference,
   );
 }
 

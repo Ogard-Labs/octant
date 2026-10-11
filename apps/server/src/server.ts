@@ -8629,7 +8629,12 @@ export function startOctantServer(
           return { status: "unavailable", reason: "refused" };
         }
         if (artifact.size > maximumBytes) return { status: "unavailable", reason: "too-large" };
-        const read = await imageJobService.readArtifact(job.id, artifact.attachmentId);
+        // The attachment store throws when a finalized image's file is gone or
+        // no longer matches its hash; that image is missing, and the design's
+        // other assets still resolve.
+        const read = await imageJobService
+          .readArtifact(job.id, artifact.attachmentId)
+          .catch(() => undefined);
         return read === undefined
           ? { status: "unavailable", reason: "missing" }
           : { status: "read", bytes: read.bytes };
@@ -8637,7 +8642,13 @@ export function startOctantServer(
       projectFile: async ({ mode, projectId, threadId, path, maximumBytes }) => {
         let root: string | undefined;
         if (mode === "code") {
-          root = await codeThreadCheckoutRoot(threadId, projectId);
+          // The same binding-revision and checkout-availability checks as any
+          // Canvas scope, so a rebound Project or a waiting checkout refuses.
+          const workspace = resolveCanvasWorkspace({ mode: "code", threadId });
+          root =
+            workspace?.kind === "code-worktree" && String(workspace.projectId) === projectId
+              ? await codeThreadCheckoutRoot(threadId, projectId)
+              : undefined;
         } else {
           const workspace = resolveCanvasWorkspace({ mode: "work", threadId });
           const project = persistence.readProject(projectId as never);
