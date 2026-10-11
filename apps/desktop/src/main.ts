@@ -146,9 +146,12 @@ import { createDesktopBackendSupervisor } from "./desktopBackendSupervision";
 import {
   buildMenuBarItems,
   formatRedactedHostDiagnostics,
-  decodeMenuBarTasks,
-  type WindowMenuBarTask,
+  decodeMenuBarOpenThread,
+  MenuBarFleet,
+  menuBarTitle,
+  type MenuBarOpenThread,
 } from "./menuBar";
+import { createMenuBarFleetReader } from "./menuBarFleetRead";
 import { createHostTrayImage, shouldPresentHostTray } from "./menuBarIcon";
 import { buildQuitConfirmation, evaluateQuitRequest } from "./quitGuard";
 import {
@@ -192,7 +195,7 @@ import { markHostInteraction } from "./interactionTrace";
 
 const IPC_CHANNELS = {
   nativeMenu: "octant:menu:popup",
-  menuBarTasks: "octant:menu:tasks",
+  menuBarOpenThread: "octant:menu:open-thread",
   menuBarTask: "octant:menu:task",
   attentionBadge: "octant:attention:badge",
   attentionNotify: "octant:attention:notify",
@@ -2024,7 +2027,7 @@ async function createWindow(): Promise<void> {
 
       window.webContents.on("did-start-navigation", (_event, _url, isInPlace, isMainFrame) => {
         if (!isMainFrame || isInPlace) return;
-        menuBarTasks.delete(window.id);
+        menuBarOpenThreads.delete(window.id);
         updateHostTray();
       });
       window.webContents.on("did-finish-load", () => {
@@ -2265,7 +2268,7 @@ async function openSecondaryProjectWindow(target: ProjectWindowTarget): Promise<
         );
         window.webContents.on("did-start-navigation", (_event, _url, isInPlace, isMainFrame) => {
           if (!isMainFrame || isInPlace) return;
-          menuBarTasks.delete(window.id);
+          menuBarOpenThreads.delete(window.id);
           updateHostTray();
         });
         window.webContents.on("did-finish-load", () => {
@@ -2328,28 +2331,89 @@ function hostStatusLabel(): string {
   return "Stopped";
 }
 
-const menuBarTasks = new Map<number, ReadonlyArray<WindowMenuBarTask>>();
+/** The thread each trusted window last reported showing; `undefined` when none. */
+const menuBarOpenThreads = new Map<number, MenuBarOpenThread | undefined>();
+const menuBarFleet = new MenuBarFleet();
+let menuBarFleetInstanceId: string | undefined;
+/** A row picked while no window could open it yet; the next ready main window takes it. */
+let pendingMenuBarOpen: MenuBarOpenThread | undefined;
+const menuBarFleetReader = createMenuBarFleetReader({
+  register: (host) =>
+    createProjectWindowAuthority({
+      desktopBridgeSecret,
+      serverUrl: host.url,
+      windowId: randomUUID(),
+    }),
+  fetch: (input, init) => globalThis.fetch(input, init),
+});
+
+function watchedMenuBarThreads(): ReadonlyArray<MenuBarOpenThread> {
+  const watched: MenuBarOpenThread[] = [];
+  for (const [windowId, thread] of menuBarOpenThreads) {
+    const window = BrowserWindow.fromId(windowId);
+    if (thread !== undefined && window !== null && !window.isDestroyed() && window.isFocused()) {
+      watched.push(thread);
+    }
+  }
+  return watched;
+}
+
+async function refreshMenuBarFleet(host: { readonly url: string; readonly instanceId: string }) {
+  if (menuBarFleetInstanceId !== host.instanceId) {
+    menuBarFleet.clear();
+    menuBarFleetInstanceId = host.instanceId;
+  }
+  const activity = await menuBarFleetReader.read(host);
+  // A failed read says nothing about which threads finished, so it changes nothing.
+  if (activity === undefined || menuBarFleetInstanceId !== host.instanceId) return;
+  menuBarFleet.observe(activity, watchedMenuBarThreads());
+}
+
+function sendMenuBarOpen(window: BrowserWindow, thread: MenuBarOpenThread): void {
+  if (window.isMinimized()) window.restore();
+  window.show();
+  window.focus();
+  window.webContents.send(IPC_CHANNELS.menuBarTask, thread);
+}
+
+async function openMenuBarThread(thread: MenuBarOpenThread): Promise<void> {
+  menuBarFleet.looked(thread);
+  updateHostTray();
+  const ready =
+    mainWindow !== undefined && !mainWindow.isDestroyed() && menuBarOpenThreads.has(mainWindow.id)
+      ? mainWindow
+      : undefined;
+  if (ready !== undefined) {
+    sendMenuBarOpen(ready, thread);
+    return;
+  }
+  // No window can take it yet: open one, and hand it the thread once its
+  // renderer reports it is ready to open threads.
+  pendingMenuBarOpen = thread;
+  await ensureMenuWindow();
+  mainWindow?.show();
+  mainWindow?.focus();
+}
 
 function updateHostTray(): void {
   if (hostTray === undefined) return;
   const snapshot = hostLifecycle.snapshot();
-  const items = buildMenuBarItems(snapshot, [...menuBarTasks.values()].flat());
+  const fleet = snapshot.state === "stopped" ? [] : menuBarFleet.threads();
+  const items = buildMenuBarItems(snapshot, fleet);
   const toTemplate = (item: (typeof items)[number]): MenuItemConstructorOptions => {
     if (item.id === "separator") return { type: "separator" };
-    const task = item.task;
-    if (task !== undefined)
+    const thread = item.thread;
+    if (thread !== undefined)
       return {
         label: item.label,
         enabled: item.enabled,
+        ...(item.toolTip === undefined ? {} : { toolTip: item.toolTip }),
         click: () => {
-          const window = BrowserWindow.fromId(task.windowId);
-          if (window === null || window.isDestroyed()) return;
-          if (window.isMinimized()) window.restore();
-          window.show();
-          window.focus();
-          window.webContents.send(IPC_CHANNELS.menuBarTask, {
-            mode: task.mode,
-            threadId: task.threadId,
+          void openMenuBarThread({ mode: thread.mode, threadId: thread.threadId }).catch(() => {
+            dialog.showErrorBox(
+              "Octant could not open that thread",
+              "Open Octant and choose the thread from the sidebar.",
+            );
           });
         },
       };
@@ -2364,7 +2428,7 @@ function updateHostTray(): void {
   const template = items.map(toTemplate);
   hostTray.setContextMenu(Menu.buildFromTemplate(template));
   hostTray.setToolTip(`Octant — ${hostStatusLabel()}`);
-  hostTray.setTitle?.(snapshot.attentionRequired ? "!" : "");
+  hostTray.setTitle?.(menuBarTitle(snapshot, fleet));
 }
 
 function ensureHostTray(): void {
@@ -2407,6 +2471,8 @@ function destroyHostTray(): void {
   }
   hostTray?.destroy();
   hostTray = undefined;
+  menuBarFleet.clear();
+  void menuBarFleetReader.revoke();
 }
 
 async function refreshHostActivity(): Promise<void> {
@@ -2454,6 +2520,10 @@ async function refreshHostActivity(): Promise<void> {
     activeAgentCount: probe.activeAgentCount ?? 0,
     attentionRequired: probe.attentionRequired ?? false,
   });
+  // Only a present menu bar reads the roster; window startup never waits on it.
+  if (hostTray !== undefined) {
+    await refreshMenuBarFleet({ url: snapshot.url, instanceId: snapshot.instanceId });
+  }
   updateHostTray();
 }
 
@@ -2648,7 +2718,7 @@ function applyAttentionBadge(): void {
 }
 
 function forgetAttentionBadge(windowId: number): void {
-  menuBarTasks.delete(windowId);
+  menuBarOpenThreads.delete(windowId);
   updateHostTray();
   if (!attentionBadgeCounts.delete(windowId)) return;
   applyAttentionBadge();
@@ -2697,13 +2767,18 @@ function installIpcHandlers(): void {
       ownedTopLevelWindowContext(event as IpcMainInvokeEvent).window,
     popup: popupNativeMenu,
   });
-  ipcMain.handle(IPC_CHANNELS.menuBarTasks, (event, value: unknown) => {
+  ipcMain.handle(IPC_CHANNELS.menuBarOpenThread, (event, value: unknown) => {
     const { window } = ownedTopLevelWindowContext(event);
-    const tasks = decodeMenuBarTasks(value);
-    menuBarTasks.set(
-      window.id,
-      tasks.map((task) => ({ ...task, windowId: window.id })),
-    );
+    const thread = decodeMenuBarOpenThread(value);
+    menuBarOpenThreads.set(window.id, thread);
+    if (thread !== undefined) menuBarFleet.looked(thread);
+    // The first report from the main window means its renderer can open a
+    // thread, so a row picked while it was still loading goes to it now.
+    const pending = pendingMenuBarOpen;
+    if (pending !== undefined && window === mainWindow) {
+      pendingMenuBarOpen = undefined;
+      sendMenuBarOpen(window, pending);
+    }
     updateHostTray();
   });
   ipcMain.handle(IPC_CHANNELS.attentionNotify, (event, request: unknown) => {

@@ -177,6 +177,8 @@ import { WorkRequestProjection } from "./work/workRequestProjection";
 import { attachWorkRequestRuntime, WorkRequestRuntime } from "./work/workRequestRuntime";
 import { WorkRequestService } from "./work/workRequestService";
 import { createWorkRequestRouteHandler } from "./workRequestRoutes";
+import { createFleetActivityRouteHandler } from "./fleetActivityRoutes";
+import { FleetActivityService, runningThreadsFromNavigation } from "./fleetActivityService";
 import { createPendingRequestRouteHandler } from "./pendingRequestRoutes";
 import { PendingRequestService } from "./pendingRequestService";
 import { createWorkThreadRouteHandler } from "./workThreadRoutes";
@@ -9671,25 +9673,61 @@ export function startOctantServer(
       windowAuthorityStore,
       maxJsonBodySize: MAX_JSON_REQUEST_BODY_SIZE,
     });
+    const pendingRequestService = new PendingRequestService({
+      readSettings: () => persistence.readShellSettings()?.settings ?? defaultShellSettings(),
+      work: async (windowId) => [
+        ...(await workRequestApplication.listPendingForWindow(windowId)),
+        ...(await listWorkTurnDecisions(
+          {
+            projects: (id) => projectService.bootstrap(id),
+            threads: async (id) => await workThreadServiceWithWorkflows.navigation(id),
+            turns: (threadId) => workTurnProjection.listForThread(threadId),
+          },
+          windowId,
+        )),
+      ],
+      code: async (windowId) => [
+        ...((await codeOperationRuntime?.pendingRequests?.(windowId)) ?? []),
+        ...(await codeTurnDecisions.listForWindow(windowId)),
+      ],
+      chat: () => chatService.listPendingQuestions(),
+    });
     const pendingRequestRoutes = createPendingRequestRouteHandler({
-      service: new PendingRequestService({
+      service: pendingRequestService,
+      windowAuthorityStore,
+    });
+    // The menu bar's roster: needs-you is the pending-request read, working is
+    // each mode's journaled run state. Nothing here reads a terminal's screen.
+    const fleetActivityRoutes = createFleetActivityRouteHandler({
+      service: new FleetActivityService({
         readSettings: () => persistence.readShellSettings()?.settings ?? defaultShellSettings(),
-        work: async (windowId) => [
-          ...(await workRequestApplication.listPendingForWindow(windowId)),
-          ...(await listWorkTurnDecisions(
-            {
-              projects: (id) => projectService.bootstrap(id),
-              threads: async (id) => await workThreadServiceWithWorkflows.navigation(id),
-              turns: (threadId) => workTurnProjection.listForThread(threadId),
-            },
-            windowId,
-          )),
-        ],
-        code: async (windowId) => [
+        pending: (windowId) => pendingRequestService.list(windowId),
+        boundCodeWindows: () =>
+          persistence
+            .readWindowWorkspaces()
+            .filter(({ workspace }) => workspace.contextByMode.code.projectId != null)
+            .map(({ workspace }) => workspace.windowId),
+        codePending: async (windowId) => [
           ...((await codeOperationRuntime?.pendingRequests?.(windowId)) ?? []),
           ...(await codeTurnDecisions.listForWindow(windowId)),
         ],
-        chat: () => chatService.listPendingQuestions(),
+        chat: () =>
+          chatService
+            .navigation()
+            .threads.filter((thread) => thread.executing)
+            .map((thread) => ({
+              threadId: String(thread.id),
+              title: thread.title,
+              ...(thread.projectId === undefined ? {} : { projectId: thread.projectId }),
+              ...(thread.turnStartedAt === undefined
+                ? {}
+                : { turnStartedAt: thread.turnStartedAt }),
+            })),
+        work: async (windowId) =>
+          runningThreadsFromNavigation(await workThreadServiceWithWorkflows.navigation(windowId)),
+        code: async (windowId) =>
+          runningThreadsFromNavigation(await baseRouteCodeService.navigation(windowId)),
+        projectName: (projectId) => persistence.readProject(projectId)?.name,
       }),
       windowAuthorityStore,
     });
@@ -9886,6 +9924,7 @@ export function startOctantServer(
       (await workPromotionRoutes(request)) ??
       (await workRequestRoutes(request)) ??
       (await pendingRequestRoutes(request)) ??
+      (await fleetActivityRoutes(request)) ??
       (await sidebarBackgroundRoutes(request)) ??
       (await zenBackgroundRoutes(request)) ??
       (await zenRoutes(request)) ??

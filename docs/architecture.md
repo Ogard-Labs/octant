@@ -35,19 +35,55 @@ list current windows; stale IDs are never silently retargeted.
 
 ## Desktop menu bar
 
-The menu bar prioritizes Open Octant, New task, and compact Needs attention,
-Running, and Unread sections. Empty activity sections disappear. Local host
-contains status, browser access, applicable lifecycle controls, and redacted
-diagnostics; Quit Octant retains the existing active-work confirmation.
+The menu bar is the closed-window fleet roster; the Inbox is the in-window list.
+It prioritizes Open Octant, New task, and three compact sections: **Needs you**,
+**Working**, and **Done since you looked**, at most six rows each. Empty
+sections disappear. A row names the thread title, its mode, and its Project,
+and choosing it opens and focuses that thread in the main window, opening the
+window first when none is open. Local host contains status, browser access,
+applicable lifecycle controls, and redacted diagnostics; Quit Octant retains
+the existing active-work confirmation. The text beside the glyph is `!` while
+the host itself needs attention (provider readiness, a lost host), otherwise the
+count of threads that need the person.
 
-Trusted top-level desktop windows contribute at most six task titles per activity
-from their existing sidebar state. Electron validates and deduplicates these
-bounded contributions, and a selection returns to the contributing window's
-ordinary task navigation. Contributions clear when that window closes or its
-renderer unloads; stopped hosts show no stale tasks. This is a view of open
-windows, not an additional host task registry. Titles never enter the public
-health response or redacted diagnostics. Separately managed hosts retain their
-existing lifecycle restrictions.
+The roster comes from the host, not from open windows, so it stays current with
+every window closed. The shell registers its own local-window authority for the
+menu bar with the desktop bridge secret it already holds, replaces it when the
+host instance changes, and revokes it when the menu bar goes; it reads exactly
+what any local window could. It polls `GET /api/fleet-activity` with the host
+probe (every 2 s while a window is visible, 10 s otherwise). Every row names its
+`activitySource`:
+
+- **Needs you** is the pending-requests read
+  ([pending requests across modes](#security-and-authority)): a Work request or
+  any turn decision is `journal`; a Code approval or question, or a Chat
+  question, is `session`, the live provider session parked on it. Code reach is
+  per bound window and the menu bar's own window binds no Code Project, so its
+  Code rows are the requests and decisions each local window with a persisted
+  Code binding could answer; a Code Project no local window binds stays out. A
+  thread that is both waiting and running is listed once, as needs you.
+- **Working** is each mode's own navigation run state, the journaled fold the
+  sidebar and board already use, so it is `journal`.
+- **Done since you looked** is the one state the host cannot know, because only
+  the shell knows when the person last opened a thread. A thread that leaves the
+  host's list between two successful reads finished; it stays done until the
+  thread is opened in a window or from the menu bar, or runs again. A focused
+  window showing the thread when it finishes never makes it done. A failed or
+  truncated read changes nothing, so a lost host cannot fake a finish. Done rows
+  live in memory and start empty with each app or host instance.
+- `screen` is reserved for an agent CLI seen only in a terminal pane. The
+  contract refuses it for needs you, it never becomes done, it never counts
+  toward the menu-bar number, and its row reads "seen in terminal". No current
+  producer emits it: Octant does not scrape a PTY or screen for agent state.
+
+Each row's tooltip names its source ("read from the journal", "read from the
+live session"). The menu bar raises no notifications; banners and the dock badge
+stay with the renderer's attention signals. Windows report only which thread
+they show, which clears that thread's done row and tells the shell the window
+can open a thread it is asked for. The read is local-window only, like pending
+requests. Titles never enter the public health response or redacted
+diagnostics. Separately managed hosts retain their existing lifecycle
+restrictions. Nothing here writes provider MCP or hook configuration.
 
 ## Desktop context menus
 
@@ -3579,6 +3615,17 @@ mechanisms are:
   answer, and turn end are journaled stream events, and a Code browser-origin
   approval that expires or is abandoned — which journals nothing — publishes
   `code-navigation` itself.
+- **Fleet activity.** `GET /api/fleet-activity` returns the threads that need
+  the calling window's person and the threads that are running, needs you
+  first, at most 64 with a `truncated` flag, each naming its mode, title,
+  Project name, and `activitySource` (`journal`, `session`, or the reserved
+  `screen`, which can never say needs you). It composes the pending-requests
+  read, the Code requests and decisions each local window with a persisted Code
+  binding could answer, and each mode's own navigation run state, and adds no
+  authority or state.
+  It is local-window only under the same rules as pending requests: outside
+  every forwarded prefix, no remote action, and a paired device's principal is
+  refused. The [desktop menu bar](#desktop-menu-bar) is its reader.
 - **Turn decisions.** A Work or Code turn that cannot continue without the
   person's choice ends its reply with one closing `octant-decision` block: an
   ask (one line, at most 110 characters) and one to four options (at most 60
