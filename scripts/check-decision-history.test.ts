@@ -1,26 +1,16 @@
 import { describe, expect, it } from "vitest";
-import {
-  findHistoryViolations,
-  type RecordIdentity,
-  type RepositoryState,
-  resolveBase,
-} from "./check-decision-history";
+import { findHistoryViolations, type RepositoryState, resolveBase } from "./check-decision-history";
 
-function identity(
-  number: string,
-  slug: string,
-  title: string,
-  status = "Accepted",
-): RecordIdentity {
-  return { number, path: `docs/decisions/${number}-${slug}.md`, title, status };
-}
+const ACCEPTED = "# 0001. Plugin architecture\n\n**Status:** Accepted\n\n## Decision\n\nWhat.\n";
+const PATH = "docs/decisions/0001-plugin-architecture.md";
 
 function reasons(
-  base: ReadonlyArray<RecordIdentity>,
-  head: ReadonlyArray<RecordIdentity>,
-  renames: ReadonlyArray<{ readonly from: string; readonly to: string }> = [],
+  current: Readonly<Record<string, string>>,
+  base: ReadonlyArray<{ readonly path: string; readonly content: string }> = [
+    { path: PATH, content: ACCEPTED },
+  ],
 ): ReadonlyArray<string> {
-  return findHistoryViolations(base, head, renames).map((violation) => violation.reason);
+  return findHistoryViolations(base, (path) => current[path]).map((violation) => violation.reason);
 }
 
 function repository(overrides: Partial<RepositoryState> = {}): RepositoryState {
@@ -76,99 +66,32 @@ describe("resolveBase", () => {
 });
 
 describe("findHistoryViolations", () => {
-  it("accepts a number that still holds the record it held", () => {
-    const record = identity("0001", "plugin-architecture", "Plugin architecture");
-    expect(reasons([record], [record])).toEqual([]);
+  it("accepts an archived record left exactly as it was", () => {
+    expect(reasons({ [PATH]: ACCEPTED })).toEqual([]);
   });
 
-  it("rejects an accepted record swapped for a different one under its number", () => {
-    // The hole this gate exists for: delete the record, add a well-formed one
-    // under the same number, fix the index row, and the tree gate sees a
-    // contiguous, internally consistent set.
-    expect(
-      reasons(
-        [identity("0001", "plugin-architecture", "Plugin architecture")],
-        [identity("0001", "replacement", "Something else entirely")],
-      ),
-    ).toEqual([
-      'held "Plugin architecture" in docs/decisions/0001-plugin-architecture.md and now holds "Something else entirely"; supersede the accepted record instead of replacing it, or stage the rename so git can see it is the same record',
+  it("refuses an edit to an archived record's wording", () => {
+    expect(reasons({ [PATH]: ACCEPTED.replace("What.", "Something else.") })).toEqual([
+      "was edited; the decision archive is closed, so its records keep their wording and status. Change the owning specification instead",
     ]);
   });
 
-  it("accepts a slug change git recognizes as the same document", () => {
-    expect(
-      reasons(
-        [identity("0001", "plugin-architecture", "Plugin architecture")],
-        [identity("0001", "plugin-seams", "Plugin seams")],
-        [
-          {
-            from: "docs/decisions/0001-plugin-architecture.md",
-            to: "docs/decisions/0001-plugin-seams.md",
-          },
-        ],
-      ),
-    ).toEqual([]);
+  it("refuses a status change, which used to be how a record retired", () => {
+    expect(reasons({ [PATH]: ACCEPTED.replace("Accepted", "Superseded by 0002") })).toHaveLength(1);
   });
 
-  it("accepts a record rewritten as history when it declares a supersession that resolves", () => {
+  it("refuses an edit to a record that was only ever proposed", () => {
+    const proposed = ACCEPTED.replace("Accepted", "Proposed");
     expect(
-      reasons(
-        [identity("0001", "plugin-architecture", "Plugin architecture")],
-        [
-          identity(
-            "0001",
-            "plugin-architecture",
-            "Plugin architecture (historical)",
-            "Superseded by 0020",
-          ),
-          identity("0020", "plugin-seams", "Plugin seams"),
-        ],
-      ),
-    ).toEqual([]);
+      reasons({ [PATH]: proposed.replace("What.", "Revised.") }, [
+        { path: PATH, content: proposed },
+      ]),
+    ).toHaveLength(1);
   });
 
-  it("rejects a replacement dressed as a supersession that points at nothing", () => {
-    expect(
-      reasons(
-        [identity("0001", "plugin-architecture", "Plugin architecture")],
-        [identity("0001", "plugin-architecture", "Something else", "Superseded by 0042")],
-      ),
-    ).toEqual([
-      'held "Plugin architecture" and now holds "Something else"; supersede the accepted record instead of retitling it',
+  it("refuses removing or renaming an archived record", () => {
+    expect(reasons({ "docs/decisions/0001-plugin-seams.md": ACCEPTED })).toEqual([
+      "is gone; the decision archive is closed, so its records keep their paths",
     ]);
-  });
-
-  it("rejects deleting an accepted record outright", () => {
-    expect(reasons([identity("0001", "plugin-architecture", "Plugin architecture")], [])).toEqual([
-      "was Accepted and is gone; an accepted record is superseded, never removed",
-    ]);
-  });
-
-  it("rejects renumbering an accepted record", () => {
-    expect(
-      reasons(
-        [identity("0001", "plugin-architecture", "Plugin architecture")],
-        [identity("0020", "plugin-architecture", "Plugin architecture")],
-        [
-          {
-            from: "docs/decisions/0001-plugin-architecture.md",
-            to: "docs/decisions/0020-plugin-architecture.md",
-          },
-        ],
-      ),
-    ).toEqual([
-      "was Accepted and became docs/decisions/0020-plugin-architecture.md; a record keeps its number for as long as it exists",
-    ]);
-  });
-
-  it("lets a proposal be revised in place", () => {
-    // `docs/decisions/README.md` says a Proposed record is still being agreed,
-    // so there is no history for this gate to protect yet.
-    expect(
-      reasons(
-        [identity("0001", "plugin-architecture", "Plugin architecture", "Proposed")],
-        [identity("0001", "plugin-seams", "Plugin seams", "Proposed")],
-      ),
-    ).toEqual([]);
   });
 });
