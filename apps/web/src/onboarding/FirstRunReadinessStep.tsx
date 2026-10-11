@@ -18,6 +18,25 @@ const FACT_TARGET: Record<FirstRunHandoff["facts"][number]["id"], FirstRunHandof
   model: "model",
 };
 
+const FACT_NOUN: Record<FirstRunHandoff["facts"][number]["id"], string> = {
+  provider: "a provider",
+  project: "a Project",
+  model: "a model",
+};
+
+/**
+ * Names the missing facts in the heading, so a host with nothing set up never
+ * reads as "Ready to start" above three "Needed" rows.
+ */
+function readinessHeading(facts: FirstRunHandoff["facts"]): string {
+  const missing = facts.filter((fact) => !fact.ready).map((fact) => FACT_NOUN[fact.id]);
+  const [first, second, third] = missing;
+  if (first === undefined) return "Ready to start";
+  if (second === undefined) return `Needs ${first}`;
+  if (third === undefined) return `Needs ${first} and ${second}`;
+  return `Needs ${first}, ${second}, and ${third}`;
+}
+
 /**
  * The end of first run: three facts, one next action.
  *
@@ -27,6 +46,7 @@ const FACT_TARGET: Record<FirstRunHandoff["facts"][number]["id"], FirstRunHandof
  * dialog footer; this step only states the facts and which mode they are for.
  */
 export function FirstRunReadinessStep(props: FirstRunReadinessStepProps) {
+  const heading = readinessHeading(props.handoff.facts);
   return (
     <div className="first-run__step">
       <p className="first-run__intro">
@@ -34,11 +54,8 @@ export function FirstRunReadinessStep(props: FirstRunReadinessStepProps) {
         a model that mode can actually use. Nothing here is assumed ready.
       </p>
 
-      <section
-        aria-label="Ready to start"
-        className="settings-card-section settings-card-section--open"
-      >
-        <h2>Ready to start</h2>
+      <section aria-label={heading} className="settings-card-section settings-card-section--open">
+        <h2>{heading}</h2>
         <ul className="setgroup first-run__providers" role="list">
           {props.handoff.facts.map((fact) => {
             const Icon = fact.ready ? Check : CircleDashed;

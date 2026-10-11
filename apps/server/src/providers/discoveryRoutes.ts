@@ -225,6 +225,17 @@ export function createDiscoveryRouteHandler(dependencies: DiscoveryRouteDependen
         );
       }
 
+      // Discovery manages one provider per driver family, as auto-registration
+      // does: connecting a driver that already has a provider answers with that
+      // provider instead of adding a second one, whatever path or address it
+      // uses. It does not switch the existing provider on: discovery never
+      // toggles an instance someone configured.
+      const configured = (await dependencies.listInstances?.(windowId))?.find(
+        (instance) => instance.driverKind === match.driverKind,
+      );
+      if (configured !== undefined) {
+        return response({ kind: "candidate-connected", instanceId: configured.id }, 200, origin);
+      }
       const result = await dependencies.onConnect(command, windowId);
       return response({ kind: "candidate-connected", instanceId: result.instanceId }, 200, origin);
     } catch {

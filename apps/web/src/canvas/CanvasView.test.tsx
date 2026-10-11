@@ -70,6 +70,17 @@ describe("Canvas accessibility basics", () => {
     expect(progress).toHaveAttribute("value", "0.75");
   });
 
+  it("shows a progress block's detail beside its bar", () => {
+    const definition = {
+      ...canvasFixture,
+      blocks: canvasFixture.blocks.map((block) =>
+        block.kind === "progress" ? { ...block, detail: "3 of 4 regions" } : block,
+      ),
+    };
+    render(<CanvasDocument definition={definition} />);
+    expect(screen.getByText("3 of 4 regions")).toBeVisible();
+  });
+
   it("exposes status blocks through a status live region", () => {
     render(<CanvasDocument definition={canvasFixture} />);
     const status = screen.getByRole("status", { name: /Ready/i });

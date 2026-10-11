@@ -13,8 +13,8 @@ describe("Computer use plugin commands", () => {
     ).toThrow();
   });
 
-  it("enables automatic driver updates without granting application control", () => {
-    expect(decodeComputerUseSettings({})).toEqual({ enabled: true, automaticUpdates: true });
+  it("leaves automatic driver updates off without granting application control", () => {
+    expect(decodeComputerUseSettings({})).toEqual({ enabled: true, automaticUpdates: false });
     expect(() => decodeComputerUseSettings({ approvedApps: ["*"] })).toThrow();
   });
 

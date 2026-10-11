@@ -52,6 +52,9 @@ export function DataBlocks({ block }: { readonly block: Block }) {
           <progress max="1" value={block.value}>
             {Math.round(block.value * 100)}%
           </progress>
+          {block.detail === undefined ? null : (
+            <span className="canvas-block__progress-detail">{block.detail}</span>
+          )}
         </div>
       );
     case "status":

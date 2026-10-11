@@ -122,6 +122,38 @@ tools as unsupported, and its text and native-tool support do not imply an
 app-browser bridge. Changing the thread to Full access does not remove the
 isolation requirement.
 
+### Provider catalog
+
+**Settings → Provider catalog** lists every provider driver that ships with
+Octant: the agent runtimes, then the model endpoints. Each one is bundled, so
+it is already installed and trusted; the catalog says so and offers no install
+or trust action. Opening the catalog, or one driver's setup, only reads what
+Octant already knows. It does not scan the host or start a runtime.
+
+A driver's setup page shows four separate states: **Available** (Octant offers
+the driver on this host), **Enabled** (a provider for it is switched on),
+**Signed in**, and **Ready** (its last connection check passed). It also says
+what the driver can do in Chat, Work, and Code, and who runs the agent loop.
+Below that is one guided setup with a single next step:
+
+- **Look on this host** runs the same discovery scan as Providers & Models.
+  The scan reads each runtime's version under confinement.
+- **Add** connects the runtime the scan found. If a provider for that driver
+  already exists, setup continues with that provider and never creates a
+  second one. The host refuses to duplicate one too.
+- **Turn on** switches the provider on.
+- **Sign in** uses the runtime's own Providers & Models card, shown on the
+  setup page. A key you enter there is stored in the system keychain, never
+  in the catalog.
+- **Check connection** starts the runtime once to read its models and sign-in.
+  If the runtime cannot start at its configured path, the card's **Locate
+  binary…** fixes it.
+
+An endpoint driver (OpenAI-compatible, Anthropic-compatible, Azure AI Foundry,
+Ollama) is added under **Octant Harness → Model endpoints** with **Add
+endpoint**. A step that fails shows the host's reason and a **Try again**
+button.
+
 ### Discovery and auto-registration
 
 Octant scans a sanitized `PATH` plus approved install locations to find

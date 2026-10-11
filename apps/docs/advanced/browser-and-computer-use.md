@@ -123,11 +123,11 @@ the result. Protected fields and macOS permission controls remain for you to
 operate. Use **Stop computer use** or disable the plugin to revoke access.
 
 Octant bundles its own CuaDriver, including the native SDK, and does not require
-a separate installation. **Automatic updates** is enabled by default: Octant
-checks upstream daily, verifies the publisher, checksum, architecture, and
+a separate installation. **Automatic updates** is off by default. When you turn
+it on, Octant checks upstream daily, verifies the publisher, checksum, architecture, and
 driver compatibility, then upgrades after computer-use tasks finish. If the
 replacement cannot start, Octant retains the previous verified driver. You
-can turn automatic checks off or use **Check for updates** in Settings.
+can use **Check for updates** in Settings at any time.
 Checks send no task content or identifiers.
 
 When a session is active it renders the

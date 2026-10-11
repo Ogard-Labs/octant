@@ -15,8 +15,8 @@ export interface HostSelectorProps {
    * Environment is the create-composer presentation people choose. */
   readonly presentation?: "host" | "environment";
   /**
-   * When set, an existing Project fixes host ownership. The selector remains
-   * visible but does not offer an alternate destination.
+   * When set, an existing Project fixes host ownership. With several hosts the
+   * selector remains visible but does not offer an alternate destination.
    */
   readonly fixedHostId?: HostId;
   /** Available hosts from observation / federation registry. */
@@ -70,9 +70,63 @@ function resolveHosts(hosts: ReadonlyArray<HostIdentity> | undefined): ReadonlyA
 }
 
 /**
- * Always-visible destination-host selector for Chat, Work, and Code create.
- * Multi-host input is always accepted; the control collapses to a status label
- * when only one host is present or when an existing Project fixes the host.
+ * The host a client is connected to and its health, with nothing to choose.
+ * The remote shell names its one paired host this way; a create composer with
+ * one host shows no host at all (see HostSelector).
+ */
+export function HostStatus(props: { readonly hosts?: ReadonlyArray<HostIdentity> }) {
+  const host = resolveHosts(props.hosts)[0];
+  const health = host?.health ?? "connecting";
+  return (
+    <HostStatusLabel
+      className="host-selector"
+      displayName={host?.displayName ?? localHostDisplayName()}
+      environment={false}
+      health={health}
+      hostId={host?.hostId ?? LOCAL_HOST_ID}
+    />
+  );
+}
+
+function HostStatusLabel(props: {
+  readonly className: string;
+  readonly displayName: string;
+  readonly environment: boolean;
+  readonly health: HostHealth;
+  readonly hostId: HostId;
+}) {
+  const healthLabel = healthLabels[props.health];
+  return (
+    <span
+      aria-label={`${props.environment ? "Environment" : "Host"}: ${props.displayName} · ${healthLabel}`}
+      className={props.className}
+      data-host-health={props.health}
+      data-host-id={props.hostId}
+      data-testid="host-selector"
+      role="status"
+    >
+      {props.environment ? (
+        <Cloud
+          aria-hidden="true"
+          className="host-selector__environment-icon"
+          size={14}
+          strokeWidth={1.7}
+        />
+      ) : (
+        <span aria-hidden="true" className={`host-selector__dot ${dotClass(props.health)}`} />
+      )}
+      <span className="host-selector__name">{props.displayName}</span>
+      <span className="host-selector__health">{healthLabel}</span>
+    </span>
+  );
+}
+
+/**
+ * Destination-host selector for Chat, Work, and Code create. It renders nothing
+ * while only one host is known: there is no destination to choose, and a
+ * permanent "This computer · Connected" label in every composer read as a
+ * control that did nothing. With several hosts it is a dropdown, or a status
+ * label when an existing Project fixes the host.
  */
 export function HostSelector(props: HostSelectorProps) {
   const hosts = useMemo(() => resolveHosts(props.hosts), [props.hosts]);
@@ -123,7 +177,6 @@ export function HostSelector(props: HostSelectorProps) {
     hosts[0];
   const displayName = selected?.displayName ?? localHostDisplayName();
   const health = selected?.health ?? "connecting";
-  const healthLabel = healthLabels[health];
   const fixed = props.fixedHostId !== undefined;
   const interactive = !fixed && hosts.length > 1;
   const environment = props.presentation === "environment";
@@ -139,29 +192,17 @@ export function HostSelector(props: HostSelectorProps) {
     props.onSelectHost?.(matched.hostId);
   }
 
+  if (hosts.length <= 1) return null;
+
   if (!interactive) {
     return (
-      <span
-        aria-label={`${environment ? "Environment" : "Host"}: ${displayName} · ${healthLabel}`}
+      <HostStatusLabel
         className={className}
-        data-host-health={health}
-        data-host-id={props.fixedHostId ?? selectedHostId}
-        data-testid="host-selector"
-        role="status"
-      >
-        {environment ? (
-          <Cloud
-            aria-hidden="true"
-            className="host-selector__environment-icon"
-            size={14}
-            strokeWidth={1.7}
-          />
-        ) : (
-          <span aria-hidden="true" className={`host-selector__dot ${dotClass(health)}`} />
-        )}
-        <span className="host-selector__name">{displayName}</span>
-        <span className="host-selector__health">{healthLabel}</span>
-      </span>
+        displayName={displayName}
+        environment={environment}
+        health={health}
+        hostId={props.fixedHostId ?? selectedHostId}
+      />
     );
   }
 

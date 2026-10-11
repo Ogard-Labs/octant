@@ -83,7 +83,7 @@ import { ThreadTasksPanel } from "../transcript/ThreadTasksPanel";
 import { modelDisplayName, providerModelLabel } from "../providers/providerModelLabel";
 import {
   pendingProviderSwitchNotice,
-  providerSwitchHandoffDisclosure,
+  conversationHandoffDisclosure,
 } from "./providerSwitchHandoff";
 import {
   TurnHeader,
@@ -1341,12 +1341,8 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                 ) : null}
                 {message.role === "assistant" && message.handoff !== undefined ? (
                   <p className="code-thread-workspace__handoff" role="note">
-                    {providerSwitchHandoffDisclosure(
-                      message.handoff,
-                      providerModelLabel(providerGroups, {
-                        providerInstanceId: message.handoff.previousProviderInstanceId,
-                        modelId: message.handoff.previousModelId,
-                      }),
+                    {conversationHandoffDisclosure(message.handoff, (selection) =>
+                      providerModelLabel(providerGroups, selection),
                     )}
                   </p>
                 ) : null}

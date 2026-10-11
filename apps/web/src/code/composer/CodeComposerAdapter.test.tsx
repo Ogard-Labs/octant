@@ -6,6 +6,22 @@ import { describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { CodeComposerAdapter } from "./CodeComposerAdapter";
 import type { ProjectId } from "@octant/contracts/projects";
+import { decodeHostId, LOCAL_HOST_ID } from "@octant/contracts/host";
+
+const twoHosts = [
+  {
+    hostId: LOCAL_HOST_ID,
+    displayName: "This computer",
+    health: "healthy" as const,
+    capabilities: ["chat", "work", "code"],
+  },
+  {
+    hostId: decodeHostId("11111111-1111-4111-8111-111111111111"),
+    displayName: "Studio",
+    health: "healthy" as const,
+    capabilities: ["chat", "work", "code"],
+  },
+];
 
 type DraftAnchor = {
   readonly kind: "draft";
@@ -235,7 +251,7 @@ describe("CodeComposerAdapter", () => {
   });
 
   it("puts Project, branch, and Environment on the context row inside the composer, above the prompt", () => {
-    const { container } = render(<CodeComposerAdapter {...defaultProps} />);
+    const { container } = render(<CodeComposerAdapter {...defaultProps} hosts={twoHosts} />);
     const frame = container.querySelector(".composer");
     const dock = container.querySelector(".composer-tray");
     const row = container.querySelector(".composer-row");

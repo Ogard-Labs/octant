@@ -745,28 +745,8 @@ describe("DraftThreadWorkspace", () => {
     expect(screen.getByRole("button", { name: "Access policy" })).toHaveTextContent("Plan");
   });
 
-  it("shows the authoritative Environment health in the context strip", () => {
-    render(
-      <DraftThreadWorkspace
-        {...baseProps}
-        hosts={[
-          {
-            hostId: LOCAL_HOST_ID,
-            displayName: "This Mac",
-            health: "healthy",
-            capabilities: ["chat", "work", "code"],
-          },
-        ]}
-      />,
-    );
-    expect(screen.getByRole("status", { name: "Environment: This Mac · Connected" })).toBeVisible();
-    expect(
-      screen.getByRole("status", { name: "Environment: This Mac · Connected" }).firstChild,
-    ).toHaveClass("host-selector__environment-icon");
-  });
-
-  it.each(["code", "work"] as const)(
-    "passes authoritative host health into the %s composer",
+  it.each(["chat", "code", "work"] as const)(
+    "offers no Environment in the %s composer while only one host is known",
     (mode) => {
       render(
         <DraftThreadWorkspace
@@ -783,9 +763,8 @@ describe("DraftThreadWorkspace", () => {
         />,
       );
 
-      expect(
-        screen.getByRole("status", { name: "Environment: This Mac · Connected" }),
-      ).toBeVisible();
+      expect(screen.queryByTestId("host-selector")).not.toBeInTheDocument();
+      expect(screen.queryByRole("combobox", { name: "Environment" })).not.toBeInTheDocument();
     },
   );
 
@@ -850,6 +829,9 @@ describe("DraftThreadWorkspace", () => {
       />,
     );
     expect(screen.getByRole("status", { name: "Environment: This Mac · Connected" })).toBeVisible();
+    expect(
+      screen.getByRole("status", { name: "Environment: This Mac · Connected" }).firstChild,
+    ).toHaveClass("host-selector__environment-icon");
     expect(screen.queryByRole("combobox", { name: "Environment" })).not.toBeInTheDocument();
   });
 
@@ -1289,7 +1271,7 @@ describe("DraftThreadWorkspace", () => {
     };
   }
 
-  it("keeps Host and Project on the tray and offers GitHub inside the Project menu", async () => {
+  it("keeps Project on the tray and offers GitHub inside the Project menu", async () => {
     const user = userEvent.setup();
     render(
       <DraftThreadWorkspace
@@ -1302,7 +1284,7 @@ describe("DraftThreadWorkspace", () => {
       />,
     );
 
-    expect(screen.getByRole("status", { name: /Environment: This computer/ })).toBeVisible();
+    expect(screen.queryByTestId("host-selector")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "GitHub repository" })).toBeNull();
     await user.click(screen.getByRole("button", { name: "Project: Choose a Project" }));
     expect(screen.getByRole("option", { name: "New Project from folder…" })).toBeVisible();

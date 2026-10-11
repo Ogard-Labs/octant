@@ -401,10 +401,20 @@ without the selection carries the refusal-only definition described under
 use is disabled, constrained out, or in Plan mode. Each application still
 needs its own approval.
 
-Canvas's `describe` operation lists the closed block
-catalogue and a creation example, or returns canonical schemas for up to three
-requested block kinds. Unscoped describe also lists document recipes: an id, a
-title, when to use one, and a skeleton of block kinds that already exist. The
+Canvas follows the same rule through its read-only `describe` operation. The
+always-visible `octant_canvas` description keeps what an agent needs before
+its first call: what a Canvas is and when to deliver work as one instead of a
+long reply, the operations, the authoring and safety rules (structured blocks,
+markup only in a design's frames, no file, shell, Git, or network authority,
+no invented references), where the thread shows it, and to call `describe`
+before authoring. Per-block guidance is answered by `describe`. Unscoped
+describe lists the closed block catalogue with one line on when to use each
+guided kind, how common requests map to recipes, what preview measures, and a
+creation example; describe for up to three block kinds returns their canonical
+schemas, plus authoring guidance and worked examples for the kinds that carry
+them; a plain kind such as `rich-text` returns its schema alone. Unscoped
+describe also lists document recipes: an id, a title, when to use one, and a
+skeleton of block kinds that already exist. The
 host offers an implementation plan, a design spec, an architecture review (its
 options in a comparison matrix), a code review, an audit or test report, a
 postmortem, a research brief, a dashboard, a repository map, a design
@@ -744,7 +754,8 @@ A table row is either a list of cells or `{ id, cells }`; the id is the
 author's, unique within the table (the domain policy refuses a repeat as
 `duplicate-table-row-id`), and arrives with Canvas schema version 13. A `row`
 comment anchor names a table block and that id, never a position, so a comment
-stays on its row through the reader's sort and filter and through a revision
+stays on its row through the reader's sort, filter, and grouping (all view
+state, never journaled; a table stores no default grouping) and through a revision
 that inserts, removes, or edits rows. A row without an id cannot be anchored
 and the renderer offers it no marker. A comment whose row is gone from the
 version on screen is shown as no longer on the canvas and is never dropped; the
@@ -1156,7 +1167,11 @@ the worktree and creates nothing. The fork starts approval-gated with
 current-session persistence and inherits no profile, pending outcome proposal,
 running turn, or session grant. Every Code thread creation checks a
 `forkedFrom` origin on the server: it must name another thread of the same
-Project.
+Project, and the fork's text handoff (below, "Fork handoff (Code)") must be
+selectable from that thread through the named turn right now. A fork or
+Restore from here whose handoff cannot be built is refused with the reason
+before any worktree is prepared, because the text handoff is the one
+conversation transfer every fork can fall back to.
 
 A child AgentRun starts only when the thread's agent delegates through the
 Octant Harness `delegate` tool or a provider harness's `octant_agents` tool.
@@ -1397,10 +1412,19 @@ The rules:
 - **Credential.** The host's installed `gh` CLI with its own stored login.
   Octant stores no GitHub token; ambient `GH_TOKEN`, `GITHUB_TOKEN`, and
   `GH_ENTERPRISE_TOKEN` are stripped and prompts are disabled.
-- **Record.** The outcome returns to the person and drops the cached detail
-  and list rows; the next refresh observes Merged. The merge is not journaled
-  as its own event: GitHub's history is its record, and a thread linked to the
-  pull request reaches Done only through the ordinary observed-state rule.
+- **Record.** Every attempt that reaches the server merge path appends one
+  `code.project-pull-request-merge-recorded@1` event, as its own aggregate,
+  before the outcome returns: the local user as actor, the Project, the
+  repository, the number, the method, the approved head SHA, and the result
+  (merged, refused with its reason, unavailable with its reason, or failed as
+  `aborted` or `error` when the merge call throws and the effect is unknown;
+  the error is rethrown and its text is never journaled). The payload carries
+  no credential, title, or body, and no projection reads it;
+  it is Octant's own record beside GitHub's history. A failed local append
+  fails the request even when GitHub already merged; the next refresh still
+  observes Merged. The outcome also drops the cached detail and list rows. A
+  thread linked to the pull request reaches Done only through the ordinary
+  observed-state rule, never from this record.
 
 **Delivery (publishing to a user-owned target) is dormant.** The ship service
 and its journaled events exist, but the host wires no target source, no
@@ -2417,6 +2441,27 @@ modelId }`, and the model picker is provider-first. Discovery can find
   is created disabled. Discovery never installs or updates runtimes, never
   toggles an existing instance, and never treats enablement as readiness
   ([decisions/0112-first-run-claude-codex-enablement.md](decisions/0112-first-run-claude-codex-enablement.md)).
+- **Provider catalog.** Settings › Provider catalog lists the bundled
+  provider-driver packages (`bundledProviderDriverCatalog` in
+  `@octant/plugin-host`). Each entry is validated against the public
+  `ProviderDriverCatalogEntry` schema, which `@octant/plugin-api` re-exports
+  from contracts. An entry is only a driver's manifest. It refuses excess
+  properties (no install, trust, enable, credential, or capability claims),
+  declared capabilities, contributions, a second component, an entry point
+  other than `builtin:provider-driver/<kind>`, and any source other than
+  `bundled`. Outside drivers need their own design before the schema admits
+  them. The catalog repeats installed and trusted from the activation context
+  that admits the driver; it never sets them. `resolveProviderCatalogState` in
+  `@octant/domain` derives available, enabled, signed in, and ready separately.
+  It reads the registry, the last observations, and the last scan, with each
+  driver's modes and agent loop, and picks one next step that acts on the
+  configured instance when one exists. Opening the catalog starts nothing. A
+  scan, connect, enable, or connection check runs only from its step's button,
+  and sign-in, Locate binary, and credentials stay on the runtime's own card.
+  Discovery keeps one provider per driver family, as auto-registration does:
+  a discovery connect for a driver that already has a provider returns that
+  provider instead of creating a second one, and leaves its switch unchanged.
+  Ollama is set up as an endpoint, never from the scan.
 - **Driver families.** Direct HTTP drivers (OpenAI-compatible, Anthropic-
   compatible, Azure AI Foundry API-key, Ollama), image HTTP profiles
   (OpenAI Image and Gemini native image — never selectable as Chat, Work, or
@@ -2979,6 +3024,42 @@ whose handoff was journaled, which happens only once the new session is
 ready), the composer says the next message starts a new session with a
 handoff.
 
+**Fork handoff (Code).** A fork's first session (no session recorded on the
+fork yet) carries the source's conversation through the fork point, never
+past it. When the fork's provider instance and model can take up the
+source's own session there (today only the Octant Harness, `seedCodeForkHarnessSession`,
+below), the fork resumes that copy and is sent no text. Otherwise, including
+every fork onto a provider instance other than the one that wrote the fork
+point, it reads the source through the same selector (purpose `fork`,
+bounded `throughOperationId`): the source's accepted prompts and completed
+replies up to and including the named turn, with the same bounds,
+attribution, taint and omission counts. The named turn must be found or the
+read refuses (`source-point-unavailable`); a whole-thread read refuses when
+the thread moved during the read, but a read through a fork point covers only
+settled turns, so the source running a later turn does not refuse it. The
+host re-reads the source's record, authorizes the sending window against the
+source's Project, and requires the source to be in the fork's Project before
+reading, then checks that what came back is that thread's.
+
+Either way the turn journals `context-handoff-attached` before the prompt is
+sent, with the fork origin and the fork's provider and model: reason `fork`
+with the counts, taint and a content reference to the exact blocks sent, and
+fixed `false` native-session and hidden-reasoning values; or reason
+`fork-native-session` with `nativeSessionTransferred: true` and no content.
+A recovered start reads that record back like a provider switch's: a text
+record is sent again without reading the source, and a native record whose
+copy cannot be taken up again refuses rather than sending text it did not
+disclose. The handoff is given once: a later turn has its own session. A first
+turn that can neither resume nor build the text handoff refuses with a named
+reason (the source unreadable to this window, in another Project, removed, its
+fork point gone, nothing readable left, history beyond the bounded scan, or a
+handoff that could not be saved). The conversation page carries the summary
+as the turn's `handoff`, and the transcript says what carried over and that
+the source's later replies (and, for text, its session, hidden reasoning and
+tool activity) did not. Other runtimes that can fork a session natively
+(Claude, Codex) still use the text handoff until a driver seam reports a
+fork-at-point capability.
+
 A switch that cannot hand over refuses before the new provider is acquired,
 naming why: no host selector, an unavailable or foreign thread or Project,
 no recorded or readable conversation (for example every body purged), a
@@ -3113,7 +3194,9 @@ native harness in `apps/server/src/harness`:
   own messages, tool calls, and results instead of a text summary. A turn
   begins with the one user message `send` journals for it, and the copy is cut
   at the turn after the named one; the copy refuses — and the fork reads the
-  text handoff instead — unless the transcript holds exactly the turns the
+  journaled text handoff instead (see "Fork handoff (Code)") — unless the
+  copy's binding is the fork's provider instance and model, the turn is
+  still admitted, and the transcript holds exactly the turns the
   source ran on that session, the named turn finished, and its last step
   settled. Copied paths under the source's checkout are rewritten to the
   fork's worktree, and the secret values the fork's turn resolved are
@@ -3561,8 +3644,11 @@ On Apple Silicon macOS, Electron main owns the official CuaDriver SDK and its
 private embedded child. The authenticated loopback broker is available only
 to Octant's host process; its credentials never enter provider children.
 Settings exposes plugin enablement, macOS permission setup, the driver version,
-and update controls. The app bundles a pinned, publisher-verified driver and
-checks upstream daily by default. Verified updates stage privately, activate
+and update controls. The app bundles a pinned, publisher-verified driver. The
+driver runs under Octant's macOS permissions, so it checks upstream daily only
+when the person turns automatic updates on in Settings › Computer use; it is
+off by default, a saved choice is kept, and a manual Check for updates still
+works. Verified updates stage privately, activate
 only while idle, and retain the previous version if startup fails. The driver
 never uses a standalone CuaDriver installation. See
 [decisions/0113-computer-use-plugin-and-driver-updates.md](decisions/0113-computer-use-plugin-and-driver-updates.md).
@@ -3571,7 +3657,12 @@ never uses a standalone CuaDriver installation. See
 upstream streaming tools (`serve-sim`, `serve-avd`) that Octant vendors like
 the Computer-use driver: each release is a pinned npm tarball the packager
 verifies against the registry's published `dist.integrity` (sha512) and lands
-in `Resources/managed-tools/<tool>` with its license. Electron main owns the
+in `Resources/managed-tools/<tool>` with its license. A release build re-signs
+every Mach-O file found there with Octant's Developer ID, hardened runtime, and a
+secure timestamp, and none of Octant's entitlements, before sealing the app,
+because notarization rejects the upstream ad-hoc signatures. Camera passthrough
+from the bundled helper would need its own camera entitlement and a camera usage
+description, which the app does not declare. Electron main owns the
 per-tool instances; tools launch under the desktop runtime
 (`ELECTRON_RUN_AS_NODE` with `process.execPath`), never a system Node. Tools
 run unconfined under Octant's signed identity: no sandbox profile limits them,
