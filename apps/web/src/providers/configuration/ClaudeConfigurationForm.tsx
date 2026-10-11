@@ -45,10 +45,14 @@ export function ClaudeConfigurationForm(props: ClaudeConfigurationFormProps) {
       onSubmit={(event) => {
         event.preventDefault();
         const data = new FormData(event.currentTarget);
+        const enteredDirectory = String(data.get("configDirectory") ?? "").trim();
         const configuration = claudeConfigurationFromFields({
           binaryPath: String(data.get("binaryPath") ?? ""),
           authentication,
-          configDirectory: String(data.get("configDirectory") ?? ""),
+          configDirectory:
+            enteredDirectory.length > 0
+              ? enteredDirectory
+              : (props.instance.configuration.configDirectory ?? ""),
           accent: String(data.get("accent") ?? ""),
         });
         const enteredCredential = transientCredential(credentialInput.current);
@@ -120,6 +124,7 @@ export function ClaudeConfigurationForm(props: ClaudeConfigurationFormProps) {
         instanceId={props.instance.id}
         onAccentChange={setAccent}
         onConfigDirectoryChange={setConfigDirectory}
+        preserveExistingDirectory={props.instance.configuration.configDirectory !== undefined}
         showSignInCommand={authentication === "subscription"}
       />
       {authentication === "api-key" ? (

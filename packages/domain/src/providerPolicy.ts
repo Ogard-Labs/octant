@@ -1884,9 +1884,17 @@ export function changeClaudeConfiguration(
   if (input.activeSessionCount > 0) {
     reject("active-sessions", "Stop active sessions before reconfiguring this provider.");
   }
+  const configuration =
+    input.configuration.configDirectory === undefined &&
+    current.configuration.configDirectory !== undefined
+      ? {
+          ...input.configuration,
+          configDirectory: current.configuration.configDirectory,
+        }
+      : input.configuration;
   return {
     ...current,
-    configuration: normalizeClaudeConfiguration(input.configuration),
+    configuration: normalizeClaudeConfiguration(configuration),
     version: nextVersion(current.version),
     updatedAt: input.updatedAt,
   };

@@ -1187,6 +1187,43 @@ describe("ProviderSettingsView", () => {
     expect(card.textContent).not.toMatch(/official Claude Code|Claude subscription login/i);
   });
 
+  it("keeps an isolated Claude directory when the edit field is left blank", async () => {
+    const user = userEvent.setup();
+    const props = fixture({
+      instance: decodeProviderInstance({
+        ...claudeProvider(),
+        displayName: "Claude work",
+        configuration: {
+          kind: "claude-agent-sdk",
+          binaryPath: "/opt/homebrew/bin/claude",
+          authentication: "subscription",
+          configDirectory: "/Users/example/.claude-accounts/work",
+          accent: "teal",
+        },
+      }),
+    });
+    renderExpanded(<ProviderSettingsView {...props} />);
+    const card = screen.getByRole("article", { name: "Claude work" });
+    const directory = within(card).getByLabelText("Claude config directory");
+    expect(directory).toHaveValue("/Users/example/.claude-accounts/work");
+    await user.clear(directory);
+    expect(within(card).getByText(/keep this account's current directory/i)).toBeVisible();
+    await user.click(
+      within(card).getByRole("button", { name: "Save Claude settings for Claude work" }),
+    );
+    expect(props.onChangeClaudeConfiguration).toHaveBeenLastCalledWith(
+      id,
+      {
+        kind: "claude-agent-sdk",
+        binaryPath: "/opt/homebrew/bin/claude",
+        authentication: "subscription",
+        configDirectory: "/Users/example/.claude-accounts/work",
+        accent: "teal",
+      },
+      expect.objectContaining({ value: "" }),
+    );
+  });
+
   it("edits Claude authentication with a write-only key and constrains remote key management", async () => {
     const user = userEvent.setup();
     const props = fixture({ instance: claudeProvider() });

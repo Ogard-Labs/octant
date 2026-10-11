@@ -40,6 +40,7 @@ export function ClaudeAccountSettingsFields(props: {
   readonly onConfigDirectoryChange?: (directory: string) => void;
   readonly includeConfigDirectoryInput?: boolean;
   readonly showSignInCommand?: boolean;
+  readonly preserveExistingDirectory?: boolean;
 }) {
   const settingPrefix =
     props.instanceId === undefined ? "provider-create-claude" : `provider-${props.instanceId}`;
@@ -53,7 +54,13 @@ export function ClaudeAccountSettingsFields(props: {
     <>
       {props.includeConfigDirectoryInput === false ? null : (
         <SettingRow
-          description="Leave blank to use Claude's default directory for the first account. Additional accounts get their own directory automatically."
+          description={
+            props.instanceId === undefined
+              ? "Leave blank to use Claude's default directory for the first account. Additional accounts get their own directory automatically."
+              : props.preserveExistingDirectory === true
+                ? "Leave blank to keep this account's current directory."
+                : "Leave blank to keep Claude's default directory for this account."
+          }
           label="Claude config directory"
           scope="host"
           settingId={`${settingPrefix}-config-directory`}

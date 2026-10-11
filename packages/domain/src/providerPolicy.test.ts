@@ -2122,6 +2122,36 @@ describe("provider instance policy", () => {
     ).toBe("/Users/example/.claude-accounts/work");
   });
 
+  it("keeps an isolated Claude directory when a later save omits it", () => {
+    const original = createClaudeProvider({
+      id: ids.local,
+      displayName: "Work Claude",
+      configuration: {
+        kind: "claude-agent-sdk",
+        binaryPath: "/opt/homebrew/bin/claude",
+        authentication: "subscription",
+        configDirectory: "/Users/example/.claude-accounts/work",
+        accent: "teal",
+      },
+      existingInstances: [],
+      expectedVersion: version(0),
+      createdAt,
+    });
+    const changed = changeClaudeConfiguration(original, {
+      configuration: {
+        kind: "claude-agent-sdk",
+        binaryPath: "/usr/local/bin/claude",
+        authentication: "subscription",
+        accent: "rose",
+      },
+      activeSessionCount: 0,
+      updatedAt,
+    });
+    expect(changed.configuration.configDirectory).toBe("/Users/example/.claude-accounts/work");
+    expect(changed.configuration.accent).toBe("rose");
+    expect(changed.configuration.binaryPath).toBe("/usr/local/bin/claude");
+  });
+
   it("returns an immutable Claude configuration update with a new version and timestamp", () => {
     const original = claudeProvider();
     const changed = changeClaudeConfiguration(original, {
