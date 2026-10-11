@@ -67,12 +67,50 @@ filtering is only a convenience; it cannot bypass the server check. A provider
 must still be installed, enabled, authenticated, and ready regardless of its
 labels or whitelist entry.
 
+### Integration: Octant tools, activity, and resume
+
+Each runtime's details open with an **Integration** section of three facts.
+The host derives them from the runtime's driver and its last Connection Check;
+the page never infers them from what a picker can mention.
+
+- **Octant tools** says whether Octant's own tools, including Browser,
+  Computer, and selected MCP servers, reach the runtime's session, and through
+  which transport. When they do not, it says **Not available on this
+  runtime** with the reason: the check did not confirm them, the runtime's
+  version, platform, or setup did not confirm its transport, Octant has no way
+  to offer tools to it, or (for a direct endpoint) no model has been verified
+  yet. A direct endpoint with verified models shows **Verified models only**
+  and how many.
+- **Activity** is **Session events** with what the live session reports
+  (replies, tool calls, approvals, file changes, task progress), or **Nothing
+  observed** when no session runs on that runtime here.
+- **Resume** is **Precise** when a follow-up reopens the runtime's own
+  session, **Best effort** when the endpoint keeps no session and Octant sends
+  the thread's history again fitted to the model's context window, or **None**
+  when the runtime cannot reopen an earlier session.
+
+| Runtime                                               | Transport for Octant tools                                     |
+| ----------------------------------------------------- | -------------------------------------------------------------- |
+| OpenAI-compatible, Anthropic-compatible, Azure        | Tool definitions in each request; the model answers with calls |
+| Claude Code                                           | A tool server inside the Claude Agent SDK connection           |
+| Codex                                                 | Dynamic tools registered on the app-server thread              |
+| OpenCode and the ACP agents (Gemini, Kilo, and so on) | A loopback MCP server registered for that one session          |
+| Pi                                                    | A loopback bridge Pi's extension calls for that one session    |
+| Ollama, Oh My Pi                                      | None                                                           |
+
+Every transport belongs to one provider connection and ends with it. Octant
+never writes a runtime's MCP or hook configuration to offer its tools. A
+runtime whose transport is not confirmed by its check reports Octant tools as
+not available, and the composers then do not offer **@Browser** or
+**@Computer** for it; a typed reference is shown as blocked.
+
 ### App-managed browser tools
 
 The Browser view and an agent's browser access are separate capabilities.
 A tool-capable model can still lack an adapter for Octant's app-managed tools;
-check the provider's capability details before relying on agent browser control.
-Manual browser controls remain governed by the thread's normal policy.
+check **Octant tools** under the provider's Integration before relying on agent
+browser control. Manual browser controls remain governed by the thread's normal
+policy.
 
 Supported app-tool adapters can request an isolated browser session under
 **Ask for approvals** without changing the task to Full access. The request
@@ -83,6 +121,38 @@ was verified (1.18.21 and 2.0.22); on any other release it reports app-managed
 tools as unsupported, and its text and native-tool support do not imply an
 app-browser bridge. Changing the thread to Full access does not remove the
 isolation requirement.
+
+### Provider catalog
+
+**Settings → Provider catalog** lists every provider driver that ships with
+Octant: the agent runtimes, then the model endpoints. Each one is bundled, so
+it is already installed and trusted; the catalog says so and offers no install
+or trust action. Opening the catalog, or one driver's setup, only reads what
+Octant already knows. It does not scan the host or start a runtime.
+
+A driver's setup page shows four separate states: **Available** (Octant offers
+the driver on this host), **Enabled** (a provider for it is switched on),
+**Signed in**, and **Ready** (its last connection check passed). It also says
+what the driver can do in Chat, Work, and Code, and who runs the agent loop.
+Below that is one guided setup with a single next step:
+
+- **Look on this host** runs the same discovery scan as Providers & Models.
+  The scan reads each runtime's version under confinement.
+- **Add** connects the runtime the scan found. If a provider for that driver
+  already exists, setup continues with that provider and never creates a
+  second one. The host refuses to duplicate one too.
+- **Turn on** switches the provider on.
+- **Sign in** uses the runtime's own Providers & Models card, shown on the
+  setup page. A key you enter there is stored in the system keychain, never
+  in the catalog.
+- **Check connection** starts the runtime once to read its models and sign-in.
+  If the runtime cannot start at its configured path, the card's **Locate
+  binary…** fixes it.
+
+An endpoint driver (OpenAI-compatible, Anthropic-compatible, Azure AI Foundry,
+Ollama) is added under **Octant Harness → Model endpoints** with **Add
+endpoint**. A step that fails shows the host's reason and a **Try again**
+button.
 
 ### Discovery and auto-registration
 

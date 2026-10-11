@@ -25,6 +25,7 @@ import {
   CodeTerminalId,
   CodeTestRunId,
   CodeThread,
+  CodeThreadForkOrigin,
   CodeThreadId,
   CreateManagedCodeThreadCommand,
   MAX_CODE_TURN_ATTACHMENTS,
@@ -1352,21 +1353,57 @@ export const CodeContextHandoffOmissions = Schema.Struct({
 }).annotations(strict);
 export type CodeContextHandoffOmissions = typeof CodeContextHandoffOmissions.Type;
 
+const handoffMessages = Schema.Int.pipe(
+  Schema.between(1, MAX_AGENT_RUN_ADMITTED_CONTEXT_BLOCKS - 1),
+);
+
 /**
  * The disclosed summary of a provider-switch handoff, as the conversation page
  * shows it beside the turn that carried it. The handed-over text itself stays
  * in the content store the event names.
  */
-export const CodeConversationTurnHandoff = Schema.Struct({
+const ProviderSwitchHandoff = Schema.Struct({
   reason: Schema.Literal("provider-switch"),
   previousProviderInstanceId: ProviderInstanceId,
   previousModelId: ProviderModelId,
   /** Conversation messages the handoff carried, not counting its summary. */
-  messages: Schema.Int.pipe(Schema.between(1, MAX_AGENT_RUN_ADMITTED_CONTEXT_BLOCKS - 1)),
+  messages: handoffMessages,
   omissions: CodeContextHandoffOmissions,
   /** Whether the thread had taken in outside content when the handoff was read. */
   externalContentIngested: Schema.Boolean,
 }).annotations(strict);
+
+/**
+ * A fork's first turn read the source thread's conversation through the fork
+ * point as text, because its provider could not take up the source's own
+ * session there. Each carried message names the provider and model that wrote
+ * it, so the summary does not repeat them.
+ */
+const ForkTextHandoff = Schema.Struct({
+  reason: Schema.Literal("fork"),
+  forkedFrom: CodeThreadForkOrigin,
+  messages: handoffMessages,
+  omissions: CodeContextHandoffOmissions,
+  /** Whether the source thread had taken in outside content when it was read. */
+  externalContentIngested: Schema.Boolean,
+}).annotations(strict);
+
+/**
+ * A fork's first turn resumed a copy of the source's own provider session cut
+ * at the fork point, so the provider kept its messages and tool activity
+ * rather than reading a text excerpt.
+ */
+const ForkNativeSessionHandoff = Schema.Struct({
+  reason: Schema.Literal("fork-native-session"),
+  forkedFrom: CodeThreadForkOrigin,
+}).annotations(strict);
+
+/** What a turn started its session with that it did not write itself, by cause. */
+export const CodeConversationTurnHandoff = Schema.Union(
+  ProviderSwitchHandoff,
+  ForkTextHandoff,
+  ForkNativeSessionHandoff,
+);
 export type CodeConversationTurnHandoff = typeof CodeConversationTurnHandoff.Type;
 
 /**
@@ -1378,8 +1415,8 @@ export type CodeConversationTurnHandoff = typeof CodeConversationTurnHandoff.Typ
  * The two `false` fields are fixed: Octant never carries a provider's native
  * session or hidden reasoning across providers, and says so in the record.
  */
-const ContextHandoffAttachedEvent = Schema.Struct({
-  ...CodeConversationTurnHandoff.fields,
+const ProviderSwitchHandoffAttachedEvent = Schema.Struct({
+  ...ProviderSwitchHandoff.fields,
   kind: Schema.Literal("context-handoff-attached"),
   previousSessionId: ProviderSessionId,
   providerInstanceId: ProviderInstanceId,
@@ -1389,6 +1426,39 @@ const ContextHandoffAttachedEvent = Schema.Struct({
   nativeSessionTransferred: Schema.Literal(false),
   hiddenReasoningTransferred: Schema.Literal(false),
 }).annotations(strict);
+
+/**
+ * A fork's first turn started a new session with the source's conversation
+ * through the fork point as text. Journaled like a provider switch's handoff,
+ * before the prompt is sent, and read back by a recovered start.
+ */
+const ForkTextHandoffAttachedEvent = Schema.Struct({
+  ...ForkTextHandoff.fields,
+  kind: Schema.Literal("context-handoff-attached"),
+  providerInstanceId: ProviderInstanceId,
+  modelId: ProviderModelId,
+  content: CodeEvidenceReference,
+  nativeSessionTransferred: Schema.Literal(false),
+  hiddenReasoningTransferred: Schema.Literal(false),
+}).annotations(strict);
+
+/**
+ * A fork's first turn started from a copy of the source's own provider session
+ * through the fork point. No text was handed over, so there is no content.
+ */
+const ForkNativeSessionHandoffAttachedEvent = Schema.Struct({
+  ...ForkNativeSessionHandoff.fields,
+  kind: Schema.Literal("context-handoff-attached"),
+  providerInstanceId: ProviderInstanceId,
+  modelId: ProviderModelId,
+  nativeSessionTransferred: Schema.Literal(true),
+}).annotations(strict);
+
+const ContextHandoffAttachedEvent = Schema.Union(
+  ProviderSwitchHandoffAttachedEvent,
+  ForkTextHandoffAttachedEvent,
+  ForkNativeSessionHandoffAttachedEvent,
+);
 
 export const CodeOperationEvent = Schema.Union(
   ProviderSessionReadyEvent,
@@ -1541,9 +1611,10 @@ export const CodeConversationTurn = Schema.Struct({
   /** Whether the turn journaled more steps than `steps` carries. */
   stepsTruncated: Schema.optional(Schema.Boolean),
   /**
-   * The text handoff this turn started its new provider session with, after
-   * the thread moved to a provider that could not take up the previous one.
-   * Absent on every turn that continued its session or started the thread.
+   * What this turn's new provider session started with beyond its own prompt:
+   * a provider switch's text handoff, or a fork's text handoff or copied
+   * native session. Absent on every turn that continued its session or
+   * started an unforked thread.
    */
   handoff: Schema.optional(CodeConversationTurnHandoff),
   /**

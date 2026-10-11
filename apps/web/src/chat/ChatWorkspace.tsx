@@ -27,7 +27,11 @@ import type { CanvasContextSelection } from "@octant/contracts/canvasContext";
 import type { PreviewContextSelection } from "@octant/contracts/previews";
 import type { ProviderObservedState, ProviderRegistrySnapshot } from "@octant/contracts/providers";
 import { decodeProviderModelId } from "@octant/contracts/providers";
-import { startedConversationPickerGroups, type PickerGroup } from "@octant/domain";
+import {
+  modelCarriesAppManagedTools,
+  startedConversationPickerGroups,
+  type PickerGroup,
+} from "@octant/domain";
 import { buildComposerPoolModel } from "@octant/domain/composer-pool-policy";
 import { useEffect, useRef, useState } from "react";
 import { useThreadMessageQueue } from "../messageQueue/useThreadMessageQueue";
@@ -318,8 +322,19 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
   const activeProvider = props.providerSnapshot?.instances.find(
     (instance) => String(instance.id) === String(activeThread?.providerInstanceId),
   );
+  const activeObservation = props.providerSnapshot?.observedStates.find(
+    (observed) => String(observed.instanceId) === String(activeThread?.providerInstanceId),
+  );
   const extensionDraft = useExtensionDraftSelections({
     ...(props.extensionClient === undefined ? {} : { client: props.extensionClient }),
+    ...(activeObservation === undefined || activeThread === undefined
+      ? {}
+      : {
+          providerCarriesTools: modelCarriesAppManagedTools(
+            activeObservation,
+            activeThread.modelId,
+          ),
+        }),
     ...(activeProvider === undefined
       ? {}
       : { providerFamily: activeProvider.driverKind as ExtensionProviderFamily }),
@@ -984,7 +999,9 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
                     <ThreadCanvases
                       cards={canvasPlacement.byRow.get(String(turn.id))}
                       client={canvasClient}
-                      // Chat has no dock, so the Canvas opens as a tab beside the thread.
+                      // The shell shows Chat without a dock, so there is no dock
+                      // Canvas tool to open: the Canvas opens as a content tab
+                      // beside the thread instead.
                       {...(props.onOpenCanvas === undefined ? {} : { onOpen: props.onOpenCanvas })}
                       openLabel="Open Canvas"
                     />

@@ -285,4 +285,60 @@ describe("ThemeSettingsProvider", () => {
     expect(block).toContain("--octant-text-secondary: var(--octant-text-secondary-high-contrast);");
     expect(block).toContain("--octant-text-muted: var(--octant-text-muted-high-contrast);");
   });
+  it("follows a live system appearance change while set to follow the system, and stops listening when it is not", () => {
+    const listeners = new Set<() => void>();
+    const query = {
+      matches: false,
+      addEventListener: vi.fn((_type: "change", listener: () => void) => listeners.add(listener)),
+      removeEventListener: vi.fn((_type: "change", listener: () => void) =>
+        listeners.delete(listener),
+      ),
+    };
+    // Only the appearance query is under test; the contrast query keeps its
+    // own listener, so it answers from a separate object.
+    const otherQuery = { matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() };
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn((media: string) => (media === "(prefers-color-scheme: dark)" ? query : otherQuery)),
+    );
+    const root = document.documentElement;
+    const switchSystemAppearance = (dark: boolean) =>
+      act(() => {
+        query.matches = dark;
+        for (const listener of listeners) listener();
+      });
+    try {
+      const result = render(
+        <ThemeSettingsProvider settings={{ ...DEFAULT_THEME_SETTINGS, mode: "system" }}>
+          <div>Theme content</div>
+        </ThemeSettingsProvider>,
+      );
+      expect(root.dataset.octantThemeMode).toBe("light");
+
+      switchSystemAppearance(true);
+      expect(root.dataset.octantThemeMode).toBe("dark");
+      switchSystemAppearance(false);
+      expect(root.dataset.octantThemeMode).toBe("light");
+
+      result.rerender(
+        <ThemeSettingsProvider settings={{ ...DEFAULT_THEME_SETTINGS, mode: "light" }}>
+          <div>Theme content</div>
+        </ThemeSettingsProvider>,
+      );
+      expect(listeners.size).toBe(0);
+      switchSystemAppearance(true);
+      expect(root.dataset.octantThemeMode).toBe("light");
+
+      result.rerender(
+        <ThemeSettingsProvider settings={{ ...DEFAULT_THEME_SETTINGS, mode: "system" }}>
+          <div>Theme content</div>
+        </ThemeSettingsProvider>,
+      );
+      expect(root.dataset.octantThemeMode).toBe("dark");
+      result.unmount();
+      expect(listeners.size).toBe(0);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
 });

@@ -548,7 +548,7 @@ export function App(props: AppProps) {
     ...(injectedCapability === undefined && launch !== undefined
       ? { serverUrl: launch.serverUrl }
       : {}),
-    onExchanged: clearLaunchTokenFragment,
+    onLaunchTokenRead: clearLaunchTokenFragment,
   });
 
   // A launch address the capability must not travel to is explained here,
@@ -605,6 +605,21 @@ export function App(props: AppProps) {
             message="Establishing the authenticated Octant browser session."
             state="loading"
             title="Opening Octant"
+          />
+        </main>
+      );
+    }
+    if (launchSession.launchRequired === true) {
+      // A browser session opens only from a one-time link the desktop app or
+      // `octant web` mints with a secret readable by the host's OS user, so a
+      // typed address, an expired tab, or a restarted host lands here.
+      return (
+        <main className="shell-boundary">
+          <ShellState
+            eyebrow="Browser session"
+            message="Octant opens a browser session only from the one-time link that the desktop app or `octant web` creates; typing the address is not enough."
+            state="warning"
+            title="Open Octant from the desktop app or run `octant web`"
           />
         </main>
       );

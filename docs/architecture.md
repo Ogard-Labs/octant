@@ -287,13 +287,36 @@ fetch sends the proof-bound session cookie explicitly and disables the shared
 cookie jar to prevent duplicate or stale cookies. Browser cookie ownership is
 unchanged, and native remote requests refuse redirects.
 
-**Local client context.** Opening the canonical host URL directly creates a
-process-local client context through `/api/shell/local-session`; no launcher
-token, persisted clock posture, or alternate profile is required. Electron,
-ordinary browsers, and Vite therefore read the same Machine-owned Projects,
-threads, settings, and journal; a Vite renderer qualifies only when the host
-was started with its origin in `OCTANT_WEB_URL` (the desktop dev loop and
-`octant web --dev` set it for the host they start). The context id scopes window-local presentation
+**Local client context.** The local trust class is "holds a secret only the
+host's OS user can read", not "is on loopback". Loopback plus an admitted
+Origin says nothing about who is calling: another OS user on the same machine,
+an `ssh -L` forward, a proxy that rewrites `Host`, or a local service account
+all arrive that way, and a forged `Origin` header costs a non-browser caller
+nothing. The secret is the desktop bridge secret, which the host owner projects
+into the owner-only runtime directory. Electron windows and every CLI command
+(`octant agent`, `octant listener`, pairing, `octant web`) present it on the
+`/api/desktop/*` routes. A browser gets a session only through a one-time
+launch token: the launcher (`octant web`, `octant web --dev`, or the desktop's
+"Open in browser" action) mints it through `/api/desktop/launch-sessions` with
+the bridge secret and opens a URL carrying it in the fragment. `octant web`
+sends the secret only to the host that this OS user's owner-only host receipt
+names (same address and instance), never to an endpoint that merely answers
+`/health`, because another OS user can bind the port while the real host is
+stopped. The token is
+single-use, expires after five minutes, and is bound to the renderer origin it
+was minted for, which must be one this listener serves (below). The renderer
+strips it from the address bar with a history replace before it exchanges it at
+`/api/shell/launch-session`; an exchange from any other origin, or with no
+Origin, is refused and burns the token. `/api/shell/local-session` never mints
+authority: it only refreshes a capability the tab already holds (so a reload
+keeps its session) and answers 401 otherwise. Typing the host address by hand,
+reopening a tab after the host restarted, or opening a copied tab therefore
+shows "Open Octant from the desktop app or run `octant web`" instead of the
+app. Electron, ordinary browsers, and Vite still read the same Machine-owned
+Projects, threads, settings, and journal; a Vite renderer qualifies only when
+the host was started with its origin in `OCTANT_WEB_URL` (the desktop dev loop
+and `octant web --dev` set it for the host they start), and `octant web --dev`
+mints its token for that origin. The context id scopes window-local presentation
 and guards against accidental cross-window commands, but it is not a separate
 Machine or durable authentication epoch. The packaged renderer additionally
 proves its native renderer identity for desktop-only integration. When the host
@@ -304,10 +327,13 @@ transport still validates the actual Host header, rejects non-loopback origins,
 and removes process-local registration when its owning client closes. The
 listener admits only its own loopback origin (under any loopback name), the
 packaged renderer, and the development renderer origin named by
-`OCTANT_WEB_URL`; a page on any other loopback port is refused before dispatch,
-gets no CORS grant, and cannot mint a client context, because agents start
-local dev servers whose pages the person opens in an ordinary browser. The
-listener never reflects a non-loopback web origin into local authority. The renderer holds the matching
+`OCTANT_WEB_URL`; a page on any other loopback port is refused before dispatch
+and gets no CORS grant, because agents start local dev servers whose pages the
+person opens in an ordinary browser. The listener never reflects a non-loopback
+web origin into local authority. One residual window remains: the launcher
+hands the token URL to the system browser as a process argument, which another
+OS user can read for the moment that process runs, and the token is valid until
+the browser exchanges it. The renderer holds the matching
 line before its first request: a launch address that is plain HTTP to a
 non-loopback host is refused with an explanation and never used
 (`docs/decisions/0103`). Requests that send the window capability set
@@ -331,13 +357,64 @@ showed. See
 [decision 0093](decisions/0093-app-owned-tools-use-managed-runtime-transports.md).
 
 Tool definitions carry the agent's usage guidance alongside their argument
-schemas. Each mode offers only its admitted tools, so providers receive the
-same guidance through MCP, dynamic tools, or direct tool calls without a
-separate global tool installation or prompt catalogue. Browser shares one
-definition across modes. Canvas's `describe` operation lists the closed block
-catalogue and a creation example, or returns canonical schemas for up to three
-requested block kinds. Unscoped describe also lists document recipes: an id, a
-title, when to use one, and a skeleton of block kinds that already exist. The
+schemas. App-owned tools are capability families: one tool per object —
+`octant_browser`, `octant_computer`, and in Code `octant_terminal`,
+`octant_apple`, and `octant_android` — with its actions in an `operation`
+enum. Decision 0067 keeps the always-visible tool prefix small and
+cache-stable, so a family's description says only what an agent must know
+before its first call, and its `help` operation returns the full usage on
+demand. The managed tool set answers help from the family's own static text
+(`withToolFamilyHelp`) and only for a family the turn offers; help never
+reaches the family's executor, so every other action passes the same server
+policy before any effect. A family whose grant or capability is off is
+omitted rather than advertised and refused: Browser when the provider has no
+verified tool transport, the thread's tool constraints exclude it, or a Code
+host lends no browser; Apple or Android when the host has no toolchain to
+lend; the planner's `octant_board` and `octant_propose_thread` outside the
+designated planner thread. Browser shares one definition across modes.
+
+Each mode offers only its admitted tools, so every runtime receives the same
+definitions without a separate global tool installation or prompt catalogue,
+through the transport its adapter verified:
+
+| Runtime                             | App-managed tool transport                                                                                            |
+| ----------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| Claude Code                         | The Agent SDK's in-process MCP server `octant`, owned by the provider connection                                      |
+| Codex                               | App-server `thread/start.dynamicTools`                                                                                |
+| OpenCode                            | A connection-private loopback MCP endpoint, registered through OpenCode's own server API                              |
+| ACP runtimes                        | An HTTP MCP bridge when the runtime advertises and accepts it; ACP client file and terminal capabilities are separate |
+| Pi                                  | Octant's own Pi extension, calling a token-authenticated loopback bridge                                              |
+| Native harness and direct endpoints | Definitions in the request, for models with verified tool support                                                     |
+
+No transport edits a person's provider MCP, hook, or global configuration;
+OpenCode's per-launch posture stays in its connection-private configuration.
+Decisions 0006, 0093, and 0121 therefore hold.
+
+Browser and Computer are granted differently. Browser is a Work and Code
+capability; Chat never offers it. It is offered on every Work or Code turn
+whose provider carries app-managed tools, `@Browser` only adds selection
+guidance, the first effect for an origin asks inline, and Plan mode refuses
+effects. Computer is the bundled plugin plus a per-send `@Computer`
+selection: only that send carries the full `octant_computer` family. A turn
+without the selection carries the refusal-only definition described under
+[Computer use plugin](#extensions-and-skills), and none at all when Computer
+use is disabled, constrained out, or in Plan mode. Each application still
+needs its own approval.
+
+Canvas follows the same rule through its read-only `describe` operation. The
+always-visible `octant_canvas` description keeps what an agent needs before
+its first call: what a Canvas is and when to deliver work as one instead of a
+long reply, the operations, the authoring and safety rules (structured blocks,
+markup only in a design's frames, no file, shell, Git, or network authority,
+no invented references), where the thread shows it, and to call `describe`
+before authoring. Per-block guidance is answered by `describe`. Unscoped
+describe lists the closed block catalogue with one line on when to use each
+guided kind, how common requests map to recipes, what preview measures, and a
+creation example; describe for up to three block kinds returns their canonical
+schemas, plus authoring guidance and worked examples for the kinds that carry
+them; a plain kind such as `rich-text` returns its schema alone. Unscoped
+describe also lists document recipes: an id, a title, when to use one, and a
+skeleton of block kinds that already exist. The
 host offers an implementation plan, a design spec, an architecture review (its
 options in a comparison matrix), a code review, an audit or test report, a
 postmortem, a research brief, a dashboard, a repository map, a design
@@ -366,7 +443,8 @@ version and does not report it corrupt.
 A treemap block is gated the same way at Canvas schema version 5, a heatmap
 block at version 6, a comparison matrix at version 10, a math block at
 version 11, the mockup catalog at version 12, a table row's `id` at
-version 13, and the funnel, radar, and sankey chart types at version 14, so a
+version 13, the funnel, radar, and sankey chart types at version 14, and the
+dashboard block at version 15, so a
 document that declares an earlier version and carries one is
 refused as a declared future version. The optional table column
 `display` and the chart, table, and metric `format` fields are the one ungated
@@ -439,6 +517,24 @@ layout is pure and deterministic in `packages/domain`
 feeds it, every ending lines up in the last column, and one scale sizes every
 band, so the screen and the artifact preview SVG draw the same picture. The
 three types arrive together with Canvas schema version 14.
+A `dashboard` block is a KPI layout: a title that names its region, an
+optional `columns` of 1 to 4 (four when absent), and 1 to 24 `cells`, each
+naming the `blockId` of a metric, progress, status, chart, or table block in the
+same document with an optional `span` of columns. It is a block rather than a
+document-level layout field so it is version-gated, revised, commented on,
+shared, and described like any other kind, and a Canvas can hold one beside
+prose. Cells reference blocks rather than copy them, so a placed block keeps
+its one definition, id, and comment anchor. A dashboard is not a placeable
+kind, so grids never nest. The domain policy names each refusal
+(`dashboard-cells-budget-exceeded`, `dangling-dashboard-cell`,
+`dashboard-cell-kind-refused`, `duplicate-dashboard-cell` for a block placed
+twice in one dashboard or across two, and `dashboard-span-exceeds-columns`).
+The reading order is pure in `packages/domain` (`canvasDashboardLayout`): a
+dashboard reads where it sits with its cells in order, and a placed block reads
+only there. The screen, the shared snapshot, the artifact preview SVG (framed
+cells packed in that order, stopping at the first row the picture cannot hold
+whole), and the Markdown and HTML export (the title as a heading, then each
+placed block) all use it.
 The accessible table lists every reading: a funnel's stages with their share of
 the first stage and of the stage before, a radar's axes by series, and a
 sankey's flows with each one's share of its source. A pie or donut legend
@@ -578,14 +674,16 @@ column keeps its number format and display, a table row leaves as its cells
 without the `id` comments anchor to, and a board keeps its own layout. Because
 the row id is the only Canvas version 13 field and a share drops it, a share at
 version 6 named a block authored at version 13 as version 12. Share version 7
-carries the version-14 chart types, so it names blocks up to version 14
-(`CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION`).
+carried the version-14 chart types, so it named blocks up to version 14, and
+share version 8 carries the version-15 dashboard, so it names blocks up to
+version 15 (`CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION`).
 Share documents version independently of Canvas documents: a treemap, a
 heatmap, a bar list, a chart's or a table column's number format, a table
 column's display, and a board's layout arrive with share version 3, and a
 comparison matrix with share version 4, math with share version 5, the
-mockup catalog with share version 6, and the funnel, radar, and sankey charts
-with share version 7 (whose blocks may name Canvas version 14), so a share that declares an older version
+mockup catalog with share version 6, the funnel, radar, and sankey charts
+with share version 7 (whose blocks may name Canvas version 14), and the
+dashboard with share version 8, so a share that declares an older version
 and carries one is refused as a future version.
 The catalogue includes a `plan` block: phases, and one list of tasks that each
 name their phase, carry a status (todo, doing, blocked, done), and may carry an
@@ -656,7 +754,8 @@ A table row is either a list of cells or `{ id, cells }`; the id is the
 author's, unique within the table (the domain policy refuses a repeat as
 `duplicate-table-row-id`), and arrives with Canvas schema version 13. A `row`
 comment anchor names a table block and that id, never a position, so a comment
-stays on its row through the reader's sort and filter and through a revision
+stays on its row through the reader's sort, filter, and grouping (all view
+state, never journaled; a table stores no default grouping) and through a revision
 that inserts, removes, or edits rows. A row without an id cannot be anchored
 and the renderer offers it no marker. A comment whose row is gone from the
 version on screen is shown as no longer on the canvas and is never dropped; the
@@ -1068,7 +1167,11 @@ the worktree and creates nothing. The fork starts approval-gated with
 current-session persistence and inherits no profile, pending outcome proposal,
 running turn, or session grant. Every Code thread creation checks a
 `forkedFrom` origin on the server: it must name another thread of the same
-Project.
+Project, and the fork's text handoff (below, "Fork handoff (Code)") must be
+selectable from that thread through the named turn right now. A fork or
+Restore from here whose handoff cannot be built is refused with the reason
+before any worktree is prepared, because the text handoff is the one
+conversation transfer every fork can fall back to.
 
 A child AgentRun starts only when the thread's agent delegates through the
 Octant Harness `delegate` tool or a provider harness's `octant_agents` tool.
@@ -1309,10 +1412,19 @@ The rules:
 - **Credential.** The host's installed `gh` CLI with its own stored login.
   Octant stores no GitHub token; ambient `GH_TOKEN`, `GITHUB_TOKEN`, and
   `GH_ENTERPRISE_TOKEN` are stripped and prompts are disabled.
-- **Record.** The outcome returns to the person and drops the cached detail
-  and list rows; the next refresh observes Merged. The merge is not journaled
-  as its own event: GitHub's history is its record, and a thread linked to the
-  pull request reaches Done only through the ordinary observed-state rule.
+- **Record.** Every attempt that reaches the server merge path appends one
+  `code.project-pull-request-merge-recorded@1` event, as its own aggregate,
+  before the outcome returns: the local user as actor, the Project, the
+  repository, the number, the method, the approved head SHA, and the result
+  (merged, refused with its reason, unavailable with its reason, or failed as
+  `aborted` or `error` when the merge call throws and the effect is unknown;
+  the error is rethrown and its text is never journaled). The payload carries
+  no credential, title, or body, and no projection reads it;
+  it is Octant's own record beside GitHub's history. A failed local append
+  fails the request even when GitHub already merged; the next refresh still
+  observes Merged. The outcome also drops the cached detail and list rows. A
+  thread linked to the pull request reaches Done only through the ordinary
+  observed-state rule, never from this record.
 
 **Delivery (publishing to a user-owned target) is dormant.** The ship service
 and its journaled events exist, but the host wires no target source, no
@@ -2329,6 +2441,27 @@ modelId }`, and the model picker is provider-first. Discovery can find
   is created disabled. Discovery never installs or updates runtimes, never
   toggles an existing instance, and never treats enablement as readiness
   ([decisions/0112-first-run-claude-codex-enablement.md](decisions/0112-first-run-claude-codex-enablement.md)).
+- **Provider catalog.** Settings › Provider catalog lists the bundled
+  provider-driver packages (`bundledProviderDriverCatalog` in
+  `@octant/plugin-host`). Each entry is validated against the public
+  `ProviderDriverCatalogEntry` schema, which `@octant/plugin-api` re-exports
+  from contracts. An entry is only a driver's manifest. It refuses excess
+  properties (no install, trust, enable, credential, or capability claims),
+  declared capabilities, contributions, a second component, an entry point
+  other than `builtin:provider-driver/<kind>`, and any source other than
+  `bundled`. Outside drivers need their own design before the schema admits
+  them. The catalog repeats installed and trusted from the activation context
+  that admits the driver; it never sets them. `resolveProviderCatalogState` in
+  `@octant/domain` derives available, enabled, signed in, and ready separately.
+  It reads the registry, the last observations, and the last scan, with each
+  driver's modes and agent loop, and picks one next step that acts on the
+  configured instance when one exists. Opening the catalog starts nothing. A
+  scan, connect, enable, or connection check runs only from its step's button,
+  and sign-in, Locate binary, and credentials stay on the runtime's own card.
+  Discovery keeps one provider per driver family, as auto-registration does:
+  a discovery connect for a driver that already has a provider returns that
+  provider instead of creating a second one, and leaves its switch unchanged.
+  Ollama is set up as an endpoint, never from the scan.
 - **Driver families.** Direct HTTP drivers (OpenAI-compatible, Anthropic-
   compatible, Azure AI Foundry API-key, Ollama), image HTTP profiles
   (OpenAI Image and Gemini native image — never selectable as Chat, Work, or
@@ -2460,7 +2593,32 @@ modelId }`, and the model picker is provider-first. Discovery can find
   app-managed tools, images, resume, approvals, and subagents are supported.
   The server disables what is unsupported instead of emulating it, and a
   composer reads the same probe before offering an app-managed tool — an
-  incapable provider never shows the offer it would refuse on send. Bounded
+  incapable provider never shows the offer it would refuse on send. Whenever
+  the host reports a runtime to a client (the registry snapshot and a
+  Connection Check result) it attaches an `integration` derived in
+  `@octant/domain/provider-runtime-integration` from the driver kind and that
+  observation; drivers never set it and it is not stored. It states three
+  facts. **Octant tools** is `available` with its transport, or `unavailable`
+  with a reason (`not-confirmed`, `model-verification-required`,
+  `runtime-not-confirmed`, `no-transport`). The transport per runtime:
+  direct endpoints (OpenAI-compatible, Anthropic-compatible, Azure AI Foundry)
+  use `request-tool-calls`; Claude uses `sdk-tool-server`, the in-process tool
+  server its Agent SDK connection owns; Codex uses `app-server-dynamic-tools`;
+  OpenCode and every ACP driver use `session-mcp-bridge`, a loopback HTTP MCP
+  server registered with one session; Pi uses `session-tool-bridge`, a
+  loopback bridge its extension calls; Ollama, Oh My Pi, and image profiles
+  have none. Each transport is owned by the provider connection, so none writes
+  provider MCP or hook configuration ([0006](decisions/0006-acp-agent-drivers.md),
+  [0093](decisions/0093-app-owned-tools-use-managed-runtime-transports.md),
+  [0121](decisions/0121-provider-owned-cli-runtime-and-updates.md)).
+  **Activity** reuses the fleet `activitySource` vocabulary: `session` with the
+  event kinds the live session reports, or `none` when no session runs here.
+  **Resume** is `precise` for a provider-owned conversation whose driver
+  resumes its session, `best-effort` for a host-owned conversation whose
+  history Octant plans again from the journal, and `none` otherwise. Settings ›
+  Providers & Models shows the three facts on each runtime card, and the
+  composers offer neither `@Browser` nor `@Computer` for a selection whose
+  runtime does not carry Octant's tools. Bounded
   provider subprocesses run under a deny-default profile: Seatbelt via
   `sandbox-exec` on macOS, Bubblewrap (`bwrap`) on Linux. Missing the backend
   selected for the host platform fails closed as incompatible.
@@ -2866,6 +3024,42 @@ whose handoff was journaled, which happens only once the new session is
 ready), the composer says the next message starts a new session with a
 handoff.
 
+**Fork handoff (Code).** A fork's first session (no session recorded on the
+fork yet) carries the source's conversation through the fork point, never
+past it. When the fork's provider instance and model can take up the
+source's own session there (today only the Octant Harness, `seedCodeForkHarnessSession`,
+below), the fork resumes that copy and is sent no text. Otherwise, including
+every fork onto a provider instance other than the one that wrote the fork
+point, it reads the source through the same selector (purpose `fork`,
+bounded `throughOperationId`): the source's accepted prompts and completed
+replies up to and including the named turn, with the same bounds,
+attribution, taint and omission counts. The named turn must be found or the
+read refuses (`source-point-unavailable`); a whole-thread read refuses when
+the thread moved during the read, but a read through a fork point covers only
+settled turns, so the source running a later turn does not refuse it. The
+host re-reads the source's record, authorizes the sending window against the
+source's Project, and requires the source to be in the fork's Project before
+reading, then checks that what came back is that thread's.
+
+Either way the turn journals `context-handoff-attached` before the prompt is
+sent, with the fork origin and the fork's provider and model: reason `fork`
+with the counts, taint and a content reference to the exact blocks sent, and
+fixed `false` native-session and hidden-reasoning values; or reason
+`fork-native-session` with `nativeSessionTransferred: true` and no content.
+A recovered start reads that record back like a provider switch's: a text
+record is sent again without reading the source, and a native record whose
+copy cannot be taken up again refuses rather than sending text it did not
+disclose. The handoff is given once: a later turn has its own session. A first
+turn that can neither resume nor build the text handoff refuses with a named
+reason (the source unreadable to this window, in another Project, removed, its
+fork point gone, nothing readable left, history beyond the bounded scan, or a
+handoff that could not be saved). The conversation page carries the summary
+as the turn's `handoff`, and the transcript says what carried over and that
+the source's later replies (and, for text, its session, hidden reasoning and
+tool activity) did not. Other runtimes that can fork a session natively
+(Claude, Codex) still use the text handoff until a driver seam reports a
+fork-at-point capability.
+
 A switch that cannot hand over refuses before the new provider is acquired,
 naming why: no host selector, an unavailable or foreign thread or Project,
 no recorded or readable conversation (for example every body purged), a
@@ -3000,7 +3194,9 @@ native harness in `apps/server/src/harness`:
   own messages, tool calls, and results instead of a text summary. A turn
   begins with the one user message `send` journals for it, and the copy is cut
   at the turn after the named one; the copy refuses — and the fork reads the
-  text handoff instead — unless the transcript holds exactly the turns the
+  journaled text handoff instead (see "Fork handoff (Code)") — unless the
+  copy's binding is the fork's provider instance and model, the turn is
+  still admitted, and the transcript holds exactly the turns the
   source ran on that session, the named turn finished, and its last step
   settled. Copied paths under the source's checkout are rewritten to the
   fork's worktree, and the secret values the fork's turn resolved are
@@ -3448,8 +3644,11 @@ On Apple Silicon macOS, Electron main owns the official CuaDriver SDK and its
 private embedded child. The authenticated loopback broker is available only
 to Octant's host process; its credentials never enter provider children.
 Settings exposes plugin enablement, macOS permission setup, the driver version,
-and update controls. The app bundles a pinned, publisher-verified driver and
-checks upstream daily by default. Verified updates stage privately, activate
+and update controls. The app bundles a pinned, publisher-verified driver. The
+driver runs under Octant's macOS permissions, so it checks upstream daily only
+when the person turns automatic updates on in Settings › Computer use; it is
+off by default, a saved choice is kept, and a manual Check for updates still
+works. Verified updates stage privately, activate
 only while idle, and retain the previous version if startup fails. The driver
 never uses a standalone CuaDriver installation. See
 [decisions/0113-computer-use-plugin-and-driver-updates.md](decisions/0113-computer-use-plugin-and-driver-updates.md).
@@ -3458,7 +3657,12 @@ never uses a standalone CuaDriver installation. See
 upstream streaming tools (`serve-sim`, `serve-avd`) that Octant vendors like
 the Computer-use driver: each release is a pinned npm tarball the packager
 verifies against the registry's published `dist.integrity` (sha512) and lands
-in `Resources/managed-tools/<tool>` with its license. Electron main owns the
+in `Resources/managed-tools/<tool>` with its license. A release build re-signs
+every Mach-O file found there with Octant's Developer ID, hardened runtime, and a
+secure timestamp, and none of Octant's entitlements, before sealing the app,
+because notarization rejects the upstream ad-hoc signatures. Camera passthrough
+from the bundled helper would need its own camera entitlement and a camera usage
+description, which the app does not declare. Electron main owns the
 per-tool instances; tools launch under the desktop runtime
 (`ELECTRON_RUN_AS_NODE` with `process.execPath`), never a system Node. Tools
 run unconfined under Octant's signed identity: no sandbox profile limits them,
@@ -3576,6 +3780,15 @@ gate. The connector marketplace hold remains in force.
 The full threat model lives in the security documentation; the load-bearing
 mechanisms are:
 
+- **Local authority needs the bridge secret.** Nothing reachable on loopback
+  grants window authority by itself. Electron and the CLI present the desktop
+  bridge secret, which only the host's OS user can read from the owner-only
+  runtime directory; a browser presents a one-time launch token minted with
+  that secret and bound to its origin. Another OS user, an `ssh -L` forward,
+  or a proxy that rewrites `Host` reaches the listener but gets no capability
+  (the local client context under [Process topology](#process-topology) has
+  the flow).
+  Paired remote clients keep their own device-session path, unchanged.
 - **Server-side tool-call policy.** A tool call from a model is a petition, not
   a grant. Every call resolves through the closed tool catalog, the mode's
   capability matrix, the thread's elevation state, and the actor's authority
@@ -4209,7 +4422,8 @@ bun run verify     # paths:check, wiring:check, decisions:check, fmt:check, lint
   restart of `bun run dev` rather than a manual
   `bun run --cwd apps/desktop build`.
 - A headless Linux station: `octant server run`, then `octant web` (or
-  `octant web --dev` for Vite). Linux requires `bubblewrap` and Git 2.36 or
+  `octant web --dev` for Vite), run as the OS user that started the host so
+  it can read the bridge secret and mint the browser's launch link. Linux requires `bubblewrap` and Git 2.36 or
   newer; without `bubblewrap`, Work and Code fail closed. Stored provider
   credentials also need an unlocked freedesktop Secret Service session and
   the `secret-tool` client; without them the host still runs Chat, Work, and

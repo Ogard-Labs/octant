@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 import {
   chartExampleBlocks,
   notificationStatesExampleBlock,
+  opsDashboardExampleBlocks,
   releaseMindmapBlock,
   settingsScreenExampleBlock,
   supportFlowBlock,
@@ -556,5 +557,30 @@ describe("drawing a preview of an artifact", () => {
 
     expect(withMarkup).toContain("<polyline");
     expect(plainMarkup).not.toContain("<polyline");
+  });
+
+  it("draws a dashboard as a grid of its cells, side by side, each placed block once", () => {
+    const markup = renderArtifactSidecarSvg(definition(opsDashboardExampleBlocks));
+    // Each cell is a nested viewport, so a label's place is its cell's.
+    const labelAt = (label: string) => {
+      const before = markup.slice(0, markup.indexOf(`>${label}<`));
+      const match = /<svg x="([0-9.]+)" y="([0-9.]+)"[^>]*>(?:(?!<svg ).)*$/.exec(before);
+      if (match === null) throw new Error(`${label} is not drawn in a cell`);
+      return { x: Number(match[1]), y: Number(match[2]) };
+    };
+    const requests = labelAt("Requests per second");
+    const latency = labelAt("p95 latency");
+    const errors = labelAt("Error rate");
+    expect(latency.y).toBe(requests.y);
+    expect(errors.y).toBe(requests.y);
+    expect(latency.x).toBeGreaterThan(requests.x);
+    expect(errors.x).toBeGreaterThan(latency.x);
+    expect(markup.split(">Error rate<")).toHaveLength(2);
+    expect(markup).toContain(">Service health<");
+    expect(markup).not.toContain("<script");
+    // The thumbnail is bounded like every other preview.
+    expect(renderArtifactThumbnail(definition(opsDashboardExampleBlocks)).length).toBeGreaterThan(
+      0,
+    );
   });
 });

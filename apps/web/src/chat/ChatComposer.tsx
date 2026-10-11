@@ -33,6 +33,7 @@ import type { ComposerExtensionSelection } from "../composer/composerExtensionSe
 import type { ProviderInstanceId, ProviderModelId } from "@octant/contracts/providers";
 import { quoteChipLabel, type TranscriptQuoteChip } from "./quoteSelection";
 import type { ModelPickerSelection, PickerGroup } from "@octant/domain";
+import { pickerGroupCarriesAppManagedTools } from "@octant/domain";
 import { applyComposerCaret } from "../composer/composerThreadDraftStore";
 import { markInteraction, markInteractionAfterPaint } from "../polling/interactionTrace";
 import { OctantButton } from "../ui/base/OctantButton";
@@ -217,6 +218,19 @@ export function ChatComposer(props: ChatComposerProps) {
     draft: props.draft,
     onDraftChange: props.onDraftChange,
     scopeKey: String(props.caretRestoreKey ?? "chat-draft"),
+    ...(props.providerGroups === undefined
+      ? {}
+      : {
+          providerCarriesTools: pickerGroupCarriesAppManagedTools(
+            props.providerGroups,
+            props.selectedProviderInstanceId === undefined || props.selectedModelId === undefined
+              ? undefined
+              : {
+                  providerInstanceId: props.selectedProviderInstanceId,
+                  modelId: props.selectedModelId,
+                },
+          ),
+        }),
     onChoose: () => {
       void resolveExtensionReference("@computer");
     },

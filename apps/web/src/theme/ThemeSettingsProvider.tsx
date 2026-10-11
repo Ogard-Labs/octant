@@ -1,7 +1,14 @@
 import { GLASS_TINT_DEFAULTS, type ThemeSettings } from "@octant/contracts/theme";
 import { enforceSidebarBackgroundAccessibility } from "@octant/domain/theme-policy";
 import { resolveEffectiveTokens } from "@octant/theme/fallback";
-import { createContext, useContext, useLayoutEffect, type ReactNode } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useLayoutEffect,
+  useSyncExternalStore,
+  type ReactNode,
+} from "react";
 import { getInjectedHostBridge } from "../shell/hostBridge";
 import { approvalSurfacePalette } from "./approvalSurfacePalette";
 import {
@@ -43,10 +50,37 @@ export function useIncreasedContrast(): boolean {
   return published ?? system;
 }
 
+const SYSTEM_DARK_QUERY = "(prefers-color-scheme: dark)";
+
+function systemDarkQuery(): MediaQueryList | undefined {
+  return typeof window === "undefined" ? undefined : window.matchMedia?.(SYSTEM_DARK_QUERY);
+}
+
+function readSystemPrefersDark(): boolean {
+  return systemDarkQuery()?.matches === true;
+}
+
 export function ThemeSettingsProvider(props: {
   readonly settings?: ThemeSettings;
   readonly children: ReactNode;
 }) {
+  const followsSystem = props.settings?.mode === "system";
+  // Only a theme that follows the system listens, so a live light/dark switch
+  // repaints without a reload while a fixed mode ignores the system entirely.
+  const subscribeToSystemAppearance = useCallback(
+    (onChange: () => void) => {
+      const query = followsSystem ? systemDarkQuery() : undefined;
+      query?.addEventListener?.("change", onChange);
+      return () => query?.removeEventListener?.("change", onChange);
+    },
+    [followsSystem],
+  );
+  const systemPrefersDark = useSyncExternalStore(
+    subscribeToSystemAppearance,
+    readSystemPrefersDark,
+    () => false,
+  );
+
   const systemIncreasedContrast = useMediaQueryMatches(SYSTEM_INCREASED_CONTRAST);
   // Either trigger publishes the one attribute every high-contrast rule keys
   // off, so the in-app toggle and the system preference draw the same rules.
@@ -67,9 +101,6 @@ export function ThemeSettingsProvider(props: {
     const settings = props.settings;
     if (settings === undefined) return;
     const accessible = enforceSidebarBackgroundAccessibility(settings);
-    const systemPrefersDark =
-      typeof window !== "undefined" &&
-      window.matchMedia?.("(prefers-color-scheme: dark)").matches === true;
     const resolved = resolveEffectiveTokens(accessible, systemPrefersDark);
     for (const [role, color] of Object.entries(resolved.tokens)) {
       if (!(increasedContrast && HIGH_CONTRAST_TEXT_ROLES.has(role))) {
@@ -144,7 +175,7 @@ export function ThemeSettingsProvider(props: {
       delete root.dataset.octantStyle;
       root.style.removeProperty("color-scheme");
     };
-  }, [props.settings, increasedContrast]);
+  }, [props.settings, increasedContrast, systemPrefersDark]);
   return (
     <IncreasedContrastContext.Provider value={increasedContrast}>
       {props.children}

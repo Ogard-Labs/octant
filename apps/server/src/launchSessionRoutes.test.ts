@@ -9,6 +9,7 @@ const globalBridgeSecret = `${"S".repeat(42)}A`;
 const windowId: WindowId = decodeWindowId(randomUUID());
 const capability = `${"A".repeat(42)}A`;
 const now = () => 1_000;
+const listenerOrigin = "http://127.0.0.1:13773";
 
 function makeHandler(options?: {
   bridgeSecret?: string | undefined;
@@ -32,7 +33,6 @@ function makeHandler(options?: {
       Object.prototype.hasOwnProperty.call(options, "allowedRendererHttpOrigin")
         ? { allowedRendererHttpOrigin: options.allowedRendererHttpOrigin }
         : {}),
-      generateLocalAuthority: () => ({ windowId, capability }),
     }),
   };
 }
@@ -51,7 +51,7 @@ describe("createLaunchSessionRouteHandler — admin create", () => {
     const response = await handler(
       post(
         "/api/desktop/launch-sessions",
-        { windowId, capability },
+        { windowId, capability, origin: listenerOrigin },
         { "x-octant-desktop-secret": globalBridgeSecret },
       ),
     );
@@ -63,7 +63,9 @@ describe("createLaunchSessionRouteHandler — admin create", () => {
 
   it("returns 503 when the desktop bridge secret is unavailable", async () => {
     const { handler } = makeHandler({ bridgeSecret: undefined });
-    const response = await handler(post("/api/desktop/launch-sessions", { windowId, capability }));
+    const response = await handler(
+      post("/api/desktop/launch-sessions", { windowId, capability, origin: listenerOrigin }),
+    );
     expect(response?.status).toBe(503);
   });
 
@@ -73,7 +75,7 @@ describe("createLaunchSessionRouteHandler — admin create", () => {
     const response = await handler(
       post(
         "/api/desktop/launch-sessions",
-        { windowId, capability },
+        { windowId, capability, origin: listenerOrigin },
         { "x-octant-desktop-secret": wrong },
       ),
     );
@@ -87,7 +89,7 @@ describe("createLaunchSessionRouteHandler — admin create", () => {
     const response = await handler(
       post(
         "/api/desktop/launch-sessions",
-        { windowId, capability },
+        { windowId, capability, origin: listenerOrigin },
         { "x-octant-desktop-secret": globalBridgeSecret, origin: "http://127.0.0.1:13773" },
       ),
     );
@@ -109,7 +111,7 @@ describe("createLaunchSessionRouteHandler — admin create", () => {
           "content-type": "application/json",
           "x-octant-desktop-secret": globalBridgeSecret,
         },
-        body: JSON.stringify({ windowId, capability }),
+        body: JSON.stringify({ windowId, capability, origin: listenerOrigin }),
       }),
     );
     expect(response?.status).toBe(401);
@@ -131,7 +133,7 @@ describe("createLaunchSessionRouteHandler — admin create", () => {
 describe("createLaunchSessionRouteHandler — renderer exchange", () => {
   it("exchanges a valid launch token for the window capability from an allowed renderer origin", async () => {
     const { handler, store } = makeHandler();
-    const receipt = store.create({ windowId, capability, ttlMs: 60_000 });
+    const receipt = store.create({ windowId, capability, origin: listenerOrigin, ttlMs: 60_000 });
     const response = await handler(
       post(
         "/api/shell/launch-session",
@@ -146,7 +148,7 @@ describe("createLaunchSessionRouteHandler — renderer exchange", () => {
 
   it("registers the exchanged capability in the window authority store", async () => {
     const { handler, store, authorityStore } = makeHandler();
-    const receipt = store.create({ windowId, capability, ttlMs: 60_000 });
+    const receipt = store.create({ windowId, capability, origin: listenerOrigin, ttlMs: 60_000 });
     const response = await handler(
       post(
         "/api/shell/launch-session",
@@ -161,7 +163,7 @@ describe("createLaunchSessionRouteHandler — renderer exchange", () => {
   it("refreshes an existing desktop-registered authority instead of failing on conflict", async () => {
     const { handler, store, authorityStore } = makeHandler();
     authorityStore.register({ windowId, capability, now: now() });
-    const receipt = store.create({ windowId, capability, ttlMs: 60_000 });
+    const receipt = store.create({ windowId, capability, origin: listenerOrigin, ttlMs: 60_000 });
     const response = await handler(
       post(
         "/api/shell/launch-session",
@@ -185,7 +187,7 @@ describe("createLaunchSessionRouteHandler — renderer exchange", () => {
       windowAuthorityStore: authorityStore,
       now,
     });
-    const receipt = store.create({ windowId, capability, ttlMs: 60_000 });
+    const receipt = store.create({ windowId, capability, origin: listenerOrigin, ttlMs: 60_000 });
     posture = "recovery-required";
 
     const unavailable = await handler(
@@ -232,7 +234,7 @@ describe("createLaunchSessionRouteHandler — renderer exchange", () => {
       windowAuthorityStore: authorityStore,
       now,
     });
-    const receipt = store.create({ windowId, capability, ttlMs: 60_000 });
+    const receipt = store.create({ windowId, capability, origin: listenerOrigin, ttlMs: 60_000 });
 
     const unavailable = await handler(
       post(
@@ -254,33 +256,14 @@ describe("createLaunchSessionRouteHandler — renderer exchange", () => {
     expect(retried?.status).toBe(200);
   });
 
-  it("emits CORS headers for an allowed loopback renderer origin", async () => {
-    const { handler, store } = makeHandler();
-    const receipt = store.create({ windowId, capability, ttlMs: 60_000 });
-    const response = await handler(
-      post(
-        "/api/shell/launch-session",
-        { launchToken: receipt.launchToken },
-        { origin: "http://localhost:5173" },
-      ),
-    );
-    expect(response?.headers.get("access-control-allow-origin")).toBe("http://localhost:5173");
-  });
-
-  it("exchanges a launch token from a packaged opaque origin", async () => {
-    const { handler, store, authorityStore } = makeHandler({ allowedRendererHttpOrigin: null });
-    const receipt = store.create({ windowId, capability, ttlMs: 60_000 });
-    const response = await handler(
-      post("/api/shell/launch-session", { launchToken: receipt.launchToken }, { origin: "null" }),
-    );
-    expect(response?.status).toBe(200);
-    expect(response?.headers.get("access-control-allow-origin")).toBe("null");
-    expect(authorityStore.authenticate(capability, now())).toBe(windowId);
-  });
-
-  it("keeps loopback browser clients available when Electron is packaged", async () => {
-    const { handler, store } = makeHandler({ allowedRendererHttpOrigin: null });
-    const receipt = store.create({ windowId, capability, ttlMs: 60_000 });
+  it("exchanges a token minted for the Vite renderer from that renderer, with CORS", async () => {
+    const { handler, store } = makeHandler({ allowedRendererHttpOrigin: "http://localhost:5173" });
+    const receipt = store.create({
+      windowId,
+      capability,
+      origin: "http://localhost:5173",
+      ttlMs: 60_000,
+    });
     const response = await handler(
       post(
         "/api/shell/launch-session",
@@ -290,11 +273,56 @@ describe("createLaunchSessionRouteHandler — renderer exchange", () => {
     );
     expect(response?.status).toBe(200);
     expect(response?.headers.get("access-control-allow-origin")).toBe("http://localhost:5173");
+  });
+
+  it("refuses a token minted for one origin when another origin or no origin presents it", async () => {
+    const { handler, store, authorityStore } = makeHandler();
+    for (const presenting of [{ origin: "http://127.0.0.1:5173" }, { origin: "null" }, {}]) {
+      const receipt = store.create({ windowId, capability, origin: listenerOrigin, ttlMs: 60_000 });
+      const refused = await handler(
+        post("/api/shell/launch-session", { launchToken: receipt.launchToken }, presenting),
+      );
+      expect(refused?.status).toBe(400);
+      expect(await refused?.json()).not.toHaveProperty("capability");
+      // The leaked token is burned, so the minted origin cannot use it either.
+      const replay = await handler(
+        post(
+          "/api/shell/launch-session",
+          { launchToken: receipt.launchToken },
+          { origin: listenerOrigin },
+        ),
+      );
+      expect(replay?.status).toBe(400);
+    }
+    expect(authorityStore.size()).toBe(0);
+  });
+
+  it("refuses an expired token", async () => {
+    let clock = 1_000;
+    const store = new LaunchSessionStore({ now: () => clock });
+    const authorityStore = new WindowAuthorityStore();
+    const handler = createLaunchSessionRouteHandler({
+      desktopBridgeSecret: globalBridgeSecret,
+      launchSessionStore: store,
+      windowAuthorityStore: authorityStore,
+      now: () => clock,
+    });
+    const receipt = store.create({ windowId, capability, origin: listenerOrigin, ttlMs: 60_000 });
+    clock = 61_000;
+    const response = await handler(
+      post(
+        "/api/shell/launch-session",
+        { launchToken: receipt.launchToken },
+        { origin: listenerOrigin },
+      ),
+    );
+    expect(response?.status).toBe(400);
+    expect(authorityStore.size()).toBe(0);
   });
 
   it("handles an OPTIONS preflight for the renderer exchange route", async () => {
     const { handler, store } = makeHandler();
-    const receipt = store.create({ windowId, capability, ttlMs: 60_000 });
+    const receipt = store.create({ windowId, capability, origin: listenerOrigin, ttlMs: 60_000 });
     const response = await handler(
       new Request(`http://127.0.0.1:13773/api/shell/launch-session?token=${receipt.launchToken}`, {
         method: "OPTIONS",
@@ -307,7 +335,7 @@ describe("createLaunchSessionRouteHandler — renderer exchange", () => {
 
   it("rejects a non-loopback renderer host", async () => {
     const { handler, store } = makeHandler();
-    const receipt = store.create({ windowId, capability, ttlMs: 60_000 });
+    const receipt = store.create({ windowId, capability, origin: listenerOrigin, ttlMs: 60_000 });
     const response = await handler(
       new Request("http://10.0.0.1:13773/api/shell/launch-session", {
         method: "POST",
@@ -320,7 +348,7 @@ describe("createLaunchSessionRouteHandler — renderer exchange", () => {
 
   it("rejects a disallowed renderer origin", async () => {
     const { handler, store } = makeHandler();
-    const receipt = store.create({ windowId, capability, ttlMs: 60_000 });
+    const receipt = store.create({ windowId, capability, origin: listenerOrigin, ttlMs: 60_000 });
     const response = await handler(
       post(
         "/api/shell/launch-session",
@@ -333,7 +361,7 @@ describe("createLaunchSessionRouteHandler — renderer exchange", () => {
 
   it("rejects an already-consumed token as 400", async () => {
     const { handler, store } = makeHandler();
-    const receipt = store.create({ windowId, capability, ttlMs: 60_000 });
+    const receipt = store.create({ windowId, capability, origin: listenerOrigin, ttlMs: 60_000 });
     await handler(
       post(
         "/api/shell/launch-session",
@@ -360,36 +388,102 @@ describe("createLaunchSessionRouteHandler — renderer exchange", () => {
   });
 });
 
-describe("createLaunchSessionRouteHandler — local client bootstrap", () => {
-  it("creates and registers local client context directly on the canonical host", async () => {
+describe("createLaunchSessionRouteHandler — admin create binds the renderer origin", () => {
+  it.each([
+    ["the listener's own origin", undefined, listenerOrigin],
+    ["the configured Vite renderer", "http://127.0.0.1:5173", "http://127.0.0.1:5173"],
+  ] as const)("mints a token for %s", async (_, allowedRendererHttpOrigin, origin) => {
+    const { handler } = makeHandler(
+      allowedRendererHttpOrigin === undefined ? {} : { allowedRendererHttpOrigin },
+    );
+    const response = await handler(
+      post(
+        "/api/desktop/launch-sessions",
+        { windowId, capability, origin },
+        { "x-octant-desktop-secret": globalBridgeSecret },
+      ),
+    );
+    expect(response?.status).toBe(201);
+  });
+
+  it.each(["http://127.0.0.1:9999", "https://example.com", "null", "file://"])(
+    "refuses to mint a token for %s, which this listener does not serve",
+    async (origin) => {
+      const { handler } = makeHandler({ allowedRendererHttpOrigin: null });
+      const response = await handler(
+        post(
+          "/api/desktop/launch-sessions",
+          { windowId, capability, origin },
+          { "x-octant-desktop-secret": globalBridgeSecret },
+        ),
+      );
+      expect(response?.status).toBe(400);
+    },
+  );
+});
+
+describe("createLaunchSessionRouteHandler — local client session refresh", () => {
+  it.each([
+    ["no renderer is configured", undefined, listenerOrigin],
+    ["the packaged renderer is running", null, "http://localhost:13773"],
+    ["a Vite renderer is configured", "http://127.0.0.1:5173", "http://127.0.0.1:5173"],
+  ] as const)(
+    "gives a loopback caller without a held capability no capability when %s",
+    async (_, allowedRendererHttpOrigin, origin) => {
+      const { handler, authorityStore } = makeHandler(
+        allowedRendererHttpOrigin === undefined ? {} : { allowedRendererHttpOrigin },
+      );
+      const response = await handler(post("/api/shell/local-session", {}, { origin }));
+
+      expect(response?.status).toBe(401);
+      const body = await response?.json();
+      expect(body).toEqual({
+        category: "unauthorized",
+        message: "Open Octant from the desktop app or run `octant web`.",
+      });
+      expect(authorityStore.size()).toBe(0);
+    },
+  );
+
+  it("refuses a capability the host does not hold, such as one from before a restart", async () => {
     const { handler, authorityStore } = makeHandler();
     const response = await handler(
-      post("/api/shell/local-session", {}, { origin: "http://127.0.0.1:13773" }),
+      post("/api/shell/local-session", { windowId, capability }, { origin: listenerOrigin }),
     );
-
-    expect(response?.status).toBe(200);
-    expect(await response?.json()).toEqual({
-      windowId,
-      capability,
-      authentication: "local-session",
-    });
-    expect(authorityStore.authenticate(capability, now())).toBe(windowId);
+    expect(response?.status).toBe(401);
+    expect(authorityStore.size()).toBe(0);
   });
 
-  it("keeps the canonical host available while a Vite renderer is configured", async () => {
-    const { handler } = makeHandler({ allowedRendererHttpOrigin: "http://localhost:5173" });
+  it("refuses a held capability presented under another window", async () => {
+    const { handler, authorityStore } = makeHandler();
+    authorityStore.register({ windowId, capability, now: now() });
     const response = await handler(
-      post("/api/shell/local-session", {}, { origin: "http://127.0.0.1:13773" }),
+      post(
+        "/api/shell/local-session",
+        { windowId: decodeWindowId(randomUUID()), capability },
+        { origin: listenerOrigin },
+      ),
     );
-
-    expect(response?.status).toBe(200);
+    expect(response?.status).toBe(401);
   });
 
-  it("reuses a Vite client context only from the explicitly configured renderer origin", async () => {
-    const { handler, authorityStore } = makeHandler({
+  it("refreshes a capability exchanged from a launch token, so a reload keeps its session", async () => {
+    const { handler, store, authorityStore } = makeHandler({
       allowedRendererHttpOrigin: "http://127.0.0.1:5173",
     });
-    await handler(post("/api/shell/local-session", {}, { origin: "http://127.0.0.1:5173" }));
+    const receipt = store.create({
+      windowId,
+      capability,
+      origin: "http://127.0.0.1:5173",
+      ttlMs: 60_000,
+    });
+    await handler(
+      post(
+        "/api/shell/launch-session",
+        { launchToken: receipt.launchToken },
+        { origin: "http://127.0.0.1:5173" },
+      ),
+    );
 
     const response = await handler(
       post(
@@ -408,27 +502,17 @@ describe("createLaunchSessionRouteHandler — local client bootstrap", () => {
     expect(authorityStore.size()).toBe(1);
   });
 
-  it("admits the canonical host under any loopback name on the listener port", async () => {
-    const { handler } = makeHandler({ allowedRendererHttpOrigin: null });
-
-    const response = await handler(
-      post("/api/shell/local-session", {}, { origin: "http://localhost:13773" }),
-    );
-
-    expect(response?.status).toBe(200);
-    expect(response?.headers.get("access-control-allow-origin")).toBe("http://localhost:13773");
-  });
-
   it.each([
     ["no renderer is configured", undefined],
     ["the packaged renderer is running", null],
     ["a different Vite renderer is configured", "http://localhost:5173"],
   ] as const)(
-    "refuses a page on another loopback port when %s, minting no authority",
+    "refuses a page on another loopback port when %s, without CORS",
     async (_, allowedRendererHttpOrigin) => {
       const { handler, authorityStore } = makeHandler(
         allowedRendererHttpOrigin === undefined ? {} : { allowedRendererHttpOrigin },
       );
+      authorityStore.register({ windowId, capability, now: now() });
 
       for (const origin of [
         "http://127.0.0.1:9999",
@@ -441,7 +525,9 @@ describe("createLaunchSessionRouteHandler — local client bootstrap", () => {
             headers: { origin, "access-control-request-method": "POST" },
           }),
         );
-        const response = await handler(post("/api/shell/local-session", {}, { origin }));
+        const response = await handler(
+          post("/api/shell/local-session", { windowId, capability }, { origin }),
+        );
 
         expect(preflight?.status).toBe(400);
         expect(preflight?.headers.get("access-control-allow-origin")).toBeNull();
@@ -449,7 +535,6 @@ describe("createLaunchSessionRouteHandler — local client bootstrap", () => {
         expect(response?.headers.get("access-control-allow-origin")).toBeNull();
         expect(await response?.json()).not.toHaveProperty("capability");
       }
-      expect(authorityStore.size()).toBe(0);
     },
   );
 
