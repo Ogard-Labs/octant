@@ -3,10 +3,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   decodeProviderInstanceId,
+  type AggregateVersion,
   type ProviderInstance,
   type ProviderRegistryCommand,
+  type UtcTimestamp,
 } from "@octant/contracts";
-import { canLocateRuntimeBinary } from "@octant/domain";
+import { canLocateRuntimeBinary, createCodexProvider } from "@octant/domain";
 import { DISCOVERY_DESCRIPTORS } from "@octant/provider-sdk/discovery";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LocalPluginImportReceiptStore } from "../extensions/localPluginImportReceiptStore";
@@ -528,4 +530,39 @@ describe("locate binary", () => {
     }
     expect(canLocateRuntimeBinary("glm")).toBe(false);
   });
+});
+
+it("connects a detected runtime to the provider already configured for it instead of adding a second", async () => {
+  const existing = createCodexProvider({
+    id: decodeProviderInstanceId("00000000-0000-4000-8000-000000000777"),
+    displayName: "Codex CLI",
+    binaryPath: "/usr/local/bin/codex",
+    existingInstances: [],
+    expectedVersion: 0 as AggregateVersion,
+    createdAt: "2026-07-25T10:00:00.000Z" as UtcTimestamp,
+    enabled: false,
+  });
+  const onConnect = vi.fn(async () => ({ instanceId: "00000000-0000-4000-8000-000000000901" }));
+  const handler = createDiscoveryRouteHandler({
+    discoveryService: makeFakeDiscoveryService(),
+    windowAuthorityStore: makeFakeWindowAuthorityStore(),
+    listInstances: async () => [existing],
+    onConnect,
+  });
+  const result = await handler(
+    makeRequest("/api/providers/discovery/connect", {
+      body: {
+        kind: "connect",
+        driverKind: "codex",
+        binaryPath: "/usr/local/bin/codex",
+        displayName: "Codex CLI",
+      },
+    }),
+  );
+  expect(result!.status).toBe(200);
+  expect(await result!.json()).toEqual({
+    kind: "candidate-connected",
+    instanceId: "00000000-0000-4000-8000-000000000777",
+  });
+  expect(onConnect).not.toHaveBeenCalled();
 });
