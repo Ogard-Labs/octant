@@ -343,7 +343,9 @@ pre {
 /* ── tabs ──
    Radio inputs and their labels, then one panel per tab in the same order.
    A checked radio shows the panel at its position, so the page switches tabs
-   without running anything. Panels must be the block's only div children. */
+   without running anything. Panels must be the block's only div children.
+   CSS cannot pair the nth radio with the nth panel generically, so the kit
+   pairs eight and the author instructions and DESIGN.md teach that limit. */
 
 .oct-tabs {
   display: flex;

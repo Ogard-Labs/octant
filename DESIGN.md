@@ -1099,8 +1099,8 @@ column with the heading ladder, lists, quotes, rules, and captions),
 `--warn`, or `--danger` tone, `oct-callout` with a `--success`, `--warn`, or
 `--danger` edge, `oct-table` inside `oct-table-wrap`, `oct-code`, and
 `oct-tabs`. Tabs are radio inputs, each followed by its label, then one
-`div.oct-tab-panel` per tab in the same order; the checked radio shows its
-panel, so tabs switch without script. Under forced colours a badge keeps a
+`div.oct-tab-panel` per tab in the same order, at most eight tabs to a group;
+the checked radio shows its panel, so tabs switch without script. Under forced colours a badge keeps a
 system border and the chosen tab a `Highlight` underline. The kit never sets a
 colour of its own, so a page written only with it matches the workspace in
 every theme.
