@@ -59,6 +59,12 @@ export interface EndpointStatusInput {
    * missing key there is added in the desktop app rather than by a fix.
    */
   readonly keysHere?: boolean;
+  /**
+   * The host deleted the stored key when the address was saved, and no check
+   * has run since. A keyed endpoint then reads as needing its key rather than
+   * as not checked, since the check would only report the key missing.
+   */
+  readonly keyRemoved?: boolean;
 }
 
 /**
@@ -87,6 +93,12 @@ export function endpointStatus(input: EndpointStatusInput): EndpointStatus {
     if (input.signIn?.kind === "signed-out") return signInToUse(offer);
   }
   if (failure !== undefined) return failureStatus(input, failure);
+  if (observed === undefined && input.keyRemoved === true && endpointTakesKey(instance)) {
+    return keyNeeded(
+      input,
+      "The address changed, so its saved API key was removed. Add the key again.",
+    );
+  }
   if (observed === undefined) {
     return {
       tone: "unchecked",
@@ -214,7 +226,7 @@ function signedOut(offer: { readonly accountLabel: string; readonly action: stri
 /** The label of an endpoint that has no key saved, which other steps can recognise. */
 export const NEEDS_KEY_LABEL = "Needs key";
 
-function keyNeeded(input: EndpointStatusInput): EndpointStatus {
+function keyNeeded(input: EndpointStatusInput, sentence?: string): EndpointStatus {
   if (input.keysHere === false) {
     return {
       tone: "needs-you",
@@ -225,7 +237,7 @@ function keyNeeded(input: EndpointStatusInput): EndpointStatus {
   return {
     tone: "needs-you",
     label: NEEDS_KEY_LABEL,
-    sentence: "No API key is saved for it.",
+    sentence: sentence ?? "No API key is saved for it.",
     fix: { kind: "add-key", label: "Add key" },
   };
 }

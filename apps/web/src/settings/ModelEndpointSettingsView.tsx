@@ -11,7 +11,10 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { boundSubscriptionOffer } from "../providers/configuration/HttpConfigurationForms";
 import { isModelEndpointDriverKind } from "../providers/providerSettingsPresentation";
 import type { ProviderSettingsViewProps } from "../providers/ProviderSettingsView";
-import type { ProviderProbeFailure } from "../providers/useProviderController";
+import type {
+  ProviderProbeFailure,
+  TransientProviderCredential,
+} from "../providers/useProviderController";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
 import { SettingsSection } from "./primitives";
@@ -88,6 +91,36 @@ export function ModelEndpointSettingsView(props: ModelEndpointSettingsViewProps)
       }),
     [endpoints],
   );
+  // Endpoints whose saved address moved and whose stored key the host deleted
+  // with it, by the address they had. An endpoint reads as needing its key
+  // only while its address is still different and no check has run since.
+  const [keysRemoved, setKeysRemoved] = useState<ReadonlyMap<string, string>>(new Map());
+  const keepsKeyAcross =
+    <Configuration extends { readonly baseUrl: string }>(
+      change: (
+        instanceId: ProviderInstanceId,
+        configuration: Configuration,
+        credential: TransientProviderCredential,
+      ) => Promise<boolean>,
+    ) =>
+    async (
+      instanceId: ProviderInstanceId,
+      configuration: Configuration,
+      credential: TransientProviderCredential,
+    ): Promise<boolean> => {
+      const prior = endpoints.find((instance) => String(instance.id) === String(instanceId));
+      const keyEntered = credential.value.length > 0;
+      const saved = await change(instanceId, configuration, credential);
+      const moved = prior !== undefined && prior.configuration.baseUrl !== configuration.baseUrl;
+      setKeysRemoved((current) => {
+        const next = new Map(current);
+        if (moved && !(keyEntered && saved))
+          next.set(String(instanceId), prior.configuration.baseUrl);
+        else if (keyEntered && saved) next.delete(String(instanceId));
+        return next;
+      });
+      return saved;
+    };
   const { signIns, record } = useEndpointSignIns(signInTargets, props.onProviderOAuth);
   const presentation = props.presentationObservedByInstance ?? props.observedByInstance;
   const hiddenModels = props.defaults.hiddenModels ?? [];
@@ -109,8 +142,12 @@ export function ModelEndpointSettingsView(props: ModelEndpointSettingsViewProps)
     const failure = props.probeFailures?.get(instance.id);
     const checking =
       props.probingIds.has(instance.id) || props.updatingIds?.has(instance.id) === true;
+    const keyRemoved =
+      keysRemoved.has(String(instance.id)) &&
+      keysRemoved.get(String(instance.id)) !== instance.configuration.baseUrl;
     const status = endpointStatus({
       instance,
+      keyRemoved,
       observed: props.observedByInstance.get(instance.id),
       checking,
       keysHere: props.credentialManagementAvailable,
@@ -271,6 +308,15 @@ export function ModelEndpointSettingsView(props: ModelEndpointSettingsViewProps)
           key={String(openInstance.id)}
           observed={described.observed}
           onBack={closeDetail}
+          onChangeAnthropicCompatibleConfiguration={keepsKeyAcross(
+            props.onChangeAnthropicCompatibleConfiguration,
+          )}
+          onChangeAzureFoundryConfiguration={keepsKeyAcross(
+            props.onChangeAzureFoundryConfiguration,
+          )}
+          onChangeOpenAiCompatibleConfiguration={keepsKeyAcross(
+            props.onChangeOpenAiCompatibleConfiguration,
+          )}
           onSignInState={(state) => {
             const prior = signIns.get(String(openInstance.id));
             record(String(openInstance.id), state);
