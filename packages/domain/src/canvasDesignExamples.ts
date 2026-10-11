@@ -3,7 +3,7 @@ import type { CanvasDesignBlock } from "@octant/contracts/canvas";
 
 /**
  * The designs an agent is shown when it asks how to write one: a clickable
- * phone flow, and a short deck. Wire shapes, not branded blocks: describe
+ * phone flow, a short deck, and a spec drawn as a themed document. Wire shapes, not branded blocks: describe
  * returns these objects as-is.
  */
 export const onboardingFlowExample = {
@@ -63,6 +63,46 @@ export const launchDeckExample = {
   ],
 };
 
+/**
+ * A spec drawn as a document in the workspace theme: the frame kit's article
+ * typography, CSS-only tabs, metric tiles, a badge table, a callout, and code.
+ * It sets no colour or font of its own, so it reads as part of Octant in every
+ * theme.
+ */
+export const searchSpecExample = {
+  blockId: "search-spec",
+  schemaVersion: CANVAS_SCHEMA_VERSION,
+  kind: "design" as const,
+  title: "Search ranking spec",
+  size: "document" as const,
+  frames: [
+    {
+      frameId: "spec",
+      title: "Spec",
+      html: [
+        '<article class="oct-article">',
+        '<p class="oct-eyebrow">Spec · Draft</p>',
+        "<h1>Search ranking</h1>",
+        '<p class="oct-lede">Rank results by what the person did last, then by how well the title matches.</p>',
+        '<div class="oct-metrics">',
+        '<div class="oct-metric"><span class="oct-metric__label">Median latency</span><span class="oct-metric__value">84 ms</span><span class="oct-metric__delta oct-metric__delta--good">−12 ms</span></div>',
+        '<div class="oct-metric"><span class="oct-metric__label">Click-through</span><span class="oct-metric__value">41%</span><span class="oct-metric__delta oct-metric__delta--good">+6 pts</span></div>',
+        '<div class="oct-metric"><span class="oct-metric__label">Zero results</span><span class="oct-metric__value">3.2%</span><span class="oct-metric__delta oct-metric__delta--bad">+0.4 pts</span></div>',
+        "</div>",
+        '<div class="oct-tabs">',
+        '<input type="radio" name="spec-tabs" id="spec-overview" checked><label for="spec-overview">Overview</label>',
+        '<input type="radio" name="spec-tabs" id="spec-signals"><label for="spec-signals">Signals</label>',
+        '<input type="radio" name="spec-tabs" id="spec-rollout"><label for="spec-rollout">Rollout</label>',
+        '<div class="oct-tab-panel"><h2>Overview</h2><p>Recent activity outranks text match for the first three results. Below that, the existing text score decides.</p><div class="oct-callout oct-callout--warn"><p class="oct-callout__title">Open question</p><p>Should a pinned result survive a filter change?</p></div></div>',
+        '<div class="oct-tab-panel"><h2>Signals</h2><div class="oct-table-wrap"><table class="oct-table"><thead><tr><th>Signal</th><th>Weight</th><th>Status</th></tr></thead><tbody><tr><td>Opened in the last day</td><td>0.6</td><td><span class="oct-badge oct-badge--success">Shipped</span></td></tr><tr><td>Title match</td><td>0.3</td><td><span class="oct-badge">Existing</span></td></tr><tr><td>Shared with me</td><td>0.1</td><td><span class="oct-badge oct-badge--warn">Testing</span></td></tr></tbody></table></div></div>',
+        '<div class="oct-tab-panel"><h2>Rollout</h2><p>Ship behind a flag and compare a week of click-through.</p><pre class="oct-code"><code>search.rank.recent = true\nsearch.rank.weights = [0.6, 0.3, 0.1]</code></pre></div>',
+        "</div>",
+        "</article>",
+      ].join(""),
+    },
+  ],
+};
+
 function designBlock(value: unknown): CanvasDesignBlock {
   const block = decodeCanvasBlock(value);
   if (block.kind !== "design") {
@@ -73,3 +113,4 @@ function designBlock(value: unknown): CanvasDesignBlock {
 
 export const onboardingFlowExampleBlock = designBlock(onboardingFlowExample);
 export const launchDeckExampleBlock = designBlock(launchDeckExample);
+export const searchSpecExampleBlock = designBlock(searchSpecExample);

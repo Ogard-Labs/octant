@@ -4082,6 +4082,16 @@
   inset: 0;
 }
 
+/* A document is read in place: the page is as wide as the column and the
+   host sets its height from the page, so nothing scrolls inside it. A themed
+   page is transparent and sits on the Canvas surface. */
+.canvas-design__document {
+  display: block;
+  width: 100%;
+  border: 0;
+  background: transparent;
+}
+
 .octant-dialog__popup.canvas-design-player {
   --octant-dialog-width: 96vw;
   --octant-dialog-height: 94vh;

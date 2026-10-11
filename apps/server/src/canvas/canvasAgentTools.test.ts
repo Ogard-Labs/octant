@@ -564,6 +564,39 @@ describe("createCanvasAgentTools", () => {
     });
   });
 
+  it("lets an agent create a phone flow, a deck, and a themed spec document from the design examples describe returns", async () => {
+    const { create, set } = tools();
+    const described = await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "describe", blockKinds: ["design"] }),
+    });
+
+    expect(described.isError).not.toBe(true);
+    const result = described.result as {
+      examples?: ReadonlyArray<Record<string, unknown>>;
+      blockSchema?: unknown;
+    };
+    const examples = result.examples ?? [];
+    expect(examples.map((example) => example.size)).toEqual(["phone", "slide", "document"]);
+    // The schema an agent reads names the document size and the theme field.
+    expect(JSON.stringify(result.blockSchema)).toContain('"document"');
+    expect(JSON.stringify(result.blockSchema)).toContain('"workspace"');
+    const blocks = examples.map((example) => decodeCanvasBlock(example));
+
+    const created = await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "create", title: "Designs", blocks: examples }),
+    });
+
+    expect(created.isError).not.toBe(true);
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "Designs" }),
+      expect.anything(),
+      expect.anything(),
+      blocks,
+    );
+  });
+
   it("lets an agent create a hottest-files list from the bar-list example describe returns", async () => {
     const { create, set } = tools();
     const described = await set.execute({

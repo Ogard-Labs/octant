@@ -462,8 +462,9 @@ version and does not report it corrupt.
 A treemap block is gated the same way at Canvas schema version 5, a heatmap
 block at version 6, a comparison matrix at version 10, a math block at
 version 11, the mockup catalog at version 12, a table row's `id` at
-version 13, the funnel, radar, and sankey chart types at version 14, and the
-dashboard block at version 15, so a
+version 13, the funnel, radar, and sankey chart types at version 14, the
+dashboard block at version 15, and a design's `document` size or `theme` at
+version 16, so a
 document that declares an earlier version and carries one is
 refused as a declared future version. The optional table column
 `display` and the chart, table, and metric `format` fields are the one ungated
@@ -787,11 +788,26 @@ snapshots serialise the definition and so never carry comments
 A `design` block (Canvas schema version 9) is the one block whose content is
 markup: the frames of one design at one size, `phone` (390×844), `tablet`
 (820×1180), `desktop` (1440×900), or `slide` (1920×1080), each a page of
-static HTML, plus one shared stylesheet. The renderer draws each frame in an
-`iframe` with an empty `sandbox` and a `srcdoc` page whose policy loads nothing
-but inline styles and `data:` images and fonts, on top of the app policy the
-page inherits. No script runs, nothing submits, and the page has no access to
-Octant. Frames link by fragment; Play draws every frame in one page so a link
+static HTML, plus one shared stylesheet. Version 16 adds the `document` size,
+whose frames are sections of one page as wide as the Canvas column and as tall
+as its content, and an optional `theme`: `workspace` or `none`, defaulting to
+`workspace` for a document and `none` for a device size, so a product screen
+keeps its own brand. The renderer draws each frame in an `iframe` with a
+`srcdoc` page whose policy loads nothing but inline styles and `data:` images
+and fonts, on top of the app policy the page inherits. The sandbox never
+includes `allow-scripts`. A device-size frame that is not themed has an empty
+`sandbox`; a document or a themed frame has `allow-same-origin` and nothing
+else, so the host can read the page: it measures the document's body with a
+`ResizeObserver` and sets the frame's height to it (up to 12,000px, past which
+the page scrolls inside the frame), and it installs Geist and Geist Mono into
+the page as fonts built from the bundled files, because the inherited app
+policy (`font-src 'self'`) refuses a `data:` font the page could name. A
+themed page also receives the workspace's computed `--oct-*` tokens and
+light or dark scheme, redrawn when the root's theme attributes change, and the
+frame kit stylesheet, all ahead of the author's own; `DESIGN.md` names the
+kit. A test renders every size and theme and asserts no frame is given
+`allow-scripts`. No script runs, nothing submits, and the page can use none
+of Octant's origin. Frames link by fragment; Play draws every frame in one page so a link
 shows its frame through `:target`, and the renderer writes each fragment
 against the page's own address because a `srcdoc` page resolves a bare one
 against its parent. The pure `canvasDesignMarkupRefusal` policy refuses a
@@ -817,10 +833,10 @@ Chromium stops painting sandboxed frames that are `inert` or have
 `pointer-events: none`, so a frame shown as a picture stays hit-testable and a
 cover over it takes the pointer
 ([decisions/0164-canvas-designs-are-html-in-a-frame-that-runs-nothing.md](decisions/0164-canvas-designs-are-html-in-a-frame-that-runs-nothing.md)).
-The frame described here is the shipped tier. Themed frames measured to their
-content, frames that show Project images, and frames that run script are
-accepted but not yet built; each replaces the matching sentence above when it
-ships (see [Canvas documents, designs, and prototypes](#canvas-documents-designs-and-prototypes)).
+The static frames and the themed `document` frames measured to their content
+described here are the shipped tiers. Frames that show Project images and
+frames that run script are accepted but not yet built; each replaces the
+matching sentence above when it ships (see [Canvas documents, designs, and prototypes](#canvas-documents-designs-and-prototypes)).
 
 The local-server provider adapter owns a separate process for each acquired
 connection and allows one live session per connection. Its MCP protocol does
@@ -840,9 +856,11 @@ spec, an article, a brief with tabs, metrics, diagrams, and badge tables),
 designs they review (app screens, a site, a deck, a design system), and
 prototypes they try (a flow that reacts to input and keeps state). It does so
 in three tiers that an author mixes in one Canvas, using the lowest tier that
-delivers the result. This is accepted direction: each rule below replaces the
-matching shipped rule above when its slice ships, and until then the shipped
-rule holds. Each tier is a Canvas schema bump, so an older runtime refuses the
+delivers the result. The static frames' `document` size and workspace theme
+have shipped (Canvas schema version 16, described with the `design` block
+above). The rest is accepted direction: each rule below replaces the matching
+shipped rule above when its slice ships, and until then the shipped rule
+holds. Each tier is a Canvas schema bump, so an older runtime refuses the
 document as a future version. Frames follow the
 [Canvas HTML frames threat model](security/canvas-html-frames-threat-model.md).
 
@@ -856,14 +874,14 @@ document as a future version. Frames follow the
   Mermaid subset into typed diagram blocks. Mermaid never renders; an unknown
   construct fails closed and stays a code block.
 - **Static frames carry the look.** A `design` keeps a frame that runs
-  nothing and gains a `document` size whose height the host measures, which
-  needs `allow-same-origin` and therefore never `allow-scripts`; an opt-in
+  nothing and has a `document` size whose height the host measures, which
+  needs `allow-same-origin` and therefore never `allow-scripts`, and an opt-in
   workspace theme (semantic tokens, light or dark, the bundled fonts, and a
   first-party stylesheet for articles, cards, CSS-only tabs, badges, metric
-  tiles, tables, callouts, and code), unthemed by default at device sizes; and
-  images named by asset id, which the server resolves under the thread's mode
-  and Project authority and the host inlines before drawing. The frame itself
-  loads nothing.
+  tiles, tables, callouts, and code), unthemed by default at device sizes;
+  both have shipped. Not yet built: images named by asset id, which the server
+  resolves under the thread's mode and Project authority and the host inlines
+  before drawing. The frame itself loads nothing.
 - **Running frames carry behavior.** A `design` may declare that it runs
   script. Its page comes from a host route fetched with a single-use ticket
   scoped to one Canvas version, never the session credential, with a
