@@ -3239,12 +3239,14 @@ to the exact blocks and fixed `false` native-session and hidden-reasoning
 values. Merges are deduplicated by fork and end turn: a merge through the
 fork's last merged turn is refused (`already-merged`), and one with no new
 readable turn is refused (`nothing-new`); the check and the append run without
-yielding, so two merges cannot both pass. Outside content the fork took in
+yielding, so two merges cannot both pass. At most 64 merges may wait for the
+source's next turn (`merges-pending` beyond that), so the bounded journal read
+that finds waiting merges always holds them all. Outside content the fork took in
 taints the source (`external-content`, label `fork-merge-back`) before the
 merge is appended. Refusals are values on the command result
 (`fork-context-merge`): unsupported, not a fork, source unavailable or
 unauthorized, another Project, a missing or unfinished end turn, already
-merged, nothing new, an unreadable fork, or a merge that could not be saved.
+merged, nothing new, too many merges waiting, an unreadable fork, or a merge that could not be saved.
 
 The source's next turn carries the oldest merges no turn has carried yet, at
 most two (`MAX_CODE_FORK_MERGE_BACKS_PER_TURN`; later ones wait), after any

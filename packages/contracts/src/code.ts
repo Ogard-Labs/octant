@@ -1030,6 +1030,7 @@ export const CodeForkMergeBackRefusal = Schema.Literal(
   "point-unavailable",
   "already-merged",
   "nothing-new",
+  "merges-pending",
   "fork-unreadable",
   "unsaved",
 );

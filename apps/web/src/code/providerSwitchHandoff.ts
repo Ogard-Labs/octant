@@ -146,6 +146,8 @@ const MERGE_BACK_REFUSALS: Record<
   "already-merged": "This fork is already merged back through this reply.",
   "nothing-new":
     "Nothing readable is new in this fork since the fork point or its last merge back.",
+  "merges-pending":
+    "The thread this was forked from already has many merges waiting. Send it a message first.",
   "fork-unreadable": "This fork's conversation could not be read. Try again.",
   unsaved: "The merge back could not be saved. Try again.",
 };

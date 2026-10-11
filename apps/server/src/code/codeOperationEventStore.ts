@@ -310,12 +310,14 @@ export class CodeOperationEventStore {
   }
 
   /**
-   * The fork conversations merged back into a thread, oldest first, and the
-   * merge its turns last carried. Merges are carried in the order they were
-   * made, so every merge after that one is still waiting for a turn. Undefined
-   * when the thread holds more merges than one read returns, a record does not
-   * decode, or the last carried merge is not among them, because a partial
-   * list would deliver a merge twice or never.
+   * The newest fork conversations merged back into a thread, oldest first, and
+   * the merge its turns last carried. Merges are carried in the order they were
+   * made, so every merge after that one is still waiting for a turn. The read
+   * covers the newest merges only; `complete` says whether it holds them all.
+   * Undefined when a record does not decode or the waiting merges are not all
+   * within the read, because a partial list would deliver a merge twice or
+   * never. A merge is refused while too many wait, so the waiting ones always
+   * fit.
    */
   forkContextMerges(threadId: CodeThreadId):
     | {
@@ -324,6 +326,7 @@ export class CodeOperationEventStore {
           readonly event: Extract<CodeOperationEvent, { readonly kind: "fork-context-merged" }>;
         }>;
         readonly lastDeliveredOperationId?: CodeOperationId;
+        readonly complete: boolean;
       }
     | undefined {
     try {
@@ -347,7 +350,7 @@ export class CodeOperationEventStore {
             return frame;
           });
       const merged = read("fork-context-merged", MAX_FORK_CONTEXT_MERGE_RECORDS);
-      if (merged.length >= MAX_FORK_CONTEXT_MERGE_RECORDS) return undefined;
+      const complete = merged.length < MAX_FORK_CONTEXT_MERGE_RECORDS;
       const merges = merged
         .flatMap((frame) =>
           frame.event.kind === "fork-context-merged"
@@ -356,10 +359,11 @@ export class CodeOperationEventStore {
         )
         .reverse();
       const delivered = read("fork-context-delivered", 1)[0]?.event;
-      if (delivered?.kind !== "fork-context-delivered") return { merges };
+      if (delivered?.kind !== "fork-context-delivered")
+        return complete ? { merges, complete } : undefined;
       if (!merges.some((merge) => String(merge.operationId) === String(delivered.mergeOperationId)))
         return undefined;
-      return { merges, lastDeliveredOperationId: delivered.mergeOperationId };
+      return { merges, lastDeliveredOperationId: delivered.mergeOperationId, complete };
     } catch {
       return undefined;
     }

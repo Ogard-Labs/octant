@@ -25,6 +25,13 @@ import type {
 } from "../context/externalContentIngestionStore";
 import type { CodeOperationEventStore } from "./codeOperationEventStore";
 
+/**
+ * The most merges that may wait for a source's next turn. A turn carries two,
+ * and the journal read that finds waiting merges covers the newest thousand,
+ * so a bound keeps every waiting merge readable instead of wedging the source.
+ */
+export const MAX_PENDING_FORK_MERGES = 64;
+
 type ForkContextMerged = Extract<CodeOperationEvent, { readonly kind: "fork-context-merged" }>;
 export type ForkContextDelivered = Extract<
   CodeOperationEvent,
@@ -127,6 +134,16 @@ export async function mergeForkConversation(
   const previous = merges.merges.findLast(
     (merge) => String(merge.event.forkThreadId) === String(fork.id),
   )?.event;
+  // An older merge of this fork may lie beyond the read; without it the
+  // duplicate check cannot be trusted.
+  if (previous === undefined && !merges.complete) return refused("source-unavailable");
+  const last = merges.lastDeliveredOperationId;
+  const waiting =
+    merges.merges.length -
+    (last === undefined
+      ? 0
+      : merges.merges.findIndex((merge) => String(merge.operationId) === String(last)) + 1);
+  if (waiting >= MAX_PENDING_FORK_MERGES) return refused("merges-pending");
   if (String(previous?.throughOperationId) === input.throughOperationId)
     return refused("already-merged");
   const turns = ports.forkTurns(fork.id);
