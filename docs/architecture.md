@@ -4066,6 +4066,27 @@ mechanisms are:
   Project inactive or rebound ends the terminal the same way. A host restart
   ends a terminal still recorded as running as `host-restarted`, since its
   process did not survive.
+- **Terminal shell configuration.** On macOS a thread or Project terminal is
+  the person's login shell (`-l`), and its read roots add, read-only and only
+  where they exist, the shell's rc and login files, the framework trees they
+  source, and the tool homes PATH points into, each listed in
+  `apps/server/src/code/terminalProcessPort.ts`. The rest of the home stays
+  enumerated as denied and writes stay in the bound root and the shell's own
+  state directory. A file is named wherever a file is enough. A directory is
+  granted only when the tool reads it as a tree: a framework (`~/.oh-my-zsh`,
+  `~/.config/fish`) sources files throughout it, and a version manager's shims
+  resolve to toolchains elsewhere in its home (`~/.local/share/mise`,
+  `~/.asdf`, `~/.pyenv`, `~/.rbenv`, `~/.volta`, `~/.nvm`, `~/.bun`,
+  `~/.rustup`), so naming only the shim directory still breaks every command
+  behind it. No listed directory is where a tool keeps credentials; a home that
+  shares its directory with one is granted by its executable subdirectory
+  (`~/.cargo/bin`, never `~/.cargo`), and credential homes such as `~/.ssh`,
+  `~/.aws`, and `~/.config/gh` are never listed. Homebrew and other prefixes
+  outside the home are already readable. A path a rc sources that is not
+  listed fails at the prompt as a permission error rather than widening the
+  grant; adding one is a change to the list under this rule. On Linux the
+  shell's HOME is its state directory with a minimal rc, so none of this
+  applies there.
 - **Project browsing contexts.** A person may open a browser for a Work or Code
   Project with no thread, under the same separation: it is the person's
   browser, never an agent's. Its page lives in its own isolated, ephemeral
