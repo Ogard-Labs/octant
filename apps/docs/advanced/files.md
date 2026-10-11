@@ -261,6 +261,14 @@ agent builds a design: real screens or slides that look finished. A design has
 one size, phone, tablet, desktop, or slide, and its screens sit side by side
 in the Canvas, numbered in order.
 
+Ask for an article, a spec, or a design system, and the agent can write it as
+a design document instead. A document is as wide as the Canvas and grows to
+fit its content, so you read it in place without scrolling inside it. It uses
+Octant's own fonts and colours, follows your theme as you change it, and can
+hold cards, metric tiles, badges, tables, callouts, code, and tabs you click
+between. App screens and slides keep the designer's own colours unless the
+agent asks for your theme.
+
 - **Play** opens the design at full size. Click its links and buttons to move
   between screens. Click a screen to play from that one. **Restart** goes back
   to the screen you started from.

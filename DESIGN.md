@@ -1002,7 +1002,41 @@ forced colours every hairline is the system frame and a filled mark is system
 text. A design is the author's own screens or slides: Octant draws
 only the frame around them (a hairline, the surface behind, and a numbered
 caption) and never restyles what is inside. Its player is a near-full-window
-dialog that scales the screen to fit with the stage padding around it.
+dialog that scales the screen to fit with the stage padding around it. A
+design of `document` size is read in place instead: no caption, no player, the
+full width of the Canvas column, and exactly as tall as its page, so it never
+scrolls inside itself below a 12,000px cap.
+
+### Design frame kit
+
+A design drawn in the workspace theme (the default for a `document`, opt-in
+for a device size) is part of Octant, not a picture of something else. Its
+page receives, ahead of the author's own stylesheet:
+
+- the semantic `--oct-*` tokens as the workspace computes them — ground,
+  surface, ink ladder, borders, accent, status foregrounds and tints, chart
+  series, the type scale, leading, weights, tracking, spacing, and radii — so
+  the active theme, Vivid, increased contrast, and the interface font size all
+  carry in, and the page redraws when any of them changes;
+- the workspace's light or dark scheme; a document is transparent on the
+  Canvas surface, a themed screen paints `--oct-bg`;
+- Geist and Geist Mono, which the host installs into the page;
+- the frame kit, a first-party stylesheet that uses only those tokens and
+  system colours.
+
+The kit's classes carry the `oct-` prefix: `oct-article` (a 72ch reading
+column with the heading ladder, lists, quotes, rules, and captions),
+`oct-eyebrow`, `oct-lede`, `oct-muted`, `oct-grid`, `oct-card` with
+`oct-card__title`, `oct-metrics` of `oct-metric` tiles (`__label`, `__value`,
+`__delta--good` or `--bad`), `oct-badge` with an `--accent`, `--success`,
+`--warn`, or `--danger` tone, `oct-callout` with a `--success`, `--warn`, or
+`--danger` edge, `oct-table` inside `oct-table-wrap`, `oct-code`, and
+`oct-tabs`. Tabs are radio inputs, each followed by its label, then one
+`div.oct-tab-panel` per tab in the same order; the checked radio shows its
+panel, so tabs switch without script. Under forced colours a badge keeps a
+system border and the chosen tab a `Highlight` underline. The kit never sets a
+colour of its own, so a page written only with it matches the workspace in
+every theme.
 
 ## Spacing, shapes, and depth
 

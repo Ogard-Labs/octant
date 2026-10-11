@@ -580,11 +580,26 @@ snapshots serialise the definition and so never carry comments
 A `design` block (Canvas schema version 9) is the one block whose content is
 markup: the frames of one design at one size, `phone` (390×844), `tablet`
 (820×1180), `desktop` (1440×900), or `slide` (1920×1080), each a page of
-static HTML, plus one shared stylesheet. The renderer draws each frame in an
-`iframe` with an empty `sandbox` and a `srcdoc` page whose policy loads nothing
-but inline styles and `data:` images and fonts, on top of the app policy the
-page inherits. No script runs, nothing submits, and the page has no access to
-Octant. Frames link by fragment; Play draws every frame in one page so a link
+static HTML, plus one shared stylesheet. Version 13 adds the `document` size,
+whose frames are sections of one page as wide as the Canvas column and as tall
+as its content, and an optional `theme`: `workspace` or `none`, defaulting to
+`workspace` for a document and `none` for a device size, so a product screen
+keeps its own brand. The renderer draws each frame in an `iframe` with a
+`srcdoc` page whose policy loads nothing but inline styles and `data:` images
+and fonts, on top of the app policy the page inherits. The sandbox never
+includes `allow-scripts`. A device-size frame that is not themed has an empty
+`sandbox`; a document or a themed frame has `allow-same-origin` and nothing
+else, so the host can read the page: it measures the document's body with a
+`ResizeObserver` and sets the frame's height to it (up to 12,000px, past which
+the page scrolls inside the frame), and it installs Geist and Geist Mono into
+the page as fonts built from the bundled files, because the inherited app
+policy (`font-src 'self'`) refuses a `data:` font the page could name. A
+themed page also receives the workspace's computed `--oct-*` tokens and
+light or dark scheme, redrawn when the root's theme attributes change, and the
+frame kit stylesheet, all ahead of the author's own; `DESIGN.md` names the
+kit. A test renders every size and theme and asserts no frame is given
+`allow-scripts`. No script runs, nothing submits, and the page can use none
+of Octant's origin. Frames link by fragment; Play draws every frame in one page so a link
 shows its frame through `:target`, and the renderer writes each fragment
 against the page's own address because a `srcdoc` page resolves a bare one
 against its parent. The pure `canvasDesignMarkupRefusal` policy refuses a
@@ -607,8 +622,8 @@ gain a design; a version append never moves a Canvas back. Agents writing
 a design can be silent for minutes while composing the tool call, so Chat and Work
 wait five minutes for a provider event before cutting a turn off, as Code does
 ([decisions/0164-canvas-designs-are-html-in-a-frame-that-runs-nothing.md](decisions/0164-canvas-designs-are-html-in-a-frame-that-runs-nothing.md)).
-The frame described here is the shipped tier. Themed frames measured to their
-content, frames that show Project assets, and frames that run script in an
+The static, measured, and themed frames described here are the shipped tiers.
+Frames that show Project assets and frames that run script in an
 opaque-origin sandbox with no network are accepted but not yet built; each
 replaces the matching sentence above when it ships, under the
 [Canvas HTML frames threat model](security/canvas-html-frames-threat-model.md)
