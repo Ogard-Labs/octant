@@ -21,6 +21,7 @@ export interface WebCommandOptions {
   readonly dev?: boolean;
   readonly attachOrCreateHost?: typeof attachOrCreateHost;
   readonly openBrowser?: (url: URL) => void | Promise<void>;
+  readonly fetch?: (input: URL, init: RequestInit) => Promise<Response>;
   readonly startDevServer?: (options: DevServerOptions) => Promise<string>;
   readonly resolveDevelopmentCodeFileHelperPath?: () => string | undefined;
   readonly generateBridgeSecret?: () => string;
@@ -41,7 +42,8 @@ export type WebCommandOutput =
   | { readonly kind: "dev"; readonly url: URL }
   | { readonly kind: "disabled"; readonly reason: string }
   | { readonly kind: "start-failed"; readonly reason: string }
-  | { readonly kind: "auth-failed"; readonly reason: string };
+  | { readonly kind: "auth-failed"; readonly reason: string }
+  | { readonly kind: "renderer-refused"; readonly reason: string };
 
 export async function runWebCommand(options: WebCommandOptions): Promise<WebCommandOutput> {
   const stdout = options.stdout ?? process.stdout;
@@ -108,6 +110,17 @@ export async function runWebCommand(options: WebCommandOptions): Promise<WebComm
   }
 
   if (options.dev) {
+    // A host that was already running may not have been started with this
+    // renderer's origin, and then refuses its local session. Ask before
+    // opening a renderer that could never bootstrap.
+    const devOrigin = `http://${devHostname}:${devPort}`;
+    if (!(await hostAdmitsRenderer(options.fetch ?? globalThis.fetch, host.url, devOrigin))) {
+      const reason =
+        `The Octant host at ${host.url.toString()} does not admit the renderer origin ${devOrigin}. ` +
+        `Stop that host and run this command again, or start it with OCTANT_WEB_URL=${devOrigin}.`;
+      stderr.write(`${reason}\n`);
+      return { kind: "renderer-refused", reason };
+    }
     const startDevServer = options.startDevServer ?? defaultStartDevServer;
     const devUrl = await startDevServer({ hostname: devHostname, port: devPort });
     const devUrlObject = new URL(devUrl);
@@ -134,6 +147,22 @@ export async function runWebCommand(options: WebCommandOptions): Promise<WebComm
   await openBrowserSafely(options.openBrowser ?? defaultOpenBrowser, url, stdout);
   stdout.write(`Octant web client opened at ${url.toString()}\n`);
   return { kind: "opened", url };
+}
+
+async function hostAdmitsRenderer(
+  fetch: (input: URL, init: RequestInit) => Promise<Response>,
+  hostUrl: URL,
+  origin: string,
+): Promise<boolean> {
+  try {
+    const response = await fetch(new URL("/api/shell/local-session", hostUrl), {
+      method: "OPTIONS",
+      headers: { origin, "access-control-request-method": "POST" },
+    });
+    return response.status === 204;
+  } catch {
+    return false;
+  }
 }
 
 function buildDevLaunchUrl(devUrl: URL, serverUrl: URL): URL {
