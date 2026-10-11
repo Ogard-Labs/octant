@@ -77,9 +77,17 @@ binary is outside that attested range or fails the same capability
 check. Do not treat a newer unattested version as compatible only
 because it is above a floor; rerun this Step 0 measurement first.
 Ordinary unconfined turns on an unattested binary may still run;
-confined login after helper-token removal must not assume they work.
-An unattested or inseparable-storage result is not the instance-wide
-API-key fallback.
+they use the account session root. Persist that chosen root with
+the thread. Confined login after helper-token removal must not
+assume an unattested binary works, and must not later grant that
+account root to Plan or relocate the thread into an empty
+per-thread directory: the first exposes other Projects'
+transcripts, and the second makes the saved cursor `stale-resume`.
+When an attested build later arrives, any account-root thread
+started on the unattested binary takes the same explicit
+new-thread transition as a pre-migration confined helper-token
+thread. An unattested or inseparable-storage result is not the
+instance-wide API-key fallback.
 
 **Fail.** Confined subscription launches cannot sign in from
 Claude-owned storage at all (the binary stays signed out after the
@@ -205,14 +213,17 @@ directory and the server's default Claude store unless it receives
 the launch session root. Pass that root into the lookup without
 mutating process-global environment: threads can resume concurrently.
 Cover restart resume for subscription and API-key roots. Threads that already started under the helper-
-token path still have their history in the account config tree. Do
+token path, and ordinary threads started on an unattested binary,
+still have their history in the account config tree. Persist that
+chosen root with the thread so a later Plan switch can see it. Do
 not relocate those threads into an empty per-thread directory: that
 makes the saved cursor `stale-resume`. Unconfined later launches may
 keep that account session root. Existing confined Chat or Plan
-threads cannot keep it: granting the account tree on the next
-confined launch would expose another Project's transcripts. Those
-confined threads take an explicit new-thread transition before the
-next confined subscription launch.
+threads, and any later confined switch of an account-root thread
+started on an unattested build, cannot keep it: granting the
+account tree on the next confined launch would expose another
+Project's transcripts. Those threads take an explicit new-thread
+transition before the next confined subscription launch.
 
 Do not grant the shared session tree to a confined Chat subagent or
 Plan turn that would otherwise read another Project's history. If
@@ -275,6 +286,10 @@ not reintroduce a setup token.
 - Resume after restart looks up that per-thread session root for
   subscription and API-key threads. The lookup receives the root
   without mutating process-global Claude directory variables.
+- The thread records the session root it actually used. An
+  account-root thread started on an unattested binary takes the
+  same new-thread transition before a later confined subscription
+  launch.
 - Confirmed thread purge deletes that host-allocated session
   directory through the provider-neutral storage seam. The host
   issued the receipt before the first session write, lists it on
@@ -293,7 +308,8 @@ Octant-set guard or an explicit authorization below.
 
 Anthropic's environment-variable reference (fetched 11 Oct 2026)
 documents that the umbrella also blocks release-note, PR/MR badge,
-and availability checks; background plugin `command` source runs
+and availability checks; `/feedback`, `/bug`, `/share`, and
+Claude-drafted feedback; background plugin `command` source runs
 (local commands that can trigger dependency installs); and
 feature-flag-dependent capabilities including account plugin/skill
 sync, Remote Control, advisor, and artifact access.
@@ -304,8 +320,13 @@ checks, PR/MR badge checks, and availability checks.
 
 Keep off with dedicated documented switches, not the umbrella:
 `DISABLE_AUTOUPDATER`, `CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL`,
-`CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS`, and
-`CLAUDE_CODE_DISABLE_AUTO_MEMORY`. `DISABLE_GROWTHBOOK=1` only stops
+`CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS`,
+`CLAUDE_CODE_DISABLE_AUTO_MEMORY`, and `DISABLE_BUG_COMMAND`.
+`/feedback`, `/share`, and Claude-drafted feedback stay off the
+same way: they can upload conversation history and code. Keep
+`DISABLE_BUG_COMMAND=1` and a dedicated documented off switch for
+each of those feedback channels. If Step 0 cannot independently
+disable one of them, keep the umbrella. `DISABLE_GROWTHBOOK=1` only stops
 feature-flag fetching. Anthropic says flags then use their code
 defaults, so that switch does not keep Remote Control, advisor,
 artifact access, or account plugin/skill sync off if a verified
@@ -350,9 +371,11 @@ API-key launches may keep the 0005 telemetry guards.
   already set a disable-only value.
 - A subscription launch sets `DISABLE_GROWTHBOOK=1` and a dedicated
   documented off switch for Remote Control, advisor, artifact access,
-  account plugin/skill sync, and background plugin `command` runs. If
-  Step 0 cannot independently disable one of those on the verified
-  build, that build is refused or the umbrella stays.
+  account plugin/skill sync, background plugin `command` runs,
+  `/feedback`, `/bug`, `/share`, and Claude-drafted feedback,
+  including `DISABLE_BUG_COMMAND=1`. If Step 0 cannot independently
+  disable one of those on the verified build, that build is refused
+  or the umbrella stays.
 - `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` is absent on a
   subscription launch only when those dedicated guards cover every
   non-telemetry channel the umbrella blocked; otherwise it stays.
@@ -407,7 +430,8 @@ HTTP endpoint. Do not add Claude subscription OAuth there.
   and availability checks, including third-party logging or error
   tracking Anthropic documents) and every channel that stays off
   (feature-flag evaluation, Remote Control, advisor, artifact access,
-  account plugin/skill sync, and background plugin `command` runs).
+  account plugin/skill sync, background plugin `command` runs,
+  `/feedback`, `/bug`, `/share`, and Claude-drafted feedback).
   The current "no telemetry" and enumerated-destination promises
   cannot remain after that traffic is allowed.
 

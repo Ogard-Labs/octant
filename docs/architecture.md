@@ -3504,10 +3504,15 @@ mechanisms are:
   the provider is disabled. A driver cannot register a path outside that
   allocated root. Confined login is limited to an attested Claude version or
   inclusive range; a newer unattested build refuses confined subscription
-  until Step 0 is rerun. Subscription launches of the unmodified binary would
-  leave Claude's own telemetry, error reporting, and Claude-owned product
-  checks intact. `DISABLE_GROWTHBOOK` only stops feature-flag fetching.
-  Process-ownership channels stay on dedicated documented switches. Host
+  until Step 0 is rerun. Ordinary unconfined turns on that unattested
+  binary may still run and use the account session root; persist that
+  root with the thread. A later confined Plan switch of that thread
+  takes an explicit new-thread transition. Subscription launches of the
+  unmodified binary would leave Claude's own telemetry, error reporting,
+  and Claude-owned product checks intact. `DISABLE_GROWTHBOOK` only
+  stops feature-flag fetching. Process-ownership channels stay on
+  dedicated documented switches, including `/feedback`, `/bug`,
+  `/share`, and Claude-drafted feedback. Host
   `DO_NOT_TRACK` and `CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY` opt-outs keep
   the documented disable spellings (`1`, `true`, `yes`, `on`). API-key
   launches may keep the 0005 telemetry guards.
