@@ -49,6 +49,10 @@ import {
   CANVAS_TABLE_ROW_ID_SCHEMA_VERSION,
   CANVAS_FLOW_CHARTS_SCHEMA_VERSION,
   CANVAS_LAYOUT_GROUPS_SCHEMA_VERSION,
+  CANVAS_DIAGRAM_STYLES_SCHEMA_VERSION,
+  canvasDiagramUsesStyles,
+  canvasPlanUsesGantt,
+  isCanvasDiagramNodeRole,
   canvasLayoutGroupChildIds,
   isCanvasLayoutGroup,
   CANVAS_MAX_CHART_CATEGORY_LABEL_LENGTH,
@@ -226,7 +230,8 @@ export type CanvasPolicyRejectionCode =
   | "sankey-cycle"
   | "dangling-layout-child"
   | "repeated-layout-child"
-  | "nested-layout-group";
+  | "nested-layout-group"
+  | "unknown-diagram-role";
 
 export class CanvasPolicyRejected extends Error {
   override readonly name = "CanvasPolicyRejected";
@@ -470,7 +475,10 @@ function declaredSchemaRejection(input: unknown): CanvasPolicyRejectionCode | un
           (declared < CANVAS_TABLE_ROW_ID_SCHEMA_VERSION &&
             canvasTableUsesRowIds(block as Record<string, unknown>)) ||
           (declared < CANVAS_FLOW_CHARTS_SCHEMA_VERSION &&
-            canvasChartUsesFlowTypes(block as Record<string, unknown>))),
+            canvasChartUsesFlowTypes(block as Record<string, unknown>)) ||
+          (declared < CANVAS_DIAGRAM_STYLES_SCHEMA_VERSION &&
+            (canvasDiagramUsesStyles(block as Record<string, unknown>) ||
+              canvasPlanUsesGantt(block as Record<string, unknown>)))),
     )
   ) {
     return "unsupported-schema-version";
@@ -966,6 +974,19 @@ function validateCrossReferences(definition: CanvasDefinition): void {
           reject("duplicate-node-id", `Canvas diagram ${block.blockId} has duplicate nodes.`);
         }
         nodes.add(node.nodeId);
+        // A role was free text before the layout drew roles as shapes. A block
+        // written since may only name a shape the layout draws; an older block
+        // keeps its text and draws as the plain box.
+        if (
+          node.role !== undefined &&
+          block.schemaVersion >= CANVAS_DIAGRAM_STYLES_SCHEMA_VERSION &&
+          !isCanvasDiagramNodeRole(node.role)
+        ) {
+          reject(
+            "unknown-diagram-role",
+            `Canvas diagram ${block.blockId} gives node ${node.nodeId} the role ${node.role}; a node role is process, decision, or terminator.`,
+          );
+        }
       }
       const edges = new Set<string>();
       for (const edge of block.edges) {

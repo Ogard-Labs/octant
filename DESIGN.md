@@ -925,6 +925,32 @@ still reads as one column. Metric tiles inside a tab or a track gather into a
 tile row as they do in the document. Under forced colours only the open tab keeps an
 underline, in `Highlight`, so the selection never rests on hue.
 
+**Diagram marks.** A board's shapes say what a step is, not its colour: a
+process is a square-cornered box, a decision a diamond, a terminator a pill,
+and a node without a role the plain rounded box. The three shaped roles carry a
+slightly heavier rule in the secondary ink; every node keeps the surface fill
+and the foreground label. An edge is a 1.5px line in the axis ink; an `arrow`
+ends in a filled head, and a `dashed` edge is a 6/4 dashed arrow for an
+optional or asynchronous step, so the dash, not a hue, carries that. An edge or
+a group may take a tone, which is a theme role (`--oct-accent`,
+`--oct-success`, `--oct-warn`, `--oct-danger`, or the foreground for neutral),
+never an authored colour: a toned edge and its head take the role's ink, and a
+toned group is a region, a 9% wash of the role inside a solid 55% edge, with its
+name in the secondary ink. Each tone sits beside a label that says what it
+means. Groups never overlap, and an edge that would cross a box steps out
+beside the column. Under forced colours every node is Canvas with a CanvasText
+rule, edges and heads are CanvasText, and dashes and shapes keep the
+distinctions.
+
+**Gantt.** A plan's Gantt view is bars on days in a horizontally scrolling
+frame: a 200px title gutter, week ticks (four-week ticks on a long plan) in
+hairline ink, and 16px bars with a 3px corner. A bar takes the plan's status
+tones — to do is a faint foreground wash, doing the accent, blocked danger, and
+done success — and its status is also written after the title, so the tone is
+never the only channel. Dependency arrows are elbows in the axis ink. Tasks
+without dates are listed under the chart as ordinary task rows. Under forced
+colours bars are CanvasText, a to-do bar is outlined, and arrows are CanvasText.
+
 **Tables.** A table is columns of a declared type and rows in the order the
 author wrote. A column may name a `format` and a `display` of `text` (the plain
 reading, the default), `bar` (an in-cell bar whose length is the value's share

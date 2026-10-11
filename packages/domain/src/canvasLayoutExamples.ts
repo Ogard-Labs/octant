@@ -97,20 +97,34 @@ export const designBriefExample = [
     kind: "diagram" as const,
     flow: "down" as const,
     nodes: [
-      { nodeId: "start", label: "Start run" },
-      { nodeId: "explore", label: "Explore zone" },
-      { nodeId: "fight", label: "Encounter?" },
-      { nodeId: "loot", label: "Collect loot" },
-      { nodeId: "upgrade", label: "Upgrade gear" },
-      { nodeId: "end", label: "Return to camp" },
+      { nodeId: "start", label: "Start run", role: "terminator" as const },
+      { nodeId: "explore", label: "Explore zone", role: "process" as const },
+      { nodeId: "fight", label: "Encounter?", role: "decision" as const },
+      { nodeId: "loot", label: "Collect loot", role: "process" as const },
+      { nodeId: "upgrade", label: "Upgrade gear", role: "process" as const },
+      { nodeId: "end", label: "Return to camp", role: "terminator" as const },
     ],
     edges: [
-      { edgeId: "e1", source: "start", target: "explore" },
-      { edgeId: "e2", source: "explore", target: "fight" },
-      { edgeId: "e3", source: "fight", target: "loot", label: "win" },
-      { edgeId: "e4", source: "fight", target: "end", label: "flee" },
-      { edgeId: "e5", source: "loot", target: "upgrade" },
-      { edgeId: "e6", source: "upgrade", target: "end" },
+      { edgeId: "e1", source: "start", target: "explore", style: "arrow" as const },
+      { edgeId: "e2", source: "explore", target: "fight", style: "arrow" as const },
+      {
+        edgeId: "e3",
+        source: "fight",
+        target: "loot",
+        label: "win",
+        style: "arrow" as const,
+        tone: "success" as const,
+      },
+      {
+        edgeId: "e4",
+        source: "fight",
+        target: "end",
+        label: "flee",
+        style: "dashed" as const,
+        tone: "warning" as const,
+      },
+      { edgeId: "e5", source: "loot", target: "upgrade", style: "arrow" as const },
+      { edgeId: "e6", source: "upgrade", target: "end", style: "arrow" as const },
     ],
   },
   {
@@ -132,9 +146,9 @@ export const designBriefExample = [
       { edgeId: "z4", source: "caves", target: "keep" },
     ],
     groups: [
-      { groupId: "safe", label: "Safe", nodeIds: ["camp"] },
-      { groupId: "wilds", label: "Wilds", nodeIds: ["forest", "ruins"] },
-      { groupId: "deep", label: "Deep", nodeIds: ["caves", "keep"] },
+      { groupId: "safe", label: "Safe", nodeIds: ["camp"], tone: "success" as const },
+      { groupId: "wilds", label: "Wilds", nodeIds: ["forest", "ruins"], tone: "warning" as const },
+      { groupId: "deep", label: "Deep", nodeIds: ["caves", "keep"], tone: "danger" as const },
     ],
   },
   statusTable("economy-table", [
@@ -166,3 +180,63 @@ export const designBriefExample = [
   note("sign-off-design", "Design signs off the loop and the zone map."),
   note("sign-off-production", "Production signs off scope and the launch window."),
 ] as const;
+
+/**
+ * A launch plan an agent is shown for the Gantt view: dated tasks across two
+ * phases, a dependency chain, a blocked task, and one task not yet scheduled.
+ */
+export const launchGanttExample = {
+  blockId: "launch-plan",
+  schemaVersion: v,
+  kind: "plan" as const,
+  title: "Launch plan",
+  view: "gantt" as const,
+  phases: [
+    { phaseId: "build", title: "Build" },
+    { phaseId: "ship", title: "Ship" },
+  ],
+  tasks: [
+    {
+      taskId: "design",
+      phaseId: "build",
+      title: "Design the loop",
+      status: "done" as const,
+      startAt: "2026-06-01T09:00:00.000Z",
+      dueAt: "2026-06-05T17:00:00.000Z",
+    },
+    {
+      taskId: "prototype",
+      phaseId: "build",
+      title: "Playable prototype",
+      status: "doing" as const,
+      startAt: "2026-06-08T09:00:00.000Z",
+      dueAt: "2026-06-19T17:00:00.000Z",
+      dependsOn: ["design"],
+    },
+    {
+      taskId: "art",
+      phaseId: "build",
+      title: "Zone art pass",
+      status: "blocked" as const,
+      startAt: "2026-06-10T09:00:00.000Z",
+      dueAt: "2026-06-24T17:00:00.000Z",
+      dependsOn: ["design"],
+    },
+    {
+      taskId: "beta",
+      phaseId: "ship",
+      title: "Closed beta",
+      status: "todo" as const,
+      startAt: "2026-06-25T09:00:00.000Z",
+      dueAt: "2026-07-03T17:00:00.000Z",
+      dependsOn: ["prototype", "art"],
+    },
+    {
+      taskId: "store",
+      phaseId: "ship",
+      title: "Store listing",
+      status: "todo" as const,
+      dependsOn: ["beta"],
+    },
+  ],
+} as const;

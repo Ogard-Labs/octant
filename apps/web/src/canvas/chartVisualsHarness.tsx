@@ -16,6 +16,7 @@ import {
   supportFlowBlock,
   releaseMindmapBlock,
   designBriefExample,
+  launchGanttExample,
 } from "@octant/domain";
 import { DEFAULT_DARK_TOKENS, DEFAULT_LIGHT_TOKENS, getThemePreset } from "@octant/theme";
 import { CanvasDocument } from "./CanvasDocument";
@@ -379,11 +380,14 @@ const flowBlocks = [
 ];
 
 // `?only=mockup` draws the mockups alone, `?only=flow` the funnel, radar,
-// and sankey charts alone, and `?only=layout` the tabbed design brief, so
+// and sankey charts alone, and `?only=layout` the tabbed design brief and a
+// Gantt plan, so
 // their capture is not a page of every chart.
 const only = new URLSearchParams(window.location.search).get("only");
 
-const layoutBlocks = designBriefExample.map((block) => decodeCanvasBlock(block));
+const layoutBlocks = [...designBriefExample, launchGanttExample].map((block) =>
+  decodeCanvasBlock(block),
+);
 
 const definition =
   only === "mockup"

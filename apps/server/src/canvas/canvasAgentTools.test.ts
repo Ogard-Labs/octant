@@ -275,6 +275,22 @@ describe("createCanvasAgentTools", () => {
     expect(create).toHaveBeenCalledTimes(1);
   });
 
+  it("shows an agent a styled flowchart, a toned zone map, and a Gantt plan that the policy admits", async () => {
+    const { set } = tools();
+    const described = await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "describe", blockKinds: ["diagram", "plan"] }),
+    });
+    expect(described.isError).not.toBe(true);
+    const result = described.result as { examples?: ReadonlyArray<Record<string, unknown>> };
+    const examples = result.examples ?? [];
+    expect(examples.map((example) => example.blockId)).toEqual(["loop", "zones", "launch-plan"]);
+    expect(JSON.stringify(examples)).toContain('"role":"decision"');
+    expect(JSON.stringify(examples)).toContain('"tone":"danger"');
+    expect(examples[2]).toMatchObject({ view: "gantt" });
+    for (const example of examples) expect(() => decodeCanvasBlock(example)).not.toThrow();
+  });
+
   it("lets an agent create an entity-relationship, a swimlane, and a mind map from the examples describe returns", async () => {
     const { create, set } = tools();
     const described = await set.execute({

@@ -44,6 +44,10 @@ import {
   CANVAS_MAX_TABS_PANES,
   CANVAS_MIN_COLUMN_TRACKS,
   isCanvasLayoutGroup,
+  CanvasDiagramEdgeStyle,
+  CanvasDiagramTone,
+  canvasDiagramUsesStyles,
+  canvasPlanUsesGantt,
   decodeCanvasDefinition,
   type CanvasDefinition,
   type CanvasVersion,
@@ -93,7 +97,8 @@ export const CANVAS_SHARE_MOCKUP_CATALOG_SCHEMA_VERSION = 6;
 // a radar, or a sankey chart, and a sankey's links.
 export const CANVAS_SHARE_FLOW_CHARTS_SCHEMA_VERSION = 7;
 // Version 8 accompanies Canvas schema version 18: a share may carry tabs and
-// columns, which name the shared blocks they hold.
+// columns, which name the shared blocks they hold, a diagram's edge styles and
+// tones and its group tones, and a plan's Gantt view.
 export const CANVAS_SHARE_LAYOUT_GROUPS_SCHEMA_VERSION = 8;
 export const CANVAS_SHARE_SCHEMA_VERSION = 8 as const;
 // The newest Canvas block version a share at this version names. Canvas
@@ -481,7 +486,7 @@ export const CanvasStaticExportBlock = Schema.Union(
     ...exportBlockFields,
     kind: Schema.Literal("plan"),
     title: ExportLabel,
-    view: Schema.optional(Schema.Literal("checklist", "kanban", "timeline")),
+    view: Schema.optional(Schema.Literal("checklist", "kanban", "timeline", "gantt")),
     phases: Schema.NonEmptyArray(
       Schema.Struct({
         phaseId: boundedToken("CanvasPlanPhaseId"),
@@ -529,6 +534,8 @@ export const CanvasStaticExportBlock = Schema.Union(
         source: boundedToken("CanvasNodeId"),
         target: boundedToken("CanvasNodeId"),
         label: Schema.optional(ExportLabel),
+        style: Schema.optional(CanvasDiagramEdgeStyle),
+        tone: Schema.optional(CanvasDiagramTone),
       }).annotations(strict),
     ).pipe(Schema.maxItems(1_024)),
     groups: Schema.optional(
@@ -537,6 +544,7 @@ export const CanvasStaticExportBlock = Schema.Union(
           groupId: boundedToken("CanvasGroupId"),
           label: ExportLabel,
           nodeIds: Schema.Array(boundedToken("CanvasNodeId")).pipe(Schema.maxItems(512)),
+          tone: Schema.optional(CanvasDiagramTone),
         }).annotations(strict),
       ).pipe(Schema.maxItems(64)),
     ),
@@ -1003,8 +1011,16 @@ export const CanvasStaticExportDocument = Schema.Struct({
     Schema.filter(
       (document) =>
         document.schemaVersion >= CANVAS_SHARE_LAYOUT_GROUPS_SCHEMA_VERSION ||
-        !document.blocks.some(isCanvasLayoutGroup),
-      { message: () => "Tabs and columns require Canvas share version 8." },
+        !document.blocks.some(
+          (block) =>
+            isCanvasLayoutGroup(block) ||
+            canvasDiagramUsesStyles(block) ||
+            canvasPlanUsesGantt(block),
+        ),
+      {
+        message: () =>
+          "Tabs, columns, diagram edge styles and tones, group tones, and the plan's Gantt view require Canvas share version 8.",
+      },
     ),
   );
 export type CanvasStaticExportDocument = typeof CanvasStaticExportDocument.Type;

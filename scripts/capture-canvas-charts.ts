@@ -95,8 +95,9 @@ if (executable === undefined) {
 
 // `--only=mockup` captures the mockup blocks alone, as `canvas-mockup-*.png`,
 // `--only=flow` the funnel, radar, and sankey charts, as `canvas-flow-*.png`,
-// and `--only=layout` the tabbed design brief, as `canvas-layout-*.png`: one
-// element capture per listed tab and one of the columns, each scrolled into
+// and `--only=layout` the tabbed design brief and a Gantt plan, as
+// `canvas-layout-*.png`: one element capture per listed tab, the columns, and
+// the Gantt plan, each scrolled into
 // view, because a full-page capture of a long page can leave content below
 // the fold unpainted.
 const ONLY_SETS = ["mockup", "flow", "layout"] as const;
@@ -193,11 +194,16 @@ try {
           await tabs.screenshot({ path });
           written.push(path);
         }
-        const columns = page.locator(".canvas-columns");
-        await columns.scrollIntoViewIfNeeded();
-        const path = join(evidenceDir, `canvas-layout-columns-${scenario}${suffix}.png`);
-        await columns.screenshot({ path });
-        written.push(path);
+        for (const [name, selector] of [
+          ["columns", ".canvas-columns"],
+          ["gantt", ".canvas-plan"],
+        ] as const) {
+          const element = page.locator(selector);
+          await element.scrollIntoViewIfNeeded();
+          const path = join(evidenceDir, `canvas-layout-${name}-${scenario}${suffix}.png`);
+          await element.screenshot({ path });
+          written.push(path);
+        }
         continue;
       }
       const path = join(evidenceDir, `canvas-${only ?? "charts"}-${scenario}${suffix}.png`);
