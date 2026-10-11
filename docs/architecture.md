@@ -330,9 +330,11 @@ version and does not report it corrupt.
 A treemap block is gated the same way at Canvas schema version 5, a heatmap
 block at version 6, a comparison matrix at version 10, a math block at
 version 11, the mockup catalog at version 12, a table row's `id` at
-version 13, and the funnel, radar, and sankey chart types at version 14, so a
-document that declares an earlier version and carries one is
-refused as a declared future version. The optional table column
+version 13, the funnel, radar, and sankey chart types at version 14, and the
+`tabs` and `columns` layout groups at version 18, so a document that declares
+an earlier version and carries one is refused as a declared future version.
+Versions 15 to 17 gate nothing in this runtime; the version set names them so
+it stays contiguous. The optional table column
 `display` and the chart, table, and metric `format` fields are the one ungated
 exception: they only change how a value is drawn, so they carry no schema
 version, but the strict definition schema refuses an unknown field, so a
@@ -542,15 +544,32 @@ column keeps its number format and display, a table row leaves as its cells
 without the `id` comments anchor to, and a board keeps its own layout. Because
 the row id is the only Canvas version 13 field and a share drops it, a share at
 version 6 named a block authored at version 13 as version 12. Share version 7
-carries the version-14 chart types, so it names blocks up to version 14
+carries the version-14 chart types, so it names blocks up to version 14, and
+share version 8 carries tabs and columns, so it names blocks up to version 18
 (`CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION`).
 Share documents version independently of Canvas documents: a treemap, a
 heatmap, a bar list, a chart's or a table column's number format, a table
 column's display, and a board's layout arrive with share version 3, and a
 comparison matrix with share version 4, math with share version 5, the
 mockup catalog with share version 6, and the funnel, radar, and sankey charts
-with share version 7 (whose blocks may name Canvas version 14), so a share that declares an older version
+with share version 7 (whose blocks may name Canvas version 14), and tabs and
+columns with share version 8, so a share that declares an older version
 and carries one is refused as a future version.
+A `tabs` block has 2 to 12 panes, each a short label and the block ids it
+shows; a `columns` block has 2 to 4 tracks, each the block ids it stacks.
+Both name blocks the same document holds rather than nesting them, so each
+child keeps the identity a comment anchors to, a revision edits, and a share
+carries. The domain policy refuses a name that holds no block
+(`dangling-layout-child`), a block placed in more than one pane or track
+(`repeated-layout-child`), and a group or an action inside a group
+(`nested-layout-group`); a pane without a label fails the schema, and groups
+count against the ordinary 128-block budget. The renderer, the shared
+snapshot, and the Markdown/HTML export draw each child inside its group once
+and never again in the block list; export reads a tab as a heading over its
+blocks and columns in track order. Tabs are a `tablist` whose arrow keys,
+Home, and End move between tabs; which tab is open is the reader's view state,
+sends nothing to the host, and journals nothing. Columns fold to one track
+when the Canvas itself is narrow.
 The catalogue includes a `plan` block: phases, and one list of tasks that each
 name their phase, carry a status (todo, doing, blocked, done), and may carry an
 owner, estimate, acceptance notes, dates, dependencies on other tasks in the
@@ -694,9 +713,9 @@ document as a future version. Frames follow the
 
 - **Typed blocks carry data.** Metrics, tables, charts, plans, and the diagram
   family stay the catalog, because comments anchor to them, revision edits
-  them, and shares keep their structure. The catalog gains `tabs` and
-  `columns`, which name existing child blocks one level deep (the selected tab
-  is view state and journals nothing); closed diagram node roles (process,
+  them, and shares keep their structure. The catalog has `tabs` and
+  `columns` (shipped at schema version 18; see the catalog above), which name
+  existing child blocks one level deep. Accepted, not yet shipped: closed diagram node roles (process,
   decision, terminator), edge styles, and group tones drawn by the one
   deterministic layout; a Gantt view of `plan`; and import of a bounded
   Mermaid subset into typed diagram blocks. Mermaid never renders; an unknown

@@ -252,6 +252,29 @@ describe("createCanvasAgentTools", () => {
     );
   });
 
+  it("shows an agent a short tabbed document whose tabs name blocks it also holds", async () => {
+    const { create, set } = tools();
+    const described = await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "describe", blockKinds: ["tabs", "columns"] }),
+    });
+    expect(described.isError).not.toBe(true);
+    const result = described.result as {
+      blockSchema: unknown;
+      examples?: ReadonlyArray<ReadonlyArray<Record<string, unknown>>>;
+    };
+    expect(JSON.stringify(result.blockSchema)).toContain("panes");
+    expect(JSON.stringify(result.blockSchema)).toContain("tracks");
+    const example = result.examples?.[0] ?? [];
+    expect(example[0]).toMatchObject({ kind: "tabs" });
+    const created = await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "create", title: "Overview", blocks: example }),
+    });
+    expect(created.isError).not.toBe(true);
+    expect(create).toHaveBeenCalledTimes(1);
+  });
+
   it("lets an agent create an entity-relationship, a swimlane, and a mind map from the examples describe returns", async () => {
     const { create, set } = tools();
     const described = await set.execute({

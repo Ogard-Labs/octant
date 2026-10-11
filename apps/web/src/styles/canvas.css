@@ -121,6 +121,89 @@
   margin: 0;
 }
 
+/* Tabs: the shared surface tab strip over a hairline, so a Canvas's sections
+   read like every other tab strip in the app. The selected tab is the
+   reader's choice and is never written to the document. */
+.canvas-tabs {
+  margin: 0 0 var(--oct-space-4);
+}
+
+.canvas-tabs__list {
+  display: flex;
+  max-width: 100%;
+  height: auto;
+  flex-wrap: wrap;
+  column-gap: var(--oct-space-4);
+  row-gap: 0;
+}
+
+.canvas-tabs__panel {
+  padding-top: var(--oct-space-3);
+}
+
+.canvas-tabs__panel:focus-visible {
+  outline: 2px solid var(--oct-accent);
+  outline-offset: 2px;
+}
+
+/* Columns: two to four equal tracks that fold into one when the Canvas
+   itself is narrow. The query reads the Canvas's width, not the window's,
+   because a sidebar Canvas is narrow on a wide display. */
+.canvas-columns {
+  container-type: inline-size;
+  margin: 0 0 var(--oct-space-4);
+}
+
+.canvas-columns__grid {
+  display: grid;
+  gap: var(--oct-space-4);
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.canvas-columns__track > .canvas-block:last-child,
+.canvas-columns__track > .canvas-metrics:last-child {
+  margin-bottom: 0;
+}
+
+@container (min-width: 32rem) {
+  .canvas-columns__grid[data-tracks="2"] {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@container (min-width: 44rem) {
+  .canvas-columns__grid[data-tracks="3"] {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .canvas-columns__grid[data-tracks="4"] {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@container (min-width: 60rem) {
+  .canvas-columns__grid[data-tracks="4"] {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+/* Forced colours paint every border in system ink, which would underline
+   each tab alike; only the open tab keeps an underline, in Highlight, and the
+   strip's hairline steps aside so the underline is the one mark. */
+@media (forced-colors: active) {
+  .canvas-tabs .canvas-tabs__list {
+    border-bottom-color: Canvas;
+  }
+
+  .canvas-tabs .canvas-tabs__list > .canvas-tabs__tab {
+    border-bottom-color: Canvas;
+  }
+
+  .canvas-tabs .canvas-tabs__list > .canvas-tabs__tab[aria-selected="true"] {
+    border-bottom-color: Highlight;
+  }
+}
+
 .canvas-block__metric {
   height: 100%;
   box-sizing: border-box;

@@ -39,6 +39,11 @@ import {
   canvasChartSeriesIssue,
   canvasChartUsesFlowTypes,
   canvasMockupUsesCatalog,
+  CANVAS_MAX_COLUMN_TRACKS,
+  CANVAS_MAX_TABS_LABEL_LENGTH,
+  CANVAS_MAX_TABS_PANES,
+  CANVAS_MIN_COLUMN_TRACKS,
+  isCanvasLayoutGroup,
   decodeCanvasDefinition,
   type CanvasDefinition,
   type CanvasVersion,
@@ -87,13 +92,17 @@ export const CANVAS_SHARE_MOCKUP_CATALOG_SCHEMA_VERSION = 6;
 // Version 7 accompanies Canvas schema version 14: a share may carry a funnel,
 // a radar, or a sankey chart, and a sankey's links.
 export const CANVAS_SHARE_FLOW_CHARTS_SCHEMA_VERSION = 7;
-export const CANVAS_SHARE_SCHEMA_VERSION = 7 as const;
+// Version 8 accompanies Canvas schema version 18: a share may carry tabs and
+// columns, which name the shared blocks they hold.
+export const CANVAS_SHARE_LAYOUT_GROUPS_SCHEMA_VERSION = 8;
+export const CANVAS_SHARE_SCHEMA_VERSION = 8 as const;
 // The newest Canvas block version a share at this version names. Canvas
 // version 13 added only the table row id, which a share drops, so share
 // version 6 named a block authored at 13 as 12. Version 14 adds chart types a
-// share carries, so share version 7 names blocks up to 14. A later Canvas bump
+// share carries, so share version 7 names blocks up to 14. Version 18 adds tabs and columns,
+// so share version 8 names blocks up to 18. A later Canvas bump
 // that adds something a share carries bumps the share version again.
-export const CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION = 14 as const;
+export const CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION = 18 as const;
 export const CanvasShareSchemaVersion = Schema.Literal(
   1,
   2,
@@ -101,6 +110,7 @@ export const CanvasShareSchemaVersion = Schema.Literal(
   4,
   5,
   6,
+  7,
   CANVAS_SHARE_SCHEMA_VERSION,
 );
 export type CanvasShareSchemaVersion = typeof CanvasShareSchemaVersion.Type;
@@ -895,6 +905,27 @@ export const CanvasStaticExportBlock = Schema.Union(
     alt: ExportNonEmptyText,
     caption: Schema.optional(ExportText),
   }).annotations(strict),
+  // Layout groups carry only block ids and short pane labels, so they leave
+  // as the author wrote them; the blocks they name are shared beside them.
+  Schema.Struct({
+    ...exportBlockFields,
+    kind: Schema.Literal("tabs"),
+    panes: Schema.Array(
+      Schema.Struct({
+        label: ExportLabel.pipe(Schema.maxLength(CANVAS_MAX_TABS_LABEL_LENGTH)),
+        blockIds: Schema.NonEmptyArray(boundedToken("CanvasBlockId")).pipe(Schema.maxItems(128)),
+      }).annotations(strict),
+    ).pipe(Schema.minItems(2), Schema.maxItems(CANVAS_MAX_TABS_PANES)),
+  }).annotations(strict),
+  Schema.Struct({
+    ...exportBlockFields,
+    kind: Schema.Literal("columns"),
+    tracks: Schema.Array(
+      Schema.Struct({
+        blockIds: Schema.NonEmptyArray(boundedToken("CanvasBlockId")).pipe(Schema.maxItems(128)),
+      }).annotations(strict),
+    ).pipe(Schema.minItems(CANVAS_MIN_COLUMN_TRACKS), Schema.maxItems(CANVAS_MAX_COLUMN_TRACKS)),
+  }).annotations(strict),
 );
 export type CanvasStaticExportBlock = typeof CanvasStaticExportBlock.Type;
 
@@ -968,6 +999,12 @@ export const CanvasStaticExportDocument = Schema.Struct({
         document.schemaVersion >= CANVAS_SHARE_FLOW_CHARTS_SCHEMA_VERSION ||
         !document.blocks.some(canvasChartUsesFlowTypes),
       { message: () => "Funnel, radar, and sankey charts require Canvas share version 7." },
+    ),
+    Schema.filter(
+      (document) =>
+        document.schemaVersion >= CANVAS_SHARE_LAYOUT_GROUPS_SCHEMA_VERSION ||
+        !document.blocks.some(isCanvasLayoutGroup),
+      { message: () => "Tabs and columns require Canvas share version 8." },
     ),
   );
 export type CanvasStaticExportDocument = typeof CanvasStaticExportDocument.Type;

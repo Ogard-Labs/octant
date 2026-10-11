@@ -1,5 +1,6 @@
 import katex from "katex";
 import {
+  canvasLayoutGroupChildIds,
   canvasTableRowCells,
   type CanvasBlock,
   type CanvasDefinition,
@@ -248,7 +249,35 @@ function renderDocument(
   format: CanvasExportImplementedFormat,
 ): ArtifactDocumentRender {
   const pieces: Piece[] = [];
+  // A layout group's children read inside the group, once: a tab's blocks
+  // under its label and a column's in track order, never again where they
+  // happen to sit in the block list.
+  const byId = new Map(definition.blocks.map((block) => [String(block.blockId), block]));
+  const placed = new Set(
+    definition.blocks.flatMap((block) =>
+      block.kind === "tabs" || block.kind === "columns"
+        ? canvasLayoutGroupChildIds(block).map(String)
+        : [],
+    ),
+  );
+  const childPieces = (blockIds: ReadonlyArray<string>): ReadonlyArray<Piece> =>
+    blockIds.flatMap((blockId) => {
+      const child = byId.get(blockId);
+      return child === undefined ? [] : piecesFor(child);
+    });
   for (const block of definition.blocks) {
+    if (placed.has(String(block.blockId))) continue;
+    if (block.kind === "tabs") {
+      for (const pane of block.panes) {
+        pieces.push({ kind: "heading", level: 3, text: reading(pane.label) });
+        pieces.push(...childPieces(pane.blockIds.map(String)));
+      }
+      continue;
+    }
+    if (block.kind === "columns") {
+      for (const track of block.tracks) pieces.push(...childPieces(track.blockIds.map(String)));
+      continue;
+    }
     pieces.push(...piecesFor(block));
   }
   const title = reading(definition.title) || "Canvas";
@@ -679,6 +708,10 @@ function piecesFor(block: CanvasBlock): ReadonlyArray<Piece> {
       if (rootId !== undefined) walk(rootId, 0);
       return [{ kind: "tree", items }];
     }
+    case "tabs":
+    case "columns":
+      // Drawn by the document walk, which places the children in the group.
+      return [];
     case "action":
       return paragraph(
         [reading(block.label), block.description === undefined ? "" : reading(block.description)]

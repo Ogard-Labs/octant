@@ -39,6 +39,7 @@ import {
   CANVAS_PRESENTATION_SCHEMA_VERSION,
   CANVAS_SCHEMA_VERSION,
   CANVAS_TABLE_ROW_ID_SCHEMA_VERSION,
+  CANVAS_LAYOUT_GROUPS_SCHEMA_VERSION,
   CANVAS_TREEMAP_SCHEMA_VERSION,
   CANVAS_VERSION_APPENDED,
   CanvasCreated,
@@ -1844,7 +1845,7 @@ describe("funnel, radar, and sankey charts", () => {
 
   it("decodes each flow chart at the version that introduced them", () => {
     expect(CANVAS_FLOW_CHARTS_SCHEMA_VERSION).toBe(14);
-    expect(CANVAS_SCHEMA_VERSION).toBe(14);
+    expect(CANVAS_SCHEMA_VERSION).toBeGreaterThanOrEqual(14);
     const decoded = decodeCanvasDefinition({ ...definition, blocks: [funnel, radar, sankey] });
     expect(decoded.blocks).toEqual([funnel, radar, sankey]);
   });
@@ -1936,5 +1937,66 @@ describe("funnel, radar, and sankey charts", () => {
     if (first === undefined || second === undefined) throw new Error("expected two series");
     const misaligned = [first, { ...second, points: [...second.points].reverse() }];
     expect(() => decodeCanvasBlock({ ...radar, series: misaligned })).toThrow();
+  });
+});
+
+describe("tabs and columns layout groups", () => {
+  const definition = {
+    schemaVersion: CANVAS_SCHEMA_VERSION,
+    title: "Design brief",
+    provenance,
+    sourceManifest: [],
+  } as const;
+  const text = (blockId: string, schemaVersion: number = CANVAS_SCHEMA_VERSION) => ({
+    blockId,
+    schemaVersion,
+    kind: "rich-text",
+    text: blockId,
+  });
+  const tabs = {
+    blockId: "brief",
+    schemaVersion: CANVAS_SCHEMA_VERSION,
+    kind: "tabs",
+    panes: [
+      { label: "Metrics", blockIds: ["a"] },
+      { label: "Loop", blockIds: ["b"] },
+    ],
+  } as const;
+
+  it("decodes tabs and columns at the version that introduced them", () => {
+    const columns = {
+      blockId: "row",
+      schemaVersion: CANVAS_SCHEMA_VERSION,
+      kind: "columns",
+      tracks: [{ blockIds: ["c"] }, { blockIds: ["d"] }],
+    };
+    const decoded = decodeCanvasDefinition({
+      ...definition,
+      blocks: [tabs, columns, text("a"), text("b"), text("c"), text("d")],
+    });
+    expect(decoded.blocks[0]).toEqual(tabs);
+    expect(decoded.blocks[1]).toEqual(columns);
+    expect(CANVAS_LAYOUT_GROUPS_SCHEMA_VERSION).toBe(CANVAS_SCHEMA_VERSION);
+  });
+
+  it("refuses tabs in a document that declares the previous shipped version", () => {
+    expect(() =>
+      decodeCanvasDefinition({
+        ...definition,
+        schemaVersion: 14,
+        blocks: [{ ...tabs, schemaVersion: 14 }, text("a", 14), text("b", 14)],
+      }),
+    ).toThrow();
+  });
+
+  it("refuses a tab strip of one pane, an unlabeled pane, and an empty pane", () => {
+    const [first, second] = tabs.panes;
+    expect(() => decodeCanvasBlock({ ...tabs, panes: [first] })).toThrow();
+    expect(() =>
+      decodeCanvasBlock({ ...tabs, panes: [{ ...first, label: "" }, second] }),
+    ).toThrow();
+    expect(() =>
+      decodeCanvasBlock({ ...tabs, panes: [{ ...first, blockIds: [] }, second] }),
+    ).toThrow();
   });
 });

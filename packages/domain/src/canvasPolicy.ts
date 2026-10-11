@@ -48,6 +48,9 @@ import {
   CANVAS_MATH_SCHEMA_VERSION,
   CANVAS_TABLE_ROW_ID_SCHEMA_VERSION,
   CANVAS_FLOW_CHARTS_SCHEMA_VERSION,
+  CANVAS_LAYOUT_GROUPS_SCHEMA_VERSION,
+  canvasLayoutGroupChildIds,
+  isCanvasLayoutGroup,
   CANVAS_MAX_CHART_CATEGORY_LABEL_LENGTH,
   CANVAS_MAX_FUNNEL_STAGES,
   CANVAS_MAX_RADAR_AXES,
@@ -91,6 +94,12 @@ const SUPPORTED_CANVAS_SCHEMA_VERSIONS: readonly number[] = [
   CANVAS_MATH_SCHEMA_VERSION,
   CANVAS_MOCKUP_CATALOG_SCHEMA_VERSION,
   CANVAS_TABLE_ROW_ID_SCHEMA_VERSION,
+  CANVAS_FLOW_CHARTS_SCHEMA_VERSION,
+  // Reserved by the contract's version literal; nothing this runtime reads
+  // was introduced at them.
+  15,
+  16,
+  17,
   CANVAS_SCHEMA_VERSION,
 ];
 
@@ -109,6 +118,8 @@ const VERSION_GATED_BLOCK_KINDS: ReadonlyArray<{ readonly kind: string; readonly
     { kind: "design", since: CANVAS_DESIGN_SCHEMA_VERSION },
     { kind: "comparison-matrix", since: CANVAS_COMPARISON_MATRIX_SCHEMA_VERSION },
     { kind: "math", since: CANVAS_MATH_SCHEMA_VERSION },
+    { kind: "tabs", since: CANVAS_LAYOUT_GROUPS_SCHEMA_VERSION },
+    { kind: "columns", since: CANVAS_LAYOUT_GROUPS_SCHEMA_VERSION },
   ];
 
 export type CanvasPolicyRejectionCode =
@@ -212,7 +223,10 @@ export type CanvasPolicyRejectionCode =
   | "sankey-links-budget-exceeded"
   | "sankey-flow-not-positive"
   | "duplicate-sankey-link"
-  | "sankey-cycle";
+  | "sankey-cycle"
+  | "dangling-layout-child"
+  | "repeated-layout-child"
+  | "nested-layout-group";
 
 export class CanvasPolicyRejected extends Error {
   override readonly name = "CanvasPolicyRejected";
@@ -1003,6 +1017,44 @@ function validateCrossReferences(definition: CanvasDefinition): void {
     if (block.kind === "comparison-matrix") validateComparisonMatrix(block);
     if (block.kind === "math") validateMath(block);
     if (block.kind === "metric") validateMetric(block);
+  }
+  validateLayoutGroups(definition);
+}
+
+/**
+ * Tabs and columns arrange blocks the document already holds, one level deep.
+ * A child that names no block would draw an empty pane; a child named twice
+ * would draw one block in two places, so a comment on it would have two
+ * homes; and a group inside a group would hide a pane behind a pane, which no
+ * reader can navigate. Each fails closed with its reason.
+ */
+function validateLayoutGroups(definition: CanvasDefinition): void {
+  const kinds = new Map(definition.blocks.map((block) => [String(block.blockId), block]));
+  const placed = new Set<string>();
+  for (const block of definition.blocks) {
+    if (block.kind !== "tabs" && block.kind !== "columns") continue;
+    for (const childId of canvasLayoutGroupChildIds(block)) {
+      const child = kinds.get(String(childId));
+      if (child === undefined) {
+        reject(
+          "dangling-layout-child",
+          `Canvas ${block.kind} ${block.blockId} names block ${childId}, which the document does not hold.`,
+        );
+      }
+      if (isCanvasLayoutGroup(child) || child.kind === "action") {
+        reject(
+          "nested-layout-group",
+          `Canvas ${block.kind} ${block.blockId} holds ${child.kind} ${childId}; tabs and columns hold content blocks one level deep.`,
+        );
+      }
+      if (placed.has(String(childId))) {
+        reject(
+          "repeated-layout-child",
+          `Canvas block ${childId} is placed in more than one tab, track, or group.`,
+        );
+      }
+      placed.add(String(childId));
+    }
   }
 }
 

@@ -1,4 +1,9 @@
-import type { CanvasBlock, CanvasId, CanvasVersionId } from "@octant/contracts/canvas";
+import {
+  canvasLayoutGroupChildIds,
+  type CanvasBlock,
+  type CanvasId,
+  type CanvasVersionId,
+} from "@octant/contracts/canvas";
 import {
   decodeCanvasStaticExportDocument,
   type CanvasStaticExportDocument,
@@ -18,12 +23,13 @@ import type {
   CanvasShareSnapshotSummary,
 } from "@octant/contracts/canvas-share-snapshot";
 import { Ban, Check, Eye, Share2, TriangleAlert } from "lucide-react";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { CanvasBlockRenderer } from "./blocks/CanvasBlock";
+import { CanvasLayoutGroup } from "./blocks/LayoutGroups";
 
 /**
  * Canvas sharing.
@@ -318,6 +324,38 @@ function SharedSnapshotView(props: {
   readonly document: CanvasStaticExportDocument;
   readonly onClose: () => void;
 }) {
+  // A shared tab or column draws its children in place, as the live
+  // document does, and a child is never drawn a second time.
+  const blocks = props.document.blocks as ReadonlyArray<CanvasBlock>;
+  const byId = new Map(blocks.map((block) => [String(block.blockId), block]));
+  const placed = new Set(
+    blocks.flatMap((block) =>
+      block.kind === "tabs" || block.kind === "columns"
+        ? canvasLayoutGroupChildIds(block).map(String)
+        : [],
+    ),
+  );
+  const drawn = (block: CanvasBlock): ReactNode => {
+    if (block.kind === "tabs" || block.kind === "columns") {
+      return (
+        <CanvasLayoutGroup
+          block={block}
+          key={block.blockId}
+          renderChildren={(blockIds) =>
+            blockIds.flatMap((blockId) => {
+              const child = byId.get(String(blockId));
+              return child === undefined ? [] : [drawn(child)];
+            })
+          }
+        />
+      );
+    }
+    return (
+      <section key={block.blockId} className="canvas-block" data-block-kind={block.kind}>
+        <CanvasBlockRenderer block={block} />
+      </section>
+    );
+  };
   return (
     <section
       className="canvas-share__snapshot"
@@ -341,11 +379,7 @@ function SharedSnapshotView(props: {
       </p>
       <article className="canvas-share__snapshot-document" aria-label={props.document.title}>
         <h5 className="canvas-share__snapshot-document-title">{props.document.title}</h5>
-        {props.document.blocks.map((block) => (
-          <section key={block.blockId} className="canvas-block" data-block-kind={block.kind}>
-            <CanvasBlockRenderer block={block as CanvasBlock} />
-          </section>
-        ))}
+        {blocks.filter((block) => !placed.has(String(block.blockId))).map(drawn)}
       </article>
     </section>
   );

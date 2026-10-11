@@ -910,6 +910,21 @@ carry the reading. It may also carry a `sparkline` of at most 256 recent
 readings, drawn as a glance with no axis, and a short `caption`. The value, the
 delta, and the caption are the accessible numbers; the sparkline is decorative.
 
+**Tabs and columns.** A long Canvas arranges its blocks with `tabs` and
+`columns`, which hold blocks of the same document one level deep. Tabs use the
+shared surface tab strip (`.surface-tabs`): plain labels over a hairline, the
+selected tab in the foreground ink with a 2px underline, wrapping onto a second
+row rather than scrolling sideways. The strip is a `tablist`; the arrow keys,
+Home, and End move between tabs and Enter or Space opens one. The open tab is
+the reader's view state, so it is never written to the document and a shared or
+exported copy reads every tab in order. Columns are two to four equal tracks
+separated by the ordinary block gap, with no rule of their own; they fold to one
+track when the Canvas itself is narrower than the tracks need (a container
+query on the Canvas, not the window), so a sidebar Canvas on a wide display
+still reads as one column. Metric tiles inside a tab or a track gather into a
+tile row as they do in the document. Under forced colours only the open tab keeps an
+underline, in `Highlight`, so the selection never rests on hue.
+
 **Tables.** A table is columns of a declared type and rows in the order the
 author wrote. A column may name a `format` and a `display` of `text` (the plain
 reading, the default), `bar` (an in-cell bar whose length is the value's share

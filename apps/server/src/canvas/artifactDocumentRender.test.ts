@@ -6,6 +6,7 @@ import {
 import { formatCanvasNumber } from "@octant/domain/canvas-number-format";
 import {
   chartExampleBlocks,
+  designBriefExample,
   notificationStatesExampleBlock,
   settingsScreenExampleBlock,
 } from "@octant/domain";
@@ -575,5 +576,25 @@ describe("rendering a canvas as a document", () => {
     expect(markdown.body).not.toContain("### ");
     expect(markdown.body).toContain("- Window, Settings");
     expect(markdown.body).toContain("      - Form field, Display name, Ada Lovelace");
+  });
+});
+
+describe("rendering tabs and columns as a document", () => {
+  it("reads each tab under its label and each named block once, in the group", () => {
+    const blocks = designBriefExample.map((block) => decodeCanvasBlock(block));
+    const rendered = renderArtifactMarkdown(definition(blocks, "Design brief"));
+    if (rendered.kind !== "rendered") throw new Error("expected a rendered document");
+    const labels = ["Metrics", "Core loop", "World", "Economy", "Content", "Live ops", "Risks"];
+    const positions = labels.map((label) => rendered.body.indexOf(`### ${label}`));
+    expect(positions.every((position) => position >= 0)).toBe(true);
+    expect([...positions].sort((a, b) => a - b)).toEqual(positions);
+    // The question is placed in the last tab only, and the sign-off columns
+    // follow the tabs, each note once.
+    const question = "Does the keep unlock by level or by story progress?";
+    expect(rendered.body.split(question)).toHaveLength(2);
+    expect(rendered.body.indexOf(question)).toBeGreaterThan(
+      rendered.body.indexOf("### Open questions"),
+    );
+    expect(rendered.body.split("Design signs off the loop and the zone map.")).toHaveLength(2);
   });
 });

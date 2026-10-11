@@ -15,6 +15,7 @@ import {
   orderSchemaBlock,
   supportFlowBlock,
   releaseMindmapBlock,
+  designBriefExample,
 } from "@octant/domain";
 import { DEFAULT_DARK_TOKENS, DEFAULT_LIGHT_TOKENS, getThemePreset } from "@octant/theme";
 import { CanvasDocument } from "./CanvasDocument";
@@ -377,43 +378,48 @@ const flowBlocks = [
   longFunnel,
 ];
 
-// `?only=mockup` draws the mockups alone and `?only=flow` the funnel, radar,
-// and sankey charts alone, so their capture is not a page of every chart.
+// `?only=mockup` draws the mockups alone, `?only=flow` the funnel, radar,
+// and sankey charts alone, and `?only=layout` the tabbed design brief, so
+// their capture is not a page of every chart.
 const only = new URLSearchParams(window.location.search).get("only");
+
+const layoutBlocks = designBriefExample.map((block) => decodeCanvasBlock(block));
 
 const definition =
   only === "mockup"
     ? { ...canvasFixture, blocks: mockupBlocks }
     : only === "flow"
       ? { ...canvasFixture, blocks: flowBlocks }
-      : {
-          ...canvasFixture,
-          blocks: [
-            line,
-            bar,
-            area,
-            scatter,
-            distribution,
-            ...chartExampleBlocks,
-            budgetSankey,
-            loneRadar,
-            longFunnel,
-            ...treemapExampleBlocks,
-            ...heatmapExampleBlocks,
-            ...barListExampleBlocks,
-            hotFiles,
-            ...comparisonMatrixExampleBlocks,
-            ...mathExampleBlocks,
-            ...metricExampleBlocks,
-            metric,
-            table,
-            timeline,
-            orderSchemaBlock,
-            supportFlowBlock,
-            releaseMindmapBlock,
-            ...mockupBlocks,
-          ],
-        };
+      : only === "layout"
+        ? { ...canvasFixture, blocks: layoutBlocks }
+        : {
+            ...canvasFixture,
+            blocks: [
+              line,
+              bar,
+              area,
+              scatter,
+              distribution,
+              ...chartExampleBlocks,
+              budgetSankey,
+              loneRadar,
+              longFunnel,
+              ...treemapExampleBlocks,
+              ...heatmapExampleBlocks,
+              ...barListExampleBlocks,
+              hotFiles,
+              ...comparisonMatrixExampleBlocks,
+              ...mathExampleBlocks,
+              ...metricExampleBlocks,
+              metric,
+              table,
+              timeline,
+              orderSchemaBlock,
+              supportFlowBlock,
+              releaseMindmapBlock,
+              ...mockupBlocks,
+            ],
+          };
 
 type ChartThemeScenario = "default-light" | "default-dark" | "vivid" | "contrast";
 

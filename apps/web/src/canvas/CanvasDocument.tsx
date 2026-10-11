@@ -1,7 +1,13 @@
-import type { CanvasDefinition } from "@octant/contracts/canvas";
+import {
+  canvasLayoutGroupChildIds,
+  type CanvasBlock,
+  type CanvasDefinition,
+} from "@octant/contracts/canvas";
+import type { ReactNode } from "react";
 import { MessageSquare } from "lucide-react";
 import type { CanvasActionBlock } from "@octant/contracts/canvas-actions";
 import { CanvasBlockRenderer } from "./blocks/CanvasBlock";
+import { CanvasLayoutGroup } from "./blocks/LayoutGroups";
 import type { DiagramBoardLayoutRuntime } from "./blocks/DiagramBoard";
 import type { PlanTaskRuntime } from "./blocks/PlanBlock";
 import { OctantButton } from "../ui/base/OctantButton";
@@ -73,6 +79,8 @@ export function canvasBlockLabel(block: CanvasDefinition["blocks"][number]): str
       return block.title;
     case "callout":
       return block.title ?? "Callout";
+    case "tabs":
+      return "Tabs";
     default:
       return block.kind.replace("-", " ");
   }
@@ -93,6 +101,71 @@ export function CanvasDocument({
     (block): block is CanvasActionBlock => block.kind === "action",
   );
   const content = definition.blocks.filter((block) => block.kind !== "action");
+  // A tab or column draws its children in place, once: a block a group names
+  // is not drawn again where it sits in the block list.
+  const byId = new Map(content.map((block) => [String(block.blockId), block]));
+  const placed = new Set(
+    content.flatMap((block) =>
+      block.kind === "tabs" || block.kind === "columns"
+        ? canvasLayoutGroupChildIds(block).map(String)
+        : [],
+    ),
+  );
+
+  const section = (block: CanvasBlock) => (
+    <section key={block.blockId} className="canvas-block" data-block-kind={block.kind}>
+      <CanvasBlockRenderer
+        block={block}
+        {...(layoutRuntime === undefined ? {} : { layoutRuntime })}
+        {...(planRuntime === undefined ? {} : { planRuntime })}
+        {...(actionRuntime === undefined ? {} : { actionRuntime })}
+        {...(comments === undefined || block.kind !== "table"
+          ? {}
+          : {
+              rowComments: {
+                openCounts: comments.openRowCounts.get(String(block.blockId)) ?? NO_ROW_COMMENTS,
+                onOpen: (rowId: string) => comments.onOpen(String(block.blockId), rowId),
+              },
+            })}
+      />
+      {comments === undefined ? null : (
+        <CommentMarker
+          count={comments.openCounts.get(String(block.blockId)) ?? 0}
+          label={canvasBlockLabel(block)}
+          onOpen={() => comments.onOpen(String(block.blockId))}
+        />
+      )}
+    </section>
+  );
+  const flow = (blocks: ReadonlyArray<CanvasBlock>): ReactNode =>
+    runsOfMetrics(blocks).map((run) => {
+      const sections = run.map((block) =>
+        block.kind === "tabs" || block.kind === "columns" ? (
+          <CanvasLayoutGroup
+            block={block}
+            key={block.blockId}
+            renderChildren={(blockIds) =>
+              flow(
+                blockIds.flatMap((blockId) => {
+                  const child = byId.get(String(blockId));
+                  return child === undefined ? [] : [child];
+                }),
+              )
+            }
+          />
+        ) : (
+          section(block)
+        ),
+      );
+      const first = run[0];
+      return first?.kind === "metric" ? (
+        <div className="canvas-metrics" key={`metrics-${first.blockId}`}>
+          {sections}
+        </div>
+      ) : (
+        sections
+      );
+    });
 
   return (
     <article
@@ -105,42 +178,7 @@ export function CanvasDocument({
         </header>
       )}
       <div className="canvas-view__body">
-        {runsOfMetrics(content).map((run) => {
-          const sections = run.map((block) => (
-            <section key={block.blockId} className="canvas-block" data-block-kind={block.kind}>
-              <CanvasBlockRenderer
-                block={block}
-                {...(layoutRuntime === undefined ? {} : { layoutRuntime })}
-                {...(planRuntime === undefined ? {} : { planRuntime })}
-                {...(actionRuntime === undefined ? {} : { actionRuntime })}
-                {...(comments === undefined || block.kind !== "table"
-                  ? {}
-                  : {
-                      rowComments: {
-                        openCounts:
-                          comments.openRowCounts.get(String(block.blockId)) ?? NO_ROW_COMMENTS,
-                        onOpen: (rowId: string) => comments.onOpen(String(block.blockId), rowId),
-                      },
-                    })}
-              />
-              {comments === undefined ? null : (
-                <CommentMarker
-                  count={comments.openCounts.get(String(block.blockId)) ?? 0}
-                  label={canvasBlockLabel(block)}
-                  onOpen={() => comments.onOpen(String(block.blockId))}
-                />
-              )}
-            </section>
-          ));
-          const first = run[0];
-          return first?.kind === "metric" ? (
-            <div className="canvas-metrics" key={`metrics-${first.blockId}`}>
-              {sections}
-            </div>
-          ) : (
-            sections
-          );
-        })}
+        {flow(content.filter((block) => !placed.has(String(block.blockId))))}
       </div>
       {actionRuntime !== undefined && actions.length > 0 ? (
         <CanvasActionPanel

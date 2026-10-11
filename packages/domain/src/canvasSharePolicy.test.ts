@@ -1,7 +1,9 @@
 import { CANVAS_SCHEMA_VERSION, decodeCanvasVersion } from "@octant/contracts/canvas";
 import { decodeCanvasComment } from "@octant/contracts/canvas-board";
 import {
+  CANVAS_SHARE_LAYOUT_GROUPS_SCHEMA_VERSION,
   CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION,
+  CANVAS_SHARE_SCHEMA_VERSION,
   decodeCanvasStaticExportDocument,
   decodeCanvasStaticExportRequest,
 } from "@octant/contracts/canvas-share";
@@ -24,6 +26,7 @@ import {
   supportFlowExample,
 } from "./canvasDiagramExamples";
 import { heatmapExamples } from "./canvasHeatmapExamples";
+import { designBriefExample } from "./canvasLayoutExamples";
 import { metricExamples } from "./canvasMetricExamples";
 import { mockupExamples } from "./canvasMockupExamples";
 import { treemapExamples } from "./canvasTreemapExamples";
@@ -226,7 +229,7 @@ describe("Canvas share policy", () => {
       }),
       context,
     });
-    expect(receipt.document.schemaVersion).toBe(7);
+    expect(receipt.document.schemaVersion).toBe(CANVAS_SHARE_SCHEMA_VERSION);
     expect(receipt.document.blocks).toEqual([
       {
         ...table,
@@ -250,7 +253,7 @@ describe("Canvas share policy", () => {
       }),
       context,
     });
-    expect(receipt.document.schemaVersion).toBe(7);
+    expect(receipt.document.schemaVersion).toBe(CANVAS_SHARE_SCHEMA_VERSION);
     expect(receipt.document.blocks).toEqual(blocks);
   });
 
@@ -714,5 +717,34 @@ describe("Canvas share policy", () => {
         context,
       }),
     ).toThrowError(CanvasSharePolicyRejected);
+  });
+});
+
+describe("Canvas share of tabs and columns", () => {
+  const brief = decodeCanvasVersion({
+    ...current,
+    schemaVersion: CANVAS_SCHEMA_VERSION,
+    definition: {
+      ...current.definition,
+      schemaVersion: CANVAS_SCHEMA_VERSION,
+      blocks: designBriefExample,
+    },
+  });
+
+  it("round-trips the tabs, columns, and every block they name", () => {
+    const receipt = buildCanvasStaticExportReceipt({ request, current: brief, context });
+    expect(receipt.document.schemaVersion).toBe(CANVAS_SHARE_LAYOUT_GROUPS_SCHEMA_VERSION);
+    const decoded = decodeCanvasStaticExportDocument(JSON.parse(JSON.stringify(receipt.document)));
+    expect(decoded.blocks).toEqual(designBriefExample);
+  });
+
+  it("is refused by a decoder that declares the previous share version", () => {
+    const receipt = buildCanvasStaticExportReceipt({ request, current: brief, context });
+    expect(() =>
+      decodeCanvasStaticExportDocument({
+        ...receipt.document,
+        schemaVersion: CANVAS_SHARE_LAYOUT_GROUPS_SCHEMA_VERSION - 1,
+      }),
+    ).toThrow();
   });
 });
