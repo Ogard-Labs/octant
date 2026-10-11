@@ -478,9 +478,19 @@ const SHARED_PLAN_STATE_ROOTS = [
 
 /** Plan must not grant a world-shared temp, IPC, or multi-user root as account state. */
 export function claudePlanStateDirectoryIsSharedRoot(path: string): boolean {
+  if (claudePlanStateDirectoryMatchesSharedRoot(path)) return true;
+  try {
+    return claudePlanStateDirectoryMatchesSharedRoot(realpathSync(path));
+  } catch {
+    return false;
+  }
+}
+
+function claudePlanStateDirectoryMatchesSharedRoot(path: string): boolean {
   if (SHARED_PLAN_STATE_ROOTS.includes(path) || claudePlanStateDirectoryIsVolumeMount(path)) {
     return true;
   }
+  if (path !== "/" && claudePlanStateDirectoryContainsSharedRoot(path)) return true;
   for (const root of SHARED_PLAN_STATE_ROOTS) {
     try {
       if (realpathSync(root) === path) return true;
@@ -488,11 +498,21 @@ export function claudePlanStateDirectoryIsSharedRoot(path: string): boolean {
       // This host does not have that directory.
     }
   }
-  try {
-    return claudePlanStateDirectoryIsVolumeMount(realpathSync(path));
-  } catch {
-    return false;
+  return false;
+}
+
+/** `/private` contains `/private/tmp`; granting the ancestor reopens the shared root. */
+function claudePlanStateDirectoryContainsSharedRoot(path: string): boolean {
+  const prefix = `${path}/`;
+  for (const root of SHARED_PLAN_STATE_ROOTS) {
+    if (root.startsWith(prefix)) return true;
+    try {
+      if (realpathSync(root).startsWith(prefix)) return true;
+    } catch {
+      // This host does not have that directory.
+    }
   }
+  return false;
 }
 
 /** `/Volumes/<name>` is the root of a mounted disk, not a dedicated account leaf. */
