@@ -1,23 +1,40 @@
-import { useEffect, useRef, useState, type KeyboardEvent, type RefObject } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type RefObject,
+  type SyntheticEvent,
+} from "react";
 import { ChevronLeft, ChevronRight, Play, RotateCcw, X } from "lucide-react";
 import {
   CANVAS_DESIGN_VIEWPORT,
   type CanvasDesignBlock,
+  type CanvasDesignDeviceSize,
   type CanvasDesignSize,
 } from "@octant/contracts/canvas";
 import { OctantButton } from "../../ui/base/OctantButton";
 import { OctantDialog } from "../../ui/base/OctantDialog";
-import { designDocument } from "./designDocument";
+import {
+  designDocument,
+  designFrameSandbox,
+  designFrameTheme,
+  readWorkspaceFrameTheme,
+  type DesignFrameThemeValues,
+} from "./designDocument";
+import { installFrameFonts } from "./designFrameFonts";
 
 const SIZE_NAME: Record<CanvasDesignSize, string> = {
   phone: "Phone",
   tablet: "Tablet",
   desktop: "Desktop",
   slide: "Slide",
+  document: "Document",
 };
 
 /** How wide a frame is drawn on the board before the board runs out of room. */
-const BOARD_FRAME_WIDTH: Record<CanvasDesignSize, number> = {
+const BOARD_FRAME_WIDTH: Record<CanvasDesignDeviceSize, number> = {
   phone: 200,
   tablet: 260,
   desktop: 440,
@@ -25,18 +42,64 @@ const BOARD_FRAME_WIDTH: Record<CanvasDesignSize, number> = {
 };
 
 /**
+ * How tall a document frame may grow before it scrolls inside itself. Past
+ * this a page is no longer read in place, and an unbounded frame would let one
+ * page make the Canvas as tall as the browser allows.
+ */
+export const DESIGN_DOCUMENT_MAX_HEIGHT = 12_000;
+const DESIGN_DOCUMENT_MIN_HEIGHT = 48;
+
+/**
  * Screens of an app or site, or the slides of a deck, side by side. Each frame
  * is a picture here; Play (or Present, for slides) opens the design at full
- * size, where its links work.
+ * size, where its links work. A document is read in place instead, as wide as
+ * the Canvas and as tall as its page.
  */
 export function DesignBlock({ block }: { readonly block: CanvasDesignBlock }) {
-  const slides = block.size === "slide";
+  const theme = useWorkspaceFrameTheme(designFrameTheme(block) === "workspace");
+  if (block.size === "document") return <DesignDocumentBlock block={block} theme={theme} />;
+  return <DesignBoard block={block} size={block.size} theme={theme} />;
+}
+
+function DesignDocumentBlock({
+  block,
+  theme,
+}: {
+  readonly block: CanvasDesignBlock;
+  readonly theme: DesignFrameThemeValues | undefined;
+}) {
+  return (
+    <section
+      aria-label={`${block.title}, document`}
+      aria-roledescription="design"
+      className="canvas-design"
+    >
+      <header className="canvas-design__header">
+        <div className="canvas-design__heading">
+          <h3 className="canvas-design__title">{block.title}</h3>
+        </div>
+      </header>
+      <DocumentFrame block={block} theme={theme} />
+    </section>
+  );
+}
+
+function DesignBoard({
+  block,
+  size,
+  theme,
+}: {
+  readonly block: CanvasDesignBlock;
+  readonly size: CanvasDesignDeviceSize;
+  readonly theme: DesignFrameThemeValues | undefined;
+}) {
+  const slides = size === "slide";
   const [playing, setPlaying] = useState<string | undefined>(undefined);
   const playButton = useRef<HTMLButtonElement>(null);
   const [boardRef, board] = useSize();
   const boardWidth = board?.width;
-  const viewport = CANVAS_DESIGN_VIEWPORT[block.size];
-  const frameWidth = Math.min(BOARD_FRAME_WIDTH[block.size], boardWidth ?? Infinity);
+  const viewport = CANVAS_DESIGN_VIEWPORT[size];
+  const frameWidth = Math.min(BOARD_FRAME_WIDTH[size], boardWidth ?? Infinity);
   const scale = frameWidth / viewport.width;
   const count = block.frames.length;
   const noun = slides ? (count === 1 ? "slide" : "slides") : count === 1 ? "screen" : "screens";
@@ -82,8 +145,10 @@ export function DesignBlock({ block }: { readonly block: CanvasDesignBlock }) {
               <FrameView
                 block={block}
                 frameIds={[String(frame.frameId)]}
+                size={size}
                 still
                 scale={scale}
+                theme={theme}
                 title={`${frame.title}, ${SIZE_NAME[block.size]} ${slides ? "slide" : "screen"}`}
               />
               <OctantButton
@@ -102,7 +167,9 @@ export function DesignBlock({ block }: { readonly block: CanvasDesignBlock }) {
           block={block}
           onClose={() => setPlaying(undefined)}
           restoreFocus={playButton}
+          size={size}
           startFrameId={playing}
+          theme={theme}
         />
       )}
     </section>
@@ -111,16 +178,20 @@ export function DesignBlock({ block }: { readonly block: CanvasDesignBlock }) {
 
 function DesignPlayer({
   block,
+  size,
+  theme,
   startFrameId,
   onClose,
   restoreFocus,
 }: {
   readonly block: CanvasDesignBlock;
+  readonly size: CanvasDesignDeviceSize;
+  readonly theme: DesignFrameThemeValues | undefined;
   readonly startFrameId: string;
   readonly onClose: () => void;
   readonly restoreFocus: RefObject<HTMLButtonElement | null>;
 }) {
-  const slides = block.size === "slide";
+  const slides = size === "slide";
   const startIndex = Math.max(
     0,
     block.frames.findIndex((frame) => String(frame.frameId) === startFrameId),
@@ -130,7 +201,7 @@ function DesignPlayer({
   // of a page that runs no script.
   const [restarts, setRestarts] = useState(0);
   const [stageRef, stage] = useSize();
-  const viewport = CANVAS_DESIGN_VIEWPORT[block.size];
+  const viewport = CANVAS_DESIGN_VIEWPORT[size];
   const scale =
     stage === undefined
       ? 1
@@ -228,7 +299,9 @@ function DesignPlayer({
                     frameIds={[String(current.frameId)]}
                     key={String(current.frameId)}
                     scale={scale}
+                    size={size}
                     still
+                    theme={theme}
                     title={`${current.title}, slide ${String(index + 1)}`}
                   />
                   <div aria-hidden="true" className="canvas-design__cover" />
@@ -239,7 +312,9 @@ function DesignPlayer({
                 block={block}
                 key={restarts}
                 scale={scale}
+                size={size}
                 startFrameId={startFrameId}
+                theme={theme}
                 title={`${block.title}, prototype`}
               />
             )}
@@ -259,6 +334,8 @@ function DesignPlayer({
  */
 function FrameView({
   block,
+  size,
+  theme,
   frameIds,
   startFrameId,
   scale,
@@ -266,22 +343,35 @@ function FrameView({
   still = false,
 }: {
   readonly block: CanvasDesignBlock;
+  readonly size: CanvasDesignDeviceSize;
+  readonly theme: DesignFrameThemeValues | undefined;
   readonly frameIds?: ReadonlyArray<string>;
   readonly startFrameId?: string;
   readonly scale: number;
   readonly title: string;
   readonly still?: boolean;
 }) {
-  const viewport = CANVAS_DESIGN_VIEWPORT[block.size];
+  const viewport = CANVAS_DESIGN_VIEWPORT[size];
+  // Keyed by the ids, not the array, so a parent's new array of the same ids
+  // does not reload the page. A frame id never holds a line break.
+  const frameKey = frameIds?.join("\n");
+  const srcDoc = useMemo(
+    () =>
+      designDocument(block, {
+        ...(frameKey === undefined ? {} : { frameIds: frameKey.split("\n") }),
+        ...(startFrameId === undefined ? {} : { startFrameId }),
+        ...(theme === undefined ? {} : { theme }),
+      }),
+    [block, frameKey, startFrameId, theme],
+  );
+  const themed = designFrameTheme(block) === "workspace";
   return (
     <iframe
       className="canvas-design__page"
+      onLoad={themed ? (event) => installFrameFonts(event.currentTarget) : undefined}
       referrerPolicy="no-referrer"
-      sandbox=""
-      srcDoc={designDocument(block, {
-        ...(frameIds === undefined ? {} : { frameIds }),
-        ...(startFrameId === undefined ? {} : { startFrameId }),
-      })}
+      sandbox={designFrameSandbox(block)}
+      srcDoc={srcDoc}
       style={{
         width: viewport.width,
         height: viewport.height,
@@ -291,6 +381,103 @@ function FrameView({
       title={title}
     />
   );
+}
+
+/**
+ * A document's page, as wide as the Canvas and as tall as its content. The
+ * frame is same-origin and runs no script, so the host reads the page's height
+ * itself and follows it as fonts arrive, the column narrows, or a tab opens.
+ * Past the height cap the page scrolls inside the frame.
+ */
+function DocumentFrame({
+  block,
+  theme,
+}: {
+  readonly block: CanvasDesignBlock;
+  readonly theme: DesignFrameThemeValues | undefined;
+}) {
+  const [height, setHeight] = useState(DESIGN_DOCUMENT_MIN_HEIGHT);
+  const observer = useRef<ResizeObserver | null>(null);
+  useEffect(() => () => observer.current?.disconnect(), []);
+  const srcDoc = useMemo(
+    () => designDocument(block, theme === undefined ? {} : { theme }),
+    [block, theme],
+  );
+  const themed = designFrameTheme(block) === "workspace";
+
+  const onLoad = (event: SyntheticEvent<HTMLIFrameElement>) => {
+    const frame = event.currentTarget;
+    observer.current?.disconnect();
+    observer.current = null;
+    if (themed) installFrameFonts(frame);
+    const page = frame.contentDocument;
+    const body = page?.body;
+    if (page === null || page === undefined || body === null || body === undefined) return;
+    const measure = () => {
+      const content = Math.ceil(body.getBoundingClientRect().height);
+      page.documentElement.style.overflowY =
+        content > DESIGN_DOCUMENT_MAX_HEIGHT ? "auto" : "hidden";
+      setHeight(
+        Math.min(DESIGN_DOCUMENT_MAX_HEIGHT, Math.max(DESIGN_DOCUMENT_MIN_HEIGHT, content)),
+      );
+    };
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const next = new ResizeObserver(measure);
+    next.observe(body);
+    observer.current = next;
+  };
+
+  return (
+    <iframe
+      className="canvas-design__document"
+      onLoad={onLoad}
+      referrerPolicy="no-referrer"
+      sandbox={designFrameSandbox(block)}
+      srcDoc={srcDoc}
+      style={{ height }}
+      title={`${block.title}, document`}
+    />
+  );
+}
+
+/**
+ * The workspace theme a themed frame is drawn in, kept current: the theme
+ * writes its tokens and mode onto the root element, so a change there redraws
+ * the frame in the new theme. Undefined when no frame here is themed.
+ */
+function useWorkspaceFrameTheme(enabled: boolean): DesignFrameThemeValues | undefined {
+  const [theme, setTheme] = useState<DesignFrameThemeValues | undefined>(() =>
+    enabled ? readWorkspaceFrameTheme(document.documentElement) : undefined,
+  );
+  useEffect(() => {
+    if (!enabled) {
+      setTheme(undefined);
+      return;
+    }
+    const root = document.documentElement;
+    let last = "";
+    const read = () => {
+      const next = readWorkspaceFrameTheme(root);
+      const key = JSON.stringify(next);
+      if (key === last) return;
+      last = key;
+      setTheme((current) => (JSON.stringify(current) === key ? current : next));
+    };
+    read();
+    const observer = new MutationObserver(read);
+    observer.observe(root, { attributes: true });
+    const scheme =
+      typeof window.matchMedia === "function"
+        ? window.matchMedia("(prefers-color-scheme: dark)")
+        : undefined;
+    scheme?.addEventListener("change", read);
+    return () => {
+      observer.disconnect();
+      scheme?.removeEventListener("change", read);
+    };
+  }, [enabled]);
+  return theme;
 }
 
 /**

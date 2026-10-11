@@ -82,6 +82,9 @@ export function canvasDigest(definition: CanvasDefinition): CanvasDigest {
   const design = blocks.find(
     (block): block is Extract<Block, { kind: "design" }> => block.kind === "design",
   );
+  if (design !== undefined && design.size === "document") {
+    return { kind: "mockup", label: "Document", facts: [] };
+  }
   if (design !== undefined) {
     const count = design.frames.length;
     const slides = design.size === "slide";

@@ -1,12 +1,29 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
-import { launchDeckExampleBlock, onboardingFlowExampleBlock } from "@octant/domain";
-import { describe, expect, it } from "vitest";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { decodeCanvasBlock, type CanvasDesignBlock } from "@octant/contracts/canvas";
+import {
+  launchDeckExampleBlock,
+  onboardingFlowExampleBlock,
+  searchSpecExampleBlock,
+} from "@octant/domain";
+import { afterEach, describe, expect, it } from "vitest";
 import { CanvasDocument } from "../CanvasDocument";
 import { canvasFixture } from "../test-fixtures";
 
-function frames(container: HTMLElement): ReadonlyArray<HTMLIFrameElement> {
+function frames(container: ParentNode): ReadonlyArray<HTMLIFrameElement> {
   return Array.from(container.querySelectorAll("iframe"));
 }
+
+function design(fields: Partial<Pick<CanvasDesignBlock, "size" | "theme">>): CanvasDesignBlock {
+  const block = decodeCanvasBlock({ ...onboardingFlowExampleBlock, ...fields });
+  if (block.kind !== "design") throw new Error("Fixture is not a design.");
+  return block;
+}
+
+afterEach(() => {
+  const root = document.documentElement;
+  delete root.dataset.octantThemeMode;
+  root.style.removeProperty("--oct-fg");
+});
 
 describe("design block", () => {
   it("draws every screen in a frame that runs nothing and loads nothing", () => {
@@ -65,5 +82,84 @@ describe("design block", () => {
     expect(within(player).getByText("2 / 2")).toBeVisible();
     expect(within(player).getByTitle("Goals, slide 2")).toHaveAttribute("tabindex", "-1");
     expect(within(player).getByRole("button", { name: "Next slide" })).toBeDisabled();
+  });
+
+  it("never draws a frame that may run script beside Octant's own origin", () => {
+    // Same origin is safe only for a page that runs nothing; together with
+    // script it would hand the page Octant itself. Every size and theme, on the
+    // board and in the player, is checked.
+    for (const size of ["phone", "tablet", "desktop", "slide", "document"] as const) {
+      for (const theme of [undefined, "workspace", "none"] as const) {
+        const block = design(theme === undefined ? { size } : { size, theme });
+        render(<CanvasDocument definition={{ ...canvasFixture, blocks: [block] }} />);
+        const play = screen.queryByRole("button", { name: /^(Play|Present)$/ });
+        if (play !== null) fireEvent.click(play);
+        const drawn = frames(document);
+        expect(drawn.length).toBeGreaterThan(0);
+        for (const frame of drawn) {
+          const tokens = (frame.getAttribute("sandbox") ?? "missing").split(/\s+/).filter(Boolean);
+          expect(frame.hasAttribute("sandbox")).toBe(true);
+          expect(tokens).not.toContain("allow-scripts");
+          expect(tokens.every((token) => token === "allow-same-origin")).toBe(true);
+          expect(frame.srcdoc).not.toMatch(/<script/i);
+        }
+        cleanup();
+      }
+    }
+  });
+
+  it("reads a document in place in the workspace theme, with the frame kit and no inner scrollbar", async () => {
+    const root = document.documentElement;
+    root.dataset.octantThemeMode = "dark";
+    root.style.setProperty("--oct-fg", "rgb(240, 240, 240)");
+    render(<CanvasDocument definition={{ ...canvasFixture, blocks: [searchSpecExampleBlock] }} />);
+
+    const article = screen.getByRole("region", { name: "Search ranking spec, document" });
+    expect(within(article).queryByRole("button", { name: "Play" })).toBeNull();
+    const [page, ...others] = frames(article);
+    expect(others).toHaveLength(0);
+    expect(page?.getAttribute("sandbox")).toBe("allow-same-origin");
+    expect(page).not.toHaveAttribute("tabindex");
+    expect(page).toHaveAttribute("title", "Search ranking spec, document");
+    const srcdoc = page?.srcdoc ?? "";
+    expect(srcdoc).toContain(
+      `content="default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:; base-uri 'none'; form-action 'none'"`,
+    );
+    expect(srcdoc).toContain('<meta name="viewport" content="width=device-width">');
+    expect(srcdoc).toContain("color-scheme: dark;");
+    expect(srcdoc).toContain("--oct-fg: rgb(240, 240, 240);");
+    expect(srcdoc).toContain(".oct-tabs > input:nth-of-type(1):checked");
+    expect(srcdoc).not.toContain("background: white");
+    // The page grows to its content rather than filling a fixed screen.
+    expect(srcdoc).not.toContain("min-height: 100vh");
+
+    // A theme change redraws the page in the new scheme.
+    await act(async () => {
+      root.dataset.octantThemeMode = "light";
+      await Promise.resolve();
+    });
+    expect(frames(article)[0]?.srcdoc).toContain("color-scheme: light;");
+  });
+
+  it("keeps a phone design unthemed at its device size unless it asks for the theme", () => {
+    render(
+      <CanvasDocument definition={{ ...canvasFixture, blocks: [onboardingFlowExampleBlock] }} />,
+    );
+    const [screenFrame] = frames(screen.getByRole("region", { name: "Onboarding, Phone design" }));
+    expect(screenFrame?.getAttribute("sandbox")).toBe("");
+    expect(screenFrame?.style.width).toBe("390px");
+    expect(screenFrame?.srcdoc).toContain("color-scheme: light; background: white; color: black;");
+    expect(screenFrame?.srcdoc).not.toContain(".oct-tabs");
+    cleanup();
+
+    render(
+      <CanvasDocument
+        definition={{ ...canvasFixture, blocks: [design({ theme: "workspace" })] }}
+      />,
+    );
+    const [themed] = frames(screen.getByRole("region", { name: "Onboarding, Phone design" }));
+    expect(themed?.getAttribute("sandbox")).toBe("allow-same-origin");
+    expect(themed?.srcdoc).toContain(".oct-tabs");
+    expect(themed?.srcdoc).toContain("background: var(--oct-bg);");
   });
 });
