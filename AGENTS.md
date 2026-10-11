@@ -171,6 +171,9 @@ test count.
 code a change does not otherwise touch. The rules below are semantics the
 formatter cannot express.
 
+`bun run style:check` refuses new `any`, non-null `!`, `as unknown as`, and
+tracker ids in shipped code against `scripts/code-style-baseline.json`.
+
 - TypeScript runs with `strict`, `exactOptionalPropertyTypes`, and
   `noUncheckedIndexedAccess`. Satisfy them by modelling the value honestly, not
   by casting. `as` narrows a value the compiler cannot see into; it never
