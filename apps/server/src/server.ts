@@ -4982,6 +4982,12 @@ export function startOctantServer(
             if (context === undefined) return undefined;
             return appleToolchainService.requestPaneOpen(context, simulatorId);
           },
+          inputGrantIsOpen: (windowId, threadId, simulatorId) =>
+            simulatorInputGrants.isOpen({
+              windowId: String(windowId),
+              threadId: String(threadId),
+              simulatorId: String(simulatorId),
+            }),
         },
         androidToolchain: {
           resolveAuthority: (_windowId, thread) => ({
@@ -5059,6 +5065,12 @@ export function startOctantServer(
             if (context === undefined) return undefined;
             return androidToolchainService.requestPaneOpen(context, emulatorId);
           },
+          inputGrantIsOpen: (windowId, threadId, emulatorId) =>
+            androidInputGrants.isOpen({
+              windowId: String(windowId),
+              threadId: String(threadId),
+              simulatorId: String(emulatorId),
+            }),
         },
         credentialResolver: { resolve: async () => undefined },
         resolveThreadMentionContext: threadMentionContextResolver(() => threadMentionService),
