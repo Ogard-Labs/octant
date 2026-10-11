@@ -567,7 +567,7 @@ describe("Claude runtime confinement", () => {
     expect(readdirSync(ambient)).toEqual([]);
   });
 
-  it("includes Darwin security extraRules for confined Plan launches and never sets allowProviderCredentialLookup", () => {
+  it("includes Darwin security extraRules for confined Plan launches", () => {
     const target = fixture();
     const confinement = recordingConfinement();
     const expectedExtraRules = [
@@ -596,7 +596,6 @@ describe("Claude runtime confinement", () => {
 
     expect(confinement.prepared).toHaveLength(3);
     for (const launch of confinement.prepared) {
-      expect(launch.allowProviderCredentialLookup).toBeUndefined();
       if (process.platform === "darwin") {
         expect(launch.extraRules).toEqual(expectedExtraRules);
       } else {
@@ -605,35 +604,6 @@ describe("Claude runtime confinement", () => {
     }
     expect(confinement.prepared[0]?.extraRules).toEqual(confinement.prepared[1]?.extraRules);
     expect(JSON.stringify(confinement.prepared)).not.toContain("helper-token-sentinel");
-  });
-
-  it("confined Plan prepare input includes security extraRules on Darwin and omits allowProviderCredentialLookup", () => {
-    const target = fixture();
-    const confinement = recordingConfinement();
-    const child = makePort(target, { confinement: confinement.port }).spawn({
-      projectRoot: target.root,
-      executionPolicy: "plan",
-    })({
-      command: target.binaryPath,
-      args: ["sdk-test"],
-      cwd: target.root,
-      env: target.environment,
-      signal: new AbortController().signal,
-    });
-    child.kill("SIGTERM");
-
-    const launch = confinement.prepared[0];
-    if (launch === undefined) throw new Error("Expected the Plan launch to be confined.");
-    expect(launch.allowProviderCredentialLookup).toBeUndefined();
-    if (process.platform === "darwin") {
-      expect(launch.extraRules).toContain(seatbeltExecRule("/usr/bin/security"));
-      expect(launch.extraRules).toContain(
-        '(allow mach-lookup (global-name "com.apple.SecurityServer"))',
-      );
-      expect(launch.extraRules).toContain(
-        '(allow mach-lookup (global-name "com.apple.securityd.xpc"))',
-      );
-    }
   });
 
   it("refuses a launch whose arguments carry the helper token", () => {

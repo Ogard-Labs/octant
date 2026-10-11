@@ -12,10 +12,7 @@ const claudeId = decodeProviderInstanceId("80000000-0000-4000-8000-000000000821"
 const otherClaudeId = decodeProviderInstanceId("80000000-0000-4000-8000-000000000822");
 const now = "2026-07-14T10:00:00.000Z";
 
-function claudeInstance(
-  id = claudeId,
-  overrides: Record<string, unknown> = {},
-) {
+function claudeInstance(id = claudeId, overrides: Record<string, unknown> = {}) {
   return decodeProviderInstance({
     id,
     displayName: "Claude local",
@@ -80,15 +77,17 @@ describe("Claude helper token retirement", () => {
     const first = await store.retire([claudeInstance()]);
     expect(first).toEqual({ deletedCount: 1, acknowledged: false });
     expect(
-      JSON.parse(await readFile(join(dataDirectory, "claude-helper-token-retirement.json"), "utf8")),
+      JSON.parse(
+        await readFile(join(dataDirectory, "claude-helper-token-retirement.json"), "utf8"),
+      ),
     ).toEqual({ deletedCount: 1, acknowledged: false });
 
-    broker.delete.mockClear();
+    const deletedAfterFirst = vi.mocked(broker.delete).mock.calls.length;
     await expect(store.retire([claudeInstance()])).resolves.toEqual({
       deletedCount: 1,
       acknowledged: false,
     });
-    expect(broker.delete).not.toHaveBeenCalled();
+    expect(vi.mocked(broker.delete).mock.calls).toHaveLength(deletedAfterFirst);
   });
 
   it("is a no-op when the credential broker is missing", async () => {

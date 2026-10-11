@@ -123,9 +123,12 @@ export function ClaudeConfigurationForm(props: ClaudeConfigurationFormProps) {
             accent,
             reassignDirectory: true,
           });
-          void props.onChange(props.instance.id, configuration, emptyTransientCredential(), {
-            reassignAccountDirectory: true,
-          });
+          void props.onChange(
+            props.instance.id,
+            configuration,
+            emptyTransientCredential({ value: "", clear: () => undefined }),
+            { reassignAccountDirectory: true },
+          );
         }}
         showSignInCommand={authentication === "subscription"}
         {...(props.instance.configuration.configDirectory === undefined

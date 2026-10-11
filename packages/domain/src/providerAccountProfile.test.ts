@@ -1,4 +1,4 @@
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it } from "vitest";
 import { decodeProviderInstanceId } from "@octant/contracts";
 import {
   assignedProviderAccountDirectory,
@@ -20,9 +20,9 @@ describe("provider account profile", () => {
   });
 
   it("assigns extra Claude accounts under ~/.claude-accounts/<instanceId>", () => {
-    expect(assignedProviderAccountDirectory(CLAUDE_ACCOUNT_PROFILE, "/Users/example/", instanceId)).toBe(
-      `/Users/example/.claude-accounts/${instanceId}`,
-    );
+    expect(
+      assignedProviderAccountDirectory(CLAUDE_ACCOUNT_PROFILE, "/Users/example/", instanceId),
+    ).toBe(`/Users/example/.claude-accounts/${instanceId}`);
     expect(defaultProviderAccountDirectory(CLAUDE_ACCOUNT_PROFILE, "/Users/example")).toBe(
       "/Users/example/.claude",
     );
