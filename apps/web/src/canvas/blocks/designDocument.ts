@@ -6,6 +6,7 @@ import {
   type CanvasDesignBlock,
   type CanvasDesignTheme,
 } from "@octant/contracts/canvas";
+import { getDefaultToken } from "@octant/theme";
 import { DESIGN_FRAME_KIT } from "./designFrameKit";
 
 /**
@@ -219,14 +220,21 @@ export function designAssetPlaceholder(
   // Asset ids are letters, digits, dots, dashes, and underscores, so they
   // need no escaping in the markup below; anything else is not drawn.
   const id = /^[A-Za-z0-9._-]{1,64}$/.test(assetId) ? assetId : "asset";
+  // An image cannot read the page's tokens, so the panel is drawn in the
+  // default light theme's neutrals, which read on a white or a themed page.
+  const ground = getDefaultToken("control-hover", "light");
+  const stripe = getDefaultToken("sidebar", "light");
+  const edge = getDefaultToken("border-strong", "light");
+  const ink = getDefaultToken("text-primary", "light");
+  const muted = getDefaultToken("text-secondary", "light");
   const svg = [
     '<svg xmlns="http://www.w3.org/2000/svg" width="320" height="200" viewBox="0 0 320 200">',
     '<defs><pattern id="h" width="12" height="12" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">',
-    '<rect width="12" height="12" fill="#eceae4"/><rect width="5" height="12" fill="#e2dfd6"/></pattern></defs>',
+    `<rect width="12" height="12" fill="${ground}"/><rect width="5" height="12" fill="${stripe}"/></pattern></defs>`,
     '<rect width="320" height="200" fill="url(#h)"/>',
-    '<rect x="1" y="1" width="318" height="198" fill="none" stroke="#a39d8f" stroke-dasharray="6 4" stroke-width="2"/>',
-    `<text x="160" y="96" text-anchor="middle" font-family="system-ui, sans-serif" font-size="15" font-weight="600" fill="#4a463e">${PLACEHOLDER_LABEL[reason]}</text>`,
-    `<text x="160" y="120" text-anchor="middle" font-family="ui-monospace, monospace" font-size="12" fill="#6b665b">${id}</text>`,
+    `<rect x="1" y="1" width="318" height="198" fill="none" stroke="${edge}" stroke-dasharray="6 4" stroke-width="2"/>`,
+    `<text x="160" y="96" text-anchor="middle" font-family="system-ui, sans-serif" font-size="15" font-weight="600" fill="${ink}">${PLACEHOLDER_LABEL[reason]}</text>`,
+    `<text x="160" y="120" text-anchor="middle" font-family="ui-monospace, monospace" font-size="12" fill="${muted}">${id}</text>`,
     "</svg>",
   ].join("");
   return `data:image/svg+xml;base64,${btoa(svg)}`;
