@@ -9396,17 +9396,6 @@ export function startOctantServer(
       projection: persistence.automationProjection,
       code: automationCodeDispatch,
       work: automationWorkDispatch,
-      windows: {
-        resolveWindowForProject: (projectId) => {
-          for (const windowId of windowAuthorityStore.listWindowIds()) {
-            // Prefer any registered local window; Project access is rechecked
-            // by the ordinary Code/Work creation path.
-            void projectId;
-            return windowId;
-          }
-          return undefined;
-        },
-      },
       capacity: {
         admit: (input) => {
           try {

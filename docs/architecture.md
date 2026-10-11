@@ -1476,8 +1476,17 @@ thread it creates could not do.
   `skip` records them as skipped; `run-once` records all but the newest as
   skipped and runs the newest once. No catch-up burst. More than the missed-run
   cap blocks the routine as `missed-run-cap-exceeded`. A routine with an active
-  run never overlaps itself. A run that needs a registered local window to
-  create its thread fails with that reason when none is open.
+  run never overlaps itself.
+- **Runs as the host.** A routine is host-owned, so its run creates the thread
+  and starts the first turn as the host, never through a window: it runs with
+  no window open, and an open window lends it neither identity nor Project
+  binding. The routine scope is minted per process and never registered, so no
+  route, renderer, or paired device can act as it; it reaches only active
+  Projects of the routine's mode, after the revalidation above, and every
+  ceiling here still applies. The thread's creation is journaled as the host's
+  `system` actor, so the journal tells a routine's thread from one a person
+  started. Browser-tool approvals are still keyed to the window that started
+  the turn, so one a routine's turn raises is not offered to any window.
 - **Journal.** Definitions, revisions, lifecycle changes, occurrence claims and
   skips, runs, dispatch intents and claims, and cancellations are journaled. A
   claim commits the deterministic run before the occurrence ledger, so a crash

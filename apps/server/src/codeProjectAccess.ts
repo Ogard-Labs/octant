@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { ProjectId, WindowId, WindowWorkspace } from "@octant/contracts";
 import type { PrincipalRouteContext } from "./principalRouteContext";
+import { isRoutineHostScope } from "./routineHostScope";
 import { windowCanAccessCodeProject } from "./windowCodeProjectAccess";
 
 /** Bridges authenticated requests to Code services that still accept an opaque scope ID.
@@ -36,6 +37,11 @@ export class CodeProjectAccess {
   }
 
   canAccessProject(scopeId: WindowId, projectId: ProjectId): boolean {
+    // A routine runs as the host, which owns every Project; a window's binding
+    // narrows what that window drives, not what the host may. The dispatcher
+    // has already matched the routine's captured Project before using this
+    // scope, and dispatch started from a request must not inherit its scope.
+    if (isRoutineHostScope(scopeId)) return this.#options.hasActiveCodeProject(projectId);
     const request = this.#requests.getStore();
     if (request !== undefined) {
       if (!request.active || request.context.abortSignal?.aborted === true) return false;
