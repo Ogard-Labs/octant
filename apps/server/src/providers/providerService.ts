@@ -96,7 +96,7 @@ import {
 import { accessSync, constants, realpathSync, statSync } from "node:fs";
 import { mkdtemp, realpath, rm } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { Cause, Effect, Exit, Fiber, Option, Schema, Stream } from "effect";
 import { admittedBundledProviderDriverKinds } from "@octant/plugin-host/provider-drivers";
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
@@ -104,6 +104,7 @@ import { ConcurrencyConflict, JournalWriteFailed } from "../persistence/journalE
 import type { PersistenceService } from "../persistence/persistenceService";
 import { ProjectionApplicationFailed } from "../persistence/projection";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
+import { snapshotClaudeHostEnvironment } from "./claudeAccountDirectory";
 import { PROVIDER_DEFAULTS_AGGREGATE_ID } from "./providerProjection";
 import {
   carryModelContextWindowFacts,
@@ -681,11 +682,17 @@ export class ProviderService implements ProviderServiceApi {
                 command.configuration.configDirectory === undefined && existingClaudeCount > 0
                   ? assignedClaudeAccountConfigDirectory(homedir(), command.instanceId)
                   : command.configuration.configDirectory;
+              const hostConfigDirectory = hostClaudeConfigDirectory(
+                await snapshotClaudeHostEnvironment(),
+              );
               const claimedDirectory =
-                assignedDirectory ?? defaultClaudeAccountDirectory(homedir());
-              if (claudeAccountDirectoryTaken(instances, claimedDirectory, homedir())) {
-                throw this.#invalid("Another Claude account already uses that config directory.");
-              }
+                assignedDirectory ??
+                implicitClaudeAccountDirectory(homedir(), hostConfigDirectory);
+              this.#refuseTakenClaudeAccountDirectory(
+                this.#persistence.readProviderInstances(),
+                claimedDirectory,
+                hostConfigDirectory,
+              );
               instance = createClaudeProvider({
                 ...common,
                 configuration: {
@@ -1016,10 +1023,17 @@ export class ProviderService implements ProviderServiceApi {
           });
           const nextDirectory =
             instance.driverKind === "claude" ? instance.configuration.configDirectory : undefined;
-          const claimedDirectory = nextDirectory ?? defaultClaudeAccountDirectory(homedir());
-          if (claudeAccountDirectoryTaken(instances, claimedDirectory, homedir(), current.id)) {
-            throw this.#invalid("Another Claude account already uses that config directory.");
-          }
+          const hostConfigDirectory = hostClaudeConfigDirectory(
+            await snapshotClaudeHostEnvironment(),
+          );
+          const claimedDirectory =
+            nextDirectory ?? implicitClaudeAccountDirectory(homedir(), hostConfigDirectory);
+          this.#refuseTakenClaudeAccountDirectory(
+            this.#persistence.readProviderInstances(),
+            claimedDirectory,
+            hostConfigDirectory,
+            current.id,
+          );
           if (nextDirectory !== previousDirectory) {
             try {
               await this.#clearClaudeHelperSignIn?.(current.id);
@@ -1033,6 +1047,14 @@ export class ProviderService implements ProviderServiceApi {
             }
           }
           await this.#runtime.invalidateRuntime(current.id);
+          // Recheck after the awaits. Create/change on another instance can
+          // claim the same directory while helpers are being cleared.
+          this.#refuseTakenClaudeAccountDirectory(
+            this.#persistence.readProviderInstances(),
+            claimedDirectory,
+            hostConfigDirectory,
+            current.id,
+          );
           eventName = "provider.instance-configuration-changed@1";
         } else if (command.kind === "change-mistral-vibe-configuration") {
           if (current.driverKind !== "mistral-vibe") {
@@ -1751,6 +1773,27 @@ export class ProviderService implements ProviderServiceApi {
     });
   }
 
+  #refuseTakenClaudeAccountDirectory(
+    instances: ReadonlyArray<ProviderInstance>,
+    directory: string,
+    hostConfigDirectory: string | undefined,
+    exceptId?: ProviderInstanceId,
+  ): void {
+    const taken =
+      exceptId === undefined
+        ? claudeAccountDirectoryTaken(instances, directory, homedir(), hostConfigDirectory)
+        : claudeAccountDirectoryTaken(
+            instances,
+            directory,
+            homedir(),
+            hostConfigDirectory,
+            exceptId,
+          );
+    if (taken) {
+      throw this.#invalid("Another Claude account already uses that config directory.");
+    }
+  }
+
   async #withInstanceOperation<T>(instanceId: ProviderInstanceId, operation: () => Promise<T>) {
     const previous = this.#instanceOperationTails.get(instanceId) ?? Promise.resolve();
     let release!: () => void;
@@ -2023,32 +2066,59 @@ function claudeAccountDirectoryKey(directory: string): string {
   while (end > 0 && directory.charAt(end - 1) === "/") {
     end -= 1;
   }
-  return directory.slice(0, end);
+  const trimmed = directory.slice(0, end);
+  // Two absolute spellings can be one filesystem directory. Uniqueness
+  // must follow the path Claude's process will open.
+  try {
+    return realpathSync(resolve(trimmed));
+  } catch {
+    return resolve(trimmed);
+  }
 }
 
-function defaultClaudeAccountDirectory(homeDirectory: string): string {
-  return `${claudeAccountDirectoryKey(homeDirectory)}/.claude`;
+function hostClaudeConfigDirectory(environment: NodeJS.ProcessEnv): string | undefined {
+  const directory = environment.CLAUDE_CONFIG_DIR?.trim();
+  return directory !== undefined && directory.length > 0 ? directory : undefined;
+}
+
+function implicitClaudeAccountDirectory(
+  homeDirectory: string,
+  hostConfigDirectory: string | undefined,
+): string {
+  // A default instance with no stored directory launches against the
+  // inherited host overlay when present; uniqueness has to use that
+  // same effective path.
+  return hostConfigDirectory ?? `${claudeAccountDirectoryKey(homeDirectory)}/.claude`;
 }
 
 function effectiveClaudeAccountDirectory(
   instance: ProviderInstance,
   homeDirectory: string,
+  hostConfigDirectory: string | undefined,
 ): string | undefined {
   if (instance.driverKind !== "claude") return undefined;
-  return instance.configuration.configDirectory ?? defaultClaudeAccountDirectory(homeDirectory);
+  return (
+    instance.configuration.configDirectory ??
+    implicitClaudeAccountDirectory(homeDirectory, hostConfigDirectory)
+  );
 }
 
 function claudeAccountDirectoryTaken(
   instances: ReadonlyArray<ProviderInstance>,
   directory: string,
   homeDirectory: string,
+  hostConfigDirectory: string | undefined,
   exceptId?: ProviderInstanceId,
 ): boolean {
   const key = claudeAccountDirectoryKey(directory);
   return instances.some((instance) => {
     if (instance.driverKind !== "claude") return false;
     if (exceptId !== undefined && String(instance.id) === String(exceptId)) return false;
-    const existing = effectiveClaudeAccountDirectory(instance, homeDirectory);
+    const existing = effectiveClaudeAccountDirectory(
+      instance,
+      homeDirectory,
+      hostConfigDirectory,
+    );
     return existing !== undefined && claudeAccountDirectoryKey(existing) === key;
   });
 }

@@ -40,12 +40,17 @@ export function ClaudeAccountSettingsFields(props: {
   readonly onConfigDirectoryChange?: (directory: string) => void;
   readonly includeConfigDirectoryInput?: boolean;
   readonly showSignInCommand?: boolean;
-  readonly preserveExistingDirectory?: boolean;
+  readonly preservedConfigDirectory?: string;
 }) {
   const settingPrefix =
     props.instanceId === undefined ? "provider-create-claude" : `provider-${props.instanceId}`;
   const binaryPath = props.binaryPath.trim();
   const configDirectory = props.configDirectory.trim();
+  const preservedDirectory = props.preservedConfigDirectory?.trim() ?? "";
+  // A blank edit field still keeps the stored isolated directory on
+  // save. The command must advertise that same directory, not the
+  // default-account login.
+  const previewDirectory = configDirectory.length > 0 ? configDirectory : preservedDirectory;
   // formatClaudeAuthLoginCommand rejects a non-absolute binary. A live
   // preview must not invent `/usr/local/bin/claude` or throw while the
   // person is still typing `claude` or `~`.
@@ -53,7 +58,7 @@ export function ClaudeAccountSettingsFields(props: {
     props.showSignInCommand !== false && binaryPath.startsWith("/")
       ? formatClaudeAuthLoginCommand({
           binaryPath,
-          ...(configDirectory.length === 0 ? {} : { configDirectory }),
+          ...(previewDirectory.length === 0 ? {} : { configDirectory: previewDirectory }),
         })
       : undefined;
   return (
@@ -63,7 +68,7 @@ export function ClaudeAccountSettingsFields(props: {
           description={
             props.instanceId === undefined
               ? "Leave blank to use Claude's default directory for the first account. Additional accounts get their own directory automatically."
-              : props.preserveExistingDirectory === true
+              : preservedDirectory.length > 0
                 ? "Leave blank to keep this account's current directory."
                 : "Leave blank to keep Claude's default directory for this account."
           }

@@ -2049,7 +2049,9 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   accounts. A confined Plan launch refuses an account directory that
   overlaps the checkout or is the user's home, so the write grant for that
   directory cannot reopen the bound root or the rest of the home tree.
-  Two Claude instances cannot share one config directory.
+  Two Claude instances cannot share one effective config directory,
+  including the default account's implicit `~/.claude` or inherited
+  `CLAUDE_CONFIG_DIR`.
   A thread stays on the instance it started with; there is no
   automatic failover, rotation, or load-balancing between accounts. Discovery can find
   installed runtimes and auto-register them. On first run, a detected Claude

@@ -126,8 +126,10 @@ export function ClaudeConfigurationForm(props: ClaudeConfigurationFormProps) {
         instanceId={props.instance.id}
         onAccentChange={setAccent}
         onConfigDirectoryChange={setConfigDirectory}
-        preserveExistingDirectory={props.instance.configuration.configDirectory !== undefined}
         showSignInCommand={authentication === "subscription"}
+        {...(props.instance.configuration.configDirectory === undefined
+          ? {}
+          : { preservedConfigDirectory: props.instance.configuration.configDirectory })}
       />
       {authentication === "api-key" ? (
         <SettingRow

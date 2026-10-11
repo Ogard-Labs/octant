@@ -1272,6 +1272,9 @@ describe("ProviderSettingsView", () => {
     expect(directory).toHaveValue("/Users/example/.claude-accounts/work");
     await user.clear(directory);
     expect(within(card).getByText(/keep this account's current directory/i)).toBeVisible();
+    expect(within(card).getByLabelText("Claude sign-in command")).toHaveValue(
+      "CLAUDE_CONFIG_DIR='/Users/example/.claude-accounts/work' CLAUDE_SECURESTORAGE_CONFIG_DIR='/Users/example/.claude-accounts/work' '/opt/homebrew/bin/claude' auth login",
+    );
     await user.click(
       within(card).getByRole("button", { name: "Save Claude settings for Claude work" }),
     );
