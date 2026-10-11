@@ -101,10 +101,11 @@ nothing essential sits under 12px at the default. The roles live in
 | ------------- | ---- | ------ | ------- | ----------- | ------------------------------------------------------------------- |
 | Hero          | 36   | 700    | 1.1     | primary     | Welcome greeting only (`oct-title--hero`, `--oct-text-3xl`)         |
 | Title         | 28   | 700    | 1.15    | primary     | One per page (`oct-title`; a role size, not one of the size tokens) |
-| Section label | 14   | 600    | 1.35    | secondary   | Group heading over a hairline (`oct-section-label`)                 |
+| Section label | 14   | 600    | 1.3     | secondary   | Group heading over a hairline (`oct-section-label`)                 |
 | Row label     | 14   | 500    | 1.35    | primary     | Setting, list row, menu option, and a Settings section's label      |
 | Body          | 13   | 400    | 1.5     | primary     | Interface text and the transcript (the interface size, `body`)      |
-| Detail        | 13   | 400    | 1.45    | secondary   | Subtitle, row description, menu detail (`oct-row-detail`)           |
+| Subtitle      | 14   | 400    | 1.45    | secondary   | The one line under a page title (`oct-subtitle`)                    |
+| Detail        | 13   | 400    | 1.45    | secondary   | Row description, menu detail (`oct-row-detail`)                     |
 | Meta          | 12   | 400    | 1.4     | muted       | Timestamps, counts, hints (`oct-meta`)                              |
 | Identifier    | 12   | 400    | 1.4     | muted, mono | Paths, branches, ids (`oct-meta--mono`)                             |
 
@@ -1507,8 +1508,8 @@ Review, Pull requests (open rows for a Code thread's Project), Files, Document
 (only once a turn has written one), Browser, Terminal, Canvas, Plan (only for a
 real plan artifact), Delivery (only for a configured target), Agents (when
 children exist or explicitly invoked), Simulator, and Side chat. A Markdown or
-text file a Code turn creates or rewrites, and a Canvas a Chat turn authors,
-open in the dock beside the transcript once, the first time they appear: the
+text file a Code turn creates or rewrites, and a Canvas a Work or Code turn
+authors, open in the dock beside the transcript once, the first time they appear: the
 offer never moves focus from the composer, a rewrite never reopens a tab, and a
 tab the person closed stays closed. Document
 reads the file through the same host-authorized open the editor uses and
@@ -2042,11 +2043,9 @@ Focus ring color control because the product does not draw focus rings.
 
 ### Mode-specific utility chrome
 
-Chat has no bottom panel. Its right dock offers the thread tools valid in Chat:
-Environment, Side chat, Canvas, Plan, and Agents (`rightUtilityDockModel.ts`);
-Browser, Files, Review, Terminal, and the device tools are Work or Code only. A
-Canvas a Chat turn authors is offered in the dock once, like Work and Code; its
-card in the transcript opens it as a content tab (**Open Canvas**). Work shares
+Chat has no right dock and no bottom panel: the shell makes both unavailable
+in Chat, and the conversation uses the available workspace width. A Chat
+Canvas opens as a content tab beside the thread (**Open Canvas**). Work shares
 Code's quiet transcript edge: Browser is a dock tool and completion lives in the
 composer's compact Task actions menu, preserving its confirmation flow.
 
