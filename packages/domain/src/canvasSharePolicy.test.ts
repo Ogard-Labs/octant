@@ -2,6 +2,7 @@ import { CANVAS_SCHEMA_VERSION, decodeCanvasVersion } from "@octant/contracts/ca
 import { decodeCanvasComment } from "@octant/contracts/canvas-board";
 import {
   CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION,
+  CANVAS_SHARE_SCHEMA_VERSION,
   decodeCanvasStaticExportDocument,
   decodeCanvasStaticExportRequest,
 } from "@octant/contracts/canvas-share";
@@ -14,6 +15,7 @@ import {
   trafficSankeyExample,
 } from "./canvasChartExamples";
 import { comparisonMatrixExamples } from "./canvasComparisonMatrixExamples";
+import { opsDashboardExample } from "./canvasDashboardExamples";
 import { mathExamples } from "./canvasMathExamples";
 import { launchDeckExample, onboardingFlowExample } from "./canvasDesignExamples";
 import {
@@ -226,7 +228,7 @@ describe("Canvas share policy", () => {
       }),
       context,
     });
-    expect(receipt.document.schemaVersion).toBe(7);
+    expect(receipt.document.schemaVersion).toBe(CANVAS_SHARE_SCHEMA_VERSION);
     expect(receipt.document.blocks).toEqual([
       {
         ...table,
@@ -250,9 +252,30 @@ describe("Canvas share policy", () => {
       }),
       context,
     });
-    expect(receipt.document.schemaVersion).toBe(7);
+    expect(receipt.document.schemaVersion).toBe(CANVAS_SHARE_SCHEMA_VERSION);
     expect(receipt.document.blocks).toEqual(
       blocks.map((block) => ({ ...block, schemaVersion: CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION })),
+    );
+  });
+
+  it("shares a dashboard with the blocks it places, so a reader draws the same grid", () => {
+    const blocks = [...opsDashboardExample];
+    const receipt = buildCanvasStaticExportReceipt({
+      request,
+      current: decodeCanvasVersion({
+        ...current,
+        schemaVersion: CANVAS_SCHEMA_VERSION,
+        definition: { ...current.definition, schemaVersion: CANVAS_SCHEMA_VERSION, blocks },
+      }),
+      context,
+    });
+    expect(receipt.document.schemaVersion).toBe(8);
+    expect(receipt.document.blocks[0]).toEqual({
+      ...opsDashboardExample[0],
+      schemaVersion: CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION,
+    });
+    expect(receipt.document.blocks.map((block) => block.blockId)).toEqual(
+      blocks.map((block) => block.blockId),
     );
   });
 

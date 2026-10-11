@@ -243,6 +243,46 @@ describe("createBrowserAppManagedTools", () => {
     expect(create).not.toHaveBeenCalled();
   });
 
+  it("answers help only where Browser is offered and keeps refusing effects Plan denies", async () => {
+    const create = vi.fn(async () => snapshot());
+    const make = (toolConstraints: ReadonlyArray<string> = []) =>
+      createBrowserAppManagedTools({
+        windowId,
+        threadId,
+        mode: "work",
+        modelId,
+        resolveModelId: () => modelId,
+        modelBindings: new Map(),
+        executionPolicy: "plan",
+        toolConstraints,
+        resolveAuthority: () => authority,
+        browser: {
+          inspectThread: () => snapshot(),
+          create,
+          act: vi.fn(async () => snapshot()),
+          releaseThread: vi.fn(async () => snapshot()),
+        },
+        uuid: crypto.randomUUID,
+      });
+    const help = await make().execute({
+      name: "octant_browser",
+      inputJson: JSON.stringify({ operation: "help" }),
+    });
+    expect(help.isError).toBe(false);
+    expect((help.result as { help: string }).help).toContain("observationRevision");
+    const planned = await make().execute({
+      name: "octant_browser",
+      inputJson: JSON.stringify({ operation: "navigate", url: "https://example.com" }),
+    });
+    expect(planned.result).toEqual({ error: "plan-mode-read-only" });
+    const denied = await make(["web-search"]).execute({
+      name: "octant_browser",
+      inputJson: JSON.stringify({ operation: "help" }),
+    });
+    expect(denied).toEqual({ result: { error: "tool-unavailable" }, isError: true });
+    expect(create).not.toHaveBeenCalled();
+  });
+
   it("cancels a queued browser approval when the selected model changes", async () => {
     let currentModel = modelId;
     let resolveApproval: ((decision: "approved") => void) | undefined;
@@ -559,6 +599,7 @@ describe("browser diagnostics reach the provider-facing result", () => {
       screenshot: {},
       diagnostics: {},
       stop: {},
+      help: {},
     };
 
     const tools = toolsFor({ revision: 1 });

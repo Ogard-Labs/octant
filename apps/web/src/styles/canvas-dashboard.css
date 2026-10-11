@@ -1,0 +1,100 @@
+/* A Canvas KPI dashboard: a labelled grid of the document's own metric,
+   progress, status, chart, and table blocks. Kept apart from canvas.css so
+   the grid owns only its layout; each placed block keeps the styling it has
+   anywhere else in the document.
+
+   The grid answers its own width, not the window's: a Canvas in a 411px dock
+   column sits in a wide window, so a viewport query would draw four columns
+   there. Below 36rem it is one column, below 52rem at most two, and from
+   52rem the declared columns and spans. Cells never leave cell order (no
+   dense packing, no explicit placement), so the column a phone reads and
+   the order focus moves are the order the author listed. */
+
+.canvas-dashboard {
+  container: canvas-dashboard / inline-size;
+}
+
+.canvas-dashboard__title {
+  margin: var(--oct-space-6) 0 var(--oct-space-3);
+  font-size: var(--oct-text-base);
+  font-weight: var(--oct-weight-strong);
+  overflow-wrap: anywhere;
+}
+
+.canvas-dashboard__grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--oct-space-3);
+}
+
+.canvas-dashboard__cell {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.canvas-dashboard__cell > .canvas-block {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+}
+
+/* A status or progress reading is one line; stretched to the height of a
+   chart beside it, its tile reads as an empty panel, so it keeps its own. */
+.canvas-dashboard__cell[data-block-kind="status"],
+.canvas-dashboard__cell[data-block-kind="progress"] {
+  align-self: start;
+}
+
+/* A metric draws its own tile; every other cell takes the same face, so the
+   grid reads as one surface of tiles rather than loose blocks. */
+.canvas-dashboard__cell:not([data-block-kind="metric"]) > .canvas-block {
+  box-sizing: border-box;
+  padding: var(--oct-space-3);
+  border: 1px solid color-mix(in oklab, var(--oct-fg) 7%, transparent);
+  border-radius: var(--oct-radius-sm);
+}
+
+/* A block's comment marker usually hangs past its right edge, which in the
+   grid is the gap or the next cell; inside a cell it sits in the corner. */
+.canvas-dashboard__cell > .canvas-block > .canvas-block__comment-marker {
+  top: var(--oct-space-1);
+  right: var(--oct-space-1);
+}
+
+@container canvas-dashboard (min-width: 36rem) {
+  .canvas-dashboard__grid:not([data-columns="1"]) {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .canvas-dashboard__grid:not([data-columns="1"]) > .canvas-dashboard__cell:not([data-span="1"]) {
+    grid-column: span 2;
+  }
+}
+
+@container canvas-dashboard (min-width: 52rem) {
+  .canvas-dashboard__grid[data-columns="3"] {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .canvas-dashboard__grid[data-columns="4"] {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  /* As specific as the two-column rule above, so these win by order. */
+  .canvas-dashboard__grid:not([data-columns="1"]) > .canvas-dashboard__cell[data-span="3"] {
+    grid-column: span 3;
+  }
+
+  .canvas-dashboard__grid:not([data-columns="1"]) > .canvas-dashboard__cell[data-span="4"] {
+    grid-column: span 4;
+  }
+}
+
+/* Forced colours drop the faint ring; a system-coloured edge keeps each
+   cell's boundary. */
+@media (forced-colors: active) {
+  .canvas-dashboard__cell:not([data-block-kind="metric"]) > .canvas-block {
+    border-color: CanvasText;
+  }
+}

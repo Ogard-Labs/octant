@@ -26,6 +26,7 @@ import {
   type CanvasMatrixCellLayout,
 } from "@octant/domain/canvas-comparison-matrix";
 import { canvasMathRenderOptions } from "@octant/domain/canvas-math-policy";
+import { canvasReadingOrder } from "@octant/domain/canvas-dashboard-layout";
 import {
   CANVAS_MOCKUP_DEVICE_NAME,
   canvasMockupCallouts,
@@ -248,8 +249,15 @@ function renderDocument(
   format: CanvasExportImplementedFormat,
 ): ArtifactDocumentRender {
   const pieces: Piece[] = [];
-  for (const block of definition.blocks) {
-    pieces.push(...piecesFor(block));
+  // A dashboard reads where it sits: its title, then each placed block in
+  // cell order, which is the order the screen's grid reads at one column.
+  for (const item of canvasReadingOrder(definition.blocks)) {
+    if (item.kind === "block") {
+      pieces.push(...piecesFor(item.block));
+      continue;
+    }
+    pieces.push({ kind: "heading", level: 2, text: reading(item.dashboard.title) });
+    for (const cell of item.cells) pieces.push(...piecesFor(cell.block));
   }
   const title = reading(definition.title) || "Canvas";
   const body = format === "html" ? htmlDocument(title, pieces) : markdownDocument(title, pieces);
@@ -679,6 +687,9 @@ function piecesFor(block: CanvasBlock): ReadonlyArray<Piece> {
       if (rootId !== undefined) walk(rootId, 0);
       return [{ kind: "tree", items }];
     }
+    case "dashboard":
+      // Drawn by the reading order with its cells; one met alone has nothing to say.
+      return [];
     case "action":
       return paragraph(
         [reading(block.label), block.description === undefined ? "" : reading(block.description)]

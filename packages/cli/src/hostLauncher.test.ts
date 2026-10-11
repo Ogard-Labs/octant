@@ -296,6 +296,7 @@ describe("createLaunchSession", () => {
       serverUrl: new URL("http://127.0.0.1:13773"),
       windowId,
       capability,
+      origin: "http://127.0.0.1:13773",
       fetch,
     });
     expect(receipt?.launchToken).toMatch(/^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/);
@@ -307,6 +308,11 @@ describe("createLaunchSession", () => {
       "x-octant-desktop-secret": bridgeSecret,
       "content-type": "application/json",
     });
+    expect(JSON.parse(String(call[1].body))).toEqual({
+      windowId,
+      capability,
+      origin: "http://127.0.0.1:13773",
+    });
   });
 
   it("returns undefined when the admin route is unavailable (503)", async () => {
@@ -317,6 +323,7 @@ describe("createLaunchSession", () => {
       serverUrl: new URL("http://127.0.0.1:13773"),
       windowId,
       capability,
+      origin: "http://127.0.0.1:13773",
       fetch,
     });
     expect(receipt).toBeUndefined();
@@ -330,6 +337,7 @@ describe("createLaunchSession", () => {
       serverUrl: new URL("http://127.0.0.1:13773"),
       windowId,
       capability,
+      origin: "http://127.0.0.1:13773",
       fetch,
     });
     expect(receipt).toBeUndefined();
@@ -345,6 +353,7 @@ describe("createLaunchSession", () => {
       serverUrl: new URL("http://127.0.0.1:13773"),
       windowId,
       capability,
+      origin: "http://127.0.0.1:13773",
       fetch,
     });
     expect(receipt).toBeUndefined();
@@ -361,6 +370,18 @@ describe("buildWebClientUrl", () => {
     expect(url.hash).toMatch(/^#launchToken=[A-Za-z0-9_-]{43}$/);
     expect(url.searchParams.get("serverUrl")).toBe("http://127.0.0.1:13773/");
     expect(url.pathname).toBe("/");
+  });
+
+  it("opens a separate development renderer while naming the host it speaks to", async () => {
+    const { buildWebClientUrl } = await import("./hostLauncher");
+    const url = buildWebClientUrl({
+      serverUrl: new URL("http://127.0.0.1:13773"),
+      rendererUrl: new URL("http://127.0.0.1:5173"),
+      launchToken: `${"A".repeat(42)}A`,
+    });
+    expect(url.origin).toBe("http://127.0.0.1:5173");
+    expect(url.searchParams.get("serverUrl")).toBe("http://127.0.0.1:13773/");
+    expect(url.hash).toBe(`#launchToken=${"A".repeat(42)}A`);
   });
 });
 
