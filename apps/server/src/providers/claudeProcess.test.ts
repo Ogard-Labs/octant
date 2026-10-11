@@ -677,6 +677,28 @@ describe("Claude runtime confinement", () => {
     expect(pids(target.root)).toEqual([]);
   });
 
+  it("refuses a Plan turn whose account directory is the shared accounts parent", () => {
+    const target = fixture();
+    const home = process.env.HOME;
+    if (home === undefined) throw new Error("Expected HOME for the shared-parent refusal.");
+    const confinement = recordingConfinement();
+
+    expect(() =>
+      makePort(target, { confinement: confinement.port }).spawn({
+        projectRoot: target.root,
+        executionPolicy: "plan",
+      })({
+        command: target.binaryPath,
+        args: ["sdk-test"],
+        cwd: target.root,
+        env: { ...target.environment, CLAUDE_CONFIG_DIR: join(home, ".claude-accounts") },
+        signal: new AbortController().signal,
+      }),
+    ).toThrow("overlaps the checkout or the user's home");
+    expect(confinement.prepared).toEqual([]);
+    expect(pids(target.root)).toEqual([]);
+  });
+
   it("refuses a Plan turn whose account directory is a sensitive home subtree", () => {
     const target = fixture();
     const home = process.env.HOME;

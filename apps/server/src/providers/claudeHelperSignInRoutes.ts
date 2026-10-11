@@ -97,10 +97,20 @@ export function createClaudeHelperSignInService(dependencies: {
             refusals.set(key, outcome.reason);
             return;
           }
-          // The browser approval can take minutes. A provider removed or
-          // switched to an API key meanwhile no longer names this token, so
-          // keeping it would leave a year-long sign-in nothing can disconnect.
-          if (subscriptionInstance(instanceId) === undefined) return;
+          // The browser approval can take minutes. A provider removed,
+          // switched to an API key, or moved to another directory
+          // meanwhile no longer names this token. Storing it would leave
+          // a year-long sign-in on the wrong account, or one nothing can
+          // disconnect.
+          const current = subscriptionInstance(instanceId);
+          if (current === undefined) return;
+          if (current.configuration.configDirectory !== directory) {
+            refusals.set(
+              key,
+              "This Claude account's config directory changed while connecting. Connect again.",
+            );
+            return;
+          }
           await dependencies.store.connect(key, outcome.token);
         })
         .catch(() => {

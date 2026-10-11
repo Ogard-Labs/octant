@@ -147,6 +147,48 @@ describe("Claude for helpers sign-in", () => {
     expect(await store.read(String(instanceId))).toEqual({ kind: "expired" });
   });
 
+  it("keeps no token when the account directory changes while Connect waits", async () => {
+    const { broker, entries } = memoryBroker();
+    let instance: ProviderInstance = {
+      ...claudeInstance("subscription"),
+      configuration: {
+        kind: "claude-agent-sdk",
+        binaryPath: "/usr/local/bin/claude",
+        authentication: "subscription",
+        configDirectory: "/Users/example/.claude-accounts/personal",
+      },
+    } as unknown as ProviderInstance;
+    let finish: (outcome: ClaudeSetupTokenOutcome) => void = () => undefined;
+    const service = createClaudeHelperSignInService({
+      store: claudeHelperSignInFromBroker(broker),
+      readInstance: () => instance,
+      runSetupToken: () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    });
+
+    expect(await service.connect(instanceId)).toEqual({ kind: "connecting" });
+    instance = {
+      ...instance,
+      version: 2,
+      configuration: {
+        kind: "claude-agent-sdk",
+        binaryPath: "/usr/local/bin/claude",
+        authentication: "subscription",
+        configDirectory: "/Users/example/.claude-accounts/work",
+      },
+    } as unknown as ProviderInstance;
+    finish({ kind: "captured", token: TOKEN });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(entries.size).toBe(0);
+    expect(await service.status(instanceId)).toEqual({
+      kind: "refused",
+      reason: "This Claude account's config directory changed while connecting. Connect again.",
+    });
+  });
+
   it("keeps no token when its provider is removed or switched to an API key while Connect waits", async () => {
     for (const later of [undefined, claudeInstance("api-key")]) {
       const { broker, entries } = memoryBroker();

@@ -2048,9 +2048,9 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   Claude credential files or stores Claude subscription tokens for those
   accounts. A confined Plan launch refuses an account directory that
   overlaps the checkout, is the user's home, is an ancestor of home, or
-  is another home subtree such as Documents or `.ssh`. The only home
-  paths Plan may write are Claude's own state directories
-  (`~/.claude` and `~/.claude-accounts/…`).
+  is another home subtree such as Documents, `.ssh`, or the shared
+  `~/.claude-accounts` parent. The only home paths Plan may write are
+  `~/.claude` and a dedicated `~/.claude-accounts/<account>` directory.
   Two Claude instances cannot share one effective config directory,
   including the default account's implicit `~/.claude` or inherited
   `CLAUDE_CONFIG_DIR`.

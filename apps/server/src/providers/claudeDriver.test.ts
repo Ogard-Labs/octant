@@ -4302,6 +4302,22 @@ describe("Claude for helpers", () => {
     expect(f.opens).toHaveLength(0);
   });
 
+  it("refuses a Plan turn whose isolated account directory is the shared accounts parent", async () => {
+    const f = harness("subscription", "current-session", {
+      configDirectory: join(homedir(), ".claude-accounts"),
+    });
+    const acquired = await acquire(f.driver, "chat");
+    try {
+      const exit = await Effect.runPromiseExit(
+        acquired.connection.start({ sessionId, modelId, executionPolicy: "plan" }),
+      );
+      expect(String(exit)).toContain("overlaps the checkout or the user's home");
+    } finally {
+      await acquired.close();
+    }
+    expect(f.opens).toHaveLength(0);
+  });
+
   it("refuses a Plan turn whose isolated account directory is a sensitive home subtree", async () => {
     const f = harness("subscription", "current-session", {
       configDirectory: join(homedir(), ".ssh"),
