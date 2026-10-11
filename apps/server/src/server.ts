@@ -397,6 +397,7 @@ import {
 import { agentResultDeliveryReceipt } from "./agentRun/agentResultDeliveryBatch";
 import { NATIVE_HARNESS_BUILT_IN_SLOTS, type AgentRunResultDeliveryMark } from "@octant/contracts";
 import { createAgentsManagedTools } from "./agentRun/agentRunManagedTools";
+import { agentRunEligibleTargets as eligibleAgentRunTargets } from "./agentRun/agentRunDelegation";
 import {
   createAgentRunChildWorktreePort,
   resolveAgentRunChildWorktreeThreadId,
@@ -2522,44 +2523,15 @@ export function startOctantServer(
       },
       uuid: randomUUID,
     };
-    const agentRunEligibleTargets = (projectId: ProjectId | undefined) => {
-      // A Work or Code Project's provider policy binds delegate targets too:
-      // the same list the tool advertises is the one explicit targets and
-      // resumes are revalidated against, so filtering here guards all three.
-      // Chat Projects carry no provider policy.
-      const project = projectId === undefined ? undefined : persistence.readProject(projectId);
-      return persistence.readProviderInstances().flatMap((instance) => {
-        if (!instance.enabled) return [];
-        const observed = providerRuntimeRegistry.observedState(instance.id);
-        if (observed?.readiness !== "ready") return [];
-        const models =
-          project === undefined || project.type === "chat"
-            ? observed.models
-            : observed.models.filter((model) =>
-                isProjectPolicyTargetAllowed(project, instance.id, model.id),
-              );
-        if (models.length === 0) return [];
-        return [
-          {
-            providerInstanceId: String(instance.id),
-            displayName: instance.displayName,
-            driverKind: String(instance.driverKind),
-            modelIds: models.map((model) => String(model.id)),
-            reasoningByModel: Object.fromEntries(
-              models.map((model) => [
-                String(model.id),
-                model.options.flatMap((option) =>
-                  option.kind === "selection" &&
-                  (option.id === "reasoning" || option.id === "effort")
-                    ? option.values
-                    : [],
-                ),
-              ]),
-            ),
-          },
-        ];
+    const agentRunEligibleTargets = (projectId: ProjectId | undefined) =>
+      eligibleAgentRunTargets({
+        project: projectId === undefined ? undefined : persistence.readProject(projectId),
+        instances: persistence.readProviderInstances(),
+        observedState: (instanceId) => providerRuntimeRegistry.observedState(instanceId),
+        // Deferred: the policy check is declared later in this scope.
+        isTargetAllowed: (project, instanceId, modelId) =>
+          isProjectPolicyTargetAllowed(project, instanceId, modelId),
       });
-    };
     // Every turn's `octant_agents` tool set binds to the calling thread: the
     // delegation and the cancellation authority it petitions are the same ones
     // the Agents dock uses, so a tool call and a click are the same request.
