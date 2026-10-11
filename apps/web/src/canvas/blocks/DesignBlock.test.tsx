@@ -13,6 +13,7 @@ import {
   readDesignBridgeMessage,
   RUNNING_DESIGN_FIRST_HEARTBEAT_MS,
   RUNNING_DESIGN_HEARTBEAT_TIMEOUT_MS,
+  RUNNING_DESIGN_MAX_MESSAGES_PER_SECOND,
   type DesignRunRuntime,
 } from "./designRunningFrame";
 
@@ -501,6 +502,40 @@ describe("running prototype", () => {
     expect(frames(document)).toHaveLength(1);
     act(() => vi.advanceTimersByTime(RUNNING_DESIGN_FIRST_HEARTBEAT_MS));
     expect(frames(document)).toHaveLength(0);
+  });
+
+  it("removes a frame that floods the bridge, so the person can still press Stop", async () => {
+    vi.useFakeTimers();
+    const { runtime } = runRuntime({ runsOnOpen: true });
+    render(
+      <CanvasDocument
+        definition={{ ...canvasFixture, blocks: [prototype("document")] }}
+        designRunRuntime={runtime}
+      />,
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+    const frame = screen.getByTitle<HTMLIFrameElement>("Checkout, running prototype");
+    // A busy page that resizes and fails every animation frame keeps running.
+    for (let second = 0; second < 3; second += 1) {
+      act(() => {
+        for (let tick = 0; tick < 60; tick += 1) {
+          bridge(frame, { type: "size", height: 400 + tick });
+          bridge(frame, { type: "error", message: "boom" });
+        }
+        vi.advanceTimersByTime(1_000);
+      });
+    }
+    expect(frames(document)).toHaveLength(1);
+
+    act(() => {
+      for (let sent = 0; sent <= RUNNING_DESIGN_MAX_MESSAGES_PER_SECOND; sent += 1) {
+        bridge(frame, { type: "error", message: `boom ${String(sent)}` });
+      }
+    });
+    expect(frames(document)).toHaveLength(0);
+    expect(screen.getByText(/sent too many messages/)).toBeVisible();
   });
 
   it("removes a frame that loads a second page", async () => {

@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import {
   CANVAS_DESIGN_ASSET_SCHEME,
+  CANVAS_DESIGN_ASSETS_MAX_BYTES,
   CANVAS_DESIGN_BRIDGE_CHANNEL,
   CANVAS_DESIGN_BRIDGE_MAX_ERROR_LENGTH,
   CANVAS_DESIGN_HEARTBEAT_INTERVAL_MS,
@@ -198,11 +199,12 @@ export function renderCanvasDesignPage(
         : assetPlaceholder(id),
     );
   }
+  const budget = new PageAssetBudget(urls);
   const frames = block.frames
     .map((frame) => {
       const id = String(frame.frameId);
       const start = id === startFrameId ? " data-start" : "";
-      return `<div class="octant-frame" id="${escapeAttribute(id)}"${start}>${withAssets(frame.html, urls)}</div>`;
+      return `<div class="octant-frame" id="${escapeAttribute(id)}"${start}>${withAssets(frame.html, budget)}</div>`;
     })
     .join("");
   return [
@@ -214,7 +216,7 @@ export function renderCanvasDesignPage(
     `<style>${UNTHEMED_PAGE}</style>`,
     // The host refuses a stylesheet that closes its element; this keeps that
     // true for a document that reached the host some other way.
-    `<style>${withAssets(block.styles ?? "", urls).replace(/<\/style/gi, "<\\/style")}</style>`,
+    `<style>${withAssets(block.styles ?? "", budget).replace(/<\/style/gi, "<\\/style")}</style>`,
     `</head><body>${frames}</body></html>`,
   ].join("");
 }
@@ -228,16 +230,63 @@ export function canvasDesignPageRefusal(): string {
   ].join("");
 }
 
+// What stands right before an address the browser loads, in the positions the
+// host's markup policy admits a reference: a `url()`, a `src`, `srcset`,
+// `poster`, or `background` value (or a later srcset candidate), and a quoted
+// `image-set()` candidate. The same token in prose, `alt`, or any other
+// attribute is the author's text and is left as written. The Canvas renderer
+// reads static frames the same way.
+const ADDRESS_LEAD = String.raw`(?:url\(\s*["']?\s*|(?:^|[\s"'/])(?:src|srcset|poster|background)\s*=\s*["']?\s*|(?:^|[\s"'/])srcset\s*=\s*(?:"[^"]*?,\s*|'[^']*?,\s*)|image-set\((?:[^()]|\([^()]*\))*?["']\s*)`;
 const ASSET_REFERENCE = new RegExp(
-  `${CANVAS_DESIGN_ASSET_SCHEME.replace(/[-:]/g, "\\$&")}([A-Za-z0-9][A-Za-z0-9._-]{0,63})`,
-  "g",
+  `(?<=${ADDRESS_LEAD})${CANVAS_DESIGN_ASSET_SCHEME.replace(/[-:]/g, "\\$&")}([A-Za-z0-9][A-Za-z0-9._-]{0,63})`,
+  "gi",
 );
 
-function withAssets(markup: string, urls: ReadonlyMap<string, string>): string {
+/**
+ * How much image data one page may carry: every declared image once, at the
+ * host's per-design budget written as base64, and room for placeholders. A
+ * reference is written in as a whole `data:` image, so a design that names a
+ * 3 MiB image twice would otherwise pass the 8 MiB a remote client is served,
+ * and arrive cut short.
+ */
+const PAGE_ASSET_BUDGET = Math.ceil(CANVAS_DESIGN_ASSETS_MAX_BYTES / 3) * 4 + 128 * 1024;
+
+/**
+ * The address each reference is drawn from, charged against the page budget.
+ * Each declared image's first reference is reserved up front, so a repeat
+ * early in the page cannot crowd out a different image later. A repeat that
+ * would pass the budget draws the placeholder, and past that an empty image.
+ */
+class PageAssetBudget {
+  readonly #urls: ReadonlyMap<string, string>;
+  readonly #drawn = new Set<string>();
+  #spent = 0;
+
+  constructor(urls: ReadonlyMap<string, string>) {
+    this.#urls = urls;
+    for (const url of urls.values()) this.#spent += url.length;
+  }
+
+  address(id: string): string {
+    const url = this.#urls.get(id);
+    if (url !== undefined && !this.#drawn.has(id)) {
+      this.#drawn.add(id);
+      return url;
+    }
+    for (const candidate of [url, assetPlaceholder(id)]) {
+      if (candidate !== undefined && this.#spent + candidate.length <= PAGE_ASSET_BUDGET) {
+        this.#spent += candidate.length;
+        return candidate;
+      }
+    }
+    return "data:,";
+  }
+}
+
+function withAssets(markup: string, budget: PageAssetBudget): string {
   if (!markup.includes(CANVAS_DESIGN_ASSET_SCHEME)) return markup;
-  return markup.replace(
-    ASSET_REFERENCE,
-    (_reference, id: string) => urls.get(id) ?? assetPlaceholder(id),
+  return markup.replace(ASSET_REFERENCE, (reference: string, id: string) =>
+    reference.startsWith(CANVAS_DESIGN_ASSET_SCHEME) ? budget.address(id) : reference,
   );
 }
 

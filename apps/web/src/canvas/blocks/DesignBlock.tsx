@@ -35,6 +35,7 @@ import {
   RUNNING_DESIGN_FIRST_HEARTBEAT_MS,
   RUNNING_DESIGN_HEARTBEAT_TIMEOUT_MS,
   RUNNING_DESIGN_MAX_ERRORS,
+  RUNNING_DESIGN_MAX_MESSAGES_PER_SECOND,
   RUNNING_DESIGN_MIN_HEIGHT,
   RUNNING_DESIGN_SANDBOX,
   type DesignRunRuntime,
@@ -547,6 +548,7 @@ type RunStopReason =
   | { readonly kind: "unresponsive" }
   | { readonly kind: "navigated" }
   | { readonly kind: "held-focus" }
+  | { readonly kind: "flooded" }
   | { readonly kind: "refused"; readonly reason: string };
 
 type RunState =
@@ -565,6 +567,7 @@ const STOPPED_TEXT: Record<Exclude<RunStopReason["kind"], "refused">, string> = 
   unresponsive: "Stopped because the prototype stopped responding.",
   navigated: "Stopped because the prototype tried to load another page.",
   "held-focus": "Stopped because the prototype kept taking the keyboard back.",
+  flooded: "Stopped because the prototype sent too many messages.",
 };
 
 /** How long after the reserved shortcut a page that takes focus back is stopped. */
@@ -804,8 +807,25 @@ function RunningFrame({
   useEffect(() => {
     let lastBeat = Date.now();
     let beating = false;
+    let windowStart = Date.now();
+    let received = 0;
+    let flooded = false;
     const onMessage = (event: MessageEvent) => {
-      const message = readDesignBridgeMessage(event, frameRef.current?.contentWindow);
+      const page = frameRef.current?.contentWindow;
+      if (flooded || page === null || page === undefined || event.source !== page) return;
+      // Counted before the message is read, so malformed messages flood too.
+      const now = Date.now();
+      if (now - windowStart >= 1_000) {
+        windowStart = now;
+        received = 0;
+      }
+      received += 1;
+      if (received > RUNNING_DESIGN_MAX_MESSAGES_PER_SECOND) {
+        flooded = true;
+        onStop({ kind: "flooded" });
+        return;
+      }
+      const message = readDesignBridgeMessage(event, page);
       if (message === undefined) return;
       if (message.type === "heartbeat") {
         lastBeat = Date.now();

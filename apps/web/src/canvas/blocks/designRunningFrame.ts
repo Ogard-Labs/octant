@@ -29,6 +29,14 @@ export const RUNNING_DESIGN_MIN_HEIGHT = 48;
 export const RUNNING_DESIGN_MAX_HEIGHT = 12_000;
 /** How many of a page's latest script errors are kept on screen. */
 export const RUNNING_DESIGN_MAX_ERRORS = 3;
+/**
+ * A page that sends more bridge messages than this in a second is stopped.
+ * Every message is handled on Octant's own renderer thread, so a page posting
+ * in a loop could starve the window that holds Stop, although its own frame
+ * runs elsewhere. A page that resizes and reports an error on every animation
+ * frame stays well under it.
+ */
+export const RUNNING_DESIGN_MAX_MESSAGES_PER_SECOND = 250;
 
 /**
  * How a surface reaches the host to run a design. `contained` is true where

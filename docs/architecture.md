@@ -850,7 +850,10 @@ font-src data:; media-src data: blob:; connect-src 'none'; frame-src 'none';
 form-action 'none'; base-uri 'none'`, `Referrer-Policy: no-referrer`, and
 `Cache-Control: no-store`; a refusal carries the same headers. Declared
 images are resolved under the version's provenance and written in as `data:`
-images. The remote gateway forwards that one path as a pre-auth route,
+images: every image once, and a repeated reference only while the page's
+images stay within the design's 5 MiB as base64, after which it draws a
+placeholder, so the page fits the remote gateway's 8 MiB rather than arriving
+cut short. The remote gateway forwards that one path as a pre-auth route,
 because a frame's load carries neither the session proof nor Octant's
 headers and the ticket is its whole authority, and keeps the page's policy in
 place of its own; its document policy adds `frame-src` for that path on its
@@ -864,7 +867,9 @@ reads only typed, bounded messages whose `source` is that frame's window and
 whose origin is opaque, clamps height to 48–12,000px, and shows errors as text.
 A frame with no heartbeat for 5 seconds (10 for the first) while the window is
 visible is removed and shown as stopped with **Run again**, as is a frame
-whose `load` fires a second time, which is a page it navigated to. Host
+that posts more than 250 messages in a second, which would starve the
+renderer that holds **Stop**, and a frame whose `load` fires a second time,
+which is a page it navigated to. Host
 chrome holds a running label and **Stop**. In the thread a prototype starts
 only on **Run**; the sidebar runs it on open, and the frame is out of the tab
 order until the person pressed Run. On desktop the main process cancels every

@@ -461,24 +461,99 @@ function attributeRefusal(
 // An event handler and its value, as an attribute of a start tag.
 const EVENT_HANDLER = /([\s"'/])on[a-z]+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'=<>`]+)/gi;
 
+// Elements whose text a browser reads as text, not markup, until their own
+// end tag, so a `<script` inside one opens nothing.
+const RAW_TEXT_ELEMENTS = new Set([
+  "style",
+  "textarea",
+  "title",
+  "xmp",
+  "noembed",
+  "noframes",
+  "noscript",
+]);
+
 /**
  * A running design's markup with the text of each script element and the
  * value of each event handler taken out, so the load checks read only what a
- * browser would load as markup. A script element left open runs to the end
- * of the markup, as a browser reads it.
+ * browser would load as markup.
+ *
+ * Script elements are found the way a browser tokenizes, not by substring: a
+ * `<script` inside a comment, an attribute value, the text of a style or
+ * textarea, or a longer name such as `<scripts>` opens nothing, and the
+ * markup after it is still read. Inside `svg` or `math` a script's text is
+ * markup, so it is kept. Everything except script text is kept, so where the
+ * scan reads something differently from a browser it checks more, never less.
+ * A script element left open runs to the end of the markup, as a browser
+ * reads it.
  */
 function withoutScriptText(markup: string): string {
   const lower = markup.toLowerCase();
   let kept = "";
   let cursor = 0;
+  let foreign = 0;
+  const endOf = (name: string, from: number): number => {
+    const close = new RegExp(`</${name}(?=[\\s/>]|$)`, "g");
+    close.lastIndex = from;
+    return close.exec(lower)?.index ?? markup.length;
+  };
   while (cursor < markup.length) {
-    const open = lower.indexOf("<script", cursor);
+    const open = lower.indexOf("<", cursor);
     if (open === -1) break;
-    const tagEnd = lower.indexOf(">", open);
-    if (tagEnd === -1) break;
-    const close = lower.indexOf("</script", tagEnd);
-    kept += markup.slice(cursor, tagEnd + 1);
-    cursor = close === -1 ? markup.length : close;
+    if (lower.startsWith("<!--", open)) {
+      const end = lower.indexOf("-->", open + 4);
+      const after = end === -1 ? markup.length : end + 3;
+      kept += markup.slice(cursor, after);
+      cursor = after;
+      continue;
+    }
+    const closing = lower.charAt(open + 1) === "/";
+    const nameStart = closing ? open + 2 : open + 1;
+    if (!/[a-z]/.test(lower.charAt(nameStart))) {
+      // `<!`, `<?`, and `</` before anything but a letter open a bogus
+      // comment that ends at the next `>`; any other `<` is text.
+      const bogus = /^(?:!|\?|\/[^>])/.test(lower.slice(open + 1, open + 3));
+      const end = bogus ? lower.indexOf(">", open) : -1;
+      const after = bogus ? (end === -1 ? markup.length : end + 1) : open + 1;
+      kept += markup.slice(cursor, after);
+      cursor = after;
+      continue;
+    }
+    let tagEnd = nameStart;
+    while (tagEnd < markup.length && !/[\s/>]/.test(lower.charAt(tagEnd))) tagEnd += 1;
+    const name = lower.slice(nameStart, tagEnd);
+    // Read past the attributes with quoted values skipped, so a `>` or
+    // `<script` inside a value neither ends the tag nor opens anything.
+    let awaitingValue = false;
+    while (tagEnd < markup.length && lower.charAt(tagEnd) !== ">") {
+      const char = lower.charAt(tagEnd);
+      if (awaitingValue && (char === '"' || char === "'")) {
+        const end = lower.indexOf(char, tagEnd + 1);
+        tagEnd = end === -1 ? markup.length : end + 1;
+        awaitingValue = false;
+        continue;
+      }
+      if (char === "=") awaitingValue = true;
+      else if (!/\s/.test(char)) awaitingValue = false;
+      tagEnd += 1;
+    }
+    const after = Math.min(tagEnd + 1, markup.length);
+    kept += markup.slice(cursor, after);
+    cursor = after;
+    const selfClosing = lower.charAt(tagEnd - 1) === "/";
+    if (name === "svg" || name === "math") {
+      if (closing) foreign = Math.max(0, foreign - 1);
+      else if (!selfClosing) foreign += 1;
+      continue;
+    }
+    if (closing || foreign > 0) continue;
+    if (name === "script") {
+      cursor = endOf("script", cursor);
+    } else if (RAW_TEXT_ELEMENTS.has(name)) {
+      const end = endOf(name, cursor);
+      kept += markup.slice(cursor, end);
+      cursor = end;
+    }
   }
   kept += markup.slice(cursor);
   return kept.replace(EVENT_HANDLER, "$1");

@@ -1518,6 +1518,13 @@ describe("design frames", () => {
       '<div style="background:url(https://example.test/a.png)"></div>',
       '<form action="https://example.test"><button>Go</button></form>',
       "<script>1</script><style>@import url(https://example.test/a.css);</style>",
+      // A script opener the browser never reads as one hides nothing after it.
+      '<!-- <script> --><img src="https://example.test/x.png" alt="">',
+      '<?x <script><img src="https://example.test/x.png" alt="">',
+      '<p title="<script>"></p><img src="https://example.test/x.png" alt="">',
+      '<scripts></scripts><img src="https://example.test/x.png" alt="">',
+      '<style>/* <script> */</style><img src="https://example.test/x.png" alt="">',
+      '<textarea><script></textarea><img src="https://example.test/x.png" alt="">',
     ]) {
       expect(run(html)).toMatch(/^design-markup-refused: /);
     }
