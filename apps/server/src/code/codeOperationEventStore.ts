@@ -6,6 +6,7 @@ import {
   MAX_CODE_CONVERSATION_PAGE_SIZE,
   MAX_CODE_CONVERSATION_ASSISTANT_PARTS,
   MAX_CODE_CONVERSATION_TURN_STEPS,
+  MAX_CODE_FORK_MERGE_BACKS_PER_TURN,
   CorrelationId,
   EventActor,
   EventId,
@@ -19,6 +20,7 @@ import {
   type CodeConversationStep,
   type CodeConversationTurn,
   type CodeConversationTurnHandoff,
+  type CodeForkMergeBack,
   type CodeProviderLimit,
   type CodeOperationId,
   type CodeThreadId,
@@ -91,6 +93,8 @@ export interface ReplayCodeOperationEventsInput {
   readonly limit: number;
 }
 
+/** One read's worth of fork merges; a thread with more is refused, not truncated. */
+const MAX_FORK_CONTEXT_MERGE_RECORDS = 1_000;
 /** One read's worth of session records; a thread with more is refused, not truncated. */
 const MAX_SESSION_READY_RECORDS = 1_000;
 
@@ -300,6 +304,66 @@ export class CodeOperationEventStore {
         if (cursor !== undefined) conversations.set(String(frame.operationId), cursor.value);
       }
       return conversations;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
+   * The fork conversations merged back into a thread, oldest first, and the
+   * merge its turns last carried. Merges are carried in the order they were
+   * made, so every merge after that one is still waiting for a turn. Undefined
+   * when the thread holds more merges than one read returns, a record does not
+   * decode, or the last carried merge is not among them, because a partial
+   * list would deliver a merge twice or never.
+   */
+  forkContextMerges(threadId: CodeThreadId):
+    | {
+        readonly merges: ReadonlyArray<{
+          readonly operationId: CodeOperationId;
+          readonly event: Extract<CodeOperationEvent, { readonly kind: "fork-context-merged" }>;
+        }>;
+        readonly lastDeliveredOperationId?: CodeOperationId;
+      }
+    | undefined {
+    try {
+      const read = (kind: string, limit: number) =>
+        this.#journal
+          .latestThreadEvents({
+            aggregateType: "code-operation",
+            threadId: String(threadId),
+            kind,
+            limit,
+          })
+          .map((envelope) => {
+            if (envelope.eventName !== CODE_OPERATION_EVENT_RECORDED || envelope.eventVersion !== 1)
+              throw new Error("unknown record");
+            const frame = decodeCodeOperationEventFrame(envelope.payload);
+            if (
+              String(frame.threadId) !== String(threadId) ||
+              String(frame.operationId) !== String(envelope.aggregateId)
+            )
+              throw new Error("foreign record");
+            return frame;
+          });
+      const merged = read("fork-context-merged", MAX_FORK_CONTEXT_MERGE_RECORDS);
+      if (merged.length >= MAX_FORK_CONTEXT_MERGE_RECORDS) return undefined;
+      const merges = merged
+        .flatMap((frame) =>
+          frame.event.kind === "fork-context-merged"
+            ? [{ operationId: frame.operationId, event: frame.event }]
+            : [],
+        )
+        .reverse();
+      const delivered = read("fork-context-delivered", 1)[0]?.event;
+      if (delivered?.kind !== "fork-context-delivered") return { merges };
+      if (
+        !merges.some(
+          (merge) => String(merge.operationId) === String(delivered.mergeOperationId),
+        )
+      )
+        return undefined;
+      return { merges, lastDeliveredOperationId: delivered.mergeOperationId };
     } catch {
       return undefined;
     }
@@ -542,6 +606,7 @@ export class CodeOperationEventStore {
               ? {}
               : { executionPolicy: frame.event.executionPolicy }),
             assistant: [],
+            forkMergeBacks: [],
             steps: [],
             stepsTruncated: false,
             status: "incomplete",
@@ -643,6 +708,10 @@ export class CodeOperationEventStore {
           });
         } else if (frame.event.kind === "context-handoff-attached") {
           builder.handoff = conversationHandoff(frame.event);
+        } else if (frame.event.kind === "fork-context-delivered") {
+          const { kind: _kind, mergeOperationId: _merge, ...mergeBack } = frame.event;
+          if (builder.forkMergeBacks.length < MAX_CODE_FORK_MERGE_BACKS_PER_TURN)
+            builder.forkMergeBacks.push(mergeBack);
         } else if (frame.event.kind === "conversation-turn-changed-files") {
           builder.changedFiles = frame.event.changedFiles;
         } else if (frame.event.kind === "operation-state") {
@@ -676,11 +745,14 @@ export class CodeOperationEventStore {
     return decodeCodeConversationPage({
       version: 3,
       threadId,
-      turns: turns.map(({ startCursor: _startCursor, steps, stepsTruncated, ...turn }) => ({
+      turns: turns.map(
+        ({ startCursor: _startCursor, steps, stepsTruncated, forkMergeBacks, ...turn }) => ({
         ...turn,
+        ...(forkMergeBacks.length === 0 ? {} : { forkMergeBacks }),
         ...(steps.length === 0 ? {} : { steps }),
         ...(stepsTruncated ? { stepsTruncated: true } : {}),
-      })),
+      }),
+      ),
       nextCursor: turns.at(-1)?.startCursor ?? input.afterCursor,
       hasMore,
       ...(currentLimits.length === 0 ? {} : { limits: currentLimits.slice(0, 8) }),
@@ -728,6 +800,7 @@ type CodeConversationBuilder = {
   executionPolicy?: CodeConversationTurn["executionPolicy"];
   usage?: CodeConversationTurn["usage"];
   handoff?: CodeConversationTurn["handoff"];
+  forkMergeBacks: Array<CodeForkMergeBack>;
   assistant: Array<CodeConversationTurn["assistant"][number]>;
   steps: Array<CodeConversationStep>;
   stepsTruncated: boolean;

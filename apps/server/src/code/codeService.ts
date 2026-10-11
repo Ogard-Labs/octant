@@ -48,6 +48,7 @@ import {
   type CodeCommand,
   type CodeCommandResult,
   type ForkCodeThreadCommand,
+  type CodeForkMergeBackOutcome,
   type CodeThreadCheckoutRebindRefusal,
   type CodeRepositoryId,
   type CodeWorktreeSourcePreview,
@@ -619,6 +620,17 @@ export interface CodeServiceOptions {
    * conversation cannot be read is refused before anything is created.
    */
   readonly forkConversation?: CodeForkConversationReader;
+  /**
+   * Merges a fork's conversation back into the thread it was forked from.
+   * Without it a merge is refused as unsupported.
+   */
+  readonly forkMergeBack?: {
+    readonly merge: (
+      authenticatedWindowId: WindowId,
+      forkThreadId: CodeThreadId,
+      throughOperationId: string,
+    ) => Promise<CodeForkMergeBackOutcome>;
+  };
   readonly probeProvider?: (
     providerInstanceId: CodeThread["providerInstanceId"],
   ) => Promise<ProviderProbeResult>;
@@ -802,6 +814,7 @@ export class CodeService {
   readonly #worktreeRefs: CodeWorktreeRefsPort | undefined;
   readonly #managedThreadCreation: ManagedCodeThreadCreationPort | undefined;
   readonly #forkPoints: CodeForkPointPort | undefined;
+  readonly #forkMergeBack: CodeServiceOptions["forkMergeBack"];
   readonly #forkConversation: CodeForkConversationReader | undefined;
   readonly #probeProvider: CodeServiceOptions["probeProvider"];
   readonly #isProviderModelAllowed: CodeServiceOptions["isProviderModelAllowed"];
@@ -850,6 +863,7 @@ export class CodeService {
     this.#worktreeRefs = options.worktreeRefs;
     this.#managedThreadCreation = options.managedThreadCreation;
     this.#forkPoints = options.forkPoints;
+    this.#forkMergeBack = options.forkMergeBack;
     this.#forkConversation = options.forkConversation;
     this.#probeProvider = options.probeProvider;
     this.#isProviderModelAllowed = options.isProviderModelAllowed;
@@ -1122,6 +1136,20 @@ export class CodeService {
         const fork = await this.#forkCreation(authenticatedWindowId, command);
         command = fork.command;
         sourceFiles = fork.files;
+      }
+      if (command.kind === "merge-code-fork-context") {
+        const fork = this.#persistence.readCodeThread(command.threadId);
+        if (fork === undefined) throw this.#failure("invalid", "Code thread was not found.");
+        await this.#authorizeThread(authenticatedWindowId, fork);
+        const outcome =
+          this.#forkMergeBack === undefined
+            ? ({ status: "refused", reason: "unsupported" } as const)
+            : await this.#forkMergeBack.merge(
+                authenticatedWindowId,
+                fork.id,
+                command.throughOperationId,
+              );
+        return { kind: "fork-context-merge", threadId: fork.id, outcome };
       }
       if (command.kind === "preview-code-worktree-source") {
         if (this.#worktreeSourcePreview === undefined) {
