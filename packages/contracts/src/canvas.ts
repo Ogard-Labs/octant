@@ -32,8 +32,10 @@ const strict = { parseOptions: { onExcessProperty: "error" as const } };
 // entity-relationship, swimlane, and mind map diagram kinds, version 9 the
 // design block, version 10 the comparison matrix, version 11 the math
 // block, version 12 the mockup catalog, version 13 the stable table row
-// id, and version 14 the funnel, radar, and sankey chart types, which the
-// definition filters below admit only under those declared versions.
+// id, version 14 the funnel, radar, and sankey chart types, version 15 the
+// dashboard layout block, and version 16 the design document size and
+// workspace theme, which the definition filters below admit only under those
+// declared versions.
 
 // These are renderer-facing aggregate limits. Per-field structural limits are
 // also applied below; the domain policy re-checks the aggregate values before
@@ -179,6 +181,9 @@ export const CANVAS_FLOW_CHARTS_SCHEMA_VERSION = 14;
 // The dashboard layout block: a titled grid that places metric, progress,
 // status, chart, and table blocks by id.
 export const CANVAS_DASHBOARD_SCHEMA_VERSION = 15;
+// A design drawn as a document that grows to its content, and a design drawn
+// in the workspace theme.
+export const CANVAS_DESIGN_DOCUMENT_SCHEMA_VERSION = 16;
 // The metric's sparkline, goodDirection, and caption arrived with the bar list.
 export const CANVAS_METRIC_TREND_SCHEMA_VERSION = 7;
 
@@ -1899,15 +1904,41 @@ export const CanvasMockupBlock = Schema.Struct({
 export type CanvasMockupBlock = typeof CanvasMockupBlock.Type;
 
 /**
- * The viewport a design frame is drawn at, in CSS pixels: a phone, a tablet,
- * a desktop window or web page, or a 16:9 slide.
+ * What a design frame is drawn as: a phone, a tablet, a desktop window or web
+ * page, or a 16:9 slide, each at a fixed viewport, or a `document` as wide as
+ * the Canvas column and as tall as its content, such as an article or a spec.
  */
-export const CanvasDesignSize = Schema.Literal("phone", "tablet", "desktop", "slide");
+export const CanvasDesignSize = Schema.Literal("phone", "tablet", "desktop", "slide", "document");
 export type CanvasDesignSize = typeof CanvasDesignSize.Type;
+/** The sizes drawn at a fixed viewport and scaled to fit. */
+export type CanvasDesignDeviceSize = Exclude<CanvasDesignSize, "document">;
 
-/** The CSS viewport each size is drawn at. Authors lay frames out against it. */
+/**
+ * Whether a design frame is drawn in Octant's theme (`workspace`: its colour
+ * tokens, light or dark as the workspace is, its fonts, and the frame kit's
+ * classes) or as the author's page alone (`none`). A document defaults to
+ * `workspace`; a device size defaults to `none`, so a product screen keeps its
+ * own brand.
+ */
+export const CanvasDesignTheme = Schema.Literal("workspace", "none");
+export type CanvasDesignTheme = typeof CanvasDesignTheme.Type;
+
+/**
+ * Whether a design uses anything version 13 introduced: the document size or
+ * a declared theme. Reads loose fields so the domain's declared-version check
+ * can ask the same question of a document that did not decode.
+ */
+export function canvasDesignUsesDocumentFields(block: {
+  readonly kind?: unknown;
+  readonly size?: unknown;
+  readonly theme?: unknown;
+}): boolean {
+  return block.kind === "design" && (block.size === "document" || block.theme !== undefined);
+}
+
+/** The CSS viewport each device size is drawn at. Authors lay frames out against it. */
 export const CANVAS_DESIGN_VIEWPORT: Readonly<
-  Record<CanvasDesignSize, { readonly width: number; readonly height: number }>
+  Record<CanvasDesignDeviceSize, { readonly width: number; readonly height: number }>
 > = {
   phone: { width: 390, height: 844 },
   tablet: { width: 820, height: 1180 },
@@ -1940,6 +1971,7 @@ export const CanvasDesignBlock = Schema.Struct({
   kind: Schema.Literal("design"),
   title: CanvasMockupText,
   size: CanvasDesignSize,
+  theme: Schema.optional(CanvasDesignTheme),
   styles: Schema.optional(CanvasDesignMarkup),
   frames: Schema.Array(CanvasDesignFrame).pipe(
     Schema.minItems(1),
@@ -2130,10 +2162,12 @@ export const CanvasDefinition = Schema.Struct({
     // from version 6, a bar list and the metric trend fields from version 7, a
     // design from version 9, a comparison matrix from version 10, math from
     // version 11, the mockup catalog from version 12, table row ids from
-    // version 13, the funnel, radar, and sankey charts from version 14, and the
-    // dashboard from version 15. A rolled-back runtime that never learned a
-    // kind or hint must see a document carrying it as a declared future
-    // version, not as a document that failed to decode. Each keeps its own floor so an earlier document stays valid.
+    // version 13, the funnel, radar, and sankey charts from version 14, the
+    // dashboard from version 15, and a design document or theme from version
+    // 16. A rolled-back runtime that never learned a kind or hint must see a
+    // document carrying it as a declared future version, not as a document
+    // that failed to decode. Each keeps its own floor so an earlier document
+    // stays valid.
     Schema.filter(
       (definition) =>
         definition.schemaVersion >= CANVAS_MOCKUP_SCHEMA_VERSION ||
@@ -2262,6 +2296,15 @@ export const CanvasDefinition = Schema.Struct({
       {
         message: () =>
           `Dashboard blocks require Canvas schema version ${String(CANVAS_DASHBOARD_SCHEMA_VERSION)}.`,
+      },
+    ),
+    Schema.filter(
+      (definition) =>
+        definition.schemaVersion >= CANVAS_DESIGN_DOCUMENT_SCHEMA_VERSION ||
+        !definition.blocks.some(canvasDesignUsesDocumentFields),
+      {
+        message: () =>
+          `A design document size or theme requires Canvas schema version ${String(CANVAS_DESIGN_DOCUMENT_SCHEMA_VERSION)}.`,
       },
     ),
   );

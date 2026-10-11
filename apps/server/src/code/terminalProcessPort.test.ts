@@ -173,7 +173,7 @@ describe("TerminalProcessPort", () => {
     expect(profile).not.toContain("(allow network*)");
   });
 
-  it("lets the shell read its own configuration from the home and opens it as a login shell", () => {
+  it("lets the login shell read its configuration and version-manager homes but never credential homes", () => {
     const pty = fakePty();
     const spawn = vi.fn(() => pty);
     const fake = createFakeSandboxConfinement();
@@ -185,6 +185,15 @@ describe("TerminalProcessPort", () => {
     writeFileSync(join(fake.root, ".oh-my-zsh", "oh-my-zsh.sh"), "# framework\n");
     mkdirSync(join(fake.root, ".ssh"));
     writeFileSync(join(fake.root, ".ssh", "id_ed25519"), "secret\n");
+    // A version manager's shims resolve to toolchains elsewhere in its home,
+    // beside credential homes that must stay denied.
+    mkdirSync(join(fake.root, ".local", "share", "mise", "shims"), { recursive: true });
+    mkdirSync(join(fake.root, ".aws"));
+    writeFileSync(join(fake.root, ".aws", "credentials"), "secret\n");
+    mkdirSync(join(fake.root, ".config", "mise"), { recursive: true });
+    writeFileSync(join(fake.root, ".config", "mise", "config.toml"), "[tools]\n");
+    mkdirSync(join(fake.root, ".config", "gh"), { recursive: true });
+    writeFileSync(join(fake.root, ".config", "gh", "hosts.yml"), "secret\n");
     const port = new TerminalProcessPort({
       spawn,
       killProcessGroup: vi.fn(),
@@ -209,7 +218,14 @@ describe("TerminalProcessPort", () => {
     const profile = launchedProfile(spawn);
     expect(profile).toContain(`(allow file-read* (subpath "${join(home, ".zshrc")}"))`);
     expect(profile).toContain(`(allow file-read* (subpath "${join(home, ".oh-my-zsh")}"))`);
-    expect(profile).toContain(`(deny file-read* (subpath "${join(home, ".ssh")}"))`);
+    expect(profile).toContain(`(allow file-read* (subpath "${join(home, ".local/share/mise")}"))`);
+    expect(profile).not.toContain(
+      `(allow file-write* (subpath "${join(home, ".local/share/mise")}"))`,
+    );
+    for (const credentials of [".ssh", ".aws", ".config/gh"]) {
+      expect(profile).toContain(`(deny file-read* (subpath "${join(home, credentials)}"))`);
+      expect(profile).not.toContain(`(allow file-read* (subpath "${join(home, credentials)}"))`);
+    }
     expect(profile).not.toContain(`(allow file-write* (subpath "${join(home, ".zshrc")}"))`);
     expect(launchedCall(spawn)[1]).toEqual(expect.arrayContaining(["--", "/bin/zsh", "-l"]));
   });
@@ -380,12 +396,18 @@ describe("TerminalProcessPort", () => {
     const cwd = join(root, "repo");
     mkdirSync(temporaryDirectory);
     mkdirSync(cwd);
+    // The shell's HOME is its state directory on Linux, so the person's
+    // configuration and version-manager homes are never bound into it.
+    const home = join(root, "home");
+    mkdirSync(join(home, ".local", "share", "mise"), { recursive: true });
+    writeFileSync(join(home, ".zshrc"), "# rc\n");
     const port = new TerminalProcessPort({
       spawn,
       killProcessGroup: vi.fn(),
       confinement: makeProcessConfinementLive({ platform: "linux", sandboxPath: bwrapPath }),
       temporaryDirectory,
       shellStateDirectory,
+      seatbeltHomeDirectory: home,
       networkEgress: "none",
       platform: "linux",
     });
@@ -406,6 +428,9 @@ describe("TerminalProcessPort", () => {
     );
     expect(launchedCall(spawn)[1]).not.toContain("--new-session");
     expect(launchedCall(spawn)[2].env.HOME).toBe(launchedStateDirectory(spawn));
+    expect(launchedCall(spawn)[1].some((argument) => String(argument).startsWith(home))).toBe(
+      false,
+    );
   });
 
   it("fails closed when Seatbelt confinement is unavailable", () => {

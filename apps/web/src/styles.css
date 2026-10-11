@@ -2244,6 +2244,11 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   line-height: 1.5;
 }
 
+/* Sits between two setting rows, so it keeps clear of the row after it. */
+.settings-view .provider-settings__field-guidance.provider-settings__field-guidance--between-rows {
+  margin: var(--oct-space-1) 0 var(--oct-space-2);
+}
+
 .provider-settings__create .settings-view__action {
   margin: 0;
 }

@@ -54,6 +54,40 @@ sidebar timer never walks the checkout tree. Inactive modes and hidden windows
 pause those refreshes so background ticks do not contend with the next
 interaction.
 
+### Sidebar thread status
+
+The sidebar speaks about what a thread is doing now with one vocabulary, in
+descending strength: `working` (Working), `attention` (Needs attention), `woke`
+(Snooze ended), and `unread` (New activity). `@octant/contracts`
+(`SidebarThreadStatus`) declares the legal set because a saved Project View
+persists it; `@octant/domain` (`sidebarThreadStatusPolicy`) owns the order,
+labels, roll-up, and comparison, and its label record is typed over the
+contract's union so a word cannot be added without a rank. A thread row, a
+Project heading, a filter, and a sort all resolve through that policy, so they
+cannot rank the same facts differently.
+
+- Nothing to report is the absence of a status (`undefined`), not a word: no
+  "Idle" label, mark, filter value, or sort rank exists.
+- Only facts the sidebar already carries are statuses. A failed run or blocked
+  check is not inferred from silence; adding a status is a wire change that
+  requires the sidebar to carry the fact first. This vocabulary answers what is
+  happening now and is narrower than the board's delivery states.
+- A folded Project reports its strongest status and how many threads reached
+  it, each thread counted once at its own strongest status. The report is the
+  mark its rows wear, appears only while the threads are hidden, yields its
+  width to the row's hover controls rather than widening the row, and obeys
+  the Status row property.
+- A saved view's status filter keeps a thread whose strongest status is
+  selected. An empty or absent list means every status; a saved word this build
+  does not know is dropped rather than refusing the view, and dropping every
+  word means no constraint.
+- Ordering by status puts the Project with the strongest status first, then
+  more threads at that status, then recency, then name. Quiet Projects follow
+  every reporting Project in that same recency-then-name order.
+
+The filter and the ordering live in the Project View menu of both visible
+modes, Work and Code, each with its own set of saved views.
+
 ## Thread visibility and completion
 
 A Chat, Work, or Code thread has two resting states beside archive, both fields
@@ -466,16 +500,24 @@ the turn that wrote it, on the reply's card face. One the agent asked to show
 inline is drawn there read-only, within a fixed height that fades out instead
 of scrolling, and is never offered in the dock, because it is already in front
 of the person; any other is a single row (a live miniature, its title, one
-line of facts) that opens it. The inline frame holds **Show as card**, a fold
-the window remembers. In Work and Code it also holds **Open in sidebar**, which
-opens the same Canvas in the dock tool, and a row opens it there too. Chat has
-no dock, so there the frame holds **Open Canvas**, and the frame and a row open
-the Canvas as a content tab beside the thread. Accepted but not yet built: a person may expand
-any Canvas of the thread in place, including one shown as a row; the expanded
-frame grows with its content up to about the thread viewport instead of
-fading, the thread keeps the wheel until the person focuses a region inside
-it, and a running design frame starts there only when the person presses
-**Run**. Until that ships, the fixed-height fade above is the behavior (see
+line of facts) that opens it. The person may expand any Canvas in place,
+including one shown as a row: **Expand in thread** on the frame or the row, or
+**Show the whole Canvas** under a faded one. Expanded, the frame grows with
+its content up to about the thread viewport instead of fading. The thread
+keeps the wheel until the person focuses the region inside the frame (a click
+or Tab); then the wheel scrolls only the Canvas, and Escape hands it back. A
+board pans by drag and zooms on ctrl/meta wheel, never on a plain wheel. The
+drawing in the thread is read-only at every size: it gets no layout, plan,
+comment, or action runtime, so nothing drawn there writes a version. The
+inline frame holds **Show as card**, a fold the window remembers, and the
+window remembers an expansion the same way; **Collapse** returns an inline
+Canvas to its faded frame, and **Show as card** returns an expanded row to its
+row. In Work and Code the frame also holds **Open in sidebar**, which opens
+the same Canvas in the dock tool, and a row opens it there too. Chat has no
+dock, so there the frame holds **Open Canvas**, and the frame and a row open
+the Canvas as a content tab beside the thread. Editing, comments, and sharing stay there.
+Accepted but not yet built: a running design frame starts in the thread only
+when the person presses **Run** (see
 [Canvas documents, designs, and prototypes](../architecture.md#canvas-documents-designs-and-prototypes)). An
 agent-authored Canvas belongs to the thread's own scope as the host resolves
 it: the active Chat Project, the Work thread's confined root, or the Code

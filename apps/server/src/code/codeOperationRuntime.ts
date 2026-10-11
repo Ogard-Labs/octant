@@ -332,6 +332,15 @@ export interface CodeOperationRuntimeOptions {
   readonly providerSwitchContext?: (input: {
     readonly thread: CodeThread;
     readonly excludeOperationId: CodeOperationId;
+    /**
+     * For a forked thread, the source it inherited its conversation from,
+     * already authorized for the window sending the turn, read through the
+     * fork point ahead of the thread's own turns.
+     */
+    readonly inheritedFrom?: {
+      readonly source: CodeThread;
+      readonly throughOperationId: string;
+    };
   }) => AgentRunParentContextSelection;
   /**
    * Whether the thread's provider can take an image. A host that cannot say so
@@ -1655,6 +1664,53 @@ const PROVIDER_SWITCH_HANDOFF_REFUSALS: Record<ProviderSwitchHandoffRefusal, str
     "The handoff to the new provider could not be saved, so the message was not sent. Send it again.",
 };
 
+type InheritedHandoffRefusal = AgentRunParentContextUnavailableReason | "source-unauthorized";
+
+/**
+ * Why a forked thread that moved to another provider did not start because
+ * the conversation it inherited could not be read. The new provider is never
+ * started with only the fork's own turns while its transcript shows the
+ * inherited ones.
+ */
+const INHERITED_HANDOFF_REFUSALS: Record<InheritedHandoffRefusal, string> = {
+  "thread-unavailable":
+    "The thread this was forked from is no longer available, so the conversation it carried cannot be handed to the new provider. Restore the previous provider or start a new task.",
+  "source-unauthorized":
+    "This window cannot read the thread this was forked from, so nothing was handed to the new provider. Restore the previous provider or start a new task.",
+  "foreign-thread":
+    "The conversation read for the handoff does not belong to the thread this was forked from, so nothing was handed over. Restore the previous provider or start a new task.",
+  "foreign-project":
+    "The thread this was forked from is not in this task's Project, so nothing was handed to the new provider. Restore the previous provider or start a new task.",
+  "source-point-unavailable":
+    "The reply this was forked from is no longer in its thread's recorded conversation, so nothing was handed to the new provider. Restore the previous provider or start a new task.",
+  "source-empty":
+    "The conversation this was forked from has no readable messages left to hand to the new provider; they may have been removed. Restore the previous provider or start a new task.",
+  "source-changed":
+    "The thread this was forked from changed while it was being read for the handoff. Send the message again.",
+  "source-unavailable":
+    "The conversation this was forked from could not be read for the handoff. Send the message again, or restore the previous provider.",
+  "invalid-page":
+    "The conversation this was forked from could not be read consistently for the handoff. Send the message again, or restore the previous provider.",
+  "history-window-exceeded":
+    "The conversation up to the fork point is too long to choose recent messages to hand over. Restore the previous provider or start a new task.",
+};
+
+type HandoffRefusal =
+  | { readonly subject: "switch"; readonly reason: ProviderSwitchHandoffRefusal }
+  | { readonly subject: "fork"; readonly reason: CodeForkHandoffRefusal }
+  | { readonly subject: "inherited"; readonly reason: InheritedHandoffRefusal };
+
+function handoffRefusalMessage(refusal: HandoffRefusal): string {
+  switch (refusal.subject) {
+    case "switch":
+      return PROVIDER_SWITCH_HANDOFF_REFUSALS[refusal.reason];
+    case "fork":
+      return CODE_FORK_HANDOFF_REFUSALS[refusal.reason];
+    case "inherited":
+      return INHERITED_HANDOFF_REFUSALS[refusal.reason];
+  }
+}
+
 class RuntimeTurnController implements CodeOperationTurnPort {
   readonly #options: CodeOperationRuntimeOptions;
   readonly #events: CodeOperationEventStore;
@@ -1801,13 +1857,10 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       input.thread,
       command.operationId,
       providerSwitch,
+      input.windowId,
     );
     if (switchHandoff?.status === "refused")
-      return failStart(
-        switchHandoff.fork
-          ? CODE_FORK_HANDOFF_REFUSALS[switchHandoff.reason]
-          : PROVIDER_SWITCH_HANDOFF_REFUSALS[switchHandoff.reason],
-      );
+      return failStart(handoffRefusalMessage(switchHandoff.refusal));
     // A recorded session without a resume cursor wedges the thread rather than
     // silently discarding the conversation the provider still holds. A prior
     // turn that never reached its session left nothing to discard only once it
@@ -2038,13 +2091,16 @@ class RuntimeTurnController implements CodeOperationTurnPort {
    * handoff went with, so it is sent again with it. A fork's journaled record
    * is read back the same way. Otherwise, only for a turn that moved
    * providers, the thread's own conversation is selected and checked to be
-   * this thread's in this Project; the record is journaled when the new
+   * this thread's in this Project; a forked thread also carries the source's
+   * conversation through the fork point, read only after the sending window
+   * is authorized against the source. The record is journaled when the new
    * session is ready.
    */
   async #providerSwitchHandoff(
     thread: CodeThread,
     operationId: CodeOperationId,
     previous: Extract<CodeOperationEvent, { readonly kind: "provider-session-ready" }> | undefined,
+    windowId: WindowId,
   ): Promise<
     | {
         readonly status: "ready";
@@ -2053,16 +2109,10 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         /** What an already journaled record carried, when this read it back. */
         readonly journaled?: "text" | "native-session";
       }
-    | {
-        readonly status: "refused";
-        readonly reason: ProviderSwitchHandoffRefusal;
-        /** Whether the refusal is about a fork's handoff rather than a switch's. */
-        readonly fork: boolean;
-      }
+    | { readonly status: "refused"; readonly refusal: HandoffRefusal }
     | undefined
   > {
-    const refused = (reason: ProviderSwitchHandoffRefusal, fork = false) =>
-      ({ status: "refused", reason, fork }) as const;
+    const refused = (refusal: HandoffRefusal) => ({ status: "refused", refusal }) as const;
     const replay = this.#events.replay({
       threadId: thread.id,
       operationId,
@@ -2073,13 +2123,17 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       return previous === undefined
         ? thread.forkedFrom === undefined
           ? undefined
-          : refused("source-unavailable", true)
-        : refused("source-unavailable");
+          : refused({ subject: "fork", reason: "source-unavailable" })
+        : refused({ subject: "switch", reason: "source-unavailable" });
     const journaled = replay.frames.find(
       (frame) => frame.event.kind === "context-handoff-attached",
     )?.event;
     if (journaled?.kind === "context-handoff-attached") {
-      const fork = journaled.reason !== "provider-switch";
+      const subject = journaled.reason === "provider-switch" ? "switch" : "fork";
+      const sameOrigin = (origin: NonNullable<CodeThread["forkedFrom"]>) =>
+        thread.forkedFrom !== undefined &&
+        String(thread.forkedFrom.threadId) === String(origin.threadId) &&
+        String(thread.forkedFrom.throughOperationId) === String(origin.throughOperationId);
       // A selection changed since the record belongs to a different switch or
       // fork than the one the record disclosed.
       if (
@@ -2088,43 +2142,85 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         (journaled.reason === "provider-switch" &&
           previous !== undefined &&
           String(journaled.previousSessionId) !== String(previous.sessionId)) ||
-        (fork &&
-          (thread.forkedFrom === undefined ||
-            String(thread.forkedFrom.threadId) !== String(journaled.forkedFrom.threadId) ||
-            String(thread.forkedFrom.throughOperationId) !==
-              String(journaled.forkedFrom.throughOperationId)))
+        (journaled.reason !== "provider-switch" && !sameOrigin(journaled.forkedFrom))
       )
-        return refused("source-changed", fork);
+        return refused({ subject, reason: "source-changed" });
+      if (
+        journaled.reason === "provider-switch" &&
+        journaled.inherited !== undefined &&
+        !sameOrigin(journaled.inherited.forkedFrom)
+      )
+        return refused({ subject: "inherited", reason: "source-changed" });
       if (journaled.reason === "fork-native-session")
         return { status: "ready", blocks: [], journaled: "native-session" };
       try {
         const text = await this.#options.evidence.read?.(journaled.content);
-        if (text === undefined) return refused("handoff-unreadable", fork);
+        if (text === undefined) return refused({ subject, reason: "handoff-unreadable" });
         return {
           status: "ready",
           blocks: decodeAgentRunAdmittedContext(JSON.parse(text)),
           journaled: "text",
         };
       } catch {
-        return refused("handoff-unreadable", fork);
+        return refused({ subject, reason: "handoff-unreadable" });
       }
     }
     if (previous === undefined) return undefined;
     const select = this.#options.providerSwitchContext;
-    if (select === undefined) return refused("unsupported");
+    if (select === undefined) return refused({ subject: "switch", reason: "unsupported" });
+    // A fork carries the conversation it inherited. The source is authorized
+    // for this window before anything is read out of it; a source that can no
+    // longer be read refuses the switch rather than handing the new provider
+    // only the fork's own turns while its transcript shows the inherited ones.
+    const origin = thread.forkedFrom;
+    let inheritedFrom:
+      | { readonly source: CodeThread; readonly throughOperationId: string }
+      | undefined;
+    if (origin !== undefined) {
+      const readable = await this.#readableForkSource(thread, origin, windowId);
+      if (readable.status === "refused")
+        return refused({ subject: "inherited", reason: readable.reason });
+      inheritedFrom = {
+        source: readable.source,
+        throughOperationId: String(origin.throughOperationId),
+      };
+    }
     let selection: AgentRunParentContextSelection;
     try {
-      selection = select({ thread, excludeOperationId: operationId });
+      selection = select({
+        thread,
+        excludeOperationId: operationId,
+        ...(inheritedFrom === undefined ? {} : { inheritedFrom }),
+      });
     } catch {
-      return refused("source-unavailable");
+      return refused({ subject: "switch", reason: "source-unavailable" });
     }
-    if (selection.status === "unavailable") return refused(selection.reason);
+    if (selection.status === "unavailable")
+      return refused(
+        selection.part === "inherited"
+          ? { subject: "inherited", reason: selection.reason }
+          : { subject: "switch", reason: selection.reason },
+      );
     // The selector is handed this thread, but what it read is checked here too:
     // a handoff is the thread's own conversation, never another thread's or
     // another Project's that a reader happened to return.
     if (selection.source.mode !== "code" || selection.source.threadId !== String(thread.id))
-      return refused("foreign-thread");
-    if (selection.source.projectId !== String(thread.projectId)) return refused("foreign-project");
+      return refused({ subject: "switch", reason: "foreign-thread" });
+    if (selection.source.projectId !== String(thread.projectId))
+      return refused({ subject: "switch", reason: "foreign-project" });
+    // The same holds for what a fork inherited: exactly the authorized source,
+    // in this thread's Project, and present whenever it was asked for.
+    const inherited = selection.inherited;
+    if (origin !== undefined) {
+      if (
+        inherited === undefined ||
+        inherited.source.mode !== "code" ||
+        inherited.source.threadId !== String(origin.threadId)
+      )
+        return refused({ subject: "inherited", reason: "foreign-thread" });
+      if (inherited.source.projectId !== String(thread.projectId))
+        return refused({ subject: "inherited", reason: "foreign-project" });
+    }
     return {
       status: "ready",
       blocks: selection.blocks,
@@ -2139,6 +2235,15 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         messages: selection.blocks.length - 1,
         omissions: selection.omissions,
         externalContentIngested: selection.source.externalContentIngested,
+        ...(origin === undefined || inherited === undefined
+          ? {}
+          : {
+              inherited: {
+                forkedFrom: origin,
+                messages: inherited.messages,
+                externalContentIngested: inherited.source.externalContentIngested,
+              },
+            }),
         nativeSessionTransferred: false,
         hiddenReasoningTransferred: false,
       },
@@ -2146,27 +2251,26 @@ class RuntimeTurnController implements CodeOperationTurnPort {
   }
 
   /**
-   * A fork's text handoff: the source's conversation through the fork point.
-   *
-   * The origin is on the fork's own record and was checked when the fork was
-   * created, but the window sending this turn is authorized against the source
-   * here, at the moment it is read: a window that may not observe the source
-   * reads nothing out of it through the fork.
+   * The thread a fork was made from, once the window sending this turn may
+   * read it. The origin is on the fork's own record and was checked when the
+   * fork was created, but the window is authorized against the source here,
+   * at the moment it is read: a window that may not observe the source reads
+   * nothing out of it through the fork, on its first turn or a later switch.
    */
-  async #forkTextHandoff(
+  async #readableForkSource(
     thread: CodeThread,
     origin: NonNullable<CodeThread["forkedFrom"]>,
     windowId: WindowId,
   ): Promise<
+    | { readonly status: "readable"; readonly source: CodeThread }
     | {
-        readonly status: "ready";
-        readonly blocks: ReadonlyArray<ProviderContextBlock>;
-        readonly record: PendingHandoffRecord;
+        readonly status: "refused";
+        readonly reason: Extract<
+          CodeForkHandoffRefusal,
+          "source-unavailable" | "thread-unavailable" | "source-unauthorized" | "foreign-project"
+        >;
       }
-    | { readonly status: "refused"; readonly reason: CodeForkHandoffRefusal }
   > {
-    if (this.#options.forkContext === undefined)
-      return { status: "refused", reason: "unsupported" };
     let source: CodeThread | undefined;
     try {
       source = this.#options.persistence.readCodeThread(origin.threadId);
@@ -2181,8 +2285,30 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       authorized = false;
     }
     if (!authorized) return { status: "refused", reason: "source-unauthorized" };
+    if (String(source.projectId) !== String(thread.projectId))
+      return { status: "refused", reason: "foreign-project" };
+    return { status: "readable", source };
+  }
+
+  /** A fork's text handoff: the source's conversation through the fork point. */
+  async #forkTextHandoff(
+    thread: CodeThread,
+    origin: NonNullable<CodeThread["forkedFrom"]>,
+    windowId: WindowId,
+  ): Promise<
+    | {
+        readonly status: "ready";
+        readonly blocks: ReadonlyArray<ProviderContextBlock>;
+        readonly record: PendingHandoffRecord;
+      }
+    | { readonly status: "refused"; readonly reason: CodeForkHandoffRefusal }
+  > {
+    if (this.#options.forkContext === undefined)
+      return { status: "refused", reason: "unsupported" };
+    const readable = await this.#readableForkSource(thread, origin, windowId);
+    if (readable.status === "refused") return readable;
     const selected = selectCodeForkHandoff(this.#options.forkContext, {
-      source,
+      source: readable.source,
       origin,
       projectId: thread.projectId,
     });

@@ -52,8 +52,8 @@ export type NativeHarnessTurnId = typeof NativeHarnessTurnId.Type;
 
 /**
  * Every tool the harness may offer a model. The nine working tools are the
- * whole mutation and search surface; the last three are harness reads that
- * let the lead pace itself, recover cut history, and ask the advisor.
+ * whole mutation and search surface; `context-remaining` and `second-opinion`
+ * are harness reads that let the lead pace itself and ask the advisor.
  */
 export const NATIVE_HARNESS_TOOL_NAMES = [
   "read",
@@ -66,7 +66,6 @@ export const NATIVE_HARNESS_TOOL_NAMES = [
   "web-search",
   "todo-write",
   "context-remaining",
-  "journal-lookup",
   "second-opinion",
   "delegate",
   "ask-user",
@@ -118,61 +117,6 @@ export const NativeHarnessContextRemaining = Schema.Struct({
     ),
   );
 export type NativeHarnessContextRemaining = typeof NativeHarnessContextRemaining.Type;
-
-export const MAX_NATIVE_HARNESS_JOURNAL_LOOKUP_ENTRIES = 200;
-export const MAX_NATIVE_HARNESS_JOURNAL_LOOKUP_BYTES = 262_144;
-const MAX_JOURNAL_LOOKUP_SELECTORS = 32;
-
-/** A bounded read of this thread's own lossless journal, never another's. */
-export const NativeHarnessJournalLookupRequest = Schema.Struct({
-  selector: Schema.Union(
-    Schema.Struct({
-      kind: Schema.Literal("turn-range"),
-      fromSequence: PositiveInt,
-      toSequence: PositiveInt,
-    })
-      .annotations(strict)
-      .pipe(Schema.filter((range) => range.fromSequence <= range.toSequence)),
-    Schema.Struct({
-      kind: Schema.Literal("turn-ids"),
-      turnIds: Schema.Array(NativeHarnessTurnId).pipe(
-        Schema.minItems(1),
-        Schema.maxItems(MAX_JOURNAL_LOOKUP_SELECTORS),
-      ),
-    }).annotations(strict),
-    Schema.Struct({
-      kind: Schema.Literal("artifact-refs"),
-      references: Schema.Array(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256))).pipe(
-        Schema.minItems(1),
-        Schema.maxItems(MAX_JOURNAL_LOOKUP_SELECTORS),
-      ),
-    }).annotations(strict),
-  ),
-  maxEntries: PositiveInt.pipe(Schema.lessThanOrEqualTo(MAX_NATIVE_HARNESS_JOURNAL_LOOKUP_ENTRIES)),
-  maxBytes: PositiveInt.pipe(Schema.lessThanOrEqualTo(MAX_NATIVE_HARNESS_JOURNAL_LOOKUP_BYTES)),
-}).annotations(strict);
-export type NativeHarnessJournalLookupRequest = typeof NativeHarnessJournalLookupRequest.Type;
-
-export const NativeHarnessJournalLookupEntry = Schema.Struct({
-  sequence: PositiveInt,
-  turnId: Schema.optional(NativeHarnessTurnId),
-  role: Schema.Literal("user", "assistant", "tool"),
-  text: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(8_192)),
-}).annotations(strict);
-export type NativeHarnessJournalLookupEntry = typeof NativeHarnessJournalLookupEntry.Type;
-
-export const NativeHarnessJournalLookupResult = Schema.Struct({
-  status: Schema.Literal("complete", "truncated", "stale", "unavailable"),
-  entries: Schema.Array(NativeHarnessJournalLookupEntry).pipe(
-    Schema.maxItems(MAX_NATIVE_HARNESS_JOURNAL_LOOKUP_ENTRIES),
-  ),
-  returnedBytes: NonNegativeInt,
-})
-  .annotations(strict)
-  // An unavailable lookup returned nothing; saying otherwise would let a
-  // partial read masquerade as an answer.
-  .pipe(Schema.filter((result) => result.status !== "unavailable" || result.entries.length === 0));
-export type NativeHarnessJournalLookupResult = typeof NativeHarnessJournalLookupResult.Type;
 
 // ── Tool arguments and definitions ───────────────────────────────────────────
 
@@ -412,7 +356,6 @@ const toolArgumentDecoders: Readonly<Record<NativeHarnessToolName, (value: unkno
   "web-search": Schema.decodeUnknownSync(NativeHarnessWebSearchArguments),
   "todo-write": Schema.decodeUnknownSync(NativeHarnessTodoWriteArguments),
   "context-remaining": Schema.decodeUnknownSync(NativeHarnessContextRemainingArguments),
-  "journal-lookup": Schema.decodeUnknownSync(NativeHarnessJournalLookupRequest),
   "second-opinion": Schema.decodeUnknownSync(NativeHarnessSecondOpinionArguments),
   delegate: Schema.decodeUnknownSync(NativeHarnessDelegateArguments),
   "ask-user": Schema.decodeUnknownSync(NativeHarnessAskUserArguments),
@@ -560,23 +503,6 @@ export const NATIVE_HARNESS_TOOL_DEFINITIONS: ReadonlyArray<ProviderToolDefiniti
     name: "context-remaining",
     description: "How much of the context window is left. Checkpoint before it runs out.",
     inputSchema: { type: "object", properties: {} },
-  },
-  {
-    name: "journal-lookup",
-    description: "Read earlier turns of this thread that were cut from context.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        selector: { type: "object" },
-        maxEntries: {
-          type: "integer",
-          minimum: 1,
-          maximum: MAX_NATIVE_HARNESS_JOURNAL_LOOKUP_ENTRIES,
-        },
-        maxBytes: { type: "integer", minimum: 1, maximum: MAX_NATIVE_HARNESS_JOURNAL_LOOKUP_BYTES },
-      },
-      required: ["selector", "maxEntries", "maxBytes"],
-    },
   },
   {
     name: "second-opinion",
@@ -1404,12 +1330,6 @@ export const decodeNativeHarnessToolResultBounds = Schema.decodeUnknownSync(
 );
 export const decodeNativeHarnessContextRemaining = Schema.decodeUnknownSync(
   NativeHarnessContextRemaining,
-);
-export const decodeNativeHarnessJournalLookupRequest = Schema.decodeUnknownSync(
-  NativeHarnessJournalLookupRequest,
-);
-export const decodeNativeHarnessJournalLookupResult = Schema.decodeUnknownSync(
-  NativeHarnessJournalLookupResult,
 );
 export const decodeNativeHarnessCarriedNote = Schema.decodeUnknownSync(NativeHarnessCarriedNote);
 export const decodeNativeHarnessContextReduction = Schema.decodeUnknownSync(

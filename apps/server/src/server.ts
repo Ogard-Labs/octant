@@ -397,6 +397,7 @@ import {
 import { agentResultDeliveryReceipt } from "./agentRun/agentResultDeliveryBatch";
 import { NATIVE_HARNESS_BUILT_IN_SLOTS, type AgentRunResultDeliveryMark } from "@octant/contracts";
 import { createAgentsManagedTools } from "./agentRun/agentRunManagedTools";
+import { agentRunEligibleTargets as eligibleAgentRunTargets } from "./agentRun/agentRunDelegation";
 import {
   createAgentRunChildWorktreePort,
   resolveAgentRunChildWorktreeThreadId,
@@ -422,6 +423,7 @@ import { createLinkedThreadRuntime } from "./linkedThread/linkedThreadRuntime";
 import { FolderBrowseService } from "./folderBrowseService";
 import { ProjectService } from "./projectService";
 import { CodeProjectAccess } from "./codeProjectAccess";
+import { isRoutineHostScope } from "./routineHostScope";
 import { ProjectRootPort } from "./projectRootPort";
 import { ProjectTerminalService } from "./code/projectTerminalService";
 import { ProjectBrowserService } from "./browser/projectBrowserService";
@@ -2521,44 +2523,15 @@ export function startOctantServer(
       },
       uuid: randomUUID,
     };
-    const agentRunEligibleTargets = (projectId: ProjectId | undefined) => {
-      // A Work or Code Project's provider policy binds delegate targets too:
-      // the same list the tool advertises is the one explicit targets and
-      // resumes are revalidated against, so filtering here guards all three.
-      // Chat Projects carry no provider policy.
-      const project = projectId === undefined ? undefined : persistence.readProject(projectId);
-      return persistence.readProviderInstances().flatMap((instance) => {
-        if (!instance.enabled) return [];
-        const observed = providerRuntimeRegistry.observedState(instance.id);
-        if (observed?.readiness !== "ready") return [];
-        const models =
-          project === undefined || project.type === "chat"
-            ? observed.models
-            : observed.models.filter((model) =>
-                isProjectPolicyTargetAllowed(project, instance.id, model.id),
-              );
-        if (models.length === 0) return [];
-        return [
-          {
-            providerInstanceId: String(instance.id),
-            displayName: instance.displayName,
-            driverKind: String(instance.driverKind),
-            modelIds: models.map((model) => String(model.id)),
-            reasoningByModel: Object.fromEntries(
-              models.map((model) => [
-                String(model.id),
-                model.options.flatMap((option) =>
-                  option.kind === "selection" &&
-                  (option.id === "reasoning" || option.id === "effort")
-                    ? option.values
-                    : [],
-                ),
-              ]),
-            ),
-          },
-        ];
+    const agentRunEligibleTargets = (projectId: ProjectId | undefined) =>
+      eligibleAgentRunTargets({
+        project: projectId === undefined ? undefined : persistence.readProject(projectId),
+        instances: persistence.readProviderInstances(),
+        observedState: (instanceId) => providerRuntimeRegistry.observedState(instanceId),
+        // Deferred: the policy check is declared later in this scope.
+        isTargetAllowed: (project, instanceId, modelId) =>
+          isProjectPolicyTargetAllowed(project, instanceId, modelId),
       });
-    };
     // Every turn's `octant_agents` tool set binds to the calling thread: the
     // delegation and the cancellation authority it petitions are the same ones
     // the Agents dock uses, so a tool call and a click are the same request.
@@ -3704,7 +3677,7 @@ export function startOctantServer(
       threadId: CodeThreadId,
       options: Pick<
         AdmittedParentCodeContextInput,
-        "purpose" | "excludeOperationId" | "throughOperationId"
+        "purpose" | "excludeOperationId" | "throughOperationId" | "inherited"
       > = {},
     ) =>
       admittedParentCodeContext({
@@ -4618,6 +4591,7 @@ export function startOctantServer(
       },
       rememberOrigin: (origin, windowId) => rememberBrowserOrigin(windowId, origin),
       isOriginRemembered: (origin) => rememberedBrowserOrigins().includes(origin),
+      isHostScope: isRoutineHostScope,
     });
     const headlessBrowserRuntime = createPlaywrightBrowserRuntime({
       receiptDirectory: join(providerDataDirectory, "browser", "runtime-receipts"),
@@ -4918,10 +4892,22 @@ export function startOctantServer(
         supportsModelSwitch: (thread) =>
           providerRuntimeRegistry.observedState(thread.providerInstanceId)?.capabilities
             .modelSwitch === "supported",
-        providerSwitchContext: ({ thread, excludeOperationId }) =>
+        providerSwitchContext: ({ thread, excludeOperationId, inheritedFrom }) =>
           selectCodeConversation(thread.id, {
             purpose: "provider-switch",
             excludeOperationId: String(excludeOperationId),
+            ...(inheritedFrom === undefined
+              ? {}
+              : {
+                  inherited: {
+                    threadId: inheritedFrom.source.id,
+                    throughOperationId: inheritedFrom.throughOperationId,
+                    externalContentIngested: readThreadExternalContentTaint(
+                      persistence.connection,
+                      String(inheritedFrom.source.id),
+                    ).externalContentIngested,
+                  },
+                }),
           }),
         supportsAttachments: (thread) => {
           const observed = providerRuntimeRegistry.observedState(thread.providerInstanceId);
@@ -9396,17 +9382,6 @@ export function startOctantServer(
       projection: persistence.automationProjection,
       code: automationCodeDispatch,
       work: automationWorkDispatch,
-      windows: {
-        resolveWindowForProject: (projectId) => {
-          for (const windowId of windowAuthorityStore.listWindowIds()) {
-            // Prefer any registered local window; Project access is rechecked
-            // by the ordinary Code/Work creation path.
-            void projectId;
-            return windowId;
-          }
-          return undefined;
-        },
-      },
       capacity: {
         admit: (input) => {
           try {

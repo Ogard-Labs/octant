@@ -702,6 +702,7 @@ function conversationHandoff(
         messages: event.messages,
         omissions: event.omissions,
         externalContentIngested: event.externalContentIngested,
+        ...(event.inherited === undefined ? {} : { inherited: event.inherited }),
       };
     case "fork":
       return {
