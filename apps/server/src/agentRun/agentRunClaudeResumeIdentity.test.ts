@@ -352,6 +352,7 @@ async function driverFixture(port: ReturnType<typeof createAgentRunClaudeResumeI
     setPermissionMode: () => Effect.void,
     supportedModels: () => Effect.succeed(initialization.models),
     accountInfo: () => Effect.succeed(initialization.account),
+    readPlanUsage: () => Effect.succeed(undefined),
     close: closed,
   };
   const openQuery = vi.fn<ClaudeAgentSdkPort["openQuery"]>(() =>

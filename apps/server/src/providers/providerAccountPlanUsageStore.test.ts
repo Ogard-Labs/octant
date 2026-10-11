@@ -1,10 +1,12 @@
 import { mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
   decodeProviderInstanceId,
   decodeProviderRuntimeEvent,
+  type ProviderInstanceId,
+  type ProviderRuntimeEvent,
   type UtcTimestamp,
 } from "@octant/contracts";
 import { ProviderAccountPlanUsageStore } from "./providerAccountPlanUsageStore";
@@ -12,6 +14,30 @@ import { ProviderAccountPlanUsageStore } from "./providerAccountPlanUsageStore";
 const firstId = decodeProviderInstanceId("11111111-1111-4111-8111-111111111111");
 const secondId = decodeProviderInstanceId("22222222-2222-4222-8222-222222222222");
 const occurredAt = "2026-10-11T12:00:00.000Z" as UtcTimestamp;
+
+function windowEvent(overrides: {
+  readonly instanceId: ProviderInstanceId;
+  readonly sessionId: string;
+  readonly correlationId: string;
+  readonly status: "allowed" | "warning" | "exhausted";
+  readonly utilization: number;
+}): Extract<ProviderRuntimeEvent, { readonly kind: "rate-limit-window" }> {
+  const event = decodeProviderRuntimeEvent({
+    instanceId: overrides.instanceId,
+    sessionId: overrides.sessionId,
+    sequence: 1,
+    correlationId: overrides.correlationId,
+    occurredAt,
+    kind: "rate-limit-window",
+    window: "five_hour",
+    status: overrides.status,
+    utilization: overrides.utilization,
+  });
+  if (event.kind !== "rate-limit-window") {
+    throw new Error("expected a rate-limit-window event");
+  }
+  return event;
+}
 
 async function openStore(): Promise<{
   readonly store: ProviderAccountPlanUsageStore;
@@ -26,28 +52,20 @@ describe("provider account plan-usage store", () => {
   it("keeps each account's windows on its own state directory", async () => {
     const { store } = await openStore();
     await store.recordWindow(
-      decodeProviderRuntimeEvent({
+      windowEvent({
         instanceId: firstId,
         sessionId: "00000000-0000-4000-8000-000000000001",
-        sequence: 1,
         correlationId: "00000000-0000-4000-8000-000000000011",
-        occurredAt,
-        kind: "rate-limit-window",
-        window: "five_hour",
         status: "warning",
         utilization: 0.8,
       }),
       "/Users/example/.claude",
     );
     await store.recordWindow(
-      decodeProviderRuntimeEvent({
+      windowEvent({
         instanceId: secondId,
         sessionId: "00000000-0000-4000-8000-000000000002",
-        sequence: 1,
         correlationId: "00000000-0000-4000-8000-000000000012",
-        occurredAt,
-        kind: "rate-limit-window",
-        window: "five_hour",
         status: "allowed",
         utilization: 0.1,
       }),

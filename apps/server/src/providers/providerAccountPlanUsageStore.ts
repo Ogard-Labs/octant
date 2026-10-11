@@ -8,20 +8,25 @@ import {
   type ProviderServiceLimits,
   type UtcTimestamp,
 } from "@octant/contracts";
-import {
-  accountPlanUsageKey,
-  type ProviderAccountPlanUsageSnapshot,
-  type ProviderPlanUsageSource,
-} from "@octant/domain";
+import { accountPlanUsageKey, type ProviderPlanUsageSource } from "@octant/domain";
 import { canonicalRateLimitWindowId } from "./rateLimitWindowIdentity";
 
 const SCHEMA_VERSION = 1;
 const MAX_ACCOUNTS = 128;
 const MAX_WINDOWS = 32;
 
+interface PersistedSnapshot {
+  readonly instanceId: string;
+  readonly stateDirectory: string;
+  readonly available: boolean;
+  readonly source: ProviderPlanUsageSource;
+  readonly observedAt: UtcTimestamp;
+  readonly windows: ReadonlyArray<ProviderRateLimitWindow>;
+}
+
 interface PersistedFile {
   readonly version: typeof SCHEMA_VERSION;
-  readonly entries: ReadonlyArray<ProviderAccountPlanUsageSnapshot>;
+  readonly entries: ReadonlyArray<PersistedSnapshot>;
 }
 
 /**
@@ -31,7 +36,7 @@ interface PersistedFile {
  */
 export class ProviderAccountPlanUsageStore {
   readonly #filePath: string;
-  readonly #entries = new Map<string, ProviderAccountPlanUsageSnapshot>();
+  readonly #entries = new Map<string, PersistedSnapshot>();
   #loaded = false;
 
   constructor(filePath: string) {
@@ -70,10 +75,7 @@ export class ProviderAccountPlanUsageStore {
     }
   }
 
-  snapshot(
-    instanceId: ProviderInstanceId,
-    stateDirectory: string,
-  ): ProviderAccountPlanUsageSnapshot | undefined {
+  snapshot(instanceId: ProviderInstanceId, stateDirectory: string): PersistedSnapshot | undefined {
     return this.#entries.get(
       accountPlanUsageKey({ instanceId: String(instanceId), stateDirectory }),
     );
@@ -102,8 +104,8 @@ export class ProviderAccountPlanUsageStore {
       quota: windows.some((window) => window.status === "exhausted") ? "exhausted" : "available",
       source: "runtime-reported",
       confidence: "high",
-      updatedAt: snapshot.observedAt as UtcTimestamp,
-      rateLimitWindows: windows as ReadonlyArray<ProviderRateLimitWindow>,
+      updatedAt: snapshot.observedAt,
+      rateLimitWindows: windows,
     });
   }
 
@@ -156,17 +158,15 @@ export class ProviderAccountPlanUsageStore {
     ) {
       return;
     }
+    const resetsAt = event.resetsAt ?? previousWindow?.resetsAt;
+    const overage = event.overage ?? previousWindow?.overage;
     windows.set(windowId, {
       window: windowId,
       status: event.status,
-      ...(event.utilization === undefined ? {} : { utilization: event.utilization }),
-      ...(event.resetsAt === undefined && previousWindow?.resetsAt === undefined
-        ? {}
-        : { resetsAt: event.resetsAt ?? previousWindow?.resetsAt }),
       observedAt: event.occurredAt,
-      ...(event.overage === undefined && previousWindow?.overage === undefined
-        ? {}
-        : { overage: event.overage ?? previousWindow?.overage }),
+      ...(event.utilization === undefined ? {} : { utilization: event.utilization }),
+      ...(resetsAt === undefined ? {} : { resetsAt }),
+      ...(overage === undefined ? {} : { overage }),
     });
     this.#entries.set(key, {
       instanceId: String(event.instanceId),
@@ -204,9 +204,9 @@ export class ProviderAccountPlanUsageStore {
   }
 }
 
-function isSnapshot(value: unknown): value is ProviderAccountPlanUsageSnapshot {
+function isSnapshot(value: unknown): value is PersistedSnapshot {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
-  const entry = value as ProviderAccountPlanUsageSnapshot;
+  const entry = value as PersistedSnapshot;
   return (
     typeof entry.instanceId === "string" &&
     typeof entry.stateDirectory === "string" &&

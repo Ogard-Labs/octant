@@ -208,7 +208,7 @@ describe("ProviderUsageLimitsPanel", () => {
     const meter = await screen.findByRole("meter", { name: "5-hour window remaining" });
     expect(meter).toHaveAttribute("value", "25");
     expect(screen.getAllByText("25% left")).toHaveLength(2);
-    expect(screen.getAllByText("Resets in 1h")).toHaveLength(2);
+    expect(screen.getAllByText(/Resets in 1h/)).toHaveLength(2);
     unmount();
     vi.mocked(Date.now).mockReturnValue(Date.parse("2026-08-23T13:01:00.000Z"));
     render(<ProviderUsageLimitsPanel client={client} instances={[provider]} />);
@@ -458,6 +458,6 @@ describe("ProviderUsageLimitsPanel", () => {
     expect(screen.getByText("Work Claude")).toBeVisible();
     expect(screen.getAllByText(/Last updated/).length).toBeGreaterThanOrEqual(2);
     expect(screen.getByText(/Overage in use/)).toBeVisible();
-    expect(screen.getByText(/Resets /)).toBeVisible();
+    expect(screen.getAllByText(/Resets in /).length).toBeGreaterThanOrEqual(2);
   });
 });

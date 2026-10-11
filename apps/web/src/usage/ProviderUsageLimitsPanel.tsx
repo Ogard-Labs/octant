@@ -399,7 +399,7 @@ function QuotaWindow(props: {
         </span>
         {props.resetsAt === undefined || expired ? null : (
           <time dateTime={props.resetsAt} title={formatTime(props.resetsAt)}>
-            Resets {formatTime(props.resetsAt)} · {resetCountdown(props.resetsAt, props.now)}
+            {formatTime(props.resetsAt)} · {resetCountdown(props.resetsAt, props.now)}
           </time>
         )}
       </div>
@@ -409,11 +409,10 @@ function QuotaWindow(props: {
   );
 }
 
-function overageCopy(overage: {
-  readonly status: "allowed" | "warning" | "exhausted";
-  readonly inUse?: boolean;
-  readonly disabledReason?: string;
-}): string {
+function overageCopy(
+  overage: NonNullable<ProviderServiceLimits["rateLimitWindows"]>[number]["overage"],
+): string {
+  if (overage === undefined) return "Overage available";
   if (overage.disabledReason !== undefined) return `Overage: ${overage.disabledReason}`;
   if (overage.inUse === true) return "Overage in use";
   if (overage.status === "exhausted") return "Overage exhausted";

@@ -985,6 +985,9 @@ function ActiveSectionContent({
         <ProvidersSection
           discoveryController={props.discoveryController}
           {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
+          {...(props.providerUsageLimitsClient === undefined
+            ? {}
+            : { usageLimitsClient: props.providerUsageLimitsClient })}
           providerController={props.providerController}
         />
       ) : null;
@@ -1229,6 +1232,7 @@ function ProvidersSection(props: {
   readonly providerController: ProviderController;
   readonly discoveryController: DiscoveryController | undefined;
   readonly hostBridge?: OctantHostBridge;
+  readonly usageLimitsClient?: ProviderUsageLimitsClient;
 }) {
   const discoveryController = props.discoveryController;
   const scan = discoveryController?.scan;
@@ -1285,9 +1289,9 @@ function ProvidersSection(props: {
     <div id="settings-providers">
       <ProviderSettingsView
         {...providerSettingsViewProps(props.providerController, props.hostBridge)}
-        {...(props.providerUsageLimitsClient === undefined
+        {...(props.usageLimitsClient === undefined
           ? {}
-          : { usageLimitsClient: props.providerUsageLimitsClient })}
+          : { usageLimitsClient: props.usageLimitsClient })}
         {...(onLocateBinary === undefined ? {} : { onLocateBinary })}
         discovery={
           discoveryController === undefined ? null : (
