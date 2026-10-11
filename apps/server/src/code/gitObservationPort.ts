@@ -8,7 +8,7 @@ import {
   prepareGitSeatbeltLaunch,
   type GitSeatbeltPortOptions,
 } from "../process/gitSeatbeltLaunch";
-import { SeatbeltConfinementError } from "../process/seatbeltProfile";
+import { ProcessConfinementError } from "../process/seatbeltProfile";
 
 export const DEFAULT_MAX_GIT_DIFF_BYTES = 256 * 1024;
 const MAX_OBSERVED_REMOTES = 32;
@@ -662,7 +662,7 @@ export class GitObservationPort {
         controller.signal,
       );
     } catch (error) {
-      if (error instanceof SeatbeltConfinementError) return { exitCode: 1, stdout: "" };
+      if (error instanceof ProcessConfinementError) return { exitCode: 1, stdout: "" };
       throw error;
     } finally {
       clearTimeout(timeout);

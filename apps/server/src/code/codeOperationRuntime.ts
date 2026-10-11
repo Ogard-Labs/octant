@@ -147,7 +147,7 @@ import {
 import { TerminalProcessPort } from "./terminalProcessPort";
 import { liveCodeTestSourcePort, type CodeTestSourcePort } from "./codeDirectoryPort";
 import { createCodeAcpClientTools, type CodeAcpTerminalConfinement } from "./codeAcpClientTools";
-import { makeSeatbeltConfinementLive } from "../process/seatbeltProfile";
+import { makeProcessConfinementLive } from "../process/seatbeltProfile";
 import { TerminalService } from "./terminalService";
 import { CodeSessionAuthorityStore } from "./codeSessionAuthorityStore";
 import { boundedDiff, draftGitText, type CodeGitDraftResult } from "./codeGitDraftService";
@@ -200,7 +200,7 @@ function defaultAcpTerminalConfinement(): CodeAcpTerminalConfinement {
     TMPDIR: process.env.TMPDIR ?? process.env.TMP ?? "/tmp",
     ...(process.env.LANG === undefined ? {} : { LANG: process.env.LANG }),
   };
-  const confinement = makeSeatbeltConfinementLive({ platform: process.platform });
+  const confinement = makeProcessConfinementLive({ platform: process.platform });
   return {
     environment,
     prepare: (input) =>

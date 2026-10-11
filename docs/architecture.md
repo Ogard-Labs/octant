@@ -3917,9 +3917,9 @@ mechanisms are:
   says what clears it where the person is, not only in a log. "Connect Claude
   for helpers in Settings › Claude Code." is the shape.
 - **Sandbox.** Git, terminals, test runners, extension executables, and every
-  provider `--version` read launch through one shared confinement port, and so
-  do provider runtimes except where the confinement matrix below says a
-  runtime is unwrapped. On macOS that is
+  provider `--version` read launch through one shared confinement port
+  (`ProcessConfinementPort`), and so do provider runtimes except where the
+  confinement matrix below says a runtime is unwrapped. On macOS that is
   `sandbox-exec` with deny-default Seatbelt profiles; on Linux it is Bubblewrap
   (`bwrap`) with private `/tmp`, bound roots, and no unconfined fallback,
   recorded in [decisions/0057-linux-confinement-bubblewrap.md](decisions/0057-linux-confinement-bubblewrap.md).

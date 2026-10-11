@@ -13,7 +13,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { createFakeSandboxConfinement } from "../process/fakeSandboxConfinement";
-import { makeSeatbeltConfinementLive, SeatbeltConfinementError } from "../process/seatbeltProfile";
+import { makeProcessConfinementLive, ProcessConfinementError } from "../process/seatbeltProfile";
 import {
   ensureNodePtySpawnHelperExecutable,
   shellStateEnvironment,
@@ -237,7 +237,7 @@ describe("TerminalProcessPort", () => {
         rows: 24,
         executionPolicy: "plan",
       }),
-    ).toThrow(SeatbeltConfinementError);
+    ).toThrow(ProcessConfinementError);
     expect(spawn).not.toHaveBeenCalled();
   });
 
@@ -383,7 +383,7 @@ describe("TerminalProcessPort", () => {
     const port = new TerminalProcessPort({
       spawn,
       killProcessGroup: vi.fn(),
-      confinement: makeSeatbeltConfinementLive({ platform: "linux", sandboxPath: bwrapPath }),
+      confinement: makeProcessConfinementLive({ platform: "linux", sandboxPath: bwrapPath }),
       temporaryDirectory,
       shellStateDirectory,
       networkEgress: "none",
@@ -422,7 +422,7 @@ describe("TerminalProcessPort", () => {
         columns: 80,
         rows: 24,
       }),
-    ).toThrow(SeatbeltConfinementError);
+    ).toThrow(ProcessConfinementError);
   });
 
   it("bounds input and geometry before invoking the PTY", () => {

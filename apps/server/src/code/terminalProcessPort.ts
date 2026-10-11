@@ -12,9 +12,9 @@ import {
   type OwnedProcessReceiptHandle,
 } from "../process/nodeOwnedProcessReceipt";
 import {
-  makeSeatbeltConfinementLive,
-  SeatbeltConfinementError,
-  type SeatbeltConfinementPort,
+  makeProcessConfinementLive,
+  ProcessConfinementError,
+  type ProcessConfinementPort,
 } from "../process/seatbeltProfile";
 import type { OsNetworkEgress } from "../process/threadEgressPolicy";
 
@@ -104,7 +104,7 @@ interface TerminalProcessDependencies {
   readonly receiptDirectory?: string;
   readonly processIdentity?: (pid: number) => Promise<string | undefined>;
   readonly ensurePtyHelperExecutable?: () => void;
-  readonly confinement?: SeatbeltConfinementPort;
+  readonly confinement?: ProcessConfinementPort;
   readonly platform?: NodeJS.Platform;
   readonly sandboxPath?: string;
   readonly temporaryDirectory?: string;
@@ -238,7 +238,7 @@ export class TerminalProcessPort {
     readonly receiptDirectory: string | undefined;
     readonly processIdentity: ((pid: number) => Promise<string | undefined>) | undefined;
     readonly ensurePtyHelperExecutable: () => void;
-    readonly confinement: SeatbeltConfinementPort;
+    readonly confinement: ProcessConfinementPort;
     readonly platform: NodeJS.Platform;
     readonly temporaryDirectory: string;
     readonly shellStateDirectory: string;
@@ -291,7 +291,7 @@ export class TerminalProcessPort {
         ),
       confinement:
         dependencies.confinement ??
-        makeSeatbeltConfinementLive({
+        makeProcessConfinementLive({
           platform,
           ...(dependencies.sandboxPath === undefined
             ? {}
@@ -309,7 +309,7 @@ export class TerminalProcessPort {
   start(input: TerminalLaunchInput): TerminalProcessHandle {
     validateLaunch(input);
     if (input.executionPolicy === "plan") {
-      throw new SeatbeltConfinementError(
+      throw new ProcessConfinementError(
         "invalid-configuration",
         "Plan mode cannot start a terminal.",
       );
@@ -370,8 +370,8 @@ export class TerminalProcessPort {
         ],
       });
     } catch (error) {
-      if (error instanceof SeatbeltConfinementError) throw error;
-      throw new SeatbeltConfinementError(
+      if (error instanceof ProcessConfinementError) throw error;
+      throw new ProcessConfinementError(
         "incompatible",
         "Terminal Seatbelt confinement could not be prepared.",
       );

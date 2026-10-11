@@ -2,13 +2,13 @@ import { chmodSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  makeSeatbeltConfinementLive,
-  type SeatbeltConfinementPort,
+  makeProcessConfinementLive,
+  type ProcessConfinementPort,
 } from "../process/seatbeltProfile";
 
 /**
  * Test-only Seatbelt confinement that uses a passthrough sandbox-exec shim.
- * Production launchers must keep using makeSeatbeltConfinementLive() so missing
+ * Production launchers must keep using makeProcessConfinementLive() so missing
  * sandbox-exec fails closed.
  *
  * Native macOS sandbox-exec probes remain packaged/native validation evidence;
@@ -17,7 +17,7 @@ import {
 export function createFakeSandboxConfinement(label = "octant-seatbelt-fake-"): {
   readonly root: string;
   readonly temporaryDirectory: string;
-  readonly confinement: SeatbeltConfinementPort;
+  readonly confinement: ProcessConfinementPort;
   readonly sandboxPath: string;
 } {
   const root = realpathSync(mkdtempSync(join(tmpdir(), label)));
@@ -31,7 +31,7 @@ export function createFakeSandboxConfinement(label = "octant-seatbelt-fake-"): {
     root,
     temporaryDirectory,
     sandboxPath,
-    confinement: makeSeatbeltConfinementLive({
+    confinement: makeProcessConfinementLive({
       platform: "darwin",
       sandboxPath,
       homeDirectory: root,
