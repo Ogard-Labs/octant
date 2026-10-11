@@ -65,6 +65,66 @@ function request(overrides: Record<string, unknown> = {}) {
 }
 
 describe("createCanvasPreviewService", () => {
+  it("resolves a design's images before drawing it and warns about each it could not draw", async () => {
+    const design = decodeCanvasBlock({
+      blockId: "phone",
+      schemaVersion: 14,
+      kind: "design",
+      title: "Onboarding",
+      size: "phone",
+      assets: [
+        { assetId: "shot", source: { kind: "project-file", path: "screens/home.png" } },
+        { assetId: "other", source: { kind: "project-file", path: "../other.png" } },
+      ],
+      frames: [
+        {
+          frameId: "home",
+          title: "Home",
+          html: '<img src="octant-asset:shot" alt=""><img src="octant-asset:other" alt="">',
+        },
+      ],
+    });
+    const provenance = { mode: "work", projectId: context.projectId, threadId: "thread-a" };
+    const canvas = {
+      get: () => ({
+        kind: "ready" as const,
+        version: {
+          canvasId,
+          versionId: "version-1",
+          sequence: 1,
+          definition: { ...definition, provenance, blocks: [design] },
+        },
+      }),
+      history: () => ({ kind: "ready" as const, history: { entries: [] } }),
+    } as never;
+    const resolved = [
+      { assetId: "shot", status: "resolved", mediaType: "image/png", data: "iVBORw0KGgo=" },
+      { assetId: "other", status: "unavailable", reason: "refused" },
+    ] as never;
+    const resolveDesignAssets = vi.fn(async () => resolved);
+    const renderer = rendererStub({ kind: "rendered", png: new Uint8Array([1]), height: 10 });
+    const service = createCanvasPreviewService({ canvas, renderer, resolveDesignAssets });
+
+    const outcome = await service.preview(request(), context, project);
+
+    expect(resolveDesignAssets).toHaveBeenCalledWith(design, provenance);
+    expect(outcome).toMatchObject({
+      kind: "preview",
+      warnings: [
+        {
+          kind: "design-asset-unavailable",
+          blockId: "phone",
+          assetId: "other",
+          reason: "refused",
+          frameIds: ["home"],
+        },
+      ],
+    });
+    expect(renderer.render).toHaveBeenCalledWith(
+      expect.objectContaining({ designAssets: [{ blockId: "phone", assets: resolved }] }),
+    );
+  });
+
   it("attaches a PNG and the warnings when a browser exists and the model takes images", async () => {
     const renderer = rendererStub({
       kind: "rendered",
