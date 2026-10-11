@@ -295,10 +295,51 @@ showed. See
 [decision 0093](decisions/0093-app-owned-tools-use-managed-runtime-transports.md).
 
 Tool definitions carry the agent's usage guidance alongside their argument
-schemas. Each mode offers only its admitted tools, so providers receive the
-same guidance through MCP, dynamic tools, or direct tool calls without a
-separate global tool installation or prompt catalogue. Browser shares one
-definition across modes. Canvas's `describe` operation lists the closed block
+schemas. App-owned tools are capability families: one tool per object —
+`octant_browser`, `octant_computer`, and in Code `octant_terminal`,
+`octant_apple`, and `octant_android` — with its actions in an `operation`
+enum. Decision 0067 keeps the always-visible tool prefix small and
+cache-stable, so a family's description says only what an agent must know
+before its first call, and its `help` operation returns the full usage on
+demand. The managed tool set answers help from the family's own static text
+(`withToolFamilyHelp`) and only for a family the turn offers; help never
+reaches the family's executor, so every other action passes the same server
+policy before any effect. A family whose grant or capability is off is
+omitted rather than advertised and refused: Browser when the provider has no
+verified tool transport, the thread's tool constraints exclude it, or a Code
+host lends no browser; Apple or Android when the host has no toolchain to
+lend; the planner's `octant_board` and `octant_propose_thread` outside the
+designated planner thread. Browser shares one definition across modes.
+
+Each mode offers only its admitted tools, so every runtime receives the same
+definitions without a separate global tool installation or prompt catalogue,
+through the transport its adapter verified:
+
+| Runtime                             | App-managed tool transport                                                                                            |
+| ----------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| Claude Code                         | The Agent SDK's in-process MCP server `octant`, owned by the provider connection                                      |
+| Codex                               | App-server `thread/start.dynamicTools`                                                                                |
+| OpenCode                            | A connection-private loopback MCP endpoint, registered through OpenCode's own server API                              |
+| ACP runtimes                        | An HTTP MCP bridge when the runtime advertises and accepts it; ACP client file and terminal capabilities are separate |
+| Pi                                  | Octant's own Pi extension, calling a token-authenticated loopback bridge                                              |
+| Native harness and direct endpoints | Definitions in the request, for models with verified tool support                                                     |
+
+No transport edits a person's provider MCP, hook, or global configuration;
+OpenCode's per-launch posture stays in its connection-private configuration.
+Decisions 0006, 0093, and 0121 therefore hold.
+
+Browser and Computer are granted differently. Browser is a Work and Code
+capability; Chat never offers it. It is offered on every Work or Code turn
+whose provider carries app-managed tools, `@Browser` only adds selection
+guidance, the first effect for an origin asks inline, and Plan mode refuses
+effects. Computer is the bundled plugin plus a per-send `@Computer`
+selection: only that send carries the full `octant_computer` family. A turn
+without the selection carries the refusal-only definition described under
+[Computer use plugin](#extensions-and-skills), and none at all when Computer
+use is disabled, constrained out, or in Plan mode. Each application still
+needs its own approval.
+
+Canvas's `describe` operation lists the closed block
 catalogue and a creation example, or returns canonical schemas for up to three
 requested block kinds. Unscoped describe also lists document recipes: an id, a
 title, when to use one, and a skeleton of block kinds that already exist. The
