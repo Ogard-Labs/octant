@@ -110,15 +110,12 @@ export function makeProviderDriver(
       const hostEnvironment = options.codexHostEnvironment ?? process.env;
       const inheritsHostOverlay = instance.configuration.codexHome === undefined;
       if (inheritsHostOverlay && hostCodexHomeOverlayIsRelative(hostEnvironment)) {
-        throw new ProviderDriverConfigurationError("Codex host home must be an absolute directory.");
+        throw new ProviderDriverConfigurationError(
+          "Codex host home must be an absolute directory.",
+        );
       }
       if (
-        codexAccountOverlapsPeerHome(
-          options.codexInstances,
-          instance,
-          homedir(),
-          hostEnvironment,
-        )
+        codexAccountOverlapsPeerHome(options.codexInstances, instance, homedir(), hostEnvironment)
       ) {
         throw new ProviderDriverConfigurationError(
           "Another Codex account already uses that home directory.",
@@ -126,8 +123,8 @@ export function makeProviderDriver(
       }
       const codexHome =
         instance.configuration.codexHome ??
-        (hostDirectoryOrDefault(hostEnvironment.CODEX_HOME) ??
-          defaultProviderAccountDirectory(CODEX_ACCOUNT_PROFILE, homedir()));
+        hostDirectoryOrDefault(hostEnvironment.CODEX_HOME) ??
+        defaultProviderAccountDirectory(CODEX_ACCOUNT_PROFILE, homedir());
       return makeCodexDriver({
         instanceId: instance.id,
         binaryPath: instance.configuration.binaryPath,

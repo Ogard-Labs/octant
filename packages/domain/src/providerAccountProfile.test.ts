@@ -60,9 +60,9 @@ describe("provider account profile", () => {
   });
 
   it("assigns extra Codex accounts under ~/.codex-accounts/<instanceId>", () => {
-    expect(assignedProviderAccountDirectory(CODEX_ACCOUNT_PROFILE, "/Users/example/", instanceId)).toBe(
-      `/Users/example/.codex-accounts/${instanceId}`,
-    );
+    expect(
+      assignedProviderAccountDirectory(CODEX_ACCOUNT_PROFILE, "/Users/example/", instanceId),
+    ).toBe(`/Users/example/.codex-accounts/${instanceId}`);
     expect(defaultProviderAccountDirectory(CODEX_ACCOUNT_PROFILE, "/Users/example")).toBe(
       "/Users/example/.codex",
     );

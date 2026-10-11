@@ -1,7 +1,4 @@
-import {
-  assignedClaudeAccountConfigDirectory,
-  assignedCodexHome,
-} from "@octant/domain";
+import { assignedClaudeAccountConfigDirectory, assignedCodexHome } from "@octant/domain";
 import {
   decodeProviderCatalogSnapshot,
   decodeProviderInstance,

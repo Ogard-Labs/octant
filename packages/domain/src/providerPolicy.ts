@@ -449,10 +449,7 @@ export function assignedClaudeAccountConfigDirectory(
   return assignedProviderAccountDirectory(CLAUDE_ACCOUNT_PROFILE, home, instanceId);
 }
 
-export function assignedCodexHome(
-  homeDirectory: string,
-  instanceId: ProviderInstanceId,
-): string {
+export function assignedCodexHome(homeDirectory: string, instanceId: ProviderInstanceId): string {
   const home = stripTrailingSlashes(homeDirectory.trim());
   if (!isPosixAbsolutePath(home)) {
     reject("invalid-config-directory", "Codex account home must be an absolute directory.");

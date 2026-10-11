@@ -558,7 +558,8 @@ function acquireCodexAppServer(
   return Effect.async<ManagedCodexConnection, ProviderFailure>((resume) => {
     const child = spawn(binaryPath, codexAppServerArgs(version), {
       detached: process.platform !== "win32",
-      env: launchEnvironment ??
+      env:
+        launchEnvironment ??
         codexProcessEnvironment(binaryPath, options.inheritedEnvironment ?? process.env),
       stdio: ["pipe", "pipe", "pipe"],
     });
@@ -721,7 +722,9 @@ export function makeCodexProcessLive(options: CodexProcessOptions = {}): CodexPr
         return Effect.acquireReleaseInterruptible(
           Effect.gen(function* () {
             const probe = yield* probeCodexBinary(binaryPath, {
-              ...(launchEnvironment === undefined ? {} : { inheritedEnvironment: launchEnvironment }),
+              ...(launchEnvironment === undefined
+                ? {}
+                : { inheritedEnvironment: launchEnvironment }),
               shutdownTimeoutMs: resolved.shutdownTimeoutMs,
               ...(onProcessStarted === undefined ? {} : { onProcessStarted }),
               ...(resolved.versionProbeConfinement === undefined

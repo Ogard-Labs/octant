@@ -636,8 +636,7 @@ export class ProviderService implements ProviderServiceApi {
             ? await this.#acquireClaudeAccountClaim()
             : undefined;
         const releaseCodexClaim =
-          command.kind === "create-codex-provider" ||
-          command.kind === "change-codex-configuration"
+          command.kind === "create-codex-provider" || command.kind === "change-codex-configuration"
             ? await this.#acquireCodexAccountClaim()
             : undefined;
         try {
@@ -693,7 +692,9 @@ export class ProviderService implements ProviderServiceApi {
                   (candidate) => candidate.driverKind === "codex",
                 ).length;
                 const assignedHome =
-                  existingCodexCount > 0 ? assignedCodexHome(homedir(), command.instanceId) : undefined;
+                  existingCodexCount > 0
+                    ? assignedCodexHome(homedir(), command.instanceId)
+                    : undefined;
                 instance = createCodexProvider({
                   ...common,
                   binaryPath: command.binaryPath,
