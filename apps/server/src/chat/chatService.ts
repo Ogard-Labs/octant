@@ -2842,18 +2842,20 @@ export class ChatService {
    * Whether a branch's next turn would need a native session it cannot have:
    * the branch keeps the source's provider, and its next turn continues from
    * the last completed attempt of its last carried turn, the only attempts a
-   * branch copies. A provider that cannot be resolved is left to
-   * the send-time refusal, which already names it.
+   * branch copies. When that attempt's provider can no longer be resolved its
+   * ownership is unknown, and the send-time check refuses such a turn, so the
+   * branch is refused too. An unresolvable source provider is left to turn
+   * routing, which may move a fresh turn to the fallback route.
    */
   #branchNeedsNativeSession(source: ChatThread, carried: ReadonlyArray<ChatTurn>): boolean {
-    const providerOwned = (providerInstanceId: string): boolean => {
+    const providerOwned = (providerInstanceId: string, whenUnknown: boolean): boolean => {
       try {
         return (
           this.#driver(decodeProviderInstanceId(providerInstanceId)).conversationOwnership ===
           "provider"
         );
       } catch {
-        return false;
+        return whenUnknown;
       }
     };
     const lastCarried = carried
@@ -2861,8 +2863,8 @@ export class ChatService {
       ?.attempts.filter((attempt) => attempt.outcome === "completed")
       .at(-1);
     return (
-      providerOwned(String(source.providerInstanceId)) ||
-      (lastCarried !== undefined && providerOwned(String(lastCarried.providerInstanceId)))
+      providerOwned(String(source.providerInstanceId), false) ||
+      (lastCarried !== undefined && providerOwned(String(lastCarried.providerInstanceId), true))
     );
   }
 

@@ -3096,9 +3096,10 @@ history; switching adapters cannot implicitly replace an existing native task.
 A Chat branch (`branch-chat-thread`, also behind a Chat checkpoint's restore)
 refuses as `unsupported` before creating anything when the source's provider,
 or the provider of the last completed attempt it would carry, owns its
-conversation: the native session already holds the source's later turns, and a
-copied attempt has no resume cursor of its own, so the branch could only refuse
-its first message. Host-owned conversations branch as before, because the
+conversation, or when that attempt's provider can no longer be resolved: the
+native session already holds the source's later turns, and a copied attempt
+has no resume cursor of its own, so the branch could only refuse its first
+message. Host-owned conversations branch as before, because the
 branch's next turn is planned again from its own journaled copy.
 Work also refuses when the previous driver is unavailable and its conversation
 ownership cannot be established.

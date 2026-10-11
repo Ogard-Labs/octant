@@ -8162,6 +8162,51 @@ describe("ChatService", () => {
       expect(fakeDriver.startedSessionIds).toHaveLength(1);
     });
 
+    it("refuses to branch when the provider of the carried reply is gone and its ownership is unknown", async () => {
+      let removed = false;
+      const replacement = "84000000-0000-4000-8000-000000000008";
+      const { service } = openFixture({
+        refuseDriverFor: (id) =>
+          removed && id === String(ids.provider) ? new Error("Provider removed") : undefined,
+      });
+      const created = await service.execute({
+        kind: "create-chat-thread",
+        hostId: "local",
+        title: "Removed provider",
+      });
+      if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+      const sent = await service.execute({
+        kind: "send-chat-turn",
+        threadId: created.thread.id,
+        expectedVersion: service.read(created.thread.id).thread.version,
+        prompt: "Carried question",
+      });
+      if (sent.kind !== "turn-created") throw new Error("Expected turn-created result.");
+      await service.execute({
+        kind: "change-chat-provider",
+        threadId: created.thread.id,
+        expectedVersion: service.read(created.thread.id).thread.version,
+        providerInstanceId: replacement,
+        modelId: "model-a",
+      });
+      removed = true;
+      const branchThreadId = "84000000-0000-4000-8000-0000000000b3" as ChatThreadId;
+
+      // The next turn would refuse to continue a reply whose provider cannot
+      // say who owns the conversation, so the branch is refused up front.
+      await expect(
+        service.execute({
+          kind: "branch-chat-thread",
+          threadId: created.thread.id,
+          expectedVersion: service.read(created.thread.id).thread.version,
+          turnId: sent.turn.id,
+          title: "Second direction",
+          branchThreadId,
+        }),
+      ).rejects.toMatchObject({ failure: { category: "unsupported" } });
+      expect(() => service.read(branchThreadId)).toThrow(ChatServiceError);
+    });
+
     it("refuses a stale branch without creating a thread", async () => {
       const { service } = openFixture();
       const created = await service.execute({
