@@ -102,7 +102,8 @@ The design rests on a small set of invariants that every package obeys:
   catalog. All have a Settings off switch: marketplace off means no catalog
   request; Updates off disables automatic update checks (manual Check for
   updates may still contact the signed feed); device tools' automatic updates
-  off means no registry request (a manual check may still contact it). An in-app
+  start off, and off means no registry request (a manual check may still
+  contact it). An in-app
   changelog rides that update path and bundled notes rather than adding a
   separate call ([decisions/0061-in-app-changelog.md](decisions/0061-in-app-changelog.md)).
   Opening Updates reads the desktop's current local update state so the installed
@@ -254,7 +255,9 @@ unchanged, and native remote requests refuse redirects.
 process-local client context through `/api/shell/local-session`; no launcher
 token, persisted clock posture, or alternate profile is required. Electron,
 ordinary browsers, and Vite therefore read the same Machine-owned Projects,
-threads, settings, and journal. The context id scopes window-local presentation
+threads, settings, and journal; a Vite renderer qualifies only when the host
+was started with its origin in `OCTANT_WEB_URL` (the desktop dev loop and
+`octant web --dev` set it for the host they start). The context id scopes window-local presentation
 and guards against accidental cross-window commands, but it is not a separate
 Machine or durable authentication epoch. The packaged renderer additionally
 proves its native renderer identity for desktop-only integration. When the host
@@ -262,9 +265,13 @@ instance changes, Electron re-registers every live Project window, replaces the
 main-process authority and renderer identity, and publishes the new capability
 so the renderer rebuilds its clients before snapshot recovery. The loopback
 transport still validates the actual Host header, rejects non-loopback origins,
-and removes process-local registration when its owning client closes. Loopback
-renderer ports share the local-user trust class; the listener never reflects a
-non-loopback web origin into local authority. The renderer holds the matching
+and removes process-local registration when its owning client closes. The
+listener admits only its own loopback origin (under any loopback name), the
+packaged renderer, and the development renderer origin named by
+`OCTANT_WEB_URL`; a page on any other loopback port is refused before dispatch,
+gets no CORS grant, and cannot mint a client context, because agents start
+local dev servers whose pages the person opens in an ordinary browser. The
+listener never reflects a non-loopback web origin into local authority. The renderer holds the matching
 line before its first request: a launch address that is plain HTTP to a
 non-loopback host is refused with an explanation and never used
 (`docs/decisions/0103`). Requests that send the window capability set
@@ -648,7 +655,12 @@ revision declares the current schema version on the version and its
 definition, so a Canvas written under an earlier version moves forward and can
 gain a design; a version append never moves a Canvas back. Agents writing
 a design can be silent for minutes while composing the tool call, so Chat and Work
-wait five minutes for a provider event before cutting a turn off, as Code does
+wait five minutes for a provider event before cutting a turn off, as Code does.
+Chromium stops painting sandboxed frames that are `inert` or have
+`pointer-events: none`, so a frame shown as a picture stays hit-testable and a
+cover over it takes the pointer. Frames that run script were set aside: they
+need their own serving origin, a network policy the renderer lacks, and a
+threat model of their own
 ([decisions/0164-canvas-designs-are-html-in-a-frame-that-runs-nothing.md](decisions/0164-canvas-designs-are-html-in-a-frame-that-runs-nothing.md)).
 
 The local-server provider adapter owns a separate process for each acquired
@@ -688,7 +700,12 @@ A screenshot's raw capture lands in a host-private directory under the data root
 denies outright to every launch except the one taking the capture — the deny is
 emitted after the broad launch-root grants, so a checkout bound to an ancestor
 of the directory cannot read another thread's screen either, and only the
-capture launch re-allows it through its own write root
+capture launch re-allows it through its own write root. A subtree grant is
+acceptable here because the directory holds only host-minted, per-attempt UUID
+names, re-read with no-follow, single-link, size-bound, and PNG-signature checks
+before becoming an artifact. Redirecting the whole Apple temporary directory
+instead was measured and reverted: `xcrun` and the Simulator services need the
+host's real temporary and cache roots
 ([decisions/0160-an-apple-screen-capture-lands-in-a-directory-only-its-launch-can-write.md](decisions/0160-an-apple-screen-capture-lands-in-a-directory-only-its-launch-can-write.md)).
 An Android emulator is a separate dock destination and `octant_android` tool,
 not an iOS helper feature
@@ -714,6 +731,25 @@ attach gate (see
 On an approval-gated thread, **Allow input** is the confirmation that opens
 that destination; clicks, typing, Home, and Lock never raise it
 ([decisions/0152-allow-input-opens-a-device-to-clicks.md](decisions/0152-allow-input-opens-a-device-to-clicks.md)).
+The agent's `octant_apple` and `octant_android` tools follow the thread's
+turn posture per operation, not a Full-access gate on the whole tool:
+`discover`, `status`, and `screenshot` are reads and run under every posture,
+Plan included, as is `open` of a destination already booted or booting: it only
+shows the pane, changes nothing on the device, and has no host action an
+approval could bind to. Every other operation is an effect, including `open` of
+a shut-down destination, which boots it. Plan refuses it; Full access
+sends it with no approval; under approval-gated and auto-accept-edits the
+server asks in the thread (an `approval-requested` turn event, answered like a
+Browser session ask) before the pane opens or the host is called, and an
+approval mints the host's one-use, five-minute approval bound to exactly that
+request and its checkout context — the same receipt a workbench confirmation
+yields, validated by the same Apple or Android policy. A denial, expiry, or
+thread that went stale or into Plan while waiting refuses the call. Input to a
+destination the turn's window already holds open under Allow input rides that
+grant without asking; an approved agent input opens or renews it as a pane
+input does. `octant_terminal` still requires Full access: it runs arbitrary
+shell commands, which an approval-gated thread already reaches through its
+provider's own per-command approvals.
 Under the desktop app that injection is the native device helper of 0137: a
 tap is a point on the captured screen, typed text is letters, digits, spaces
 and new lines, and every refusal names the helper's own reason. Without that
@@ -866,16 +902,26 @@ follows the same rules as a rename: an archived Project refuses it, and a change
 that would leave the colour as it is journals nothing. The colour grants no
 authority and carries no status.
 
-A Work Project folder carries `AGENTS.md` (the person's standing brief, seeded
-once and never rewritten) and `STATUS.md` (where the work stands, with dated
-follow-ups and deadlines). Both are read into every Work turn ahead of the
-thread's transcript, with a standing instruction to keep `STATUS.md` current;
-a completed turn that changed files without touching it gets a `Recent
-changes` line appended from the 0083 record. A stale status or a near or passed
-date makes the next task open by taking stock and asking for an update. The
-Work Project page, the Work board's follow-up mark, and the inbox's
-`follow-up-due` attention signal all read the same file on demand; nothing
-about it is journaled. See
+A Work Project may opt into a **status file**: `STATUS.md` at the top of its
+folder, where the work stands, with dated follow-ups and deadlines. The setting
+lives on the Project record as `statusFile` and is journaled as
+`project.work-status-file-changed@1`; absent reads as disabled, so every
+Project, including one created before the setting existed or whose folder
+already holds a `STATUS.md`, starts off. The default-folder Project refuses it
+on the server: it holds what nobody gave a home, so there is no single piece of
+work for a status to describe. Enabling seeds `STATUS.md` if it is missing.
+While enabled, the file is read into every Work turn ahead of the thread's
+transcript with a standing instruction to keep it current; a completed turn
+that changed files without touching it gets a `Recent changes` line appended
+from the 0083 record; and a stale status or a near or passed date makes the next
+task open by taking stock and asking for an update. The Work Project page, the
+Work board's follow-up mark, and the inbox's `follow-up-due` attention signal
+read the same file on demand; nothing about its content is journaled. While
+disabled, Octant reads nothing from the folder for this purpose, adds no
+instruction, and writes nothing there; turning the setting off leaves an
+existing file untouched. Octant never writes an agent brief (`AGENTS.md`,
+`CLAUDE.md`, or similar) into a user folder. This narrows the always-on
+behavior first recorded in
 [decisions/0119-a-work-project-keeps-its-status-in-its-folder.md](decisions/0119-a-work-project-keeps-its-status-in-its-folder.md).
 
 Work never silently becomes Code. When coding work is detected in a Work
@@ -1126,6 +1172,96 @@ thread-owned PR status onto Code board cards. A Work or Code thread is Done
 only when its user-confirmed delivery target is objectively satisfied;
 ambiguous state resolves to Waiting.
 
+**Pull-request merge.** The person at a local desktop window may merge one
+open pull request from its review (`POST /api/code/project-pull-requests/merge`).
+That is the only pull-request mutation Octant performs; approving, commenting,
+requesting changes, editing, closing, reopening, and force-pushing stay absent.
+The rules:
+
+- **Who.** Only a `local-window` principal. The route answers 403 to a paired
+  remote device before decoding the command, and the server service refuses
+  any initiator other than `user` as `not-authorized`. No provider, agent tool,
+  plugin, routine, or Code posture (Full access included) can reach it.
+- **Confirmation.** The review enables Merge only for a fresh, unambiguous,
+  open, mergeable observation. Merge opens an inline confirmation that names the reviewed head
+  and focuses Cancel; nothing merges until the person chooses Confirm merge.
+- **Server checks before the effect.** The command names the Project, the
+  repository, the number, a method (merge, squash, or rebase), and the head SHA
+  the person reviewed. The server refuses unless that Project is connected on
+  this window and resolves to exactly that github.com repository, and refuses
+  while GitHub access is revoked. It then re-reads the pull request and refuses
+  `not-open`, `not-mergeable`, or `stale` (head moved), and passes
+  `--match-head-commit` so GitHub also refuses a head that moves in between.
+- **Credential.** The host's installed `gh` CLI with its own stored login.
+  Octant stores no GitHub token; ambient `GH_TOKEN`, `GITHUB_TOKEN`, and
+  `GH_ENTERPRISE_TOKEN` are stripped and prompts are disabled.
+- **Record.** The outcome returns to the person and drops the cached detail
+  and list rows; the next refresh observes Merged. The merge is not journaled
+  as its own event: GitHub's history is its record, and a thread linked to the
+  pull request reaches Done only through the ordinary observed-state rule.
+
+**Delivery (publishing to a user-owned target) is dormant.** The ship service
+and its journaled events exist, but the host wires no target source, no
+artifact observer that saw a build produced, and no issuer of the per-act
+approval bound to the exact target, revision, and build (`server.ts` passes an
+empty target list, `observedArtifact` and `approval` that return nothing, and a
+publish path that fails). The renderer shows Delivery only when a thread has an
+enabled target (`hasActionableDelivery`), so it stays absent. It stays absent
+until all three exist; a standing grant never substitutes for the per-act
+approval.
+
+**Routines (Automation Center).** A routine is a host-owned, Project-bound
+definition that starts an ordinary Work or Code thread with a fixed task prompt
+on a trigger: once, every N minutes (15 minutes to 30 days), or weekly at a
+local time in an IANA time zone. Chat has no routines. Each occurrence creates
+at most one new thread (target policy `new-thread`) and runs its first turn
+through the ordinary thread and turn services; a routine cannot do anything the
+thread it creates could not do.
+
+- **Authority ceiling.** A definition captures an execution profile (an existing
+  agent profile: provider, model, policy, permission persistence) and an
+  authority snapshot whose effective authority never widens the requested one
+  and fits under the profile. Work routines get no shell or Git authority. Full
+  access is never eligible, whether or not it was remembered elsewhere: the
+  contract refuses it on the snapshot and dispatch blocks it as
+  `full-access-ineligible`. Code runs are always created approval-gated. Work
+  runs bind the Project's confined root like an interactive Work thread, and
+  their unattended first turn runs ask-first even when the host's Work default
+  is auto-accept-edits, unless the routine's captured effective authority is
+  itself auto-accept-edits; the hold only narrows. A Code first turn runs with
+  the `agent` initiator, so approvals wait for a person.
+- **Revalidation at every occurrence.** Before creating a thread the dispatcher
+  re-reads live host facts and blocks with a typed reason when the host, the
+  Project (active, same mode, same version), the binding revision, the Code
+  checkout, the execution profile version and policy, the provider and model,
+  the authority digest, or the confirmed delivery-target template no longer
+  matches. A stale definition never adopts replacement authority.
+- **Who may author.** Routes accept only an authenticated principal from the
+  transport; a body cannot supply principal or origin. A create must target a
+  Project of the same mode that principal can reach, and every other command
+  must address a routine whose Project it can reach. A paired remote device may
+  author only on its own host and within those Projects; its routines get the
+  same ceiling. Automation-origin execution cannot create, edit, run, pause, or
+  archive a routine (`automation-recursion`), and no agent or provider tool
+  reaches the routes.
+- **Asleep or offline.** The scheduler is an in-process timer in the running
+  host over journaled definitions. Nothing wakes the computer or runs in a
+  cloud. On return it reconciles missed occurrences by the routine's policy:
+  `skip` records them as skipped; `run-once` records all but the newest as
+  skipped and runs the newest once. No catch-up burst. More than the missed-run
+  cap blocks the routine as `missed-run-cap-exceeded`. A routine with an active
+  run never overlaps itself. A run that needs a registered local window to
+  create its thread fails with that reason when none is open.
+- **Journal.** Definitions, revisions, lifecycle changes, occurrence claims and
+  skips, runs, dispatch intents and claims, and cancellations are journaled. A
+  claim commits the deterministic run before the occurrence ledger, so a crash
+  repairs forward to the same run and never dispatches twice. Run-now and
+  cancel are idempotent by request id.
+- **Turning one off.** Pause stops future occurrences; Resume restarts from the
+  next occurrence; Archive ends the routine and keeps its history (there is no
+  delete). Cancel stops a run before its first turn starts; afterwards the
+  thread's own interrupt applies.
+
 A `#thread` mention points at another thread the sender can already Open. The
 host resolves a bounded, read-only title, status, and transcript window at send
 time. Dragging a sidebar thread onto a composer, or choosing Attach as context
@@ -1217,11 +1353,11 @@ it fire against newer state; a dispatch the admission path refuses settles as
 `failed`. A dispatch that cannot yet reach its admission path — the mode has
 no window registered on this host to carry the continuation — is deferred
 rather than settled: the opt-in stays armed and re-evaluates on a bounded
-retry cadence until it dispatches, invalidates, or is cancelled. The scheduler
-is deliberately narrow under the release boundary: an
-in-process host timer over journaled opt-ins, not a scheduling product — no
-cloud wake, no background claim beyond the host's own running process, and no
-billing automation. A host that was down or unreachable at the reset instant
+retry cadence until it dispatches, invalidates, or is cancelled. This resume
+timer is deliberately narrow and separate from
+[routines](#modes-chat-work-and-code): an in-process host timer over journaled
+opt-ins that only continues a stopped turn — no cloud wake, no background claim
+beyond the host's own running process, and no billing automation. A host that was down or unreachable at the reset instant
 rescans `status = scheduled` rows on return and dispatches the still-valid
 ones; a record that cannot be re-validated settles `invalidated` and never
 re-arms.
@@ -1990,6 +2126,13 @@ flowchart LR
 
 The provider layer is defined by `@octant/provider-sdk` and implemented in
 `apps/server/src/providers`.
+
+- **Project provider policy.** A Project allows all providers (the default),
+  an explicit list of provider instances, or `eu-zdr`: a provider instance or
+  its selected model must carry an `eu` or a `zdr` data tag. Either tag
+  suffices, as the Project page says; `eu-zdr` does not by itself guarantee
+  zero retention. The host checks the policy before every Work and Code turn
+  and handoff, including child runs, and refuses a disallowed provider.
 
 - **Driver interface.** A `ProviderDriver` exposes `probe` (readiness and
   capability report without side effects), `acquire` (a `ProviderConnection`
@@ -3129,13 +3272,28 @@ the Computer-use driver: each release is a pinned npm tarball the packager
 verifies against the registry's published `dist.integrity` (sha512) and lands
 in `Resources/managed-tools/<tool>` with its license. Electron main owns the
 per-tool instances; tools launch under the desktop runtime
-(`ELECTRON_RUN_AS_NODE` with `process.execPath`), never a system Node. The
-same updater state machine as the driver checks `registry.npmjs.org` daily by
-default; a newer release stages with its dependency closure resolved
+(`ELECTRON_RUN_AS_NODE` with `process.execPath`), never a system Node. Tools
+run unconfined under Octant's signed identity: no sandbox profile limits them,
+and macOS may attribute their access to Octant's privacy (TCC) grants. They
+need `simctl`, the Simulator's frameworks, and the shared `adb` server, and
+Octant has no confinement profile for them yet. Octant narrows what they
+inherit instead: each
+launch receives only an allowlisted environment (`PATH`, `HOME`, user and
+locale variables, `TMPDIR`, `DEVELOPER_DIR`, and the Android SDK and `adb`
+variables), never provider keys, tokens, broker credentials, or other `OCTANT_*`
+values. The same updater state machine as the driver checks
+`registry.npmjs.org` daily only when the person turns automatic updates on in
+Settings › Device tools; it is off by default, a saved choice is kept, and a
+manual check or Update still works. A newer release stages with its dependency closure resolved
 in-app (no npm or Bun is available inside the packaged app), each package
 integrity-verified, and activates only while idle and after its entrypoint
 survives a smoke launch. A staged tree that cannot start keeps the previous
-release. Settings shows each tool's channel, version, and update state.
+release. Extraction accepts only allowlisted tar entries (no absolute path, no
+`..`, no `:`) and never runs an upstream installer or lifecycle script. The
+in-app resolver handles only `^`, `~`, and exact ranges, nests a conflicting
+version under its owner, and stops at 64 packages; an upstream release that
+needs anything else fails honestly and keeps the previous version. Settings
+shows each tool's channel, version, and update state.
 Verification is the registry's package-level integrity hash — npm publishes
 no per-package signature — so the design pins URL plus hash and reports
 honestly when they disagree. OpenCode is a descriptor on this same channel,
@@ -3339,8 +3497,17 @@ mechanisms are:
   `awaiting-input`, before an interrupted turn); Done still requires the
   delivery target to be satisfied, and a decision blocks neither completing nor
   snoozing.
-- **Sandbox.** Provider CLIs, Git, terminals, test runners, and extension
-  executables launch through one shared confinement port. On macOS that is
+- **Fail-closed refusals name a recovery.** A refusal that fails closed on
+  authority must name a recovery a person can perform: a user action, a
+  restart, or elapsed time. A posture none of those can clear is not an
+  acceptable resting state. Recovery is a deliberate act by the machine's
+  owner, never a widening of the automatic admission rule, and the refusal
+  says what clears it where the person is, not only in a log. "Connect Claude
+  for helpers in Settings › Claude Code." is the shape.
+- **Sandbox.** Git, terminals, test runners, extension executables, and every
+  provider `--version` read launch through one shared confinement port, and so
+  do provider runtimes except where the confinement matrix below says a
+  runtime is unwrapped. On macOS that is
   `sandbox-exec` with deny-default Seatbelt profiles; on Linux it is Bubblewrap
   (`bwrap`) with private `/tmp`, bound roots, and no unconfined fallback,
   recorded in [decisions/0057-linux-confinement-bubblewrap.md](decisions/0057-linux-confinement-bubblewrap.md).
@@ -3366,15 +3533,39 @@ mechanisms are:
   and extended by
   [decisions/0145-a-plan-turn-is-confined-by-octant.md](decisions/0145-a-plan-turn-is-confined-by-octant.md):
   the process producing a plan still has to ask the model for it, while the
-  tools that thread reaches keep `none`.
+  tools that thread reaches keep `none`. Seatbelt and Bubblewrap cannot express
+  a host allowlist, so `provider-endpoints-only` materializes as plain OS
+  network `allow` for the runtime process (`materializeOsNetworkEgress`): the
+  runtime, Plan included, can reach any host. The endpoint restriction the name
+  promises holds only for Octant-brokered tools (browser origin allowlists,
+  research backends). The persisted value keeps its name for journal
+  compatibility.
   A provider runtime launch is wrapped when the process carries exactly one
-  thread's authority, which is why the ACP, OpenCode, and Pi runtimes are below
-  Full access, and the Claude Agent SDK launch is on Plan; the Codex app-server
-  and the two Claude postures that write are not. That set is named and pinned
-  by
-  [decisions/0143-confinement-wraps-a-runtime-that-carries-one-thread.md](decisions/0143-confinement-wraps-a-runtime-that-carries-one-thread.md)
-  and narrowed by 0145, and the tools those threads reach stay confined either
-  way. A confined Claude launch never reaches the keychain itself: the runtime
+  thread's authority. The goal is that every runtime below Full access is
+  wrapped; the current state, which `providerProcessConfinement.test.ts` pins
+  against this table, is below. Full access never gets the deny-default
+  profile. The one wrapper it can get is deny-only: an ACP profile with
+  extension or host-auth paths to deny (Kimi, for example) launches Full access
+  under an allow-default `sandbox-exec` profile or a Bubblewrap host-root bind
+  that denies only those paths (`makeAcpConfinementLive`). That wrapper
+  confines nothing else.
+
+  | Runtime (module)                                                          | Plan                            | Approval-gated, auto-accept-edits                   | OS egress below Full access                      | Plan's read-only enforced by                   |
+  | ------------------------------------------------------------------------- | ------------------------------- | --------------------------------------------------- | ------------------------------------------------ | ---------------------------------------------- |
+  | ACP, OpenCode, Pi (`acpProcess.ts`, `openCodeProcess.ts`, `piProcess.ts`) | Wrapped                         | Wrapped                                             | `allow`                                          | Octant sandbox: no root write, no exec or fork |
+  | Claude Agent SDK (`claudeProcess.ts`)                                     | Wrapped; Chat children run here | Unwrapped; runtime's own sandbox, project root only | `allow` on Plan; not limited by Octant otherwise | Octant sandbox: no root write, no exec or fork |
+  | Codex app-server (`codexProcess.ts`)                                      | Unwrapped                       | Unwrapped                                           | Not limited by Octant                            | Codex's own `read-only` sandbox                |
+  | Oh My Pi (`ohMyPiProcess.ts`), readiness probe only                       | Unwrapped                       | Unwrapped                                           | Not limited by Octant                            | No turn runs                                   |
+
+  Codex is unwrapped because one app-server carries every thread on a provider
+  instance, so it has no one root to bind. The ACP/OpenCode/Pi row has one
+  carve-out from "no exec or fork". On macOS, an OpenCode 2 Chat, Plan or Work
+  launch may fork and may exec exactly `/usr/bin/false`, which is its Git
+  stand-in (described below). Oh My Pi's probe is a held gap, not
+  an exception. Octant-owned tools those threads reach stay confined either
+  way. A runtime's own built-in tools (Codex's shell, Claude's Bash on the
+  postures that write) run under that runtime's sandbox, not Octant's.
+  A confined Claude launch never reaches the keychain itself: the runtime
   reads its subscription sign-in by running `/usr/bin/security`, which would
   return any keychain item that trusts that tool, including other command-line
   programs' tokens, so the profile runs neither the tool nor reads the keychain
@@ -3390,6 +3581,11 @@ mechanisms are:
   switched to an API key is discarded, never kept.
   A confined launch receives it as `CLAUDE_CODE_OAUTH_TOKEN`
   and no keychain lookup; unconfined launches keep the runtime's own sign-in.
+  The one confined Claude launch with no credential of its own is the
+  subscription readiness probe, which runs under Plan; only it keeps the
+  security-server lookup (`allowProviderCredentialLookup`), with the keychain
+  files and `/usr/bin/security` still denied. That lookup signs no turn in;
+  whether the probe's account read depends on it has not been measured.
   Without a connected token the launch refuses with "Connect Claude for helpers
   in Settings › Claude Code.", which a parent's `wait` and `status` carry. The
   runtime never refreshes a handed-in token, so one it refuses is marked
@@ -3429,19 +3625,35 @@ mechanisms are:
   builder refuse every Android command.
   The Apple `test` action stays confined too, and splits so the extra reach
   touches only the phase that needs it: `build-for-testing` runs under the
-  ordinary profile while `test-without-building` carries a closed set of
-  measured per-launch grants through `extraRules` — literal reads of the SDK
-  index plist and the launchd socket's ancestors, read-write over the
-  per-boot launchd session socket family, four named `mach-lookup` services,
-  the pseudo-terminal pair it allocates, `job-creation`, and `signal` for
-  the session's stale-app teardown — recorded with each measurement in
-  [decisions/0159-a-confined-apple-test-carries-its-measured-grants.md](decisions/0159-a-confined-apple-test-carries-its-measured-grants.md).
-  No other Apple launch receives any of them.
+  ordinary profile, which keeps the project's Run Script phases away from the
+  widened reach, while `test-without-building` carries a closed set of
+  per-launch grants through `extraRules`, never the shared profile default:
+  literal `file-read*` on `~/Library/Developer/Xcode/SDKToSimulatorIndexMapping.plist`;
+  literal `file-read-metadata` on `/private`, `/private/var`, and
+  `/private/var/tmp`; `file-read* file-write*` over
+  `^/private/var/tmp/com\.apple\.launchd\.[^/]+(/.*)?$`, the per-boot launchd
+  session socket family; `mach-lookup` on `com.apple.PowerManagement.control`,
+  `com.apple.testmanagerd.control`, `com.apple.dt.instruments.dtarbiter.xpc`,
+  and `com.apple.dt.instruments.dtsecurity.xpc`; `pseudo-tty` with
+  `file-write*`/`file-ioctl` on `/dev/ptmx` and `/dev/ttys<N>`;
+  `job-creation`; and untargeted `signal`. No other Apple launch receives any
+  of them. Xcode's `IDETestProgressNotification` post stays denied: it is
+  cosmetic to a CLI run.
+  _Rationale:_ each grant is the weakest spelling that cleared a measured,
+  fatal refusal — an empty destination list, an aborted power assertion, an
+  unreachable session socket, "Pseudo Terminal Setup Error", a runner that
+  could not launch, and hangs at `testmanagerd`, the DT arbiter, and "Testing
+  started" — and no single grant unblocks the run alone. `signal` is the
+  broadest: the session kills a stale app copy it did not fork, and denying it
+  hangs every later session; the launch still cannot read user files, open the
+  network, or leave its root. A future xcodebuild refusal is measured and added
+  to this list, never to the shared profile.
   Apple builds prepare a private derived-data directory per action and grant
   writes to that directory only for its `xcodebuild` phases. Run installation
   reads its product from the same directory without write access; XCTest
   results also land inside it. Simulator captures remain isolated in their own
   private directory and are writable only by the capture launch.
+
 - **ACP client capabilities.** ACP client filesystem and terminal effects are
   executed by Octant inside the Code confinement, with bounded reads, writes,
   terminal lifetimes, and output. Terminal requests with direct `args` use
@@ -3574,6 +3786,11 @@ mechanisms are:
   remembered owner-only under the data directory (the boundary that holds the
   host identity key), including its TLS key, and re-enabled when the server
   starts; a server shutdown keeps it and only a local disable forgets it.
+  A paired client may click, scroll, and press keys in the host's agent
+  browser, but may not navigate it, type into it, or close a tab. Those clicks
+  and keys can still follow a link or submit a form within the context's
+  approved origins; the host's navigation guards refuse any page outside them,
+  so a paired client cannot take the host browser to a new origin.
 - **Artifact replica membership.** Each replica entry carries a detached
   Ed25519 signature from the device signing key the writing host holds for its
   replica instance, in a credential namespace of its own that provider
@@ -3764,6 +3981,12 @@ person owns — a synced folder or an S3-compatible bucket. Octant operates no
 storage and no relay for them. The storage provider can read the files. That
 does not open a hosted relay or an Octant cloud account. See
 [0163](decisions/0163-artifact-replicas-in-storage-the-user-owns.md).
+
+Two shipped capabilities are in scope under their rules above: the person's
+confirmed [pull-request merge](#modes-chat-work-and-code) from a local window,
+and host-local [routines](#modes-chat-work-and-code) in the Automation Center.
+Neither opens other pull-request mutation, agent-initiated merge, cloud
+scheduling, or a hosted wake service.
 
 Two holds stay Later until documented approved designs, published seams, and an
 explicit maintainer request open them:
