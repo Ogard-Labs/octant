@@ -2835,7 +2835,6 @@
   overflow-wrap: anywhere;
   text-align: left;
   border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-sm);
   background: var(--oct-surface);
   padding: var(--oct-space-2) var(--oct-space-3);
   cursor: pointer;
