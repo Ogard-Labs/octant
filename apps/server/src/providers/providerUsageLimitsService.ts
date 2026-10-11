@@ -26,7 +26,8 @@ class ProviderUsageLimitsStopped extends Error {
 
 export interface ProviderUsageLimitsObservation {
   readonly source: ProviderUsageLimitsSource;
-  readonly limits: ProviderServiceLimits;
+  readonly limits?: ProviderServiceLimits;
+  readonly unavailableReason?: ProviderUsageLimitsUnavailableReason;
 }
 
 export interface ProviderUsageLimitsServiceOptions {
@@ -187,7 +188,10 @@ export class ProviderUsageLimitsService {
         }),
       ]);
       const runtimeLimits = this.#options.runtimeLimits?.(instance.id, observedAt);
-      if (observation === undefined) {
+      if (observation?.unavailableReason !== undefined) {
+        return this.#unavailable(instance, observedAt, observation.unavailableReason);
+      }
+      if (observation === undefined || observation.limits === undefined) {
         if (runtimeLimits === undefined) {
           return this.#unavailable(instance, observedAt, this.#noEvidenceReason(instance));
         }

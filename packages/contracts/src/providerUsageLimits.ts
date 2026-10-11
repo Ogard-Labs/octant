@@ -37,6 +37,7 @@ export const ProviderUsageLimitsUnavailableReason = Schema.Literal(
   "runtime-does-not-report",
   "local-runtime",
   "endpoint-silent",
+  "plan-limits-do-not-apply",
 );
 export type ProviderUsageLimitsUnavailableReason = typeof ProviderUsageLimitsUnavailableReason.Type;
 

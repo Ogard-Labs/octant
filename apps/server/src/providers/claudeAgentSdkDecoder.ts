@@ -1117,6 +1117,8 @@ export function decodeMessage(
         (typeof info.rateLimitType !== "string" || !RATE_LIMIT_TYPES.has(info.rateLimitType)))
     )
       throw protocol("Claude returned an unsupported runtime message.");
+    const overageResetsAt = optionalNonNegativeNumber(info.overageResetsAt);
+    const overageStatus = info.overageStatus;
     return {
       kind: "rate-limit",
       sessionId: message.session_id,
@@ -1124,6 +1126,16 @@ export function decodeMessage(
       ...(resetsAt === undefined ? {} : { resetsAt }),
       ...(typeof info.rateLimitType === "string" ? { rateLimitType: info.rateLimitType } : {}),
       ...(utilization === undefined ? {} : { utilization }),
+      ...(overageStatus === "allowed" ||
+      overageStatus === "allowed_warning" ||
+      overageStatus === "rejected"
+        ? { overageStatus }
+        : {}),
+      ...(overageResetsAt === undefined ? {} : { overageResetsAt }),
+      ...(typeof info.overageDisabledReason === "string"
+        ? { overageDisabledReason: info.overageDisabledReason }
+        : {}),
+      ...(info.overageInUse === true || info.isUsingOverage === true ? { overageInUse: true } : {}),
     };
   }
   if (message.type === "auth_status") {

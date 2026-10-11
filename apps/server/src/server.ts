@@ -530,6 +530,7 @@ import {
 import { ProviderUsageLimitsService } from "./providers/providerUsageLimitsService";
 import { unavailableLimitsReason } from "./providers/providerLimitsReporting";
 import { createProviderUsageLimitsRouteHandler } from "./providers/providerUsageLimitsRoutes";
+import { ProviderAccountPlanUsageStore } from "./providers/providerAccountPlanUsageStore";
 import { ProviderRuntimeUsageLimitsStore } from "./providers/providerRuntimeUsageLimitsStore";
 import { attachProviderRuntimeUsageLimits } from "./providers/providerRuntimeUsageLimitsDriver";
 import {
@@ -805,6 +806,8 @@ import {
   enabledModes,
   formatThreadMentionContext,
   isAgentRunActiveStatus,
+  CLAUDE_ACCOUNT_PROFILE,
+  defaultProviderAccountDirectory,
   isImageProfileDriverKind,
   isNativeHarnessDriverKind,
   isProviderAllowedByProjectPolicy,
@@ -3825,6 +3828,27 @@ export function startOctantServer(
           ),
       });
     const providerRuntimeUsageLimitsStore = new ProviderRuntimeUsageLimitsStore();
+    const providerAccountPlanUsageStore = new ProviderAccountPlanUsageStore(
+      join(providerDataDirectory, "providers", "plan-usage.json"),
+    );
+    void providerAccountPlanUsageStore.load().catch(() => undefined);
+    const claudePlanUsageStateDirectory = (instance: ProviderInstance): string | undefined => {
+      if (instance.driverKind !== "claude") return undefined;
+      const stored = instance.configuration.configDirectory;
+      if (typeof stored === "string" && stored.trim().length > 0) return stored;
+      return defaultProviderAccountDirectory(CLAUDE_ACCOUNT_PROFILE, homedir());
+    };
+    const recordProviderRuntimeUsage = (event: ProviderRuntimeEvent): void => {
+      providerRuntimeUsageLimitsStore.record(event);
+      if (event.kind !== "rate-limit-window") return;
+      const instance = persistence
+        .readProviderInstances()
+        .find((candidate) => String(candidate.id) === String(event.instanceId));
+      if (instance === undefined) return;
+      const directory = claudePlanUsageStateDirectory(instance);
+      if (directory === undefined) return;
+      void providerAccountPlanUsageStore.recordWindow(event, directory).catch(() => undefined);
+    };
     const openCodeProcess = options.openCodeProcess ?? makeOpenCodeProcessLive();
     const codexProcess = options.codexProcess ?? makeCodexProcessLive({ octantVersion: version });
     const acpProcess = options.acpProcess ?? makeAcpProcessLive();
@@ -4308,7 +4332,7 @@ export function startOctantServer(
             claudeInstances: persistence.readProviderInstances(),
             runtimeRegistry: providerRuntimeRegistry,
             permissionPersistence: () => persistence.readProviderDefaults().permissionPersistence,
-            onRuntimeEvent: (event) => providerRuntimeUsageLimitsStore.record(event),
+            onRuntimeEvent: recordProviderRuntimeUsage,
             ...(credentialResolver === undefined ? {} : { credentialResolver }),
             ...(subscriptionOAuth === undefined ? {} : { subscriptionOAuth }),
           }),
@@ -4430,7 +4454,7 @@ export function startOctantServer(
       isProjectConfinedPath,
       runtimeRegistry: providerRuntimeRegistry,
       permissionPersistence: () => persistence.readProviderDefaults().permissionPersistence,
-      onRuntimeEvent: (event) => providerRuntimeUsageLimitsStore.record(event),
+      onRuntimeEvent: recordProviderRuntimeUsage,
       ...(credentialResolver === undefined ? {} : { credentialResolver }),
       ...(subscriptionOAuth === undefined ? {} : { subscriptionOAuth }),
       localUsageHistorySourceForInstance: (instance) =>
@@ -4495,11 +4519,19 @@ export function startOctantServer(
           .filter((instance) => !isImageProfileDriverKind(instance.driverKind)),
       now: () => new Date().toISOString() as UtcTimestamp,
       unavailableReason: (instance) =>
-        unavailableLimitsReason(
-          instance.driverKind,
-          providerRuntimeUsageLimitsStore.lastCompletedTurn(instance.id),
-        ),
+        instance.driverKind === "claude" && instance.configuration.authentication === "api-key"
+          ? "plan-limits-do-not-apply"
+          : unavailableLimitsReason(
+              instance.driverKind,
+              providerRuntimeUsageLimitsStore.lastCompletedTurn(instance.id),
+            ),
       observe: async (instance, signal) => {
+        if (
+          instance.driverKind === "claude" &&
+          instance.configuration.authentication === "api-key"
+        ) {
+          return { source: "provider-runtime", unavailableReason: "plan-limits-do-not-apply" };
+        }
         let driver: ProviderDriver;
         try {
           driver = makeConfiguredProviderDriver(instance, {
@@ -4510,14 +4542,43 @@ export function startOctantServer(
         }
         const facts = driver.contextFacts;
         if (facts === undefined) return undefined;
-        const limits = await Effect.runPromise(
-          Effect.scoped(facts.observeServiceLimits({ instanceId: instance.id })),
+        const outcome = await Effect.runPromise(
+          Effect.scoped(Effect.either(facts.observeServiceLimits({ instanceId: instance.id }))),
           { signal },
         );
+        if (outcome._tag === "Left") {
+          if (outcome.left.category === "unsupported") {
+            return { source: "provider-runtime", unavailableReason: "plan-limits-do-not-apply" };
+          }
+          if (outcome.left.category === "unavailable") return undefined;
+          throw outcome.left;
+        }
+        const limits = outcome.right;
+        const directory = claudePlanUsageStateDirectory(instance);
+        if (directory !== undefined) {
+          await providerAccountPlanUsageStore.replace({
+            instanceId: instance.id,
+            stateDirectory: directory,
+            source: "process-refresh",
+            observedAt: limits.updatedAt,
+            available: true,
+            ...(limits.rateLimitWindows === undefined ? {} : { windows: limits.rateLimitWindows }),
+          });
+        }
         return { source: "provider-runtime", limits };
       },
-      runtimeLimits: (instanceId, observedAt) =>
-        providerRuntimeUsageLimitsStore.serviceLimits(instanceId, observedAt),
+      runtimeLimits: (instanceId, observedAt) => {
+        const live = providerRuntimeUsageLimitsStore.serviceLimits(instanceId, observedAt);
+        if (live !== undefined) return live;
+        const instance = persistence
+          .readProviderInstances()
+          .find((candidate) => String(candidate.id) === String(instanceId));
+        if (instance === undefined) return undefined;
+        const directory = claudePlanUsageStateDirectory(instance);
+        return directory === undefined
+          ? undefined
+          : providerAccountPlanUsageStore.serviceLimits(instanceId, directory, observedAt);
+      },
     });
     providerUsageLimitsService.start();
     void providerUsageLimitsService.refresh().catch(() => undefined);

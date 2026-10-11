@@ -182,6 +182,9 @@ export class ProviderRuntimeUsageLimitsStore {
         ? {}
         : { resetsAt: event.resetsAt ?? previous?.resetsAt }),
       observedAt: event.occurredAt,
+      ...(event.overage === undefined && previous?.overage === undefined
+        ? {}
+        : { overage: event.overage ?? previous?.overage }),
     });
     while (windows.size > this.#maxWindowsPerProvider) {
       const oldest = [...windows.entries()].sort(

@@ -125,6 +125,7 @@ class FakeQuery implements ClaudeQueryPort {
   readonly accountInfo = vi.fn<ClaudeQueryPort["accountInfo"]>(() =>
     Effect.succeed(this.initialization.account),
   );
+  readonly readPlanUsage = vi.fn<ClaudeQueryPort["readPlanUsage"]>(() => Effect.succeed(undefined));
   readonly close = vi.fn(() => Effect.void);
   readonly send = vi.fn(({ text }: Parameters<ClaudeQueryPort["send"]>[0]) =>
     Effect.sync(() => {
@@ -4327,5 +4328,55 @@ describe("Claude account sign-in", () => {
       configDirectory: accountDirectory,
     });
     await recreated.close();
+  });
+
+  it("reads plan usage from the Claude process and never opens a query for an API-key account", async () => {
+    const subscription = harness("subscription", "current-session", {
+      configDirectory: "/Users/example/.claude",
+    });
+    subscription.setOpenQuery(() =>
+      Effect.acquireRelease(
+        Effect.sync(() => {
+          const query = new FakeQuery("sdk-usage-1");
+          query.readPlanUsage.mockReturnValue(
+            Effect.succeed({
+              rate_limits_available: true,
+              rate_limits: {
+                five_hour: { utilization: 50, resets_at: "2026-10-11T17:00:00.000Z" },
+              },
+            }),
+          );
+          subscription.queries.push(query);
+          return query;
+        }),
+        (query) => query.close(),
+      ),
+    );
+    const facts = subscription.driver.contextFacts;
+    expect(facts).toBeDefined();
+    const limits = await Effect.runPromise(
+      Effect.scoped(facts!.observeServiceLimits({ instanceId })),
+    );
+    expect(limits.rateLimitWindows).toEqual([
+      expect.objectContaining({ window: "five_hour", utilization: 0.5 }),
+    ]);
+    expect(subscription.queries[0]?.readPlanUsage).toHaveBeenCalledOnce();
+
+    const apiKey = harness("api-key", "current-session", {
+      configDirectory: "/Users/example/.claude-accounts/api",
+    });
+    const apiFacts = apiKey.driver.contextFacts;
+    const exit = await Effect.runPromise(
+      Effect.scoped(Effect.either(apiFacts!.observeServiceLimits({ instanceId }))),
+    );
+    expect(exit._tag).toBe("Left");
+    if (exit._tag === "Left") {
+      expect(exit.left).toMatchObject({
+        category: "unsupported",
+        message: "Plan limits do not apply.",
+      });
+    }
+    expect(apiKey.queries).toHaveLength(0);
+    expect(apiKey.credentialResolver.resolve).not.toHaveBeenCalled();
   });
 });

@@ -357,4 +357,107 @@ describe("ProviderUsageLimitsPanel", () => {
       screen.getByRole("meter", { name: "7-day window (secondary) remaining" }),
     ).toHaveAttribute("value", "15");
   });
+
+  it("says plan limits do not apply instead of drawing empty bars", async () => {
+    const unavailable = decodeProviderUsageLimitsSnapshot({
+      version: 1,
+      refreshedAt: "2026-08-23T12:00:00.000Z",
+      entries: [
+        {
+          providerInstanceId,
+          status: "unavailable",
+          source: "provider-runtime",
+          reason: "plan-limits-do-not-apply",
+          observedAt: "2026-08-23T12:00:00.000Z",
+        },
+      ],
+    });
+    render(
+      <ProviderUsageLimitsPanel
+        client={{ list: async () => unavailable, refresh: async () => unavailable }}
+        instances={[{ ...provider, driverKind: "claude" } as ProviderInstance]}
+      />,
+    );
+    expect(await screen.findByText("Plan limits do not apply")).toBeVisible();
+    expect(screen.queryByRole("meter")).not.toBeInTheDocument();
+  });
+
+  it("labels each account and shows last updated plus a local reset time", async () => {
+    const secondId = "22222222-2222-4222-8222-222222222222" as ProviderInstanceId;
+    const data = decodeProviderUsageLimitsSnapshot({
+      version: 1,
+      refreshedAt: "2026-08-23T12:00:00.000Z",
+      entries: [
+        {
+          providerInstanceId,
+          status: "available",
+          source: "provider-runtime",
+          observedAt: "2026-08-23T12:00:00.000Z",
+          limits: {
+            providerInstanceId,
+            scope: "account",
+            requests: { status: "unavailable" },
+            tokens: { status: "unavailable" },
+            concurrency: { status: "unavailable" },
+            retry: { status: "inactive" },
+            quota: "available",
+            source: "runtime-reported",
+            confidence: "high",
+            updatedAt: "2026-08-23T12:00:00.000Z",
+            rateLimitWindows: [
+              {
+                window: "five_hour",
+                status: "warning",
+                utilization: 0.75,
+                resetsAt: "2026-08-23T17:00:00.000Z",
+                observedAt: "2026-08-23T12:00:00.000Z",
+                overage: { status: "allowed", inUse: true },
+              },
+            ],
+          },
+        },
+        {
+          providerInstanceId: secondId,
+          status: "available",
+          source: "provider-runtime",
+          observedAt: "2026-08-23T11:00:00.000Z",
+          limits: {
+            providerInstanceId: secondId,
+            scope: "account",
+            requests: { status: "unavailable" },
+            tokens: { status: "unavailable" },
+            concurrency: { status: "unavailable" },
+            retry: { status: "inactive" },
+            quota: "available",
+            source: "runtime-reported",
+            confidence: "high",
+            updatedAt: "2026-08-23T11:00:00.000Z",
+            rateLimitWindows: [
+              {
+                window: "seven_day",
+                status: "allowed",
+                utilization: 0.2,
+                resetsAt: "2026-08-30T12:00:00.000Z",
+                observedAt: "2026-08-23T11:00:00.000Z",
+              },
+            ],
+          },
+        },
+      ],
+    });
+    render(
+      <ProviderUsageLimitsPanel
+        client={{ list: async () => data, refresh: async () => data }}
+        instances={[
+          { ...provider, displayName: "Home Claude" },
+          { ...provider, id: secondId, displayName: "Work Claude" },
+        ]}
+      />,
+    );
+    expect(await screen.findByText("Home Claude")).toBeVisible();
+    expect(screen.getByText("Work Claude")).toBeVisible();
+    expect(screen.getAllByText(/Last updated/).length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByText(/Overage in use/)).toBeVisible();
+    expect(screen.getByText(/Resets /)).toBeVisible();
+  });
 });

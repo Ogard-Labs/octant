@@ -25,6 +25,7 @@ import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
 import { SettingRow, SettingsSection } from "../settings/primitives";
+import { ProviderUsageLimitsPanel } from "../usage/ProviderUsageLimitsPanel";
 import { ProviderGlyph } from "./ProviderGlyph";
 import {
   AnthropicConfigurationForm,
@@ -81,6 +82,7 @@ export type ProviderSettingsListProps = Pick<
   | "onRename"
   | "onChangeBinary"
   | "onLocateBinary"
+  | "usageLimitsClient"
   | "onChangeClaudeConfiguration"
   | "onChangeDevinConfiguration"
   | "onChangeKiloConfiguration"
@@ -240,6 +242,9 @@ export function ProviderSettingsList(props: ProviderSettingsListProps) {
         credentialManagementAvailable={props.credentialManagementAvailable}
         index={index}
         extraClaudeAccount={claudeAccountUsesAssignedDirectory(ordered, instance)}
+        {...(props.usageLimitsClient === undefined
+          ? {}
+          : { usageLimitsClient: props.usageLimitsClient })}
         instance={instance}
         key={instance.id}
         {...(props.discoverySnapshot === undefined
@@ -558,6 +563,7 @@ function AgentEligibleModelsControls(props: {
 
 interface ProviderRowProps {
   readonly extraClaudeAccount: boolean;
+  readonly usageLimitsClient?: ProviderSettingsViewProps["usageLimitsClient"];
   readonly instance: ProviderInstance;
   readonly observed?: ProviderObservedState;
   readonly discoverySnapshot?: DiscoverySnapshot;
@@ -1540,6 +1546,13 @@ function ProviderRow(props: ProviderRowProps) {
                         ? "Anthropic API key"
                         : "Claude subscription"}
                     </span>
+                    {props.usageLimitsClient === undefined ? null : (
+                      <ProviderUsageLimitsPanel
+                        client={props.usageLimitsClient}
+                        compact
+                        instances={[props.instance]}
+                      />
+                    )}
                   </div>
                 )}
                 {!isVibe ? null : (

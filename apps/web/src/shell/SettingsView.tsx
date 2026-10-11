@@ -1285,6 +1285,9 @@ function ProvidersSection(props: {
     <div id="settings-providers">
       <ProviderSettingsView
         {...providerSettingsViewProps(props.providerController, props.hostBridge)}
+        {...(props.providerUsageLimitsClient === undefined
+          ? {}
+          : { usageLimitsClient: props.providerUsageLimitsClient })}
         {...(onLocateBinary === undefined ? {} : { onLocateBinary })}
         discovery={
           discoveryController === undefined ? null : (

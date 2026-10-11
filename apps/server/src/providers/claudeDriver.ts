@@ -26,6 +26,7 @@ import type {
   ProviderConnection,
   ProviderDriver,
 } from "@octant/provider-sdk/driver";
+import type { ProviderContextFactsSource } from "@octant/provider-sdk/context-facts";
 import {
   renderProviderTurnPrompt,
   unsupportedChatCapabilities,
@@ -63,6 +64,7 @@ import {
   type ClaudeEnvironmentScopeOptions,
 } from "./claudeEnvironment";
 import { CONFINED_CLAUDE_EXECUTION_POLICIES, type ClaudeProcessPort } from "./claudeProcess";
+import { claudeProcessPlanUsageLimits, decodeClaudeProcessPlanUsage } from "./claudeProcessUsage";
 import type { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
 
 const CLAUDE_TOOLS = ["Read", "Grep", "Glob", "Edit", "Write", "Bash", "AskUserQuestion"];
@@ -842,6 +844,52 @@ function makeProbe(
   };
 }
 
+function makeClaudeContextFacts(
+  options: ClaudeDriverOptions,
+  environmentFactory: ClaudeEnvironmentFactory,
+  clock: () => string,
+): ProviderContextFactsSource {
+  return {
+    observeModelLimits: () => Effect.succeed([]),
+    observeServiceLimits: ({ instanceId }) =>
+      Effect.gen(function* () {
+        if (instanceId !== options.instanceId) {
+          return yield* Effect.fail(
+            failure("invalid-configuration", "Provider instance does not match driver."),
+          );
+        }
+        if (options.authentication === "api-key") {
+          return yield* Effect.fail(failure("unsupported", "Plan limits do not apply."));
+        }
+        const environment = yield* environmentFactory(
+          "subscription",
+          options.configDirectory === undefined ? {} : { configDirectory: options.configDirectory },
+        );
+        const probeRoot = yield* privateProbeRoot;
+        const query = yield* options.sdk.openQuery({
+          binaryPath: options.binaryPath,
+          projectRoot: probeRoot,
+          authEnvironment: environment.environment,
+          model: PROBE_MODEL,
+          executionPolicy: "plan",
+          tools: CLAUDE_PLAN_TOOLS,
+          canUseTool: async () => ({ behavior: "deny", message: "Plan usage cannot use tools." }),
+          preToolUse: async () => ({ behavior: "deny", message: "Plan usage cannot use tools." }),
+        });
+        const payload = yield* query.readPlanUsage();
+        const observedAt = clock() as UtcTimestamp;
+        const decoded = decodeClaudeProcessPlanUsage(payload, observedAt);
+        if (decoded === undefined) {
+          return yield* Effect.fail(failure("unavailable", "Claude plan usage is unavailable."));
+        }
+        if (!decoded.available) {
+          return yield* Effect.fail(failure("unsupported", "Plan limits do not apply."));
+        }
+        return claudeProcessPlanUsageLimits(instanceId, decoded, observedAt);
+      }),
+  };
+}
+
 export function makeClaudeDriver(options: ClaudeDriverOptions): ProviderDriver {
   const environmentFactory = options.makeEnvironmentScope ?? makeClaudeEnvironmentScope;
   const factories: ConnectionFactories = {
@@ -855,6 +903,7 @@ export function makeClaudeDriver(options: ClaudeDriverOptions): ProviderDriver {
     kind: "claude",
     conversationOwnership: "provider",
     probe: makeProbe(options, environmentFactory, factories.clock),
+    contextFacts: makeClaudeContextFacts(options, environmentFactory, factories.clock),
     acquire: ({ instanceId, projectRoot, mode }) => {
       if (instanceId !== options.instanceId) {
         return Effect.fail(

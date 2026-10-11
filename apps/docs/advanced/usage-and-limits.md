@@ -119,9 +119,18 @@ model, and provider-instance scope are labeled separately; account limits can
 include usage from other applications.
 
 Codex supports a read-only account refresh while idle. That request creates no
-thread or model turn. Other providers contribute windows when their supported
-runtime or response headers report them. A provider that reports no quota data
-stays unavailable; Octant does not infer a balance from token history.
+thread or model turn. Claude subscription accounts report 5-hour, 7-day,
+per-model weekly, and overage windows from the Claude process itself: live
+session events, or an on-demand refresh. Octant never reads a Claude token or
+credential file to fetch those numbers, and never calls a vendor usage
+endpoint. Each Claude account shows its own limits, labeled by the account
+name, with reset time in local time and when the reading was last updated. An
+API-key Claude account says plan limits do not apply instead of drawing empty
+bars. A failed or missing refresh keeps the last reading and shows its age.
+
+Other providers contribute windows when their supported runtime or response
+headers report them. A provider that reports no quota data stays unavailable;
+Octant does not infer a balance from token history.
 
 An expired reset time means **Awaiting updated limits**, not an assumed refill.
 A failed refresh retains the previous reading with a stale label. Limits are

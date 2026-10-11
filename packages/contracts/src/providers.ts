@@ -2085,6 +2085,15 @@ export const ProviderRuntimeEvent = Schema.Union(
     utilization: Schema.optional(Schema.Number.pipe(Schema.between(0, 1))),
     /** When the window next resets. Absent when the provider gives none. */
     resetsAt: Schema.optional(UtcTimestamp),
+    /** Extra-usage posture the process reported with this window, when it did. */
+    overage: Schema.optional(
+      Schema.Struct({
+        status: Schema.Literal("allowed", "warning", "exhausted"),
+        inUse: Schema.optional(Schema.Boolean),
+        resetsAt: Schema.optional(UtcTimestamp),
+        disabledReason: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(64))),
+      }).annotations(strict),
+    ),
   }).annotations(strict),
   /**
    * An absolute quota bucket the provider disclosed on a response it already

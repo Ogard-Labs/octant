@@ -215,6 +215,7 @@ class ConformanceQuery implements ClaudeQueryPort {
   };
   readonly supportedModels = () => Effect.succeed(this.initialization.models);
   readonly accountInfo = () => Effect.succeed(this.initialization.account);
+  readonly readPlanUsage = () => Effect.succeed(undefined);
   readonly setPermissionMode = () => Effect.void;
   readonly close = () =>
     Effect.sync(() => {

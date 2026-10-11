@@ -453,6 +453,16 @@
   border-radius: var(--oct-radius-pill);
 }
 
+.provider-limits__updated {
+  margin: 0;
+  color: var(--oct-muted);
+}
+
+.provider-limits--compact {
+  width: 100%;
+  min-width: 0;
+}
+
 .provider-limits__warning {
   display: grid;
   gap: 2px;

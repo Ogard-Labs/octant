@@ -2195,6 +2195,15 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   model picker, thread pinning, and usage history are written against
   that profile. Octant never reads, stores, or injects that provider's
   credentials ([0005](decisions/0005-provider-sdk-contract.md)).
+  Plan usage limits (rolling windows, per-model weekly, overage) come
+  only from the provider's own process: session `rate-limit-window`
+  events, or an on-demand process refresh. Octant never reads a token
+  or credential file to fetch those numbers, and never calls a vendor
+  usage endpoint itself. Each account keeps its own snapshot, keyed by
+  the instance and the state directory that session ran under. An
+  API-key account reports that plan limits do not apply rather than
+  drawing empty bars. A failed or missing refresh keeps the last
+  snapshot and shows its age. Claude is the first adopter.
   Claude is the first adopter (`CLAUDE_CONFIG_DIR` and
   `CLAUDE_SECURESTORAGE_CONFIG_DIR`, default `~/.claude`, extras
   `~/.claude-accounts/<instanceId>`, `claude auth login` /

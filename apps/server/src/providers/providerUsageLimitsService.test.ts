@@ -654,4 +654,22 @@ describe("ProviderUsageLimitsService", () => {
     expect(refilled.entries[0]).toMatchObject({ status: "unavailable", reason: "endpoint-silent" });
     expect(JSON.stringify(refilled)).not.toContain("120");
   });
+
+  it("shows that plan limits do not apply instead of empty windows", async () => {
+    const service = new ProviderUsageLimitsService({
+      listInstances: () => [instance(firstId)],
+      observe: vi.fn(async () => ({
+        source: "provider-runtime" as const,
+        unavailableReason: "plan-limits-do-not-apply" as const,
+      })),
+      now: () => "2026-08-23T12:00:00.000Z" as UtcTimestamp,
+    });
+
+    const snapshot = await service.refresh();
+    expect(snapshot.entries[0]).toMatchObject({
+      status: "unavailable",
+      reason: "plan-limits-do-not-apply",
+    });
+    expect(snapshot.entries[0]).not.toHaveProperty("limits");
+  });
 });
