@@ -389,7 +389,12 @@ export class TerminalProcessPort {
           this.#dependencies.temporaryDirectory,
           shellState,
           shellDirectory,
-          ...shellConfigurationReadRoots(this.#dependencies.homeDirectory),
+          // Only macOS runs the person's own shell configuration. On Linux the
+          // shell's HOME is its state directory, so binding these homes would
+          // widen its reads for nothing it uses.
+          ...(this.#dependencies.platform === "darwin"
+            ? shellConfigurationReadRoots(this.#dependencies.homeDirectory)
+            : []),
         ],
       });
     } catch (error) {

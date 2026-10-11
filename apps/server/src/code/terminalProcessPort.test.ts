@@ -396,12 +396,18 @@ describe("TerminalProcessPort", () => {
     const cwd = join(root, "repo");
     mkdirSync(temporaryDirectory);
     mkdirSync(cwd);
+    // The shell's HOME is its state directory on Linux, so the person's
+    // configuration and version-manager homes are never bound into it.
+    const home = join(root, "home");
+    mkdirSync(join(home, ".local", "share", "mise"), { recursive: true });
+    writeFileSync(join(home, ".zshrc"), "# rc\n");
     const port = new TerminalProcessPort({
       spawn,
       killProcessGroup: vi.fn(),
       confinement: makeSeatbeltConfinementLive({ platform: "linux", sandboxPath: bwrapPath }),
       temporaryDirectory,
       shellStateDirectory,
+      seatbeltHomeDirectory: home,
       networkEgress: "none",
       platform: "linux",
     });
@@ -422,6 +428,9 @@ describe("TerminalProcessPort", () => {
     );
     expect(launchedCall(spawn)[1]).not.toContain("--new-session");
     expect(launchedCall(spawn)[2].env.HOME).toBe(launchedStateDirectory(spawn));
+    expect(launchedCall(spawn)[1].some((argument) => String(argument).startsWith(home))).toBe(
+      false,
+    );
   });
 
   it("fails closed when Seatbelt confinement is unavailable", () => {
