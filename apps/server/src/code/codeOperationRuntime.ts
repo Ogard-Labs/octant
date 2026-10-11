@@ -2161,7 +2161,8 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       }
     | { readonly status: "refused"; readonly reason: CodeForkHandoffRefusal }
   > {
-    if (this.#options.forkContext === undefined) return { status: "refused", reason: "unsupported" };
+    if (this.#options.forkContext === undefined)
+      return { status: "refused", reason: "unsupported" };
     let source: CodeThread | undefined;
     try {
       source = this.#options.persistence.readCodeThread(origin.threadId);

@@ -414,10 +414,9 @@ export function admittedParentCodeContext(
         projectId: String(thread.projectId),
         threadVersion: thread.version,
         externalContentIngested: input.externalContentIngested,
-        point:
-          through
-            ? { throughOperationId: String(input.throughOperationId), conversationCursor: cursor }
-            : { lastSequence: activity.lastSequence, conversationCursor: cursor },
+        point: through
+          ? { throughOperationId: String(input.throughOperationId), conversationCursor: cursor }
+          : { lastSequence: activity.lastSequence, conversationCursor: cursor },
       },
       { unfinishedReplies, attachments },
     );

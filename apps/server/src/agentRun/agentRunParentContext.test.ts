@@ -519,7 +519,8 @@ describe("a fork reading the thread it was forked from", () => {
     expect(
       input.readEvidence.mock.calls.some(
         ([ref]) =>
-          ref.contentId === later.prompt.contentId || ref.contentId === later.assistant[0]?.contentId,
+          ref.contentId === later.prompt.contentId ||
+          ref.contentId === later.assistant[0]?.contentId,
       ),
     ).toBe(false);
     expect(result.blocks).toHaveLength(5);

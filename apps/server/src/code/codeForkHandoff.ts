@@ -70,7 +70,10 @@ export function selectCodeForkHandoff(
     readonly projectId: CodeThread["projectId"];
   },
 ):
-  | { readonly status: "available"; readonly selection: Extract<AgentRunParentContextSelection, { readonly status: "available" }> }
+  | {
+      readonly status: "available";
+      readonly selection: Extract<AgentRunParentContextSelection, { readonly status: "available" }>;
+    }
   | { readonly status: "refused"; readonly reason: CodeForkHandoffRefusal } {
   if (read === undefined) return { status: "refused", reason: "unsupported" };
   if (String(input.source.id) !== String(input.origin.threadId))
@@ -87,7 +90,10 @@ export function selectCodeForkHandoff(
     return { status: "refused", reason: "source-unavailable" };
   }
   if (selection.status === "unavailable") return { status: "refused", reason: selection.reason };
-  if (selection.source.mode !== "code" || selection.source.threadId !== String(input.origin.threadId))
+  if (
+    selection.source.mode !== "code" ||
+    selection.source.threadId !== String(input.origin.threadId)
+  )
     return { status: "refused", reason: "foreign-thread" };
   if (selection.source.projectId !== String(input.projectId))
     return { status: "refused", reason: "foreign-project" };

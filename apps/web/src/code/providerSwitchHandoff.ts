@@ -31,10 +31,7 @@ function count(value: number, one: string, many: string): string {
   return `${value} ${value === 1 ? one : many}`;
 }
 
-type TextHandoff = Exclude<
-  CodeConversationTurnHandoff,
-  { readonly reason: "fork-native-session" }
->;
+type TextHandoff = Exclude<CodeConversationTurnHandoff, { readonly reason: "fork-native-session" }>;
 
 /** Every omission the host counted, named, so a short handoff never reads as a short conversation. */
 function omissionsDisclosure(handoff: TextHandoff): string {

@@ -48,10 +48,7 @@ describe("provider switch handoff disclosure", () => {
   });
 
   it("describes outside content as the thread's, not as part of the excerpts", () => {
-    const text = conversationHandoffDisclosure(
-      handoff({ externalContentIngested: true }),
-      label,
-    );
+    const text = conversationHandoffDisclosure(handoff({ externalContentIngested: true }), label);
     expect(text).toContain("This thread has taken in outside content.");
     expect(text).not.toContain("Some of it came from outside content");
   });
@@ -81,7 +78,10 @@ describe("fork handoff disclosure", () => {
   });
 
   it("says a fork that continued the source's session kept its tool activity", () => {
-    const text = conversationHandoffDisclosure({ reason: "fork-native-session", forkedFrom }, label);
+    const text = conversationHandoffDisclosure(
+      { reason: "fork-native-session", forkedFrom },
+      label,
+    );
     expect(text).toContain("continuing the source's own session");
     expect(text).toContain("tool activity");
     expect(text).toContain("later replies did not transfer");
