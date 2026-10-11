@@ -2284,6 +2284,14 @@ html[data-octant-reduced-motion="true"] .code-transcript-row__status-icon {
   font-size: var(--oct-text-xs);
 }
 
+/* What a provider switch handed over, under the divider that marks it. */
+.code-thread-workspace__handoff {
+  margin: 0 0 var(--oct-space-2);
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  text-align: center;
+}
+
 .code-thread-workspace__checkpoint,
 .code-thread-workspace__fork,
 .code-thread-workspace__restore {

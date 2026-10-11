@@ -20,7 +20,7 @@ import {
   clampTurnAccessPosture,
   decidesCodeEffectsByApproval,
   pickerGroupCarriesAppManagedTools,
-  startedThreadPickerGroups,
+  startedCodeThreadPickerGroups,
   type PickerGroup,
 } from "@octant/domain";
 import { CirclePause, X } from "lucide-react";
@@ -81,6 +81,10 @@ import { HarnessRetryStatus } from "../transcript/HarnessRetryStatus";
 import { liveTaskProgress } from "./transcriptActivity";
 import { ThreadTasksPanel } from "../transcript/ThreadTasksPanel";
 import { modelDisplayName, providerModelLabel } from "../providers/providerModelLabel";
+import {
+  pendingProviderSwitchNotice,
+  providerSwitchHandoffDisclosure,
+} from "./providerSwitchHandoff";
 import {
   TurnHeader,
   TurnTime,
@@ -674,11 +678,32 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     (message) => message.role === "assistant" && message.status === "completed",
   );
   const threadModelGroups = hasProviderSession
-    ? startedThreadPickerGroups(providerGroups, {
+    ? startedCodeThreadPickerGroups(providerGroups, {
         providerInstanceId: thread.providerInstanceId,
         modelId: thread.modelId,
       })
     : providerGroups;
+  // The provider the conversation's session lives on is the one the last
+  // finished reply came from. A thread now pointed elsewhere starts a new
+  // session on its next message, and the host hands the conversation over as
+  // text; the person is told so before they send, not after.
+  const sessionReply = messages.findLast(
+    (message) =>
+      message.role === "assistant" &&
+      message.status === "completed" &&
+      message.providerInstanceId !== undefined,
+  );
+  const pendingSwitchNotice =
+    sessionReply !== undefined &&
+    String(sessionReply.providerInstanceId) !== String(thread.providerInstanceId)
+      ? pendingProviderSwitchNotice(
+          providerModelLabel(providerGroups, thread),
+          providerModelLabel(providerGroups, {
+            providerInstanceId: sessionReply.providerInstanceId,
+            modelId: sessionReply.modelId,
+          }),
+        )
+      : undefined;
   const canvasClient = props.canvasClient;
   const openInSidebar = props.onOpenCanvasInSidebar;
   const canvasPlacement = placeThreadCanvases(
@@ -1314,6 +1339,17 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                     })}
                   </OctantSeparatorWithLabel>
                 ) : null}
+                {message.role === "assistant" && message.handoff !== undefined ? (
+                  <p className="code-thread-workspace__handoff" role="note">
+                    {providerSwitchHandoffDisclosure(
+                      message.handoff,
+                      providerModelLabel(providerGroups, {
+                        providerInstanceId: message.handoff.previousProviderInstanceId,
+                        modelId: message.handoff.previousModelId,
+                      }),
+                    )}
+                  </p>
+                ) : null}
                 <article
                   aria-label={
                     delivered
@@ -1947,6 +1983,15 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                 Checking the selected provider…
               </span>
             ) : null}
+            {pendingSwitchNotice === undefined || providerChanging ? null : (
+              <span
+                className="composer-status__hint code-thread-workspace__hint"
+                role="status"
+                title={pendingSwitchNotice}
+              >
+                {pendingSwitchNotice}
+              </span>
+            )}
             {props.controller.accessNotice === undefined ? null : (
               <span
                 className="code-thread-workspace__hint"

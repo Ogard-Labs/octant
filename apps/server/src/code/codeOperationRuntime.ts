@@ -112,7 +112,11 @@ import type {
 } from "../harness/nativeHarnessTurnObserver";
 import type { TurnEndSummary } from "../metrics/turnEnd";
 import type { LiveTurnRegistry } from "../liveTurn/liveTurnRegistry";
-import type { ProviderContextBlock } from "@octant/contracts";
+import { decodeAgentRunAdmittedContext, type ProviderContextBlock } from "@octant/contracts";
+import type {
+  AgentRunParentContextSelection,
+  AgentRunParentContextUnavailableReason,
+} from "../agentRun/agentRunParentContext";
 import {
   CodeServiceError,
   type CodeForkPoint,
@@ -307,6 +311,16 @@ export interface CodeOperationRuntimeOptions {
    * model differs from its session's is refused as before.
    */
   readonly supportsModelSwitch?: (thread: CodeThread) => boolean;
+  /**
+   * Reads the thread's own earlier conversation for a provider-switch handoff,
+   * through the bounded selector a child's parent context uses. Absent means
+   * this host cannot hand a conversation over, so a turn on a provider other
+   * than its session's is refused, naming that reason.
+   */
+  readonly providerSwitchContext?: (input: {
+    readonly thread: CodeThread;
+    readonly excludeOperationId: CodeOperationId;
+  }) => AgentRunParentContextSelection;
   /**
    * Whether the thread's provider can take an image. A host that cannot say so
    * answers false: a turn that attached images then fails in words rather than
@@ -1504,7 +1518,21 @@ function persistenceLabel(value: "current-session" | "project-default"): string 
   return value === "current-session" ? "current session only" : "remember for this Project";
 }
 
+/** The handoff record a switching turn still has to journal, without its content reference. */
+type PendingHandoffRecord = Omit<
+  Extract<CodeOperationEvent, { readonly kind: "context-handoff-attached" }>,
+  "content"
+>;
+
 interface ActiveTurn {
+  /**
+   * A provider-switch handoff this turn selected and has not journaled yet.
+   * It is journaled when the new session is ready, before the prompt is sent.
+   */
+  pendingHandoff?: {
+    readonly blocks: ReadonlyArray<ProviderContextBlock>;
+    readonly record: PendingHandoffRecord;
+  };
   readonly computerUseSelection?: import("@octant/contracts/extensions").ExtensionSelection;
   /** The selected MCP servers' tools, resolved when the turn was accepted. */
   readonly extensionTools?: AppManagedToolSet;
@@ -1552,6 +1580,45 @@ interface ActiveTurn {
   changedFilesRecording?: Promise<void>;
   launch?: () => void;
 }
+
+class HandoffUnsaved extends Error {}
+
+type ProviderSwitchHandoffRefusal =
+  | AgentRunParentContextUnavailableReason
+  | "unsupported"
+  | "handoff-unreadable"
+  | "handoff-unsaved";
+
+/**
+ * Why a turn that moved to another provider did not start. Each names what
+ * the person can do; none starts the new provider without the handoff.
+ */
+const PROVIDER_SWITCH_HANDOFF_REFUSALS: Record<ProviderSwitchHandoffRefusal, string> = {
+  unsupported:
+    "This host cannot hand a task's conversation to another provider. Restore the previous provider or start a new task.",
+  "thread-unavailable":
+    "This task is no longer available, so its conversation cannot be handed to the new provider.",
+  "foreign-thread":
+    "The conversation read for the handoff does not belong to this task, so nothing was handed over. Restore the previous provider or start a new task.",
+  "foreign-project":
+    "The conversation read for the handoff does not belong to this task's Project, so nothing was handed over. Restore the previous provider or start a new task.",
+  "source-point-unavailable":
+    "This task has no recorded conversation to hand to the new provider. Restore the previous provider or start a new task.",
+  "source-empty":
+    "This task has no readable messages to hand to the new provider; earlier messages may have been removed. Restore the previous provider or start a new task.",
+  "source-changed":
+    "This task's conversation changed while it was being read for the handoff. Send the message again.",
+  "source-unavailable":
+    "This task's conversation could not be read for the handoff. Send the message again, or restore the previous provider.",
+  "invalid-page":
+    "This task's conversation could not be read consistently for the handoff. Send the message again, or restore the previous provider.",
+  "history-window-exceeded":
+    "This task's history is too long to choose recent messages to hand over. Restore the previous provider or start a new task.",
+  "handoff-unreadable":
+    "The handoff this message was prepared with can no longer be read. Send the message again.",
+  "handoff-unsaved":
+    "The handoff to the new provider could not be saved, so the message was not sent. Send it again.",
+};
 
 class RuntimeTurnController implements CodeOperationTurnPort {
   readonly #options: CodeOperationRuntimeOptions;
@@ -1666,16 +1733,38 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     // thread; refusing every turn after that switch left the thread stuck. A
     // provider that can resume onto the new model keeps the conversation, and
     // the turn records the new model on its session.
+    const providerSwitch =
+      previous?.kind === "provider-session-ready" &&
+      String(previous.providerInstanceId) !== String(input.thread.providerInstanceId)
+        ? previous
+        : undefined;
     if (
       previous?.kind === "provider-session-ready" &&
-      (String(previous.providerInstanceId) !== String(input.thread.providerInstanceId) ||
-        (String(previous.modelId) !== String(input.thread.modelId) &&
-          this.#options.supportsModelSwitch?.(input.thread) !== true) ||
-        String(previous.checkoutId) !== String(input.thread.checkoutId))
+      String(previous.checkoutId) !== String(input.thread.checkoutId)
     )
       return failStart(
-        "This task's provider session belongs to a different provider, model, or checkout. Restore that selection or start a new task.",
+        "This task's provider session belongs to a different checkout. Restore that selection or start a new task.",
       );
+    if (
+      previous?.kind === "provider-session-ready" &&
+      providerSwitch === undefined &&
+      String(previous.modelId) !== String(input.thread.modelId) &&
+      this.#options.supportsModelSwitch?.(input.thread) !== true
+    )
+      return failStart(
+        "This provider cannot carry the task's session on to another of its models. Restore that model, choose a different provider, or start a new task.",
+      );
+    // Another provider cannot take up this session, so the turn starts a new
+    // one with a disclosed text handoff of the thread's own conversation. The
+    // handoff is chosen before anything else is prepared, so a refusal names
+    // its reason and leaves nothing behind.
+    const switchHandoff = await this.#providerSwitchHandoff(
+      input.thread,
+      command.operationId,
+      providerSwitch,
+    );
+    if (switchHandoff?.status === "refused")
+      return failStart(PROVIDER_SWITCH_HANDOFF_REFUSALS[switchHandoff.reason]);
     // A recorded session without a resume cursor wedges the thread rather than
     // silently discarding the conversation the provider still holds. A prior
     // turn that never reached its session left nothing to discard only once it
@@ -1686,6 +1775,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     if (
       priorTurn &&
       previous?.kind === "provider-session-ready" &&
+      providerSwitch === undefined &&
       previous.resumeCursor === undefined
     ) {
       return failStart(
@@ -1731,7 +1821,9 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     // when the provider can take it up exactly; otherwise it reads the
     // source's history as text. Never both.
     let resumeCursor =
-      previous?.kind === "provider-session-ready" ? previous.resumeCursor : undefined;
+      previous?.kind === "provider-session-ready" && providerSwitch === undefined
+        ? previous.resumeCursor
+        : undefined;
     let forkSeeded = false;
     if (previous === undefined && input.thread.forkedFrom !== undefined) {
       const seeded = await this.#options
@@ -1771,6 +1863,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     }
     const context = [
       ...(forkSeeded || input.forkHandoff === undefined ? [] : [input.forkHandoff]),
+      ...(switchHandoff?.blocks ?? []),
       ...(input.context ?? []),
       ...(feedback?.context === undefined || feedback.context.trim().length === 0
         ? []
@@ -1778,6 +1871,9 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     ];
     const attachments = [...(input.attachments ?? []), ...(feedback?.attachments ?? [])];
     const active: ActiveTurn = {
+      ...(switchHandoff?.record === undefined
+        ? {}
+        : { pendingHandoff: { blocks: switchHandoff.blocks, record: switchHandoff.record } }),
       ...(command.computerUseSelection === undefined
         ? {}
         : { computerUseSelection: command.computerUseSelection }),
@@ -1788,7 +1884,10 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       windowId: input.windowId,
       thread: input.thread,
       operationId: command.operationId,
-      sessionId: previous?.kind === "provider-session-ready" ? previous.sessionId : input.sessionId,
+      sessionId:
+        previous?.kind === "provider-session-ready" && providerSwitch === undefined
+          ? previous.sessionId
+          : input.sessionId,
       requestedSessionId: input.sessionId,
       ...(resumeCursor === undefined ? {} : { resumeCursor }),
       checkoutRoot: input.checkoutRoot,
@@ -1831,6 +1930,99 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       }),
     );
     return turnState("running");
+  }
+
+  /**
+   * The handoff a turn that moved to another provider starts with.
+   *
+   * A turn's handoff is chosen once. If its operation already journaled one
+   * (a start recovered after a restart), that record is read back rather than
+   * the conversation selected again, so a recovery never sends context other
+   * than what was disclosed. That includes a recovery whose new session was
+   * already recorded: the provider may never have received the prompt the
+   * handoff went with, so it is sent again with it. Otherwise, only for a turn
+   * that moved providers, the thread's own conversation is selected and
+   * checked to be this thread's in this Project; the record is journaled when
+   * the new session is ready.
+   */
+  async #providerSwitchHandoff(
+    thread: CodeThread,
+    operationId: CodeOperationId,
+    previous: Extract<CodeOperationEvent, { readonly kind: "provider-session-ready" }> | undefined,
+  ): Promise<
+    | {
+        readonly status: "ready";
+        readonly blocks: ReadonlyArray<ProviderContextBlock>;
+        readonly record?: PendingHandoffRecord;
+      }
+    | { readonly status: "refused"; readonly reason: ProviderSwitchHandoffRefusal }
+    | undefined
+  > {
+    const refused = (reason: ProviderSwitchHandoffRefusal) =>
+      ({ status: "refused", reason }) as const;
+    const replay = this.#events.replay({
+      threadId: thread.id,
+      operationId,
+      afterCursor: 0,
+      limit: MAX_CODE_OPERATION_REPLAY_LIMIT,
+    });
+    if (replay.status !== "ok")
+      return previous === undefined ? undefined : refused("source-unavailable");
+    const journaled = replay.frames.find(
+      (frame) => frame.event.kind === "context-handoff-attached",
+    )?.event;
+    if (journaled?.kind === "context-handoff-attached") {
+      // A selection changed since the record belongs to a different switch
+      // than the one the record disclosed.
+      if (
+        String(journaled.providerInstanceId) !== String(thread.providerInstanceId) ||
+        String(journaled.modelId) !== String(thread.modelId) ||
+        (previous !== undefined &&
+          String(journaled.previousSessionId) !== String(previous.sessionId))
+      )
+        return refused("source-changed");
+      try {
+        const text = await this.#options.evidence.read?.(journaled.content);
+        if (text === undefined) return refused("handoff-unreadable");
+        return { status: "ready", blocks: decodeAgentRunAdmittedContext(JSON.parse(text)) };
+      } catch {
+        return refused("handoff-unreadable");
+      }
+    }
+    if (previous === undefined) return undefined;
+    const select = this.#options.providerSwitchContext;
+    if (select === undefined) return refused("unsupported");
+    let selection: AgentRunParentContextSelection;
+    try {
+      selection = select({ thread, excludeOperationId: operationId });
+    } catch {
+      return refused("source-unavailable");
+    }
+    if (selection.status === "unavailable") return refused(selection.reason);
+    // The selector is handed this thread, but what it read is checked here too:
+    // a handoff is the thread's own conversation, never another thread's or
+    // another Project's that a reader happened to return.
+    if (selection.source.mode !== "code" || selection.source.threadId !== String(thread.id))
+      return refused("foreign-thread");
+    if (selection.source.projectId !== String(thread.projectId)) return refused("foreign-project");
+    return {
+      status: "ready",
+      blocks: selection.blocks,
+      record: {
+        kind: "context-handoff-attached",
+        reason: "provider-switch",
+        previousProviderInstanceId: previous.providerInstanceId,
+        previousModelId: previous.modelId,
+        previousSessionId: previous.sessionId,
+        providerInstanceId: thread.providerInstanceId,
+        modelId: thread.modelId,
+        messages: selection.blocks.length - 1,
+        omissions: selection.omissions,
+        externalContentIngested: selection.source.externalContentIngested,
+        nativeSessionTransferred: false,
+        hiddenReasoningTransferred: false,
+      },
+    };
   }
 
   async answerInput(input: Parameters<CodeOperationTurnPort["answerInput"]>[0]) {
@@ -2388,6 +2580,29 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           onSessionReady: (handle) =>
             Effect.try({
               try: () => {
+                // The handoff is recorded before the session it opened is, and
+                // both before the prompt is sent, so nothing reaches the new
+                // provider that the journal does not disclose.
+                const pending = active.pendingHandoff;
+                if (pending !== undefined) {
+                  let content: Extract<
+                    CodeOperationEvent,
+                    { readonly kind: "context-handoff-attached" }
+                  >["content"];
+                  try {
+                    content = this.#options.evidence.put(JSON.stringify(pending.blocks));
+                  } catch {
+                    throw new HandoffUnsaved();
+                  }
+                  const handoff = this.#events.append({
+                    threadId: active.thread.id,
+                    operationId: active.operationId,
+                    expectedCursor: active.cursor,
+                    event: { ...pending.record, content },
+                  });
+                  active.cursor = handoff.cursor;
+                  delete active.pendingHandoff;
+                }
                 const resumeCursor = handle.resumeCursor ?? active.resumeCursor;
                 const frame = this.#events.append({
                   threadId: active.thread.id,
@@ -2404,9 +2619,12 @@ class RuntimeTurnController implements CodeOperationTurnPort {
                 });
                 active.cursor = frame.cursor;
               },
-              catch: () => ({
+              catch: (error) => ({
                 category: "failed" as const,
-                message: "The provider session could not be saved. The message was not sent.",
+                message:
+                  error instanceof HandoffUnsaved
+                    ? PROVIDER_SWITCH_HANDOFF_REFUSALS["handoff-unsaved"]
+                    : "The provider session could not be saved. The message was not sent.",
               }),
             }),
           checkoutRoot: active.checkoutRoot,

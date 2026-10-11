@@ -2385,8 +2385,9 @@ From that the turn runner builds the parts (`octantWindowBreakdown` in
   (`retention-unknown`, `compacted`, `history-unknown`), the copies stay in
   `Other (provider)`, and the session stays uncounted until it ends. Nothing is
   estimated from a guess about what a runtime kept.
-- Thread and file mentions, issue context, a fork's handoff and product feedback
-  are part of the turn's own request; they stay in `Other (provider)`.
+- Thread and file mentions, issue context, a fork's or provider switch's
+  handoff and product feedback are part of the turn's own request; they stay in
+  `Other (provider)`.
 
 The renderer shows the parts and one remainder, `Other (provider)`, which is the
 reported occupancy less the parts and is itself marked estimated when any part
@@ -2539,13 +2540,53 @@ the same provider instance resumes the same native session only when the driver
 reports the `modelSwitch` capability; the resume carries the thread's current
 model and the turn records it on the session. Codex restates the model and its
 reasoning effort on each turn, and Claude resumes the SDK session under the new
-model. Any other driver, and any change of provider instance, still fails
-closed, and a started Code thread's model picker offers only the choices its
-next turn will accept. Work and Chat also refuse
+model. Another model on any other driver still fails closed. In Code, a
+change of provider instance starts a new session with a provider-switch
+handoff (below); in Chat and Work it still fails closed. A started Code
+thread's model picker offers its own provider's models only where its next
+turn will accept them, and every other provider. Work and Chat also refuse
 a follow-up that switches between provider-owned and host-owned conversation
 history; switching adapters cannot implicitly replace an existing native task.
 Work also refuses when the previous driver is unavailable and its conversation
 ownership cannot be established.
+
+**Provider-switch handoff (Code).** A Code turn whose last recorded session
+belongs to another provider instance on the same checkout starts a new session
+on the thread's current provider; it never resumes or names the previous
+session to the new provider. The turn carries a disclosed text handoff built by
+the same selector that admits a child's parent context
+(`admittedParentCodeContext`, purpose `provider-switch`): the thread's own
+accepted prompts and completed replies, at most 24 blocks of 4,000 characters
+including the summary block, each attributed to its provider and model, with
+the thread's taint and every omission counted (earlier messages, purged or
+oversized bodies, empty bodies, unfinished replies, attachments, truncation).
+Reasoning, tool bodies and attachments are never read. The switching turn's
+own prompt is excluded from the selection because it is sent as the prompt.
+The host checks that what the selector returned is this thread's in this
+Project before using it.
+
+The handoff is journaled on the turn's operation as `context-handoff-attached`
+when the new session is ready and before the prompt is sent: the previous and
+new provider, model and session, the counts and taint, a content-store
+reference to the exact blocks sent, and fixed `nativeSessionTransferred` and
+`hiddenReasoningTransferred` values of `false`. A start recovered after a
+restart reads that record back instead of selecting again, so it sends the
+handoff first disclosed and journals no second one; a recovery after the new
+session was recorded sends the journaled handoff again with the prompt, since
+the provider may never have received it. A selection that changed since the
+record refuses. The conversation page carries a summary of the record on the
+turn (`handoff`), and the transcript shows what was handed over and that hidden
+reasoning, tool activity and the previous session did not transfer. While the
+thread's selection names a provider other than the one its last reply came
+from, the composer says the next message starts a new session with a handoff.
+
+A switch that cannot hand over refuses before the new provider is acquired,
+naming why: no host selector, an unavailable or foreign thread or Project,
+no recorded or readable conversation (for example every body purged), a
+conversation that changed during the read, an inconsistent page, a history
+beyond the bounded scan, or a journaled handoff that can no longer be read or
+saved. A model change within a provider that cannot carry its session, and a
+change of checkout, still refuse as before.
 
 Optional Project and
 thread spend ceilings (0060) are host owner policy over four dimensions:

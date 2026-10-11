@@ -1656,7 +1656,7 @@ describe("CodeThreadWorkspace", () => {
     );
   });
 
-  it("offers a started thread only the models its next turn will accept", async () => {
+  it("offers a started thread only the models its next turn will accept, plus every other provider", async () => {
     const user = userEvent.setup();
     const execute = vi.fn(async () => undefined) as CodeController["execute"];
     const switching = providerGroup();
@@ -1687,9 +1687,10 @@ describe("CodeThreadWorkspace", () => {
     );
 
     await user.click(screen.getByRole("button", { name: "Provider and model" }));
-    // The conversation lives in this provider's session, so another provider
-    // is never offered; another of its models is, because it can carry over.
-    expect(screen.queryByRole("option", { name: "Remote Provider" })).not.toBeInTheDocument();
+    // Another of this provider's models carries the session over. Another
+    // provider is offered too: it starts a new session with the conversation
+    // handed over as text.
+    expect(screen.getByRole("option", { name: "Remote Provider" })).toBeInTheDocument();
     expect(screen.queryByRole("option", { name: "Model Two" })).not.toBeInTheDocument();
     await user.click(screen.getByRole("option", { name: "Model Three" }));
     expect(execute).toHaveBeenCalledWith({
@@ -2217,6 +2218,96 @@ describe("CodeThreadWorkspace", () => {
 
     expect(screen.getByRole("separator", { name: /provider handoff/i })).toHaveTextContent(
       "Provider handoff",
+    );
+  });
+
+  it("says what a provider switch handed over and that hidden reasoning stayed behind", () => {
+    render(
+      <CodeThreadWorkspace
+        controller={controller({
+          conversation: [
+            {
+              id: "turn:assistant-one",
+              role: "assistant",
+              text: "The first pass is complete.",
+              providerInstanceId: providerId,
+              modelId,
+              status: "completed",
+            },
+            {
+              id: "turn:assistant-two",
+              role: "assistant",
+              text: "The second pass is complete.",
+              providerInstanceId: alternateProviderId,
+              modelId: alternateModelId,
+              status: "completed",
+              handoff: {
+                reason: "provider-switch",
+                previousProviderInstanceId: providerId,
+                previousModelId: modelId,
+                messages: 3,
+                omissions: {
+                  earlierMessages: 4,
+                  unfinishedReplies: 0,
+                  missingBodies: 1,
+                  oversizedBodies: 0,
+                  emptyBodies: 0,
+                  attachments: 0,
+                  truncatedMessages: 0,
+                  truncatedCharacters: 0,
+                  sourceTruncatedMessages: 0,
+                },
+                externalContentIngested: false,
+              },
+            },
+          ],
+        })}
+        providerGroups={[providerGroup(), alternateProviderGroup()]}
+        threadId={threadId}
+      />,
+    );
+
+    const note = screen.getByRole("note");
+    expect(note).toHaveTextContent("Handed over 3 recent messages from");
+    expect(note).toHaveTextContent("Left out: 4 earlier messages, 1 message no longer stored.");
+    expect(note).toHaveTextContent(
+      "Hidden reasoning, tool activity and the previous session did not transfer.",
+    );
+  });
+
+  it("warns before sending that a thread moved to another provider starts a new session", () => {
+    const base = controller();
+    const view = base.activeView!;
+    render(
+      <CodeThreadWorkspace
+        controller={{
+          ...base,
+          activeView: {
+            ...view,
+            thread: {
+              ...view.thread,
+              providerInstanceId: alternateProviderId,
+              modelId: alternateModelId,
+            },
+          },
+          conversation: [
+            {
+              id: "turn:assistant-one",
+              role: "assistant",
+              text: "The first pass is complete.",
+              providerInstanceId: providerId,
+              modelId,
+              status: "completed",
+            },
+          ],
+        }}
+        providerGroups={[providerGroup(), alternateProviderGroup()]}
+        threadId={threadId}
+      />,
+    );
+
+    expect(screen.getByText(/Your next message starts a new session on/)).toHaveTextContent(
+      "Hidden reasoning and the",
     );
   });
 

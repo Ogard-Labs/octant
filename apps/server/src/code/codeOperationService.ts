@@ -3405,6 +3405,7 @@ function evidenceReferences(event: CodeOperationEvent): readonly CodeEvidenceRef
     case "provider-content":
     case "terminal-output":
     case "diff":
+    case "context-handoff-attached":
       return [event.content];
     case "operation-result":
       return resultEvidenceReferences(event.result);
