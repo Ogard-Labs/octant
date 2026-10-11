@@ -33,6 +33,7 @@ import {
   type CodeOperationApprovalChallenge,
   type CodeOperationApprovalConfirmation,
   type CodeEvidenceContentId,
+  type CodeEvidenceReference,
   type CodeOperationEvent,
   type HarnessRetryNotice,
   type CodeOperationEventFrame,
@@ -118,6 +119,12 @@ import type {
   AgentRunParentContextSelection,
   AgentRunParentContextUnavailableReason,
 } from "../agentRun/agentRunParentContext";
+import {
+  CODE_FORK_HANDOFF_REFUSALS,
+  selectCodeForkHandoff,
+  type CodeForkConversationReader,
+  type CodeForkHandoffRefusal,
+} from "./codeForkHandoff";
 import {
   CodeServiceError,
   type CodeForkPoint,
@@ -441,7 +448,13 @@ export interface CodeOperationRuntimeOptions {
    * the checkout as it stands rather than as the caller last saw it.
    */
   readonly resolveBaseCheckoutRoot?: (thread: CodeThread) => Promise<string | undefined>;
-  readonly resolveForkHandoff?: CodeOperationServiceOptions["resolveForkHandoff"];
+  /**
+   * Reads a fork's source conversation through the fork point for a text
+   * handoff, through the selector a provider switch uses. Absent means this
+   * host cannot carry a conversation into a fork, so a fork's first turn that
+   * cannot take up the source's own session is refused, naming that reason.
+   */
+  readonly forkContext?: CodeForkConversationReader;
   /**
    * Starts a fork's first provider session from the source's own
    * conversation through the fork point, returning the cursor that resumes
@@ -812,9 +825,6 @@ export function createCodeOperationRuntime(
       : {
           resolveBaseCheckout: baseCheckoutResolver(gitService, options.resolveBaseCheckoutRoot),
         }),
-    ...(options.resolveForkHandoff === undefined
-      ? {}
-      : { resolveForkHandoff: options.resolveForkHandoff }),
     ...(options.resolveSelectedExtensions === undefined
       ? {}
       : { resolveSelectedExtensions: options.resolveSelectedExtensions }),
@@ -1526,16 +1536,24 @@ function persistenceLabel(value: "current-session" | "project-default"): string 
   return value === "current-session" ? "current session only" : "remember for this Project";
 }
 
-/** The handoff record a switching turn still has to journal, without its content reference. */
-type PendingHandoffRecord = Omit<
-  Extract<CodeOperationEvent, { readonly kind: "context-handoff-attached" }>,
-  "content"
->;
+type HandoffAttached = Extract<CodeOperationEvent, { readonly kind: "context-handoff-attached" }>;
+
+/**
+ * The handoff record a turn still has to journal, without the content
+ * reference a text handoff gets when it is saved. A fork that took up the
+ * source's own session carries no text, so its record has no content.
+ */
+type PendingHandoffRecord = HandoffAttached extends infer Record
+  ? Record extends { readonly content: unknown }
+    ? Omit<Record, "content">
+    : Record
+  : never;
 
 interface ActiveTurn {
   /**
-   * A provider-switch handoff this turn selected and has not journaled yet.
-   * It is journaled when the new session is ready, before the prompt is sent.
+   * A provider-switch or fork handoff this turn selected and has not
+   * journaled yet. It is journaled when the new session is ready, before the
+   * prompt is sent.
    */
   pendingHandoff?: {
     readonly blocks: ReadonlyArray<ProviderContextBlock>;
@@ -1592,7 +1610,13 @@ interface ActiveTurn {
   launch?: () => void;
 }
 
-class HandoffUnsaved extends Error {}
+class HandoffUnsaved extends Error {
+  readonly fork: boolean;
+  constructor(fork: boolean) {
+    super();
+    this.fork = fork;
+  }
+}
 
 type ProviderSwitchHandoffRefusal =
   | AgentRunParentContextUnavailableReason
@@ -1779,7 +1803,11 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       providerSwitch,
     );
     if (switchHandoff?.status === "refused")
-      return failStart(PROVIDER_SWITCH_HANDOFF_REFUSALS[switchHandoff.reason]);
+      return failStart(
+        switchHandoff.fork
+          ? CODE_FORK_HANDOFF_REFUSALS[switchHandoff.reason]
+          : PROVIDER_SWITCH_HANDOFF_REFUSALS[switchHandoff.reason],
+      );
     // A recorded session without a resume cursor wedges the thread rather than
     // silently discarding the conversation the provider still holds. A prior
     // turn that never reached its session left nothing to discard only once it
@@ -1840,11 +1868,15 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         ? previous.resumeCursor
         : undefined;
     let forkSeeded = false;
-    if (previous === undefined && input.thread.forkedFrom !== undefined) {
+    // A fork's first session: no session of its own yet. One whose text
+    // handoff is already journaled keeps that record rather than switching to
+    // the source's session on a recovered start.
+    const forkOrigin = previous === undefined ? input.thread.forkedFrom : undefined;
+    if (forkOrigin !== undefined && switchHandoff?.journaled !== "text") {
       const seeded = await this.#options
         .forkProviderSession?.({
           fork: input.thread,
-          origin: input.thread.forkedFrom,
+          origin: forkOrigin,
           sessionId: decodeProviderSessionId(input.sessionId),
           checkoutRoot: input.checkoutRoot,
           secrets,
@@ -1854,6 +1886,47 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         resumeCursor = seeded;
         forkSeeded = true;
       }
+    }
+    // Otherwise the fork reads its source's conversation through the fork
+    // point as text, journaled like a provider switch's handoff. A fork that
+    // can do neither refuses rather than starting from nothing while its
+    // transcript shows an inherited conversation.
+    let forkHandoff:
+      | {
+          readonly blocks: ReadonlyArray<ProviderContextBlock>;
+          readonly record?: PendingHandoffRecord;
+        }
+      | undefined;
+    if (forkOrigin !== undefined && switchHandoff === undefined) {
+      if (forkSeeded) {
+        forkHandoff = {
+          blocks: [],
+          record: {
+            kind: "context-handoff-attached",
+            reason: "fork-native-session",
+            forkedFrom: forkOrigin,
+            providerInstanceId: input.thread.providerInstanceId,
+            modelId: input.thread.modelId,
+            nativeSessionTransferred: true,
+          },
+        };
+      } else {
+        const selected = await this.#forkTextHandoff(input.thread, forkOrigin, input.windowId);
+        if (selected.status === "refused") {
+          await input.extensionTools?.close?.().catch(() => undefined);
+          return failStart(CODE_FORK_HANDOFF_REFUSALS[selected.reason]);
+        }
+        forkHandoff = selected;
+      }
+    } else if (
+      forkOrigin !== undefined &&
+      switchHandoff?.journaled === "native-session" &&
+      !forkSeeded
+    ) {
+      // The record says this turn took up the source's session; sending it
+      // anything else would contradict what was disclosed.
+      await input.extensionTools?.close?.().catch(() => undefined);
+      return failStart(CODE_FORK_HANDOFF_REFUSALS["handoff-unreadable"]);
     }
     // Driver, credentials, and fork preparation may outlive the host's admission.
     if (input.admissionCurrent?.() === false) {
@@ -1877,8 +1950,8 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       // A feedback read failure must not prevent the person's message from running.
     }
     const context = [
-      ...(forkSeeded || input.forkHandoff === undefined ? [] : [input.forkHandoff]),
       ...(switchHandoff?.blocks ?? []),
+      ...(forkHandoff?.blocks ?? []),
       ...(input.context ?? []),
       ...(feedback?.context === undefined || feedback.context.trim().length === 0
         ? []
@@ -1886,9 +1959,11 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     ];
     const attachments = [...(input.attachments ?? []), ...(feedback?.attachments ?? [])];
     const active: ActiveTurn = {
-      ...(switchHandoff?.record === undefined
-        ? {}
-        : { pendingHandoff: { blocks: switchHandoff.blocks, record: switchHandoff.record } }),
+      ...(switchHandoff?.record !== undefined
+        ? { pendingHandoff: { blocks: switchHandoff.blocks, record: switchHandoff.record } }
+        : forkHandoff?.record !== undefined
+          ? { pendingHandoff: { blocks: forkHandoff.blocks, record: forkHandoff.record } }
+          : {}),
       ...(command.computerUseSelection === undefined
         ? {}
         : { computerUseSelection: command.computerUseSelection }),
@@ -1948,17 +2023,19 @@ class RuntimeTurnController implements CodeOperationTurnPort {
   }
 
   /**
-   * The handoff a turn that moved to another provider starts with.
+   * The handoff a turn that moved to another provider starts with, or the one
+   * a recovered turn already journaled.
    *
    * A turn's handoff is chosen once. If its operation already journaled one
    * (a start recovered after a restart), that record is read back rather than
    * the conversation selected again, so a recovery never sends context other
    * than what was disclosed. That includes a recovery whose new session was
    * already recorded: the provider may never have received the prompt the
-   * handoff went with, so it is sent again with it. Otherwise, only for a turn
-   * that moved providers, the thread's own conversation is selected and
-   * checked to be this thread's in this Project; the record is journaled when
-   * the new session is ready.
+   * handoff went with, so it is sent again with it. A fork's journaled record
+   * is read back the same way. Otherwise, only for a turn that moved
+   * providers, the thread's own conversation is selected and checked to be
+   * this thread's in this Project; the record is journaled when the new
+   * session is ready.
    */
   async #providerSwitchHandoff(
     thread: CodeThread,
@@ -1969,12 +2046,19 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         readonly status: "ready";
         readonly blocks: ReadonlyArray<ProviderContextBlock>;
         readonly record?: PendingHandoffRecord;
+        /** What an already journaled record carried, when this read it back. */
+        readonly journaled?: "text" | "native-session";
       }
-    | { readonly status: "refused"; readonly reason: ProviderSwitchHandoffRefusal }
+    | {
+        readonly status: "refused";
+        readonly reason: ProviderSwitchHandoffRefusal;
+        /** Whether the refusal is about a fork's handoff rather than a switch's. */
+        readonly fork: boolean;
+      }
     | undefined
   > {
-    const refused = (reason: ProviderSwitchHandoffRefusal) =>
-      ({ status: "refused", reason }) as const;
+    const refused = (reason: ProviderSwitchHandoffRefusal, fork = false) =>
+      ({ status: "refused", reason, fork }) as const;
     const replay = this.#events.replay({
       threadId: thread.id,
       operationId,
@@ -1982,26 +2066,43 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       limit: MAX_CODE_OPERATION_REPLAY_LIMIT,
     });
     if (replay.status !== "ok")
-      return previous === undefined ? undefined : refused("source-unavailable");
+      return previous === undefined
+        ? thread.forkedFrom === undefined
+          ? undefined
+          : refused("source-unavailable", true)
+        : refused("source-unavailable");
     const journaled = replay.frames.find(
       (frame) => frame.event.kind === "context-handoff-attached",
     )?.event;
     if (journaled?.kind === "context-handoff-attached") {
-      // A selection changed since the record belongs to a different switch
-      // than the one the record disclosed.
+      const fork = journaled.reason !== "provider-switch";
+      // A selection changed since the record belongs to a different switch or
+      // fork than the one the record disclosed.
       if (
         String(journaled.providerInstanceId) !== String(thread.providerInstanceId) ||
         String(journaled.modelId) !== String(thread.modelId) ||
-        (previous !== undefined &&
-          String(journaled.previousSessionId) !== String(previous.sessionId))
+        (journaled.reason === "provider-switch" &&
+          previous !== undefined &&
+          String(journaled.previousSessionId) !== String(previous.sessionId)) ||
+        (fork &&
+          (thread.forkedFrom === undefined ||
+            String(thread.forkedFrom.threadId) !== String(journaled.forkedFrom.threadId) ||
+            String(thread.forkedFrom.throughOperationId) !==
+              String(journaled.forkedFrom.throughOperationId)))
       )
-        return refused("source-changed");
+        return refused("source-changed", fork);
+      if (journaled.reason === "fork-native-session")
+        return { status: "ready", blocks: [], journaled: "native-session" };
       try {
         const text = await this.#options.evidence.read?.(journaled.content);
-        if (text === undefined) return refused("handoff-unreadable");
-        return { status: "ready", blocks: decodeAgentRunAdmittedContext(JSON.parse(text)) };
+        if (text === undefined) return refused("handoff-unreadable", fork);
+        return {
+          status: "ready",
+          blocks: decodeAgentRunAdmittedContext(JSON.parse(text)),
+          journaled: "text",
+        };
       } catch {
-        return refused("handoff-unreadable");
+        return refused("handoff-unreadable", fork);
       }
     }
     if (previous === undefined) return undefined;
@@ -2029,6 +2130,66 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         previousProviderInstanceId: previous.providerInstanceId,
         previousModelId: previous.modelId,
         previousSessionId: previous.sessionId,
+        providerInstanceId: thread.providerInstanceId,
+        modelId: thread.modelId,
+        messages: selection.blocks.length - 1,
+        omissions: selection.omissions,
+        externalContentIngested: selection.source.externalContentIngested,
+        nativeSessionTransferred: false,
+        hiddenReasoningTransferred: false,
+      },
+    };
+  }
+
+  /**
+   * A fork's text handoff: the source's conversation through the fork point.
+   *
+   * The origin is on the fork's own record and was checked when the fork was
+   * created, but the window sending this turn is authorized against the source
+   * here, at the moment it is read: a window that may not observe the source
+   * reads nothing out of it through the fork.
+   */
+  async #forkTextHandoff(
+    thread: CodeThread,
+    origin: NonNullable<CodeThread["forkedFrom"]>,
+    windowId: WindowId,
+  ): Promise<
+    | {
+        readonly status: "ready";
+        readonly blocks: ReadonlyArray<ProviderContextBlock>;
+        readonly record: PendingHandoffRecord;
+      }
+    | { readonly status: "refused"; readonly reason: CodeForkHandoffRefusal }
+  > {
+    if (this.#options.forkContext === undefined) return { status: "refused", reason: "unsupported" };
+    let source: CodeThread | undefined;
+    try {
+      source = this.#options.persistence.readCodeThread(origin.threadId);
+    } catch {
+      return { status: "refused", reason: "source-unavailable" };
+    }
+    if (source === undefined) return { status: "refused", reason: "thread-unavailable" };
+    let authorized: boolean;
+    try {
+      authorized = await this.#options.windowAccess.canAccessProject(windowId, source.projectId);
+    } catch {
+      authorized = false;
+    }
+    if (!authorized) return { status: "refused", reason: "source-unauthorized" };
+    const selected = selectCodeForkHandoff(this.#options.forkContext, {
+      source,
+      origin,
+      projectId: thread.projectId,
+    });
+    if (selected.status === "refused") return selected;
+    const { selection } = selected;
+    return {
+      status: "ready",
+      blocks: selection.blocks,
+      record: {
+        kind: "context-handoff-attached",
+        reason: "fork",
+        forkedFrom: origin,
         providerInstanceId: thread.providerInstanceId,
         modelId: thread.modelId,
         messages: selection.blocks.length - 1,
@@ -2666,20 +2827,23 @@ class RuntimeTurnController implements CodeOperationTurnPort {
                 // provider that the journal does not disclose.
                 const pending = active.pendingHandoff;
                 if (pending !== undefined) {
-                  let content: Extract<
-                    CodeOperationEvent,
-                    { readonly kind: "context-handoff-attached" }
-                  >["content"];
-                  try {
-                    content = this.#options.evidence.put(JSON.stringify(pending.blocks));
-                  } catch {
-                    throw new HandoffUnsaved();
+                  const record = pending.record;
+                  let event: HandoffAttached;
+                  if (record.reason === "fork-native-session") event = record;
+                  else {
+                    let content: CodeEvidenceReference;
+                    try {
+                      content = this.#options.evidence.put(JSON.stringify(pending.blocks));
+                    } catch {
+                      throw new HandoffUnsaved(record.reason === "fork");
+                    }
+                    event = { ...record, content };
                   }
                   const handoff = this.#events.append({
                     threadId: active.thread.id,
                     operationId: active.operationId,
                     expectedCursor: active.cursor,
-                    event: { ...pending.record, content },
+                    event,
                   });
                   active.cursor = handoff.cursor;
                   delete active.pendingHandoff;
@@ -2704,7 +2868,9 @@ class RuntimeTurnController implements CodeOperationTurnPort {
                 category: "failed" as const,
                 message:
                   error instanceof HandoffUnsaved
-                    ? PROVIDER_SWITCH_HANDOFF_REFUSALS["handoff-unsaved"]
+                    ? error.fork
+                      ? CODE_FORK_HANDOFF_REFUSALS["handoff-unsaved"]
+                      : PROVIDER_SWITCH_HANDOFF_REFUSALS["handoff-unsaved"]
                     : "The provider session could not be saved. The message was not sent.",
               }),
             }),

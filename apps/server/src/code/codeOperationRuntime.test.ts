@@ -3753,7 +3753,10 @@ describe("provider switch handoff", () => {
         // The journal names the handed-over text by content reference, and
         // that text is exactly what the provider was sent.
         const reference =
-          handoff?.event.kind === "context-handoff-attached" ? handoff.event.content : undefined;
+          handoff?.event.kind === "context-handoff-attached" &&
+          handoff.event.reason === "provider-switch"
+            ? handoff.event.content
+            : undefined;
         expect(JSON.parse(fixture.evidenceValues.get(reference!.contentId) ?? "[]")).toEqual(
           context.slice(0, 3),
         );
