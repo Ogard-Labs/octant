@@ -472,6 +472,7 @@ const SHARED_PLAN_STATE_ROOTS = [
   "/private/var/tmp",
   "/dev/shm",
   "/Users/Shared",
+  "/Volumes",
 ];
 
 /** Plan must not grant a world-shared temp, IPC, or multi-user root as account state. */

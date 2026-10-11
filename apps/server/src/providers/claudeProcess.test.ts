@@ -750,6 +750,7 @@ describe("Claude runtime confinement", () => {
     expect(claudePlanStateDirectoryIsSharedRoot("/tmp")).toBe(true);
     expect(claudePlanStateDirectoryIsSharedRoot("/var/tmp")).toBe(true);
     expect(claudePlanStateDirectoryIsSharedRoot("/Users/Shared")).toBe(true);
+    expect(claudePlanStateDirectoryIsSharedRoot("/Volumes")).toBe(true);
     expect(claudePlanStateDirectoryIsSharedRoot("/tmp/claude-accounts/work")).toBe(false);
   });
 
