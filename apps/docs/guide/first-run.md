@@ -60,6 +60,10 @@ Secret Service on a headless host) and resolved through the authenticated
 host broker. They are never written to the event journal or returned to the
 renderer.
 
+A model endpoint's key is kept only for the endpoint URL you entered it for.
+If you change the URL later, Octant deletes the saved key, and you enter the
+key again with the new URL.
+
 Closing Settings returns to first run with the answers you already gave.
 
 ## Create your first Project

@@ -4287,6 +4287,9 @@ export function startOctantServer(
         await claudeHelperSignInService?.forgetRemovedProvider(instanceId).catch(() => undefined);
       },
       clearRuntimeUsageLimits: (instanceId) => providerRuntimeUsageLimitsStore.clear(instanceId),
+      ...(credentialResolver === undefined
+        ? {}
+        : { clearProviderCredential: (instanceId) => credentialResolver.delete(instanceId) }),
       driver: (instance) =>
         attachWorkRequestRuntime(
           makeConfiguredProviderDriver(instance, {
