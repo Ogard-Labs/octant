@@ -2180,11 +2180,14 @@ export async function runPackagedProviderSmokeTurn(
 
 function claudeAccountDirectoryKey(directory: string): string {
   const canonical = canonicalClaudeAccountDirectory(directory);
-  // macOS's default volume is case-insensitive. Fold every uniqueness
-  // key the same way so an existing `Work` still overlaps a missing
-  // `work/child`. A case-sensitive Darwin volume may then refuse two
-  // distinct spellings; that is safer than missing a nested claim.
-  return process.platform === "darwin" ? canonical.path.toLowerCase() : canonical.path;
+  // macOS's default volume is case-insensitive and Unicode-normalization
+  // insensitive. Fold every uniqueness key the same way so an existing
+  // `Work` still overlaps a missing `work/child`, and `é` overlaps `é`.
+  // A case-sensitive Darwin volume may then refuse two distinct
+  // spellings; that is safer than missing a nested claim.
+  return process.platform === "darwin"
+    ? canonical.path.normalize("NFC").toLowerCase()
+    : canonical.path;
 }
 
 function hostDirectoryClaim(directory: string | undefined): string | undefined {

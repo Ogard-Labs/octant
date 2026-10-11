@@ -1818,6 +1818,57 @@ describe("ProviderService", () => {
   });
 
   it.skipIf(process.platform !== "darwin")(
+    "refuses Claude account directories that differ only by Unicode composition",
+    async () => {
+      const fixture = serviceFixture();
+      await fixture.service.execute(windowId, {
+        kind: "create-claude-provider",
+        instanceId,
+        expectedVersion: 0,
+        displayName: "Claude personal",
+        configuration: {
+          kind: "claude-agent-sdk",
+          binaryPath: "/opt/homebrew/bin/claude",
+          authentication: "subscription",
+        },
+      });
+      await fixture.service.execute(windowId, {
+        kind: "create-claude-provider",
+        instanceId: otherId,
+        expectedVersion: 0,
+        displayName: "Claude work",
+        configuration: {
+          kind: "claude-agent-sdk",
+          binaryPath: "/opt/homebrew/bin/claude",
+          authentication: "subscription",
+          configDirectory: `${homedir()}/.claude-accounts/caf\u00e9`,
+          accent: "teal",
+        },
+      });
+      await expect(
+        fixture.service.execute(windowId, {
+          kind: "create-claude-provider",
+          instanceId: decodeProviderInstanceId("80000000-0000-4000-8000-000000000799"),
+          expectedVersion: 0,
+          displayName: "Claude extra",
+          configuration: {
+            kind: "claude-agent-sdk",
+            binaryPath: "/opt/homebrew/bin/claude",
+            authentication: "subscription",
+            configDirectory: `${homedir()}/.claude-accounts/cafe\u0301`,
+            accent: "violet",
+          },
+        }),
+      ).rejects.toMatchObject({
+        failure: {
+          category: "invalid-configuration",
+          message: "Another Claude account already uses that config directory.",
+        },
+      });
+    },
+  );
+
+  it.skipIf(process.platform !== "darwin")(
     "refuses a Claude account directory that differs only by case",
     async () => {
       const fixture = serviceFixture();

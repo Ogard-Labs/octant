@@ -2660,6 +2660,26 @@ function collectTerminal(
 }
 
 describe("Claude driver probe", () => {
+  it("refuses a probe whose account directory is not a dedicated Claude leaf before creating it", async () => {
+    const parent = await mkdtemp(join(tmpdir(), "octant-claude-probe-state-"));
+    const accountDirectory = join(parent, "octant-state");
+    try {
+      const f = harness("subscription", "current-session", {
+        configDirectory: accountDirectory,
+        makeEnvironmentScope: makeClaudeEnvironmentScope,
+      });
+      const exit = await Effect.runPromise(
+        Effect.scoped(Effect.exit(f.driver.probe({ instanceId }))),
+      );
+      expect(String(exit)).toContain("dedicated Claude account directory");
+      expect(existsSync(accountDirectory)).toBe(false);
+      expect(f.process.probeSubscription).not.toHaveBeenCalled();
+      expect(f.opens).toHaveLength(0);
+    } finally {
+      rmSync(parent, { recursive: true, force: true });
+    }
+  });
+
   it("rejects the wrong instance without probing any authentication source", async () => {
     const f = harness();
     const exit = await Effect.runPromise(

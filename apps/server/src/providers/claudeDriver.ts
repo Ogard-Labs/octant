@@ -178,18 +178,37 @@ function claudeSandboxSettings(
   };
 }
 
+function claudeAccountDirectoryRefusesPlanState(configDirectory: string): boolean {
+  const directory = canonicalClaudeAccountDirectory(configDirectory).path;
+  const home = homedir();
+  return (
+    claudePlanStateDirectoryReopensHome(directory, home) ||
+    claudePlanStateDirectoryIsSharedRoot(directory) ||
+    !claudePlanStateDirectoryIsDedicatedLeaf(directory, home)
+  );
+}
+
+function refuseUnsafePlanAccountDirectory(
+  configDirectory: string | undefined,
+): Effect.Effect<void, ProviderFailure> {
+  if (configDirectory === undefined || !claudeAccountDirectoryRefusesPlanState(configDirectory)) {
+    return Effect.void;
+  }
+  return Effect.fail(
+    failure(
+      "invalid-configuration",
+      "Claude Plan confinement cannot use an account directory that overlaps the checkout, the user's home, or a shared host directory, or that is not a dedicated Claude account directory.",
+    ),
+  );
+}
+
 function claudeAccountDirectoryBroadensPlan(
   projectRoot: string,
   configDirectory: string,
   isProjectConfinedPath: (projectRoot: string, absolutePath: string) => boolean,
 ): boolean {
   const directory = canonicalClaudeAccountDirectory(configDirectory).path;
-  if (
-    claudePlanStateDirectoryReopensHome(directory, homedir()) ||
-    claudePlanStateDirectoryIsSharedRoot(directory) ||
-    !claudePlanStateDirectoryIsDedicatedLeaf(directory, homedir()) ||
-    directory === projectRoot
-  )
+  if (claudeAccountDirectoryRefusesPlanState(configDirectory) || directory === projectRoot)
     return true;
   if (projectRoot.startsWith(`${directory}/`)) return true;
   try {
@@ -736,6 +755,7 @@ function probeSdk(
   environmentOptions: ClaudeEnvironmentScopeOptions,
 ): Effect.Effect<readonly ProviderModel[], ProviderFailure, Scope.Scope> {
   return Effect.gen(function* () {
+    yield* refuseUnsafePlanAccountDirectory(environmentOptions.configDirectory);
     const environment = yield* environmentFactory(options.authentication, environmentOptions);
     // Acquired before the query, so it is released after the query closes.
     const probeRoot = yield* privateProbeRoot;
@@ -784,6 +804,7 @@ function makeProbe(
       );
     }
     return Effect.gen(function* () {
+      yield* refuseUnsafePlanAccountDirectory(options.configDirectory);
       const version = yield* options.process.probeVersion(options.binaryPath);
       let apiKey: string | undefined;
       if (options.authentication === "subscription") {
