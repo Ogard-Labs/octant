@@ -64,6 +64,38 @@ describe("layoutCanvasPlanGantt", () => {
     expect(inverted.bars[0]?.width).toBeGreaterThan(0);
   });
 
+  it("keeps a plan spanning millennia to a bounded chart with a bounded number of ticks", () => {
+    const vast = layoutCanvasPlanGantt(
+      plan({
+        ...launchGanttExample,
+        tasks: [
+          {
+            taskId: "forever",
+            phaseId: "build",
+            title: "Forever",
+            status: "todo",
+            startAt: "0000-01-01T00:00:00.000Z",
+            dueAt: "9999-12-31T00:00:00.000Z",
+          },
+          {
+            taskId: "moment",
+            phaseId: "build",
+            title: "Moment",
+            status: "todo",
+            startAt: "5000-06-01T00:00:00.000Z",
+          },
+        ],
+      }),
+    );
+    expect(vast.width).toBeLessThanOrEqual(5_000);
+    expect(vast.ticks.length).toBeLessThanOrEqual(100);
+    expect(vast.ticks[0]?.day).toBe("0000-01-01");
+    const gaps = vast.ticks.slice(1).map((tick, index) => tick.x - (vast.ticks[index]?.x ?? 0));
+    expect(Math.min(...gaps)).toBeGreaterThanOrEqual(56);
+    // A one-day task is still drawn wide enough to see.
+    expect(vast.bars.find((bar) => bar.taskId === "moment")?.width).toBeGreaterThanOrEqual(2);
+  });
+
   it("snapshots the bar geometry so every surface draws the same chart", () => {
     expect(layout.bars.map((bar) => ({ taskId: bar.taskId, x: bar.x, y: bar.y, width: bar.width })))
       .toMatchInlineSnapshot(`

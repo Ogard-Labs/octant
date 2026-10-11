@@ -449,7 +449,7 @@ function PlanGantt({
               <g className="canvas-plan__gantt-tick" key={tick.day}>
                 <line x1={tick.x} x2={tick.x} y1={20} y2={layout.height} />
                 <text x={tick.x + 3} y={14}>
-                  {formatDay(`${tick.day}T12:00:00.000Z`)}
+                  {formatCalendarDay(tick.day)}
                 </text>
               </g>
             ))}
@@ -471,7 +471,7 @@ function PlanGantt({
                   x={bar.x}
                   y={bar.y}
                 >
-                  <title>{`${bar.title}: ${STATUS_LABEL[bar.status]}, ${formatDay(`${bar.startDay}T12:00:00.000Z`)} to ${formatDay(`${bar.endDay}T12:00:00.000Z`)}`}</title>
+                  <title>{`${bar.title}: ${STATUS_LABEL[bar.status]}, ${formatCalendarDay(bar.startDay)} to ${formatCalendarDay(bar.endDay)}`}</title>
                 </rect>
               </g>
             ))}
@@ -489,7 +489,7 @@ function PlanGantt({
       <ul className="canvas-plan__tasks sr-only">
         {layout.bars.map((bar) => (
           <li key={bar.taskId}>
-            {`${bar.title}, ${STATUS_LABEL[bar.status]}, ${formatDay(`${bar.startDay}T12:00:00.000Z`)} to ${formatDay(`${bar.endDay}T12:00:00.000Z`)}`}
+            {`${bar.title}, ${STATUS_LABEL[bar.status]}, ${formatCalendarDay(bar.startDay)} to ${formatCalendarDay(bar.endDay)}`}
           </li>
         ))}
       </ul>
@@ -509,6 +509,18 @@ function PlanGantt({
 
 function taskTitles(block: CanvasPlanBlock): ReadonlyMap<string, string> {
   return new Map(block.tasks.map((task) => [String(task.taskId), task.title]));
+}
+
+/**
+ * A Gantt day is a calendar date, not an instant, so it is read in UTC where
+ * the layout counted it; read in local time it showed the next day east of
+ * UTC+12.
+ */
+function formatCalendarDay(day: string): string {
+  const date = new Date(`${day}T00:00:00.000Z`);
+  return Number.isNaN(date.getTime())
+    ? day
+    : date.toLocaleDateString(undefined, { month: "short", day: "numeric", timeZone: "UTC" });
 }
 
 function formatDay(iso: string): string {

@@ -967,8 +967,11 @@ rule, edges and heads are CanvasText, and dashes and shapes keep the
 distinctions.
 
 **Gantt.** A plan's Gantt view is bars on days in a horizontally scrolling
-frame: a 200px title gutter, week ticks (four-week ticks on a long plan) in
-hairline ink, and 16px bars with a 3px corner. A bar takes the plan's status
+frame: a 200px title gutter, week ticks (four-week ticks, or a multiple of four
+weeks, on a long plan, so ticks stay a label apart) in hairline ink, and 16px
+bars with a 3px corner. The track stops widening at 4096px, past which days
+narrow below 2px and a bar keeps at least 2px. Days are calendar dates, named
+in UTC so no reader's time zone moves them. A bar takes the plan's status
 tones — to do is a faint foreground wash, doing the accent, blocked danger, and
 done success — and its status is also written after the title, so the tone is
 never the only channel. Dependency arrows are elbows in the axis ink. Tasks
