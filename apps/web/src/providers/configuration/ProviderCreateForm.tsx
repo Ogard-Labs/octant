@@ -470,7 +470,13 @@ export function ProviderCreateForm(
               }
               void operation
                 .then((created) => {
-                  if (created) form.reset();
+                  if (created) {
+                    form.reset();
+                    setClaudeAuthentication("subscription");
+                    setClaudeAccent("");
+                    setClaudeBinaryPath("");
+                    setClaudeConfigDirectory("");
+                  }
                 })
                 .finally(() => setCreating(false));
             }}

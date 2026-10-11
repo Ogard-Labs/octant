@@ -35,6 +35,7 @@ export function ClaudeConfigurationForm(props: ClaudeConfigurationFormProps) {
   const [accent, setAccent] = useState<ClaudeAccountAccent | "">(
     props.instance.configuration.accent ?? "",
   );
+  const [binaryPath, setBinaryPath] = useState(props.instance.configuration.binaryPath);
   const [configDirectory, setConfigDirectory] = useState(
     props.instance.configuration.configDirectory ?? "",
   );
@@ -84,9 +85,10 @@ export function ClaudeConfigurationForm(props: ClaudeConfigurationFormProps) {
         <OctantInput
           aria-label={`Claude binary for ${props.instance.displayName}`}
           className="settings-view__text-input"
-          defaultValue={props.instance.configuration.binaryPath}
           name="binaryPath"
+          onChange={(event) => setBinaryPath(event.currentTarget.value)}
           required
+          value={binaryPath}
         />
       </SettingRow>
       <SettingRow
@@ -119,7 +121,7 @@ export function ClaudeConfigurationForm(props: ClaudeConfigurationFormProps) {
       </SettingRow>
       <ClaudeAccountSettingsFields
         accent={accent}
-        binaryPath={props.instance.configuration.binaryPath}
+        binaryPath={binaryPath}
         configDirectory={configDirectory}
         instanceId={props.instance.id}
         onAccentChange={setAccent}

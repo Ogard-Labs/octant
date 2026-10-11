@@ -601,6 +601,28 @@ describe("ProviderSettingsView", () => {
     );
   });
 
+  it("clears the Claude create fields after a successful add so the next account starts blank", async () => {
+    const user = userEvent.setup();
+    const props = fixture({ instance: claudeProvider() });
+    renderExpanded(<ProviderSettingsView {...props} />);
+
+    await chooseSelectFieldOption(user, screen.getByLabelText("Provider type"), "Claude Agent SDK");
+    const create = screen.getByRole("form", { name: "Add Claude provider" });
+    await user.type(within(create).getByLabelText("Provider name"), "Work Claude");
+    await user.type(within(create).getByLabelText("Claude binary"), "/opt/homebrew/bin/claude");
+    await user.type(
+      within(create).getByLabelText("Claude config directory"),
+      "/Users/example/.claude-accounts/work",
+    );
+    await user.click(within(create).getByRole("radio", { name: "Teal" }));
+    await user.click(within(create).getByRole("button", { name: "Add Claude" }));
+    await waitFor(() => {
+      expect(within(create).getByLabelText("Claude binary")).toHaveValue("");
+    });
+    expect(within(create).getByLabelText("Claude config directory")).toHaveValue("");
+    expect(within(create).queryByLabelText("Claude sign-in command")).toBeNull();
+  });
+
   it("does not show the default-account sign-in command when adding another Claude account", async () => {
     const user = userEvent.setup();
     const props = fixture({ instance: claudeProvider() });
@@ -1185,6 +1207,30 @@ describe("ProviderSettingsView", () => {
     expect(within(card).getByText(/replace.*Anthropic API key/i)).toHaveTextContent(/write-only/i);
     expect(within(card).getByText(/replace.*Anthropic API key/i)).toHaveTextContent(/Keychain/i);
     expect(card.textContent).not.toMatch(/official Claude Code|Claude subscription login/i);
+  });
+
+  it("updates the Claude sign-in command while the binary path is being edited", async () => {
+    const user = userEvent.setup();
+    const props = fixture({
+      instance: decodeProviderInstance({
+        ...claudeProvider(),
+        displayName: "Claude work",
+        configuration: {
+          kind: "claude-agent-sdk",
+          binaryPath: "/opt/homebrew/bin/claude",
+          authentication: "subscription",
+          configDirectory: "/Users/example/.claude-accounts/work",
+        },
+      }),
+    });
+    renderExpanded(<ProviderSettingsView {...props} />);
+    const card = screen.getByRole("article", { name: "Claude work" });
+    const binary = within(card).getByLabelText("Claude binary for Claude work");
+    await user.clear(binary);
+    await user.type(binary, "/usr/local/bin/claude");
+    expect(within(card).getByLabelText("Claude sign-in command")).toHaveValue(
+      "CLAUDE_CONFIG_DIR='/Users/example/.claude-accounts/work' CLAUDE_SECURESTORAGE_CONFIG_DIR='/Users/example/.claude-accounts/work' '/usr/local/bin/claude' auth login",
+    );
   });
 
   it("keeps an isolated Claude directory when the edit field is left blank", async () => {
