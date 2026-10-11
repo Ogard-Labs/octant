@@ -1,5 +1,4 @@
-import { existsSync, readdirSync } from "node:fs";
-import { join } from "node:path";
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { decodeProviderInstanceId, type UtcTimestamp } from "@octant/contracts";
 import { claudeProcessPlanUsageLimits, decodeClaudeProcessPlanUsage } from "./claudeProcessUsage";
@@ -54,22 +53,15 @@ describe("Claude process plan usage", () => {
   });
 
   it("never reads a credential file or keychain while decoding a process payload", () => {
-    const home = process.env.HOME ?? "";
-    const credentialHints = [
-      join(home, ".claude", ".credentials.json"),
-      join(home, "Library", "Keychains", "login.keychain-db"),
-    ];
-    const existing = credentialHints.filter((path) => existsSync(path));
+    // The decoder is pure: it turns the process payload into numbers and never
+    // touches the filesystem, so no credential store can be read through it.
+    const decoderSource = readFileSync(new URL("./claudeProcessUsage.ts", import.meta.url), "utf8");
+    expect(decoderSource).not.toMatch(/from "node:(fs|fs\/promises|os|child_process)"/);
+    expect(decoderSource).not.toMatch(/readFile|readdir|existsSync|\.credentials\.json|Keychains/);
     decodeClaudeProcessPlanUsage(
       { rate_limits_available: true, rate_limits: { five_hour: { utilization: 1 } } },
       observedAt,
     );
-    for (const path of existing) {
-      expect(existsSync(path)).toBe(true);
-    }
-    if (home.length > 0 && existsSync(join(home, "Library", "Keychains"))) {
-      expect(readdirSync(join(home, "Library", "Keychains")).length).toBeGreaterThanOrEqual(0);
-    }
     const limits = claudeProcessPlanUsageLimits(
       instanceId,
       {
