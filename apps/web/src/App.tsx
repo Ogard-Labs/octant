@@ -7516,6 +7516,12 @@ function LaunchedShell(
                         onRenameProject={projectController.rename}
                         onProjectColorChange={projectController.setColor}
                         onProviderPolicyChange={projectController.setProviderPolicy}
+                        onWorkStatusFileChange={(projectId, enabled) =>
+                          projectController.setWorkStatusFile(
+                            projectId,
+                            enabled ? "enabled" : "disabled",
+                          )
+                        }
                         onSplitPane={(paneId, orientation, placement) =>
                           void controller.splitPane(paneId, orientation, placement)
                         }
