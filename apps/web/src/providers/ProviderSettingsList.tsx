@@ -739,7 +739,7 @@ function ProviderRow(props: ProviderRowProps) {
       ? "ACP"
       : isPi || isOhMyPi
         ? "RPC"
-        : isCli
+        : isCli || isCodex
           ? "CLI"
           : isImageProfile
             ? "Image"

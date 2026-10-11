@@ -1080,7 +1080,7 @@ export function makeConfiguredProviderDriver(
         ? {}
         : { claudeInstances: options.claudeInstances }),
       ...(options.codexInstances === undefined ? {} : { codexInstances: options.codexInstances }),
-      ...(options.credentialResolver === undefined)
+      ...(options.credentialResolver === undefined
         ? {}
         : { credentialResolver: options.credentialResolver }),
       ...(options.ollamaHistoryStore === undefined

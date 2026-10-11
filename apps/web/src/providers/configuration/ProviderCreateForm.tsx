@@ -298,11 +298,12 @@ export function ProviderCreateForm(
                   String(data.get("binaryPath") ?? ""),
                 );
               } else if (providerType === "codex") {
+                const accent = String(data.get("accent") ?? "").trim();
                 operation = props.onCreate(
                   providerType,
                   String(data.get("displayName") ?? ""),
                   String(data.get("binaryPath") ?? ""),
-                  String(data.get("accent") ?? ""),
+                  ...(accent === "" ? [] : [accent]),
                 );
               } else if (providerType === "claude") {
                 const configuration = claudeConfigurationFromFields({
