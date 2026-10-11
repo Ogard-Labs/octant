@@ -123,7 +123,8 @@ starts.
 - **Windows desktop confinement, credentials, and packaging** — the identical
   desktop app (0058) sequences Windows after Linux + macOS parity; packaging
   stays outside the first release until the Out of scope preconditions in 0058
-  hold; Work/Code stay `incompatible` until a Windows sandbox ADR exists.
+  hold; Work/Code stay `incompatible` until an approved Windows confinement design is
+  documented in the architecture.
 - **Mobile maturity after internal TestFlight** — Android device builds, live
   push notifications, native capture, voice input, and public store
   distribution for the Expo client. Design:
