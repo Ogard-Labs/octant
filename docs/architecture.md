@@ -2431,6 +2431,27 @@ modelId }`, and the model picker is provider-first. Discovery can find
   is created disabled. Discovery never installs or updates runtimes, never
   toggles an existing instance, and never treats enablement as readiness
   ([decisions/0112-first-run-claude-codex-enablement.md](decisions/0112-first-run-claude-codex-enablement.md)).
+- **Provider catalog.** Settings › Provider catalog lists the bundled
+  provider-driver packages (`bundledProviderDriverCatalog` in
+  `@octant/plugin-host`). Each entry is validated against the public
+  `ProviderDriverCatalogEntry` schema, which `@octant/plugin-api` re-exports
+  from contracts. An entry is only a driver's manifest. It refuses excess
+  properties (no install, trust, enable, credential, or capability claims),
+  declared capabilities, contributions, a second component, an entry point
+  other than `builtin:provider-driver/<kind>`, and any source other than
+  `bundled`. Outside drivers need their own design before the schema admits
+  them. The catalog repeats installed and trusted from the activation context
+  that admits the driver; it never sets them. `resolveProviderCatalogState` in
+  `@octant/domain` derives available, enabled, signed in, and ready separately.
+  It reads the registry, the last observations, and the last scan, with each
+  driver's modes and agent loop, and picks one next step that acts on the
+  configured instance when one exists. Opening the catalog starts nothing. A
+  scan, connect, enable, or connection check runs only from its step's button,
+  and sign-in, Locate binary, and credentials stay on the runtime's own card.
+  Discovery keeps one provider per driver family, as auto-registration does:
+  a discovery connect for a driver that already has a provider returns that
+  provider instead of creating a second one, and leaves its switch unchanged.
+  Ollama is set up as an endpoint, never from the scan.
 - **Driver families.** Direct HTTP drivers (OpenAI-compatible, Anthropic-
   compatible, Azure AI Foundry API-key, Ollama), image HTTP profiles
   (OpenAI Image and Gemini native image — never selectable as Chat, Work, or
