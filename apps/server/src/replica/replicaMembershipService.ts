@@ -32,9 +32,11 @@ import {
   type ReplicaEntry,
   type ReplicaJoinRequestEntry,
   type ReplicaMembershipCommand,
+  type ReplicaJoinReadResult,
   type ReplicaMembershipEntry,
   type ReplicaMembershipResult,
   type ReplicaReadRefusal,
+  type ReplicaRestoreProgress,
   type ReplicaRevocationEntry,
 } from "@octant/contracts";
 import {
@@ -131,6 +133,11 @@ export interface ReplicaMembershipPorts {
   readonly state: () => ReplicaMembershipState;
   readonly localHostId: HostId;
   readonly clock: () => number;
+  /**
+   * Whether the person stopped this identity's restore. Until it resumes,
+   * every command that would read the store is refused before any store call.
+   */
+  readonly restoreStopped?: () => boolean;
 }
 
 export type ReplicaMembershipOutcome = ReplicaMembershipResult;
@@ -145,6 +152,11 @@ const MAX_ENTRIES_PER_INSTANCE = 100_000;
  * stops its publishes with a visible error.
  */
 export const REPLICA_MAX_SQUATTED_SLOTS = 32;
+/**
+ * How many store slots one batch of a restore, or of a join confirmation's
+ * read, reads before it journals its progress and checks for a Stop.
+ */
+export const REPLICA_READ_BATCH = 25;
 const ENTRY_KEY =
   /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/([1-9][0-9]{0,15})\.(json|sig)$/;
 const decodeInstanceId = Schema.decodeUnknownSync(ReplicaInstanceId);
@@ -255,11 +267,45 @@ function listedSlots(listing: ReadonlyMap<string, ReadonlySet<number>>): Readonl
   return slots;
 }
 
+/**
+ * The order a restore and a join confirmation read in: each computer's slots
+ * newest first, taking one from each computer in turn, so every computer's
+ * newest entries arrive before anyone's older history.
+ */
+export function replicaNewestFirst(slots: ReadonlyArray<Slot>): ReadonlyArray<Slot> {
+  const byWriter = new Map<string, Slot[]>();
+  for (const slot of slots) {
+    const key = String(slot.instanceId);
+    byWriter.set(key, [...(byWriter.get(key) ?? []), slot]);
+  }
+  const queues = [...byWriter.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([, writer]) => writer.sort((left, right) => right.sequence - left.sequence));
+  const ordered: Slot[] = [];
+  for (let index = 0; ordered.length < slots.length; index += 1) {
+    for (const writer of queues) {
+      const slot = writer[index];
+      if (slot !== undefined) ordered.push(slot);
+    }
+  }
+  return ordered;
+}
+
+/** Commands that read the store, and so wait while a restore is stopped. */
+const READS_STORE: ReadonlySet<ReplicaMembershipCommand["kind"]> = new Set([
+  "pull",
+  "approve-join",
+  "revoke-preview",
+  "revoke",
+]);
+
 export class ReplicaMembershipService {
   readonly #ports: ReplicaMembershipPorts;
   // Commands run one at a time: each one reads the next local sequence and
   // publishes into it, and two interleaved commands would race for one slot.
   #queue: Promise<unknown> = Promise.resolve();
+  /** A join confirmation in this process is reading the store now. */
+  #joinReading = false;
 
   constructor(ports: ReplicaMembershipPorts) {
     this.#ports = ports;
@@ -335,6 +381,15 @@ export class ReplicaMembershipService {
       );
     }
     const store = selection.store;
+    // Stop means the store is not read until Resume: the person asked for
+    // that, and a command they press meanwhile is refused, not run quietly.
+    if (READS_STORE.has(command.kind) && this.#ports.restoreStopped?.() === true) {
+      return this.#refuse(
+        command.kind,
+        "restore-stopped",
+        "The restore is stopped, so this computer reads nothing from the store. Resume the restore first.",
+      );
+    }
     if (
       command.kind === "approve-join" ||
       command.kind === "confirm-join" ||
@@ -586,12 +641,20 @@ export class ReplicaMembershipService {
         approver,
       );
     }
-    const pulled = await this.#readStore(store);
-    if (pulled.status === "unavailable") {
+    const read = await this.#joinRead(store, local.instanceId);
+    if (read.status === "unavailable") {
       return this.#refuse(
         "confirm-join",
         "store-unavailable",
         "The replica store cannot be read.",
+        approver,
+      );
+    }
+    if (read.status === "stopped") {
+      return this.#refuse(
+        "confirm-join",
+        "join-stopped",
+        `Stopped after reading ${String(read.done)} of ${String(read.total)} entries. Confirm again to carry on where it stopped.`,
         approver,
       );
     }
@@ -676,6 +739,122 @@ export class ReplicaMembershipService {
     const publish = await this.#publishLocal(store, "confirm-join", local, accept);
     if (publish.status === "stopped") return publish.outcome;
     return { kind: "join-confirmed", approver, founder: founder.instanceId };
+  }
+
+  /**
+   * The read a join confirmation makes before it decides: every slot this
+   * computer holds nothing in and did not already read, newest first, in
+   * batches, journaling progress after each one. Membership records are held
+   * as they are read; the other slots it read are journaled as passed, so a
+   * Stop, a restart, or a refused confirmation carries on at the next unread
+   * slot. Artifact entries count only once this computer is a member, so the
+   * restore after the join reads them again.
+   */
+  async #joinRead(
+    store: ReplicaStore,
+    instanceId: ReplicaInstanceId,
+  ): Promise<
+    | { readonly status: "read" }
+    | { readonly status: "unavailable" }
+    | { readonly status: "stopped"; readonly done: number; readonly total: number }
+  > {
+    this.#joinReading = true;
+    try {
+      const listing = await this.#listInstances(store);
+      if (listing === undefined) return { status: "unavailable" };
+      const listed = listedSlots(listing);
+      const state = this.#ports.state();
+      const unread = listed.filter(
+        (slot) =>
+          !state.holds(slot.instanceId, slot.sequence) &&
+          !state.joinReadPassed(slot.instanceId, slot.sequence),
+      );
+      const names = REPLICA_MEMBERSHIP_EVENT_NAMES;
+      const before = state.joinRead;
+      let done: number;
+      let total: number;
+      if (before === undefined) {
+        done = 0;
+        total = unread.length;
+        this.#journal(names.joinReadStarted, { instanceId, total });
+      } else {
+        // What the store gained since the last read counts toward the total.
+        done = Math.max(before.done, before.total - unread.length);
+        total = Math.max(before.total, done + unread.length);
+        if (before.state !== "running") this.#journal(names.joinReadResumed, { instanceId });
+        if (done !== before.done || total !== before.total) {
+          this.#journal(names.joinReadProgress, { instanceId, done, total, passed: [] });
+        }
+      }
+      const running = () => this.#ports.state().joinRead?.state === "running";
+      const order = replicaNewestFirst(unread);
+      for (let start = 0; start < order.length; start += REPLICA_READ_BATCH) {
+        if (!running()) return { status: "stopped", done, total };
+        const batch = order.slice(start, start + REPLICA_READ_BATCH);
+        const read = await this.#readSlots(store, batch);
+        if (read.status === "unavailable") return read;
+        done = Math.min(total, done + batch.length);
+        this.#journal(names.joinReadProgress, {
+          instanceId,
+          done,
+          total,
+          passed: [
+            ...read.artifacts.map(({ instanceId: writer, sequence }) => ({
+              instanceId: writer,
+              sequence,
+            })),
+            ...read.refused.map(({ instanceId: writer, sequence }) => ({
+              instanceId: writer,
+              sequence,
+            })),
+          ],
+        });
+      }
+      // A Stop pressed during the last batch still stops the confirmation.
+      if (!running()) return { status: "stopped", done, total };
+      this.#journal(names.joinReadFinished, { instanceId });
+      return { status: "read" };
+    } finally {
+      this.#joinReading = false;
+    }
+  }
+
+  /**
+   * This identity's join confirmation read, as Settings shows it. A read the
+   * journal says is running while no confirmation here is reading was cut
+   * off by a restart, so it shows as stopped.
+   */
+  joinReadProgress(): ReplicaRestoreProgress | undefined {
+    const read = this.#ports.state().joinRead;
+    if (read === undefined) return undefined;
+    return {
+      state: read.state === "running" && !this.#joinReading ? "stopped" : read.state,
+      done: read.done,
+      total: read.total,
+    };
+  }
+
+  /**
+   * Stop a join confirmation's read after the batch it is reading. It runs
+   * outside the command line, which the confirmation holds while it reads.
+   */
+  stopJoinRead(): ReplicaJoinReadResult {
+    const state = this.#ports.state();
+    const read = state.joinRead;
+    if (state.local === undefined || read === undefined || read.state === "finished") {
+      return {
+        kind: "refused",
+        reason: "no-join-read",
+        message: "This computer is not reading the store to confirm a join.",
+      };
+    }
+    if (read.state === "running") {
+      this.#journal(REPLICA_MEMBERSHIP_EVENT_NAMES.joinReadStopped, {
+        instanceId: state.local.instanceId,
+      });
+    }
+    const progress = this.joinReadProgress();
+    return { kind: "join-read", joinRead: progress ?? { ...read, state: "stopped" } };
   }
 
   async #revokePreview(

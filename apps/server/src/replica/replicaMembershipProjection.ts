@@ -60,6 +60,11 @@ export const REPLICA_MEMBERSHIP_EVENT_NAMES = {
   entryUnreadable: "replica.entry-unreadable@2",
   commandRefused: "replica.command-refused@2",
   storeFailure: "replica.store-failure@2",
+  joinReadStarted: "replica.join-read-started@2",
+  joinReadProgress: "replica.join-read-progress@2",
+  joinReadStopped: "replica.join-read-stopped@2",
+  joinReadResumed: "replica.join-read-resumed@2",
+  joinReadFinished: "replica.join-read-finished@2",
 } as const;
 
 /**
@@ -152,6 +157,8 @@ export const ReplicaMembershipCommandRefused = Schema.Struct({
     "invalid-cut",
     "store-unavailable",
     "key-unavailable",
+    "restore-stopped",
+    "join-stopped",
   ),
   subject: Schema.optional(ReplicaInstanceId),
 }).annotations(strict);
@@ -163,6 +170,35 @@ export const ReplicaMembershipStoreFailure = Schema.Struct({
   sequence: Schema.optional(Sequence),
 }).annotations(strict);
 
+/**
+ * A join confirmation began reading the store before it publishes this
+ * identity's accept: the store listed `total` slots this computer had not read.
+ */
+export const ReplicaJoinReadStarted = Schema.Struct({
+  instanceId: ReplicaInstanceId,
+  total: Schema.Int.pipe(Schema.nonNegative()),
+}).annotations(strict);
+
+/**
+ * How far a join confirmation's read got, journaled after each batch. `passed`
+ * names the slots in that batch it read and holds no record for - artifact
+ * entries, which count only once this computer is a member, and files that
+ * are not records - so confirming again does not read them a second time.
+ */
+export const ReplicaJoinReadProgressed = Schema.Struct({
+  instanceId: ReplicaInstanceId,
+  done: Schema.Int.pipe(Schema.nonNegative()),
+  total: Schema.Int.pipe(Schema.nonNegative()),
+  passed: Schema.Array(
+    Schema.Struct({ instanceId: ReplicaInstanceId, sequence: Sequence }).annotations(strict),
+  ).pipe(Schema.maxItems(1_000)),
+}).annotations(strict);
+
+/** The person stopped or resumed a join confirmation's read, or it read every listed slot. */
+export const ReplicaJoinReadMarked = Schema.Struct({
+  instanceId: ReplicaInstanceId,
+}).annotations(strict);
+
 export function registerReplicaMembershipEvents(registry: EventRegistry): EventRegistry {
   const names = REPLICA_MEMBERSHIP_EVENT_NAMES;
   let registered = registry
@@ -172,7 +208,12 @@ export function registerReplicaMembershipEvents(registry: EventRegistry): EventR
     .register(names.entrySigned, 1, ReplicaEntrySigned)
     .register(names.entryUnreadable, 1, ReplicaEntryUnreadable)
     .register(names.commandRefused, 1, ReplicaMembershipCommandRefused)
-    .register(names.storeFailure, 1, ReplicaMembershipStoreFailure);
+    .register(names.storeFailure, 1, ReplicaMembershipStoreFailure)
+    .register(names.joinReadStarted, 1, ReplicaJoinReadStarted)
+    .register(names.joinReadProgress, 1, ReplicaJoinReadProgressed)
+    .register(names.joinReadStopped, 1, ReplicaJoinReadMarked)
+    .register(names.joinReadResumed, 1, ReplicaJoinReadMarked)
+    .register(names.joinReadFinished, 1, ReplicaJoinReadMarked);
   for (const name of RETIRED_REPLICA_EVENT_NAMES) {
     registered = registered.register(name, 1, Schema.Unknown);
   }
@@ -185,6 +226,9 @@ const decodeHeld = Schema.decodeUnknownSync(ReplicaRecordHeld);
 const decodeSigned = Schema.decodeUnknownSync(ReplicaEntrySigned);
 const decodeUnreadable = Schema.decodeUnknownSync(ReplicaEntryUnreadable);
 const decodeStoreFailure = Schema.decodeUnknownSync(ReplicaMembershipStoreFailure);
+const decodeJoinReadStarted = Schema.decodeUnknownSync(ReplicaJoinReadStarted);
+const decodeJoinReadProgressed = Schema.decodeUnknownSync(ReplicaJoinReadProgressed);
+const decodeJoinReadMarked = Schema.decodeUnknownSync(ReplicaJoinReadMarked);
 
 /** This host's own identity in the store, once it founded one or asked to join. */
 export interface ReplicaLocalIdentity {
@@ -255,6 +299,19 @@ export interface ReplicaMembershipState {
   readonly unreadableRecorded: (refusal: typeof ReplicaEntryUnreadable.Type) => boolean;
   /** The last store failure journaled, with when it happened. */
   readonly lastStoreFailure: ReplicaLastStoreFailure | undefined;
+  /**
+   * The read this identity's join confirmation makes, as the journal last
+   * said: `running` here may be a read a restart cut off.
+   */
+  readonly joinRead: ReplicaJoinReadState | undefined;
+  /** Whether this identity's join confirmation already read that slot and holds nothing for it. */
+  readonly joinReadPassed: (instanceId: ReplicaInstanceId, sequence: number) => boolean;
+}
+
+export interface ReplicaJoinReadState {
+  readonly state: "running" | "stopped" | "finished";
+  readonly done: number;
+  readonly total: number;
 }
 
 export interface ReplicaLastStoreFailure {
@@ -295,6 +352,8 @@ export class ReplicaMembershipProjection implements Projection {
     string,
     { readonly instanceId: ReplicaInstanceId; readonly sequence: number }
   >();
+  /** By identity: only the current one's is ever read. */
+  readonly #joinReads = new Map<string, ReplicaJoinReadState & { readonly passed: Set<string> }>();
   #state: ReplicaMembershipState | undefined;
 
   reset(_connection: SqliteConnection): void {
@@ -307,6 +366,7 @@ export class ReplicaMembershipProjection implements Projection {
     this.#lastStoreFailure = undefined;
     this.#artifactSlots.clear();
     this.#unreadableSlots.clear();
+    this.#joinReads.clear();
     this.#state = undefined;
   }
 
@@ -414,6 +474,49 @@ export class ReplicaMembershipProjection implements Projection {
         }
         break;
       }
+      case names.joinReadStarted: {
+        const started = decodeJoinReadStarted(event.payload);
+        this.#joinReads.set(String(started.instanceId), {
+          state: "running",
+          done: 0,
+          total: started.total,
+          passed: new Set(),
+        });
+        break;
+      }
+      case names.joinReadProgress: {
+        const progress = decodeJoinReadProgressed(event.payload);
+        const read = this.#joinReads.get(String(progress.instanceId));
+        if (read === undefined) return;
+        const done = Math.max(read.done, Math.min(progress.done, progress.total));
+        for (const slot of progress.passed)
+          read.passed.add(slotKey(slot.instanceId, slot.sequence));
+        this.#joinReads.set(String(progress.instanceId), {
+          ...read,
+          done,
+          total: Math.max(progress.total, done),
+        });
+        break;
+      }
+      case names.joinReadStopped:
+      case names.joinReadResumed:
+      case names.joinReadFinished: {
+        const marked = decodeJoinReadMarked(event.payload);
+        const read = this.#joinReads.get(String(marked.instanceId));
+        if (read === undefined) return;
+        this.#joinReads.set(
+          String(marked.instanceId),
+          event.eventName === names.joinReadFinished
+            ? { ...read, state: "finished", done: read.total }
+            : event.eventName === names.joinReadResumed
+              ? { ...read, state: "running" }
+              : // Stopping a read that already finished changes nothing.
+                read.state === "finished"
+                ? read
+                : { ...read, state: "stopped" },
+        );
+        break;
+      }
       default:
         return;
     }
@@ -466,6 +569,8 @@ export class ReplicaMembershipProjection implements Projection {
         : undefined;
     const members = replicaMembers(membership);
     const unreadable = new Set(this.#unreadable);
+    const joinRead =
+      local === undefined ? undefined : this.#joinReads.get(String(local.instanceId));
     return {
       local,
       founder,
@@ -492,6 +597,12 @@ export class ReplicaMembershipProjection implements Projection {
       localFinished,
       unreadableRecorded: (refusal) => unreadable.has(unreadableKey(refusal)),
       lastStoreFailure: this.#lastStoreFailure,
+      joinRead:
+        joinRead === undefined
+          ? undefined
+          : { state: joinRead.state, done: joinRead.done, total: joinRead.total },
+      joinReadPassed: (instanceId, sequence) =>
+        joinRead?.passed.has(slotKey(instanceId, sequence)) === true,
     };
   }
 }

@@ -13,6 +13,7 @@ import {
   encodeReplicaEntry,
   type CanvasId,
   type CanvasVersion,
+  type ReplicaMembershipCommand,
   type ReplicaMembershipResult,
   type UtcTimestamp,
 } from "@octant/contracts";
@@ -39,6 +40,7 @@ import { createReplicaDeviceKey, makeReplicaDeviceSigner } from "./replicaDevice
 import {
   createReplicaMembershipJournal,
   registerReplicaMembershipEvents,
+  REPLICA_MEMBERSHIP_EVENT_NAMES,
   ReplicaMembershipProjection,
   type ReplicaMembershipJournal,
 } from "./replicaMembershipProjection";
@@ -257,6 +259,13 @@ function computer(
     state: () => membershipProjection.state(),
     localHostId: LOCAL_HOST_ID,
     clock: () => Date.parse(NOW),
+    restoreStopped: () => {
+      const local = membershipProjection.state().local;
+      return (
+        local !== undefined &&
+        artifactProjection.state().restore(local.instanceId)?.state === "stopped"
+      );
+    },
   });
   const sync = new ReplicaArtifactSyncService({
     membership,
@@ -1497,6 +1506,172 @@ describe("restoring a whole library on a computer that joins", () => {
     expect(new Set(keptSlots(restarted)).size).toBe(60);
     expect(restarted.sync.stopRestore()).toEqual(
       expect.objectContaining({ kind: "refused", reason: "finished" }),
+    );
+  });
+
+  it("refuses every action that reads the store while the restore is stopped, with no store call", async () => {
+    const memory = memoryStore();
+    const shared: SharedStore = {
+      kind: "direct",
+      selection: () => ({ status: "selected", store: memory.store }),
+    };
+    const { studio, laptop } = await pair(shared);
+    for (let canvas = 1; canvas <= 30; canvas += 1) {
+      await studio.commit(
+        canvasVersion({
+          canvasId: numbered("1", canvas) as CanvasId,
+          versionId: numbered("2", canvas, 1),
+          sequence: 1,
+          text: `Plan ${String(canvas)}`,
+        }),
+      );
+    }
+    const mini = computer("Mac mini", shared);
+    const request = expectKind(
+      await mini.membership.execute({ kind: "write-join-request", displayName: mini.name }),
+      "join-requested",
+    );
+    const stopping = computer(laptop.name, shared, {
+      disk: laptop.disk,
+      stopAfter: { eventName: REPLICA_ARTIFACT_EVENT_NAMES.restoreProgress, times: 1 },
+    });
+    await expect(stopping.sync.restore()).rejects.toThrow("The host stopped.");
+    const stopped = computer(laptop.name, shared, { disk: laptop.disk });
+    // 30 versions and the Mac mini's request.
+    expect(stopped.sync.stopRestore()).toEqual({
+      kind: "restore",
+      restore: { state: "stopped", done: 25, total: 31 },
+    });
+
+    const calls = memory.state.calls;
+    const refusedReason = async (command: ReplicaMembershipCommand) => {
+      const outcome = expectKind(await stopped.membership.execute(command), "refused");
+      return outcome.reason;
+    };
+    expect(await refusedReason({ kind: "pull" })).toBe("restore-stopped");
+    expect(
+      await refusedReason({
+        kind: "approve-join",
+        joinRequest: request.entry,
+        confirmationCode: "000000",
+      }),
+    ).toBe("restore-stopped");
+    expect(await refusedReason({ kind: "revoke-preview", subject: studio.id() })).toBe(
+      "restore-stopped",
+    );
+    expect(await refusedReason({ kind: "revoke", subject: studio.id() })).toBe("restore-stopped");
+    await stopped.sync.sync();
+    expect(memory.state.calls).toBe(calls);
+
+    // Resume, and the store answers again.
+    expect(stopped.sync.resumeRestore().kind).toBe("restore");
+    await stopped.sync.restore();
+    expect(stopped.sync.restoreProgress()?.state).toBe("finished");
+    expect(expectKind(await stopped.membership.execute({ kind: "pull" }), "pulled").kind).toBe(
+      "pulled",
+    );
+  });
+
+  it("shows a join confirmation's read newest first, stops it when asked, and carries on after a restart with nothing read twice", async () => {
+    const memory = memoryStore();
+    const hooks: { onGet: (() => void) | undefined } = { onGet: undefined };
+    let gets = 0;
+    const store: ReplicaStore = {
+      ...memory.store,
+      async get(key) {
+        gets += 1;
+        hooks.onGet?.();
+        return memory.store.get(key);
+      },
+    };
+    const shared: SharedStore = {
+      kind: "direct",
+      selection: () => ({ status: "selected", store }),
+    };
+    const studio = computer("Studio Mac", shared);
+    const laptop = computer("MacBook Air", shared);
+    expectKind(
+      await studio.membership.execute({ kind: "create-replica", displayName: studio.name }),
+      "replica-created",
+    );
+    for (let canvas = 1; canvas <= 60; canvas += 1) {
+      await studio.commit(
+        canvasVersion({
+          canvasId: numbered("1", canvas) as CanvasId,
+          versionId: numbered("2", canvas, 1),
+          sequence: 1,
+          text: `Plan ${String(canvas)}`,
+        }),
+      );
+    }
+    const request = expectKind(
+      await laptop.membership.execute({ kind: "write-join-request", displayName: laptop.name }),
+      "join-requested",
+    );
+    expectKind(await studio.membership.execute({ kind: "pull" }), "pulled");
+    const pinned = studio.membershipProjection.state();
+    if (pinned.local === undefined || pinned.founder === undefined) throw new Error("no replica");
+    const code = deriveReplicaJoinMatchingCode({
+      joinRequest: request.entry,
+      approver: pinned.local,
+      founder: pinned.founder,
+    });
+    expectKind(
+      await studio.membership.execute({
+        kind: "approve-join",
+        joinRequest: request.entry,
+        confirmationCode: code,
+      }),
+      "join-approved",
+    );
+    const confirm = {
+      kind: "confirm-join",
+      approver: studio.id(),
+      confirmationCode: code,
+    } as const;
+    // The Studio Mac wrote its founding record, 60 versions, and the approval.
+    const total = 62;
+
+    // The person presses Stop while the first batch is being read.
+    let reads = 0;
+    hooks.onGet = () => {
+      reads += 1;
+      if (reads === 3) expect(laptop.membership.stopJoinRead().kind).toBe("join-read");
+    };
+    expect(expectKind(await laptop.membership.execute(confirm), "refused").reason).toBe(
+      "join-stopped",
+    );
+    hooks.onGet = undefined;
+    expect(laptop.membership.joinReadProgress()).toEqual({ state: "stopped", done: 25, total });
+    expect(laptop.membershipProjection.state().localAccepted).toBe(false);
+
+    // Confirming again carries on; the host stops after its next batch.
+    const interrupted = computer(laptop.name, shared, {
+      disk: laptop.disk,
+      stopAfter: { eventName: REPLICA_MEMBERSHIP_EVENT_NAMES.joinReadProgress, times: 1 },
+    });
+    await expect(interrupted.membership.execute(confirm)).rejects.toThrow("The host stopped.");
+
+    // After the restart the read shows as stopped, and confirming again reads
+    // only the slots no earlier batch read: two files for each.
+    const restarted = computer(laptop.name, shared, { disk: laptop.disk });
+    expect(restarted.membership.joinReadProgress()).toEqual({ state: "stopped", done: 50, total });
+    gets = 0;
+    expectKind(await restarted.membership.execute(confirm), "join-confirmed");
+    expect(gets).toBe((total - 50) * 2);
+    expect(restarted.membership.joinReadProgress()).toEqual({
+      state: "finished",
+      done: total,
+      total,
+    });
+    // Newest first: the approval is the first slot read, in the first batch.
+    const progress = restarted
+      .events()
+      .filter((event) => event.eventName === REPLICA_MEMBERSHIP_EVENT_NAMES.joinReadProgress)
+      .map((event) => (event.payload as { done: number }).done);
+    expect(progress).toEqual([25, 50, total]);
+    expect(restarted.membership.stopJoinRead()).toEqual(
+      expect.objectContaining({ kind: "refused", reason: "no-join-read" }),
     );
   });
 

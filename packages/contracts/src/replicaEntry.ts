@@ -725,6 +725,10 @@ export const ReplicaMembershipResult = Schema.Union(
       "invalid-cut",
       "store-unavailable",
       "key-unavailable",
+      /** This computer's restore is stopped, and nothing reads the store until it resumes. */
+      "restore-stopped",
+      /** The person stopped the read a join confirmation makes; confirming again carries on. */
+      "join-stopped",
     ),
     message: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512)),
   }).annotations(strict),
@@ -864,12 +868,44 @@ export type ReplicaRestoreResult = typeof ReplicaRestoreResult.Type;
 export const decodeReplicaRestoreCommand = Schema.decodeUnknownSync(ReplicaRestoreCommand);
 export const decodeReplicaRestoreResult = Schema.decodeUnknownSync(ReplicaRestoreResult);
 
+/**
+ * Stop the read a join confirmation makes before it publishes the accept. It
+ * travels only over the loopback host route; confirming again resumes it.
+ */
+export const ReplicaJoinReadCommand = Schema.Struct({
+  kind: Schema.Literal("stop-join-read"),
+}).annotations(strict);
+export type ReplicaJoinReadCommand = typeof ReplicaJoinReadCommand.Type;
+
+export const ReplicaJoinReadResult = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal("join-read"),
+    joinRead: ReplicaRestoreProgress,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("refused"),
+    /** No join confirmation is reading, or the last one already read everything. */
+    reason: Schema.Literal("no-join-read"),
+    message: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512)),
+  }).annotations(strict),
+);
+export type ReplicaJoinReadResult = typeof ReplicaJoinReadResult.Type;
+
+export const decodeReplicaJoinReadCommand = Schema.decodeUnknownSync(ReplicaJoinReadCommand);
+export const decodeReplicaJoinReadResult = Schema.decodeUnknownSync(ReplicaJoinReadResult);
+
 export const ReplicaSyncStatus = Schema.Struct({
   lastPublish: ReplicaStatusNotAvailable,
   lastPull: ReplicaStatusNotAvailable,
   queued: ReplicaStatusNotAvailable,
   /** The restore of this computer's current identity, once one has started. */
   restore: Schema.optional(ReplicaRestoreProgress),
+  /**
+   * The read a join confirmation makes before this computer publishes its
+   * accept, with the same progress as a restore. A read a restart cut off
+   * shows as stopped; confirming again carries on where it stopped.
+   */
+  joinRead: Schema.optional(ReplicaRestoreProgress),
   /** The last time the store refused, could not be reached, or held a file in this computer's place. */
   lastError: Schema.optional(
     Schema.Struct({

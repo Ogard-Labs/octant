@@ -225,6 +225,39 @@ describe("replica membership routes", () => {
     expect(calls).toEqual([]);
   });
 
+  it("stops a join confirmation's read for a local window at once, and refuses a paired device", async () => {
+    const { bindPrincipalRouteContext } = await import("../principalRouteContext");
+    const { instance, calls } = service([]);
+    const stops: string[] = [];
+    const handler = createReplicaMembershipRouteHandler({
+      service: {
+        ...instance,
+        stopJoinRead: () => {
+          stops.push("stop");
+          return { kind: "join-read", joinRead: { state: "stopped", done: 25, total: 62 } };
+        },
+      } as never,
+      view: () => emptyView,
+      windowAuthorityStore: windowStore(),
+    });
+    const stop = makeRequest({ kind: "stop-join-read" });
+    bindPrincipalRouteContext(stop, localWindow);
+    const stopped = await handler(stop);
+    expect(stopped?.status).toBe(200);
+    expect(await stopped?.json()).toEqual({
+      kind: "join-read",
+      joinRead: { state: "stopped", done: 25, total: 62 },
+    });
+    const remote = makeRequest({ kind: "stop-join-read" });
+    bindPrincipalRouteContext(remote, {
+      principal: remoteDevice(thisHost),
+      scopeId: localWindow.scopeId,
+    });
+    expect((await handler(remote))?.status).toBe(403);
+    expect(stops).toEqual(["stop"]);
+    expect(calls).toEqual([]);
+  });
+
   it("answers a typed not-configured refusal when the host has no replica store", async () => {
     const { bindPrincipalRouteContext } = await import("../principalRouteContext");
     const projection = new ReplicaMembershipProjection();

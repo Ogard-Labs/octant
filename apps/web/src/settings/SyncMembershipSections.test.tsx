@@ -1,6 +1,7 @@
 import type { ReplicaMembershipClient } from "@octant/client-runtime/replica-membership-client";
 import type { ReplicaSyncStatusClient } from "@octant/client-runtime/replica-sync-status-client";
 import {
+  decodeReplicaJoinReadResult,
   decodeReplicaMembershipResult,
   decodeReplicaMembershipView,
   decodeReplicaRestoreResult,
@@ -11,6 +12,7 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import {
+  SYNC_RESTORE_STOPPED,
   SYNC_STATUS_NOT_AVAILABLE,
   SYNC_STORE_NOT_READY,
   SyncMembershipSections,
@@ -75,15 +77,20 @@ function client(
   const restore = vi.fn(async (command: { readonly kind: string }) =>
     decodeReplicaRestoreResult(answer(command)),
   );
+  const stopJoinRead = vi.fn(async () =>
+    decodeReplicaJoinReadResult(answer({ kind: "stop-join-read" })),
+  );
   const fake: ReplicaMembershipClient = {
     read: vi.fn(async () => current),
     execute: execute as unknown as ReplicaMembershipClient["execute"],
     restore: restore as unknown as ReplicaMembershipClient["restore"],
+    stopJoinRead,
   };
   return {
     fake,
     execute,
     restore,
+    stopJoinRead,
     setView: (next: ReplicaMembershipView) => {
       current = next;
     },
@@ -189,6 +196,102 @@ describe("SyncMembershipSections", () => {
     expect(
       await screen.findByText("This computer joined. Studio Mac brought it in."),
     ).toBeVisible();
+  });
+
+  it("follows a join confirmation's read of the store, and stops it when asked", async () => {
+    const joining = (joinRead?: unknown) =>
+      view({
+        thisComputer: {
+          kind: "joining",
+          instanceId: laptop,
+          displayName: "Laptop",
+          fresh: true,
+          approvers: [
+            {
+              instanceId: studio,
+              displayName: "Studio Mac",
+              matchingCode: "482913",
+              approvedThisComputer: true,
+            },
+          ],
+        },
+        status: joinRead === undefined ? status : { ...status, joinRead },
+      });
+    let answerConfirm: (() => void) | undefined;
+    const confirmed = new Promise<void>((resolve) => {
+      answerConfirm = resolve;
+    });
+    const { fake, stopJoinRead, setView } = client(joining(), (command) =>
+      command.kind === "stop-join-read"
+        ? { kind: "join-read", joinRead: { state: "stopped", done: 25, total: 62 } }
+        : {
+            kind: "refused",
+            reason: "join-stopped",
+            message:
+              "Stopped after reading 25 of 62 entries. Confirm again to carry on where it stopped.",
+          },
+    );
+    const execute = fake.execute;
+    fake.execute = vi.fn(async (command) => {
+      await confirmed;
+      return execute(command);
+    });
+    renderSections(fake);
+    const user = userEvent.setup();
+
+    setView(joining({ state: "running", done: 25, total: 62 }));
+    await user.click(await screen.findByRole("button", { name: "Confirm join" }));
+    expect(
+      await screen.findByText(
+        "Reading the store before joining: 25 of 62 entries read.",
+        {},
+        { timeout: 4_000 },
+      ),
+    ).toBeVisible();
+    expect(screen.getByRole("progressbar", { name: "Reading the store" })).toHaveAttribute(
+      "value",
+      "25",
+    );
+    expect(screen.getByRole("button", { name: "Confirm join" })).toBeDisabled();
+
+    setView(joining({ state: "stopped", done: 25, total: 62 }));
+    await user.click(screen.getByRole("button", { name: "Stop" }));
+    expect(stopJoinRead).toHaveBeenCalledTimes(1);
+    answerConfirm?.();
+    expect(
+      await screen.findByText(
+        "Stopped: 25 of 62 entries read. Confirm join again to carry on where it stopped.",
+      ),
+    ).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Stop" })).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Confirm join" })).toBeEnabled());
+    expect(screen.queryByText(/Confirm again to carry on/)).not.toBeInTheDocument();
+  });
+
+  it("keeps Check the store, Approve, and Revoke off while the restore is stopped, and says why", async () => {
+    const request = {
+      format: "octant.replica-entry/2",
+      kind: "join-request",
+      origin: { instanceId: phone, displayName: "Travel Mac", sequence: 1, publicKey: key },
+      requestedAt: Date.parse("2026-10-09T08:00:00.000Z"),
+    };
+    const { fake, execute } = client(
+      view({
+        thisComputer: { kind: "member", instanceId: studio, displayName: "Studio Mac" },
+        members: founderMembers,
+        joinRequests: [{ request, matchingCode: "120034", approvedByThisComputer: false }],
+        status: { ...status, restore: { state: "stopped", done: 25, total: 60 } },
+      }),
+    );
+    renderSections(fake);
+    const check = await screen.findByRole("button", { name: "Check the store" });
+    expect(check).toBeDisabled();
+    expect(check).toHaveAttribute("title", SYNC_RESTORE_STOPPED);
+    expect(screen.getByText(SYNC_RESTORE_STOPPED)).toBeVisible();
+    expect(screen.getByRole("button", { name: "Approve…" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Revoke Laptop" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Resume" })).toBeEnabled();
+    expect(execute).not.toHaveBeenCalled();
   });
 
   it("approves a join request only from the dialog where the person confirms the codes match", async () => {
@@ -416,7 +519,7 @@ describe("restoring the library", () => {
     expect(restore).toHaveBeenCalledWith({ kind: "stop-restore" });
     expect(
       await within(section).findByText(
-        "Stopped: 25 of 60 entries read. Background sync reads nothing more from the store until you resume.",
+        "Stopped: 25 of 60 entries read. Nothing reads the store until you resume, not even Check the store.",
       ),
     ).toBeVisible();
 

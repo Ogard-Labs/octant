@@ -12,6 +12,7 @@
  */
 
 import {
+  decodeReplicaJoinReadCommand,
   decodeReplicaMembershipCommand,
   decodeReplicaRestoreCommand,
   type ReplicaMembershipCommand,
@@ -123,6 +124,21 @@ export function createReplicaMembershipRouteHandler(
       }
       const result = restoreCommand.kind === "stop-restore" ? restore.stop() : restore.resume();
       return Response.json(result, { status: 200, headers: corsHeaders(origin) });
+    }
+
+    // Stopping a join confirmation's read answers at once: the confirmation
+    // holds the command line while it reads, so this does not queue behind it.
+    let stopsJoinRead = false;
+    try {
+      stopsJoinRead = decodeReplicaJoinReadCommand(body).kind === "stop-join-read";
+    } catch {
+      stopsJoinRead = false;
+    }
+    if (stopsJoinRead) {
+      return Response.json(dependencies.service.stopJoinRead(), {
+        status: 200,
+        headers: corsHeaders(origin),
+      });
     }
 
     // The contract decoder is the only way in: a join request a caller hands

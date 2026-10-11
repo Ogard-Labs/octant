@@ -26,7 +26,11 @@ export const SYNC_STATUS_NOT_AVAILABLE = "Not available yet";
 /** Why Create and Join are off until the store above is ready. */
 export const SYNC_STORE_NOT_READY = "Choose a store and turn sync on first.";
 
-/** How often the page reads a running restore's progress again. */
+/** Why every action that reads the store is off while the restore is stopped. */
+export const SYNC_RESTORE_STOPPED =
+  "The restore is stopped, so this computer reads nothing from the store. Resume it first.";
+
+/** How often the page reads a running restore's, or a join read's, progress again. */
 export const SYNC_RESTORE_POLL_MS = 2_000;
 
 type Feedback = {
@@ -59,6 +63,10 @@ export function SyncMembershipSections(props: SyncMembershipSectionsProps) {
   const [view, setView] = useState<ReplicaMembershipView>();
   const [loadFailed, setLoadFailed] = useState(false);
   const [busy, setBusy] = useState(false);
+  // A join confirmation reads the store before it decides; the page follows
+  // its count and keeps Stop available while every other control waits.
+  const [confirming, setConfirming] = useState(false);
+  const [stoppingJoinRead, setStoppingJoinRead] = useState(false);
   const [feedback, setFeedback] = useState<Feedback>();
   // A restore's outcome is said in its own section.
   const [restoreFeedback, setRestoreFeedback] = useState<Feedback>();
@@ -84,13 +92,33 @@ export function SyncMembershipSections(props: SyncMembershipSectionsProps) {
     void load();
   }, [load]);
 
-  // A running restore reads in the background; the page follows its count.
-  const restoreRunning = view?.status.restore?.state === "running";
+  // A running restore reads in the background, and a join confirmation reads
+  // before it answers; the page follows either count.
+  const following =
+    confirming ||
+    view?.status.restore?.state === "running" ||
+    view?.status.joinRead?.state === "running";
   useEffect(() => {
-    if (!restoreRunning) return;
+    if (!following) return;
     const timer = setInterval(() => void load(), SYNC_RESTORE_POLL_MS);
     return () => clearInterval(timer);
-  }, [load, restoreRunning]);
+  }, [load, following]);
+
+  const stopJoinRead = useCallback(async () => {
+    setStoppingJoinRead(true);
+    try {
+      const result = await client.stopJoinRead();
+      if (result.kind === "refused") setFeedback({ kind: "error", message: result.message });
+      await load();
+    } catch (error) {
+      setFeedback({
+        kind: "error",
+        message: error instanceof Error ? error.message : "Replica membership is unavailable.",
+      });
+    } finally {
+      setStoppingJoinRead(false);
+    }
+  }, [client, load]);
 
   const runRestore = useCallback(
     async (command: ReplicaRestoreCommand) => {
@@ -122,7 +150,11 @@ export function SyncMembershipSections(props: SyncMembershipSectionsProps) {
       setFeedbackNearComputers(command.kind === "revoke-preview");
       try {
         const result = await client.execute(command);
-        if (result.kind === "refused" || result.kind === "store-failed") {
+        // A stopped join read says so in its own progress row.
+        if (
+          (result.kind === "refused" && result.reason !== "join-stopped") ||
+          result.kind === "store-failed"
+        ) {
           setFeedback({ kind: "error", message: result.message });
         }
         await load();
@@ -162,12 +194,20 @@ export function SyncMembershipSections(props: SyncMembershipSectionsProps) {
       )}
     </div>
   );
+  // Stop means no store reads until Resume; the host refuses them too.
+  const restoreStopped = view.status.restore?.state === "stopped";
+  const readsOffReason = !props.storeReady
+    ? SYNC_STORE_NOT_READY
+    : restoreStopped
+      ? SYNC_RESTORE_STOPPED
+      : undefined;
+  const joinRead = view.status.joinRead;
   const checkStore = (
     <OctantButton
-      disabled={busy || !props.storeReady}
+      disabled={busy || readsOffReason !== undefined}
       onClick={() => void run({ kind: "pull" })}
       size="sm"
-      title={props.storeReady ? undefined : SYNC_STORE_NOT_READY}
+      title={readsOffReason}
       type="button"
       variant="ghost"
     >
@@ -237,20 +277,23 @@ export function SyncMembershipSections(props: SyncMembershipSectionsProps) {
                     {approver.approvedThisComputer ? (
                       <OctantButton
                         disabled={busy}
-                        onClick={() =>
+                        onClick={() => {
+                          setConfirming(true);
                           void run({
                             kind: "confirm-join",
                             approver: approver.instanceId,
                             confirmationCode: approver.matchingCode,
-                          }).then((result) => {
-                            if (result?.kind !== "join-confirmed") return;
-                            setFeedback({
-                              kind: "success",
-                              message: `This computer joined. ${approver.displayName} brought it in.`,
-                            });
-                            onMembershipChange();
                           })
-                        }
+                            .then((result) => {
+                              if (result?.kind !== "join-confirmed") return;
+                              setFeedback({
+                                kind: "success",
+                                message: `This computer joined. ${approver.displayName} brought it in.`,
+                              });
+                              onMembershipChange();
+                            })
+                            .finally(() => setConfirming(false));
+                        }}
                         size="sm"
                         type="button"
                       >
@@ -260,6 +303,13 @@ export function SyncMembershipSections(props: SyncMembershipSectionsProps) {
                   </div>
                 </SettingRow>
               ))
+            )}
+            {joinRead === undefined ? null : (
+              <JoinReadRow
+                joinRead={joinRead}
+                onStop={() => void stopJoinRead()}
+                stopping={stoppingJoinRead}
+              />
             )}
             {here.fresh ? null : (
               <SettingRow
@@ -290,9 +340,11 @@ export function SyncMembershipSections(props: SyncMembershipSectionsProps) {
         <SettingsSection
           actions={checkStore}
           description={
-            here.kind === "founder"
-              ? `This computer set up the replica as ${here.displayName}. Check the store to see computers that asked to join.`
-              : `This computer is a member as ${here.displayName}. Check the store to see computers that asked to join.`
+            restoreStopped
+              ? SYNC_RESTORE_STOPPED
+              : here.kind === "founder"
+                ? `This computer set up the replica as ${here.displayName}. Check the store to see computers that asked to join.`
+                : `This computer is a member as ${here.displayName}. Check the store to see computers that asked to join.`
           }
           title="Join requests"
         >
@@ -321,9 +373,10 @@ export function SyncMembershipSections(props: SyncMembershipSectionsProps) {
                     ) : (
                       <OctantButton
                         aria-haspopup="dialog"
-                        disabled={busy}
+                        disabled={busy || restoreStopped}
                         onClick={() => setApproving(request)}
                         size="sm"
+                        title={restoreStopped ? SYNC_RESTORE_STOPPED : undefined}
                         type="button"
                         variant="secondary"
                       >
@@ -377,7 +430,7 @@ export function SyncMembershipSections(props: SyncMembershipSectionsProps) {
                   <OctantButton
                     aria-haspopup="dialog"
                     aria-label={`Revoke ${entry.displayName}`}
-                    disabled={busy}
+                    disabled={busy || restoreStopped}
                     onClick={() => {
                       setFeedbackNearComputers(true);
                       setFeedback({
@@ -393,6 +446,7 @@ export function SyncMembershipSections(props: SyncMembershipSectionsProps) {
                       );
                     }}
                     size="sm"
+                    title={restoreStopped ? SYNC_RESTORE_STOPPED : undefined}
                     type="button"
                     variant="destructive"
                   >
@@ -884,13 +938,62 @@ function SyncRestoreSection(props: {
   );
 }
 
+/**
+ * The read a join confirmation makes before this computer publishes its
+ * accept: newest first, in batches, with the same progress as a restore.
+ */
+function JoinReadRow(props: {
+  readonly joinRead: ReplicaRestoreProgress;
+  readonly stopping: boolean;
+  readonly onStop: () => void;
+}) {
+  const { joinRead } = props;
+  const progressId = useId();
+  const count = `${String(joinRead.done)} of ${String(joinRead.total)} entries read`;
+  return (
+    <SettingRow
+      description={
+        joinRead.state === "running"
+          ? `Reading the store before joining: ${count}.`
+          : `Stopped: ${count}. Confirm join again to carry on where it stopped.`
+      }
+      htmlFor={progressId}
+      label="Reading the store"
+      scope="host"
+      settingId="sync-join-read"
+    >
+      <div className="sync-settings__member-controls">
+        <progress
+          className="sync-settings__progress"
+          id={progressId}
+          max={Math.max(1, joinRead.total)}
+          value={joinRead.total === 0 ? 1 : joinRead.done}
+        >
+          {joinRead.done} of {joinRead.total}
+        </progress>
+        {joinRead.state === "running" ? (
+          <OctantButton
+            disabled={props.stopping}
+            onClick={props.onStop}
+            size="sm"
+            type="button"
+            variant="secondary"
+          >
+            Stop
+          </OctantButton>
+        ) : null}
+      </div>
+    </SettingRow>
+  );
+}
+
 function restoreSentence(restore: ReplicaRestoreProgress): string {
   const count = `${String(restore.done)} of ${String(restore.total)} entries read`;
   switch (restore.state) {
     case "running":
       return `Restoring: ${count}.`;
     case "stopped":
-      return `Stopped: ${count}. Background sync reads nothing more from the store until you resume.`;
+      return `Stopped: ${count}. Nothing reads the store until you resume, not even Check the store.`;
     case "finished":
       return `Restored: ${count}.`;
   }

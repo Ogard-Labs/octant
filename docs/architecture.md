@@ -1635,7 +1635,23 @@ flowchart LR
     signed, so the walk is unique. It checks the matching code against the
     approver's key and that founder, checks that an acceptance would admit
     this computer, and only then pins the founder and signs `join-accepted`;
-    an identity has one parent forever. Revoking needs good standing and a
+    an identity has one parent forever. Confirming's read follows the
+    restore's progress model: it lists the store once and reads every slot
+    this computer holds nothing in and did not already read, newest first,
+    in batches of 25, inside the command line. The journal holds
+    `replica.join-read-started@2` (the identity and the unread total),
+    `replica.join-read-progress@2` after each batch with the slots it read
+    and holds no record for (artifact entries and files that are not
+    records), and `replica.join-read-stopped@2`, `replica.join-read-resumed@2`,
+    and `replica.join-read-finished@2`. `stop-join-read` on the same route
+    stops it after the current batch without queueing behind it, and the
+    confirmation is refused as `join-stopped`; confirming again, also after
+    a restart, re-lists and carries on at the next unread slot, adding what
+    the store gained to the total. A read the journal says is running while
+    no confirmation in this process reads shows as stopped. Its state and
+    counts are `joinRead` in the sync status until it finishes. Artifact
+    entries count only once this computer is a member, so the restore after
+    the join reads them again. Revoking needs good standing and a
     subject this computer brought in, directly or through others; a sibling
     or cousin is revoked from a shared ancestor, the founder at worst.
     Revoke reads the store first, then cuts at the highest sequence of the
@@ -1777,8 +1793,12 @@ flowchart LR
     was confirmed. Until it finishes, the restore reads in
     place of the interval pull. A person can stop it from Settings › Sync on
     the host; a stopped restore stays stopped across restarts, and
-    background sync reads nothing from the store until the person resumes
-    it (publishing continues, and an explicit Check the store still reads).
+    nothing reads the store until the person resumes it: background sync
+    skips its pull, and the membership commands that read the store - pull
+    (Check the store), approve a join, preview a revoke, and revoke - are
+    refused as `restore-stopped` before any store call. Settings › Sync
+    turns those controls off and says why. Publishing continues; it only
+    writes, and reads back a slot it writes only when that slot is taken.
     Stop and Resume ride the host-only membership commands route
     (`stop-restore`, `resume-restore`); the restore's state, read count, and
     total are in the sync status, which a paired device reads without the
@@ -1866,8 +1886,9 @@ flowchart LR
     `replica.artifact-slot-erased@2` that keeps its slot settled, so a later
     pull does not import the erased content again. Published slots keep
     their content-free record. Copies already in the store are not deleted.
-  - **Not built yet.** Confirming a join still reads every slot of the
-    store once without progress before the restore starts. Binding selects
+  - **Not built yet.** While a computer waits to be approved, the interval
+    pull and Check the store read its unread slots, artifact entries
+    included, in one pass without progress. Binding selects
     an existing compatible thread; it
     does not create one. Keep and Merge resolve version heads only: a
     tombstone beside a revision stays a head, and the artifact stays
