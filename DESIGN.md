@@ -229,7 +229,9 @@ opens with Model endpoints, every endpoint Octant calls over an API itself
 by model roles and helper agents; with no endpoint yet it offers three ways
 in instead (Sign in with ChatGPT, Sign in with OpenRouter, Add endpoint), each
 sign-in one click with its terms as a consent line under the button. Image
-generation holds the image profiles and custom image sources. A sign-in
+generation holds the image profiles and custom image sources. Provider catalog lists
+every bundled driver of both kinds and sends each one to the page that
+configures it. A sign-in
 endpoint's row says who is signed in, its detail page offers sign out and
 sign in again, and its configuration fixes the base URL and asks for no key. The
 instances, commands, and credentials are the same on every page. A setting lives
@@ -1412,6 +1414,31 @@ action beside Check connection, shown only where the desktop's file picker
 exists and only for a runtime whose version probe the host can run. Its
 answer is one quiet line under the actions (the version the host read), or a
 warning box saying why the host refused the file.
+
+Provider catalog, the Models page after Providers & Models, lists every
+bundled provider driver in the Model endpoints row style. Agent runtimes and
+model endpoints are two sections. A row is one link named with its state
+("Codex CLI, off. Open setup") and shows the mark, the name, "Agent runtime ·
+Bundled" or "Model endpoint · Bundled", and the state in words beside the same
+dot shapes. The states are Ready, Sign in to use, Partly working, Checking…,
+Not checked yet, Found, not added, Not looked for yet, Not on this host, Not
+added, Off, Can't start, Version not supported, and Not available. A one-line
+introduction says each driver is already installed and trusted, followed by a
+summary ("21 drivers · 3 ready · 1 need you"). Opening a row replaces the page
+with that driver's setup sub-page: breadcrumb, Back, and Escape as on an
+endpoint's page, and an h1 with the driver's name. It leads with Set up, a
+numbered list of steps (Find it on this host, for runtimes only; Add it to
+Octant or Add the endpoint; Turn it on; Sign in; Check the connection). Done
+steps carry a check. The current step carries one sentence, one action, and a
+polite live region where a refusal shows the host's reason with Try again.
+Next comes the runtime's own Providers & Models card (an endpoint links to its
+Model endpoints page instead). Then come State (Available, Enabled, Signed in,
+and Ready, each in words with its dot), What it can do (Chat, Work, Code, and
+Agent loop in plain sentences), and Package (Bundled with Octant, installed,
+trusted and by whom it was reviewed, and the driver version). It offers no
+install or trust action, because a bundled driver needs neither. Opening the
+page or a setup runs nothing; at phone width a fact's value moves under its
+name.
 
 Octant Harness lists its model endpoints differently: as rows in one list,
 never two-up cards. A row is a single link named with its state ("Team
