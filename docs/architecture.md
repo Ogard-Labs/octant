@@ -1252,10 +1252,15 @@ separately. Result reads do not consume or acknowledge delivery.
 
 A managed child's lifecycle moves from Starting to Running once its workspace
 is verified and its provider session starts, not at completion. One turn,
-from provider acquisition to its terminal event, may run for at most 30
+from provider acquisition to its terminal event, may work for at most 30
 minutes (`MANAGED_AGENT_RUN_TURN_DEADLINE_MS`); a turn that reaches that bound
-is recorded as Interrupted and releases its capacity. The bound covers time a
-child spends waiting for an approval or answer.
+is recorded as Interrupted and releases its capacity. The bound counts working
+time only: it pauses while the child waits for a person's approval or answer and
+resumes with the remaining time once every pending request is answered, because
+a child cut off with its approval card still open lost its work to the person's
+pace rather than its own. No separate wall-time bound exists; a waiting child
+keeps its capacity slot until the request is answered, the run is cancelled, or
+the host restarts.
 
 Managed children retain a private provider-session cursor and a bounded,
 purgeable conversation alongside their journaled lifecycle. A cursor is bound
