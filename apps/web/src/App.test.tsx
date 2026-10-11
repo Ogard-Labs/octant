@@ -520,23 +520,47 @@ describe("App", () => {
     );
   });
 
-  it("opens the canonical Machine directly in a browser without a launch token", async () => {
-    const browserCapability = `${"C".repeat(42)}A`;
+  it("asks for a launch from the desktop app or `octant web` when the address is typed, and asks the host nothing", async () => {
     const originalHref = window.location.href;
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      throw new Error(`unexpected fetch ${typeof input === "string" ? input : input.toString()}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      window.sessionStorage.clear();
+      window.history.replaceState(null, "", `${window.location.origin}/`);
+      render(
+        <App
+          chatClient={chats()}
+          codeClient={codes()}
+          projectClient={projects()}
+          providerClient={providers()}
+          shellClient={client(codeShellBootstrap())}
+        />,
+      );
+      expect(
+        await screen.findByText("Open Octant from the desktop app or run `octant web`"),
+      ).toBeVisible();
+      expect(fetchMock).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+      window.history.replaceState(null, "", originalHref);
+    }
+  });
+
+  it("opens a browser session from a one-time launch link and removes the token from the address bar", async () => {
+    const browserCapability = `${"C".repeat(42)}A`;
+    const launchToken = `${"T".repeat(42)}A`;
+    const originalHref = window.location.href;
+    let addressAtExchange: string | undefined;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = typeof input === "string" ? input : input.toString();
-      if (url.endsWith("/api/shell/local-session")) {
-        return new Response(
-          JSON.stringify({
-            windowId,
-            capability: browserCapability,
-            authentication: "local-session",
-          }),
-          {
-            status: 200,
-            headers: { "content-type": "application/json" },
-          },
-        );
+      if (url.endsWith("/api/shell/launch-session")) {
+        addressAtExchange = window.location.href;
+        return new Response(JSON.stringify({ windowId, capability: browserCapability }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
       }
       const canvasResponse = canvasFetchPassthrough(url);
       if (canvasResponse !== undefined) {
@@ -546,11 +570,16 @@ describe("App", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
     try {
-      const codeApi = codes();
+      window.sessionStorage.clear();
+      window.history.replaceState(
+        null,
+        "",
+        `${window.location.origin}/#launchToken=${launchToken}`,
+      );
       render(
         <App
           chatClient={chats()}
-          codeClient={codeApi}
+          codeClient={codes()}
           projectClient={projects()}
           providerClient={providers()}
           shellClient={client(codeShellBootstrap())}
@@ -562,9 +591,14 @@ describe("App", () => {
         }),
       ).toBeVisible();
       expect(fetchMock).toHaveBeenCalledWith(
-        new URL("/api/shell/local-session", window.location.origin),
-        expect.objectContaining({ method: "POST" }),
+        new URL("/api/shell/launch-session", window.location.origin),
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({ launchToken }),
+        }),
       );
+      expect(addressAtExchange).not.toContain(launchToken);
+      expect(window.location.href).not.toContain(launchToken);
     } finally {
       vi.unstubAllGlobals();
       window.history.replaceState(null, "", originalHref);

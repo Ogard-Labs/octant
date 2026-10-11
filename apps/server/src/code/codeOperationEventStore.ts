@@ -18,6 +18,7 @@ import {
   type CodeConversationPage,
   type CodeConversationStep,
   type CodeConversationTurn,
+  type CodeConversationTurnHandoff,
   type CodeProviderLimit,
   type CodeOperationId,
   type CodeThreadId,
@@ -640,6 +641,8 @@ export class CodeOperationEventStore {
               ...(frame.event.resetsAt === undefined ? {} : { resetsAt: frame.event.resetsAt }),
             },
           });
+        } else if (frame.event.kind === "context-handoff-attached") {
+          builder.handoff = conversationHandoff(frame.event);
         } else if (frame.event.kind === "conversation-turn-changed-files") {
           builder.changedFiles = frame.event.changedFiles;
         } else if (frame.event.kind === "operation-state") {
@@ -686,6 +689,33 @@ export class CodeOperationEventStore {
   }
 }
 
+/** The part of a journaled handoff the conversation page shows; the text stays in the content store. */
+function conversationHandoff(
+  event: Extract<CodeOperationEvent, { readonly kind: "context-handoff-attached" }>,
+): CodeConversationTurnHandoff {
+  switch (event.reason) {
+    case "provider-switch":
+      return {
+        reason: event.reason,
+        previousProviderInstanceId: event.previousProviderInstanceId,
+        previousModelId: event.previousModelId,
+        messages: event.messages,
+        omissions: event.omissions,
+        externalContentIngested: event.externalContentIngested,
+      };
+    case "fork":
+      return {
+        reason: event.reason,
+        forkedFrom: event.forkedFrom,
+        messages: event.messages,
+        omissions: event.omissions,
+        externalContentIngested: event.externalContentIngested,
+      };
+    case "fork-native-session":
+      return { reason: event.reason, forkedFrom: event.forkedFrom };
+  }
+}
+
 type CodeConversationBuilder = {
   startCursor: number;
   operationId: CodeConversationTurn["operationId"];
@@ -696,6 +726,7 @@ type CodeConversationBuilder = {
   checkpoint?: CodeConversationTurn["checkpoint"];
   executionPolicy?: CodeConversationTurn["executionPolicy"];
   usage?: CodeConversationTurn["usage"];
+  handoff?: CodeConversationTurn["handoff"];
   assistant: Array<CodeConversationTurn["assistant"][number]>;
   steps: Array<CodeConversationStep>;
   stepsTruncated: boolean;

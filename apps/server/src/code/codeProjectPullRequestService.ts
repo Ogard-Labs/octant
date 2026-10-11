@@ -9,6 +9,7 @@ import type {
   CodeProjectPullRequestFreshness,
   CodeProjectPullRequestMergeCommand,
   CodeProjectPullRequestMergeOutcome,
+  CodeProjectPullRequestMergeRecorded,
   CodeProjectPullRequestQuery,
   CodeProjectPullRequestRefreshCommand,
   CodeProjectPullRequestRow,
@@ -20,6 +21,7 @@ import type {
   WindowId,
 } from "@octant/contracts";
 import {
+  CODE_PROJECT_PULL_REQUEST_MERGE_RECORDED,
   decodeCodeProjectPullRequestDetailView,
   decodeCodeProjectPullRequestView,
   MAX_CODE_PROJECT_PULL_REQUEST_DETAIL_DIFF_BYTES,
@@ -36,6 +38,8 @@ import {
 } from "@octant/domain/code-project-pull-request-policy";
 import { Schema } from "effect";
 import type { CacheStatsRecorder } from "../cacheStatsProjection";
+import type { Journal } from "../persistence/journal";
+import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import { resolveConnectedGitHubRepository } from "./connectedRepository";
 import type {
   GhActivePullRequestListResult,
@@ -122,6 +126,33 @@ export interface CodeProjectPullRequestMergePort {
 }
 
 /**
+ * Appends one merge attempt as its own single-event aggregate. Attempts are
+ * independent facts, so none waits on another's version, and the local user
+ * is the actor because only a local window reaches the merge route.
+ */
+export function journalPullRequestMerge(
+  journal: Pick<Journal, "append">,
+  record: CodeProjectPullRequestMergeRecorded,
+  options: { readonly uuid: () => string; readonly clock: () => string },
+): void {
+  journal.append({
+    aggregate: { aggregateType: "code-project-pull-request-merge", aggregateId: options.uuid() },
+    expectedVersion: 0,
+    events: [
+      {
+        eventId: options.uuid(),
+        eventName: CODE_PROJECT_PULL_REQUEST_MERGE_RECORDED,
+        eventVersion: 1,
+        correlationId: options.uuid(),
+        actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+        occurredAt: options.clock(),
+        payload: record,
+      },
+    ],
+  });
+}
+
+/**
  * Host-wide linked-thread facts, deliberately not window-scoped. The snapshot
  * cache is shared by every window and by background refreshes, so building it
  * from one window's visible threads let a refresh from a window with disjoint
@@ -182,6 +213,7 @@ export class CodeProjectPullRequestService {
   readonly #list: CodeProjectPullRequestListPort;
   readonly #detail: CodeProjectPullRequestDetailPort;
   readonly #merge: CodeProjectPullRequestMergePort;
+  readonly #recordMerge: ((record: CodeProjectPullRequestMergeRecorded) => void) | undefined;
   readonly #threads: CodeProjectLinkedThreadSource;
   readonly #clock: () => string;
   readonly #cacheStats: CacheStatsRecorder | undefined;
@@ -219,6 +251,12 @@ export class CodeProjectPullRequestService {
     readonly list: CodeProjectPullRequestListPort;
     readonly detail: CodeProjectPullRequestDetailPort;
     readonly merge?: CodeProjectPullRequestMergePort;
+    /**
+     * Journals each merge attempt's outcome. The merge is a user-confirmed
+     * mutation of the person's repository, so Octant keeps its own record of
+     * which head was approved and how the attempt ended, beside GitHub's.
+     */
+    readonly recordMerge?: (record: CodeProjectPullRequestMergeRecorded) => void;
     readonly threads: CodeProjectLinkedThreadSource;
     readonly clock?: () => string;
     readonly cacheStats?: CacheStatsRecorder;
@@ -240,6 +278,7 @@ export class CodeProjectPullRequestService {
       ({
         mergeByIdentity: async () => ({ status: "unavailable", reason: "unavailable" }),
       } satisfies CodeProjectPullRequestMergePort);
+    this.#recordMerge = options.recordMerge;
     this.#threads = options.threads;
     this.#clock = options.clock ?? (() => new Date().toISOString());
     this.#cacheStats = options.cacheStats;
@@ -434,19 +473,43 @@ export class CodeProjectPullRequestService {
   ): Promise<CodeProjectPullRequestMergeOutcome> {
     const projects = await this.#resolveProjects(windowId);
     const authorized = this.#authorizedConnection(projects, command);
-    if (authorized === undefined) return { status: "refused", reason: "not-authorized" };
-    if (this.#githubRevoked) return { status: "unavailable", reason: "disconnected" };
-    const result = await this.#merge.mergeByIdentity(
-      {
-        owner: command.repositoryOwner,
-        name: command.repositoryName,
+    const record = (result: CodeProjectPullRequestMergeRecorded["result"]) =>
+      this.#recordMerge?.({
+        projectId: command.projectId,
+        repositoryOwner: command.repositoryOwner,
+        repositoryName: command.repositoryName,
         number: command.number,
         method: command.method,
         headSha: command.headSha,
-      },
-      signal,
-    );
+        result,
+      });
+    let result: GhPullRequestMergeResult | { status: "refused"; reason: "not-authorized" };
+    if (authorized === undefined) {
+      result = { status: "refused", reason: "not-authorized" };
+    } else if (this.#githubRevoked) {
+      result = { status: "unavailable", reason: "disconnected" };
+    } else {
+      try {
+        result = await this.#merge.mergeByIdentity(
+          {
+            owner: command.repositoryOwner,
+            name: command.repositoryName,
+            number: command.number,
+            method: command.method,
+            headSha: command.headSha,
+          },
+          signal,
+        );
+      } catch (error) {
+        // The attempt still reached GitHub's merge path, so it is recorded;
+        // the error itself is rethrown unchanged and never journaled.
+        record({ status: "failed", reason: signal.aborted ? "aborted" : "error" });
+        throw error;
+      }
+    }
     if (result.status === "merged") {
+      // Dropped before the record is appended: if that append fails, GitHub
+      // has still merged, and a cached row must not keep showing it open.
       const key = detailKey(command);
       this.#detailCache.delete(key);
       this.#detailFreshness.delete(key);
@@ -454,6 +517,12 @@ export class CodeProjectPullRequestService {
       // The list snapshot still holds the merged row as open until the next
       // refresh; drop it so a query cannot return a pull request that is gone.
       this.#cache = undefined;
+    }
+    // Recorded before the outcome returns, so no answer reaches the person
+    // for an attempt the journal lacks. A failed local append surfaces as the
+    // route's failure; GitHub's state is still observed on the next refresh.
+    record(result);
+    if (result.status === "merged") {
       return {
         status: "merged",
         number: command.number,

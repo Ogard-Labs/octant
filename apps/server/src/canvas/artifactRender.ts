@@ -23,6 +23,11 @@ import {
 } from "@octant/domain/canvas-bar-list-layout";
 import { layoutCanvasComparisonMatrix } from "@octant/domain/canvas-comparison-matrix";
 import {
+  canvasReadingOrder,
+  packCanvasDashboardGrid,
+  type CanvasReadingItem,
+} from "@octant/domain/canvas-dashboard-layout";
+import {
   canvasMockupCallouts,
   canvasMockupFrames,
   type CanvasMockupBranch,
@@ -155,10 +160,19 @@ export function renderArtifactSvg(
   ];
 
   let y = PADDING + 26;
-  for (const block of definition.blocks) {
+  // A tab's or column's children, a dashboard among them, draw in the group's
+  // order as they would at the top level.
+  const items = canvasReadingOrder(definition.blocks).flatMap((item) =>
+    item.kind === "group" ? item.sections.flat() : [item],
+  );
+  for (const item of items) {
     if (y > height - PADDING) break;
-    if (!DRAWN_KINDS.has(block.kind)) continue;
-    const drawn = drawBlock(block, y, palette, width);
+    const drawn =
+      item.kind === "dashboard"
+        ? dashboardGrid(item, y, palette, width, height - PADDING)
+        : DRAWN_KINDS.has(item.block.kind)
+          ? drawBlock(item.block, y, palette, width)
+          : undefined;
     if (drawn === undefined) continue;
     parts.push(drawn.markup);
     y += drawn.height + ROW_GAP;
@@ -266,6 +280,76 @@ function drawBlock(
     default:
       return undefined;
   }
+}
+
+const DASHBOARD_GAP = 6;
+const DASHBOARD_INSET = 4;
+/** The narrowest column a picture keeps before it draws fewer columns. */
+const DASHBOARD_MIN_COLUMN = 64;
+
+/**
+ * A dashboard as its title over a grid of framed cells, packed in reading
+ * order the way the screen's grid flows. Each cell draws its block exactly as
+ * the block draws alone, at the cell's width, inside a nested viewport (which
+ * clips by default), so a long label never spills into its neighbour. A narrow picture
+ * draws fewer columns, as the screen does.
+ */
+function dashboardGrid(
+  item: Extract<CanvasReadingItem<CanvasBlock>, { readonly kind: "dashboard" }>,
+  y: number,
+  palette: ArtifactThumbnailPalette,
+  canvasWidth: number,
+  bottom: number,
+): DrawnBlock {
+  const width = canvasWidth - PADDING * 2;
+  const fit = Math.max(
+    1,
+    Math.floor((width + DASHBOARD_GAP) / (DASHBOARD_MIN_COLUMN + DASHBOARD_GAP)),
+  );
+  const columns = Math.min(item.columns, fit);
+  const columnWidth = (width - DASHBOARD_GAP * (columns - 1)) / columns;
+  const parts = [
+    text(
+      PADDING,
+      y + 9,
+      clamp(item.dashboard.title, titleLength(canvasWidth)),
+      10,
+      palette.ink,
+      600,
+    ),
+  ];
+  const packed = packCanvasDashboardGrid(item.cells, columns).map((cell) => {
+    const cellWidth = columnWidth * cell.span + DASHBOARD_GAP * (cell.span - 1);
+    const innerWidth = Math.max(1, cellWidth - DASHBOARD_INSET * 2);
+    const drawn = DRAWN_KINDS.has(cell.block.kind)
+      ? drawBlock(cell.block, DASHBOARD_INSET, palette, innerWidth + PADDING * 2)
+      : undefined;
+    return { cell, cellWidth, drawn };
+  });
+  let rowY = y + 16;
+  const rows = new Set(packed.map(({ cell }) => cell.row));
+  for (const row of [...rows].sort((a, b) => a - b)) {
+    const inRow = packed.filter(({ cell }) => cell.row === row);
+    const rowHeight =
+      Math.max(...inRow.map(({ drawn }) => drawn?.height ?? 12)) + DASHBOARD_INSET * 2;
+    // The grid stops at the first row the picture cannot hold whole: a row
+    // cut through its cells reads as broken tiles, and the card's markup
+    // budget is better left to the rows a person can read.
+    if (row > 0 && rowY + rowHeight > bottom) break;
+    for (const { cell, cellWidth, drawn } of inRow) {
+      const x = PADDING + cell.column * (columnWidth + DASHBOARD_GAP);
+      parts.push(
+        `<svg x="${String(round(x))}" y="${String(round(rowY))}" width="${String(round(cellWidth))}" height="${String(rowHeight)}">` +
+          `<rect x="0.5" y="0.5" width="${String(round(cellWidth - 1))}" height="${String(rowHeight - 1)}" rx="3" fill="none" stroke="${palette.muted}"/>` +
+          (drawn === undefined
+            ? ""
+            : `<g transform="translate(${String(DASHBOARD_INSET - PADDING)} 0)">${drawn.markup}</g>`) +
+          "</svg>",
+      );
+    }
+    rowY += rowHeight + DASHBOARD_GAP;
+  }
+  return { markup: parts.join(""), height: rowY - DASHBOARD_GAP - y };
 }
 
 function lines(y: number, count: number, width: number, palette: ArtifactThumbnailPalette): string {

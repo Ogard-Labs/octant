@@ -95,18 +95,21 @@ if (executable === undefined) {
 
 // `--only=mockup` captures the mockup blocks alone, as `canvas-mockup-*.png`,
 // `--only=flow` the funnel, radar, and sankey charts, as `canvas-flow-*.png`,
-// and `--only=layout` the tabbed design brief and a Gantt plan, as
-// `canvas-layout-*.png`: one element capture per listed tab, the columns, and
-// the Gantt plan, each scrolled into
-// view, because a full-page capture of a long page can leave content below
-// the fold unpainted.
-const ONLY_SETS = ["mockup", "flow", "layout"] as const;
+// `--only=table` a wide table grouped, summarised, pinned, with one group
+// collapsed and the grid scrolled sideways, as `canvas-table-*.png`,
+// `--only=dashboard` the ops dashboard and release health board, as
+// `canvas-dashboard-*.png`, and `--only=layout` the tabbed design brief and a
+// Gantt plan, as `canvas-layout-*.png`: one element capture per listed tab,
+// the columns, and the Gantt plan, each scrolled into view, because a
+// full-page capture of a long page can leave content below the fold
+// unpainted.
+const ONLY_SETS = ["mockup", "flow", "table", "dashboard", "layout"] as const;
 const LAYOUT_TABS = ["Metrics", "Core loop", "World", "Economy"] as const;
 const onlyArg = process.argv.find((arg) => arg.startsWith("--only="))?.slice("--only=".length);
 const only = ONLY_SETS.find((set) => set === onlyArg);
 if (onlyArg !== undefined && only === undefined) {
   console.error(
-    JSON.stringify({ status: "failed", reason: `--only takes ${ONLY_SETS.join(" or ")}` }),
+    JSON.stringify({ status: "failed", reason: `--only takes ${ONLY_SETS.join(", ")}` }),
   );
   process.exit(1);
 }
@@ -146,7 +149,7 @@ try {
     page.setDefaultTimeout(15_000);
     await page.goto(harnessUrl, { waitUntil: "domcontentloaded" });
     await page.waitForSelector(
-      "main[data-canvas-chart-evidence='all'] .canvas-tabs, main[data-canvas-chart-evidence='all'] .canvas-mockup, main[data-canvas-chart-evidence='all'] .canvas-block__chart, main[data-canvas-chart-evidence='all'] .canvas-block__heatmap, main[data-canvas-chart-evidence='all'] .canvas-block__bar-list, main[data-canvas-chart-evidence='all'] .canvas-block__matrix, main[data-canvas-chart-evidence='all'] .canvas-block__math, main[data-canvas-chart-evidence='all'] .canvas-block__table, main[data-canvas-chart-evidence='all'] .canvas-block__kind-diagram",
+      "main[data-canvas-chart-evidence='all'] .canvas-tabs, main[data-canvas-chart-evidence='all'] .canvas-mockup, main[data-canvas-chart-evidence='all'] .canvas-dashboard, main[data-canvas-chart-evidence='all'] .canvas-block__chart, main[data-canvas-chart-evidence='all'] .canvas-block__heatmap, main[data-canvas-chart-evidence='all'] .canvas-block__bar-list, main[data-canvas-chart-evidence='all'] .canvas-block__matrix, main[data-canvas-chart-evidence='all'] .canvas-block__math, main[data-canvas-chart-evidence='all'] .canvas-block__table, main[data-canvas-chart-evidence='all'] .canvas-block__kind-diagram",
     );
     // The dev server injects the stylesheet after the first paint, and a chart
     // measured before it lands keeps the narrow width it drew at; let the page
@@ -157,7 +160,7 @@ try {
     // Show the table's sorted state in the capture: the sort mark and the
     // announced direction are what a header control looks like once used.
     const tableSort = page.locator(".canvas-block__table .canvas-block__table-sort");
-    if ((await tableSort.count()) > 1) {
+    if (only !== "table" && (await tableSort.count()) > 1) {
       await tableSort.nth(1).click();
       await page.waitForTimeout(50);
     }
@@ -169,11 +172,31 @@ try {
       }
     }
 
-    // Open each flow chart's data table so the capture shows its fallback too.
-    if (only === "flow") {
+    // Open each flow chart's, or each dashboard chart's, data table so the
+    // capture shows its fallback too.
+    if (only === "flow" || only === "dashboard") {
       for (const summary of await page.locator(".canvas-block__chart-data summary").all()) {
         await summary.click();
       }
+    }
+
+    // Group by State with a summary, pin the first column, sort within the
+    // groups, collapse the group holding open threads, and scroll the grid so
+    // the pinned column and the comment gutter are seen holding their place.
+    if (only === "table") {
+      await page.getByRole("combobox", { name: "Group rows" }).click();
+      await page.getByRole("option", { name: "State" }).click();
+      await page.getByRole("combobox", { name: "Group summary" }).click();
+      await page.getByRole("option", { name: "Sum of Requests" }).click();
+      await page.getByText("Columns", { exact: true }).click();
+      await page.getByRole("button", { name: "Pin Service" }).click();
+      await page.getByText("Columns", { exact: true }).click();
+      await page.getByRole("button", { name: "Requests", exact: true }).click();
+      await page.getByRole("button", { name: /^State: Blocked/ }).click();
+      await page.locator(".canvas-block__table-scroll").evaluate((element) => {
+        element.scrollLeft = 260;
+      });
+      await page.waitForTimeout(50);
     }
 
     for (const scenario of SCENARIOS) {

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   CANVAS_MAX_BLOCKS,
+  CANVAS_MAX_DASHBOARD_CELLS,
   CANVAS_MAX_CHART_CATEGORY_LABEL_LENGTH,
   CANVAS_MAX_FUNNEL_STAGES,
   CANVAS_MAX_RADAR_AXES,
@@ -41,6 +42,7 @@ import {
 } from "@octant/contracts/canvas";
 import { launchDeckExample, onboardingFlowExample } from "./canvasDesignExamples";
 import { designBriefExample, launchGanttExample } from "./canvasLayoutExamples";
+import { opsDashboardExample, releaseHealthBoardExample } from "./canvasDashboardExamples";
 import { mathExamples } from "./canvasMathExamples";
 import { mockupExamples } from "./canvasMockupExamples";
 import {
@@ -2495,6 +2497,118 @@ describe("funnel, radar, and sankey chart policy", () => {
   });
 });
 
+describe("dashboard policy", () => {
+  const tile = (blockId: string) => ({
+    blockId,
+    schemaVersion: CANVAS_SCHEMA_VERSION,
+    kind: "status",
+    label: blockId,
+    value: "Healthy",
+    tone: "success",
+  });
+  const dashboard = (cells: ReadonlyArray<unknown>, overrides: Record<string, unknown> = {}) => ({
+    blockId: "board",
+    schemaVersion: CANVAS_SCHEMA_VERSION,
+    kind: "dashboard",
+    title: "Board",
+    cells,
+    ...overrides,
+  });
+
+  it("accepts the ops dashboard and the release health board", () => {
+    expect(() => validateCanvasDefinition(withBlocks(opsDashboardExample))).not.toThrow();
+    expect(() => validateCanvasDefinition(withBlocks(releaseHealthBoardExample))).not.toThrow();
+    expect(() =>
+      validateCanvasDefinition(withBlocks([...opsDashboardExample, ...releaseHealthBoardExample])),
+    ).not.toThrow();
+  });
+
+  it("refuses a cell that names a block the document does not hold", () => {
+    expectPolicyCode(
+      () => validateCanvasDefinition(withBlocks([dashboard([{ blockId: "missing" }])])),
+      "dangling-dashboard-cell",
+    );
+  });
+
+  it("refuses a grid inside a grid and a block kind a dashboard does not place", () => {
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            dashboard([{ blockId: "inner" }]),
+            dashboard([{ blockId: "a" }], { blockId: "inner" }),
+            tile("a"),
+          ]),
+        ),
+      "dashboard-cell-kind-refused",
+    );
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([dashboard([{ blockId: "heading" }]), ...baseDefinition.blocks]),
+        ),
+      "dashboard-cell-kind-refused",
+    );
+  });
+
+  it("refuses a block placed twice, in one dashboard or across two", () => {
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([dashboard([{ blockId: "a" }, { blockId: "a" }]), tile("a")]),
+        ),
+      "duplicate-dashboard-cell",
+    );
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            dashboard([{ blockId: "a" }]),
+            dashboard([{ blockId: "a" }], { blockId: "board-2" }),
+            tile("a"),
+          ]),
+        ),
+      "duplicate-dashboard-cell",
+    );
+  });
+
+  it("refuses a span wider than the grid", () => {
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([dashboard([{ blockId: "a", span: 3 }], { columns: 2 }), tile("a")]),
+        ),
+      "dashboard-span-exceeds-columns",
+    );
+  });
+
+  it("names the cell budget when a dashboard places too many blocks", () => {
+    const tiles = Array.from({ length: CANVAS_MAX_DASHBOARD_CELLS + 1 }, (_value, index) =>
+      tile(`t${String(index)}`),
+    );
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([dashboard(tiles.map((block) => ({ blockId: block.blockId }))), ...tiles]),
+        ),
+      "dashboard-cells-budget-exceeded",
+    );
+  });
+
+  it("refuses a dashboard in a document that declares an earlier version", () => {
+    const older = (block: Record<string, unknown>) => ({ ...block, schemaVersion: 14 });
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition({
+          ...baseDefinition,
+          schemaVersion: 14,
+          blocks: [older(dashboard([{ blockId: "a" }])), older(tile("a"))],
+        }),
+      "unsupported-schema-version",
+    );
+  });
+});
+
 describe("tabs and columns layout groups", () => {
   const text = (blockId: string) => ({
     blockId,
@@ -2657,21 +2771,112 @@ describe("tabs and columns layout groups", () => {
       () =>
         validateCanvasDefinition({
           ...baseDefinition,
-          schemaVersion: 14,
+          schemaVersion: 18,
           blocks: [
             {
               ...tabs([
                 { label: "One", blockIds: ["a"] },
                 { label: "Two", blockIds: ["b"] },
               ]),
-              schemaVersion: 14,
+              schemaVersion: 18,
             },
-            { ...text("a"), schemaVersion: 14 },
-            { ...text("b"), schemaVersion: 14 },
+            { ...text("a"), schemaVersion: 18 },
+            { ...text("b"), schemaVersion: 18 },
           ],
         }),
       "unsupported-schema-version",
     );
+  });
+
+  describe("beside dashboards", () => {
+    const tile = (blockId: string) => ({
+      blockId,
+      schemaVersion: CANVAS_SCHEMA_VERSION,
+      kind: "metric",
+      label: blockId,
+      value: 1,
+    });
+    const board = (cells: ReadonlyArray<string>, blockId = "board") => ({
+      blockId,
+      schemaVersion: CANVAS_SCHEMA_VERSION,
+      kind: "dashboard",
+      title: "Metrics",
+      cells: cells.map((cellId) => ({ blockId: cellId })),
+    });
+
+    it("admits a tab and a column that each hold a dashboard", () => {
+      const definition = validateCanvasDefinition(
+        withBlocks([
+          tabs([
+            { label: "Metrics", blockIds: ["board"] },
+            { label: "Notes", blockIds: ["a"] },
+          ]),
+          columns([["side-board"], ["b"]]),
+          board(["m1", "m2"]),
+          board(["m3"], "side-board"),
+          ...["m1", "m2", "m3"].map(tile),
+          text("a"),
+          text("b"),
+        ]),
+      );
+      expect(definition.blocks.map((block) => block.kind).slice(0, 4)).toEqual([
+        "tabs",
+        "columns",
+        "dashboard",
+        "dashboard",
+      ]);
+    });
+
+    it("refuses a dashboard that places tabs or columns", () => {
+      expectPolicyCode(
+        () =>
+          validateCanvasDefinition(
+            withBlocks([
+              board(["brief", "m1"]),
+              tabs([
+                { label: "One", blockIds: ["a"] },
+                { label: "Two", blockIds: ["b"] },
+              ]),
+              tile("m1"),
+              text("a"),
+              text("b"),
+            ]),
+          ),
+        "nested-layout-group",
+      );
+      expectPolicyCode(
+        () =>
+          validateCanvasDefinition(
+            withBlocks([board(["row"]), columns([["a"], ["b"]]), text("a"), text("b")]),
+          ),
+        "nested-layout-group",
+      );
+    });
+
+    it("refuses a block placed by both a dashboard and a tab, naming the block and both placers", () => {
+      let refusal: unknown;
+      try {
+        validateCanvasDefinition(
+          withBlocks([
+            tabs([
+              { label: "Metrics", blockIds: ["board"] },
+              { label: "Headline", blockIds: ["m1"] },
+            ]),
+            board(["m1", "m2"]),
+            tile("m1"),
+            tile("m2"),
+          ]),
+        );
+      } catch (error) {
+        refusal = error;
+      }
+      expect(refusal).toBeInstanceOf(CanvasPolicyRejected);
+      const rejected = refusal as CanvasPolicyRejected;
+      expect(rejected.code).toBe("block-placed-twice");
+      expect(rejected.message).toContain("m1");
+      expect(rejected.message).toContain("tabs brief");
+      expect(rejected.message).toContain("dashboard board");
+    });
   });
 });
 

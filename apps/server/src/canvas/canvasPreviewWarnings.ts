@@ -1,5 +1,9 @@
 import type { CanvasBlock, CanvasDefinition, CanvasPresentation } from "@octant/contracts/canvas";
 import { CANVAS_INLINE_MAX_BLOCKS } from "@octant/domain";
+import {
+  canvasDashboardCellWidth,
+  canvasReadingOrder,
+} from "@octant/domain/canvas-dashboard-layout";
 import { contrastRatio } from "@octant/theme";
 
 /**
@@ -111,8 +115,31 @@ export function canvasPreviewWarnings(
       limit: CANVAS_INLINE_MAX_BLOCKS,
     });
   }
+  // A block placed in a dashboard is drawn at its cell's width, not the
+  // document's, so it is measured there; otherwise a chart in a quarter of a
+  // wide grid would clip labels that the full width would hold.
+  const cellWidths = new Map<string, number>();
+  // A dashboard inside a tab or column is measured the same way.
+  const items = canvasReadingOrder(input.definition.blocks).flatMap((item) =>
+    item.kind === "group" ? item.sections.flat() : [item],
+  );
+  for (const item of items) {
+    if (item.kind !== "dashboard") continue;
+    for (const cell of item.cells) {
+      cellWidths.set(
+        String(cell.block.blockId),
+        canvasDashboardCellWidth({
+          gridWidth: input.width,
+          columns: item.columns,
+          span: cell.span,
+          kind: cell.block.kind,
+        }),
+      );
+    }
+  }
   for (const block of input.definition.blocks) {
-    warnings.push(...blockWarnings(block, input));
+    const width = cellWidths.get(String(block.blockId));
+    warnings.push(...blockWarnings(block, width === undefined ? input : { ...input, width }));
   }
   return warnings;
 }

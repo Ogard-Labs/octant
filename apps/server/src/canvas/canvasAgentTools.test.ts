@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { CANVAS_SCHEMA_VERSION, decodeCanvasBlock } from "@octant/contracts";
+import { validateCanvasDefinition } from "@octant/domain/canvas-policy";
 import { createManagedMcpTools } from "../providers/managedMcpTools";
 import {
   CANVAS_TOOL_NAME,
@@ -147,10 +148,11 @@ describe("createCanvasAgentTools", () => {
         skeleton: recipe.skeleton.map((block) => ({ kind: block.kind, role: block.role })),
       })),
     });
-    const description = set.definitions[0]?.description ?? "";
-    expect(description).toContain('"write a plan" uses implementation-plan');
-    expect(description).toContain('"review this PR" uses code-review');
-    expect(description).toContain('"summarise research" uses research-brief');
+    const recipeGuide = (outcome.result as { recipeGuide: string }).recipeGuide;
+    expect(recipeGuide).toContain('"write a plan" uses implementation-plan');
+    expect(recipeGuide).toContain('"review this PR" uses code-review');
+    expect(recipeGuide).toContain('"summarise research" uses research-brief');
+    expect(set.definitions[0]?.description).toContain("document recipe");
     const recipes = (
       outcome.result as {
         recipes: ReadonlyArray<{ skeleton: ReadonlyArray<{ kind: string }> }>;
@@ -160,6 +162,100 @@ describe("createCanvasAgentTools", () => {
       false,
     );
     expect(create).not.toHaveBeenCalled();
+  });
+
+  it("keeps the always-visible definition small in every mode and for a managed child", () => {
+    const port = {
+      activeContext: vi.fn(),
+      project: vi.fn(),
+      canvas: {},
+      resolveChildWorkspace: vi.fn(),
+    } as never;
+    const sets = [
+      createCanvasAgentTools({ windowId, thread, port }),
+      createCanvasAgentTools({ windowId, mode: "work", thread, port }),
+      createCanvasAgentTools({ windowId, mode: "code", thread, port }),
+      ...(["chat", "work", "code"] as const).map((mode) =>
+        createChildCanvasAgentTools({
+          port,
+          run: {
+            id: "run-1",
+            parentThreadId: threadId,
+            mode,
+            providerInstanceId: "44444444-4444-4444-8444-444444444444" as never,
+            modelId: "octant-test-model" as never,
+          },
+        }),
+      ),
+    ];
+    for (const set of sets) {
+      const [definition] = set.definitions;
+      if (definition === undefined) throw new Error("Expected the Canvas definition.");
+      // Every definition serialized to about 15,250 bytes while it carried each
+      // block kind's guidance. That guidance is answered by describe now; the
+      // budget catches it growing back into every turn's tool prefix.
+      expect(JSON.stringify(definition).length).toBeLessThanOrEqual(6_000);
+    }
+  });
+
+  it.each([
+    ["plan", "dependsOn"],
+    ["sequence", "activations"],
+    ["state", "initial and a final state"],
+    ["er", "cardinality"],
+    ["swimlane", "lanes"],
+    ["mindmap", "one root topic"],
+    ["diagram", "nodes and edges"],
+    ["chart", "sankey"],
+    ["mockup", "variantId"],
+    ["treemap", "never to a group"],
+    ["heatmap", "calendar"],
+    ["design", "Frames run no JavaScript"],
+    ["bar-list", "Show all"],
+    ["comparison-matrix", "recommendedOptionId"],
+    ["math", "\\newcommand"],
+    ["table", "{ id, cells }"],
+    ["metric", "goodDirection"],
+    ["dashboard", "blockId"],
+    ["tabs", "may hold a dashboard"],
+    ["columns", "2 to 4 tracks"],
+    ["plan", "view to gantt"],
+    ["diagram", "terminator (a pill)"],
+    ["code-excerpt", "language mermaid"],
+  ])(
+    "answers the %s guidance from describe instead of every turn's description",
+    async (kind, phrase) => {
+      const { create, set } = tools();
+      const outcome = await set.execute({
+        name: CANVAS_TOOL_NAME,
+        inputJson: JSON.stringify({ operation: "describe", blockKinds: [kind] }),
+      });
+
+      expect(outcome.isError).not.toBe(true);
+      const { guidance } = outcome.result as { guidance: Readonly<Record<string, string>> };
+      expect(guidance[kind]).toContain(phrase);
+      expect(set.definitions[0]?.description).not.toContain(guidance[kind]);
+      expect(create).not.toHaveBeenCalled();
+    },
+  );
+
+  it("says which block kind fits each need when describe names no kinds", async () => {
+    const { set } = tools();
+    const outcome = await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "describe" }),
+    });
+
+    const { blockGuide, blockKinds } = outcome.result as {
+      blockGuide: Readonly<Record<string, string>>;
+      blockKinds: ReadonlyArray<string>;
+    };
+    expect(blockGuide).toMatchObject({
+      sequence: expect.stringContaining("login"),
+      "comparison-matrix": expect.stringContaining("criteria"),
+      design: expect.stringContaining("slide deck"),
+    });
+    for (const kind of Object.keys(blockGuide)) expect(blockKinds).toContain(kind);
   });
 
   it("discloses only the requested block schemas, including the fields needed to draw a diagram", async () => {
@@ -681,6 +777,46 @@ describe("createCanvasAgentTools", () => {
     expect(examples[1]).toMatchObject({ kind: "metric", goodDirection: "up", format: "compact" });
   });
 
+  it("describes a dashboard with an ops dashboard and a release health board that validate as written", async () => {
+    const { set } = tools();
+    const described = await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "describe", blockKinds: ["dashboard"] }),
+    });
+
+    expect(described.isError).not.toBe(true);
+    const result = described.result as {
+      examples?: ReadonlyArray<Record<string, unknown>>;
+    };
+    const examples = result.examples ?? [];
+    const dashboards = examples.filter((example) => example.kind === "dashboard");
+    expect(dashboards.map((example) => example.title)).toEqual([
+      "Service health",
+      "Release 4.2 health",
+    ]);
+    // Each dashboard arrives with the blocks it places, so the examples
+    // validate as one document an agent can copy.
+    const blocks = examples.map((example) => decodeCanvasBlock(example));
+    expect(() =>
+      validateCanvasDefinition({
+        schemaVersion: CANVAS_SCHEMA_VERSION,
+        title: "Dashboards",
+        provenance: {
+          mode: "chat",
+          hostId: "local",
+          projectId: "22222222-2222-4222-8222-222222222222",
+          threadId: "33333333-3333-4333-8333-333333333333",
+          actor: { kind: "local-user", actorId: "55555555-5555-4555-8555-555555555555" },
+          providerInstanceId: "44444444-4444-4444-8444-444444444444",
+          modelId: "octant-test-model",
+          createdAt: "2026-08-01T21:00:00.000Z",
+        },
+        sourceManifest: [],
+        blocks,
+      }),
+    ).not.toThrow();
+  });
+
   it("lets an agent create and then revise a settings screen mockup from the example describe returns", async () => {
     const { create, revise, set } = tools();
     const described = await set.execute({
@@ -1105,6 +1241,7 @@ describe("createCanvasAgentTools", () => {
       expect(description).toContain("design or mockup, diagram, report, review, audit");
       expect(description).toContain("Keep short answers");
       expect(description).toContain("Text renders as plain text, not Markdown");
+      expect(description).toContain("call describe");
       expect(description).toContain(
         "revise the thread's existing Canvas instead of creating another",
       );

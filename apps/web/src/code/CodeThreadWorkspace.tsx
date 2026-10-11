@@ -20,7 +20,7 @@ import {
   clampTurnAccessPosture,
   decidesCodeEffectsByApproval,
   pickerGroupCarriesAppManagedTools,
-  startedThreadPickerGroups,
+  startedCodeThreadPickerGroups,
   type PickerGroup,
 } from "@octant/domain";
 import { CirclePause, X } from "lucide-react";
@@ -81,6 +81,10 @@ import { HarnessRetryStatus } from "../transcript/HarnessRetryStatus";
 import { liveTaskProgress } from "./transcriptActivity";
 import { ThreadTasksPanel } from "../transcript/ThreadTasksPanel";
 import { modelDisplayName, providerModelLabel } from "../providers/providerModelLabel";
+import {
+  pendingProviderSwitchNotice,
+  conversationHandoffDisclosure,
+} from "./providerSwitchHandoff";
 import {
   TurnHeader,
   TurnTime,
@@ -263,10 +267,17 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   // an acknowledged message leaves the composer, so an async mention lookup cannot
   // erase a newer draft typed while that lookup is pending.
   const draftRevisionRef = useRef(0);
+  const runtimeCarriesTools = pickerGroupCarriesAppManagedTools(
+    props.providerGroups ?? [],
+    view === undefined
+      ? undefined
+      : { providerInstanceId: view.thread.providerInstanceId, modelId: view.thread.modelId },
+  );
   const computer = useComputerUseMention({
     textarea: () => textareaRef.current,
     draft,
     scopeKey: String(props.threadId),
+    providerCarriesTools: runtimeCarriesTools,
     onDraftChange: (next) => {
       draftRevisionRef.current += 1;
       setDraft(next);
@@ -283,6 +294,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   const extensionDraft = useExtensionDraftSelections({
     ...(props.extensionClient === undefined ? {} : { client: props.extensionClient }),
     mode: "code",
+    providerCarriesTools: runtimeCarriesTools,
     projectId: view?.thread.projectId ?? null,
     threadId: view === undefined ? props.threadId : view.thread.id,
     ...(providerFamily === undefined ? {} : { providerFamily }),
@@ -296,17 +308,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
       props.controller.setPendingDraft?.(next);
     },
     scopeKey: String(props.threadId),
-    available:
-      props.browserAvailable === true &&
-      pickerGroupCarriesAppManagedTools(
-        props.providerGroups ?? [],
-        view === undefined
-          ? undefined
-          : {
-              providerInstanceId: view.thread.providerInstanceId,
-              modelId: view.thread.modelId,
-            },
-      ),
+    available: props.browserAvailable === true && runtimeCarriesTools,
     onChoose: () => void extensionDraft.resolveReference("@browser"),
     onSelectionEdited: () => {
       draftRevisionRef.current += 1;
@@ -674,11 +676,34 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     (message) => message.role === "assistant" && message.status === "completed",
   );
   const threadModelGroups = hasProviderSession
-    ? startedThreadPickerGroups(providerGroups, {
+    ? startedCodeThreadPickerGroups(providerGroups, {
         providerInstanceId: thread.providerInstanceId,
         modelId: thread.modelId,
       })
     : providerGroups;
+  // The provider the conversation's session lives on is the one the last
+  // finished reply came from, or the one a switching turn's journaled handoff
+  // opened a session on even if that turn then stopped: the host records the
+  // handoff only once the new session is ready. A thread now pointed
+  // elsewhere starts a new session on its next message, and the person is
+  // told so before they send, not after.
+  const sessionReply = messages.findLast(
+    (message) =>
+      message.role === "assistant" &&
+      (message.status === "completed" || message.handoff !== undefined) &&
+      message.providerInstanceId !== undefined,
+  );
+  const pendingSwitchNotice =
+    sessionReply !== undefined &&
+    String(sessionReply.providerInstanceId) !== String(thread.providerInstanceId)
+      ? pendingProviderSwitchNotice(
+          providerModelLabel(providerGroups, thread),
+          providerModelLabel(providerGroups, {
+            providerInstanceId: sessionReply.providerInstanceId,
+            modelId: sessionReply.modelId,
+          }),
+        )
+      : undefined;
   const canvasClient = props.canvasClient;
   const openInSidebar = props.onOpenCanvasInSidebar;
   const canvasPlacement = placeThreadCanvases(
@@ -1314,6 +1339,13 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                     })}
                   </OctantSeparatorWithLabel>
                 ) : null}
+                {message.role === "assistant" && message.handoff !== undefined ? (
+                  <p className="code-thread-workspace__handoff" role="note">
+                    {conversationHandoffDisclosure(message.handoff, (selection) =>
+                      providerModelLabel(providerGroups, selection),
+                    )}
+                  </p>
+                ) : null}
                 <article
                   aria-label={
                     delivered
@@ -1947,6 +1979,14 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                 Checking the selected provider…
               </span>
             ) : null}
+            {pendingSwitchNotice === undefined || providerChanging ? null : (
+              <span
+                className="composer-status__hint code-thread-workspace__hint code-thread-workspace__switch-notice"
+                role="status"
+              >
+                {pendingSwitchNotice}
+              </span>
+            )}
             {props.controller.accessNotice === undefined ? null : (
               <span
                 className="code-thread-workspace__hint"

@@ -49,6 +49,7 @@ import {
   tabbedOverviewExample,
   designBriefExample,
   launchGanttExample,
+  dashboardExamples,
   CANVAS_INLINE_MAX_BLOCKS,
   canvasInlineRefusal,
   effectiveCanvasPresentation,
@@ -99,7 +100,7 @@ const canvasDefinitionSchema = {
       minItems: 1,
       maxItems: MAX_DESCRIBED_BLOCK_KINDS,
       description:
-        "For describe: request the schemas of up to three block kinds. Omit to list kinds and see a create example.",
+        "For describe: up to three block kinds whose schemas to return, with guidance and examples for the kinds that have them. Omit to list every kind, the recipes, and a create example.",
     },
     title: { type: "string", maxLength: MAX_TITLE_CHARS, description: "Title of a new Canvas." },
     canvasId: {
@@ -277,6 +278,7 @@ function describedExamples(kinds: ReadonlyArray<string>): ReadonlyArray<unknown>
       );
     }
     if (kind === "plan") examples.push(launchGanttExample);
+    if (kind === "dashboard") examples.push(...dashboardExamples);
   }
   return examples;
 }
@@ -342,6 +344,145 @@ async function resolveCanvasTarget(
   };
 }
 
+const LAYOUT_GROUP_GUIDE =
+  "To arrange a long document, use tabs or columns. Both name blocks the same document holds, by blockId, and the document draws each named block inside its tab or column instead of in the block list. tabs has 2 to 12 panes, each with a short label and the blockIds it shows; columns has 2 to 4 tracks, each with the blockIds it stacks, and folds to one column when the Canvas is narrow. A block sits in at most one tab, track, or dashboard cell; a tab or track may hold a dashboard but never another tabs or columns block or an action. Which tab is open is the reader's choice and is never saved.";
+
+/**
+ * Which block kind fits a need, and how to author it.
+ *
+ * Decision 0067 keeps the always-visible tool prefix small, and this guidance
+ * was more than half of every mode's prefix while it rode in the description.
+ * Describe answers it instead: `use` for every listed kind when no kinds are
+ * named, and `detail` for each kind an agent asks for, beside its schema.
+ */
+const BLOCK_GUIDANCE: Readonly<Record<string, { readonly use: string; readonly detail: string }>> =
+  {
+    plan: {
+      use: "A plan: phases and tasks with a status.",
+      detail:
+        "For a plan, use a plan block: phases, and tasks that name their phase, with a status (todo, doing, blocked, done), and optional owner, estimate, acceptance notes, dates, and dependsOn. Give tasks startAt and dueAt and set view to gantt to open the plan as bars on days with its dependency arrows; a task without dates is listed under the chart. The person can work the plan too, so read the Canvas before revising it and keep their progress.",
+    },
+    sequence: {
+      use: "A login or request flow between participants.",
+      detail:
+        "A login or request flow is a sequence block: participants, ordered messages, activations, and notes.",
+    },
+    state: {
+      use: "A lifecycle, such as an order's states and transitions.",
+      detail:
+        "A lifecycle such as an order is a state block: states that may nest, labeled transitions, and an initial and a final state.",
+    },
+    er: {
+      use: "A data model of entities and relationships.",
+      detail:
+        "A data model is an er block: entities with named, typed attributes, and relationships with a cardinality at each end.",
+    },
+    swimlane: {
+      use: "A process handed between people or teams.",
+      detail:
+        "A process handed between people or teams is a swimlane block: ordered lanes, the steps each lane owns (a decision step is flagged), and labeled connections.",
+    },
+    mindmap: {
+      use: "A topic and its branches.",
+      detail:
+        "A topic and its branches is a mindmap block: one root topic, children that name their parent, and an optional note per topic.",
+    },
+    diagram: {
+      use: "A generic graph of nodes and edges.",
+      detail:
+        "Use diagram for a generic graph of nodes and edges, such as a flowchart or a zone map: a node's role is process (a box), decision (a diamond), or terminator (a pill), or left out for a plain box; an edge's style is line, arrow, or dashed (a dashed arrow, for an optional or asynchronous step); an edge or a group may take a tone of neutral, accent, success, warning, or danger, and a toned group reads as a region. Tones are theme roles, never colours, and a label still says what the tone means. Prefer sequence, state, er, swimlane, or mindmap when the drawing is one of those.",
+    },
+    chart: {
+      use: "A pie, donut, stacked or grouped bar, bar-line, funnel, radar, or sankey chart.",
+      detail:
+        "A share of a whole is a pie or a donut: one series of labeled slices whose values are not negative. Comparing series across the same categories is a stacked-bar or a grouped-bar; every series lists those categories in the same order, and a stacked bar's values are not negative. A bar-line pairs bar series and line series on those categories, and each series names its mark. Drop-off through ordered stages is a funnel: one series of up to 16 labeled stages, each no larger than the one before. Comparing a few things on the same 3 to 16 qualities is a radar: every series lists the same labeled axes in the same order, with readings that are not negative. Where a quantity goes is a sankey: series is empty and links lists flows of { source, target, value } between node names (at most 80 characters, 64 nodes, 256 flows), each value positive, no flow listed twice, and no flow returning to a node it left.",
+    },
+    mockup: {
+      use: "A wireframe or UI mockup of a screen, with states or alternatives.",
+      detail:
+        "A wireframe or UI mockup of a screen is a mockup block, built only from its closed catalog; it holds no HTML, CSS, or images. Pick a device (desktop window, browser, phone, tablet, dock-panel, or custom with a size) and a fidelity (wireframe, the default, or styled to draw with the person's theme). Nodes name a parent rather than nesting: window, header, sidebar, nav, stack, row, grid, card, tabs (the first child is the shown tab), list, list-row, heading, text, form-field and select (with a value), button, toggle, checkbox, badge, avatar, icon (from the bundled set), image-placeholder, table (columns and rows), modal, and toast. A button, badge, or toast may take a tone; on draws a toggle or checkbox as set, or a list row as current. For states (loading, empty, error) or alternatives (A and B), declare variants and give each top-level node a variantId. Pin numbered callouts to nodes with annotations to explain behaviour; people comment on those callouts. The controls are drawn, not live.",
+    },
+    treemap: {
+      use: "A hierarchy sized and coloured by measures, such as a repository map.",
+      detail:
+        "A hierarchy is a treemap: nodes that name a parent (one root, no cycles), a list of measures with ids, labels, and optional number formats, a default sizeBy and colorBy, and a colour scale of sequential, diverging, or categorical by top-level group. Values sit on leaves; a group sums its children, so give values only to leaves and never to a group. A leaf may name a manifest source id, which offers Open file through the allowlisted open-source action. The person can switch size and colour and zoom into a group without revising the Canvas; use startNodeId to open a static export at a chosen node.",
+    },
+    heatmap: {
+      use: "A grid coloured by value: a matrix, or a calendar of daily readings.",
+      detail:
+        "A grid coloured by value is a heatmap with a layout of matrix or calendar. A matrix names its rows and columns and carries a cell per coordinate with a value and an optional short note; a coordinate you do not list reads as missing, not as zero, and the person can sort the rows by their total without revising the Canvas. A calendar carries one reading per date and reads as a week grid. Both take an optional format and a scale of sequential or diverging.",
+    },
+    design: {
+      use: "Finished-looking app screens, a website or landing page, or a slide deck.",
+      detail:
+        'A finished-looking design is a design block: app screens, a website or landing page, or a slide deck. Pick one size for the block (phone 390x844, tablet 820x1180, desktop 1440x900, or slide 1920x1080), put shared CSS in styles, and write each screen or slide as a frame of static HTML. The person clicks through it, so link frames with href="#frameId"; a link may only name a frame or a section. Frames run no JavaScript and load nothing: no script, event handlers, external links, remote images, fonts, or imports. Draw images with inline SVG, CSS gradients, or data:image URLs, and use system fonts. Make it look finished: real copy, a clear type scale, and a deliberate palette.',
+    },
+    "bar-list": {
+      use: "A ranking, such as hottest files or slowest tests.",
+      detail:
+        "A ranking is a bar list: rows with a label, a value, an optional second value, and an optional manifest source id. It sorts largest first by default, shows the top rows with Show all up to 500, and a row that names a source offers Open file through the allowlisted open-source action. Give each row a unique label, a value that is not negative, and a path-like label when it names a file (the renderer draws the directory dimmed). Bars use neutral ink, or the sequential scale when the magnitude matters.",
+    },
+    "comparison-matrix": {
+      use: "Options compared against criteria, such as an architecture or vendor decision.",
+      detail:
+        "Comparing options against criteria, such as an architecture decision, a vendor or library choice, or a feature comparison, is a comparison-matrix: options (columns) and criteria (rows) with unique ids, and one cell per criterion and option holding a score, a short text, or a glyph of yes, partial, or no, with an optional note that explains it. A criterion takes an optional weight (absent counts once, 0 keeps it out of the score) and prefer lower when a low reading is good, such as cost. Declare a scoreRange such as 1 to 5 when you score. The host computes each option's weighted score from scores and glyphs, never text; do not write totals yourself. Name the option you recommend with recommendedOptionId and say why in recommendation; it may differ from the highest score.",
+    },
+    math: {
+      use: "Mathematics: display formulas or prose with inline formulas, in LaTeX.",
+      detail:
+        "Mathematics is a math block written in LaTeX math markup, never in a text block or between dollar signs. A formula on its own line is layout display with a source and an optional caption that names it, such as Bayes' theorem; a sentence that carries formulas is layout inline with runs, each either prose (text, keep the spaces next to a formula) or a formula (math). A source is at most 1000 characters. Use standard commands, environments such as aligned, pmatrix, and cases, and \\text for words inside a formula. Macro definitions (\\def, \\newcommand), links and images (\\href, \\url, \\includegraphics, \\html...), and colour (\\color, \\textcolor) are refused: formulas take the reader's theme.",
+    },
+    table: {
+      use: "Typed columns and rows the person can sort and filter.",
+      detail:
+        "A table is columns of a declared type (text, number, boolean, date, status) and rows that list one value per column in the same order. A column may take an optional format and an optional display: text (the plain reading), bar (an in-cell bar whose length is the value's share of the column's largest reading), heat (a tint on the shared sequential scale), or status (the value shown as a badge). The value is always shown, so bar and heat add a mark without replacing the reading; the person can sort, filter, and hide columns without revising the Canvas. A text column whose values read as a path is drawn with the shared path style. A row may instead be { id, cells } with a short id unique in the table; people can comment on a row only when it has an id, and the comment stays on that id, so keep a row's id when you revise it and give a new row a new id.",
+    },
+    metric: {
+      use: "Headline numbers, gathered into a tile row.",
+      detail:
+        "Headline numbers are metric blocks. Give each a label and a value, and add an optional format, unit, delta, a goodDirection of up, down, or neutral so a delta's tone is never guessed, a caption, and a sparkline of at most 256 recent readings. Consecutive metric blocks are gathered into a responsive tile row of two to four tiles.",
+    },
+    "code-excerpt": {
+      use: "Code, or a Mermaid diagram you already have, which the host imports as a typed diagram.",
+      detail:
+        "A Mermaid diagram you already have may be passed as a code-excerpt block with language mermaid: the host translates a flowchart or graph (TD or LR; [ ] process, { } decision, ([ ]) terminator, ( ) plain; -->, ---, and -.-> links with labels; one level of subgraph), a sequenceDiagram (participants, actors, messages, notes, activate and deactivate), a stateDiagram (transitions, [*] start and end, aliases, composite states), an erDiagram (relationships with cardinalities, attributes, PK), or a mindmap into the matching typed block under the same blockId. Anything else, such as styling, click, loops, or another diagram type, keeps the code block, and the result's mermaid list says which blocks were imported and why any were not. Mermaid itself is never drawn.",
+    },
+    tabs: {
+      use: "A long document arranged in labelled tabs.",
+      detail: LAYOUT_GROUP_GUIDE,
+    },
+    columns: {
+      use: "Blocks side by side in two to four columns.",
+      detail: LAYOUT_GROUP_GUIDE,
+    },
+    dashboard: {
+      use: "A KPI dashboard grid that places metric, progress, status, chart, and table blocks.",
+      detail:
+        "A KPI dashboard is a dashboard block: a title that names the region, an optional number of columns from 1 to 4 (four when absent), and up to 24 cells, each naming the blockId of a metric, progress, status, chart, or table block elsewhere in the same Canvas, with an optional span of columns. Write the placed blocks as ordinary blocks and list them in reading order; each block sits in at most one cell, tab, or track, and a dashboard never places another dashboard, tabs, or columns. A tile takes one column and a chart or table two unless you give a span no wider than the grid. The grid is drawn where the dashboard sits and collapses to one column in a narrow dock or on a phone, in cell order.",
+    },
+  };
+
+const RECIPE_GUIDE =
+  'Match the request to a document recipe before inventing a shape: "write a plan" uses implementation-plan, "review this PR" uses code-review, "summarise research" uses research-brief, and "decide between designs" uses architecture-review. Fill a recipe\'s roles from block kinds that exist today, and do not invent a block kind the catalogue does not have.';
+
+const PREVIEW_GUIDE =
+  "Preview returns the same picture the person will see and the warnings it can measure: an inline document past its height cap, and on a chart clipped labels, legend overflow, empty series, or ink below its contrast target, and on a bar list clipped labels or empty series. Every other block kind gets no warnings, so read its picture yourself.";
+
+function blockGuide(): Readonly<Record<string, string>> {
+  return Object.fromEntries(
+    Object.entries(BLOCK_GUIDANCE).map(([kind, guidance]) => [kind, guidance.use]),
+  );
+}
+
+function describedGuidance(kinds: ReadonlyArray<string>): Readonly<Record<string, string>> {
+  const guidance: Record<string, string> = {};
+  for (const kind of kinds) {
+    const detail = BLOCK_GUIDANCE[kind]?.detail;
+    if (detail !== undefined) guidance[kind] = detail;
+  }
+  return guidance;
+}
+
 function toolDescription(
   mode: "chat" | "work" | "code",
   scope: "thread" | "run" = "thread",
@@ -365,25 +506,12 @@ function toolDescription(
     scope === "run"
       ? "When the request iterates on earlier work, revise the existing Canvas instead of creating another: list returns this run's Canvases, and read returns one's current blocks and sequence."
       : "When the request iterates on earlier work, revise the thread's existing Canvas instead of creating another: list returns this thread's Canvases, and read returns one's current blocks and sequence.",
-    "Start with describe to see the block kinds, the document recipes, and a create example, then describe the kinds you need for their exact schemas. Author the content in blocks, not in prompt. Use structured blocks rather than HTML, JavaScript, or CSS; only a design block's frames are HTML and CSS. Mermaid is never drawn, but a Mermaid diagram you already have may be passed as a code-excerpt block with language mermaid: the host translates a flowchart or graph (TD or LR; [ ] process, { } decision, ([ ]) terminator, ( ) plain; -->, ---, and -.-> links with labels; one level of subgraph), a sequenceDiagram (participants, actors, messages, notes, activate and deactivate), a stateDiagram (transitions, [*] start and end, aliases, composite states), an erDiagram (relationships with cardinalities, attributes, PK), or a mindmap into the matching typed block under the same blockId. Anything else, such as styling, click, loops, or another diagram type, keeps the code block, and the result's mermaid list says which blocks were imported and why any were not. Text renders as plain text, not Markdown: give each section its own heading block (the Canvas title is already shown, so do not repeat it), and use key-value, table, status, or callout blocks instead of Markdown lists, bold, or code spans.",
-    'Match the request to a document recipe before inventing a shape: "write a plan" uses implementation-plan, "review this PR" uses code-review, "summarise research" uses research-brief, and "decide between designs" uses architecture-review. Describe with no block kinds lists every offered recipe and its skeleton; fill those roles from block kinds that exist today, and do not invent a block kind the catalogue does not have.',
-    "For a plan, use a plan block: phases, and tasks that name their phase, with a status (todo, doing, blocked, done), and optional owner, estimate, acceptance notes, dates, and dependsOn. Give tasks startAt and dueAt and set view to gantt to open the plan as bars on days with its dependency arrows; a task without dates is listed under the chart. Describe plan to get a launch plan in the Gantt view. The person can work the plan too, so read the Canvas before revising it and keep their progress.",
-    "A login or request flow is a sequence block: participants, ordered messages, activations, and notes. A lifecycle such as an order is a state block: states that may nest, labeled transitions, and an initial and a final state. A data model is an er block: entities with named, typed attributes, and relationships with a cardinality at each end. A process handed between people or teams is a swimlane block: ordered lanes, the steps each lane owns (a decision step is flagged), and labeled connections. A topic and its branches is a mindmap block: one root topic, children that name their parent, and an optional note per topic. Use diagram for a generic graph of nodes and edges, such as a flowchart or a zone map: a node's role is process (a box), decision (a diamond), or terminator (a pill), or left out for a plain box; an edge's style is line, arrow, or dashed (a dashed arrow, for an optional or asynchronous step); an edge or a group may take a tone of neutral, accent, success, warning, or danger, and a toned group reads as a region. Tones are theme roles, never colours, and a label still says what the tone means. Describe diagram to get a flowchart and a zone map; describe sequence, state, er, swimlane, or mindmap to get an example of each.",
-    "A share of a whole is a pie or a donut: one series of labeled slices whose values are not negative. Comparing series across the same categories is a stacked-bar or a grouped-bar; every series lists those categories in the same order, and a stacked bar's values are not negative. A bar-line pairs bar series and line series on those categories, and each series names its mark. Drop-off through ordered stages is a funnel: one series of up to 16 labeled stages, each no larger than the one before. Comparing a few things on the same 3 to 16 qualities is a radar: every series lists the same labeled axes in the same order, with readings that are not negative. Where a quantity goes is a sankey: series is empty and links lists flows of { source, target, value } between node names (at most 80 characters, 64 nodes, 256 flows), each value positive, no flow listed twice, and no flow returning to a node it left. Describe chart to get an example of each.",
-    "A wireframe or UI mockup of a screen is a mockup block, built only from its closed catalog; it holds no HTML, CSS, or images. Pick a device (desktop window, browser, phone, tablet, dock-panel, or custom with a size) and a fidelity (wireframe, the default, or styled to draw with the person's theme). Nodes name a parent rather than nesting: window, header, sidebar, nav, stack, row, grid, card, tabs (the first child is the shown tab), list, list-row, heading, text, form-field and select (with a value), button, toggle, checkbox, badge, avatar, icon (from the bundled set), image-placeholder, table (columns and rows), modal, and toast. A button, badge, or toast may take a tone; on draws a toggle or checkbox as set, or a list row as current. For states (loading, empty, error) or alternatives (A and B), declare variants and give each top-level node a variantId. Pin numbered callouts to nodes with annotations to explain behaviour; people comment on those callouts. The controls are drawn, not live. Describe mockup to get a settings screen and a set of states.",
-    "A hierarchy is a treemap: nodes that name a parent (one root, no cycles), a list of measures with ids, labels, and optional number formats, a default sizeBy and colorBy, and a colour scale of sequential, diverging, or categorical by top-level group. Values sit on leaves; a group sums its children, so give values only to leaves and never to a group. A leaf may name a manifest source id, which offers Open file through the allowlisted open-source action. The person can switch size and colour and zoom into a group without revising the Canvas; use startNodeId to open a static export at a chosen node. Describe treemap to get a repository map sized by lines of code and coloured by recent edits.",
-    "A grid coloured by value is a heatmap with a layout of matrix or calendar. A matrix names its rows and columns and carries a cell per coordinate with a value and an optional short note; a coordinate you do not list reads as missing, not as zero, and the person can sort the rows by their total without revising the Canvas. A calendar carries one reading per date and reads as a week grid. Both take an optional format and a scale of sequential or diverging. Describe heatmap to get commits by weekday and hour, and test failures per day.",
-    'A finished-looking design is a design block: app screens, a website or landing page, or a slide deck. Pick one size for the block (phone 390x844, tablet 820x1180, desktop 1440x900, or slide 1920x1080), put shared CSS in styles, and write each screen or slide as a frame of static HTML. The person clicks through it, so link frames with href="#frameId"; a link may only name a frame or a section. Frames run no JavaScript and load nothing: no script, event handlers, external links, remote images, fonts, or imports. Draw images with inline SVG, CSS gradients, or data:image URLs, and use system fonts. Make it look finished: real copy, a clear type scale, and a deliberate palette. Describe design to get a phone flow and a deck.',
-    "A ranking is a bar list: rows with a label, a value, an optional second value, and an optional manifest source id. It sorts largest first by default, shows the top rows with Show all up to 500, and a row that names a source offers Open file through the allowlisted open-source action. Give each row a unique label, a value that is not negative, and a path-like label when it names a file (the renderer draws the directory dimmed). Bars use neutral ink, or the sequential scale when the magnitude matters. Describe bar-list to get hottest files and slowest tests.",
-    "Comparing options against criteria, such as an architecture decision, a vendor or library choice, or a feature comparison, is a comparison-matrix: options (columns) and criteria (rows) with unique ids, and one cell per criterion and option holding a score, a short text, or a glyph of yes, partial, or no, with an optional note that explains it. A criterion takes an optional weight (absent counts once, 0 keeps it out of the score) and prefer lower when a low reading is good, such as cost. Declare a scoreRange such as 1 to 5 when you score. The host computes each option's weighted score from scores and glyphs, never text; do not write totals yourself. Name the option you recommend with recommendedOptionId and say why in recommendation; it may differ from the highest score. Describe comparison-matrix to get an architecture decision and a feature comparison.",
-    "Mathematics is a math block written in LaTeX math markup, never in a text block or between dollar signs. A formula on its own line is layout display with a source and an optional caption that names it, such as Bayes' theorem; a sentence that carries formulas is layout inline with runs, each either prose (text, keep the spaces next to a formula) or a formula (math). A source is at most 1000 characters. Use standard commands, environments such as aligned, pmatrix, and cases, and \\text for words inside a formula. Macro definitions (\\def, \\newcommand), links and images (\\href, \\url, \\includegraphics, \\html...), and colour (\\color, \\textcolor) are refused: formulas take the reader's theme. Describe math to get a display formula, an aligned derivation, and a paragraph with inline formulas.",
-    "A table is columns of a declared type (text, number, boolean, date, status) and rows that list one value per column in the same order. A column may take an optional format and an optional display: text (the plain reading), bar (an in-cell bar whose length is the value's share of the column's largest reading), heat (a tint on the shared sequential scale), or status (the value shown as a badge). The value is always shown, so bar and heat add a mark without replacing the reading; the person can sort, filter, and hide columns without revising the Canvas. A text column whose values read as a path is drawn with the shared path style. A row may instead be { id, cells } with a short id unique in the table; people can comment on a row only when it has an id, and the comment stays on that id, so keep a row's id when you revise it and give a new row a new id.",
-    "To arrange a long document, use tabs or columns. Both name blocks the same document holds, by blockId, and the document draws each named block inside its tab or column instead of in the block list. tabs has 2 to 12 panes, each with a short label and the blockIds it shows; columns has 2 to 4 tracks, each with the blockIds it stacks, and folds to one column when the Canvas is narrow. A block sits in at most one tab or track, and a tab or track never holds another tabs or columns block or an action. Which tab is open is the reader's choice and is never saved. Describe tabs to get a short tabbed example.",
-    "Headline numbers are metric blocks. Give each a label and a value, and add an optional format, unit, delta, a goodDirection of up, down, or neutral so a delta's tone is never guessed, a caption, and a sparkline of at most 256 recent readings. Consecutive metric blocks are gathered into a responsive tile row of two to four tiles. Describe metric to get a repo-stats tile row.",
+    "Operations: describe, list, read, create, revise, preview. Before you author, call describe: with no block kinds it lists every kind, when to use the structured ones, the document recipes to start from, and a create example; with up to three blockKinds it returns their exact schemas, plus authoring guidance and examples for the kinds that have them. Start from a document recipe before inventing a shape.",
+    "Author the content in blocks, not in prompt. Use structured blocks rather than HTML, JavaScript, or CSS; only a design block's frames are HTML and CSS, and they run no script and load nothing. Mermaid is never drawn; describe code-excerpt for how a Mermaid diagram you already have becomes a typed diagram. Text renders as plain text, not Markdown: give each section its own heading block (the Canvas title is already shown, so do not repeat it), and use key-value, table, status, or callout blocks instead of Markdown lists, bold, or code spans.",
     "A Canvas is a document: it grants no file, shell, Git, or network access. Creation adds a card to this thread and offers the Canvas in the thread's dock the first time it appears; the user can also select Open Canvas. Do not claim the user has read it or invent a download URL.",
     `Choose where the thread shows it. Use presentation inline for one small visual that answers the question, such as a chart, a few metrics, a short table, or a sequence or state diagram; it is drawn in the conversation just below your reply to this turn, so refer to it as below, and the user can still open it in the sidebar. Leave presentation out (sidebar) for reports, plans, boards, mockups, designs, and anything the user will keep working on. Inline holds at most ${String(CANVAS_INLINE_MAX_BLOCKS)} blocks; when the host shows a card instead, the result says so in presentationNote.`,
-    "Revise with the canvasId, the last observed expectedSequence, and the complete replacement blocks. Reference blocks require source ids already in the Canvas source manifest; create attaches no sources. Never invent file or artifact references.",
-    "Preview once after you create or revise a chart, treemap, or inline Canvas: preview returns the same picture the person will see and the warnings it can measure: an inline document past its height cap, and on a chart clipped labels, legend overflow, empty series, or ink below its contrast target, and on a bar list clipped labels or empty series. Every other block kind gets no warnings, so read its picture yourself. Fix what the warnings or the picture show with a revise, then reply. Previewing again before you change the document only spends the host's browser and your context, so look once per change.",
+    "Revise with the canvasId, the last observed expectedSequence, and the complete replacement blocks; people edit Canvases too, so read before revising and keep their changes. Reference blocks require source ids already in the Canvas source manifest; create attaches no sources. Never invent file or artifact references.",
+    "Preview once after you create or revise a chart, treemap, or inline Canvas, fix what its warnings or picture show with a revise, then reply. Look once per change: previewing an unchanged document only spends the host's browser and your context.",
   ].join(" ");
 }
 
@@ -769,6 +897,9 @@ function canvasToolSet(options: {
           return {
             result: {
               blockKinds,
+              blockGuide: blockGuide(),
+              recipeGuide: RECIPE_GUIDE,
+              previewGuide: PREVIEW_GUIDE,
               recipes: listedDocumentRecipes(
                 options.port.documentRecipes?.() ?? inTreeCanvasDocumentRecipes(),
               ),
@@ -794,6 +925,7 @@ function canvasToolSet(options: {
         return {
           result: {
             blockSchema: JSONSchema.make(Schema.Union(...selected)),
+            guidance: describedGuidance(input.blockKinds ?? []),
             ...(examples.length === 0 ? {} : { examples }),
           },
         };
