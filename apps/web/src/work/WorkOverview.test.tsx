@@ -43,7 +43,6 @@ describe("WorkOverview", () => {
           ...populatedModel(),
           status: {
             projectId: "00000000-0000-4000-8000-000000000001" as never,
-            hasAgentsFile: true,
             hasStatusFile: true,
             lastUpdatedOn: "2026-08-20",
             stale: true,
@@ -77,7 +76,6 @@ describe("WorkOverview", () => {
           ...emptyModel(),
           status: {
             projectId: "00000000-0000-4000-8000-000000000001" as never,
-            hasAgentsFile: false,
             hasStatusFile: false,
             stale: true,
             followUps: [],

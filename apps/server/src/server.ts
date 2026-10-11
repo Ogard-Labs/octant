@@ -819,6 +819,7 @@ import {
   listHosts,
   type PreviewPosture,
   findWorkspacePresetTarget,
+  workProjectKeepsStatusFile,
 } from "@octant/domain";
 import { ZenThreadCatalog } from "./zen/zenThreadCatalog";
 import { localHostDisplayName } from "./localHostDisplayName";
@@ -3458,7 +3459,7 @@ export function startOctantServer(
         if (remotes === undefined) return undefined;
         return resolveConnectedGitHubRepository(remotes);
       },
-      seedWorkProjectFiles: async (canonicalRoot, name, today) => {
+      seedWorkProjectStatusFile: async (canonicalRoot, name, today) => {
         await workProjectStatusFiles.seed(canonicalRoot, name, today);
       },
     });
@@ -9672,8 +9673,8 @@ export function startOctantServer(
           const openThreads = bootstrap.threads.filter(
             (thread) => thread.lifecycle !== "archived" && thread.completedAt === undefined,
           );
-          // A due date in a Project's STATUS.md raises the follow-up mark on
-          // that Project's most recent open thread (decision 0119): the
+          // A due date in the STATUS.md of a Project that keeps one raises the
+          // follow-up mark on that Project's most recent open thread: the
           // reminder belongs to the work, and that thread is where the person
           // would pick it up.
           const dueByProject = new Map<string, boolean>();
@@ -9681,7 +9682,7 @@ export function startOctantServer(
             [...new Set(openThreads.map((thread) => String(thread.projectId)))].map(
               async (projectId) => {
                 const project = projectById.get(projectId);
-                if (project?.type !== "work") return;
+                if (project?.type !== "work" || !workProjectKeepsStatusFile(project)) return;
                 dueByProject.set(
                   projectId,
                   await workProjectStatusReader.hasDueItems(
