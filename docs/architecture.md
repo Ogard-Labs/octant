@@ -1436,6 +1436,40 @@ enabled target (`hasActionableDelivery`), so it stays absent. It stays absent
 until all three exist; a standing grant never substitutes for the per-act
 approval.
 
+**The Project planner thread is a server-only capability.** A Code Project may
+designate one of its own Code threads as its planner, whose agent surveys the
+Project's board and proposes new Code threads for a person to accept. The
+server, contracts, domain policy (`@octant/domain/code-planner-policy`), and
+the client-runtime transport implement it; no renderer, phone, or CLI surface
+designates a planner, lists proposals, or resolves them, and the shell does not
+advertise it. Because nothing in the shell designates a planner, no thread
+receives the planner tools in ordinary use. Any later surface must keep the
+rules below:
+
+- **Routes.** `GET /api/code/planner/:projectId` returns the designation, its
+  version, and the proposals; it needs only the authenticated window's access
+  to that Project. `POST /api/code/planner/commands` (designate or undesignate)
+  and `POST /api/code/planner/proposals/commands` (confirm or decline) accept
+  only the `user` initiator; a principal gated as an agent, such as a paired
+  remote device, is refused as unauthorized before decoding. Every command
+  carries the expected aggregate version, and a stale one is refused, never
+  merged. A body cannot supply window identity.
+- **Designation.** Only an active Code Project, one planner per Project, and
+  only a non-archived thread of that same Project. Designating while one is
+  designated refuses, even for the same thread; undesignate first.
+- **Agent tools.** `octant_board` and `octant_propose_thread` are offered only
+  to the currently designated planner thread, and both re-resolve the
+  designation on every call, so an undesignation takes effect mid-turn. The
+  board read is the same server read-model the board UI queries, scoped to the
+  planner's own Project, with no GitHub call. A proposal executes nothing: it
+  is journaled as pending (at most ten unresolved per Project) with the
+  planner thread as actor. Both tools sit before the Code posture gate because
+  neither touches the checkout, but still pass the stale-identity and profile
+  tool-constraint checks.
+- **Resolution.** Only a person confirms or declines. A confirm creates its
+  thread through the ordinary Code creation command, inside the proposal's own
+  Project only; the planner has no creation authority of its own.
+
 **Routines (Automation Center).** A routine is a host-owned, Project-bound
 definition that starts an ordinary Work or Code thread with a fixed task prompt
 on a trigger: once, every N minutes (15 minutes to 30 days), or weekly at a
