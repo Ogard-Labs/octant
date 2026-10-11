@@ -196,6 +196,21 @@ describe("styled diagram layout", () => {
     expect(legacy.nodes[0]?.shape).toBe("plain");
   });
 
+  it("draws an older block's free-text role as the plain box even when it names a shape", () => {
+    const older = layoutCanvasDiagram(
+      diagram({
+        nodes: [
+          { nodeId: "a" as never, label: "A", role: "decision" as never },
+          { nodeId: "b" as never, label: "B", role: "terminator" as never },
+        ],
+      }),
+    );
+    expect(older.nodes.map((node) => [node.role, node.shape])).toEqual([
+      ["decision", "plain"],
+      ["terminator", "plain"],
+    ]);
+  });
+
   it("carries each edge's style and tone, defaulting an unstyled edge to a plain line", () => {
     const layout = layoutCanvasDiagram(loop);
     expect(layout.edges.map((edge) => [edge.edgeId, edge.style, edge.tone])).toEqual([

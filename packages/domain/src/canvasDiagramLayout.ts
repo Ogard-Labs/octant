@@ -1,4 +1,5 @@
 import {
+  CANVAS_DIAGRAM_STYLES_SCHEMA_VERSION,
   isCanvasDiagramNodeRole,
   type CanvasDiagramBlock,
   type CanvasDiagramEdgeStyle,
@@ -26,7 +27,8 @@ export interface CanvasDiagramLayout {
 /**
  * The shape a node is drawn as: `process` a box, `decision` a diamond,
  * `terminator` a pill, and `plain` the rounded box of a node without a role.
- * A legacy role outside the closed set draws as `plain`.
+ * A role outside the closed set, and any role on a block older than the
+ * diagram-styles version, draws as `plain`.
  */
 export type CanvasDiagramNodeShape = "plain" | "process" | "decision" | "terminator";
 
@@ -192,6 +194,10 @@ export function layoutCanvasDiagram(block: CanvasDiagramBlock): CanvasDiagramLay
   // above the picture's edge.
   const origin =
     MARGIN + ((block.groups ?? []).length > 0 ? GROUP_PADDING + GROUP_LABEL_HEIGHT : 0);
+  // Before the diagram-styles version a role was free text, so an older
+  // block that happened to write `decision` meant nothing by it and keeps the
+  // plain box rather than being redrawn as a shape it never asked for.
+  const styled = block.schemaVersion >= CANVAS_DIAGRAM_STYLES_SCHEMA_VERSION;
   const boxes = block.nodes.map((node) => {
     const nodeId = String(node.nodeId);
     const rank = ranks.get(nodeId) ?? 0;
@@ -205,7 +211,7 @@ export function layoutCanvasDiagram(block: CanvasDiagramBlock): CanvasDiagramLay
       nodeId,
       label: node.label,
       ...(node.role === undefined ? {} : { role: node.role }),
-      shape: canvasDiagramNodeShape(node.role),
+      shape: styled ? canvasDiagramNodeShape(node.role) : "plain",
       x: authoredX ?? (flow === "down" ? acrossFlow : alongFlow),
       y: authoredY ?? (flow === "down" ? alongFlow : acrossFlow),
       width: NODE_WIDTH,

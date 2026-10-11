@@ -1334,8 +1334,8 @@ export type CanvasTimelineBlock = typeof CanvasTimelineBlock.Type;
  * diamond, a terminator a pill, and a node without a role the plain rounded
  * box. Before version 19 a role was free text no renderer read; a block that
  * declares version 19 or newer may only use these, and the domain policy
- * refuses anything else there. An older block keeps whatever it wrote, and a
- * role outside this set draws as the plain box.
+ * refuses anything else there. An older block keeps whatever it wrote and
+ * draws every node as the plain box, even a role that names a shape.
  */
 export const CANVAS_DIAGRAM_NODE_ROLES = ["process", "decision", "terminator"] as const;
 export const CanvasDiagramNodeRole = Schema.Literal(...CANVAS_DIAGRAM_NODE_ROLES);
