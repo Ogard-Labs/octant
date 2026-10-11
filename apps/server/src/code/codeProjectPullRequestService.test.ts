@@ -1,4 +1,9 @@
-import { decodeProjectId, decodeWindowId, type CodeProjectPullRequestRow } from "@octant/contracts";
+import {
+  decodeProjectId,
+  decodeWindowId,
+  type CodeProjectPullRequestMergeRecorded,
+  type CodeProjectPullRequestRow,
+} from "@octant/contracts";
 import { decodeCodeThreadId } from "@octant/contracts/code";
 import type { CodeProjectLinkedThreadFact } from "@octant/domain/code-project-pull-request-policy";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -101,6 +106,7 @@ function serviceFixture(options: {
   }>;
   readonly merge?: CodeProjectPullRequestMergePort;
   readonly mergeJournal?: Journal;
+  readonly recordMerge?: (record: CodeProjectPullRequestMergeRecorded) => void;
   readonly clock?: () => string;
   readonly cacheStats?: CacheStatsRecorder;
   readonly snapshotStore?: CodeProjectPullRequestSnapshotStore;
@@ -161,6 +167,7 @@ function serviceFixture(options: {
     list: { listActive },
     detail: { observeReviewByIdentity },
     ...(options.merge === undefined ? {} : { merge: options.merge }),
+    ...(options.recordMerge === undefined ? {} : { recordMerge: options.recordMerge }),
     ...(mergeJournal === undefined
       ? {}
       : {
@@ -342,6 +349,34 @@ describe("CodeProjectPullRequestService", () => {
         store.close();
       }
     });
+  });
+
+  it("stops showing a merged pull request as open even when its journal record fails", async () => {
+    const fixture = serviceFixture({
+      merge: { mergeByIdentity: async () => ({ status: "merged" }) },
+      recordMerge: () => {
+        throw new Error("journal unavailable");
+      },
+    });
+    await fixture.service.refresh(windowId, { kind: "refresh-all" }, new AbortController().signal);
+
+    await expect(
+      fixture.service.merge(
+        windowId,
+        {
+          projectId: projectA,
+          repositoryOwner: "octant",
+          repositoryName: "octant",
+          number: 12,
+          method: "squash",
+          headSha: "9".repeat(40),
+        },
+        new AbortController().signal,
+      ),
+    ).rejects.toThrow("journal unavailable");
+
+    const after = await fixture.service.query(windowId, { version: 1 });
+    expect(after.rows.filter((row) => row.number === 12 && row.state === "open")).toEqual([]);
   });
 
   it("restores a successful snapshot after restart without contacting GitHub", async () => {

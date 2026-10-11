@@ -488,6 +488,17 @@ export class CodeProjectPullRequestService {
               },
               signal,
             );
+    if (result.status === "merged") {
+      // Dropped before the record is appended: if that append fails, GitHub
+      // has still merged, and a cached row must not keep showing it open.
+      const key = detailKey(command);
+      this.#detailCache.delete(key);
+      this.#detailFreshness.delete(key);
+      this.#navigationSnapshots.clear();
+      // The list snapshot still holds the merged row as open until the next
+      // refresh; drop it so a query cannot return a pull request that is gone.
+      this.#cache = undefined;
+    }
     // Recorded before the outcome returns, so no answer reaches the person
     // for an attempt the journal lacks. A failed local append surfaces as the
     // route's failure; GitHub's state is still observed on the next refresh.
@@ -501,13 +512,6 @@ export class CodeProjectPullRequestService {
       result,
     });
     if (result.status === "merged") {
-      const key = detailKey(command);
-      this.#detailCache.delete(key);
-      this.#detailFreshness.delete(key);
-      this.#navigationSnapshots.clear();
-      // The list snapshot still holds the merged row as open until the next
-      // refresh; drop it so a query cannot return a pull request that is gone.
-      this.#cache = undefined;
       return {
         status: "merged",
         number: command.number,
