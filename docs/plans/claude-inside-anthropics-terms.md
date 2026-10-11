@@ -221,14 +221,39 @@ in Settings. Do not reintroduce a setup token.
 ## Step 3 — Telemetry on subscription launches
 
 On subscription launches of the unmodified binary, stop setting
-`DISABLE_TELEMETRY`, `DISABLE_ERROR_REPORTING`, and
-`CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`. Keep `DISABLE_AUTOUPDATER`,
-`CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL`,
-`CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS`, and
-`CLAUDE_CODE_DISABLE_AUTO_MEMORY`.
+`DISABLE_TELEMETRY` and `DISABLE_ERROR_REPORTING`. Drop
+`CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` only when every
+non-telemetry channel that umbrella also blocks has a dedicated
+Octant-set guard or an explicit authorization below.
+
+Anthropic's environment-variable reference (fetched 11 Oct 2026)
+documents that the umbrella also blocks release-note, PR/MR badge,
+and availability checks; background plugin `command` source runs
+(local commands that can trigger dependency installs); and
+feature-flag-dependent capabilities including account plugin/skill
+sync, Remote Control, advisor, and artifact access.
+
+Authorize as Claude's own traffic, and name them in Step 4: usage
+metrics, error reports, session-quality surveys, release-note
+checks, PR/MR badge checks, and availability checks.
+
+Keep off with dedicated documented switches, not the umbrella:
+`DISABLE_AUTOUPDATER`, `CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL`,
+`CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS`, `CLAUDE_CODE_DISABLE_AUTO_MEMORY`,
+and `DISABLE_GROWTHBOOK=1`. The GrowthBook switch is process ownership:
+it keeps Remote Control, advisor, artifact access, and account
+plugin/skill sync off. Octant sets it; a host disable-only value of
+`1` is already that setting. Do not pass through any other value.
+
+Background plugin `command` runs stay off. If the verified Claude
+build documents a dedicated disable switch, set it. If the umbrella
+is still the only documented switch, keep
+`CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` and do not drop it only
+to re-enable telemetry. Amend 0165 in the same implementation PR
+if that measurement keeps the umbrella.
 
 `sanitizeClaudeEnvironment()` copies only `PASSTHROUGH_VARIABLES` today,
-so merely dropping those three names from `REQUIRED_GUARDS` also discards
+so merely dropping names from `REQUIRED_GUARDS` also discards
 a user's own disable-only values. Preserve a disable-only setting the
 person already exported in the host environment, including the documented
 Claude opt-outs `DO_NOT_TRACK=1`, `DISABLE_GROWTHBOOK=1`, and
@@ -242,18 +267,25 @@ API-key launches may keep the 0005 telemetry guards.
 - `apps/server/src/providers/claudeEnvironment.ts` (`REQUIRED_GUARDS`)
 - `apps/server/src/providers/claudeEnvironment.test.ts`
 - `apps/server/src/providers/claudeProcess.ts` / its test if they assert
-  the three subscription guards
+  the subscription guards
 
 **Acceptance:**
 
-- A subscription launch's environment does not contain those three
-  switches unless the host already set a disable-only value.
+- A subscription launch's environment does not contain
+  `DISABLE_TELEMETRY` or `DISABLE_ERROR_REPORTING` unless the host
+  already set a disable-only value.
+- A subscription launch sets `DISABLE_GROWTHBOOK=1` and the other
+  process-ownership switches, including a dedicated background-plugin
+  `command` guard when the verified build documents one.
+- `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` is absent on a
+  subscription launch only when those dedicated guards cover every
+  non-telemetry channel the umbrella blocked; otherwise it stays.
 - A host `DISABLE_TELEMETRY`, `DISABLE_ERROR_REPORTING`,
   `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`, `DO_NOT_TRACK=1`,
   `DISABLE_GROWTHBOOK=1`, or `CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY=1`
   disable-only value survives sanitization on a subscription launch.
-- An API-key launch still sets them.
-- The other process-ownership switches remain on every launch.
+- An API-key launch still sets the 0005 telemetry guards.
+- Tests name each re-enabled channel and each channel that stays off.
 
 ## Step 4 — Docs and Settings copy
 
@@ -285,13 +317,15 @@ HTTP endpoint. Do not add Claude subscription OAuth there.
 - Privacy text no longer says Octant stores a Claude setup token.
 - The Providers guide describes `claude auth login` into a Claude-owned
   config directory, and the optional native-harness API key.
-- Architecture and the privacy pages name the Claude telemetry
-  destinations, data categories, conditions, and opt-out that Step 3
-  newly enables on subscription launches (usage metrics, error reports,
-  feature-flag traffic, and session-quality surveys, including
-  third-party logging or error tracking Anthropic documents). The
-  current "no telemetry" and enumerated-destination promises cannot
-  remain after that traffic is allowed.
+- Architecture and the privacy pages name every channel Step 3 newly
+  enables on subscription launches (usage metrics, error reports,
+  session-quality surveys, release-note checks, PR/MR badge checks,
+  and availability checks, including third-party logging or error
+  tracking Anthropic documents) and every channel that stays off
+  (feature-flag evaluation, Remote Control, advisor, artifact access,
+  account plugin/skill sync, and background plugin `command` runs).
+  The current "no telemetry" and enumerated-destination promises
+  cannot remain after that traffic is allowed.
 
 Do not publish that deprecation in the decision PR. 0165 stays Proposed
 until Steps 0–5 land, and the shipped guide must keep describing the

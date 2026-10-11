@@ -135,12 +135,20 @@ Whether a confined launch that can read that directory, and cannot run
   harness or on Anthropic-compatible HTTP endpoints. 0111's Anthropic
   exclusion stands and this record extends it to that surface.
 - **Subscription launches of the unmodified binary leave Claude's own
-  telemetry, error reporting, and essential traffic intact.** Octant
-  does not set `DISABLE_TELEMETRY`, `DISABLE_ERROR_REPORTING`, or
-  `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` on those launches. Process
-  ownership switches (auto-update, marketplace autoinstall, built-in
-  agents, auto memory) stay off. API-key launches may keep the 0005
-  telemetry guards.
+  telemetry, error reporting, and Claude-owned product checks intact.**
+  Octant does not set `DISABLE_TELEMETRY` or `DISABLE_ERROR_REPORTING`
+  on those launches. Dropping `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`
+  also re-enables release-note, PR/MR badge, and availability checks;
+  those stay allowed as Claude's own traffic. Process ownership stays
+  off: auto-update, marketplace autoinstall, built-in agents, auto
+  memory, feature-flag evaluation (`DISABLE_GROWTHBOOK`), Remote
+  Control, advisor, artifact access, account plugin/skill sync, and
+  background plugin `command` runs. Use a dedicated documented switch
+  for each of those. If background plugin `command` runs have no
+  dedicated switch on the verified build, keep
+  `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` until one exists; do not
+  drop the umbrella only to re-enable telemetry. API-key launches may
+  keep the 0005 telemetry guards.
 - **Naming.** Octant may say, in plain text, that it runs Claude Code.
   It does not use the Claude Code or Anthropic names or logos as a
   product, feature, or company name, in its own logo, or in a way that
