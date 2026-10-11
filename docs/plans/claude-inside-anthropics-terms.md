@@ -53,6 +53,17 @@ Measure:
 **Pass.** The unmodified binary signs in on a confined Plan launch from
 Claude-owned storage, and Octant never reads or sets a token.
 
+**Version.** Record the exact Claude Code version that passed. The
+secure-storage variable is undocumented and build-specific, and the
+driver records `probeVersion` without a floor today. A pass on one
+current build therefore does not cover every installed binary. The
+implementation must keep that version as the confined-login floor:
+probe each configured `claude` executable and refuse confined
+subscription (or take the instance-wide API-key fallback) when the
+binary is older or fails the same capability check. Ordinary
+unconfined turns on an older binary may still run; confined login
+after helper-token removal must not assume they work.
+
 **Fail.** Confined subscription launches cannot sign in that way. The
 fallback is to switch that instance to Anthropic API-key authentication
 for every launch, including ordinary unconfined turns. The current
@@ -84,6 +95,14 @@ ordinary CLI login for unconfined turns.
 3. Do not treat an API key in the same broker slot as a helper token.
    0005's API-key path stays.
 
+The existing credential cleanup boundary distinguishes `unavailable`,
+`partial`, and `indeterminate` because deletion cannot be assumed.
+Keep this migration pending and retry or reconcile on later launches
+until the scoped cleanup reports complete. Do not show the
+notification that the token is gone, and do not treat the migration
+as finished, while the broker is locked, the first attempt is
+partial, or the destructive response is lost.
+
 **Files:**
 
 - `apps/server/src/providers/claudeSetupToken.ts` and its test
@@ -103,7 +122,9 @@ ordinary CLI login for unconfined turns.
 
 - Settings has no Connect / Disconnect / expired helper-token row.
 - No Octant path stores a Claude setup or OAuth token in the broker.
-- A previously stored helper token is gone after migration.
+- A previously stored helper token is gone after migration confirms
+  deletion. A launch that cannot reach the broker leaves the
+  migration pending.
 - Unconfined subscription turns still use the CLI login Claude owns.
 
 ## Step 2 — Confined launches use the Claude-owned config directory
