@@ -128,6 +128,12 @@
   margin: 0 0 var(--oct-space-4);
 }
 
+/* The group's section already spaces it from the next block. */
+.canvas-block--group > .canvas-tabs,
+.canvas-block--group > .canvas-columns {
+  margin-bottom: 0;
+}
+
 .canvas-tabs__list {
   display: flex;
   max-width: 100%;
