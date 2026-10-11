@@ -114,7 +114,12 @@ Whether a confined launch that can read that directory, and cannot run
   two denials are unconditional. If that verification shows the
   config-directory path cannot work, that instance switches to API-key
   authentication for every launch. Mixed CLI-plus-API-key is not
-  available.
+  available. Existing subscription threads cannot resume across that
+  switch: a stored Claude resume cursor records `authentication`, and
+  rewriting it would claim API-key identity for session files the
+  subscription login still owns. The switch is refused, or those
+  threads are marked as requiring a new thread, before
+  `authentication` changes.
 - **Several Claude accounts are allowed, later, on this same
   mechanism.** Each account has its own Claude-owned config directory.
   The person signs in once per account with unmodified
@@ -157,7 +162,8 @@ exception; the product path above does not create that.
   subscription only if the macOS must-verify succeeds. If it fails, that
   instance switches to an Anthropic API key for every launch until a
   later change finds a Claude-owned storage path that does not require
-  Octant to hold a token.
+  Octant to hold a token. Existing subscription threads do not resume
+  after that switch; the person starts a new thread.
 - Settings loses **Connect Claude for helpers**. Stored helper tokens
   are deleted from the broker, and the person is told to revoke them
   with Anthropic. A test or lint refuses any Octant path that sets

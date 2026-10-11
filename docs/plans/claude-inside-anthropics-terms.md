@@ -79,8 +79,15 @@ fallback is to switch that instance to Anthropic API-key authentication
 for every launch, including ordinary unconfined turns. The current
 provider model has one `authentication` value per instance, so mixed
 "CLI login when unconfined, API key when confined" is not available.
-Write the failure and that instance-wide switch into 0165 before
-implementing it.
+A stored Claude resume cursor records that instance's
+`authentication`. Changing it to `api-key` makes every existing
+cursor `stale-resume`, including ordinary unconfined threads. Do not
+rewrite those cursors as API-key identity: the session files still
+belong to the subscription login. Before the switch, require an
+explicit new-thread transition: refuse the change while those threads
+can still resume, or mark them as needing a new thread and do not
+resume them after the switch. Write the failure, the instance-wide
+switch, and that transition into 0165 before implementing it.
 
 **Touches (notes only):** a short evidence note on the implementation
 PR. No product code in this step.
@@ -173,7 +180,9 @@ flow) against that directory. Octant does not read the directory's
 credential file.
 
 If Step 0 failed, confined launches require an Anthropic API key instead.
-Say so in Settings. Do not reintroduce a setup token.
+That is the same instance-wide switch Step 0 recorded, including its
+new-thread transition for existing subscription resume cursors. Say so
+in Settings. Do not reintroduce a setup token.
 
 **Files:**
 
