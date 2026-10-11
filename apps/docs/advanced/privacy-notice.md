@@ -93,7 +93,7 @@ see [Sign in on a direct endpoint](#sign-in-on-a-direct-endpoint-only-if-you-cho
 
 ### Claude for helpers, only if you connect it
 
-Decision 0165 proposes dropping this exception. It is still Proposed, so
+A proposed replacement would drop this exception. It is not accepted, so
 this notice describes the current build: Octant still stores the helper
 token if you connect it.
 

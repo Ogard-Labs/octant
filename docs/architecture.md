@@ -2211,6 +2211,10 @@ modelId }`, and the model picker is provider-first. Discovery can find
   those tokens, except the opt-in Claude for helpers token that a confined
   Claude launch signs in with, which the credential broker holds as the Sandbox
   paragraph of [security and authority](#security-and-authority) states.
+  A proposed replacement would drop that helper-token exception and sign
+  confined Claude launches in from a Claude-owned config directory; see
+  that same Sandbox paragraph. The replacement is not accepted and is
+  not the current build.
   **Host-driven** (`subscription-oauth`, direct HTTP drivers):
   the host runs a generic authorization-code PKCE runner and a device-code
   runner from a provider descriptor (endpoints, scopes, and a public client
@@ -3470,8 +3474,45 @@ mechanisms are:
   connect or disconnect. Disconnecting deletes the token from the broker and
   reports a broker it cannot reach. Removing the Claude Code provider clears
   it best-effort: the removal completes even when the broker is unreachable and
-  the token can remain. Octant has no call that revokes it with Anthropic. A
-  bound root a launch may not write is denied in the profile, so a checkout under that launch's own temporary directory is not
+  the token can remain. Octant has no call that revokes it with Anthropic.
+  **Proposed replacement (not accepted).** Claude subscription sign-in would
+  stay inside Anthropic's own flow. Octant would not run `claude setup-token`,
+  would not keep `CLAUDE_CODE_OAUTH_TOKEN` in the credential broker, and would
+  not set that variable from Octant storage. Confined Plan and Chat-subagent
+  launches would grant the account's Claude-owned config directory
+  (`CLAUDE_CONFIG_DIR`, and `CLAUDE_SECURESTORAGE_CONFIG_DIR` when distinct)
+  and let the unmodified binary read its own login there. `/usr/bin/security`
+  and the Keychain file stay denied. This is not the current product. It stays
+  proposed until Step 0 of
+  [docs/plans/claude-inside-anthropics-terms.md](plans/claude-inside-anthropics-terms.md)
+  is measured on a current Claude Code build on macOS, and until Anthropic's
+  Commercial Terms or an explicit exception cover the path. Consumer Terms
+  alone are not enough. If that measurement shows confined sign-in from
+  Claude-owned storage cannot work, the instance switches to API-key
+  authentication for every launch. Existing subscription threads cannot resume
+  across that switch; they take an explicit new-thread transition. If sign-in
+  works but login cannot be separated from account session history, keep the
+  subscription and refuse confined Chat, Work Plan, and Code Plan launches;
+  that is not the instance-wide API-key fallback. If login can live apart from
+  session files, every launch for a new thread uses the credential path plus
+  one durable per-thread session directory. `findSession` receives that root
+  without mutating process-global environment. Durable session roots are
+  purged through a provider-neutral `@octant/provider-sdk` seam: a path
+  receipt, then a host data map and purge sweep that only see registered
+  locations. Confined login is limited to an attested Claude version or
+  inclusive range; a newer unattested build refuses confined subscription
+  until Step 0 is rerun. Subscription launches of the unmodified binary would
+  leave Claude's own telemetry, error reporting, and Claude-owned product
+  checks intact. `DISABLE_GROWTHBOOK` only stops feature-flag fetching.
+  Process-ownership channels stay on dedicated documented switches. Host
+  `DO_NOT_TRACK` opt-outs keep the documented disable spellings (`1`,
+  `true`, `yes`, `on`). API-key launches may keep the 0005 telemetry guards.
+  Several Claude accounts would use the same config-directory mechanism.
+  Each thread stays on the account it started with. Automatic failover,
+  rotation, and load-balancing are refused. The native harness stays API-key
+  only: Claude subscription OAuth is never offered there. 0111's Anthropic
+  exclusion stands.
+  A bound root a launch may not write is denied in the profile, so a checkout under that launch's own temporary directory is not
   writable through it. The `--version` read every family and the discovery
   scan perform before a runtime starts is wrapped too, with no root, no home, no network and one
   throwaway scratch directory it may write, per

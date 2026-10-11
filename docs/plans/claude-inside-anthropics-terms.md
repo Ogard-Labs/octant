@@ -1,7 +1,10 @@
 # Claude inside Anthropic's terms
 
-Remediation for [0165](../decisions/0165-claude-runs-inside-anthropics-terms.md).
-This plan is product work, not legal advice. It does not authorize merging.
+Remediation for the proposed Claude-inside-Anthropic's-terms rule in
+[architecture](../architecture.md#security-and-authority). The decision
+archive closed at 0164, so that rule lives in the owning specification
+rather than a numbered record. This plan is product work, not legal
+advice. It does not authorize merging.
 
 The helper-token path stays in the tree until a later implementation PR
 lands these steps. This document is the order of that work.
@@ -95,7 +98,8 @@ belong to the subscription login. Before the switch, require an
 explicit new-thread transition: refuse the change while those threads
 can still resume, or mark them as needing a new thread and do not
 resume them after the switch. Write the failure, the instance-wide
-switch, and that transition into 0165 before implementing it.
+switch, and that transition into the architecture rule before
+implementing it.
 
 **Touches (notes only):** a short evidence note on the implementation
 PR. No product code in this step.
@@ -298,8 +302,8 @@ Background plugin `command` runs stay off. If the verified Claude
 build documents a dedicated disable switch, set it. If the umbrella
 is still the only documented switch, keep
 `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` and do not drop it only
-to re-enable telemetry. Amend 0165 in the same implementation PR
-if that measurement keeps the umbrella.
+to re-enable telemetry. Amend the architecture rule in the same
+implementation PR if that measurement keeps the umbrella.
 
 `sanitizeClaudeEnvironment()` copies only `PASSTHROUGH_VARIABLES` today,
 so merely dropping names from `REQUIRED_GUARDS` also discards
@@ -349,7 +353,8 @@ API-key launches may keep the 0005 telemetry guards.
 ## Step 4 — Docs and Settings copy
 
 The shipped pages currently describe the helper-token path the build
-still uses, and they note that 0165 proposes replacing it. When Steps
+still uses, and they note that a proposed architecture rule would
+replace it. When Steps
 0–5 land, replace that current-behavior guidance with the
 config-directory rule. Architecture and the threat model change in the
 same implementation PR.
@@ -386,9 +391,10 @@ HTTP endpoint. Do not add Claude subscription OAuth there.
   The current "no telemetry" and enumerated-destination promises
   cannot remain after that traffic is allowed.
 
-Do not publish that deprecation in the decision PR. 0165 stays Proposed
-until Steps 0–5 land, and the shipped guide must keep describing the
-helper token the current build still needs.
+Do not publish that deprecation in this documentation PR. The
+architecture rule stays proposed until Steps 0–5 land, and the shipped
+guide must keep describing the helper token the current build still
+needs.
 
 ## Step 5 — Tests that enforce the rule
 
@@ -402,8 +408,9 @@ own storage.
 - `apps/server/src/providers/claudeDriver.test.ts`
 - A small repo check next to the existing provider tests, or an
   assertion in `sanitizeClaudeEnvironment` that the variable is absent
-  unless it arrived from the host environment for a reason 0165 does
-  not allow — in practice it must stay absent.
+  unless it arrived from the host environment for a reason the
+  proposed architecture rule does not allow — in practice it must stay
+  absent.
 
 **Acceptance:**
 
@@ -446,7 +453,8 @@ same turn on another account.
 
 ## Out of scope
 
-- Product code in the decision PR that added 0165.
+- Product code in the documentation PR that proposed the architecture
+  rule.
 - Host-driven Claude subscription OAuth on the native harness or on
   Anthropic-compatible HTTP (refused).
 - Reading `~/.claude/.credentials.json` or the Keychain from Octant.
