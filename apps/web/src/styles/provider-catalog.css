@@ -98,6 +98,11 @@
   font-weight: var(--oct-weight-medium);
 }
 
+.provider-catalog__step-note {
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
 .provider-catalog__current {
   display: grid;
   gap: var(--oct-space-2);

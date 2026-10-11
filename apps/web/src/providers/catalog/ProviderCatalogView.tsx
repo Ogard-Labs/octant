@@ -426,6 +426,16 @@ function SetupSteps(
               {step.title}
               {step.progress === "done" ? <span className="sr-only"> (done)</span> : null}
             </span>
+            {/* A sign-in is only known once a check reaches the runtime, so an
+                open Sign in step ahead of the check says so rather than
+                reading as skipped. */}
+            {step.id === "sign-in" &&
+            step.progress === "upcoming" &&
+            props.entry.state.authenticated === "not-checked" ? (
+              <span className="provider-catalog__step-note">
+                Known once the connection check reaches it.
+              </span>
+            ) : null}
             {step.progress === "current" ? (
               <CurrentStep {...props} key={props.entry.state.next.kind} />
             ) : null}
