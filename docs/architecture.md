@@ -2046,7 +2046,9 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   the unmodified `claude auth login` command in a terminal for that directory,
   and stay ready only from what the CLI or SDK reports. Octant never reads
   Claude credential files or stores Claude subscription tokens for those
-  accounts. A thread stays on the instance it started with; there is no
+  accounts. A confined Plan launch refuses an account directory at or
+  inside the checkout, so the write grant for that directory cannot reopen
+  the bound root. A thread stays on the instance it started with; there is no
   automatic failover, rotation, or load-balancing between accounts. Discovery can find
   installed runtimes and auto-register them. On first run, a detected Claude
   Code or Codex CLI instance is created enabled; every other detected runtime

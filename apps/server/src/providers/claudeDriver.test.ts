@@ -4271,6 +4271,22 @@ describe("Claude for helpers", () => {
     expect(f.opens[0]?.authEnvironment.CLAUDE_CONFIG_DIR).toBe(accountDirectory);
   });
 
+  it("refuses a Plan turn whose isolated account directory is inside the checkout", async () => {
+    const f = harness("subscription", "current-session", {
+      configDirectory: `${projectRoot}/.claude-accounts/work`,
+    });
+    const acquired = await acquire(f.driver, "chat");
+    try {
+      const exit = await Effect.runPromiseExit(
+        acquired.connection.start({ sessionId, modelId, executionPolicy: "plan" }),
+      );
+      expect(String(exit)).toContain("account directory inside the checkout");
+    } finally {
+      await acquired.close();
+    }
+    expect(f.opens).toHaveLength(0);
+  });
+
   it("resumes an isolated Claude account from that account's directory", async () => {
     const accountDirectory = "/Users/example/.claude-accounts/work";
     const f = harness("subscription", "current-session", { configDirectory: accountDirectory });

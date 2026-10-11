@@ -630,9 +630,31 @@ describe("Claude runtime confinement", () => {
         env: { ...target.environment, HOME: configHome, CLAUDE_CONFIG_DIR: configHome },
         signal: new AbortController().signal,
       }),
-    ).toThrow("also a runtime state directory");
+    ).toThrow("at or inside the checkout");
     expect(confinement.prepared).toEqual([]);
     expect(pids(configHome)).toEqual([]);
+  });
+
+  it("refuses a Plan turn whose account directory is inside the checkout", () => {
+    const target = fixture();
+    const accountDirectory = join(target.root, ".claude-accounts", "work");
+    mkdirSync(accountDirectory, { recursive: true });
+    const confinement = recordingConfinement();
+
+    expect(() =>
+      makePort(target, { confinement: confinement.port }).spawn({
+        projectRoot: target.root,
+        executionPolicy: "plan",
+      })({
+        command: target.binaryPath,
+        args: ["sdk-test"],
+        cwd: target.root,
+        env: { ...target.environment, CLAUDE_CONFIG_DIR: accountDirectory },
+        signal: new AbortController().signal,
+      }),
+    ).toThrow("at or inside the checkout");
+    expect(confinement.prepared).toEqual([]);
+    expect(pids(target.root)).toEqual([]);
   });
 
   it("refuses a Plan turn whose temporary directory is inside the checkout", () => {

@@ -171,6 +171,19 @@ function claudeSandboxSettings(
   };
 }
 
+function claudeAccountDirectoryOverlapsCheckout(
+  projectRoot: string,
+  configDirectory: string,
+  isProjectConfinedPath: (projectRoot: string, absolutePath: string) => boolean,
+): boolean {
+  if (configDirectory === projectRoot) return true;
+  try {
+    return isProjectConfinedPath(projectRoot, configDirectory) === true;
+  } catch {
+    return true;
+  }
+}
+
 const availableCapabilities: ProviderCapabilities = {
   streaming: "supported",
   resume: "supported",
@@ -1255,6 +1268,20 @@ function makeConnection(
           CONFINED_CLAUDE_EXECUTION_POLICIES.has(input.executionPolicy)
             ? await connectedHelperToken(options)
             : undefined;
+        if (
+          options.configDirectory !== undefined &&
+          CONFINED_CLAUDE_EXECUTION_POLICIES.has(input.executionPolicy) &&
+          claudeAccountDirectoryOverlapsCheckout(
+            projectRoot,
+            options.configDirectory,
+            options.isProjectConfinedPath,
+          )
+        ) {
+          throw failure(
+            "invalid-configuration",
+            "Claude Plan confinement cannot use an account directory inside the checkout.",
+          );
+        }
         scope = await runSetupEffect(Scope.make(), signal);
         const initialized = deferred<string>();
         // Startup no longer waits on this: the runtime initializes with the

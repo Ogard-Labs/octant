@@ -10,7 +10,7 @@ import {
   statSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { isAbsolute, join, sep } from "node:path";
+import { isAbsolute, join, resolve, sep } from "node:path";
 
 import type {
   Options as ClaudeAgentSdkOptions,
@@ -422,16 +422,16 @@ function planStateDirectories(
     try {
       return realpathSync(path);
     } catch {
-      // A provider may create its state directory during launch; preserve the
-      // configured path when it does not exist yet.
-      return path;
+      // A provider may create its state directory during launch; resolve the
+      // configured path so `..` cannot slip under the bound root.
+      return resolve(path);
     }
   });
   for (const path of canonicalDirectories) {
-    if (path === boundRoot) {
+    if (path === boundRoot || path.startsWith(`${boundRoot}${sep}`)) {
       throw new SeatbeltConfinementError(
         "invalid-configuration",
-        "Claude Plan confinement cannot use a project root that is also a runtime state directory.",
+        "Claude Plan confinement cannot grant a runtime state directory at or inside the checkout.",
       );
     }
   }
