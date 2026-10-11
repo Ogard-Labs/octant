@@ -323,7 +323,8 @@ version and does not report it corrupt.
 A treemap block is gated the same way at Canvas schema version 5, a heatmap
 block at version 6, a comparison matrix at version 10, a math block at
 version 11, the mockup catalog at version 12, a table row's `id` at
-version 13, and the funnel, radar, and sankey chart types at version 14, so a
+version 13, the funnel, radar, and sankey chart types at version 14, and the
+dashboard block at version 15, so a
 document that declares an earlier version and carries one is
 refused as a declared future version. The optional table column
 `display` and the chart, table, and metric `format` fields are the one ungated
@@ -392,6 +393,24 @@ layout is pure and deterministic in `packages/domain`
 feeds it, every ending lines up in the last column, and one scale sizes every
 band, so the screen and the artifact preview SVG draw the same picture. The
 three types arrive together with Canvas schema version 14.
+A `dashboard` block is a KPI layout: a title that names its region, an
+optional `columns` of 1 to 4 (four when absent), and 1 to 24 `cells`, each
+naming the `blockId` of a metric, progress, status, chart, or table block in the
+same document with an optional `span` of columns. It is a block rather than a
+document-level layout field so it is version-gated, revised, commented on,
+shared, and described like any other kind, and a Canvas can hold one beside
+prose. Cells reference blocks rather than copy them, so a placed block keeps
+its one definition, id, and comment anchor. A dashboard is not a placeable
+kind, so grids never nest. The domain policy names each refusal
+(`dashboard-cells-budget-exceeded`, `dangling-dashboard-cell`,
+`dashboard-cell-kind-refused`, `duplicate-dashboard-cell` for a block placed
+twice in one dashboard or across two, and `dashboard-span-exceeds-columns`).
+The reading order is pure in `packages/domain` (`canvasDashboardLayout`): a
+dashboard reads where it sits with its cells in order, and a placed block reads
+only there. The screen, the shared snapshot, the artifact preview SVG (framed
+cells packed in that order, stopping at the first row the picture cannot hold
+whole), and the Markdown and HTML export (the title as a heading, then each
+placed block) all use it.
 The accessible table lists every reading: a funnel's stages with their share of
 the first stage and of the stage before, a radar's axes by series, and a
 sankey's flows with each one's share of its source. A pie or donut legend
@@ -531,14 +550,16 @@ column keeps its number format and display, a table row leaves as its cells
 without the `id` comments anchor to, and a board keeps its own layout. Because
 the row id is the only Canvas version 13 field and a share drops it, a share at
 version 6 named a block authored at version 13 as version 12. Share version 7
-carries the version-14 chart types, so it names blocks up to version 14
-(`CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION`).
+carried the version-14 chart types, so it named blocks up to version 14, and
+share version 8 carries the version-15 dashboard, so it names blocks up to
+version 15 (`CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION`).
 Share documents version independently of Canvas documents: a treemap, a
 heatmap, a bar list, a chart's or a table column's number format, a table
 column's display, and a board's layout arrive with share version 3, and a
 comparison matrix with share version 4, math with share version 5, the
-mockup catalog with share version 6, and the funnel, radar, and sankey charts
-with share version 7 (whose blocks may name Canvas version 14), so a share that declares an older version
+mockup catalog with share version 6, the funnel, radar, and sankey charts
+with share version 7 (whose blocks may name Canvas version 14), and the
+dashboard with share version 8, so a share that declares an older version
 and carries one is refused as a future version.
 The catalogue includes a `plan` block: phases, and one list of tasks that each
 name their phase, carry a status (todo, doing, blocked, done), and may carry an

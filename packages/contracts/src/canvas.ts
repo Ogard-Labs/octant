@@ -2131,9 +2131,9 @@ export const CanvasDefinition = Schema.Struct({
     // design from version 9, a comparison matrix from version 10, math from
     // version 11, the mockup catalog from version 12, table row ids from
     // version 13, the funnel, radar, and sankey charts from version 14, and the
-    // dashboard from version 15. A rolled-back runtime that never learned a kind or hint must see a document
-    // carrying it as a declared future version, not as a document that failed
-    // to decode. Each keeps its own floor so an earlier document stays valid.
+    // dashboard from version 15. A rolled-back runtime that never learned a
+    // kind or hint must see a document carrying it as a declared future
+    // version, not as a document that failed to decode. Each keeps its own floor so an earlier document stays valid.
     Schema.filter(
       (definition) =>
         definition.schemaVersion >= CANVAS_MOCKUP_SCHEMA_VERSION ||
