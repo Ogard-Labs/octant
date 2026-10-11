@@ -108,6 +108,8 @@ export type RightUtilityDockResolution =
  * still mode-valid here; presence is gated by the thread's current artifact or
  * enabled target, not by this catalog. Agents is conditional: it appears when
  * subagents exist or a composer tray row asks for one. Review is the local-diff tool.
+ * No tool lists Chat: the shell shows Chat without a dock or bottom panel, so a
+ * Chat entry here would only describe a tool no reader can open.
  */
 /**
  * Surfaces a reader can hold several of at once. A second browser is a second
@@ -131,13 +133,13 @@ export const RIGHT_UTILITY_DOCK_SURFACES = [
   {
     id: "environment",
     label: "Environment",
-    modes: ["chat", "work", "code"],
+    modes: ["work", "code"],
     scope: "thread",
   },
   {
     id: "side-chat",
     label: "Side Chat",
-    modes: ["chat", "work", "code"],
+    modes: ["work", "code"],
     scope: "thread",
   },
   {
@@ -161,13 +163,13 @@ export const RIGHT_UTILITY_DOCK_SURFACES = [
   {
     id: "canvas",
     label: "Canvas",
-    modes: ["chat", "work", "code"],
+    modes: ["work", "code"],
     scope: "thread",
   },
   {
     id: "plan",
     label: "Plan",
-    modes: ["chat", "work", "code"],
+    modes: ["work", "code"],
     scope: "thread",
   },
   {
@@ -179,7 +181,7 @@ export const RIGHT_UTILITY_DOCK_SURFACES = [
   {
     id: "agents",
     label: "Agents",
-    modes: ["chat", "work", "code"],
+    modes: ["work", "code"],
     scope: "thread",
   },
   {

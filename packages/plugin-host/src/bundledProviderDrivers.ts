@@ -1,12 +1,17 @@
 import type { ProviderDriverKind } from "@octant/contracts/providers";
 import type {
   ExtensionActivationState,
+  ExtensionEffectiveState,
   ExtensionPackageManifest,
 } from "@octant/contracts/extensions";
 import {
   decodeExtensionContentDigest,
   decodeExtensionPackageManifest,
 } from "@octant/contracts/extensions";
+import {
+  decodeProviderDriverCatalogEntry,
+  type ProviderDriverCatalogEntry,
+} from "@octant/plugin-api/provider-driver-catalog";
 import {
   isExtensionComponentModeSafe,
   resolveExtensionActivation,
@@ -200,4 +205,39 @@ export function bundledProviderDriverPlugin(
   driverKind: ProviderDriverKind,
 ): BundledProviderDriverPlugin | undefined {
   return BUNDLED_PROVIDER_DRIVER_PLUGINS.find((plugin) => plugin.driverKind === driverKind);
+}
+
+/**
+ * A provider driver as the provider catalog lists it: the entry, validated
+ * through the public catalog schema, beside the package facts the activation
+ * ladder holds for it. `installed` and `trusted` are read from the same context
+ * that admits the driver, so the catalog can only repeat them, never set them.
+ */
+export interface ProviderDriverCatalogListing {
+  readonly entry: ProviderDriverCatalogEntry;
+  readonly installed: boolean;
+  readonly trusted: boolean;
+  readonly activation: ExtensionEffectiveState;
+}
+
+/**
+ * Every bundled provider driver as a catalog listing, in bundle order. Listing
+ * reads manifests and activation policy only; it starts nothing.
+ */
+export function bundledProviderDriverCatalog(
+  patches: Readonly<Partial<Record<ProviderDriverKind, BundledProviderDriverActivationPatch>>> = {},
+): ReadonlyArray<ProviderDriverCatalogListing> {
+  return BUNDLED_PROVIDER_DRIVER_PLUGINS.map((plugin) => {
+    const patch = patches[plugin.driverKind] ?? {};
+    const activation = bundledProviderDriverActivation(patch);
+    return {
+      entry: decodeProviderDriverCatalogEntry({
+        driverKind: plugin.driverKind,
+        manifest: plugin.manifest,
+      }),
+      installed: activation.installed,
+      trusted: activation.trusted,
+      activation: resolveBundledProviderDriverActivation(plugin, patch),
+    };
+  });
 }

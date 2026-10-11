@@ -95,12 +95,14 @@ if (executable === undefined) {
 
 // `--only=mockup` captures the mockup blocks alone, as `canvas-mockup-*.png`,
 // `--only=flow` the funnel, radar, and sankey charts, as `canvas-flow-*.png`,
+// `--only=table` a wide table grouped, summarised, pinned, with one group
+// collapsed and the grid scrolled sideways, as `canvas-table-*.png`,
 // `--only=dashboard` the ops dashboard and release health board, as
 // `canvas-dashboard-*.png`, and `--only=layout` the tabbed design brief, as
 // `canvas-layout-*.png`: one element capture per listed tab and one of the
 // columns, each scrolled into view, because a full-page capture of a long
 // page can leave content below the fold unpainted.
-const ONLY_SETS = ["mockup", "flow", "dashboard", "layout"] as const;
+const ONLY_SETS = ["mockup", "flow", "table", "dashboard", "layout"] as const;
 const LAYOUT_TABS = ["Metrics", "Core loop", "World", "Economy"] as const;
 const onlyArg = process.argv.find((arg) => arg.startsWith("--only="))?.slice("--only=".length);
 const only = ONLY_SETS.find((set) => set === onlyArg);
@@ -157,7 +159,7 @@ try {
     // Show the table's sorted state in the capture: the sort mark and the
     // announced direction are what a header control looks like once used.
     const tableSort = page.locator(".canvas-block__table .canvas-block__table-sort");
-    if ((await tableSort.count()) > 1) {
+    if (only !== "table" && (await tableSort.count()) > 1) {
       await tableSort.nth(1).click();
       await page.waitForTimeout(50);
     }
@@ -175,6 +177,25 @@ try {
       for (const summary of await page.locator(".canvas-block__chart-data summary").all()) {
         await summary.click();
       }
+    }
+
+    // Group by State with a summary, pin the first column, sort within the
+    // groups, collapse the group holding open threads, and scroll the grid so
+    // the pinned column and the comment gutter are seen holding their place.
+    if (only === "table") {
+      await page.getByRole("combobox", { name: "Group rows" }).click();
+      await page.getByRole("option", { name: "State" }).click();
+      await page.getByRole("combobox", { name: "Group summary" }).click();
+      await page.getByRole("option", { name: "Sum of Requests" }).click();
+      await page.getByText("Columns", { exact: true }).click();
+      await page.getByRole("button", { name: "Pin Service" }).click();
+      await page.getByText("Columns", { exact: true }).click();
+      await page.getByRole("button", { name: "Requests", exact: true }).click();
+      await page.getByRole("button", { name: /^State: Blocked/ }).click();
+      await page.locator(".canvas-block__table-scroll").evaluate((element) => {
+        element.scrollLeft = 260;
+      });
+      await page.waitForTimeout(50);
     }
 
     for (const scenario of SCENARIOS) {

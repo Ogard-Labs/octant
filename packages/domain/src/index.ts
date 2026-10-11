@@ -100,6 +100,7 @@ export * from "./modelCatalogPolicy";
 export * from "./modelPickerPolicy";
 export * from "./navigatorAssistantPolicy";
 export * from "./providerPolicy";
+export * from "./providerCatalogPolicy";
 export * from "./researchPolicy";
 export * from "./shellPolicy";
 export * from "./sidebarThreadStatusPolicy";
