@@ -1139,7 +1139,10 @@ base branch, and Environment sit on the context row above the composer
 on the page ground with no band chrome. Environment is the
 create-facing presentation of Octant's authoritative host federation: its
 dropdown selects This computer, devbox, or another healthy capable host without
-creating a second environment model. Workspace remains on that rear card after the three primary choices;
+creating a second environment model. Every create composer shows Environment
+only when more than one host is known. With one host there is nothing to
+choose, so no Environment control or label appears. With several, an existing
+Project's fixed host reads as a label instead of a dropdown. Workspace remains on that rear card after the three primary choices;
 nothing about delivery is asked up front (see "Language"). The Project
 control is one menu: saved Projects to search, then New Project from folder
 and New Project from GitHub repository. Choosing GitHub swaps the menu's body
