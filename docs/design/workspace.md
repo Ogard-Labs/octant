@@ -54,6 +54,40 @@ sidebar timer never walks the checkout tree. Inactive modes and hidden windows
 pause those refreshes so background ticks do not contend with the next
 interaction.
 
+### Sidebar thread status
+
+The sidebar speaks about what a thread is doing now with one vocabulary, in
+descending strength: `working` (Working), `attention` (Needs attention), `woke`
+(Snooze ended), and `unread` (New activity). `@octant/contracts`
+(`SidebarThreadStatus`) declares the legal set because a saved Project View
+persists it; `@octant/domain` (`sidebarThreadStatusPolicy`) owns the order,
+labels, roll-up, and comparison, and its label record is typed over the
+contract's union so a word cannot be added without a rank. A thread row, a
+Project heading, a filter, and a sort all resolve through that policy, so they
+cannot rank the same facts differently.
+
+- Nothing to report is the absence of a status (`undefined`), not a word: no
+  "Idle" label, mark, filter value, or sort rank exists.
+- Only facts the sidebar already carries are statuses. A failed run or blocked
+  check is not inferred from silence; adding a status is a wire change that
+  requires the sidebar to carry the fact first. This vocabulary answers what is
+  happening now and is narrower than the board's delivery states.
+- A folded Project reports its strongest status and how many threads reached
+  it, each thread counted once at its own strongest status. The report is the
+  mark its rows wear, appears only while the threads are hidden, yields its
+  width to the row's hover controls rather than widening the row, and obeys
+  the Status row property.
+- A saved view's status filter keeps a thread whose strongest status is
+  selected. An empty or absent list means every status; a saved word this build
+  does not know is dropped rather than refusing the view, and dropping every
+  word means no constraint.
+- Ordering by status puts the Project with the strongest status first, then
+  more threads at that status, then recency, then name. Quiet Projects follow
+  every reporting Project in that same recency-then-name order.
+
+The filter and the ordering live in the Project View menu of both visible
+modes, Work and Code, each with its own set of saved views.
+
 ## Thread visibility and completion
 
 A Chat, Work, or Code thread has two resting states beside archive, both fields
