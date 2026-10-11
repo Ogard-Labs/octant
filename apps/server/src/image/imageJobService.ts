@@ -168,6 +168,21 @@ export class ImageJobService {
     return this.#projection.listByScope(scopeId);
   }
 
+  /**
+   * The completed job that made an image, found by the image's attachment id.
+   * A Canvas design names an image by that id alone; the caller decides from
+   * the job's thread whether the reader may see it.
+   */
+  completedJobFor(attachmentId: ImageArtifactId): ImageJob | undefined {
+    return this.#projection
+      .list()
+      .find(
+        (job) =>
+          job.status === "completed" &&
+          job.artifacts.some((artifact) => String(artifact.attachmentId) === String(attachmentId)),
+      );
+  }
+
   async readArtifact(
     jobId: ImageJobId,
     attachmentId: ImageArtifactId,
