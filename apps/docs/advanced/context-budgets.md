@@ -149,7 +149,9 @@ What the breakdown can say depends on the runtime:
   it keeps in reserve. They are shown as the provider's figures. Tools it knows
   of but has not loaded are counted as **deferred** and take no share of the
   bar. Memory file paths and skill names are never kept, only how many there
-  are.
+  are. If Claude Code does not answer in time, Octant counts what it adds as
+  for the runtimes below, and stops counting what it sent once Claude Code
+  compacts the session.
 - **Codex CLI, OpenCode and Pi** report one occupancy figure and no
   categories. Octant counts what it adds itself, each part marked **Estimated**
   (a conservative estimate: four characters to a token, and an image by its

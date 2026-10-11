@@ -6,7 +6,8 @@ const strict = { parseOptions: { onExcessProperty: "error" as const } };
 /**
  * Opaque, single-use, short-lived token that bootstraps a browser client
  * session. The launcher creates it through the desktop bridge secret and the
- * renderer exchanges it once for the per-window capability. It is transmitted
+ * renderer exchanges it once, from the origin it was minted for, for the
+ * per-window capability. It is transmitted
  * in a URL fragment so it never reaches the server access log.
  */
 export const LaunchSessionToken = Schema.String.pipe(
@@ -22,10 +23,15 @@ export function isCanonicalLaunchSessionToken(value: unknown): value is string {
   return typeof value === "string" && LAUNCH_SESSION_TOKEN_PATTERN.test(value);
 }
 
-/** Admin request body: the launcher creates a launch session for a registered window. */
+/**
+ * Admin request body: the launcher creates a launch session for a window. The
+ * token is bound to `origin`, the renderer page the launcher opens; an
+ * exchange from any other origin is refused.
+ */
 export const LaunchSessionRequest = Schema.Struct({
   windowId: WindowId,
   capability: Schema.String.pipe(Schema.pattern(LAUNCH_SESSION_TOKEN_PATTERN)),
+  origin: Schema.NonEmptyTrimmedString,
 }).annotations(strict);
 export type LaunchSessionRequest = typeof LaunchSessionRequest.Type;
 

@@ -391,6 +391,14 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       ],
     },
     {
+      id: "provider-catalog",
+      label: "Provider catalog",
+      scope: "host",
+      keywords:
+        "provider catalog drivers bundled installed trusted available enabled authenticated signed in ready set up setup guided add runtime endpoint find look on this host install modes chat work code agent loop harness capabilities",
+      settings: [],
+    },
+    {
       id: "harness",
       label: "Octant Harness",
       scope: "app",

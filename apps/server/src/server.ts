@@ -177,6 +177,8 @@ import { WorkRequestProjection } from "./work/workRequestProjection";
 import { attachWorkRequestRuntime, WorkRequestRuntime } from "./work/workRequestRuntime";
 import { WorkRequestService } from "./work/workRequestService";
 import { createWorkRequestRouteHandler } from "./workRequestRoutes";
+import { createFleetActivityRouteHandler } from "./fleetActivityRoutes";
+import { FleetActivityService, runningThreadsFromNavigation } from "./fleetActivityService";
 import { createPendingRequestRouteHandler } from "./pendingRequestRoutes";
 import { PendingRequestService } from "./pendingRequestService";
 import { createWorkThreadRouteHandler } from "./workThreadRoutes";
@@ -265,6 +267,7 @@ import {
   type CodeProjectPullRequestDetailPort,
   type CodeProjectPullRequestListPort,
   type CodeProjectPullRequestMergePort,
+  journalPullRequestMerge,
 } from "./code/codeProjectPullRequestService";
 import { CodeProjectPullRequestCadence } from "./code/codeProjectPullRequestCadence";
 import { CodeProjectPullRequestSnapshotStore } from "./code/codeProjectPullRequestSnapshotStore";
@@ -389,6 +392,7 @@ import type { AgentRunControlAdmissionDependencies } from "./agentRun/agentRunCo
 import {
   admittedParentWorkContext,
   admittedParentCodeContext,
+  type AdmittedParentCodeContextInput,
 } from "./agentRun/agentRunParentContext";
 import { agentResultDeliveryReceipt } from "./agentRun/agentResultDeliveryBatch";
 import { NATIVE_HARNESS_BUILT_IN_SLOTS, type AgentRunResultDeliveryMark } from "@octant/contracts";
@@ -574,7 +578,6 @@ import {
   createSideChatWorkFileReader,
   type SideChatFileSource,
 } from "./chat/sideChatSourceTools";
-import { codeForkHandoffResolver } from "./code/codeForkHandoff";
 import { createThreadMentionRouteHandler } from "./threadMentionRoutes";
 import { createFileMentionRouteHandler } from "./fileMentionRoutes";
 import { pinFileMentionRoot } from "./fileMentionIo";
@@ -828,8 +831,13 @@ import {
 import { createCanvasPreviewService } from "./canvas/canvasPreviewService";
 import { createPlaywrightCanvasPreviewRenderer } from "./canvas/canvasPreviewRenderer";
 import { loadChildCanvasWorkspace } from "./canvas/childCanvasWorkspace";
-import { combineAppManagedToolSets, type AppManagedToolSet } from "./providers/appManagedToolSet";
+import {
+  combineAppManagedToolSets,
+  withToolFamilyHelp,
+  type AppManagedToolSet,
+} from "./providers/appManagedToolSet";
 import { taintAppManagedToolResults } from "./providers/appManagedToolTaint";
+import { COMPUTER_USE_TOOL_HELP } from "./plugins/computerUse/computerUsePlugin";
 import {
   isPrivateListenerFailureCode,
   type PrivateListener,
@@ -1554,35 +1562,6 @@ function observedCheckoutHeadMatches(
  * The service is reached lazily so a mode wired before it exists can still
  * hold this: nothing is read until a turn actually runs.
  */
-/**
- * Reach the Code service's conversation and evidence readers for the fork
- * handoff. Lazy because the runtime that holds the resolver is composed before
- * the service exists; the decision about when a handoff is owed lives with the
- * handoff itself.
- */
-function forkHandoffResolver(codeService: () => CodeRouteService) {
-  return codeForkHandoffResolver(() => {
-    const service = codeService();
-    const conversation = service.conversation;
-    const readEvidence = service.readOperationContent;
-    if (conversation === undefined || readEvidence === undefined) return undefined;
-    return {
-      conversation: async (...args) => await conversation(...args),
-      readEvidence: async (...args) => await readEvidence(...args),
-      projectOf: async (windowId, threadId) => {
-        try {
-          // `read` authorizes the window against the thread, so a thread this
-          // window may not observe is indistinguishable from one that is absent.
-          const view = await service.read(windowId, threadId);
-          return String(view.thread.projectId);
-        } catch {
-          return undefined;
-        }
-      },
-    };
-  });
-}
-
 function threadMentionContextResolver(threadMentions: () => ThreadMentionService) {
   return async ({
     threadMentionIds,
@@ -2528,17 +2507,7 @@ export function startOctantServer(
                     readThread: (id) => workThreadProjection.read(id),
                     readTurns: (id) => workTurnProjection.listForThread(id),
                   })
-                : admittedParentCodeContext({
-                    threadId: decodeCodeThreadId(String(parentThreadId)),
-                    externalContentIngested,
-                    readThread: (id) => persistence.readCodeThread(id),
-                    readActivity: (id) =>
-                      persistence
-                        .readCodeThreadActivity()
-                        .find((activity) => String(activity.threadId) === String(id)),
-                    conversation: (input) => codeBoardEventStore.conversation(input),
-                    readEvidence: (reference) => codeEvidence.read(reference),
-                  });
+                : selectCodeConversation(decodeCodeThreadId(String(parentThreadId)));
             return selection.status === "available"
               ? selection.blocks
               : { unavailable: selection.reason };
@@ -3102,14 +3071,20 @@ export function startOctantServer(
         selection,
         model?.inputModalities.includes("image") === true,
       );
+      // Help is the plugin's own static guidance, not application content, so
+      // it is answered outside the taint wrapper and never marks the thread.
       return tools === undefined
         ? undefined
-        : taintAppManagedToolResults({
-            tools,
-            threadId: owner.threadId,
-            recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
-            uuid: randomUUID,
-          });
+        : withToolFamilyHelp(
+            taintAppManagedToolResults({
+              tools,
+              threadId: owner.threadId,
+              recordExternalContentIngestion: (input) =>
+                externalContentIngestionStore.record(input),
+              uuid: randomUUID,
+            }),
+            COMPUTER_USE_TOOL_HELP,
+          );
     };
     let lastComputerSettings = "";
     let computerSettingsTail = Promise.resolve();
@@ -3664,6 +3639,10 @@ export function startOctantServer(
               ? { status: "refused", reason: "unavailable" }
               : codeOperationRuntime.forkPoint(windowId, source, throughOperationId),
         },
+        // A fork is created only when the conversation it carries over can be
+        // read now, through the same selector its first turn uses.
+        forkConversation: ({ source, throughOperationId }) =>
+          selectCodeConversation(source.id, { purpose: "fork", throughOperationId }),
         managedThreadCreation: {
           prepare: (input, signal) => managedCodeThreadCreation.prepare(input, signal),
           commit: (input, preparation, signal) =>
@@ -3715,6 +3694,31 @@ export function startOctantServer(
       clock: () => new Date().toISOString(),
       actor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
     });
+    // A child's parent context and a provider switch's handoff read a Code
+    // thread through one selector, so both carry the same bounds, attribution,
+    // taint and omissions.
+    const selectCodeConversation = (
+      threadId: CodeThreadId,
+      options: Pick<
+        AdmittedParentCodeContextInput,
+        "purpose" | "excludeOperationId" | "throughOperationId"
+      > = {},
+    ) =>
+      admittedParentCodeContext({
+        threadId,
+        externalContentIngested: readThreadExternalContentTaint(
+          persistence.connection,
+          String(threadId),
+        ).externalContentIngested,
+        readThread: (id) => persistence.readCodeThread(id),
+        readActivity: (id) =>
+          persistence
+            .readCodeThreadActivity()
+            .find((activity) => String(activity.threadId) === String(id)),
+        conversation: (input) => codeBoardEventStore.conversation(input),
+        readEvidence: (reference) => codeEvidence.read(reference),
+        ...options,
+      });
     const projectPullRequestPorts = createProjectPullRequestPorts(options.ghExecutable);
     // Late-bound because the follow-up service that consumes refreshed
     // snapshots is constructed further down, alongside the other Code thread
@@ -3767,6 +3771,11 @@ export function startOctantServer(
       list: projectPullRequestPorts.list,
       detail: projectPullRequestPorts.detail,
       merge: projectPullRequestPorts.merge,
+      recordMerge: (record) =>
+        journalPullRequestMerge(persistence.journal, record, {
+          uuid: randomUUID,
+          clock: () => new Date().toISOString(),
+        }),
       cacheStats,
       snapshotStore: new CodeProjectPullRequestSnapshotStore(
         join(persistence.dataDirectory, "code", "pull-request-snapshot.json"),
@@ -4292,6 +4301,9 @@ export function startOctantServer(
         ]);
       },
       clearRuntimeUsageLimits: (instanceId) => providerRuntimeUsageLimitsStore.clear(instanceId),
+      ...(credentialResolver === undefined
+        ? {}
+        : { clearProviderCredential: (instanceId) => credentialResolver.delete(instanceId) }),
       driver: (instance) =>
         attachWorkRequestRuntime(
           makeConfiguredProviderDriver(instance, {
@@ -4892,6 +4904,11 @@ export function startOctantServer(
         supportsModelSwitch: (thread) =>
           providerRuntimeRegistry.observedState(thread.providerInstanceId)?.capabilities
             .modelSwitch === "supported",
+        providerSwitchContext: ({ thread, excludeOperationId }) =>
+          selectCodeConversation(thread.id, {
+            purpose: "provider-switch",
+            excludeOperationId: String(excludeOperationId),
+          }),
         supportsAttachments: (thread) => {
           const observed = providerRuntimeRegistry.observedState(thread.providerInstanceId);
           if (observed?.capabilities.nativeAttachments !== "supported") return false;
@@ -5100,7 +5117,8 @@ export function startOctantServer(
             ? project.binding.canonicalRoot
             : undefined;
         },
-        resolveForkHandoff: forkHandoffResolver(() => routeCodeService),
+        forkContext: ({ source, throughOperationId }) =>
+          selectCodeConversation(source.id, { purpose: "fork", throughOperationId }),
         forkProviderSession: (input) =>
           seedCodeForkHarnessSession(
             {
@@ -9654,25 +9672,61 @@ export function startOctantServer(
       windowAuthorityStore,
       maxJsonBodySize: MAX_JSON_REQUEST_BODY_SIZE,
     });
+    const pendingRequestService = new PendingRequestService({
+      readSettings: () => persistence.readShellSettings()?.settings ?? defaultShellSettings(),
+      work: async (windowId) => [
+        ...(await workRequestApplication.listPendingForWindow(windowId)),
+        ...(await listWorkTurnDecisions(
+          {
+            projects: (id) => projectService.bootstrap(id),
+            threads: async (id) => await workThreadServiceWithWorkflows.navigation(id),
+            turns: (threadId) => workTurnProjection.listForThread(threadId),
+          },
+          windowId,
+        )),
+      ],
+      code: async (windowId) => [
+        ...((await codeOperationRuntime?.pendingRequests?.(windowId)) ?? []),
+        ...(await codeTurnDecisions.listForWindow(windowId)),
+      ],
+      chat: () => chatService.listPendingQuestions(),
+    });
     const pendingRequestRoutes = createPendingRequestRouteHandler({
-      service: new PendingRequestService({
+      service: pendingRequestService,
+      windowAuthorityStore,
+    });
+    // The menu bar's roster: needs-you is the pending-request read, working is
+    // each mode's journaled run state. Nothing here reads a terminal's screen.
+    const fleetActivityRoutes = createFleetActivityRouteHandler({
+      service: new FleetActivityService({
         readSettings: () => persistence.readShellSettings()?.settings ?? defaultShellSettings(),
-        work: async (windowId) => [
-          ...(await workRequestApplication.listPendingForWindow(windowId)),
-          ...(await listWorkTurnDecisions(
-            {
-              projects: (id) => projectService.bootstrap(id),
-              threads: async (id) => await workThreadServiceWithWorkflows.navigation(id),
-              turns: (threadId) => workTurnProjection.listForThread(threadId),
-            },
-            windowId,
-          )),
-        ],
-        code: async (windowId) => [
+        pending: (windowId) => pendingRequestService.list(windowId),
+        boundCodeWindows: () =>
+          persistence
+            .readWindowWorkspaces()
+            .filter(({ workspace }) => workspace.contextByMode.code.projectId != null)
+            .map(({ workspace }) => workspace.windowId),
+        codePending: async (windowId) => [
           ...((await codeOperationRuntime?.pendingRequests?.(windowId)) ?? []),
           ...(await codeTurnDecisions.listForWindow(windowId)),
         ],
-        chat: () => chatService.listPendingQuestions(),
+        chat: () =>
+          chatService
+            .navigation()
+            .threads.filter((thread) => thread.executing)
+            .map((thread) => ({
+              threadId: String(thread.id),
+              title: thread.title,
+              ...(thread.projectId === undefined ? {} : { projectId: thread.projectId }),
+              ...(thread.turnStartedAt === undefined
+                ? {}
+                : { turnStartedAt: thread.turnStartedAt }),
+            })),
+        work: async (windowId) =>
+          runningThreadsFromNavigation(await workThreadServiceWithWorkflows.navigation(windowId)),
+        code: async (windowId) =>
+          runningThreadsFromNavigation(await baseRouteCodeService.navigation(windowId)),
+        projectName: (projectId) => persistence.readProject(projectId)?.name,
       }),
       windowAuthorityStore,
     });
@@ -9868,6 +9922,7 @@ export function startOctantServer(
       (await workPromotionRoutes(request)) ??
       (await workRequestRoutes(request)) ??
       (await pendingRequestRoutes(request)) ??
+      (await fleetActivityRoutes(request)) ??
       (await sidebarBackgroundRoutes(request)) ??
       (await zenBackgroundRoutes(request)) ??
       (await zenRoutes(request)) ??
@@ -10095,6 +10150,7 @@ export function startOctantServer(
         now: Date.now(),
         computerName: replicaComputerName(hostname(), localHostDisplayName()),
         restore: replicaArtifactSync.service?.restoreProgress(),
+        joinRead: replicaMembershipService.joinReadProgress(),
       });
     const replicaSyncStatusRoutes = createReplicaSyncStatusRouteHandler({
       windowAuthorityStore,
@@ -10263,6 +10319,7 @@ export function startOctantServer(
       state: () => persistence.replicaMembershipProjection.state(),
       localHostId: LOCAL_HOST_ID,
       clock: () => Date.now(),
+      restoreStopped: () => replicaArtifactSync.service?.restoreProgress()?.state === "stopped",
     });
     // Publish and pull for artifacts. With sync off, or no identity in a
     // replica, nothing is queued and no store is called; a Code thread under

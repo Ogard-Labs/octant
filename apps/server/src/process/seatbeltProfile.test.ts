@@ -312,7 +312,6 @@ describe("shared Seatbelt profile builder", () => {
           "#!/bin/bash",
           `IFS= read -r login < '${join(keychains, "login.keychain-db")}' && echo login=read`,
           "echo reached-security-step",
-          "/usr/bin/security help >/dev/null 2>&1 && echo security=ran",
           "/bin/sh -c 'echo shell=ran' >/dev/null 2>&1 && echo shell=ran",
           "",
         ].join("\n"),
@@ -345,9 +344,19 @@ describe("shared Seatbelt profile builder", () => {
         encoding: "utf8",
       }).stdout;
       expect(output).toContain("reached-security-step");
-      expect(output).toContain("security=ran");
       expect(output).not.toContain("login=read");
       expect(output).not.toContain("shell=ran");
+      // The profile denies fork, so a bash child cannot start security. The
+      // runtime launches it directly, which is the exec this rule grants.
+      const security = spawnSync(
+        "/usr/bin/sandbox-exec",
+        ["-p", profile, "/usr/bin/security", "help"],
+        {
+          cwd: checkout,
+          encoding: "utf8",
+        },
+      );
+      expect(security.status).toBe(0);
     },
   );
 

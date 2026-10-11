@@ -676,6 +676,23 @@ export function startedThreadPickerGroups(
 }
 
 /**
+ * The choices a started Code thread can take. Its own provider keeps the
+ * session, so only the models that provider can carry the session on to are
+ * offered from it. Any other provider starts a new session with a disclosed
+ * text handoff of the thread's own conversation, so every other provider
+ * stays offered, including when the thread's own provider is gone.
+ */
+export function startedCodeThreadPickerGroups(
+  groups: ReadonlyArray<PickerGroup>,
+  selection: ModelPickerSelection,
+): ReadonlyArray<PickerGroup> {
+  const current = startedThreadPickerGroups(groups, selection);
+  return groups.flatMap((group) =>
+    String(group.instance.id) === String(selection.providerInstanceId) ? current : [group],
+  );
+}
+
+/**
  * The choices a started Chat or Work thread can take. A provider that keeps
  * the conversation itself binds the thread the way Code is bound; a thread
  * whose history the host holds may move to any provider whose history the

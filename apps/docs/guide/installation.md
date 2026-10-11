@@ -186,7 +186,9 @@ Use `octant web` to open the authenticated browser client without rebuilding Ele
 bun --cwd packages/cli src/bin.ts web
 ```
 
-This attaches to a running local host or spawns one. The browser receives a single-use launch token in the URL fragment and exchanges it for a per-window capability. The desktop bridge secret and provider credentials never reach browser URLs or logs.
+This attaches to a running local host or spawns one. The browser receives a single-use launch token in the URL fragment, removes it from the address bar, and exchanges it for a per-window capability. The token expires after five minutes and works only for the page it was created for. The desktop bridge secret and provider credentials never reach browser URLs or logs.
+
+Typing the host address (for example `http://127.0.0.1:13773`) into a browser does not open a session; the page asks you to open Octant from the desktop app or run `octant web`. Run `octant web` as the same OS user that runs the host: it reads the host's bridge secret from that user's private runtime directory to create the link. `octant web --no-open` prints the one-time link instead of opening it.
 
 ## Updates
 

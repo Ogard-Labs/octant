@@ -455,10 +455,17 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
     ...(props.draftStore === undefined ? {} : { store: props.draftStore }),
   });
   const prompt = composerDraft.text;
+  const runtimeCarriesTools = pickerGroupCarriesAppManagedTools(
+    props.providerGroups ?? [],
+    thread === undefined
+      ? undefined
+      : { providerInstanceId: thread.providerInstanceId, modelId: thread.modelId },
+  );
   const computer = useComputerUseMention({
     textarea: () => textareaRef.current,
     draft: prompt,
     scopeKey: String(props.threadId),
+    providerCarriesTools: runtimeCarriesTools,
     onDraftChange: (next, caret) => composerDraft.setDraft(next, caret),
     onSelectionEdited: () => composerDraft.setDraft(composerDraft.text),
   });
@@ -469,6 +476,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
   const extensionDraft = useExtensionDraftSelections({
     ...(props.extensionClient === undefined ? {} : { client: props.extensionClient }),
     mode: "work",
+    providerCarriesTools: runtimeCarriesTools,
     projectId: thread?.projectId ?? projectId ?? null,
     threadId: thread?.id ?? props.threadId,
     ...(providerFamily === undefined ? {} : { providerFamily }),
@@ -478,14 +486,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
     draft: composerDraft.text,
     onDraftChange: (next, caret) => composerDraft.setDraft(next, caret),
     scopeKey: String(props.threadId),
-    available:
-      props.browserAvailable === true &&
-      pickerGroupCarriesAppManagedTools(
-        props.providerGroups ?? [],
-        thread === undefined
-          ? undefined
-          : { providerInstanceId: thread.providerInstanceId, modelId: thread.modelId },
-      ),
+    available: props.browserAvailable === true && runtimeCarriesTools,
     onChoose: () => void extensionDraft.resolveReference("@browser"),
   });
   const slash = useComposerSlashCommands({

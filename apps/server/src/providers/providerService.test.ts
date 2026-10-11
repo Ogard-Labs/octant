@@ -12,6 +12,8 @@ import {
   type ProviderInstance,
 } from "@octant/contracts";
 import { existsSync, realpathSync } from "node:fs";
+import { createServer as createHttpServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -53,6 +55,18 @@ const capabilities = {
   nativeWebResearch: "supported",
   appManagedTools: "supported",
   citations: "supported",
+} as const;
+
+// What the server reports for the OpenCode fixture above: every capability is
+// supported, so its session bridge carries Octant's tools and its own session
+// resumes.
+const openCodeIntegration = {
+  tools: { status: "available", transport: "session-mcp-bridge" },
+  activity: {
+    source: "session",
+    observes: ["replies", "tool-calls", "approvals", "file-changes", "task-progress"],
+  },
+  resume: "precise",
 } as const;
 
 describe("ProviderService", () => {
@@ -686,9 +700,32 @@ describe("ProviderService", () => {
     await expect(fixture.service.bootstrap(windowId)).resolves.toEqual({
       instances: [provider()],
       defaults: { permissionPersistence: "current-session", version: 0 },
-      observedStates: [observed],
+      observedStates: [{ ...observed, integration: openCodeIntegration }],
     });
     expect(fixture.append).not.toHaveBeenCalled();
+  });
+
+  it("reports a runtime whose tool bridge was not confirmed as having no Octant tools, with the reason", async () => {
+    const observed = observation({
+      capabilities: { ...capabilities, appManagedTools: "unsupported", resume: "unsupported" },
+    });
+    const fixture = serviceFixture({ instances: [kimiProvider()], probeResult: observed });
+    const integration = {
+      tools: {
+        status: "unavailable",
+        transport: "session-mcp-bridge",
+        reason: "runtime-not-confirmed",
+      },
+      activity: openCodeIntegration.activity,
+      resume: "none",
+    };
+
+    await expect(fixture.service.probe(windowId, instanceId)).resolves.toMatchObject({
+      integration,
+    });
+    await expect(fixture.service.bootstrap(windowId)).resolves.toMatchObject({
+      observedStates: [{ integration }],
+    });
   });
 
   it("keeps Settings instances but contributes no models, tools, or capabilities when the driver plugin is not effective", async () => {
@@ -726,6 +763,16 @@ describe("ProviderService", () => {
             nativeWebResearch: "unavailable",
             appManagedTools: "unavailable",
             citations: "unavailable",
+          },
+          // The card still says, honestly, that nothing reaches the runtime.
+          integration: {
+            tools: {
+              status: "unavailable",
+              transport: "session-mcp-bridge",
+              reason: "not-confirmed",
+            },
+            activity: { source: "none" },
+            resume: "none",
           },
           message: "This provider driver is not available.",
           observedAt: now,
@@ -3369,7 +3416,11 @@ describe("ProviderService", () => {
   it("stores only strict normalized probe results", async () => {
     const observed = observation();
     const fixture = serviceFixture({ instances: [provider()], probeResult: observed });
-    await expect(fixture.service.probe(windowId, instanceId)).resolves.toEqual(observed);
+    await expect(fixture.service.probe(windowId, instanceId)).resolves.toEqual({
+      ...observed,
+      integration: openCodeIntegration,
+    });
+    // The integration is derived when the runtime is reported, never stored.
     expect(fixture.runtime.observedStates()).toEqual([observed]);
   });
 
@@ -3628,7 +3679,10 @@ describe("ProviderService", () => {
       uuid: () => crypto.randomUUID(),
       clock: () => now,
     });
-    await expect(service.probe(windowId, instanceId)).resolves.toEqual(observation());
+    await expect(service.probe(windowId, instanceId)).resolves.toEqual({
+      ...observation(),
+      integration: openCodeIntegration,
+    });
     expect(probe).toHaveBeenCalledWith({ instanceId });
   });
 
@@ -4514,6 +4568,7 @@ function serviceFixture(
     readonly driver?: NonNullable<ProviderServiceOptions["driver"]>;
     readonly clearResumeIdentities?: (providerId: typeof instanceId) => Promise<void>;
     readonly clearRuntimeUsageLimits?: (providerId: typeof instanceId) => void;
+    readonly clearProviderCredential?: (providerId: typeof instanceId) => Promise<void>;
     readonly withCatalogPersistence?: boolean;
     readonly initialCatalog?: ProviderCatalogSnapshot;
     readonly isDriverPluginEffective?: (driverKind: ProviderInstance["driverKind"]) => boolean;
@@ -4594,6 +4649,9 @@ function serviceFixture(
       ...(options.clearRuntimeUsageLimits === undefined
         ? {}
         : { clearRuntimeUsageLimits: options.clearRuntimeUsageLimits }),
+      ...(options.clearProviderCredential === undefined
+        ? {}
+        : { clearProviderCredential: options.clearProviderCredential }),
       ...(options.isDriverPluginEffective === undefined
         ? {}
         : { isDriverPluginEffective: options.isDriverPluginEffective }),
@@ -4813,3 +4871,220 @@ async function rejected(value: Promise<unknown>): Promise<any> {
   }
   throw new Error("expected rejection");
 }
+
+describe("a stored provider key and the base URL it was entered for", () => {
+  // Throwaway value: no real credential is used in these tests.
+  const storedKey = "throwaway-test-key-for-endpoint-a";
+
+  async function listenOnLoopback() {
+    const received: Array<string | undefined> = [];
+    const server = createHttpServer((request, response) => {
+      received.push(request.headers.authorization);
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ object: "list", data: [{ id: "model-a", object: "model" }] }));
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address() as AddressInfo;
+    return {
+      baseUrl: `http://127.0.0.1:${address.port}/v1/`,
+      received,
+      close: () => new Promise<void>((resolve) => server.close(() => resolve())),
+    };
+  }
+
+  function memoryCredentialStore() {
+    const keys = new Map<string, string>();
+    return {
+      keys,
+      has: async (id: string) => keys.has(id),
+      resolve: async (id: string) => {
+        const key = keys.get(id);
+        if (key === undefined) throw new Error("missing credential");
+        return key;
+      },
+      set: async (id: string, key: string) => {
+        keys.set(id, key);
+      },
+      delete: async (id: string) => {
+        keys.delete(id);
+      },
+    };
+  }
+
+  it("does not send the key stored for one endpoint to a base URL a window changes it to", async () => {
+    const endpointA = await listenOnLoopback();
+    const endpointB = await listenOnLoopback();
+    try {
+      const credentials = memoryCredentialStore();
+      await credentials.set(String(instanceId), storedKey);
+      const runtime = new ProviderRuntimeRegistry();
+      const fixture = serviceFixture({
+        instances: [
+          httpProvider({
+            configuration: {
+              kind: "openai-compatible-http",
+              baseUrl: endpointA.baseUrl,
+              authentication: "bearer",
+              protocol: "chat-completions",
+              manualModelIds: [],
+            },
+          }),
+        ],
+      });
+      const service = new ProviderService({
+        persistence: fixture.persistence,
+        runtimeRegistry: runtime,
+        driver: (instance) =>
+          makeOpenAiCompatibleDriver({
+            instanceId: instance.id,
+            configuration: instance.configuration as never,
+            runtimeRegistry: runtime,
+            credentialResolver: credentials,
+            clock: () => now,
+          }),
+        clearProviderCredential: credentials.delete,
+        uuid: () => crypto.randomUUID(),
+        clock: () => now,
+      });
+      const capability = "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBA";
+      const windowAuthorityStore = new WindowAuthorityStore();
+      windowAuthorityStore.register({ windowId, capability, now: 0 });
+      const route = createProviderRouteHandler({ service, windowAuthorityStore, now: () => 1 });
+      const headers = { "x-octant-window-capability": capability };
+      const probe = () =>
+        route(
+          new Request(`http://127.0.0.1/api/providers/${instanceId}/probe`, {
+            method: "POST",
+            headers,
+          }),
+        );
+
+      await probe();
+      expect(endpointA.received).toContain(`Bearer ${storedKey}`);
+
+      const change = await route(
+        new Request("http://127.0.0.1/api/providers/commands", {
+          method: "POST",
+          headers: { ...headers, "content-type": "application/json" },
+          body: JSON.stringify({
+            kind: "change-openai-compatible-configuration",
+            instanceId,
+            expectedVersion: 1,
+            configuration: {
+              kind: "openai-compatible-http",
+              baseUrl: endpointB.baseUrl,
+              authentication: "bearer",
+              protocol: "chat-completions",
+              manualModelIds: [],
+            },
+          }),
+        }),
+      );
+      expect(change?.status).toBe(200);
+      await probe();
+
+      expect(endpointB.received.some((value) => value?.includes(storedKey))).toBe(false);
+    } finally {
+      await endpointA.close();
+      await endpointB.close();
+    }
+  });
+  const endpoints = [
+    {
+      driverKind: "openai-compatible",
+      command: "change-openai-compatible-configuration",
+      configuration: (baseUrl: string) => ({
+        kind: "openai-compatible-http",
+        baseUrl,
+        authentication: "bearer",
+        protocol: "auto",
+        manualModelIds: ["model-a"],
+      }),
+    },
+    {
+      driverKind: "anthropic-compatible",
+      command: "change-anthropic-compatible-configuration",
+      configuration: (baseUrl: string) => ({
+        kind: "anthropic-compatible-http",
+        baseUrl,
+        authentication: "api-key",
+        protocol: "auto",
+        protocolVersion: "2023-06-01",
+        manualModelIds: ["model-a"],
+      }),
+    },
+    {
+      driverKind: "azure-foundry",
+      command: "change-azure-foundry-configuration",
+      configuration: (baseUrl: string) => ({
+        kind: "azure-foundry-openai-http",
+        baseUrl: `${baseUrl}openai/v1/`,
+        authentication: "api-key",
+        protocol: "auto",
+        manualModelIds: ["deployment-a"],
+      }),
+    },
+  ] as const;
+
+  it.each(endpoints)(
+    "removes the stored $driverKind key before the base URL moves, and keeps it when only other settings change",
+    async ({ driverKind, command, configuration }) => {
+      const clearProviderCredential = vi.fn(async () => undefined);
+      const fixture = serviceFixture({
+        instances: [
+          httpProvider({ driverKind, configuration: configuration("https://a.example/") }),
+        ],
+        clearProviderCredential,
+      });
+
+      await fixture.service.execute(windowId, {
+        kind: command,
+        instanceId,
+        expectedVersion: 1,
+        configuration: { ...configuration("https://a.example/"), manualModelIds: ["model-b"] },
+      } as never);
+      expect(clearProviderCredential).not.toHaveBeenCalled();
+
+      await fixture.service.execute(windowId, {
+        kind: command,
+        instanceId,
+        expectedVersion: 2,
+        configuration: configuration("https://b.example/"),
+      } as never);
+      expect(clearProviderCredential).toHaveBeenCalledExactlyOnceWith(instanceId);
+      expect(clearProviderCredential.mock.invocationCallOrder[0]).toBeLessThan(
+        fixture.append.mock.invocationCallOrder.at(-1) ?? 0,
+      );
+    },
+  );
+
+  it("refuses to move the base URL and keeps the old one when the stored key cannot be removed", async () => {
+    const fixture = serviceFixture({
+      instances: [httpProvider()],
+      clearProviderCredential: async () => {
+        throw new Error("credential store locked");
+      },
+    });
+
+    const failure = await rejected(
+      fixture.service.execute(windowId, {
+        kind: "change-openai-compatible-configuration",
+        instanceId,
+        expectedVersion: 1,
+        configuration: {
+          kind: "openai-compatible-http",
+          baseUrl: "https://other.example/v1/",
+          authentication: "bearer",
+          protocol: "auto",
+          manualModelIds: ["model-a"],
+        },
+      }),
+    );
+
+    expect(failure).toMatchObject({ failure: { category: "unavailable" } });
+    expect(fixture.append).not.toHaveBeenCalled();
+    expect(fixture.persistence.readProviderInstance(instanceId)?.configuration).toMatchObject({
+      baseUrl: "https://gateway.example/v1/",
+    });
+  });
+});

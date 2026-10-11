@@ -171,15 +171,19 @@ function claudeAccountDirectoryBroadensPlan(
   configDirectory: string,
   isProjectConfinedPath: (projectRoot: string, absolutePath: string) => boolean,
 ): boolean {
+  // Both sides resolve symlinks first. `/tmp` is `/private/tmp` on macOS, so
+  // comparing a physical account path with a configured checkout path misses
+  // an overlap.
+  const root = canonicalClaudeAccountDirectory(projectRoot).path;
   const directory = canonicalClaudeAccountDirectory(configDirectory).path;
-  if (directory === projectRoot || projectRoot.startsWith(`${directory}/`)) return true;
+  if (directory === root || root.startsWith(`${directory}/`)) return true;
   try {
-    if (isProjectConfinedPath(projectRoot, directory) === true) return true;
+    if (isProjectConfinedPath(root, directory) === true) return true;
   } catch {
     return true;
   }
   try {
-    return isProjectConfinedPath(directory, projectRoot) === true;
+    return isProjectConfinedPath(directory, root) === true;
   } catch {
     return true;
   }

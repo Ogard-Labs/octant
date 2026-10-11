@@ -2,6 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   CANVAS_AGGREGATE_TYPE,
   CANVAS_CREATED,
+  CANVAS_DASHBOARD_SCHEMA_VERSION,
+  CANVAS_MAX_DASHBOARD_CELLS,
+  CANVAS_MAX_DASHBOARD_COLUMNS,
   CANVAS_BAR_LIST_SCHEMA_VERSION,
   CANVAS_COMPARISON_MATRIX_SCHEMA_VERSION,
   CANVAS_DESIGN_SCHEMA_VERSION,
@@ -1844,7 +1847,6 @@ describe("funnel, radar, and sankey charts", () => {
 
   it("decodes each flow chart at the version that introduced them", () => {
     expect(CANVAS_FLOW_CHARTS_SCHEMA_VERSION).toBe(14);
-    expect(CANVAS_SCHEMA_VERSION).toBe(14);
     const decoded = decodeCanvasDefinition({ ...definition, blocks: [funnel, radar, sankey] });
     expect(decoded.blocks).toEqual([funnel, radar, sankey]);
   });
@@ -1936,5 +1938,80 @@ describe("funnel, radar, and sankey charts", () => {
     if (first === undefined || second === undefined) throw new Error("expected two series");
     const misaligned = [first, { ...second, points: [...second.points].reverse() }];
     expect(() => decodeCanvasBlock({ ...radar, series: misaligned })).toThrow();
+  });
+});
+
+describe("dashboard layout", () => {
+  const metric = {
+    blockId: "error-rate",
+    schemaVersion: CANVAS_SCHEMA_VERSION,
+    kind: "metric",
+    label: "Error rate",
+    value: 0.004,
+    format: "percent",
+  } as const;
+  const status = {
+    blockId: "api-status",
+    schemaVersion: CANVAS_SCHEMA_VERSION,
+    kind: "status",
+    label: "API",
+    value: "Healthy",
+    tone: "success",
+  } as const;
+  const dashboard = {
+    blockId: "ops",
+    schemaVersion: CANVAS_SCHEMA_VERSION,
+    kind: "dashboard",
+    title: "Service health",
+    columns: 3,
+    cells: [{ blockId: "error-rate" }, { blockId: "api-status", span: 2 }],
+  } as const;
+
+  it("decodes a titled grid that places other blocks by id at the version that introduced it", () => {
+    expect(CANVAS_DASHBOARD_SCHEMA_VERSION).toBe(15);
+    expect(CANVAS_SCHEMA_VERSION).toBe(15);
+    const decoded = decodeCanvasDefinition({ ...definition, blocks: [dashboard, metric, status] });
+    expect(decoded.blocks).toEqual([dashboard, metric, status]);
+  });
+
+  it("refuses a dashboard in a document that declares an earlier version", () => {
+    expect(() =>
+      decodeCanvasDefinition({
+        ...definition,
+        schemaVersion: 14,
+        blocks: [{ ...dashboard, schemaVersion: 14 }, metric, status].map((block) => ({
+          ...block,
+          schemaVersion: 14,
+        })),
+      }),
+    ).toThrow();
+  });
+
+  it("bounds the cell count, the column count, and each span", () => {
+    const cells = Array.from({ length: CANVAS_MAX_DASHBOARD_CELLS + 1 }, (_value, index) => ({
+      blockId: `cell-${String(index)}`,
+    }));
+    expect(() => decodeCanvasBlock({ ...dashboard, cells })).toThrow();
+    expect(() => decodeCanvasBlock({ ...dashboard, cells: [] })).toThrow();
+    expect(() =>
+      decodeCanvasBlock({ ...dashboard, columns: CANVAS_MAX_DASHBOARD_COLUMNS + 1 }),
+    ).toThrow();
+    expect(() => decodeCanvasBlock({ ...dashboard, columns: 0 })).toThrow();
+    expect(() =>
+      decodeCanvasBlock({
+        ...dashboard,
+        cells: [{ blockId: "error-rate", span: CANVAS_MAX_DASHBOARD_COLUMNS + 1 }],
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeCanvasBlock({ ...dashboard, cells: [{ blockId: "error-rate", span: 1.5 }] }),
+    ).toThrow();
+  });
+
+  it("refuses a cell that carries a block inline instead of naming one", () => {
+    expect(() =>
+      decodeCanvasBlock({ ...dashboard, cells: [{ blockId: "error-rate", block: metric }] }),
+    ).toThrow();
+    expect(() => decodeCanvasBlock({ ...dashboard, title: "" })).toThrow();
   });
 });

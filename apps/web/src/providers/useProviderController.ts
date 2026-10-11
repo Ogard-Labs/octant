@@ -2720,6 +2720,10 @@ export function useProviderController(options: ProviderControllerOptions) {
           const mustSet =
             (nextAuthentication === "api-key" || nextAuthentication === "bearer") &&
             credentialValue.length > 0;
+          // The host deletes the stored key when the base URL moves, so a key
+          // stored first would be the one deleted. Store it after the change.
+          const setAfterChange =
+            mustSet && configuration.baseUrl !== instance.configuration.baseUrl;
           if ((mustClear || mustSet) && hostBridge === undefined) {
             if (mounted.current) {
               setMessage("Provider credential management is unavailable on this host.");
@@ -2728,7 +2732,9 @@ export function useProviderController(options: ProviderControllerOptions) {
           }
           try {
             if (mustClear) await hostBridge!.clearProviderCredential(instanceId);
-            if (mustSet) await hostBridge!.setProviderCredential(instanceId, credentialValue);
+            if (mustSet && !setAfterChange) {
+              await hostBridge!.setProviderCredential(instanceId, credentialValue);
+            }
           } catch {
             if (mounted.current) {
               setMessage(
@@ -2750,9 +2756,20 @@ export function useProviderController(options: ProviderControllerOptions) {
               current,
               install,
             );
-            return true;
           } catch (error) {
             await recoverRegistryFailure(error, "Provider configuration could not be updated.");
+            return false;
+          }
+          if (!setAfterChange) return true;
+          try {
+            await hostBridge!.setProviderCredential(instanceId, credentialValue);
+            return true;
+          } catch {
+            if (mounted.current) {
+              setMessage(
+                "Provider configuration was saved, but its credential could not be stored. Enter the API key again.",
+              );
+            }
             return false;
           }
         }),
@@ -2784,19 +2801,22 @@ export function useProviderController(options: ProviderControllerOptions) {
             return false;
           }
           const priorConfiguration = instance.configuration;
+          let priorKeyDeleted = false;
           // Validate the configuration server-side before rotating the Keychain credential so a
           // rejected /openai/v1/ URL or stale version leaves the prior key intact.
           try {
-            applyResult(
-              await client.execute({
-                kind: "change-azure-foundry-configuration",
-                instanceId,
-                expectedVersion: instance.version,
-                configuration,
-              }),
-              current,
-              install,
-            );
+            const result = await client.execute({
+              kind: "change-azure-foundry-configuration",
+              instanceId,
+              expectedVersion: instance.version,
+              configuration,
+            });
+            // The host deleted the prior key if the saved base URL moved.
+            priorKeyDeleted =
+              result.kind === "provider-updated" &&
+              result.instance.driverKind === "azure-foundry" &&
+              result.instance.configuration.baseUrl !== priorConfiguration.baseUrl;
+            applyResult(result, current, install);
           } catch (error) {
             await recoverRegistryFailure(error, "Provider configuration could not be updated.");
             return false;
@@ -2805,9 +2825,19 @@ export function useProviderController(options: ProviderControllerOptions) {
             try {
               await hostBridge!.setProviderCredential(instanceId, credentialValue);
             } catch {
-              // The new endpoint is committed but its key could not be stored.
-              // Roll back the configuration so the prior endpoint and prior key
-              // stay paired instead of leaving a new endpoint with a stale key.
+              // The prior key went with the prior base URL, so rolling back
+              // would only restore an endpoint without a key.
+              if (priorKeyDeleted) {
+                if (mounted.current) {
+                  setMessage(
+                    "The new endpoint was saved, but its API key could not be stored. Enter the API key again.",
+                  );
+                }
+                return false;
+              }
+              // The new configuration is committed but its key could not be
+              // stored. Roll back the configuration so the prior settings and
+              // prior key stay paired.
               const rolledBackCurrent = authoritative.current;
               const rolledBackInstance =
                 rolledBackCurrent === undefined

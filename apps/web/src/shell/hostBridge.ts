@@ -1,11 +1,10 @@
 import type { NativeMenuRequest, NativeMenuOutcome } from "@octant/contracts/shell";
 import type { OpenInApplicationId } from "@octant/contracts/shell";
 
-export interface MenuBarTask {
+/** The thread a window shows, or the one a menu-bar row asks it to open. */
+export interface MenuBarOpenThread {
   readonly mode: "chat" | "work" | "code";
   readonly threadId: string;
-  readonly title: string;
-  readonly activity: "working" | "attention" | "unread";
 }
 
 export type ResolvedSidebarMaterial = "opaque" | "translucent";
@@ -352,10 +351,9 @@ export interface OctantHostBridge extends Partial<RemoteAccessAdministrationBrid
   readonly checkManagedToolUpdates?: (tool?: string) => Promise<unknown>;
   readonly setManagedToolAutomaticUpdates?: (enabled: boolean) => Promise<unknown>;
   readonly notifyAttention?: (request: AttentionNotificationRequest) => Promise<void>;
-  readonly setMenuBarTasks?: (tasks: ReadonlyArray<MenuBarTask>) => Promise<void>;
-  readonly subscribeMenuBarTask?: (
-    listener: (target: Pick<MenuBarTask, "mode" | "threadId">) => void,
-  ) => () => void;
+  /** Tells the menu bar which thread this window shows, so its done row clears. */
+  readonly setMenuBarOpenThread?: (thread: MenuBarOpenThread | null) => Promise<void>;
+  readonly subscribeMenuBarTask?: (listener: (target: MenuBarOpenThread) => void) => () => void;
   readonly setAttentionBadge?: (count: number) => Promise<void>;
   readonly attachBrowserSurface?: (request: BrowserSurfaceRequest) => Promise<BrowserSurfaceState>;
   readonly updateBrowserSurfaceBounds?: (request: BrowserSurfaceRequest) => Promise<void>;

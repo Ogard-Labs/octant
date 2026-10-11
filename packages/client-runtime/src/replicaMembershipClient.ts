@@ -1,7 +1,9 @@
 import {
+  decodeReplicaJoinReadResult,
   decodeReplicaMembershipResult,
   decodeReplicaMembershipView,
   decodeReplicaRestoreResult,
+  type ReplicaJoinReadResult,
   type ReplicaMembershipCommand,
   type ReplicaMembershipResult,
   type ReplicaMembershipView,
@@ -26,6 +28,8 @@ export interface ReplicaMembershipClient {
   ): Promise<ReplicaMembershipResult>;
   /** Stops or resumes this host's restore of the replica's library. A paired phone is refused. */
   restore(command: ReplicaRestoreCommand, signal?: AbortSignal): Promise<ReplicaRestoreResult>;
+  /** Stops the read a join confirmation is making on this host. A paired phone is refused. */
+  stopJoinRead(signal?: AbortSignal): Promise<ReplicaJoinReadResult>;
 }
 
 export class ReplicaMembershipClientFailure extends Error {
@@ -106,6 +110,18 @@ export function createReplicaMembershipClient(
         ...(signal === undefined ? {} : { signal }),
       });
       return decodeReplicaRestoreResult(body);
+    },
+    async stopJoinRead(signal) {
+      const body = await send(commandsUrl, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-octant-window-capability": options.windowCapability,
+        },
+        body: JSON.stringify({ kind: "stop-join-read" }),
+        ...(signal === undefined ? {} : { signal }),
+      });
+      return decodeReplicaJoinReadResult(body);
     },
   };
 }

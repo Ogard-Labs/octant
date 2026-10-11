@@ -1300,6 +1300,99 @@ export const ProviderRefusalReason = Schema.Literal(
 );
 export type ProviderRefusalReason = typeof ProviderRefusalReason.Type;
 
+/**
+ * How Octant's own tools reach a runtime's session. Every transport is owned by
+ * the provider connection and lives only as long as that session; none writes
+ * the provider's MCP or hook configuration.
+ *
+ * - `request-tool-calls`: a direct endpoint receives the tool definitions in
+ *   each request and answers with structured tool calls.
+ * - `sdk-tool-server`: an in-process tool server the provider SDK connection
+ *   owns.
+ * - `app-server-dynamic-tools`: tools registered on the app-server thread when
+ *   it starts.
+ * - `session-mcp-bridge`: a loopback HTTP MCP server registered with one
+ *   session.
+ * - `session-tool-bridge`: a loopback bridge the runtime's own extension calls
+ *   for one session.
+ */
+export const ProviderToolTransport = Schema.Literal(
+  "request-tool-calls",
+  "sdk-tool-server",
+  "app-server-dynamic-tools",
+  "session-mcp-bridge",
+  "session-tool-bridge",
+);
+export type ProviderToolTransport = typeof ProviderToolTransport.Type;
+
+/**
+ * Why Octant's tools are not available on a runtime. `not-confirmed`: the last
+ * connection check did not establish it either way. `model-verification-required`:
+ * a direct endpoint offers tools only to models a person verified.
+ * `runtime-not-confirmed`: the transport exists, but this runtime's version,
+ * platform, or setup did not confirm it. `no-transport`: Octant has no way to
+ * offer its tools to this runtime.
+ */
+export const ProviderToolsUnavailableReason = Schema.Literal(
+  "not-confirmed",
+  "model-verification-required",
+  "runtime-not-confirmed",
+  "no-transport",
+);
+export type ProviderToolsUnavailableReason = typeof ProviderToolsUnavailableReason.Type;
+
+/** What a live session reports while a turn runs. */
+export const ProviderObservedActivity = Schema.Literal(
+  "replies",
+  "tool-calls",
+  "approvals",
+  "file-changes",
+  "task-progress",
+);
+export type ProviderObservedActivity = typeof ProviderObservedActivity.Type;
+
+/**
+ * How a follow-up continues an earlier conversation. `precise`: the runtime
+ * reopens its own session by id. `best-effort`: the endpoint holds no session,
+ * so Octant sends the thread's history from its journal again, fitted to the
+ * model's context window. `none`: the runtime cannot continue a previous
+ * session.
+ */
+export const ProviderResumeQuality = Schema.Literal("precise", "best-effort", "none");
+export type ProviderResumeQuality = typeof ProviderResumeQuality.Type;
+
+/**
+ * The integration a runtime actually has, derived by the server from the
+ * driver and its last connection check so a client never guesses it.
+ * `activity.source` reuses the fleet vocabulary: `session` is a live provider
+ * session the host holds and journals; `none` means no session runs here, so
+ * nothing is observed.
+ */
+export const ProviderRuntimeIntegration = Schema.Struct({
+  tools: Schema.Union(
+    Schema.Struct({
+      status: Schema.Literal("available"),
+      transport: ProviderToolTransport,
+    }).annotations(strict),
+    Schema.Struct({
+      status: Schema.Literal("unavailable"),
+      transport: Schema.optional(ProviderToolTransport),
+      reason: ProviderToolsUnavailableReason,
+    }).annotations(strict),
+  ),
+  activity: Schema.Union(
+    Schema.Struct({
+      source: Schema.Literal("session"),
+      observes: Schema.Array(ProviderObservedActivity).pipe(
+        Schema.filter((values) => new Set(values).size === values.length),
+      ),
+    }).annotations(strict),
+    Schema.Struct({ source: Schema.Literal("none") }).annotations(strict),
+  ),
+  resume: ProviderResumeQuality,
+}).annotations(strict);
+export type ProviderRuntimeIntegration = typeof ProviderRuntimeIntegration.Type;
+
 export const ProviderObservedState = Schema.Struct({
   instanceId: ProviderInstanceId,
   readiness: ProviderReadiness,
@@ -1316,6 +1409,11 @@ export const ProviderObservedState = Schema.Struct({
   // flag, so one verified model does not unlock tools for the other models
   // of the same profile.
   verifiedToolModelIds: Schema.optional(Schema.Array(ProviderModelId)),
+  /**
+   * Attached by the server when it reports a runtime to a client; a driver
+   * never sets it. Absent for image profiles, which run no turns.
+   */
+  integration: Schema.optional(ProviderRuntimeIntegration),
   message: Schema.optional(Schema.NonEmptyTrimmedString),
   reason: Schema.optional(ProviderRefusalReason),
   diagnostic: Schema.optional(ProviderProcessDiagnostic),

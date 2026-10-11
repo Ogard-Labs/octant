@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, realpath, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -121,7 +121,10 @@ describe("Claude account isolation source", () => {
 
 describe("canonicalClaudeAccountDirectory", () => {
   it("resolves parent references through the nearest existing ancestor", async () => {
-    const parent = await mkdtemp(join(tmpdir(), "octant-claude-account-canonical-"));
+    // tmpdir() is a symlink on macOS; compare against the physical path.
+    const parent = await realpath(
+      await mkdtemp(join(tmpdir(), "octant-claude-account-canonical-")),
+    );
     const nested = join(parent, "accounts", "work", "..", "..", "new-state");
     expect(canonicalClaudeAccountDirectory(nested)).toEqual({
       path: join(parent, "new-state"),
