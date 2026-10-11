@@ -101,9 +101,10 @@ Whether a confined launch that can read that directory, and cannot run
   macOS:** when those variables are set, does `claude` store the login in
   a file under the config directory, or only as a Keychain entry keyed
   to it, and what minimum sandbox access does the binary need to sign
-  in without `/usr/bin/security` and without the Keychain file? An
-  Anthropic API key is the confined-launch fallback only if that
-  verification shows the config-directory path cannot work.
+  in without `/usr/bin/security` and without the Keychain file? If that
+  verification shows the config-directory path cannot work, that
+  instance switches to API-key authentication for every launch. Mixed
+  CLI-plus-API-key is not available.
 - **Several Claude accounts are allowed, later, on this same
   mechanism.** Each account has its own Claude-owned config directory.
   The person signs in once per account with unmodified
@@ -141,9 +142,10 @@ above. No earlier record authorized the helper token.
 ## Consequences
 
 - Confined Plan and subagent launches keep working on the person's
-  subscription only if the macOS must-verify succeeds. If it fails, those
-  launches take an Anthropic API key until a later change finds a
-  Claude-owned storage path that does not require Octant to hold a token.
+  subscription only if the macOS must-verify succeeds. If it fails, that
+  instance switches to an Anthropic API key for every launch until a
+  later change finds a Claude-owned storage path that does not require
+  Octant to hold a token.
 - Settings loses **Connect Claude for helpers**. Stored helper tokens
   are deleted from the broker, and the person is told to revoke them
   with Anthropic. A test or lint refuses any Octant path that sets
