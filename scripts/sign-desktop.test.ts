@@ -1,4 +1,6 @@
-import { readFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   createArchiveArgv,
@@ -8,6 +10,8 @@ import {
   createStapleArgv,
   createVerifyArgv,
   ENTITLEMENTS_PATH,
+  findMachOFiles,
+  MANAGED_TOOLS_PATH,
   parseNotarizationSubmission,
   requireSigned,
   resolveSigningCredentials,
@@ -249,6 +253,77 @@ describe("signAndNotarizeDesktop", () => {
       }),
     );
     expect(argv.some((command) => command.includes("stapler"))).toBe(false);
+  });
+});
+
+describe("vendored managed-tool binaries", () => {
+  async function appWithManagedTool(): Promise<string> {
+    const app = join(await mkdtemp(join(tmpdir(), "octant-sign-")), "Octant.app");
+    const tool = join(app, MANAGED_TOOLS_PATH, "serve-sim/dist");
+    await mkdir(join(tool, "simcam"), { recursive: true });
+    // A Mach-O header is all the scan reads; the rest of the file is irrelevant.
+    await writeFile(
+      join(tool, "simcam/serve-sim-camera-helper"),
+      Buffer.from([0xcf, 0xfa, 0xed, 0xfe, 0, 0]),
+    );
+    await writeFile(
+      join(tool, "simcam/libSimCameraInjector.dylib"),
+      Buffer.from([0xca, 0xfe, 0xba, 0xbe, 0]),
+    );
+    await mkdir(join(tool, "native"), { recursive: true });
+    await writeFile(join(tool, "native/fat64.node"), Buffer.from([0xca, 0xfe, 0xba, 0xbf, 0]));
+    await writeFile(join(tool, "serve-sim.js"), "console.log('not a binary');\n");
+    return app;
+  }
+
+  it("finds the binaries by content and leaves scripts alone", async () => {
+    const app = await appWithManagedTool();
+    try {
+      const found = await findMachOFiles(join(app, MANAGED_TOOLS_PATH));
+      expect(found.map((path) => path.slice(app.length + 1)).sort()).toEqual([
+        `${MANAGED_TOOLS_PATH}/serve-sim/dist/native/fat64.node`,
+        `${MANAGED_TOOLS_PATH}/serve-sim/dist/simcam/libSimCameraInjector.dylib`,
+        `${MANAGED_TOOLS_PATH}/serve-sim/dist/simcam/serve-sim-camera-helper`,
+      ]);
+      expect(await findMachOFiles(join(app, "missing"))).toEqual([]);
+    } finally {
+      await rm(join(app, ".."), { recursive: true, force: true });
+    }
+  });
+
+  it("signs a vendored helper with the hardened runtime and no entitlements before sealing the app", async () => {
+    // Notarization rejected the preview build because these kept their
+    // upstream ad-hoc signatures: no Developer ID, runtime, or timestamp.
+    const app = await appWithManagedTool();
+    try {
+      const signed: string[][] = [];
+      await signAndNotarizeDesktop({
+        repositoryRoot: "/repo",
+        appPath: app,
+        archivePath: `${app}.zip`,
+        credentials: { identity: "Developer ID", notaryProfile: "profile", teamId: "TEAM" },
+        run: async (command) => {
+          if (command.includes("--sign")) signed.push([...command]);
+        },
+        runForOutput: async () => ({
+          exitCode: 0,
+          stdout: JSON.stringify({ id: "submission-id", status: "Accepted" }),
+          stderr: "",
+        }),
+      });
+      const targets = signed.map((command) => command[command.length - 1]);
+      const helper = join(app, MANAGED_TOOLS_PATH, "serve-sim/dist/simcam/serve-sim-camera-helper");
+      expect(targets.indexOf(helper)).toBeGreaterThanOrEqual(0);
+      expect(targets.indexOf(helper)).toBeLessThan(targets.indexOf(app));
+      expect(signed[targets.indexOf(helper)]).toEqual(
+        expect.arrayContaining(["runtime", "--timestamp"]),
+      );
+      // No JIT, unsigned-memory, or audio exceptions for a vendored helper.
+      expect(signed[targets.indexOf(helper)]).not.toContain("--entitlements");
+      expect(signed[targets.indexOf(app)]).toContain("--entitlements");
+    } finally {
+      await rm(join(app, ".."), { recursive: true, force: true });
+    }
   });
 });
 

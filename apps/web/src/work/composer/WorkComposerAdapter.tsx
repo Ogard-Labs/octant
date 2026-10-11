@@ -132,11 +132,21 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
     props.selectedModelId,
   );
 
+  const runtimeCarriesTools = pickerGroupCarriesAppManagedTools(
+    props.providerGroups,
+    props.selectedProviderInstanceId === undefined || props.selectedModelId === undefined
+      ? undefined
+      : {
+          providerInstanceId: props.selectedProviderInstanceId,
+          modelId: props.selectedModelId,
+        },
+  );
   const computer = useComputerUseMention({
     textarea: () => textareaRef.current,
     draft: prompt,
     onDraftChange: setPrompt,
     scopeKey: "work-draft",
+    providerCarriesTools: runtimeCarriesTools,
   });
   const selectedFamily = providerFamilyForThread(
     props.providerGroups,
@@ -145,6 +155,7 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
   const extensionDraft = useExtensionDraftSelections({
     ...(props.extensionClient === undefined ? {} : { client: props.extensionClient }),
     mode: "work",
+    providerCarriesTools: runtimeCarriesTools,
     projectId: props.projectId ?? null,
     ...(selectedFamily === undefined ? {} : { providerFamily: selectedFamily }),
   });
@@ -153,17 +164,7 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
     draft: prompt,
     onDraftChange: setPrompt,
     scopeKey: "work-draft",
-    available:
-      props.browserAvailable === true &&
-      pickerGroupCarriesAppManagedTools(
-        props.providerGroups,
-        props.selectedProviderInstanceId === undefined || props.selectedModelId === undefined
-          ? undefined
-          : {
-              providerInstanceId: props.selectedProviderInstanceId,
-              modelId: props.selectedModelId,
-            },
-      ),
+    available: props.browserAvailable === true && runtimeCarriesTools,
     onChoose: () => void extensionDraft.resolveReference("@browser"),
   });
   const slash = useComposerSlashCommands({

@@ -83,7 +83,7 @@ import { ThreadTasksPanel } from "../transcript/ThreadTasksPanel";
 import { modelDisplayName, providerModelLabel } from "../providers/providerModelLabel";
 import {
   pendingProviderSwitchNotice,
-  providerSwitchHandoffDisclosure,
+  conversationHandoffDisclosure,
 } from "./providerSwitchHandoff";
 import {
   TurnHeader,
@@ -267,10 +267,17 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   // an acknowledged message leaves the composer, so an async mention lookup cannot
   // erase a newer draft typed while that lookup is pending.
   const draftRevisionRef = useRef(0);
+  const runtimeCarriesTools = pickerGroupCarriesAppManagedTools(
+    props.providerGroups ?? [],
+    view === undefined
+      ? undefined
+      : { providerInstanceId: view.thread.providerInstanceId, modelId: view.thread.modelId },
+  );
   const computer = useComputerUseMention({
     textarea: () => textareaRef.current,
     draft,
     scopeKey: String(props.threadId),
+    providerCarriesTools: runtimeCarriesTools,
     onDraftChange: (next) => {
       draftRevisionRef.current += 1;
       setDraft(next);
@@ -287,6 +294,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   const extensionDraft = useExtensionDraftSelections({
     ...(props.extensionClient === undefined ? {} : { client: props.extensionClient }),
     mode: "code",
+    providerCarriesTools: runtimeCarriesTools,
     projectId: view?.thread.projectId ?? null,
     threadId: view === undefined ? props.threadId : view.thread.id,
     ...(providerFamily === undefined ? {} : { providerFamily }),
@@ -300,17 +308,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
       props.controller.setPendingDraft?.(next);
     },
     scopeKey: String(props.threadId),
-    available:
-      props.browserAvailable === true &&
-      pickerGroupCarriesAppManagedTools(
-        props.providerGroups ?? [],
-        view === undefined
-          ? undefined
-          : {
-              providerInstanceId: view.thread.providerInstanceId,
-              modelId: view.thread.modelId,
-            },
-      ),
+    available: props.browserAvailable === true && runtimeCarriesTools,
     onChoose: () => void extensionDraft.resolveReference("@browser"),
     onSelectionEdited: () => {
       draftRevisionRef.current += 1;
@@ -1343,12 +1341,8 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                 ) : null}
                 {message.role === "assistant" && message.handoff !== undefined ? (
                   <p className="code-thread-workspace__handoff" role="note">
-                    {providerSwitchHandoffDisclosure(
-                      message.handoff,
-                      providerModelLabel(providerGroups, {
-                        providerInstanceId: message.handoff.previousProviderInstanceId,
-                        modelId: message.handoff.previousModelId,
-                      }),
+                    {conversationHandoffDisclosure(message.handoff, (selection) =>
+                      providerModelLabel(providerGroups, selection),
                     )}
                   </p>
                 ) : null}

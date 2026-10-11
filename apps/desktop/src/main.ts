@@ -125,6 +125,7 @@ import {
   generateProjectBridgeToken,
   namesItsCause,
 } from "./projectRootPicker";
+import { createBrowserLaunchLink } from "./browserLaunchLink";
 import { createLocalPluginFolderPicker } from "./localPluginFolderPicker";
 import { createRuntimeBinaryPicker } from "./runtimeBinaryPicker";
 import {
@@ -2532,11 +2533,9 @@ async function openLocalWebApp(): Promise<void> {
   if (snapshot.url === undefined || snapshot.state === "stopped") {
     throw new Error("Octant local web app is unavailable while the host is stopped.");
   }
-  await shell.openExternal(resolveLocalWebAppUrl(snapshot.url));
-}
-
-export function resolveLocalWebAppUrl(hostUrl: string): string {
-  return new URL(hostUrl).toString();
+  await shell.openExternal(
+    await createBrowserLaunchLink({ hostUrl: snapshot.url, desktopBridgeSecret }),
+  );
 }
 
 async function startHostFromMenu(): Promise<void> {

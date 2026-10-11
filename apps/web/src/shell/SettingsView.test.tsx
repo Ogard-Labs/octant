@@ -507,6 +507,25 @@ describe("SettingsView", () => {
     await waitFor(() => expect(discoveryController.scan).toHaveBeenCalledTimes(1));
   });
 
+  it("opens the Provider catalog and a driver's setup without scanning the host", async () => {
+    const providerController = providerControllerFixture();
+    const discoveryController = discoveryControllerFixture();
+    renderSettings({
+      providerController,
+      discoveryController,
+      initialDeepLink: { section: "provider-catalog" },
+    });
+
+    fireEvent.click(await screen.findByRole("link", { name: /^Codex CLI, / }));
+    expect(screen.getByRole("heading", { level: 1, name: "Codex CLI" })).toBeDefined();
+    expect(
+      within(screen.getByRole("navigation", { name: "Settings breadcrumb" })).getByText(
+        "Codex CLI",
+      ),
+    ).toBeDefined();
+    expect(discoveryController.scan).not.toHaveBeenCalled();
+  });
+
   it("checks every enabled installed provider when discovery is checked again", async () => {
     const user = userEvent.setup();
     const enabledId = "70000000-0000-4000-8000-000000000091" as never;

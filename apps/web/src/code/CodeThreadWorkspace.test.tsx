@@ -2275,6 +2275,86 @@ describe("CodeThreadWorkspace", () => {
     );
   });
 
+  it.each([
+    {
+      transfer: "as text",
+      handoff: {
+        reason: "fork" as const,
+        forkedFrom: {
+          threadId: anotherThreadId,
+          throughOperationId: "c0000000-0000-4000-8000-0000000000f1",
+        },
+        messages: 2,
+        omissions: {
+          earlierMessages: 0,
+          unfinishedReplies: 0,
+          missingBodies: 0,
+          oversizedBodies: 1,
+          emptyBodies: 0,
+          attachments: 0,
+          truncatedMessages: 0,
+          truncatedCharacters: 0,
+          sourceTruncatedMessages: 0,
+        },
+        externalContentIngested: false,
+      },
+      says: [
+        "Forked with 2 recent messages of the source conversation as text",
+        "Left out: 1 message too large to read.",
+        "Hidden reasoning, tool activity, the source's session and its later replies did not transfer.",
+      ],
+    },
+    {
+      transfer: "by continuing the source's session",
+      handoff: {
+        reason: "fork-native-session" as const,
+        forkedFrom: {
+          threadId: anotherThreadId,
+          throughOperationId: "c0000000-0000-4000-8000-0000000000f1",
+        },
+      },
+      says: [
+        "Forked by continuing the source's own session up to the reply it was forked from",
+        "The source's later replies did not transfer.",
+      ],
+    },
+  ])(
+    "says on a fork's first reply what carried over $transfer and what did not",
+    ({ handoff, says }) => {
+      render(
+        <CodeThreadWorkspace
+          controller={controller({
+            conversation: [
+              {
+                id: "source:assistant",
+                role: "assistant",
+                text: "The source's reply.",
+                providerInstanceId: providerId,
+                modelId,
+                status: "completed",
+                sourceThreadId: anotherThreadId,
+              },
+              {
+                id: "fork:assistant",
+                role: "assistant",
+                text: "The fork's first reply.",
+                providerInstanceId: alternateProviderId,
+                modelId: alternateModelId,
+                status: "completed",
+                handoff,
+              },
+            ],
+          })}
+          providerGroups={[providerGroup(), alternateProviderGroup()]}
+          threadId={threadId}
+        />,
+      );
+
+      const note = screen.getByRole("note");
+      for (const text of says) expect(note).toHaveTextContent(text);
+    },
+  );
+
   it("warns before sending that a thread moved to another provider starts a new session", () => {
     const base = controller();
     const view = base.activeView!;

@@ -267,6 +267,7 @@ import {
   type CodeProjectPullRequestDetailPort,
   type CodeProjectPullRequestListPort,
   type CodeProjectPullRequestMergePort,
+  journalPullRequestMerge,
 } from "./code/codeProjectPullRequestService";
 import { CodeProjectPullRequestCadence } from "./code/codeProjectPullRequestCadence";
 import { CodeProjectPullRequestSnapshotStore } from "./code/codeProjectPullRequestSnapshotStore";
@@ -582,7 +583,6 @@ import {
   createSideChatWorkFileReader,
   type SideChatFileSource,
 } from "./chat/sideChatSourceTools";
-import { codeForkHandoffResolver } from "./code/codeForkHandoff";
 import { createThreadMentionRouteHandler } from "./threadMentionRoutes";
 import { createFileMentionRouteHandler } from "./fileMentionRoutes";
 import { pinFileMentionRoot } from "./fileMentionIo";
@@ -836,8 +836,13 @@ import {
 import { createCanvasPreviewService } from "./canvas/canvasPreviewService";
 import { createPlaywrightCanvasPreviewRenderer } from "./canvas/canvasPreviewRenderer";
 import { loadChildCanvasWorkspace } from "./canvas/childCanvasWorkspace";
-import { combineAppManagedToolSets, type AppManagedToolSet } from "./providers/appManagedToolSet";
+import {
+  combineAppManagedToolSets,
+  withToolFamilyHelp,
+  type AppManagedToolSet,
+} from "./providers/appManagedToolSet";
 import { taintAppManagedToolResults } from "./providers/appManagedToolTaint";
+import { COMPUTER_USE_TOOL_HELP } from "./plugins/computerUse/computerUsePlugin";
 import {
   isPrivateListenerFailureCode,
   type PrivateListener,
@@ -1560,35 +1565,6 @@ function observedCheckoutHeadMatches(
  * The service is reached lazily so a mode wired before it exists can still
  * hold this: nothing is read until a turn actually runs.
  */
-/**
- * Reach the Code service's conversation and evidence readers for the fork
- * handoff. Lazy because the runtime that holds the resolver is composed before
- * the service exists; the decision about when a handoff is owed lives with the
- * handoff itself.
- */
-function forkHandoffResolver(codeService: () => CodeRouteService) {
-  return codeForkHandoffResolver(() => {
-    const service = codeService();
-    const conversation = service.conversation;
-    const readEvidence = service.readOperationContent;
-    if (conversation === undefined || readEvidence === undefined) return undefined;
-    return {
-      conversation: async (...args) => await conversation(...args),
-      readEvidence: async (...args) => await readEvidence(...args),
-      projectOf: async (windowId, threadId) => {
-        try {
-          // `read` authorizes the window against the thread, so a thread this
-          // window may not observe is indistinguishable from one that is absent.
-          const view = await service.read(windowId, threadId);
-          return String(view.thread.projectId);
-        } catch {
-          return undefined;
-        }
-      },
-    };
-  });
-}
-
 function threadMentionContextResolver(threadMentions: () => ThreadMentionService) {
   return async ({
     threadMentionIds,
@@ -3098,14 +3074,20 @@ export function startOctantServer(
         selection,
         model?.inputModalities.includes("image") === true,
       );
+      // Help is the plugin's own static guidance, not application content, so
+      // it is answered outside the taint wrapper and never marks the thread.
       return tools === undefined
         ? undefined
-        : taintAppManagedToolResults({
-            tools,
-            threadId: owner.threadId,
-            recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
-            uuid: randomUUID,
-          });
+        : withToolFamilyHelp(
+            taintAppManagedToolResults({
+              tools,
+              threadId: owner.threadId,
+              recordExternalContentIngestion: (input) =>
+                externalContentIngestionStore.record(input),
+              uuid: randomUUID,
+            }),
+            COMPUTER_USE_TOOL_HELP,
+          );
     };
     let lastComputerSettings = "";
     let computerSettingsTail = Promise.resolve();
@@ -3660,6 +3642,10 @@ export function startOctantServer(
               ? { status: "refused", reason: "unavailable" }
               : codeOperationRuntime.forkPoint(windowId, source, throughOperationId),
         },
+        // A fork is created only when the conversation it carries over can be
+        // read now, through the same selector its first turn uses.
+        forkConversation: ({ source, throughOperationId }) =>
+          selectCodeConversation(source.id, { purpose: "fork", throughOperationId }),
         managedThreadCreation: {
           prepare: (input, signal) => managedCodeThreadCreation.prepare(input, signal),
           commit: (input, preparation, signal) =>
@@ -3716,7 +3702,10 @@ export function startOctantServer(
     // taint and omissions.
     const selectCodeConversation = (
       threadId: CodeThreadId,
-      options: Pick<AdmittedParentCodeContextInput, "purpose" | "excludeOperationId"> = {},
+      options: Pick<
+        AdmittedParentCodeContextInput,
+        "purpose" | "excludeOperationId" | "throughOperationId"
+      > = {},
     ) =>
       admittedParentCodeContext({
         threadId,
@@ -3785,6 +3774,11 @@ export function startOctantServer(
       list: projectPullRequestPorts.list,
       detail: projectPullRequestPorts.detail,
       merge: projectPullRequestPorts.merge,
+      recordMerge: (record) =>
+        journalPullRequestMerge(persistence.journal, record, {
+          uuid: randomUUID,
+          clock: () => new Date().toISOString(),
+        }),
       cacheStats,
       snapshotStore: new CodeProjectPullRequestSnapshotStore(
         join(persistence.dataDirectory, "code", "pull-request-snapshot.json"),
@@ -5137,7 +5131,8 @@ export function startOctantServer(
             ? project.binding.canonicalRoot
             : undefined;
         },
-        resolveForkHandoff: forkHandoffResolver(() => routeCodeService),
+        forkContext: ({ source, throughOperationId }) =>
+          selectCodeConversation(source.id, { purpose: "fork", throughOperationId }),
         forkProviderSession: (input) =>
           seedCodeForkHarnessSession(
             {

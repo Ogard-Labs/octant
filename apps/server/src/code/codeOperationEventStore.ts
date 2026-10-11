@@ -18,6 +18,7 @@ import {
   type CodeConversationPage,
   type CodeConversationStep,
   type CodeConversationTurn,
+  type CodeConversationTurnHandoff,
   type CodeProviderLimit,
   type CodeOperationId,
   type CodeThreadId,
@@ -641,14 +642,7 @@ export class CodeOperationEventStore {
             },
           });
         } else if (frame.event.kind === "context-handoff-attached") {
-          builder.handoff = {
-            reason: frame.event.reason,
-            previousProviderInstanceId: frame.event.previousProviderInstanceId,
-            previousModelId: frame.event.previousModelId,
-            messages: frame.event.messages,
-            omissions: frame.event.omissions,
-            externalContentIngested: frame.event.externalContentIngested,
-          };
+          builder.handoff = conversationHandoff(frame.event);
         } else if (frame.event.kind === "conversation-turn-changed-files") {
           builder.changedFiles = frame.event.changedFiles;
         } else if (frame.event.kind === "operation-state") {
@@ -692,6 +686,33 @@ export class CodeOperationEventStore {
       ...(currentLimits.length === 0 ? {} : { limits: currentLimits.slice(0, 8) }),
       ...(restoreUndo === undefined ? {} : { restoreUndo }),
     });
+  }
+}
+
+/** The part of a journaled handoff the conversation page shows; the text stays in the content store. */
+function conversationHandoff(
+  event: Extract<CodeOperationEvent, { readonly kind: "context-handoff-attached" }>,
+): CodeConversationTurnHandoff {
+  switch (event.reason) {
+    case "provider-switch":
+      return {
+        reason: event.reason,
+        previousProviderInstanceId: event.previousProviderInstanceId,
+        previousModelId: event.previousModelId,
+        messages: event.messages,
+        omissions: event.omissions,
+        externalContentIngested: event.externalContentIngested,
+      };
+    case "fork":
+      return {
+        reason: event.reason,
+        forkedFrom: event.forkedFrom,
+        messages: event.messages,
+        omissions: event.omissions,
+        externalContentIngested: event.externalContentIngested,
+      };
+    case "fork-native-session":
+      return { reason: event.reason, forkedFrom: event.forkedFrom };
   }
 }
 

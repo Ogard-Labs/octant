@@ -1,3 +1,4 @@
+import { randomBytes, randomUUID } from "node:crypto";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -723,7 +724,7 @@ describe("startOctantServer", () => {
     expect(MAX_JSON_REQUEST_BODY_SIZE).toBe(1_048_576);
   });
 
-  it("lets a fresh local-session browser reach Navigator after workspace registration, and refuses a denied principal", async () => {
+  it("lets a freshly launched browser reach Navigator after workspace registration, and refuses a denied principal", async () => {
     const directory = mkdtempSync(join(tmpdir(), "octant-server-navigator-local-session-"));
     directories.push(directory);
     const desktopSecret = `${"B".repeat(42)}A`;
@@ -750,23 +751,42 @@ describe("startOctantServer", () => {
           const fetchRoute = (request: Request) =>
             Effect.promise(() => Promise.resolve(routeHandler?.(request)).then(assertResponse));
 
-          const session = yield* fetchRoute(
-            new Request(new URL("/api/shell/local-session", server.url), {
-              method: "POST",
-              headers: {
-                "content-type": "application/json",
-                origin: rendererOrigin,
-              },
-              body: "{}",
-            }),
-          );
-          expect(session.status).toBe(200);
-          const authority = (yield* Effect.promise(() => session.json())) as {
-            readonly windowId: string;
-            readonly capability: string;
-            readonly authentication: string;
-          };
-          expect(authority.authentication).toBe("local-session");
+          // A browser session starts from a one-time launch token the launcher
+          // mints with the bridge secret for this renderer's origin.
+          const launchBrowserSession = () =>
+            Effect.gen(function* () {
+              const minted = {
+                windowId: randomUUID(),
+                capability: randomBytes(32).toString("base64url"),
+              };
+              const created = yield* fetchRoute(
+                new Request(new URL("/api/desktop/launch-sessions", server.url), {
+                  method: "POST",
+                  headers: {
+                    "content-type": "application/json",
+                    "x-octant-desktop-secret": desktopSecret,
+                  },
+                  body: JSON.stringify({ ...minted, origin: rendererOrigin }),
+                }),
+              );
+              expect(created.status).toBe(201);
+              const receipt = (yield* Effect.promise(() => created.json())) as {
+                readonly launchToken: string;
+              };
+              const exchanged = yield* fetchRoute(
+                new Request(new URL("/api/shell/launch-session", server.url), {
+                  method: "POST",
+                  headers: { "content-type": "application/json", origin: rendererOrigin },
+                  body: JSON.stringify({ launchToken: receipt.launchToken }),
+                }),
+              );
+              expect(exchanged.status).toBe(200);
+              return (yield* Effect.promise(() => exchanged.json())) as {
+                readonly windowId: string;
+                readonly capability: string;
+              };
+            });
+          const authority = yield* launchBrowserSession();
           const capabilityHeaders = {
             origin: rendererOrigin,
             "x-octant-window-capability": authority.capability,
@@ -818,20 +838,7 @@ describe("startOctantServer", () => {
             status: "unconfigured",
           });
 
-          const deniedSession = yield* fetchRoute(
-            new Request(new URL("/api/shell/local-session", server.url), {
-              method: "POST",
-              headers: {
-                "content-type": "application/json",
-                origin: rendererOrigin,
-              },
-              body: "{}",
-            }),
-          );
-          expect(deniedSession.status).toBe(200);
-          const denied = (yield* Effect.promise(() => deniedSession.json())) as {
-            readonly capability: string;
-          };
+          const denied = yield* launchBrowserSession();
           const deniedSnapshot = yield* fetchRoute(
             new Request(new URL("/api/navigator-assistant/snapshot", server.url), {
               headers: {
