@@ -11,6 +11,11 @@ exception to 0009's confinement.
   `vercel-labs/fx` release `v0.0.10` (published 2026-09-14), sha256
   `b3f0121e46f8227690def72b920d9d1fc299f0b73dd7eb91382bd83674219876`. Probed
   on macOS 27.0 arm64.
+- **Re-probe binary:** `fx v0.0.13`, same asset from release `v0.0.13`
+  (published 2026-10-04), sha256
+  `9dbed465d6c56e09a399576c98bfc804a67d1c2a24dfaef896a762565592f96e`, checked
+  against the release's `.sha256` file before extraction. Probed on macOS 27.0
+  arm64 on 2026-10-11. See [v0.0.13 re-probe](#v0013-re-probe).
 - **Docs:** the ACP, configuration, sessions, permissions, skills, MCP, and
   authentication pages at `fx.sh/docs`, compared with `vercel-labs/fx` at
   `v0.0.10` and with the shipped ACP stack (`acpDriver.ts`, `acpProcess.ts`,
@@ -75,6 +80,50 @@ pinned source, no live round trip), or `missing` (required contract absent).
 | managed-home isolation                            | proven          | Session state lands under `$HOME/.fx` for a relocated `HOME`, and the real `~/.fx` stays untouched. See above.                                                                                                                                                                                                                                |
 | mode mapping                                      | proven          | `ask` / `code` are permission behaviors, not Octant Chat / Plan / Work / Code. Octant maps an approval-gated turn to `ask`, Full access to `code`, and refuses Chat and Plan.                                                                                                                                                                 |
 | auth                                              | documented-only | Provider-native: `fx login`, `fx setup`, `AI_GATEWAY_API_KEY`, `VERCEL_OIDC_TOKEN`. OAuth lives in `~/.fx/auth.json`; macOS Keychain holds API keys. Under 0130 Octant grants neither, and supplies only a brokered `AI_GATEWAY_API_KEY`. `FX_AUTH_MODE=host-managed` is a libfx embedding switch, not an `fx acp` CLI contract.              |
+
+## v0.0.13 re-probe
+
+The release notes say ACP clients can now supply session instructions and
+workspaces, steer running turns, and host MCP servers over the ACP connection,
+and that profile MCP servers load only on explicit client opt-in. Every row
+below ran against the live binary over stdio JSON-RPC with `HOME` set to a
+temporary directory, a placeholder (non-credential) `AI_GATEWAY_API_KEY`, and a
+scratch workspace. No model turn ran, so nothing reached any provider.
+
+**Verdict: GO for v0.0.13**, with the same scope as above. Every check that can
+run without a model turn passed. The checks that need a model turn remain open
+(see the end of this section) and are gated on a brokered key, as before.
+
+| Check                           | Result         | Evidence                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| ------------------------------- | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Pin integrity                   | proven         | The downloaded tarball's sha256 matched the release's `.sha256` file. `fx --version` printed `0.0.13`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| initialize and auth gate        | proven         | Without a key, `initialize` fails with `-32600` naming `fx login`, `fx setup`, and `AI_GATEWAY_API_KEY`. With a placeholder key it returns protocolVersion `1`, `agentInfo.version` `0.0.13`, empty `authMethods`, `sessionCapabilities {list, resume, close, systemPrompt}`, `mcpCapabilities {http, sse, acp}`, and `agentCapabilities._meta.fx.steering: true`.                                                                                                                                                                                                                                                                            |
+| Managed-home isolation          | proven         | `session/new` wrote only `$HOME/.fx/sessions/<id>/{session.json,permissions.json,usage-v2.json,events.jsonl,session.lock}` under the temporary home. Before and after listings showed no `~/.fx`, `~/.config/fx`, `~/.local/share/fx`, or fx entry under `~/Library/{Application Support,Caches}`, and no new fx-named path in the real home. `fs_usage` needs root and was unavailable, so this is listing evidence, not a syscall trace.                                                                                                                                                                                                    |
+| Denied workspace surfaces       | proven         | With `AGENTS.md`, `.mcp.json`, `.fx.json`, and `.agents` set to mode 000, `initialize` and `session/new` returned the same shape as with them readable, with the same default mode.                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| Project `.fx.json` cannot raise | proven         | A readable project `.fx.json` with `"permission_mode": "auto"` still produced `mode: ask` and `currentModeId: ask` on `session/new`. An unapproved project `.mcp.json` server was never spawned.                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| Session instructions            | proven         | `session/new` `systemPrompt` (text blocks) is stored verbatim at `sessions/<id>/client/system-prompt.txt`; `_meta.fx.systemPrompt` behaves the same. Both together: `-32602`. A non-text block (`resource_link` to `file:///etc/hosts`): `-32602 systemPrompt supports text content blocks only`. 65,537 bytes: `-32602` over the 64 KiB limit; 65,536 bytes accepted. A replace-mode object: `-32602`. Instructions are text only and pull in no file or tool surface.                                                                                                                                                                       |
+| Workspaces                      | partly proven  | The documented workspace mechanism is the process flag `--add-dir`, not a `session/new` parameter, so Octant controls it through argv. `fx --add-dir <dir> acp` started and created a session; the added directory's `.mcp.json` server was never spawned and the path was not recorded in session state. `session/new` with `additionalDirectories`, `_meta.fx.workspaces`, or `_meta.fx.additionalDirectories` was accepted and ignored: the path appears nowhere under the home. Docs say an added directory contributes no `AGENTS.md`, skills, or configuration; that cannot be observed without a model turn and stays documented-only. |
+| Profile MCP opt-in              | proven         | With a canary server in `$HOME/.fx/mcp.json`: `session/new` and `session/resume` without the flag, and with `_meta.fx.profileMcpServers: false`, did not spawn it. With `true` it spawned immediately and `session/new` blocked until the canary (which speaks no MCP) timed out. Octant must never send the flag.                                                                                                                                                                                                                                                                                                                            |
+| MCP over ACP                    | proven (shape) | `mcpServers: [{type: "acp", name, serverId}]` is accepted; without `serverId` it fails `-32602 Each ACP MCP server requires serverId`. Hosting a working server needs a client-side MCP bridge and a model turn to call it, which did not run.                                                                                                                                                                                                                                                                                                                                                                                                |
+| Modes and cancel without a turn | proven         | `session/set_mode` to `code` and `ask` succeeded. `session/set_mode` with an unknown mode id also returned success (`result: null`), so Octant must validate mode ids itself rather than rely on fx to refuse. `session/cancel` with no active prompt returned `result: null`. `session/list` returned saved sessions.                                                                                                                                                                                                                                                                                                                        |
+| Resume                          | proven         | `session/resume` reattached a saved `sessionId` from a new process and replayed no history.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+
+### Needs a model turn (not run)
+
+- Permission round trip in `ask` mode, which fires only when a model requests
+  a sensitive tool call, and its allow, deny, and cancel outcomes.
+- `session/cancel` of an active prompt, and cancellation of pending permission
+  input.
+- Steering a running turn (`_meta.fx.steer: true`).
+- Whether instructions appended through `systemPrompt` and `--add-dir`
+  directories reach the model as documented, including that an added
+  directory's `AGENTS.md` and skills stay out.
+- Tool calls reaching a client-hosted `type: "acp"` MCP server.
+- The brokered-credential test: that a key supplied only through the
+  environment is accepted by the gateway, and that no fx credential store is
+  read.
+
+These need a brokered AI Gateway key, which this probe did not have.
 
 ## Residual risk
 
