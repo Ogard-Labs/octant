@@ -35,11 +35,12 @@ here is merged or being hardened for it.
 - **Unified subagents** — managed children run as in-process provider sessions
   with clamped authority, isolated worktrees, hierarchy panel, and durable
   results.
-- **Agent-to-agent messaging** — journaled contracts, pure clamps, the delivery
-  service, the Code turn tool, and the Agents center bounds view are wired.
-  Broader use still waits on maintainer approval of its design and
-  threat-model sign-off
-  ([threat model](security/agent-to-agent-messaging-threat-model.md)).
+- **Agent-to-agent messaging** — shipped: journaled contracts, pure clamps,
+  the delivery service, and the Agents center bounds view, and every Code turn
+  is offered the `octant_agent_message` tool with no separate activation gate.
+  Maintainer approval of its design and threat-model sign-off
+  ([threat model](security/agent-to-agent-messaging-threat-model.md)) are
+  still pending.
 - **Remote access** — pairing, revocable device keys, HTTPS private listener on
   LAN or Tailscale, fail-closed remote route policy, paired-browser client.
 - **Shell and appearance** — borderless macOS shell, dockable tabs and splits,
@@ -49,8 +50,9 @@ here is merged or being hardened for it.
   start ordinary Work or Code threads under a capped authority, with durable
   occurrence recovery and no cloud wake.
 - **Operations** — usage dashboard, optional Project and thread spend
-  ceilings over tokens, turns, run time, and money with atomic reservation at
-  turn admission, thread retention windows and confirmed purge, diagnostics export,
+  ceilings over tokens, turns, run time, and money, checked at turn admission
+  (tokens by atomic reservation; money, turns, and run time against recorded
+  and in-flight spend), thread retention windows and confirmed purge, diagnostics export,
   first-run onboarding, packaged desktop smoke scripts, and What's new from
   bundled notes plus a signed summary when an update is offered.
 
