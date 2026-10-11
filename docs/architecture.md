@@ -3497,9 +3497,12 @@ mechanisms are:
   session files, every launch for a new thread uses the credential path plus
   one durable per-thread session directory. `findSession` receives that root
   without mutating process-global environment. Durable session roots are
-  purged through a provider-neutral `@octant/provider-sdk` seam: a path
-  receipt, then a host data map and purge sweep that only see registered
-  locations. Confined login is limited to an attested Claude version or
+  host-allocated beneath a provider/thread-scoped root and purged through a
+  provider-neutral `@octant/provider-sdk` seam: the host issues a
+  thread-bound receipt before the first session write; the data map and
+  purge sweep only see those receipts, including after restart or while
+  the provider is disabled. A driver cannot register a path outside that
+  allocated root. Confined login is limited to an attested Claude version or
   inclusive range; a newer unattested build refuses confined subscription
   until Step 0 is rerun. Subscription launches of the unmodified binary would
   leave Claude's own telemetry, error reporting, and Claude-owned product

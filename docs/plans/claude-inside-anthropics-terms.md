@@ -177,15 +177,28 @@ thread, confined or not. A later Plan or ordinary turn has to find
 the same session files; mixing the per-thread root with the account
 root makes the saved cursor `stale-resume`. Do not use a throwaway
 per-launch config directory: resume has to find the same session
-files after a restart. That session directory is thread-owned. Confirmed
-purge must delete it with the thread. A third-party driver has no
-way to register thread-owned storage today, so do not add a
-Claude-only path to `hostDataMap` or the purge sweep. First add a
-provider-neutral storage/lifecycle seam on `@octant/provider-sdk`:
-the driver registers a path receipt; the host data map and purge
-sweep only see registered locations. Claude consumes that seam.
-Report deletion or failure, and cover it with a purge test. Leaving
-the transcript on disk after a successful purge is a privacy defect.
+files after a restart. That session directory is thread-owned. The
+host allocates it beneath a host-owned, provider/thread-scoped
+root. The driver does not choose or register an arbitrary
+filesystem path: a receipt that named `/`, home, or a checkout
+would otherwise turn confirmed purge into an arbitrary delete. If
+the driver later reports a nested path, the host canonicalizes it
+and refuses anything outside that allocated root. Cover the
+refusal with a rejection test.
+
+The host commits a thread-bound receipt before the first session
+write. That receipt is journaled host data, reloadable after a
+restart and while the provider is disabled. Confirmed purge
+deletes only the allocated location from the receipt. A
+third-party driver has no way to register thread-owned storage
+today, so do not add a Claude-only path to `hostDataMap` or the
+purge sweep. First add a provider-neutral storage/lifecycle seam
+on `@octant/provider-sdk`: the host allocates the root and issues
+the receipt; the host data map and purge sweep only see those
+host-issued receipts. Claude consumes that seam. Report deletion
+or failure, and cover purge after restart with the provider
+disabled. Leaving the transcript on disk after a successful purge
+is a privacy defect.
 Resume lookup must use that same per-thread root. `findSession`
 today calls `listSessions` against the project
 directory and the server's default Claude store unless it receives
@@ -234,7 +247,8 @@ not reintroduce a setup token.
 - `apps/server/src/providers/claudeDriver.ts`
 - `apps/server/src/providers/claudeAgentSdkPort.ts` (`findSession`)
 - `@octant/provider-sdk` thread-owned storage/lifecycle seam, then the
-  host data map and purge sweep that consume registered receipts
+  host allocation root, durable receipt, and purge sweep that consume
+  host-issued receipts
 - `apps/server/src/process/seatbeltProfile.ts` and the Linux builder
 - Settings copy that today asks the person to Connect Claude for helpers
 - `docs/architecture.md` (0145 / confined Claude launch)
@@ -261,10 +275,13 @@ not reintroduce a setup token.
 - Resume after restart looks up that per-thread session root for
   subscription and API-key threads. The lookup receives the root
   without mutating process-global Claude directory variables.
-- Confirmed thread purge deletes that session directory through the
-  provider-neutral storage seam, lists the registered receipt on the
-  host data map, and has a purge test. A successful purge does not
-  leave the Claude transcript on disk.
+- Confirmed thread purge deletes that host-allocated session
+  directory through the provider-neutral storage seam. The host
+  issued the receipt before the first session write, lists it on
+  the host data map after restart and while the provider is
+  disabled, refuses a path outside the allocated root, and has a
+  purge-after-restart test. A successful purge does not leave the
+  Claude transcript on disk.
 
 ## Step 3 — Telemetry on subscription launches
 
