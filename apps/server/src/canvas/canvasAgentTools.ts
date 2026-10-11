@@ -45,6 +45,7 @@ import {
   comparisonMatrixExamples,
   mathExamples,
   metricExamples,
+  dashboardExamples,
   CANVAS_INLINE_MAX_BLOCKS,
   canvasInlineRefusal,
   effectiveCanvasPresentation,
@@ -266,6 +267,7 @@ function describedExamples(kinds: ReadonlyArray<string>): ReadonlyArray<unknown>
     if (kind === "comparison-matrix") examples.push(...comparisonMatrixExamples);
     if (kind === "math") examples.push(...mathExamples);
     if (kind === "metric") examples.push(...metricExamples);
+    if (kind === "dashboard") examples.push(...dashboardExamples);
   }
   return examples;
 }
@@ -382,6 +384,7 @@ function toolDescription(
     "Mathematics is a math block written in LaTeX math markup, never in a text block or between dollar signs. A formula on its own line is layout display with a source and an optional caption that names it, such as Bayes' theorem; a sentence that carries formulas is layout inline with runs, each either prose (text, keep the spaces next to a formula) or a formula (math). A source is at most 1000 characters. Use standard commands, environments such as aligned, pmatrix, and cases, and \\text for words inside a formula. Macro definitions (\\def, \\newcommand), links and images (\\href, \\url, \\includegraphics, \\html...), and colour (\\color, \\textcolor) are refused: formulas take the reader's theme. Describe math to get a display formula, an aligned derivation, and a paragraph with inline formulas.",
     "A table is columns of a declared type (text, number, boolean, date, status) and rows that list one value per column in the same order. A column may take an optional format and an optional display: text (the plain reading), bar (an in-cell bar whose length is the value's share of the column's largest reading), heat (a tint on the shared sequential scale), or status (the value shown as a badge). The value is always shown, so bar and heat add a mark without replacing the reading; the person can sort, filter, and hide columns without revising the Canvas. A text column whose values read as a path is drawn with the shared path style. A row may instead be { id, cells } with a short id unique in the table; people can comment on a row only when it has an id, and the comment stays on that id, so keep a row's id when you revise it and give a new row a new id.",
     "Headline numbers are metric blocks. Give each a label and a value, and add an optional format, unit, delta, a goodDirection of up, down, or neutral so a delta's tone is never guessed, a caption, and a sparkline of at most 256 recent readings. Consecutive metric blocks are gathered into a responsive tile row of two to four tiles. Describe metric to get a repo-stats tile row.",
+    "A KPI dashboard is a dashboard block: a title that names the region, an optional number of columns from 1 to 4 (four when absent), and up to 24 cells, each naming the blockId of a metric, progress, status, chart, or table block elsewhere in the same Canvas, with an optional span of columns. Write the placed blocks as ordinary blocks and list them in reading order; each block sits in at most one cell, and a dashboard never places another dashboard. A tile takes one column and a chart or table two unless you give a span no wider than the grid. The grid is drawn where the dashboard sits and collapses to one column in a narrow dock or on a phone, in cell order. Describe dashboard to get an ops dashboard and a release health board.",
     "A Canvas is a document: it grants no file, shell, Git, or network access. Creation adds a card to this thread and offers the Canvas in the thread's dock the first time it appears; the user can also select Open Canvas. Do not claim the user has read it or invent a download URL.",
     `Choose where the thread shows it. Use presentation inline for one small visual that answers the question, such as a chart, a few metrics, a short table, or a sequence or state diagram; it is drawn in the conversation just below your reply to this turn, so refer to it as below, and the user can still open it in the sidebar. Leave presentation out (sidebar) for reports, plans, boards, mockups, designs, and anything the user will keep working on. Inline holds at most ${String(CANVAS_INLINE_MAX_BLOCKS)} blocks; when the host shows a card instead, the result says so in presentationNote.`,
     "Revise with the canvasId, the last observed expectedSequence, and the complete replacement blocks. Reference blocks require source ids already in the Canvas source manifest; create attaches no sources. Never invent file or artifact references.",

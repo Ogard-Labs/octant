@@ -417,6 +417,10 @@ answered in place, above its other waiting threads, and a thread with a
 decision is not listed again as a finished turn. The list is read at a local
 window only, so a remote window has no Needs you source. What it includes and leaves out is in
 [Architecture: pending requests across modes](../architecture.md#security-and-authority).
+With every window closed, the desktop menu bar carries the same waiting threads
+as its **Needs you** section, beside **Working** and **Done since you looked**;
+a row opens the thread. It is described in
+[Architecture: desktop menu bar](../architecture.md#desktop-menu-bar).
 
 The command palette opens on a **Needs you** group when this window can read
 that list. It has one row per waiting thread, titled with the thread and

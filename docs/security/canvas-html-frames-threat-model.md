@@ -6,9 +6,9 @@
   [Canvas documents, designs, and prototypes](../architecture.md#canvas-documents-designs-and-prototypes).
   Static frames that run nothing ship today under
   [0164](../decisions/0164-canvas-designs-are-html-in-a-frame-that-runs-nothing.md),
-  measured and themed static frames (F2) ship with Canvas schema version 15,
-  asset-bearing static frames (F5) with version 16, and running frames with
-  version 17, with F1, F3, F4, F6, F7, F8, F9, and F10 implemented and tested.
+  measured and themed static frames (F2) ship with Canvas schema version 16,
+  asset-bearing static frames (F5) with version 17, and running frames with
+  version 18, with F1, F3, F4, F6, F7, F8, F9, and F10 implemented and tested.
 - Scope: agent-authored HTML, CSS, and script drawn in a Canvas `design`
   frame, in the sidebar, the thread, preview, authenticated snapshots, and
   HTML export

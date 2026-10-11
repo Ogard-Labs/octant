@@ -21,7 +21,7 @@ const PAGE = `http://127.0.0.1:3773/api/canvas/design-page?ticket=${"a".repeat(4
 function prototype(size: CanvasDesignBlock["size"] = "phone"): CanvasDesignBlock {
   const block = decodeCanvasBlock({
     blockId: "checkout",
-    schemaVersion: 17,
+    schemaVersion: 18,
     kind: "design",
     title: "Checkout",
     size,
@@ -97,7 +97,7 @@ describe("design block", () => {
   it("shows a Project screenshot in a phone mockup and a placeholder for an image the host refused, loading nothing", async () => {
     const block = decodeCanvasBlock({
       blockId: "phone",
-      schemaVersion: 16,
+      schemaVersion: 17,
       kind: "design",
       title: "Mockup",
       size: "phone",
@@ -143,7 +143,7 @@ describe("design block", () => {
   it("draws every declared image as a placeholder where no host can resolve it", () => {
     const block = decodeCanvasBlock({
       blockId: "phone",
-      schemaVersion: 16,
+      schemaVersion: 17,
       kind: "design",
       title: "Mockup",
       size: "phone",
@@ -281,6 +281,50 @@ describe("design block", () => {
       await Promise.resolve();
     });
     expect(frames(article)[0]?.srcdoc).toContain("color-scheme: light;");
+  });
+
+  it("redraws a document in the Contrast theme when the system asks for more contrast", async () => {
+    // Contrast is the system preference: the stylesheet swaps the text roles
+    // under `prefers-contrast: more`, so no theme attribute on the root moves
+    // and only the computed tokens change.
+    const preferences = new Map<string, EventTarget>();
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn().mockImplementation((query: string) => {
+        const preference = preferences.get(query) ?? new EventTarget();
+        preferences.set(query, preference);
+        return Object.assign(preference, { matches: false });
+      }),
+    );
+    let foreground = "rgb(240, 240, 240)";
+    const computedStyle = window.getComputedStyle.bind(window);
+    vi.spyOn(window, "getComputedStyle").mockImplementation((element, pseudo) => {
+      const style = computedStyle(element, pseudo);
+      if (element !== document.documentElement) return style;
+      return new Proxy(style, {
+        get: (target, key) =>
+          key === "getPropertyValue"
+            ? (name: string) => (name === "--oct-fg" ? foreground : target.getPropertyValue(name))
+            : Reflect.get(target, key, target),
+      });
+    });
+    try {
+      render(
+        <CanvasDocument definition={{ ...canvasFixture, blocks: [searchSpecExampleBlock] }} />,
+      );
+      const article = screen.getByRole("region", { name: "Search ranking spec, document" });
+      expect(frames(article)[0]?.srcdoc).toContain("--oct-fg: rgb(240, 240, 240);");
+
+      await act(async () => {
+        foreground = "rgb(255, 255, 255)";
+        preferences.get("(prefers-contrast: more)")?.dispatchEvent(new Event("change"));
+        await Promise.resolve();
+      });
+      expect(frames(article)[0]?.srcdoc).toContain("--oct-fg: rgb(255, 255, 255);");
+    } finally {
+      vi.restoreAllMocks();
+      vi.unstubAllGlobals();
+    }
   });
 
   it("keeps a phone design unthemed at its device size unless it asks for the theme", () => {

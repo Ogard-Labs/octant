@@ -86,7 +86,7 @@ refused("form submit", () => new Promise((resolve) => {
 ${extra}`;
   const block = decodeCanvasBlock({
     blockId: "hostile",
-    schemaVersion: 17,
+    schemaVersion: 18,
     kind: "design",
     title: "Hostile",
     size: "phone",
