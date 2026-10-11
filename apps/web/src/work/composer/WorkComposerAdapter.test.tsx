@@ -1,3 +1,4 @@
+import { decodeHostId, LOCAL_HOST_ID } from "@octant/contracts/host";
 import { decodeProviderInstanceId, decodeProviderModelId } from "@octant/contracts/providers";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -6,6 +7,21 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { WorkComposerAdapter } from "./WorkComposerAdapter";
 import type { ProjectId } from "@octant/contracts/projects";
 import type { PickerGroup } from "@octant/domain";
+
+const twoHosts = [
+  {
+    hostId: LOCAL_HOST_ID,
+    displayName: "This Mac",
+    health: "healthy" as const,
+    capabilities: ["chat", "work", "code"],
+  },
+  {
+    hostId: decodeHostId("11111111-1111-4111-8111-111111111111"),
+    displayName: "Studio",
+    health: "healthy" as const,
+    capabilities: ["chat", "work", "code"],
+  },
+];
 
 const baseProps = {
   providerGroups: [],
@@ -111,7 +127,7 @@ describe("WorkComposerAdapter", () => {
   });
 
   it("carries host and Project context on the row inside the composer, above the prompt", () => {
-    const { container } = render(<WorkComposerAdapter {...baseProps} />);
+    const { container } = render(<WorkComposerAdapter {...baseProps} hosts={twoHosts} />);
     const frame = container.querySelector(".composer");
     const tray = container.querySelector(".composer-tray");
     const row = container.querySelector(".composer-row");

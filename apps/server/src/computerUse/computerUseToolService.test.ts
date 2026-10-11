@@ -515,6 +515,12 @@ describe("a turn without a Computer selection", () => {
       expect(answer.isError).toBe(true);
       expect(answer.result).toMatchObject({ error: "computer-use-not-attached" });
       expect(JSON.stringify(answer.result)).toContain("@Computer");
+      // Help belongs to the attached family; without @Computer it is refused too.
+      const help = await unattached.execute({
+        name: "octant_computer",
+        inputJson: '{"operation":"help"}',
+      });
+      expect(help.result).toMatchObject({ error: "computer-use-not-attached" });
     } finally {
       await f.service.close();
     }

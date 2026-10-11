@@ -577,6 +577,23 @@ describe("FirstRunOnboarding", () => {
     expect(screen.queryByText(/^Step \d of \d$/)).toBeNull();
   });
 
+  it("says ready to start only when provider, Project, and model all hold, and otherwise names what is missing", async () => {
+    const user = userEvent.setup();
+    const missing = mount();
+
+    await openHandoff(user);
+    expect(
+      screen.getByRole("heading", { name: "Needs a provider, a Project, and a model" }),
+    ).toBeVisible();
+    expect(screen.queryByRole("heading", { name: "Ready to start" })).toBeNull();
+
+    missing.rerender({ projects: [codeProject] });
+    expect(screen.getByRole("heading", { name: "Needs a provider and a model" })).toBeVisible();
+
+    missing.rerender(readyHandoff());
+    expect(screen.getByRole("heading", { name: "Ready to start" })).toBeVisible();
+  });
+
   it("does not start a task or fabricate readiness when first run is skipped", async () => {
     const user = userEvent.setup();
     const props = mount(readyHandoff());

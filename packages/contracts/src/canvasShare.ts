@@ -1,6 +1,8 @@
 import { Schema } from "effect";
 import {
   CANVAS_MAX_BAR_LIST_ROWS,
+  CANVAS_MAX_DASHBOARD_CELLS,
+  CANVAS_MAX_DASHBOARD_COLUMNS,
   CANVAS_MAX_CHART_CATEGORY_LABEL_LENGTH,
   CANVAS_MAX_HEATMAP_CELLS,
   CANVAS_MAX_HEATMAP_COLUMNS,
@@ -96,18 +98,23 @@ export const CANVAS_SHARE_MOCKUP_CATALOG_SCHEMA_VERSION = 6;
 // Version 7 accompanies Canvas schema version 14: a share may carry a funnel,
 // a radar, or a sankey chart, and a sankey's links.
 export const CANVAS_SHARE_FLOW_CHARTS_SCHEMA_VERSION = 7;
-// Version 8 accompanies Canvas schema version 18: a share may carry tabs and
+// Version 8 accompanies Canvas schema version 15: a share may carry a
+// dashboard, which names the blocks it places by their ids in the same share.
+export const CANVAS_SHARE_DASHBOARD_SCHEMA_VERSION = 8;
+// Version 9 accompanies Canvas schema version 19: a share may carry tabs and
 // columns, which name the shared blocks they hold, a diagram's edge styles and
 // tones and its group tones, and a plan's Gantt view.
-export const CANVAS_SHARE_LAYOUT_GROUPS_SCHEMA_VERSION = 8;
-export const CANVAS_SHARE_SCHEMA_VERSION = 8 as const;
+export const CANVAS_SHARE_LAYOUT_GROUPS_SCHEMA_VERSION = 9;
+export const CANVAS_SHARE_SCHEMA_VERSION = 9 as const;
 // The newest Canvas block version a share at this version names. Canvas
 // version 13 added only the table row id, which a share drops, so share
 // version 6 named a block authored at 13 as 12. Version 14 adds chart types a
-// share carries, so share version 7 names blocks up to 14. Version 18 adds tabs and columns,
-// so share version 8 names blocks up to 18. A later Canvas bump
-// that adds something a share carries bumps the share version again.
-export const CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION = 18 as const;
+// share carries, so share version 7 named blocks up to 14, version 15 adds
+// the dashboard, so share version 8 named blocks up to 15, and version 19
+// adds tabs and columns, so share version 9 names blocks up to 19. A later
+// Canvas bump that adds something a share carries bumps the share version
+// again.
+export const CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION = 19 as const;
 export const CanvasShareSchemaVersion = Schema.Literal(
   1,
   2,
@@ -116,6 +123,7 @@ export const CanvasShareSchemaVersion = Schema.Literal(
   5,
   6,
   7,
+  8,
   CANVAS_SHARE_SCHEMA_VERSION,
 );
 export type CanvasShareSchemaVersion = typeof CanvasShareSchemaVersion.Type;
@@ -909,6 +917,18 @@ export const CanvasStaticExportBlock = Schema.Union(
   }).annotations(strict),
   Schema.Struct({
     ...exportBlockFields,
+    kind: Schema.Literal("dashboard"),
+    title: ExportLabel,
+    columns: Schema.optional(Schema.Int.pipe(Schema.between(1, CANVAS_MAX_DASHBOARD_COLUMNS))),
+    cells: Schema.NonEmptyArray(
+      Schema.Struct({
+        blockId: boundedToken("CanvasBlockId"),
+        span: Schema.optional(Schema.Int.pipe(Schema.between(1, CANVAS_MAX_DASHBOARD_COLUMNS))),
+      }).annotations(strict),
+    ).pipe(Schema.maxItems(CANVAS_MAX_DASHBOARD_CELLS)),
+  }).annotations(strict),
+  Schema.Struct({
+    ...exportBlockFields,
     kind: Schema.Literal("image"),
     alt: ExportNonEmptyText,
     caption: Schema.optional(ExportText),
@@ -1010,6 +1030,12 @@ export const CanvasStaticExportDocument = Schema.Struct({
     ),
     Schema.filter(
       (document) =>
+        document.schemaVersion >= CANVAS_SHARE_DASHBOARD_SCHEMA_VERSION ||
+        !document.blocks.some((block) => block.kind === "dashboard"),
+      { message: () => "Dashboard blocks require Canvas share version 8." },
+    ),
+    Schema.filter(
+      (document) =>
         document.schemaVersion >= CANVAS_SHARE_LAYOUT_GROUPS_SCHEMA_VERSION ||
         !document.blocks.some(
           (block) =>
@@ -1019,7 +1045,7 @@ export const CanvasStaticExportDocument = Schema.Struct({
         ),
       {
         message: () =>
-          "Tabs, columns, diagram edge styles and tones, group tones, and the plan's Gantt view require Canvas share version 8.",
+          "Tabs, columns, diagram edge styles and tones, group tones, and the plan's Gantt view require Canvas share version 9.",
       },
     ),
   );

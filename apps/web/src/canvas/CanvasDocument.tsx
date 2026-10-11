@@ -1,13 +1,11 @@
-import {
-  canvasLayoutGroupChildIds,
-  type CanvasBlock,
-  type CanvasDefinition,
-} from "@octant/contracts/canvas";
+import type { CanvasDefinition } from "@octant/contracts/canvas";
 import type { ReactNode } from "react";
 import { MessageSquare } from "lucide-react";
 import type { CanvasActionBlock } from "@octant/contracts/canvas-actions";
+import { canvasReadingOrder, type CanvasReadingItem } from "@octant/domain/canvas-dashboard-layout";
 import { CanvasBlockRenderer } from "./blocks/CanvasBlock";
 import { CanvasLayoutGroup } from "./blocks/LayoutGroups";
+import { DashboardBlock } from "./blocks/DashboardBlock";
 import type { DiagramBoardLayoutRuntime } from "./blocks/DiagramBoard";
 import type { PlanTaskRuntime } from "./blocks/PlanBlock";
 import { OctantButton } from "../ui/base/OctantButton";
@@ -76,6 +74,7 @@ export function canvasBlockLabel(block: CanvasDefinition["blocks"][number]): str
     case "design":
       return block.title;
     case "plan":
+    case "dashboard":
       return block.title;
     case "callout":
       return block.title ?? "Callout";
@@ -101,18 +100,7 @@ export function CanvasDocument({
     (block): block is CanvasActionBlock => block.kind === "action",
   );
   const content = definition.blocks.filter((block) => block.kind !== "action");
-  // A tab or column draws its children in place, once: a block a group names
-  // is not drawn again where it sits in the block list.
-  const byId = new Map(content.map((block) => [String(block.blockId), block]));
-  const placed = new Set(
-    content.flatMap((block) =>
-      block.kind === "tabs" || block.kind === "columns"
-        ? canvasLayoutGroupChildIds(block).map(String)
-        : [],
-    ),
-  );
-
-  const section = (block: CanvasBlock) => (
+  const blockSection = (block: CanvasDefinition["blocks"][number]) => (
     <section key={block.blockId} className="canvas-block" data-block-kind={block.kind}>
       <CanvasBlockRenderer
         block={block}
@@ -137,36 +125,51 @@ export function CanvasDocument({
       )}
     </section>
   );
-  const flow = (blocks: ReadonlyArray<CanvasBlock>): ReactNode =>
-    runsOfMetrics(blocks).map((run) => {
-      const sections = run.map((block) =>
-        block.kind === "tabs" || block.kind === "columns" ? (
-          <CanvasLayoutGroup
-            block={block}
-            key={block.blockId}
-            renderChildren={(blockIds) =>
-              flow(
-                blockIds.flatMap((blockId) => {
-                  const child = byId.get(String(blockId));
-                  return child === undefined ? [] : [child];
-                }),
-              )
-            }
-          />
-        ) : (
-          section(block)
-        ),
-      );
+
+  const dashboardSection = (item: Extract<ReadingItem, { readonly kind: "dashboard" }>) => (
+    <section key={item.dashboard.blockId} className="canvas-block" data-block-kind="dashboard">
+      <DashboardBlock
+        title={item.dashboard.title}
+        columns={item.columns}
+        cells={item.cells}
+        cellKey={(block) => String(block.blockId)}
+        cellKind={(block) => block.kind}
+        renderCell={(block) => blockSection(block)}
+      />
+      {comments === undefined ? null : (
+        <CommentMarker
+          count={comments.openCounts.get(String(item.dashboard.blockId)) ?? 0}
+          label={canvasBlockLabel(item.dashboard)}
+          onOpen={() => comments.onOpen(String(item.dashboard.blockId))}
+        />
+      )}
+    </section>
+  );
+
+  // A tab pane or a column draws its children through the same flow as the
+  // document, so a dashboard in a pane is the same grid it is at the top.
+  const flow = (items: ReadonlyArray<ReadingItem>): ReactNode =>
+    runsOfMetrics(items).map((run) => {
       const first = run[0];
-      return first?.kind === "metric" ? (
-        <div className="canvas-metrics" key={`metrics-${first.blockId}`}>
+      if (first?.kind === "dashboard") return dashboardSection(first);
+      if (first?.kind === "group") {
+        return (
+          <CanvasLayoutGroup
+            block={first.group}
+            key={first.group.blockId}
+            renderSection={(index) => flow(first.sections[index] ?? [])}
+          />
+        );
+      }
+      const sections = run.map((item) => (item.kind === "block" ? blockSection(item.block) : null));
+      return first?.kind === "block" && first.block.kind === "metric" ? (
+        <div className="canvas-metrics" key={`metrics-${first.block.blockId}`}>
           {sections}
         </div>
       ) : (
         sections
       );
     });
-
   return (
     <article
       className={placement === "thread" ? "canvas-view canvas-view--thread" : "canvas-view"}
@@ -177,9 +180,7 @@ export function CanvasDocument({
           <h1>{definition.title}</h1>
         </header>
       )}
-      <div className="canvas-view__body">
-        {flow(content.filter((block) => !placed.has(String(block.blockId))))}
-      </div>
+      <div className="canvas-view__body">{flow(canvasReadingOrder(content))}</div>
       {actionRuntime !== undefined && actions.length > 0 ? (
         <CanvasActionPanel
           actions={actions}
@@ -192,18 +193,22 @@ export function CanvasDocument({
   );
 }
 
+type ReadingItem = CanvasReadingItem<CanvasDefinition["blocks"][number]>;
+
 /**
- * The document's blocks in order, with each run of consecutive metrics
+ * The document in reading order, with each run of consecutive metrics
  * gathered so they sit side by side as tiles instead of one number per line.
+ * A dashboard is its own run; the metrics it places are tiles in its grid.
  */
 function runsOfMetrics(
-  blocks: ReadonlyArray<CanvasDefinition["blocks"][number]>,
-): ReadonlyArray<ReadonlyArray<CanvasDefinition["blocks"][number]>> {
-  const runs: Array<Array<CanvasDefinition["blocks"][number]>> = [];
-  for (const block of blocks) {
-    const last = runs.at(-1);
-    if (block.kind === "metric" && last?.[0]?.kind === "metric") last.push(block);
-    else runs.push([block]);
+  items: ReadonlyArray<ReadingItem>,
+): ReadonlyArray<ReadonlyArray<ReadingItem>> {
+  const runs: Array<Array<ReadingItem>> = [];
+  for (const item of items) {
+    const last = runs.at(-1)?.[0];
+    const isMetric = item.kind === "block" && item.block.kind === "metric";
+    if (isMetric && last?.kind === "block" && last.block.kind === "metric") runs.at(-1)?.push(item);
+    else runs.push([item]);
   }
   return runs;
 }
