@@ -234,6 +234,7 @@
       "name": "@octant/plugin-host",
       "dependencies": {
         "@octant/contracts": "workspace:*",
+        "@octant/plugin-api": "workspace:*",
         "yaml": "catalog:",
       },
       "devDependencies": {

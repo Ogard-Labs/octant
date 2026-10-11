@@ -10,13 +10,16 @@ import {
   useComputerUseMention,
 } from "./ComputerUseMention";
 
-function Composer() {
+function Composer(props: { readonly providerCarriesTools?: boolean }) {
   const [draft, setDraft] = useState("");
   const computer = useComputerUseMention({
     draft,
     onDraftChange: setDraft,
     scopeKey: "task",
     available: true,
+    ...(props.providerCarriesTools === undefined
+      ? {}
+      : { providerCarriesTools: props.providerCarriesTools }),
   });
   return (
     <>
@@ -70,6 +73,26 @@ describe("Computer plugin mention", () => {
     expect(screen.getByRole("textbox")).toHaveValue("Use ");
     expect(screen.getByText("plugin")).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "Remove Computer" }));
+    expect(screen.getByText("none")).toBeVisible();
+  });
+
+  it("drops a chosen @Computer once the composer moves to a runtime without Octant tools", () => {
+    const { rerender } = render(<Composer providerCarriesTools />);
+    fireEvent.change(screen.getByRole("textbox"), {
+      target: { value: "Use @Com", selectionStart: 8 },
+    });
+    fireEvent.click(screen.getByRole("option", { name: /Computer/ }));
+    expect(screen.getByText("plugin")).toBeVisible();
+    rerender(<Composer providerCarriesTools={false} />);
+    expect(screen.getByText("none")).toBeVisible();
+  });
+
+  it("does not offer @Computer on a runtime that carries no Octant tools", () => {
+    render(<Composer providerCarriesTools={false} />);
+    fireEvent.change(screen.getByRole("textbox"), {
+      target: { value: "Use @Com", selectionStart: 8 },
+    });
+    expect(screen.queryByRole("option", { name: /Computer/ })).not.toBeInTheDocument();
     expect(screen.getByText("none")).toBeVisible();
   });
 

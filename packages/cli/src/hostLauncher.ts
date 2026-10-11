@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { realpathSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { resolve } from "node:path";
@@ -343,7 +343,9 @@ export interface CreateLaunchSessionOptions {
   readonly serverUrl: URL;
   readonly windowId: WindowId;
   readonly capability: string;
-  readonly fetch?: typeof globalThis.fetch | undefined;
+  /** The renderer origin the browser will open; only it can exchange the token. */
+  readonly origin: string;
+  readonly fetch?: ((input: URL, init: RequestInit) => Promise<Response>) | undefined;
 }
 
 export interface LaunchSessionReceipt {
@@ -363,7 +365,11 @@ export async function createLaunchSession(
         "content-type": "application/json",
         "x-octant-desktop-secret": options.bridgeSecret,
       },
-      body: JSON.stringify({ windowId: options.windowId, capability: options.capability }),
+      body: JSON.stringify({
+        windowId: options.windowId,
+        capability: options.capability,
+        origin: options.origin,
+      }),
     });
   } catch {
     return undefined;
@@ -374,14 +380,26 @@ export async function createLaunchSession(
   return undefined;
 }
 
+/**
+ * The URL a browser opens to start a session. The launch token rides in the
+ * fragment so it never reaches a server log, and the renderer removes it from
+ * the address bar as soon as it reads it. `rendererUrl` names a development
+ * renderer served apart from the host; by default the host serves its own.
+ */
 export function buildWebClientUrl(options: {
   readonly serverUrl: URL;
   readonly launchToken: string;
+  readonly rendererUrl?: URL;
 }): URL {
-  const url = new URL(options.serverUrl);
+  const url = new URL(options.rendererUrl ?? options.serverUrl);
   url.searchParams.set("serverUrl", options.serverUrl.toString());
   url.hash = `launchToken=${options.launchToken}`;
   return url;
+}
+
+/** A fresh 256-bit window capability in the canonical base64url shape. */
+export function generateWindowCapability(): string {
+  return randomBytes(32).toString("base64url");
 }
 
 export function generateWindowId(): WindowId {

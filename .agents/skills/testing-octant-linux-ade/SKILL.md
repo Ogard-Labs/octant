@@ -8,7 +8,7 @@ description: How to run and validate Octant's Linux ADE in Chrome on an Ubuntu d
 ## Environment
 
 - Server: `OCTANT_WEB_URL=http://127.0.0.1:5173 bun run packages/cli/src/bin.ts server run` → http://127.0.0.1:13773 (`/health` returns ok; `/` returns 503 "web client not built" — expected; use the Vite renderer).
-- Renderer: `bun run packages/cli/src/bin.ts web --dev --no-open` → open `http://127.0.0.1:5173/?serverUrl=http%3A%2F%2F127.0.0.1%3A13773%2F` in Chrome. No launch token needed — the renderer POSTs `/api/shell/local-session` automatically; the host admits only the origin named in `OCTANT_WEB_URL`, so another Vite port is refused.
+- Renderer: `bun run packages/cli/src/bin.ts web --dev --no-open` prints a one-time launch URL (`http://127.0.0.1:5173/?serverUrl=…#launchToken=…`); open that exact URL in Chrome within five minutes. The token is single-use and bound to the Vite origin, so print a new one for each fresh tab. A reload keeps the session; the bare address shows "Open Octant from the desktop app or run `octant web`". The host admits only the origin named in `OCTANT_WEB_URL`, so another Vite port is refused.
 - Always `. ~/.config/octant-host/session.env` before CLI use; if stale, run `bash scripts/ade/start-secret-service-session.sh` and then re-source `. ~/.config/octant-host/session.env` (the script runs as a subprocess — its exports do not reach the calling shell).
 - CLI: `bun run packages/cli/src/bin.ts <cmd>` from repo root.
 

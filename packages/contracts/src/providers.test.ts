@@ -2258,6 +2258,72 @@ describe("provider registry contracts", () => {
       decodeProviderObservedState({ ...observed, rawDiagnostics: { port: 1234 } }),
     ).toThrow();
   });
+
+  it("carries a runtime's integration and refuses one that claims tools without a transport", () => {
+    const observed = {
+      instanceId: ids.instance,
+      readiness: "ready",
+      processState: "stopped",
+      models: [],
+      capabilities: {
+        streaming: "supported",
+        resume: "supported",
+        interruption: "supported",
+        approvals: "supported",
+        userQuestions: "supported",
+        reasoning: "supported",
+        usage: "supported",
+        toolActivity: "supported",
+        fileChanges: "supported",
+        diffs: "supported",
+        taskProgress: "supported",
+        nativeChildAgents: "unavailable",
+        harnessAutoReview: "unsupported",
+        nativeAttachments: "supported",
+        nativeWebResearch: "unsupported",
+        appManagedTools: "supported",
+        citations: "supported",
+      },
+      observedAt: occurredAt,
+    } as const;
+    const integration = {
+      tools: { status: "available", transport: "session-mcp-bridge" },
+      activity: { source: "session", observes: ["replies", "tool-calls"] },
+      resume: "precise",
+    } as const;
+
+    expect(decodeProviderObservedState({ ...observed, integration })).toMatchObject({
+      integration,
+    });
+    expect(
+      decodeProviderObservedState({
+        ...observed,
+        integration: {
+          tools: { status: "unavailable", reason: "no-transport" },
+          activity: { source: "none" },
+          resume: "none",
+        },
+      }).integration?.tools,
+    ).toEqual({ status: "unavailable", reason: "no-transport" });
+    expect(() =>
+      decodeProviderObservedState({
+        ...observed,
+        integration: { ...integration, tools: { status: "available" } },
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeProviderObservedState({
+        ...observed,
+        integration: { ...integration, activity: { source: "screen" } },
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeProviderObservedState({
+        ...observed,
+        integration: { ...integration, resume: "maybe" },
+      }),
+    ).toThrow();
+  });
 });
 
 describe("provider model option values", () => {

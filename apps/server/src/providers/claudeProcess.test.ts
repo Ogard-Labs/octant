@@ -567,7 +567,7 @@ describe("Claude runtime confinement", () => {
     expect(readdirSync(ambient)).toEqual([]);
   });
 
-  it("includes Darwin security extraRules for confined Plan launches", () => {
+  it("includes Darwin security extraRules only for subscription confined Plan launches", () => {
     const target = fixture();
     const confinement = recordingConfinement();
     const expectedExtraRules = [
@@ -595,14 +595,17 @@ describe("Claude runtime confinement", () => {
     }
 
     expect(confinement.prepared).toHaveLength(3);
-    for (const launch of confinement.prepared) {
-      if (process.platform === "darwin") {
-        expect(launch.extraRules).toEqual(expectedExtraRules);
-      } else {
-        expect(launch.extraRules).toBeUndefined();
-      }
+    const [subscription, apiKey, helperSentinel] = confinement.prepared;
+    // Only a subscription launch signs in from the store. An API-key launch
+    // reads nothing there, so it keeps the profile's default deny.
+    if (process.platform === "darwin") {
+      expect(subscription?.extraRules).toEqual(expectedExtraRules);
+      expect(apiKey?.extraRules).toBeUndefined();
+      expect(helperSentinel?.extraRules).toEqual(expectedExtraRules);
+    } else {
+      expect(subscription?.extraRules).toBeUndefined();
+      expect(apiKey?.extraRules).toBeUndefined();
     }
-    expect(confinement.prepared[0]?.extraRules).toEqual(confinement.prepared[1]?.extraRules);
     expect(JSON.stringify(confinement.prepared)).not.toContain("helper-token-sentinel");
   });
 

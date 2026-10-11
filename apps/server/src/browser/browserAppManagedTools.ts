@@ -1,5 +1,5 @@
 import { browserToolImage } from "./browserToolImage";
-import { BROWSER_TOOL_DEFINITION } from "./browserToolDefinition";
+import { BROWSER_TOOL_DEFINITION, BROWSER_TOOL_HELP } from "./browserToolDefinition";
 import type {
   BrowserActionRequest,
   BrowserAutomationSnapshot,
@@ -12,7 +12,7 @@ import type {
 } from "@octant/contracts";
 import { MAX_BROWSER_TABS_PER_CONTEXT, sameToolActionAuthority } from "@octant/contracts";
 import { isToolAllowedByAllowlist } from "@octant/domain";
-import type { AppManagedToolSet } from "../providers/appManagedToolSet";
+import { withToolFamilyHelp, type AppManagedToolSet } from "../providers/appManagedToolSet";
 import type { BrowserToolApprovalService } from "./browserToolApprovalService";
 
 export const BROWSER_TOOL_NAME = BROWSER_TOOL_DEFINITION.name;
@@ -125,7 +125,7 @@ export function createBrowserAppManagedTools(
   const definitions = isToolAllowedByAllowlist(options.toolConstraints ?? [], BROWSER_TOOL_NAME)
     ? [BROWSER_TOOL_DEFINITION]
     : [];
-  return {
+  const tools: AppManagedToolSet = {
     definitions,
     execute: async ({ inputJson, name, signal }) => {
       if (name !== BROWSER_TOOL_NAME || definitions.length === 0) {
@@ -261,6 +261,7 @@ export function createBrowserAppManagedTools(
       return browserResult(acted, input.operation === "screenshot");
     },
   };
+  return withToolFamilyHelp(tools, BROWSER_TOOL_HELP);
 }
 
 function modelIsCurrent(options: BrowserAppManagedToolsOptions): boolean {

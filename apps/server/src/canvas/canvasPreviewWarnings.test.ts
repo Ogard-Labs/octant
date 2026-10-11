@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { decodeCanvasBlock } from "@octant/contracts";
-import type { CanvasBlock } from "@octant/contracts/canvas";
+import { CANVAS_SCHEMA_VERSION, type CanvasBlock } from "@octant/contracts/canvas";
 import { chartExampleBlocks } from "@octant/domain";
 import { canvasPreviewWarnings, type CanvasPreviewPalette } from "./canvasPreviewWarnings";
 import { canvasPreviewPalette } from "./canvasPreviewService";
@@ -144,6 +144,41 @@ describe("canvasPreviewWarnings", () => {
     );
     expect(blocks).toHaveLength(3);
     expect(warningsFor(blocks, { width: 360 })).toEqual([]);
+  });
+
+  it("measures a chart placed in a dashboard at its cell's width, not the document's", () => {
+    const chart = groupedBar(
+      "spend",
+      [
+        { seriesId: "a", label: "Plan", values: [1, 2, 3, 4] },
+        { seriesId: "b", label: "Actual", values: [2, 2, 3, 5] },
+      ],
+      ["Compute nodes", "Object storage", "Network egress", "Support plans"],
+    );
+    const tile = block({
+      blockId: "api",
+      schemaVersion: CANVAS_SCHEMA_VERSION,
+      kind: "status",
+      label: "API",
+      value: "Healthy",
+      tone: "success",
+    });
+    const dashboard = (span: number) =>
+      block({
+        blockId: "board",
+        schemaVersion: CANVAS_SCHEMA_VERSION,
+        kind: "dashboard",
+        title: "Board",
+        columns: 4,
+        cells: [{ blockId: "spend", span }, { blockId: "api" }],
+      });
+    // Alone at 1100px every label has room.
+    expect(warningsFor([chart], { width: 1100 })).toEqual([]);
+    // A quarter of a four-column grid is too narrow for the same labels.
+    const narrow = warningsFor([dashboard(1), chart, tile], { width: 1100 });
+    expect(narrow.some((warning) => warning.kind === "clipped-label")).toBe(true);
+    // The whole row is the document's width less the cell's frame.
+    expect(warningsFor([dashboard(4), chart, tile], { width: 1100 })).toEqual([]);
   });
 
   it("reports an inline document that is past the block cap", () => {
