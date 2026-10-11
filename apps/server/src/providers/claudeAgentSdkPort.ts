@@ -11,6 +11,7 @@ import type {
   ProviderFailure,
   ProviderToolDefinition,
 } from "@octant/contracts";
+import { withClaudeAccountDirectory } from "./claudeAccountDirectory";
 import { createManagedMcpTools, type ManagedToolAnswer } from "./managedMcpTools";
 import { Effect, Stream, type Scope } from "effect";
 
@@ -366,6 +367,7 @@ export interface ClaudeAgentSdkPort {
   readonly findSession: (input: {
     readonly sessionId: string;
     readonly projectRoot: string;
+    readonly configDirectory?: string;
   }) => Effect.Effect<ClaudeSessionMetadata | undefined, ProviderFailure>;
 }
 
@@ -1105,11 +1107,13 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
       });
       return Effect.acquireRelease(acquire, (query, _exit) => query.close());
     },
-    findSession: ({ sessionId, projectRoot }) =>
+    findSession: ({ sessionId, projectRoot, configDirectory }) =>
       Effect.tryPromise({
         try: async () => {
           const sessions = decodeSessions(
-            await sdk.listSessions({ dir: projectRoot }),
+            await withClaudeAccountDirectory(configDirectory, () =>
+              sdk.listSessions({ dir: projectRoot }),
+            ),
             projectRoot,
           );
           return sessions.find((session) => session.sessionId === sessionId);

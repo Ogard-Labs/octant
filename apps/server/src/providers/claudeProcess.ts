@@ -9,8 +9,8 @@ import {
   rmSync,
   statSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
-import { isAbsolute, join, sep } from "node:path";
+import { homedir, tmpdir } from "node:os";
+import { isAbsolute, join, resolve, sep } from "node:path";
 
 import type {
   Options as ClaudeAgentSdkOptions,
@@ -422,20 +422,47 @@ function planStateDirectories(
     try {
       return realpathSync(path);
     } catch {
-      // A provider may create its state directory during launch; preserve the
-      // configured path when it does not exist yet.
-      return path;
+      // A provider may create its state directory during launch; resolve the
+      // configured path so `..` cannot slip under the bound root.
+      return resolve(path);
     }
   });
+  const home = (() => {
+    try {
+      return realpathSync(homedir());
+    } catch {
+      return homedir();
+    }
+  })();
   for (const path of canonicalDirectories) {
-    if (path === boundRoot) {
+    // A write grant that is the checkout, sits inside it, or contains it
+    // reopens Plan's bound root. Home, its ancestors, `/`, and arbitrary
+    // home subtrees (Documents, .ssh) are the same class of grant: only
+    // Claude's own state directories under home may be writable.
+    if (
+      claudePlanStateDirectoryReopensHome(path, home) ||
+      path === boundRoot ||
+      path.startsWith(`${boundRoot}${sep}`) ||
+      boundRoot.startsWith(`${path}${sep}`)
+    ) {
       throw new SeatbeltConfinementError(
         "invalid-configuration",
-        "Claude Plan confinement cannot use a project root that is also a runtime state directory.",
+        "Claude Plan confinement cannot grant a runtime state directory that overlaps the checkout or the user's home.",
       );
     }
   }
   return canonicalDirectories;
+}
+
+/** Plan may write Claude's own state dirs, not the rest of the home tree. */
+export function claudePlanStateDirectoryReopensHome(path: string, home: string): boolean {
+  if (path === "/" || path === home || home.startsWith(`${path}${sep}`)) return true;
+  if (!path.startsWith(`${home}${sep}`)) return false;
+  if (path === `${home}${sep}.claude`) return false;
+  return !(
+    path === `${home}${sep}.claude-accounts` ||
+    path.startsWith(`${home}${sep}.claude-accounts${sep}`)
+  );
 }
 
 function claudeRuntimeStateDirectories(environment: SpawnOptions["env"]): ReadonlyArray<string> {
@@ -713,7 +740,7 @@ function spawnOwnedClaudeProcess(
 
 export function makeClaudeProcessLive(options: ClaudeProcessOptions = {}): ClaudeProcessPort {
   const resolved: ResolvedClaudeProcessOptions = {
-    inheritedEnvironment: options.inheritedEnvironment ?? process.env,
+    inheritedEnvironment: { ...(options.inheritedEnvironment ?? process.env) },
     confinement: options.confinement ?? makeSeatbeltConfinementLive(),
     onDiagnostic: options.onDiagnostic,
     probeOutputBytes: options.probeOutputBytes ?? DEFAULT_PROBE_OUTPUT_BYTES,

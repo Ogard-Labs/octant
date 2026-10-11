@@ -4281,10 +4281,11 @@ export function startOctantServer(
           agentRunSessionStore.removeProviderIdentities(instanceId, signal),
         ]);
       },
-      // The provider is already gone; a store that cannot be reached leaves the
-      // token behind rather than reporting the removal as failed.
+      // Removal swallows failure at the service after the instance is gone.
+      // A directory change must see this rejection so the old helper token
+      // cannot follow the new account.
       clearClaudeHelperSignIn: async (instanceId) => {
-        await claudeHelperSignInService?.forgetRemovedProvider(instanceId).catch(() => undefined);
+        await claudeHelperSignInService?.forgetRemovedProvider(instanceId);
       },
       clearRuntimeUsageLimits: (instanceId) => providerRuntimeUsageLimitsStore.clear(instanceId),
       driver: (instance) =>

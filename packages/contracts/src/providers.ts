@@ -554,10 +554,41 @@ export const CodexProviderConfiguration = Schema.Struct({
 export type CodexProviderConfiguration = typeof CodexProviderConfiguration.Type;
 export const ClaudeAuthentication = Schema.Literal("subscription", "api-key");
 export type ClaudeAuthentication = typeof ClaudeAuthentication.Type;
+/** Closed swatch set so Claude accounts stay distinguishable in the picker. */
+export const CLAUDE_ACCOUNT_ACCENTS = [
+  "rust",
+  "gold",
+  "green",
+  "teal",
+  "blue",
+  "violet",
+  "rose",
+] as const;
+export const ClaudeAccountAccent = Schema.Literal(...CLAUDE_ACCOUNT_ACCENTS);
+export type ClaudeAccountAccent = typeof ClaudeAccountAccent.Type;
+/** Linear scan. A `/+$` replace is polynomial in the trailing slashes. */
+function claudeConfigDirectoryBasename(path: string): string {
+  let end = path.length;
+  while (end > 0 && path.charAt(end - 1) === "/") {
+    end -= 1;
+  }
+  const slash = path.lastIndexOf("/", end - 1);
+  return slash === -1 ? path.slice(0, end) : path.slice(slash + 1, end);
+}
+
+const ClaudeConfigDirectory = Schema.NonEmptyTrimmedString.pipe(
+  Schema.filter((path) => {
+    if (!path.startsWith("/")) return false;
+    return claudeConfigDirectoryBasename(path) !== ".credentials.json";
+  }),
+);
 export const ClaudeProviderConfiguration = Schema.Struct({
   kind: Schema.Literal("claude-agent-sdk"),
   binaryPath: Schema.NonEmptyTrimmedString,
   authentication: ClaudeAuthentication,
+  /** Claude-owned directory for this account. Absent uses Claude's default. */
+  configDirectory: Schema.optional(ClaudeConfigDirectory),
+  accent: Schema.optional(ClaudeAccountAccent),
 }).annotations(strict);
 export type ClaudeProviderConfiguration = typeof ClaudeProviderConfiguration.Type;
 

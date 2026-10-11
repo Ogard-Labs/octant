@@ -630,9 +630,119 @@ describe("Claude runtime confinement", () => {
         env: { ...target.environment, HOME: configHome, CLAUDE_CONFIG_DIR: configHome },
         signal: new AbortController().signal,
       }),
-    ).toThrow("also a runtime state directory");
+    ).toThrow("overlaps the checkout or the user's home");
     expect(confinement.prepared).toEqual([]);
     expect(pids(configHome)).toEqual([]);
+  });
+
+  it("refuses a Plan turn whose account directory is inside the checkout", () => {
+    const target = fixture();
+    const accountDirectory = join(target.root, ".claude-accounts", "work");
+    mkdirSync(accountDirectory, { recursive: true });
+    const confinement = recordingConfinement();
+
+    expect(() =>
+      makePort(target, { confinement: confinement.port }).spawn({
+        projectRoot: target.root,
+        executionPolicy: "plan",
+      })({
+        command: target.binaryPath,
+        args: ["sdk-test"],
+        cwd: target.root,
+        env: { ...target.environment, CLAUDE_CONFIG_DIR: accountDirectory },
+        signal: new AbortController().signal,
+      }),
+    ).toThrow("overlaps the checkout or the user's home");
+    expect(confinement.prepared).toEqual([]);
+    expect(pids(target.root)).toEqual([]);
+  });
+
+  it("refuses a Plan turn whose account directory is an ancestor of the checkout", () => {
+    const target = fixture();
+    const confinement = recordingConfinement();
+
+    expect(() =>
+      makePort(target, { confinement: confinement.port }).spawn({
+        projectRoot: target.root,
+        executionPolicy: "plan",
+      })({
+        command: target.binaryPath,
+        args: ["sdk-test"],
+        cwd: target.root,
+        env: { ...target.environment, CLAUDE_CONFIG_DIR: dirname(target.root) },
+        signal: new AbortController().signal,
+      }),
+    ).toThrow("overlaps the checkout or the user's home");
+    expect(confinement.prepared).toEqual([]);
+    expect(pids(target.root)).toEqual([]);
+  });
+
+  it("refuses a Plan turn whose account directory is a sensitive home subtree", () => {
+    const target = fixture();
+    const home = process.env.HOME;
+    if (home === undefined) throw new Error("Expected HOME for the home-subtree refusal.");
+    const confinement = recordingConfinement();
+
+    expect(() =>
+      makePort(target, { confinement: confinement.port }).spawn({
+        projectRoot: target.root,
+        executionPolicy: "plan",
+      })({
+        command: target.binaryPath,
+        args: ["sdk-test"],
+        cwd: target.root,
+        env: { ...target.environment, CLAUDE_CONFIG_DIR: join(home, ".ssh") },
+        signal: new AbortController().signal,
+      }),
+    ).toThrow("overlaps the checkout or the user's home");
+    expect(confinement.prepared).toEqual([]);
+    expect(pids(target.root)).toEqual([]);
+  });
+
+  it("refuses a Plan turn whose account directory is an ancestor of the user's home", () => {
+    const target = fixture();
+    const home = process.env.HOME;
+    if (home === undefined) throw new Error("Expected HOME for the home-ancestor refusal.");
+    const ancestor = dirname(home);
+    if (ancestor === "/") throw new Error("Expected a home directory with a parent besides /.");
+    const confinement = recordingConfinement();
+
+    expect(() =>
+      makePort(target, { confinement: confinement.port }).spawn({
+        projectRoot: target.root,
+        executionPolicy: "plan",
+      })({
+        command: target.binaryPath,
+        args: ["sdk-test"],
+        cwd: target.root,
+        env: { ...target.environment, CLAUDE_CONFIG_DIR: ancestor },
+        signal: new AbortController().signal,
+      }),
+    ).toThrow("overlaps the checkout or the user's home");
+    expect(confinement.prepared).toEqual([]);
+    expect(pids(target.root)).toEqual([]);
+  });
+
+  it("refuses a Plan turn whose account directory is the user's home", () => {
+    const target = fixture();
+    const home = process.env.HOME;
+    if (home === undefined) throw new Error("Expected HOME for the home-directory refusal.");
+    const confinement = recordingConfinement();
+
+    expect(() =>
+      makePort(target, { confinement: confinement.port }).spawn({
+        projectRoot: target.root,
+        executionPolicy: "plan",
+      })({
+        command: target.binaryPath,
+        args: ["sdk-test"],
+        cwd: target.root,
+        env: { ...target.environment, CLAUDE_CONFIG_DIR: home },
+        signal: new AbortController().signal,
+      }),
+    ).toThrow("overlaps the checkout or the user's home");
+    expect(confinement.prepared).toEqual([]);
+    expect(pids(target.root)).toEqual([]);
   });
 
   it("refuses a Plan turn whose temporary directory is inside the checkout", () => {

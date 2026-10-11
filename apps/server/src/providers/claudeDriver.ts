@@ -1,7 +1,7 @@
 import type { ManagedToolAnswer } from "./managedMcpTools";
 import { randomUUID } from "node:crypto";
 import { mkdtemp, realpath, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 
 import {
@@ -61,7 +61,11 @@ import {
   type ClaudeEnvironmentScope,
   type ClaudeEnvironmentScopeOptions,
 } from "./claudeEnvironment";
-import { CONFINED_CLAUDE_EXECUTION_POLICIES, type ClaudeProcessPort } from "./claudeProcess";
+import {
+  claudePlanStateDirectoryReopensHome,
+  CONFINED_CLAUDE_EXECUTION_POLICIES,
+  type ClaudeProcessPort,
+} from "./claudeProcess";
 import {
   CLAUDE_HELPER_EXPIRED_MESSAGE,
   CLAUDE_HELPER_NOT_CONNECTED_MESSAGE,
@@ -171,6 +175,27 @@ function claudeSandboxSettings(
   };
 }
 
+function claudeAccountDirectoryBroadensPlan(
+  projectRoot: string,
+  configDirectory: string,
+  isProjectConfinedPath: (projectRoot: string, absolutePath: string) => boolean,
+): boolean {
+  const directory = configDirectory.replace(/\/+$/, "") || "/";
+  if (claudePlanStateDirectoryReopensHome(directory, homedir()) || directory === projectRoot)
+    return true;
+  if (projectRoot.startsWith(`${directory}/`)) return true;
+  try {
+    if (isProjectConfinedPath(projectRoot, directory) === true) return true;
+  } catch {
+    return true;
+  }
+  try {
+    return isProjectConfinedPath(directory, projectRoot) === true;
+  } catch {
+    return true;
+  }
+}
+
 const availableCapabilities: ProviderCapabilities = {
   streaming: "supported",
   resume: "supported",
@@ -216,6 +241,8 @@ export interface ClaudeDriverOptions {
   readonly instanceId: ProviderInstanceId;
   readonly binaryPath: string;
   readonly authentication: ClaudeAuthentication;
+  /** Claude-owned directory for this account. Isolated launches skip helper tokens. */
+  readonly configDirectory?: string;
   readonly process: ClaudeProcessPort;
   readonly sdk: ClaudeAgentSdkPort;
   readonly credentialResolver?: ProviderCredentialResolver;
@@ -752,7 +779,10 @@ function makeProbe(
       const version = yield* options.process.probeVersion(options.binaryPath);
       let apiKey: string | undefined;
       if (options.authentication === "subscription") {
-        const environment = yield* environmentFactory("subscription");
+        const environment = yield* environmentFactory(
+          "subscription",
+          options.configDirectory === undefined ? {} : { configDirectory: options.configDirectory },
+        );
         const status = yield* options.process.probeSubscription(
           options.binaryPath,
           environment.environment,
@@ -816,11 +846,12 @@ function makeProbe(
         }
         apiKey = resolved.right;
       }
-      const sdkResult = yield* probeSdk(
-        options,
-        environmentFactory,
-        apiKey === undefined ? {} : { apiKey },
-      ).pipe(
+      const sdkResult = yield* probeSdk(options, environmentFactory, {
+        ...(apiKey === undefined ? {} : { apiKey }),
+        ...(options.configDirectory === undefined
+          ? {}
+          : { configDirectory: options.configDirectory }),
+      }).pipe(
         Effect.map((models) => ({ kind: "ready" as const, models })),
         Effect.catchAll((providerFailure) =>
           providerFailure.category === "protocol" || providerFailure.category === "unsupported"
@@ -1249,6 +1280,20 @@ function makeConnection(
           CONFINED_CLAUDE_EXECUTION_POLICIES.has(input.executionPolicy)
             ? await connectedHelperToken(options)
             : undefined;
+        if (
+          options.configDirectory !== undefined &&
+          CONFINED_CLAUDE_EXECUTION_POLICIES.has(input.executionPolicy) &&
+          claudeAccountDirectoryBroadensPlan(
+            projectRoot,
+            options.configDirectory,
+            options.isProjectConfinedPath,
+          )
+        ) {
+          throw failure(
+            "invalid-configuration",
+            "Claude Plan confinement cannot use an account directory that overlaps the checkout or the user's home.",
+          );
+        }
         scope = await runSetupEffect(Scope.make(), signal);
         const initialized = deferred<string>();
         // Startup no longer waits on this: the runtime initializes with the
@@ -1256,14 +1301,13 @@ function makeConnection(
         void initialized.promise.catch(() => undefined);
         const terminalResult = deferred<void>();
         const environment = await runSetupEffect(
-          environmentFactory(
-            options.authentication,
-            apiKey !== undefined
-              ? { apiKey }
-              : helperToken !== undefined
-                ? { oauthToken: helperToken }
-                : {},
-          ).pipe(Effect.provideService(Scope.Scope, scope)),
+          environmentFactory(options.authentication, {
+            ...(apiKey !== undefined ? { apiKey } : {}),
+            ...(helperToken !== undefined ? { oauthToken: helperToken } : {}),
+            ...(options.configDirectory === undefined
+              ? {}
+              : { configDirectory: options.configDirectory }),
+          }).pipe(Effect.provideService(Scope.Scope, scope)),
           signal,
         );
         const runtimeVersion = await runSetupEffect(
@@ -1743,6 +1787,9 @@ function makeConnection(
               options.sdk.findSession({
                 sessionId: input.resumeCursor.value,
                 projectRoot,
+                ...(options.configDirectory === undefined
+                  ? {}
+                  : { configDirectory: options.configDirectory }),
               }),
               signal,
             );

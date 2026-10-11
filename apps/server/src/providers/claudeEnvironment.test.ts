@@ -1,10 +1,14 @@
 import { existsSync, readdirSync, statSync } from "node:fs";
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import type { ProviderFailure } from "@octant/contracts";
 import { Effect, Either, Exit, Scope } from "effect";
 import { describe, expect, it } from "vitest";
 
 import { makeClaudeEnvironmentScope, sanitizeClaudeEnvironment } from "./claudeEnvironment";
+import { isolatedClaudeAccountEnvironment } from "./claudeAccountIsolation";
 
 const requiredGuards = {
   CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
@@ -143,6 +147,7 @@ describe("makeClaudeEnvironmentScope", () => {
       HOME: "/Users/provider-user",
       LANG: "en_US.UTF-8",
       CLAUDE_CONFIG_DIR: configDirectory,
+      CLAUDE_SECURESTORAGE_CONFIG_DIR: configDirectory,
       ANTHROPIC_API_KEY: "broker-resolved-api-key-sentinel",
       ...requiredGuards,
     });
@@ -189,6 +194,46 @@ describe("makeClaudeEnvironmentScope", () => {
     await Effect.runPromise(Scope.close(scope, Exit.void));
 
     expect(heldEnvironment.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
+  });
+
+  it("keeps an isolated Claude account on its directory and the connected helper token", async () => {
+    const accountDirectory = join(await mkdtemp(join(tmpdir(), "octant-claude-account-")), "work");
+    const scope = await Effect.runPromise(Scope.make());
+    const acquired = await Effect.runPromise(
+      makeClaudeEnvironmentScope("subscription", {
+        hostEnvironment: hostileHostEnvironment,
+        configDirectory: accountDirectory,
+        oauthToken: "helper-token-sentinel-0123456789",
+      }).pipe(Effect.provideService(Scope.Scope, scope)),
+    );
+
+    expect(acquired.environment.CLAUDE_CONFIG_DIR).toBe(accountDirectory);
+    expect(acquired.environment.CLAUDE_SECURESTORAGE_CONFIG_DIR).toBe(accountDirectory);
+    expect(acquired.environment.CLAUDE_CODE_OAUTH_TOKEN).toBe("helper-token-sentinel-0123456789");
+    expect(acquired.environment.ANTHROPIC_API_KEY).toBeUndefined();
+    expect(existsSync(accountDirectory)).toBe(true);
+    await Effect.runPromise(Scope.close(scope, Exit.void));
+    expect(acquired.environment.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
+  });
+
+  it("keeps an API-key account on its stable directory instead of deleting it", async () => {
+    const parent = await mkdtemp(join(tmpdir(), "octant-claude-stable-"));
+    const accountDirectory = join(parent, "account");
+    const scope = await Effect.runPromise(Scope.make());
+    const acquired = await Effect.runPromise(
+      makeClaudeEnvironmentScope("api-key", {
+        hostEnvironment: hostileHostEnvironment,
+        apiKey: "broker-resolved-api-key-sentinel",
+        configDirectory: accountDirectory,
+      }).pipe(Effect.provideService(Scope.Scope, scope)),
+    );
+
+    expect(acquired.configDirectory).toBe(accountDirectory);
+    expect(acquired.environment.CLAUDE_CONFIG_DIR).toBe(accountDirectory);
+    expect(acquired.environment.ANTHROPIC_API_KEY).toBe("broker-resolved-api-key-sentinel");
+    await Effect.runPromise(Scope.close(scope, Exit.void));
+    expect(acquired.environment.ANTHROPIC_API_KEY).toBeUndefined();
+    expect(existsSync(accountDirectory)).toBe(true);
   });
 
   it("never passes an ambient OAuth token to a subscription launch", async () => {

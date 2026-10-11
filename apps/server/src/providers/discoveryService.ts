@@ -7,6 +7,7 @@ import type { ProviderDiscoveryDescriptor } from "@octant/provider-sdk/discovery
 import { discoverableDescriptorsForAdmittedDrivers } from "@octant/provider-sdk/driver-plugins";
 import { execVersionRead, prepareConfinedVersionProbe } from "../process/confinedVersionProbe";
 import type { SeatbeltConfinementPort } from "../process/seatbeltProfile";
+import { snapshotClaudeHostEnvironment } from "./claudeAccountDirectory";
 
 // ── Budgets ─────────────────────────────────────────────────────────────────
 
@@ -119,9 +120,13 @@ export function makeDiscoveryService(options: DiscoveryServiceOptions = {}): Dis
   const fs = options.fs ?? defaultFs;
   const now = options.now ?? Date.now;
   const hostId = options.hostId ?? "local";
-  const environment = options.environment ?? process.env;
+  const explicitEnvironment = options.environment;
   const admittedDriverKinds = options.admittedDriverKinds ?? admittedBundledProviderDriverKinds();
   const versionProbeConfinement = options.versionProbeConfinement;
+  const resolveEnvironment = async (): Promise<NodeJS.ProcessEnv> => {
+    if (explicitEnvironment !== undefined) return explicitEnvironment;
+    return await snapshotClaudeHostEnvironment();
+  };
 
   let lastScanCandidates: DiscoveryCandidate[] = [];
 
@@ -132,6 +137,7 @@ export function makeDiscoveryService(options: DiscoveryServiceOptions = {}): Dis
   let inFlightScan: Promise<DiscoverySnapshot> | undefined;
   const runScan = async (signal?: AbortSignal): Promise<DiscoverySnapshot> => {
     const startTime = now();
+    const environment = await resolveEnvironment();
     const descriptors = discoverableDescriptorsForAdmittedDrivers(admittedDriverKinds);
     const candidates: DiscoveryCandidate[] = [];
     const searchedDirectories: Array<
@@ -257,7 +263,7 @@ export function makeDiscoveryService(options: DiscoveryServiceOptions = {}): Dis
         descriptor,
         validated.canonicalPath,
         exec,
-        environment,
+        await resolveEnvironment(),
         versionProbeConfinement,
         signal,
       );

@@ -32,7 +32,9 @@ import {
   createAnthropicCompatibleProvider,
   createAzureFoundryProvider,
   createBflImageProvider,
+  assignedClaudeAccountConfigDirectory,
   createClaudeProvider,
+  formatClaudeAuthLoginCommand,
   createClineProvider,
   createGeminiImageProvider,
   createGeminiProvider,
@@ -1370,6 +1372,114 @@ describe("provider instance policy", () => {
     expect(original).toEqual(kimiCodeProvider());
   });
 
+  it("assigns a Claude-owned account directory under the home folder", () => {
+    expect(assignedClaudeAccountConfigDirectory("/Users/example/", ids.local)).toBe(
+      `/Users/example/.claude-accounts/${ids.local}`,
+    );
+    expect(assignedClaudeAccountConfigDirectory("/Users/example////", ids.local)).toBe(
+      `/Users/example/.claude-accounts/${ids.local}`,
+    );
+  });
+
+  it("refuses a Windows or relative home when assigning a Claude account directory", () => {
+    expect(() => assignedClaudeAccountConfigDirectory("C:\\Users\\example", ids.local)).toThrow(
+      "Claude account home must be an absolute directory.",
+    );
+    expect(() => assignedClaudeAccountConfigDirectory("Users/example", ids.local)).toThrow(
+      "Claude account home must be an absolute directory.",
+    );
+  });
+
+  it("formats the unmodified Claude sign-in command for an isolated account", () => {
+    expect(
+      formatClaudeAuthLoginCommand({
+        binaryPath: "  /opt/homebrew/bin/claude  ",
+        configDirectory: "/Users/example/.claude-accounts/work",
+      }),
+    ).toBe(
+      "CLAUDE_CONFIG_DIR='/Users/example/.claude-accounts/work' CLAUDE_SECURESTORAGE_CONFIG_DIR='/Users/example/.claude-accounts/work' '/opt/homebrew/bin/claude' auth login",
+    );
+  });
+
+  it("refuses a Claude config directory that names a credential file", () => {
+    expect(() =>
+      createClaudeProvider({
+        id: ids.local,
+        displayName: "Claude local",
+        configuration: {
+          kind: "claude-agent-sdk",
+          binaryPath: "/opt/homebrew/bin/claude",
+          authentication: "subscription",
+          configDirectory: "/Users/example/.claude/.credentials.json",
+        },
+        existingInstances: [],
+        expectedVersion: version(0),
+        createdAt,
+      }),
+    ).toThrow("Claude config directory cannot be a credential file.");
+    expect(() =>
+      createClaudeProvider({
+        id: ids.local,
+        displayName: "Claude local",
+        configuration: {
+          kind: "claude-agent-sdk",
+          binaryPath: "/opt/homebrew/bin/claude",
+          authentication: "subscription",
+          configDirectory: "/Users/example/.claude/.credentials.json////",
+        },
+        existingInstances: [],
+        expectedVersion: version(0),
+        createdAt,
+      }),
+    ).toThrow("Claude config directory cannot be a credential file.");
+  });
+
+  it("refuses a Windows or relative Claude config directory", () => {
+    expect(() =>
+      createClaudeProvider({
+        id: ids.local,
+        displayName: "Claude local",
+        configuration: {
+          kind: "claude-agent-sdk",
+          binaryPath: "/opt/homebrew/bin/claude",
+          authentication: "subscription",
+          configDirectory: "C:\\Users\\example\\.claude-accounts\\work",
+        },
+        existingInstances: [],
+        expectedVersion: version(0),
+        createdAt,
+      }),
+    ).toThrow("Claude config directory must be an absolute path.");
+  });
+
+  it("creates a Claude account with a config directory and accent", () => {
+    expect(
+      createClaudeProvider({
+        id: ids.local,
+        displayName: "Work Claude",
+        configuration: {
+          kind: "claude-agent-sdk",
+          binaryPath: "/opt/homebrew/bin/claude",
+          authentication: "subscription",
+          configDirectory: "/Users/example/.claude-accounts/work",
+          accent: "teal",
+        },
+        existingInstances: [],
+        expectedVersion: version(0),
+        createdAt,
+      }),
+    ).toMatchObject({
+      displayName: "Work Claude",
+      configuration: {
+        kind: "claude-agent-sdk",
+        binaryPath: "/opt/homebrew/bin/claude",
+        authentication: "subscription",
+        configDirectory: "/Users/example/.claude-accounts/work",
+        accent: "teal",
+      },
+    });
+  });
+
   it("creates a Claude instance with a normalized binary path and explicit authentication", () => {
     expect(
       createClaudeProvider({
@@ -1961,6 +2071,85 @@ describe("provider instance policy", () => {
         1,
       ),
     ).toThrow("Stop active sessions before changing this provider endpoint.");
+  });
+
+  it("keeps a Claude account pinned to the config directory and accent it was given", () => {
+    const original = createClaudeProvider({
+      id: ids.local,
+      displayName: "Work Claude",
+      configuration: {
+        kind: "claude-agent-sdk",
+        binaryPath: "/opt/homebrew/bin/claude",
+        authentication: "subscription",
+        configDirectory: "/Users/example/.claude-accounts/work",
+        accent: "teal",
+      },
+      existingInstances: [],
+      expectedVersion: version(0),
+      createdAt,
+    });
+    const changed = changeClaudeConfiguration(original, {
+      configuration: {
+        kind: "claude-agent-sdk",
+        binaryPath: "/usr/local/bin/claude",
+        authentication: "subscription",
+        configDirectory: "/Users/example/.claude-accounts/work",
+        accent: "rose",
+      },
+      activeSessionCount: 0,
+      updatedAt,
+    });
+    expect(changed.configuration.configDirectory).toBe("/Users/example/.claude-accounts/work");
+    expect(changed.configuration.accent).toBe("rose");
+    expect(original.configuration.accent).toBe("teal");
+
+    const renamed = renameProvider(original, {
+      displayName: "Personal Claude",
+      existingInstances: [original],
+      updatedAt,
+    });
+    expect(renamed.displayName).toBe("Personal Claude");
+    expect(renamed.configuration).toEqual(original.configuration);
+
+    const disabled = setProviderEnabled(original, { enabled: false, updatedAt });
+    expect(disabled.enabled).toBe(false);
+    expect(disabled.configuration).toEqual(original.configuration);
+
+    const removed = removeProvider(original, { activeSessionCount: 0, updatedAt });
+    expect(removed.configuration).toEqual(original.configuration);
+    expect(
+      removed.driverKind === "claude" ? removed.configuration.configDirectory : undefined,
+    ).toBe("/Users/example/.claude-accounts/work");
+  });
+
+  it("keeps an isolated Claude directory when a later save omits it", () => {
+    const original = createClaudeProvider({
+      id: ids.local,
+      displayName: "Work Claude",
+      configuration: {
+        kind: "claude-agent-sdk",
+        binaryPath: "/opt/homebrew/bin/claude",
+        authentication: "subscription",
+        configDirectory: "/Users/example/.claude-accounts/work",
+        accent: "teal",
+      },
+      existingInstances: [],
+      expectedVersion: version(0),
+      createdAt,
+    });
+    const changed = changeClaudeConfiguration(original, {
+      configuration: {
+        kind: "claude-agent-sdk",
+        binaryPath: "/usr/local/bin/claude",
+        authentication: "subscription",
+        accent: "rose",
+      },
+      activeSessionCount: 0,
+      updatedAt,
+    });
+    expect(changed.configuration.configDirectory).toBe("/Users/example/.claude-accounts/work");
+    expect(changed.configuration.accent).toBe("rose");
+    expect(changed.configuration.binaryPath).toBe("/usr/local/bin/claude");
   });
 
   it("returns an immutable Claude configuration update with a new version and timestamp", () => {

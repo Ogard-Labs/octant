@@ -4995,6 +4995,75 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   box-shadow: none;
 }
 
+.composer-model-picker__rail-accent,
+.claude-account-accent-picker__swatch {
+  --claude-account-accent: var(--octant-text-muted);
+}
+
+.composer-model-picker__rail-accent[data-accent="rust"],
+.claude-account-accent-picker__swatch[data-accent="rust"] {
+  --claude-account-accent: var(--octant-palette-orange);
+}
+
+.composer-model-picker__rail-accent[data-accent="gold"],
+.claude-account-accent-picker__swatch[data-accent="gold"] {
+  --claude-account-accent: var(--octant-palette-yellow);
+}
+
+.composer-model-picker__rail-accent[data-accent="green"],
+.claude-account-accent-picker__swatch[data-accent="green"] {
+  --claude-account-accent: var(--octant-palette-green);
+}
+
+.composer-model-picker__rail-accent[data-accent="teal"],
+.claude-account-accent-picker__swatch[data-accent="teal"] {
+  --claude-account-accent: var(--octant-palette-teal);
+}
+
+.composer-model-picker__rail-accent[data-accent="blue"],
+.claude-account-accent-picker__swatch[data-accent="blue"] {
+  --claude-account-accent: var(--octant-palette-blue);
+}
+
+.composer-model-picker__rail-accent[data-accent="violet"],
+.claude-account-accent-picker__swatch[data-accent="violet"] {
+  --claude-account-accent: var(--octant-palette-purple);
+}
+
+.composer-model-picker__rail-accent[data-accent="rose"],
+.claude-account-accent-picker__swatch[data-accent="rose"] {
+  --claude-account-accent: var(--octant-palette-pink);
+}
+
+.composer-model-picker__rail-accent {
+  position: absolute;
+  left: 2px;
+  bottom: 2px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--claude-account-accent);
+}
+
+.claude-account-accent-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.claude-account-accent-picker__swatch {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--octant-border);
+  border-radius: 50%;
+  background: var(--claude-account-accent);
+}
+
+.claude-account-accent-picker__swatch[data-selected="true"] {
+  box-shadow: 0 0 0 2px var(--octant-focus-ring);
+}
+
 .composer-model-picker__rail-item--favorites {
   color: var(--octant-text-muted);
 }

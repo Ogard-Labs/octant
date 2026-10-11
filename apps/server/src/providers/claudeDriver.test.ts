@@ -9,7 +9,8 @@ import {
 } from "@octant/contracts";
 import { Effect, Exit, Fiber, PubSub, Scope, Stream } from "effect";
 import { existsSync, readdirSync } from "node:fs";
-import { basename, isAbsolute, resolve } from "node:path";
+import { homedir } from "node:os";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
 import type { ProviderCredentialResolver } from "./credentialBrokerClient";
@@ -182,6 +183,7 @@ function harness(
   options: {
     readonly models?: ClaudeQueryPort["initialization"]["models"];
     readonly autoCompactThreshold?: number;
+    readonly configDirectory?: string;
   } = {},
 ) {
   const queries: FakeQuery[] = [];
@@ -241,20 +243,36 @@ function harness(
   const releasedEnvironments: NodeJS.ProcessEnv[] = [];
   const makeEnvironmentScope = (
     mode: ClaudeAuthentication,
-    options?: { readonly apiKey?: string; readonly oauthToken?: string },
+    options?: {
+      readonly apiKey?: string;
+      readonly oauthToken?: string;
+      readonly configDirectory?: string;
+    },
   ): Effect.Effect<ClaudeEnvironmentScope, ProviderFailure, Scope.Scope> =>
     Effect.acquireRelease(
       Effect.sync(() => ({
         environment:
-          mode === "api-key"
-            ? { PATH: "/usr/bin", ANTHROPIC_API_KEY: options?.apiKey }
-            : {
+          options?.configDirectory !== undefined
+            ? {
                 PATH: "/usr/bin",
-                CLAUDE_CONFIG_DIR: "/provider-native",
-                ...(options?.oauthToken === undefined
-                  ? {}
-                  : { CLAUDE_CODE_OAUTH_TOKEN: options.oauthToken }),
-              },
+                CLAUDE_CONFIG_DIR: options.configDirectory,
+                CLAUDE_SECURESTORAGE_CONFIG_DIR: options.configDirectory,
+                ...(mode === "api-key" && options.apiKey !== undefined
+                  ? { ANTHROPIC_API_KEY: options.apiKey }
+                  : {}),
+                ...(mode === "subscription" && options.oauthToken !== undefined
+                  ? { CLAUDE_CODE_OAUTH_TOKEN: options.oauthToken }
+                  : {}),
+              }
+            : mode === "api-key"
+              ? { PATH: "/usr/bin", ANTHROPIC_API_KEY: options?.apiKey }
+              : {
+                  PATH: "/usr/bin",
+                  CLAUDE_CONFIG_DIR: "/provider-native",
+                  ...(options?.oauthToken === undefined
+                    ? {}
+                    : { CLAUDE_CODE_OAUTH_TOKEN: options.oauthToken }),
+                },
       })),
       ({ environment }) =>
         Effect.sync(() => {
@@ -305,6 +323,9 @@ function harness(
       instanceId,
       binaryPath: "/opt/homebrew/bin/claude",
       authentication: selectedAuthentication,
+      ...(options.configDirectory === undefined
+        ? {}
+        : { configDirectory: options.configDirectory }),
       process,
       sdk,
       credentialResolver,
@@ -4232,6 +4253,124 @@ describe("Claude for helpers", () => {
     expect(f.opens[1]?.authEnvironment.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
     // The connected token stands in for the keychain probe it could not pass.
     expect(f.process.probeSubscription).toHaveBeenCalledOnce();
+  });
+
+  it("keeps an isolated Claude account on its own directory and the connected helper token", async () => {
+    const accountDirectory = "/Users/example/.claude-accounts/work";
+    const f = harness("subscription", "current-session", { configDirectory: accountDirectory });
+    const acquired = await acquire(f.driver, "chat");
+    try {
+      await Effect.runPromise(
+        acquired.connection.start({ sessionId, modelId, executionPolicy: "plan" }),
+      );
+    } finally {
+      await acquired.close();
+    }
+
+    expect(f.helperSignIn.read).toHaveBeenCalled();
+    expect(f.opens[0]?.authEnvironment.CLAUDE_CODE_OAUTH_TOKEN).toBe(HELPER_TOKEN);
+    expect(f.opens[0]?.authEnvironment.CLAUDE_CONFIG_DIR).toBe(accountDirectory);
+  });
+
+  it("refuses a Plan turn whose isolated account directory is inside the checkout", async () => {
+    const f = harness("subscription", "current-session", {
+      configDirectory: `${projectRoot}/.claude-accounts/work`,
+    });
+    const acquired = await acquire(f.driver, "chat");
+    try {
+      const exit = await Effect.runPromiseExit(
+        acquired.connection.start({ sessionId, modelId, executionPolicy: "plan" }),
+      );
+      expect(String(exit)).toContain("overlaps the checkout or the user's home");
+    } finally {
+      await acquired.close();
+    }
+    expect(f.opens).toHaveLength(0);
+  });
+
+  it("refuses a Plan turn whose isolated account directory is an ancestor of the checkout", async () => {
+    const f = harness("subscription", "current-session", { configDirectory: "/tmp" });
+    const acquired = await acquire(f.driver, "chat");
+    try {
+      const exit = await Effect.runPromiseExit(
+        acquired.connection.start({ sessionId, modelId, executionPolicy: "plan" }),
+      );
+      expect(String(exit)).toContain("overlaps the checkout or the user's home");
+    } finally {
+      await acquired.close();
+    }
+    expect(f.opens).toHaveLength(0);
+  });
+
+  it("refuses a Plan turn whose isolated account directory is a sensitive home subtree", async () => {
+    const f = harness("subscription", "current-session", {
+      configDirectory: join(homedir(), ".ssh"),
+    });
+    const acquired = await acquire(f.driver, "chat");
+    try {
+      const exit = await Effect.runPromiseExit(
+        acquired.connection.start({ sessionId, modelId, executionPolicy: "plan" }),
+      );
+      expect(String(exit)).toContain("overlaps the checkout or the user's home");
+    } finally {
+      await acquired.close();
+    }
+    expect(f.opens).toHaveLength(0);
+  });
+
+  it("refuses a Plan turn whose isolated account directory is an ancestor of the user's home", async () => {
+    const ancestor = dirname(homedir());
+    if (ancestor === "/") throw new Error("Expected a home directory with a parent besides /.");
+    const f = harness("subscription", "current-session", { configDirectory: ancestor });
+    const acquired = await acquire(f.driver, "chat");
+    try {
+      const exit = await Effect.runPromiseExit(
+        acquired.connection.start({ sessionId, modelId, executionPolicy: "plan" }),
+      );
+      expect(String(exit)).toContain("overlaps the checkout or the user's home");
+    } finally {
+      await acquired.close();
+    }
+    expect(f.opens).toHaveLength(0);
+  });
+
+  it("refuses a Plan turn whose isolated account directory is the user's home", async () => {
+    const f = harness("subscription", "current-session", { configDirectory: homedir() });
+    const acquired = await acquire(f.driver, "chat");
+    try {
+      const exit = await Effect.runPromiseExit(
+        acquired.connection.start({ sessionId, modelId, executionPolicy: "plan" }),
+      );
+      expect(String(exit)).toContain("overlaps the checkout or the user's home");
+    } finally {
+      await acquired.close();
+    }
+    expect(f.opens).toHaveLength(0);
+  });
+
+  it("resumes an isolated Claude account from that account's directory", async () => {
+    const accountDirectory = "/Users/example/.claude-accounts/work";
+    const f = harness("subscription", "current-session", { configDirectory: accountDirectory });
+    const acquired = await acquire(f.driver, "chat");
+    const started = await Effect.runPromise(
+      acquired.connection.start({ sessionId, modelId, executionPolicy: "plan" }),
+    );
+    await Effect.runPromise(acquired.connection.stop(sessionId));
+    await acquired.close();
+    const recreated = await acquire(f.makeDriver(), "chat");
+    await Effect.runPromise(
+      recreated.connection.resume({
+        sessionId,
+        resumeCursor: started.resumeCursor!,
+        executionPolicy: "plan",
+      }),
+    );
+    expect(f.sdk.findSession).toHaveBeenCalledWith({
+      sessionId: "sdk-session-1",
+      projectRoot,
+      configDirectory: accountDirectory,
+    });
+    await recreated.close();
   });
 
   it("refuses a confined launch with the step that connects Claude for helpers", async () => {

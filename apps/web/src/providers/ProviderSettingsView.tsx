@@ -408,6 +408,9 @@ export function ProviderSettingsView(props: ProviderSettingsViewProps) {
           <ProviderCreateForm
             allowedProviderTypes={GENERAL_PROVIDER_TYPES}
             busy={props.busy}
+            existingClaudeAccountCount={
+              props.instances.filter((instance) => instance.driverKind === "claude").length
+            }
             heading="Agent runtime"
             hint="Installed runtimes are detected automatically. Use this for an unusual executable location or a runtime the scan missed. Model endpoints such as OpenAI-compatible APIs are added under Octant Harness › Model endpoints."
             credentialManagementAvailable={props.credentialManagementAvailable}

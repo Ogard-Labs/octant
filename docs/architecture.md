@@ -2040,7 +2040,22 @@ The provider layer is defined by `@octant/provider-sdk` and implemented in
 - **Registry.** Providers are multi-instance: each instance has a stable id,
   driver kind, configuration, readiness state, model list, capability report,
   and environment policy. A selected model is `{ hostId, providerInstanceId,
-modelId }`, and the model picker is provider-first. Discovery can find
+modelId }`, and the model picker is provider-first. Each Claude instance is
+  one account: isolated accounts set `CLAUDE_CONFIG_DIR` and
+  `CLAUDE_SECURESTORAGE_CONFIG_DIR` to a Claude-owned directory, sign in with
+  the unmodified `claude auth login` command in a terminal for that directory,
+  and stay ready only from what the CLI or SDK reports. Octant never reads
+  Claude credential files or stores Claude subscription tokens for those
+  accounts. A confined Plan launch refuses an account directory that
+  overlaps the checkout, is the user's home, is an ancestor of home, or
+  is another home subtree such as Documents or `.ssh`. The only home
+  paths Plan may write are Claude's own state directories
+  (`~/.claude` and `~/.claude-accounts/…`).
+  Two Claude instances cannot share one effective config directory,
+  including the default account's implicit `~/.claude` or inherited
+  `CLAUDE_CONFIG_DIR`.
+  A thread stays on the instance it started with; there is no
+  automatic failover, rotation, or load-balancing between accounts. Discovery can find
   installed runtimes and auto-register them. On first run, a detected Claude
   Code or Codex CLI instance is created enabled; every other detected runtime
   is created disabled. Discovery never installs or updates runtimes, never

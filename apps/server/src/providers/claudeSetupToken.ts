@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { spawnHostPty } from "../code/terminalProcessPort";
+import { snapshotClaudeHostEnvironment } from "./claudeAccountDirectory";
 import { sanitizeClaudeEnvironment } from "./claudeEnvironment";
 import { isClaudeHelperToken } from "./claudeHelperSignIn";
 
@@ -171,6 +172,7 @@ export const spawnSetupTokenOnHostPty: SpawnSetupTokenTerminal = (input) => {
 export async function runInstalledClaudeSetupToken(
   binaryPath: string,
   signal: AbortSignal,
+  configDirectory?: string,
 ): Promise<ClaudeSetupTokenOutcome> {
   let cwd: string;
   try {
@@ -182,7 +184,11 @@ export async function runInstalledClaudeSetupToken(
     return await runClaudeSetupToken({
       binaryPath,
       cwd,
-      environment: sanitizeClaudeEnvironment("subscription", process.env),
+      environment: sanitizeClaudeEnvironment(
+        "subscription",
+        await snapshotClaudeHostEnvironment(),
+        configDirectory === undefined ? {} : { configDirectory },
+      ),
       spawn: spawnSetupTokenOnHostPty,
       signal,
     });
