@@ -5,6 +5,7 @@ import {
   decodeCodeProjectPullRequestDetailView,
   decodeCodeProjectPullRequestMergeCommand,
   decodeCodeProjectPullRequestMergeOutcome,
+  decodeCodeProjectPullRequestMergeRecorded,
   decodeCodeProjectPullRequestQuery,
   decodeCodeProjectPullRequestRefreshCommand,
   decodeCodeProjectPullRequestView,
@@ -319,6 +320,28 @@ describe("Code Project pull-request detail contracts", () => {
     expect(
       decodeCodeProjectPullRequestMergeOutcome({ status: "refused", reason: "not-mergeable" }),
     ).toEqual({ status: "refused", reason: "not-mergeable" });
+  });
+
+  it("records a merge attempt with its approved head and refuses a record that carries a credential", () => {
+    const record = {
+      projectId: detailQuery.projectId,
+      repositoryOwner: detailQuery.repositoryOwner,
+      repositoryName: detailQuery.repositoryName,
+      number: detailQuery.number,
+      method: "squash" as const,
+      headSha: "a".repeat(40),
+      result: { status: "refused" as const, reason: "stale" as const },
+    };
+    expect(decodeCodeProjectPullRequestMergeRecorded(record)).toEqual(record);
+    expect(() =>
+      decodeCodeProjectPullRequestMergeRecorded({ ...record, token: "ghp_secret" }),
+    ).toThrow();
+    expect(() =>
+      decodeCodeProjectPullRequestMergeRecorded({
+        ...record,
+        result: { status: "merged", token: "ghp_secret" },
+      }),
+    ).toThrow();
   });
 
   it("decodes an observed detail with inline description and diff plus linked threads", () => {
