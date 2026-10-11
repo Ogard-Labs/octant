@@ -110,10 +110,11 @@ Whether a confined launch that can read that directory, and cannot run
   macOS:** when those variables are set, does `claude` store the login in
   a file under the config directory, or only as a Keychain entry keyed
   to it, and what minimum sandbox access does the binary need to sign
-  in without `/usr/bin/security` and without the Keychain file? If that
-  verification shows the config-directory path cannot work, that
-  instance switches to API-key authentication for every launch. Mixed
-  CLI-plus-API-key is not available.
+  in without `/usr/bin/security` and without the Keychain file? Those
+  two denials are unconditional. If that verification shows the
+  config-directory path cannot work, that instance switches to API-key
+  authentication for every launch. Mixed CLI-plus-API-key is not
+  available.
 - **Several Claude accounts are allowed, later, on this same
   mechanism.** Each account has its own Claude-owned config directory.
   The person signs in once per account with unmodified
@@ -165,9 +166,10 @@ exception; the product path above does not create that.
   mechanism. They are not part of the helper-token remediation. The
   isolation unit is the account. If the macOS must-verify shows the
   login can live apart from session files, confined launches grant
-  only that credential path. If it cannot, same-account threads share
-  Claude session history; that is a recorded limit, not a later
-  invention.
+  only that credential path. If it cannot, same-account Work and Code
+  threads share Claude session history; confined Chat subscription
+  launches are refused so Chat cannot read another Project's files.
+  That is a recorded limit, not a later invention.
 - User-facing copy stops presenting Claude login as an Octant-owned
   connect step.
 

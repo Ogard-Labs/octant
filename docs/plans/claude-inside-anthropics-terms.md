@@ -42,10 +42,12 @@ Measure:
    read/write on only that directory (and the launch's temporary
    directory). Do not grant `/usr/bin/security` or the Keychain file.
    Report whether the binary is signed in.
-4. If it is signed out, try the smallest extra grant that still never
-   hands Octant a token: the security-server lookup 0145 already
-   described, scoped to this launch, with the Keychain file still
-   denied. Report whether that is enough.
+4. If it is signed out, try only the scoped security-server lookup
+   0145 already described, scoped to this launch. Never grant
+   `/usr/bin/security` or the Keychain file: the threat model records
+   that the tool can return unrelated programs' trusted tokens. If
+   that lookup is not enough, this step fails and the instance takes
+   the API-key fallback.
 5. Record what `CLAUDE_SECURESTORAGE_CONFIG_DIR` does on this build. It
    is already threaded in `claudeEnvironment.ts` and is not listed in
    Anthropic's public environment-variable table fetched on 10 Oct 2026.
@@ -144,19 +146,25 @@ config directory. A confined Plan or subagent launch sets
 `CLAUDE_CONFIG_DIR` and, when needed, `CLAUDE_SECURESTORAGE_CONFIG_DIR`
 to that directory. The shared confinement builder grants read and write
 on exactly those directories and the launch's temporary directory. It
-does not grant `/usr/bin/security` or the Keychain file unless Step 0
-proved a narrowly scoped lookup is required and still never exposes the
-token to Octant.
+never grants `/usr/bin/security` or the Keychain file. Those denials
+are unconditional. The 0145 scoped security-server lookup may stay if
+Step 0 recorded that it is required; it still never exposes the token
+to Octant.
 
 If Step 0 showed the login can live in a credential-only directory
 distinct from session history, grant only that credential path plus a
 per-launch config directory. Do not grant the shared session tree to a
 confined Chat subagent or Plan turn that would otherwise read another
 Project's history. If the login is inseparable from the account config
-tree, the account directory remains the isolation unit. Same-account
-threads then share Claude session history; write that limit into 0165
-before implementing it. Do not invent a split the unmodified binary
-does not support.
+tree, a Work or Code Plan turn may use the account directory as the
+isolation unit. Same-account Work and Code threads then share Claude
+session history; write that limit into 0165 before implementing it.
+A confined Chat launch or Chat subagent must not receive that shared
+session tree: Chat has no filesystem authority. Refuse confined Chat
+subscription launches. Unconfined Chat turns may still use the CLI
+login. Do not invent a split the unmodified binary does not support,
+and do not switch the whole instance to an API key only because Chat
+cannot share history.
 
 The person signs in once with unmodified `claude auth login` (Anthropic's
 flow) against that directory. Octant does not read the directory's
@@ -183,12 +191,13 @@ Say so in Settings. Do not reintroduce a setup token.
 - A launch whose config directory is missing or unsigned-in refuses with
   a step the person can take (`claude auth login` in that directory, or
   store an API key if this is the fallback).
-- The Keychain file and `/usr/bin/security` stay denied unless Step 0
-  recorded a scoped exception.
+- The Keychain file and `/usr/bin/security` stay denied. Step 0 cannot
+  add an exception for either.
 - A confined grant follows Step 0's credential/session split. If the
   login is separable, the launch does not receive another Project's
-  session files. If it is not, the account directory is the recorded
-  isolation unit.
+  session files. If it is not, Work and Code Plan use the account
+  directory as the recorded isolation unit, and confined Chat
+  subscription launches are refused.
 
 ## Step 3 — Telemetry on subscription launches
 
