@@ -39,6 +39,13 @@
   margin: 0;
 }
 
+/* A status or progress reading is one line; stretched to the height of a
+   chart beside it, its tile reads as an empty panel, so it keeps its own. */
+.canvas-dashboard__cell[data-block-kind="status"],
+.canvas-dashboard__cell[data-block-kind="progress"] {
+  align-self: start;
+}
+
 /* A metric draws its own tile; every other cell takes the same face, so the
    grid reads as one surface of tiles rather than loose blocks. */
 .canvas-dashboard__cell:not([data-block-kind="metric"]) > .canvas-block {
@@ -74,11 +81,12 @@
     grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 
-  .canvas-dashboard__grid > .canvas-dashboard__cell[data-span="3"] {
+  /* As specific as the two-column rule above, so these win by order. */
+  .canvas-dashboard__grid:not([data-columns="1"]) > .canvas-dashboard__cell[data-span="3"] {
     grid-column: span 3;
   }
 
-  .canvas-dashboard__grid > .canvas-dashboard__cell[data-span="4"] {
+  .canvas-dashboard__grid:not([data-columns="1"]) > .canvas-dashboard__cell[data-span="4"] {
     grid-column: span 4;
   }
 }
