@@ -25,6 +25,14 @@ export class ExtensionToolApprovalService {
       readonly uuid: () => string;
       readonly now: () => number;
       readonly ttlMs?: number;
+      /**
+       * Whether a requesting scope is the host acting on its own (a routine,
+       * a usage-limit resume). Nobody sits at that scope, so its approvals go
+       * to the windows that can see the thread.
+       */
+      readonly isHostScope?: (windowId: WindowId) => boolean;
+      /** Whether a local window may drive this thread, by its Project binding. */
+      readonly windowCanReachThread?: (windowId: WindowId, threadId: string) => boolean;
     },
   ) {
     this.#ttlMs = Math.max(1_000, Math.min(options.ttlMs ?? DEFAULT_APPROVAL_TTL_MS, 10 * 60_000));
@@ -83,15 +91,35 @@ export class ExtensionToolApprovalService {
 
   list(windowId: WindowId): ReadonlyArray<ExtensionToolApproval> {
     return [...this.#pending.values()]
-      .filter((pending) => pending.windowId === windowId)
+      .filter((pending) => this.#answerableBy(pending, windowId))
       .map((pending) => pending.view);
   }
 
   decide(windowId: WindowId, decision: ExtensionToolApprovalDecision): boolean {
     const pending = this.#pending.get(decision.approvalId);
-    if (pending === undefined || pending.windowId !== windowId) return false;
+    if (pending === undefined || !this.#answerableBy(pending, windowId)) return false;
     pending.resolve(decision.decision === "approved");
     return true;
+  }
+
+  /**
+   * A window answers its own prompts. A host-owned turn's prompt has no
+   * window of its own, so any window that may drive that thread answers it;
+   * the answer settles only this prompt and lends the window nothing else of
+   * the host scope.
+   */
+  #answerableBy(pending: PendingApproval, windowId: WindowId): boolean {
+    if (pending.windowId === windowId) return true;
+    const { isHostScope, windowCanReachThread } = this.options;
+    if (
+      isHostScope === undefined ||
+      windowCanReachThread === undefined ||
+      !isHostScope(pending.windowId) ||
+      isHostScope(windowId)
+    ) {
+      return false;
+    }
+    return windowCanReachThread(windowId, pending.view.threadId);
   }
 
   revokeWindow(windowId: WindowId): void {

@@ -1874,6 +1874,17 @@ export function startOctantServer(
     const extensionToolApprovalService = new ExtensionToolApprovalService({
       uuid: randomUUID,
       now: Date.now,
+      // A usage-limit resume replays its stopped Work turn's extension
+      // selections as the host, so that turn's tool prompts go to the windows
+      // bound to the thread's Project, as a routine's browser prompts do.
+      isHostScope: isRoutineHostScope,
+      windowCanReachThread: (windowId, threadId) => {
+        const thread = decodeBrowserThreadId(threadId);
+        return (
+          browserAuthority.canAccessWindow(windowId, thread, "work") ||
+          browserAuthority.canAccessWindow(windowId, thread, "code")
+        );
+      },
     });
     let browserToolApprovalService: BrowserToolApprovalService | undefined;
     const codeSessionAuthority = new CodeSessionAuthorityStore();
@@ -7595,7 +7606,6 @@ export function startOctantServer(
         journal: persistence.journal,
         clock: () => new Date(),
         uuid: randomUUID,
-        windowId: firstRegisteredWindowId,
         chat: {
           readThread: (threadId) => persistence.readChatThread(threadId),
           readThreadView: (threadId) => persistence.readChatThreadView(threadId),

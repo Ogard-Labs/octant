@@ -63,9 +63,7 @@ export interface UsageResumeModePort {
   readonly dispatch: (
     record: UsageResumeRecord,
   ) => Promise<
-    | { readonly kind: "dispatched" }
-    | { readonly kind: "refused"; readonly detail: string }
-    | { readonly kind: "deferred"; readonly detail: string }
+    { readonly kind: "dispatched" } | { readonly kind: "refused"; readonly detail: string }
   >;
   /**
    * The thread row clients refresh through, rebuilt with the settle's
@@ -117,7 +115,7 @@ interface UsageResumeServiceOptions {
   /** Injectable so tests drive the reset boundary by hand. */
   readonly schedule?: (atEpochMs: number, fire: () => void) => UsageResumeTimerHandle;
   readonly unschedule?: (handle: UsageResumeTimerHandle) => void;
-  /** How long a deferred dispatch or a failed settle waits before re-arming. */
+  /** How long a failed settle waits before re-arming. */
   readonly retryAfterMs?: number;
   /** Watches committed appends for schedule, cancel, and supersede events. */
   readonly onError?: (message: string, error: unknown) => void;
@@ -129,7 +127,7 @@ interface UsageResumeServiceOptions {
  */
 const MAX_TIMER_DELAY_MS = 2_147_483_647;
 
-const DEFER_RETRY_AFTER_MS = 30_000;
+const SETTLE_RETRY_AFTER_MS = 30_000;
 
 const pendingKey = (aggregateType: string, aggregateId: string) =>
   `${aggregateType}::${aggregateId}`;
@@ -385,7 +383,7 @@ export class UsageResumeService {
   }
 
   #retryAfterMs(): number {
-    return this.#options.retryAfterMs ?? DEFER_RETRY_AFTER_MS;
+    return this.#options.retryAfterMs ?? SETTLE_RETRY_AFTER_MS;
   }
 
   #clearTimer(pending: PendingResume): void {
@@ -426,11 +424,6 @@ export class UsageResumeService {
       const result = await port.dispatch(pending.record);
       if (result.kind === "dispatched") {
         await this.#settle(pending, "dispatched");
-      } else if (result.kind === "deferred") {
-        // The opt-in is still valid but cannot fire yet — for example no
-        // local window has registered since the host restarted. Keep it
-        // armed and re-check on the retry cadence instead of settling.
-        this.#armTimer(pending, this.#options.clock().getTime() + this.#retryAfterMs());
       } else {
         await this.#settle(pending, "failed", result.detail);
       }
