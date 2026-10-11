@@ -206,6 +206,7 @@
   display: block;
   color: var(--oct-muted);
   font-size: var(--oct-text-xs);
+  overflow-wrap: anywhere;
 }
 
 /* Forced colours reset `accent-color`, and Chromium then paints the native
