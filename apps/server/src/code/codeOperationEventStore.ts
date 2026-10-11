@@ -357,11 +357,7 @@ export class CodeOperationEventStore {
         .reverse();
       const delivered = read("fork-context-delivered", 1)[0]?.event;
       if (delivered?.kind !== "fork-context-delivered") return { merges };
-      if (
-        !merges.some(
-          (merge) => String(merge.operationId) === String(delivered.mergeOperationId),
-        )
-      )
+      if (!merges.some((merge) => String(merge.operationId) === String(delivered.mergeOperationId)))
         return undefined;
       return { merges, lastDeliveredOperationId: delivered.mergeOperationId };
     } catch {
@@ -747,11 +743,11 @@ export class CodeOperationEventStore {
       threadId,
       turns: turns.map(
         ({ startCursor: _startCursor, steps, stepsTruncated, forkMergeBacks, ...turn }) => ({
-        ...turn,
-        ...(forkMergeBacks.length === 0 ? {} : { forkMergeBacks }),
-        ...(steps.length === 0 ? {} : { steps }),
-        ...(stepsTruncated ? { stepsTruncated: true } : {}),
-      }),
+          ...turn,
+          ...(forkMergeBacks.length === 0 ? {} : { forkMergeBacks }),
+          ...(steps.length === 0 ? {} : { steps }),
+          ...(stepsTruncated ? { stepsTruncated: true } : {}),
+        }),
       ),
       nextCursor: turns.at(-1)?.startCursor ?? input.afterCursor,
       hasMore,

@@ -555,9 +555,7 @@ export function admittedParentCodeContext(
       ...(input.throughOperationId === undefined
         ? {}
         : { throughOperationId: input.throughOperationId }),
-      ...(input.afterOperationId === undefined
-        ? {}
-        : { afterOperationId: input.afterOperationId }),
+      ...(input.afterOperationId === undefined ? {} : { afterOperationId: input.afterOperationId }),
       inherited: false,
     });
     if (own.status === "unavailable") return own;

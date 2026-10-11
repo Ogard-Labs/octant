@@ -4565,7 +4565,6 @@ describe("provider switch handoff", () => {
 
     describe("merging a fork's conversation back into its source", () => {
       const sourceSession = sessionId;
-      const sourceNext = operationId(85);
 
       /**
        * The source's first turn on one runtime and the fork's first turn on the
@@ -4682,13 +4681,14 @@ describe("provider switch handoff", () => {
             expect(kinds.indexOf("fork-context-delivered")).toBeLessThan(
               kinds.indexOf("provider-session-ready"),
             );
-            expect(frames.find((frame) => frame.event.kind === "fork-context-delivered")?.event)
-              .toMatchObject({
-                forkThreadId,
-                throughOperationId: operationId(90),
-                messages: 2,
-                externalContentIngested: true,
-              });
+            expect(
+              frames.find((frame) => frame.event.kind === "fork-context-delivered")?.event,
+            ).toMatchObject({
+              forkThreadId,
+              throughOperationId: operationId(90),
+              messages: 2,
+              externalContentIngested: true,
+            });
             expect(fixture.conversation().turns[1]?.forkMergeBacks).toEqual([
               expect.objectContaining({ forkThreadId, messages: 2 }),
             ]);
@@ -4714,10 +4714,18 @@ describe("provider switch handoff", () => {
             { instance: harnessInstance, model: "harness-model" },
           );
           expect(
-            await fixture.runtime.mergeForkContext!(windowId, forkThreadId, String(operationId(90))),
+            await fixture.runtime.mergeForkContext!(
+              windowId,
+              forkThreadId,
+              String(operationId(90)),
+            ),
           ).toMatchObject({ status: "merged" });
           expect(
-            await fixture.runtime.mergeForkContext!(windowId, forkThreadId, String(operationId(90))),
+            await fixture.runtime.mergeForkContext!(
+              windowId,
+              forkThreadId,
+              String(operationId(90)),
+            ),
           ).toEqual({ status: "refused", reason: "already-merged" });
           await fixture.runtime.close();
 
@@ -4749,7 +4757,9 @@ describe("provider switch handoff", () => {
             providerInstance,
             eventOn(providerInstance, { kind: "completed" }),
           );
-          await vi.waitFor(() => expect(restarted!.conversation().turns[1]?.status).toBe("completed"));
+          await vi.waitFor(() =>
+            expect(restarted!.conversation().turns[1]?.status).toBe("completed"),
+          );
 
           // The turn after carries nothing more.
           await sendOnSource(restarted, 86);
@@ -4829,7 +4839,11 @@ describe("provider switch handoff", () => {
           );
           fixture.setThread(decodeCodeThread({ ...thread(), projectId: otherProject, version: 2 }));
           expect(
-            await fixture.runtime.mergeForkContext!(windowId, forkThreadId, String(operationId(90))),
+            await fixture.runtime.mergeForkContext!(
+              windowId,
+              forkThreadId,
+              String(operationId(90)),
+            ),
           ).toEqual({ status: "refused", reason: refusal });
           expect(readFork).not.toHaveBeenCalled();
           fixture.setThread(onProvider(providerInstance, "model-a", 3));
@@ -4857,12 +4871,20 @@ describe("provider switch handoff", () => {
           fixture.setOtherThread(forkOn(harnessInstance, "harness-model"));
           // No fork turn at all: there is nothing after the fork point.
           expect(
-            await fixture.runtime.mergeForkContext!(windowId, forkThreadId, String(operationId(90))),
+            await fixture.runtime.mergeForkContext!(
+              windowId,
+              forkThreadId,
+              String(operationId(90)),
+            ),
           ).toEqual({ status: "refused", reason: "point-unavailable" });
           await sendOnFork(fixture);
           await vi.waitFor(() => expect(drivers.harness.send).toHaveBeenCalledOnce());
           expect(
-            await fixture.runtime.mergeForkContext!(windowId, forkThreadId, String(operationId(90))),
+            await fixture.runtime.mergeForkContext!(
+              windowId,
+              forkThreadId,
+              String(operationId(90)),
+            ),
           ).toEqual({ status: "refused", reason: "point-unavailable" });
         } finally {
           await fixture.runtime.close();

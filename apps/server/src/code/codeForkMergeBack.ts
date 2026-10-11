@@ -59,7 +59,9 @@ export interface CodeForkMergeBackPorts {
   readonly uuid: () => string;
 }
 
-function selectionRefusal(reason: AgentRunParentContextUnavailableReason): CodeForkMergeBackRefusal {
+function selectionRefusal(
+  reason: AgentRunParentContextUnavailableReason,
+): CodeForkMergeBackRefusal {
   switch (reason) {
     case "source-empty":
       return "nothing-new";
