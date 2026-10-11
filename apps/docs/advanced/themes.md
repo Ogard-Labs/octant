@@ -46,6 +46,13 @@ your preset's palette, so it changes with light and dark, and it never
 recolours a warning or an error. It looks best in the light theme.
 **Increased contrast** always uses the Default style.
 
+### Accessibility
+
+**Increased contrast** strengthens primary, secondary, and muted text (darker in
+the light theme, brighter in the dark one) and draws firmer edges on panes,
+menus, dialogs, and cards. Turning on **Increase contrast** in macOS
+Accessibility settings does the same, whether or not the toggle is on.
+
 **Project view switcher** lives in **Settings → Code**. It chooses how the Code
 sidebar offers saved project views: a dropdown, or one icon button per view
 that shows the view name on hover. Each project view can be given its own icon

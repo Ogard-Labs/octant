@@ -169,19 +169,17 @@ html[data-octant-reduced-transparency="true"] .browser-pip__close {
   }
 }
 
-@media (prefers-contrast: more) {
-  .octant-glass,
-  .octant-chip,
-  .octant-menu__popup,
-  .octant-dialog__popup,
-  .window-chrome__disclosure,
-  .composer-folder-selector__menu,
-  .thread-activity-pip,
-  .thread-activity-pip__collapsed-controls,
-  .project-dialog,
-  .folder-picker {
-    border-color: var(--octant-border-strong);
-  }
+html[data-octant-increased-contrast="true"] .octant-glass,
+html[data-octant-increased-contrast="true"] .octant-chip,
+html[data-octant-increased-contrast="true"] .octant-menu__popup,
+html[data-octant-increased-contrast="true"] .octant-dialog__popup,
+html[data-octant-increased-contrast="true"] .window-chrome__disclosure,
+html[data-octant-increased-contrast="true"] .composer-folder-selector__menu,
+html[data-octant-increased-contrast="true"] .thread-activity-pip,
+html[data-octant-increased-contrast="true"] .thread-activity-pip__collapsed-controls,
+html[data-octant-increased-contrast="true"] .project-dialog,
+html[data-octant-increased-contrast="true"] .folder-picker {
+  border-color: var(--octant-border-strong);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -238,15 +236,13 @@ html[data-octant-reduced-transparency="true"] .browser-pip__close {
   }
 }
 
-@media (prefers-contrast: more) {
-  .turn-action-menu__more {
-    opacity: 1;
-    pointer-events: auto;
-  }
+html[data-octant-increased-contrast="true"] .turn-action-menu__more {
+  opacity: 1;
+  pointer-events: auto;
+}
 
-  .turn-action-menu__more .shell-icon-button {
-    border-color: var(--octant-border-strong);
-  }
+html[data-octant-increased-contrast="true"] .turn-action-menu__more .shell-icon-button {
+  border-color: var(--octant-border-strong);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1163,11 +1159,16 @@ html[data-octant-reduced-motion="true"] .turn-header svg {
   padding-inline-end: 32px;
 }
 
-@media (hover: none), (prefers-contrast: more) {
+@media (hover: none) {
   .turn-message-meta {
     opacity: 1;
     pointer-events: auto;
   }
+}
+
+html[data-octant-increased-contrast="true"] .turn-message-meta {
+  opacity: 1;
+  pointer-events: auto;
 }
 
 /* Keyboard focus may reveal actions, but the response clock follows the pointer. */

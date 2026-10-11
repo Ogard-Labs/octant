@@ -395,9 +395,7 @@
   }
 }
 
-@media (prefers-contrast: more) {
-  .github-issue-browser__row[aria-current="true"] {
-    background: var(--octant-control-hover);
-    text-decoration: underline;
-  }
+html[data-octant-increased-contrast="true"] .github-issue-browser__row[aria-current="true"] {
+  background: var(--octant-control-hover);
+  text-decoration: underline;
 }

@@ -1,9 +1,10 @@
 import { GLASS_TINT_DEFAULTS, type ThemeSettings } from "@octant/contracts/theme";
 import { enforceSidebarBackgroundAccessibility } from "@octant/domain/theme-policy";
 import { resolveEffectiveTokens } from "@octant/theme/fallback";
-import { useLayoutEffect, type ReactNode } from "react";
+import { createContext, useContext, useLayoutEffect, type ReactNode } from "react";
 import { getInjectedHostBridge } from "../shell/hostBridge";
 import { approvalSurfacePalette } from "./approvalSurfacePalette";
+import { useMediaQueryMatches } from "./useMediaQueryMatches";
 
 const VARIABLE_ALIASES: Readonly<Record<string, ReadonlyArray<string>>> = {
   sidebar: ["sidebar-opaque"],
@@ -17,10 +18,48 @@ const VARIABLE_ALIASES: Readonly<Record<string, ReadonlyArray<string>>> = {
   "danger-text": ["destructive"],
 };
 
+// Roles the stylesheet repoints at their `-high-contrast` values under
+// `data-octant-increased-contrast`; an inline colour would outrank that rule.
+const HIGH_CONTRAST_TEXT_ROLES: ReadonlySet<string> = new Set([
+  "text-primary",
+  "text-secondary",
+  "text-muted",
+]);
+
+const SYSTEM_INCREASED_CONTRAST = "(prefers-contrast: more)";
+
+const IncreasedContrastContext = createContext<boolean | undefined>(undefined);
+
+/**
+ * Whether the app is drawing increased contrast: the person's setting or the
+ * system's preference, whichever asks. Outside the provider only the system
+ * can ask.
+ */
+export function useIncreasedContrast(): boolean {
+  const published = useContext(IncreasedContrastContext);
+  const system = useMediaQueryMatches(SYSTEM_INCREASED_CONTRAST);
+  return published ?? system;
+}
+
 export function ThemeSettingsProvider(props: {
   readonly settings?: ThemeSettings;
   readonly children: ReactNode;
 }) {
+  const systemIncreasedContrast = useMediaQueryMatches(SYSTEM_INCREASED_CONTRAST);
+  // Either trigger publishes the one attribute every high-contrast rule keys
+  // off, so the in-app toggle and the system preference draw the same rules.
+  // The setting alone used to set the attribute while the rules sat under the
+  // media query, and the toggle changed no colours.
+  const increasedContrast = systemIncreasedContrast || props.settings?.increasedContrast === true;
+
+  useLayoutEffect(() => {
+    const root = document.documentElement;
+    root.dataset.octantIncreasedContrast = String(increasedContrast);
+    return () => {
+      delete root.dataset.octantIncreasedContrast;
+    };
+  }, [increasedContrast]);
+
   useLayoutEffect(() => {
     const root = document.documentElement;
     const settings = props.settings;
@@ -31,7 +70,9 @@ export function ThemeSettingsProvider(props: {
       window.matchMedia?.("(prefers-color-scheme: dark)").matches === true;
     const resolved = resolveEffectiveTokens(accessible, systemPrefersDark);
     for (const [role, color] of Object.entries(resolved.tokens)) {
-      root.style.setProperty(`--octant-${role}`, color);
+      if (!(increasedContrast && HIGH_CONTRAST_TEXT_ROLES.has(role))) {
+        root.style.setProperty(`--octant-${role}`, color);
+      }
       for (const alias of VARIABLE_ALIASES[role] ?? []) {
         root.style.setProperty(`--octant-${alias}`, color);
       }
@@ -68,7 +109,6 @@ export function ThemeSettingsProvider(props: {
       }
     }
     root.dataset.octantThemeMode = resolved.mode;
-    root.dataset.octantIncreasedContrast = String(accessible.increasedContrast);
     root.dataset.octantReducedMotion = String(accessible.reducedMotion);
     root.dataset.octantReducedTransparency = String(accessible.reducedTransparency);
     // Increased contrast keeps the monochrome chrome: colour as decoration is
@@ -97,12 +137,15 @@ export function ThemeSettingsProvider(props: {
       root.style.removeProperty("--octant-workspace-translucent-subtle");
       root.style.removeProperty("--octant-workspace-translucent-strong");
       delete root.dataset.octantThemeMode;
-      delete root.dataset.octantIncreasedContrast;
       delete root.dataset.octantReducedMotion;
       delete root.dataset.octantReducedTransparency;
       delete root.dataset.octantStyle;
       root.style.removeProperty("color-scheme");
     };
-  }, [props.settings]);
-  return props.children;
+  }, [props.settings, increasedContrast]);
+  return (
+    <IncreasedContrastContext.Provider value={increasedContrast}>
+      {props.children}
+    </IncreasedContrastContext.Provider>
+  );
 }

@@ -2038,10 +2038,10 @@ textarea.settings-view__text-input {
   }
 }
 
-@media (prefers-contrast: more) {
-  .shell--material-translucent .settings-view__effective-note {
-    display: block;
-  }
+html[data-octant-increased-contrast="true"]
+  .shell--material-translucent
+  .settings-view__effective-note {
+  display: block;
 }
 
 /* Settings > Host: open sections for identity, policy, readiness, and
