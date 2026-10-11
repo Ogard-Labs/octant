@@ -367,7 +367,10 @@ function readLink(
 
 // A participant id is word characters: a hyphen would run into the arrow.
 const MESSAGE = /^(\w+)\s*(-->>|->>|-->|->)\s*(\w+)\s*:\s*(.+)$/;
-const NOTE = /^Note\s+(left of|right of|over)\s+(\w+)(?:\s*,\s*\w+)?\s*:\s*(.+)$/i;
+const NOTE = /^Note\s+(left of|right of|over)\s+(\w+)\s*:\s*(.+)$/i;
+// A Canvas note sits beside one participant; a note spanning two has no
+// faithful translation, so the source stays code rather than losing one side.
+const SPANNING_NOTE = /^Note\s+over\s+\w+\s*,/i;
 
 function sequence(_header: Statement, body: ReadonlyArray<Statement>, blockId: CanvasBlockId) {
   const ids = new Ids("Participant");
@@ -402,6 +405,7 @@ function sequence(_header: Statement, body: ReadonlyArray<Statement>, blockId: C
       });
       continue;
     }
+    if (SPANNING_NOTE.test(text)) throw unsupported(statement, "A note spanning two participants");
     const note = NOTE.exec(text);
     if (note !== null) {
       const last = messages.at(-1);
@@ -485,7 +489,9 @@ function state(_header: Statement, body: ReadonlyArray<Statement>, blockId: Canv
   };
   const pseudo = (role: "initial" | "final", statement: Statement): string => {
     if (parents.length > 0) throw unsupported(statement, "A start or end inside a composite state");
-    const id = role === "initial" ? "start" : "end";
+    // A Mermaid state id never holds a colon, so these cannot meet a state
+    // the author named start or end.
+    const id = role === "initial" ? "pseudo:start" : "pseudo:end";
     if (!states.has(id)) states.set(id, { label: role === "initial" ? "Start" : "End", role });
     return id;
   };
@@ -585,18 +591,22 @@ function er(_header: Statement, body: ReadonlyArray<Statement>, blockId: CanvasB
         continue;
       }
       const attribute =
-        /^([A-Za-z0-9_][A-Za-z0-9_()[\],-]*)\s+([A-Za-z0-9_][A-Za-z0-9_-]*)(?:\s+(PK|FK|UK)(?:\s*,\s*(?:PK|FK|UK))*)?$/.exec(
+        /^([A-Za-z0-9_][A-Za-z0-9_()[\],-]*)\s+([A-Za-z0-9_][A-Za-z0-9_-]*)(?:\s+((?:PK|FK|UK)(?:\s*,\s*(?:PK|FK|UK))*))?$/.exec(
           text,
         );
       const target = entities.get(open);
       if (attribute === null || target === undefined)
         throw unsupported(statement, "This attribute");
+      // A Canvas attribute records only a primary key; a foreign or unique
+      // key would be dropped, so the source stays code instead.
+      const keys = attribute[3] ?? "";
+      if (/FK|UK/.test(keys)) throw unsupported(statement, "A foreign or unique key marker");
       const name = attribute[2] ?? "";
       target.attributes.push({
         attributeId: `${name.replace(/_/g, "-")}`,
         name,
         type: attribute[1] ?? "",
-        ...(/\bPK\b/.test(text) ? { key: true } : {}),
+        ...(keys.includes("PK") ? { key: true } : {}),
       });
       continue;
     }

@@ -170,22 +170,53 @@ describe("importing the other Mermaid diagram kinds", () => {
       kind: "state",
       states: [
         { stateId: "Pending", label: "Awaiting payment" },
-        { stateId: "start", role: "initial" },
+        { stateId: "pseudo:start", role: "initial" },
         { stateId: "Paid", label: "Paid" },
         { stateId: "Authorized", parentId: "Paid" },
         { stateId: "Captured", parentId: "Paid" },
-        { stateId: "end", role: "final" },
+        { stateId: "pseudo:end", role: "final" },
       ],
       transitions: [
-        { source: "start", target: "Pending", label: "→" },
+        { source: "pseudo:start", target: "Pending", label: "→" },
         { source: "Pending", target: "Paid", label: "pay" },
         { source: "Authorized", target: "Captured", label: "capture" },
-        { source: "Paid", target: "end" },
+        { source: "Paid", target: "pseudo:end" },
       ],
     });
     expect(refusal("stateDiagram\n A --> B\n note right of A : hi").reason).toBe(
       "unsupported-construct",
     );
+  });
+
+  it("keeps a start and an end apart from states the author named start and end", () => {
+    const block = imported(
+      ["stateDiagram-v2", "  [*] --> start", "  start --> end", "  end --> [*]"].join("\n"),
+    );
+    if (block.kind !== "state") throw new Error("expected a state machine");
+    const initial = block.states.find((entry) => entry.role === "initial");
+    const final = block.states.find((entry) => entry.role === "final");
+    expect(block.states.map((entry) => String(entry.stateId))).toContain("start");
+    expect(block.states.map((entry) => String(entry.stateId))).toContain("end");
+    expect(block.states).toHaveLength(4);
+    expect(block.transitions.map((entry) => [String(entry.source), String(entry.target)])).toEqual([
+      [String(initial?.stateId), "start"],
+      ["start", "end"],
+      ["end", String(final?.stateId)],
+    ]);
+  });
+
+  it("refuses a note that spans two participants rather than pinning it to one", () => {
+    const refused = refusal("sequenceDiagram\n  A->>B: hi\n  Note over A,B: shared");
+    expect(refused.reason).toBe("unsupported-construct");
+    expect(refused.line).toBe(3);
+  });
+
+  it("refuses a foreign or unique key marker it cannot keep instead of dropping it", () => {
+    for (const marker of ["FK", "UK", "PK, FK"]) {
+      const refused = refusal(`erDiagram\n  ORDER {\n    uuid customer_id ${marker}\n  }`);
+      expect(refused.reason).toBe("unsupported-construct");
+      expect(refused.line).toBe(3);
+    }
   });
 
   it("reads an entity-relationship diagram with cardinalities, attributes, and keys", () => {

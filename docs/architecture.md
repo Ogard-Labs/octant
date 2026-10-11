@@ -782,13 +782,15 @@ subset into the typed blocks above: a `flowchart` or `graph` (TD/TB or LR;
 `[ ]` process, `{ }` decision, `([ ])` terminator, `( )` the plain box;
 `-->`, `---`, and `-.->` links with a piped or inline label; one level of
 `subgraph`) into a `diagram`; a `sequenceDiagram` (participants and actors
-with aliases, `->>`, `-->>`, `->`, `-->` messages, notes, activate and
-deactivate) into a `sequence`; a `stateDiagram` (transitions, `[*]` as a start
-and an end, `state "…" as`, composite states) into a `state`; an `erDiagram`
-(relationships with cardinalities, attribute blocks, `PK`) into an `er`; and a
+with aliases, `->>`, `-->>`, `->`, `-->` messages, notes beside or over one
+participant, activate and deactivate) into a `sequence`; a `stateDiagram`
+(transitions, `[*]` as a start and an end with their own ids, `state "…" as`,
+composite states) into a `state`; an `erDiagram` (relationships with
+cardinalities, attribute blocks, `PK`) into an `er`; and a
 `mindmap` (tree by indentation) into a `mindmap`. Anything else — another
 diagram type, styling, classes, `click`, loops and alternatives, other shapes
-and links, a nested subgraph, two ids that would collide, a source over 32,768
+and links, a nested subgraph, a note spanning two participants, an `FK` or
+`UK` key, two ids that would collide, a source over 32,768
 characters, or a translation the block catalog refuses — returns a typed
 refusal (`unsupported-diagram`, `unsupported-construct` with its line, `empty`,
 `too-large`, `invalid-result`). The one entry point is the agent's Canvas
