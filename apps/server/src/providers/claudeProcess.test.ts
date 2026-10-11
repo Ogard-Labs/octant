@@ -27,6 +27,7 @@ import type {
   SeatbeltConfinementPrepareInput,
 } from "../process/seatbeltProfile";
 import {
+  claudePlanStateDirectoryIsSharedRoot,
   makeClaudeProcessLive,
   type ClaudeProcessOptions,
   type ClaudeRuntimeConfinement,
@@ -630,7 +631,7 @@ describe("Claude runtime confinement", () => {
         env: { ...target.environment, HOME: configHome, CLAUDE_CONFIG_DIR: configHome },
         signal: new AbortController().signal,
       }),
-    ).toThrow("overlaps the checkout or the user's home");
+    ).toThrow("overlaps the checkout");
     expect(confinement.prepared).toEqual([]);
     expect(pids(configHome)).toEqual([]);
   });
@@ -652,7 +653,7 @@ describe("Claude runtime confinement", () => {
         env: { ...target.environment, CLAUDE_CONFIG_DIR: accountDirectory },
         signal: new AbortController().signal,
       }),
-    ).toThrow("overlaps the checkout or the user's home");
+    ).toThrow("overlaps the checkout");
     expect(confinement.prepared).toEqual([]);
     expect(pids(target.root)).toEqual([]);
   });
@@ -672,7 +673,7 @@ describe("Claude runtime confinement", () => {
         env: { ...target.environment, CLAUDE_CONFIG_DIR: dirname(target.root) },
         signal: new AbortController().signal,
       }),
-    ).toThrow("overlaps the checkout or the user's home");
+    ).toThrow("overlaps the checkout");
     expect(confinement.prepared).toEqual([]);
     expect(pids(target.root)).toEqual([]);
   });
@@ -694,7 +695,7 @@ describe("Claude runtime confinement", () => {
         env: { ...target.environment, CLAUDE_CONFIG_DIR: join(home, ".claude-accounts") },
         signal: new AbortController().signal,
       }),
-    ).toThrow("overlaps the checkout or the user's home");
+    ).toThrow("overlaps the checkout");
     expect(confinement.prepared).toEqual([]);
     expect(pids(target.root)).toEqual([]);
   });
@@ -716,7 +717,7 @@ describe("Claude runtime confinement", () => {
         env: { ...target.environment, CLAUDE_CONFIG_DIR: join(home, ".ssh") },
         signal: new AbortController().signal,
       }),
-    ).toThrow("overlaps the checkout or the user's home");
+    ).toThrow("overlaps the checkout");
     expect(confinement.prepared).toEqual([]);
     expect(pids(target.root)).toEqual([]);
   });
@@ -740,7 +741,33 @@ describe("Claude runtime confinement", () => {
         env: { ...target.environment, CLAUDE_CONFIG_DIR: ancestor },
         signal: new AbortController().signal,
       }),
-    ).toThrow("overlaps the checkout or the user's home");
+    ).toThrow("overlaps the checkout");
+    expect(confinement.prepared).toEqual([]);
+    expect(pids(target.root)).toEqual([]);
+  });
+
+  it("treats shared temporary roots as Plan-forbidden account directories", () => {
+    expect(claudePlanStateDirectoryIsSharedRoot("/tmp")).toBe(true);
+    expect(claudePlanStateDirectoryIsSharedRoot("/var/tmp")).toBe(true);
+    expect(claudePlanStateDirectoryIsSharedRoot("/tmp/claude-accounts/work")).toBe(false);
+  });
+
+  it("refuses a Plan turn whose account directory is a shared temporary root", () => {
+    const target = fixture();
+    const confinement = recordingConfinement();
+
+    expect(() =>
+      makePort(target, { confinement: confinement.port }).spawn({
+        projectRoot: target.root,
+        executionPolicy: "plan",
+      })({
+        command: target.binaryPath,
+        args: ["sdk-test"],
+        cwd: target.root,
+        env: { ...target.environment, CLAUDE_CONFIG_DIR: "/var/tmp" },
+        signal: new AbortController().signal,
+      }),
+    ).toThrow("shared host directory");
     expect(confinement.prepared).toEqual([]);
     expect(pids(target.root)).toEqual([]);
   });
@@ -762,7 +789,7 @@ describe("Claude runtime confinement", () => {
         env: { ...target.environment, CLAUDE_CONFIG_DIR: home },
         signal: new AbortController().signal,
       }),
-    ).toThrow("overlaps the checkout or the user's home");
+    ).toThrow("overlaps the checkout");
     expect(confinement.prepared).toEqual([]);
     expect(pids(target.root)).toEqual([]);
   });

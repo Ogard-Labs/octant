@@ -62,6 +62,7 @@ import {
   type ClaudeEnvironmentScopeOptions,
 } from "./claudeEnvironment";
 import {
+  claudePlanStateDirectoryIsSharedRoot,
   claudePlanStateDirectoryReopensHome,
   CONFINED_CLAUDE_EXECUTION_POLICIES,
   type ClaudeProcessPort,
@@ -181,7 +182,11 @@ function claudeAccountDirectoryBroadensPlan(
   isProjectConfinedPath: (projectRoot: string, absolutePath: string) => boolean,
 ): boolean {
   const directory = configDirectory.replace(/\/+$/, "") || "/";
-  if (claudePlanStateDirectoryReopensHome(directory, homedir()) || directory === projectRoot)
+  if (
+    claudePlanStateDirectoryReopensHome(directory, homedir()) ||
+    claudePlanStateDirectoryIsSharedRoot(directory) ||
+    directory === projectRoot
+  )
     return true;
   if (projectRoot.startsWith(`${directory}/`)) return true;
   try {
@@ -1291,7 +1296,7 @@ function makeConnection(
         ) {
           throw failure(
             "invalid-configuration",
-            "Claude Plan confinement cannot use an account directory that overlaps the checkout or the user's home.",
+            "Claude Plan confinement cannot use an account directory that overlaps the checkout, the user's home, or a shared host directory.",
           );
         }
         scope = await runSetupEffect(Scope.make(), signal);

@@ -191,6 +191,8 @@ interface PackagedProviderSmokeLimits {
 
 const DEFAULT_PACKAGED_SMOKE_MAX_EVENTS = 256;
 const DEFAULT_PACKAGED_SMOKE_TIMEOUT_MS = 30_000;
+const CLAUDE_ACCOUNT_NEEDS_DIRECTORY_MESSAGE =
+  "This Claude account needs its own config directory.";
 
 export interface ProviderServiceOptions {
   readonly persistence: PersistenceService;
@@ -227,6 +229,7 @@ export class ProviderService implements ProviderServiceApi {
   readonly #runtime: ProviderRuntimeRegistry;
   readonly #probeProvider: NonNullable<ProviderServiceOptions["probe"]>;
   readonly #instanceOperationTails = new Map<ProviderInstanceId, Promise<void>>();
+  #claudeAccountClaimTail: Promise<void> = Promise.resolve();
   readonly #probesInFlight = new Map<
     ProviderInstanceId,
     { readonly result: Promise<ProviderProbeResult>; readonly tail: Promise<void> }
@@ -379,6 +382,11 @@ export class ProviderService implements ProviderServiceApi {
       if (!instance.enabled) continue;
       const unusable = this.#unusableConfigurationObservation(instance);
       if (unusable !== undefined) this.#runtime.setObservedState(unusable);
+      else if (
+        this.#runtime.observedState(instance.id)?.message === CLAUDE_ACCOUNT_NEEDS_DIRECTORY_MESSAGE
+      ) {
+        this.#runtime.clearObservedState(instance.id);
+      }
     }
   }
 
@@ -420,6 +428,9 @@ export class ProviderService implements ProviderServiceApi {
         throw this.#unsupported("Packaged provider smoke requires an enabled provider.");
       }
       this.#assertDriverPluginEffective(instance);
+      if (this.#claudeAccountNeedsOwnConfigDirectory(instance)) {
+        throw this.#invalid("This Claude account needs its own config directory.");
+      }
       if (this.#driverProvider === undefined) throw this.#unavailable();
       const result = await runPackagedProviderSmokeTurn(this.#driverProvider(instance), {
         instanceId,
@@ -621,6 +632,12 @@ export class ProviderService implements ProviderServiceApi {
       }
 
       const result = await this.#withInstanceOperation(command.instanceId, async () => {
+        const releaseClaudeClaim =
+          command.kind === "create-claude-provider" ||
+          command.kind === "change-claude-configuration"
+            ? await this.#acquireClaudeAccountClaim()
+            : undefined;
+        try {
         this.#assertReady();
         const current = this.#persistence.readProviderInstance(command.instanceId);
         const instances = this.#persistence.readProviderInstances();
@@ -1031,6 +1048,16 @@ export class ProviderService implements ProviderServiceApi {
             hostSecureDirectory,
             current.id,
           );
+          await this.#runtime.invalidateRuntime(current.id);
+          // Recheck after the await. Create/change on another instance can
+          // claim the same directory while this runtime is invalidated.
+          this.#refuseTakenClaudeAccountDirectories(
+            this.#persistence.readProviderInstances(),
+            instance,
+            hostConfigDirectory,
+            hostSecureDirectory,
+            current.id,
+          );
           if (nextDirectory !== previousDirectory) {
             try {
               await this.#clearClaudeHelperSignIn?.(current.id);
@@ -1043,16 +1070,6 @@ export class ProviderService implements ProviderServiceApi {
               });
             }
           }
-          await this.#runtime.invalidateRuntime(current.id);
-          // Recheck after the awaits. Create/change on another instance can
-          // claim the same directory while helpers are being cleared.
-          this.#refuseTakenClaudeAccountDirectories(
-            this.#persistence.readProviderInstances(),
-            instance,
-            hostConfigDirectory,
-            hostSecureDirectory,
-            current.id,
-          );
           eventName = "provider.instance-configuration-changed@1";
         } else if (command.kind === "change-mistral-vibe-configuration") {
           if (current.driverKind !== "mistral-vibe") {
@@ -1272,6 +1289,9 @@ export class ProviderService implements ProviderServiceApi {
           kind: "provider-updated",
           instance: authoritative,
         });
+        } finally {
+          releaseClaudeClaim?.();
+        }
       });
       this.reconcileConfiguredProviders();
       return result;
@@ -1345,6 +1365,11 @@ export class ProviderService implements ProviderServiceApi {
           this.#runtime.clearObservedState(instanceId);
           this.#clearRuntimeUsageLimits?.(instanceId);
           throw this.#unsupported("Image profiles have no runtime to probe.");
+        }
+        if (this.#claudeAccountNeedsOwnConfigDirectory(instance)) {
+          this.#runtime.clearObservedState(instanceId);
+          this.#clearRuntimeUsageLimits?.(instanceId);
+          throw this.#invalid("This Claude account needs its own config directory.");
         }
         // Do NOT clear the runtime observed state for a valid enabled probe:
         // the web client already clears its local snapshot for the "checking"
@@ -1534,6 +1559,17 @@ export class ProviderService implements ProviderServiceApi {
     if (isImageProfileDriverKind(instance.driverKind)) {
       this.#runtime.clearObservedState(instance.id);
       return undefined;
+    }
+    if (this.#claudeAccountNeedsOwnConfigDirectory(instance)) {
+      return decodeProviderObservedState({
+        instanceId: instance.id,
+        readiness: "incompatible",
+        processState: "stopped",
+        models: [],
+        capabilities: unavailableCapabilities,
+        message: CLAUDE_ACCOUNT_NEEDS_DIRECTORY_MESSAGE,
+        observedAt: decodeTimestamp(this.#clock()),
+      });
     }
     if (this.#driverProvider === undefined) return undefined;
     try {
@@ -1783,6 +1819,7 @@ export class ProviderService implements ProviderServiceApi {
       homedir(),
       hostConfigDirectory,
       hostSecureDirectory,
+      instances,
     )) {
       this.#refuseTakenClaudeAccountDirectory(
         instances,
@@ -1821,6 +1858,23 @@ export class ProviderService implements ProviderServiceApi {
     if (taken) {
       throw this.#invalid("Another Claude account already uses that config directory.");
     }
+  }
+
+  #claudeAccountNeedsOwnConfigDirectory(instance: ProviderInstance): boolean {
+    return claudeAccountNeedsOwnConfigDirectory(
+      this.#persistence.readProviderInstances(),
+      instance,
+    );
+  }
+
+  async #acquireClaudeAccountClaim(): Promise<() => void> {
+    const previous = this.#claudeAccountClaimTail;
+    let release!: () => void;
+    this.#claudeAccountClaimTail = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await previous.catch(() => undefined);
+    return release;
   }
 
   async #withInstanceOperation<T>(instanceId: ProviderInstanceId, operation: () => Promise<T>) {
@@ -2144,11 +2198,41 @@ function implicitClaudeAccountDirectory(
   return hostConfigDirectory ?? `${claudeAccountDirectoryKey(homeDirectory)}/.claude`;
 }
 
+function implicitClaudeAccountOwnerId(
+  instances: ReadonlyArray<ProviderInstance>,
+): ProviderInstanceId | undefined {
+  const candidates = instances.filter(
+    (instance) =>
+      instance.driverKind === "claude" &&
+      instance.configuration.configDirectory === undefined &&
+      instance.configuration.authentication === "subscription",
+  );
+  if (candidates.length === 0) return undefined;
+  const [owner] = [...candidates].sort((left, right) => {
+    const created = left.createdAt.localeCompare(right.createdAt);
+    if (created !== 0) return created;
+    return String(left.id).localeCompare(String(right.id));
+  });
+  return owner?.id;
+}
+
+export function claudeAccountNeedsOwnConfigDirectory(
+  instances: ReadonlyArray<ProviderInstance>,
+  instance: ProviderInstance,
+): boolean {
+  if (instance.driverKind !== "claude") return false;
+  if (instance.configuration.configDirectory !== undefined) return false;
+  if (instance.configuration.authentication !== "subscription") return false;
+  const ownerId = implicitClaudeAccountOwnerId(instances);
+  return ownerId !== undefined && String(instance.id) !== String(ownerId);
+}
+
 function effectiveClaudeAccountDirectories(
   instance: ProviderInstance,
   homeDirectory: string,
   hostConfigDirectory: string | undefined,
   hostSecureDirectory: string | undefined,
+  instances: ReadonlyArray<ProviderInstance>,
 ): ReadonlyArray<string> {
   if (instance.driverKind !== "claude") return [];
   if (instance.configuration.configDirectory !== undefined) {
@@ -2157,6 +2241,9 @@ function effectiveClaudeAccountDirectories(
   // An API-key instance with no stored directory uses a temporary
   // isolated directory per launch. It never opens the host default.
   if (instance.configuration.authentication === "api-key") return [];
+  // A replayed secondary subscription without a stored directory must
+  // not inherit the default account's login.
+  if (claudeAccountNeedsOwnConfigDirectory(instances, instance)) return [];
   const directories = [implicitClaudeAccountDirectory(homeDirectory, hostConfigDirectory)];
   if (hostSecureDirectory !== undefined) directories.push(hostSecureDirectory);
   return directories;
@@ -2183,6 +2270,7 @@ function claudeAccountDirectoryTaken(
       homeDirectory,
       hostConfigDirectory,
       hostSecureDirectory,
+      instances,
     ).some((existing) => claudeAccountDirectoriesOverlap(claudeAccountDirectoryKey(existing), key));
   });
 }

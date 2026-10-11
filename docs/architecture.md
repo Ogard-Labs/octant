@@ -2046,17 +2046,22 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   the unmodified `claude auth login` command in a terminal for that directory,
   and stay ready only from what the CLI or SDK reports. Octant never reads
   Claude credential files or stores Claude subscription tokens for those
-  accounts. A confined Plan launch refuses an account directory that
-  overlaps the checkout, is the user's home, is an ancestor of home, or
+  accounts.   A confined Plan launch refuses an account directory that
+  overlaps the checkout, is the user's home, is an ancestor of home,
   is another home subtree such as Documents, `.ssh`, or the shared
-  `~/.claude-accounts` parent. The only home paths Plan may write are
+  `~/.claude-accounts` parent, or is a shared host root such as
+  `/tmp` or `/var/tmp`. The only home paths Plan may write are
   `~/.claude` and a dedicated `~/.claude-accounts/<account>` directory.
   Two Claude instances cannot share one effective config directory,
   including the default account's implicit `~/.claude` or inherited
   `CLAUDE_CONFIG_DIR`, and one instance cannot claim a directory
   nested under another instance. An API-key instance with no stored
   directory uses a temporary launch directory and does not claim the
-  host default, including when that instance is later edited.
+  host default, including when that instance is later edited. A
+  replayed secondary Claude instance that still omits
+  `configDirectory` is not treated as a separate account: it stays
+  unusable until it has its own directory, so it cannot launch against
+  the default login.
   A thread stays on the instance it started with; there is no
   automatic failover, rotation, or load-balancing between accounts. Discovery can find
   installed runtimes and auto-register them. On first run, a detected Claude

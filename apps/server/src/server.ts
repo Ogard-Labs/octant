@@ -981,6 +981,7 @@ interface ConfiguredProviderDriverOptions {
   readonly claudeResumeIdentityPort?: ClaudeResumeIdentityPort;
   readonly claudeHelperSignIn?: ClaudeHelperSignInPort;
   readonly isProjectConfinedPath?: (projectRoot: string, absolutePath: string) => boolean;
+  readonly claudeInstances?: ReadonlyArray<ProviderInstance>;
   readonly runtimeRegistry: ProviderRuntimeRegistry;
   readonly permissionPersistence: () => PermissionPersistence;
   readonly credentialResolver?: ProviderCredentialResolver;
@@ -1084,6 +1085,9 @@ export function makeConfiguredProviderDriver(
       ...(options.isProjectConfinedPath === undefined
         ? {}
         : { isProjectConfinedPath: options.isProjectConfinedPath }),
+      ...(options.claudeInstances === undefined
+        ? {}
+        : { claudeInstances: options.claudeInstances }),
       ...(options.credentialResolver === undefined
         ? {}
         : { credentialResolver: options.credentialResolver }),
@@ -4306,6 +4310,7 @@ export function startOctantServer(
             claudeSdk,
             claudeResumeIdentityPort: claudeResumeIdentityStore,
             isProjectConfinedPath,
+            claudeInstances: persistence.readProviderInstances(),
             runtimeRegistry: providerRuntimeRegistry,
             permissionPersistence: () => persistence.readProviderDefaults().permissionPersistence,
             onRuntimeEvent: (event) => providerRuntimeUsageLimitsStore.record(event),

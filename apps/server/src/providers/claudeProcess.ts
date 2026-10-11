@@ -437,18 +437,19 @@ function planStateDirectories(
   for (const path of canonicalDirectories) {
     // A write grant that is the checkout, sits inside it, or contains it
     // reopens Plan's bound root. Home, its ancestors, `/`, arbitrary home
-    // subtrees (Documents, .ssh), and the shared `~/.claude-accounts`
-    // parent are the same class of grant: only one dedicated Claude
-    // state directory may be writable.
+    // subtrees (Documents, .ssh), the shared `~/.claude-accounts` parent,
+    // and shared host roots such as `/tmp` are the same class of grant:
+    // only one dedicated Claude state directory may be writable.
     if (
       claudePlanStateDirectoryReopensHome(path, home) ||
+      claudePlanStateDirectoryIsSharedRoot(path) ||
       path === boundRoot ||
       path.startsWith(`${boundRoot}${sep}`) ||
       boundRoot.startsWith(`${path}${sep}`)
     ) {
       throw new SeatbeltConfinementError(
         "invalid-configuration",
-        "Claude Plan confinement cannot grant a runtime state directory that overlaps the checkout or the user's home.",
+        "Claude Plan confinement cannot grant a runtime state directory that overlaps the checkout, the user's home, or a shared host directory.",
       );
     }
   }
@@ -462,6 +463,21 @@ export function claudePlanStateDirectoryReopensHome(path: string, home: string):
   if (path === `${home}${sep}.claude`) return false;
   // The shared parent would let one Plan turn write every sibling account.
   return !path.startsWith(`${home}${sep}.claude-accounts${sep}`);
+}
+
+const SHARED_PLAN_STATE_ROOTS = ["/tmp", "/var/tmp", "/private/tmp", "/private/var/tmp", "/dev/shm"];
+
+/** Plan must not grant a world-shared temp or IPC root as account state. */
+export function claudePlanStateDirectoryIsSharedRoot(path: string): boolean {
+  if (SHARED_PLAN_STATE_ROOTS.includes(path)) return true;
+  for (const root of SHARED_PLAN_STATE_ROOTS) {
+    try {
+      if (realpathSync(root) === path) return true;
+    } catch {
+      // This host does not have that directory.
+    }
+  }
+  return false;
 }
 
 function claudeRuntimeStateDirectories(environment: SpawnOptions["env"]): ReadonlyArray<string> {

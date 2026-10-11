@@ -4281,7 +4281,7 @@ describe("Claude for helpers", () => {
       const exit = await Effect.runPromiseExit(
         acquired.connection.start({ sessionId, modelId, executionPolicy: "plan" }),
       );
-      expect(String(exit)).toContain("overlaps the checkout or the user's home");
+      expect(String(exit)).toContain("overlaps the checkout");
     } finally {
       await acquired.close();
     }
@@ -4295,7 +4295,7 @@ describe("Claude for helpers", () => {
       const exit = await Effect.runPromiseExit(
         acquired.connection.start({ sessionId, modelId, executionPolicy: "plan" }),
       );
-      expect(String(exit)).toContain("overlaps the checkout or the user's home");
+      expect(String(exit)).toContain("overlaps the checkout");
     } finally {
       await acquired.close();
     }
@@ -4311,7 +4311,7 @@ describe("Claude for helpers", () => {
       const exit = await Effect.runPromiseExit(
         acquired.connection.start({ sessionId, modelId, executionPolicy: "plan" }),
       );
-      expect(String(exit)).toContain("overlaps the checkout or the user's home");
+      expect(String(exit)).toContain("overlaps the checkout");
     } finally {
       await acquired.close();
     }
@@ -4327,7 +4327,7 @@ describe("Claude for helpers", () => {
       const exit = await Effect.runPromiseExit(
         acquired.connection.start({ sessionId, modelId, executionPolicy: "plan" }),
       );
-      expect(String(exit)).toContain("overlaps the checkout or the user's home");
+      expect(String(exit)).toContain("overlaps the checkout");
     } finally {
       await acquired.close();
     }
@@ -4343,7 +4343,21 @@ describe("Claude for helpers", () => {
       const exit = await Effect.runPromiseExit(
         acquired.connection.start({ sessionId, modelId, executionPolicy: "plan" }),
       );
-      expect(String(exit)).toContain("overlaps the checkout or the user's home");
+      expect(String(exit)).toContain("overlaps the checkout");
+    } finally {
+      await acquired.close();
+    }
+    expect(f.opens).toHaveLength(0);
+  });
+
+  it("refuses a Plan turn whose isolated account directory is a shared temporary root", async () => {
+    const f = harness("subscription", "current-session", { configDirectory: "/var/tmp" });
+    const acquired = await acquire(f.driver, "chat");
+    try {
+      const exit = await Effect.runPromiseExit(
+        acquired.connection.start({ sessionId, modelId, executionPolicy: "plan" }),
+      );
+      expect(String(exit)).toContain("shared host directory");
     } finally {
       await acquired.close();
     }
@@ -4357,7 +4371,7 @@ describe("Claude for helpers", () => {
       const exit = await Effect.runPromiseExit(
         acquired.connection.start({ sessionId, modelId, executionPolicy: "plan" }),
       );
-      expect(String(exit)).toContain("overlaps the checkout or the user's home");
+      expect(String(exit)).toContain("overlaps the checkout");
     } finally {
       await acquired.close();
     }
