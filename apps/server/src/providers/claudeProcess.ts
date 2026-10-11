@@ -438,7 +438,7 @@ function planStateDirectories(
     // A write grant that is the checkout, sits inside it, or contains it
     // reopens Plan's bound root. Home, its ancestors, `/`, arbitrary home
     // subtrees (Documents, .ssh), the shared `~/.claude-accounts` parent,
-    // and shared host roots such as `/tmp` are the same class of grant:
+    // and shared host roots such as `/tmp` or `/Users/Shared` are the same class of grant:
     // only one dedicated Claude state directory may be writable.
     if (
       claudePlanStateDirectoryReopensHome(path, home) ||
@@ -471,9 +471,10 @@ const SHARED_PLAN_STATE_ROOTS = [
   "/private/tmp",
   "/private/var/tmp",
   "/dev/shm",
+  "/Users/Shared",
 ];
 
-/** Plan must not grant a world-shared temp or IPC root as account state. */
+/** Plan must not grant a world-shared temp, IPC, or multi-user root as account state. */
 export function claudePlanStateDirectoryIsSharedRoot(path: string): boolean {
   if (SHARED_PLAN_STATE_ROOTS.includes(path)) return true;
   for (const root of SHARED_PLAN_STATE_ROOTS) {

@@ -4351,7 +4351,7 @@ describe("Claude for helpers", () => {
   });
 
   it("refuses a Plan turn whose isolated account directory is a shared temporary root", async () => {
-    const f = harness("subscription", "current-session", { configDirectory: "/var/tmp" });
+    const f = harness("subscription", "current-session", { configDirectory: "/Users/Shared" });
     const acquired = await acquire(f.driver, "chat");
     try {
       const exit = await Effect.runPromiseExit(

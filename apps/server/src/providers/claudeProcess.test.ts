@@ -749,6 +749,7 @@ describe("Claude runtime confinement", () => {
   it("treats shared temporary roots as Plan-forbidden account directories", () => {
     expect(claudePlanStateDirectoryIsSharedRoot("/tmp")).toBe(true);
     expect(claudePlanStateDirectoryIsSharedRoot("/var/tmp")).toBe(true);
+    expect(claudePlanStateDirectoryIsSharedRoot("/Users/Shared")).toBe(true);
     expect(claudePlanStateDirectoryIsSharedRoot("/tmp/claude-accounts/work")).toBe(false);
   });
 
