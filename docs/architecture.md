@@ -610,7 +610,31 @@ fragment, naming the frame and the
 construct; the event store and revise policy return that reason to the
 author rather than a generic failure. The sandbox is the boundary and the
 link rule is part of it, because a link is the one way a page with no script
-can leave. A share refuses a design, and Markdown or HTML export writes
+can leave. Version 14 lets a design declare up to 12 image `assets`, each a
+`generated-image` (a completed image job's attachment id) or a `project-file`
+(a path relative to the Work thread's folder or the Code thread's checkout),
+and markup names one as `octant-asset:<id>` in `src`, `srcset`, a `url()`, or
+an `image-set()` candidate. The markup policy admits a reference only for a
+declared id spelled literally and refuses a Project file in a Chat Canvas or
+a path that is not confined. The definition holds references only. Each time
+a reader draws the design it asks `GET /api/canvas/design-assets` for that
+version and block; the route runs the same window authorization as `get`
+(paired devices included, under their Canvas read grant) and the server
+resolves each asset under that version's provenance, with nothing cached: a
+generated image only when its job's thread belongs to the Canvas's Project
+(never the host-wide image library), a Work file through the Work confinement
+sequence under the Project root while the thread is bound to its current
+revision, and a Code file the same way under the thread's checkout. Bytes are
+sniffed as PNG, JPEG, GIF, or WebP; SVG is refused because an SVG file is
+markup a sniff cannot tell from other text, and inline SVG already serves
+vector art. Each image is capped at 3 MiB and a design at 5 MiB, which keeps
+the base64 response inside the remote gateway's 8 MiB. The renderer replaces
+each literal reference with a `data:` image before writing the page, so the
+frame still loads nothing; an image that is loading, missing, refused, too
+large, or not an image draws a labelled placeholder, and the agent's
+`preview` reports a `design-asset-unavailable` warning naming the block, the
+asset id, the reason, and the frames that name it, never the bytes. A share
+refuses a design, and Markdown or HTML export writes
 frame titles, not markup. A share also refuses an action block, whose command
 runs only on this host. Both refusals, and any block or field the share
 contract does not carry, are checked before the snapshot is journaled and
@@ -622,10 +646,10 @@ gain a design; a version append never moves a Canvas back. Agents writing
 a design can be silent for minutes while composing the tool call, so Chat and Work
 wait five minutes for a provider event before cutting a turn off, as Code does
 ([decisions/0164-canvas-designs-are-html-in-a-frame-that-runs-nothing.md](decisions/0164-canvas-designs-are-html-in-a-frame-that-runs-nothing.md)).
-The static, measured, and themed frames described here are the shipped tiers.
-Frames that show Project assets and frames that run script in an
-opaque-origin sandbox with no network are accepted but not yet built; each
-replaces the matching sentence above when it ships, under the
+The static, measured, themed, and asset-bearing frames described here are the
+shipped tiers. Frames that run script in an opaque-origin sandbox with no
+network are accepted but not yet built; they replace the matching sentence
+above when they ship, under the
 [Canvas HTML frames threat model](security/canvas-html-frames-threat-model.md)
 ([decisions/0165-canvas-artifacts-are-documents-designs-and-prototypes.md](decisions/0165-canvas-artifacts-are-documents-designs-and-prototypes.md)).
 
@@ -3519,6 +3543,14 @@ mechanisms are:
   app-managed tools fails the start with a typed reason rather than dropping
   the tool. Each adapter turns its provider's own subagent feature off, because a child
   the provider starts itself runs outside the journal and the approval path.
+- **Canvas design images.** A design frame never loads anything itself. The
+  server resolves the images a design declares on every read, through the
+  authorized Canvas read and under the version's mode, Project, and thread: a
+  Chat Project reaches only images generated in its own threads, and Work and
+  Code files pass the Work confinement sequence. Only sniffed raster images
+  within the per-image and per-design budgets are returned, the renderer
+  inlines them as `data:` images, and the journal holds references only
+  ([Canvas HTML frames threat model](security/canvas-html-frames-threat-model.md), F5).
 - **Remote clients.** Pairing issues a revocable device key; the private
   listener is HTTPS on a LAN or Tailscale address with a host-owned identity.
   Remote requests are classified fail-closed by an admission policy and route
