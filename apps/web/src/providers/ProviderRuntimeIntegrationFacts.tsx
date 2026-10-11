@@ -22,7 +22,7 @@ export function ProviderRuntimeIntegrationFacts(props: {
   const headingId = `integration-${props.instanceId}`;
   const tools = toolsFact(integration.tools, props.observed.verifiedToolModelIds?.length ?? 0);
   const activity = activityFact(integration.activity);
-  const resume = resumeFact(integration.resume);
+  const resume = resumeFact(integration.resume, integration.activity.source === "none");
   return (
     <section
       aria-labelledby={headingId}
@@ -118,7 +118,7 @@ function activityFact(activity: ProviderRuntimeIntegration["activity"]): Fact {
   };
 }
 
-function resumeFact(resume: ProviderResumeQuality): Fact {
+function resumeFact(resume: ProviderResumeQuality, noSession: boolean): Fact {
   if (resume === "precise") {
     return { value: "Precise", detail: "A follow-up reopens the runtime’s own session." };
   }
@@ -129,7 +129,14 @@ function resumeFact(resume: ProviderResumeQuality): Fact {
         "The endpoint keeps no session, so Octant sends the thread’s history again, fitted to the model’s context window.",
     };
   }
-  return { value: "None", detail: "This runtime cannot reopen an earlier session." };
+  // A runtime that is not running here may resume fine once it starts; saying
+  // it cannot would claim more than a failed check established.
+  return {
+    value: "None",
+    detail: noSession
+      ? "No session runs on this runtime here, so there is none to reopen."
+      : "This runtime cannot reopen an earlier session.",
+  };
 }
 
 function listJoin(values: ReadonlyArray<string>): string {

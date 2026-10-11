@@ -148,6 +148,12 @@ describe("provider runtime integration facts", () => {
 
     renderFacts({ ...base, resume: "none" });
     expect(fact("Resume")).toHaveTextContent("NoneThis runtime cannot reopen an earlier session.");
+    document.body.innerHTML = "";
+
+    renderFacts({ ...base, activity: { source: "none" }, resume: "none" });
+    expect(fact("Resume")).toHaveTextContent(
+      "NoneNo session runs on this runtime here, so there is none to reopen.",
+    );
   });
 
   it("claims nothing when the server reported no integration", () => {
