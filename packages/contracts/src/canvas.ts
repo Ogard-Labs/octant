@@ -19,6 +19,7 @@ import { WorkThreadId } from "./workThreads";
 import { HostId } from "./host";
 import { ProjectId } from "./projects";
 import { ProviderInstanceId, ProviderModelId } from "./providers";
+import { ImageArtifactId } from "./imageGeneration";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 
@@ -30,9 +31,10 @@ const strict = { parseOptions: { onExcessProperty: "error" as const } };
 // block, version 7 the ranked bar-list block, version 8 the
 // entity-relationship, swimlane, and mind map diagram kinds, version 9 the
 // design block, version 10 the comparison matrix, version 11 the math
-// block, version 12 the mockup catalog, and version 13 the design document
-// size and workspace theme, which the definition filters below admit only
-// under those declared versions.
+// block, version 12 the mockup catalog, version 13 the design document
+// size and workspace theme, and version 14 a design's declared image assets,
+// which the definition filters below admit only under those declared
+// versions.
 
 // These are renderer-facing aggregate limits. Per-field structural limits are
 // also applied below; the domain policy re-checks the aggregate values before
@@ -93,6 +95,20 @@ export const CANVAS_MAX_HEATMAP_DAYS = 3 * 366;
 export const CANVAS_MAX_HEATMAP_NOTE_LENGTH = 120;
 export const CANVAS_MAX_DESIGN_FRAMES = 24;
 export const CANVAS_MAX_DESIGN_MARKUP_LENGTH = 32_768;
+// A design shows a few real pictures: a screenshot in a phone frame, a hero
+// image, a team photo. The host reads and inlines every declared image each
+// time the design is drawn, so the count and bytes are bounded per design.
+// The design budget keeps one design's resolved images, base64-encoded in a
+// JSON response, inside the 8 MiB a paired remote client's gateway forwards.
+export const CANVAS_MAX_DESIGN_ASSETS = 12;
+export const CANVAS_DESIGN_ASSET_MAX_BYTES = 3 * 1024 * 1024;
+export const CANVAS_DESIGN_ASSETS_MAX_BYTES = 5 * 1024 * 1024;
+/**
+ * How frame markup and styles name a declared asset, in `src`, `srcset`, a CSS
+ * `url()`, or an `image-set()` candidate: `octant-asset:hero`. The renderer
+ * replaces each reference with the resolved image before the page is drawn.
+ */
+export const CANVAS_DESIGN_ASSET_SCHEME = "octant-asset:";
 // A ranked list is read, not scrolled: the cap is what keeps a "hottest files"
 // list from becoming the whole repository. The renderer shows a shorter top N
 // and offers Show all up to this bound.
@@ -151,6 +167,8 @@ export const CANVAS_MOCKUP_CATALOG_SCHEMA_VERSION = 12;
 // A design drawn as a document that grows to its content, and a design drawn
 // in the workspace theme.
 export const CANVAS_DESIGN_DOCUMENT_SCHEMA_VERSION = 13;
+// A design that declares the images its frames show.
+export const CANVAS_DESIGN_ASSET_SCHEMA_VERSION = 14;
 // The metric's sparkline, goodDirection, and caption arrived with the bar list.
 export const CANVAS_METRIC_TREND_SCHEMA_VERSION = 7;
 
@@ -1742,6 +1760,18 @@ export function canvasDesignUsesDocumentFields(block: {
   return block.kind === "design" && (block.size === "document" || block.theme !== undefined);
 }
 
+/**
+ * Whether a design declares image assets, which version 14 introduced. Reads
+ * loose fields so the domain's declared-version check can ask the same
+ * question of a document that did not decode.
+ */
+export function canvasDesignUsesAssets(block: {
+  readonly kind?: unknown;
+  readonly assets?: unknown;
+}): boolean {
+  return block.kind === "design" && block.assets !== undefined;
+}
+
 /** The CSS viewport each device size is drawn at. Authors lay frames out against it. */
 export const CANVAS_DESIGN_VIEWPORT: Readonly<
   Record<CanvasDesignDeviceSize, { readonly width: number; readonly height: number }>
@@ -1769,8 +1799,49 @@ export const CanvasDesignFrame = Schema.Struct({
 export type CanvasDesignFrame = typeof CanvasDesignFrame.Type;
 
 /**
+ * The name markup gives a declared asset after the scheme: `octant-asset:hero`.
+ * Letters, digits, dots, dashes, and underscores, so a reference ends at the
+ * quote, parenthesis, or space around it wherever it is written.
+ */
+export const CanvasDesignAssetId = Schema.String.pipe(
+  Schema.pattern(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/),
+  Schema.brand("CanvasDesignAssetId"),
+);
+export type CanvasDesignAssetId = typeof CanvasDesignAssetId.Type;
+
+/**
+ * Where a declared image comes from. A `generated-image` is a completed image
+ * an image job made in a thread of the Canvas's own Project, named by its
+ * attachment id. A `project-file` is a path relative to the folder a Work
+ * thread is bound to or the checkout a Code thread is bound to; a Chat
+ * Project has no folder, so it never resolves one. The definition holds only
+ * the reference: the host resolves it under the thread's authority each time
+ * the design is drawn, and the bytes are never journaled.
+ */
+export const CanvasDesignAssetSource = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal("generated-image"),
+    imageId: ImageArtifactId,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("project-file"),
+    path: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1_024)),
+  }).annotations(strict),
+);
+export type CanvasDesignAssetSource = typeof CanvasDesignAssetSource.Type;
+
+export const CanvasDesignAsset = Schema.Struct({
+  assetId: CanvasDesignAssetId,
+  source: CanvasDesignAssetSource,
+  /** What the image shows, for the author's own reference and the warnings. */
+  description: Schema.optional(CanvasMockupText),
+}).annotations(strict);
+export type CanvasDesignAsset = typeof CanvasDesignAsset.Type;
+
+/**
  * Screens of an app or site, or the slides of a deck, written as HTML and CSS.
- * `styles` is one stylesheet every frame shares.
+ * `styles` is one stylesheet every frame shares. `assets` declares the images
+ * the frames and styles may name with `octant-asset:<assetId>`.
  */
 export const CanvasDesignBlock = Schema.Struct({
   ...CanvasBlockFields,
@@ -1779,12 +1850,84 @@ export const CanvasDesignBlock = Schema.Struct({
   size: CanvasDesignSize,
   theme: Schema.optional(CanvasDesignTheme),
   styles: Schema.optional(CanvasDesignMarkup),
+  assets: Schema.optional(
+    Schema.Array(CanvasDesignAsset).pipe(Schema.maxItems(CANVAS_MAX_DESIGN_ASSETS)),
+  ),
   frames: Schema.Array(CanvasDesignFrame).pipe(
     Schema.minItems(1),
     Schema.maxItems(CANVAS_MAX_DESIGN_FRAMES),
   ),
 }).annotations(strict);
 export type CanvasDesignBlock = typeof CanvasDesignBlock.Type;
+
+/** The image types a design asset may resolve to, read from the bytes. */
+export const CanvasDesignAssetMediaType = Schema.Literal(
+  "image/png",
+  "image/jpeg",
+  "image/gif",
+  "image/webp",
+);
+export type CanvasDesignAssetMediaType = typeof CanvasDesignAssetMediaType.Type;
+
+/**
+ * Why a declared asset is drawn as a placeholder. `missing`: nothing by that
+ * reference exists, or it was deleted. `refused`: it exists but lies outside
+ * this Canvas's authority, such as another Project's image, a path that
+ * leaves the folder, or a file asked for in Chat. `too-large`: past the
+ * per-image budget. `design-budget`: the design's earlier images already
+ * spent its budget. `not-an-image`: the bytes are not a PNG, JPEG, GIF, or
+ * WebP.
+ */
+export const CanvasDesignAssetUnavailableReason = Schema.Literal(
+  "missing",
+  "refused",
+  "too-large",
+  "design-budget",
+  "not-an-image",
+);
+export type CanvasDesignAssetUnavailableReason = typeof CanvasDesignAssetUnavailableReason.Type;
+
+export const CanvasDesignAssetResolution = Schema.Union(
+  Schema.Struct({
+    assetId: CanvasDesignAssetId,
+    status: Schema.Literal("resolved"),
+    mediaType: CanvasDesignAssetMediaType,
+    // Base64 of at most the per-image budget.
+    data: Schema.String.pipe(
+      Schema.maxLength(Math.ceil(CANVAS_DESIGN_ASSET_MAX_BYTES / 3) * 4),
+      Schema.pattern(/^[A-Za-z0-9+/]*={0,2}$/),
+    ),
+  }).annotations(strict),
+  Schema.Struct({
+    assetId: CanvasDesignAssetId,
+    status: Schema.Literal("unavailable"),
+    reason: CanvasDesignAssetUnavailableReason,
+  }).annotations(strict),
+);
+export type CanvasDesignAssetResolution = typeof CanvasDesignAssetResolution.Type;
+
+/**
+ * One design's declared images as the host resolved them for this reader,
+ * now. Never stored: a reader asks again each time it draws the design.
+ */
+export const CanvasDesignAssetsOutcome = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal("ready"),
+    canvasId: CanvasId,
+    versionId: CanvasVersionId,
+    blockId: CanvasBlockId,
+    assets: Schema.Array(CanvasDesignAssetResolution).pipe(
+      Schema.maxItems(CANVAS_MAX_DESIGN_ASSETS),
+    ),
+  }).annotations(strict),
+  Schema.Struct({ kind: Schema.Literal("unauthorized"), canvasId: CanvasId }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("unavailable"),
+    canvasId: CanvasId,
+    reason: boundedNonEmptyText(512),
+  }).annotations(strict),
+);
+export type CanvasDesignAssetsOutcome = typeof CanvasDesignAssetsOutcome.Type;
 
 export const CanvasPlanBlock = Schema.Struct({
   ...CanvasBlockFields,
@@ -1920,8 +2063,8 @@ export const CanvasDefinition = Schema.Struct({
     // thread presentation from version 4, a treemap from version 5, a heatmap
     // from version 6, a bar list and the metric trend fields from version 7, a
     // design from version 9, a comparison matrix from version 10, math from
-    // version 11, the mockup catalog from version 12, and a design document
-    // or theme from version 13. A
+    // version 11, the mockup catalog from version 12, a design document
+    // or theme from version 13, and design assets from version 14. A
     // rolled-back runtime that never learned a kind or hint must see a document
     // carrying it as a declared future version, not as a document that failed
     // to decode. Each keeps its own floor so an earlier document stays valid.
@@ -2037,6 +2180,15 @@ export const CanvasDefinition = Schema.Struct({
           `A design document size or theme requires Canvas schema version ${String(CANVAS_DESIGN_DOCUMENT_SCHEMA_VERSION)}.`,
       },
     ),
+    Schema.filter(
+      (definition) =>
+        definition.schemaVersion >= CANVAS_DESIGN_ASSET_SCHEMA_VERSION ||
+        !definition.blocks.some(canvasDesignUsesAssets),
+      {
+        message: () =>
+          `Design assets require Canvas schema version ${String(CANVAS_DESIGN_ASSET_SCHEMA_VERSION)}.`,
+      },
+    ),
   );
 export type CanvasDefinition = typeof CanvasDefinition.Type;
 
@@ -2071,6 +2223,7 @@ export const decodeCanvasPresentation = Schema.decodeUnknownSync(CanvasPresentat
 export const decodeCanvasDiagramLayoutKind = Schema.decodeUnknownSync(CanvasDiagramLayoutKind);
 export const decodeCanvasPlanTaskId = Schema.decodeUnknownSync(CanvasPlanTaskId);
 export const decodeCanvasNodeId = Schema.decodeUnknownSync(CanvasNodeId);
+export const decodeCanvasDesignAssetsOutcome = Schema.decodeUnknownSync(CanvasDesignAssetsOutcome);
 
 // ── Journaled lifecycle events ──────────────────────────────────────────────
 //

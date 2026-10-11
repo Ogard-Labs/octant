@@ -1255,6 +1255,181 @@ describe("design frames", () => {
     ).toBe("accepted");
   });
 
+  it("draws a declared asset from src, srcset, url(), and image-set(), and refuses an undeclared one", () => {
+    const hero = { assetId: "hero", source: { kind: "generated-image", imageId: ids.source } };
+    const withAssets = (
+      frames: ReadonlyArray<{ frameId: string; html: string }>,
+      styles?: string,
+    ) => ({ ...design(frames, styles), assets: [hero] });
+    expect(
+      refusalOf(
+        withAssets(
+          [
+            {
+              frameId: "home",
+              html: [
+                '<img src="octant-asset:hero" alt="">',
+                '<img srcset="octant-asset:hero 1x, data:image/png;base64,AA 2x" alt="">',
+                '<div style="background:url(octant-asset:hero)"></div>',
+                '<div style="background-image:image-set(&quot;octant-asset:hero&quot; 1x)"></div>',
+                '<style>.a{background:url("octant-asset:hero")}</style>',
+              ].join(""),
+            },
+          ],
+          ".hero { background: url('octant-asset:hero'); } .b { background-image: image-set(\"octant-asset:hero\" 2x); }",
+        ),
+      ),
+    ).toBe("accepted");
+    for (const html of [
+      '<img src="octant-asset:other" alt="">',
+      '<img srcset="octant-asset:hero 1x, octant-asset:other 2x" alt="">',
+      '<div style="background:url(octant-asset:other)"></div>',
+      '<style>.a{background-image:image-set("octant-asset:other" 1x)}</style>',
+    ]) {
+      expect(refusalOf(withAssets([{ frameId: "home", html }]))).toMatch(
+        /^design-markup-refused: .*"other", which the design does not declare/,
+      );
+    }
+    // A design that declares nothing names no asset.
+    expect(
+      refusalOf(design([{ frameId: "home", html: '<img src="octant-asset:hero" alt="">' }])),
+    ).toContain("does not declare");
+    expect(
+      refusalOf(
+        withAssets(
+          [{ frameId: "home", html: "<p>Hi</p>" }],
+          ".a{background:url(octant-asset:other)}",
+        ),
+      ),
+    ).toContain("stylesheet uses the asset");
+  });
+
+  it("refuses an asset reference spelled through a character reference or CSS escape", () => {
+    const hero = { assetId: "hero", source: { kind: "generated-image", imageId: ids.source } };
+    const withAssets = (html: string, styles?: string) => ({
+      ...design([{ frameId: "home", html }], styles),
+      assets: [hero],
+    });
+    for (const html of [
+      // The renderer replaces only the literal spelling; a browser would try to
+      // load any other, which the frame policy blocks but the author would not see.
+      '<div style="background:url(octant&#45;asset:hero)"></div>',
+      '<div style="background:url(octant-asset&colon;hero)"></div>',
+      '<div style="background:url(&#111;ctant-asset:hero)"></div>',
+      String.raw`<div style="background:url(octant\2d asset:hero)"></div>`,
+      String.raw`<style>.a{background-image:image-set("\6f ctant-asset:hero" 1x)}</style>`,
+      String.raw`<style>.a{background:u\72l(octant-asset\3a hero)}</style>`,
+    ]) {
+      expect(refusalOf(withAssets(html))).toContain("spells an octant-asset: reference");
+    }
+    for (const styles of [
+      String.raw`.a { background: url(octant\-asset:hero); }`,
+      String.raw`.a { background-image: image-set("octant-asset\3a hero" 1x); }`,
+    ]) {
+      expect(refusalOf(withAssets("<p>Hi</p>", styles))).toContain(
+        "spells an octant-asset: reference",
+      );
+    }
+    // An attribute is read as written, so a reference in a source attribute
+    // must be literal too.
+    for (const html of [
+      '<img src="octant-asset&#58;hero" alt="">',
+      '<img src="OCTANT-ASSET:hero" alt="">',
+    ]) {
+      expect(refusalOf(withAssets(html))).toMatch(/^design-markup-refused: /);
+    }
+    expect(
+      refusalOf(withAssets("<p>Hi</p>", ".a { background: url(OCTANT-ASSET:hero); }")),
+    ).toContain("loads a file with url()");
+  });
+
+  it("keeps refusing every remote load in a design that declares assets", () => {
+    const withAssets = (html: string, styles?: string) => ({
+      ...design([{ frameId: "home", html }], styles),
+      assets: [{ assetId: "hero", source: { kind: "generated-image", imageId: ids.source } }],
+    });
+    for (const html of [
+      '<img src="https://x.test/hero.png" alt="">',
+      '<img srcset="octant-asset:hero 1x, https://x.test/a.png 2x" alt="">',
+      '<div style="background:url(https://x.test/a.png)"></div>',
+      '<div style="background:ur&#108;(https://x.test/a.png)"></div>',
+      '<style>.a{background-image:image-set("https://x.test/a.png" 1x)}</style>',
+      '<img src="octant-asset:https://x.test/a.png" alt="">',
+    ]) {
+      expect(refusalOf(withAssets(html))).toMatch(/^design-markup-refused: /);
+    }
+    expect(refusalOf(withAssets("<p>Hi</p>", "@import url(octant-asset:hero);"))).toContain(
+      "imports a stylesheet",
+    );
+  });
+
+  it("refuses a Project file asset in a Chat Canvas, a path that leaves the folder, and a repeated id", () => {
+    const work = (assets: ReadonlyArray<unknown>, mode: "chat" | "work" | "code" = "work") => {
+      try {
+        validateCanvasDefinition({
+          ...baseDefinition,
+          provenance: { ...baseDefinition.provenance, mode },
+          blocks: [
+            {
+              ...design([{ frameId: "home", html: '<img src="octant-asset:shot" alt="">' }]),
+              assets,
+            },
+          ],
+        });
+      } catch (error) {
+        if (error instanceof CanvasPolicyRejected) return `${error.code}: ${error.message}`;
+        throw error;
+      }
+      return "accepted";
+    };
+    const file = (path: string) => [{ assetId: "shot", source: { kind: "project-file", path } }];
+    expect(work(file("screens/home.png"))).toBe("accepted");
+    expect(work(file("screens/home.png"), "code")).toBe("accepted");
+    expect(work(file("screens/home.png"), "chat")).toMatch(
+      /^design-asset-refused: .*a Chat Project has no folder/,
+    );
+    for (const path of ["../secrets.png", "screens/../../x.png", "/etc/hosts", "a\\b.png"]) {
+      expect(work(file(path))).toMatch(/^design-asset-refused: .*stay inside it/);
+    }
+    expect(
+      work([
+        ...file("a.png"),
+        { assetId: "shot", source: { kind: "generated-image", imageId: ids.source } },
+      ]),
+    ).toMatch(/^design-asset-refused: .*declares the asset shot twice/);
+    // A generated image is the one source a Chat Project has.
+    expect(
+      work([{ assetId: "shot", source: { kind: "generated-image", imageId: ids.source } }], "chat"),
+    ).toBe("accepted");
+  });
+
+  it("refuses design assets inside a document declaring version 13", () => {
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition({
+          ...baseDefinition,
+          schemaVersion: 13,
+          blocks: [
+            {
+              ...design([{ frameId: "home", html: '<img src="octant-asset:hero" alt="">' }]),
+              schemaVersion: 13,
+              assets: [
+                { assetId: "hero", source: { kind: "generated-image", imageId: ids.source } },
+              ],
+            },
+          ],
+        }),
+      "unsupported-schema-version",
+    );
+    expect(() =>
+      validateCanvasDefinition({
+        ...baseDefinition,
+        schemaVersion: 13,
+        blocks: [{ ...design([{ frameId: "home", html: "<p>Hi</p>" }]), schemaVersion: 13 }],
+      }),
+    ).not.toThrow();
+  });
+
   it("refuses two frames with one id, since a link could only reach the first", () => {
     expect(
       refusalOf(

@@ -22,19 +22,21 @@ const strict = { parseOptions: { onExcessProperty: "error" as const } };
 // block, version 6 the heatmap block, version 7 the ranked bar list block,
 // version 8 the entity-relationship, swimlane, and mind map diagram kinds,
 // version 9 the design block, version 10 the comparison matrix, version 11
-// the math block, version 12 the mockup catalog, and version 13 the design
-// document size and workspace theme. A version-gated kind or hint is only
+// the math block, version 12 the mockup catalog, version 13 the design
+// document size and workspace theme, and version 14 the design's declared
+// image assets. A version-gated kind or hint is only
 // valid inside a document declaring the version that introduced it, so a
 // rolled-back older runtime refuses it as a declared future version instead
 // of reading it as corrupt. Each gated block kind is admitted from the version
 // that introduced it: every earlier document (including mockup-carrying v3,
 // presentation v4, treemap-carrying v5, heatmap-carrying v6, bar-list-carrying
 // v7, diagram-kind-carrying v8, design-carrying v9, matrix-carrying v10,
-// math-carrying v11, and catalog-carrying v12 documents) remains decodable so
+// math-carrying v11, catalog-carrying v12, and design-document-carrying v13
+// documents) remains decodable so
 // a host does not lose its history at the bump. The literal set names each
 // earlier version explicitly and ends at the current one, so a future bump
 // cannot silently drop an intermediate version from the set that decodes.
-export const CANVAS_SCHEMA_VERSION = 13 as const;
+export const CANVAS_SCHEMA_VERSION = 14 as const;
 export const CanvasSchemaVersion = Schema.Literal(
   1,
   2,
@@ -48,6 +50,7 @@ export const CanvasSchemaVersion = Schema.Literal(
   10,
   11,
   12,
+  13,
   CANVAS_SCHEMA_VERSION,
 );
 export type CanvasSchemaVersion = typeof CanvasSchemaVersion.Type;
