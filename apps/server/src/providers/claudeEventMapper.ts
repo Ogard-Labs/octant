@@ -1020,6 +1020,11 @@ export function mapClaudeMessage(
       // survives is Claude Code's own choice. Usage reports for the rest of
       // the turn say so; the driver opens a fresh context for the next turn.
       context.windowCompacted = true;
+      // The last request's fill is the window before the cut. Until the next
+      // request measures it, the window holds what the runtime says survived,
+      // or an unknown amount; a stale pre-compaction figure would show it full.
+      if (message.postTokens === undefined) delete context.contextTokens;
+      else context.contextTokens = message.postTokens;
       return [{ kind: "ignored" }];
     case "ignored":
       return [{ kind: "ignored" }];

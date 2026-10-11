@@ -140,6 +140,7 @@ describe("Runtime compaction", () => {
     expect(decodeMessage(boundary, openInput, active)).toEqual({
       kind: "compaction",
       sessionId: "session-1",
+      postTokens: 18_204,
     });
   });
 
@@ -180,7 +181,7 @@ describe("Runtime compaction", () => {
     );
   });
 
-  it("refuses a system message it does not know and names its subtype", () => {
+  it("refuses a system message it does not know without quoting its subtype", () => {
     expect(
       refusal({
         type: "system",
@@ -188,7 +189,7 @@ describe("Runtime compaction", () => {
         uuid: "u-1",
         session_id: "session-1",
       }),
-    ).toBe("Claude returned an unsupported system message (conversation_reset).");
+    ).toBe("Claude returned an unsupported system message.");
     expect(
       refusal({
         type: "system",

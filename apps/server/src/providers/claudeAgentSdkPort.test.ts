@@ -1096,7 +1096,7 @@ describe("Claude Agent SDK port", () => {
         uuid: "5",
         session_id: "session-1",
       },
-      "Claude returned an unsupported system message (permission_denied).",
+      "Claude returned an unsupported system message.",
     ],
     [
       {
@@ -1106,7 +1106,7 @@ describe("Claude Agent SDK port", () => {
         uuid: "6",
         session_id: "session-1",
       },
-      "Claude returned an unsupported system message (worker_shutting_down).",
+      "Claude returned an unsupported system message.",
     ],
     [
       {

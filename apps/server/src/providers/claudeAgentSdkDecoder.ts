@@ -1196,7 +1196,12 @@ export function decodeMessage(
     ) {
       throw protocol("Claude returned an unsupported runtime message.");
     }
-    return { kind: "compaction", sessionId: message.session_id };
+    const postTokens = nonNegativeInteger(metadata.post_tokens);
+    return {
+      kind: "compaction",
+      sessionId: message.session_id,
+      ...(postTokens === undefined ? {} : { postTokens }),
+    };
   }
   if (
     message.type === "system" &&
@@ -1285,19 +1290,16 @@ export function decodeMessage(
   }
 
   if (isHarmlessInformational(message)) return { kind: "ignored" };
-  // A subtype this decoder knows but whose fields it refused stays generic.
-  // Naming any other says which runtime message a new Claude Code release
-  // added; only a plain identifier is quoted, never arbitrary runtime text.
+  // A system subtype this decoder does not know says so in a sentence of its
+  // own. The subtype itself is runtime-supplied text and stays out of a
+  // failure the driver journals; a known subtype with refused fields stays
+  // generic.
   if (
     message.type === "system" &&
     typeof message.subtype === "string" &&
     !INFORMATIONAL_SYSTEM_SUBTYPES.has(message.subtype)
   ) {
-    throw protocol(
-      /^[a-z][a-z0-9_]{0,63}$/.test(message.subtype)
-        ? `Claude returned an unsupported system message (${message.subtype}).`
-        : "Claude returned an unsupported system message.",
-    );
+    throw protocol("Claude returned an unsupported system message.");
   }
   throw protocol("Claude returned an unsupported runtime message.");
 }

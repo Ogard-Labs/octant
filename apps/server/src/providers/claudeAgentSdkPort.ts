@@ -333,6 +333,8 @@ export type ClaudeDecodedMessage =
       /** The runtime compacted the session's window by itself. */
       readonly kind: "compaction";
       readonly sessionId: string;
+      /** What the compacted window holds, in tokens, when the runtime said. */
+      readonly postTokens?: number;
     }
   | { readonly kind: "ignored" };
 
