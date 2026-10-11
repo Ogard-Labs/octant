@@ -562,11 +562,11 @@ function confineClaudeLaunch(
       // open is left to it.
     }
   };
-  const stateDirectories = planStateDirectories(
-    boundRoot,
-    claudeRuntimeStateDirectories(spawnOptions.env),
-  );
   try {
+    const stateDirectories = planStateDirectories(
+      boundRoot,
+      claudeRuntimeStateDirectories(spawnOptions.env),
+    );
     const launch = options.confinement.prepare({
       executable: spawnOptions.command,
       args: spawnOptions.args,

@@ -773,6 +773,28 @@ describe("Claude runtime confinement", () => {
     expect(pids(target.root)).toEqual([]);
   });
 
+  it("removes the Plan temporary directory when the account directory is refused", () => {
+    const target = fixture();
+    const scratch = mkdtempSync(join(tmpdir(), "octant-claude-plan-scratch-"));
+    directories.push(scratch);
+    const confinement = recordingConfinement();
+
+    expect(() =>
+      makePort(target, { confinement: confinement.port }).spawn({
+        projectRoot: target.root,
+        executionPolicy: "plan",
+      })({
+        command: target.binaryPath,
+        args: ["sdk-test"],
+        cwd: target.root,
+        env: { ...target.environment, TMPDIR: scratch, CLAUDE_CONFIG_DIR: "/var/tmp" },
+        signal: new AbortController().signal,
+      }),
+    ).toThrow("shared host directory");
+    expect(readdirSync(scratch)).toEqual([]);
+    expect(confinement.prepared).toEqual([]);
+  });
+
   it("refuses a Plan turn whose account directory is the user's home", () => {
     const target = fixture();
     const home = process.env.HOME;
