@@ -1391,7 +1391,8 @@ describe("ProviderService", () => {
     ).rejects.toMatchObject({
       failure: {
         category: "invalid-configuration",
-        message: "Another Claude account already uses that config directory.",
+        message:
+          "Claude accounts use an Octant-assigned directory. Re-assign the account to use it.",
       },
     });
     const defaultAccount = fixture.persistence.readProviderInstance(instanceId);
@@ -1403,6 +1404,30 @@ describe("ProviderService", () => {
         ? defaultAccount.configuration.configDirectory
         : undefined,
     ).toBeUndefined();
+  });
+
+  it("refuses a Claude account directory Octant did not assign", async () => {
+    const fixture = serviceFixture();
+    await expect(
+      fixture.service.execute(windowId, {
+        kind: "create-claude-provider",
+        instanceId,
+        expectedVersion: 0,
+        displayName: "Claude personal",
+        configuration: {
+          kind: "claude-agent-sdk",
+          binaryPath: "/opt/homebrew/bin/claude",
+          authentication: "subscription",
+          configDirectory: `${homedir()}/Documents`,
+        },
+      }),
+    ).rejects.toMatchObject({
+      failure: {
+        category: "invalid-configuration",
+        message:
+          "Claude accounts use an Octant-assigned directory. Re-assign the account to use it.",
+      },
+    });
   });
 
   it("refuses a Claude account directory that matches the default account's host overlay", async () => {
@@ -1593,7 +1618,7 @@ describe("ProviderService", () => {
           kind: "claude-agent-sdk",
           binaryPath: "/opt/homebrew/bin/claude",
           authentication: "subscription",
-          configDirectory: `${homedir()}/.claude-accounts/personal`,
+          configDirectory: assignedClaudeAccountConfigDirectory(homedir(), instanceId),
           accent: "teal",
         },
       }),
@@ -1646,7 +1671,7 @@ describe("ProviderService", () => {
         }),
       ],
     });
-    const directory = `${homedir()}/.claude-accounts/work`;
+    const directory = assignedClaudeAccountConfigDirectory(homedir(), otherId);
     await expect(
       fixture.service.execute(windowId, {
         kind: "change-claude-configuration",
