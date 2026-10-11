@@ -1867,6 +1867,62 @@ describe("ProviderService", () => {
     },
   );
 
+  it.skipIf(process.platform !== "darwin")(
+    "refuses a missing Claude account directory nested under another account's case-different path",
+    async () => {
+      const parent = join(tmpdir(), `octant-claude-dir-${crypto.randomUUID()}`);
+      const existing = join(parent, "Work");
+      mkdirSync(existing, { recursive: true });
+      try {
+        const fixture = serviceFixture();
+        await fixture.service.execute(windowId, {
+          kind: "create-claude-provider",
+          instanceId,
+          expectedVersion: 0,
+          displayName: "Claude personal",
+          configuration: {
+            kind: "claude-agent-sdk",
+            binaryPath: "/opt/homebrew/bin/claude",
+            authentication: "subscription",
+          },
+        });
+        await fixture.service.execute(windowId, {
+          kind: "create-claude-provider",
+          instanceId: otherId,
+          expectedVersion: 0,
+          displayName: "Claude work",
+          configuration: {
+            kind: "claude-agent-sdk",
+            binaryPath: "/opt/homebrew/bin/claude",
+            authentication: "subscription",
+            configDirectory: existing,
+            accent: "teal",
+          },
+        });
+        await expect(
+          fixture.service.execute(windowId, {
+            kind: "change-claude-configuration",
+            instanceId,
+            expectedVersion: 1,
+            configuration: {
+              kind: "claude-agent-sdk",
+              binaryPath: "/opt/homebrew/bin/claude",
+              authentication: "subscription",
+              configDirectory: join(parent, "work", "child"),
+            },
+          }),
+        ).rejects.toMatchObject({
+          failure: {
+            category: "invalid-configuration",
+            message: "Another Claude account already uses that config directory.",
+          },
+        });
+      } finally {
+        rmSync(parent, { recursive: true, force: true });
+      }
+    },
+  );
+
   it("refuses a Claude account directory that shares a symlink ancestor with another account", async () => {
     const parent = join(tmpdir(), `octant-claude-dir-${crypto.randomUUID()}`);
     const realAccounts = join(parent, "real");

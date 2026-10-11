@@ -2180,13 +2180,11 @@ export async function runPackagedProviderSmokeTurn(
 
 function claudeAccountDirectoryKey(directory: string): string {
   const canonical = canonicalClaudeAccountDirectory(directory);
-  // macOS's default volume is case-insensitive. Two not-yet-created
-  // leaves that differ only by case open the same directory after mkdir.
-  // An existing realpath result already distinguished two case-different
-  // directories on a case-sensitive volume.
-  return process.platform === "darwin" && !canonical.existed
-    ? canonical.path.toLowerCase()
-    : canonical.path;
+  // macOS's default volume is case-insensitive. Fold every uniqueness
+  // key the same way so an existing `Work` still overlaps a missing
+  // `work/child`. A case-sensitive Darwin volume may then refuse two
+  // distinct spellings; that is safer than missing a nested claim.
+  return process.platform === "darwin" ? canonical.path.toLowerCase() : canonical.path;
 }
 
 function hostDirectoryClaim(directory: string | undefined): string | undefined {
