@@ -5002,37 +5002,37 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 
 .composer-model-picker__rail-accent[data-accent="rust"],
 .claude-account-accent-picker__swatch[data-accent="rust"] {
-  --claude-account-accent: #c45c26;
+  --claude-account-accent: var(--octant-palette-orange);
 }
 
 .composer-model-picker__rail-accent[data-accent="gold"],
 .claude-account-accent-picker__swatch[data-accent="gold"] {
-  --claude-account-accent: #c4922a;
+  --claude-account-accent: var(--octant-palette-yellow);
 }
 
 .composer-model-picker__rail-accent[data-accent="green"],
 .claude-account-accent-picker__swatch[data-accent="green"] {
-  --claude-account-accent: #3d8f5a;
+  --claude-account-accent: var(--octant-palette-green);
 }
 
 .composer-model-picker__rail-accent[data-accent="teal"],
 .claude-account-accent-picker__swatch[data-accent="teal"] {
-  --claude-account-accent: #2a8f8a;
+  --claude-account-accent: var(--octant-palette-teal);
 }
 
 .composer-model-picker__rail-accent[data-accent="blue"],
 .claude-account-accent-picker__swatch[data-accent="blue"] {
-  --claude-account-accent: #3a6ea8;
+  --claude-account-accent: var(--octant-palette-blue);
 }
 
 .composer-model-picker__rail-accent[data-accent="violet"],
 .claude-account-accent-picker__swatch[data-accent="violet"] {
-  --claude-account-accent: #7a4ea8;
+  --claude-account-accent: var(--octant-palette-purple);
 }
 
 .composer-model-picker__rail-accent[data-accent="rose"],
 .claude-account-accent-picker__swatch[data-accent="rose"] {
-  --claude-account-accent: #b44d6a;
+  --claude-account-accent: var(--octant-palette-pink);
 }
 
 .composer-model-picker__rail-accent {
