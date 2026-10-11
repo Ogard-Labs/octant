@@ -1779,48 +1779,6 @@ describe("CodeOperationService", () => {
     );
   });
 
-  it("gives a forked thread the conversation it branched from, on the host's own reading", async () => {
-    const resolveForkHandoff = vi.fn(async () => "Forked from: user asked about the loader.");
-    const fixture = providerTurnFixture({
-      thread: decodeCodeThread({
-        ...thread(),
-        forkedFrom: {
-          threadId: "b0000000-0000-4000-8000-0000000000ff",
-          throughOperationId: "c0000000-0000-4000-8000-0000000000ff",
-        },
-      }),
-      resolveForkHandoff,
-    });
-
-    await expect(fixture.service.execute(ids.window, startProviderTurn)).resolves.toMatchObject({
-      kind: "provider-turn-state",
-      state: "running",
-    });
-
-    // The origin comes from the thread record, never from the command, so a
-    // renderer cannot choose what history a turn is given. The asking turn is
-    // named too: its own start is already journalled, so the resolver cannot
-    // tell a first turn from a later one without it.
-    expect(resolveForkHandoff).toHaveBeenCalledWith({
-      threadId: thread().id,
-      origin: {
-        threadId: "b0000000-0000-4000-8000-0000000000ff",
-        throughOperationId: "c0000000-0000-4000-8000-0000000000ff",
-      },
-      windowId: ids.window,
-      operationId: startProviderTurn.operationId,
-    });
-    const started = fixture.turns.start.mock.calls[0]![0];
-    // It travels apart from the turn's other context, so a provider that can
-    // take up the source's own conversation does not also read it as text.
-    expect(started.forkHandoff?.text).toContain("Forked from: user asked about the loader.");
-    expect((started.context ?? []).map((block) => block.text).join("\n")).not.toContain(
-      "Forked from",
-    );
-    // The durable message stays exactly what the user typed.
-    expect(started.prompt).toBe("does this still hold?");
-  });
-
   it("takes no restore point on a Plan turn, which may write nothing", async () => {
     const checkpoint = vi.fn(async () => ({ status: "failed" as const }));
     const planning = providerTurnFixture({
@@ -2043,18 +2001,6 @@ describe("CodeOperationService", () => {
     expect(fixture.turns.start.mock.calls[0]![0].context).toEqual([
       { kind: "instructions", text: "Review as a skeptic." },
     ]);
-  });
-
-  it("sends a thread that was never forked without asking for a handoff", async () => {
-    const resolveForkHandoff = vi.fn(async () => "should never be read");
-    const fixture = providerTurnFixture({ resolveForkHandoff });
-
-    await expect(fixture.service.execute(ids.window, startProviderTurn)).resolves.toMatchObject({
-      kind: "provider-turn-state",
-    });
-
-    expect(resolveForkHandoff).not.toHaveBeenCalled();
-    expect(fixture.turns.start.mock.calls[0]![0].context).toBeUndefined();
   });
 
   it("does not carry a Code turn's mention context into the next turn", async () => {
@@ -2496,7 +2442,6 @@ function providerTurnFixture(
     Pick<
       CodeOperationServiceOptions,
       | "resolveThreadMentionContext"
-      | "resolveForkHandoff"
       | "resolveProfileSkills"
       | "resolveSelectedExtensions"
       | "attachments"
