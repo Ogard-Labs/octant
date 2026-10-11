@@ -1181,6 +1181,92 @@ describe("createAgentRunSessionRuntime", () => {
     );
   });
 
+  it("refuses to start a Work child run on a provider the Project policy excludes", () => {
+    const provider = fakeProvider();
+    const asked: Array<{ project: unknown; provider: string; model: string }> = [];
+    const runtime = createAgentRunSessionRuntime(
+      runtimeOptions(provider, {
+        isTargetAllowedByProjectPolicy: ({ run, providerInstanceId: id, modelId }) => {
+          asked.push({
+            project:
+              "projectId" in run.workspaceReceipt ? run.workspaceReceipt.projectId : undefined,
+            provider: String(id),
+            model: String(modelId),
+          });
+          return false;
+        },
+      }),
+    );
+
+    expect(() =>
+      runtime.start(
+        agentRun({
+          workspaceReceipt: {
+            kind: "work-root",
+            mode: "work",
+            projectId: "88888888-8888-4888-8888-888888888888" as never,
+            bindingRevisionId: "77777777-7777-4777-8777-777777777777" as never,
+            canonicalRoot: "/work",
+          },
+        }),
+      ),
+    ).toThrowError(expect.objectContaining({ reason: "provider-unavailable" }));
+    expect(asked).toEqual([
+      {
+        project: "88888888-8888-4888-8888-888888888888",
+        provider: providerInstanceId,
+        model: "gpt-4o",
+      },
+    ]);
+    expect(provider.acquired).toHaveLength(0);
+  });
+
+  it("refuses a queued child whose provider the Project policy dropped after admission", () => {
+    let policyAllows = true;
+    const provider = fakeProvider();
+    const runtime = createAgentRunSessionRuntime(
+      runtimeOptions(provider, { isTargetAllowedByProjectPolicy: () => policyAllows }),
+    );
+    const queued = agentRun({
+      workspaceReceipt: {
+        kind: "code-worktree",
+        mode: "code",
+        projectId: "88888888-8888-4888-8888-888888888888" as never,
+        checkoutRoot: "/repo",
+        worktreeRoot: "/repo/.worktrees/child",
+        verified: true,
+      },
+    });
+    policyAllows = false;
+
+    expect(() => runtime.start(queued)).toThrowError(
+      expect.objectContaining({ reason: "provider-unavailable" }),
+    );
+    expect(provider.acquired).toHaveLength(0);
+  });
+
+  it("refuses to resume a saved child whose provider the Project policy no longer allows", async () => {
+    const runtime = createAgentRunSessionRuntime(
+      runtimeOptions(fakeProvider({ resumable: true }), {
+        supportsResume: () => true,
+        sessionStore: {
+          read: () =>
+            ({
+              sessionId,
+              resumeCursor: { value: "private-provider-session" },
+            }) as never,
+          write: () => true,
+        },
+        isTargetAllowedByProjectPolicy: () => false,
+      }),
+    );
+
+    expect(await runtime.checkResume?.({ ...agentRun(), lifecycleStatus: "completed" })).toEqual({
+      status: "refused",
+      message: expect.stringContaining("provider policy"),
+    });
+  });
+
   it("fails closed when the admitted context snapshot cannot be resolved", () => {
     const runtime = createAgentRunSessionRuntime(
       runtimeOptions(fakeProvider(), { context: { resolve: () => undefined } }),

@@ -31,6 +31,7 @@ function baseOptions(overrides: Partial<WebCommandOptions> = {}): WebCommandOpti
       version: "0.0.0-dev",
     })),
     openBrowser: vi.fn(),
+    fetch: vi.fn(async () => new Response(null, { status: 204 })),
     startDevServer: vi.fn(async () => "http://127.0.0.1:5173"),
     stdout: { write: vi.fn((chunk: string) => chunk.length > 0) },
     stderr: { write: vi.fn((chunk: string) => chunk.length > 0) },
@@ -146,6 +147,7 @@ describe("runWebCommand", () => {
     expect(attachOrCreateHost).toHaveBeenCalledWith(
       expect.objectContaining({
         environment: {
+          OCTANT_WEB_URL: "http://127.0.0.1:5173",
           OCTANT_CODE_FILE_HELPER_PATH: "/repo/dist/octant-code-file-helper",
         },
       }),
@@ -432,6 +434,31 @@ describe("runWebCommand", () => {
     );
 
     expect(result).toMatchObject({ kind: "dev" });
+  });
+
+  it("refuses to open a Vite renderer that an already-running host would refuse", async () => {
+    const fetch = vi.fn(async () => new Response(null, { status: 403 }));
+    const startDevServer = vi.fn(async () => "http://127.0.0.1:5173");
+    const openBrowser = vi.fn();
+    const stderr = { write: vi.fn((chunk: string) => chunk.length > 0) };
+
+    const result = await runWebCommand(
+      baseOptions({ dev: true, fetch, startDevServer, openBrowser, stderr }),
+    );
+
+    expect(result.kind).toBe("renderer-refused");
+    expect(fetch).toHaveBeenCalledWith(
+      new URL("http://127.0.0.1:13773/api/shell/local-session"),
+      expect.objectContaining({
+        method: "OPTIONS",
+        headers: expect.objectContaining({ origin: "http://127.0.0.1:5173" }),
+      }),
+    );
+    expect(startDevServer).not.toHaveBeenCalled();
+    expect(openBrowser).not.toHaveBeenCalled();
+    expect(stderr.write).toHaveBeenCalledWith(
+      expect.stringContaining("OCTANT_WEB_URL=http://127.0.0.1:5173"),
+    );
   });
 
   it("prints the URL manually when the browser opener throws", async () => {

@@ -9,13 +9,19 @@ import type { FirstRunReadinessOverall } from "./firstRunReadinessModel";
  * The three facts the end of first run has to report, and the one next action
  * they produce.
  *
- * Setup stays the five steps 0019 named. This model is the handoff after them:
- * whether a real thread can start in the selected mode, and if not, which
- * exact surface still has to be opened. Skipping is not modelled here — skip
- * records skip and does not invent any of these facts.
+ * This model is the handoff after the setup steps: whether a real task can
+ * start in the selected mode, and if not, which exact surface still has to be
+ * opened. Skipping is not modelled here — skip records skip and does not
+ * invent any of these facts.
  */
 
-export type FirstRunHandoffSetupTarget = "providers" | "project" | "default-model";
+/**
+ * The modes a first task can start in. First run asks for a folder, and a
+ * Chat Project has none, so Chat is reached from the shell rather than here.
+ */
+export type FirstRunTaskMode = Extract<OctantMode, "work" | "code">;
+
+export type FirstRunHandoffSetupTarget = "providers" | "project" | "model";
 
 export interface FirstRunHandoffProject {
   readonly id: ProjectId;
@@ -50,7 +56,7 @@ export type FirstRunHandoffPrimary =
     };
 
 export interface FirstRunHandoff {
-  readonly mode: OctantMode;
+  readonly mode: FirstRunTaskMode;
   readonly facts: readonly [FirstRunHandoffFact, FirstRunHandoffFact, FirstRunHandoffFact];
   readonly ready: boolean;
   readonly primary: FirstRunHandoffPrimary;
@@ -59,10 +65,12 @@ export interface FirstRunHandoff {
 }
 
 export interface FirstRunHandoffInput {
-  readonly mode: OctantMode;
+  readonly mode: FirstRunTaskMode;
   readonly providerOverall: FirstRunReadinessOverall;
   readonly providerHeadline: string;
   readonly projects: ReadonlyArray<FirstRunHandoffProject>;
+  /** The Project picked on the Project step, when there was more than one. */
+  readonly preferredProjectId?: ProjectId | undefined;
   readonly groups: ReadonlyArray<PickerGroup>;
   readonly preferredDefault?: {
     readonly providerInstanceId: ProviderInstanceId;
@@ -70,16 +78,9 @@ export interface FirstRunHandoffInput {
   };
 }
 
-const MODE_LABEL: Record<OctantMode, string> = {
-  chat: "Chat",
+const MODE_LABEL: Record<FirstRunTaskMode, string> = {
   work: "Work",
   code: "Code",
-};
-
-const PROJECT_NOUN: Record<OctantMode, string> = {
-  chat: "Chat Project",
-  work: "Work folder",
-  code: "Code folder",
 };
 
 /**
@@ -127,11 +128,26 @@ function resolveModeModel(
   return firstSelectableModel(groups);
 }
 
+export function projectsForMode(
+  projects: ReadonlyArray<FirstRunHandoffProject>,
+  mode: FirstRunTaskMode,
+): ReadonlyArray<FirstRunHandoffProject> {
+  return projects.filter((project) => project.type === mode && project.lifecycle === "active");
+}
+
+/**
+ * The Project a first task starts in: the one the user picked, while it is
+ * still an active Project of this mode, otherwise the first one that is.
+ */
 export function projectForMode(
   projects: ReadonlyArray<FirstRunHandoffProject>,
-  mode: OctantMode,
+  mode: FirstRunTaskMode,
+  preferredProjectId?: ProjectId,
 ): FirstRunHandoffProject | undefined {
-  return projects.find((project) => project.type === mode && project.lifecycle === "active");
+  const candidates = projectsForMode(projects, mode);
+  return (
+    candidates.find((project) => String(project.id) === String(preferredProjectId)) ?? candidates[0]
+  );
 }
 
 function providerFact(input: FirstRunHandoffInput): FirstRunHandoffFact {
@@ -169,7 +185,7 @@ function providerFact(input: FirstRunHandoffInput): FirstRunHandoffFact {
 }
 
 function projectFact(
-  mode: OctantMode,
+  mode: FirstRunTaskMode,
   project: FirstRunHandoffProject | undefined,
 ): FirstRunHandoffFact {
   if (project !== undefined) {
@@ -184,32 +200,31 @@ function projectFact(
     id: "project",
     label: "Project",
     ready: false,
-    detail: `No ${PROJECT_NOUN[mode]} yet. A thread starts in a Project.`,
+    detail: `No ${MODE_LABEL[mode]} folder yet. A task starts in a Project.`,
   };
 }
 
 function modelFact(
-  mode: OctantMode,
+  mode: FirstRunTaskMode,
   model: FirstRunHandoffModelChoice | undefined,
 ): FirstRunHandoffFact {
   if (model !== undefined) {
     return {
       id: "model",
-      label: "Default model",
+      label: "Model",
       ready: true,
       detail: model.label,
     };
   }
   return {
     id: "model",
-    label: "Default model",
+    label: "Model",
     ready: false,
     detail: `No model this host can use in ${MODE_LABEL[mode]} yet.`,
   };
 }
 
 function primaryAction(
-  mode: OctantMode,
   providerReady: boolean,
   project: FirstRunHandoffProject | undefined,
   model: FirstRunHandoffModelChoice | undefined,
@@ -218,29 +233,20 @@ function primaryAction(
     return { kind: "setup", target: "providers", label: "Set up a provider" };
   }
   if (project === undefined) {
-    return {
-      kind: "setup",
-      target: "project",
-      label: mode === "chat" ? "Create a Chat Project" : `Add a ${MODE_LABEL[mode]} folder`,
-    };
+    // The same words, and the same create surface, as the empty Work and Code
+    // pages, so the folder chosen here is chosen the way it is chosen later.
+    return { kind: "setup", target: "project", label: "Choose a folder…" };
   }
   if (model === undefined) {
-    // Chat's default-model step is the picker for that mode. Work and Code
-    // have no first-run model step of their own: a missing mode-valid model
-    // is a provider-setup problem, not a Chat default to reuse.
-    return mode === "chat"
-      ? { kind: "setup", target: "default-model", label: "Choose a default model" }
-      : { kind: "setup", target: "providers", label: "Set up a provider" };
+    // Any usable model would already have been taken as the fallback, so none
+    // being there is a provider-setup problem the model step cannot answer.
+    return { kind: "setup", target: "providers", label: "Set up a provider" };
   }
-  return {
-    kind: "start-thread",
-    label: `Start a ${MODE_LABEL[mode]} thread`,
-    projectId: project.id,
-  };
+  return { kind: "start-thread", label: "Start a task", projectId: project.id };
 }
 
 export function resolveFirstRunHandoff(input: FirstRunHandoffInput): FirstRunHandoff {
-  const project = projectForMode(input.projects, input.mode);
+  const project = projectForMode(input.projects, input.mode, input.preferredProjectId);
   const model = resolveModeModel(input.groups, input.preferredDefault);
   const provider = providerFact(input);
   const facts = [provider, projectFact(input.mode, project), modelFact(input.mode, model)] as const;
@@ -249,7 +255,7 @@ export function resolveFirstRunHandoff(input: FirstRunHandoffInput): FirstRunHan
     mode: input.mode,
     facts,
     ready,
-    primary: primaryAction(input.mode, provider.ready, project, model),
+    primary: primaryAction(provider.ready, project, model),
     project,
     model,
   };

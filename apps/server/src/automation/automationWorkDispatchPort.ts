@@ -27,6 +27,7 @@ export interface AutomationWorkTurnService {
   readonly startFirstTurn: (
     windowId: WindowId,
     command: unknown,
+    options?: { readonly holdAskFirst?: boolean },
   ) => Promise<{
     readonly kind: string;
     readonly turn?: { readonly requestId: string; readonly status?: string };
@@ -167,7 +168,13 @@ async function startOrRecover(
   };
 
   try {
-    const result = await options.turns.startFirstTurn(input.windowId, command);
+    // A routine thread takes its access from the host's Work default, which a
+    // person may have set to auto-accept-edits. Nobody is present for this
+    // turn, so it runs ask-first unless the routine's captured authority
+    // itself is auto-accept-edits; the hold can only narrow the thread.
+    const result = await options.turns.startFirstTurn(input.windowId, command, {
+      holdAskFirst: input.run.authoritySnapshot.effective.executionPolicy !== "auto-accept-edits",
+    });
     if (result.kind === "accepted") {
       return {
         kind: "accepted",

@@ -186,7 +186,39 @@ describe("createAutomationWorkDispatchPort", () => {
           modelId: run.definitionSnapshot.executionProfile.modelId,
         }),
       }),
+      { holdAskFirst: true },
     );
+  });
+
+  it("holds an unattended first turn ask-first unless the routine captured auto-accept-edits", async () => {
+    const turns = createTurns();
+    const port = createAutomationWorkDispatchPort({
+      threads: createThreads(),
+      turns,
+      clock: () => now,
+      uuid: () => "aa000000-0000-4000-8000-0000000000e0",
+    });
+    const gated = workRun();
+    const autoAccept: AutomationRun = {
+      ...gated,
+      authoritySnapshot: {
+        ...gated.authoritySnapshot,
+        effective: { ...gated.authoritySnapshot.effective, executionPolicy: "auto-accept-edits" },
+      },
+    };
+
+    for (const run of [gated, autoAccept]) {
+      await port.startOrRecoverFirstTurn({
+        run,
+        threadId,
+        firstTurnRequestId: run.firstTurnRequestId,
+        promptDigest: "unused" as never,
+        windowId,
+      });
+    }
+
+    const holds = vi.mocked(turns.startFirstTurn).mock.calls.map((call) => call[2]?.holdAskFirst);
+    expect(holds).toEqual([true, false]);
   });
 
   it("is idempotent on firstTurnRequestId by returning the existing accepted turn", async () => {
