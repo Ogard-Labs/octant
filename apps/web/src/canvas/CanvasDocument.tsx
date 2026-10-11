@@ -7,6 +7,7 @@ import type { PlanTaskRuntime } from "./blocks/PlanBlock";
 import { OctantButton } from "../ui/base/OctantButton";
 import { CanvasActionPanel } from "./CanvasActionPanel";
 import type { CanvasActionRuntime } from "./canvasActionRuntime";
+import type { DesignAssetRuntime } from "./blocks/designDocument";
 
 export interface CanvasDocumentProps {
   readonly definition: CanvasDefinition;
@@ -23,6 +24,11 @@ export interface CanvasDocumentProps {
   readonly layoutRuntime?: DiagramBoardLayoutRuntime;
   /** Host-owned journaling for a plan task's status. Without it a plan reads only. */
   readonly planRuntime?: PlanTaskRuntime;
+  /**
+   * Host-owned resolution of a design's declared images, asked on every
+   * draw. Without it a design draws each image as a placeholder.
+   */
+  readonly designAssetRuntime?: DesignAssetRuntime;
   /**
    * Comment markers beside each block. Offered only when the host journals
    * comments; `openCounts` holds the unresolved threads anchored to a block,
@@ -79,6 +85,7 @@ export function CanvasDocument({
   actionRuntime,
   layoutRuntime,
   planRuntime,
+  designAssetRuntime,
   comments,
   placement = "document",
 }: CanvasDocumentProps) {
@@ -109,6 +116,7 @@ export function CanvasDocument({
                 {...(layoutRuntime === undefined ? {} : { layoutRuntime })}
                 {...(planRuntime === undefined ? {} : { planRuntime })}
                 {...(actionRuntime === undefined ? {} : { actionRuntime })}
+                {...(designAssetRuntime === undefined ? {} : { designAssetRuntime })}
               />
               {comments === undefined ? null : (
                 <CommentMarker

@@ -5,9 +5,10 @@ import {
   onboardingFlowExampleBlock,
   searchSpecExampleBlock,
 } from "@octant/domain";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { CanvasDocument } from "../CanvasDocument";
 import { canvasFixture } from "../test-fixtures";
+import { designAssetPlaceholder, type DesignAssetRuntime } from "./designDocument";
 
 function frames(container: ParentNode): ReadonlyArray<HTMLIFrameElement> {
   return Array.from(container.querySelectorAll("iframe"));
@@ -46,6 +47,68 @@ describe("design block", () => {
     expect(pages[0]?.srcdoc).toContain("Dinner from the places your street already loves.");
     expect(pages[0]?.srcdoc).not.toContain("Where should we deliver?");
     expect(pages[0]).toHaveAttribute("title", "Welcome, Phone screen");
+  });
+
+  it("shows a Project screenshot in a phone mockup and a placeholder for an image the host refused, loading nothing", async () => {
+    const block = decodeCanvasBlock({
+      blockId: "phone",
+      schemaVersion: 14,
+      kind: "design",
+      title: "Mockup",
+      size: "phone",
+      styles: ".brand { background: url(octant-asset:logo); }",
+      assets: [
+        { assetId: "shot", source: { kind: "project-file", path: "screens/home.png" } },
+        { assetId: "logo", source: { kind: "project-file", path: "../outside.png" } },
+      ],
+      frames: [
+        {
+          frameId: "home",
+          title: "Home",
+          html: '<img src="octant-asset:shot" alt="Home"><div class="brand"></div>',
+        },
+      ],
+    });
+    const resolve = vi.fn<DesignAssetRuntime["resolve"]>(
+      async () =>
+        [
+          { assetId: "shot", status: "resolved", mediaType: "image/png", data: "iVBORw0KGgo=" },
+          { assetId: "logo", status: "unavailable", reason: "refused" },
+        ] as never,
+    );
+    render(
+      <CanvasDocument
+        definition={{ ...canvasFixture, blocks: [block] }}
+        designAssetRuntime={{ resolve }}
+      />,
+    );
+    const page = frames(document.body)[0];
+    // Until the host answers, the image is a placeholder that says so.
+    expect(page?.srcdoc).toContain(designAssetPlaceholder("shot", "loading"));
+    await act(async () => {});
+
+    expect(resolve).toHaveBeenCalledWith("phone");
+    const drawn = frames(document.body)[0]?.srcdoc ?? "";
+    expect(drawn).toContain('<img src="data:image/png;base64,iVBORw0KGgo=" alt="Home">');
+    expect(drawn).toContain(`url(${designAssetPlaceholder("logo", "refused")})`);
+    expect(drawn).not.toContain("octant-asset:");
+    expect(drawn).toContain("img-src data:;");
+  });
+
+  it("draws every declared image as a placeholder where no host can resolve it", () => {
+    const block = decodeCanvasBlock({
+      blockId: "phone",
+      schemaVersion: 14,
+      kind: "design",
+      title: "Mockup",
+      size: "phone",
+      assets: [{ assetId: "shot", source: { kind: "project-file", path: "a.png" } }],
+      frames: [{ frameId: "home", title: "Home", html: '<img src="octant-asset:shot" alt="">' }],
+    });
+    render(<CanvasDocument definition={{ ...canvasFixture, blocks: [block] }} />);
+    const drawn = frames(document.body)[0]?.srcdoc ?? "";
+    expect(drawn).toContain(designAssetPlaceholder("shot", "not-loaded"));
+    expect(drawn).not.toContain("octant-asset:");
   });
 
   it("plays the whole flow from the screen a person picks, so its links work", () => {
