@@ -16,6 +16,7 @@ import {
   trafficSankeyExample,
 } from "./canvasChartExamples";
 import { comparisonMatrixExamples } from "./canvasComparisonMatrixExamples";
+import { opsDashboardExample } from "./canvasDashboardExamples";
 import { mathExamples } from "./canvasMathExamples";
 import { launchDeckExample, onboardingFlowExample } from "./canvasDesignExamples";
 import {
@@ -255,6 +256,24 @@ describe("Canvas share policy", () => {
     });
     expect(receipt.document.schemaVersion).toBe(CANVAS_SHARE_SCHEMA_VERSION);
     expect(receipt.document.blocks).toEqual(blocks);
+  });
+
+  it("shares a dashboard with the blocks it places, so a reader draws the same grid", () => {
+    const blocks = [...opsDashboardExample];
+    const receipt = buildCanvasStaticExportReceipt({
+      request,
+      current: decodeCanvasVersion({
+        ...current,
+        schemaVersion: CANVAS_SCHEMA_VERSION,
+        definition: { ...current.definition, schemaVersion: CANVAS_SCHEMA_VERSION, blocks },
+      }),
+      context,
+    });
+    expect(receipt.document.schemaVersion).toBe(CANVAS_SHARE_SCHEMA_VERSION);
+    expect(receipt.document.blocks[0]).toEqual(opsDashboardExample[0]);
+    expect(receipt.document.blocks.map((block) => block.blockId)).toEqual(
+      blocks.map((block) => block.blockId),
+    );
   });
 
   it("round-trips entity-relationship, swimlane, and mind map blocks through the static export", () => {

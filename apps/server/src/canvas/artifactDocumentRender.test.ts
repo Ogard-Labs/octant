@@ -8,6 +8,7 @@ import {
   chartExampleBlocks,
   designBriefExample,
   notificationStatesExampleBlock,
+  opsDashboardExampleBlocks,
   settingsScreenExampleBlock,
 } from "@octant/domain";
 import { describe, expect, it } from "vitest";
@@ -577,6 +578,41 @@ describe("rendering a canvas as a document", () => {
     expect(markdown.body).toContain("- Window, Settings");
     expect(markdown.body).toContain("      - Form field, Display name, Ada Lovelace");
   });
+
+  it("writes a dashboard in reading order where it sits, each placed block once", () => {
+    const [board, ...placed] = opsDashboardExampleBlocks;
+    if (board === undefined) throw new Error("missing dashboard");
+    // Placed blocks listed before the dashboard still read inside it.
+    const source = definition([prose, ...placed.slice(0, 2), board, ...placed.slice(2), heading]);
+    const markdown = renderArtifactMarkdown(source);
+    if (markdown.kind !== "rendered") throw new Error("expected markdown");
+    const order = [
+      "Ship the reading copy.",
+      "## Service health",
+      "Requests per second:",
+      "p95 latency:",
+      "Error rate:",
+      "API: Healthy",
+      "p50: 09:00",
+      "Job queue:",
+      "| Incident | Severity | Open (h) |",
+      "## Scope",
+    ].map((needle) => markdown.body.indexOf(needle));
+    expect(order.every((index) => index >= 0)).toBe(true);
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
+    expect(markdown.body.split("Requests per second:")).toHaveLength(2);
+
+    const html = renderArtifactHtml(source);
+    if (html.kind !== "rendered") throw new Error("expected html");
+    const htmlOrder = [
+      "<h2>Service health</h2>",
+      "Requests per second:",
+      "Slow search in eu-west",
+      "<h2>Scope</h2>",
+    ].map((needle) => html.body.indexOf(needle));
+    expect(htmlOrder.every((index) => index >= 0)).toBe(true);
+    expect([...htmlOrder].sort((a, b) => a - b)).toEqual(htmlOrder);
+  });
 });
 
 describe("rendering tabs and columns as a document", () => {
@@ -596,5 +632,28 @@ describe("rendering tabs and columns as a document", () => {
       rendered.body.indexOf("### Open questions"),
     );
     expect(rendered.body.split("Design signs off the loop and the zone map.")).toHaveLength(2);
+  });
+
+  it("reads a dashboard in a tab as it reads at the top level: its title, then its tiles, once", () => {
+    const blocks = designBriefExample.map((block) => decodeCanvasBlock(block));
+    for (const format of ["markdown", "html"] as const) {
+      const rendered =
+        format === "markdown"
+          ? renderArtifactMarkdown(definition(blocks, "Design brief"))
+          : renderArtifactHtml(definition(blocks, "Design brief"));
+      if (rendered.kind !== "rendered") throw new Error("expected a rendered document");
+      const metricsTab = rendered.body.indexOf("Metrics");
+      const board = rendered.body.indexOf("Launch metrics");
+      const loopTab = rendered.body.indexOf("Core loop");
+      expect(metricsTab).toBeGreaterThanOrEqual(0);
+      expect(board).toBeGreaterThan(metricsTab);
+      expect(loopTab).toBeGreaterThan(board);
+      expect(rendered.body.split("Daily players")).toHaveLength(2);
+      expect(rendered.body.indexOf("Daily players")).toBeGreaterThan(board);
+      expect(rendered.body.indexOf("Daily players")).toBeLessThan(loopTab);
+    }
+    const markdown = renderArtifactMarkdown(definition(blocks, "Design brief"));
+    if (markdown.kind !== "rendered") throw new Error("expected a rendered document");
+    expect(markdown.body).toContain("## Launch metrics");
   });
 });

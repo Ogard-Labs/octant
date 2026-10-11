@@ -1,8 +1,8 @@
-import {
-  canvasLayoutGroupChildIds,
-  type CanvasBlock,
-  type CanvasId,
-  type CanvasVersionId,
+import type {
+  CanvasBlock,
+  CanvasId,
+  CanvasLayoutGroupBlock,
+  CanvasVersionId,
 } from "@octant/contracts/canvas";
 import {
   decodeCanvasStaticExportDocument,
@@ -28,8 +28,13 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
+import {
+  canvasReadingOrder,
+  type CanvasPlacedReadingItem,
+} from "@octant/domain/canvas-dashboard-layout";
 import { CanvasBlockRenderer } from "./blocks/CanvasBlock";
 import { CanvasLayoutGroup } from "./blocks/LayoutGroups";
+import { DashboardBlock } from "./blocks/DashboardBlock";
 
 /**
  * Canvas sharing.
@@ -324,38 +329,25 @@ function SharedSnapshotView(props: {
   readonly document: CanvasStaticExportDocument;
   readonly onClose: () => void;
 }) {
-  // A shared tab or column draws its children in place, as the live
-  // document does, and a child is never drawn a second time.
-  const blocks = props.document.blocks as ReadonlyArray<CanvasBlock>;
-  const byId = new Map(blocks.map((block) => [String(block.blockId), block]));
-  const placed = new Set(
-    blocks.flatMap((block) =>
-      block.kind === "tabs" || block.kind === "columns"
-        ? canvasLayoutGroupChildIds(block).map(String)
-        : [],
-    ),
-  );
-  const drawn = (block: CanvasBlock): ReactNode => {
-    if (block.kind === "tabs" || block.kind === "columns") {
-      return (
-        <CanvasLayoutGroup
-          block={block}
-          key={block.blockId}
-          renderChildren={(blockIds) =>
-            blockIds.flatMap((blockId) => {
-              const child = byId.get(String(blockId));
-              return child === undefined ? [] : [drawn(child)];
-            })
-          }
+  // A shared tab or column draws its children in place through the same
+  // reading order as the live document, so a dashboard in a pane is the same
+  // grid, and a placed block is never drawn a second time.
+  const placed = (item: CanvasPlacedReadingItem<SharedBlock>): ReactNode =>
+    item.kind === "block" ? (
+      <SnapshotBlock block={item.block} key={item.block.blockId} />
+    ) : (
+      <section key={item.dashboard.blockId} className="canvas-block" data-block-kind="dashboard">
+        <DashboardBlock
+          headingLevel={6}
+          title={item.dashboard.title}
+          columns={item.columns}
+          cells={item.cells}
+          cellKey={(block) => block.blockId}
+          cellKind={(block) => block.kind}
+          renderCell={(block) => <SnapshotBlock block={block} />}
         />
-      );
-    }
-    return (
-      <section key={block.blockId} className="canvas-block" data-block-kind={block.kind}>
-        <CanvasBlockRenderer block={block} />
       </section>
     );
-  };
   return (
     <section
       className="canvas-share__snapshot"
@@ -379,8 +371,28 @@ function SharedSnapshotView(props: {
       </p>
       <article className="canvas-share__snapshot-document" aria-label={props.document.title}>
         <h5 className="canvas-share__snapshot-document-title">{props.document.title}</h5>
-        {blocks.filter((block) => !placed.has(String(block.blockId))).map(drawn)}
+        {canvasReadingOrder(props.document.blocks).map((item) =>
+          item.kind === "group" ? (
+            <CanvasLayoutGroup
+              block={item.group as CanvasLayoutGroupBlock}
+              key={item.group.blockId}
+              renderSection={(index) => (item.sections[index] ?? []).map(placed)}
+            />
+          ) : (
+            placed(item)
+          ),
+        )}
       </article>
+    </section>
+  );
+}
+
+type SharedBlock = CanvasStaticExportDocument["blocks"][number];
+
+function SnapshotBlock(props: { readonly block: SharedBlock }) {
+  return (
+    <section className="canvas-block" data-block-kind={props.block.kind}>
+      <CanvasBlockRenderer block={props.block as CanvasBlock} />
     </section>
   );
 }

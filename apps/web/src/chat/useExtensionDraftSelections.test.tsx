@@ -81,6 +81,65 @@ describe("draft extension selections", () => {
     expect(result.current.receipts).toEqual(original);
   });
 
+  it("blocks a typed @Browser or @Computer on a runtime that carries no Octant tools", async () => {
+    const { client } = pendingClient();
+    const { result } = renderHook(() =>
+      useExtensionDraftSelections({
+        client,
+        mode: "code",
+        projectId: projectA,
+        providerFamily,
+        providerCarriesTools: false,
+      }),
+    );
+    await act(async () => {
+      await result.current.resolveReference("@browser");
+      await result.current.resolveReference("@Computer");
+    });
+    expect(result.current.receipts).toEqual([
+      {
+        reference: "@Browser",
+        label: "@Browser",
+        status: { kind: "blocked", reason: "no Octant tools on this runtime" },
+      },
+      {
+        reference: "@Computer",
+        label: "@Computer",
+        status: { kind: "blocked", reason: "no Octant tools on this runtime" },
+      },
+    ]);
+    expect(client.snapshot).not.toHaveBeenCalled();
+  });
+
+  it("blocks a staged @Browser, without its selection, once the runtime carries no Octant tools", async () => {
+    const { client } = pendingClient();
+    const { result, rerender } = renderHook(
+      ({ providerCarriesTools }) =>
+        useExtensionDraftSelections({
+          client,
+          mode: "code",
+          projectId: projectA,
+          providerFamily,
+          providerCarriesTools,
+        }),
+      { initialProps: { providerCarriesTools: true } },
+    );
+    await act(async () => {
+      await result.current.resolveReference("@Browser");
+    });
+    expect(result.current.receipts[0]?.status).toEqual({ kind: "selected" });
+    rerender({ providerCarriesTools: false });
+    expect(result.current.receipts).toEqual([
+      {
+        reference: "@Browser",
+        label: "@Browser",
+        status: { kind: "blocked", reason: "no Octant tools on this runtime" },
+      },
+    ]);
+    rerender({ providerCarriesTools: true });
+    expect(result.current.receipts[0]?.status).toEqual({ kind: "selected" });
+  });
+
   it("refuses an invalid Project identity without querying a broader scope", async () => {
     const { client } = pendingClient();
     const { result } = renderHook(() =>

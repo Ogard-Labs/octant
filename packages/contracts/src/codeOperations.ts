@@ -1,7 +1,7 @@
 import { HarnessRetryEventFields } from "./harnessRetry";
 import { ProviderChildActivityEvent } from "./providers";
 import { Schema } from "effect";
-import { AgentRunResultDeliveryMark } from "./agentRun";
+import { AgentRunResultDeliveryMark, MAX_AGENT_RUN_ADMITTED_CONTEXT_BLOCKS } from "./agentRun";
 import { ExtensionSelection } from "./extensions";
 import { AppleActionRequest } from "./appleToolchain";
 import { AndroidEmulatorRequest } from "./androidToolchain";
@@ -1330,8 +1330,69 @@ const ProviderSessionReadyEvent = Schema.Struct({
   resumeCursor: Schema.optional(ProviderResumeCursor),
 }).annotations(strict);
 
+const nonNegativeCount = Schema.Int.pipe(Schema.nonNegative());
+
+/**
+ * What a handoff left out of the conversation it carried, by cause. Every
+ * count is explicit so a reader never mistakes a short handoff for a short
+ * conversation: purged bodies are `missingBodies`, bodies over the read bound
+ * are `oversizedBodies`, and replies a turn never finished are
+ * `unfinishedReplies`.
+ */
+export const CodeContextHandoffOmissions = Schema.Struct({
+  earlierMessages: nonNegativeCount,
+  unfinishedReplies: nonNegativeCount,
+  missingBodies: nonNegativeCount,
+  oversizedBodies: nonNegativeCount,
+  emptyBodies: nonNegativeCount,
+  attachments: nonNegativeCount,
+  truncatedMessages: nonNegativeCount,
+  truncatedCharacters: nonNegativeCount,
+  sourceTruncatedMessages: nonNegativeCount,
+}).annotations(strict);
+export type CodeContextHandoffOmissions = typeof CodeContextHandoffOmissions.Type;
+
+/**
+ * The disclosed summary of a provider-switch handoff, as the conversation page
+ * shows it beside the turn that carried it. The handed-over text itself stays
+ * in the content store the event names.
+ */
+export const CodeConversationTurnHandoff = Schema.Struct({
+  reason: Schema.Literal("provider-switch"),
+  previousProviderInstanceId: ProviderInstanceId,
+  previousModelId: ProviderModelId,
+  /** Conversation messages the handoff carried, not counting its summary. */
+  messages: Schema.Int.pipe(Schema.between(1, MAX_AGENT_RUN_ADMITTED_CONTEXT_BLOCKS - 1)),
+  omissions: CodeContextHandoffOmissions,
+  /** Whether the thread had taken in outside content when the handoff was read. */
+  externalContentIngested: Schema.Boolean,
+}).annotations(strict);
+export type CodeConversationTurnHandoff = typeof CodeConversationTurnHandoff.Type;
+
+/**
+ * A turn moved the thread to a provider that cannot take up the previous
+ * provider's session, so it starts a new session with a bounded, attributed
+ * text handoff of the thread's own earlier conversation. Journaled on the
+ * turn's operation before the provider is sent anything, so the handoff a
+ * turn ran with is never re-chosen: a recovered start reads this record back.
+ * The two `false` fields are fixed: Octant never carries a provider's native
+ * session or hidden reasoning across providers, and says so in the record.
+ */
+const ContextHandoffAttachedEvent = Schema.Struct({
+  ...CodeConversationTurnHandoff.fields,
+  kind: Schema.Literal("context-handoff-attached"),
+  previousSessionId: ProviderSessionId,
+  providerInstanceId: ProviderInstanceId,
+  modelId: ProviderModelId,
+  /** The handed-over context blocks, as JSON, in the content store. */
+  content: CodeEvidenceReference,
+  nativeSessionTransferred: Schema.Literal(false),
+  hiddenReasoningTransferred: Schema.Literal(false),
+}).annotations(strict);
+
 export const CodeOperationEvent = Schema.Union(
   ProviderSessionReadyEvent,
+  ContextHandoffAttachedEvent,
   ConversationTurnStartedEvent,
   ConversationTurnChangedFilesEvent,
   OperationStateEvent,
@@ -1479,6 +1540,12 @@ export const CodeConversationTurn = Schema.Struct({
   ),
   /** Whether the turn journaled more steps than `steps` carries. */
   stepsTruncated: Schema.optional(Schema.Boolean),
+  /**
+   * The text handoff this turn started its new provider session with, after
+   * the thread moved to a provider that could not take up the previous one.
+   * Absent on every turn that continued its session or started the thread.
+   */
+  handoff: Schema.optional(CodeConversationTurnHandoff),
   /**
    * What changed in the checkout while this turn ran. Absent when the host
    * could not observe it: a Plan turn, a checkout it could not read, a turn

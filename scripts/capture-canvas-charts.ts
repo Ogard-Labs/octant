@@ -95,17 +95,18 @@ if (executable === undefined) {
 
 // `--only=mockup` captures the mockup blocks alone, as `canvas-mockup-*.png`,
 // `--only=flow` the funnel, radar, and sankey charts, as `canvas-flow-*.png`,
-// and `--only=layout` the tabbed design brief, as `canvas-layout-*.png`: one
-// element capture per listed tab and one of the columns, each scrolled into
-// view, because a full-page capture of a long page can leave content below
-// the fold unpainted.
-const ONLY_SETS = ["mockup", "flow", "layout"] as const;
+// `--only=dashboard` the ops dashboard and release health board, as
+// `canvas-dashboard-*.png`, and `--only=layout` the tabbed design brief, as
+// `canvas-layout-*.png`: one element capture per listed tab and one of the
+// columns, each scrolled into view, because a full-page capture of a long
+// page can leave content below the fold unpainted.
+const ONLY_SETS = ["mockup", "flow", "dashboard", "layout"] as const;
 const LAYOUT_TABS = ["Metrics", "Core loop", "World", "Economy"] as const;
 const onlyArg = process.argv.find((arg) => arg.startsWith("--only="))?.slice("--only=".length);
 const only = ONLY_SETS.find((set) => set === onlyArg);
 if (onlyArg !== undefined && only === undefined) {
   console.error(
-    JSON.stringify({ status: "failed", reason: `--only takes ${ONLY_SETS.join(" or ")}` }),
+    JSON.stringify({ status: "failed", reason: `--only takes ${ONLY_SETS.join(", ")}` }),
   );
   process.exit(1);
 }
@@ -145,7 +146,7 @@ try {
     page.setDefaultTimeout(15_000);
     await page.goto(harnessUrl, { waitUntil: "domcontentloaded" });
     await page.waitForSelector(
-      "main[data-canvas-chart-evidence='all'] .canvas-tabs, main[data-canvas-chart-evidence='all'] .canvas-mockup, main[data-canvas-chart-evidence='all'] .canvas-block__chart, main[data-canvas-chart-evidence='all'] .canvas-block__heatmap, main[data-canvas-chart-evidence='all'] .canvas-block__bar-list, main[data-canvas-chart-evidence='all'] .canvas-block__matrix, main[data-canvas-chart-evidence='all'] .canvas-block__math, main[data-canvas-chart-evidence='all'] .canvas-block__table, main[data-canvas-chart-evidence='all'] .canvas-block__kind-diagram",
+      "main[data-canvas-chart-evidence='all'] .canvas-tabs, main[data-canvas-chart-evidence='all'] .canvas-mockup, main[data-canvas-chart-evidence='all'] .canvas-dashboard, main[data-canvas-chart-evidence='all'] .canvas-block__chart, main[data-canvas-chart-evidence='all'] .canvas-block__heatmap, main[data-canvas-chart-evidence='all'] .canvas-block__bar-list, main[data-canvas-chart-evidence='all'] .canvas-block__matrix, main[data-canvas-chart-evidence='all'] .canvas-block__math, main[data-canvas-chart-evidence='all'] .canvas-block__table, main[data-canvas-chart-evidence='all'] .canvas-block__kind-diagram",
     );
     // The dev server injects the stylesheet after the first paint, and a chart
     // measured before it lands keeps the narrow width it drew at; let the page
@@ -168,8 +169,9 @@ try {
       }
     }
 
-    // Open each flow chart's data table so the capture shows its fallback too.
-    if (only === "flow") {
+    // Open each flow chart's, or each dashboard chart's, data table so the
+    // capture shows its fallback too.
+    if (only === "flow" || only === "dashboard") {
       for (const summary of await page.locator(".canvas-block__chart-data summary").all()) {
         await summary.click();
       }

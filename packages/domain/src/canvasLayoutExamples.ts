@@ -66,10 +66,10 @@ const statusTable = (blockId: string, rows: ReadonlyArray<readonly [string, stri
 });
 
 /**
- * A game design brief in eight tabs: headline metrics, the core loop as a
- * flowchart, the world as a grouped zone map, and badge tables, with a
- * two-column sign-off below. It is the fixture the rendered evidence and the
- * share round trip draw.
+ * A game design brief in eight tabs: a dashboard of headline metrics, the
+ * core loop as a flowchart, the world as a grouped zone map, and badge
+ * tables, with a two-column sign-off below. It is the fixture the rendered
+ * evidence and the share round trip draw.
  */
 export const designBriefExample = [
   {
@@ -77,7 +77,7 @@ export const designBriefExample = [
     schemaVersion: v,
     kind: "tabs" as const,
     panes: [
-      { label: "Metrics", blockIds: ["m-dau", "m-session", "m-retention", "m-arpdau"] },
+      { label: "Metrics", blockIds: ["metrics-board"] },
       { label: "Core loop", blockIds: ["loop"] },
       { label: "World", blockIds: ["zones"] },
       { label: "Economy", blockIds: ["economy-table"] },
@@ -85,6 +85,21 @@ export const designBriefExample = [
       { label: "Live ops", blockIds: ["liveops-weekly", "liveops-seasonal"] },
       { label: "Risks", blockIds: ["risk-table"] },
       { label: "Open questions", blockIds: ["questions"] },
+    ],
+  },
+  // A tab may hold a dashboard; the dashboard places the tiles, so the tab
+  // names only the dashboard.
+  {
+    blockId: "metrics-board",
+    schemaVersion: v,
+    kind: "dashboard" as const,
+    title: "Launch metrics",
+    columns: 4,
+    cells: [
+      { blockId: "m-dau" },
+      { blockId: "m-session" },
+      { blockId: "m-retention" },
+      { blockId: "m-arpdau" },
     ],
   },
   metric("m-dau", "Daily players", 48_200),
@@ -155,8 +170,8 @@ export const designBriefExample = [
     ["Server cost at launch", "Platform", "danger"],
   ]),
   note("questions", "Does the keep unlock by level or by story progress?"),
-  // Below the tabs, side by side: who signs off. A column holds content
-  // blocks, never another group, so it sits beside the tabs, not in them.
+  // Below the tabs, side by side: who signs off. A column never holds tabs
+  // or columns, so it sits beside the tabs, not in them.
   {
     blockId: "sign-off",
     schemaVersion: v,

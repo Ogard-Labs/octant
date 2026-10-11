@@ -37,6 +37,7 @@
     "./work-promotion": "./src/workPromotion.ts",
     "./work-requests": "./src/workRequests.ts",
     "./pending-requests": "./src/pendingRequests.ts",
+    "./fleet-activity": "./src/fleetActivity.ts",
     "./work-research": "./src/workResearch.ts",
     "./work-threads": "./src/workThreads.ts",
     "./work-turns": "./src/workTurns.ts",

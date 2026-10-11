@@ -1,4 +1,4 @@
-import type { CanvasBlockId, CanvasColumnsBlock, CanvasTabsBlock } from "@octant/contracts/canvas";
+import type { CanvasColumnsBlock, CanvasTabsBlock } from "@octant/contracts/canvas";
 import { useState, type ReactNode } from "react";
 import {
   OctantTabs,
@@ -9,20 +9,21 @@ import {
 
 /**
  * Tabs and columns arrange blocks the document already holds. The document
- * hands each group a way to draw its children, so a child keeps its comment
- * marker and its runtime exactly as it has outside a group.
+ * hands each group a way to draw a pane's or track's children in reading
+ * order, so a child keeps its comment marker and its runtime exactly as it
+ * has outside a group, and a dashboard in a pane is the grid it is anywhere.
  */
 export function CanvasLayoutGroup({
   block,
-  renderChildren,
+  renderSection,
 }: {
   readonly block: CanvasTabsBlock | CanvasColumnsBlock;
-  readonly renderChildren: (blockIds: ReadonlyArray<CanvasBlockId>) => ReactNode;
+  readonly renderSection: (index: number) => ReactNode;
 }) {
   return block.kind === "tabs" ? (
-    <CanvasTabs block={block} renderChildren={renderChildren} />
+    <CanvasTabs block={block} renderSection={renderSection} />
   ) : (
-    <CanvasColumns block={block} renderChildren={renderChildren} />
+    <CanvasColumns block={block} renderSection={renderSection} />
   );
 }
 
@@ -34,10 +35,10 @@ export function CanvasLayoutGroup({
  */
 function CanvasTabs({
   block,
-  renderChildren,
+  renderSection,
 }: {
   readonly block: CanvasTabsBlock;
-  readonly renderChildren: (blockIds: ReadonlyArray<CanvasBlockId>) => ReactNode;
+  readonly renderSection: (index: number) => ReactNode;
 }) {
   const [selected, setSelected] = useState(0);
   // A revision may remove panes; the reader falls back to the first.
@@ -60,7 +61,7 @@ function CanvasTabs({
       </OctantTabsList>
       {block.panes.map((pane, index) => (
         <OctantTabsPanel className="canvas-tabs__panel" key={index} value={index}>
-          {renderChildren(pane.blockIds)}
+          {renderSection(index)}
         </OctantTabsPanel>
       ))}
     </OctantTabs>
@@ -74,17 +75,17 @@ function CanvasTabs({
  */
 function CanvasColumns({
   block,
-  renderChildren,
+  renderSection,
 }: {
   readonly block: CanvasColumnsBlock;
-  readonly renderChildren: (blockIds: ReadonlyArray<CanvasBlockId>) => ReactNode;
+  readonly renderSection: (index: number) => ReactNode;
 }) {
   return (
     <div className="canvas-columns" data-block-kind="columns">
       <div className="canvas-columns__grid" data-tracks={block.tracks.length}>
         {block.tracks.map((track, index) => (
           <div className="canvas-columns__track" key={index}>
-            {renderChildren(track.blockIds)}
+            {renderSection(index)}
           </div>
         ))}
       </div>

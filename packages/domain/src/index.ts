@@ -35,6 +35,7 @@ export * from "./canvasBarListExamples";
 export * from "./canvasComparisonMatrixExamples";
 export * from "./canvasMathExamples";
 export * from "./canvasMetricExamples";
+export * from "./canvasDashboardExamples";
 export * from "./canvasLayoutExamples";
 export * from "./canvasNumberFormat";
 export * from "./canvasMockupExamples";

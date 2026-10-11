@@ -1,6 +1,5 @@
 import katex from "katex";
 import {
-  canvasLayoutGroupChildIds,
   canvasTableRowCells,
   type CanvasBlock,
   type CanvasDefinition,
@@ -27,6 +26,10 @@ import {
   type CanvasMatrixCellLayout,
 } from "@octant/domain/canvas-comparison-matrix";
 import { canvasMathRenderOptions } from "@octant/domain/canvas-math-policy";
+import {
+  canvasReadingOrder,
+  type CanvasPlacedReadingItem,
+} from "@octant/domain/canvas-dashboard-layout";
 import {
   CANVAS_MOCKUP_DEVICE_NAME,
   canvasMockupCallouts,
@@ -249,36 +252,29 @@ function renderDocument(
   format: CanvasExportImplementedFormat,
 ): ArtifactDocumentRender {
   const pieces: Piece[] = [];
-  // A layout group's children read inside the group, once: a tab's blocks
-  // under its label and a column's in track order, never again where they
-  // happen to sit in the block list.
-  const byId = new Map(definition.blocks.map((block) => [String(block.blockId), block]));
-  const placed = new Set(
-    definition.blocks.flatMap((block) =>
-      block.kind === "tabs" || block.kind === "columns"
-        ? canvasLayoutGroupChildIds(block).map(String)
-        : [],
-    ),
-  );
-  const childPieces = (blockIds: ReadonlyArray<string>): ReadonlyArray<Piece> =>
-    blockIds.flatMap((blockId) => {
-      const child = byId.get(blockId);
-      return child === undefined ? [] : piecesFor(child);
+  // A dashboard reads where it sits: its title, then each placed block in
+  // cell order, which is the order the screen's grid reads at one column. A
+  // tab reads under its label and a column in track order, and a dashboard in
+  // a pane or column reads there exactly as it does at the top level. A
+  // placed block never reads again where it sits in the block list.
+  const placedPieces = (item: CanvasPlacedReadingItem<CanvasBlock>): ReadonlyArray<Piece> =>
+    item.kind === "block"
+      ? piecesFor(item.block)
+      : [
+          { kind: "heading", level: 2, text: reading(item.dashboard.title) },
+          ...item.cells.flatMap((cell) => piecesFor(cell.block)),
+        ];
+  for (const item of canvasReadingOrder(definition.blocks)) {
+    if (item.kind !== "group") {
+      pieces.push(...placedPieces(item));
+      continue;
+    }
+    const group = item.group;
+    item.sections.forEach((section, index) => {
+      const label = group.kind === "tabs" ? group.panes[index]?.label : undefined;
+      if (label !== undefined) pieces.push({ kind: "heading", level: 3, text: reading(label) });
+      for (const child of section) pieces.push(...placedPieces(child));
     });
-  for (const block of definition.blocks) {
-    if (placed.has(String(block.blockId))) continue;
-    if (block.kind === "tabs") {
-      for (const pane of block.panes) {
-        pieces.push({ kind: "heading", level: 3, text: reading(pane.label) });
-        pieces.push(...childPieces(pane.blockIds.map(String)));
-      }
-      continue;
-    }
-    if (block.kind === "columns") {
-      for (const track of block.tracks) pieces.push(...childPieces(track.blockIds.map(String)));
-      continue;
-    }
-    pieces.push(...piecesFor(block));
   }
   const title = reading(definition.title) || "Canvas";
   const body = format === "html" ? htmlDocument(title, pieces) : markdownDocument(title, pieces);
@@ -708,9 +704,10 @@ function piecesFor(block: CanvasBlock): ReadonlyArray<Piece> {
       if (rootId !== undefined) walk(rootId, 0);
       return [{ kind: "tree", items }];
     }
+    case "dashboard":
     case "tabs":
     case "columns":
-      // Drawn by the document walk, which places the children in the group.
+      // Drawn by the reading order with what it places; one met alone has nothing to say.
       return [];
     case "action":
       return paragraph(

@@ -28,6 +28,14 @@ function brief(): CanvasDefinition {
   });
 }
 
+function commentRuntime() {
+  return {
+    openCounts: new Map<string, number>(),
+    openRowCounts: new Map<string, ReadonlyMap<string, number>>(),
+    onOpen: vi.fn(),
+  };
+}
+
 afterEach(() => vi.unstubAllGlobals());
 
 describe("Canvas tabs and columns", () => {
@@ -75,6 +83,20 @@ describe("Canvas tabs and columns", () => {
     expect(columns).toHaveAttribute("data-tracks", "2");
     expect(screen.getAllByText("Design signs off the loop and the zone map.")).toHaveLength(1);
     expect(columns).toHaveTextContent("Design signs off the loop and the zone map.");
+  });
+
+  it("draws a dashboard in a tab as the same labelled grid it is at the top level", () => {
+    render(<CanvasDocument definition={brief()} comments={commentRuntime()} />);
+    const panel = screen.getByRole("tabpanel");
+    const region = within(panel).getByRole("region", { name: "Launch metrics" });
+    expect(
+      Array.from(region.querySelectorAll(".canvas-dashboard__cell")).map((cell) =>
+        cell.getAttribute("data-block-kind"),
+      ),
+    ).toEqual(["metric", "metric", "metric", "metric"]);
+    expect(within(region).getByText("Daily players")).toBeInTheDocument();
+    // The dashboard keeps its own comment marker inside the pane.
+    expect(within(panel).getByRole("button", { name: "Comment on Launch metrics" })).toBeVisible();
   });
 
   it("switches tabs without a network call or a journaled revision", async () => {

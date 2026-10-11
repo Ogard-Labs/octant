@@ -32,8 +32,8 @@ const strict = { parseOptions: { onExcessProperty: "error" as const } };
 // entity-relationship, swimlane, and mind map diagram kinds, version 9 the
 // design block, version 10 the comparison matrix, version 11 the math
 // block, version 12 the mockup catalog, version 13 the stable table row
-// id, version 14 the funnel, radar, and sankey chart types, and version 18
-// the tabs and columns layout groups, which the
+// id, version 14 the funnel, radar, and sankey chart types, version 15 the
+// dashboard, and version 19 the tabs and columns layout groups, which the
 // definition filters below admit only under those declared versions.
 
 // These are renderer-facing aggregate limits. Per-field structural limits are
@@ -148,6 +148,12 @@ export const CANVAS_MAX_SANKEY_LINKS = 256;
 // A funnel stage, a radar axis, and a sankey node are drawn as labels beside
 // their marks, so they are names rather than sentences.
 export const CANVAS_MAX_CHART_CATEGORY_LABEL_LENGTH = 80;
+// A dashboard is a glance, not a second document: at most 24 cells on a grid
+// of at most four columns, so a wide window shows six rows of tiles and a
+// phone a single column it can still scroll through.
+export const CANVAS_MAX_DASHBOARD_CELLS = 24;
+export const CANVAS_MAX_DASHBOARD_COLUMNS = 4;
+export const CANVAS_DEFAULT_DASHBOARD_COLUMNS = 4;
 // A tab strip is read at a glance: past a dozen labels it wraps or scrolls,
 // and the document wants headings instead. A label names the pane, so it is a
 // word or two rather than a sentence.
@@ -180,8 +186,11 @@ export const CANVAS_TABLE_ROW_ID_SCHEMA_VERSION = 13;
 // The funnel, radar, and sankey chart types shipped as one slice and share a
 // floor, as the three diagram kinds do.
 export const CANVAS_FLOW_CHARTS_SCHEMA_VERSION = 14;
+// The dashboard layout block: a titled grid that places metric, progress,
+// status, chart, and table blocks by id.
+export const CANVAS_DASHBOARD_SCHEMA_VERSION = 15;
 // The tabs and columns layout groups, which name other blocks of the document.
-export const CANVAS_LAYOUT_GROUPS_SCHEMA_VERSION = 18;
+export const CANVAS_LAYOUT_GROUPS_SCHEMA_VERSION = 19;
 // The metric's sparkline, goodDirection, and caption arrived with the bar list.
 export const CANVAS_METRIC_TREND_SCHEMA_VERSION = 7;
 
@@ -442,6 +451,7 @@ export const CanvasBlockKind = Schema.Literal(
   "bar-list",
   "comparison-matrix",
   "math",
+  "dashboard",
   "tabs",
   "columns",
 );
@@ -2009,6 +2019,52 @@ export const CanvasImageBlock = Schema.Struct({
 export type CanvasImageBlock = typeof CanvasImageBlock.Type;
 
 /**
+ * The block kinds a dashboard may place. A dashboard is never among them, so
+ * a grid never holds a grid; neither does prose, a diagram, or an action,
+ * which read as a document rather than at a glance.
+ */
+export const CANVAS_DASHBOARD_CELL_KINDS = [
+  "metric",
+  "progress",
+  "status",
+  "chart",
+  "table",
+] as const;
+export type CanvasDashboardCellKind = (typeof CANVAS_DASHBOARD_CELL_KINDS)[number];
+
+/**
+ * One place on the grid. It names a block elsewhere in the same document
+ * rather than holding a copy, so the block keeps its own id, its comments,
+ * and its one definition; `span` is how many columns it takes on a wide grid.
+ */
+export const CanvasDashboardCell = Schema.Struct({
+  blockId: CanvasBlockId,
+  span: Schema.optional(Schema.Int.pipe(Schema.between(1, CANVAS_MAX_DASHBOARD_COLUMNS))),
+}).annotations(strict);
+export type CanvasDashboardCell = typeof CanvasDashboardCell.Type;
+
+/**
+ * A KPI dashboard: a titled grid of the document's metric, progress, status,
+ * chart, and table blocks. The grid is drawn where the dashboard sits, its
+ * cells in the order listed, and each placed block is drawn there instead of
+ * at its own position. A layout block rather than a document-level field, so
+ * it is version-gated, revised, commented on, and described like every other
+ * kind, and a Canvas can hold a dashboard beside ordinary prose.
+ */
+export const CanvasDashboardBlock = Schema.Struct({
+  ...CanvasBlockFields,
+  kind: Schema.Literal("dashboard"),
+  /** Names the region a screen reader lands on. */
+  title: CanvasLabel,
+  /** Columns on a wide grid; absent means four. Narrow widths draw one. */
+  columns: Schema.optional(Schema.Int.pipe(Schema.between(1, CANVAS_MAX_DASHBOARD_COLUMNS))),
+  cells: Schema.NonEmptyArray(CanvasDashboardCell).pipe(
+    Schema.maxItems(CANVAS_MAX_DASHBOARD_CELLS),
+  ),
+}).annotations(strict);
+export type CanvasDashboardBlock = typeof CanvasDashboardBlock.Type;
+
+/**
  * Layout groups: tabs and columns arrange blocks the document already holds.
  *
  * A group names its children by block id rather than nesting them, so every
@@ -2109,6 +2165,7 @@ export const CanvasBlock = Schema.Union(
   CanvasComparisonMatrixBlock,
   CanvasMathDisplayBlock,
   CanvasMathInlineBlock,
+  CanvasDashboardBlock,
   // Typed actions (Canvas D). The block is a declarative reference to an
   // allowlisted command; the server reauthorizes every action before any side
   // effect, so union membership never makes a definition executable.
@@ -2146,10 +2203,12 @@ export const CanvasDefinition = Schema.Struct({
     // from version 6, a bar list and the metric trend fields from version 7, a
     // design from version 9, a comparison matrix from version 10, math from
     // version 11, the mockup catalog from version 12, table row ids from
-    // version 13, the funnel, radar, and sankey charts from version 14, and
-    // the tabs and columns layout groups from version 18. A rolled-back runtime that never learned a kind or hint must see a document
-    // carrying it as a declared future version, not as a document that failed
-    // to decode. Each keeps its own floor so an earlier document stays valid.
+    // version 13, the funnel, radar, and sankey charts from version 14, the
+    // dashboard from version 15, and the tabs and columns layout groups from
+    // version 19. A rolled-back runtime that never learned a kind or hint must
+    // see a document carrying it as a declared future version, not as a
+    // document that failed to decode. Each keeps its own floor so an earlier
+    // document stays valid.
     Schema.filter(
       (definition) =>
         definition.schemaVersion >= CANVAS_MOCKUP_SCHEMA_VERSION ||
@@ -2269,6 +2328,15 @@ export const CanvasDefinition = Schema.Struct({
       {
         message: () =>
           `Funnel, radar, and sankey charts require Canvas schema version ${String(CANVAS_FLOW_CHARTS_SCHEMA_VERSION)}.`,
+      },
+    ),
+    Schema.filter(
+      (definition) =>
+        definition.schemaVersion >= CANVAS_DASHBOARD_SCHEMA_VERSION ||
+        !definition.blocks.some((block) => block.kind === "dashboard"),
+      {
+        message: () =>
+          `Dashboard blocks require Canvas schema version ${String(CANVAS_DASHBOARD_SCHEMA_VERSION)}.`,
       },
     ),
     Schema.filter(
