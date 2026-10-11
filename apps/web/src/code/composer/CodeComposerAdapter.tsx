@@ -246,11 +246,21 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     props.selectedModelId,
   );
 
+  const runtimeCarriesTools = pickerGroupCarriesAppManagedTools(
+    props.providerGroups,
+    props.selectedProviderInstanceId === undefined || props.selectedModelId === undefined
+      ? undefined
+      : {
+          providerInstanceId: props.selectedProviderInstanceId,
+          modelId: props.selectedModelId,
+        },
+  );
   const computer = useComputerUseMention({
     textarea: () => textareaRef.current,
     draft: prompt,
     onDraftChange: setPrompt,
     scopeKey: "code-draft",
+    providerCarriesTools: runtimeCarriesTools,
   });
   const selectedFamily = providerFamilyForThread(
     props.providerGroups,
@@ -259,6 +269,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
   const extensionDraft = useExtensionDraftSelections({
     ...(props.extensionClient === undefined ? {} : { client: props.extensionClient }),
     mode: "code",
+    providerCarriesTools: runtimeCarriesTools,
     projectId: props.projectId ?? null,
     ...(selectedFamily === undefined ? {} : { providerFamily: selectedFamily }),
   });
@@ -267,17 +278,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     draft: prompt,
     onDraftChange: setPrompt,
     scopeKey: "code-draft",
-    available:
-      props.browserAvailable === true &&
-      pickerGroupCarriesAppManagedTools(
-        props.providerGroups,
-        props.selectedProviderInstanceId === undefined || props.selectedModelId === undefined
-          ? undefined
-          : {
-              providerInstanceId: props.selectedProviderInstanceId,
-              modelId: props.selectedModelId,
-            },
-      ),
+    available: props.browserAvailable === true && runtimeCarriesTools,
     onChoose: () => void extensionDraft.resolveReference("@browser"),
   });
   const slash = useComposerSlashCommands({
