@@ -3134,7 +3134,11 @@ conversation, or when that attempt's provider can no longer be resolved: the
 native session already holds the source's later turns, and a copied attempt
 has no resume cursor of its own, so the branch could only refuse its first
 message. Host-owned conversations branch as before, because the
-branch's next turn is planned again from its own journaled copy.
+branch's next turn is planned again from its own journaled copy. The Chat
+transcript omits Fork, Branch from here, and Restore from here on a turn the
+host would refuse this way, reading each listed provider's kind through the
+shared `providerKeepsConversation` policy; a provider the picker does not
+list is left to the host, so the renderer never hides a branch it would accept.
 Work also refuses when the previous driver is unavailable and its conversation
 ownership cannot be established.
 
