@@ -13,7 +13,8 @@
  * exercised on hosts that hold no certificate.
  */
 
-import { resolve } from "node:path";
+import { open, readdir } from "node:fs/promises";
+import { join, resolve } from "node:path";
 
 export const ENTITLEMENTS_PATH = "apps/desktop/resources/entitlements.plist";
 
@@ -47,6 +48,44 @@ export const SIGNING_ORDER = [
   "Contents/Frameworks/Octant Helper (Plugin).app",
   "Contents/Frameworks/Octant Helper (Renderer).app",
 ] as const;
+
+/**
+ * Vendored tools whose binaries are not listed above.
+ *
+ * Their file set changes with each pinned release, so they are found by content
+ * at signing time. Notarization rejected the `serve-sim` camera helper, its
+ * injector dylib, its accessibility helper, and its native module when they
+ * kept their upstream ad-hoc signatures (no Developer ID, no hardened runtime,
+ * no secure timestamp).
+ */
+export const MANAGED_TOOLS_PATH = "Contents/Resources/managed-tools";
+
+// Thin 64-bit Mach-O in either byte order, and universal (fat) binaries.
+const MACH_O_MAGIC = new Set([0xfeedfacf, 0xcffaedfe, 0xcafebabe, 0xbebafeca]);
+
+/** Every Mach-O file under `root`, deepest first; none when `root` is absent. */
+export async function findMachOFiles(root: string): Promise<ReadonlyArray<string>> {
+  let entries;
+  try {
+    entries = await readdir(root, { recursive: true, withFileTypes: true });
+  } catch {
+    return [];
+  }
+  const found: Array<string> = [];
+  for (const entry of entries) {
+    if (!entry.isFile()) continue;
+    const path = join(entry.parentPath, entry.name);
+    const handle = await open(path, "r");
+    try {
+      const header = Buffer.alloc(4);
+      const { bytesRead } = await handle.read(header, 0, 4, 0);
+      if (bytesRead === 4 && MACH_O_MAGIC.has(header.readUInt32BE(0))) found.push(path);
+    } finally {
+      await handle.close();
+    }
+  }
+  return found.sort((a, b) => b.split("/").length - a.split("/").length || a.localeCompare(b));
+}
 
 export interface SigningCredentials {
   /** The Developer ID Application identity, as `security find-identity` names it. */
@@ -233,6 +272,11 @@ export async function signAndNotarizeDesktop(input: {
   readonly runForOutput: CommandOutputRunner;
 }): Promise<void> {
   const entitlements = resolve(input.repositoryRoot, ENTITLEMENTS_PATH);
+  for (const target of await findMachOFiles(`${input.appPath}/${MANAGED_TOOLS_PATH}`)) {
+    await input.run(
+      createCodesignArgv({ identity: input.credentials.identity, target, entitlements }),
+    );
+  }
   for (const relativePath of SIGNING_ORDER) {
     await input.run(
       createCodesignArgv({
