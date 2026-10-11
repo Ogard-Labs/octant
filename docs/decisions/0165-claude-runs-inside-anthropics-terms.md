@@ -46,8 +46,15 @@ built on the Claude Agent SDK."
 
 Octant drives the installed `claude` binary through
 `@anthropic-ai/claude-agent-sdk`. Subscription mode uses the person's own
-CLI login; API-key mode sets `ANTHROPIC_API_KEY`. That main path matches
-the unmodified-binary permission above.
+CLI login; API-key mode sets `ANTHROPIC_API_KEY`. That is the product
+path this record chooses: the unmodified binary and a Claude-owned
+config directory, not an Octant-held token.
+
+The unmodified-binary permission is necessary for that path. It is not
+by itself a compliance conclusion. Whether Octant may offer this path
+stays conditional on the applicable Anthropic agreement (Consumer or
+Commercial Terms) or an explicit Anthropic exception. This record does
+not claim that agreement exists.
 
 It diverges at **Connect Claude for helpers**. A confined Plan or
 subagent launch cannot reach the macOS Keychain the runtime uses for
@@ -137,7 +144,9 @@ Whether a confined launch that can read that directory, and cannot run
 0005 stays Accepted. This record restores its never-store rule for
 Claude and retires the helper-token exception #1058 introduced. 0111
 stays Proposed; its Anthropic exclusion is confirmed and extended as
-above. No earlier record authorized the helper token.
+above. No earlier record authorized the helper token. Accepting this
+record still requires the applicable Anthropic agreement or an
+explicit exception; the product path above does not create that.
 
 ## Consequences
 
