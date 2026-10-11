@@ -341,7 +341,11 @@ drawing it as plain text.
 The pure `canvasInlineRefusal` policy admits `inline` only for at most 12 blocks
 with no `diagram`, `plan`, `mockup` or `design`. When an author asks for `inline` over
 that bound, the host records `sidebar` and returns the reason as
-`presentationNote`.
+`presentationNote`. Accepted but not yet built: the 12-block cap goes for
+reading blocks and static design frames within the ordinary block budget, the
+refusal applies only to the author's unprompted request, and a person's expand
+in the thread may show any Canvas; until that ships, the bound above holds
+(see [Canvas documents, designs, and prototypes](#canvas-documents-designs-and-prototypes)).
 A revise without a choice keeps the current presentation.
 `preview` returns a picture and a layout reading of one shipped version. Its
 input is the `canvasId`, an optional `version` (a sequence), a `width`
@@ -657,10 +661,12 @@ a design can be silent for minutes while composing the tool call, so Chat and Wo
 wait five minutes for a provider event before cutting a turn off, as Code does.
 Chromium stops painting sandboxed frames that are `inert` or have
 `pointer-events: none`, so a frame shown as a picture stays hit-testable and a
-cover over it takes the pointer. Frames that run script were set aside: they
-need their own serving origin, a network policy the renderer lacks, and a
-threat model of their own
+cover over it takes the pointer
 ([decisions/0164-canvas-designs-are-html-in-a-frame-that-runs-nothing.md](decisions/0164-canvas-designs-are-html-in-a-frame-that-runs-nothing.md)).
+The frame described here is the shipped tier. Themed frames measured to their
+content, frames that show Project images, and frames that run script are
+accepted but not yet built; each replaces the matching sentence above when it
+ships (see [Canvas documents, designs, and prototypes](#canvas-documents-designs-and-prototypes)).
 
 The local-server provider adapter owns a separate process for each acquired
 connection and allows one live session per connection. Its MCP protocol does
@@ -672,6 +678,79 @@ receipt attesting that external MCP, plugins, and skills cannot enter the
 runtime. Ordinary inherited configuration does not supply that attestation and
 continues to report app tools as unsupported. Process exit, stream failure,
 interruption, and scope cleanup retire pending tool requests.
+
+### Canvas documents, designs, and prototypes
+
+Canvas produces three kinds of finished work: documents a person reads (a
+spec, an article, a brief with tabs, metrics, diagrams, and badge tables),
+designs they review (app screens, a site, a deck, a design system), and
+prototypes they try (a flow that reacts to input and keeps state). It does so
+in three tiers that an author mixes in one Canvas, using the lowest tier that
+delivers the result. This is accepted direction: each rule below replaces the
+matching shipped rule above when its slice ships, and until then the shipped
+rule holds. Each tier is a Canvas schema bump, so an older runtime refuses the
+document as a future version. Frames follow the
+[Canvas HTML frames threat model](security/canvas-html-frames-threat-model.md).
+
+- **Typed blocks carry data.** Metrics, tables, charts, plans, and the diagram
+  family stay the catalog, because comments anchor to them, revision edits
+  them, and shares keep their structure. The catalog gains `tabs` and
+  `columns`, which name existing child blocks one level deep (the selected tab
+  is view state and journals nothing); closed diagram node roles (process,
+  decision, terminator), edge styles, and group tones drawn by the one
+  deterministic layout; a Gantt view of `plan`; and import of a bounded
+  Mermaid subset into typed diagram blocks. Mermaid never renders; an unknown
+  construct fails closed and stays a code block.
+- **Static frames carry the look.** A `design` keeps a frame that runs
+  nothing and gains a `document` size whose height the host measures, which
+  needs `allow-same-origin` and therefore never `allow-scripts`; an opt-in
+  workspace theme (semantic tokens, light or dark, the bundled fonts, and a
+  first-party stylesheet for articles, cards, CSS-only tabs, badges, metric
+  tiles, tables, callouts, and code), unthemed by default at device sizes; and
+  images named by asset id, which the server resolves under the thread's mode
+  and Project authority and the host inlines before drawing. The frame itself
+  loads nothing.
+- **Running frames carry behavior.** A `design` may declare that it runs
+  script. Its page comes from a host route fetched with a single-use ticket
+  scoped to one Canvas version, never the session credential, with a
+  `sandbox allow-scripts` response directive and a policy that allows inline
+  script and style and no connection; the parent sandboxes the frame without
+  `allow-same-origin`, `allow-top-navigation`, `allow-popups`, or
+  `allow-forms`. A host-written bridge reports size, script errors, and a
+  heartbeat, grants no tool, journal, or file capability, and a frame that
+  stops answering or loads a second page is removed. Desktop runs these frames
+  out of process, cancels any navigation away from the frame's own page, and
+  reserves a shortcut frame script cannot intercept to return focus to host
+  chrome. A remote browser cannot cancel a frame's own navigation, so there a
+  running frame is not network-contained; that exposure is accepted, bounded
+  by what the frame holds, and the Run control there says so.
+- **The thread can hold the whole Canvas.** A person may expand any Canvas in
+  its thread; the agent may ask for `inline` on a reading document without the
+  12-block cap; a running frame in the thread starts only on **Run**. Editing,
+  comments, and sharing stay in the sidebar, and nothing drawn in the thread
+  writes a version.
+- **Agents are taught and checked.** `describe` presents the tiers with a
+  finished example of each, in-tree recipes cover an article, a design brief,
+  a design system, and a clickable prototype, and `preview` draws frames and
+  returns overflow, contrast, missing-asset, and script-error warnings.
+- **Shares and exports carry what they can draw safely.** Typed blocks travel
+  as today. A frame travels in an authenticated snapshot only when the viewer
+  draws it under the same frame policy and the sharer acknowledges that markup
+  is shared as written, because the secret filter reads values, not markup.
+  HTML export writes frames as sandboxed `srcdoc` pages with the policy inside;
+  Markdown export writes the title. Public links stay out.
+
+_Rationale:_ a `srcdoc` frame inherits the app policy (`script-src 'self'`),
+so a running frame needs a page the host serves, and a frame sandboxed without
+`allow-same-origin` has an opaque origin wherever it is served, so no separate
+origin or desktop protocol is needed for that isolation. Growing only the
+typed catalog was rejected because every new look becomes a schema change and
+no closed set reaches a finished design or article. A separate origin, or an
+Electron view per artifact, was rejected because it cannot be laid out in the
+thread and does not exist for a remote browser; revisit if a frame ever needs
+script with `allow-same-origin`. Rendering Mermaid was rejected as a second
+layout, and an external design service because it sends Project content to a
+third party and makes a core capability depend on one vendor.
 
 ### Device transport and evidence
 
