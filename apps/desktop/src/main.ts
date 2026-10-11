@@ -189,6 +189,7 @@ import {
   type RemoteDeviceControlService,
 } from "./remoteDeviceControls";
 import { markHostInteraction } from "./interactionTrace";
+import { installCanvasFrameGuards, type CanvasFrameGuardWebContentsPort } from "./canvasFrameGuard";
 
 const IPC_CHANNELS = {
   nativeMenu: "octant:menu:popup",
@@ -2014,6 +2015,10 @@ async function createWindow(): Promise<void> {
         rendererNavigationWebContents(window),
         rendererNavigationPolicyOptions(),
       );
+      installCanvasFrameGuards(canvasFrameGuardWebContents(window), {
+        serverUrl: () => activeServerUrl,
+        platform: process.platform,
+      });
       const stopThermalPerformance = observeThermalPerformance({
         platform: process.platform,
         powerMonitor,
@@ -2263,6 +2268,10 @@ async function openSecondaryProjectWindow(target: ProjectWindowTarget): Promise<
           rendererNavigationWebContents(window),
           rendererNavigationPolicyOptions(),
         );
+        installCanvasFrameGuards(canvasFrameGuardWebContents(window), {
+          serverUrl: () => activeServerUrl,
+          platform: process.platform,
+        });
         window.webContents.on("did-start-navigation", (_event, _url, isInPlace, isMainFrame) => {
           if (!isMainFrame || isInPlace) return;
           menuBarTasks.delete(window.id);
@@ -3452,6 +3461,29 @@ function rendererNavigationPolicyOptions() {
     developmentUrl: process.env.OCTANT_WEB_URL,
     packagedRendererPath: resolve(repositoryRoot(), "apps/web/dist/index.html"),
   } as const;
+}
+
+/** The window's own contents, as the running Canvas frame guards see them. */
+function canvasFrameGuardWebContents(window: BrowserWindow): CanvasFrameGuardWebContentsPort {
+  const contents = window.webContents;
+  return {
+    onFrameNavigate: (listener) => {
+      contents.on("will-frame-navigate", (details) => {
+        listener({
+          url: details.url,
+          isMainFrame: details.isMainFrame,
+          frame: details.frame,
+          preventDefault: () => details.preventDefault(),
+        });
+      });
+    },
+    onKeyInput: (listener) => {
+      contents.on("before-input-event", (event, input) => listener(event, input));
+    },
+    focusedFrame: () => contents.focusedFrame,
+    send: (channel) => contents.send(channel),
+    setWebRTCIPHandlingPolicy: (policy) => contents.setWebRTCIPHandlingPolicy(policy),
+  };
 }
 
 function rendererNavigationWebContents(window: BrowserWindow): RendererNavigationWebContentsPort {

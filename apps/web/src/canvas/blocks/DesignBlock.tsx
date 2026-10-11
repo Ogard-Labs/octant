@@ -546,6 +546,7 @@ type RunStopReason =
   | { readonly kind: "stopped" }
   | { readonly kind: "unresponsive" }
   | { readonly kind: "navigated" }
+  | { readonly kind: "held-focus" }
   | { readonly kind: "refused"; readonly reason: string };
 
 type RunState =
@@ -563,7 +564,11 @@ const STOPPED_TEXT: Record<Exclude<RunStopReason["kind"], "refused">, string> = 
   stopped: "Stopped.",
   unresponsive: "Stopped because the prototype stopped responding.",
   navigated: "Stopped because the prototype tried to load another page.",
+  "held-focus": "Stopped because the prototype kept taking the keyboard back.",
 };
+
+/** How long after the reserved shortcut a page that takes focus back is stopped. */
+const FOCUS_RECAPTURE_MS = 1_000;
 
 /**
  * A design that runs its own script: a prototype a person can click through
@@ -638,6 +643,9 @@ function RunningDesignBlock({
 
   // The desktop's reserved shortcut reaches Octant before the frame sees the
   // key. A frame that holds focus here gives it up to its own Stop control.
+  // A page can take focus straight back from script, as one that refocuses
+  // itself on blur does in Electron 43, so a page that does so within a moment
+  // of the shortcut is stopped: the keyboard always comes back to Octant.
   const running = state.kind === "running";
   useEffect(() => {
     if (!running) return;
@@ -649,10 +657,33 @@ function RunningDesignBlock({
     }
     const subscribe = bridge?.subscribeCanvasFrameFocusEscape;
     if (subscribe === undefined) return;
-    return subscribe(() => {
-      if (document.activeElement === frameRef.current) stopButton.current?.focus();
+    const watches = new Set<number>();
+    const unsubscribe = subscribe(() => {
+      if (frameRef.current === null || document.activeElement !== frameRef.current) return;
+      stopButton.current?.focus();
+      const escapedAt = Date.now();
+      const watch = window.setInterval(() => {
+        if (document.activeElement === frameRef.current && frameRef.current !== null) {
+          stop({ kind: "held-focus" });
+        }
+        if (Date.now() - escapedAt >= FOCUS_RECAPTURE_MS) {
+          window.clearInterval(watch);
+          watches.delete(watch);
+        }
+      }, 100);
+      watches.add(watch);
     });
-  }, [running]);
+    return () => {
+      unsubscribe();
+      for (const watch of watches) window.clearInterval(watch);
+    };
+  }, [running, stop]);
+
+  // When a stop takes the frame away, the keyboard lands on Run again.
+  const heldFocus = state.kind === "stopped" && state.why.kind === "held-focus";
+  useEffect(() => {
+    if (heldFocus) runButton.current?.focus();
+  }, [heldFocus]);
 
   const contained = runtime?.contained === true;
   return (

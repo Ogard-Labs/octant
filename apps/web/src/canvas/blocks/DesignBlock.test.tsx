@@ -496,6 +496,40 @@ describe("running prototype", () => {
   });
 });
 
+describe("running prototype focus", () => {
+  it("stops a frame that takes the keyboard straight back after the reserved shortcut", async () => {
+    let escape: (() => void) | undefined;
+    (window as { octantHost?: unknown }).octantHost = {
+      setProviderCredential: () => undefined,
+      providerCredentialStatus: () => undefined,
+      clearProviderCredential: () => undefined,
+      subscribeCanvasFrameFocusEscape: (listener: () => void) => {
+        escape = listener;
+        return () => undefined;
+      },
+    };
+    const { runtime } = runRuntime();
+    render(
+      <CanvasDocument
+        definition={{ ...canvasFixture, blocks: [prototype()] }}
+        designRunRuntime={runtime}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Run" }));
+    const frame = await screen.findByTitle<HTMLIFrameElement>("Checkout, running prototype");
+    vi.useFakeTimers();
+    frame.focus();
+    act(() => escape?.());
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Stop" }));
+    // The page refocuses itself, as one listening for blur can.
+    frame.focus();
+    act(() => vi.advanceTimersByTime(200));
+    expect(frames(document)).toHaveLength(0);
+    expect(screen.getByText(/kept taking the keyboard back/)).toBeVisible();
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Run again" }));
+  });
+});
+
 describe("design bridge messages", () => {
   it("accepts only typed, bounded messages from the frame's own window", () => {
     const frame = {} as Window;
