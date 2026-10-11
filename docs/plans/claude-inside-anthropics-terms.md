@@ -152,8 +152,10 @@ Step 0 recorded that it is required; it still never exposes the token
 to Octant.
 
 If Step 0 showed the login can live in a credential-only directory
-distinct from session history, grant only that credential path plus a
-per-launch config directory. Do not grant the shared session tree to a
+distinct from session history, grant that credential path plus a
+durable per-thread session directory. Do not use a throwaway
+per-launch config directory: resume has to find the same session
+files after a restart. Do not grant the shared session tree to a
 confined Chat subagent or Plan turn that would otherwise read another
 Project's history. If the login is inseparable from the account config
 tree, a Work or Code Plan turn may use the account directory as the
