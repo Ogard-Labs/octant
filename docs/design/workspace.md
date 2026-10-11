@@ -472,7 +472,7 @@ frame grows with its content up to about the thread viewport instead of
 fading, the thread keeps the wheel until the person focuses a region inside
 it, and a running design frame starts there only when the person presses
 **Run**. Until that ships, the fixed-height fade above is the behavior (see
-[decisions/0165-canvas-artifacts-are-documents-designs-and-prototypes.md](../decisions/0165-canvas-artifacts-are-documents-designs-and-prototypes.md)). An
+[Canvas documents, designs, and prototypes](../architecture.md#canvas-documents-designs-and-prototypes)). An
 agent-authored Canvas belongs to the thread's own scope as the host resolves
 it: the active Chat Project, the Work thread's confined root, or the Code
 thread's checkout; a thread whose binding the host cannot resolve is refused
