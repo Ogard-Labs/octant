@@ -64,5 +64,5 @@ export function providerSwitchHandoffDisclosure(
 
 /** What the next message will do after the person picked a different provider. */
 export function pendingProviderSwitchNotice(nextLabel: string, previousLabel: string): string {
-  return `Your next message starts a new session on ${nextLabel}, with recent messages handed over as text. Hidden reasoning and the ${previousLabel} session do not carry over.`;
+  return `Your next message starts a new session on ${nextLabel}. Recent messages go as text; hidden reasoning and the ${previousLabel} session do not carry over.`;
 }

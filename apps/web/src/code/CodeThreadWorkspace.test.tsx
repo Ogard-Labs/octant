@@ -2307,7 +2307,7 @@ describe("CodeThreadWorkspace", () => {
     );
 
     expect(screen.getByText(/Your next message starts a new session on/)).toHaveTextContent(
-      "Hidden reasoning and the",
+      "hidden reasoning and the",
     );
   });
 

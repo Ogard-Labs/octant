@@ -2284,6 +2284,16 @@ html[data-octant-reduced-motion="true"] .code-transcript-row__status-icon {
   font-size: var(--oct-text-xs);
 }
 
+/* The status strip is one truncated line, but this notice is a disclosure the
+   person must be able to read in full before sending, so it wraps. */
+.composer-status:has(> .code-thread-workspace__switch-notice) {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.code-thread-workspace__switch-notice {
+  white-space: normal;
+}
+
 /* What a provider switch handed over, under the divider that marks it. */
 .code-thread-workspace__handoff {
   margin: 0 0 var(--oct-space-2);

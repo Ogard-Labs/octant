@@ -1985,9 +1985,8 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
             ) : null}
             {pendingSwitchNotice === undefined || providerChanging ? null : (
               <span
-                className="composer-status__hint code-thread-workspace__hint"
+                className="composer-status__hint code-thread-workspace__hint code-thread-workspace__switch-notice"
                 role="status"
-                title={pendingSwitchNotice}
               >
                 {pendingSwitchNotice}
               </span>
