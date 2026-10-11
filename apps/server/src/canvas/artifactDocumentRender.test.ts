@@ -7,6 +7,7 @@ import { formatCanvasNumber } from "@octant/domain/canvas-number-format";
 import {
   chartExampleBlocks,
   notificationStatesExampleBlock,
+  opsDashboardExampleBlocks,
   settingsScreenExampleBlock,
 } from "@octant/domain";
 import { describe, expect, it } from "vitest";
@@ -575,5 +576,38 @@ describe("rendering a canvas as a document", () => {
     expect(markdown.body).not.toContain("### ");
     expect(markdown.body).toContain("- Window, Settings");
     expect(markdown.body).toContain("      - Form field, Display name, Ada Lovelace");
+  });
+
+  it("writes a dashboard in reading order where it sits, each placed block once", () => {
+    const [board, ...placed] = opsDashboardExampleBlocks;
+    if (board === undefined) throw new Error("missing dashboard");
+    // Placed blocks listed before the dashboard still read inside it.
+    const source = definition([prose, ...placed.slice(0, 2), board, ...placed.slice(2), heading]);
+    const markdown = renderArtifactMarkdown(source);
+    if (markdown.kind !== "rendered") throw new Error("expected markdown");
+    const order = [
+      "Ship the reading copy.",
+      "## Service health",
+      "Requests per second:",
+      "p95 latency:",
+      "Error rate:",
+      "API: Healthy",
+      "p50: 09:00",
+      "Job queue:",
+      "| Incident | Severity | Open (h) |",
+      "## Scope",
+    ].map((needle) => markdown.body.indexOf(needle));
+    expect(order.every((index) => index >= 0)).toBe(true);
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
+    expect(markdown.body.split("Requests per second:")).toHaveLength(2);
+
+    const html = renderArtifactHtml(source);
+    if (html.kind !== "rendered") throw new Error("expected html");
+    expect(html.body.indexOf("<h2>Service health</h2>")).toBeLessThan(
+      html.body.indexOf("Requests per second:"),
+    );
+    expect(html.body.indexOf("Slow search in eu-west")).toBeLessThan(
+      html.body.indexOf("<h2>Scope</h2>"),
+    );
   });
 });
