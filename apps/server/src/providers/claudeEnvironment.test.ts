@@ -1,14 +1,14 @@
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { mkdtemp } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { homedir, tmpdir } from "node:os";
+import { basename, join } from "node:path";
 
 import type { ProviderFailure } from "@octant/contracts";
 import { Effect, Either, Exit, Scope } from "effect";
 import { describe, expect, it } from "vitest";
 
 import { makeClaudeEnvironmentScope, sanitizeClaudeEnvironment } from "./claudeEnvironment";
-import { isolatedClaudeAccountEnvironment } from "./claudeAccountIsolation";
+import { claudePlanStateDirectoryIsDedicatedLeaf } from "./claudeProcess";
 
 const requiredGuards = {
   CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
@@ -140,6 +140,10 @@ describe("makeClaudeEnvironmentScope", () => {
 
     expect(configDirectory).toBeDefined();
     if (configDirectory === undefined) throw new Error("Expected an isolated config directory.");
+    expect(basename(configDirectory)).toMatch(/^octant-claude-config-/);
+    expect(configDirectory.includes("/.claude-accounts/")).toBe(true);
+    expect(claudePlanStateDirectoryIsDedicatedLeaf(configDirectory, homedir())).toBe(true);
+    expect(configDirectory.startsWith(tmpdir())).toBe(false);
     expect(statSync(configDirectory).mode & 0o777).toBe(0o700);
     expect(readdirSync(configDirectory)).toEqual([]);
     expect(acquired.environment).toEqual({

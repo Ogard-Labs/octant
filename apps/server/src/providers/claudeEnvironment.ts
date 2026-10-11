@@ -1,5 +1,5 @@
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { homedir } from "node:os";
 import { join } from "node:path";
 
 import type { ClaudeAuthentication, ProviderFailure } from "@octant/contracts";
@@ -245,7 +245,12 @@ export function makeClaudeEnvironmentScope(
   return Effect.acquireRelease(
     Effect.tryPromise({
       try: async () => {
-        const configDirectory = await mkdtemp(join(tmpdir(), "octant-claude-config-"));
+        // Plan only grants ~/.claude or a **/.claude-accounts/<account> leaf.
+        // A /tmp/octant-claude-config-* directory is neither, so confinement
+        // would refuse the launch after this scope handed it CLAUDE_CONFIG_DIR.
+        const parent = join(homedir(), ".claude-accounts");
+        await mkdir(parent, { recursive: true, mode: 0o700 });
+        const configDirectory = await mkdtemp(join(parent, "octant-claude-config-"));
         return {
           configDirectory,
           environment: sanitizeClaudeEnvironment(authentication, hostEnvironment, {

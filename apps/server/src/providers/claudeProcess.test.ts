@@ -845,6 +845,55 @@ describe("Claude runtime confinement", () => {
     expect(pids(target.root)).toEqual([]);
   });
 
+  it("refuses a Plan turn whose account directory is a temporary /tmp API-key config leaf", () => {
+    const target = fixture();
+    const configDirectory = mkdtempSync(join(tmpdir(), "octant-claude-config-"));
+    directories.push(configDirectory);
+    const confinement = recordingConfinement();
+
+    expect(() =>
+      makePort(target, { confinement: confinement.port }).spawn({
+        projectRoot: target.root,
+        executionPolicy: "plan",
+      })({
+        command: target.binaryPath,
+        args: ["sdk-test"],
+        cwd: target.root,
+        env: { ...target.environment, CLAUDE_CONFIG_DIR: configDirectory },
+        signal: new AbortController().signal,
+      }),
+    ).toThrow("shared host directory");
+    expect(confinement.prepared).toEqual([]);
+    expect(pids(target.root)).toEqual([]);
+  });
+
+  it("grants a Plan turn a dedicated temporary API-key account leaf", () => {
+    const target = fixture();
+    const home = process.env.HOME;
+    if (home === undefined) throw new Error("Expected HOME for the API-key Plan grant.");
+    const parent = join(home, ".claude-accounts");
+    mkdirSync(parent, { recursive: true, mode: 0o700 });
+    const configDirectory = mkdtempSync(join(parent, "octant-claude-config-"));
+    directories.push(configDirectory);
+    const confinement = recordingConfinement();
+
+    const child = makePort(target, { confinement: confinement.port }).spawn({
+      projectRoot: target.root,
+      executionPolicy: "plan",
+    })({
+      command: target.binaryPath,
+      args: ["sdk-test"],
+      cwd: target.root,
+      env: { ...target.environment, CLAUDE_CONFIG_DIR: configDirectory },
+      signal: new AbortController().signal,
+    });
+    child.kill("SIGTERM");
+
+    const launch = confinement.prepared[0];
+    if (launch === undefined) throw new Error("Expected the Plan launch to be confined.");
+    expect(launch.additionalWriteRoots).toContain(realpathSync(configDirectory));
+  });
+
   it("refuses a Plan turn whose account directory is a shared temporary root", () => {
     const target = fixture();
     const confinement = recordingConfinement();

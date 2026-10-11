@@ -2064,8 +2064,9 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   only that implicit directory-less subscription account; isolated and
   directory-less API-key launches overwrite both directory variables
   with absolute paths and do not inherit it. An API-key instance with no stored
-  directory uses a temporary launch directory and does not claim the
-  host default, including when that instance is later edited. A
+  directory uses a temporary `~/.claude-accounts/<leaf>` launch
+  directory and does not claim the host default, including when that
+  instance is later edited. A
   replayed secondary Claude instance that still omits
   `configDirectory` is not treated as a separate account: it stays
   unusable until it has its own directory, so it cannot launch against
