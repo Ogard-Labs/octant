@@ -137,6 +137,15 @@ export function InlineThreadCanvas(props: InlineThreadCanvasProps) {
   const bodyRef = useRef<HTMLDivElement>(null);
   const toggleRef = useRef<HTMLButtonElement>(null);
   const expanded = view === "expanded";
+  // Expanding a row replaces the row, and the button that had focus with it;
+  // without this the browser drops focus to the page and a keyboard user starts
+  // over at the top of the transcript.
+  const focusToggleOnShow = useRef(false);
+  useEffect(() => {
+    if (!focusToggleOnShow.current) return;
+    focusToggleOnShow.current = false;
+    toggleRef.current?.focus();
+  }, [view]);
 
   // The body is capped rather than free to scroll: a nested scroller would
   // take the wheel from the thread. Content past the cap fades; expanded, it
@@ -165,7 +174,10 @@ export function InlineThreadCanvas(props: InlineThreadCanvasProps) {
       <CanvasReferenceRow
         card={card}
         client={client}
-        onExpand={() => show("expanded")}
+        onExpand={() => {
+          focusToggleOnShow.current = true;
+          show("expanded");
+        }}
         {...(props.onOpen === undefined ? {} : { onOpen: props.onOpen })}
       />
     );

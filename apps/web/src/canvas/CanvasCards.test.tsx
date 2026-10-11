@@ -746,6 +746,20 @@ describe("Canvas create panel and card list", () => {
       localStorage.clear();
     });
 
+    it("keeps keyboard focus on the Canvas when a row is expanded in place", async () => {
+      const user = userEvent.setup();
+      localStorage.clear();
+      render(<ThreadCanvases cards={[rowCard()]} client={readOnlyClient()} />);
+      const expand = await screen.findByRole("button", { name: "Expand in thread" });
+      expand.focus();
+      await user.keyboard("{Enter}");
+      await screen.findByRole("region", { name: "Launch review content" });
+      // The row and its button are gone; focus moves to the frame's own control
+      // instead of falling back to the page.
+      expect(screen.getByRole("button", { name: "Show as card" })).toHaveFocus();
+      localStorage.clear();
+    });
+
     it("leaves the wheel with the thread until the person focuses the expanded Canvas", async () => {
       const user = userEvent.setup();
       localStorage.clear();
@@ -803,6 +817,21 @@ describe("Canvas create panel and card list", () => {
       // The focused Canvas still keeps its own scroll from chaining to the thread.
       expect(bodyRules.length).toBeGreaterThan(0);
       for (const rule of bodyRules) expect(rule[1]).toContain('[data-wheel="canvas"]');
+    });
+
+    it("never draws an expanded Canvas shorter than the one it expanded from", () => {
+      // At the 600px minimum window height the viewport rule alone gives 376px,
+      // which would clip a Canvas that fit in the 560px resting frame.
+      const css = readFileSync(
+        join(dirname(fileURLToPath(import.meta.url)), "../styles/canvas.css"),
+        "utf8",
+      );
+      const resting = /\.thread-canvas__body\s*\{[^}]*max-height:\s*(\d+)px/.exec(css)?.[1];
+      const expanded = /data-shown-as="expanded"\]\s*\.thread-canvas__body\s*\{[^}]*max-height:\s*max\((\d+)px,/.exec(
+        css,
+      )?.[1];
+      expect(resting).toBeDefined();
+      expect(Number(expanded)).toBeGreaterThanOrEqual(Number(resting));
     });
 
     it("remembers an expanded Canvas, and folding it to a card ends the expansion", async () => {

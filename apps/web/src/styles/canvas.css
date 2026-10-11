@@ -4117,9 +4117,11 @@
 }
 
 /* Tall enough to read a long document whole, short enough that the frame's
-   header and the composer stay in view around it. */
+   header and the composer stay in view around it. Never shorter than the
+   resting cap: on a short window the viewport rule alone (376px at the 600px
+   minimum height) would clip a Canvas that fit before it was expanded. */
 .thread-canvas[data-shown-as="expanded"] .thread-canvas__body {
-  max-height: max(20rem, calc(100dvh - 14rem));
+  max-height: max(560px, calc(100dvh - 14rem));
 }
 
 /* A focused region takes the wheel; an unfocused one is not a scroll
