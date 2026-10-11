@@ -49,31 +49,21 @@ describe("HostSelector", () => {
     expect(onSelectHost).toHaveBeenCalledWith(STUDIO);
   });
 
-  it("keeps a single Environment honest about its authoritative health", () => {
-    render(<HostSelector hosts={[localHealthy]} presentation="environment" />);
-
-    expect(screen.getByRole("status", { name: "Environment: This Mac · Connected" })).toBeVisible();
-    expect(screen.getByTestId("host-selector")).toHaveClass("host-selector--environment");
+  it.each([
+    ["no host list yet", {}],
+    ["one host", { hosts: [localHealthy] }],
+    ["one host as an Environment", { hosts: [localHealthy], presentation: "environment" }],
+    ["one host fixed by a Project", { hosts: [localHealthy], fixedHostId: LOCAL_HOST_ID }],
+  ] as const)("shows no host choice with %s", (_case, props) => {
+    const { container } = render(<HostSelector {...props} />);
+    expect(container).toBeEmptyDOMElement();
+    expect(screen.queryByTestId("host-selector")).not.toBeInTheDocument();
   });
 
-  it("renders the default neutral host with a neutral dot when hosts are not loaded", () => {
-    render(<HostSelector />);
-    expect(screen.getByRole("status")).toBeInTheDocument();
-    expect(screen.getByText("This computer")).toBeInTheDocument();
-    const dot = document.querySelector(".host-selector__dot");
-    expect(dot).not.toHaveClass("host-selector__dot--healthy");
-  });
-
-  it("renders a healthy dot when the host list confirms health", () => {
-    render(<HostSelector hosts={[localHealthy]} />);
+  it("renders a healthy dot when the selected host is connected", () => {
+    render(<HostSelector hosts={[localHealthy, studioHealthy]} selectedHostId={LOCAL_HOST_ID} />);
     const dot = document.querySelector(".host-selector__dot");
     expect(dot).toHaveClass("host-selector__dot--healthy");
-  });
-
-  it("collapses to a non-interactive status when only one host is available", () => {
-    render(<HostSelector hosts={[localHealthy]} />);
-    expect(screen.getByRole("status", { name: "Host: This Mac · Connected" })).toBeVisible();
-    expect(screen.queryByRole("combobox", { name: /destination host/i })).not.toBeInTheDocument();
   });
 
   it("renders a fixed Project host without offering alternate selection", () => {
@@ -88,17 +78,24 @@ describe("HostSelector", () => {
     expect(screen.queryByRole("combobox", { name: /destination host/i })).not.toBeInTheDocument();
   });
 
-  it("renders an unhealthy host without the healthy dot class", () => {
+  it("keeps a fixed Environment honest about its authoritative health", () => {
     render(
       <HostSelector
-        hosts={[
-          {
-            hostId: LOCAL_HOST_ID,
-            displayName: "This Mac",
-            health: "unavailable",
-            capabilities: ["chat"],
-          },
-        ]}
+        fixedHostId={LOCAL_HOST_ID}
+        hosts={[localHealthy, studioHealthy]}
+        presentation="environment"
+      />,
+    );
+
+    expect(screen.getByRole("status", { name: "Environment: This Mac · Connected" })).toBeVisible();
+    expect(screen.getByTestId("host-selector")).toHaveClass("host-selector--environment");
+  });
+
+  it("renders an unavailable fixed host without the healthy dot class", () => {
+    render(
+      <HostSelector
+        fixedHostId={LOCAL_HOST_ID}
+        hosts={[{ ...localHealthy, health: "unavailable", capabilities: ["chat"] }, studioHealthy]}
       />,
     );
     const dot = document.querySelector(".host-selector__dot");
@@ -106,39 +103,11 @@ describe("HostSelector", () => {
     expect(screen.getByText("Host unavailable")).toBeInTheDocument();
   });
 
-  it("renders a stale host with a warning dot class", () => {
-    render(
-      <HostSelector
-        hosts={[
-          {
-            hostId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" as never,
-            displayName: "This Mac",
-            health: "stale",
-            capabilities: ["chat", "work", "code"],
-          },
-        ]}
-      />,
-    );
+  it("renders a stale fixed host with a warning dot class", () => {
+    render(<HostSelector fixedHostId={LAPTOP} hosts={[localHealthy, laptopStale]} />);
     const dot = document.querySelector(".host-selector__dot");
     expect(dot).toHaveClass("host-selector__dot--stale");
     expect(screen.getByText("Stale connection")).toBeInTheDocument();
-  });
-
-  it("uses a single reported host when the local host id is not present", () => {
-    render(
-      <HostSelector
-        hosts={[
-          {
-            hostId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" as never,
-            displayName: "Remote Mac",
-            health: "healthy",
-            capabilities: ["chat", "work", "code"],
-          },
-        ]}
-      />,
-    );
-    expect(screen.getByText("Remote Mac")).toBeInTheDocument();
-    expect(screen.getByText("Connected")).toBeInTheDocument();
   });
 
   it("shows an interactive destination-host choice when multiple hosts are available", async () => {
