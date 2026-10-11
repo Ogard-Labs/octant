@@ -1283,6 +1283,80 @@ describe("ProviderService", () => {
     );
   });
 
+  it("refuses a Claude account directory that another account already uses", async () => {
+    const fixture = serviceFixture();
+    await fixture.service.execute(windowId, {
+      kind: "create-claude-provider",
+      instanceId,
+      expectedVersion: 0,
+      displayName: "Claude personal",
+      configuration: {
+        kind: "claude-agent-sdk",
+        binaryPath: "/opt/homebrew/bin/claude",
+        authentication: "subscription",
+      },
+    });
+    await expect(
+      fixture.service.execute(windowId, {
+        kind: "create-claude-provider",
+        instanceId: otherId,
+        expectedVersion: 0,
+        displayName: "Claude work",
+        configuration: {
+          kind: "claude-agent-sdk",
+          binaryPath: "/opt/homebrew/bin/claude",
+          authentication: "subscription",
+          configDirectory: `${homedir()}/.claude`,
+        },
+      }),
+    ).rejects.toMatchObject({
+      failure: {
+        category: "invalid-configuration",
+        message: "Another Claude account already uses that config directory.",
+      },
+    });
+    const directory = assignedClaudeAccountConfigDirectory(homedir(), otherId);
+    await fixture.service.execute(windowId, {
+      kind: "create-claude-provider",
+      instanceId: otherId,
+      expectedVersion: 0,
+      displayName: "Claude work",
+      configuration: {
+        kind: "claude-agent-sdk",
+        binaryPath: "/opt/homebrew/bin/claude",
+        authentication: "subscription",
+        configDirectory: directory,
+        accent: "teal",
+      },
+    });
+    await expect(
+      fixture.service.execute(windowId, {
+        kind: "change-claude-configuration",
+        instanceId,
+        expectedVersion: 1,
+        configuration: {
+          kind: "claude-agent-sdk",
+          binaryPath: "/opt/homebrew/bin/claude",
+          authentication: "subscription",
+          configDirectory: `${directory}/`,
+        },
+      }),
+    ).rejects.toMatchObject({
+      failure: {
+        category: "invalid-configuration",
+        message: "Another Claude account already uses that config directory.",
+      },
+    });
+    expect(fixture.persistence.readProviderInstance(instanceId)).toMatchObject({
+      configuration: { authentication: "subscription" },
+    });
+    expect(
+      fixture.persistence.readProviderInstance(instanceId)?.driverKind === "claude"
+        ? fixture.persistence.readProviderInstance(instanceId)?.configuration.configDirectory
+        : undefined,
+    ).toBeUndefined();
+  });
+
   it("assigns a separate Claude-owned directory to each additional Claude account", async () => {
     const fixture = serviceFixture();
     await fixture.service.execute(windowId, {

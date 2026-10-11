@@ -681,6 +681,11 @@ export class ProviderService implements ProviderServiceApi {
                 command.configuration.configDirectory === undefined && existingClaudeCount > 0
                   ? assignedClaudeAccountConfigDirectory(homedir(), command.instanceId)
                   : command.configuration.configDirectory;
+              const claimedDirectory =
+                assignedDirectory ?? defaultClaudeAccountDirectory(homedir());
+              if (claudeAccountDirectoryTaken(instances, claimedDirectory, homedir())) {
+                throw this.#invalid("Another Claude account already uses that config directory.");
+              }
               instance = createClaudeProvider({
                 ...common,
                 configuration: {
@@ -1011,6 +1016,10 @@ export class ProviderService implements ProviderServiceApi {
           });
           const nextDirectory =
             instance.driverKind === "claude" ? instance.configuration.configDirectory : undefined;
+          const claimedDirectory = nextDirectory ?? defaultClaudeAccountDirectory(homedir());
+          if (claudeAccountDirectoryTaken(instances, claimedDirectory, homedir(), current.id)) {
+            throw this.#invalid("Another Claude account already uses that config directory.");
+          }
           if (nextDirectory !== previousDirectory) {
             try {
               await this.#clearClaudeHelperSignIn?.(current.id);
@@ -2007,6 +2016,41 @@ export async function runPackagedProviderSmokeTurn(
   } finally {
     await rm(createdProjectRoot, { recursive: true, force: true });
   }
+}
+
+function claudeAccountDirectoryKey(directory: string): string {
+  let end = directory.length;
+  while (end > 0 && directory.charAt(end - 1) === "/") {
+    end -= 1;
+  }
+  return directory.slice(0, end);
+}
+
+function defaultClaudeAccountDirectory(homeDirectory: string): string {
+  return `${claudeAccountDirectoryKey(homeDirectory)}/.claude`;
+}
+
+function effectiveClaudeAccountDirectory(
+  instance: ProviderInstance,
+  homeDirectory: string,
+): string | undefined {
+  if (instance.driverKind !== "claude") return undefined;
+  return instance.configuration.configDirectory ?? defaultClaudeAccountDirectory(homeDirectory);
+}
+
+function claudeAccountDirectoryTaken(
+  instances: ReadonlyArray<ProviderInstance>,
+  directory: string,
+  homeDirectory: string,
+  exceptId?: ProviderInstanceId,
+): boolean {
+  const key = claudeAccountDirectoryKey(directory);
+  return instances.some((instance) => {
+    if (instance.driverKind !== "claude") return false;
+    if (exceptId !== undefined && String(instance.id) === String(exceptId)) return false;
+    const existing = effectiveClaudeAccountDirectory(instance, homeDirectory);
+    return existing !== undefined && claudeAccountDirectoryKey(existing) === key;
+  });
 }
 
 function providerFailureOfError(error: unknown): ProviderFailure | undefined {
