@@ -447,7 +447,8 @@ or a valid launchable tool. An available empty dock opens on a thread overview (
 changes; see [DESIGN.md](../../DESIGN.md#shell-and-layout))
 above a grid of tool tiles; an open dock shows a tool strip. Direct tools are Side Chat, Browser, Files,
 Document, Canvas, artifact-gated Plan, conditional Delivery, Review, Terminal,
-Tests, iOS Simulator, and Android emulator, as mode and capability allow. Side
+Tests, iOS Simulator, and Android emulator, as mode and capability allow; Chat
+has no dock and no bottom panel. Side
 Chat is a Chat conversation about the pane's thread: it reads that thread's
 conversation, current state, files, and subagent results, and changes none of
 them ([authority](../architecture.md#security-and-authority)). Its notice says
@@ -476,10 +477,10 @@ Canvas to its faded frame, and **Show as card** returns an expanded row to its
 row. In Work and Code the frame also holds **Open in sidebar**, which opens
 the same Canvas in the dock tool, and a row opens it there too. Chat has no
 dock, so there the frame holds **Open Canvas**, and the frame and a row open
-the Canvas as a content tab. Editing, comments, and sharing stay there.
+the Canvas as a content tab beside the thread. Editing, comments, and sharing stay there.
 Accepted but not yet built: a running design frame starts in the thread only
 when the person presses **Run** (see
-[decisions/0165-canvas-artifacts-are-documents-designs-and-prototypes.md](../decisions/0165-canvas-artifacts-are-documents-designs-and-prototypes.md)). An
+[Canvas documents, designs, and prototypes](../architecture.md#canvas-documents-designs-and-prototypes)). An
 agent-authored Canvas belongs to the thread's own scope as the host resolves
 it: the active Chat Project, the Work thread's confined root, or the Code
 thread's checkout; a thread whose binding the host cannot resolve is refused
@@ -514,9 +515,10 @@ agent's device open raises the relevant in-app pane once per request. Both use
 one device-first pane that adapts to its container's width: a toolbar (device
 switcher, OS and state in words, Back on Android, Home, Screenshot, Lock when
 wide, and More with Type text, Switch device, Diagnostics, Stop live view, and
-Shut down), at most one line under it (error, then approval, then typing, then
-notice; one sentence and at most one fix, such as Repair input after the host
-refuses input as disconnected), and the device on a stage with an original
+Shut down), at most one line under it (error, then the notice that the live view is
+off or lost, then approval, then typing, then any other notice, so Resume or
+Reconnect never waits on an input grant; one sentence and at most one fix,
+such as Repair input after the host refuses input as disconnected), and the device on a stage with an original
 silhouette whose screen is the only input region; the row under the device says
 where keys go while the screen has focus and otherwise, quietly, how the picture
 arrives (Android's live stream or snapshots and why). The pane offers only

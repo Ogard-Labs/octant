@@ -398,6 +398,57 @@
   filter: brightness(1.12);
 }
 
+/* Funnel, radar, and sankey charts. A stage, an axis, or a node is named in
+   text ink beside its mark, never in the mark's hue; its reading follows in
+   the meta ink so the name leads. */
+.canvas-chart__category {
+  fill: var(--oct-fg-2);
+  font-family: inherit;
+  font-size: var(--oct-text-xs);
+}
+
+.canvas-chart__reading {
+  fill: var(--oct-fg-2);
+  font-family: inherit;
+  font-size: var(--oct-text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.canvas-chart__reading-share {
+  fill: var(--oct-meta);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The neck between two funnel stages is a faint wash of the stage hue, so the
+   drop-off reads as one shape without competing with the bars. */
+.canvas-chart__funnel-neck {
+  fill: var(--oct-ser, var(--oct-series-1));
+  opacity: 0.14;
+}
+
+/* A radar series is an outline with a faint wash, so overlapping series stay
+   readable through each other. */
+.canvas-block__chart-mark.canvas-chart__radar-area {
+  fill-opacity: 0.14;
+}
+
+/* A sankey band is a translucent wash of the node it leaves; the hovered or
+   focused band, or every band through a hovered node, darkens. */
+.canvas-block__chart-mark.canvas-chart__flow {
+  opacity: 0.34;
+}
+
+.canvas-block__chart-mark.canvas-chart__flow[data-active="true"] {
+  opacity: 0.62;
+}
+
+/* A sankey chain longer than the column holds draws at its own width and
+   scrolls sideways rather than stacking its columns on each other. */
+.canvas-chart__scroll {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
 .canvas-block__chart-mark {
   fill: var(--oct-ser, var(--oct-series-1));
   stroke: none;
@@ -459,13 +510,6 @@
 .canvas-block__chart-legend-item[aria-pressed="false"] {
   color: var(--oct-meta);
   text-decoration: line-through;
-}
-
-.canvas-block__chart .chart-legend button:focus-visible,
-.canvas-block__chart-legend-item:focus-visible,
-.canvas-block__chart-table:focus-visible {
-  outline: 2px solid var(--octant-focus-ring);
-  outline-offset: 2px;
 }
 
 .canvas-block__chart-data {
@@ -566,11 +610,6 @@
   position: relative;
 }
 
-.canvas-block__treemap-plot:focus-visible {
-  outline: 2px solid var(--octant-focus-ring);
-  outline-offset: 2px;
-}
-
 .canvas-block__treemap-svg {
   display: block;
   width: 100%;
@@ -606,7 +645,7 @@
 
 .canvas-block__treemap-cell.is-active .canvas-block__treemap-mark,
 .canvas-block__treemap-group[data-active="true"] .canvas-block__treemap-group-frame {
-  stroke: var(--octant-focus-ring);
+  stroke: var(--oct-focus-edge);
   stroke-width: 2;
 }
 
@@ -693,11 +732,6 @@
 .canvas-block__treemap-table {
   max-width: 100%;
   overflow-x: auto;
-}
-
-.canvas-block__treemap-table:focus-visible {
-  outline: 2px solid var(--octant-focus-ring);
-  outline-offset: 2px;
 }
 
 .canvas-block__treemap-table th button {
@@ -793,11 +827,6 @@
   max-width: 100%;
 }
 
-.canvas-block__heatmap-plot:focus-visible {
-  outline: 2px solid var(--octant-focus-ring);
-  outline-offset: 2px;
-}
-
 .canvas-block__heatmap-svg {
   display: block;
   width: 100%;
@@ -835,7 +864,7 @@
 }
 
 .canvas-block__heatmap-mark.is-active {
-  stroke: var(--octant-focus-ring);
+  stroke: var(--oct-focus-edge);
   stroke-width: 2;
 }
 
@@ -897,11 +926,6 @@
 .canvas-block__heatmap-table {
   max-width: 100%;
   overflow-x: auto;
-}
-
-.canvas-block__heatmap-table:focus-visible {
-  outline: 2px solid var(--octant-focus-ring);
-  outline-offset: 2px;
 }
 
 .canvas-block__heatmap-data {
@@ -1007,12 +1031,6 @@
   font-size: var(--oct-text-sm);
 }
 
-.canvas-block__bar-list-entry:focus-visible {
-  outline: 2px solid var(--octant-focus-ring);
-  outline-offset: 2px;
-  border-radius: 2px;
-}
-
 .canvas-block__bar-list-label {
   min-width: 0;
   overflow: hidden;
@@ -1042,11 +1060,6 @@
 .canvas-block__bar-list-table {
   max-width: 100%;
   overflow-x: auto;
-}
-
-.canvas-block__bar-list-table:focus-visible {
-  outline: 2px solid var(--octant-focus-ring);
-  outline-offset: 2px;
 }
 
 .canvas-block__bar-list-data {
@@ -1104,11 +1117,6 @@
   border-radius: var(--oct-radius-md);
   background: var(--canvas-matrix-ground);
   box-shadow: inset 0 0 0 1px var(--oct-hairline);
-}
-
-.canvas-block__matrix-scroll:focus-visible {
-  outline: 2px solid var(--octant-focus-ring);
-  outline-offset: 2px;
 }
 
 .canvas-block__matrix-table {
@@ -1324,11 +1332,6 @@
   overflow-x: auto;
 }
 
-.canvas-block__matrix-data-table:focus-visible {
-  outline: 2px solid var(--octant-focus-ring);
-  outline-offset: 2px;
-}
-
 /* System colours replace the tints, so the recommended column keeps a frame,
    the badge keeps an outline, the meters fall to system ink on a framed
    track, and a glyph's check is cut from the system ground. */
@@ -1382,12 +1385,6 @@
   overflow-y: hidden;
   overscroll-behavior-x: contain;
   padding: var(--oct-space-2) 0;
-}
-
-.canvas-block__math-display:focus-visible {
-  outline: 2px solid var(--octant-focus-ring);
-  outline-offset: 2px;
-  border-radius: var(--oct-radius-md);
 }
 
 /* KaTeX centres display math with its own margin; the region supplies the
@@ -1520,11 +1517,6 @@
   overscroll-behavior: contain;
 }
 
-.canvas-block__table-scroll:focus-visible {
-  outline: 2px solid var(--octant-focus-ring);
-  outline-offset: 2px;
-}
-
 .canvas-block__table-grid {
   border-collapse: separate;
   border-spacing: 0;
@@ -1559,12 +1551,6 @@
 
 .canvas-block__table-sortmark {
   display: inline-block;
-}
-
-.canvas-block__table-sort:focus-visible {
-  outline: 2px solid var(--octant-focus-ring);
-  outline-offset: 2px;
-  border-radius: 2px;
 }
 
 .canvas-block__table-path .canvas-block__path {
@@ -1603,6 +1589,68 @@
 .canvas-block__table-empty {
   color: var(--oct-muted);
   text-align: center;
+}
+
+/* The comment gutter leads each row and is pinned to the scroll region's
+   left edge, so a marker stays in view while a wide table scrolls sideways.
+   A pinned cell must be opaque or the columns scroll through it, and the
+   surface behind a table differs between the main tab, the dock, and its
+   sheet, so the gutter takes the header's warm surface: one frame along the
+   top and the left edge. The corner cell rides above both the header and the
+   gutter. Like a block's marker it shows on hover or focus and always once
+   the row holds an open thread; a row without an id has an empty gutter cell
+   because nothing could keep a comment on it. */
+.canvas-block__table-grid .canvas-block__table-comment {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  width: 1px;
+  padding-inline: var(--oct-space-1);
+  white-space: nowrap;
+  background: var(--oct-surface-warm);
+  box-shadow: inset -1px 0 0 var(--oct-border);
+}
+
+.canvas-block__table-grid th.canvas-block__table-comment {
+  z-index: calc(var(--oct-z-sticky) + 1);
+  box-shadow:
+    inset -1px 0 0 var(--oct-border),
+    inset 0 -1px 0 var(--oct-border);
+}
+
+.canvas-block__row-comment-marker {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 4px;
+  border: 0;
+  border-radius: var(--oct-radius-sm);
+  background: transparent;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+  cursor: pointer;
+  opacity: 0;
+}
+
+.canvas-block__table-grid tr:hover .canvas-block__row-comment-marker,
+.canvas-block__row-comment-marker:focus-visible,
+.canvas-block__row-comment-marker[data-has-comments="true"] {
+  opacity: 1;
+}
+
+.canvas-block__row-comment-marker[data-has-comments="true"] {
+  color: var(--oct-accent);
+}
+
+.canvas-block__row-comment-marker:hover,
+.canvas-block__row-comment-marker:focus-visible {
+  background: var(--oct-fill-2);
+}
+
+@media (hover: none) {
+  .canvas-block__row-comment-marker {
+    opacity: 1;
+  }
 }
 
 /* System colours: the bar and the tint fall to system ink, and the value text
@@ -1858,12 +1906,6 @@
   cursor: move;
 }
 
-.canvas-board__node:focus-visible rect {
-  stroke: var(--oct-accent);
-  stroke-width: 2;
-  outline: none;
-}
-
 /* Every grid here takes the drawer's width rather than its content's: the
    anchor picker names a block by its heading, and an unbreakable heading
    pushed the picker, the composer and its Comment button past the drawer. */
@@ -2024,13 +2066,6 @@
 .canvas-block__state-header {
   fill: var(--oct-muted);
   font-size: var(--oct-text-xs);
-}
-
-/* The picture is reachable by keyboard so its overflow can be scrolled without
-   a pointer; a visible ring marks where focus is. */
-.canvas-block__kind-diagram:focus-visible {
-  outline: 2px solid var(--oct-focus-ring, var(--oct-fg));
-  outline-offset: 2px;
 }
 
 /* The kind diagrams draw inside .canvas-block__diagram-node groups, whose
@@ -4322,6 +4357,43 @@
   .canvas-chart__dot {
     fill: CanvasText;
     stroke: Canvas;
+  }
+
+  .canvas-chart__category,
+  .canvas-chart__reading,
+  .canvas-chart__reading-share {
+    fill: CanvasText;
+  }
+
+  /* Washes give way to outlines: a filled radar area or funnel neck would
+     cover the rings and the series behind it in a system colour. */
+  .canvas-chart__funnel-neck {
+    fill: none;
+    stroke: GrayText;
+    opacity: 1;
+  }
+
+  .canvas-block__chart-mark.canvas-chart__radar-area[data-series] {
+    fill: none;
+    stroke: none;
+  }
+
+  .canvas-block__chart-mark.canvas-chart__flow[data-series] {
+    fill: Canvas;
+    stroke: CanvasText;
+    stroke-width: 1;
+    opacity: 1;
+  }
+
+  .canvas-block__chart-mark.canvas-chart__flow[data-active="true"] {
+    fill: Highlight;
+  }
+
+  .canvas-chart__flow:focus-visible,
+  .canvas-chart__node:focus-visible,
+  .canvas-chart__dot:focus-visible,
+  .canvas-chart__bar:focus-visible {
+    outline-color: Highlight;
   }
 
   .canvas-block__metric,

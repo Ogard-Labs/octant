@@ -5,6 +5,7 @@ import {
 } from "@octant/contracts/canvas";
 import { MAX_ARTIFACT_PREVIEW_CHARACTERS } from "@octant/contracts/artifact-library";
 import { CHART_BAR_RADIUS, CHART_LINE_WIDTH } from "@octant/theme";
+import { layoutCanvasSankey } from "@octant/domain/canvas-sankey-layout";
 import { formatCanvasNumber } from "@octant/domain/canvas-number-format";
 import { layoutCanvasTreemap } from "@octant/domain/canvas-treemap-layout";
 import {
@@ -321,9 +322,102 @@ function bars(
       return groupedColumns(block, y, width, palette, block.series.length);
     case "bar-line":
       return barAndLine(block, y, width, palette);
+    case "funnel":
+      return funnel(block, y, width, palette);
+    case "radar":
+      return radar(block, y, width, palette);
+    case "sankey":
+      return sankey(block, y, width, palette);
     default:
       return simpleBars(block, y, width, palette);
   }
+}
+
+/** Centred stages, each as wide as its share of the first, top to bottom. */
+function funnel(
+  block: Extract<CanvasBlock, { readonly kind: "chart" }>,
+  y: number,
+  width: number,
+  palette: ArtifactThumbnailPalette,
+): string {
+  const stages = (block.series[0]?.points ?? []).slice(0, 8);
+  const first = stages[0]?.y ?? 0;
+  if (stages.length === 0 || first <= 0) return grid(y, width, palette);
+  const row = CHART_HEIGHT / stages.length;
+  return stages
+    .map((stage, index) => {
+      const share = Math.min(1, Math.max(0, stage.y / first));
+      const barWidth = Math.max(2, width * share);
+      return column(
+        PADDING + (width - barWidth) / 2,
+        barWidth,
+        y + index * row + 0.5,
+        Math.max(1.5, row - 1.5),
+        palette,
+        0.9 - index * 0.08,
+      );
+    })
+    .join("");
+}
+
+/** Rings and spokes, with each series' outline on them. */
+function radar(
+  block: Extract<CanvasBlock, { readonly kind: "chart" }>,
+  y: number,
+  width: number,
+  palette: ArtifactThumbnailPalette,
+): string {
+  const axes = block.series[0]?.points.length ?? 0;
+  if (axes < 3) return grid(y, width, palette);
+  const peak = Math.max(...block.series.flatMap((series) => series.points.map((p) => p.y)), 1);
+  const cx = PADDING + width / 2;
+  const cy = y + CHART_HEIGHT / 2;
+  const radius = Math.min(CHART_HEIGHT / 2 - 1, width / 2);
+  const point = (index: number, share: number) => {
+    const angle = -Math.PI / 2 + (index / axes) * Math.PI * 2;
+    return `${String(round(cx + Math.cos(angle) * radius * share))},${String(round(cy + Math.sin(angle) * radius * share))}`;
+  };
+  const rim = Array.from({ length: axes }, (_value, index) => point(index, 1)).join(" ");
+  const shapes = block.series
+    .slice(0, 4)
+    .map((series, seriesIndex) => {
+      const outline = series.points
+        .map((reading, index) => point(index, Math.max(0, reading.y) / peak))
+        .join(" ");
+      return `<polygon points="${outline}" fill="${palette.accent}" fill-opacity="0.18" stroke="${palette.accent}" stroke-width="${String(CHART_LINE_WIDTH)}" opacity="${opacityFor(0.9 - seriesIndex * 0.2)}"/>`;
+    })
+    .join("");
+  return `<polygon points="${rim}" fill="none" stroke="${palette.muted}" stroke-width="1" opacity="0.5"/>${shapes}`;
+}
+
+/** The same columns and bands the screen draws, from the shared layout. */
+function sankey(
+  block: Extract<CanvasBlock, { readonly kind: "chart" }>,
+  y: number,
+  width: number,
+  palette: ArtifactThumbnailPalette,
+): string {
+  const links = block.links ?? [];
+  if (links.length === 0) return grid(y, width, palette);
+  const layout = layoutCanvasSankey(links, {
+    width,
+    height: CHART_HEIGHT,
+    nodeWidth: 4,
+    nodeGap: 2,
+  });
+  const bands = layout.links
+    .map(
+      (link) =>
+        `<path d="${link.path}" transform="translate(${String(PADDING)} ${String(y)})" fill="${palette.accent}" opacity="0.3"/>`,
+    )
+    .join("");
+  const nodes = layout.nodes
+    .map(
+      (node) =>
+        `<rect x="${String(round(PADDING + node.x))}" y="${String(round(y + node.y))}" width="${String(node.width)}" height="${String(Math.max(1, round(node.height)))}" rx="1" fill="${palette.ink}" opacity="0.8"/>`,
+    )
+    .join("");
+  return bands + nodes;
 }
 
 function pie(

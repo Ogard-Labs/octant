@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises";
+import { remoteListenerOrigin } from "@octant/domain";
 import {
   failureMessage,
   type LocalControlResponse,
@@ -237,7 +238,7 @@ async function runListenerCommand(
         // The listener's own address and port, as Settings derives it, which
         // the host refuses unless they match the bind; an IPv6 address must be
         // bracketed to be a valid URL authority.
-        origin: `https://${command.hostname.includes(":") ? `[${command.hostname}]` : command.hostname}${command.port === 443 ? "" : `:${command.port}`}`,
+        origin: remoteListenerOrigin(command.hostname, command.port),
         certificatePem,
         privateKeyPem,
       },

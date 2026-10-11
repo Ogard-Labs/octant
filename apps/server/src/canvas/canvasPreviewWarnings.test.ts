@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { decodeCanvasBlock } from "@octant/contracts";
 import type { CanvasBlock } from "@octant/contracts/canvas";
+import { chartExampleBlocks } from "@octant/domain";
 import { canvasPreviewWarnings, type CanvasPreviewPalette } from "./canvasPreviewWarnings";
 import { canvasPreviewPalette } from "./canvasPreviewService";
 
@@ -135,6 +136,17 @@ describe("canvasPreviewWarnings", () => {
   it("does not warn about the length of a long reading document", () => {
     const blocks = Array.from({ length: 40 }, (_unused, index) => richText(`block-${index}`));
     expect(warningsFor(blocks)).toEqual([]);
+  });
+
+  it("reports a sankey as no empty series and a funnel's long stage as no clipped slot", () => {
+    const blocks = chartExampleBlocks.filter(
+      (candidate) =>
+        candidate.chartType === "sankey" ||
+        candidate.chartType === "funnel" ||
+        candidate.chartType === "radar",
+    );
+    expect(blocks).toHaveLength(3);
+    expect(warningsFor(blocks, { width: 360 })).toEqual([]);
   });
 
   it("reports ink that does not clear its contrast target on the surface", () => {

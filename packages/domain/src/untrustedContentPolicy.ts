@@ -153,6 +153,95 @@ function fieldOf(value: unknown, key: string): unknown {
     : undefined;
 }
 
+/** A search query longer than this is refused on a tainted thread. */
+export const MAX_SEARCH_QUERY_LENGTH_UNDER_TAINT = 200;
+
+/** Why a search query on a tainted thread looks like it carries data. */
+export type SearchQueryRefusalDetail =
+  | "contains a URL"
+  | "contains an email address"
+  | "contains a hex run"
+  | "contains a percent-encoded run"
+  | "contains a base64 run"
+  | "contains a long high-entropy token"
+  | "is longer than 200 characters";
+
+export type SearchQueryRefusal = {
+  readonly reason: "search-query-refused-under-taint";
+  readonly detail: SearchQueryRefusalDetail;
+};
+
+// A scheme, a `www.` host, a dotted name followed by a path, query, fragment,
+// or a port and one of those, or an IPv4 address followed by a port or path.
+// A bare version such as `19.2` or `v1.2.3/dist` is not a URL: the last label
+// of a name must be letters, a punycode `xn--` label, and may carry a root
+// dot (`host.example./path`). A port alone after a name is not enough, because
+// `Component.test.tsx:42` is a file and line.
+const URL_PATTERN =
+  /[a-z][a-z0-9+.-]*:\/\/|\bwww\.|\b[a-z0-9-]+(?:\.[a-z0-9-]+)*\.(?:[a-z]{2,}|xn--[a-z0-9-]+)\.?(?::\d{1,5})?[/?#]|\b\d{1,3}(?:\.\d{1,3}){3}[:/]/i;
+const EMAIL_PATTERN = /[^\s@]+@[^\s@]+\.[^\s@]+/;
+// Sixteen hex digits is a 64-bit value: longer than a short commit SHA, and
+// as long as a card number or the start of a key.
+const HEX_RUN_PATTERN = /[0-9a-f]{16,}/i;
+// Three escaped bytes in a row: `%68%75%6E` or `\x68\x75\x6e` is text spelled
+// to slip past the hex and base64 checks, never part of a question.
+const ESCAPED_BYTE_RUN_PATTERN = /(?:(?:%|\\x)[0-9a-f]{2}){3,}/i;
+const BASE64_RUN_PATTERN = /[A-Za-z0-9+/]{24,}={0,2}|[A-Za-z0-9+/]{16,}={1,2}/g;
+const MIN_HIGH_ENTROPY_TOKEN_LENGTH = 20;
+const MIN_HIGH_ENTROPY_BITS_PER_CHARACTER = 3.5;
+
+/**
+ * Why a `web-search` query from a tainted thread must not leave, or
+ * `undefined` when it reads like an ordinary question. Outside content the
+ * thread took in can tell the model to smuggle what it has read into a query,
+ * and the endpoint sees every query; refusing what looks like data — a URL,
+ * an address, a key, an encoded run, a long blob — keeps the search useful
+ * without asking a person on every call. A short query can still carry a few
+ * words, but only to the search endpoint the person configured.
+ */
+export function searchQueryRefusalUnderTaint(query: string): SearchQueryRefusal | undefined {
+  const detail = searchQueryDataSign(query);
+  return detail === undefined ? undefined : { reason: "search-query-refused-under-taint", detail };
+}
+
+function searchQueryDataSign(query: string): SearchQueryRefusalDetail | undefined {
+  if (query.length > MAX_SEARCH_QUERY_LENGTH_UNDER_TAINT) return "is longer than 200 characters";
+  if (URL_PATTERN.test(query)) return "contains a URL";
+  if (EMAIL_PATTERN.test(query)) return "contains an email address";
+  if (HEX_RUN_PATTERN.test(query)) return "contains a hex run";
+  if (ESCAPED_BYTE_RUN_PATTERN.test(query)) return "contains a percent-encoded run";
+  for (const run of query.match(BASE64_RUN_PATTERN) ?? []) {
+    // Real base64 mixes cases and digits; a long identifier or word does not.
+    if (run.endsWith("=") || (/[a-z]/.test(run) && /[A-Z]/.test(run) && /\d/.test(run))) {
+      return "contains a base64 run";
+    }
+  }
+  // Path, file, and sentence punctuation separate words; `-` and `_` sit
+  // inside keys, so they stay part of the token.
+  for (const token of query.split(/[\s.,:;/\\()[\]{}"'`<>|!?]+/)) {
+    if (
+      token.length >= MIN_HIGH_ENTROPY_TOKEN_LENGTH &&
+      /[a-z]/i.test(token) &&
+      /\d/.test(token) &&
+      shannonBitsPerCharacter(token) >= MIN_HIGH_ENTROPY_BITS_PER_CHARACTER
+    ) {
+      return "contains a long high-entropy token";
+    }
+  }
+  return undefined;
+}
+
+function shannonBitsPerCharacter(text: string): number {
+  const counts = new Map<string, number>();
+  for (const character of text) counts.set(character, (counts.get(character) ?? 0) + 1);
+  let bits = 0;
+  for (const count of counts.values()) {
+    const share = count / text.length;
+    bits -= share * Math.log2(share);
+  }
+  return bits;
+}
+
 export function isIrreversibleOrAuthorityBearingApprovalClass(
   approvalClass: ToolApprovalClass,
 ): boolean {
