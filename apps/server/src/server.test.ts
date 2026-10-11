@@ -370,6 +370,7 @@ describe("startOctantServer", () => {
         remove: async () => undefined,
       },
       isProjectConfinedPath: () => false,
+      claudeInstances: [instance],
       runtimeRegistry: new ProviderRuntimeRegistry(),
       permissionPersistence: () => "current-session",
     });
@@ -378,6 +379,43 @@ describe("startOctantServer", () => {
       Effect.runPromise(Effect.scoped(driver.probe({ instanceId: instance.id }))),
     ).rejects.toThrow(/Claude process selected/);
     expect(probeVersion).toHaveBeenCalledOnce();
+  });
+
+  it("refuses to construct a Claude driver without the account snapshot", () => {
+    const instance = decodeProviderInstance({
+      id: "80000000-0000-4000-8000-000000000402",
+      displayName: "Claude local",
+      driverKind: "claude",
+      configuration: {
+        kind: "claude-agent-sdk",
+        binaryPath: "/missing/claude",
+        authentication: "subscription",
+      },
+      enabled: true,
+      environmentPolicy: "inherit-host",
+      version: 1,
+      createdAt: "2026-07-16T10:00:00.000Z",
+      updatedAt: "2026-07-16T10:00:00.000Z",
+    });
+
+    expect(() =>
+      makeConfiguredProviderDriver(instance, {
+        openCodeProcess: { start: () => Effect.die("must not start OpenCode") },
+        codexProcess: { start: () => Effect.die("must not start Codex") },
+        claudeProcess: {
+          probeVersion: () => Effect.die("must not probe"),
+        } as unknown as ClaudeProcessPort,
+        claudeSdk: {} as ClaudeAgentSdkPort,
+        claudeResumeIdentityPort: {
+          lookup: async () => undefined,
+          put: async () => undefined,
+          remove: async () => undefined,
+        },
+        isProjectConfinedPath: () => false,
+        runtimeRegistry: new ProviderRuntimeRegistry(),
+        permissionPersistence: () => "current-session",
+      }),
+    ).toThrow(/invalid/i);
   });
 
   it.each([

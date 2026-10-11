@@ -98,10 +98,12 @@ export function makeProviderDriver(
       ) {
         throw new ProviderDriverConfigurationError();
       }
-      if (
-        options.claudeInstances !== undefined &&
-        claudeAccountNeedsOwnConfigDirectory(options.claudeInstances, instance)
-      ) {
+      // A missing snapshot would skip the secondary-account guard and let a
+      // replayed directory-less instance launch against the default login.
+      if (options.claudeInstances === undefined) {
+        throw new ProviderDriverConfigurationError();
+      }
+      if (claudeAccountNeedsOwnConfigDirectory(options.claudeInstances, instance)) {
         throw new ProviderDriverConfigurationError(
           "This Claude account needs its own config directory.",
         );

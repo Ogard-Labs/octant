@@ -4466,6 +4466,9 @@ export function startOctantServer(
             join(persistence.dataDirectory, "local-usage-cache.sqlite3"),
           ),
         }),
+      get claudeInstances() {
+        return persistence.readProviderInstances();
+      },
     };
     const localUsageHistoryRoutes = createLocalUsageHistoryRouteHandler({
       windowAuthorityStore,

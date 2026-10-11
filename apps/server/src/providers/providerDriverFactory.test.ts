@@ -93,6 +93,41 @@ describe("makeProviderDriver", () => {
     expect(fixture.openCodeStart).not.toHaveBeenCalled();
   });
 
+  it("refuses to construct a Claude driver without the account snapshot", () => {
+    const fixture = factoryFixture();
+    const { claudeInstances: _ignored, ...withoutSnapshot } = fixture.options;
+
+    expect(() => makeProviderDriver(provider("claude"), withoutSnapshot)).toThrowError(
+      ProviderDriverConfigurationError,
+    );
+    expect(fixture.claudeProbeVersion).not.toHaveBeenCalled();
+  });
+
+  it("refuses a replayed secondary Claude account that still lacks its own directory", () => {
+    const fixture = factoryFixture();
+    const owner = provider("claude");
+    const secondary = decodeProviderInstance({
+      id: "80000000-0000-4000-8000-000000000062",
+      displayName: "Claude secondary",
+      driverKind: "claude",
+      configuration: {
+        kind: "claude-agent-sdk",
+        binaryPath: "/missing/claude",
+        authentication: "subscription",
+      },
+      enabled: true,
+      environmentPolicy: "inherit-host",
+      version: 1,
+      createdAt: "2026-07-16T11:00:00.000Z",
+      updatedAt: "2026-07-16T11:00:00.000Z",
+    });
+
+    expect(() =>
+      makeProviderDriver(secondary, { ...fixture.options, claudeInstances: [owner, secondary] }),
+    ).toThrow(/own config directory/);
+    expect(fixture.claudeProbeVersion).not.toHaveBeenCalled();
+  });
+
   it.each([
     ["kimi-code", "/missing/kimi"],
     ["mistral-vibe", "/missing/vibe-acp"],
@@ -355,6 +390,7 @@ function factoryFixture(): {
     },
     isProjectConfinedPath: (root: string, path: string) => path.startsWith(`${root}/`),
     permissionPersistence: () => "current-session" as const,
+    claudeInstances: [provider("claude")],
   } as unknown as ProviderDriverFactoryOptions;
   return {
     openCodeStart,
