@@ -1552,10 +1552,41 @@ describe("the Apple capability as an agent tool", () => {
     });
   });
 
+  it.each(["plan", "approval-gated"] as const)(
+    "shows an already-booted Simulator's pane under %s without asking, since nothing on the device changes",
+    async (executionPolicy) => {
+      const request = vi.fn();
+      const snapshot = vi.fn(async () => ({
+        ...(appleSnapshot() as unknown as Record<string, unknown>),
+        simulators: [{ simulatorId, name: "iPhone", platform: "ios", state: "booted" }],
+      }));
+      const { execute, requestPaneOpen, tools } = appleTools(
+        { snapshot } as never,
+        { executionPolicy } as never,
+        { request },
+      );
+
+      const opened = await tools.execute({
+        name: "octant_apple",
+        inputJson: JSON.stringify({ operation: "open", simulatorId }),
+      });
+
+      expect(opened).toMatchObject({ isError: false, result: { opensInAppPane: true } });
+      expect(requestPaneOpen).toHaveBeenCalledOnce();
+      expect(request).not.toHaveBeenCalled();
+      expect(execute).not.toHaveBeenCalled();
+    },
+  );
+
   it("refuses a boot in Plan mode while still reading the Simulator's status", async () => {
     const request = vi.fn();
-    const { execute, requestPaneOpen, snapshot, tools } = appleTools(
-      {},
+    const { execute, requestPaneOpen, tools } = appleTools(
+      {
+        snapshot: vi.fn(async () => ({
+          ...(appleSnapshot() as unknown as Record<string, unknown>),
+          simulators: [{ simulatorId, name: "iPhone", platform: "ios", state: "shutdown" }],
+        })) as never,
+      },
       { executionPolicy: "plan" } as never,
       { request },
     );
@@ -1574,9 +1605,9 @@ describe("the Apple capability as an agent tool", () => {
     });
 
     expect(booted.result).toMatchObject({ error: "plan-mode-read-only" });
+    // Opening a shut-down Simulator would boot it.
     expect(opened.result).toMatchObject({ error: "plan-mode-read-only" });
     expect(status.isError).toBe(false);
-    expect(snapshot).toHaveBeenCalledTimes(1);
     expect(request).not.toHaveBeenCalled();
     expect(execute).not.toHaveBeenCalled();
     expect(requestPaneOpen).not.toHaveBeenCalled();

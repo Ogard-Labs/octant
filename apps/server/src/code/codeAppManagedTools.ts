@@ -121,7 +121,7 @@ const terminalDefinition = {
 const appleDefinition = {
   name: CODE_APPLE_TOOL_NAME,
   description:
-    "Build, test, run, and inspect Apple apps through Octant's in-app Simulator pane and Apple workbench. Begin with discover or status and use the returned project, scheme, and destination identifiers for later operations. boot, run, and open show the selected Simulator in Octant's iOS Simulator pane — never launch Simulator.app, never run open -a Simulator, and never start serve-sim or another out-of-app simulator. open boots the destination if it is shut down, otherwise only opens the pane. shutdown stops it; screenshot returns its current screen as an image when it fits the provider image limit. tap takes a point (x, y) in the pixels of the latest screenshot; swipe goes from (x, y) to (toX, toY) in the same pixels, over durationMs when given — a short one flings a list, a long one drags. Use only supported operations and inspect returned build, test, or runtime evidence before claiming success. discover, status, and screenshot are reads; every other operation is an effect, which Plan mode refuses and an approval-gated thread runs only after the person allows it. An unavailable operation is not a successful action or permission to bypass the host's validation and approval policy.",
+    "Build, test, run, and inspect Apple apps through Octant's in-app Simulator pane and Apple workbench. Begin with discover or status and use the returned project, scheme, and destination identifiers for later operations. boot, run, and open show the selected Simulator in Octant's iOS Simulator pane — never launch Simulator.app, never run open -a Simulator, and never start serve-sim or another out-of-app simulator. open boots the destination if it is shut down, otherwise only opens the pane. shutdown stops it; screenshot returns its current screen as an image when it fits the provider image limit. tap takes a point (x, y) in the pixels of the latest screenshot; swipe goes from (x, y) to (toX, toY) in the same pixels, over durationMs when given — a short one flings a list, a long one drags. Use only supported operations and inspect returned build, test, or runtime evidence before claiming success. discover, status, screenshot, and open of a destination that is already running are reads; every other operation is an effect, which Plan mode refuses and an approval-gated thread runs only after the person allows it. An unavailable operation is not a successful action or permission to bypass the host's validation and approval policy.",
   inputSchema: {
     type: "object",
     properties: {
@@ -163,7 +163,7 @@ const appleDefinition = {
 const androidDefinition = {
   name: CODE_ANDROID_TOOL_NAME,
   description:
-    "Boot, inspect, and drive Android emulators through Octant's in-app Android emulator pane. Begin with discover or status and use the returned AVD names for later operations. boot, open, install, and launch show the selected emulator in Octant's Android emulator pane — never start an external emulator window as the place to look. open boots the destination if it is shut down, otherwise only opens the pane. shutdown stops it; screenshot returns its current screen as an image when it fits the provider image limit. tap takes a point (x, y) in the pixels of the live screen; swipe goes from (x, y) to (toX, toY) over durationMs when given. install takes a checkout-relative APK; launch takes a package name. Use only supported operations and inspect returned evidence before claiming success. discover, status, and screenshot are reads; every other operation is an effect, which Plan mode refuses and an approval-gated thread runs only after the person allows it. An unavailable operation is not a successful action or permission to bypass the host's validation and approval policy.",
+    "Boot, inspect, and drive Android emulators through Octant's in-app Android emulator pane. Begin with discover or status and use the returned AVD names for later operations. boot, open, install, and launch show the selected emulator in Octant's Android emulator pane — never start an external emulator window as the place to look. open boots the destination if it is shut down, otherwise only opens the pane. shutdown stops it; screenshot returns its current screen as an image when it fits the provider image limit. tap takes a point (x, y) in the pixels of the live screen; swipe goes from (x, y) to (toX, toY) over durationMs when given. install takes a checkout-relative APK; launch takes a package name. Use only supported operations and inspect returned evidence before claiming success. discover, status, screenshot, and open of a destination that is already running are reads; every other operation is an effect, which Plan mode refuses and an approval-gated thread runs only after the person allows it. An unavailable operation is not a successful action or permission to bypass the host's validation and approval policy.",
   inputSchema: {
     type: "object",
     properties: {
@@ -830,7 +830,8 @@ async function browserTool(
  * Every request carries the thread and checkout the tool is bound to, and the
  * host decides. Reading the toolchain, the runtime, or the Simulator's screen
  * is not an effect and stays available wherever the tool itself is, Plan mode
- * included. Every other operation is an effect and passes
+ * included, as is showing the pane of a Simulator already running. Every other
+ * operation is an effect and passes
  * `deviceEffectApproval` first, before the pane opens or the host is asked.
  */
 async function appleTool(
@@ -900,11 +901,6 @@ async function appleTool(
 
   if (input.operation === "open") {
     if (input.simulatorId === undefined) return failure("invalid-apple-input");
-    // Opening shows the pane and may boot the destination; Plan mode does
-    // neither.
-    if (currentPosture(options) === "plan") {
-      return failure("plan-mode-read-only", postureRefusal("plan"));
-    }
     const snapshot = await apple.snapshot(options.windowId, scope);
     if (snapshot === undefined) return failure("apple-unavailable");
     const destination = snapshot.simulators.find(
@@ -919,6 +915,9 @@ async function appleTool(
     if (destination.state === "unavailable") {
       return failure("unavailable", "That Simulator destination is unavailable.");
     }
+    // Showing a destination that is already running changes nothing on it, so
+    // it is a read under every posture and has no host action an approval
+    // could bind to. Only opening a shut-down one boots, and that is gated below.
     if (destination.state === "booted" || destination.state === "booting") {
       await apple.requestPaneOpen(options.windowId, scope, destination.simulatorId);
       return {
@@ -1059,11 +1058,6 @@ async function androidTool(
 
   if (input.operation === "open") {
     if (input.emulatorId === undefined) return failure("invalid-android-input");
-    // Opening shows the pane and may boot the destination; Plan mode does
-    // neither.
-    if (currentPosture(options) === "plan") {
-      return failure("plan-mode-read-only", postureRefusal("plan"));
-    }
     const snapshot = await android.snapshot(options.windowId, scope);
     if (snapshot === undefined) return failure("android-unavailable");
     const destination = snapshot.emulators.find(

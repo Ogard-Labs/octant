@@ -716,7 +716,10 @@ that destination; clicks, typing, Home, and Lock never raise it
 The agent's `octant_apple` and `octant_android` tools follow the thread's
 turn posture per operation, not a Full-access gate on the whole tool:
 `discover`, `status`, and `screenshot` are reads and run under every posture,
-Plan included. Every other operation is an effect. Plan refuses it; Full access
+Plan included, as is `open` of a destination already booted or booting: it only
+shows the pane, changes nothing on the device, and has no host action an
+approval could bind to. Every other operation is an effect, including `open` of
+a shut-down destination, which boots it. Plan refuses it; Full access
 sends it with no approval; under approval-gated and auto-accept-edits the
 server asks in the thread (an `approval-requested` turn event, answered like a
 Browser session ask) before the pane opens or the host is called, and an

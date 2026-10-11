@@ -197,8 +197,7 @@ and inject tap, swipe, typed text, and hardware keys.
 `boot`, `run`, and `open` show the Simulator in Octant's iOS Simulator pane
 — never by launching Simulator.app. Pane-driven input journals as
 `local-user`; tool-driven input journals as `agent`. The host binds both to
-the same thread and checkout and refuses them with the same policy. Discover,
-status, and screenshot work under every posture, Plan included. On an
+the same thread and checkout and refuses them with the same policy. Discover, status, screenshot, and `open` of a device that is already running (it only shows the pane) work under every posture, Plan included. On an
 approval-gated thread every other operation asks in the thread first and runs
 only once you allow it; input the window's **Allow input** already covers
 goes through without asking again. Plan mode refuses them, and Full access

@@ -1332,6 +1332,8 @@ async function resolveDeviceApprovalScope(
     readonly checkoutId: CodeCheckoutIdentity["id"];
     readonly authority: AppleActionRequest["authority"];
   },
+  /** The posture that decides; a live turn may run narrower than the stored thread. */
+  effectiveThread: (thread: CodeThread) => CodeThread = (thread) => thread,
 ): Promise<{ readonly thread: CodeThread; readonly checkout: CodeCheckoutIdentity } | undefined> {
   const thread = options.persistence.readCodeThread(request.threadId);
   const checkout = options.persistence.readCodeCheckout(request.checkoutId);
@@ -1343,7 +1345,7 @@ async function resolveDeviceApprovalScope(
     thread.projectId !== request.authority.projectId ||
     thread.providerInstanceId !== request.authority.providerInstanceId ||
     thread.lifecycle !== "active" ||
-    !decidesCodeEffectsByApproval(thread.executionPolicy) ||
+    !decidesCodeEffectsByApproval(effectiveThread(thread).executionPolicy) ||
     checkout.availability !== "available" ||
     request.authority.mode !== "code" ||
     request.authority.extension.kind !== "core" ||
@@ -2023,7 +2025,14 @@ class RuntimeTurnController implements CodeOperationTurnPort {
   > {
     const store = this.#approvalStore;
     if (store === undefined) return { status: "unavailable" };
-    const scope = await resolveDeviceApprovalScope(this.#options, active.windowId, effect.request);
+    // The turn's posture, not the stored one: a Full-access thread running an
+    // approval-gated turn asks here too, and its stored policy alone refused it.
+    const scope = await resolveDeviceApprovalScope(
+      this.#options,
+      active.windowId,
+      effect.request,
+      (thread) => this.threadWithActiveTurnPosture(thread),
+    );
     if (scope === undefined) return { status: "unavailable" };
     const context = await approvalContext(this.#options, undefined, scope.thread, scope.checkout);
     if (context === undefined) return { status: "unavailable" };
