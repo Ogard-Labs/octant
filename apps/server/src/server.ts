@@ -9336,8 +9336,8 @@ export function startOctantServer(
         },
       },
       turns: {
-        startFirstTurn: async (windowId, command) =>
-          workTurnService.startFirstTurn(windowId, command),
+        startFirstTurn: async (windowId, command, options) =>
+          workTurnService.startFirstTurn(windowId, command, options),
       },
       clock: () => new Date().toISOString() as UtcTimestamp,
       uuid: randomUUID,
