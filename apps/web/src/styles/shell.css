@@ -597,7 +597,6 @@ html[data-octant-native-host="true"]
   width: 7px;
   background: transparent;
   cursor: col-resize;
-  outline: 0;
 }
 
 .shell-frame__sidebar-resize::before {
@@ -611,7 +610,8 @@ html[data-octant-native-host="true"]
 }
 
 /* The same feedback the system's .split-handle gives: the hairline takes the
-   accent ink while grabbed. Keyboard focus remains visually quiet. */
+   accent ink while grabbed. Keyboard focus also draws the shared focus edge,
+   which is what tells it apart from the pointer. */
 .shell-frame__sidebar-resize:hover::before,
 .shell-frame__sidebar-resize:focus-visible::before {
   background: var(--oct-accent-fg);
