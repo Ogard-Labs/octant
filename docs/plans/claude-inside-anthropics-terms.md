@@ -327,11 +327,12 @@ so merely dropping names from `REQUIRED_GUARDS` also discards
 a user's own disable-only values. Preserve a disable-only setting the
 person already exported in the host environment, including the documented
 Claude opt-outs `DO_NOT_TRACK`, `DISABLE_GROWTHBOOK=1`, and
-`CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY=1`. Anthropic documents
-`DO_NOT_TRACK` as a standard boolean: pass through every disabling
-spelling (`1`, `true`, `yes`, `on`, any casing) and reject values that
-leave telemetry on (`0`, `false`, `no`, `off`, empty, or unset). Do not
-invent an enable flag or pass through any other value.
+`CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY`. Anthropic documents
+`DO_NOT_TRACK` and `CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY` as standard
+booleans: pass through every disabling spelling (`1`, `true`, `yes`,
+`on`, any casing) and reject values that leave telemetry or surveys on
+(`0`, `false`, `no`, `off`, empty, or unset). Do not invent an enable
+flag or pass through any other value.
 
 API-key launches may keep the 0005 telemetry guards.
 
@@ -356,15 +357,17 @@ API-key launches may keep the 0005 telemetry guards.
   subscription launch only when those dedicated guards cover every
   non-telemetry channel the umbrella blocked; otherwise it stays.
 - A host `DISABLE_TELEMETRY`, `DISABLE_ERROR_REPORTING`,
-  `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`, `DISABLE_GROWTHBOOK=1`,
-  or `CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY=1` disable-only value
-  survives sanitization on a subscription launch. A host
-  `DO_NOT_TRACK` survives when it is a documented disabling spelling
-  (`1`, `true`, `yes`, `on`, any casing) and is dropped when it is a
-  documented enabling spelling or any other value.
+  `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`, or
+  `DISABLE_GROWTHBOOK=1` disable-only value survives sanitization on a
+  subscription launch. A host `DO_NOT_TRACK` or
+  `CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY` survives when it is a
+  documented disabling spelling (`1`, `true`, `yes`, `on`, any casing)
+  and is dropped when it is a documented enabling spelling or any
+  other value.
 - An API-key launch still sets the 0005 telemetry guards.
 - Tests name each re-enabled channel and each channel that stays off.
-  They also cover `DO_NOT_TRACK` disabling spellings and reject
+  They also cover `DO_NOT_TRACK` and
+  `CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY` disabling spellings and reject
   enabling spellings.
 
 ## Step 4 — Docs and Settings copy

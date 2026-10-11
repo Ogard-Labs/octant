@@ -3508,8 +3508,9 @@ mechanisms are:
   leave Claude's own telemetry, error reporting, and Claude-owned product
   checks intact. `DISABLE_GROWTHBOOK` only stops feature-flag fetching.
   Process-ownership channels stay on dedicated documented switches. Host
-  `DO_NOT_TRACK` opt-outs keep the documented disable spellings (`1`,
-  `true`, `yes`, `on`). API-key launches may keep the 0005 telemetry guards.
+  `DO_NOT_TRACK` and `CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY` opt-outs keep
+  the documented disable spellings (`1`, `true`, `yes`, `on`). API-key
+  launches may keep the 0005 telemetry guards.
   Several Claude accounts would use the same config-directory mechanism.
   Each thread stays on the account it started with. Automatic failover,
   rotation, and load-balancing are refused. The native harness stays API-key
