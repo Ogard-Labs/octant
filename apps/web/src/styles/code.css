@@ -2299,7 +2299,6 @@ html[data-octant-reduced-motion="true"] .code-transcript-row__status-icon {
   margin: 0 0 var(--oct-space-2);
   color: var(--oct-meta);
   font-size: var(--oct-text-xs);
-  text-align: center;
 }
 
 .code-thread-workspace__checkpoint,
