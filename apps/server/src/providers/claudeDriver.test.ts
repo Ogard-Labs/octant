@@ -9,6 +9,7 @@ import {
 } from "@octant/contracts";
 import { Effect, Exit, Fiber, PubSub, Scope, Stream } from "effect";
 import { existsSync, readdirSync } from "node:fs";
+import { homedir } from "node:os";
 import { basename, isAbsolute, resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
@@ -4280,7 +4281,35 @@ describe("Claude for helpers", () => {
       const exit = await Effect.runPromiseExit(
         acquired.connection.start({ sessionId, modelId, executionPolicy: "plan" }),
       );
-      expect(String(exit)).toContain("account directory inside the checkout");
+      expect(String(exit)).toContain("overlaps the checkout or the user's home");
+    } finally {
+      await acquired.close();
+    }
+    expect(f.opens).toHaveLength(0);
+  });
+
+  it("refuses a Plan turn whose isolated account directory is an ancestor of the checkout", async () => {
+    const f = harness("subscription", "current-session", { configDirectory: "/tmp" });
+    const acquired = await acquire(f.driver, "chat");
+    try {
+      const exit = await Effect.runPromiseExit(
+        acquired.connection.start({ sessionId, modelId, executionPolicy: "plan" }),
+      );
+      expect(String(exit)).toContain("overlaps the checkout or the user's home");
+    } finally {
+      await acquired.close();
+    }
+    expect(f.opens).toHaveLength(0);
+  });
+
+  it("refuses a Plan turn whose isolated account directory is the user's home", async () => {
+    const f = harness("subscription", "current-session", { configDirectory: homedir() });
+    const acquired = await acquire(f.driver, "chat");
+    try {
+      const exit = await Effect.runPromiseExit(
+        acquired.connection.start({ sessionId, modelId, executionPolicy: "plan" }),
+      );
+      expect(String(exit)).toContain("overlaps the checkout or the user's home");
     } finally {
       await acquired.close();
     }

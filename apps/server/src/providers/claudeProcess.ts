@@ -9,7 +9,7 @@ import {
   rmSync,
   statSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { isAbsolute, join, resolve, sep } from "node:path";
 
 import type {
@@ -427,11 +427,28 @@ function planStateDirectories(
       return resolve(path);
     }
   });
+  const home = (() => {
+    try {
+      return realpathSync(homedir());
+    } catch {
+      return homedir();
+    }
+  })();
   for (const path of canonicalDirectories) {
-    if (path === boundRoot || path.startsWith(`${boundRoot}${sep}`)) {
+    // A write grant that is the checkout, sits inside it, or contains it
+    // reopens Plan's bound root. Home and `/` are the same class of grant
+    // even when this checkout lives somewhere else: the runtime would then
+    // write the rest of the tree (0145).
+    if (
+      path === "/" ||
+      path === home ||
+      path === boundRoot ||
+      path.startsWith(`${boundRoot}${sep}`) ||
+      boundRoot.startsWith(`${path}${sep}`)
+    ) {
       throw new SeatbeltConfinementError(
         "invalid-configuration",
-        "Claude Plan confinement cannot grant a runtime state directory at or inside the checkout.",
+        "Claude Plan confinement cannot grant a runtime state directory that overlaps the checkout or the user's home.",
       );
     }
   }

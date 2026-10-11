@@ -1,7 +1,7 @@
 import type { ManagedToolAnswer } from "./managedMcpTools";
 import { randomUUID } from "node:crypto";
 import { mkdtemp, realpath, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 
 import {
@@ -171,14 +171,21 @@ function claudeSandboxSettings(
   };
 }
 
-function claudeAccountDirectoryOverlapsCheckout(
+function claudeAccountDirectoryBroadensPlan(
   projectRoot: string,
   configDirectory: string,
   isProjectConfinedPath: (projectRoot: string, absolutePath: string) => boolean,
 ): boolean {
-  if (configDirectory === projectRoot) return true;
+  const directory = configDirectory.replace(/\/+$/, "") || "/";
+  if (directory === "/" || directory === homedir() || directory === projectRoot) return true;
+  if (projectRoot.startsWith(`${directory}/`)) return true;
   try {
-    return isProjectConfinedPath(projectRoot, configDirectory) === true;
+    if (isProjectConfinedPath(projectRoot, directory) === true) return true;
+  } catch {
+    return true;
+  }
+  try {
+    return isProjectConfinedPath(directory, projectRoot) === true;
   } catch {
     return true;
   }
@@ -1271,7 +1278,7 @@ function makeConnection(
         if (
           options.configDirectory !== undefined &&
           CONFINED_CLAUDE_EXECUTION_POLICIES.has(input.executionPolicy) &&
-          claudeAccountDirectoryOverlapsCheckout(
+          claudeAccountDirectoryBroadensPlan(
             projectRoot,
             options.configDirectory,
             options.isProjectConfinedPath,
@@ -1279,7 +1286,7 @@ function makeConnection(
         ) {
           throw failure(
             "invalid-configuration",
-            "Claude Plan confinement cannot use an account directory inside the checkout.",
+            "Claude Plan confinement cannot use an account directory that overlaps the checkout or the user's home.",
           );
         }
         scope = await runSetupEffect(Scope.make(), signal);
