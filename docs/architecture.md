@@ -401,10 +401,20 @@ without the selection carries the refusal-only definition described under
 use is disabled, constrained out, or in Plan mode. Each application still
 needs its own approval.
 
-Canvas's `describe` operation lists the closed block
-catalogue and a creation example, or returns canonical schemas for up to three
-requested block kinds. Unscoped describe also lists document recipes: an id, a
-title, when to use one, and a skeleton of block kinds that already exist. The
+Canvas follows the same rule through its read-only `describe` operation. The
+always-visible `octant_canvas` description keeps what an agent needs before
+its first call: what a Canvas is and when to deliver work as one instead of a
+long reply, the operations, the authoring and safety rules (structured blocks,
+markup only in a design's frames, no file, shell, Git, or network authority,
+no invented references), where the thread shows it, and to call `describe`
+before authoring. Per-block guidance is answered by `describe`. Unscoped
+describe lists the closed block catalogue with one line on when to use each
+guided kind, how common requests map to recipes, what preview measures, and a
+creation example; describe for up to three block kinds returns their canonical
+schemas, plus authoring guidance and worked examples for the kinds that carry
+them; a plain kind such as `rich-text` returns its schema alone. Unscoped
+describe also lists document recipes: an id, a title, when to use one, and a
+skeleton of block kinds that already exist. The
 host offers an implementation plan, a design spec, an architecture review (its
 options in a comparison matrix), a code review, an audit or test report, a
 postmortem, a research brief, a dashboard, a repository map, a design
