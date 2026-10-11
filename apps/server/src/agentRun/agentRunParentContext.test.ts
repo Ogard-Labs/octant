@@ -27,6 +27,7 @@ import {
   decodeProjectId,
   decodeWorkThreadId,
   decodeWorkTurnState,
+  MAX_AGENT_RUN_ADMITTED_CONTEXT_BLOCKS,
   type CodeConversationPage,
   type CodeEvidenceReference,
   type WorkTurnState,
@@ -553,5 +554,150 @@ describe("a fork reading the thread it was forked from", () => {
       status: "unavailable",
       reason: "source-changed",
     });
+  });
+});
+
+describe("a forked thread reading its conversation for a provider switch", () => {
+  const sourceThreadId = decodeCodeThreadId(id(7));
+  const sourceThread = { ...codeThread, id: sourceThreadId };
+
+  function forkedInput(sourceTurns: ReturnType<typeof codeTurn>[], ownTurns = [codeTurn(21)]) {
+    const turnsOf = (threadId: unknown) =>
+      String(threadId) === String(sourceThreadId) ? sourceTurns : ownTurns;
+    return {
+      ...codeInput(ownTurns),
+      purpose: "provider-switch" as const,
+      readThread: (threadId: unknown) =>
+        String(threadId) === String(sourceThreadId) ? sourceThread : codeThread,
+      readActivity: (threadId: unknown) => ({
+        threadId: String(threadId) === String(sourceThreadId) ? sourceThreadId : codeThreadId,
+        lastSequence: 20 as never,
+      }),
+      conversation: (page: { readonly threadId: unknown }): CodeConversationPage => ({
+        version: 3,
+        threadId: String(page.threadId) === String(sourceThreadId) ? sourceThreadId : codeThreadId,
+        turns: turnsOf(page.threadId),
+        nextCursor: 10,
+        hasMore: false,
+      }),
+    };
+  }
+
+  it("hands over the source's conversation through the fork point ahead of the fork's own turns", () => {
+    const later = codeTurn(3);
+    const switching = codeTurn(22, "incomplete");
+    const result = admittedParentCodeContext({
+      ...forkedInput([codeTurn(1), codeTurn(2), later], [codeTurn(21), switching]),
+      excludeOperationId: String(switching.operationId),
+      inherited: {
+        threadId: sourceThreadId,
+        throughOperationId: String(codeTurn(2).operationId),
+        externalContentIngested: true,
+      },
+    });
+    expect(result.status).toBe("available");
+    if (result.status !== "available") return;
+    const messages = result.blocks.slice(1).map((block) => block.text);
+    // Source turns 1 and 2, then the fork's own turn 21; never the source's
+    // later turn 3 or the switching turn.
+    expect(messages).toHaveLength(6);
+    expect(
+      messages.slice(0, 4).every((text) => text.startsWith("Forked conversation source:")),
+    ).toBe(true);
+    expect(messages[0]).toContain(`"threadId":"${String(sourceThreadId)}"`);
+    expect(messages[0]).toContain(String(codeTurn(1).prompt.contentId));
+    expect(messages.slice(4).every((text) => text.startsWith("Earlier conversation source:"))).toBe(
+      true,
+    );
+    expect(messages[4]).toContain(String(codeTurn(21).prompt.contentId));
+    expect(messages.some((text) => text.includes(String(later.prompt.contentId)))).toBe(false);
+    expect(messages.some((text) => text.includes(String(switching.prompt.contentId)))).toBe(false);
+    expect(result.blocks[0]?.text).toContain("This thread is a fork");
+    expect(result.inherited).toMatchObject({
+      messages: 4,
+      source: {
+        threadId: String(sourceThreadId),
+        externalContentIngested: true,
+        point: { throughOperationId: String(codeTurn(2).operationId) },
+      },
+    });
+    expect(result.source).toMatchObject({
+      threadId: String(codeThreadId),
+      externalContentIngested: false,
+    });
+  });
+
+  it("keeps the newest messages within the budget and discloses the inherited ones it left out", () => {
+    const source = Array.from({ length: 15 }, (_, index) => codeTurn(index + 1));
+    const own = [codeTurn(21), codeTurn(22), codeTurn(23)];
+    const result = admittedParentCodeContext({
+      ...forkedInput(source, own),
+      inherited: {
+        threadId: sourceThreadId,
+        throughOperationId: String(codeTurn(15).operationId),
+        externalContentIngested: false,
+      },
+    });
+    expect(result.status).toBe("available");
+    if (result.status !== "available") return;
+    // 30 inherited and 6 own messages share one window of 23.
+    expect(result.blocks).toHaveLength(MAX_AGENT_RUN_ADMITTED_CONTEXT_BLOCKS);
+    expect(result.omissions.earlierMessages).toBe(13);
+    expect(result.inherited?.messages).toBe(17);
+    const messages = result.blocks.slice(1).map((block) => block.text);
+    // Every one of the fork's own messages survives; the oldest inherited go first.
+    expect(
+      messages.slice(-6).every((text) => text.startsWith("Earlier conversation source:")),
+    ).toBe(true);
+    expect(messages[0]).toContain(String(codeTurn(7).assistant[0]?.contentId));
+    expect(messages.some((text) => text.includes(String(codeTurn(6).prompt.contentId)))).toBe(
+      false,
+    );
+    expect(result.blocks[0]?.text).toContain('"earlierMessages":13');
+  });
+
+  it("names the inherited source as the part it could not read", () => {
+    const input = forkedInput([codeTurn(1)]);
+    expect(
+      admittedParentCodeContext({
+        ...input,
+        readThread: (threadId: unknown) =>
+          String(threadId) === String(sourceThreadId) ? undefined : codeThread,
+        inherited: {
+          threadId: sourceThreadId,
+          throughOperationId: String(codeTurn(1).operationId),
+          externalContentIngested: false,
+        },
+      }),
+    ).toEqual({ status: "unavailable", reason: "thread-unavailable", part: "inherited" });
+    expect(
+      admittedParentCodeContext({
+        ...input,
+        inherited: {
+          threadId: sourceThreadId,
+          throughOperationId: id(399),
+          externalContentIngested: false,
+        },
+      }),
+    ).toEqual({ status: "unavailable", reason: "source-point-unavailable", part: "inherited" });
+  });
+
+  it("refuses rather than hand over only the fork's own turns when no inherited message is readable", () => {
+    const input = forkedInput([codeTurn(1)]);
+    const result = admittedParentCodeContext({
+      ...input,
+      readEvidence: vi.fn((reference: CodeEvidenceReference) =>
+        String(reference.contentId) === String(codeTurn(1).prompt.contentId) ||
+        String(reference.contentId) === String(codeTurn(1).assistant[0]?.contentId)
+          ? undefined
+          : `body ${reference.contentId}`,
+      ),
+      inherited: {
+        threadId: sourceThreadId,
+        throughOperationId: String(codeTurn(1).operationId),
+        externalContentIngested: false,
+      },
+    });
+    expect(result).toEqual({ status: "unavailable", reason: "source-empty", part: "inherited" });
   });
 });

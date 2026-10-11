@@ -5,9 +5,10 @@
 - Status: Accepted with
   [Canvas documents, designs, and prototypes](../architecture.md#canvas-documents-designs-and-prototypes).
   Static frames that run nothing ship today under
-  [0164](../decisions/0164-canvas-designs-are-html-in-a-frame-that-runs-nothing.md);
-  measured, themed, asset-bearing, and running frames do not ship until the
-  mitigations below that apply to them are implemented and tested.
+  [0164](../decisions/0164-canvas-designs-are-html-in-a-frame-that-runs-nothing.md),
+  and measured and themed static frames (F2) ship with Canvas schema version
+  16; asset-bearing and running frames do not ship until the mitigations
+  below that apply to them are implemented and tested.
 - Scope: agent-authored HTML, CSS, and script drawn in a Canvas `design`
   frame, in the sidebar, the thread, preview, authenticated snapshots, and
   HTML export

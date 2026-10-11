@@ -13,6 +13,7 @@ export function handoffSummary(
         messages: event.messages,
         omissions: event.omissions,
         externalContentIngested: event.externalContentIngested,
+        ...(event.inherited === undefined ? {} : { inherited: event.inherited }),
       };
     case "fork":
       return {
@@ -81,10 +82,16 @@ export function conversationHandoffDisclosure(
     case "provider-switch":
       return [
         `Handed over ${count(handoff.messages, "recent message", "recent messages")} from ${label({ providerInstanceId: handoff.previousProviderInstanceId, modelId: handoff.previousModelId })} as text.`,
+        handoff.inherited === undefined
+          ? ""
+          : ` ${count(handoff.inherited.messages, "of them comes", "of them come")} from the conversation this was forked from, up to the reply it was forked from.`,
         omissionsDisclosure(handoff),
         // The taint is the thread's, not the excerpts': the outside content that
         // set it may be tool output or an attachment the handoff never carried.
         handoff.externalContentIngested ? " This thread has taken in outside content." : "",
+        handoff.inherited?.externalContentIngested === true
+          ? " The thread it was forked from has taken in outside content."
+          : "",
         " Hidden reasoning, tool activity and the previous session did not transfer.",
       ].join("");
     case "fork":

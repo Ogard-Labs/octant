@@ -11,6 +11,8 @@ import {
   mathExampleBlocks,
   metricExampleBlocks,
   notificationStatesExampleBlock,
+  onboardingFlowExampleBlock,
+  searchSpecExampleBlock,
   settingsScreenExampleBlock,
   orderSchemaBlock,
   supportFlowBlock,
@@ -296,6 +298,48 @@ const dashboardMockup = decodeCanvasBlock({
   ],
 });
 
+/**
+ * A long article drawn as a themed document: headings, a lede, prose, a
+ * quote, a list, a figure caption, cards, a callout, and code, so a capture
+ * shows the kit's reading rhythm and that the page grows to its content.
+ */
+const articleBlock = decodeCanvasBlock({
+  ...base,
+  blockId: "article",
+  kind: "design",
+  title: "Why local-first",
+  size: "document",
+  frames: [
+    {
+      frameId: "article",
+      title: "Article",
+      html: [
+        '<article class="oct-article">',
+        '<p class="oct-eyebrow">Essay · 6 min read</p>',
+        "<h1>Why a workspace should keep working offline</h1>",
+        '<p class="oct-lede">The network is a convenience, not a dependency. Here is what changes when the work lives on your machine first.</p>',
+        "<p>Every tool that waits on a server before it shows you your own notes teaches you to wait. A local-first workspace answers from disk, then reconciles. The difference is not speed alone: it is that nothing you wrote is ever hostage to a connection.</p>",
+        "<h2>What stays on the machine</h2>",
+        "<p>Threads, Canvases, and the journal that records them are written locally before anything else happens. A remote client reads them through the host, under the same authority the host enforces for itself.</p>",
+        "<ul><li>The event journal is the source of truth.</li><li>Projections are rebuilt from it and can be thrown away.</li><li>Exports are explicit and name what leaves.</li></ul>",
+        '<blockquote>"Offline is not an edge case. It is the case where you find out what you actually own."</blockquote>',
+        '<div class="oct-grid"><div class="oct-card"><p class="oct-card__title">Journal</p><p>Append-only, replayable, and the only thing that is authoritative.</p></div><div class="oct-card"><p class="oct-card__title">Projections</p><p>Fast to read and safe to rebuild whenever the schema moves.</p></div><div class="oct-card"><p class="oct-card__title">Exports</p><p>Written on request, with the reader named before anything leaves.</p></div></div>',
+        "<h2>What it costs</h2>",
+        "<p>Conflict resolution moves from the server into the client, and every schema change needs a story for documents written by an older version. That is why each Canvas carries a schema version, and why an older runtime refuses a newer document instead of guessing.</p>",
+        '<div class="oct-callout"><p class="oct-callout__title">Rule of thumb</p><p>If a feature cannot explain what it does with no network, it is not finished.</p></div>',
+        '<pre class="oct-code"><code>if (declared > SUPPORTED) refuse("unsupported-schema-version");</code></pre>',
+        "<h3>Further reading</h3>",
+        '<p>The architecture notes cover persistence and replay in more depth; see <a href="#article">the top of this essay</a> for the summary.</p>',
+        "<hr>",
+        '<p class="oct-muted">Written for the Octant team. Comments welcome.</p>',
+        "</article>",
+      ].join(""),
+    },
+  ],
+});
+
+const designBlocks = [articleBlock, searchSpecExampleBlock, onboardingFlowExampleBlock];
+
 const mockupBlocks = [
   settingsScreenExampleBlock,
   notificationStatesExampleBlock,
@@ -508,9 +552,9 @@ const tableComments = {
 };
 
 // `?only=mockup` draws the mockups alone, `?only=flow` the funnel, radar, and
-// sankey charts alone, `?only=table` the grouped and pinned table alone, and
-// `?only=dashboard` the two example dashboards, so
-// their capture is not a page of every chart.
+// sankey charts alone, `?only=table` the grouped and pinned table alone,
+// `?only=dashboard` the two example dashboards, and `?only=design` the
+// designs, so their capture is not a page of every chart.
 const only = new URLSearchParams(window.location.search).get("only");
 
 const definition =
@@ -522,35 +566,37 @@ const definition =
         ? { ...canvasFixture, blocks: [wideTable] }
         : only === "dashboard"
           ? { ...canvasFixture, blocks: dashboardBlocks }
-          : {
-              ...canvasFixture,
-              blocks: [
-                line,
-                bar,
-                area,
-                scatter,
-                distribution,
-                ...chartExampleBlocks,
-                budgetSankey,
-                loneRadar,
-                longFunnel,
-                ...treemapExampleBlocks,
-                ...heatmapExampleBlocks,
-                ...barListExampleBlocks,
-                hotFiles,
-                ...comparisonMatrixExampleBlocks,
-                ...mathExampleBlocks,
-                ...metricExampleBlocks,
-                metric,
-                table,
-                timeline,
-                orderSchemaBlock,
-                supportFlowBlock,
-                releaseMindmapBlock,
-                ...mockupBlocks,
-                ...dashboardBlocks,
-              ],
-            };
+          : only === "design"
+            ? { ...canvasFixture, blocks: designBlocks }
+            : {
+                ...canvasFixture,
+                blocks: [
+                  line,
+                  bar,
+                  area,
+                  scatter,
+                  distribution,
+                  ...chartExampleBlocks,
+                  budgetSankey,
+                  loneRadar,
+                  longFunnel,
+                  ...treemapExampleBlocks,
+                  ...heatmapExampleBlocks,
+                  ...barListExampleBlocks,
+                  hotFiles,
+                  ...comparisonMatrixExampleBlocks,
+                  ...mathExampleBlocks,
+                  ...metricExampleBlocks,
+                  metric,
+                  table,
+                  timeline,
+                  orderSchemaBlock,
+                  supportFlowBlock,
+                  releaseMindmapBlock,
+                  ...mockupBlocks,
+                  ...dashboardBlocks,
+                ],
+              };
 
 type ChartThemeScenario = "default-light" | "default-dark" | "vivid" | "contrast";
 

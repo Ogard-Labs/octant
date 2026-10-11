@@ -176,6 +176,7 @@ import {
   type CodeApprovalValidationPort,
 } from "./codeOperationApprovalStore";
 import { CodeSessionAuthorityStore } from "./codeSessionAuthorityStore";
+import { isRoutineHostScope } from "../routineHostScope";
 
 const decodeEventId = Schema.decodeUnknownSync(EventId);
 const decodeAggregateId = Schema.decodeUnknownSync(AggregateId);
@@ -1378,10 +1379,14 @@ export class CodeService {
             { kind: "checkout-observed", checkout },
           );
           checkoutJournaled = true;
-          this.#append("code-thread", thread.id, 0, "code.thread-created@1", {
-            kind: "thread-created",
-            thread: durableThread,
-          });
+          this.#append(
+            "code-thread",
+            thread.id,
+            0,
+            "code.thread-created@1",
+            { kind: "thread-created", thread: durableThread },
+            isRoutineHostScope(authenticatedWindowId) ? "system" : "local-user",
+          );
         } catch {
           if (checkoutJournaled) {
             // Compensate the orphan checkout so replay/projections stay clean.
