@@ -287,13 +287,36 @@ fetch sends the proof-bound session cookie explicitly and disables the shared
 cookie jar to prevent duplicate or stale cookies. Browser cookie ownership is
 unchanged, and native remote requests refuse redirects.
 
-**Local client context.** Opening the canonical host URL directly creates a
-process-local client context through `/api/shell/local-session`; no launcher
-token, persisted clock posture, or alternate profile is required. Electron,
-ordinary browsers, and Vite therefore read the same Machine-owned Projects,
-threads, settings, and journal; a Vite renderer qualifies only when the host
-was started with its origin in `OCTANT_WEB_URL` (the desktop dev loop and
-`octant web --dev` set it for the host they start). The context id scopes window-local presentation
+**Local client context.** The local trust class is "holds a secret only the
+host's OS user can read", not "is on loopback". Loopback plus an admitted
+Origin says nothing about who is calling: another OS user on the same machine,
+an `ssh -L` forward, a proxy that rewrites `Host`, or a local service account
+all arrive that way, and a forged `Origin` header costs a non-browser caller
+nothing. The secret is the desktop bridge secret, which the host owner projects
+into the owner-only runtime directory. Electron windows and every CLI command
+(`octant agent`, `octant listener`, pairing, `octant web`) present it on the
+`/api/desktop/*` routes. A browser gets a session only through a one-time
+launch token: the launcher (`octant web`, `octant web --dev`, or the desktop's
+"Open in browser" action) mints it through `/api/desktop/launch-sessions` with
+the bridge secret and opens a URL carrying it in the fragment. `octant web`
+sends the secret only to the host that this OS user's owner-only host receipt
+names (same address and instance), never to an endpoint that merely answers
+`/health`, because another OS user can bind the port while the real host is
+stopped. The token is
+single-use, expires after five minutes, and is bound to the renderer origin it
+was minted for, which must be one this listener serves (below). The renderer
+strips it from the address bar with a history replace before it exchanges it at
+`/api/shell/launch-session`; an exchange from any other origin, or with no
+Origin, is refused and burns the token. `/api/shell/local-session` never mints
+authority: it only refreshes a capability the tab already holds (so a reload
+keeps its session) and answers 401 otherwise. Typing the host address by hand,
+reopening a tab after the host restarted, or opening a copied tab therefore
+shows "Open Octant from the desktop app or run `octant web`" instead of the
+app. Electron, ordinary browsers, and Vite still read the same Machine-owned
+Projects, threads, settings, and journal; a Vite renderer qualifies only when
+the host was started with its origin in `OCTANT_WEB_URL` (the desktop dev loop
+and `octant web --dev` set it for the host they start), and `octant web --dev`
+mints its token for that origin. The context id scopes window-local presentation
 and guards against accidental cross-window commands, but it is not a separate
 Machine or durable authentication epoch. The packaged renderer additionally
 proves its native renderer identity for desktop-only integration. When the host
@@ -304,10 +327,13 @@ transport still validates the actual Host header, rejects non-loopback origins,
 and removes process-local registration when its owning client closes. The
 listener admits only its own loopback origin (under any loopback name), the
 packaged renderer, and the development renderer origin named by
-`OCTANT_WEB_URL`; a page on any other loopback port is refused before dispatch,
-gets no CORS grant, and cannot mint a client context, because agents start
-local dev servers whose pages the person opens in an ordinary browser. The
-listener never reflects a non-loopback web origin into local authority. The renderer holds the matching
+`OCTANT_WEB_URL`; a page on any other loopback port is refused before dispatch
+and gets no CORS grant, because agents start local dev servers whose pages the
+person opens in an ordinary browser. The listener never reflects a non-loopback
+web origin into local authority. One residual window remains: the launcher
+hands the token URL to the system browser as a process argument, which another
+OS user can read for the moment that process runs, and the token is valid until
+the browser exchanges it. The renderer holds the matching
 line before its first request: a launch address that is plain HTTP to a
 non-loopback host is refused with an explanation and never used
 (`docs/decisions/0103`). Requests that send the window capability set
@@ -3638,6 +3664,15 @@ gate. The connector marketplace hold remains in force.
 The full threat model lives in the security documentation; the load-bearing
 mechanisms are:
 
+- **Local authority needs the bridge secret.** Nothing reachable on loopback
+  grants window authority by itself. Electron and the CLI present the desktop
+  bridge secret, which only the host's OS user can read from the owner-only
+  runtime directory; a browser presents a one-time launch token minted with
+  that secret and bound to its origin. Another OS user, an `ssh -L` forward,
+  or a proxy that rewrites `Host` reaches the listener but gets no capability
+  (the local client context under [Process topology](#process-topology) has
+  the flow).
+  Paired remote clients keep their own device-session path, unchanged.
 - **Server-side tool-call policy.** A tool call from a model is a petition, not
   a grant. Every call resolves through the closed tool catalog, the mode's
   capability matrix, the thread's elevation state, and the actor's authority
@@ -4271,7 +4306,8 @@ bun run verify     # paths:check, wiring:check, decisions:check, fmt:check, lint
   restart of `bun run dev` rather than a manual
   `bun run --cwd apps/desktop build`.
 - A headless Linux station: `octant server run`, then `octant web` (or
-  `octant web --dev` for Vite). Linux requires `bubblewrap` and Git 2.36 or
+  `octant web --dev` for Vite), run as the OS user that started the host so
+  it can read the bridge secret and mint the browser's launch link. Linux requires `bubblewrap` and Git 2.36 or
   newer; without `bubblewrap`, Work and Code fail closed. Stored provider
   credentials also need an unlocked freedesktop Secret Service session and
   the `secret-tool` client; without them the host still runs Chat, Work, and
