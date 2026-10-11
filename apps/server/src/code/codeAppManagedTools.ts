@@ -121,7 +121,7 @@ const terminalDefinition = {
 const appleDefinition = {
   name: CODE_APPLE_TOOL_NAME,
   description:
-    "Build, test, run, and drive Apple apps through Octant's in-app iOS Simulator pane and Apple workbench. Begin with discover or status and reuse the returned identifiers. Show a Simulator only in that pane: never launch Simulator.app, run open -a Simulator, or start serve-sim. Reads run under any posture; every other operation is an effect that Plan mode refuses and an approval-gated thread runs only after the person allows it. Inspect returned evidence before claiming success. Call operation help for full usage.",
+    "Build, test, run, and drive Apple apps through Octant's in-app iOS Simulator pane and Apple workbench. Begin with discover or status and reuse the returned identifiers. Show a Simulator only in that pane: never launch Simulator.app, run open -a Simulator, or start serve-sim. discover, status, screenshot, and open of a running Simulator are reads under any posture; every other operation is an effect that Plan mode refuses and an approval-gated thread runs only after the person allows it. Inspect returned evidence before claiming success. Call operation help for full usage.",
   inputSchema: {
     type: "object",
     properties: {
@@ -164,7 +164,7 @@ const appleDefinition = {
 const androidDefinition = {
   name: CODE_ANDROID_TOOL_NAME,
   description:
-    "Boot, inspect, and drive Android emulators through Octant's in-app Android emulator pane. Begin with discover or status and reuse the returned AVD names; never start an external emulator window as the place to look. Reads run under any posture; every other operation is an effect that Plan mode refuses and an approval-gated thread runs only after the person allows it. Inspect returned evidence before claiming success. Call operation help for full usage.",
+    "Boot, inspect, and drive Android emulators through Octant's in-app Android emulator pane. Begin with discover or status and reuse the returned AVD names; never start an external emulator window as the place to look. discover, status, screenshot, and open of a running emulator are reads under any posture; every other operation is an effect that Plan mode refuses and an approval-gated thread runs only after the person allows it. Inspect returned evidence before claiming success. Call operation help for full usage.",
   inputSchema: {
     type: "object",
     properties: {

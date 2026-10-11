@@ -2278,6 +2278,27 @@ describe("Code tool families", () => {
     expect(ports.executeOperation).not.toHaveBeenCalled();
   });
 
+  it("records no external content when help answers on a tainting thread", async () => {
+    const record = vi.fn();
+    const tools = createCodeAppManagedTools({
+      windowId,
+      thread: thread(),
+      readThread: () => thread(),
+      uuid: uuidFactory(),
+      executeOperation: vi.fn(),
+      terminal: { read: vi.fn() },
+      recordExternalContentIngestion: record,
+    });
+
+    const outcome = await tools.execute({
+      name: CODE_TERMINAL_TOOL_NAME,
+      inputJson: '{"operation":"help"}',
+    });
+
+    expect(outcome.isError).toBe(false);
+    expect(record).not.toHaveBeenCalled();
+  });
+
   it("omits the browser family when the host lends no browser", async () => {
     const tools = createCodeAppManagedTools({
       windowId,

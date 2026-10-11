@@ -833,8 +833,13 @@ import {
 import { createCanvasPreviewService } from "./canvas/canvasPreviewService";
 import { createPlaywrightCanvasPreviewRenderer } from "./canvas/canvasPreviewRenderer";
 import { loadChildCanvasWorkspace } from "./canvas/childCanvasWorkspace";
-import { combineAppManagedToolSets, type AppManagedToolSet } from "./providers/appManagedToolSet";
+import {
+  combineAppManagedToolSets,
+  withToolFamilyHelp,
+  type AppManagedToolSet,
+} from "./providers/appManagedToolSet";
 import { taintAppManagedToolResults } from "./providers/appManagedToolTaint";
+import { COMPUTER_USE_TOOL_HELP } from "./plugins/computerUse/computerUsePlugin";
 import {
   isPrivateListenerFailureCode,
   type PrivateListener,
@@ -3105,14 +3110,20 @@ export function startOctantServer(
         selection,
         model?.inputModalities.includes("image") === true,
       );
+      // Help is the plugin's own static guidance, not application content, so
+      // it is answered outside the taint wrapper and never marks the thread.
       return tools === undefined
         ? undefined
-        : taintAppManagedToolResults({
-            tools,
-            threadId: owner.threadId,
-            recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
-            uuid: randomUUID,
-          });
+        : withToolFamilyHelp(
+            taintAppManagedToolResults({
+              tools,
+              threadId: owner.threadId,
+              recordExternalContentIngestion: (input) =>
+                externalContentIngestionStore.record(input),
+              uuid: randomUUID,
+            }),
+            COMPUTER_USE_TOOL_HELP,
+          );
     };
     let lastComputerSettings = "";
     let computerSettingsTail = Promise.resolve();

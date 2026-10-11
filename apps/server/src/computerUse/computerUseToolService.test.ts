@@ -500,23 +500,6 @@ describe("Computer use through a provider tool", () => {
       await f.service.close();
     }
   });
-  it("answers help with the full Computer use guidance without issuing a desktop command", async () => {
-    const f = fixture();
-    try {
-      const definition = f.tools.definitions[0];
-      const answer = await f.tools.execute({
-        name: "octant_computer",
-        inputJson: '{"operation":"help"}',
-      });
-      expect(answer.isError).toBe(false);
-      const help = (answer.result as { help: string }).help;
-      expect(help).toContain("observationId");
-      expect(help.length).toBeGreaterThan(definition?.description?.length ?? 0);
-      expect(f.execute).not.toHaveBeenCalled();
-    } finally {
-      await f.service.close();
-    }
-  });
 });
 
 describe("a turn without a Computer selection", () => {
