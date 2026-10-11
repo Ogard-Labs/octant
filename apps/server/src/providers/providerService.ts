@@ -58,6 +58,8 @@ import {
   createBflImageProvider,
   createIdeogramImageProvider,
   assignedClaudeAccountConfigDirectory,
+  CLAUDE_ACCOUNT_PROFILE,
+  defaultProviderAccountDirectory,
   implicitClaudeAccountOwnerId,
   createClaudeProvider,
   createDevinProvider,
@@ -710,6 +712,12 @@ export class ProviderService implements ProviderServiceApi {
                 const hostEnvironment = await snapshotClaudeHostEnvironment();
                 const hostConfigDirectory = hostClaudeConfigDirectory(hostEnvironment);
                 const hostSecureDirectory = hostClaudeSecureStorageDirectory(hostEnvironment);
+                this.#refuseUnassignedClaudeDirectory(
+                  command.configuration.configDirectory,
+                  command.instanceId,
+                  undefined,
+                  [hostConfigDirectory, hostSecureDirectory],
+                );
                 instance = createClaudeProvider({
                   ...common,
                   configuration: {
@@ -1046,6 +1054,16 @@ export class ProviderService implements ProviderServiceApi {
                     configDirectory: assignedClaudeAccountConfigDirectory(homedir(), current.id),
                   }
                 : command.configuration;
+            const hostEnvironmentForDirectory = await snapshotClaudeHostEnvironment();
+            this.#refuseUnassignedClaudeDirectory(
+              requestedConfiguration.configDirectory,
+              current.id,
+              current.configuration.configDirectory,
+              [
+                hostClaudeConfigDirectory(hostEnvironmentForDirectory),
+                hostClaudeSecureStorageDirectory(hostEnvironmentForDirectory),
+              ],
+            );
             const configuration = this.#assignedClaudeConfigurationForChange(
               instances,
               current,
@@ -1870,6 +1888,33 @@ export class ProviderService implements ProviderServiceApi {
     }
   }
 
+  /**
+   * Octant assigns each Claude account its directory. A client may name the
+   * assigned leaf, the default host directory, or the directory the account
+   * already stores, or the host's own overlay: a leftover keeps working until it
+   * is re-assigned. Any other path would receive the Plan write grant for a folder
+   * Octant did not pick.
+   */
+  #refuseUnassignedClaudeDirectory(
+    directory: string | undefined,
+    instanceId: ProviderInstanceId,
+    stored: string | undefined,
+    hostDirectories: ReadonlyArray<string | undefined>,
+  ): void {
+    if (directory === undefined) return;
+    const home = homedir();
+    const allowed = [
+      assignedClaudeAccountConfigDirectory(home, instanceId),
+      defaultProviderAccountDirectory(CLAUDE_ACCOUNT_PROFILE, home),
+      ...(stored === undefined ? [] : [stored]),
+      ...hostDirectories.filter((path): path is string => path !== undefined),
+    ].map(withoutTrailingSlashes);
+    if (allowed.includes(withoutTrailingSlashes(directory))) return;
+    throw this.#invalid(
+      "Claude accounts use an Octant-assigned directory. Re-assign the account to use it.",
+    );
+  }
+
   #assignedClaudeConfigurationForChange(
     instances: ReadonlyArray<ProviderInstance>,
     current: Extract<ProviderInstance, { readonly driverKind: "claude" }>,
@@ -2081,6 +2126,10 @@ export class ProviderService implements ProviderServiceApi {
       message: "Octant Provider service is unavailable.",
     });
   }
+}
+
+function withoutTrailingSlashes(path: string): string {
+  return path.replace(/\/+$/, "") || "/";
 }
 
 /**
