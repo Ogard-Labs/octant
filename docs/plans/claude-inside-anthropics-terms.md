@@ -57,8 +57,8 @@ Measure:
    together. If `CLAUDE_SECURESTORAGE_CONFIG_DIR` (or another
    documented location) holds the login independently of session
    files, record that split. If they cannot be separated, record that
-   the account directory remains the isolation unit: same-account
-   threads share Claude session history.
+   confined subscription launches are refused: a bound root cannot
+   receive another Project's session files.
 
 **Pass.** The unmodified binary signs in on a confined Plan launch from
 Claude-owned storage, and Octant never reads or sets a token.
@@ -160,25 +160,26 @@ to Octant.
 
 If Step 0 showed the login can live in a credential-only directory
 distinct from session history, grant that credential path plus a
-durable per-thread session directory. Do not use a throwaway
+durable per-thread session directory on every launch for that
+thread, confined or not. A later Plan or ordinary turn has to find
+the same session files; mixing the per-thread root with the account
+root makes the saved cursor `stale-resume`. Do not use a throwaway
 per-launch config directory: resume has to find the same session
 files after a restart. Threads that already started under the helper-
 token path still have their history in the account config tree. Do
 not relocate those threads into an empty per-thread directory: that
 makes the saved cursor `stale-resume`. Keep their existing session
-root, or require an explicit new-thread transition, before changing
-the storage root. Do not grant the shared session tree to a
-confined Chat subagent or Plan turn that would otherwise read another
-Project's history. If the login is inseparable from the account config
-tree, a Work or Code Plan turn may use the account directory as the
-isolation unit. Same-account Work and Code threads then share Claude
-session history; write that limit into 0165 before implementing it.
-A confined Chat launch or Chat subagent must not receive that shared
-session tree: Chat has no filesystem authority. Refuse confined Chat
-subscription launches. Unconfined Chat turns may still use the CLI
-login. Do not invent a split the unmodified binary does not support,
-and do not switch the whole instance to an API key only because Chat
-cannot share history.
+root for every later launch, or require an explicit new-thread
+transition, before changing the storage root.
+
+Do not grant the shared session tree to a confined Chat subagent or
+Plan turn that would otherwise read another Project's history. If
+the login is inseparable from the account config tree, refuse
+confined subscription launches (Chat, Work Plan, and Code Plan).
+Unconfined turns may still use the CLI login. Do not invent a split
+the unmodified binary does not support, and do not switch the whole
+instance to an API key only because confined launches cannot share
+history.
 
 The person signs in once with unmodified `claude auth login` (Anthropic's
 flow) against that directory. Octant does not read the directory's
@@ -202,10 +203,11 @@ in Settings. Do not reintroduce a setup token.
 **Acceptance:**
 
 - A confined Plan turn on a subscription instance signs in without
-  `CLAUDE_CODE_OAUTH_TOKEN` in the launch environment. A Chat
-  subagent does the same only when Step 0 found a credential
-  directory that can be granted without the shared session tree;
-  otherwise confined Chat subscription launches are refused.
+  `CLAUDE_CODE_OAUTH_TOKEN` in the launch environment only when
+  Step 0 found a credential directory that can be granted without
+  the shared session tree; otherwise confined Chat, Work Plan, and
+  Code Plan subscription launches are refused. A Chat subagent
+  follows the same grant-or-refuse rule.
 - Octant never reads `.credentials.json` or a Keychain item.
 - A launch whose config directory is missing or unsigned-in refuses with
   a step the person can take (`claude auth login` in that directory, or
@@ -213,9 +215,9 @@ in Settings. Do not reintroduce a setup token.
 - The Keychain file and `/usr/bin/security` stay denied. Step 0 cannot
   add an exception for either.
 - A confined grant follows Step 0's credential/session split. If the
-  login is separable, the launch does not receive another Project's
-  session files. If it is not, Work and Code Plan use the account
-  directory as the recorded isolation unit, and confined Chat
+  login is separable, every launch for that thread uses the same
+  durable per-thread session directory, and the launch does not
+  receive another Project's session files. If it is not, confined
   subscription launches are refused.
 
 ## Step 3 — Telemetry on subscription launches
