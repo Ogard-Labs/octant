@@ -178,6 +178,11 @@ Octant, because the approval opens a browser there. The
 [privacy notice](/advanced/privacy-notice#claude-for-helpers-only-if-you-connect-it)
 states what is stored and who receives it.
 
+Decision 0165 proposes replacing this helper-token path. It is still
+Proposed, so this guide describes the current build: confined Plan turns
+and Claude subagents still need the helper token until that decision is
+Accepted and the follow-up lands.
+
 The **Update CLI** action is shown only for providers with a verified native
 update command. It runs that command against the same configured executable,
 when no active session is using it, and then reports whether the observed

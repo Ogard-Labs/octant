@@ -106,7 +106,9 @@ screenshots, or diagnostics. See [Remote access](/advanced/remote-access)
 for the full lifecycle.
 
 **Claude for helpers** is the one login from a provider's own runtime that
-Octant keeps, and only if you connect it under **Settings → Providers → Claude Code**. A Plan turn and
+Octant keeps, and only if you connect it under **Settings → Providers → Claude Code**.
+Decision 0165 proposes dropping this exception. It is still Proposed, so
+this page describes the current build. A Plan turn and
 every Chat subagent runs confined, away from the keychain where Claude keeps
 its subscription sign-in, so Octant runs Claude's own `claude setup-token` on
 this host after one browser approval and stores the long-lived token it

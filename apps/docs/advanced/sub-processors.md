@@ -47,7 +47,9 @@ stores, refreshes, or journals those tokens, with one exception you opt
 into: if you choose **Connect Claude for helpers**, Octant keeps the
 long-lived token Claude's own `claude setup-token` prints in its credential
 store and hands it only to the confined Claude runtime that signs in with it,
-which presents it to Anthropic. A direct endpoint's **Sign in** (today
+which presents it to Anthropic.
+Decision 0165 proposes dropping that exception. It is still Proposed, so
+this page describes the current build. A direct endpoint's **Sign in** (today
 OpenRouter) is the other case: Octant runs it and keeps the issued API key,
 which goes to that endpoint. See the
 [privacy notice](/advanced/privacy-notice#claude-for-helpers-only-if-you-connect-it).

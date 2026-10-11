@@ -93,6 +93,10 @@ see [Sign in on a direct endpoint](#sign-in-on-a-direct-endpoint-only-if-you-cho
 
 ### Claude for helpers, only if you connect it
 
+Decision 0165 proposes dropping this exception. It is still Proposed, so
+this notice describes the current build: Octant still stores the helper
+token if you connect it.
+
 Claude Code on a Claude subscription signs in through Claude's own runtime,
 and Octant never holds that login. A Plan turn, and every Chat subagent, runs
 confined, away from the keychain where that login lives.
