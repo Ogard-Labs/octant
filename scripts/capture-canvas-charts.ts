@@ -93,10 +93,14 @@ if (executable === undefined) {
   process.exit(2);
 }
 
-// `--only=mockup` captures the mockup blocks alone, as `canvas-mockup-*.png`.
+// `--only=mockup` captures the mockup blocks alone, as `canvas-mockup-*.png`,
+// and `--only=design` the design documents and a phone design, as
+// `canvas-design-*.png`.
 const onlyMockups = process.argv.includes("--only=mockup");
+const onlyDesigns = process.argv.includes("--only=design");
+const captureName = onlyMockups ? "mockup" : onlyDesigns ? "design" : "charts";
 const port = pickPort();
-const harnessUrl = `http://localhost:${String(port)}/chart-visuals-evidence.html${onlyMockups ? "?only=mockup" : ""}`;
+const harnessUrl = `http://localhost:${String(port)}/chart-visuals-evidence.html${onlyMockups ? "?only=mockup" : onlyDesigns ? "?only=design" : ""}`;
 const serverProcess = Bun.spawn(
   [process.execPath, "run", "dev", "--", "--port", String(port), "--strictPort"],
   { cwd: webDir, stdout: "ignore", stderr: "ignore" },
@@ -130,7 +134,7 @@ try {
     page.setDefaultTimeout(15_000);
     await page.goto(harnessUrl, { waitUntil: "domcontentloaded" });
     await page.waitForSelector(
-      "main[data-canvas-chart-evidence='all'] .canvas-mockup, main[data-canvas-chart-evidence='all'] .canvas-block__chart, main[data-canvas-chart-evidence='all'] .canvas-block__heatmap, main[data-canvas-chart-evidence='all'] .canvas-block__bar-list, main[data-canvas-chart-evidence='all'] .canvas-block__matrix, main[data-canvas-chart-evidence='all'] .canvas-block__math, main[data-canvas-chart-evidence='all'] .canvas-block__table, main[data-canvas-chart-evidence='all'] .canvas-block__kind-diagram",
+      "main[data-canvas-chart-evidence='all'] .canvas-mockup, main[data-canvas-chart-evidence='all'] .canvas-block__chart, main[data-canvas-chart-evidence='all'] .canvas-block__heatmap, main[data-canvas-chart-evidence='all'] .canvas-block__bar-list, main[data-canvas-chart-evidence='all'] .canvas-block__matrix, main[data-canvas-chart-evidence='all'] .canvas-block__math, main[data-canvas-chart-evidence='all'] .canvas-block__table, main[data-canvas-chart-evidence='all'] .canvas-block__kind-diagram, main[data-canvas-chart-evidence='all'] .canvas-design",
     );
 
     // Show the table's sorted state in the capture: the sort mark and the
@@ -153,12 +157,10 @@ try {
       await page.evaluate((value: Scenario) => {
         window.__applyChartTheme?.(value === "forced" ? "default-light" : value);
       }, scenario);
-      // Let fonts and any layout settle before the capture.
-      await page.waitForTimeout(150);
-      const path = join(
-        evidenceDir,
-        `canvas-${onlyMockups ? "mockup" : "charts"}-${scenario}${suffix}.png`,
-      );
+      // Let fonts and any layout settle before the capture. A themed design
+      // page reloads in the new theme, then takes its fonts and its height.
+      await page.waitForTimeout(onlyDesigns ? 600 : 150);
+      const path = join(evidenceDir, `canvas-${captureName}-${scenario}${suffix}.png`);
       await page.screenshot({ path, fullPage: true });
       written.push(path);
     }
