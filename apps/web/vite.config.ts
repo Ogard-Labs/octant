@@ -7,6 +7,13 @@ import { keepFontsAsFiles } from "./vite.fonts";
 
 const rootDir = path.dirname(fileURLToPath(import.meta.url));
 
+// OCTANT_TEST_ASYNC_STRESS=1 makes tests that read async-rendered state too
+// early fail far more often; see src/testAsyncStress.ts. Diagnostic only.
+const domSetupFiles =
+  process.env.OCTANT_TEST_ASYNC_STRESS === "1"
+    ? ["./src/testSetup.ts", "./src/testAsyncStress.ts"]
+    : ["./src/testSetup.ts"];
+
 const domTestFilesWithoutJsx = [
   "src/apple/useAppleSimulatorPaneOffer.test.ts",
   "src/android/useAndroidEmulatorPaneOffer.test.ts",
@@ -53,7 +60,7 @@ export default defineConfig({
           exclude: ["src/App.test.tsx"],
           maxWorkers: 2,
           sequence: { groupOrder: 0 },
-          setupFiles: ["./src/testSetup.ts"],
+          setupFiles: domSetupFiles,
         },
       },
       {
@@ -64,7 +71,7 @@ export default defineConfig({
           include: ["src/App.test.tsx"],
           maxWorkers: 1,
           sequence: { groupOrder: 1 },
-          setupFiles: ["./src/testSetup.ts"],
+          setupFiles: domSetupFiles,
         },
       },
     ],
