@@ -629,7 +629,11 @@ function BaseUrlField(props: {
         />
       </SettingRow>
       {changed ? (
-        <p className="provider-settings__field-guidance" id={noteId} role="status">
+        <p
+          className="provider-settings__field-guidance provider-settings__field-guidance--between-rows"
+          id={noteId}
+          role="status"
+        >
           Saving a different address removes this endpoint&apos;s stored API key, so it is never
           sent to the new server. Enter the key again to keep using the endpoint.
         </p>
