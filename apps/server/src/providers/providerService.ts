@@ -92,6 +92,7 @@ import {
   isNativeHarnessDriverKind,
   type CapabilityEvidenceChange,
 } from "@octant/domain";
+import { describeProviderRuntimeIntegration } from "@octant/domain/provider-runtime-integration";
 import { accessSync, constants, realpathSync, statSync } from "node:fs";
 import { mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -324,13 +325,13 @@ export class ProviderService implements ProviderServiceApi {
               observedAt: state.observedAt,
             });
           }
-          return {
+          return withRuntimeIntegration(instance.driverKind, {
             ...state,
             models: orderProviderModels(
               state.models,
               catalogByInstance.get(String(state.instanceId))?.manualModelOrder ?? [],
             ),
-          };
+          });
         })
         .sort(
           (left, right) =>
@@ -1365,7 +1366,7 @@ export class ProviderService implements ProviderServiceApi {
         }
         const withFacts = this.#runtime.observedState(instanceId) ?? observed;
         this.#persistCatalog(withFacts);
-        return withFacts;
+        return withRuntimeIntegration(instance.driverKind, withFacts);
       } catch (error) {
         const failedObservation = this.#failedProbeObservation(instanceId, error);
         if (failedObservation !== undefined) this.#runtime.setObservedState(failedObservation);
@@ -2101,4 +2102,17 @@ function probeFailureMessage(
   if (readiness === "unavailable") return "Provider runtime is unavailable.";
   if (readiness === "incompatible") return "Provider configuration is incompatible.";
   return "Provider probe failed.";
+}
+
+/**
+ * A client reads what a runtime can do from the server, never from its own
+ * guess: the integration is derived here, from the driver kind and the
+ * observation the server gates sends on, each time a runtime is reported.
+ */
+function withRuntimeIntegration(
+  driverKind: ProviderDriverKind,
+  observed: ProviderObservedState,
+): ProviderObservedState {
+  const integration = describeProviderRuntimeIntegration(driverKind, observed);
+  return integration === undefined ? observed : { ...observed, integration };
 }

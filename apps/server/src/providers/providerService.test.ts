@@ -54,6 +54,18 @@ const capabilities = {
   citations: "supported",
 } as const;
 
+// What the server reports for the OpenCode fixture above: every capability is
+// supported, so its session bridge carries Octant's tools and its own session
+// resumes.
+const openCodeIntegration = {
+  tools: { status: "available", transport: "session-mcp-bridge" },
+  activity: {
+    source: "session",
+    observes: ["replies", "tool-calls", "approvals", "file-changes", "task-progress"],
+  },
+  resume: "precise",
+} as const;
+
 describe("ProviderService", () => {
   it("consumes a single-queue smoke event stream exactly once", async () => {
     const sessionId = "80000000-0000-4000-8000-000000000023";
@@ -685,9 +697,32 @@ describe("ProviderService", () => {
     await expect(fixture.service.bootstrap(windowId)).resolves.toEqual({
       instances: [provider()],
       defaults: { permissionPersistence: "current-session", version: 0 },
-      observedStates: [observed],
+      observedStates: [{ ...observed, integration: openCodeIntegration }],
     });
     expect(fixture.append).not.toHaveBeenCalled();
+  });
+
+  it("reports a runtime whose tool bridge was not confirmed as having no Octant tools, with the reason", async () => {
+    const observed = observation({
+      capabilities: { ...capabilities, appManagedTools: "unsupported", resume: "unsupported" },
+    });
+    const fixture = serviceFixture({ instances: [kimiProvider()], probeResult: observed });
+    const integration = {
+      tools: {
+        status: "unavailable",
+        transport: "session-mcp-bridge",
+        reason: "runtime-not-confirmed",
+      },
+      activity: openCodeIntegration.activity,
+      resume: "none",
+    };
+
+    await expect(fixture.service.probe(windowId, instanceId)).resolves.toMatchObject({
+      integration,
+    });
+    await expect(fixture.service.bootstrap(windowId)).resolves.toMatchObject({
+      observedStates: [{ integration }],
+    });
   });
 
   it("keeps Settings instances but contributes no models, tools, or capabilities when the driver plugin is not effective", async () => {
@@ -2533,7 +2568,11 @@ describe("ProviderService", () => {
   it("stores only strict normalized probe results", async () => {
     const observed = observation();
     const fixture = serviceFixture({ instances: [provider()], probeResult: observed });
-    await expect(fixture.service.probe(windowId, instanceId)).resolves.toEqual(observed);
+    await expect(fixture.service.probe(windowId, instanceId)).resolves.toEqual({
+      ...observed,
+      integration: openCodeIntegration,
+    });
+    // The integration is derived when the runtime is reported, never stored.
     expect(fixture.runtime.observedStates()).toEqual([observed]);
   });
 
@@ -2792,7 +2831,10 @@ describe("ProviderService", () => {
       uuid: () => crypto.randomUUID(),
       clock: () => now,
     });
-    await expect(service.probe(windowId, instanceId)).resolves.toEqual(observation());
+    await expect(service.probe(windowId, instanceId)).resolves.toEqual({
+      ...observation(),
+      integration: openCodeIntegration,
+    });
     expect(probe).toHaveBeenCalledWith({ instanceId });
   });
 
