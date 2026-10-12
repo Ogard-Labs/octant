@@ -2000,6 +2000,7 @@ export function useCodeController(options: CodeControllerOptions) {
     readonly externalEditor?: CodeExternalEditor;
     readonly requireGitRepository?: boolean;
     readonly allowDefaultFolderThreads?: boolean;
+    readonly defaultDiffLayout?: CodeBootstrap["settings"]["defaultDiffLayout"];
   }): Promise<boolean> {
     if (bootstrap === undefined) return false;
     const result = await execute({

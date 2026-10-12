@@ -778,6 +778,7 @@ function rateLimitWindowEvent(
   if (window === undefined || window.length === 0) return undefined;
   const utilization = message.utilization;
   const resetsAt = resetTimestamp(message.resetsAt);
+  const overage = rateLimitOverage(message);
   return event(context, {
     kind: "rate-limit-window",
     window,
@@ -791,7 +792,33 @@ function rateLimitWindowEvent(
       ? {}
       : { utilization: Math.min(utilization, 1) }),
     ...(resetsAt === undefined ? {} : { resetsAt }),
+    ...(overage === undefined ? {} : { overage }),
   });
+}
+
+function rateLimitOverage(message: Extract<ClaudeDecodedMessage, { readonly kind: "rate-limit" }>):
+  | {
+      readonly status: "allowed" | "warning" | "exhausted";
+      readonly inUse?: boolean;
+      readonly resetsAt?: UtcTimestamp;
+      readonly disabledReason?: string;
+    }
+  | undefined {
+  if (message.overageStatus === undefined) return undefined;
+  const resetsAt = resetTimestamp(message.overageResetsAt);
+  return {
+    status:
+      message.overageStatus === "rejected"
+        ? "exhausted"
+        : message.overageStatus === "allowed_warning"
+          ? "warning"
+          : "allowed",
+    ...(message.overageInUse === true ? { inUse: true } : {}),
+    ...(resetsAt === undefined ? {} : { resetsAt }),
+    ...(message.overageDisabledReason === undefined
+      ? {}
+      : { disabledReason: message.overageDisabledReason.slice(0, 64) }),
+  };
 }
 
 /** Claude reports a reset instant in seconds or milliseconds; both are accepted. */

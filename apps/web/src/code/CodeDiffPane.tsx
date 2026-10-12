@@ -2,6 +2,7 @@ import type { CodeClient } from "@octant/client-runtime/code-client";
 import type {
   CodeApprovalId,
   CodeCheckoutId,
+  CodeDiffLayout,
   CodeGitOperationId,
   CodeRelativePath,
   CodeThreadId,
@@ -23,6 +24,7 @@ import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import { OctantAlert } from "../ui/base/OctantAlert";
+import { readCodeDiffLayout, writeCodeDiffLayout } from "./codeDiffLayoutPreference";
 
 type GitObservation = Extract<CodeOperationResult, { readonly kind: "git-observed" }>;
 type RunReviewed = Extract<CodeOperationResult, { readonly kind: "run-reviewed" }>;
@@ -67,6 +69,11 @@ export interface CodeDiffPaneProps {
    * the comparison the moment a watch notice arrives.
    */
   readonly staleNotice?: { readonly message: string; readonly onRefresh: () => void };
+  /**
+   * Settings default used only while this window has no stored layout for the
+   * thread. Toggling writes the thread's own choice and leaves the default.
+   */
+  readonly defaultLayout?: CodeDiffLayout;
 }
 
 type ContentState =
@@ -102,7 +109,14 @@ export function CodeDiffPane(props: CodeDiffPaneProps) {
         />
       );
     }
-    return <AvailableDiff {...props} diff={props.diff} snapshot={summary} />;
+    return (
+      <AvailableDiff
+        key={String(props.diff.threadId)}
+        {...props}
+        diff={props.diff}
+        snapshot={summary}
+      />
+    );
   }
   if (props.diff.state === "loading") return <ShellState state="loading" title="Loading diff" />;
   return <OctantAlert tone="warning">{props.diff.message}</OctantAlert>;
@@ -118,7 +132,12 @@ function AvailableDiff(
   const [selectedId, setSelectedId] = useState<string>();
   // The stacked unified list is how a change is read; side by side is how one
   // file is studied, so it keeps the file list and the editor.
-  const [layout, setLayout] = useState<"unified" | "side-by-side">("unified");
+  const [layout, setLayout] = useState<CodeDiffLayout>(
+    () => readCodeDiffLayout(props.diff.threadId) ?? props.defaultLayout ?? "unified",
+  );
+  // Storage can refuse a write after the person already picked a layout.
+  // Later default sync must not overwrite that in-memory choice.
+  const choseLayout = useRef(readCodeDiffLayout(props.diff.threadId) !== undefined);
   const sideBySide = layout === "side-by-side";
   const [confirmingDiscard, setConfirmingDiscard] = useState<string>();
   const [discarding, setDiscarding] = useState(false);
@@ -127,6 +146,10 @@ function AvailableDiff(
   const evidence = props.snapshot.evidence;
   const operationId = props.snapshot.operationId;
   const threadId = props.diff.threadId;
+  useEffect(() => {
+    if (choseLayout.current || readCodeDiffLayout(threadId) !== undefined) return;
+    setLayout(props.defaultLayout ?? "unified");
+  }, [props.defaultLayout, threadId]);
   const policy = props.executionPolicy;
   const createOperationId = props.createOperationId;
   const createGitOperationId = props.createGitOperationId;
@@ -237,11 +260,14 @@ function AvailableDiff(
           {props.snapshot.changedPaths.length.toLocaleString()}{" "}
           {props.snapshot.changedPaths.length === 1 ? "changed path" : "changed paths"}
         </p>
-        <OctantToggleGroup<"unified" | "side-by-side">
+        <OctantToggleGroup<CodeDiffLayout>
           aria-label="Diff layout"
           onValueChange={(value) => {
             const selected = value[0];
-            if (selected !== undefined) setLayout(selected);
+            if (selected === undefined) return;
+            choseLayout.current = true;
+            setLayout(selected);
+            writeCodeDiffLayout(threadId, selected);
           }}
           value={[layout]}
         >

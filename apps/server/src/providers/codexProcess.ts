@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { accessSync, constants, statSync } from "node:fs";
+import { accessSync, constants, mkdirSync, statSync } from "node:fs";
 import { delimiter, dirname, isAbsolute } from "node:path";
 
 import type { ProviderFailure } from "@octant/contracts";
@@ -31,6 +31,7 @@ export interface CodexAppServerConnection {
 export interface CodexProcessPort {
   readonly start: (input: {
     readonly binaryPath: string;
+    readonly environment?: NodeJS.ProcessEnv;
     readonly onProcessStarted?: ProviderProcessStartedListener;
   }) => Effect.Effect<CodexAppServerConnection, ProviderFailure, Scope.Scope>;
 }
@@ -307,6 +308,53 @@ export function codexProcessEnvironment(
   };
 }
 
+const ACCOUNT_AUTH_VARIABLES = [
+  "AWS_BEARER_TOKEN_BEDROCK",
+  "CODEX_ACCESS_TOKEN",
+  "CODEX_API_KEY",
+  "OPENAI_API_KEY",
+] as const;
+
+/**
+ * Per-account app-server environment. An extra account, on its assigned home,
+ * loses the inherited auth variables so it cannot share the host's key, and
+ * loses `CODEX_SQLITE_HOME`, which would point its thread state database at
+ * the host's instead of at its own home. The first account, on the host
+ * profile, keeps them: existing installs authenticate and store state that
+ * way, and Settings has no Codex API-key field to populate the broker.
+ *
+ * The AWS profile and file variables stay for every account. They choose
+ * among the AWS identities of the one operating-system user and hold no
+ * login of their own, so removing them would move an extra account to the
+ * default AWS profile without separating anything.
+ *
+ * Octant never reads `auth.json` or the keyring, and never writes
+ * `cli_auth_credentials_store` into the user's config. Codex names its
+ * keyring entry by a hash of the canonical `CODEX_HOME` path (read in the
+ * Codex source at `rust-v0.162.1`, `login/src/auth/storage.rs`), so two homes
+ * hold two logins without forcing file storage.
+ */
+export function codexAccountProcessEnvironment(input: {
+  readonly binaryPath: string;
+  readonly hostEnvironment: NodeJS.ProcessEnv;
+  readonly codexHome: string;
+  readonly inheritHostAuth?: boolean;
+  readonly brokerApiKey?: string;
+}): NodeJS.ProcessEnv {
+  const environment = codexProcessEnvironment(input.binaryPath, input.hostEnvironment);
+  if (input.inheritHostAuth !== true) {
+    for (const name of ACCOUNT_AUTH_VARIABLES) {
+      delete environment[name];
+    }
+    delete environment.CODEX_SQLITE_HOME;
+  }
+  environment.CODEX_HOME = input.codexHome;
+  if (input.brokerApiKey !== undefined && input.brokerApiKey.trim() !== "") {
+    environment.OPENAI_API_KEY = input.brokerApiKey;
+  }
+  return environment;
+}
+
 function wait(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
@@ -519,11 +567,14 @@ function acquireCodexAppServer(
   version: string,
   options: ResolvedCodexProcessOptions,
   onProcessStarted?: ProviderProcessStartedListener,
+  launchEnvironment?: NodeJS.ProcessEnv,
 ): Effect.Effect<ManagedCodexConnection, ProviderFailure> {
   return Effect.async<ManagedCodexConnection, ProviderFailure>((resume) => {
     const child = spawn(binaryPath, codexAppServerArgs(version), {
       detached: process.platform !== "win32",
-      env: codexProcessEnvironment(binaryPath, options.inheritedEnvironment ?? process.env),
+      env:
+        launchEnvironment ??
+        codexProcessEnvironment(binaryPath, options.inheritedEnvironment ?? process.env),
       stdio: ["pipe", "pipe", "pipe"],
     });
     const terminateGroup = makeProcessTerminator(child, options.shutdownTimeoutMs);
@@ -674,15 +725,35 @@ export function makeCodexProcessLive(options: CodexProcessOptions = {}): CodexPr
   };
 
   return {
-    start: ({ binaryPath, onProcessStarted }) =>
+    start: ({ binaryPath, environment, onProcessStarted }) =>
       Effect.suspend(() => {
         let terminate: (() => Promise<void>) | undefined;
+        const launchEnvironment =
+          environment ??
+          (resolved.inheritedEnvironment === undefined
+            ? undefined
+            : codexProcessEnvironment(binaryPath, resolved.inheritedEnvironment));
+        // Codex never creates its home: it refuses one that is missing with
+        // "CODEX_HOME points to …, but that path does not exist" (codex-cli
+        // 0.162.1). An account's assigned home is new, so it has to exist
+        // before the first start, and before the person runs the sign-in
+        // command against it.
+        const accountHome = environment?.CODEX_HOME;
+        if (accountHome !== undefined && isAbsolute(accountHome)) {
+          try {
+            mkdirSync(accountHome, { recursive: true, mode: 0o700 });
+          } catch {
+            return Effect.fail(
+              failure("invalid-configuration", "Codex account home could not be created."),
+            );
+          }
+        }
         return Effect.acquireReleaseInterruptible(
           Effect.gen(function* () {
             const probe = yield* probeCodexBinary(binaryPath, {
-              ...(resolved.inheritedEnvironment === undefined
+              ...(launchEnvironment === undefined
                 ? {}
-                : { inheritedEnvironment: resolved.inheritedEnvironment }),
+                : { inheritedEnvironment: launchEnvironment }),
               shutdownTimeoutMs: resolved.shutdownTimeoutMs,
               ...(onProcessStarted === undefined ? {} : { onProcessStarted }),
               ...(resolved.versionProbeConfinement === undefined
@@ -692,8 +763,9 @@ export function makeCodexProcessLive(options: CodexProcessOptions = {}): CodexPr
             const managed = yield* acquireCodexAppServer(
               binaryPath,
               probe.version,
-              resolved,
+              { ...resolved, inheritedEnvironment: launchEnvironment },
               onProcessStarted,
+              launchEnvironment,
             );
             terminate = managed.terminate;
             return managed.connection;

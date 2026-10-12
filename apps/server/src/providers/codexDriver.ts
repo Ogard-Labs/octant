@@ -38,6 +38,7 @@ import {
   type CodexEventContext,
   type CodexPendingApproval,
 } from "./codexEventMapper";
+import type { ProviderCredentialResolver } from "./credentialBrokerClient";
 import type { CodexAppServerConnection, CodexProcessPort } from "./codexProcess";
 import { codexProviderCredential, type CodexProviderCredential } from "./codexProviderCredential";
 import {
@@ -240,6 +241,7 @@ export interface CodexDriverOptions {
    * exercised without mutating process.env.
    */
   readonly environment?: NodeJS.ProcessEnv;
+  readonly credentialResolver?: ProviderCredentialResolver;
   readonly correlationId?: () => string;
   readonly requestId?: () => string;
   readonly taskId?: () => string;
@@ -659,13 +661,14 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
             const runtime = yield* acquireRuntime(options, clientFactory);
             const accountResult = yield* request(runtime.client.accountRead);
             const models = yield* readModels(runtime.client);
+            const environment = yield* Effect.promise(() => resolveCodexLaunchEnvironment(options));
             const result = normalizeProbe(
               instanceId,
               runtime.version,
               accountResult,
               models,
               clock(),
-              codexProviderCredential(options.environment ?? process.env),
+              codexProviderCredential(environment ?? process.env),
             );
             // Publish the fresh catalog like the other drivers do, so a caller
             // that probes before opening a session (Chat probes before every
@@ -713,10 +716,12 @@ function acquireRuntime(
       const scope = await Effect.runPromise(Scope.make());
       let receipt: Awaited<ReturnType<ProviderRuntimeRegistry["trackProcess"]>> | undefined;
       try {
+        const environment = await resolveCodexLaunchEnvironment(options);
         const processExit = await Effect.runPromiseExit(
           options.process
             .start({
               binaryPath: options.binaryPath,
+              ...(environment === undefined ? {} : { environment }),
               onProcessStarted: async (process) => {
                 receipt = await options.runtimeRegistry.trackProcess(options.instanceId, process);
                 return receipt;
@@ -1643,6 +1648,21 @@ function stateForMessage(
     (state) => !state.terminal && state.context !== undefined,
   );
   return active.length === 1 ? active[0] : undefined;
+}
+
+async function resolveCodexLaunchEnvironment(
+  options: CodexDriverOptions,
+): Promise<NodeJS.ProcessEnv | undefined> {
+  const base = options.environment;
+  if (options.credentialResolver === undefined) return base;
+  try {
+    if (!(await options.credentialResolver.has(String(options.instanceId)))) return base;
+    const value = await options.credentialResolver.resolve(String(options.instanceId));
+    if (value.trim().length === 0) return base;
+    return { ...(base ?? {}), OPENAI_API_KEY: value };
+  } catch {
+    return base;
+  }
 }
 
 function makeEventContext(state: SessionState, factories: ConnectionFactories): CodexEventContext {

@@ -1862,7 +1862,9 @@ within that thread/checkout presentation, not the URL or journal. Search results
 show individual nodes rather than inventing graph edges across omitted commits.
 Loading, unavailable, no-result, shallow, and truncated states remain explicit.
 Historical file inspection is read-only. Existing unified diffs and Monaco own
-diff presentation; file disclosures mount only their open preview.
+diff presentation; file disclosures mount only their open preview. Unified and
+Side by side are a compact Settings row on Code, used only until this window
+stores a layout for that thread.
 
 ### Compact task controls
 

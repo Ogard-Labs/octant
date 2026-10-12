@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import type { DiscoverySnapshot, ProviderDriverKind } from "@octant/contracts";
+import { withClaudeAccountDirectory } from "./claudeAccountDirectory";
 import {
   MAX_ALIAS_FILE_BYTES,
   makeDiscoveryService,
@@ -884,6 +885,64 @@ describe("discoveryService", () => {
 
     const snapshot = await service.scan();
     expect(snapshot.candidates.map((candidate) => candidate.driverKind)).toEqual(["codex"]);
+  });
+
+  it("keeps a Claude auth probe off an isolated account overlay", async () => {
+    const previousPath = process.env.PATH;
+    const previousHome = process.env.HOME;
+    const previousConfig = process.env.CLAUDE_CONFIG_DIR;
+    const previousSecure = process.env.CLAUDE_SECURESTORAGE_CONFIG_DIR;
+    process.env.PATH = "/usr/local/bin";
+    process.env.HOME = "/Users/test";
+    delete process.env.CLAUDE_CONFIG_DIR;
+    delete process.env.CLAUDE_SECURESTORAGE_CONFIG_DIR;
+
+    let releaseOverlay: (() => void) | undefined;
+    try {
+      const overlayHeld = new Promise<void>((resolve) => {
+        void withClaudeAccountDirectory("/Users/example/.claude-accounts/work", async () => {
+          resolve();
+          await new Promise<void>((hold) => {
+            releaseOverlay = hold;
+          });
+        });
+      });
+      await overlayHeld;
+
+      const seen: Array<string | undefined> = [];
+      const exec: DiscoveryExecPort = async (_file, args, options) => {
+        seen.push(options.env?.CLAUDE_CONFIG_DIR);
+        if (args[0] === "auth") throw new Error("unauthenticated");
+        return { stdout: "claude 1.0.0\n", stderr: "" };
+      };
+      const scanPromise = makeDiscoveryService({
+        versionProbeConfinement: passthroughConfinement,
+        exec,
+        fs: makeFakeFs(new Map([["/usr/local/bin/claude", { file: true }]])),
+        now: () => 1753430400000,
+        hostId: "local",
+        admittedDriverKinds: new Set<ProviderDriverKind>(["claude"]),
+      }).scan();
+      releaseOverlay?.();
+      releaseOverlay = undefined;
+      const snapshot = await scanPromise;
+
+      expect(snapshot.candidates).toEqual([
+        expect.objectContaining({ driverKind: "claude", binaryPath: "/usr/local/bin/claude" }),
+      ]);
+      expect(seen.length).toBeGreaterThan(0);
+      expect(seen.every((value) => value === undefined)).toBe(true);
+    } finally {
+      releaseOverlay?.();
+      if (previousPath === undefined) delete process.env.PATH;
+      else process.env.PATH = previousPath;
+      if (previousHome === undefined) delete process.env.HOME;
+      else process.env.HOME = previousHome;
+      if (previousConfig === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+      else process.env.CLAUDE_CONFIG_DIR = previousConfig;
+      if (previousSecure === undefined) delete process.env.CLAUDE_SECURESTORAGE_CONFIG_DIR;
+      else process.env.CLAUDE_SECURESTORAGE_CONFIG_DIR = previousSecure;
+    }
   });
 
   it("reads only up to the alias byte budget from a regular home file", async () => {

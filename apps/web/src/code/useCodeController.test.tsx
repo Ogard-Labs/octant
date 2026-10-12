@@ -3698,6 +3698,7 @@ function bootstrap(version = 1, activitySequence = 0): CodeBootstrap {
       defaultPermissionPersistence: "current-session",
       requireGitRepository: true,
       allowDefaultFolderThreads: false,
+      defaultDiffLayout: "unified",
       updatedAt: now as never,
       version: 1 as never,
     },

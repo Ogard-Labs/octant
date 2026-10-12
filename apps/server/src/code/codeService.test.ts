@@ -203,6 +203,7 @@ describe("CodeService reads", () => {
         defaultPermissionPersistence: "current-session",
         requireGitRepository: true,
         allowDefaultFolderThreads: false,
+        defaultDiffLayout: "unified",
         version: 0,
         updatedAt: now,
       },
@@ -777,6 +778,7 @@ describe("CodeService commands", () => {
         expectedVersion: 0,
         defaultExecutionPolicy: "plan",
         defaultPermissionPersistence: "project-default",
+        defaultDiffLayout: "side-by-side",
         externalEditor: {
           executable: "/usr/local/bin/editor",
           arguments: ["--goto", "{file}:{line}:{column}"],
@@ -787,6 +789,7 @@ describe("CodeService commands", () => {
       settings: {
         defaultExecutionPolicy: "plan",
         defaultPermissionPersistence: "project-default",
+        defaultDiffLayout: "side-by-side",
         version: 1,
       },
     });

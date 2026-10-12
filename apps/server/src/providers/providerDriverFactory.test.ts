@@ -9,6 +9,7 @@ import { isAcpHostProfileDriver } from "@octant/provider-sdk/driver-plugins";
 import { providerKeepsConversation } from "@octant/domain";
 import { Effect } from "effect";
 import { describe, expect, it, vi } from "vitest";
+import { snapshotClaudeHostEnvironment } from "./claudeAccountDirectory";
 import type { ClaudeAgentSdkPort } from "./claudeAgentSdkPort";
 import type { ClaudeProcessPort } from "./claudeProcess";
 import type { CodexProcessPort } from "./codexProcess";
@@ -83,6 +84,127 @@ describe("makeProviderDriver", () => {
     expect(fixture.openCodeStart).not.toHaveBeenCalled();
   });
 
+  it("refuses to construct a Codex driver without the account snapshot", () => {
+    const fixture = factoryFixture();
+    const { codexInstances: _ignored, ...withoutSnapshot } = fixture.options;
+
+    expect(() => makeProviderDriver(provider("codex"), withoutSnapshot)).toThrowError(
+      ProviderDriverConfigurationError,
+    );
+    expect(fixture.codexStart).not.toHaveBeenCalled();
+  });
+
+  it("refuses a replayed secondary Codex account that still lacks its own home", () => {
+    const fixture = factoryFixture();
+    const owner = provider("codex");
+    const secondary = decodeProviderInstance({
+      id: "80000000-0000-4000-8000-000000000062",
+      displayName: "Codex secondary",
+      driverKind: "codex",
+      configuration: {
+        kind: "codex-cli",
+        binaryPath: "/missing/codex",
+      },
+      enabled: true,
+      environmentPolicy: "inherit-host",
+      version: 1,
+      createdAt: "2026-07-16T11:00:00.000Z",
+      updatedAt: "2026-07-16T11:00:00.000Z",
+    });
+
+    expect(() =>
+      makeProviderDriver(secondary, { ...fixture.options, codexInstances: [owner, secondary] }),
+    ).toThrow(/own home directory/);
+    expect(fixture.codexStart).not.toHaveBeenCalled();
+  });
+
+  it("starts each Codex account as its own app-server with an isolated home", async () => {
+    const fixture = factoryFixture();
+    const extraId = decodeProviderInstanceId("80000000-0000-4000-8000-000000000062");
+    const extraHome = "/Users/test/.codex-accounts/80000000-0000-4000-8000-000000000062";
+    const owner = provider("codex");
+    const extra = decodeProviderInstance({
+      id: extraId,
+      displayName: "Codex work",
+      driverKind: "codex",
+      configuration: {
+        kind: "codex-cli",
+        binaryPath: "/missing/codex",
+        codexHome: extraHome,
+      },
+      enabled: true,
+      environmentPolicy: "inherit-host",
+      version: 1,
+      createdAt: "2026-07-16T11:00:00.000Z",
+      updatedAt: "2026-07-16T11:00:00.000Z",
+    });
+    const options = {
+      ...fixture.options,
+      codexInstances: [owner, extra],
+      codexHostEnvironment: {
+        PATH: "/usr/bin",
+        CODEX_HOME: "/Users/test/.codex",
+        OPENAI_API_KEY: "inherited-must-not-cross",
+        CODEX_ACCESS_TOKEN: "inherited-must-not-cross",
+        CODEX_API_KEY: "inherited-must-not-cross",
+        AWS_BEARER_TOKEN_BEDROCK: "inherited-must-not-cross",
+      },
+    };
+
+    await expect(runProbe(makeProviderDriver(owner, options))).rejects.toThrow(
+      /Codex process selected/,
+    );
+    expect(fixture.codexStart).toHaveBeenCalledOnce();
+    const ownerLaunch = fixture.codexStart.mock.calls[0]?.[0] as {
+      readonly environment?: NodeJS.ProcessEnv;
+    };
+    expect(ownerLaunch.environment?.CODEX_HOME).toBe("/Users/test/.codex");
+    expect(ownerLaunch.environment?.OPENAI_API_KEY).toBe("inherited-must-not-cross");
+    expect(ownerLaunch.environment?.CODEX_ACCESS_TOKEN).toBe("inherited-must-not-cross");
+    expect(ownerLaunch.environment?.CODEX_API_KEY).toBe("inherited-must-not-cross");
+    expect(ownerLaunch.environment?.AWS_BEARER_TOKEN_BEDROCK).toBe("inherited-must-not-cross");
+
+    fixture.codexStart.mockClear();
+    await expect(
+      Effect.runPromise(
+        Effect.scoped(makeProviderDriver(extra, options).probe({ instanceId: extraId })),
+      ),
+    ).rejects.toThrow(/Codex process selected/);
+    expect(fixture.codexStart).toHaveBeenCalledOnce();
+    const extraLaunch = fixture.codexStart.mock.calls[0]?.[0] as {
+      readonly environment?: NodeJS.ProcessEnv;
+    };
+    expect(extraLaunch.environment?.CODEX_HOME).toBe(extraHome);
+    expect(extraLaunch.environment?.OPENAI_API_KEY).toBeUndefined();
+    expect(extraLaunch.environment?.CODEX_HOME).not.toBe(ownerLaunch.environment?.CODEX_HOME);
+  });
+
+  it("injects only a broker-resolved Codex API key into that account's app-server", async () => {
+    const fixture = factoryFixture();
+    const owner = provider("codex");
+    await expect(
+      runProbe(
+        makeProviderDriver(owner, {
+          ...fixture.options,
+          codexInstances: [owner],
+          codexHostEnvironment: {
+            PATH: "/usr/bin",
+            OPENAI_API_KEY: "inherited-must-not-cross",
+          },
+          credentialResolver: {
+            has: async () => true,
+            resolve: async () => "broker-resolved-key",
+          },
+        }),
+      ),
+    ).rejects.toThrow(/Codex process selected/);
+    const launch = fixture.codexStart.mock.calls[0]?.[0] as {
+      readonly environment?: NodeJS.ProcessEnv;
+    };
+    expect(launch.environment?.OPENAI_API_KEY).toBe("broker-resolved-key");
+    expect(launch.environment?.CODEX_ACCESS_TOKEN).toBeUndefined();
+  });
+
   it("selects the injected Claude ports only for a Claude instance", async () => {
     const fixture = factoryFixture();
     const driver = makeProviderDriver(provider("claude"), fixture.options);
@@ -91,6 +213,193 @@ describe("makeProviderDriver", () => {
     expect(fixture.claudeProbeVersion).toHaveBeenCalledOnce();
     expect(fixture.codexStart).not.toHaveBeenCalled();
     expect(fixture.openCodeStart).not.toHaveBeenCalled();
+  });
+
+  it("refuses to construct a Claude driver without the account snapshot", () => {
+    const fixture = factoryFixture();
+    const { claudeInstances: _ignored, ...withoutSnapshot } = fixture.options;
+
+    expect(() => makeProviderDriver(provider("claude"), withoutSnapshot)).toThrowError(
+      ProviderDriverConfigurationError,
+    );
+    expect(fixture.claudeProbeVersion).not.toHaveBeenCalled();
+  });
+
+  it("refuses a replayed secondary Claude account that still lacks its own directory", () => {
+    const fixture = factoryFixture();
+    const owner = provider("claude");
+    const secondary = decodeProviderInstance({
+      id: "80000000-0000-4000-8000-000000000062",
+      displayName: "Claude secondary",
+      driverKind: "claude",
+      configuration: {
+        kind: "claude-agent-sdk",
+        binaryPath: "/missing/claude",
+        authentication: "subscription",
+      },
+      enabled: true,
+      environmentPolicy: "inherit-host",
+      version: 1,
+      createdAt: "2026-07-16T11:00:00.000Z",
+      updatedAt: "2026-07-16T11:00:00.000Z",
+    });
+
+    expect(() =>
+      makeProviderDriver(secondary, { ...fixture.options, claudeInstances: [owner, secondary] }),
+    ).toThrow(/own config directory/);
+    expect(fixture.claudeProbeVersion).not.toHaveBeenCalled();
+  });
+
+  it("refuses the implicit Claude account when the host overlay is a relative directory", () => {
+    const fixture = factoryFixture();
+    const owner = provider("claude");
+    expect(() =>
+      makeProviderDriver(owner, {
+        ...fixture.options,
+        claudeInstances: [owner],
+        claudeHostEnvironment: { CLAUDE_CONFIG_DIR: "relative-claude" },
+      }),
+    ).toThrow(/must be absolute/);
+    expect(fixture.claudeProbeVersion).not.toHaveBeenCalled();
+  });
+
+  it("builds an isolated Claude driver when the host overlay is relative", () => {
+    const fixture = factoryFixture();
+    const isolated = decodeProviderInstance({
+      id: "80000000-0000-4000-8000-000000000063",
+      displayName: "Claude isolated",
+      driverKind: "claude",
+      configuration: {
+        kind: "claude-agent-sdk",
+        binaryPath: "/missing/claude",
+        authentication: "subscription",
+        configDirectory: "/tmp/octant-claude-isolated",
+      },
+      enabled: true,
+      environmentPolicy: "inherit-host",
+      version: 1,
+      createdAt: "2026-07-16T11:00:00.000Z",
+      updatedAt: "2026-07-16T11:00:00.000Z",
+    });
+
+    expect(() =>
+      makeProviderDriver(isolated, {
+        ...fixture.options,
+        claudeInstances: [isolated],
+        claudeHostEnvironment: { CLAUDE_CONFIG_DIR: "relative-claude" },
+      }),
+    ).not.toThrow();
+  });
+
+  it("builds a directory-less API-key Claude driver when the host overlay is relative", () => {
+    const fixture = factoryFixture();
+    const apiKey = decodeProviderInstance({
+      id: "80000000-0000-4000-8000-000000000064",
+      displayName: "Claude API key",
+      driverKind: "claude",
+      configuration: {
+        kind: "claude-agent-sdk",
+        binaryPath: "/missing/claude",
+        authentication: "api-key",
+      },
+      enabled: true,
+      environmentPolicy: "inherit-host",
+      version: 1,
+      createdAt: "2026-07-16T11:00:00.000Z",
+      updatedAt: "2026-07-16T11:00:00.000Z",
+    });
+
+    expect(() =>
+      makeProviderDriver(apiKey, {
+        ...fixture.options,
+        claudeInstances: [apiKey],
+        claudeHostEnvironment: { CLAUDE_SECURESTORAGE_CONFIG_DIR: "relative-secure" },
+      }),
+    ).not.toThrow();
+  });
+
+  it("refuses a Claude driver whose host overlay now matches another account directory", () => {
+    const fixture = factoryFixture();
+    const owner = provider("claude");
+    const directory = "/tmp/octant-claude-peer-dir";
+    const secondary = decodeProviderInstance({
+      id: "80000000-0000-4000-8000-000000000062",
+      displayName: "Claude secondary",
+      driverKind: "claude",
+      configuration: {
+        kind: "claude-agent-sdk",
+        binaryPath: "/missing/claude",
+        authentication: "subscription",
+        configDirectory: directory,
+      },
+      enabled: true,
+      environmentPolicy: "inherit-host",
+      version: 1,
+      createdAt: "2026-07-16T11:00:00.000Z",
+      updatedAt: "2026-07-16T11:00:00.000Z",
+    });
+    const previous = process.env.CLAUDE_CONFIG_DIR;
+    process.env.CLAUDE_CONFIG_DIR = directory;
+    try {
+      expect(() =>
+        makeProviderDriver(owner, {
+          ...fixture.options,
+          claudeInstances: [owner, secondary],
+          claudeHostEnvironment: { ...process.env },
+        }),
+      ).toThrow(/already uses that config directory/);
+      expect(fixture.claudeProbeVersion).not.toHaveBeenCalled();
+    } finally {
+      if (previous === undefined) {
+        delete process.env.CLAUDE_CONFIG_DIR;
+      } else {
+        process.env.CLAUDE_CONFIG_DIR = previous;
+      }
+    }
+  });
+
+  it("does not treat a resume overlay as the host Claude directory", async () => {
+    const fixture = factoryFixture();
+    const owner = provider("claude");
+    const directory = "/tmp/octant-claude-overlay-dir";
+    const secondary = decodeProviderInstance({
+      id: "80000000-0000-4000-8000-000000000062",
+      displayName: "Claude secondary",
+      driverKind: "claude",
+      configuration: {
+        kind: "claude-agent-sdk",
+        binaryPath: "/missing/claude",
+        authentication: "subscription",
+        configDirectory: directory,
+      },
+      enabled: true,
+      environmentPolicy: "inherit-host",
+      version: 1,
+      createdAt: "2026-07-16T11:00:00.000Z",
+      updatedAt: "2026-07-16T11:00:00.000Z",
+    });
+    const previousConfig = process.env.CLAUDE_CONFIG_DIR;
+    const previousSecure = process.env.CLAUDE_SECURESTORAGE_CONFIG_DIR;
+    delete process.env.CLAUDE_CONFIG_DIR;
+    delete process.env.CLAUDE_SECURESTORAGE_CONFIG_DIR;
+    await snapshotClaudeHostEnvironment();
+    process.env.CLAUDE_CONFIG_DIR = directory;
+    try {
+      expect(() =>
+        makeProviderDriver(owner, { ...fixture.options, claudeInstances: [owner, secondary] }),
+      ).not.toThrow();
+    } finally {
+      if (previousConfig === undefined) {
+        delete process.env.CLAUDE_CONFIG_DIR;
+      } else {
+        process.env.CLAUDE_CONFIG_DIR = previousConfig;
+      }
+      if (previousSecure === undefined) {
+        delete process.env.CLAUDE_SECURESTORAGE_CONFIG_DIR;
+      } else {
+        process.env.CLAUDE_SECURESTORAGE_CONFIG_DIR = previousSecure;
+      }
+    }
   });
 
   it.each([
@@ -355,6 +664,8 @@ function factoryFixture(): {
     },
     isProjectConfinedPath: (root: string, path: string) => path.startsWith(`${root}/`),
     permissionPersistence: () => "current-session" as const,
+    claudeInstances: [provider("claude")],
+    codexInstances: [provider("codex")],
   } as unknown as ProviderDriverFactoryOptions;
   return {
     openCodeStart,

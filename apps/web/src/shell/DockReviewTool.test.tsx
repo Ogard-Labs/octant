@@ -2,7 +2,7 @@ import type { CodeClient } from "@octant/client-runtime/code-client";
 import type { CodeOperationResult } from "@octant/contracts/code-operations";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { MonacoDiffRuntime } from "../code/MonacoEditorAdapter";
 import type { CodeController } from "../code/useCodeController";
 import { DockReviewTool } from "./DockReviewTool";
@@ -43,6 +43,10 @@ async function chooseSideBySide() {
 }
 
 describe("Review beside the active thread", () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
   it("shows changed files, line counts, and the selected-file comparison", async () => {
     const fixture = runtime();
     render(<DockReviewTool {...bound()} loadRuntime={fixture.loadRuntime} />);

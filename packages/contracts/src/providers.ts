@@ -547,17 +547,67 @@ export const IdeogramImageProviderConfiguration = Schema.Struct({
   .pipe(Schema.filter(imageAllowlistContainsDefault))
   .annotations(strict);
 export type IdeogramImageProviderConfiguration = typeof IdeogramImageProviderConfiguration.Type;
+export const ClaudeAuthentication = Schema.Literal("subscription", "api-key");
+export type ClaudeAuthentication = typeof ClaudeAuthentication.Type;
+/** Closed swatch set so multi-account drivers stay distinguishable in the picker. */
+export const CLAUDE_ACCOUNT_ACCENTS = [
+  "rust",
+  "gold",
+  "green",
+  "teal",
+  "blue",
+  "violet",
+  "rose",
+] as const;
+export const ClaudeAccountAccent = Schema.Literal(...CLAUDE_ACCOUNT_ACCENTS);
+export type ClaudeAccountAccent = typeof ClaudeAccountAccent.Type;
+function codexHomeBasename(path: string): string {
+  let end = path.length;
+  while (end > 0 && path.charAt(end - 1) === "/") {
+    end -= 1;
+  }
+  const slash = path.lastIndexOf("/", end - 1);
+  return slash === -1 ? path.slice(0, end) : path.slice(slash + 1, end);
+}
+
+const CodexHomeDirectory = Schema.NonEmptyTrimmedString.pipe(
+  Schema.filter((path) => {
+    if (!path.startsWith("/")) return false;
+    const leaf = codexHomeBasename(path);
+    return leaf !== "auth.json" && leaf !== ".auth.json";
+  }),
+);
 export const CodexProviderConfiguration = Schema.Struct({
   kind: Schema.Literal("codex-cli"),
   binaryPath: Schema.NonEmptyTrimmedString,
+  /** Codex-owned directory for this account. Absent uses Codex's default. */
+  codexHome: Schema.optional(CodexHomeDirectory),
+  accent: Schema.optional(ClaudeAccountAccent),
 }).annotations(strict);
 export type CodexProviderConfiguration = typeof CodexProviderConfiguration.Type;
-export const ClaudeAuthentication = Schema.Literal("subscription", "api-key");
-export type ClaudeAuthentication = typeof ClaudeAuthentication.Type;
+/** Linear scan. A `/+$` replace is polynomial in the trailing slashes. */
+function claudeConfigDirectoryBasename(path: string): string {
+  let end = path.length;
+  while (end > 0 && path.charAt(end - 1) === "/") {
+    end -= 1;
+  }
+  const slash = path.lastIndexOf("/", end - 1);
+  return slash === -1 ? path.slice(0, end) : path.slice(slash + 1, end);
+}
+
+const ClaudeConfigDirectory = Schema.NonEmptyTrimmedString.pipe(
+  Schema.filter((path) => {
+    if (!path.startsWith("/")) return false;
+    return claudeConfigDirectoryBasename(path) !== ".credentials.json";
+  }),
+);
 export const ClaudeProviderConfiguration = Schema.Struct({
   kind: Schema.Literal("claude-agent-sdk"),
   binaryPath: Schema.NonEmptyTrimmedString,
   authentication: ClaudeAuthentication,
+  /** Claude-owned directory for this account. Absent uses Claude's default. */
+  configDirectory: Schema.optional(ClaudeConfigDirectory),
+  accent: Schema.optional(ClaudeAccountAccent),
 }).annotations(strict);
 export type ClaudeProviderConfiguration = typeof ClaudeProviderConfiguration.Type;
 
@@ -1460,6 +1510,7 @@ export const ProviderRegistryCommand = Schema.Union(
     ...CreateProviderCommandFields,
     displayName: Schema.NonEmptyTrimmedString,
     binaryPath: Schema.NonEmptyTrimmedString,
+    accent: Schema.optional(ClaudeAccountAccent),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("create-kimi-code-provider"),
@@ -1606,6 +1657,15 @@ export const ProviderRegistryCommand = Schema.Union(
     kind: Schema.Literal("change-claude-configuration"),
     ...ProviderInstanceCommandFields,
     configuration: ClaudeProviderConfiguration,
+    /** Replaces a legacy custom directory with Octant's assigned leaf. */
+    reassignAccountDirectory: Schema.optional(Schema.Boolean),
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("change-codex-configuration"),
+    ...ProviderInstanceCommandFields,
+    configuration: CodexProviderConfiguration,
+    /** Replaces a leftover custom directory with Octant's assigned leaf. */
+    reassignAccountDirectory: Schema.optional(Schema.Boolean),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("change-mistral-vibe-configuration"),
@@ -2150,6 +2210,15 @@ export const ProviderRuntimeEvent = Schema.Union(
     utilization: Schema.optional(Schema.Number.pipe(Schema.between(0, 1))),
     /** When the window next resets. Absent when the provider gives none. */
     resetsAt: Schema.optional(UtcTimestamp),
+    /** Extra-usage posture the process reported with this window, when it did. */
+    overage: Schema.optional(
+      Schema.Struct({
+        status: Schema.Literal("allowed", "warning", "exhausted"),
+        inUse: Schema.optional(Schema.Boolean),
+        resetsAt: Schema.optional(UtcTimestamp),
+        disabledReason: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(64))),
+      }).annotations(strict),
+    ),
   }).annotations(strict),
   /**
    * An absolute quota bucket the provider disclosed on a response it already

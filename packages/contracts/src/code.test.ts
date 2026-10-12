@@ -171,10 +171,12 @@ describe("Code aggregate contracts", () => {
       updatedAt: now,
     } as const;
     // A store from before the Git requirement was a setting decodes to on.
+    // A store from before the Review layout default existed decodes to unified.
     expect(decodeCodeSettings(settings)).toEqual({
       ...settings,
       requireGitRepository: true,
       allowDefaultFolderThreads: false,
+      defaultDiffLayout: "unified",
     });
     expect(decodeCodeSettings({ ...settings, requireGitRepository: false })).toMatchObject({
       requireGitRepository: false,
@@ -347,6 +349,7 @@ describe("Code aggregate contracts", () => {
       defaultPermissionPersistence: "current-session",
       requireGitRepository: true,
       allowDefaultFolderThreads: false,
+      defaultDiffLayout: "unified",
       version: 1,
       updatedAt: now,
     } as const;
