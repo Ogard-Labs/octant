@@ -22,6 +22,7 @@ import {
   SourceQualifiedSkill,
   StandaloneSkillRecord,
 } from "./extensions";
+import { ExtensionToolGrantId, ExtensionToolGrantRecorded } from "./extensionEvents";
 import { ToolExtensionId } from "./toolActions";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
@@ -57,12 +58,21 @@ export const ExtensionToolApproval = Schema.Struct({
   approvalId: Schema.UUID,
   threadId: Schema.UUID,
   projectId: Schema.optional(Schema.UUID),
+  extensionId: ToolExtensionId,
   packageId: ExtensionPackageId,
   componentId: ExtensionComponentId,
+  /** The MCP server's own name, as its package configuration declares it. */
+  serverName: boundedText(128),
   providerToolName: boundedText(256),
   mcpToolName: boundedText(256),
   inputJson: Schema.String.pipe(Schema.maxLength(64 * 1024)),
   requestedAt: UtcTimestamp,
+  /**
+   * Whether this prompt may be answered with `remember`. False when the
+   * thread has no Project, on a Plan turn, and for a network tool on a thread
+   * that took in outside content: those are approved one call at a time.
+   */
+  rememberable: Schema.Boolean,
 }).annotations(strict);
 export type ExtensionToolApproval = typeof ExtensionToolApproval.Type;
 
@@ -72,8 +82,34 @@ export type ExtensionToolApprovalList = typeof ExtensionToolApprovalList.Type;
 export const ExtensionToolApprovalDecision = Schema.Struct({
   approvalId: Schema.UUID,
   decision: Schema.Literal("approved", "denied"),
-}).annotations(strict);
+  /** Always allow this tool in this Project. Only an approval can be remembered. */
+  remember: Schema.optional(Schema.Boolean),
+})
+  .annotations(strict)
+  .pipe(Schema.filter((answer) => answer.remember !== true || answer.decision === "approved"));
 export type ExtensionToolApprovalDecision = typeof ExtensionToolApprovalDecision.Type;
+
+/** A remembered approval of one MCP tool in one Project, as Settings lists it. */
+export const ExtensionToolGrant = Schema.Struct({
+  ...ExtensionToolGrantRecorded.fields,
+  grantedAt: UtcTimestamp,
+}).annotations(strict);
+export type ExtensionToolGrant = typeof ExtensionToolGrant.Type;
+
+export const ExtensionToolGrantList = Schema.Array(ExtensionToolGrant).pipe(Schema.maxItems(4096));
+export type ExtensionToolGrantList = typeof ExtensionToolGrantList.Type;
+
+/**
+ * What a local window may ask of remembered approvals: read them, or take one
+ * away. Nothing here creates one; that happens only by answering a prompt.
+ */
+export const ExtensionToolGrantRequest = Schema.Union(
+  Schema.Struct({ kind: Schema.Literal("list") }).annotations(strict),
+  Schema.Struct({ kind: Schema.Literal("revoke"), grantId: ExtensionToolGrantId }).annotations(
+    strict,
+  ),
+);
+export type ExtensionToolGrantRequest = typeof ExtensionToolGrantRequest.Type;
 
 export const ExtensionCommand = Schema.Union(
   Schema.Struct({
@@ -313,3 +349,6 @@ export const decodeExtensionToolApprovalList = Schema.decodeUnknownSync(Extensio
 export const decodeExtensionToolApprovalDecision = Schema.decodeUnknownSync(
   ExtensionToolApprovalDecision,
 );
+export const decodeExtensionToolGrant = Schema.decodeUnknownSync(ExtensionToolGrant);
+export const decodeExtensionToolGrantList = Schema.decodeUnknownSync(ExtensionToolGrantList);
+export const decodeExtensionToolGrantRequest = Schema.decodeUnknownSync(ExtensionToolGrantRequest);

@@ -22,6 +22,7 @@ const LOCAL_ONLY_PREFIXES = [
   "/api/folders",
   "/api/extensions/lifecycle",
   "/api/extensions/skills",
+  "/api/extensions/tool-grants",
   "/api/providers/discovery",
   "/api/host-control",
   "/api/replica-store",

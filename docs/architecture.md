@@ -606,7 +606,8 @@ server the person installed and enabled as an Octant plugin is selectable in
 Work and Code exactly as in Chat (see
 [Extensions and skills](#extensions-and-skills)). It runs in Octant's own
 supervised session rather than inside the provider, so the Work-mode launch
-confinement does not stop it, and every call it answers waits for a person.
+confinement does not stop it, and every call it answers waits for a person
+unless a remembered approval of that tool in that Project covers it.
 
 A Work or Code thread started without a chosen Project lands in the mode's
 **default Project**: the host provisions `<default folder>/Work` or
@@ -2763,11 +2764,51 @@ prompt, schema, tool, route, model, or capability.
   the provider's app-managed tool transport. The host resolves the selection
   against the thread's own mode scope, connects the supervised session for
   that scope, offers only the selected tools, and refuses the turn when the
-  provider or model cannot carry Octant's tools. Every call waits for a
-  one-time approval in the turn's window, shown in the open thread. An MCP
+  provider or model cannot carry Octant's tools. Every call waits for an
+  approval in the turn's window, shown in the open thread, unless a
+  remembered approval covers it (next item). An MCP
   server's launch command starts the server, not a shell the model holds, so
   a stdio server is declared `mcp`, not `shell`, whichever package format
   carried it.
+- **Remembered MCP tool approvals.** A person may answer a tool's prompt with
+  "always allow in this Project". That journals a grant for that one tool in
+  that one Project (`extension.tool-grant-recorded@1` on the Project's
+  `extension-tool-grant` aggregate), never for the whole server. The grant
+  binds the Project, extension, package, component, and MCP tool name, the
+  package version and digest, and a SHA-256 of the tool's name, description,
+  and input schema as its server listed them at connect; the provider-facing
+  tool name is not part of it, because that name embeds the thread. A later
+  call in any thread of the Project that matches all of it runs unasked,
+  under the calling turn's own authority and only while the component is
+  effective and selected on that send. Any mismatch asks again, so a package
+  update or a changed listing is a new question
+  (`decideExtensionToolGrant` in `@octant/domain`). The payloads hold
+  identifiers and digests, never a call's arguments or result.
+  - A grant grows only through that answer from a local window. No route,
+    command, manifest field, structured reference, tool call, model output,
+    paired device, or host-owned turn (a routine, a goal loop, a usage-limit
+    resume, a child-run delivery) can create one. A host-owned turn in the
+    Project may use one, and a person at a local window may still answer that
+    turn's prompt.
+  - A thread with no Project and a Plan turn are asked for every call, and
+    the answer covers that call alone.
+  - On a thread that has taken in outside content, a grant holds only for a
+    stdio server, which Octant launches with no network and writes limited to
+    its plugin data. A network (HTTP) server's tool asks for every call there
+    and the answer is single use, because its arguments can carry out what
+    the thread has read. Every MCP result taints its thread, so a network
+    tool's grant spares the prompt only until that thread's first tool result.
+  - Disabling the plugin or component, archiving the Project, or switching a
+    mode off leaves grants stored and unused. Uninstall, withdrawn source
+    trust, and rollback revoke them (`extension.tool-grant-revoked@1`), so
+    installing or trusting the package again restores nothing. A person
+    revokes one through the local-only `/api/extensions/tool-grants`, which
+    lists and revokes and has no request that adds a grant.
+  - This covers only the tools Octant itself calls. An MCP server that a
+    provider runtime starts from the person's own configuration (for example
+    a Codex Work or Code thread using `~/.codex/config.toml`) is called
+    inside that runtime, is never seen by Octant, and stays under the
+    runtime's own approvals.
 - Core capabilities (browser/computer use, tests, Apple validation, approvals,
   memory, subagents) are app-managed and provider-neutral; no core capability
   depends on an optional extension. Computer use is destination-shaped: the
@@ -2946,7 +2987,9 @@ mechanisms are:
 - **Approvals.** Independent categories — project file writes, shell commands,
   network access, external application observation or control, destructive
   actions, credential access, access outside the bound root, privilege or
-  sandbox changes. Grants are scoped and journaled. Code starts approval-gated;
+  sandbox changes. Grants are scoped and journaled; a remembered approval of
+  one MCP tool in one Project follows the rules in
+  [Extensions and skills](#extensions-and-skills). Code starts approval-gated;
   Plan mode is read-only; auto-accept-edits waives only project file writes;
   a Work thread takes its access from Settings › Work when it is created —
   ask-first (the default) or auto-accept-edits — and keeps it; the host sets
