@@ -3780,16 +3780,6 @@ gate. The connector marketplace hold remains in force.
 The full threat model lives in the security documentation; the load-bearing
 mechanisms are:
 
-**Proposed, not accepted: Claude sign-in inside Anthropic's terms.** Octant
-would not mint, store, or inject a Claude setup or OAuth token. Claude
-subscription sign-in would stay in Anthropic's own flow, and confined Claude
-launches would sign in from a Claude-owned config directory. The rule is not
-in force. It needs the Step 0 measurement on a current Claude Code build on
-macOS, and Anthropic's Commercial Terms or an explicit Anthropic exception.
-Until both are recorded, the rules in this document describe the build as it
-ships. The steps, the open questions, and the rejected alternatives live in
-[the remediation plan](plans/claude-inside-anthropics-terms.md).
-
 - **Local authority needs the bridge secret.** Nothing reachable on loopback
   grants window authority by itself. Electron and the CLI present the desktop
   bridge secret, which only the host's OS user can read from the owner-only
@@ -4368,6 +4358,16 @@ ships. The steps, the open questions, and the rejected alternatives live in
   "models can't be listed" state carrying the manual model IDs, never a
   protocol failure. Credential, usage-limit, and availability answers keep
   failing the check with their typed states.
+
+**Proposed, not accepted: Claude sign-in inside Anthropic's terms.** Octant
+would not mint, store, or inject a Claude setup or OAuth token. Claude
+subscription sign-in would stay in Anthropic's own flow, and confined Claude
+launches would sign in from a Claude-owned config directory. The rule is not
+in force. It needs the Step 0 measurement on a current Claude Code build on
+macOS, and Anthropic's Commercial Terms or an explicit Anthropic exception.
+Until both are recorded, the rules in this document describe the build as it
+ships. The steps, the open questions, and the rejected alternatives live in
+[the remediation plan](plans/claude-inside-anthropics-terms.md).
 
 ## Package map
 

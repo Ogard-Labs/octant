@@ -39,14 +39,11 @@ Anthropic's Authentication page (fetched 10 Oct 2026) says:
   under that directory, including the macOS fallback file, and keys the
   Keychain entry to that directory.
 
-Source status: the three points above were not checked against the official
-page in the 11 Oct 2026 review. Third-party reports agree that Linux keeps
-the login in `~/.claude/.credentials.json` and that macOS uses the Keychain,
-but none confirms the macOS fallback file or its exact lookup order. Treat
-the points as unverified until measurement 1 and 2 below record what the
-build does. The Linux point also matters for the refusal rule in Step 2: on
-Linux the file may be the normal login store, so refusing confined launches
-when it exists would refuse every Linux subscription Plan turn.
+Checked against that page on 12 Oct 2026: it states all three points, and
+that Linux keeps the login in `~/.claude/.credentials.json` with mode `0600`.
+Linux therefore has no Keychain step, and a rule that refuses a confined
+launch whenever that file exists would refuse every Linux subscription Plan
+turn.
 
 Measure:
 
@@ -90,6 +87,63 @@ Measure:
    subscription launches are refused: a bound root cannot
    receive another Project's session files, and a granted
    `.credentials.json` directory is a token leak.
+
+### Measured on 12 Oct 2026
+
+macOS 27.0.1 (26A434) on Apple Silicon, Claude Code 2.1.296, signed in
+with a claude.ai subscription on the default account (`CLAUDE_CONFIG_DIR`
+unset). `~/.claude` holds no `.credentials.json`, so the login is in the
+Keychain only.
+
+The command was `claude auth status --json` in the environment Octant
+gives the implicit first account, run once unconfined and once through
+the Plan launch path of PR 1142 (`makeClaudeProcessLive().spawn` with
+`executionPolicy: "plan"`). The same profile was then rebuilt with extra
+rules. Only `loggedIn` and exit codes were read; `security` ran without
+`-w` and its output was discarded.
+
+| Rules added to the Plan profile                                           | `security` finds the item | `claude` signed in |
+| ------------------------------------------------------------------------- | ------------------------- | ------------------ |
+| Unconfined                                                                | yes                       | yes                |
+| PR 1142: exec `/usr/bin/security`, two security-server lookups            | no (exit 44)              | no                 |
+| The above, read `~/Library/Keychains`                                     | yes                       | no                 |
+| The above, `process-fork`                                                 | not rerun                 | yes                |
+| Read and write `~/Library/Keychains`, exec `/bin/sh`, no `process-fork`   | not run                   | no                 |
+| Exec `/bin/sh`, `process-fork`, read Keychains, no exec of `security`     | not run                   | no                 |
+| Exec `/usr/bin/security`, exec `/bin/sh`, `process-fork`, Keychain denied | not run                   | no                 |
+
+What this settles:
+
+- Measurement 3 fails for the carve-out as PR 1142 wrote it. The binary
+  is signed out on every confined launch, while the unconfined readiness
+  probe reports the account signed in.
+- Measurement 4 holds, and it is the cause: `security` runs but cannot
+  open the login keychain, and the runtime cannot start a child without
+  `process-fork`.
+- The smallest set that signs in is exec of `/usr/bin/security`,
+  `process-fork`, read of `~/Library/Keychains`, and the two
+  security-server lookups. No shell and no Keychain write are needed.
+- Measurement 5: on this build `CLAUDE_SECURESTORAGE_CONFIG_DIR` names the
+  directory that keys the Keychain entry and holds the fallback file.
+  When it is unset, `CLAUDE_CONFIG_DIR` does. The entry is
+  `Claude Code-credentials`, with a suffix taken from a hash of that
+  directory string whenever a directory is named. Read from the build,
+  not measured: the string is hashed as given apart from Unicode
+  normalization, so a trailing slash would name a different entry.
+- Measurement 6: the two variables can keep the login apart from session
+  history, but on macOS that login is not opaque. A confined read needs
+  the Keychain file.
+
+Not measured: an extra assigned leaf with its own login, a full Plan
+turn, and Linux.
+
+By the rules of this plan the result is "refuse confined subscription
+launches" on macOS, unless the Keychain-file denial is relaxed on
+purpose. PR 1142 does neither today: it launches, and the turn fails
+signed out. That choice is open. This plan also still says in Step 2
+that `/usr/bin/security` stays denied without exception, which
+contradicts the carve-out its own Step 0 describes; whichever way the
+choice goes, one of the two has to change.
 
 **Pass.** The unmodified binary signs in on a confined Plan launch from
 Claude-owned storage, and Octant never reads or sets a token.
