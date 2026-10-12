@@ -1,6 +1,6 @@
 # Agent-to-agent messaging threat model
 
-**Status:** Draft for design review (not yet maintainer-approved)
+**Status:** Approved by the maintainer on 2026-10-12
 
 **Date:** 2026-08-28
 
@@ -103,14 +103,16 @@ absolute paths, raw body text, credentials, or provider payloads.
 
 ## Residual risk
 
-- This document is design-only. Controls are not enforced until contracts,
-  domain policy, and server delivery land under an Accepted 0063.
+- The contracts, domain policy, and server delivery enforce these controls
+  today. The effective rule is in the
+  [architecture](../architecture.md#modes-chat-work-and-code); 0063 stays a
+  Proposed historical record.
 - Model-to-model social engineering inside a single already-authorized thread
   remains a residual of ordinary tool use; messaging must not make that worse
   across threads.
-- Exact numeric caps (depth, fan-out, bytes, in-flight) are left to the
-  implementation ADR acceptance pass so they can track measured abuse, not
-  guesswork here.
+- The numeric caps are depth 2, four recipients per send, eight open messages
+  per sender, and a 64 KiB body (`packages/domain/src/agentMessagePolicy.ts`,
+  `packages/contracts/src/agentMessage.ts`).
 
 ## Related
 

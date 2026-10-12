@@ -38,9 +38,9 @@ here is merged or being hardened for it.
 - **Agent-to-agent messaging** — shipped: journaled contracts, pure clamps,
   the delivery service, and the Agents center bounds view, and every Code turn
   is offered the `octant_agent_message` tool with no separate activation gate.
-  Maintainer approval of its design and threat-model sign-off
-  ([threat model](security/agent-to-agent-messaging-threat-model.md)) are
-  still pending.
+  The maintainer approved its design and
+  [threat model](security/agent-to-agent-messaging-threat-model.md) on
+  2026-10-12.
 - **Remote access** — pairing, revocable device keys, HTTPS private listener on
   LAN or Tailscale, fail-closed remote route policy, paired-browser client.
 - **Shell and appearance** — borderless macOS shell, dockable tabs and splits,
@@ -69,6 +69,9 @@ Hardening in progress for the preview:
 - Internal TestFlight packaging for the existing mobile remote client: signing,
   protected CI, Apple processing, and real-device acceptance are separate
   gates under [0147](decisions/0147-internal-testflight-carries-the-existing-remote-client.md).
+- Four shipped features take bug fixes only until the preview ships: artifact
+  replica sync, the artifact mirror, model role slots, and local provider usage
+  history.
 
 ## Next
 
