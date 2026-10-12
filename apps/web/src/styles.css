@@ -396,7 +396,7 @@ html[data-octant-native-host="true"]:not([data-octant-host-vibrancy="active"]) b
   display: inline-flex;
   height: 32px;
   align-items: center;
-  gap: 7px;
+  gap: var(--oct-space-2);
   padding: 0 10px;
   font-size: var(--oct-text-xs);
 }
@@ -500,7 +500,7 @@ html[data-octant-native-host="true"]:not([data-octant-host-vibrancy="active"]) b
   position: absolute;
   right: 8px;
   bottom: 8px;
-  padding: 4px 7px;
+  padding: var(--oct-space-1) var(--oct-space-2);
   color: var(--octant-warning-text);
   background: var(--octant-warning-surface);
   border-radius: var(--oct-radius-sm);
@@ -509,7 +509,7 @@ html[data-octant-native-host="true"]:not([data-octant-host-vibrancy="active"]) b
 
 .thread-activity-pip__empty {
   align-content: center;
-  gap: 7px;
+  gap: var(--oct-space-2);
   padding: 20px;
   text-align: center;
 }
@@ -710,7 +710,7 @@ html[data-octant-native-host="true"]:not([data-octant-host-vibrancy="active"]) b
   }
 
   .thread-activity-pip__empty {
-    gap: 5px;
+    gap: var(--oct-space-1);
     padding: 10px 12px;
   }
 
@@ -780,7 +780,7 @@ html[data-octant-native-host="true"]:not([data-octant-host-vibrancy="active"]) b
   display: flex;
   justify-content: space-between;
   gap: 10px;
-  padding: 7px 0;
+  padding: var(--oct-space-2) 0;
   color: var(--octant-text-muted);
   border-top: 1px solid var(--octant-border);
 }
@@ -852,8 +852,8 @@ h6 {
   min-width: 0;
   min-height: 28px;
   align-items: center;
-  gap: 7px;
-  padding: 0 7px;
+  gap: var(--oct-space-2);
+  padding: 0 var(--oct-space-2);
   color: var(--octant-text-primary);
   background: transparent;
   border: 1px solid transparent;
@@ -896,9 +896,9 @@ h6 {
   display: grid;
   grid-template-columns: 18px minmax(0, 1fr) 18px;
   align-items: center;
-  gap: 7px;
+  gap: var(--oct-space-2);
   min-height: 42px;
-  padding: 5px 7px;
+  padding: var(--oct-space-1) var(--oct-space-2);
   color: var(--octant-text-secondary);
   border-radius: var(--oct-radius-sm);
   cursor: default;
@@ -959,7 +959,7 @@ h6 {
   width: 100%;
   min-height: 30px;
   margin-top: 8px;
-  padding: 0 9px;
+  padding: 0 var(--oct-space-2);
   color: var(--octant-text-primary);
   background: transparent;
   border: 1px solid transparent;
@@ -1717,7 +1717,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 }
 
 .workspace-drop-overlay > span {
-  padding: 3px 7px;
+  padding: var(--oct-space-1) var(--oct-space-2);
   background: var(--octant-floating);
   border: 1px solid var(--octant-border-strong);
   border-radius: var(--oct-radius-sm);
@@ -1731,7 +1731,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   left: var(--workspace-drag-preview-left);
   z-index: 100;
   max-width: 220px;
-  padding: 5px 9px;
+  padding: var(--oct-space-1) var(--oct-space-2);
   overflow: hidden;
   color: var(--octant-text-primary);
   background: var(--octant-floating);
@@ -3152,7 +3152,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 .provider-data-tags__button {
   min-width: 34px;
   min-height: 26px;
-  padding-inline: 7px;
+  padding-inline: var(--oct-space-2);
   font-size: var(--oct-text-xs);
   letter-spacing: 0.04em;
 }
@@ -3644,7 +3644,6 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   color: var(--octant-text-primary);
   background: transparent;
   border: 0;
-  border-radius: var(--oct-radius-sm);
   cursor: pointer;
   font: inherit;
   text-align: start;
@@ -4064,7 +4063,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 .local-servers__meta {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: var(--oct-space-1);
   overflow: hidden;
   color: var(--octant-text-muted);
   font-size: var(--oct-text-xs);
@@ -4148,8 +4147,8 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 
 .memory-section {
   display: grid;
-  gap: 7px;
-  padding-top: 13px;
+  gap: var(--oct-space-2);
+  padding-top: var(--oct-space-3);
 }
 
 .memory-section + .memory-section {
@@ -4180,7 +4179,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 
 .memory-section__empty {
   margin: 0;
-  padding: 13px 0;
+  padding: var(--oct-space-3) 0;
   color: var(--octant-text-muted);
   font-size: var(--oct-text-xs);
 }
@@ -4193,7 +4192,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 .memory-row__meta {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: var(--oct-space-2);
   color: var(--octant-text-muted);
   font-size: var(--oct-text-xs);
 }
@@ -4209,7 +4208,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 }
 
 .memory-row__content {
-  margin: 7px 0 0;
+  margin: var(--oct-space-2) 0 0;
   color: var(--octant-text-primary);
   font-size: var(--oct-text-xs);
   line-height: 1.48;
@@ -4226,7 +4225,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 }
 
 .memory-row__audit {
-  margin-top: 7px;
+  margin-top: var(--oct-space-2);
   color: var(--octant-text-muted);
   font-size: var(--oct-text-xs);
 }
@@ -4245,7 +4244,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 .memory-row__audit-note dl {
   display: grid;
   grid-template-columns: 88px minmax(0, 1fr);
-  gap: 3px 8px;
+  gap: var(--oct-space-1) var(--oct-space-2);
   margin: 6px 0 0;
 }
 
@@ -4409,7 +4408,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 
 .work-overview__context-item {
   display: inline-flex;
-  gap: 5px;
+  gap: var(--oct-space-1);
   align-items: center;
   min-width: 0;
   color: var(--oct-muted);
@@ -5287,7 +5286,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 .composer-model-picker__model-detail {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: var(--oct-space-1);
   overflow: hidden;
   color: var(--octant-text-muted);
   font-size: var(--oct-text-xs);
@@ -5518,7 +5517,6 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   padding: 8px;
   white-space: normal;
   border: 1px solid var(--octant-border-subtle);
-  border-radius: var(--oct-radius-sm);
   background: transparent;
   color: inherit;
   font: inherit;
@@ -6690,7 +6688,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 
 .code-board__filters-panel legend,
 .code-board__filter-fields label > span:first-child {
-  margin-bottom: 5px;
+  margin-bottom: var(--oct-space-1);
   font-size: var(--oct-text-xs);
   font-weight: 500;
   letter-spacing: 0;
@@ -6793,8 +6791,8 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   display: inline-flex;
   height: var(--oct-rail-button-h);
   align-items: center;
-  gap: 5px;
-  padding: 0 9px;
+  gap: var(--oct-space-1);
+  padding: 0 var(--oct-space-2);
 }
 
 /* Every control on the Board toolbar is one 28px rail control: the Board
@@ -6822,7 +6820,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 .code-board__card-details summary {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: var(--oct-space-1);
   cursor: pointer;
   list-style: none;
   color: var(--oct-fg-2);
@@ -6867,7 +6865,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   display: flex;
   flex-direction: row;
   align-items: center;
-  gap: 7px;
+  gap: var(--oct-space-2);
   color: var(--oct-fg);
   font-size: var(--oct-text-detail);
 }
@@ -7383,7 +7381,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   width: 100%;
   min-height: 48px;
   gap: 8px;
-  padding: 7px 8px;
+  padding: var(--oct-space-2) var(--oct-space-2);
   border: 0;
   border-bottom: 1px solid var(--oct-border-soft);
   border-radius: 0;
