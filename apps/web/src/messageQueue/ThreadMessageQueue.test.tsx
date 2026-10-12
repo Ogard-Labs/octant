@@ -190,6 +190,104 @@ describe("compact message queue controls", () => {
     expect(host.execute).not.toHaveBeenCalled();
   });
 
+  it("shows Follow-up paused and Resume on a held queue without opening the disclosure", async () => {
+    const user = userEvent.setup();
+    const host = queueTestHost();
+    host.apply(
+      decodeThreadMessageQueueCommand({
+        kind: "enqueue",
+        scope: { mode: "chat", threadId },
+        requestId: crypto.randomUUID(),
+        messageId: crypto.randomUUID(),
+        expectedVersion: 0,
+        payload: { mode: "chat", prompt: "Waiting" },
+      }),
+    );
+    host.apply(
+      decodeThreadMessageQueueCommand({
+        kind: "pause",
+        scope: { mode: "chat", threadId },
+        requestId: crypto.randomUUID(),
+        expectedVersion: 1,
+      }),
+    );
+    function Harness() {
+      return (
+        <ThreadMessageQueue
+          queue={useThreadMessageQueue({ mode: "chat", threadId, client: host })}
+        />
+      );
+    }
+    render(<Harness />);
+    expect(await screen.findByText("Follow-up paused")).toBeVisible();
+    const toggle = screen.getByRole("button", { name: /queued/ });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getByText("Waiting")).not.toBeVisible();
+    await user.click(screen.getByRole("button", { name: /^Resume$/ }));
+    expect(host.execute.mock.calls.map(([command]) => command.kind)).toEqual(["resume"]);
+    await waitFor(() => expect(screen.queryByText("Follow-up paused")).not.toBeInTheDocument());
+  });
+
+  it("keeps the hold sentence in the disclosure after Stop", async () => {
+    const host = queueTestHost();
+    const snapshot = decodeThreadMessageQueueSnapshot({
+      scope: { mode: "chat", threadId },
+      version: 2,
+      paused: false,
+      holdReason: "cancelled",
+      items: [
+        {
+          messageId: crypto.randomUUID(),
+          status: "queued",
+          revision: 0,
+          createdAt: "2026-10-03T10:00:00.000Z",
+          payload: { mode: "chat", prompt: "Waiting" },
+        },
+      ],
+    });
+    host.publish(snapshot);
+    function Harness() {
+      return (
+        <ThreadMessageQueue
+          queue={useThreadMessageQueue({ mode: "chat", threadId, client: host })}
+        />
+      );
+    }
+    render(<Harness />);
+    expect(await screen.findByText("Follow-up paused")).toBeVisible();
+    expect(screen.getByText(/The last turn was stopped/)).toBeVisible();
+    expect(screen.getByRole("button", { name: /queued/ })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+  });
+
+  it("renders nothing for an empty unheld queue", () => {
+    const snapshot = decodeThreadMessageQueueSnapshot({
+      scope: { mode: "chat", threadId },
+      version: 1,
+      paused: false,
+      items: [],
+    });
+    render(
+      <ThreadMessageQueue
+        queue={{
+          snapshot,
+          available: true,
+          busy: false,
+          uncertain: false,
+          message: undefined,
+          enqueue: async () => "accepted" as const,
+          change: async () => "accepted" as const,
+          refresh: async () => {},
+          retry: async () => {},
+        }}
+      />,
+    );
+    expect(screen.queryByRole("region", { name: "Message queue" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Follow-up paused")).not.toBeInTheDocument();
+  });
+
   it("keeps a restart hold visible while the messages are collapsed", async () => {
     const host = queueTestHost();
     host.read.mockImplementation(async (scope) => ({
