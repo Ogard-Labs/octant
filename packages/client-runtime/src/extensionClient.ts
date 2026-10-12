@@ -5,6 +5,8 @@ import {
   decodeExtensionSnapshot,
   decodeExtensionToolApprovalDecision,
   decodeExtensionToolApprovalList,
+  decodeExtensionToolGrantList,
+  decodeExtensionToolGrantRequest,
   type ExtensionCommand,
   type ExtensionCommandResult,
   type ExtensionEffectiveSnapshot,
@@ -12,6 +14,8 @@ import {
   type ExtensionSnapshot,
   type ExtensionToolApprovalDecision,
   type ExtensionToolApprovalList,
+  type ExtensionToolGrantList,
+  type ExtensionToolGrantRequest,
 } from "@octant/contracts/extension-rpc";
 import { bindFetchPort } from "./bindFetchPort";
 
@@ -27,6 +31,16 @@ export interface ExtensionClient {
   execute(command: ExtensionCommand, signal?: AbortSignal): Promise<ExtensionCommandResult>;
   listToolApprovals(signal?: AbortSignal): Promise<ExtensionToolApprovalList>;
   decideToolApproval(decision: ExtensionToolApprovalDecision): Promise<boolean>;
+  /**
+   * Whether this client may remember an approval or list and revoke remembered
+   * ones. True for a local window; the host refuses a paired device, so the
+   * client does not offer it off a loopback host.
+   */
+  readonly toolGrantsAvailable: boolean;
+  /** The MCP tools a person always allows, per Project. A local window only. */
+  listToolGrants(signal?: AbortSignal): Promise<ExtensionToolGrantList>;
+  /** Takes one remembered approval away; false when it was already gone. */
+  revokeToolGrant(grantId: string): Promise<boolean>;
   /** Consume one native-picker receipt to register and inspect an Agent Plugins directory. */
   importLocalPluginReceipt(receiptId: string): Promise<ExtensionCommandResult>;
 }
@@ -44,7 +58,9 @@ export class ExtensionClientFailure extends Error {
 export function createExtensionClient(options: ExtensionClientOptions): ExtensionClient {
   const fetch = bindFetchPort(options.fetch);
   const headers = { "x-octant-window-capability": options.windowCapability };
+  const toolGrantsAvailable = isLoopbackHttp(options.baseUrl);
   return {
+    toolGrantsAvailable,
     snapshot() {
       return request(
         fetch,
@@ -142,6 +158,50 @@ export function createExtensionClient(options: ExtensionClientOptions): Extensio
         },
       );
     },
+    listToolGrants(signal) {
+      if (!toolGrantsAvailable) return Promise.reject(notOnThisHost());
+      return request(
+        fetch,
+        new URL("/api/extensions/tool-grants", options.baseUrl).toString(),
+        {
+          method: "POST",
+          headers: { ...headers, "content-type": "application/json" },
+          body: JSON.stringify({ kind: "list" }),
+          ...(signal === undefined ? {} : { signal }),
+        },
+        decodeExtensionToolGrantList,
+      );
+    },
+    async revokeToolGrant(grantId) {
+      if (!toolGrantsAvailable) throw notOnThisHost();
+      let validated: ExtensionToolGrantRequest;
+      try {
+        validated = decodeExtensionToolGrantRequest({ kind: "revoke", grantId });
+      } catch {
+        throw new ExtensionClientFailure("invalid", "Remembered tool approval is invalid.");
+      }
+      return request(
+        fetch,
+        new URL("/api/extensions/tool-grants", options.baseUrl).toString(),
+        {
+          method: "POST",
+          headers: { ...headers, "content-type": "application/json" },
+          body: JSON.stringify(validated),
+        },
+        (value) => {
+          if (
+            typeof value !== "object" ||
+            value === null ||
+            Object.keys(value).length !== 1 ||
+            !("revoked" in value) ||
+            typeof value.revoked !== "boolean"
+          ) {
+            throw new Error("invalid");
+          }
+          return value.revoked;
+        },
+      );
+    },
     importLocalPluginReceipt(receiptId) {
       if (typeof receiptId !== "string" || !/^[A-Za-z0-9_-]{43}$/.test(receiptId)) {
         return Promise.reject(
@@ -160,6 +220,25 @@ export function createExtensionClient(options: ExtensionClientOptions): Extensio
       );
     },
   };
+}
+
+function isLoopbackHttp(baseUrl: string): boolean {
+  try {
+    const url = new URL(baseUrl);
+    return (
+      url.protocol === "http:" &&
+      (url.hostname === "127.0.0.1" || url.hostname === "localhost" || url.hostname === "[::1]")
+    );
+  } catch {
+    return false;
+  }
+}
+
+function notOnThisHost(): ExtensionClientFailure {
+  return new ExtensionClientFailure(
+    "unavailable",
+    "Remembered tool approvals are managed at a window on the host.",
+  );
 }
 
 function routeFor(command: ExtensionCommand): string {

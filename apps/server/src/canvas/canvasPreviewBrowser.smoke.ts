@@ -2,7 +2,11 @@
 //
 // Screenshots a real Canvas through the host's headless Chromium, from the built
 // web app's Canvas preview page, and writes the PNG the preview operation would
-// return, so the picture is inspected rather than trusted. Needs the web app
+// return, so the picture is inspected rather than trusted. A second look draws
+// designs: it checks that a static frame's overflow and faint text are
+// measured, that a running prototype runs and its error is read, and that the
+// prototype's fetch, XHR, WebSocket, image, self-navigation, and WebRTC reach
+// nothing on this machine. Needs the web app
 // built (`bun run build` in apps/web). Exits non-zero with an explanatory status
 // when no Chromium executable is found, the same way the other Canvas browser
 // smokes do.
@@ -10,6 +14,9 @@
 import { resolve, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { decodeCanvasDefinition } from "@octant/contracts/canvas";
+import { createSocket } from "node:dgram";
+import { createServer, type AddressInfo } from "node:net";
+import { renderCanvasDesignPage } from "./canvasDesignPage";
 import { createPlaywrightCanvasPreviewRenderer } from "./canvasPreviewRenderer";
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
@@ -106,6 +113,116 @@ if (rendered.kind !== "rendered") {
   process.exit(1);
 }
 
+// A second look, at designs: a static screen that overflows and has faint
+// text, and a running prototype that throws and then tries every way out.
+// Listeners on this machine record anything that arrives, over HTTP, raw TCP,
+// or UDP, because WebRTC is the one channel request interception cannot see.
+const arrivals: string[] = [];
+const beacon = Bun.serve({
+  hostname: "127.0.0.1",
+  port: 0,
+  fetch(incoming, server) {
+    arrivals.push(`http ${new URL(incoming.url).pathname}`);
+    if (server.upgrade(incoming)) return undefined;
+    return new Response("beacon", { headers: { "access-control-allow-origin": "*" } });
+  },
+  websocket: { message() {} },
+});
+const tcp = createServer((socket) => {
+  arrivals.push("tcp connection");
+  socket.destroy();
+});
+await new Promise<void>((done) => tcp.listen(0, "127.0.0.1", done));
+const tcpPort = (tcp.address() as AddressInfo).port;
+const udp = createSocket("udp4");
+udp.on("message", () => arrivals.push("udp datagram"));
+await new Promise<void>((done) => udp.bind(0, "127.0.0.1", done));
+const udpPort = udp.address().port;
+const beaconOrigin = `http://127.0.0.1:${String(beacon.port)}`;
+
+/**
+ * A string as script source inside a page: JSON, with every character that
+ * could end the script element or a line written as an escape.
+ */
+function inScript(value: string): string {
+  return JSON.stringify(value).replace(
+    /[<>/\u2028\u2029]/g,
+    (character) => `\\u${character.charCodeAt(0).toString(16).padStart(4, "0")}`,
+  );
+}
+
+const hostile = `
+fetch(${inScript(`${beaconOrigin}/fetch`)}).catch(() => undefined);
+try { const x = new XMLHttpRequest(); x.open("GET", ${inScript(`${beaconOrigin}/xhr`)}); x.send(); } catch (_) {}
+try { new WebSocket(${inScript(`ws://127.0.0.1:${String(beacon.port)}/ws`)}); } catch (_) {}
+new Image().src = ${inScript(`${beaconOrigin}/image`)};
+try {
+  const peer = new RTCPeerConnection({ iceServers: [
+    { urls: "stun:127.0.0.1:${String(udpPort)}" },
+    { urls: "turn:127.0.0.1:${String(tcpPort)}?transport=tcp", username: "u", credential: "p" },
+    { urls: "turn:127.0.0.1:${String(udpPort)}?transport=udp", username: "u", credential: "p" },
+  ] });
+  peer.createDataChannel("out");
+  peer.createOffer().then((offer) => peer.setLocalDescription(offer)).catch(() => undefined);
+} catch (_) {}
+setTimeout(() => { location.href = ${inScript(`${beaconOrigin}/self-navigation`)}; }, 300);
+for (let late = 1; late <= 5; late += 1) setTimeout(() => { throw new Error("later " + String(late)); }, 20 * late);
+missingFunction();
+`;
+const designs = decodeCanvasDefinition({
+  ...definition,
+  schemaVersion: 18,
+  blocks: [
+    {
+      blockId: "static-screen",
+      schemaVersion: 18,
+      kind: "design",
+      title: "Static screen",
+      size: "phone",
+      styles:
+        "body { margin: 0; background: #ffffff; } .wide { width: 900px; } .faint { color: #cccccc; }",
+      frames: [
+        {
+          frameId: "home",
+          title: "Home",
+          html: '<div class="wide">A row wider than the phone.</div><p class="faint">Fine print nobody can read.</p>',
+        },
+      ],
+    },
+    {
+      blockId: "prototype",
+      schemaVersion: 18,
+      kind: "design",
+      title: "Prototype",
+      size: "phone",
+      runsScript: true,
+      frames: [
+        { frameId: "start", title: "Start", html: `<p>prototype</p><script>${hostile}</script>` },
+      ],
+    },
+  ],
+});
+const prototype = designs.blocks.find((block) => String(block.blockId) === "prototype");
+if (prototype?.kind !== "design") throw new Error("Fixture is not a design.");
+const looked = await renderer.render({
+  definition: designs,
+  width,
+  theme: "light",
+  placement: "document",
+  designPages: [{ blockId: "prototype", html: renderCanvasDesignPage(prototype, "start", []) }],
+});
+// Give a connection that got out time to arrive before the listeners close.
+await new Promise((done) => setTimeout(done, 500));
+beacon.stop(true);
+tcp.close();
+udp.close();
+if (looked.kind !== "rendered") {
+  console.error(JSON.stringify({ status: "failed", reason: `designs: ${looked.reason}` }));
+  process.exit(1);
+}
+const screen = looked.designs.find((design) => design.blockId === "static-screen");
+const ran = looked.designs.find((design) => design.blockId === "prototype");
+
 const evidenceDir = join(repoRoot, ".canvas-preview-browser-evidence");
 await Bun.$`mkdir -p ${evidenceDir}`.quiet();
 const pngPath = join(evidenceDir, "canvas-preview.png");
@@ -120,6 +237,16 @@ const results = {
   // A drawn document with a heading, a chart, and a metric is far taller than
   // an empty page's padding.
   pageDrewTheDocument: rendered.height > 200,
+  // The static screen is 390px wide and holds a 900px row and #cccccc text.
+  staticFrameOverflowMeasured:
+    screen?.overflow[0]?.frameId === "home" && (screen.overflow[0]?.overflowPx ?? 0) >= 500,
+  staticFrameFaintTextMeasured:
+    screen?.contrast[0]?.foreground === "#cccccc" && screen.contrast[0]?.target === 4.5,
+  prototypeRanAndReportedItsError: ran?.scriptErrors[0]?.includes("missingFunction") === true,
+  // The app's own list keeps the latest three; the preview keeps the first
+  // ones, so the error that started it is still there after five more.
+  prototypeKeptItsFirstErrors: ran?.scriptErrors.length === 6,
+  nothingLeftThePreviewBrowser: arrivals.length === 0,
 };
 const failed = Object.entries(results).filter(([, ok]) => !ok);
 console.log(
@@ -129,6 +256,8 @@ console.log(
       pngPath,
       bytes: rendered.png.byteLength,
       size,
+      designs: looked.designs,
+      arrivals,
       assertions: results,
       failures: failed.map(([name]) => name),
     },

@@ -1116,6 +1116,7 @@ function renderCodeTab(
         {...(props.imageGenerationProfiles === undefined
           ? {}
           : { imageGenerationProfiles: props.imageGenerationProfiles })}
+        {...(browserAutomationClient === undefined ? {} : { browserAutomationClient })}
         {...(props.hostId === undefined ? {} : { hostId: props.hostId as HostId })}
         {...(props.projectServerUrl === undefined ? {} : { serverUrl: props.projectServerUrl })}
         {...(props.projectWindowCapability === undefined

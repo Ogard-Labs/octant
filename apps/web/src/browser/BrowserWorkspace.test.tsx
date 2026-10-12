@@ -518,6 +518,101 @@ describe("BrowserWorkspace", () => {
     );
   });
 
+  describe("Screenshot control", () => {
+    const tab = {
+      kind: "browser" as const,
+      id: "90000000-0000-4000-8000-000000000031" as any,
+      mode: "work" as const,
+      title: "Browser",
+      threadId: threadId as any,
+    };
+    const observation = (extra: object = {}) => ({
+      contextId: context.contextId,
+      actionId: context.actionId,
+      correlationId: context.correlationId,
+      authority,
+      url: "https://example.com/current",
+      observedAt: "2026-07-27T20:01:00.000Z",
+      stale: false,
+      ...extra,
+    });
+
+    function withContext(takeCapture?: BrowserAutomationClient["takeCapture"]) {
+      const browser = client();
+      vi.mocked(browser.inspectThread).mockResolvedValue({
+        status: "running",
+        threadId: threadId as any,
+        context: { ...context, presentation: "headless" } as any,
+        observation: observation() as any,
+        evidence: [],
+      } as any);
+      if (takeCapture !== undefined) browser.takeCapture = takeCapture;
+      return browser;
+    }
+
+    it("keeps a capture through takeCapture and leaves Refresh preview as an ordinary action", async () => {
+      const takeCapture = vi.fn(
+        async () =>
+          ({
+            status: "running",
+            threadId,
+            context,
+            observation: observation({
+              capture: { status: "kept", captureId: "a0000000-0000-4000-8000-000000000001" },
+            }),
+            evidence: [],
+          }) as any,
+      );
+      const browser = withContext(takeCapture);
+      render(<BrowserWorkspace client={browser} tab={tab} />);
+
+      fireEvent.click(await screen.findByRole("button", { name: "Screenshot" }));
+      await waitFor(() =>
+        expect(takeCapture).toHaveBeenCalledWith({
+          threadId,
+          request: expect.objectContaining({ kind: "screenshot", contextId: context.contextId }),
+        }),
+      );
+      expect(browser.act).not.toHaveBeenCalled();
+
+      fireEvent.click(await screen.findByRole("button", { name: "Refresh preview" }));
+      await waitFor(() =>
+        expect(browser.act).toHaveBeenCalledWith(expect.objectContaining({ kind: "screenshot" })),
+      );
+      expect(takeCapture).toHaveBeenCalledOnce();
+    });
+
+    it("says why a screenshot was not kept without blocking the page", async () => {
+      const takeCapture = vi.fn(
+        async () =>
+          ({
+            status: "running",
+            threadId,
+            context,
+            observation: observation({ capture: { status: "not-kept", reason: "too-large" } }),
+            evidence: [],
+          }) as any,
+      );
+      render(<BrowserWorkspace client={withContext(takeCapture)} tab={tab} />);
+      fireEvent.click(await screen.findByRole("button", { name: "Screenshot" }));
+      expect(
+        await screen.findByText("This screenshot could not be kept: the picture is too large."),
+      ).toBeVisible();
+      // The pane gives a notice its own row only under this class; without it
+      // the page picture is drawn over the notice.
+      expect(screen.getByRole("region", { name: "Browser automation" })).toHaveClass(
+        "browser-workspace--message",
+      );
+      expect(screen.getByRole("button", { name: "Screenshot" })).toBeEnabled();
+    });
+
+    it("is absent when the client cannot keep a capture", async () => {
+      render(<BrowserWorkspace client={withContext()} tab={tab} />);
+      expect(await screen.findByRole("button", { name: "Stop" })).toBeVisible();
+      expect(screen.queryByRole("button", { name: "Screenshot" })).not.toBeInTheDocument();
+    });
+  });
+
   it("hands the committed HTTP address to the desktop default browser", async () => {
     const browser = client();
     const openBrowserExternal = vi.fn(async () => undefined);

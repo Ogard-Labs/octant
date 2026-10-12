@@ -273,12 +273,15 @@ describe("WorkThreadWorkspace", () => {
     const approval = {
       approvalId: "90000000-0000-4000-8000-000000000002",
       threadId: String(threadId),
+      extensionId: "90000000-0000-4000-8000-000000000006",
       packageId: "90000000-0000-4000-8000-000000000003",
       componentId: "notes-server",
+      serverName: "notes",
       providerToolName: "plugin__notes__search",
       mcpToolName: "search",
       inputJson: '{"q":"plan"}',
       requestedAt: "2026-09-09T10:00:00.000Z",
+      rememberable: false,
     };
     const otherThread = {
       ...approval,
@@ -287,6 +290,8 @@ describe("WorkThreadWorkspace", () => {
       mcpToolName: "elsewhere",
     };
     const extensionClient = {
+      toolGrantsAvailable: true,
+      snapshot: vi.fn(async () => ({ packages: [] })),
       listToolApprovals: vi.fn(async () => [otherThread, approval]),
       decideToolApproval: vi.fn(async () => undefined),
     };
@@ -304,7 +309,8 @@ describe("WorkThreadWorkspace", () => {
     );
 
     const row = await screen.findByRole("group", { name: "Extension tool approval" });
-    expect(row).toHaveTextContent("Allow search?");
+    expect(row).toHaveTextContent("Allow search from A plugin?");
+    expect(row).toHaveTextContent("Server: notes");
     expect(row).toHaveTextContent('{"q":"plan"}');
     await user.click(within(row).getByRole("button", { name: "Approve once" }));
     expect(extensionClient.decideToolApproval).toHaveBeenCalledWith({
@@ -321,14 +327,19 @@ describe("WorkThreadWorkspace", () => {
     const approval = {
       approvalId: "90000000-0000-4000-8000-000000000005",
       threadId: String(threadId),
+      extensionId: "90000000-0000-4000-8000-000000000006",
       packageId: "90000000-0000-4000-8000-000000000003",
       componentId: "notes-server",
+      serverName: "notes",
       providerToolName: "plugin__notes__search",
       mcpToolName: "search",
       inputJson: "{}",
       requestedAt: "2026-09-09T10:00:00.000Z",
+      rememberable: false,
     };
     const extensionClient = {
+      toolGrantsAvailable: true,
+      snapshot: vi.fn(async () => ({ packages: [] })),
       listToolApprovals: vi.fn(async () => [approval]),
       decideToolApproval: vi.fn(async () => {
         throw new Error("offline");

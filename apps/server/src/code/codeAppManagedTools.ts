@@ -406,6 +406,7 @@ export interface CodeAppManagedToolsOptions {
     readonly act: (input: {
       readonly windowId: WindowId;
       readonly request: BrowserActionRequest;
+      readonly capturedBy?: "agent";
     }) => Promise<BrowserAutomationSnapshot>;
     readonly releaseThread: (
       windowId: WindowId,
@@ -837,7 +838,7 @@ async function browserTool(
   const request = browserAction(input, context);
   if (request === undefined) return failure("invalid-browser-input");
   const acted = await guardedBrowserEffect(options, threadId, signal, () =>
-    options.browser!.act({ windowId: options.windowId, request }),
+    options.browser!.act({ windowId: options.windowId, request, capturedBy: "agent" }),
   );
   if (acted.kind === "failure") return failure(acted.reason);
   if (
@@ -1688,6 +1689,9 @@ function browserResult(snapshot: BrowserAutomationSnapshot, includeScreenshot = 
                 : { failedRequests: snapshot.observation.failedRequests }),
               ...(includeScreenshot && image === undefined
                 ? { screenshotOmitted: "invalid-or-too-large" as const }
+                : {}),
+              ...(snapshot.observation.capture?.status === "not-kept"
+                ? { captureNotKept: snapshot.observation.capture.reason }
                 : {}),
             },
           }),

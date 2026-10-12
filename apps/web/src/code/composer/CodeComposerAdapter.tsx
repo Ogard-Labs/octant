@@ -56,7 +56,7 @@ import {
 } from "@octant/domain/code-worktree-source-policy";
 import { suggestCodeDeliveryOutcome } from "@octant/domain/delivery-target-policy";
 import type { CodeDeliveryOutcomeKind } from "@octant/contracts/code";
-import { FolderOpen, GitBranch } from "lucide-react";
+import { FolderOpen } from "lucide-react";
 import {
   useCallback,
   useContext,
@@ -754,6 +754,9 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
         <span>{props.projectName}</span>
       </span>
     ));
+  // A branch names a Project's checkout. With no Project chosen, a static
+  // "Default branch" chip named a branch of nothing and sat between the
+  // person and the prompt.
   const branchControl = hasProject ? (
     <CodeBranchSelector
       key={String(props.projectId)}
@@ -770,12 +773,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
       {...(worktreeRefs === undefined ? {} : { refs: worktreeRefs })}
       {...(props.creating === true ? { disabled: true } : {})}
     />
-  ) : (
-    <span className="composer-tray__item">
-      <GitBranch aria-hidden="true" size={12} strokeWidth={1.8} />
-      <span>{props.branchName ?? "Default branch"}</span>
-    </span>
-  );
+  ) : null;
   const environmentControl = (
     <HostSelector
       presentation="environment"

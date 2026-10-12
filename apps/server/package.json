@@ -8,6 +8,7 @@
     "canvas:browser:smoke": "bun src/canvas/canvasRendererBrowser.smoke.ts",
     "canvas:inventory:browser:smoke": "bun src/canvas/canvasInventoryBrowser.smoke.ts",
     "canvas:preview:browser:smoke": "bun src/canvas/canvasPreviewBrowser.smoke.ts",
+    "canvas:export:frame:browser:smoke": "bun src/canvas/canvasExportFrameBrowser.smoke.ts",
     "db:backup": "bun src/dbCli.ts backup",
     "db:rebuild": "bun src/dbCli.ts rebuild",
     "db:remove": "bun src/dbCli.ts remove",

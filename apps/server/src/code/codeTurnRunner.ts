@@ -176,6 +176,12 @@ export interface CodeTurnRunnerInput {
     failure?: CodeTurnFailure,
   ) => Effect.Effect<void, CodeTurnFailure>;
   readonly signal?: AbortSignal;
+  /**
+   * Told once the provider has accepted this turn's prompt and context. A
+   * turn that is refused, cancelled, or fails before then never calls it, so
+   * whatever the context carried is known not to have reached a provider.
+   */
+  readonly onPromptSent?: () => void;
   /** Observes a completed reply with its full text, the tool calls it made, and how the turn ran. */
   readonly onTurnCompleted?: (input: {
     readonly text: string;
@@ -532,6 +538,16 @@ export class CodeTurnRunner {
               tools: [...(input.appManagedTools?.definitions ?? [])],
             })
             .pipe(Effect.catchAll((providerFailure) => failForProvider(providerFailure, fail)));
+          const promptSent = input.onPromptSent;
+          if (promptSent !== undefined) {
+            yield* Effect.sync(() => {
+              try {
+                promptSent();
+              } catch {
+                // An observer of the send cannot fail the turn it observed.
+              }
+            });
+          }
         }),
       });
 

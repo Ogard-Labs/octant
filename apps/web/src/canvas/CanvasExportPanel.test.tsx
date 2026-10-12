@@ -165,6 +165,52 @@ describe("CanvasExportPanel", () => {
     );
   });
 
+  it("says on the card when the export writes design markup as written, and not otherwise", async () => {
+    const user = userEvent.setup();
+    const card = (writesDesignMarkup: boolean) => ({
+      kind: "approval" as const,
+      card: {
+        schemaVersion: 1 as const,
+        kind: "canvas-export-approval" as const,
+        approvalId,
+        canvasId,
+        versionId,
+        sequence: 1,
+        targetId: "folder-on-this-mac",
+        destinationLabel: "A folder on this Mac",
+        format: "html" as const,
+        title: "Cart",
+        ...(writesDesignMarkup ? { writesDesignMarkup: true as const } : {}),
+        payload: "<!DOCTYPE html><html></html>\n",
+        payloadDigest: "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        byteLength: 29,
+      },
+    });
+    const withMarkup = render(
+      <CanvasExportPanel
+        offers={offers()}
+        onDecide={vi.fn()}
+        onPrepare={vi.fn(async () => card(true)) as never}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Review export" }));
+    expect(await screen.findByTestId("canvas-export-design-markup")).toHaveTextContent(
+      "design markup exactly as written",
+    );
+    withMarkup.unmount();
+
+    render(
+      <CanvasExportPanel
+        offers={offers()}
+        onDecide={vi.fn()}
+        onPrepare={vi.fn(async () => card(false)) as never}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Review export" }));
+    expect(await screen.findByRole("button", { name: "Approve export" })).toBeVisible();
+    expect(screen.queryByTestId("canvas-export-design-markup")).toBeNull();
+  });
+
   it("shows the chosen folder and sends back the candidate the host listed", async () => {
     const user = userEvent.setup();
     const candidateId = "88888888-8888-4888-8888-888888888888";

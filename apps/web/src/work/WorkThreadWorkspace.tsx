@@ -72,11 +72,12 @@ import { ComposerVoiceButton } from "../voice/ComposerVoiceButton";
 import { appendTranscript } from "../voice/appendTranscript";
 import type { ImageGenerationClient } from "@octant/client-runtime/image-generation-client";
 import type { ImageGenerationProfileView } from "@octant/contracts";
-import { decodeImageGenerationScopeId } from "@octant/contracts";
+import { decodeBrowserThreadId, decodeImageGenerationScopeId } from "@octant/contracts";
 import {
   unattachedCapabilityMentionCopy,
   unattachedCapabilityMentions,
 } from "@octant/plugin-host/capability-mentions";
+import { BrowserCaptureList } from "../browser/BrowserCaptureList";
 import { GeneratedImageList } from "../image/GeneratedImageList";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import type { CanvasThreadReferenceCard } from "@octant/contracts/canvas-cards";
@@ -1688,32 +1689,42 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
         restoreKey={`work:${String(props.threadId)}`}
         role="log"
         trail={
-          props.imageGenerationClient === undefined ||
-          props.imageGenerationProfiles === undefined ? null : (
+          (props.imageGenerationClient === undefined ||
+            props.imageGenerationProfiles === undefined) &&
+          props.browserAutomationClient === undefined ? null : (
             <div className="work-thread-workspace__transcript-trail">
-              <GeneratedImageList
-                canSaveToProject
-                client={props.imageGenerationClient}
-                onAttach={(file) => images.attach([file])}
-                onSaveToProject={(job, artifact) => {
-                  void props.imageGenerationClient
-                    ?.save({
-                      jobId: job.id,
-                      attachmentId: artifact.attachmentId,
-                      relativePath: `generated/${String(artifact.attachmentId).slice(0, 8)}.png`,
-                    })
-                    .then((result) => {
-                      if (result.status === "saved") setStatus(`Saved ${result.relativePath}.`);
-                      else setStatus(result.reason);
-                    })
-                    .catch(() => {
-                      setStatus("The image could not be saved.");
-                    });
-                }}
-                profiles={props.imageGenerationProfiles}
-                scopeId={decodeImageGenerationScopeId(String(props.threadId))}
-                threadKind="work-thread"
-              />
+              {props.imageGenerationClient === undefined ||
+              props.imageGenerationProfiles === undefined ? null : (
+                <GeneratedImageList
+                  canSaveToProject
+                  client={props.imageGenerationClient}
+                  onAttach={(file) => images.attach([file])}
+                  onSaveToProject={(job, artifact) => {
+                    void props.imageGenerationClient
+                      ?.save({
+                        jobId: job.id,
+                        attachmentId: artifact.attachmentId,
+                        relativePath: `generated/${String(artifact.attachmentId).slice(0, 8)}.png`,
+                      })
+                      .then((result) => {
+                        if (result.status === "saved") setStatus(`Saved ${result.relativePath}.`);
+                        else setStatus(result.reason);
+                      })
+                      .catch(() => {
+                        setStatus("The image could not be saved.");
+                      });
+                  }}
+                  profiles={props.imageGenerationProfiles}
+                  scopeId={decodeImageGenerationScopeId(String(props.threadId))}
+                  threadKind="work-thread"
+                />
+              )}
+              {props.browserAutomationClient === undefined ? null : (
+                <BrowserCaptureList
+                  client={props.browserAutomationClient}
+                  threadId={decodeBrowserThreadId(String(props.threadId))}
+                />
+              )}
             </div>
           )
         }

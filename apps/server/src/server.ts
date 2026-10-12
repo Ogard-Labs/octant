@@ -467,6 +467,17 @@ import { CanvasExportEventStore } from "./canvas/canvasExportEventStore";
 import { CanvasExportService } from "./canvas/canvasExportService";
 import { createCanvasRefreshSourceResolver } from "./canvas/canvasRefreshSourceResolver";
 import { readCanvasRefreshFile, resolveCanvasRefreshFile } from "./canvas/canvasRefreshFileRead";
+import type {
+  CanvasDesignAssetResolution,
+  CanvasDesignBlock,
+  CanvasProvenance,
+} from "@octant/contracts/canvas";
+import { CanvasDesignRunTickets } from "./canvas/canvasDesignPage";
+import {
+  readCanvasDesignAssetFile,
+  resolveCanvasDesignAssets,
+  type CanvasDesignAssetPorts,
+} from "./canvas/canvasDesignAssets";
 import { createCanvasSkillContributionResolver } from "./canvas/canvasSkillContributionResolver";
 import {
   createCanvasSkillContributionLookup,
@@ -490,6 +501,7 @@ import {
   makeReplicaStoreCredentialBrokerClient,
   type ProviderCredentialResolver,
 } from "./providers/credentialBrokerClient";
+import { makeProviderApiKeyPool } from "./providers/providerApiKeyPool";
 import { createHostOAuthService, extAgentHostIdFor } from "./providers/oauth/hostOAuthService";
 import { makeHostOAuthBrokerClient } from "./providers/oauth/hostOAuthBrokerClient";
 import { hostOAuthEventJournal } from "./providers/oauth/hostOAuthEventJournal";
@@ -612,6 +624,10 @@ import { createValidationEvidenceRouteHandler } from "./validationEvidenceRoutes
 import { createValidationEvidenceLoader } from "./validation/validationEvidenceLoader";
 import { createExtensionRouteHandler } from "./extensionRoutes";
 import {
+  createExternalContentRouteHandler,
+  threadStandingFromMessageQueue,
+} from "./externalContentRoutes";
+import {
   ExtensionApiService,
   type ExtensionPackageResolverPort,
 } from "./extensions/extensionApiService";
@@ -676,6 +692,8 @@ import { AgentPluginMcpSessionManager } from "./extensions/agentPluginMcpSession
 import { LocalPluginFolderRegistry } from "./extensions/localPluginFolderRegistry";
 import { LocalPluginImportReceiptStore } from "./extensions/localPluginImportReceiptStore";
 import { ExtensionToolApprovalService } from "./extensions/extensionToolApprovalService";
+import { createExtensionToolCallAuthorizer } from "./extensions/extensionToolCallAuthorizer";
+import { ExtensionToolGrantStore } from "./extensions/extensionToolGrantStore";
 import {
   BrowserAutomationService,
   createBrowserToolCallAuthorityService,
@@ -685,6 +703,9 @@ import {
   type BrowserModelBinding,
 } from "./browser/browserAppManagedTools";
 import { BrowserToolApprovalService } from "./browser/browserToolApprovalService";
+import { ExternalContentClearStore } from "./context/externalContentClearStore";
+import { BrowserCaptureService } from "./browser/browserCaptureService";
+import { BrowserCaptureStore } from "./browser/browserCaptureStore";
 import { ExternalContentIngestionStore } from "./context/externalContentIngestionStore";
 import {
   AgentMessageProjection,
@@ -1933,6 +1954,15 @@ export function startOctantServer(
       });
     let activeCodeService: CodeRouteService | undefined;
     let browserAutomationService: BrowserAutomationService | undefined;
+    const browserCaptureStore = new BrowserCaptureStore(persistence.dataDirectory);
+    const browserCaptures = new BrowserCaptureService({
+      store: browserCaptureStore,
+      journal: persistence.journal,
+      connection: persistence.connection,
+      personActor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+      uuid: randomUUID,
+      clock: () => new Date().toISOString(),
+    });
     let projectBrowserService: ProjectBrowserService | undefined;
     const browserModelBindings = new Map<string, BrowserModelBinding>();
     const requireBrowserAutomationService = (): BrowserAutomationService => {
@@ -2803,43 +2833,33 @@ export function startOctantServer(
     const agentMessageBodyStore = new AgentMessageBodyStore(
       join(persistence.dataDirectory, "agent-messages"),
     );
+    // Only a real thread is addressable. A child run has no turn that would
+    // carry a message, so its id resolves to nothing and refuses like any
+    // other unreachable one.
     const resolveAgentMessageEndpoint: AgentMessageEndpointResolver = (threadId) => {
       const chat = persistence.readChatThread(threadId as never);
       if (chat !== undefined) {
-        return { mode: "chat", terminal: chat.lifecycle !== "active" };
+        return {
+          mode: "chat",
+          projectId: chat.projectId === undefined ? undefined : String(chat.projectId),
+          terminal: chat.lifecycle !== "active",
+        };
       }
       const code = persistence.readCodeThread(threadId as never);
       if (code !== undefined) {
-        return { mode: "code", terminal: code.lifecycle !== "active" };
+        return {
+          mode: "code",
+          projectId: String(code.projectId),
+          terminal: code.lifecycle !== "active",
+        };
       }
       const work = workThreadProjection.list().find((thread) => String(thread.id) === threadId);
       if (work !== undefined) {
-        return { mode: "work", terminal: work.lifecycle !== "active" };
-      }
-      const run = persistence.agentRunProjection.getById(threadId as never);
-      if (run !== undefined) {
-        // A run speaks for its parent thread's mode, and a message to a run
-        // lands on the hierarchy edge 0012 already owns.
-        const runTerminal =
-          run.lifecycleStatus === "completed" ||
-          run.lifecycleStatus === "failed" ||
-          run.lifecycleStatus === "cancelled" ||
-          run.lifecycleStatus === "interrupted";
-        const parentChat = persistence.readChatThread(String(run.parentThreadId) as never);
-        if (parentChat !== undefined) {
-          return {
-            mode: "chat",
-            terminal: runTerminal || parentChat.lifecycle !== "active",
-          };
-        }
-        const parentCode = persistence.readCodeThread(String(run.parentThreadId) as never);
-        if (parentCode !== undefined) {
-          return {
-            mode: "code",
-            terminal: runTerminal || parentCode.lifecycle !== "active",
-          };
-        }
-        return { mode: "chat", terminal: runTerminal };
+        return {
+          mode: "work",
+          projectId: String(work.projectId),
+          terminal: work.lifecycle !== "active",
+        };
       }
       return undefined;
     };
@@ -3973,20 +3993,25 @@ export function startOctantServer(
           isMarketplaceFetchAllowed,
         }),
       });
+    const extensionToolGrantStore = new ExtensionToolGrantStore({
+      journal: persistence.journal,
+      connection: persistence.connection,
+      uuid: randomUUID,
+      clock: () => new Date().toISOString(),
+      actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+    });
     const agentPluginMcpSessionManager =
       options.agentPluginMcpSessionManager ??
       new AgentPluginMcpSessionManager({
         store: extensionPackageStore,
-        authorizeToolCall: async ({ windowId, thread, signal, ...tool }) =>
-          windowId === undefined
-            ? false
-            : extensionToolApprovalService.request({
-                windowId,
-                threadId: String(thread.id),
-                ...(thread.projectId === undefined ? {} : { projectId: String(thread.projectId) }),
-                ...tool,
-                ...(signal === undefined ? {} : { signal }),
-              }),
+        authorizeToolCall: createExtensionToolCallAuthorizer({
+          grants: extensionToolGrantStore,
+          approvals: extensionToolApprovalService,
+          isHostScope: isRoutineHostScope,
+          threadTainted: (threadId) =>
+            readThreadExternalContentTaint(persistence.connection, threadId)
+              .externalContentIngested,
+        }),
         recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
         ...(extensionSupervisor instanceof ExtensionSupervisor
           ? { stdioSupervisor: extensionSupervisor }
@@ -4044,7 +4069,10 @@ export function startOctantServer(
             extensionActivationService.resolve(snapshot, query),
           ),
       },
-      onStateChanged: async (snapshot) => {
+      onStateChanged: async (snapshot, command) => {
+        // Uninstall, rollback, and withdrawn trust end the package's remembered
+        // tool approvals, so bringing it back restores none of them.
+        extensionToolGrantStore.revokeForLifecycleChange(command);
         // Settings has no thread authority. Drain only package/components whose
         // lifecycle state changed; unrelated in-flight MCP calls remain intact.
         await agentPluginMcpSessionManager.reconcileLifecycleSnapshot(snapshot);
@@ -4094,6 +4122,7 @@ export function startOctantServer(
       localPluginFolderRegistry,
       localPluginImportReceipts: new LocalPluginImportReceiptStore(),
       toolApprovals: extensionToolApprovalService,
+      toolGrants: extensionToolGrantStore,
     });
     const managedWorktreePorts = createManagedWorktreeNodePorts();
     const managedWorktreeService = new ManagedWorktreeService({
@@ -4252,10 +4281,12 @@ export function startOctantServer(
     const credentialResolver =
       options.credentialBrokerUrl === undefined || options.credentialBrokerToken === undefined
         ? undefined
-        : makeCredentialBrokerClient({
-            url: options.credentialBrokerUrl,
-            token: options.credentialBrokerToken,
-          });
+        : makeProviderApiKeyPool(
+            makeCredentialBrokerClient({
+              url: options.credentialBrokerUrl,
+              token: options.credentialBrokerToken,
+            }),
+          );
     const claudeHelperSignIn =
       credentialResolver === undefined
         ? undefined
@@ -4685,6 +4716,7 @@ export function startOctantServer(
     browserAutomationService = new BrowserAutomationService({
       runtime: browserRuntime,
       authority: browserAuthority,
+      captures: browserCaptures,
       toolCallAuthority: createBrowserToolCallAuthorityService(
         browserAuthority,
         () => new Date().toISOString(),
@@ -5185,11 +5217,17 @@ export function startOctantServer(
           githubReadToolSetIfEffective(githubExtensionSnapshot.read(), () =>
             githubReadToolService.createToolSet({ windowId, thread, readThread }),
           ),
-        agentMessages: ({ thread }) =>
+        agentMessages: ({ thread, readPosture }) =>
           createAgentMessageTools({
             service: agentMessageService,
             senderThreadId: String(thread.id),
+            toolConstraints: thread.toolConstraints ?? [],
+            profileDisplayName: thread.profileDisplayName ?? "the bound profile",
+            readPosture,
           }),
+        carryAgentMessages: (threadId) => agentMessageService.carryIntoTurn(threadId),
+        confirmAgentMessagesDelivered: (messageIds) =>
+          agentMessageService.confirmDelivered(messageIds),
         sideTasks: ({ thread }) =>
           createSideTaskTools({
             store: sideTasks,
@@ -6693,6 +6731,7 @@ export function startOctantServer(
           persistence.imageJobProjection.isFinalizedAttachmentReferenced(scopeId, attachmentId),
       }),
     );
+    yield* Effect.promise(() => browserCaptures.recover());
     imageJobService = new ImageJobService({
       journal: persistence.journal,
       projection: persistence.imageJobProjection,
@@ -6852,6 +6891,10 @@ export function startOctantServer(
       }),
       "Agent message",
     );
+    // A body lives only while its message waits for a turn. The sweep is a
+    // disk bound, not a precondition: a host that cannot read the store still
+    // starts.
+    yield* Effect.promise(() => agentMessageService.reconcileStoredBodies().catch(() => undefined));
     const workArtifactProjection = new WorkArtifactProjection();
     requireJournalHydration(
       hydrateWorkArtifactProjectionFromJournal({
@@ -7252,6 +7295,7 @@ export function startOctantServer(
       generatedImages: {
         listByScope: (scopeId) => imageJobService.listByScope(scopeId),
       },
+      browserCaptures,
     });
     const threadExportRoutes = createThreadExportRouteHandler({
       service: threadExportService,
@@ -7991,8 +8035,54 @@ export function startOctantServer(
       windowAuthorityStore,
       maxJsonBodySize: MAX_JSON_REQUEST_BODY_SIZE,
     });
+    // Which threads a window can open, archived ones included. What a thread
+    // kept (generated images, Browser captures) is read under this rather than
+    // under a live tool authority, which an archived thread no longer has.
+    const windowCanOpenThread = async (
+      windowId: WindowId,
+      threadKind: "chat-thread" | "work-thread" | "code-thread",
+      threadId: string,
+    ): Promise<boolean> => {
+      try {
+        if (threadKind === "chat-thread") {
+          const view = chatService.read(decodeChatThreadId(threadId));
+          const workspace = persistence.readWindowWorkspace(windowId)?.workspace;
+          return chatImageScopeAllowedForWindow({
+            chatContext: workspace?.contextByMode.chat,
+            thread: view?.thread,
+          });
+        }
+        if (threadKind === "work-thread") {
+          const bootstrap = await workThreadService.bootstrap(windowId);
+          return bootstrap.threads.some((thread) => String(thread.id) === threadId);
+        }
+        const view = await routeCodeService.read(windowId, decodeCodeThreadId(threadId));
+        return view !== undefined;
+      } catch {
+        return false;
+      }
+    };
     const browserAutomationRoutes = createBrowserAutomationRouteHandler({
       service: browserAutomationService,
+      captures: browserCaptures,
+      windowCanOpenThread: async (windowId, threadId) => {
+        const id = String(threadId);
+        // A capture names only its thread. The projections say which kind of
+        // thread it is, so one check runs instead of all three on every read.
+        let threadKind: "chat-thread" | "work-thread" | "code-thread" | undefined;
+        try {
+          if (persistence.readChatThread(decodeChatThreadId(id)) !== undefined) {
+            threadKind = "chat-thread";
+          } else if (persistence.readCodeThread(decodeCodeThreadId(id)) !== undefined) {
+            threadKind = "code-thread";
+          } else if (workThreadProjection.read(decodeWorkThreadId(id)) !== undefined) {
+            threadKind = "work-thread";
+          }
+        } catch {
+          return false;
+        }
+        return threadKind !== undefined && (await windowCanOpenThread(windowId, threadKind, id));
+      },
       projectBrowsers: liveProjectBrowsers,
       authority: browserAuthority,
       approvals: requireBrowserToolApprovalService(),
@@ -8075,24 +8165,7 @@ export function startOctantServer(
         // The library is host-wide: window capability already proved the
         // caller is a registered window, and the scope id is fixed.
         if (threadKind === "image-library") return threadId === String(IMAGE_LIBRARY_SCOPE_ID);
-        try {
-          if (threadKind === "chat-thread") {
-            const view = chatService.read(decodeChatThreadId(threadId));
-            const workspace = persistence.readWindowWorkspace(windowId)?.workspace;
-            return chatImageScopeAllowedForWindow({
-              chatContext: workspace?.contextByMode.chat,
-              thread: view?.thread,
-            });
-          }
-          if (threadKind === "work-thread") {
-            const bootstrap = await workThreadService.bootstrap(windowId);
-            return bootstrap.threads.some((thread) => String(thread.id) === threadId);
-          }
-          const view = await routeCodeService.read(windowId, decodeCodeThreadId(threadId));
-          return view !== undefined;
-        } catch {
-          return false;
-        }
+        return windowCanOpenThread(windowId, threadKind, threadId);
       },
       saveToProject: async (input) => {
         if (input.threadKind === "chat-thread") {
@@ -8433,6 +8506,125 @@ export function startOctantServer(
       };
     };
 
+    /**
+     * The checkout an active Code thread is bound to now: the Project's own
+     * repository for an existing worktree, or a managed worktree only while
+     * its ownership receipt still names this thread, checkout, and repository.
+     * Undefined refuses.
+     */
+    const codeThreadCheckoutRoot = async (
+      threadId: string,
+      projectId: string,
+    ): Promise<string | undefined> => {
+      const thread = persistence.readCodeThread(threadId as never);
+      if (
+        thread === undefined ||
+        String(thread.projectId) !== projectId ||
+        thread.lifecycle !== "active"
+      ) {
+        return undefined;
+      }
+      const project = persistence.readProject(thread.projectId);
+      if (project?.type !== "code" || project.lifecycle !== "active") return undefined;
+      const checkout = persistence.readCodeCheckout(thread.checkoutId);
+      if (checkout === undefined) return undefined;
+      if (checkout.kind === "existing-worktree") return project.binding.canonicalRoot;
+      if (checkout.kind !== "managed-worktree") return undefined;
+      const receipt = await managedWorktreeReceipts.load(String(checkout.ownershipReceiptId));
+      if (
+        receipt === undefined ||
+        receipt.state !== "ready" ||
+        receipt.receiptId !== checkout.ownershipReceiptId ||
+        receipt.threadId !== thread.id ||
+        receipt.checkoutId !== checkout.id ||
+        receipt.repositoryId !== thread.repositoryId ||
+        receipt.repositoryId !== checkout.repositoryId ||
+        receipt.canonicalRepositoryPath !== project.binding.canonicalRoot
+      ) {
+        return undefined;
+      }
+      return receipt.canonicalWorktreePath;
+    };
+
+    /**
+     * Where a Canvas design's declared images are read from. Every call
+     * re-derives authority from the Canvas version's provenance and durable
+     * host state: a generated image only from a thread of the same Project,
+     * a Work file only under the Project root while the thread is bound to its
+     * current revision, and a Code file only under the thread's checkout.
+     */
+    const canvasDesignAssetPorts: CanvasDesignAssetPorts = {
+      generatedImage: async ({ imageId, projectId, maximumBytes }) => {
+        const job = imageJobService.completedJobFor(imageId);
+        if (job === undefined) return { status: "unavailable", reason: "missing" };
+        const artifact = job.artifacts.find(
+          (candidate) => String(candidate.attachmentId) === String(imageId),
+        );
+        if (artifact === undefined) return { status: "unavailable", reason: "missing" };
+        const owner =
+          job.threadKind === "chat-thread"
+            ? persistence.readChatThread(job.scopeId as never)
+            : job.threadKind === "work-thread"
+              ? workThreadProjection.read(job.scopeId as never)
+              : job.threadKind === "code-thread"
+                ? persistence.readCodeThread(job.scopeId as never)
+                : undefined;
+        // The host-wide image library belongs to no Project, so no Canvas
+        // reaches it through a design.
+        if (owner === undefined) return { status: "unavailable", reason: "refused" };
+        if (owner.lifecycle === "deleted" || owner.lifecycle === "deleting") {
+          return { status: "unavailable", reason: "missing" };
+        }
+        if (owner.projectId === undefined || String(owner.projectId) !== projectId) {
+          return { status: "unavailable", reason: "refused" };
+        }
+        if (artifact.size > maximumBytes) return { status: "unavailable", reason: "too-large" };
+        // The attachment store throws when a finalized image's file is gone or
+        // no longer matches its hash; that image is missing, and the design's
+        // other assets still resolve.
+        const read = await imageJobService
+          .readArtifact(job.id, artifact.attachmentId)
+          .catch(() => undefined);
+        return read === undefined
+          ? { status: "unavailable", reason: "missing" }
+          : { status: "read", bytes: read.bytes };
+      },
+      projectFile: async ({ mode, projectId, threadId, path, maximumBytes }) => {
+        let root: string | undefined;
+        if (mode === "code") {
+          // The same binding-revision and checkout-availability checks as any
+          // Canvas scope, so a rebound Project or a waiting checkout refuses.
+          const workspace = resolveCanvasWorkspace({ mode: "code", threadId });
+          root =
+            workspace?.kind === "code-worktree" && String(workspace.projectId) === projectId
+              ? await codeThreadCheckoutRoot(threadId, projectId)
+              : undefined;
+        } else {
+          const workspace = resolveCanvasWorkspace({ mode: "work", threadId });
+          const project = persistence.readProject(projectId as never);
+          root =
+            workspace?.kind === "work-root" &&
+            String(workspace.projectId) === projectId &&
+            project?.type === "work" &&
+            project.lifecycle === "active"
+              ? project.binding.canonicalRoot
+              : undefined;
+        }
+        if (root === undefined) return { status: "unavailable", reason: "refused" };
+        return await readCanvasDesignAssetFile({
+          filesystem: liveWorkFilesystem,
+          root,
+          path,
+          maximumBytes,
+        });
+      },
+    };
+    const resolveDesignAssets = (
+      block: CanvasDesignBlock,
+      provenance: CanvasProvenance,
+    ): Promise<ReadonlyArray<CanvasDesignAssetResolution>> =>
+      resolveCanvasDesignAssets(block, provenance, canvasDesignAssetPorts);
+
     const artifactMirrorEvents = new ArtifactMirrorEventStore({
       journal: persistence.journal,
       uuid: randomUUID,
@@ -8703,29 +8895,8 @@ export function startOctantServer(
                     reference.state !== "completed")
                 )
                   return undefined;
-                let checkoutRoot = project.binding.canonicalRoot;
-                const checkout = persistence.readCodeCheckout(thread.checkoutId);
-                if (checkout === undefined) return undefined;
-                if (checkout?.kind === "managed-worktree") {
-                  const receipt = await managedWorktreeReceipts.load(
-                    String(checkout.ownershipReceiptId),
-                  );
-                  if (
-                    receipt === undefined ||
-                    receipt.state !== "ready" ||
-                    receipt.receiptId !== checkout.ownershipReceiptId ||
-                    receipt.threadId !== thread.id ||
-                    receipt.checkoutId !== checkout.id ||
-                    receipt.repositoryId !== thread.repositoryId ||
-                    receipt.repositoryId !== checkout.repositoryId ||
-                    receipt.canonicalRepositoryPath !== project.binding.canonicalRoot
-                  ) {
-                    return undefined;
-                  }
-                  checkoutRoot = receipt.canonicalWorktreePath;
-                } else if (checkout.kind !== "existing-worktree") {
-                  return undefined;
-                }
+                const checkoutRoot = await codeThreadCheckoutRoot(thread.id, projectId);
+                if (checkoutRoot === undefined) return undefined;
                 const resolved = resolveConfinedPath(checkoutRoot, reference.relativePath);
                 if (!resolved.ok) return undefined;
                 return await resolveCanvasRefreshFile(liveWorkFilesystem, {
@@ -8874,6 +9045,7 @@ export function startOctantServer(
       canvas: canvasService,
       preview: createCanvasPreviewService({
         canvas: canvasService,
+        resolveDesignAssets,
         renderer: createPlaywrightCanvasPreviewRenderer({
           // The preview page ships beside the web build, so it follows the
           // same folder a host injects for the app; otherwise every preview
@@ -9155,6 +9327,8 @@ export function startOctantServer(
     const canvasRoutes = createCanvasRouteHandler({
       canvasProjection: persistence.canvasProjection,
       canvasService,
+      resolveDesignAssets,
+      designRunTickets: new CanvasDesignRunTickets(),
       canvasShareService,
       canvasExportService,
       // A host with no usable `gh` has no GitHub state to read; the gist
@@ -9927,6 +10101,20 @@ export function startOctantServer(
         signing: identity.signing,
         webAssets,
         productDispatch: authenticatedProductDispatch,
+        // The page's ticket is its only authority, so the request reaches the
+        // Canvas route as a loopback load carrying nothing but its address
+        // and what the browser said it is loading.
+        designPage: async (request) => {
+          const source = new URL(request.url);
+          const destination = request.headers.get("sec-fetch-dest");
+          return await canvasRoutes(
+            new Request(`http://127.0.0.1${source.pathname}${source.search}`, {
+              method: request.method,
+              headers: destination === null ? {} : { "sec-fetch-dest": destination },
+              signal: request.signal,
+            }),
+          );
+        },
         pushTokenStore: pushNotificationTokenStore,
       };
     };
@@ -10039,6 +10227,16 @@ export function startOctantServer(
               // A thread id that is not a generated-image scope is not an image basin.
             }
           },
+          purgeBrowserCaptures: async (id) => {
+            let threadId;
+            try {
+              threadId = decodeBrowserThreadId(id);
+            } catch {
+              // A thread id that is not a browser thread has no capture basin.
+              return;
+            }
+            await browserCaptureStore.purgeThread(threadId);
+          },
           purgeAgentMessages: (id) => agentMessageService.purgeThread(id),
         });
       },
@@ -10067,6 +10265,19 @@ export function startOctantServer(
       ...(options.allowedRendererHttpOrigin === undefined
         ? {}
         : { allowedRendererHttpOrigin: options.allowedRendererHttpOrigin }),
+    });
+    // Loopback chain only, like host control: a person at this machine clears
+    // a thread's outside-content mark, and nothing else holds this store.
+    const externalContentRoutes = createExternalContentRouteHandler({
+      windowAuthorityStore,
+      clears: new ExternalContentClearStore({
+        journal: persistence.journal,
+        connection: persistence.connection,
+        uuid: randomUUID,
+        clock: () => new Date().toISOString(),
+        actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+      }),
+      withThreadStanding: threadStandingFromMessageQueue(threadMessageQueue),
     });
     const hostControlRoutes = createHostControlRouteHandler({
       windowAuthorityStore,
@@ -10514,6 +10725,7 @@ export function startOctantServer(
                 (await privateListenerAdministrationRoutes(request)) ??
                 (await localDeviceAdministrationRoutes(request)) ??
                 (await hostControlRoutes(request)) ??
+                (await externalContentRoutes(request)) ??
                 (await replicaStoreSettingsRoutes(request)) ??
                 (await replicaMembershipRoutes(request)) ??
                 (await dispatchMeasuredProductRoutes(request)) ??

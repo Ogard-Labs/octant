@@ -248,6 +248,12 @@ export function CanvasExportPanel(props: CanvasExportPanelProps) {
                 : `Writes ${card.destinationPath}`}
             </p>
           )}
+          {card.writesDesignMarkup === true ? (
+            <p className="canvas-export__note" data-testid="canvas-export-design-markup">
+              Includes this canvas's design markup exactly as written. Octant does not check markup
+              for secrets.
+            </p>
+          ) : null}
           {card.destinationAccount === undefined ? null : (
             <p className="canvas-export__account" data-testid="canvas-export-account">
               {`Posts as ${card.destinationAccount}`}
