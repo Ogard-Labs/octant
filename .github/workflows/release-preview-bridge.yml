@@ -34,6 +34,12 @@ permissions:
 jobs:
   bridge:
     name: Bridge (${{ matrix.target }})
+    # Run from `main` only. The `stable` environment admits `v*` tags, because
+    # the stable release is proposed by one, and a dispatch from a tag would
+    # check out that tag's signing scripts and hand them the stable key. This
+    # guard is the second lock, not the first: a workflow file dispatched from
+    # a tag could drop it, so the environment's approval stays the control.
+    if: github.ref == 'refs/heads/main'
     # Required reviewers live on this environment; nothing below can read the
     # stable key until a person approves this run.
     environment: stable
