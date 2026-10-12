@@ -30,6 +30,8 @@ export const MAX_BROWSER_DIAGNOSTIC_TEXT_CHARACTERS = 2_048;
 
 export const BrowserContextId = brandedUuid("BrowserContextId");
 export type BrowserContextId = typeof BrowserContextId.Type;
+export const BrowserCaptureId = brandedUuid("BrowserCaptureId");
+export type BrowserCaptureId = typeof BrowserCaptureId.Type;
 export const BrowserThreadId = brandedUuid("BrowserThreadId");
 export type BrowserThreadId = typeof BrowserThreadId.Type;
 
@@ -148,6 +150,31 @@ export const BrowserFailedRequest = Schema.Struct({
 }).annotations(strict);
 export type BrowserFailedRequest = typeof BrowserFailedRequest.Type;
 
+/**
+ * What happened to a screenshot the host was asked to keep as a thread capture.
+ * Keeping is best effort: the screenshot itself succeeds either way, and a
+ * capture that was not kept says why so the refusal is observable instead of
+ * a picture that quietly never appears.
+ */
+export const BrowserCaptureNotKeptReason = Schema.Literal(
+  "too-large",
+  "not-an-image",
+  "no-page-origin",
+  "unavailable",
+);
+export type BrowserCaptureNotKeptReason = typeof BrowserCaptureNotKeptReason.Type;
+
+export const BrowserCaptureOutcome = Schema.Union(
+  Schema.Struct({ status: Schema.Literal("kept"), captureId: BrowserCaptureId }).annotations(
+    strict,
+  ),
+  Schema.Struct({
+    status: Schema.Literal("not-kept"),
+    reason: BrowserCaptureNotKeptReason,
+  }).annotations(strict),
+);
+export type BrowserCaptureOutcome = typeof BrowserCaptureOutcome.Type;
+
 export const BrowserObservation = Schema.Struct({
   contextId: BrowserContextId,
   actionId: ToolActionId,
@@ -176,6 +203,8 @@ export const BrowserObservation = Schema.Struct({
     ),
   ),
   viewport: Schema.optional(BrowserViewportSize),
+  /** Present only on an explicit `screenshot` action that the host was asked to keep. */
+  capture: Schema.optional(BrowserCaptureOutcome),
   revision: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
   observedAt: UtcTimestamp,
   stale: Schema.Boolean,
@@ -224,6 +253,7 @@ export type BrowserAutomationFailure = typeof BrowserAutomationFailure.Type;
 
 export const decodeBrowserContextId = Schema.decodeUnknownSync(BrowserContextId);
 export const decodeBrowserThreadId = Schema.decodeUnknownSync(BrowserThreadId);
+export const decodeBrowserCaptureId = Schema.decodeUnknownSync(BrowserCaptureId);
 export const decodeBrowserProfileMode = Schema.decodeUnknownSync(BrowserProfileMode);
 export const decodeBrowserContextPolicy = Schema.decodeUnknownSync(BrowserContextPolicy);
 export const decodeBrowserContextState = Schema.decodeUnknownSync(BrowserContextState);

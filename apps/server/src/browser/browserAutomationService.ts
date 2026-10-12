@@ -2,6 +2,7 @@ import type {
   BrowserActionRequest,
   BrowserAutomationFailure,
   BrowserAutomationSnapshot,
+  BrowserCaptureOutcome,
   BrowserContextId,
   BrowserContextObservation,
   BrowserContextPolicy,
@@ -23,15 +24,18 @@ import {
 } from "@octant/contracts";
 import {
   authorizeToolAction,
+  browserCaptureTaker,
   canRequestToolCancellation,
   evaluateBrowserAction,
   evaluateProfileMode,
+  type BrowserCaptureTaker,
 } from "@octant/domain";
 import type {
   ExternalContentIngestionResult,
   RecordExternalContentIngestionInput,
 } from "../context/externalContentIngestionStore";
 import { ToolCallAuthorityService } from "../toolCallAuthorityService";
+import type { KeepBrowserCaptureInput } from "./browserCaptureService";
 import {
   BrowserNavigationBlockedError,
   type BrowserPointObservation,
@@ -58,6 +62,13 @@ export interface BrowserAutomationServiceOptions {
   readonly recordExternalContentIngestion?: (
     input: RecordExternalContentIngestionInput,
   ) => ExternalContentIngestionResult;
+  /**
+   * Keeps an explicit screenshot as a thread capture. Absent on a host that
+   * keeps none, and never reached for the thread-less Project browser.
+   */
+  readonly captures?: {
+    readonly keep: (input: KeepBrowserCaptureInput) => Promise<BrowserCaptureOutcome>;
+  };
   readonly uuid: () => string;
   readonly clock: () => string;
   readonly now: () => number;
@@ -107,6 +118,7 @@ export class BrowserAutomationService {
   readonly #recordExternalContentIngestion:
     | ((input: RecordExternalContentIngestionInput) => ExternalContentIngestionResult)
     | undefined;
+  readonly #captures: BrowserAutomationServiceOptions["captures"];
   readonly #uuid: () => string;
   readonly #clock: () => string;
   readonly #now: () => number;
@@ -121,6 +133,7 @@ export class BrowserAutomationService {
       options.toolCallAuthority ??
       createBrowserToolCallAuthorityService(options.authority, options.clock);
     this.#recordExternalContentIngestion = options.recordExternalContentIngestion;
+    this.#captures = options.captures;
     this.#uuid = options.uuid;
     this.#clock = options.clock;
     this.#now = options.now;
@@ -295,6 +308,11 @@ export class BrowserAutomationService {
   async act(input: {
     readonly windowId: WindowId;
     readonly request: BrowserActionRequest;
+    /**
+     * Who asked. A screenshot is kept as a thread capture only when the caller
+     * names the agent tool or the person's pane; an unnamed caller keeps none.
+     */
+    readonly capturedBy?: BrowserCaptureTaker;
   }): Promise<BrowserAutomationSnapshot> {
     const owned = this.#contexts.get(input.request.contextId);
     if (owned === undefined) {
@@ -312,7 +330,11 @@ export class BrowserAutomationService {
 
   async #actOwned(
     owned: OwnedContext,
-    input: { readonly windowId: WindowId; readonly request: BrowserActionRequest },
+    input: {
+      readonly windowId: WindowId;
+      readonly request: BrowserActionRequest;
+      readonly capturedBy?: BrowserCaptureTaker;
+    },
   ): Promise<BrowserAutomationSnapshot> {
     if (owned.abort.signal.aborted || owned.record.state !== "active") {
       return this.#failure(
@@ -469,7 +491,10 @@ export class BrowserAutomationService {
           "failed",
         );
       }
-      owned.observation = observation;
+      // After the ingestion above: the thread's taint is recorded before any
+      // picture of that page is kept.
+      const capture = await this.#keepCapture(owned, input, observed);
+      owned.observation = capture === undefined ? observation : { ...observation, capture };
       owned.evidence.push(evidence);
       if (owned.evidence.length > MAX_RETAINED_BROWSER_EVIDENCE) {
         owned.evidence.splice(0, owned.evidence.length - MAX_RETAINED_BROWSER_EVIDENCE);
@@ -497,6 +522,41 @@ export class BrowserAutomationService {
         },
         interrupted ? "interrupted" : "failed",
       );
+    }
+  }
+
+  /**
+   * Keep the screenshot an explicit `screenshot` action just took. The action
+   * has already succeeded, so a copy that cannot be kept is reported on the
+   * observation instead of failing the action.
+   */
+  async #keepCapture(
+    owned: OwnedContext,
+    input: {
+      readonly request: BrowserActionRequest;
+      readonly capturedBy?: BrowserCaptureTaker;
+    },
+    observed: {
+      readonly screenshotDataUrl?: string;
+      readonly url?: string;
+      readonly title?: string;
+    },
+  ): Promise<BrowserCaptureOutcome | undefined> {
+    const takenBy = browserCaptureTaker(input.request.kind, input.capturedBy);
+    if (takenBy === undefined || this.#captures === undefined) return undefined;
+    if (observed.screenshotDataUrl === undefined) return undefined;
+    try {
+      return await this.#captures.keep({
+        threadId: owned.threadId,
+        dataUrl: observed.screenshotDataUrl,
+        url: observed.url,
+        title: observed.title,
+        takenBy,
+        providerInstanceId: owned.record.authority.providerInstanceId,
+        correlationId: owned.action.correlationId,
+      });
+    } catch {
+      return { status: "not-kept", reason: "unavailable" };
     }
   }
 

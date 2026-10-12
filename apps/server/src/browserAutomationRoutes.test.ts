@@ -341,6 +341,146 @@ describe("browser automation routes", () => {
     expect(service.act).toHaveBeenCalledOnce();
   });
 
+  describe("thread captures", () => {
+    const captureId = "b0000000-0000-4000-8000-000000000001";
+    const capture = {
+      captureId,
+      threadId,
+      origin: "https://example.com",
+      url: "https://example.com/",
+      hash: "a".repeat(64),
+      size: 4,
+      mime: "image/png",
+      capturedAt: "2026-10-12T09:00:00.000Z",
+    };
+    const headers = {
+      "content-type": "application/json",
+      "x-octant-window-capability": capability,
+    };
+
+    function withCaptures(canAccessWindow = true) {
+      const captures = {
+        list: vi.fn(() => [capture] as never),
+        read: vi.fn(async (_thread: unknown, id: unknown) =>
+          String(id) === captureId
+            ? { capture, bytes: Uint8Array.from([0x89, 0x50, 0x4e, 0x47]) }
+            : undefined,
+        ),
+      };
+      return {
+        captures,
+        handler: createBrowserAutomationRouteHandler({
+          service: service as any,
+          captures: captures as never,
+          authority: { canAccessWindow: () => canAccessWindow, resolve: () => authority },
+          windowAuthorityStore: store,
+          maxRequestBodySize: 64_000,
+        }),
+      };
+    }
+
+    const post = (path: string, payload: unknown, extra: Record<string, string> = {}) =>
+      new Request(`http://127.0.0.1/api/browser/captures${path}`, {
+        method: "POST",
+        headers: { ...headers, ...extra },
+        body: JSON.stringify(payload),
+      });
+
+    function asPairedDevice(request: Request): Request {
+      bindPrincipalRouteContext(request, {
+        principal: createRemoteDevicePrincipal({
+          hostId: "local" as never,
+          deviceId: "90000000-0000-4000-8000-000000000001" as never,
+          credentialGeneration: 1,
+          origin: "https://octant.example",
+          protocolVersion: 1,
+          capabilityDigest: "a".repeat(64),
+          sessionId: "a1000000-0000-4000-8000-000000000001" as never,
+        }),
+        scopeId: windowId,
+      });
+      return request;
+    }
+
+    it("lists a thread's captures and serves one as an image for a window that can open the thread", async () => {
+      const { captures, handler: capturing } = withCaptures();
+      const listed = await capturing(post("", { threadId }));
+      expect(listed?.status).toBe(200);
+      expect(await listed?.json()).toEqual({ captures: [capture] });
+      expect(captures.list).toHaveBeenCalledWith(threadId);
+
+      const image = await capturing(post("/image", { threadId, captureId }));
+      expect(image?.status).toBe(200);
+      expect(await image?.json()).toEqual({
+        captureId,
+        dataUrl: `data:image/png;base64,${Buffer.from([0x89, 0x50, 0x4e, 0x47]).toString("base64")}`,
+      });
+    });
+
+    it("refuses a caller with no window capability", async () => {
+      const { captures, handler: capturing } = withCaptures();
+      for (const [path, payload] of [
+        ["", { threadId }],
+        ["/image", { threadId, captureId }],
+      ] as const) {
+        const response = await capturing(
+          post(path, payload, { "x-octant-window-capability": "wrong" }),
+        );
+        expect(response?.status).toBe(401);
+      }
+      expect(captures.list).not.toHaveBeenCalled();
+      expect(captures.read).not.toHaveBeenCalled();
+    });
+
+    it("refuses a window that cannot open the thread", async () => {
+      const { captures, handler: capturing } = withCaptures(false);
+      expect((await capturing(post("", { threadId })))?.status).toBe(403);
+      expect((await capturing(post("/image", { threadId, captureId })))?.status).toBe(403);
+      expect(captures.list).not.toHaveBeenCalled();
+      expect(captures.read).not.toHaveBeenCalled();
+    });
+
+    it("refuses a paired device even for a thread its host window can open", async () => {
+      const { captures, handler: capturing } = withCaptures();
+      expect((await capturing(asPairedDevice(post("", { threadId }))))?.status).toBe(403);
+      expect(
+        (await capturing(asPairedDevice(post("/image", { threadId, captureId }))))?.status,
+      ).toBe(403);
+      expect(captures.list).not.toHaveBeenCalled();
+      expect(captures.read).not.toHaveBeenCalled();
+    });
+
+    it("does not serve a capture id the thread does not own", async () => {
+      const { handler: capturing } = withCaptures();
+      const response = await capturing(
+        post("/image", { threadId, captureId: "b0000000-0000-4000-8000-0000000000ff" }),
+      );
+      expect(response?.status).toBe(404);
+    });
+
+    it("asks the service to keep a screenshot only when a local window took it", async () => {
+      const screenshot = () =>
+        new Request("http://127.0.0.1/api/browser/actions", {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            actionId: "70000000-0000-4000-8000-000000000001",
+            contextId,
+            correlationId: "80000000-0000-4000-8000-000000000001",
+            authority,
+            kind: "screenshot",
+          }),
+        });
+      expect((await handler(screenshot()))?.status).toBe(200);
+      expect(service.act).toHaveBeenLastCalledWith(
+        expect.objectContaining({ windowId, capturedBy: "person" }),
+      );
+
+      expect((await handler(asPairedDevice(screenshot())))?.status).toBe(200);
+      expect(service.act.mock.lastCall?.[0]).not.toHaveProperty("capturedBy");
+    });
+  });
+
   it("carries a Project browser command with the window and caller the host proved", async () => {
     const projectBrowsers = {
       execute: vi.fn(async () => ({

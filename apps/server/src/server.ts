@@ -685,6 +685,8 @@ import {
   type BrowserModelBinding,
 } from "./browser/browserAppManagedTools";
 import { BrowserToolApprovalService } from "./browser/browserToolApprovalService";
+import { BrowserCaptureService } from "./browser/browserCaptureService";
+import { BrowserCaptureStore } from "./browser/browserCaptureStore";
 import { ExternalContentIngestionStore } from "./context/externalContentIngestionStore";
 import {
   AgentMessageProjection,
@@ -1933,6 +1935,15 @@ export function startOctantServer(
       });
     let activeCodeService: CodeRouteService | undefined;
     let browserAutomationService: BrowserAutomationService | undefined;
+    const browserCaptureStore = new BrowserCaptureStore(persistence.dataDirectory);
+    const browserCaptures = new BrowserCaptureService({
+      store: browserCaptureStore,
+      journal: persistence.journal,
+      connection: persistence.connection,
+      personActor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+      uuid: randomUUID,
+      clock: () => new Date().toISOString(),
+    });
     let projectBrowserService: ProjectBrowserService | undefined;
     const browserModelBindings = new Map<string, BrowserModelBinding>();
     const requireBrowserAutomationService = (): BrowserAutomationService => {
@@ -4685,6 +4696,7 @@ export function startOctantServer(
     browserAutomationService = new BrowserAutomationService({
       runtime: browserRuntime,
       authority: browserAuthority,
+      captures: browserCaptures,
       toolCallAuthority: createBrowserToolCallAuthorityService(
         browserAuthority,
         () => new Date().toISOString(),
@@ -6693,6 +6705,7 @@ export function startOctantServer(
           persistence.imageJobProjection.isFinalizedAttachmentReferenced(scopeId, attachmentId),
       }),
     );
+    yield* Effect.promise(() => browserCaptures.recover());
     imageJobService = new ImageJobService({
       journal: persistence.journal,
       projection: persistence.imageJobProjection,
@@ -7993,6 +8006,7 @@ export function startOctantServer(
     });
     const browserAutomationRoutes = createBrowserAutomationRouteHandler({
       service: browserAutomationService,
+      captures: browserCaptures,
       projectBrowsers: liveProjectBrowsers,
       authority: browserAuthority,
       approvals: requireBrowserToolApprovalService(),
@@ -10038,6 +10052,16 @@ export function startOctantServer(
             } catch {
               // A thread id that is not a generated-image scope is not an image basin.
             }
+          },
+          purgeBrowserCaptures: async (id) => {
+            let threadId;
+            try {
+              threadId = decodeBrowserThreadId(id);
+            } catch {
+              // A thread id that is not a browser thread has no capture basin.
+              return;
+            }
+            await browserCaptureStore.purgeThread(threadId);
           },
           purgeAgentMessages: (id) => agentMessageService.purgeThread(id),
         });

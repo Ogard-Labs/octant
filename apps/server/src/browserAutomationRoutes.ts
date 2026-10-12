@@ -16,11 +16,19 @@ import {
 import {
   decodeBrowserAutomationFailure,
   type BrowserAutomationFailure,
+  type BrowserThreadId,
 } from "@octant/contracts/browser-automation";
+import {
+  decodeBrowserCaptureImage,
+  decodeBrowserCaptureImageCommand,
+  decodeBrowserCapturesCommand,
+  decodeBrowserCapturesResponse,
+} from "@octant/contracts/browser-capture";
 import type {
   BrowserAuthorityResolver,
   BrowserAutomationService,
 } from "./browser/browserAutomationService";
+import type { BrowserCaptureService } from "./browser/browserCaptureService";
 import { remoteBrowserActionReach } from "@octant/domain";
 import {
   decodeProjectBrowserCommand,
@@ -43,6 +51,8 @@ export interface BrowserAutomationRouteDependencies {
     "create" | "act" | "cancel" | "stop" | "inspect" | "inspectThread" | "releaseThread"
   > &
     Partial<Pick<BrowserAutomationService, "peekThread">>;
+  /** The thread's kept screenshots; absent on a host that keeps none. */
+  readonly captures?: Pick<BrowserCaptureService, "list" | "read">;
   readonly authority: BrowserAuthorityResolver;
   readonly approvals?: {
     list(windowId: WindowId): ReadonlyArray<BrowserToolApproval>;
@@ -57,6 +67,24 @@ export interface BrowserAutomationRouteDependencies {
 export function createBrowserAutomationRouteHandler(
   dependencies: BrowserAutomationRouteDependencies,
 ): (request: Request) => Promise<Response | undefined> {
+  // A capture is a picture of a page the person browsed, so only a local
+  // window that can open the thread reads one: not a paired device, and not a
+  // window of another thread.
+  const captureRefusal = (
+    windowId: WindowId,
+    callerKind: "local-window" | "remote-device",
+    threadId: BrowserThreadId,
+    origin: string | null,
+  ): Response | undefined =>
+    callerKind === "local-window" &&
+    BROWSER_MODES.some((mode) => dependencies.authority.canAccessWindow(windowId, threadId, mode))
+      ? undefined
+      : failure(
+          { category: "unauthorized", message: "Browser thread is not owned by this window." },
+          403,
+          origin,
+        );
+
   return async (request) => {
     const url = new URL(request.url);
     if (!url.pathname.startsWith(PREFIX)) return undefined;
@@ -222,6 +250,37 @@ export function createBrowserAutomationRouteHandler(
             : await dependencies.service.peekThread(windowId, input.threadId, request.signal);
         return success(decodeBrowserAutomationSnapshot(snapshot), origin);
       }
+      if (url.pathname === "/api/browser/captures") {
+        const input = decodeBrowserCapturesCommand(decoded.value);
+        const refusal = captureRefusal(windowId, callerKind, input.threadId, origin);
+        if (refusal !== undefined) return refusal;
+        return success(
+          decodeBrowserCapturesResponse({
+            captures: dependencies.captures?.list(input.threadId) ?? [],
+          }),
+          origin,
+        );
+      }
+      if (url.pathname === "/api/browser/captures/image") {
+        const input = decodeBrowserCaptureImageCommand(decoded.value);
+        const refusal = captureRefusal(windowId, callerKind, input.threadId, origin);
+        if (refusal !== undefined) return refusal;
+        const found = await dependencies.captures?.read(input.threadId, input.captureId);
+        if (found === undefined) {
+          return failure(
+            { category: "unavailable", message: "The browser capture is unavailable." },
+            404,
+            origin,
+          );
+        }
+        return success(
+          decodeBrowserCaptureImage({
+            captureId: input.captureId,
+            dataUrl: `data:${found.capture.mime};base64,${Buffer.from(found.bytes).toString("base64")}`,
+          }),
+          origin,
+        );
+      }
       if (url.pathname === "/api/browser/contexts/release") {
         const input = decodeBrowserThreadContextCommand(decoded.value);
         return success(
@@ -245,7 +304,13 @@ export function createBrowserAutomationRouteHandler(
         }
         return success(
           decodeBrowserAutomationSnapshot(
-            await dependencies.service.act({ windowId, request: input }),
+            await dependencies.service.act({
+              windowId,
+              request: input,
+              // Only a local window is the person at the pane; a paired device
+              // never causes a capture to be kept on the host.
+              ...(callerKind === "local-window" ? { capturedBy: "person" as const } : {}),
+            }),
           ),
           origin,
         );
