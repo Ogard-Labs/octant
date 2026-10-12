@@ -118,10 +118,11 @@ Evidence after the change, on the same machine:
   keychain, `~/.ssh`, `sh`, `bash`, `zsh`, `curl`, and a write to the
   checkout are all refused. An API-key launch is refused the keychain
   file and `security` as well.
-- The real-provider subscription smoke passes its probe, Plan, decline,
-  accept, and question stages. Its interrupt stage fails after the
-  interrupt with "Claude returned an unsupported runtime message", which
-  is a separate defect, and its resume stage was not reached.
+- The real-provider subscription smoke passes every stage: probe, Plan,
+  decline, accept, question, interrupt, and resume. The interrupt stage
+  failed at first with "Claude returned an unsupported runtime message".
+  That was a separate defect in how an interrupted turn was decoded, and
+  it has since been fixed on `main`.
 
 Still not measured: an extra assigned account with its own login, and
 Linux.
