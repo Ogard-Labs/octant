@@ -1,6 +1,6 @@
 # Agent-to-agent messaging threat model
 
-**Status:** Draft for design review (not yet maintainer-approved)
+**Status:** Approved by the maintainer on 2026-10-12
 
 **Date:** 2026-08-28
 
@@ -11,6 +11,11 @@ host, beyond bounded `#thread` mention excerpts and beyond Chat-only
 `octant_thread_message` (0049)
 
 **Design:** [`../decisions/0063-agent-to-agent-messaging.md`](../decisions/0063-agent-to-agent-messaging.md)
+
+**Effective rule:** [`../architecture.md`](../architecture.md) (the paragraph on
+agent-to-agent messaging under Modes) states what the host enforces. It is
+narrower than this model's scope, and where they differ the architecture
+governs; [Residual risk](#residual-risk) lists the difference.
 
 ## Overview
 
@@ -69,14 +74,14 @@ power in another.
 | T3  | Depth or fan-out loop (A→B→A… or broadcast storms)                  | Hard depth, fan-out, and in-flight caps; refuse `depth-exceeded`; no broadcast groups                                |
 | T4  | Messaging skips sandbox, approvals, or Plan-mode read-only          | Ordinary tool-call policy on both sides; message delivery is not an approval or elevation                            |
 | T5  | Journal carries secrets or raw bodies                               | Opaque body references and size class only; redaction and payload byte caps                                          |
-| T6  | Unauthorized target (foreign Project, purged thread, closed run)    | Open check + lifecycle gate; refuse `unauthorized` / `recipient-terminal` with no title leak beyond opaque ids       |
+| T6  | Unauthorized target (foreign Project, purged thread, closed run)    | Same-Project check + lifecycle gate; every unreachable id refuses `unauthorized` in one sentence, leaking no title   |
 | T7  | Provider-native side channel bypasses Octant events                 | No peer pipe; only host-delivered messages count; native subagent chat is not this channel                           |
-| T8  | Replay or duplicate delivery double-applies side effects            | Idempotent event application; acknowledge is explicit and journaled                                                  |
+| T8  | Replay or duplicate delivery double-applies side effects            | Idempotent event application; only a message still `sent` is carried, and its body is deleted once delivered         |
 | T11 | Grant revoked or recipient closed between send and deliver          | Recheck live sender grant and recipient lifecycle before `agent.message-delivered@1`; refuse rather than deliver     |
 | T9  | Remote client forges a send                                         | Authenticated principal + host-side admission; remote cannot mint workspace or authority receipts                    |
 | T10 | Swarm UI invents team authority above parents                       | Hierarchy remains the product; no rooms, roles, or shared wallets                                                    |
 
-## Event shape sketch (contracts, not shipped)
+## Event shape
 
 Aggregate type: `agent-message`. Event names:
 
@@ -92,7 +97,7 @@ absolute paths, raw body text, credentials, or provider payloads.
 
 ## Acceptance sketch
 
-| Criterion                        | Evidence when implemented                                                              |
+| Criterion                        | Evidence                                                                               |
 | -------------------------------- | -------------------------------------------------------------------------------------- |
 | Authority clamp refuses widening | Domain red/green tests on sender vs recipient ceilings                                 |
 | Delivery taints recipient        | Journal + taint projection after one delivered message                                 |
@@ -103,14 +108,29 @@ absolute paths, raw body text, credentials, or provider payloads.
 
 ## Residual risk
 
-- This document is design-only. Controls are not enforced until contracts,
-  domain policy, and server delivery land under an Accepted 0063.
+- **Narrower than the scope above.** Only a Code turn is offered the tool, and
+  a thread reaches only another active thread of its own Project. AgentRuns,
+  Chat threads, and Work threads neither send nor receive, so the
+  cross-mode and run-to-run parts of this model describe no shipped path.
+- **The frame is shared.** A delivered body sits inside the external-data
+  frame every other external source uses. This channel adds no escaping of its
+  own, so its data boundary is exactly as strong as that framing function.
+- **A message may wait indefinitely.** Delivery happens only when the
+  recipient's next turn starts, and messaging starts none. The sender is told
+  `sent` and has no tool to read the later outcome.
+- **Delivery is at least once.** A host that stops after a turn was taken on
+  and before `agent.message-delivered@1` is appended offers the same message
+  to the next turn. The taint record is idempotent; the body is read twice.
+- **No recipient acknowledgement.** Nothing journals
+  `agent.message-acknowledged@1`; `delivered` means a turn carried the body,
+  not that the model acted on it.
+- **Refusals at admission are journaled without endpoints.** The refused
+  event carries no sender or recipient id, so the Agents center counts only
+  refusals of messages that were first admitted.
 - Model-to-model social engineering inside a single already-authorized thread
-  remains a residual of ordinary tool use; messaging must not make that worse
-  across threads.
-- Exact numeric caps (depth, fan-out, bytes, in-flight) are left to the
-  implementation ADR acceptance pass so they can track measured abuse, not
-  guesswork here.
+  remains a residual of ordinary tool use; within one Project, a message from
+  a thread that ingested hostile content carries that content to its
+  recipient, framed and tainting, and no further.
 
 ## Related
 

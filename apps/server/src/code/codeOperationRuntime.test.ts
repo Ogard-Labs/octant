@@ -58,6 +58,10 @@ import {
   readCodeRuntimeWorkAggregateVersion,
   readCodeThreadActivity,
 } from "../persistence/codeProjection";
+import {
+  AGENT_MESSAGE_TOOL_NAME,
+  createAgentMessageTools,
+} from "../agentMessage/agentMessageTools";
 import { admittedParentCodeContext } from "../agentRun/agentRunParentContext";
 import {
   CODE_OPERATION_EVENT_RECORDED,
@@ -4914,6 +4918,7 @@ function runtimeFixture(options: {
   computerUseUnattachedTools?: Parameters<
     typeof createCodeOperationRuntime
   >[0]["computerUseUnattachedTools"];
+  agentMessages?: Parameters<typeof createCodeOperationRuntime>[0]["agentMessages"];
   /** Whether the thread's provider can carry app-managed tools (default true). */
   supportsAppManagedTools?: boolean;
   /** Whether the provider natively serves ACP client capabilities. */
@@ -5184,6 +5189,7 @@ function runtimeFixture(options: {
     ...(options.computerUseUnattachedTools === undefined
       ? {}
       : { computerUseUnattachedTools: options.computerUseUnattachedTools }),
+    ...(options.agentMessages === undefined ? {} : { agentMessages: options.agentMessages }),
     ...(options.browserAutomation === undefined &&
     options.supportsAppManagedTools === undefined &&
     options.supportsAcpClientCapabilities === undefined
@@ -6009,6 +6015,41 @@ it("registers a refusal-only Computer tool on a turn that carried no Computer se
   expect(unattachedCalls).toHaveLength(1);
   expect(starts[0]?.tools?.map((tool) => tool.name)).toContain("octant_computer");
   fixture.close();
+});
+
+it("offers the agent message tool to a Code turn and withholds it from one in Plan", async () => {
+  const offered = async (executionPolicy: CodeThread["executionPolicy"], operation: number) => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const starts: Array<ProviderSessionStart> = [];
+    const fixture = runtimeFixture({
+      provider: providerDriver(providerConnection(queue, starts)),
+      supportsAppManagedTools: true,
+      agentMessages: ({ thread: sender, readPosture }) =>
+        createAgentMessageTools({
+          service: { send: async () => [] },
+          senderThreadId: String(sender.id),
+          toolConstraints: [],
+          profileDisplayName: "the bound profile",
+          readPosture,
+        }),
+    });
+    fixture.setThread(decodeCodeThread({ ...thread(), executionPolicy }));
+    await fixture.runtime.execute(windowId, {
+      kind: "start-provider-turn",
+      operationId: operationId(operation),
+      threadId,
+      checkoutId,
+      sessionId,
+      prompt: fixture.prompt,
+    });
+    fixture.close();
+    return starts[0]?.tools?.map((tool) => tool.name) ?? [];
+  };
+
+  expect(await offered("approval-gated", 83)).toContain(AGENT_MESSAGE_TOOL_NAME);
+  // Plan is read-only, and sending stores a body and journals: the provider
+  // is never told the tool exists.
+  expect(await offered("plan", 84)).not.toContain(AGENT_MESSAGE_TOOL_NAME);
 });
 
 it("keeps the selected Computer tool instead of the refusal stub when @Computer is attached", async () => {

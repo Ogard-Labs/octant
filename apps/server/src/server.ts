@@ -2803,43 +2803,33 @@ export function startOctantServer(
     const agentMessageBodyStore = new AgentMessageBodyStore(
       join(persistence.dataDirectory, "agent-messages"),
     );
+    // Only a real thread is addressable. A child run has no turn that would
+    // carry a message, so its id resolves to nothing and refuses like any
+    // other unreachable one.
     const resolveAgentMessageEndpoint: AgentMessageEndpointResolver = (threadId) => {
       const chat = persistence.readChatThread(threadId as never);
       if (chat !== undefined) {
-        return { mode: "chat", terminal: chat.lifecycle !== "active" };
+        return {
+          mode: "chat",
+          projectId: chat.projectId === undefined ? undefined : String(chat.projectId),
+          terminal: chat.lifecycle !== "active",
+        };
       }
       const code = persistence.readCodeThread(threadId as never);
       if (code !== undefined) {
-        return { mode: "code", terminal: code.lifecycle !== "active" };
+        return {
+          mode: "code",
+          projectId: String(code.projectId),
+          terminal: code.lifecycle !== "active",
+        };
       }
       const work = workThreadProjection.list().find((thread) => String(thread.id) === threadId);
       if (work !== undefined) {
-        return { mode: "work", terminal: work.lifecycle !== "active" };
-      }
-      const run = persistence.agentRunProjection.getById(threadId as never);
-      if (run !== undefined) {
-        // A run speaks for its parent thread's mode, and a message to a run
-        // lands on the hierarchy edge 0012 already owns.
-        const runTerminal =
-          run.lifecycleStatus === "completed" ||
-          run.lifecycleStatus === "failed" ||
-          run.lifecycleStatus === "cancelled" ||
-          run.lifecycleStatus === "interrupted";
-        const parentChat = persistence.readChatThread(String(run.parentThreadId) as never);
-        if (parentChat !== undefined) {
-          return {
-            mode: "chat",
-            terminal: runTerminal || parentChat.lifecycle !== "active",
-          };
-        }
-        const parentCode = persistence.readCodeThread(String(run.parentThreadId) as never);
-        if (parentCode !== undefined) {
-          return {
-            mode: "code",
-            terminal: runTerminal || parentCode.lifecycle !== "active",
-          };
-        }
-        return { mode: "chat", terminal: runTerminal };
+        return {
+          mode: "work",
+          projectId: String(work.projectId),
+          terminal: work.lifecycle !== "active",
+        };
       }
       return undefined;
     };
@@ -5185,11 +5175,17 @@ export function startOctantServer(
           githubReadToolSetIfEffective(githubExtensionSnapshot.read(), () =>
             githubReadToolService.createToolSet({ windowId, thread, readThread }),
           ),
-        agentMessages: ({ thread }) =>
+        agentMessages: ({ thread, readPosture }) =>
           createAgentMessageTools({
             service: agentMessageService,
             senderThreadId: String(thread.id),
+            toolConstraints: thread.toolConstraints ?? [],
+            profileDisplayName: thread.profileDisplayName ?? "the bound profile",
+            readPosture,
           }),
+        carryAgentMessages: (threadId) => agentMessageService.carryIntoTurn(threadId),
+        confirmAgentMessagesDelivered: (messageIds) =>
+          agentMessageService.confirmDelivered(messageIds),
         sideTasks: ({ thread }) =>
           createSideTaskTools({
             store: sideTasks,
@@ -6852,6 +6848,10 @@ export function startOctantServer(
       }),
       "Agent message",
     );
+    // A body lives only while its message waits for a turn. The sweep is a
+    // disk bound, not a precondition: a host that cannot read the store still
+    // starts.
+    yield* Effect.promise(() => agentMessageService.reconcileStoredBodies().catch(() => undefined));
     const workArtifactProjection = new WorkArtifactProjection();
     requireJournalHydration(
       hydrateWorkArtifactProjectionFromJournal({

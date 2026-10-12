@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -148,6 +148,38 @@ describe("the agent message body store", () => {
         reason: "oversize",
       });
       expect(await store.write("")).toEqual({ status: "refused", reason: "oversize" });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("after a restart keeps only the bodies of waiting messages and counts them against the budget", async () => {
+    const root = await mkdtemp(join(tmpdir(), "octant-agent-message-bodies-"));
+    try {
+      const earlier = new AgentMessageBodyStore(root);
+      const waiting = await earlier.write("w".repeat(40_000));
+      const settled = await earlier.write("An already delivered handoff.");
+      if (waiting.status !== "stored" || settled.status !== "stored") {
+        throw new Error("The store refused a bounded body.");
+      }
+      await writeFile(join(root, "notes.txt"), "Not a message body.", "utf8");
+
+      // A new process starts with no count of what the last one left on disk.
+      const store = new AgentMessageBodyStore(root, { maxTotalBytes: 65_536 });
+      await store.retainOnly(new Set([waiting.contentReference]));
+
+      expect(await store.read(waiting.contentReference)).toBe("w".repeat(40_000));
+      expect(await store.read(settled.contentReference)).toBeUndefined();
+      // A file the store did not write is not its to delete.
+      expect(await readFile(join(root, "notes.txt"), "utf8")).toBe("Not a message body.");
+      // The waiting body still holds its share of the budget, and gives it
+      // back once its message settles.
+      expect(await store.write("x".repeat(40_000))).toEqual({
+        status: "refused",
+        reason: "oversize",
+      });
+      await store.forget(waiting.contentReference);
+      expect(await store.write("x".repeat(40_000))).toMatchObject({ status: "stored" });
     } finally {
       await rm(root, { recursive: true, force: true });
     }

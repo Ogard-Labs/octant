@@ -1540,6 +1540,62 @@ describe("CodeOperationService", () => {
     expect(consumeIssueContextFramed).toHaveBeenCalledExactlyOnceWith(String(ids.thread));
   });
 
+  it("carries a waiting agent message in the turn's context and records it delivered only once a turn is admitted", async () => {
+    const waiting = [{ messageId: "message-1", text: "<framed agent message>" }];
+    const carryAgentMessages = vi.fn(async () => waiting);
+    const confirmAgentMessagesDelivered = vi.fn(async () => undefined);
+    const fixture = providerTurnFixture({ carryAgentMessages, confirmAgentMessagesDelivered });
+    fixture.turns.start.mockResolvedValueOnce({
+      state: "failed",
+      admission: "refused",
+      failure: { category: "unauthorized", message: "Turn admission is no longer current." },
+    });
+    fixture.turns.start.mockResolvedValueOnce({
+      state: "failed",
+      failure: { category: "failed", message: "The provider is not ready." },
+    });
+
+    // Neither a refused nor a failed start reached a provider, so the message
+    // is still waiting and nothing claims it was delivered.
+    await fixture.service.execute(ids.window, startProviderTurn);
+    await fixture.service.execute(ids.window, {
+      ...startProviderTurn,
+      operationId: decodeCodeOperationId("56565656-5656-4565-8565-565656565656"),
+    });
+    expect(confirmAgentMessagesDelivered).not.toHaveBeenCalled();
+
+    await expect(
+      fixture.service.execute(ids.window, {
+        ...startProviderTurn,
+        operationId: decodeCodeOperationId("57575757-5757-4575-8575-575757575757"),
+      }),
+    ).resolves.toMatchObject({ kind: "provider-turn-state", state: "running" });
+
+    expect(carryAgentMessages).toHaveBeenCalledWith(String(ids.thread));
+    expect(fixture.turns.start).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        context: expect.arrayContaining([{ kind: "user-message", text: "<framed agent message>" }]),
+      }),
+    );
+    expect(confirmAgentMessagesDelivered).toHaveBeenCalledExactlyOnceWith(["message-1"]);
+  });
+
+  it("starts the person's turn without agent messages when they cannot be read", async () => {
+    const confirmAgentMessagesDelivered = vi.fn(async () => undefined);
+    const fixture = providerTurnFixture({
+      carryAgentMessages: async () => {
+        throw new Error("The message journal is unavailable.");
+      },
+      confirmAgentMessagesDelivered,
+    });
+
+    await expect(fixture.service.execute(ids.window, startProviderTurn)).resolves.toMatchObject({
+      kind: "provider-turn-state",
+      state: "running",
+    });
+    expect(confirmAgentMessagesDelivered).not.toHaveBeenCalled();
+  });
+
   it("sends the images the journal recorded, and refuses ones no turn may claim", async () => {
     const reference = {
       attachmentId: "40000000-0000-4000-8000-000000000001",
@@ -2450,6 +2506,8 @@ function providerTurnFixture(
       | "isProviderModelAllowed"
       | "agentRuns"
       | "consumeIssueContextFramed"
+      | "carryAgentMessages"
+      | "confirmAgentMessagesDelivered"
       | "takeProductFeedbackForTurn"
     >
   > & { readonly thread?: CodeThread; readonly recordEvents?: boolean } = {},

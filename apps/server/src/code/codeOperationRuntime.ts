@@ -379,10 +379,12 @@ export interface CodeOperationRuntimeOptions {
   /**
    * The agent-message tool set for this thread, when the host admits agent
    * messaging (decision 0063). The service is server-owned; the tool only
-   * petitions it.
+   * petitions it. `readPosture` is the turn's access posture at the moment it
+   * is asked, so a turn in Plan is neither offered the tool nor able to send.
    */
   readonly agentMessages?: (input: {
     readonly thread: CodeThread;
+    readonly readPosture: () => CodeThread["executionPolicy"];
   }) => AppManagedToolSet | undefined;
   /** Lets the model offer out-of-scope work as a side task the person may start. */
   readonly sideTasks?: (input: { readonly thread: CodeThread }) => AppManagedToolSet | undefined;
@@ -458,6 +460,10 @@ export interface CodeOperationRuntimeOptions {
   readonly takeIssueContextFramed?: CodeOperationServiceOptions["takeIssueContextFramed"];
   readonly peekIssueContextFramed?: CodeOperationServiceOptions["peekIssueContextFramed"];
   readonly consumeIssueContextFramed?: CodeOperationServiceOptions["consumeIssueContextFramed"];
+  /** Reads the agent messages waiting for a thread into its next turn. */
+  readonly carryAgentMessages?: CodeOperationServiceOptions["carryAgentMessages"];
+  /** Records that an admitted turn carries those messages. */
+  readonly confirmAgentMessagesDelivered?: CodeOperationServiceOptions["confirmAgentMessagesDelivered"];
   /**
    * The Project checkout a run comes home to. The host resolves the path; this
    * runtime observes its branch and cleanliness itself, so the merge gate reads
@@ -851,6 +857,12 @@ export function createCodeOperationRuntime(
     ...(options.consumeIssueContextFramed === undefined
       ? {}
       : { consumeIssueContextFramed: options.consumeIssueContextFramed }),
+    ...(options.carryAgentMessages === undefined
+      ? {}
+      : { carryAgentMessages: options.carryAgentMessages }),
+    ...(options.confirmAgentMessagesDelivered === undefined
+      ? {}
+      : { confirmAgentMessagesDelivered: options.confirmAgentMessagesDelivered }),
     ...(options.resolveBaseCheckoutRoot === undefined
       ? {}
       : {
@@ -2920,7 +2932,16 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           thread: active.thread,
           readThread: (windowId, threadId) => this.#effectiveThread(windowId, threadId),
         }),
-        this.#options.agentMessages?.({ thread: active.thread }),
+        this.#options.agentMessages?.({
+          thread: active.thread,
+          readPosture: () =>
+            clampTurnAccessPosture({
+              requested: active.thread.executionPolicy,
+              thread:
+                this.#effectiveThread(active.windowId, active.thread.id)?.executionPolicy ??
+                active.thread.executionPolicy,
+            }),
+        }),
         this.#options.sideTasks?.({ thread: active.thread }),
         this.#options.canvas?.({ windowId: active.windowId, thread: active.thread }),
         this.#options.agents?.({ windowId: active.windowId, thread: active.thread }),
