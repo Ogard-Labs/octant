@@ -1,4 +1,13 @@
-import { accessSync, chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  accessSync,
+  chmodSync,
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -8,6 +17,7 @@ import { Effect, Either, Exit, Fiber, Scope } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
+  codexAccountProcessEnvironment,
   codexAppServerArgs,
   codexProcessEnvironment,
   makeCodexProcessLive,
@@ -194,6 +204,87 @@ describe("sanitizeCodexEnvironment", () => {
     ).toEqual({ PATH: "/usr/bin" });
   });
 
+  it("keeps inherited auth on the host-overlay account", () => {
+    const environment = codexAccountProcessEnvironment({
+      binaryPath: "/opt/homebrew/bin/codex",
+      hostEnvironment: {
+        PATH: "/usr/bin",
+        OPENAI_API_KEY: "host-key",
+        CODEX_ACCESS_TOKEN: "host-token",
+        CODEX_API_KEY: "host-codex-key",
+        AWS_BEARER_TOKEN_BEDROCK: "host-bedrock",
+      },
+      codexHome: "/Users/test/.codex",
+      inheritHostAuth: true,
+    });
+    expect(environment.CODEX_HOME).toBe("/Users/test/.codex");
+    expect(environment.OPENAI_API_KEY).toBe("host-key");
+    expect(environment.CODEX_ACCESS_TOKEN).toBe("host-token");
+    expect(environment.CODEX_API_KEY).toBe("host-codex-key");
+    expect(environment.AWS_BEARER_TOKEN_BEDROCK).toBe("host-bedrock");
+  });
+
+  it("strips inherited auth variables and pins CODEX_HOME for one account", () => {
+    const environment = codexAccountProcessEnvironment({
+      binaryPath: "/opt/homebrew/bin/codex",
+      hostEnvironment: {
+        PATH: "/usr/bin",
+        CODEX_HOME: "/Users/test/.codex",
+        OPENAI_API_KEY: "inherited-must-not-cross",
+        CODEX_ACCESS_TOKEN: "inherited-must-not-cross",
+        CODEX_API_KEY: "inherited-must-not-cross",
+        AWS_BEARER_TOKEN_BEDROCK: "inherited-must-not-cross",
+      },
+      codexHome: "/Users/test/.codex-accounts/work",
+    });
+    expect(environment.CODEX_HOME).toBe("/Users/test/.codex-accounts/work");
+    expect(environment.OPENAI_API_KEY).toBeUndefined();
+    expect(environment.CODEX_ACCESS_TOKEN).toBeUndefined();
+    expect(environment.CODEX_API_KEY).toBeUndefined();
+    expect(environment.AWS_BEARER_TOKEN_BEDROCK).toBeUndefined();
+    expect(JSON.stringify(environment)).not.toMatch(/cli_auth_credentials_store|auth\.json/i);
+  });
+
+  it("keeps an extra account's thread state out of the host's database and leaves the AWS profile alone", () => {
+    const hostEnvironment = {
+      PATH: "/usr/bin",
+      CODEX_SQLITE_HOME: "/Users/test/.codex-state",
+      AWS_PROFILE: "work",
+      AWS_REGION: "eu-north-1",
+    };
+
+    const extra = codexAccountProcessEnvironment({
+      binaryPath: "/opt/homebrew/bin/codex",
+      hostEnvironment,
+      codexHome: "/Users/test/.codex-accounts/work",
+    });
+    expect(extra.CODEX_SQLITE_HOME).toBeUndefined();
+    expect(extra.AWS_PROFILE).toBe("work");
+    expect(extra.AWS_REGION).toBe("eu-north-1");
+
+    const first = codexAccountProcessEnvironment({
+      binaryPath: "/opt/homebrew/bin/codex",
+      hostEnvironment,
+      codexHome: "/Users/test/.codex",
+      inheritHostAuth: true,
+    });
+    expect(first.CODEX_SQLITE_HOME).toBe("/Users/test/.codex-state");
+  });
+
+  it("injects only a broker-resolved API key after stripping inherited auth", () => {
+    const environment = codexAccountProcessEnvironment({
+      binaryPath: "/opt/homebrew/bin/codex",
+      hostEnvironment: {
+        PATH: "/usr/bin",
+        OPENAI_API_KEY: "inherited-must-not-cross",
+      },
+      codexHome: "/Users/test/.codex-accounts/api",
+      brokerApiKey: "broker-resolved-key",
+    });
+    expect(environment.OPENAI_API_KEY).toBe("broker-resolved-key");
+    expect(environment.CODEX_HOME).toBe("/Users/test/.codex-accounts/api");
+  });
+
   it("prepends the configured binary directory for env-based interpreters", () => {
     const binaryPath = "/opt/homebrew/bin/codex";
 
@@ -355,6 +446,27 @@ describe("codexAppServerArgs", () => {
 });
 
 describe("CodexProcessPort", () => {
+  it("creates an account home that does not exist yet before starting Codex", async () => {
+    const target = fixture();
+    const accountHome = join(target.root, "codex-accounts", "work");
+    expect(existsSync(accountHome)).toBe(false);
+
+    await Effect.runPromise(
+      Effect.scoped(
+        makePort()
+          .start({
+            binaryPath: target.binaryPath,
+            environment: { ...process.env, CODEX_HOME: accountHome },
+          })
+          .pipe(Effect.asVoid),
+      ),
+    );
+
+    // Codex refuses a missing home, so the folder must be there first, and
+    // only its owner may read a folder that will hold a login.
+    expect(statSync(accountHome).mode & 0o777).toBe(0o700);
+  });
+
   it("spawns stdio app-server and completes the stable handshake exactly once", async () => {
     const target = fixture();
     const environment = {

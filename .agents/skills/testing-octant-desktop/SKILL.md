@@ -140,8 +140,8 @@ description: How to test the packaged Octant macOS desktop app end-to-end — la
 - `vibe-acp --setup` is a fullscreen TUI (welcome → theme → "Use an API key" → paste field). Run it in a
   real Terminal.app window and type the key via `${MISTRAL_API_KEY}` substitution — write_to_process and
   piped stdin can't deliver it. It stores the key in macOS Keychain (`ai.mistral.vibe`).
-- That keychain entry is USELESS to Octant: Vibe's confined spawn sets `VIBE_TEST_DISABLE_KEYRING=1` and
-  lacks `allowProviderCredentialLookup` — "Sign in required" persists. The working path is Settings →
+- That keychain entry is USELESS to Octant: Vibe's confined spawn sets `VIBE_TEST_DISABLE_KEYRING=1`,
+  so "Sign in required" persists. The working path is Settings →
   Providers → Mistral Vibe ACP → Configure → "Mistral API key (leave blank to preserve)" → Save
   ("Stored in Keychain") → Check connection → Ready.
 - Provider-card Save buttons can be unresponsive; pressing Enter inside the API-key field submits reliably

@@ -36,7 +36,7 @@ describe("CodeSettingsView", () => {
     const update = vi.fn(async () => true);
     render(<CodeSettingsView onUpdate={update} settings={settings as never} />);
 
-    expect(screen.getByText(/apply only to new Code threads/i)).toBeVisible();
+    expect(screen.getByText(/Access defaults apply only to new Code threads/i)).toBeVisible();
     expect(screen.getByRole("combobox", { name: "Default Code access" })).toHaveTextContent(
       "Ask for approvals",
     );
@@ -53,6 +53,7 @@ describe("CodeSettingsView", () => {
     expect(update).toHaveBeenCalledWith({
       defaultExecutionPolicy: "plan",
       defaultPermissionPersistence: "current-session",
+      defaultDiffLayout: "unified",
     });
   });
 
@@ -76,6 +77,7 @@ describe("CodeSettingsView", () => {
     expect(update).toHaveBeenLastCalledWith({
       defaultExecutionPolicy: "approval-gated",
       defaultPermissionPersistence: "current-session",
+      defaultDiffLayout: "unified",
       externalEditor: {
         executable: "/usr/local/bin/code",
         arguments: ["--goto", "{file}:{line}:{column}"],
@@ -98,8 +100,38 @@ describe("CodeSettingsView", () => {
     // the two-way persistence choice stays segmented.
     expect(screen.getByRole("combobox", { name: "Default Code access" })).toBeVisible();
     expect(screen.getByRole("group", { name: "Default approval persistence" })).toBeVisible();
+    expect(screen.getByRole("group", { name: "Default diff layout" })).toBeVisible();
     expect(
       screen.getByRole("textbox", { name: "External editor executable" }).closest(".setrow"),
     ).not.toBeNull();
+  });
+
+  it("marks the default diff layout row when Settings search lands on it", () => {
+    render(
+      <CodeSettingsView
+        focusedSetting="code-default-diff-layout"
+        onUpdate={async () => true}
+        settings={settings as never}
+      />,
+    );
+
+    expect(screen.getByRole("group", { name: "Default diff layout setting" })).toHaveAttribute(
+      "data-focused",
+      "true",
+    );
+  });
+
+  it("keeps a default diff layout the moment it is chosen, with no Save step", async () => {
+    const update = vi.fn(async () => true);
+    const user = userEvent.setup();
+    render(<CodeSettingsView onUpdate={update} settings={settings as never} />);
+
+    expect(screen.getByRole("button", { name: "Unified" })).toHaveAttribute("aria-pressed", "true");
+    await user.click(screen.getByRole("button", { name: "Side by side" }));
+    expect(update).toHaveBeenCalledWith({
+      defaultExecutionPolicy: "approval-gated",
+      defaultPermissionPersistence: "current-session",
+      defaultDiffLayout: "side-by-side",
+    });
   });
 });

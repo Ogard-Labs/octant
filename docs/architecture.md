@@ -1719,7 +1719,97 @@ The provider layer is defined by `@octant/provider-sdk` and implemented in
 - **Registry.** Providers are multi-instance: each instance has a stable id,
   driver kind, configuration, readiness state, model list, capability report,
   and environment policy. A selected model is `{ hostId, providerInstanceId,
-modelId }`, and the model picker is provider-first. Discovery can find
+modelId }`, and the model picker is provider-first. Each Claude instance is
+  one account. An account is a provider instance with a display name, an
+  accent, an Octant-assigned provider-owned state directory, and a
+  sign-in command. Each CLI driver that supports more than one account
+  declares one account profile: the environment variables that point
+  the CLI at that state directory, the default host directory, the
+  assigned-directory pattern for extra accounts
+  (`~/.<provider>-accounts/<instanceId>`), the sign-in and status
+  commands, and whether multi-account is supported. Settings, the
+  model picker, thread pinning, and usage history are written against
+  that profile. Octant never reads, stores, or injects that provider's
+  credentials ([0005](decisions/0005-provider-sdk-contract.md)).
+  Plan usage limits (rolling windows, per-model weekly, overage) come
+  only from the provider's own process: session `rate-limit-window`
+  events, or a process reading a person asks for. That reading starts
+  the provider's process, so it is made only on an explicit refresh
+  (`onDemand` on the context-facts input), never on the schedule or
+  before a turn. Observed with Claude Code 2.1.296, a process started
+  only for the question holds no windows until it has made a model
+  request, and answers with none; that is no answer, and the last
+  snapshot stays. Octant never reads a token or credential file to
+  fetch those numbers, and never calls a vendor usage endpoint
+  itself. Each account keeps its own snapshot, keyed by
+  the instance and the state directory that session ran under. The
+  snapshots live in `providers/plan-usage.json` in the host store,
+  readable by its owner only and listed in the host data map; removing
+  an account removes its snapshots. An
+  API-key account reports that plan limits do not apply rather than
+  drawing empty bars, also when it kept the directory it had as a
+  subscription account. Overage reads as in use once something was
+  spent, not when it is merely switched on. A failed or missing
+  refresh keeps the last snapshot and shows its age. Claude is the
+  first adopter.
+  Claude is the first adopter (`CLAUDE_CONFIG_DIR` and
+  `CLAUDE_SECURESTORAGE_CONFIG_DIR`, default `~/.claude`, extras
+  `~/.claude-accounts/<instanceId>`, `claude auth login` /
+  `claude auth status`). Codex uses the same profile
+  (`CODEX_HOME`, default `~/.codex`, extras
+  `~/.codex-accounts/<instanceId>`, `codex login` /
+  `codex login status`). Octant never reads Codex `auth.json` or
+  the keyring, and never writes `cli_auth_credentials_store` into
+  the user's config: Codex names its keyring entry by a hash of the
+  canonical `CODEX_HOME` path (read in the Codex source at
+  `rust-v0.162.1`), so two homes hold two logins without forcing
+  file storage. The first account holds the host profile, and a new
+  account takes it again once no account holds it. The first
+  account keeps inherited `OPENAI_API_KEY` and the other Codex
+  auth variables (existing installs authenticate that way). Extra
+  assigned homes strip those variables so they cannot share the
+  host key, and strip `CODEX_SQLITE_HOME` so their thread state
+  database is not the host's. The AWS profile and file variables
+  stay for every account: they choose among the AWS identities of
+  the one operating-system user and hold no login of their own. An
+  explicit API-key instance still receives only the
+  broker-resolved key. Each Codex account has its own
+  long-lived app-server and never shares that process with another
+  account. Codex Plan uses Codex's own read-only sandbox, not an
+  OS wrap; the account `CODEX_HOME` is the only extra path that
+  launch receives. Extra Claude accounts are a
+  maintainer-approved exception to the rule that a CLI uses its
+  documented host profile and does not take a second login
+  ([0121](decisions/0121-provider-owned-cli-runtime-and-updates.md)):
+  two logins cannot share one profile without sharing credentials and
+  session history. The implicit first subscription account keeps the
+  host profile (`~/.claude`, or the inherited host overlay). Every
+  extra account, and every API-key account, uses its assigned leaf.
+  A leftover custom directory keeps working until the person
+  explicitly re-assigns it; Octant never silently points that login
+  at another path. Removing an account leaves its assigned directory
+  in place, with that account's sign-in and history: Octant says
+  where it is, the host data map lists `~/.claude-accounts` and
+  `~/.codex-accounts`, and
+  deleting it is the person's step. An accent is presentation only:
+  changing it alone neither stops a running session nor resets the
+  account's readiness. Sign-in is the unmodified CLI command in a
+  terminal for that account. Connection check uses what the CLI or
+  SDK reports. Two instances of the same driver cannot share one
+  effective state directory after trailing-slash identity, including
+  when a host overlay points two instances at the same existing
+  directory. A relative inherited overlay refuses only that implicit
+  directory-less subscription account. A replayed extra subscription
+  that still omits a stored directory stays unusable until it has
+  its own assigned leaf, so it cannot launch against the default
+  login. A confined Plan launch refuses an account directory that
+  is the checkout, sits inside it, or is an ancestor of it
+  ([0145](decisions/0145-a-plan-turn-is-confined-by-octant.md)).
+  Plan stays read-only for the project and checkout. The only write
+  a confined Plan Claude launch receives is that assigned leaf plus
+  the launch temporary directory.
+  A thread stays on the instance it started with; there is no
+  automatic failover, rotation, or load-balancing between accounts. Discovery can find
   installed runtimes and auto-register them. On first run, a detected Claude
   Code or Codex CLI instance is created enabled; every other detected runtime
   is created disabled. Discovery never installs or updates runtimes, never
@@ -1865,9 +1955,10 @@ modelId }`, and the model picker is provider-first. Discovery can find
   Provider OAuth has two postures ([0111](decisions/0111-host-driven-provider-oauth.md)).
   **Delegated** (`delegated-oauth`, including CLI `subscription`): login stays
   on the provider's own runtime; Octant never stores, refreshes, or journals
-  those tokens, except the opt-in Claude for helpers token that a confined
-  Claude launch signs in with, which the credential broker holds as the Sandbox
-  paragraph of [security and authority](#security-and-authority) states.
+  those tokens. The account profile names the sign-in command; Octant never
+  reads, stores, or injects that provider's credentials, including Claude
+  OAuth tokens. A leftover helper-token envelope is deleted on upgrade,
+  also for an account that was removed before the upgrade.
   **Host-driven** (`subscription-oauth`, direct HTTP drivers):
   the host runs a generic authorization-code PKCE runner and a device-code
   runner from a provider descriptor (endpoints, scopes, and a public client
@@ -3263,8 +3354,8 @@ mechanisms are:
   restart, or elapsed time. A posture none of those can clear is not an
   acceptable resting state. Recovery is a deliberate act by the machine's
   owner, never a widening of the automatic admission rule, and the refusal
-  says what clears it where the person is, not only in a log. "Connect Claude
-  for helpers in Settings › Claude Code." is the shape.
+  says what clears it where the person is, not only in a log. "Sign in with
+  the account command in Settings." is the shape.
 - **Sandbox.** Git, terminals, test runners, extension executables, and every
   provider `--version` read launch through one shared confinement port
   (`ProcessConfinementPort`), and so do provider runtimes except where the
@@ -3318,12 +3409,12 @@ mechanisms are:
   that denies only those paths (`makeAcpConfinementLive`). That wrapper
   confines nothing else.
 
-  | Runtime (module)                                                          | Plan                            | Approval-gated, auto-accept-edits                   | OS egress below Full access                      | Plan's read-only enforced by                   |
-  | ------------------------------------------------------------------------- | ------------------------------- | --------------------------------------------------- | ------------------------------------------------ | ---------------------------------------------- |
-  | ACP, OpenCode, Pi (`acpProcess.ts`, `openCodeProcess.ts`, `piProcess.ts`) | Wrapped                         | Wrapped                                             | `allow`                                          | Octant sandbox: no root write, no exec or fork |
-  | Claude Agent SDK (`claudeProcess.ts`)                                     | Wrapped; Chat children run here | Unwrapped; runtime's own sandbox, project root only | `allow` on Plan; not limited by Octant otherwise | Octant sandbox: no root write, no exec or fork |
-  | Codex app-server (`codexProcess.ts`)                                      | Unwrapped                       | Unwrapped                                           | Not limited by Octant                            | Codex's own `read-only` sandbox                |
-  | Oh My Pi (`ohMyPiProcess.ts`), readiness probe only                       | Unwrapped                       | Unwrapped                                           | Not limited by Octant                            | No turn runs                                   |
+  | Runtime (module)                                                          | Plan                            | Approval-gated, auto-accept-edits                   | OS egress below Full access                      | Plan's read-only enforced by                                                         |
+  | ------------------------------------------------------------------------- | ------------------------------- | --------------------------------------------------- | ------------------------------------------------ | ------------------------------------------------------------------------------------ |
+  | ACP, OpenCode, Pi (`acpProcess.ts`, `openCodeProcess.ts`, `piProcess.ts`) | Wrapped                         | Wrapped                                             | `allow`                                          | Octant sandbox: no root write, no exec or fork                                       |
+  | Claude Agent SDK (`claudeProcess.ts`)                                     | Wrapped; Chat children run here | Unwrapped; runtime's own sandbox, project root only | `allow` on Plan; not limited by Octant otherwise | Octant sandbox: project and checkout read-only; write only the assigned account leaf |
+  | Codex app-server (`codexProcess.ts`)                                      | Unwrapped                       | Unwrapped                                           | Not limited by Octant                            | Codex's own `read-only` sandbox                                                      |
+  | Oh My Pi (`ohMyPiProcess.ts`), readiness probe only                       | Unwrapped                       | Unwrapped                                           | Not limited by Octant                            | No turn runs                                                                         |
 
   Codex is unwrapped because its app-server is leased once per provider
   instance: `providerRuntimeRegistry` keys runtimes by `instanceId`, so one
@@ -3342,35 +3433,35 @@ mechanisms are:
   an exception. Octant-owned tools those threads reach stay confined either
   way. A runtime's own built-in tools (Codex's shell, Claude's Bash on the
   postures that write) run under that runtime's sandbox, not Octant's.
-  A confined Claude launch never reaches the keychain itself: the runtime
-  reads its subscription sign-in by running `/usr/bin/security`, which would
-  return any keychain item that trusts that tool, including other command-line
-  programs' tokens, so the profile runs neither the tool nor reads the keychain
-  file. Measured on macOS 27, the security-server lookup alone leaves such a
-  launch signed out, so a confined Claude launch on subscription sign-in, Chat
-  children included, signs in with "Claude for helpers" instead: a long-lived
-  token the runtime's own `claude setup-token` mints after one browser approval.
-  The host runs that command on a host-owned pseudo-terminal outside any
-  sandbox, reads the printed token from memory, and keeps it in the credential
-  broker under the Claude Code instance, wrapped so it never reads as that
-  instance's API key. Removing the provider stops a connect still waiting for
-  that approval, and a token that arrives after the instance was removed or
-  switched to an API key is discarded, never kept.
-  A confined launch receives it as `CLAUDE_CODE_OAUTH_TOKEN`
-  and no keychain lookup; unconfined launches keep the runtime's own sign-in.
-  The one confined Claude launch with no credential of its own is the
-  subscription readiness probe, which runs under Plan; only it keeps the
-  security-server lookup (`allowProviderCredentialLookup`), with the keychain
-  files and `/usr/bin/security` still denied. That lookup signs no turn in;
-  whether the probe's account read depends on it has not been measured.
-  Without a connected token the launch refuses with "Connect Claude for helpers
-  in Settings › Claude Code.", which a parent's `wait` and `status` carry. The
-  runtime never refreshes a handed-in token, so one it refuses is marked
-  expired and the same reconnect step is reported. Only a local window may
-  connect or disconnect. Disconnecting deletes the token from the broker and
-  reports a broker it cannot reach. Removing the Claude Code provider clears
-  it best-effort: the removal completes even when the broker is unreachable and
-  the token can remain. Octant has no call that revokes it with Anthropic. A
+  A confined Claude Plan launch may write only the assigned leaf of that
+  account's state directory (`~/.claude` or
+  `~/.claude-accounts/<instanceId>`) and the launch temporary directory.
+  The checkout must not be that leaf, sit inside it, or be an ancestor of
+  it, so Plan cannot reopen the project through the account grant.
+  A confined Claude launch on a subscription account signs in with the
+  unmodified CLI, which on macOS reads its login by running
+  `/usr/bin/security` against the login keychain. Measured on macOS 27.0.1
+  with Claude Code 2.1.296, that read needs four things and nothing else:
+  exec of exactly `/usr/bin/security`, `process-fork`, read of the one file
+  `~/Library/Keychains/login.keychain-db`, and the two security-server
+  lookups. With any one missing the runtime is signed out, so the launch
+  takes all four, as Seatbelt `extraRules` and the fork switch, the same
+  way an OpenCode launch may exec `/usr/bin/false`. No shell, no Keychain
+  write, and no other file in that folder is granted: `/bin/sh` and every
+  other exec stay refused, which keeps hooks and the Bash tool out. The
+  cost: the confined runtime may fork, may run `security`, which returns
+  any keychain item that trusts that tool, and may read the encrypted
+  login keychain file. The driver refuses a file tool that names that
+  folder, so the grant serves the runtime's sign-in read and not the
+  model. A launch on an API key takes none of it. Linux keeps the login in
+  a file inside the account directory, which the launch already holds, and
+  Seatbelt rules do not apply there. Before a confined launch starts, the
+  `claude auth status` check that readiness uses runs inside that launch's
+  sandbox: a sign-in the sandbox cannot read refuses the turn with the step
+  that fixes it, instead of failing after the turn has started. Octant
+  never reads, stores, or injects Claude OAuth tokens; a leftover
+  helper-token envelope is deleted on upgrade, and the account form says
+  to revoke it with Anthropic. A
   bound root a launch may not write is denied in the profile, so a checkout under that launch's own temporary directory is not
   writable through it. The `--version` read every family and the discovery
   scan perform before a runtime starts is wrapped too, with no root, no home, no network and one
@@ -3728,6 +3819,16 @@ mechanisms are:
   deleted, and a request the plan route's profile cannot express is refused
   before send. The wire details are in
   [Provider runtimes](design/provider-runtimes.md#subscription-sign-in-dialects).
+
+**Proposed, not accepted: Claude sign-in inside Anthropic's terms.** Octant
+would not mint, store, or inject a Claude setup or OAuth token. Claude
+subscription sign-in would stay in Anthropic's own flow, and confined Claude
+launches would sign in from a Claude-owned config directory. Step 0 of the
+plan was measured on 12 Oct 2026, and the maintainer chose the Keychain read
+it found. The rule is still not in force: it needs Anthropic's Commercial
+Terms or an explicit Anthropic exception. Until that is recorded, the rules
+in this document describe the build as it ships. The steps, the open questions, and the rejected alternatives live in
+[the remediation plan](plans/claude-inside-anthropics-terms.md).
 
 ## Package map
 

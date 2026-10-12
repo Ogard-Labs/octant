@@ -506,15 +506,7 @@ import { createHostOAuthService, extAgentHostIdFor } from "./providers/oauth/hos
 import { makeHostOAuthBrokerClient } from "./providers/oauth/hostOAuthBrokerClient";
 import { hostOAuthEventJournal } from "./providers/oauth/hostOAuthEventJournal";
 import { createProviderOAuthRouteHandler } from "./providers/oauth/providerOAuthRoutes";
-import {
-  claudeHelperSignInFromBroker,
-  type ClaudeHelperSignInPort,
-} from "./providers/claudeHelperSignIn";
-import {
-  createClaudeHelperSignInRouteHandler,
-  createClaudeHelperSignInService,
-} from "./providers/claudeHelperSignInRoutes";
-import { runInstalledClaudeSetupToken } from "./providers/claudeSetupToken";
+import { retireClaudeHelperTokens } from "./providers/claudeHelperTokenRetirement";
 import { subscriptionOAuthHostFromBroker } from "./providers/oauth/subscriptionOAuthHost";
 import type { CompatibleFetch } from "./providers/openAiCompatibleEndpoint";
 import { makeClaudeAgentSdkPort, type ClaudeAgentSdkPort } from "./providers/claudeAgentSdkPort";
@@ -558,6 +550,7 @@ import {
 import { ProviderUsageLimitsService } from "./providers/providerUsageLimitsService";
 import { unavailableLimitsReason } from "./providers/providerLimitsReporting";
 import { createProviderUsageLimitsRouteHandler } from "./providers/providerUsageLimitsRoutes";
+import { ProviderAccountPlanUsageStore } from "./providers/providerAccountPlanUsageStore";
 import { ProviderRuntimeUsageLimitsStore } from "./providers/providerRuntimeUsageLimitsStore";
 import { attachProviderRuntimeUsageLimits } from "./providers/providerRuntimeUsageLimitsDriver";
 import {
@@ -579,7 +572,10 @@ import { createSpendCeilingRouteHandler } from "./spendCeilingRoutes";
 import { CacheStatsProjection } from "./cacheStatsProjection";
 import { createUsageDashboardRouteHandler } from "./usageDashboardRoutes";
 import { createLocalUsageHistoryRouteHandler } from "./localUsageHistoryRoutes";
-import { createLocalUsageHistorySourceForDriver } from "./providers/providerUsageHistorySources";
+import {
+  createLocalUsageHistorySourceForDriver,
+  localUsageHistorySourceKey,
+} from "./providers/providerUsageHistorySources";
 import { resolveWindowProjectScope, type UsageProjectScope } from "./usageProjectScope";
 import { SideChatSidecarStore } from "./chat/sideChatSidecarStore";
 import {
@@ -838,9 +834,11 @@ import {
   isAndroidEmulatorInputKind,
   androidActionOpensInputGrant,
   defaultShellSettings,
+  effectiveClaudeAccountConfigDirectory,
   enabledModes,
   formatThreadMentionContext,
   isAgentRunActiveStatus,
+  claudePlanUsageStateDirectory,
   isImageProfileDriverKind,
   isNativeHarnessDriverKind,
   isProviderAllowedByProjectPolicy,
@@ -1014,8 +1012,9 @@ interface ConfiguredProviderDriverOptions {
   readonly claudeProcess?: ClaudeProcessPort;
   readonly claudeSdk?: ClaudeAgentSdkPort;
   readonly claudeResumeIdentityPort?: ClaudeResumeIdentityPort;
-  readonly claudeHelperSignIn?: ClaudeHelperSignInPort;
   readonly isProjectConfinedPath?: (projectRoot: string, absolutePath: string) => boolean;
+  readonly claudeInstances?: ReadonlyArray<ProviderInstance>;
+  readonly codexInstances?: ReadonlyArray<ProviderInstance>;
   readonly runtimeRegistry: ProviderRuntimeRegistry;
   readonly permissionPersistence: () => PermissionPersistence;
   readonly credentialResolver?: ProviderCredentialResolver;
@@ -1113,12 +1112,13 @@ export function makeConfiguredProviderDriver(
       ...(options.claudeResumeIdentityPort === undefined
         ? {}
         : { claudeResumeIdentityPort: options.claudeResumeIdentityPort }),
-      ...(options.claudeHelperSignIn === undefined
-        ? {}
-        : { claudeHelperSignIn: options.claudeHelperSignIn }),
       ...(options.isProjectConfinedPath === undefined
         ? {}
         : { isProjectConfinedPath: options.isProjectConfinedPath }),
+      ...(options.claudeInstances === undefined
+        ? {}
+        : { claudeInstances: options.claudeInstances }),
+      ...(options.codexInstances === undefined ? {} : { codexInstances: options.codexInstances }),
       ...(options.credentialResolver === undefined
         ? {}
         : { credentialResolver: options.credentialResolver }),
@@ -3866,6 +3866,21 @@ export function startOctantServer(
           ),
       });
     const providerRuntimeUsageLimitsStore = new ProviderRuntimeUsageLimitsStore();
+    const providerAccountPlanUsageStore = new ProviderAccountPlanUsageStore(
+      join(providerDataDirectory, "providers", "plan-usage.json"),
+    );
+    void providerAccountPlanUsageStore.load().catch(() => undefined);
+    const recordProviderRuntimeUsage = (event: ProviderRuntimeEvent): void => {
+      providerRuntimeUsageLimitsStore.record(event);
+      if (event.kind !== "rate-limit-window") return;
+      const instance = persistence
+        .readProviderInstances()
+        .find((candidate) => String(candidate.id) === String(event.instanceId));
+      if (instance === undefined) return;
+      const directory = claudePlanUsageStateDirectory(instance, homedir());
+      if (directory === undefined) return;
+      void providerAccountPlanUsageStore.recordWindow(event, directory).catch(() => undefined);
+    };
     const openCodeProcess = options.openCodeProcess ?? makeOpenCodeProcessLive();
     const codexProcess = options.codexProcess ?? makeCodexProcessLive({ octantVersion: version });
     const acpProcess = options.acpProcess ?? makeAcpProcessLive();
@@ -4278,27 +4293,23 @@ export function startOctantServer(
       },
     };
     const isProjectConfinedPath = options.isProjectConfinedPath ?? pathIsProjectConfined;
-    const credentialResolver =
+    const credentialBroker =
       options.credentialBrokerUrl === undefined || options.credentialBrokerToken === undefined
         ? undefined
-        : makeProviderApiKeyPool(
-            makeCredentialBrokerClient({
-              url: options.credentialBrokerUrl,
-              token: options.credentialBrokerToken,
-            }),
-          );
-    const claudeHelperSignIn =
-      credentialResolver === undefined
-        ? undefined
-        : claudeHelperSignInFromBroker(credentialResolver);
-    const claudeHelperSignInService =
-      claudeHelperSignIn === undefined
-        ? undefined
-        : createClaudeHelperSignInService({
-            store: claudeHelperSignIn,
-            readInstance: (instanceId) => persistence.readProviderInstance(instanceId),
-            runSetupToken: runInstalledClaudeSetupToken,
+        : makeCredentialBrokerClient({
+            url: options.credentialBrokerUrl,
+            token: options.credentialBrokerToken,
           });
+    const credentialResolver =
+      credentialBroker === undefined ? undefined : makeProviderApiKeyPool(credentialBroker);
+    // The retirement reads the stored value as it is, so it asks the broker
+    // and not the key pool, which answers with one key of a pool.
+    void retireClaudeHelperTokens({
+      dataDirectory: persistence.dataDirectory,
+      broker: credentialBroker,
+      instances: persistence.readProviderInstances(),
+      removedInstanceIds: persistence.readRemovedProviderInstanceIds?.() ?? [],
+    }).catch(() => undefined);
     const oauthBroker =
       options.credentialBrokerUrl === undefined || options.credentialBrokerToken === undefined
         ? undefined
@@ -4345,12 +4356,14 @@ export function startOctantServer(
           agentRunSessionStore.removeProviderIdentities(instanceId, signal),
         ]);
       },
-      // The provider is already gone; a store that cannot be reached leaves the
-      // token behind rather than reporting the removal as failed.
-      clearClaudeHelperSignIn: async (instanceId) => {
-        await claudeHelperSignInService?.forgetRemovedProvider(instanceId).catch(() => undefined);
+      clearRuntimeUsageLimits: (instanceId) => {
+        providerRuntimeUsageLimitsStore.clear(instanceId);
+        // This also runs when a provider is reconfigured or probed. The saved
+        // plan snapshot outlives those, and goes only with the account.
+        if (persistence.readProviderInstance(instanceId) === undefined) {
+          void providerAccountPlanUsageStore.forget(instanceId).catch(() => undefined);
+        }
       },
-      clearRuntimeUsageLimits: (instanceId) => providerRuntimeUsageLimitsStore.clear(instanceId),
       ...(credentialResolver === undefined
         ? {}
         : { clearProviderCredential: (instanceId) => credentialResolver.delete(instanceId) }),
@@ -4372,11 +4385,12 @@ export function startOctantServer(
             claudeSdk,
             claudeResumeIdentityPort: claudeResumeIdentityStore,
             isProjectConfinedPath,
+            claudeInstances: persistence.readProviderInstances(),
+            codexInstances: persistence.readProviderInstances(),
             runtimeRegistry: providerRuntimeRegistry,
             permissionPersistence: () => persistence.readProviderDefaults().permissionPersistence,
-            onRuntimeEvent: (event) => providerRuntimeUsageLimitsStore.record(event),
+            onRuntimeEvent: recordProviderRuntimeUsage,
             ...(credentialResolver === undefined ? {} : { credentialResolver }),
-            ...(claudeHelperSignIn === undefined ? {} : { claudeHelperSignIn }),
             ...(subscriptionOAuth === undefined ? {} : { subscriptionOAuth }),
           }),
           () => workRequestRuntime,
@@ -4399,24 +4413,6 @@ export function startOctantServer(
       windowAuthorityStore,
       maxRequestBodySize: MAX_JSON_REQUEST_BODY_SIZE,
       packagedProviderSmokeControl: options.packagedProviderSmokeControl === true,
-    });
-    // A host without the credential broker has nowhere safe to keep the token,
-    // so Settings is told that instead of a Connect button that cannot work.
-    const brokerMissing = async () =>
-      ({
-        kind: "refused",
-        reason: "Claude for helpers needs Octant's credential store, which this host does not run.",
-      }) as const;
-    const claudeHelperSignInRoutes = createClaudeHelperSignInRouteHandler({
-      service: claudeHelperSignInService ?? {
-        status: brokerMissing,
-        connect: brokerMissing,
-        disconnect: brokerMissing,
-      },
-      windowAuthorityStore,
-      ...(options.allowedRendererHttpOrigin === undefined
-        ? {}
-        : { allowedRendererHttpOrigin: options.allowedRendererHttpOrigin }),
     });
     const providerOAuthRoutes =
       hostOAuth === undefined
@@ -4515,18 +4511,32 @@ export function startOctantServer(
       isProjectConfinedPath,
       runtimeRegistry: providerRuntimeRegistry,
       permissionPersistence: () => persistence.readProviderDefaults().permissionPersistence,
-      onRuntimeEvent: (event) => providerRuntimeUsageLimitsStore.record(event),
+      onRuntimeEvent: recordProviderRuntimeUsage,
       ...(credentialResolver === undefined ? {} : { credentialResolver }),
-      ...(claudeHelperSignIn === undefined ? {} : { claudeHelperSignIn }),
       ...(subscriptionOAuth === undefined ? {} : { subscriptionOAuth }),
-      localUsageHistorySourceForInstance: (instance) =>
-        createLocalUsageHistorySourceForDriver({
+      localUsageHistorySourceForInstance: (instance) => {
+        const claudeConfigDirectory =
+          instance.driverKind === "claude"
+            ? effectiveClaudeAccountConfigDirectory(instance, homedir())
+            : undefined;
+        return createLocalUsageHistorySourceForDriver({
           driverKind: instance.driverKind,
           home: homedir(),
+          ...(claudeConfigDirectory === undefined ? {} : { claudeConfigDirectory }),
+          ...(instance.driverKind === "codex" && instance.configuration.codexHome !== undefined
+            ? { codexHome: instance.configuration.codexHome }
+            : {}),
           checkpointStore: createLocalUsageHistoryCheckpointStore(
             join(persistence.dataDirectory, "local-usage-cache.sqlite3"),
           ),
-        }),
+        });
+      },
+      get claudeInstances() {
+        return persistence.readProviderInstances();
+      },
+      get codexInstances() {
+        return persistence.readProviderInstances();
+      },
     };
     const localUsageHistoryRoutes = createLocalUsageHistoryRouteHandler({
       windowAuthorityStore,
@@ -4551,8 +4561,14 @@ export function startOctantServer(
             continue;
           }
           const source = driver.localUsageHistory;
-          if (source === undefined || seen.has(source.sourceKind)) continue;
-          seen.add(source.sourceKind);
+          if (source === undefined) continue;
+          const sourceKey = localUsageHistorySourceKey({
+            driverKind: instance.driverKind,
+            instanceId: instance.id,
+            sourceKind: source.sourceKind,
+          });
+          if (seen.has(sourceKey)) continue;
+          seen.add(sourceKey);
           sources.push(source);
         }
         return sources;
@@ -4569,11 +4585,19 @@ export function startOctantServer(
           .filter((instance) => !isImageProfileDriverKind(instance.driverKind)),
       now: () => new Date().toISOString() as UtcTimestamp,
       unavailableReason: (instance) =>
-        unavailableLimitsReason(
-          instance.driverKind,
-          providerRuntimeUsageLimitsStore.lastCompletedTurn(instance.id),
-        ),
-      observe: async (instance, signal) => {
+        instance.driverKind === "claude" && instance.configuration.authentication === "api-key"
+          ? "plan-limits-do-not-apply"
+          : unavailableLimitsReason(
+              instance.driverKind,
+              providerRuntimeUsageLimitsStore.lastCompletedTurn(instance.id),
+            ),
+      observe: async (instance, signal, { onDemand }) => {
+        if (
+          instance.driverKind === "claude" &&
+          instance.configuration.authentication === "api-key"
+        ) {
+          return { source: "provider-runtime", unavailableReason: "plan-limits-do-not-apply" };
+        }
         let driver: ProviderDriver;
         try {
           driver = makeConfiguredProviderDriver(instance, {
@@ -4584,14 +4608,50 @@ export function startOctantServer(
         }
         const facts = driver.contextFacts;
         if (facts === undefined) return undefined;
-        const limits = await Effect.runPromise(
-          Effect.scoped(facts.observeServiceLimits({ instanceId: instance.id })),
+        const outcome = await Effect.runPromise(
+          Effect.scoped(
+            Effect.either(
+              facts.observeServiceLimits({
+                instanceId: instance.id,
+                ...(onDemand ? { onDemand: true } : {}),
+              }),
+            ),
+          ),
           { signal },
         );
+        if (outcome._tag === "Left") {
+          if (outcome.left.category === "unsupported") {
+            return { source: "provider-runtime", unavailableReason: "plan-limits-do-not-apply" };
+          }
+          if (outcome.left.category === "unavailable") return undefined;
+          throw outcome.left;
+        }
+        const limits = outcome.right;
+        const directory = claudePlanUsageStateDirectory(instance, homedir());
+        if (directory !== undefined) {
+          await providerAccountPlanUsageStore.replace({
+            instanceId: instance.id,
+            stateDirectory: directory,
+            source: "process-refresh",
+            observedAt: limits.updatedAt,
+            available: true,
+            ...(limits.rateLimitWindows === undefined ? {} : { windows: limits.rateLimitWindows }),
+          });
+        }
         return { source: "provider-runtime", limits };
       },
-      runtimeLimits: (instanceId, observedAt) =>
-        providerRuntimeUsageLimitsStore.serviceLimits(instanceId, observedAt),
+      runtimeLimits: (instanceId, observedAt) => {
+        const live = providerRuntimeUsageLimitsStore.serviceLimits(instanceId, observedAt);
+        if (live !== undefined) return live;
+        const instance = persistence
+          .readProviderInstances()
+          .find((candidate) => String(candidate.id) === String(instanceId));
+        if (instance === undefined) return undefined;
+        const directory = claudePlanUsageStateDirectory(instance, homedir());
+        return directory === undefined
+          ? undefined
+          : providerAccountPlanUsageStore.serviceLimits(instanceId, directory, observedAt);
+      },
     });
     providerUsageLimitsService.start();
     void providerUsageLimitsService.refresh().catch(() => undefined);
@@ -9978,7 +10038,6 @@ export function startOctantServer(
       (await androidToolchainRoutes(request)) ??
       (await providerRoutes(request)) ??
       (await providerOAuthRoutes(request)) ??
-      (await claudeHelperSignInRoutes(request)) ??
       (await providerUsageLimitsRoutes(request)) ??
       (await discoveryRoutes(request)) ??
       (await chatRoutes(request)) ??
@@ -10294,6 +10353,7 @@ export function startOctantServer(
         : {
             dataMap: {
               dataDirectory: persistence.dataDirectory,
+              homeDirectory: homedir(),
               platform: hostRuntimePlatform,
               ...(options.credentialBrokerUrl !== undefined && hostRuntimePlatform === "darwin"
                 ? { credentialStore: desktopCredentialStore() }

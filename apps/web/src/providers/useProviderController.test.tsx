@@ -1654,6 +1654,44 @@ describe("useProviderController", () => {
     expect(calls).toEqual(["provider.update", "credential.clear", "field.clear"]);
   });
 
+  it("sends reassignAccountDirectory when changing a leftover custom Claude directory", async () => {
+    const leftover = claudeProvider({
+      configuration: {
+        kind: "claude-agent-sdk",
+        binaryPath: "/opt/homebrew/bin/claude",
+        authentication: "subscription",
+        configDirectory: "/Users/example/.claude-accounts/work",
+        accent: "teal",
+      },
+    });
+    const api = client(snapshot([leftover]));
+    vi.mocked(api.execute).mockResolvedValue({
+      kind: "provider-updated",
+      instance: leftover,
+    });
+    const { result } = renderHook(() => useProviderController({ client: api }));
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    await act(async () => {
+      await expect(
+        result.current.changeClaudeConfiguration(
+          id,
+          leftover.configuration,
+          transientCredential(""),
+          { reassignAccountDirectory: true },
+        ),
+      ).resolves.toBe(true);
+    });
+
+    expect(api.execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "change-claude-configuration",
+        instanceId: id,
+        reassignAccountDirectory: true,
+      }),
+    );
+  });
+
   // A clear that fails once the instance has stopped using the key leaves a
   // secret behind rather than an unusable provider, so the change stands and
   // cleanup is retried later.
@@ -2080,6 +2118,74 @@ describe("useProviderController", () => {
       );
       unmount();
     }
+  });
+
+  it("says where a removed Claude account's folder still is, and says nothing for the host profile", async () => {
+    for (const configDirectory of ["/Users/ada/.claude-accounts/extra", undefined] as const) {
+      const instance = claudeProvider({
+        displayName: "Claude work",
+        configuration: {
+          kind: "claude-agent-sdk",
+          binaryPath: "/opt/homebrew/bin/claude",
+          authentication: "subscription",
+          ...(configDirectory === undefined ? {} : { configDirectory }),
+        },
+      });
+      const api = client(snapshot([instance]));
+      vi.mocked(api.execute).mockResolvedValue({
+        kind: "provider-removed",
+        instanceId: id,
+        version: 2 as never,
+      });
+      const host = credentialHost([]);
+      const { result, unmount } = renderHook(() =>
+        useProviderController({ client: api, hostBridge: host }),
+      );
+      await waitFor(() => expect(result.current.status).toBe("ready"));
+
+      await act(async () => {
+        await expect(result.current.remove(id)).resolves.toBe(true);
+      });
+
+      expect(result.current.message).toBe(
+        configDirectory === undefined
+          ? undefined
+          : "Claude work was removed. Its folder /Users/ada/.claude-accounts/extra still holds that account's sign-in and history. Delete the folder to remove them.",
+      );
+      unmount();
+    }
+  });
+
+  it("says where a removed Codex account's home still is", async () => {
+    const instance = provider({
+      displayName: "Codex work",
+      driverKind: "codex",
+      configuration: {
+        kind: "codex-cli",
+        binaryPath: "/opt/homebrew/bin/codex",
+        codexHome: "/Users/ada/.codex-accounts/extra",
+      },
+    } as Partial<ProviderInstance>);
+    const api = client(snapshot([instance]));
+    vi.mocked(api.execute).mockResolvedValue({
+      kind: "provider-removed",
+      instanceId: id,
+      version: 2 as never,
+    });
+    const host = credentialHost([]);
+    const { result, unmount } = renderHook(() =>
+      useProviderController({ client: api, hostBridge: host }),
+    );
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    await act(async () => {
+      await expect(result.current.remove(id)).resolves.toBe(true);
+    });
+
+    expect(result.current.message).toBe(
+      "Codex work was removed. Its folder /Users/ada/.codex-accounts/extra still holds that account's sign-in and history. Delete the folder to remove them.",
+    );
+    unmount();
   });
 
   it("clears Anthropic-compatible credentials after removal", async () => {

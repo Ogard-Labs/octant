@@ -1,9 +1,11 @@
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-
 import type { ClaudeAuthentication, ProviderFailure } from "@octant/contracts";
 import { Effect, type Scope } from "effect";
+
+import { snapshotClaudeHostEnvironment } from "./claudeAccountDirectory";
+import {
+  ensureClaudeAccountConfigDirectory,
+  isolatedClaudeAccountEnvironment,
+} from "./claudeAccountIsolation";
 
 export interface ClaudeEnvironmentScope {
   readonly environment: NodeJS.ProcessEnv;
@@ -12,14 +14,13 @@ export interface ClaudeEnvironmentScope {
 
 export interface ClaudeEnvironmentScopeOptions {
   readonly apiKey?: string;
-  /** The connected helper token a confined subscription launch signs in with. */
-  readonly oauthToken?: string;
   readonly hostEnvironment?: NodeJS.ProcessEnv;
+  /** Claude-owned directory for this account. Isolated launches never inherit host Claude dirs. */
+  readonly configDirectory?: string;
 }
 
 interface ClaudeEnvironmentOverrides {
   readonly apiKey?: string;
-  readonly oauthToken?: string;
   readonly configDirectory?: string;
 }
 
@@ -97,6 +98,17 @@ export function sanitizeClaudeEnvironment(
   hostEnvironment: NodeJS.ProcessEnv,
   overrides: ClaudeEnvironmentOverrides = {},
 ): NodeJS.ProcessEnv {
+  if (overrides.configDirectory !== undefined) {
+    const environment = isolatedClaudeAccountEnvironment({
+      hostEnvironment,
+      configDirectory: overrides.configDirectory,
+      authentication,
+      ...(overrides.apiKey === undefined ? {} : { apiKey: overrides.apiKey }),
+    });
+    Object.assign(environment, packagedSmokeObserverEnvironment(hostEnvironment));
+    return environment;
+  }
+
   const environment = passthroughHostEnvironment(hostEnvironment);
   Object.assign(environment, packagedSmokeObserverEnvironment(hostEnvironment));
 
@@ -107,14 +119,8 @@ export function sanitizeClaudeEnvironment(
     if (hostEnvironment.CLAUDE_SECURESTORAGE_CONFIG_DIR !== undefined) {
       environment.CLAUDE_SECURESTORAGE_CONFIG_DIR = hostEnvironment.CLAUDE_SECURESTORAGE_CONFIG_DIR;
     }
-    if (overrides.oauthToken !== undefined) {
-      environment.CLAUDE_CODE_OAUTH_TOKEN = overrides.oauthToken;
-    }
-  } else {
-    if (overrides.configDirectory !== undefined) {
-      environment.CLAUDE_CONFIG_DIR = overrides.configDirectory;
-    }
-    if (overrides.apiKey !== undefined) environment.ANTHROPIC_API_KEY = overrides.apiKey;
+  } else if (overrides.apiKey !== undefined) {
+    environment.ANTHROPIC_API_KEY = overrides.apiKey;
   }
 
   return { ...environment, ...REQUIRED_GUARDS };
@@ -124,26 +130,75 @@ export function makeClaudeEnvironmentScope(
   authentication: ClaudeAuthentication,
   options: ClaudeEnvironmentScopeOptions = {},
 ): Effect.Effect<ClaudeEnvironmentScope, ProviderFailure, Scope.Scope> {
-  const hostEnvironment = options.hostEnvironment ?? process.env;
+  if (options.hostEnvironment === undefined) {
+    return Effect.flatMap(
+      Effect.tryPromise({
+        try: snapshotClaudeHostEnvironment,
+        catch: () => failure("provider-failed", "Claude host environment could not be read."),
+      }),
+      (hostEnvironment) =>
+        makeClaudeEnvironmentScope(authentication, { ...options, hostEnvironment }),
+    );
+  }
+  const hostEnvironment = options.hostEnvironment;
+  // The caller names the account directory. The driver factory resolves an
+  // API-key account's assigned leaf once, so this scope never picks a folder.
+  const configDirectory = options.configDirectory;
+
+  if (configDirectory !== undefined) {
+    if (authentication === "api-key") {
+      if (options.apiKey === undefined || options.apiKey.trim().length === 0) {
+        return Effect.fail(
+          failure(
+            "invalid-configuration",
+            "Claude API-key authentication requires a resolved credential.",
+          ),
+        );
+      }
+      const apiKey = options.apiKey;
+      return Effect.acquireRelease(
+        Effect.tryPromise({
+          try: async () => {
+            await ensureClaudeAccountConfigDirectory(configDirectory);
+            return {
+              configDirectory,
+              environment: sanitizeClaudeEnvironment(authentication, hostEnvironment, {
+                apiKey,
+                configDirectory,
+              }),
+            } satisfies ClaudeEnvironmentScope;
+          },
+          catch: () =>
+            failure("provider-failed", "Claude account configuration could not be prepared."),
+        }),
+        ({ environment }) =>
+          Effect.sync(() => {
+            delete environment.ANTHROPIC_API_KEY;
+          }),
+      );
+    }
+    return Effect.acquireRelease(
+      Effect.tryPromise({
+        try: async () => {
+          await ensureClaudeAccountConfigDirectory(configDirectory);
+          return {
+            configDirectory,
+            environment: sanitizeClaudeEnvironment(authentication, hostEnvironment, {
+              configDirectory,
+            }),
+          } satisfies ClaudeEnvironmentScope;
+        },
+        catch: () =>
+          failure("provider-failed", "Claude account configuration could not be prepared."),
+      }),
+      () => Effect.void,
+    );
+  }
 
   if (authentication === "subscription") {
-    const oauthToken = options.oauthToken;
-    if (oauthToken === undefined) {
-      return Effect.succeed({
-        environment: sanitizeClaudeEnvironment(authentication, hostEnvironment),
-      });
-    }
-    // The token lives in this launch's environment only while the launch
-    // does, as an API key does below.
-    return Effect.acquireRelease(
-      Effect.sync(() => ({
-        environment: sanitizeClaudeEnvironment(authentication, hostEnvironment, { oauthToken }),
-      })),
-      ({ environment }) =>
-        Effect.sync(() => {
-          delete environment.CLAUDE_CODE_OAUTH_TOKEN;
-        }),
-    );
+    return Effect.succeed({
+      environment: sanitizeClaudeEnvironment(authentication, hostEnvironment),
+    });
   }
 
   if (options.apiKey === undefined || options.apiKey.trim().length === 0) {
@@ -154,33 +209,10 @@ export function makeClaudeEnvironmentScope(
       ),
     );
   }
-  const apiKey = options.apiKey;
-
-  return Effect.acquireRelease(
-    Effect.tryPromise({
-      try: async () => {
-        const configDirectory = await mkdtemp(join(tmpdir(), "octant-claude-config-"));
-        return {
-          configDirectory,
-          environment: sanitizeClaudeEnvironment(authentication, hostEnvironment, {
-            apiKey,
-            configDirectory,
-          }),
-        } satisfies ClaudeEnvironmentScope;
-      },
-      catch: () =>
-        failure("provider-failed", "Claude isolated configuration could not be created."),
-    }),
-    ({ configDirectory, environment }) =>
-      Effect.sync(() => {
-        delete environment.ANTHROPIC_API_KEY;
-      }).pipe(
-        Effect.zipRight(
-          Effect.tryPromise({
-            try: () => rm(configDirectory, { recursive: true, force: true }),
-            catch: () => new Error("Claude isolated configuration cleanup failed."),
-          }).pipe(Effect.orDie),
-        ),
-      ),
+  return Effect.fail(
+    failure(
+      "invalid-configuration",
+      "Claude API-key authentication requires an assigned account directory.",
+    ),
   );
 }

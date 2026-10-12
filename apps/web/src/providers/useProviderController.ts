@@ -7,6 +7,7 @@ import {
   type AzureFoundryProviderConfiguration,
   type BflImageProviderConfiguration,
   type ClaudeProviderConfiguration,
+  type CodexProviderConfiguration,
   type DevinProviderConfiguration,
   type GrokProviderConfiguration,
   type GlmProviderConfiguration,
@@ -45,9 +46,8 @@ import {
   ProviderClientFailure,
   type ProviderClient,
 } from "@octant/client-runtime/provider-client";
+import { parseClaudeAccountAccent } from "./configuration/claudeAccountValues";
 import { runProviderOAuthCommand } from "./providerOAuthClient";
-import { runClaudeHelperCommand } from "./claudeHelperSignInClient";
-import type { ClaudeHelperCommand } from "./ClaudeHelperSignIn";
 import type { ProviderOAuthCommand } from "./ProviderOAuthSignIn";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { failureMessage } from "../lib/failureMessage";
@@ -399,6 +399,7 @@ export function useProviderController(options: ProviderControllerOptions) {
         | "copilot",
       displayName: string,
       binaryPath: string,
+      accent?: string,
     ) =>
       execute(() => {
         const instanceId = decodeProviderInstanceId(crypto.randomUUID());
@@ -477,6 +478,9 @@ export function useProviderController(options: ProviderControllerOptions) {
           expectedVersion,
           displayName,
           binaryPath,
+          ...(driverKind === "codex" && parseClaudeAccountAccent(accent ?? "") !== undefined
+            ? { accent: parseClaudeAccountAccent(accent ?? "") }
+            : {}),
         };
       }),
     [execute],
@@ -1430,11 +1434,31 @@ export function useProviderController(options: ProviderControllerOptions) {
     },
     [client, install],
   );
+  const changeCodexConfiguration = useCallback(
+    (
+      instanceId: ProviderInstanceId,
+      configuration: CodexProviderConfiguration,
+      options?: { readonly reassignAccountDirectory?: boolean },
+    ) =>
+      execute((current) => {
+        const instance = findProvider(current, instanceId);
+        if (instance?.driverKind !== "codex") return undefined;
+        return {
+          kind: "change-codex-configuration",
+          instanceId,
+          expectedVersion: instance.version,
+          configuration,
+          ...(options?.reassignAccountDirectory === true ? { reassignAccountDirectory: true } : {}),
+        };
+      }),
+    [execute],
+  );
   const changeClaudeConfiguration = useCallback(
     (
       instanceId: ProviderInstanceId,
       configuration: ClaudeProviderConfiguration,
       credential: TransientProviderCredential,
+      options?: { readonly reassignAccountDirectory?: boolean },
     ) =>
       queueProviderMutation(mutationQueue, mounted, setBusy, setMessage, () =>
         withTransientCredential(credential, async (credentialValue) => {
@@ -1493,6 +1517,9 @@ export function useProviderController(options: ProviderControllerOptions) {
                 instanceId,
                 expectedVersion: instance.version,
                 configuration,
+                ...(options?.reassignAccountDirectory === true
+                  ? { reassignAccountDirectory: true }
+                  : {}),
               }),
               current,
               install,
@@ -1528,6 +1555,9 @@ export function useProviderController(options: ProviderControllerOptions) {
                         instanceId,
                         expectedVersion: refreshedInstance.version,
                         configuration,
+                        ...(options?.reassignAccountDirectory === true
+                          ? { reassignAccountDirectory: true }
+                          : {}),
                       }),
                       refreshed,
                       install,
@@ -2983,7 +3013,22 @@ export function useProviderController(options: ProviderControllerOptions) {
                 "The provider was removed, but its stored credential could not be cleared. Retry cleanup from the Octant host.",
               );
             }
+            return true;
           }
+        }
+        // Octant assigned this folder and the provider's own CLI filled it.
+        // Removing the account does not delete it, so the person is told
+        // where the sign-in and history still are.
+        const accountDirectory =
+          instance.driverKind === "claude"
+            ? instance.configuration.configDirectory
+            : instance.driverKind === "codex"
+              ? instance.configuration.codexHome
+              : undefined;
+        if (accountDirectory !== undefined && mounted.current) {
+          setMessage(
+            `${instance.displayName} was removed. Its folder ${accountDirectory} still holds that account's sign-in and history. Delete the folder to remove them.`,
+          );
         }
         return true;
       }),
@@ -3252,6 +3297,7 @@ export function useProviderController(options: ProviderControllerOptions) {
     createIdeogramImage,
     rename,
     changeBinary,
+    changeCodexConfiguration,
     changeClaudeConfiguration,
     changeDevinConfiguration,
     changeKiloConfiguration,
@@ -3297,16 +3343,6 @@ export function useProviderController(options: ProviderControllerOptions) {
         return Promise.resolve(undefined);
       }
       return runProviderOAuthCommand({
-        baseUrl: options.serverUrl,
-        windowCapability: options.windowCapability,
-        command,
-      }).catch(() => undefined);
-    },
-    claudeHelpers: (command: ClaudeHelperCommand) => {
-      if (options.serverUrl === undefined || options.windowCapability === undefined) {
-        return Promise.resolve(undefined);
-      }
-      return runClaudeHelperCommand({
         baseUrl: options.serverUrl,
         windowCapability: options.windowCapability,
         command,

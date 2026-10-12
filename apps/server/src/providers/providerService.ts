@@ -16,6 +16,7 @@ import {
   type ProviderInstance,
   type ProviderInstanceId,
   type ProviderCatalogSnapshot,
+  type ClaudeProviderConfiguration,
   type ProviderObservedState,
   type ProviderProbeResult,
   type ProviderRegistryCommandResult,
@@ -35,6 +36,7 @@ import {
   changeBflImageConfiguration,
   changeIdeogramImageConfiguration,
   changeClaudeConfiguration,
+  claudeChangeKeepsRuntime,
   changeDevinConfiguration,
   changeGeminiImageConfiguration,
   changeGrokConfiguration,
@@ -56,6 +58,12 @@ import {
   createAzureFoundryProvider,
   createBflImageProvider,
   createIdeogramImageProvider,
+  assignedClaudeAccountConfigDirectory,
+  assignedCodexHome,
+  changeCodexConfiguration,
+  codexChangeKeepsRuntime,
+  implicitClaudeAccountOwnerId,
+  implicitCodexAccountOwnerId,
   createClaudeProvider,
   createDevinProvider,
   createGeminiImageProvider,
@@ -94,9 +102,9 @@ import {
 } from "@octant/domain";
 import { describeProviderRuntimeIntegration } from "@octant/domain/provider-runtime-integration";
 import { accessSync, constants, realpathSync, statSync } from "node:fs";
-import { mkdtemp, realpath, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { mkdir, mkdtemp, realpath, rm } from "node:fs/promises";
+import { homedir, tmpdir } from "node:os";
+import { isAbsolute, join } from "node:path";
 import { Cause, Effect, Exit, Fiber, Option, Schema, Stream } from "effect";
 import { admittedBundledProviderDriverKinds } from "@octant/plugin-host/provider-drivers";
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
@@ -104,6 +112,7 @@ import { ConcurrencyConflict, JournalWriteFailed } from "../persistence/journalE
 import type { PersistenceService } from "../persistence/persistenceService";
 import { ProjectionApplicationFailed } from "../persistence/projection";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
+import { snapshotClaudeHostEnvironment } from "./claudeAccountDirectory";
 import { PROVIDER_DEFAULTS_AGGREGATE_ID } from "./providerProjection";
 import {
   carryModelContextWindowFacts,
@@ -190,6 +199,8 @@ interface PackagedProviderSmokeLimits {
 
 const DEFAULT_PACKAGED_SMOKE_MAX_EVENTS = 256;
 const DEFAULT_PACKAGED_SMOKE_TIMEOUT_MS = 30_000;
+const CLAUDE_ACCOUNT_NEEDS_DIRECTORY_MESSAGE =
+  "This Claude account needs its own config directory.";
 
 export interface ProviderServiceOptions {
   readonly persistence: PersistenceService;
@@ -198,8 +209,6 @@ export interface ProviderServiceOptions {
   readonly driver?: (instance: ProviderInstance) => ProviderDriver;
   readonly isDriverPluginEffective?: (driverKind: ProviderDriverKind) => boolean;
   readonly clearResumeIdentities?: (instanceId: ProviderInstanceId) => Promise<void>;
-  /** Removes the long-lived Claude for helpers token a removed Claude provider held. */
-  readonly clearClaudeHelperSignIn?: (instanceId: ProviderInstanceId) => Promise<void>;
   /**
    * Deletes the API key stored for a provider instance. Called before an
    * endpoint's base URL changes, because the key is stored by instance and
@@ -208,6 +217,12 @@ export interface ProviderServiceOptions {
   readonly clearProviderCredential?: (instanceId: ProviderInstanceId) => Promise<void>;
   /** Clears process-local provider limit evidence when identity/configuration changes. */
   readonly clearRuntimeUsageLimits?: (instanceId: ProviderInstanceId) => void;
+  /**
+   * Creates an account's assigned state directory. Codex refuses a home that
+   * does not exist, so the folder has to be there before the sign-in command
+   * for it is shown. Defaults to creating it for the owner only.
+   */
+  readonly ensureAccountDirectory?: (directory: string) => Promise<void>;
   readonly runCliUpdate?: (input: ProviderCliUpdateInput) => Promise<ProviderCliUpdateOutput>;
   /** Read-only host fact used to refuse enabling a missing local CLI. */
   readonly isProviderExecutableAvailable?: (instance: ProviderInstance) => boolean;
@@ -228,6 +243,8 @@ export class ProviderService implements ProviderServiceApi {
   readonly #runtime: ProviderRuntimeRegistry;
   readonly #probeProvider: NonNullable<ProviderServiceOptions["probe"]>;
   readonly #instanceOperationTails = new Map<ProviderInstanceId, Promise<void>>();
+  #claudeAccountClaimTail: Promise<void> = Promise.resolve();
+  #codexAccountClaimTail: Promise<void> = Promise.resolve();
   readonly #probesInFlight = new Map<
     ProviderInstanceId,
     { readonly result: Promise<ProviderProbeResult>; readonly tail: Promise<void> }
@@ -237,8 +254,8 @@ export class ProviderService implements ProviderServiceApi {
   readonly #driverProvider: ProviderServiceOptions["driver"];
   readonly #isDriverPluginEffective: (driverKind: ProviderDriverKind) => boolean;
   readonly #clearResumeIdentities: ProviderServiceOptions["clearResumeIdentities"];
-  readonly #clearClaudeHelperSignIn: ProviderServiceOptions["clearClaudeHelperSignIn"];
   readonly #clearRuntimeUsageLimits: ProviderServiceOptions["clearRuntimeUsageLimits"];
+  readonly #ensureAccountDirectory: (directory: string) => Promise<void>;
   readonly #clearProviderCredential: ProviderServiceOptions["clearProviderCredential"];
   readonly #runCliUpdate: (input: ProviderCliUpdateInput) => Promise<ProviderCliUpdateOutput>;
   readonly #isProviderExecutableAvailable: (instance: ProviderInstance) => boolean;
@@ -273,8 +290,12 @@ export class ProviderService implements ProviderServiceApi {
       options.isDriverPluginEffective ??
       ((driverKind) => admittedBundledProviderDriverKinds().has(driverKind));
     this.#clearResumeIdentities = options.clearResumeIdentities;
-    this.#clearClaudeHelperSignIn = options.clearClaudeHelperSignIn;
     this.#clearRuntimeUsageLimits = options.clearRuntimeUsageLimits;
+    this.#ensureAccountDirectory =
+      options.ensureAccountDirectory ??
+      (async (directory) => {
+        await mkdir(directory, { recursive: true, mode: 0o700 });
+      });
     this.#clearProviderCredential = options.clearProviderCredential;
     this.#runCliUpdate = options.runCliUpdate ?? runProviderCliUpdate;
     this.#isProviderExecutableAvailable = options.isProviderExecutableAvailable ?? (() => true);
@@ -385,6 +406,11 @@ export class ProviderService implements ProviderServiceApi {
       if (!instance.enabled) continue;
       const unusable = this.#unusableConfigurationObservation(instance);
       if (unusable !== undefined) this.#runtime.setObservedState(unusable);
+      else if (
+        this.#runtime.observedState(instance.id)?.message === CLAUDE_ACCOUNT_NEEDS_DIRECTORY_MESSAGE
+      ) {
+        this.#runtime.clearObservedState(instance.id);
+      }
     }
   }
 
@@ -426,6 +452,9 @@ export class ProviderService implements ProviderServiceApi {
         throw this.#unsupported("Packaged provider smoke requires an enabled provider.");
       }
       this.#assertDriverPluginEffective(instance);
+      if (this.#claudeAccountNeedsOwnConfigDirectory(instance)) {
+        throw this.#invalid("This Claude account needs its own config directory.");
+      }
       if (this.#driverProvider === undefined) throw this.#unavailable();
       const result = await runPackagedProviderSmokeTurn(this.#driverProvider(instance), {
         instanceId,
@@ -627,603 +656,752 @@ export class ProviderService implements ProviderServiceApi {
       }
 
       const result = await this.#withInstanceOperation(command.instanceId, async () => {
-        this.#assertReady();
-        const current = this.#persistence.readProviderInstance(command.instanceId);
-        const instances = this.#persistence.readProviderInstances();
-        if (
-          command.kind === "create-opencode-provider" ||
-          command.kind === "create-codex-provider" ||
-          command.kind === "create-kimi-code-provider" ||
+        const releaseClaudeClaim =
           command.kind === "create-claude-provider" ||
-          command.kind === "create-devin-provider" ||
-          command.kind === "create-kilo-provider" ||
-          command.kind === "create-pi-provider" ||
-          command.kind === "create-oh-my-pi-provider" ||
-          command.kind === "create-ollama-provider" ||
-          command.kind === "create-mistral-vibe-provider" ||
-          command.kind === "create-grok-provider" ||
-          command.kind === "create-goose-provider" ||
-          command.kind === "create-glm-provider" ||
-          command.kind === "create-gemini-provider" ||
-          command.kind === "create-copilot-provider" ||
-          command.kind === "create-cline-provider" ||
-          command.kind === "create-qwen-provider" ||
-          command.kind === "create-fx-provider" ||
-          command.kind === "create-openai-compatible-provider" ||
-          command.kind === "create-anthropic-compatible-provider" ||
-          command.kind === "create-azure-foundry-provider" ||
-          command.kind === "create-openai-image-provider" ||
-          command.kind === "create-gemini-native-image-provider" ||
-          command.kind === "create-bfl-image-provider" ||
-          command.kind === "create-ideogram-image-provider"
-        ) {
-          if (current !== undefined || command.expectedVersion !== 0) {
-            throw this.#invalid("Provider configuration changed; reload and retry.");
+          command.kind === "change-claude-configuration"
+            ? await this.#acquireClaudeAccountClaim()
+            : undefined;
+        const releaseCodexClaim =
+          command.kind === "create-codex-provider" || command.kind === "change-codex-configuration"
+            ? await this.#acquireCodexAccountClaim()
+            : undefined;
+        try {
+          this.#assertReady();
+          const current = this.#persistence.readProviderInstance(command.instanceId);
+          const instances = this.#persistence.readProviderInstances();
+          if (
+            command.kind === "create-opencode-provider" ||
+            command.kind === "create-codex-provider" ||
+            command.kind === "create-kimi-code-provider" ||
+            command.kind === "create-claude-provider" ||
+            command.kind === "create-devin-provider" ||
+            command.kind === "create-kilo-provider" ||
+            command.kind === "create-pi-provider" ||
+            command.kind === "create-oh-my-pi-provider" ||
+            command.kind === "create-ollama-provider" ||
+            command.kind === "create-mistral-vibe-provider" ||
+            command.kind === "create-grok-provider" ||
+            command.kind === "create-goose-provider" ||
+            command.kind === "create-glm-provider" ||
+            command.kind === "create-gemini-provider" ||
+            command.kind === "create-copilot-provider" ||
+            command.kind === "create-cline-provider" ||
+            command.kind === "create-qwen-provider" ||
+            command.kind === "create-fx-provider" ||
+            command.kind === "create-openai-compatible-provider" ||
+            command.kind === "create-anthropic-compatible-provider" ||
+            command.kind === "create-azure-foundry-provider" ||
+            command.kind === "create-openai-image-provider" ||
+            command.kind === "create-gemini-native-image-provider" ||
+            command.kind === "create-bfl-image-provider" ||
+            command.kind === "create-ideogram-image-provider"
+          ) {
+            if (current !== undefined || command.expectedVersion !== 0) {
+              throw this.#invalid("Provider configuration changed; reload and retry.");
+            }
+            const enabled = "enabled" in command ? command.enabled : undefined;
+            const common = {
+              id: command.instanceId,
+              displayName: command.displayName,
+              existingInstances: instances,
+              expectedVersion: command.expectedVersion,
+              createdAt: decodeTimestamp(this.#clock()),
+              ...(enabled === undefined ? {} : { enabled }),
+            };
+            let instance: ProviderInstance;
+            switch (command.kind) {
+              case "create-opencode-provider":
+                instance = createOpenCodeProvider({ ...common, binaryPath: command.binaryPath });
+                break;
+              case "create-codex-provider": {
+                // The host profile goes to the first account, and again to a new
+                // one once no account holds it, so `~/.codex` never ends up with
+                // a login no account in Settings can reach.
+                const assignedHome =
+                  implicitCodexAccountOwnerId(instances) === undefined
+                    ? undefined
+                    : assignedCodexHome(homedir(), command.instanceId);
+                instance = createCodexProvider({
+                  ...common,
+                  binaryPath: command.binaryPath,
+                  ...(command.accent === undefined ? {} : { accent: command.accent }),
+                  ...(assignedHome === undefined ? {} : { codexHome: assignedHome }),
+                });
+                this.#refuseTakenCodexHomes(this.#persistence.readProviderInstances(), instance);
+                if (assignedHome !== undefined) await this.#ensureCodexAccountHome(assignedHome);
+                break;
+              }
+              case "create-kimi-code-provider":
+                instance = createKimiCodeProvider({ ...common, binaryPath: command.binaryPath });
+                break;
+              case "create-claude-provider": {
+                // The host profile belongs to one subscription account. An
+                // API-key account never takes it, so one created first does
+                // not push the first subscription account onto a new leaf
+                // and a second sign-in.
+                const assignedDirectory =
+                  command.configuration.configDirectory !== undefined
+                    ? command.configuration.configDirectory
+                    : command.configuration.authentication === "api-key" ||
+                        implicitClaudeAccountOwnerId(instances) !== undefined
+                      ? assignedClaudeAccountConfigDirectory(homedir(), command.instanceId)
+                      : undefined;
+                const hostEnvironment = await snapshotClaudeHostEnvironment();
+                const hostConfigDirectory = hostClaudeConfigDirectory(hostEnvironment);
+                const hostSecureDirectory = hostClaudeSecureStorageDirectory(hostEnvironment);
+                this.#refuseUnassignedClaudeDirectory(
+                  command.configuration.configDirectory,
+                  command.instanceId,
+                  undefined,
+                );
+                instance = createClaudeProvider({
+                  ...common,
+                  configuration: {
+                    ...command.configuration,
+                    ...(assignedDirectory === undefined
+                      ? {}
+                      : { configDirectory: assignedDirectory }),
+                  },
+                });
+                this.#refuseTakenClaudeAccountDirectories(
+                  this.#persistence.readProviderInstances(),
+                  instance,
+                  hostConfigDirectory,
+                  hostSecureDirectory,
+                );
+                break;
+              }
+              case "create-devin-provider":
+                instance = createDevinProvider({
+                  ...common,
+                  configuration: command.configuration,
+                });
+                break;
+              case "create-kilo-provider":
+                instance = createKiloProvider({
+                  ...common,
+                  configuration: command.configuration,
+                });
+                break;
+              case "create-pi-provider":
+                instance = createPiProvider({
+                  ...common,
+                  configuration: command.configuration,
+                });
+                break;
+              case "create-oh-my-pi-provider":
+                instance = createOhMyPiProvider({
+                  ...common,
+                  configuration: command.configuration,
+                });
+                break;
+              case "create-ollama-provider":
+                instance = createOllamaProvider({
+                  ...common,
+                  configuration: command.configuration,
+                });
+                break;
+              case "create-mistral-vibe-provider":
+                instance = createMistralVibeProvider({
+                  ...common,
+                  configuration: command.configuration,
+                });
+                break;
+              case "create-grok-provider":
+                instance = createGrokProvider({
+                  ...common,
+                  configuration: command.configuration,
+                });
+                break;
+              case "create-goose-provider":
+                instance = createGooseProvider({
+                  ...common,
+                  configuration: command.configuration,
+                });
+                break;
+              case "create-glm-provider":
+                instance = createGlmProvider({
+                  ...common,
+                  configuration: command.configuration,
+                });
+                break;
+              case "create-gemini-provider":
+                instance = createGeminiProvider({
+                  ...common,
+                  configuration: command.configuration,
+                });
+                break;
+              case "create-copilot-provider":
+                instance = createCopilotProvider({
+                  ...common,
+                  configuration: command.configuration,
+                });
+                break;
+              case "create-cline-provider":
+                instance = createClineProvider({
+                  ...common,
+                  configuration: command.configuration,
+                });
+                break;
+              case "create-qwen-provider":
+                instance = createQwenProvider({
+                  ...common,
+                  configuration: command.configuration,
+                });
+                break;
+              case "create-fx-provider":
+                instance = createFxProvider({
+                  ...common,
+                  configuration: command.configuration,
+                });
+                break;
+              case "create-openai-compatible-provider":
+                instance = createOpenAiCompatibleProvider({
+                  ...common,
+                  configuration: command.configuration,
+                });
+                break;
+              case "create-anthropic-compatible-provider":
+                instance = createAnthropicCompatibleProvider({
+                  ...common,
+                  configuration: command.configuration,
+                });
+                break;
+              case "create-azure-foundry-provider":
+                instance = createAzureFoundryProvider({
+                  ...common,
+                  configuration: command.configuration,
+                });
+                break;
+              case "create-openai-image-provider":
+                instance = createOpenAiImageProvider({
+                  ...common,
+                  configuration: command.configuration,
+                });
+                break;
+              case "create-gemini-native-image-provider":
+                instance = createGeminiImageProvider({
+                  ...common,
+                  configuration: command.configuration,
+                });
+                break;
+              case "create-bfl-image-provider":
+                instance = createBflImageProvider({
+                  ...common,
+                  configuration: command.configuration,
+                });
+                break;
+              case "create-ideogram-image-provider":
+                instance = createIdeogramImageProvider({
+                  ...common,
+                  configuration: command.configuration,
+                });
+                break;
+            }
+            this.#assertDriverPluginEffective(instance);
+            this.#appendInstance(command.expectedVersion, "provider.instance-created@1", instance);
+            const authoritative = this.#authoritativeInstance(instance);
+            this.#publishSelectedAuthenticationObservation(authoritative);
+            return decodeProviderRegistryCommandResult({
+              kind: "provider-created",
+              instance: authoritative,
+            });
           }
-          const enabled = "enabled" in command ? command.enabled : undefined;
-          const common = {
-            id: command.instanceId,
-            displayName: command.displayName,
-            existingInstances: instances,
-            expectedVersion: command.expectedVersion,
-            createdAt: decodeTimestamp(this.#clock()),
-            ...(enabled === undefined ? {} : { enabled }),
-          };
+
+          if (current === undefined) throw this.#invalid("Provider instance was not found.");
+          this.#assertVersion(current.version, command.expectedVersion);
+          const updatedAt = decodeTimestamp(this.#clock());
+          if (command.kind === "remove-provider") {
+            this.#refuseVacatingImplicitClaudeOwner(instances, current);
+            this.#refuseVacatingImplicitCodexOwner(instances, current);
+            const removed = removeProvider(current, {
+              activeSessionCount: this.#runtime.activeSessionCount(current.id),
+              updatedAt,
+            });
+            await this.#runtime.invalidateRuntime(current.id);
+            this.#persistence.journal.append({
+              aggregate: { aggregateType: "provider-instance", aggregateId: current.id },
+              expectedVersion: command.expectedVersion,
+              events: [
+                this.#pendingEvent("provider.instance-removed@1", {
+                  instanceId: current.id,
+                  version: removed.version,
+                }),
+              ],
+            });
+            if (this.#persistence.readProviderInstance(current.id) !== undefined) {
+              throw this.#unavailable();
+            }
+            if (current.driverKind === "claude") {
+              await this.#clearResumeIdentities?.(current.id);
+            }
+            this.#invalidateCatalog(current.id, { kind: "all" }, "provider removed", updatedAt);
+            this.#clearRuntimeUsageLimits?.(current.id);
+            return decodeProviderRegistryCommandResult({
+              kind: "provider-removed",
+              instanceId: current.id,
+              version: removed.version,
+            });
+          }
+
+          if (command.kind === "set-provider-model-context-window") {
+            return decodeProviderRegistryCommandResult({
+              kind: "provider-model-updated",
+              snapshot: this.#updateCatalogModel(
+                current.id,
+                command.modelId,
+                updatedAt,
+                ({ contextWindowOverride: _cleared, ...model }) =>
+                  command.contextWindow === undefined
+                    ? model
+                    : { ...model, contextWindowOverride: command.contextWindow },
+              ),
+            });
+          }
+
+          if (command.kind === "set-provider-model-data-tags") {
+            if (this.#persistence.readProviderCatalog === undefined) {
+              throw this.#unavailable();
+            }
+            const catalog = this.#persistence.readProviderCatalog(current.id);
+            if (catalog === undefined) throw this.#invalid("Provider model catalog was not found.");
+            const model = catalog.models.find(
+              (candidate) => String(candidate.id) === String(command.modelId),
+            );
+            if (model === undefined) throw this.#invalid("Provider model was not found.");
+            const snapshot = decodeProviderCatalogSnapshot({
+              ...catalog,
+              version: (catalog.version + 1) as typeof catalog.version,
+              models: catalog.models.map((candidate) =>
+                String(candidate.id) === String(command.modelId)
+                  ? setProviderModelDataTags(candidate, command.dataTags)
+                  : candidate,
+              ),
+              updatedAt,
+            });
+            this.#persistence.journal.append({
+              aggregate: { aggregateType: "provider-catalog", aggregateId: current.id },
+              expectedVersion: catalog.version,
+              events: [this.#pendingEvent("provider.catalog-updated@1", { snapshot })],
+            });
+            const authoritative = this.#persistence.readProviderCatalog(current.id);
+            if (authoritative?.version !== snapshot.version) throw this.#unavailable();
+            return decodeProviderRegistryCommandResult({
+              kind: "provider-model-tags-updated",
+              snapshot: authoritative,
+            });
+          }
+
           let instance: ProviderInstance;
-          switch (command.kind) {
-            case "create-opencode-provider":
-              instance = createOpenCodeProvider({ ...common, binaryPath: command.binaryPath });
-              break;
-            case "create-codex-provider":
-              instance = createCodexProvider({ ...common, binaryPath: command.binaryPath });
-              break;
-            case "create-kimi-code-provider":
-              instance = createKimiCodeProvider({ ...common, binaryPath: command.binaryPath });
-              break;
-            case "create-claude-provider":
-              instance = createClaudeProvider({
-                ...common,
-                configuration: command.configuration,
-              });
-              break;
-            case "create-devin-provider":
-              instance = createDevinProvider({
-                ...common,
-                configuration: command.configuration,
-              });
-              break;
-            case "create-kilo-provider":
-              instance = createKiloProvider({
-                ...common,
-                configuration: command.configuration,
-              });
-              break;
-            case "create-pi-provider":
-              instance = createPiProvider({
-                ...common,
-                configuration: command.configuration,
-              });
-              break;
-            case "create-oh-my-pi-provider":
-              instance = createOhMyPiProvider({
-                ...common,
-                configuration: command.configuration,
-              });
-              break;
-            case "create-ollama-provider":
-              instance = createOllamaProvider({
-                ...common,
-                configuration: command.configuration,
-              });
-              break;
-            case "create-mistral-vibe-provider":
-              instance = createMistralVibeProvider({
-                ...common,
-                configuration: command.configuration,
-              });
-              break;
-            case "create-grok-provider":
-              instance = createGrokProvider({
-                ...common,
-                configuration: command.configuration,
-              });
-              break;
-            case "create-goose-provider":
-              instance = createGooseProvider({
-                ...common,
-                configuration: command.configuration,
-              });
-              break;
-            case "create-glm-provider":
-              instance = createGlmProvider({
-                ...common,
-                configuration: command.configuration,
-              });
-              break;
-            case "create-gemini-provider":
-              instance = createGeminiProvider({
-                ...common,
-                configuration: command.configuration,
-              });
-              break;
-            case "create-copilot-provider":
-              instance = createCopilotProvider({
-                ...common,
-                configuration: command.configuration,
-              });
-              break;
-            case "create-cline-provider":
-              instance = createClineProvider({
-                ...common,
-                configuration: command.configuration,
-              });
-              break;
-            case "create-qwen-provider":
-              instance = createQwenProvider({
-                ...common,
-                configuration: command.configuration,
-              });
-              break;
-            case "create-fx-provider":
-              instance = createFxProvider({
-                ...common,
-                configuration: command.configuration,
-              });
-              break;
-            case "create-openai-compatible-provider":
-              instance = createOpenAiCompatibleProvider({
-                ...common,
-                configuration: command.configuration,
-              });
-              break;
-            case "create-anthropic-compatible-provider":
-              instance = createAnthropicCompatibleProvider({
-                ...common,
-                configuration: command.configuration,
-              });
-              break;
-            case "create-azure-foundry-provider":
-              instance = createAzureFoundryProvider({
-                ...common,
-                configuration: command.configuration,
-              });
-              break;
-            case "create-openai-image-provider":
-              instance = createOpenAiImageProvider({
-                ...common,
-                configuration: command.configuration,
-              });
-              break;
-            case "create-gemini-native-image-provider":
-              instance = createGeminiImageProvider({
-                ...common,
-                configuration: command.configuration,
-              });
-              break;
-            case "create-bfl-image-provider":
-              instance = createBflImageProvider({
-                ...common,
-                configuration: command.configuration,
-              });
-              break;
-            case "create-ideogram-image-provider":
-              instance = createIdeogramImageProvider({
-                ...common,
-                configuration: command.configuration,
-              });
-              break;
+          let eventName: string;
+          // An accent is how Octant draws an account. A change to it alone
+          // leaves the running process, its readiness, and its models as they are.
+          let keepsRuntime = false;
+          if (command.kind === "set-provider-data-tags") {
+            instance = setProviderDataTags(current, command.dataTags, updatedAt);
+            eventName = "provider.instance-data-tags-changed@1";
+          } else if (command.kind === "rename-provider") {
+            instance = renameProvider(current, {
+              displayName: command.displayName,
+              existingInstances: instances,
+              updatedAt,
+            });
+            eventName = "provider.instance-renamed@1";
+          } else if (command.kind === "change-provider-binary") {
+            if (
+              current.driverKind !== "opencode" &&
+              current.driverKind !== "codex" &&
+              current.driverKind !== "kimi-code"
+            ) {
+              throw this.#unsupported("This provider does not use a CLI binary.");
+            }
+            if (this.#runtime.activeSessionCount(current.id) !== 0) {
+              throw this.#invalid("Stop active sessions before changing this provider runtime.");
+            }
+            instance = changeProviderBinary(current, {
+              binaryPath: command.binaryPath,
+              activeSessionCount: 0,
+              updatedAt,
+            });
+            await this.#runtime.invalidateRuntime(current.id);
+            eventName = "provider.instance-binary-changed@1";
+          } else if (command.kind === "change-openai-compatible-configuration") {
+            if (current.driverKind !== "openai-compatible") {
+              throw this.#unsupported("This provider does not use HTTP configuration.");
+            }
+            instance = changeOpenAiCompatibleConfiguration(
+              current,
+              command.configuration,
+              updatedAt,
+            );
+            await this.#runtime.invalidateRuntime(current.id);
+            eventName = "provider.instance-configuration-changed@1";
+          } else if (command.kind === "change-anthropic-compatible-configuration") {
+            if (current.driverKind !== "anthropic-compatible") {
+              throw this.#unsupported("This provider does not use HTTP configuration.");
+            }
+            instance = changeAnthropicCompatibleConfiguration(
+              current,
+              command.configuration,
+              updatedAt,
+            );
+            await this.#runtime.invalidateRuntime(current.id);
+            eventName = "provider.instance-configuration-changed@1";
+          } else if (command.kind === "change-azure-foundry-configuration") {
+            if (current.driverKind !== "azure-foundry") {
+              throw this.#unsupported("This provider does not use Azure AI Foundry configuration.");
+            }
+            instance = changeAzureFoundryConfiguration(current, command.configuration, updatedAt);
+            await this.#runtime.invalidateRuntime(current.id);
+            eventName = "provider.instance-configuration-changed@1";
+          } else if (command.kind === "change-openai-image-configuration") {
+            if (current.driverKind !== "openai-image") {
+              throw this.#unsupported("This provider does not use OpenAI image configuration.");
+            }
+            instance = changeOpenAiImageConfiguration(current, command.configuration, updatedAt);
+            await this.#runtime.invalidateRuntime(current.id);
+            eventName = "provider.instance-configuration-changed@1";
+          } else if (command.kind === "change-gemini-native-image-configuration") {
+            if (current.driverKind !== "gemini-native-image") {
+              throw this.#unsupported("This provider does not use Gemini image configuration.");
+            }
+            instance = changeGeminiImageConfiguration(current, command.configuration, updatedAt);
+            await this.#runtime.invalidateRuntime(current.id);
+            eventName = "provider.instance-configuration-changed@1";
+          } else if (command.kind === "change-bfl-image-configuration") {
+            if (current.driverKind !== "bfl-image") {
+              throw this.#unsupported("This provider does not use BFL image configuration.");
+            }
+            instance = changeBflImageConfiguration(current, command.configuration, updatedAt);
+            await this.#runtime.invalidateRuntime(current.id);
+            eventName = "provider.instance-configuration-changed@1";
+          } else if (command.kind === "change-ideogram-image-configuration") {
+            if (current.driverKind !== "ideogram-image") {
+              throw this.#unsupported("This provider does not use Ideogram image configuration.");
+            }
+            instance = changeIdeogramImageConfiguration(current, command.configuration, updatedAt);
+            await this.#runtime.invalidateRuntime(current.id);
+            eventName = "provider.instance-configuration-changed@1";
+          } else if (command.kind === "change-claude-configuration") {
+            if (current.driverKind !== "claude") {
+              throw this.#unsupported("This provider does not use Claude configuration.");
+            }
+            const requestedConfiguration =
+              command.kind === "change-claude-configuration" &&
+              command.reassignAccountDirectory === true
+                ? {
+                    ...command.configuration,
+                    configDirectory: assignedClaudeAccountConfigDirectory(homedir(), current.id),
+                  }
+                : command.configuration;
+            this.#refuseUnassignedClaudeDirectory(
+              requestedConfiguration.configDirectory,
+              current.id,
+              current.configuration.configDirectory,
+            );
+            const configuration = this.#assignedClaudeConfigurationForChange(
+              instances,
+              current,
+              requestedConfiguration,
+            );
+            instance = changeClaudeConfiguration(current, {
+              configuration,
+              activeSessionCount: this.#runtime.activeSessionCount(current.id),
+              updatedAt,
+            });
+            this.#refuseVacatingImplicitClaudeOwner(instances, current, instance);
+            const hostEnvironment = await snapshotClaudeHostEnvironment();
+            const hostConfigDirectory = hostClaudeConfigDirectory(hostEnvironment);
+            const hostSecureDirectory = hostClaudeSecureStorageDirectory(hostEnvironment);
+            this.#refuseTakenClaudeAccountDirectories(
+              this.#persistence.readProviderInstances(),
+              instance,
+              hostConfigDirectory,
+              hostSecureDirectory,
+              current.id,
+            );
+            keepsRuntime = claudeChangeKeepsRuntime(current.configuration, instance.configuration);
+            if (!keepsRuntime) await this.#runtime.invalidateRuntime(current.id);
+            // Recheck after the await. Create/change on another instance can
+            // claim the same directory while this runtime is invalidated.
+            this.#refuseTakenClaudeAccountDirectories(
+              this.#persistence.readProviderInstances(),
+              instance,
+              hostConfigDirectory,
+              hostSecureDirectory,
+              current.id,
+            );
+            eventName = "provider.instance-configuration-changed@1";
+          } else if (command.kind === "change-codex-configuration") {
+            if (current.driverKind !== "codex") {
+              throw this.#unsupported("This provider does not use Codex configuration.");
+            }
+            const requestedConfiguration =
+              command.reassignAccountDirectory === true
+                ? {
+                    ...command.configuration,
+                    codexHome: assignedCodexHome(homedir(), current.id),
+                  }
+                : command.configuration;
+            this.#refuseUnassignedCodexHome(
+              requestedConfiguration.codexHome,
+              current.id,
+              current.configuration.codexHome,
+            );
+            const configuration = this.#assignedCodexConfigurationForChange(
+              instances,
+              current,
+              requestedConfiguration,
+            );
+            instance = changeCodexConfiguration(current, {
+              configuration,
+              activeSessionCount: this.#runtime.activeSessionCount(current.id),
+              updatedAt,
+            });
+            this.#refuseVacatingImplicitCodexOwner(instances, current, instance);
+            this.#refuseTakenCodexHomes(
+              this.#persistence.readProviderInstances(),
+              instance,
+              current.id,
+            );
+            keepsRuntime = codexChangeKeepsRuntime(current.configuration, instance.configuration);
+            if (!keepsRuntime) await this.#runtime.invalidateRuntime(current.id);
+            this.#refuseTakenCodexHomes(
+              this.#persistence.readProviderInstances(),
+              instance,
+              current.id,
+            );
+            if (instance.driverKind === "codex" && instance.configuration.codexHome !== undefined) {
+              await this.#ensureCodexAccountHome(instance.configuration.codexHome);
+            }
+            eventName = "provider.instance-configuration-changed@1";
+          } else if (command.kind === "change-mistral-vibe-configuration") {
+            if (current.driverKind !== "mistral-vibe") {
+              throw this.#unsupported("This provider does not use Mistral Vibe configuration.");
+            }
+            instance = changeMistralVibeConfiguration(
+              current,
+              command.configuration,
+              updatedAt,
+              this.#runtime.activeSessionCount(current.id),
+            );
+            await this.#runtime.invalidateRuntime(current.id);
+            eventName = "provider.instance-configuration-changed@1";
+          } else if (command.kind === "change-grok-configuration") {
+            if (current.driverKind !== "grok") {
+              throw this.#unsupported("This provider does not use Grok Build configuration.");
+            }
+            instance = changeGrokConfiguration(
+              current,
+              command.configuration,
+              updatedAt,
+              this.#runtime.activeSessionCount(current.id),
+            );
+            await this.#runtime.invalidateRuntime(current.id);
+            eventName = "provider.instance-configuration-changed@1";
+          } else if (command.kind === "change-goose-configuration") {
+            if (current.driverKind !== "goose") {
+              throw this.#unsupported("This provider does not use Goose configuration.");
+            }
+            instance = changeGooseConfiguration(
+              current,
+              command.configuration,
+              updatedAt,
+              this.#runtime.activeSessionCount(current.id),
+            );
+            await this.#runtime.invalidateRuntime(current.id);
+            eventName = "provider.instance-configuration-changed@1";
+          } else if (command.kind === "change-glm-configuration") {
+            if (current.driverKind !== "glm") {
+              throw this.#unsupported("This provider does not use GLM Agent configuration.");
+            }
+            instance = changeGlmConfiguration(
+              current,
+              command.configuration,
+              updatedAt,
+              this.#runtime.activeSessionCount(current.id),
+            );
+            await this.#runtime.invalidateRuntime(current.id);
+            eventName = "provider.instance-configuration-changed@1";
+          } else if (command.kind === "change-gemini-configuration") {
+            if (current.driverKind !== "gemini") {
+              throw this.#unsupported("This provider does not use Gemini CLI configuration.");
+            }
+            instance = changeGeminiConfiguration(
+              current,
+              command.configuration,
+              updatedAt,
+              this.#runtime.activeSessionCount(current.id),
+            );
+            await this.#runtime.invalidateRuntime(current.id);
+            eventName = "provider.instance-configuration-changed@1";
+          } else if (command.kind === "change-copilot-configuration") {
+            if (current.driverKind !== "copilot") {
+              throw this.#unsupported("This provider does not use GitHub Copilot configuration.");
+            }
+            instance = changeCopilotConfiguration(
+              current,
+              command.configuration,
+              updatedAt,
+              this.#runtime.activeSessionCount(current.id),
+            );
+            await this.#runtime.invalidateRuntime(current.id);
+            eventName = "provider.instance-configuration-changed@1";
+          } else if (command.kind === "change-cline-configuration") {
+            if (current.driverKind !== "cline") {
+              throw this.#unsupported("This provider does not use Cline configuration.");
+            }
+            instance = changeClineConfiguration(
+              current,
+              command.configuration,
+              updatedAt,
+              this.#runtime.activeSessionCount(current.id),
+            );
+            await this.#runtime.invalidateRuntime(current.id);
+            eventName = "provider.instance-configuration-changed@1";
+          } else if (command.kind === "change-qwen-configuration") {
+            if (current.driverKind !== "qwen") {
+              throw this.#unsupported("This provider does not use Qwen Code configuration.");
+            }
+            instance = changeQwenConfiguration(
+              current,
+              command.configuration,
+              updatedAt,
+              this.#runtime.activeSessionCount(current.id),
+            );
+            await this.#runtime.invalidateRuntime(current.id);
+            eventName = "provider.instance-configuration-changed@1";
+          } else if (command.kind === "change-fx-configuration") {
+            if (current.driverKind !== "fx") {
+              throw this.#unsupported("This provider does not use fx configuration.");
+            }
+            instance = changeFxConfiguration(
+              current,
+              command.configuration,
+              updatedAt,
+              this.#runtime.activeSessionCount(current.id),
+            );
+            await this.#runtime.invalidateRuntime(current.id);
+            eventName = "provider.instance-configuration-changed@1";
+          } else if (command.kind === "change-devin-configuration") {
+            if (current.driverKind !== "devin") {
+              throw this.#unsupported("This provider does not use Devin configuration.");
+            }
+            instance = changeDevinConfiguration(
+              current,
+              command.configuration,
+              updatedAt,
+              this.#runtime.activeSessionCount(current.id),
+            );
+            await this.#runtime.invalidateRuntime(current.id);
+            eventName = "provider.instance-configuration-changed@1";
+          } else if (command.kind === "change-kilo-configuration") {
+            if (current.driverKind !== "kilo") {
+              throw this.#unsupported("This provider does not use Kilo configuration.");
+            }
+            instance = changeKiloConfiguration(
+              current,
+              command.configuration,
+              updatedAt,
+              this.#runtime.activeSessionCount(current.id),
+            );
+            await this.#runtime.invalidateRuntime(current.id);
+            eventName = "provider.instance-configuration-changed@1";
+          } else if (command.kind === "change-pi-configuration") {
+            if (current.driverKind !== "pi") {
+              throw this.#unsupported("This provider does not use Pi configuration.");
+            }
+            instance = changePiConfiguration(
+              current,
+              command.configuration,
+              updatedAt,
+              this.#runtime.activeSessionCount(current.id),
+            );
+            await this.#runtime.invalidateRuntime(current.id);
+            eventName = "provider.instance-configuration-changed@1";
+          } else if (command.kind === "change-oh-my-pi-configuration") {
+            if (current.driverKind !== "oh-my-pi") {
+              throw this.#unsupported("This provider does not use Oh My Pi configuration.");
+            }
+            instance = changeOhMyPiConfiguration(
+              current,
+              command.configuration,
+              updatedAt,
+              this.#runtime.activeSessionCount(current.id),
+            );
+            await this.#runtime.invalidateRuntime(current.id);
+            eventName = "provider.instance-configuration-changed@1";
+          } else if (command.kind === "change-ollama-configuration") {
+            if (current.driverKind !== "ollama") {
+              throw this.#unsupported("This provider does not use Ollama configuration.");
+            }
+            instance = changeOllamaConfiguration(
+              current,
+              command.configuration,
+              updatedAt,
+              this.#runtime.activeSessionCount(current.id),
+            );
+            await this.#runtime.invalidateRuntime(current.id);
+            eventName = "provider.instance-configuration-changed@1";
+          } else {
+            if (
+              command.kind === "set-provider-enabled" &&
+              command.enabled &&
+              !this.#isProviderExecutableAvailable(current)
+            ) {
+              throw this.#invalid(
+                "This provider CLI is not available on this host. Run discovery again or update its binary path before enabling it.",
+              );
+            }
+            instance = setProviderEnabled(current, { enabled: command.enabled, updatedAt });
+            if (!instance.enabled && this.#runtime.activeSessionCount(instance.id) === 0) {
+              await this.#runtime.invalidateRuntime(instance.id);
+            }
+            eventName = "provider.instance-enabled-changed@1";
           }
-          this.#assertDriverPluginEffective(instance);
-          this.#appendInstance(command.expectedVersion, "provider.instance-created@1", instance);
+          if (credentialEndpoint(current) !== credentialEndpoint(instance)) {
+            await this.#forgetCredentialForOldEndpoint(current.id);
+          }
+          this.#appendInstance(command.expectedVersion, eventName, instance);
           const authoritative = this.#authoritativeInstance(instance);
-          this.#publishSelectedAuthenticationObservation(authoritative);
+          if (
+            !keepsRuntime &&
+            eventName !== "provider.instance-renamed@1" &&
+            eventName !== "provider.instance-data-tags-changed@1"
+          ) {
+            this.#invalidateCatalog(
+              instance.id,
+              describeProviderConfigurationChange(current, instance),
+              "provider configuration changed",
+              updatedAt,
+            );
+            this.#clearRuntimeUsageLimits?.(instance.id);
+          }
+          if (
+            !keepsRuntime &&
+            (command.kind === "change-claude-configuration" ||
+              command.kind === "change-mistral-vibe-configuration" ||
+              command.kind === "change-grok-configuration" ||
+              command.kind === "change-glm-configuration" ||
+              command.kind === "change-gemini-configuration" ||
+              command.kind === "change-cline-configuration" ||
+              command.kind === "change-qwen-configuration" ||
+              command.kind === "change-fx-configuration" ||
+              command.kind === "change-devin-configuration")
+          ) {
+            this.#publishSelectedAuthenticationObservation(authoritative);
+          }
+          if (command.kind === "set-provider-enabled" && instance.enabled) {
+            this.#runtime.clearObservedState(instance.id);
+          }
           return decodeProviderRegistryCommandResult({
-            kind: "provider-created",
+            kind: "provider-updated",
             instance: authoritative,
           });
+        } finally {
+          releaseClaudeClaim?.();
+          releaseCodexClaim?.();
         }
-
-        if (current === undefined) throw this.#invalid("Provider instance was not found.");
-        this.#assertVersion(current.version, command.expectedVersion);
-        const updatedAt = decodeTimestamp(this.#clock());
-        if (command.kind === "remove-provider") {
-          const removed = removeProvider(current, {
-            activeSessionCount: this.#runtime.activeSessionCount(current.id),
-            updatedAt,
-          });
-          await this.#runtime.invalidateRuntime(current.id);
-          this.#persistence.journal.append({
-            aggregate: { aggregateType: "provider-instance", aggregateId: current.id },
-            expectedVersion: command.expectedVersion,
-            events: [
-              this.#pendingEvent("provider.instance-removed@1", {
-                instanceId: current.id,
-                version: removed.version,
-              }),
-            ],
-          });
-          if (this.#persistence.readProviderInstance(current.id) !== undefined) {
-            throw this.#unavailable();
-          }
-          if (current.driverKind === "claude") {
-            await this.#clearResumeIdentities?.(current.id);
-            // The renderer clears a removed provider's API key, but nothing
-            // else names this token once the instance is gone, and it stays
-            // valid for a year.
-            await this.#clearClaudeHelperSignIn?.(current.id);
-          }
-          this.#invalidateCatalog(current.id, { kind: "all" }, "provider removed", updatedAt);
-          this.#clearRuntimeUsageLimits?.(current.id);
-          return decodeProviderRegistryCommandResult({
-            kind: "provider-removed",
-            instanceId: current.id,
-            version: removed.version,
-          });
-        }
-
-        if (command.kind === "set-provider-model-context-window") {
-          return decodeProviderRegistryCommandResult({
-            kind: "provider-model-updated",
-            snapshot: this.#updateCatalogModel(
-              current.id,
-              command.modelId,
-              updatedAt,
-              ({ contextWindowOverride: _cleared, ...model }) =>
-                command.contextWindow === undefined
-                  ? model
-                  : { ...model, contextWindowOverride: command.contextWindow },
-            ),
-          });
-        }
-
-        if (command.kind === "set-provider-model-data-tags") {
-          if (this.#persistence.readProviderCatalog === undefined) {
-            throw this.#unavailable();
-          }
-          const catalog = this.#persistence.readProviderCatalog(current.id);
-          if (catalog === undefined) throw this.#invalid("Provider model catalog was not found.");
-          const model = catalog.models.find(
-            (candidate) => String(candidate.id) === String(command.modelId),
-          );
-          if (model === undefined) throw this.#invalid("Provider model was not found.");
-          const snapshot = decodeProviderCatalogSnapshot({
-            ...catalog,
-            version: (catalog.version + 1) as typeof catalog.version,
-            models: catalog.models.map((candidate) =>
-              String(candidate.id) === String(command.modelId)
-                ? setProviderModelDataTags(candidate, command.dataTags)
-                : candidate,
-            ),
-            updatedAt,
-          });
-          this.#persistence.journal.append({
-            aggregate: { aggregateType: "provider-catalog", aggregateId: current.id },
-            expectedVersion: catalog.version,
-            events: [this.#pendingEvent("provider.catalog-updated@1", { snapshot })],
-          });
-          const authoritative = this.#persistence.readProviderCatalog(current.id);
-          if (authoritative?.version !== snapshot.version) throw this.#unavailable();
-          return decodeProviderRegistryCommandResult({
-            kind: "provider-model-tags-updated",
-            snapshot: authoritative,
-          });
-        }
-
-        let instance: ProviderInstance;
-        let eventName: string;
-        if (command.kind === "set-provider-data-tags") {
-          instance = setProviderDataTags(current, command.dataTags, updatedAt);
-          eventName = "provider.instance-data-tags-changed@1";
-        } else if (command.kind === "rename-provider") {
-          instance = renameProvider(current, {
-            displayName: command.displayName,
-            existingInstances: instances,
-            updatedAt,
-          });
-          eventName = "provider.instance-renamed@1";
-        } else if (command.kind === "change-provider-binary") {
-          if (
-            current.driverKind !== "opencode" &&
-            current.driverKind !== "codex" &&
-            current.driverKind !== "kimi-code"
-          ) {
-            throw this.#unsupported("This provider does not use a CLI binary.");
-          }
-          if (this.#runtime.activeSessionCount(current.id) !== 0) {
-            throw this.#invalid("Stop active sessions before changing this provider runtime.");
-          }
-          instance = changeProviderBinary(current, {
-            binaryPath: command.binaryPath,
-            activeSessionCount: 0,
-            updatedAt,
-          });
-          await this.#runtime.invalidateRuntime(current.id);
-          eventName = "provider.instance-binary-changed@1";
-        } else if (command.kind === "change-openai-compatible-configuration") {
-          if (current.driverKind !== "openai-compatible") {
-            throw this.#unsupported("This provider does not use HTTP configuration.");
-          }
-          instance = changeOpenAiCompatibleConfiguration(current, command.configuration, updatedAt);
-          await this.#runtime.invalidateRuntime(current.id);
-          eventName = "provider.instance-configuration-changed@1";
-        } else if (command.kind === "change-anthropic-compatible-configuration") {
-          if (current.driverKind !== "anthropic-compatible") {
-            throw this.#unsupported("This provider does not use HTTP configuration.");
-          }
-          instance = changeAnthropicCompatibleConfiguration(
-            current,
-            command.configuration,
-            updatedAt,
-          );
-          await this.#runtime.invalidateRuntime(current.id);
-          eventName = "provider.instance-configuration-changed@1";
-        } else if (command.kind === "change-azure-foundry-configuration") {
-          if (current.driverKind !== "azure-foundry") {
-            throw this.#unsupported("This provider does not use Azure AI Foundry configuration.");
-          }
-          instance = changeAzureFoundryConfiguration(current, command.configuration, updatedAt);
-          await this.#runtime.invalidateRuntime(current.id);
-          eventName = "provider.instance-configuration-changed@1";
-        } else if (command.kind === "change-openai-image-configuration") {
-          if (current.driverKind !== "openai-image") {
-            throw this.#unsupported("This provider does not use OpenAI image configuration.");
-          }
-          instance = changeOpenAiImageConfiguration(current, command.configuration, updatedAt);
-          await this.#runtime.invalidateRuntime(current.id);
-          eventName = "provider.instance-configuration-changed@1";
-        } else if (command.kind === "change-gemini-native-image-configuration") {
-          if (current.driverKind !== "gemini-native-image") {
-            throw this.#unsupported("This provider does not use Gemini image configuration.");
-          }
-          instance = changeGeminiImageConfiguration(current, command.configuration, updatedAt);
-          await this.#runtime.invalidateRuntime(current.id);
-          eventName = "provider.instance-configuration-changed@1";
-        } else if (command.kind === "change-bfl-image-configuration") {
-          if (current.driverKind !== "bfl-image") {
-            throw this.#unsupported("This provider does not use BFL image configuration.");
-          }
-          instance = changeBflImageConfiguration(current, command.configuration, updatedAt);
-          await this.#runtime.invalidateRuntime(current.id);
-          eventName = "provider.instance-configuration-changed@1";
-        } else if (command.kind === "change-ideogram-image-configuration") {
-          if (current.driverKind !== "ideogram-image") {
-            throw this.#unsupported("This provider does not use Ideogram image configuration.");
-          }
-          instance = changeIdeogramImageConfiguration(current, command.configuration, updatedAt);
-          await this.#runtime.invalidateRuntime(current.id);
-          eventName = "provider.instance-configuration-changed@1";
-        } else if (command.kind === "change-claude-configuration") {
-          if (current.driverKind !== "claude") {
-            throw this.#unsupported("This provider does not use Claude configuration.");
-          }
-          instance = changeClaudeConfiguration(current, {
-            configuration: command.configuration,
-            activeSessionCount: this.#runtime.activeSessionCount(current.id),
-            updatedAt,
-          });
-          await this.#runtime.invalidateRuntime(current.id);
-          eventName = "provider.instance-configuration-changed@1";
-        } else if (command.kind === "change-mistral-vibe-configuration") {
-          if (current.driverKind !== "mistral-vibe") {
-            throw this.#unsupported("This provider does not use Mistral Vibe configuration.");
-          }
-          instance = changeMistralVibeConfiguration(
-            current,
-            command.configuration,
-            updatedAt,
-            this.#runtime.activeSessionCount(current.id),
-          );
-          await this.#runtime.invalidateRuntime(current.id);
-          eventName = "provider.instance-configuration-changed@1";
-        } else if (command.kind === "change-grok-configuration") {
-          if (current.driverKind !== "grok") {
-            throw this.#unsupported("This provider does not use Grok Build configuration.");
-          }
-          instance = changeGrokConfiguration(
-            current,
-            command.configuration,
-            updatedAt,
-            this.#runtime.activeSessionCount(current.id),
-          );
-          await this.#runtime.invalidateRuntime(current.id);
-          eventName = "provider.instance-configuration-changed@1";
-        } else if (command.kind === "change-goose-configuration") {
-          if (current.driverKind !== "goose") {
-            throw this.#unsupported("This provider does not use Goose configuration.");
-          }
-          instance = changeGooseConfiguration(
-            current,
-            command.configuration,
-            updatedAt,
-            this.#runtime.activeSessionCount(current.id),
-          );
-          await this.#runtime.invalidateRuntime(current.id);
-          eventName = "provider.instance-configuration-changed@1";
-        } else if (command.kind === "change-glm-configuration") {
-          if (current.driverKind !== "glm") {
-            throw this.#unsupported("This provider does not use GLM Agent configuration.");
-          }
-          instance = changeGlmConfiguration(
-            current,
-            command.configuration,
-            updatedAt,
-            this.#runtime.activeSessionCount(current.id),
-          );
-          await this.#runtime.invalidateRuntime(current.id);
-          eventName = "provider.instance-configuration-changed@1";
-        } else if (command.kind === "change-gemini-configuration") {
-          if (current.driverKind !== "gemini") {
-            throw this.#unsupported("This provider does not use Gemini CLI configuration.");
-          }
-          instance = changeGeminiConfiguration(
-            current,
-            command.configuration,
-            updatedAt,
-            this.#runtime.activeSessionCount(current.id),
-          );
-          await this.#runtime.invalidateRuntime(current.id);
-          eventName = "provider.instance-configuration-changed@1";
-        } else if (command.kind === "change-copilot-configuration") {
-          if (current.driverKind !== "copilot") {
-            throw this.#unsupported("This provider does not use GitHub Copilot configuration.");
-          }
-          instance = changeCopilotConfiguration(
-            current,
-            command.configuration,
-            updatedAt,
-            this.#runtime.activeSessionCount(current.id),
-          );
-          await this.#runtime.invalidateRuntime(current.id);
-          eventName = "provider.instance-configuration-changed@1";
-        } else if (command.kind === "change-cline-configuration") {
-          if (current.driverKind !== "cline") {
-            throw this.#unsupported("This provider does not use Cline configuration.");
-          }
-          instance = changeClineConfiguration(
-            current,
-            command.configuration,
-            updatedAt,
-            this.#runtime.activeSessionCount(current.id),
-          );
-          await this.#runtime.invalidateRuntime(current.id);
-          eventName = "provider.instance-configuration-changed@1";
-        } else if (command.kind === "change-qwen-configuration") {
-          if (current.driverKind !== "qwen") {
-            throw this.#unsupported("This provider does not use Qwen Code configuration.");
-          }
-          instance = changeQwenConfiguration(
-            current,
-            command.configuration,
-            updatedAt,
-            this.#runtime.activeSessionCount(current.id),
-          );
-          await this.#runtime.invalidateRuntime(current.id);
-          eventName = "provider.instance-configuration-changed@1";
-        } else if (command.kind === "change-fx-configuration") {
-          if (current.driverKind !== "fx") {
-            throw this.#unsupported("This provider does not use fx configuration.");
-          }
-          instance = changeFxConfiguration(
-            current,
-            command.configuration,
-            updatedAt,
-            this.#runtime.activeSessionCount(current.id),
-          );
-          await this.#runtime.invalidateRuntime(current.id);
-          eventName = "provider.instance-configuration-changed@1";
-        } else if (command.kind === "change-devin-configuration") {
-          if (current.driverKind !== "devin") {
-            throw this.#unsupported("This provider does not use Devin configuration.");
-          }
-          instance = changeDevinConfiguration(
-            current,
-            command.configuration,
-            updatedAt,
-            this.#runtime.activeSessionCount(current.id),
-          );
-          await this.#runtime.invalidateRuntime(current.id);
-          eventName = "provider.instance-configuration-changed@1";
-        } else if (command.kind === "change-kilo-configuration") {
-          if (current.driverKind !== "kilo") {
-            throw this.#unsupported("This provider does not use Kilo configuration.");
-          }
-          instance = changeKiloConfiguration(
-            current,
-            command.configuration,
-            updatedAt,
-            this.#runtime.activeSessionCount(current.id),
-          );
-          await this.#runtime.invalidateRuntime(current.id);
-          eventName = "provider.instance-configuration-changed@1";
-        } else if (command.kind === "change-pi-configuration") {
-          if (current.driverKind !== "pi") {
-            throw this.#unsupported("This provider does not use Pi configuration.");
-          }
-          instance = changePiConfiguration(
-            current,
-            command.configuration,
-            updatedAt,
-            this.#runtime.activeSessionCount(current.id),
-          );
-          await this.#runtime.invalidateRuntime(current.id);
-          eventName = "provider.instance-configuration-changed@1";
-        } else if (command.kind === "change-oh-my-pi-configuration") {
-          if (current.driverKind !== "oh-my-pi") {
-            throw this.#unsupported("This provider does not use Oh My Pi configuration.");
-          }
-          instance = changeOhMyPiConfiguration(
-            current,
-            command.configuration,
-            updatedAt,
-            this.#runtime.activeSessionCount(current.id),
-          );
-          await this.#runtime.invalidateRuntime(current.id);
-          eventName = "provider.instance-configuration-changed@1";
-        } else if (command.kind === "change-ollama-configuration") {
-          if (current.driverKind !== "ollama") {
-            throw this.#unsupported("This provider does not use Ollama configuration.");
-          }
-          instance = changeOllamaConfiguration(
-            current,
-            command.configuration,
-            updatedAt,
-            this.#runtime.activeSessionCount(current.id),
-          );
-          await this.#runtime.invalidateRuntime(current.id);
-          eventName = "provider.instance-configuration-changed@1";
-        } else {
-          if (
-            command.kind === "set-provider-enabled" &&
-            command.enabled &&
-            !this.#isProviderExecutableAvailable(current)
-          ) {
-            throw this.#invalid(
-              "This provider CLI is not available on this host. Run discovery again or update its binary path before enabling it.",
-            );
-          }
-          instance = setProviderEnabled(current, { enabled: command.enabled, updatedAt });
-          if (!instance.enabled && this.#runtime.activeSessionCount(instance.id) === 0) {
-            await this.#runtime.invalidateRuntime(instance.id);
-          }
-          eventName = "provider.instance-enabled-changed@1";
-        }
-        if (credentialEndpoint(current) !== credentialEndpoint(instance)) {
-          await this.#forgetCredentialForOldEndpoint(current.id);
-        }
-        this.#appendInstance(command.expectedVersion, eventName, instance);
-        const authoritative = this.#authoritativeInstance(instance);
-        if (
-          eventName !== "provider.instance-renamed@1" &&
-          eventName !== "provider.instance-data-tags-changed@1"
-        ) {
-          this.#invalidateCatalog(
-            instance.id,
-            describeProviderConfigurationChange(current, instance),
-            "provider configuration changed",
-            updatedAt,
-          );
-          this.#clearRuntimeUsageLimits?.(instance.id);
-        }
-        if (
-          command.kind === "change-claude-configuration" ||
-          command.kind === "change-mistral-vibe-configuration" ||
-          command.kind === "change-grok-configuration" ||
-          command.kind === "change-glm-configuration" ||
-          command.kind === "change-gemini-configuration" ||
-          command.kind === "change-cline-configuration" ||
-          command.kind === "change-qwen-configuration" ||
-          command.kind === "change-fx-configuration" ||
-          command.kind === "change-devin-configuration"
-        ) {
-          this.#publishSelectedAuthenticationObservation(authoritative);
-        }
-        if (command.kind === "set-provider-enabled" && instance.enabled) {
-          this.#runtime.clearObservedState(instance.id);
-        }
-        return decodeProviderRegistryCommandResult({
-          kind: "provider-updated",
-          instance: authoritative,
-        });
       });
       this.reconcileConfiguredProviders();
       return result;
@@ -1297,6 +1475,11 @@ export class ProviderService implements ProviderServiceApi {
           this.#runtime.clearObservedState(instanceId);
           this.#clearRuntimeUsageLimits?.(instanceId);
           throw this.#unsupported("Image profiles have no runtime to probe.");
+        }
+        if (this.#claudeAccountNeedsOwnConfigDirectory(instance)) {
+          this.#runtime.clearObservedState(instanceId);
+          this.#clearRuntimeUsageLimits?.(instanceId);
+          throw this.#invalid("This Claude account needs its own config directory.");
         }
         // Do NOT clear the runtime observed state for a valid enabled probe:
         // the web client already clears its local snapshot for the "checking"
@@ -1486,6 +1669,17 @@ export class ProviderService implements ProviderServiceApi {
     if (isImageProfileDriverKind(instance.driverKind)) {
       this.#runtime.clearObservedState(instance.id);
       return undefined;
+    }
+    if (this.#claudeAccountNeedsOwnConfigDirectory(instance)) {
+      return decodeProviderObservedState({
+        instanceId: instance.id,
+        readiness: "incompatible",
+        processState: "stopped",
+        models: [],
+        capabilities: unavailableCapabilities,
+        message: CLAUDE_ACCOUNT_NEEDS_DIRECTORY_MESSAGE,
+        observedAt: decodeTimestamp(this.#clock()),
+      });
     }
     if (this.#driverProvider === undefined) return undefined;
     try {
@@ -1721,6 +1915,238 @@ export class ProviderService implements ProviderServiceApi {
       if (!("binaryPath" in instance.configuration)) return false;
       return resolveProviderExecutableKey(instance.configuration.binaryPath) === executableKey;
     });
+  }
+
+  #refuseTakenClaudeAccountDirectories(
+    instances: ReadonlyArray<ProviderInstance>,
+    instance: ProviderInstance,
+    hostConfigDirectory: string | undefined,
+    hostSecureDirectory: string | undefined,
+    exceptId?: ProviderInstanceId,
+  ): void {
+    for (const directory of effectiveClaudeAccountDirectories(
+      instance,
+      homedir(),
+      hostConfigDirectory,
+      hostSecureDirectory,
+      instances,
+    )) {
+      this.#refuseTakenClaudeAccountDirectory(
+        instances,
+        directory,
+        hostConfigDirectory,
+        hostSecureDirectory,
+        exceptId,
+      );
+    }
+  }
+
+  #refuseTakenClaudeAccountDirectory(
+    instances: ReadonlyArray<ProviderInstance>,
+    directory: string,
+    hostConfigDirectory: string | undefined,
+    hostSecureDirectory: string | undefined,
+    exceptId?: ProviderInstanceId,
+  ): void {
+    const taken =
+      exceptId === undefined
+        ? claudeAccountDirectoryTaken(
+            instances,
+            directory,
+            homedir(),
+            hostConfigDirectory,
+            hostSecureDirectory,
+          )
+        : claudeAccountDirectoryTaken(
+            instances,
+            directory,
+            homedir(),
+            hostConfigDirectory,
+            hostSecureDirectory,
+            exceptId,
+          );
+    if (taken) {
+      throw this.#invalid("Another Claude account already uses that config directory.");
+    }
+  }
+
+  /**
+   * Octant assigns each Claude account its directory. A client may name only
+   * the account's own assigned leaf or the directory the account already
+   * stores, which is what a change that leaves the directory alone sends back.
+   * Any other path, the host profile included, would put the Plan write grant
+   * or another account's login behind a folder Octant did not pick for it.
+   */
+  #refuseUnassignedClaudeDirectory(
+    directory: string | undefined,
+    instanceId: ProviderInstanceId,
+    stored: string | undefined,
+  ): void {
+    if (directory === undefined) return;
+    const named = accountDirectoryIdentity(directory);
+    if (named === assignedClaudeAccountConfigDirectory(homedir(), instanceId)) return;
+    if (stored !== undefined && named === accountDirectoryIdentity(stored)) return;
+    throw this.#invalid(
+      "Claude accounts use an Octant-assigned directory. Re-assign the account to use it.",
+    );
+  }
+
+  #assignedClaudeConfigurationForChange(
+    instances: ReadonlyArray<ProviderInstance>,
+    current: Extract<ProviderInstance, { readonly driverKind: "claude" }>,
+    configuration: ClaudeProviderConfiguration,
+  ): ClaudeProviderConfiguration {
+    if (configuration.configDirectory !== undefined) return configuration;
+    if (current.configuration.configDirectory !== undefined) return configuration;
+    if (configuration.authentication === "api-key") {
+      return {
+        ...configuration,
+        configDirectory: assignedClaudeAccountConfigDirectory(homedir(), current.id),
+      };
+    }
+    const ownerId = implicitClaudeAccountOwnerId(instances);
+    if (ownerId === undefined || String(ownerId) === String(current.id)) return configuration;
+    return {
+      ...configuration,
+      configDirectory: assignedClaudeAccountConfigDirectory(homedir(), current.id),
+    };
+  }
+
+  #refuseVacatingImplicitClaudeOwner(
+    instances: ReadonlyArray<ProviderInstance>,
+    current: ProviderInstance,
+    next?: ProviderInstance,
+  ): void {
+    if (current.driverKind !== "claude") return;
+    if (current.configuration.configDirectory !== undefined) return;
+    if (current.configuration.authentication !== "subscription") return;
+    if (claudeAccountNeedsOwnConfigDirectory(instances, current)) return;
+    const stillImplicit =
+      next !== undefined &&
+      next.driverKind === "claude" &&
+      next.configuration.configDirectory === undefined &&
+      next.configuration.authentication === "subscription";
+    if (stillImplicit) return;
+    if (
+      !instances.some((candidate) => claudeAccountNeedsOwnConfigDirectory(instances, candidate))
+    ) {
+      return;
+    }
+    throw this.#invalid(
+      next === undefined
+        ? "Give the other Claude accounts their own config directory before removing this one."
+        : "Give the other Claude accounts their own config directory before moving this one.",
+    );
+  }
+
+  #claudeAccountNeedsOwnConfigDirectory(instance: ProviderInstance): boolean {
+    return claudeAccountNeedsOwnConfigDirectory(
+      this.#persistence.readProviderInstances(),
+      instance,
+    );
+  }
+
+  async #acquireClaudeAccountClaim(): Promise<() => void> {
+    const previous = this.#claudeAccountClaimTail;
+    let release!: () => void;
+    this.#claudeAccountClaimTail = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await previous.catch(() => undefined);
+    return release;
+  }
+
+  async #acquireCodexAccountClaim(): Promise<() => void> {
+    const previous = this.#codexAccountClaimTail;
+    let release!: () => void;
+    this.#codexAccountClaimTail = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await previous.catch(() => undefined);
+    return release;
+  }
+
+  /**
+   * Octant assigns each Codex account its home, by the same rule as a Claude
+   * account: a client may name only the account's own assigned home or the one
+   * it already stores. Codex loads `config.toml` from that folder, and two
+   * accounts on one folder share one login.
+   */
+  #refuseUnassignedCodexHome(
+    directory: string | undefined,
+    instanceId: ProviderInstanceId,
+    stored: string | undefined,
+  ): void {
+    if (directory === undefined) return;
+    const named = accountDirectoryIdentity(directory);
+    if (named === assignedCodexHome(homedir(), instanceId)) return;
+    if (stored !== undefined && named === accountDirectoryIdentity(stored)) return;
+    throw this.#invalid(
+      "Codex accounts use an Octant-assigned home. Re-assign the account to use it.",
+    );
+  }
+
+  async #ensureCodexAccountHome(directory: string): Promise<void> {
+    try {
+      await this.#ensureAccountDirectory(directory);
+    } catch {
+      throw new ProviderServiceError({
+        category: "unavailable",
+        message: "The Codex account folder could not be created, so nothing was saved. Try again.",
+      });
+    }
+  }
+
+  #assignedCodexConfigurationForChange(
+    instances: ReadonlyArray<ProviderInstance>,
+    current: Extract<ProviderInstance, { readonly driverKind: "codex" }>,
+    configuration: Extract<ProviderInstance, { readonly driverKind: "codex" }>["configuration"],
+  ): Extract<ProviderInstance, { readonly driverKind: "codex" }>["configuration"] {
+    if (configuration.codexHome !== undefined) return configuration;
+    if (current.configuration.codexHome !== undefined) return configuration;
+    const ownerId = implicitCodexAccountOwnerId(instances);
+    if (ownerId === undefined || String(ownerId) === String(current.id)) return configuration;
+    return {
+      ...configuration,
+      codexHome: assignedCodexHome(homedir(), current.id),
+    };
+  }
+
+  #refuseVacatingImplicitCodexOwner(
+    instances: ReadonlyArray<ProviderInstance>,
+    current: ProviderInstance,
+    next?: ProviderInstance,
+  ): void {
+    if (current.driverKind !== "codex") return;
+    if (current.configuration.codexHome !== undefined) return;
+    if (codexAccountNeedsOwnHome(instances, current)) return;
+    const stillImplicit =
+      next !== undefined &&
+      next.driverKind === "codex" &&
+      next.configuration.codexHome === undefined;
+    if (stillImplicit) return;
+    if (!instances.some((candidate) => codexAccountNeedsOwnHome(instances, candidate))) {
+      return;
+    }
+    throw this.#invalid(
+      next === undefined
+        ? "Give the other Codex accounts their own home directory before removing this one."
+        : "Give the other Codex accounts their own home directory before moving this one.",
+    );
+  }
+
+  #refuseTakenCodexHomes(
+    instances: ReadonlyArray<ProviderInstance>,
+    instance: ProviderInstance,
+    exceptId?: ProviderInstanceId,
+  ): void {
+    if (instance.driverKind !== "codex") return;
+    const hostHome = hostDirectoryClaim(process.env.CODEX_HOME);
+    for (const directory of effectiveCodexHomes(instance, homedir(), hostHome, instances)) {
+      if (codexHomeTaken(instances, directory, homedir(), hostHome, exceptId ?? instance.id)) {
+        throw this.#invalid("Another Codex account already uses that home directory.");
+      }
+    }
   }
 
   async #withInstanceOperation<T>(instanceId: ProviderInstanceId, operation: () => Promise<T>) {
@@ -2021,6 +2447,199 @@ export async function runPackagedProviderSmokeTurn(
   } finally {
     await rm(createdProjectRoot, { recursive: true, force: true });
   }
+}
+
+function accountDirectoryIdentity(directory: string): string {
+  let end = directory.length;
+  while (end > 0 && directory.charAt(end - 1) === "/") {
+    end -= 1;
+  }
+  return directory.slice(0, end);
+}
+
+function hostDirectoryClaim(directory: string | undefined): string | undefined {
+  const trimmed = directory?.trim();
+  // A relative overlay resolves against the server cwd here and against
+  // the thread project root at launch. Refuse it rather than claim the
+  // wrong directory.
+  if (trimmed === undefined || trimmed.length === 0 || !isAbsolute(trimmed)) return undefined;
+  return trimmed;
+}
+
+/** Host Claude directory overlays must be absolute or the implicit default account is refused. */
+export function hostClaudeDirectoryOverlayIsRelative(environment: NodeJS.ProcessEnv): boolean {
+  return [environment.CLAUDE_CONFIG_DIR, environment.CLAUDE_SECURESTORAGE_CONFIG_DIR].some(
+    (value) => {
+      const trimmed = value?.trim();
+      return trimmed !== undefined && trimmed.length > 0 && !isAbsolute(trimmed);
+    },
+  );
+}
+
+function hostClaudeConfigDirectory(environment: NodeJS.ProcessEnv): string | undefined {
+  return hostDirectoryClaim(environment.CLAUDE_CONFIG_DIR);
+}
+
+function hostClaudeSecureStorageDirectory(environment: NodeJS.ProcessEnv): string | undefined {
+  return hostDirectoryClaim(environment.CLAUDE_SECURESTORAGE_CONFIG_DIR);
+}
+
+function implicitClaudeAccountDirectory(
+  homeDirectory: string,
+  hostConfigDirectory: string | undefined,
+): string {
+  // A default instance with no stored directory launches against the
+  // inherited host overlay when present; uniqueness has to use that
+  // same effective path.
+  return hostConfigDirectory ?? `${accountDirectoryIdentity(homeDirectory)}/.claude`;
+}
+
+function implicitCodexAccountDirectory(
+  homeDirectory: string,
+  hostHome: string | undefined,
+): string {
+  return hostHome ?? `${accountDirectoryIdentity(homeDirectory)}/.codex`;
+}
+
+export function hostCodexHomeOverlayIsRelative(environment: NodeJS.ProcessEnv): boolean {
+  const trimmed = environment.CODEX_HOME?.trim();
+  return trimmed !== undefined && trimmed.length > 0 && !isAbsolute(trimmed);
+}
+
+export function codexAccountNeedsOwnHome(
+  instances: ReadonlyArray<ProviderInstance>,
+  instance: ProviderInstance,
+): boolean {
+  if (instance.driverKind !== "codex") return false;
+  if (instance.configuration.codexHome !== undefined) return false;
+  const ownerId = implicitCodexAccountOwnerId(instances);
+  return ownerId !== undefined && String(instance.id) !== String(ownerId);
+}
+
+export function codexAccountOverlapsPeerHome(
+  instances: ReadonlyArray<ProviderInstance>,
+  instance: ProviderInstance,
+  homeDirectory: string,
+  hostEnvironment: NodeJS.ProcessEnv,
+): boolean {
+  const hostHome = hostDirectoryClaim(hostEnvironment.CODEX_HOME);
+  return effectiveCodexHomes(instance, homeDirectory, hostHome, instances).some((directory) =>
+    codexHomeTaken(instances, directory, homeDirectory, hostHome, instance.id),
+  );
+}
+
+function effectiveCodexHomes(
+  instance: ProviderInstance,
+  homeDirectory: string,
+  hostHome: string | undefined,
+  instances: ReadonlyArray<ProviderInstance>,
+): ReadonlyArray<string> {
+  if (instance.driverKind !== "codex") return [];
+  if (instance.configuration.codexHome !== undefined) {
+    return [instance.configuration.codexHome];
+  }
+  if (codexAccountNeedsOwnHome(instances, instance)) {
+    return [assignedCodexHome(homeDirectory, instance.id)];
+  }
+  return [implicitCodexAccountDirectory(homeDirectory, hostHome)];
+}
+
+function codexHomeTaken(
+  instances: ReadonlyArray<ProviderInstance>,
+  directory: string,
+  homeDirectory: string,
+  hostHome: string | undefined,
+  exceptId?: ProviderInstanceId,
+): boolean {
+  const key = accountDirectoryIdentity(directory);
+  return instances.some((instance) => {
+    if (instance.driverKind !== "codex") return false;
+    if (exceptId !== undefined && String(instance.id) === String(exceptId)) return false;
+    return effectiveCodexHomes(instance, homeDirectory, hostHome, instances).some(
+      (claimed) => accountDirectoryIdentity(claimed) === key,
+    );
+  });
+}
+
+export function claudeAccountNeedsOwnConfigDirectory(
+  instances: ReadonlyArray<ProviderInstance>,
+  instance: ProviderInstance,
+): boolean {
+  if (instance.driverKind !== "claude") return false;
+  if (instance.configuration.configDirectory !== undefined) return false;
+  if (instance.configuration.authentication !== "subscription") return false;
+  const ownerId = implicitClaudeAccountOwnerId(instances);
+  return ownerId !== undefined && String(instance.id) !== String(ownerId);
+}
+
+export function claudeAccountOverlapsPeerLaunchDirectory(
+  instances: ReadonlyArray<ProviderInstance>,
+  instance: ProviderInstance,
+  homeDirectory: string,
+  hostEnvironment: NodeJS.ProcessEnv,
+): boolean {
+  const hostConfigDirectory = hostClaudeConfigDirectory(hostEnvironment);
+  const hostSecureDirectory = hostClaudeSecureStorageDirectory(hostEnvironment);
+  return effectiveClaudeAccountDirectories(
+    instance,
+    homeDirectory,
+    hostConfigDirectory,
+    hostSecureDirectory,
+    instances,
+  ).some((directory) =>
+    claudeAccountDirectoryTaken(
+      instances,
+      directory,
+      homeDirectory,
+      hostConfigDirectory,
+      hostSecureDirectory,
+      instance.id,
+    ),
+  );
+}
+
+function effectiveClaudeAccountDirectories(
+  instance: ProviderInstance,
+  homeDirectory: string,
+  hostConfigDirectory: string | undefined,
+  hostSecureDirectory: string | undefined,
+  instances: ReadonlyArray<ProviderInstance>,
+): ReadonlyArray<string> {
+  if (instance.driverKind !== "claude") return [];
+  if (instance.configuration.configDirectory !== undefined) {
+    return [instance.configuration.configDirectory];
+  }
+  if (instance.configuration.authentication === "api-key") {
+    return [assignedClaudeAccountConfigDirectory(homeDirectory, instance.id)];
+  }
+  if (claudeAccountNeedsOwnConfigDirectory(instances, instance)) {
+    return [assignedClaudeAccountConfigDirectory(homeDirectory, instance.id)];
+  }
+  const directories = [implicitClaudeAccountDirectory(homeDirectory, hostConfigDirectory)];
+  if (hostSecureDirectory !== undefined) directories.push(hostSecureDirectory);
+  return directories;
+}
+
+function claudeAccountDirectoryTaken(
+  instances: ReadonlyArray<ProviderInstance>,
+  directory: string,
+  homeDirectory: string,
+  hostConfigDirectory: string | undefined,
+  hostSecureDirectory: string | undefined,
+  exceptId?: ProviderInstanceId,
+): boolean {
+  const key = accountDirectoryIdentity(directory);
+  return instances.some((instance) => {
+    if (instance.driverKind !== "claude") return false;
+    if (exceptId !== undefined && String(instance.id) === String(exceptId)) return false;
+    return effectiveClaudeAccountDirectories(
+      instance,
+      homeDirectory,
+      hostConfigDirectory,
+      hostSecureDirectory,
+      instances,
+    ).some((existing) => accountDirectoryIdentity(existing) === key);
+  });
 }
 
 function providerFailureOfError(error: unknown): ProviderFailure | undefined {

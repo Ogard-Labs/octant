@@ -8,7 +8,9 @@ import { WindowAuthorityError, type WindowAuthorityStore } from "../windowAuthor
 
 export interface ProviderUsageLimitsRouteService {
   readonly snapshot: () => ProviderUsageLimitsSnapshot;
-  readonly refresh: () => Promise<ProviderUsageLimitsSnapshot>;
+  readonly refresh: (request?: {
+    readonly onDemand?: boolean;
+  }) => Promise<ProviderUsageLimitsSnapshot>;
 }
 
 export function createProviderUsageLimitsRouteHandler(dependencies: {
@@ -59,7 +61,8 @@ export function createProviderUsageLimitsRouteHandler(dependencies: {
     }
     try {
       const value = isRefresh
-        ? await dependencies.service.refresh()
+        ? // A person pressed refresh, which is the one time a costly source is asked.
+          await dependencies.service.refresh({ onDemand: true })
         : dependencies.service.snapshot();
       return response(decodeProviderUsageLimitsSnapshot(value), 200, origin);
     } catch {

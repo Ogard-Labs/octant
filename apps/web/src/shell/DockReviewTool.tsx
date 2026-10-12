@@ -129,6 +129,7 @@ function BoundReview(props: {
       client={refreshingClient}
       createGitOperationId={() => nextUuid() as never}
       createOperationId={() => nextUuid() as never}
+      defaultLayout={props.controller.bootstrap?.settings.defaultDiffLayout ?? "unified"}
       diff={projection}
       executionPolicy={props.view.thread.executionPolicy}
       {...(props.loadRuntime === undefined ? {} : { loadRuntime: props.loadRuntime })}

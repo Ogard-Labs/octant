@@ -21,6 +21,13 @@ import type { Effect, Scope } from "effect";
 
 export interface ProviderContextFactsInput {
   readonly instanceId: ProviderInstanceId;
+  /**
+   * True when a person asked for a reading now. A source whose reading is
+   * costly, because it has to start the provider's process, answers only then.
+   * At any other time it reports `unavailable` and the host keeps what it last
+   * saw.
+   */
+  readonly onDemand?: boolean;
 }
 
 export interface ProviderModelLimitEvidence {

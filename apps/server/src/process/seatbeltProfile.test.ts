@@ -270,35 +270,32 @@ describe("shared Seatbelt profile builder", () => {
     );
   });
 
-  it("opens a provider's credential lookup without opening the keychain files", () => {
+  it("lets extraRules exec /usr/bin/security without opening the keychain files", () => {
     const root = temporaryRoot();
-    const input = {
+    const profile = buildDenyDefaultSeatbeltProfile({
       boundRoot: root,
       temporaryDirectory: root,
       networkEgress: "allow",
       allowFileReadStar: true,
+      allowProcessExec: false,
       privateHomeAllowPaths: [],
-    } as const;
-
-    const withLookup = buildDenyDefaultSeatbeltProfile({
-      ...input,
-      allowProviderCredentialLookup: true,
+      extraRules: [
+        seatbeltExecRule("/usr/bin/security"),
+        '(allow mach-lookup (global-name "com.apple.SecurityServer"))',
+        '(allow mach-lookup (global-name "com.apple.securityd.xpc"))',
+      ],
     });
 
-    expect(withLookup).toContain('(allow mach-lookup (global-name "com.apple.SecurityServer"))');
-    // The daemon opens the store; this process may never read it off disk.
-    expect(withLookup).toContain(seatbeltDenyRule("file-read*", "/Library/Keychains"));
-    expect(withLookup).not.toContain(seatbeltAllowRule("file-read*", "/Library/Keychains"));
-    expect(buildDenyDefaultSeatbeltProfile(input)).not.toContain("com.apple.SecurityServer");
+    expect(profile).toContain(seatbeltExecRule("/usr/bin/security"));
+    expect(profile).toContain('(allow mach-lookup (global-name "com.apple.SecurityServer"))');
+    expect(profile).toContain(seatbeltDenyRule("file-read*", "/Library/Keychains"));
+    expect(profile).not.toContain(seatbeltAllowRule("file-read*", "/Library/Keychains"));
+    expect(profile).not.toContain(seatbeltExecRule("/bin/sh"));
   });
 
   it.skipIf(process.platform !== "darwin" || !existsSync("/usr/bin/security"))(
-    "keeps a credential-lookup launch away from the login keychain and the security tool",
+    "opens a Keychain sign-in to security and the one login keychain file, and nothing beside them",
     () => {
-      // The Claude runtime reads its sign-in by running `/usr/bin/security`,
-      // which would hand back any item that trusts the tool, including other
-      // command-line programs' tokens. A confined launch may run neither the
-      // tool nor read the keychain file, even with the lookup open.
       const root = temporaryRoot();
       const home = join(root, "home");
       const keychains = join(home, "Library", "Keychains");
@@ -307,19 +304,27 @@ describe("shared Seatbelt profile builder", () => {
       mkdirSync(keychains, { recursive: true });
       mkdirSync(checkout);
       mkdirSync(temporaryDirectory);
-      writeFileSync(join(keychains, "login.keychain-db"), "kych\n");
+      const loginKeychain = join(keychains, "login.keychain-db");
+      const otherKeychain = join(keychains, "metadata.keychain-db");
+      writeFileSync(loginKeychain, "kych\n");
+      writeFileSync(otherKeychain, "kych\n");
       const script = join(checkout, "runtime.sh");
       writeFileSync(
         script,
         [
           "#!/bin/bash",
-          `IFS= read -r login < '${join(keychains, "login.keychain-db")}' && echo login=read`,
-          "echo reached-security-step",
+          `IFS= read -r login < '${loginKeychain}' && echo login=read`,
+          `IFS= read -r other < '${otherKeychain}' && echo other=read`,
           "/usr/bin/security help >/dev/null 2>&1 && echo security=ran",
+          "/bin/sh -c 'echo shell=ran' >/dev/null 2>&1 && echo shell=ran",
+          "echo reached-the-end",
           "",
         ].join("\n"),
         { mode: 0o700 },
       );
+      // The rules a confined Claude subscription launch takes. Measured on
+      // macOS 27.0.1 with Claude Code 2.1.296: the runtime is signed out with
+      // any one of them missing, and needs no shell and no other keychain file.
       const profile = buildDenyDefaultSeatbeltProfile({
         boundRoot: checkout,
         temporaryDirectory,
@@ -327,23 +332,30 @@ describe("shared Seatbelt profile builder", () => {
         writeBoundRoot: false,
         allowFileReadStar: true,
         allowProcessExec: false,
-        allowProcessFork: false,
+        allowProcessFork: true,
         execAllowPaths: ["/bin/bash", script],
-        allowProviderCredentialLookup: true,
+        extraRules: [
+          seatbeltExecRule("/usr/bin/security"),
+          '(allow mach-lookup (global-name "com.apple.SecurityServer"))',
+          '(allow mach-lookup (global-name "com.apple.securityd.xpc"))',
+          seatbeltAllowLiteralReadRule(loginKeychain),
+        ],
         homeDirectory: home,
         usersDirectory: root,
       });
 
-      expect(profile).not.toContain("/usr/bin/security");
-      expect(profile).not.toContain("(allow process-fork)");
-      expect(profile).not.toContain("login.keychain-db");
+      expect(profile).not.toContain(seatbeltExecRule("/bin/sh"));
+      expect(profile).not.toContain("(allow process-exec)\n");
       const output = spawnSync("/usr/bin/sandbox-exec", ["-p", profile, script], {
         cwd: checkout,
         encoding: "utf8",
       }).stdout;
-      expect(output).toContain("reached-security-step");
-      expect(output).not.toContain("login=read");
-      expect(output).not.toContain("security=ran");
+      expect(output).toContain("reached-the-end");
+      expect(output).toContain("login=read");
+      expect(output).toContain("security=ran");
+      // The rest of the folder and every shell stay closed.
+      expect(output).not.toContain("other=read");
+      expect(output).not.toContain("shell=ran");
     },
   );
 
