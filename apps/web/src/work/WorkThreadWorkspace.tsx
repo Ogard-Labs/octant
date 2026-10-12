@@ -1788,6 +1788,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
       )}
       <ThreadComposer
         queue={<ThreadMessageQueue queue={messageQueue} showUnavailable={queueFollowUp} />}
+        threadBusy={turnRunning || (messageQueue.snapshot?.items.length ?? 0) > 0}
         presentation="follow-up"
         {...(threadDropKey === undefined ? {} : { threadDropKey })}
         context={

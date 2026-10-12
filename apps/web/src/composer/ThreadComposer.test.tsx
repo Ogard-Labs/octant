@@ -1,6 +1,9 @@
-import { render, screen } from "@testing-library/react";
+import type { ContextClient } from "@octant/client-runtime/context-client";
+import { decodeThreadExternalContentState } from "@octant/contracts/content-provenance";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
+import { OutsideContentContext } from "./OutsideContentNotice";
 import { ThreadComposer } from "./ThreadComposer";
 
 describe("ThreadComposer", () => {
@@ -49,6 +52,38 @@ describe("ThreadComposer", () => {
     expect(container.querySelector(".thread-composer__feedback")).toBe(feedback);
     expect(screen.getByRole("textbox", { name: "Message" })).toBe(field);
     expect(field).toHaveValue("Keep my draft");
+  });
+
+  it("offers the outside-content review inside a marked thread's composer and holds the clear while the thread is busy", async () => {
+    const threadId = "40000000-0000-4000-8000-000000000001";
+    const marked = decodeThreadExternalContentState({
+      threadId,
+      externalContentIngested: true,
+      version: 1,
+      ingestionCount: 1,
+      sources: [{ sourceLabel: "web-fetch", ingestionCount: 1 }],
+    });
+    const client = {
+      externalContentAvailable: true,
+      readExternalContent: vi.fn(async () => marked),
+      clearExternalContent: vi.fn(),
+    } as unknown as ContextClient;
+    const { container } = render(
+      <OutsideContentContext value={{ client, mode: "work", threadId }}>
+        <ThreadComposer
+          presentation="follow-up"
+          threadBusy
+          input={<textarea aria-label="Message" className="composer-input" />}
+          row={{ actions: { kind: "send", send: { ariaLabel: "Send", onSend: vi.fn() } } }}
+        />
+      </OutsideContentContext>,
+    );
+
+    const review = await screen.findByRole("button", { name: "Review" });
+    expect(container.querySelector(".thread-composer__surface")).toContainElement(review);
+    await userEvent.setup().click(review);
+    expect(await screen.findByRole("button", { name: "Clear the mark" })).toBeDisabled();
+    await waitFor(() => expect(client.readExternalContent).toHaveBeenCalled());
   });
 
   it("renders only the capabilities the surface passes in", () => {
