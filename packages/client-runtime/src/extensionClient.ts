@@ -5,6 +5,8 @@ import {
   decodeExtensionSnapshot,
   decodeExtensionToolApprovalDecision,
   decodeExtensionToolApprovalList,
+  decodeExtensionToolGrantList,
+  decodeExtensionToolGrantRequest,
   type ExtensionCommand,
   type ExtensionCommandResult,
   type ExtensionEffectiveSnapshot,
@@ -12,6 +14,8 @@ import {
   type ExtensionSnapshot,
   type ExtensionToolApprovalDecision,
   type ExtensionToolApprovalList,
+  type ExtensionToolGrantList,
+  type ExtensionToolGrantRequest,
 } from "@octant/contracts/extension-rpc";
 import { bindFetchPort } from "./bindFetchPort";
 
@@ -27,6 +31,10 @@ export interface ExtensionClient {
   execute(command: ExtensionCommand, signal?: AbortSignal): Promise<ExtensionCommandResult>;
   listToolApprovals(signal?: AbortSignal): Promise<ExtensionToolApprovalList>;
   decideToolApproval(decision: ExtensionToolApprovalDecision): Promise<boolean>;
+  /** The MCP tools a person always allows, per Project. A local window only. */
+  listToolGrants(signal?: AbortSignal): Promise<ExtensionToolGrantList>;
+  /** Takes one remembered approval away; false when it was already gone. */
+  revokeToolGrant(grantId: string): Promise<boolean>;
   /** Consume one native-picker receipt to register and inspect an Agent Plugins directory. */
   importLocalPluginReceipt(receiptId: string): Promise<ExtensionCommandResult>;
 }
@@ -139,6 +147,48 @@ export function createExtensionClient(options: ExtensionClientOptions): Extensio
             throw new Error("invalid");
           }
           return true;
+        },
+      );
+    },
+    listToolGrants(signal) {
+      return request(
+        fetch,
+        new URL("/api/extensions/tool-grants", options.baseUrl).toString(),
+        {
+          method: "POST",
+          headers: { ...headers, "content-type": "application/json" },
+          body: JSON.stringify({ kind: "list" }),
+          ...(signal === undefined ? {} : { signal }),
+        },
+        decodeExtensionToolGrantList,
+      );
+    },
+    async revokeToolGrant(grantId) {
+      let validated: ExtensionToolGrantRequest;
+      try {
+        validated = decodeExtensionToolGrantRequest({ kind: "revoke", grantId });
+      } catch {
+        throw new ExtensionClientFailure("invalid", "Remembered tool approval is invalid.");
+      }
+      return request(
+        fetch,
+        new URL("/api/extensions/tool-grants", options.baseUrl).toString(),
+        {
+          method: "POST",
+          headers: { ...headers, "content-type": "application/json" },
+          body: JSON.stringify(validated),
+        },
+        (value) => {
+          if (
+            typeof value !== "object" ||
+            value === null ||
+            Object.keys(value).length !== 1 ||
+            !("revoked" in value) ||
+            typeof value.revoked !== "boolean"
+          ) {
+            throw new Error("invalid");
+          }
+          return value.revoked;
         },
       );
     },
