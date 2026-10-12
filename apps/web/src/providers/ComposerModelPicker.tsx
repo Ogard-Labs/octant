@@ -4,7 +4,7 @@ import type {
   ProviderModelOptionValues,
 } from "@octant/contracts";
 import type { ModelPickerSelection, PickerGroup, PickerModel } from "@octant/domain";
-import { findPickerModel, pickerCatalogs } from "@octant/domain";
+import { findPickerModel, pickerCatalogs, providerAccountAccent } from "@octant/domain";
 import { Check, ChevronDown, Clock, Plus, RotateCcw, Search, Star } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import {
@@ -491,6 +491,13 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
             driverKind={group.instance.driverKind}
             size={20}
           />
+          {providerAccountAccent(group.instance) !== undefined ? (
+            <span
+              aria-hidden="true"
+              className="composer-model-picker__rail-accent"
+              data-accent={providerAccountAccent(group.instance)}
+            />
+          ) : null}
           <span className="composer-model-picker__rail-label">{group.instance.displayName}</span>
           {status === undefined ? null : (
             <span

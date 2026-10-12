@@ -1217,6 +1217,30 @@ describe("mapClaudeMessage", () => {
     expect(ctx.terminal).toBe(false);
   });
 
+  it("carries overage posture on the same window the process reported", () => {
+    const ctx = context();
+    const results = mapped(ctx, {
+      kind: "rate-limit",
+      sessionId: claudeSessionId,
+      status: "allowed",
+      rateLimitType: "five_hour",
+      utilization: 0.4,
+      overageStatus: "allowed_warning",
+      overageInUse: true,
+    });
+
+    expect(results).toMatchObject([
+      {
+        kind: "event",
+        event: {
+          kind: "rate-limit-window",
+          window: "five_hour",
+          overage: { status: "warning", inUse: true },
+        },
+      },
+    ]);
+  });
+
   it.each([
     {
       name: "result usage",
@@ -1430,6 +1454,42 @@ describe("mapClaudeMessage", () => {
       event: { kind: "usage", inputTokens: 200, contextTokens: 150, autoCompactThreshold: 167_000 },
     });
   });
+
+  it.each([
+    ["the size the runtime says survived", 18_000, 18_000],
+    ["no fill when the runtime does not say", undefined, undefined],
+  ] as const)(
+    "reports a compacted window's fill as %s until the next request measures it",
+    (_, postTokens, contextTokens) => {
+      const ctx = context();
+      mapped(ctx, {
+        kind: "assistant",
+        sessionId: claudeSessionId,
+        messageId: "sdk-message-1",
+        content: [{ kind: "text", text: "Working." }],
+        usage: { ...usage, inputTokens: 160_000 },
+      });
+      mapped(ctx, {
+        kind: "compaction",
+        sessionId: claudeSessionId,
+        ...(postTokens === undefined ? {} : { postTokens }),
+      });
+      const [settled] = eventValues(
+        mapped(ctx, {
+          kind: "result",
+          sessionId: claudeSessionId,
+          outcome: "success",
+          subtype: "success",
+          stopReason: "end_turn",
+          usage,
+          permissionDenials: [],
+        }),
+      );
+      expect(settled).toMatchObject({ kind: "usage", promptRetention: "compacted" });
+      if (contextTokens === undefined) expect(settled).not.toHaveProperty("contextTokens");
+      else expect(settled).toMatchObject({ contextTokens });
+    },
+  );
 
   it("carries the runtime's account of the window on the usage that settles the turn", () => {
     const ctx = context();

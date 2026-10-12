@@ -48,6 +48,13 @@ function bridge(overrides: Partial<OctantHostBridge> = {}): OctantHostBridge {
       return () => undefined;
     }),
     clearProviderCredential: vi.fn(),
+    listProviderApiKeys: vi.fn(),
+    addProviderApiKey: vi.fn(),
+    renameProviderApiKey: vi.fn(),
+    replaceProviderApiKey: vi.fn(),
+    removeProviderApiKey: vi.fn(),
+    setActiveProviderApiKey: vi.fn(),
+    moveProviderApiKey: vi.fn(),
     close: vi.fn(),
     maximizeOrRestore: vi.fn(),
     minimize: vi.fn(),

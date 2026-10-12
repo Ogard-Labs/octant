@@ -126,6 +126,7 @@ export interface HostControlRouteDependencies {
 
 export interface HostDataMapRouteDependencies {
   readonly dataDirectory: string;
+  readonly homeDirectory?: string;
   readonly platform: "darwin" | "linux";
   readonly credentialStore?: HostDataMapCredentialStoreInput;
   readonly listProjects?: () => ReadonlyArray<HostDataMapProjectInput>;
@@ -357,6 +358,7 @@ function handleDataMap(
       : {
           platform: dataMap.platform,
           dataDirectory: dataMap.dataDirectory,
+          ...(dataMap.homeDirectory === undefined ? {} : { homeDirectory: dataMap.homeDirectory }),
           ...(dataMap.credentialStore === undefined
             ? {}
             : { credentialStore: dataMap.credentialStore }),

@@ -1,4 +1,7 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { CanvasCreationContext } from "./CreateCanvasDraft";
@@ -6,7 +9,7 @@ import { CanvasThreadReferenceCard } from "./CanvasThreadReferenceCard";
 import { CreateCanvasDraft } from "./CreateCanvasDraft";
 import { CanvasCreatePanel } from "./CanvasCreatePanel";
 import { CanvasThreadReferenceCardList } from "./CanvasThreadReferenceCardList";
-import { InlineThreadCanvas } from "./InlineThreadCanvas";
+import { InlineThreadCanvas, ThreadCanvases } from "./InlineThreadCanvas";
 import { useThreadCanvasCards } from "./useThreadCanvasCards";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 
@@ -668,6 +671,241 @@ describe("Canvas create panel and card list", () => {
       render(<InlineThreadCanvas card={inlineCard()} client={client} />);
       expect(screen.getByRole("button", { name: "Show in thread" })).toBeInTheDocument();
       expect(client.get).not.toHaveBeenCalled();
+      localStorage.clear();
+    });
+
+    // A long document with a board: the agent could never ask for it inline,
+    // so the thread first shows it as a row.
+    const longDefinition = {
+      ...definition,
+      title: "Launch review",
+      presentation: "sidebar",
+      blocks: [
+        {
+          blockId: "flow",
+          schemaVersion: 1,
+          kind: "diagram",
+          nodes: [
+            { nodeId: "draft", label: "Draft" },
+            { nodeId: "ship", label: "Ship" },
+          ],
+          edges: [{ edgeId: "next", source: "draft", target: "ship" }],
+        },
+        ...Array.from({ length: 39 }, (_unused, index) => ({
+          blockId: `finding-${String(index)}`,
+          schemaVersion: 1,
+          kind: "rich-text",
+          text: `Finding ${String(index + 1)}`,
+        })),
+      ],
+    };
+    const rowCard = () =>
+      referenceCardFixture({ title: "Launch review", canvasCreatedAt: "2026-08-01T21:00:00.000Z" });
+    // Only a read: any write the thread attempted would fail on this client.
+    const readOnlyClient = () =>
+      ({
+        get: vi.fn().mockResolvedValue({
+          kind: "ready",
+          version: {
+            schemaVersion: 4,
+            canvasId: "20000000-0000-4000-8000-000000000002",
+            versionId: "20000000-0000-4000-8000-000000000003",
+            sequence: 1,
+            definition: longDefinition,
+            createdBy: definition.provenance.actor,
+            createdAt: "2026-08-01T21:00:00.000Z",
+          },
+        }),
+      }) as unknown as CanvasClient;
+
+    it("expands a Canvas shown as a row in place, board and all, without a way to change it", async () => {
+      const user = userEvent.setup();
+      localStorage.clear();
+      const onOpen = vi.fn();
+      render(
+        <ThreadCanvases
+          cards={[rowCard()]}
+          client={readOnlyClient()}
+          onOpen={onOpen}
+          openLabel="Open Canvas"
+        />,
+      );
+
+      await user.click(await screen.findByRole("button", { name: "Expand in thread" }));
+      expect(await screen.findByText("Finding 39")).toBeInTheDocument();
+      const board = screen.getByRole("group", { name: "Board" });
+      // No layout runtime reaches the thread, so a drag can never journal a version.
+      expect(board).toHaveAttribute("data-editable", "false");
+      expect(onOpen).not.toHaveBeenCalled();
+
+      await user.click(screen.getByRole("button", { name: "Open Canvas" }));
+      expect(onOpen).toHaveBeenCalledTimes(1);
+      await user.click(screen.getByRole("button", { name: "Show as card" }));
+      expect(screen.queryByRole("region", { name: "Launch review content" })).toBeNull();
+      expect(screen.getByTestId("canvas-card-title")).toHaveTextContent("Launch review");
+      localStorage.clear();
+    });
+
+    it("runs a prototype expanded in its thread when the person presses Run, and keeps it running while they use the frame", async () => {
+      const user = userEvent.setup();
+      localStorage.clear();
+      const prototype = {
+        blockId: "cart",
+        schemaVersion: 18,
+        kind: "design",
+        title: "Cart",
+        size: "phone",
+        runsScript: true,
+        frames: [{ frameId: "cart", title: "Cart", html: '<button onclick="add()">Add</button>' }],
+      };
+      const runDesign = vi.fn(async () => ({
+        kind: "ready" as const,
+        url: "http://127.0.0.1:13773/api/canvas/design-page?ticket=t",
+      }));
+      const client = {
+        get: vi.fn().mockResolvedValue({
+          kind: "ready",
+          version: {
+            schemaVersion: 18,
+            canvasId: "20000000-0000-4000-8000-000000000002",
+            versionId: "20000000-0000-4000-8000-000000000003",
+            sequence: 1,
+            definition: { ...definition, schemaVersion: 18, blocks: [prototype] },
+            createdBy: definition.provenance.actor,
+            createdAt: "2026-08-01T21:00:00.000Z",
+          },
+        }),
+        runDesign,
+      } as unknown as CanvasClient;
+      // A design that runs script is always a row first; the person expands it.
+      const view = render(<ThreadCanvases cards={[rowCard()]} client={client} />);
+      await user.click(await screen.findByRole("button", { name: "Expand in thread" }));
+
+      // In the thread a prototype waits for the person.
+      expect(screen.queryByTitle("Cart, running prototype")).toBeNull();
+      expect(runDesign).not.toHaveBeenCalled();
+      await user.click(await screen.findByRole("button", { name: "Run" }));
+      const frame = await screen.findByTitle("Cart, running prototype");
+      expect(frame).toHaveAttribute("sandbox", "allow-scripts");
+
+      // The thread redraws around the frame all the time: a new turn, a
+      // scroll, a focus. The Canvas is the same version, so the prototype
+      // keeps running with its state instead of going back to Run.
+      view.rerender(<ThreadCanvases cards={[rowCard()]} client={client} />);
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(screen.getByTitle("Cart, running prototype")).toBe(frame);
+      expect(screen.queryByRole("button", { name: "Run" })).toBeNull();
+      expect(runDesign).toHaveBeenCalledTimes(1);
+      localStorage.clear();
+    });
+
+    it("keeps keyboard focus on the Canvas when a row is expanded in place", async () => {
+      const user = userEvent.setup();
+      localStorage.clear();
+      render(<ThreadCanvases cards={[rowCard()]} client={readOnlyClient()} />);
+      const expand = await screen.findByRole("button", { name: "Expand in thread" });
+      expand.focus();
+      await user.keyboard("{Enter}");
+      await screen.findByRole("region", { name: "Launch review content" });
+      // The row and its button are gone; focus moves to the frame's own control
+      // instead of falling back to the page.
+      expect(screen.getByRole("button", { name: "Show as card" })).toHaveFocus();
+      localStorage.clear();
+    });
+
+    it("leaves the wheel with the thread until the person focuses the expanded Canvas", async () => {
+      const user = userEvent.setup();
+      localStorage.clear();
+      render(<ThreadCanvases cards={[rowCard()]} client={readOnlyClient()} />);
+      await user.click(await screen.findByRole("button", { name: "Expand in thread" }));
+      const region = await screen.findByRole("region", { name: "Launch review content" });
+      expect(region).toHaveAttribute("data-wheel", "thread");
+
+      await user.click(screen.getByText("Finding 3"));
+      expect(region).toHaveAttribute("data-wheel", "canvas");
+
+      // Escape hands the wheel back and leaves focus on the frame's own control.
+      await user.keyboard("{Escape}");
+      expect(region).toHaveAttribute("data-wheel", "thread");
+      expect(screen.getByRole("button", { name: "Show as card" })).toHaveFocus();
+      localStorage.clear();
+    });
+
+    it("zooms an expanded board only on a ctrl or meta wheel", async () => {
+      const user = userEvent.setup();
+      localStorage.clear();
+      render(<ThreadCanvases cards={[rowCard()]} client={readOnlyClient()} />);
+      await user.click(await screen.findByRole("button", { name: "Expand in thread" }));
+      const board = await screen.findByRole("group", { name: "Board" });
+      const surface = board.querySelector("svg");
+      expect(surface).not.toBeNull();
+      if (surface === null) return;
+
+      // A plain wheel is left for the thread to scroll.
+      expect(fireEvent.wheel(surface, { deltaY: -100 })).toBe(true);
+      expect(within(board).getByText("100%")).toBeInTheDocument();
+      // A zoom wheel is consumed: in Electron an unconsumed ctrl+wheel also
+      // scrolls the thread, so the board would zoom and the thread jump at once.
+      expect(fireEvent.wheel(surface, { deltaY: -100, ctrlKey: true })).toBe(false);
+      expect(within(board).getByText("120%")).toBeInTheDocument();
+      expect(fireEvent.wheel(surface, { deltaY: -100, metaKey: true })).toBe(false);
+      expect(within(board).getByText("144%")).toBeInTheDocument();
+      localStorage.clear();
+    });
+
+    it("lets the wheel chain to the thread while the expanded Canvas is unfocused", () => {
+      // An unfocused body is overflow: hidden, which is still a scroll
+      // container; Electron 43 (Chromium 150) stops the wheel at it when it
+      // also carries overscroll-behavior: contain, so the thread never scrolls.
+      const css = readFileSync(
+        join(dirname(fileURLToPath(import.meta.url)), "../styles/canvas.css"),
+        "utf8",
+      );
+      const containing = [...css.matchAll(/([^{}]+)\{([^}]*)\}/g)].filter((rule) =>
+        /overscroll-behavior[^:]*:\s*contain/.test(rule[2] ?? ""),
+      );
+      const bodyRules = containing.filter((match) =>
+        (match[1] ?? "").includes("thread-canvas__body"),
+      );
+      // The focused Canvas still keeps its own scroll from chaining to the thread.
+      expect(bodyRules.length).toBeGreaterThan(0);
+      for (const rule of bodyRules) expect(rule[1]).toContain('[data-wheel="canvas"]');
+    });
+
+    it("never draws an expanded Canvas shorter than the one it expanded from", () => {
+      // At the 600px minimum window height the viewport rule alone gives 376px,
+      // which would clip a Canvas that fit in the 560px resting frame.
+      const css = readFileSync(
+        join(dirname(fileURLToPath(import.meta.url)), "../styles/canvas.css"),
+        "utf8",
+      );
+      const resting = /\.thread-canvas__body\s*\{[^}]*max-height:\s*(\d+)px/.exec(css)?.[1];
+      const expanded =
+        /data-shown-as="expanded"\]\s*\.thread-canvas__body\s*\{[^}]*max-height:\s*max\((\d+)px,/.exec(
+          css,
+        )?.[1];
+      expect(resting).toBeDefined();
+      expect(Number(expanded)).toBeGreaterThanOrEqual(Number(resting));
+    });
+
+    it("remembers an expanded Canvas, and folding it to a card ends the expansion", async () => {
+      const user = userEvent.setup();
+      localStorage.clear();
+      const first = render(<InlineThreadCanvas card={inlineCard()} client={clientWith()} />);
+      await screen.findByText("Signups this week");
+      await user.click(screen.getByRole("button", { name: "Expand in thread" }));
+      expect(screen.getByTestId("thread-canvas")).toHaveAttribute("data-shown-as", "expanded");
+      first.unmount();
+
+      const second = render(<InlineThreadCanvas card={inlineCard()} client={clientWith()} />);
+      expect(screen.getByTestId("thread-canvas")).toHaveAttribute("data-shown-as", "expanded");
+      await user.click(screen.getByRole("button", { name: "Show as card" }));
+      second.unmount();
+
+      render(<InlineThreadCanvas card={inlineCard()} client={clientWith()} />);
+      expect(screen.getByTestId("thread-canvas")).toHaveAttribute("data-shown-as", "card");
       localStorage.clear();
     });
   });

@@ -26,7 +26,7 @@ import {
 import {
   seatbeltAllowRule,
   seatbeltDenyRule,
-  type SeatbeltConfinementPort,
+  type ProcessConfinementPort,
 } from "../process/seatbeltProfile";
 
 /**
@@ -35,7 +35,7 @@ import {
  * bubblewrap — so the version launch is prepared with confinement passed
  * straight through.
  */
-const passthroughVersionProbeConfinement: SeatbeltConfinementPort = {
+const passthroughVersionProbeConfinement: ProcessConfinementPort = {
   prepare: (input) => ({ command: input.executable, args: input.args }),
 };
 

@@ -10,17 +10,17 @@ import {
 } from "node:fs";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import {
-  makeSeatbeltConfinementLive,
-  SeatbeltConfinementError,
+  makeProcessConfinementLive,
+  ProcessConfinementError,
   type ConfinedProcessLaunch,
-  type SeatbeltConfinementPort,
+  type ProcessConfinementPort,
   seatbeltAllowRule,
   seatbeltAllowLiteralMetadataRule,
 } from "./seatbeltProfile";
 import type { OsNetworkEgress } from "./threadEgressPolicy";
 
 export interface GitSeatbeltLaunchOptions {
-  readonly confinement: SeatbeltConfinementPort;
+  readonly confinement: ProcessConfinementPort;
   /**
    * The platform `confinement` confines for, which is the dialect these rules
    * have to be written in — not the platform this process happens to run on.
@@ -57,7 +57,7 @@ export interface GitSeatbeltLaunchOptions {
 }
 
 export interface GitSeatbeltPortOptions {
-  readonly confinement?: SeatbeltConfinementPort;
+  readonly confinement?: ProcessConfinementPort;
   readonly platform?: NodeJS.Platform;
   readonly sandboxPath?: string;
   readonly gitExecutable?: string;
@@ -73,7 +73,7 @@ export function resolveGitExecutable(
 ): string {
   const candidate = explicit ?? (platform === "darwin" ? developerGitExecutable() : "/usr/bin/git");
   if (!isAbsolute(candidate)) {
-    throw new SeatbeltConfinementError(
+    throw new ProcessConfinementError(
       "invalid-configuration",
       "Git executable path must be absolute for Seatbelt confinement.",
     );
@@ -229,7 +229,7 @@ function ancestorMetadataRules(path: string): ReadonlyArray<string> {
 }
 
 export function createGitSeatbeltConfinement(options: GitSeatbeltPortOptions = {}): {
-  readonly confinement: SeatbeltConfinementPort;
+  readonly confinement: ProcessConfinementPort;
   readonly platform: NodeJS.Platform;
   readonly gitExecutable: string;
   readonly temporaryDirectory: string;
@@ -240,7 +240,7 @@ export function createGitSeatbeltConfinement(options: GitSeatbeltPortOptions = {
     platform,
     confinement:
       options.confinement ??
-      makeSeatbeltConfinementLive({
+      makeProcessConfinementLive({
         platform,
         ...(options.sandboxPath === undefined ? {} : { sandboxPath: options.sandboxPath }),
         ...(options.seatbeltHomeDirectory === undefined
@@ -263,7 +263,7 @@ export function createGitSeatbeltConfinement(options: GitSeatbeltPortOptions = {
 
 export function prepareGitSeatbeltLaunch(options: GitSeatbeltLaunchOptions): ConfinedProcessLaunch {
   if (!isAbsolute(options.checkoutRoot)) {
-    throw new SeatbeltConfinementError(
+    throw new ProcessConfinementError(
       "invalid-configuration",
       "Git checkout root must be absolute for Seatbelt confinement.",
     );

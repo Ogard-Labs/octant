@@ -87,7 +87,8 @@ the macOS Keychain** — never returned to the interface, never journaled,
 never placed in process arguments, never exported, and never included in
 diagnostics. Provider OAuth and subscription login are delegated to the
 provider's own runtime, and Octant does not store, render, export, or journal
-those logins, with one opt-in exception described below: Claude for helpers.
+those logins. Octant never reads, stores, or injects a provider CLI's
+credentials.
 Where you choose **Sign in** on a direct endpoint that offers it (today
 OpenRouter), Octant runs the sign-in itself and stores the API key it issues
 in the same credential store as a typed-in key, under the same rules.
@@ -105,25 +106,12 @@ TTL, and the secret never enters the database, journal, logs, exports,
 screenshots, or diagnostics. See [Remote access](/advanced/remote-access)
 for the full lifecycle.
 
-**Claude for helpers** is the one login from a provider's own runtime that
-Octant keeps, and only if you connect it under **Settings → Providers → Claude Code**. A Plan turn and
-every Chat subagent runs confined, away from the keychain where Claude keeps
-its subscription sign-in, so Octant runs Claude's own `claude setup-token` on
-this host after one browser approval and stores the long-lived token it
-prints in the credential store, under that provider, behind an opaque
-reference. The token reaches only the confined Claude runtime started for that
-provider, as `CLAUDE_CODE_OAUTH_TOKEN` in that launch's environment until the
-launch ends; inside the launch it has the reach an API key given to a launch
-has. Turns that are not confined, and every other provider, never receive it.
-The settings route returns state only, never the token, and only a window on
-the host can connect or disconnect. Octant never logs it, places it in a process argument, journals it,
-exports it, or includes it in diagnostics. **Disconnect** deletes it from the
-store and reports a store it cannot reach. Removing the provider also tries to
-delete it, but the removal completes even when the store is unreachable, so
-disconnect first. Either removes Octant's copy only: Octant cannot revoke the
-token with Anthropic. The
-[privacy notice](/advanced/privacy-notice#claude-for-helpers-only-if-you-connect-it)
-states what is stored, where, and who receives it.
+Claude subscription sign-in stays on the unmodified `claude auth login`
+command in that account's assigned directory. Octant never reads those
+credential files, never stores a Claude OAuth token, and never injects
+`CLAUDE_CODE_OAUTH_TOKEN`. If you previously connected Claude for helpers,
+Octant deletes that leftover token on upgrade. Revoke it with Anthropic;
+Octant cannot.
 
 ## Approvals
 
@@ -143,6 +131,20 @@ Grants are scoped and recorded. Child agents can never exceed their parent's
 policy. A remote principal can never convert to a local principal or mint
 native receipts; desktop admin routes are loopback-only.
 
+### Outside content
+
+When a thread reads content from outside, such as a web page, a tool's result,
+an issue, or a message from another agent, Octant marks it. While a thread is
+marked, some actions ask each time and some remembered approvals stop applying.
+A notice above the message box says so, with a **Review** button. Review lists
+where the thread read from, how often, and when. **Clear the mark** tells Octant
+you looked at it, so those actions stop asking because of it.
+
+Clearing removes nothing from what the model already read, and the next outside
+content marks the thread again. A running or queued turn holds the button back
+until the thread is idle. You can clear a mark only at a window on the computer
+that hosts the thread, not from a paired phone or browser.
+
 ## Confinement
 
 - **Work** uses OS-enforced macOS project confinement for one bound root.
@@ -151,7 +153,8 @@ native receipts; desktop admin routes are loopback-only.
   selected. A per-message posture may only narrow the thread's grant; the
   server clamps composer intent. Full access is what it says: the provider
   runtime runs without Octant's deny-default sandbox, so keep it for folders
-  and providers you trust. Merge authority is never granted, in any posture.
+  and providers you trust. No posture grants an agent merge authority; only you merge, from a pull
+  request's review on the desktop after confirming.
 - App-managed filesystem and shell tools cross an Octant-owned sandbox
   boundary; path checks alone are insufficient. Most provider runtimes cross it
   too.
@@ -160,9 +163,12 @@ native receipts; desktop admin routes are loopback-only.
   to the provider's own sandbox. That sandbox is on every posture except Full
   access, which you select explicitly and which is unsandboxed by design. The
   Claude runtime crosses the boundary on Plan turns, where Octant's own sandbox
-  makes the folder unwritable and stops the runtime starting any process at
-  all; its approval-gated and auto-accept-edits turns still fall to the
-  provider's own sandbox.
+  makes the folder unwritable and stops the runtime starting any process, with
+  one exception on macOS: on a Claude subscription account the runtime may run
+  Apple's `security` tool and read your login keychain file, because that is
+  how Claude Code reads its own sign-in. No shell is allowed, and Octant
+  refuses a file tool that names that folder. Its approval-gated and
+  auto-accept-edits turns still fall to the provider's own sandbox.
 - Every app-managed tool those two threads reach is still confined, and
   approvals still gate every app-managed action and every provider callback
   that reaches Octant. A write one of those runtimes makes inside its own

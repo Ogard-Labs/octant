@@ -33,6 +33,7 @@ import type { ComposerExtensionSelection } from "../composer/composerExtensionSe
 import type { ProviderInstanceId, ProviderModelId } from "@octant/contracts/providers";
 import { quoteChipLabel, type TranscriptQuoteChip } from "./quoteSelection";
 import type { ModelPickerSelection, PickerGroup } from "@octant/domain";
+import { pickerGroupCarriesAppManagedTools } from "@octant/domain";
 import { applyComposerCaret } from "../composer/composerThreadDraftStore";
 import { markInteraction, markInteractionAfterPaint } from "../polling/interactionTrace";
 import { OctantButton } from "../ui/base/OctantButton";
@@ -125,6 +126,7 @@ export interface ChatComposerProps {
    */
   readonly queue?: ReactNode;
   readonly queueing?: boolean;
+  readonly threadBusy?: boolean;
   readonly provider: ChatComposerSelection;
   readonly research: ChatComposerResearch;
   /**
@@ -217,6 +219,19 @@ export function ChatComposer(props: ChatComposerProps) {
     draft: props.draft,
     onDraftChange: props.onDraftChange,
     scopeKey: String(props.caretRestoreKey ?? "chat-draft"),
+    ...(props.providerGroups === undefined
+      ? {}
+      : {
+          providerCarriesTools: pickerGroupCarriesAppManagedTools(
+            props.providerGroups,
+            props.selectedProviderInstanceId === undefined || props.selectedModelId === undefined
+              ? undefined
+              : {
+                  providerInstanceId: props.selectedProviderInstanceId,
+                  modelId: props.selectedModelId,
+                },
+          ),
+        }),
     onChoose: () => {
       void resolveExtensionReference("@computer");
     },
@@ -861,6 +876,7 @@ export function ChatComposer(props: ChatComposerProps) {
   return (
     <ThreadComposer
       queue={props.queue}
+      {...(props.threadBusy === undefined ? {} : { threadBusy: props.threadBusy })}
       presentation="follow-up"
       ariaLabel="Chat composer"
       chips={chips}

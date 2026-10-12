@@ -63,11 +63,26 @@ describe("Canvas accessibility basics", () => {
     expect(within(table).getByRole("cell", { name: "Octant" })).toBeInTheDocument();
   });
 
-  it("exposes progress as a real progress element with a value", () => {
+  it("exposes progress as a real progress element named by its label, with a value", () => {
     render(<CanvasDocument definition={canvasFixture} />);
-    const progress = screen.getByRole("progressbar");
+    const progress = screen.getByRole("progressbar", { name: "Complete" });
+    expect(progress).not.toHaveAccessibleDescription();
     expect(progress).toHaveAttribute("max", "1");
     expect(progress).toHaveAttribute("value", "0.75");
+  });
+
+  it("shows a progress block's detail beside its bar and reads it as the bar's description", () => {
+    const definition = {
+      ...canvasFixture,
+      blocks: canvasFixture.blocks.map((block) =>
+        block.kind === "progress" ? { ...block, detail: "3 of 4 regions" } : block,
+      ),
+    };
+    render(<CanvasDocument definition={definition} />);
+    expect(screen.getByText("3 of 4 regions")).toBeVisible();
+    expect(screen.getByRole("progressbar", { name: "Complete" })).toHaveAccessibleDescription(
+      "3 of 4 regions",
+    );
   });
 
   it("exposes status blocks through a status live region", () => {

@@ -1042,7 +1042,7 @@ describe("useProviderController", () => {
     });
 
     expect(calls).toEqual(["provider.create", "field.clear"]);
-    expect(host.setProviderCredential).not.toHaveBeenCalled();
+    expect(host.addProviderApiKey).not.toHaveBeenCalled();
     expect(host.clearProviderCredential).not.toHaveBeenCalled();
   });
 
@@ -1128,7 +1128,7 @@ describe("useProviderController", () => {
       });
 
       expect(calls).toEqual(["provider.create", "field.clear"]);
-      expect(host.setProviderCredential).not.toHaveBeenCalled();
+      expect(host.addProviderApiKey).not.toHaveBeenCalled();
       expect(host.clearProviderCredential).not.toHaveBeenCalled();
     },
   );
@@ -1329,7 +1329,7 @@ describe("useProviderController", () => {
       });
 
       expect(calls).toEqual(["provider.update", "field.clear"]);
-      expect(host.setProviderCredential).not.toHaveBeenCalled();
+      expect(host.addProviderApiKey).not.toHaveBeenCalled();
     },
   );
 
@@ -1452,7 +1452,7 @@ describe("useProviderController", () => {
       });
 
       expect(host.clearProviderCredential).toHaveBeenCalledWith(id);
-      expect(host.setProviderCredential).not.toHaveBeenCalled();
+      expect(host.addProviderApiKey).not.toHaveBeenCalled();
     },
   );
 
@@ -1593,7 +1593,7 @@ describe("useProviderController", () => {
       }),
     });
     const host = credentialHost(calls);
-    vi.mocked(host.setProviderCredential).mockImplementation(async () => {
+    vi.mocked(host.addProviderApiKey).mockImplementation(async () => {
       calls.push("credential.set");
       throw new Error("private-value raw Keychain diagnostic");
     });
@@ -1652,6 +1652,44 @@ describe("useProviderController", () => {
     });
 
     expect(calls).toEqual(["provider.update", "credential.clear", "field.clear"]);
+  });
+
+  it("sends reassignAccountDirectory when changing a leftover custom Claude directory", async () => {
+    const leftover = claudeProvider({
+      configuration: {
+        kind: "claude-agent-sdk",
+        binaryPath: "/opt/homebrew/bin/claude",
+        authentication: "subscription",
+        configDirectory: "/Users/example/.claude-accounts/work",
+        accent: "teal",
+      },
+    });
+    const api = client(snapshot([leftover]));
+    vi.mocked(api.execute).mockResolvedValue({
+      kind: "provider-updated",
+      instance: leftover,
+    });
+    const { result } = renderHook(() => useProviderController({ client: api }));
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    await act(async () => {
+      await expect(
+        result.current.changeClaudeConfiguration(
+          id,
+          leftover.configuration,
+          transientCredential(""),
+          { reassignAccountDirectory: true },
+        ),
+      ).resolves.toBe(true);
+    });
+
+    expect(api.execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "change-claude-configuration",
+        instanceId: id,
+        reassignAccountDirectory: true,
+      }),
+    );
   });
 
   // A clear that fails once the instance has stopped using the key leaves a
@@ -2082,6 +2120,74 @@ describe("useProviderController", () => {
     }
   });
 
+  it("says where a removed Claude account's folder still is, and says nothing for the host profile", async () => {
+    for (const configDirectory of ["/Users/ada/.claude-accounts/extra", undefined] as const) {
+      const instance = claudeProvider({
+        displayName: "Claude work",
+        configuration: {
+          kind: "claude-agent-sdk",
+          binaryPath: "/opt/homebrew/bin/claude",
+          authentication: "subscription",
+          ...(configDirectory === undefined ? {} : { configDirectory }),
+        },
+      });
+      const api = client(snapshot([instance]));
+      vi.mocked(api.execute).mockResolvedValue({
+        kind: "provider-removed",
+        instanceId: id,
+        version: 2 as never,
+      });
+      const host = credentialHost([]);
+      const { result, unmount } = renderHook(() =>
+        useProviderController({ client: api, hostBridge: host }),
+      );
+      await waitFor(() => expect(result.current.status).toBe("ready"));
+
+      await act(async () => {
+        await expect(result.current.remove(id)).resolves.toBe(true);
+      });
+
+      expect(result.current.message).toBe(
+        configDirectory === undefined
+          ? undefined
+          : "Claude work was removed. Its folder /Users/ada/.claude-accounts/extra still holds that account's sign-in and history. Delete the folder to remove them.",
+      );
+      unmount();
+    }
+  });
+
+  it("says where a removed Codex account's home still is", async () => {
+    const instance = provider({
+      displayName: "Codex work",
+      driverKind: "codex",
+      configuration: {
+        kind: "codex-cli",
+        binaryPath: "/opt/homebrew/bin/codex",
+        codexHome: "/Users/ada/.codex-accounts/extra",
+      },
+    } as Partial<ProviderInstance>);
+    const api = client(snapshot([instance]));
+    vi.mocked(api.execute).mockResolvedValue({
+      kind: "provider-removed",
+      instanceId: id,
+      version: 2 as never,
+    });
+    const host = credentialHost([]);
+    const { result, unmount } = renderHook(() =>
+      useProviderController({ client: api, hostBridge: host }),
+    );
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    await act(async () => {
+      await expect(result.current.remove(id)).resolves.toBe(true);
+    });
+
+    expect(result.current.message).toBe(
+      "Codex work was removed. Its folder /Users/ada/.codex-accounts/extra still holds that account's sign-in and history. Delete the folder to remove them.",
+    );
+    unmount();
+  });
+
   it("clears Anthropic-compatible credentials after removal", async () => {
     for (const authentication of ["api-key", "bearer", "none"] as const) {
       const calls: string[] = [];
@@ -2440,6 +2546,90 @@ describe("useProviderController", () => {
     expect(calls).toEqual(["credential.set", "provider.update", "field.clear"]);
   });
 
+  it("stores the Anthropic-compatible key after a base URL change, since the host deletes the old one", async () => {
+    const calls: string[] = [];
+    const configuration = (baseUrl: string) =>
+      ({
+        kind: "anthropic-compatible-http",
+        baseUrl,
+        authentication: "api-key",
+        protocol: "auto",
+        protocolVersion: "2023-06-01",
+        manualModelIds: [],
+      }) as const;
+    const api = client(
+      snapshot([anthropicProvider({ configuration: configuration("https://a.example/v1/") })]),
+    );
+    vi.mocked(api.execute).mockImplementation(async () => {
+      calls.push("provider.update");
+      return {
+        kind: "provider-updated",
+        instance: anthropicProvider({
+          version: 2 as never,
+          configuration: configuration("https://b.example/v1/"),
+        }),
+      };
+    });
+    const host = credentialHost(calls);
+    const { result } = renderHook(() => useProviderController({ client: api, hostBridge: host }));
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    await act(async () => {
+      await expect(
+        result.current.changeAnthropicCompatibleConfiguration(
+          id,
+          configuration("https://b.example/v1/"),
+          transientCredential("throwaway-key-for-b", calls),
+        ),
+      ).resolves.toBe(true);
+    });
+
+    expect(calls).toEqual(["provider.update", "credential.set", "field.clear"]);
+  });
+
+  it("does not roll an Azure AI Foundry endpoint back to a base URL whose key the host already deleted", async () => {
+    const configuration = (baseUrl: string) =>
+      ({
+        kind: "azure-foundry-openai-http",
+        baseUrl,
+        authentication: "api-key",
+        protocol: "auto",
+        manualModelIds: [decodeProviderModelId("deployment-a")],
+      }) as const;
+    const foundry = (baseUrl: string, version: number) =>
+      decodeProviderInstance({
+        ...provider(),
+        version,
+        displayName: "Foundry",
+        driverKind: "azure-foundry",
+        configuration: configuration(baseUrl),
+      });
+    const api = client(snapshot([foundry("https://a.example/openai/v1/", 1)]));
+    vi.mocked(api.execute).mockResolvedValue({
+      kind: "provider-updated",
+      instance: foundry("https://b.example/openai/v1/", 2),
+    });
+    const host = credentialHost();
+    vi.mocked(host.addProviderApiKey).mockRejectedValue(new Error("store locked"));
+    const { result } = renderHook(() => useProviderController({ client: api, hostBridge: host }));
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    await act(async () => {
+      await expect(
+        result.current.changeAzureFoundryConfiguration(
+          id,
+          configuration("https://b.example/openai/v1/"),
+          transientCredential("throwaway-key-for-b"),
+        ),
+      ).resolves.toBe(false);
+    });
+
+    expect(api.execute).toHaveBeenCalledTimes(1);
+    expect(result.current.message).toBe(
+      "The new endpoint was saved, but its API key could not be stored. Enter the API key again.",
+    );
+  });
+
   it("clears the credential field only after successful storage settles", async () => {
     const stored = deferred<void>();
     const calls: string[] = [];
@@ -2449,10 +2639,11 @@ describe("useProviderController", () => {
       return { kind: "provider-created", instance: httpProvider() };
     });
     const host = credentialHost();
-    vi.mocked(host.setProviderCredential).mockImplementation(async () => {
+    vi.mocked(host.addProviderApiKey).mockImplementation(async () => {
       calls.push("credential.set");
       await stored.promise;
       calls.push("credential.settled");
+      return { id: "7d444840-9dc0-11d1-b245-5ffdce74fad2", label: "Key 1", active: true };
     });
     const credential = transientCredential("private-value", calls);
     const { result } = renderHook(() => useProviderController({ client: api, hostBridge: host }));
@@ -2487,7 +2678,7 @@ describe("useProviderController", () => {
       instance: httpProvider(),
     });
     const host = credentialHost();
-    vi.mocked(host.setProviderCredential).mockImplementation(async () => {
+    vi.mocked(host.addProviderApiKey).mockImplementation(async () => {
       calls.push("credential.set");
       throw new Error("private-value raw Keychain diagnostic");
     });
@@ -2512,7 +2703,7 @@ describe("useProviderController", () => {
       instance: httpProvider(),
     });
     const host = credentialHost();
-    vi.mocked(host.setProviderCredential).mockRejectedValue(
+    vi.mocked(host.addProviderApiKey).mockRejectedValue(
       new Error("private-value raw Keychain diagnostic"),
     );
     const { result } = renderHook(() => useProviderController({ client: api, hostBridge: host }));
@@ -2554,7 +2745,7 @@ describe("useProviderController", () => {
     });
 
     expect(api.execute).toHaveBeenCalledOnce();
-    expect(host.setProviderCredential).not.toHaveBeenCalled();
+    expect(host.addProviderApiKey).not.toHaveBeenCalled();
     expect(host.clearProviderCredential).not.toHaveBeenCalled();
     expect(calls).toEqual(["field.clear"]);
   });
@@ -2816,9 +3007,19 @@ function credentialHost(calls: string[] = []): OctantHostBridge {
     providerCredentialStatus: vi.fn(async () => "missing" as const),
     resetBounds: vi.fn(),
     selectProjectRoot: vi.fn(),
-    setProviderCredential: vi.fn(async () => void calls.push("credential.set")),
+    addProviderApiKey: vi.fn(async () => {
+      calls.push("credential.set");
+      return { id: "7d444840-9dc0-11d1-b245-5ffdce74fad2", label: "Key 1", active: true };
+    }),
+    setProviderCredential: vi.fn(),
     setSidebarMaterialPreference: vi.fn(),
     subscribeResolvedMaterial: vi.fn(() => vi.fn()),
+    listProviderApiKeys: vi.fn(async () => []),
+    renameProviderApiKey: vi.fn(),
+    replaceProviderApiKey: vi.fn(),
+    removeProviderApiKey: vi.fn(),
+    setActiveProviderApiKey: vi.fn(),
+    moveProviderApiKey: vi.fn(),
   };
 }
 

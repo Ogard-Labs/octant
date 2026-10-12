@@ -26,8 +26,8 @@ import type {
   AutomationCapacityAdmissionPort,
   AutomationCodeDispatchPort,
   AutomationWorkDispatchPort,
-  AutomationDispatchWindowPort,
 } from "./automationModeDispatchPorts";
+import { ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
 
 export interface AutomationDispatchServiceOptions {
   readonly store: Pick<
@@ -41,7 +41,6 @@ export interface AutomationDispatchServiceOptions {
   readonly projection: AutomationProjection;
   readonly code: AutomationCodeDispatchPort;
   readonly work: AutomationWorkDispatchPort;
-  readonly windows: AutomationDispatchWindowPort;
   readonly capacity: AutomationCapacityAdmissionPort;
   readonly resolveFacts: (input: {
     readonly definition: AutomationDefinition;
@@ -79,7 +78,6 @@ export class AutomationDispatchService implements AutomationDispatchPort {
   readonly #projection: AutomationProjection;
   readonly #code: AutomationCodeDispatchPort;
   readonly #work: AutomationWorkDispatchPort;
-  readonly #windows: AutomationDispatchWindowPort;
   readonly #capacity: AutomationCapacityAdmissionPort;
   readonly #resolveFacts: AutomationDispatchServiceOptions["resolveFacts"];
   readonly #now: () => UtcTimestamp;
@@ -93,7 +91,6 @@ export class AutomationDispatchService implements AutomationDispatchPort {
     this.#projection = options.projection;
     this.#code = options.code;
     this.#work = options.work;
-    this.#windows = options.windows;
     this.#capacity = options.capacity;
     this.#resolveFacts = options.resolveFacts;
     this.#now = options.now;
@@ -227,17 +224,6 @@ export class AutomationDispatchService implements AutomationDispatchPort {
     definition: AutomationDefinition,
     run: AutomationRun,
   ): Promise<AutomationThreadId | undefined> {
-    const windowId = this.#windows.resolveWindowForProject(
-      String(run.definitionSnapshot.projectId),
-    );
-    if (windowId === undefined) {
-      this.#failRun(
-        run,
-        "thread-creation-failed",
-        "No authorized local window is available to create the Automation thread.",
-      );
-      return undefined;
-    }
     const threadId = automationThreadIdForOccurrence(String(run.occurrenceKey));
     const title = automationThreadTitle(definition.displayName);
     const mode = run.definitionSnapshot.mode;
@@ -247,13 +233,13 @@ export class AutomationDispatchService implements AutomationDispatchPort {
             run,
             threadId: threadId as unknown as CodeThreadId,
             title,
-            windowId,
+            scopeId: ROUTINE_HOST_SCOPE_ID,
           })
         : await this.#work.createThread({
             run,
             threadId: threadId as unknown as WorkThreadId,
             title,
-            windowId,
+            scopeId: ROUTINE_HOST_SCOPE_ID,
           });
     if (outcome.kind === "failed") {
       this.#failRun(run, "thread-creation-failed", outcome.message);
@@ -340,23 +326,13 @@ export class AutomationDispatchService implements AutomationDispatchPort {
     if (latest?.cancellationTombstone !== undefined) {
       return { kind: "failed", reason: "cancelled", message: "Automation run was cancelled." };
     }
-    const windowId = this.#windows.resolveWindowForProject(
-      String(run.definitionSnapshot.projectId),
-    );
-    if (windowId === undefined) {
-      return {
-        kind: "failed",
-        reason: "provider-launch-failed",
-        message: "No authorized local window is available to launch the Automation first turn.",
-      };
-    }
     if (run.definitionSnapshot.mode === "code") {
       return this.#code.startOrRecoverFirstTurn({
         run,
         threadId: intent.threadId as unknown as CodeThreadId,
         firstTurnRequestId: run.firstTurnRequestId,
         promptDigest: intent.promptDigest,
-        windowId,
+        scopeId: ROUTINE_HOST_SCOPE_ID,
       });
     }
     return this.#work.startOrRecoverFirstTurn({
@@ -364,7 +340,7 @@ export class AutomationDispatchService implements AutomationDispatchPort {
       threadId: intent.threadId as unknown as WorkThreadId,
       firstTurnRequestId: run.firstTurnRequestId,
       promptDigest: intent.promptDigest,
-      windowId,
+      scopeId: ROUTINE_HOST_SCOPE_ID,
     });
   }
 

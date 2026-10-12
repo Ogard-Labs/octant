@@ -45,6 +45,9 @@ class FakeQuery implements ClaudeAgentSdkQueryLike {
   readonly close = vi.fn(() => undefined);
   readonly setMcpServers = vi.fn(async () => ({ added: ["octant"], removed: [], errors: {} }));
   getContextUsage?: () => Promise<unknown>;
+  usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET?: (options?: {
+    readonly skipBehaviors?: boolean;
+  }) => Promise<unknown>;
 
   constructor(private readonly output: readonly unknown[]) {}
 
@@ -538,6 +541,32 @@ describe("Claude Agent SDK port", () => {
     ).not.toContain("private prompt summary");
   });
 
+  test("asks the Claude process for plan usage on the query itself", async () => {
+    const harness = makeHarness();
+    harness.query.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET = function (
+      this: FakeQuery,
+      options?: { readonly skipBehaviors?: boolean },
+    ) {
+      if (this.close === undefined) {
+        throw new TypeError("plan usage method lost its query receiver");
+      }
+      expect(this).toBe(harness.query);
+      expect(options).toEqual({ skipBehaviors: true });
+      return Promise.resolve({ rate_limits_available: false, rate_limits: null });
+    };
+
+    const answer = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const query = yield* harness.port.openQuery(openInput);
+          return yield* query.readPlanUsage();
+        }),
+      ),
+    );
+
+    expect(answer).toEqual({ rate_limits_available: false, rate_limits: null });
+  });
+
   test("contains close exceptions and retries cleanup from the scope finalizer", async () => {
     const harness = makeHarness();
     harness.query.close
@@ -621,7 +650,7 @@ describe("Claude Agent SDK port", () => {
     expect(harness.query.close).toHaveBeenCalledOnce();
   });
 
-  test("finds only an exact-root explicit session through listSessions({ dir })", async () => {
+  test("finds only an exact-root session and does not list the other worktrees", async () => {
     const harness = makeHarness();
     await expect(
       Effect.runPromise(harness.port.findSession({ sessionId: "session-1", projectRoot: "/repo" })),
@@ -631,13 +660,48 @@ describe("Claude Agent SDK port", () => {
       lastModified: 123,
       createdAt: 100,
     });
-    expect(harness.listSessions).toHaveBeenCalledWith({ dir: "/repo" });
+    expect(harness.listSessions).toHaveBeenCalledWith({ dir: "/repo", includeWorktrees: false });
 
     await expect(
       Effect.runPromise(
         harness.port.findSession({ sessionId: "session-1", projectRoot: "/other" }),
       ),
     ).resolves.toBeUndefined();
+  });
+
+  test("looks up an isolated account's sessions under that account directory", async () => {
+    const harness = makeHarness();
+    harness.listSessions.mockImplementation(async () => {
+      expect(process.env.CLAUDE_CONFIG_DIR).toBe("/Users/example/.claude-accounts/work");
+      expect(process.env.CLAUDE_SECURESTORAGE_CONFIG_DIR).toBe(
+        "/Users/example/.claude-accounts/work",
+      );
+      return [
+        {
+          sessionId: "session-1",
+          summary: "private prompt summary",
+          lastModified: 123,
+          cwd: "/repo",
+          createdAt: 100,
+        },
+      ];
+    });
+    await expect(
+      Effect.runPromise(
+        harness.port.findSession({
+          sessionId: "session-1",
+          projectRoot: "/repo",
+          configDirectory: "/Users/example/.claude-accounts/work",
+        }),
+      ),
+    ).resolves.toEqual({
+      sessionId: "session-1",
+      projectRoot: "/repo",
+      lastModified: 123,
+      createdAt: 100,
+    });
+    expect(process.env.CLAUDE_CONFIG_DIR).toBeUndefined();
+    expect(process.env.CLAUDE_SECURESTORAGE_CONFIG_DIR).toBeUndefined();
   });
 
   test("rejects a resumed runtime whose initialized session identity does not match", async () => {
@@ -1082,59 +1146,74 @@ describe("Claude Agent SDK port", () => {
   });
 
   test.each([
-    { type: "future_information", detail: "not allowlisted" },
-    {
-      type: "system",
-      subtype: "permission_denied",
-      tool_name: "Read",
-      tool_use_id: "tool-1",
-      message: "denied",
-      uuid: "5",
-      session_id: "session-1",
-    },
-    {
-      type: "system",
-      subtype: "worker_shutting_down",
-      reason: "host_exit",
-      uuid: "6",
-      session_id: "session-1",
-    },
-    {
-      type: "system",
-      subtype: "informational",
-      content: "blocking",
-      level: "warning",
-      prevent_continuation: true,
-      uuid: "7",
-      session_id: "session-1",
-    },
+    [
+      { type: "future_information", detail: "not allowlisted" },
+      "Claude returned an unsupported runtime message.",
+    ],
+    [
+      {
+        type: "system",
+        subtype: "permission_denied",
+        tool_name: "Read",
+        tool_use_id: "tool-1",
+        message: "denied",
+        uuid: "5",
+        session_id: "session-1",
+      },
+      "Claude returned an unsupported system message.",
+    ],
+    [
+      {
+        type: "system",
+        subtype: "worker_shutting_down",
+        reason: "host_exit",
+        uuid: "6",
+        session_id: "session-1",
+      },
+      "Claude returned an unsupported system message.",
+    ],
+    [
+      {
+        type: "system",
+        subtype: "informational",
+        content: "blocking",
+        level: "warning",
+        prevent_continuation: true,
+        uuid: "7",
+        session_id: "session-1",
+      },
+      "Claude returned an unsupported runtime message.",
+    ],
     // A retry note whose counters are not whole non-negative numbers is not
     // the frame this allowlist recognizes, so it is reported rather than
     // silently dropped.
-    {
-      type: "system",
-      subtype: "api_retry",
-      attempt: -1,
-      max_retries: 10.5,
-      retry_delay_ms: 581,
-      uuid: "8",
-      session_id: "session-1",
+    [
+      {
+        type: "system",
+        subtype: "api_retry",
+        attempt: -1,
+        max_retries: 10.5,
+        retry_delay_ms: 581,
+        uuid: "8",
+        session_id: "session-1",
+      },
+      "Claude returned an unsupported runtime message.",
+    ],
+  ])(
+    "protocol-fails every non-allowlisted message after initialization",
+    async (message, reason) => {
+      const failed = await failureOf(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const harness = makeHarness([safeRuntimeInitialization, message]);
+            const query = yield* harness.port.openQuery(openInput);
+            return yield* Stream.runDrain(query.messages);
+          }),
+        ),
+      );
+      expect(failed).toEqual({ category: "protocol", message: reason });
     },
-  ])("protocol-fails every non-allowlisted message after initialization", async (message) => {
-    const failed = await failureOf(
-      Effect.scoped(
-        Effect.gen(function* () {
-          const harness = makeHarness([safeRuntimeInitialization, message]);
-          const query = yield* harness.port.openQuery(openInput);
-          return yield* Stream.runDrain(query.messages);
-        }),
-      ),
-    );
-    expect(failed).toEqual({
-      category: "protocol",
-      message: "Claude returned an unsupported runtime message.",
-    });
-  });
+  );
 
   test("decodes supported assistant and stream variants without forwarding SDK payload objects", async () => {
     const rawToolInput = { path: "/repo/file.ts", nested: { line: 7 } };

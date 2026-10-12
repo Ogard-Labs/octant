@@ -1,7 +1,7 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { describe, expect, it, vi } from "vitest";
+import { dirname, join } from "node:path";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import {
   resolveWebRoot,
   runWebCommand,
@@ -9,6 +9,7 @@ import {
   type WebCommandOutput,
 } from "./web";
 import type { HostLauncherDependencies } from "./hostLauncher";
+import { resolveHostInfoFilePath, type BridgeSecretFileInput } from "./bridgeSecretFile";
 
 it("resolves the Vite root as a filesystem path", () => {
   expect(resolveWebRoot()).not.toMatch(/^file:/);
@@ -16,6 +17,43 @@ it("resolves the Vite root as a filesystem path", () => {
 });
 
 const bridgeSecret = `${"S".repeat(42)}A`;
+const launchToken = `${"T".repeat(42)}A`;
+
+/** The owner-only receipt a host writes when it starts; the CLI sends its secret only there. */
+async function writeOwnerReceipt(directory: string, url: string, instanceId = "instance-1") {
+  await writeFile(join(directory, "octant-host.json"), JSON.stringify({ url, instanceId }), {
+    mode: 0o600,
+  });
+}
+
+// The default input names no OCTANT_DATA_DIR, so development mode keeps the
+// canonical Machine store; the receipt sits where that store's runtime reads it.
+let ownerDirectory = "";
+let ownerInput: BridgeSecretFileInput = { env: {}, platform: "linux", home: "/home/user" };
+beforeAll(async () => {
+  ownerDirectory = await mkdtemp(join(tmpdir(), "octant-web-owner-"));
+  ownerInput = { env: { XDG_DATA_HOME: ownerDirectory }, platform: "linux", home: "/home/user" };
+  const receiptPath = resolveHostInfoFilePath(ownerInput);
+  await mkdir(dirname(receiptPath), { recursive: true, mode: 0o700 });
+  await writeOwnerReceipt(dirname(receiptPath), "http://127.0.0.1:13773");
+});
+afterAll(async () => {
+  await rm(ownerDirectory, { recursive: true, force: true });
+});
+
+/** A host that admits the renderer and mints a launch token for the bridge secret. */
+function hostFetch(hostBridgeSecret = bridgeSecret) {
+  return vi.fn(async (input: URL, init: RequestInit) => {
+    if (input.pathname === "/api/desktop/launch-sessions") {
+      const headers = init.headers as Record<string, string>;
+      if (headers["x-octant-desktop-secret"] !== hostBridgeSecret) {
+        return new Response("{}", { status: 401 });
+      }
+      return Response.json({ launchToken, expiresAt: 1 }, { status: 201 });
+    }
+    return new Response(null, { status: 204 });
+  });
+}
 
 function baseOptions(overrides: Partial<WebCommandOptions> = {}): WebCommandOptions {
   return {
@@ -31,9 +69,11 @@ function baseOptions(overrides: Partial<WebCommandOptions> = {}): WebCommandOpti
       version: "0.0.0-dev",
     })),
     openBrowser: vi.fn(),
+    fetch: hostFetch(),
     startDevServer: vi.fn(async () => "http://127.0.0.1:5173"),
     stdout: { write: vi.fn((chunk: string) => chunk.length > 0) },
     stderr: { write: vi.fn((chunk: string) => chunk.length > 0) },
+    bridgeSecretInput: ownerInput,
     ...overrides,
   } as unknown as WebCommandOptions;
 }
@@ -83,26 +123,75 @@ describe("runWebCommand", () => {
     expect(resolveWebRoot()).not.toMatch(/^file:/);
   });
 
-  it("attaches to the canonical host and opens its stable URL directly", async () => {
+  it("opens the canonical host with a one-time launch token bound to its origin", async () => {
+    const fetch = hostFetch();
     const openBrowser = vi.fn();
     const stdout = { write: vi.fn((chunk: string) => chunk.length > 0) };
-    const result = await runWebCommand(baseOptions({ openBrowser, stdout }));
+    const result = await runWebCommand(baseOptions({ fetch, openBrowser, stdout }));
     expect(result.kind).toBe("opened");
-    expect(openBrowser).toHaveBeenCalledWith(new URL("http://127.0.0.1:13773/"));
+    const opened = openBrowser.mock.calls[0]?.[0] as URL;
+    expect(opened.origin).toBe("http://127.0.0.1:13773");
+    expect(opened.hash).toBe(`#launchToken=${launchToken}`);
+    const minted = fetch.mock.calls.find(
+      ([url]) => url.pathname === "/api/desktop/launch-sessions",
+    );
+    expect(JSON.parse(String(minted?.[1].body))).toMatchObject({
+      origin: "http://127.0.0.1:13773",
+    });
+    // The token is consumed by the browser; the terminal shows the plain address.
     expect(stdout.write).toHaveBeenCalledWith(
       "Octant web client opened at http://127.0.0.1:13773/\n",
     );
+    expect(stdout.write).not.toHaveBeenCalledWith(expect.stringContaining(launchToken));
   });
 
-  it("prints the URL without opening the browser when --no-open is set", async () => {
+  it("prints the one-time launch URL without opening the browser when --no-open is set", async () => {
     const openBrowser = vi.fn();
     const stdout = { write: vi.fn((chunk: string) => chunk.length > 0) };
     const result = await runWebCommand(baseOptions({ noOpen: true, openBrowser, stdout }));
     expect(result.kind).toBe("served");
     expect(openBrowser).not.toHaveBeenCalled();
     expect(stdout.write).toHaveBeenCalledWith(
-      "Octant web client ready at http://127.0.0.1:13773/\n",
+      `Octant web client ready at http://127.0.0.1:13773/?serverUrl=http%3A%2F%2F127.0.0.1%3A13773%2F#launchToken=${launchToken}\n`,
     );
+  });
+
+  it.each([
+    ["answers on a port the receipt does not name", "http://127.0.0.1:13999", "instance-1"],
+    ["claims a different instance than the receipt", "http://127.0.0.1:13773", "impostor"],
+  ])("never sends the bridge secret to a host that %s", async (_, hostUrl, instanceId) => {
+    const fetch = hostFetch();
+    const openBrowser = vi.fn();
+    const stderr = { write: vi.fn((chunk: string) => chunk.length > 0) };
+    const result = await runWebCommand(
+      baseOptions({
+        fetch,
+        openBrowser,
+        stderr,
+        attachOrCreateHost: vi.fn(async () => ({
+          kind: "attached" as const,
+          url: new URL(hostUrl),
+          instanceId,
+        })),
+      }),
+    );
+    expect(result.kind).toBe("auth-failed");
+    expect(openBrowser).not.toHaveBeenCalled();
+    expect(fetch.mock.calls.some(([url]) => url.pathname === "/api/desktop/launch-sessions")).toBe(
+      false,
+    );
+    expect(stderr.write).toHaveBeenCalledWith(expect.stringContaining("host receipt"));
+  });
+
+  it("opens no browser when the host refuses to mint a launch token for this bridge secret", async () => {
+    const openBrowser = vi.fn();
+    const stderr = { write: vi.fn((chunk: string) => chunk.length > 0) };
+    const result = await runWebCommand(
+      baseOptions({ bridgeSecret: `${"W".repeat(42)}A`, openBrowser, stderr }),
+    );
+    expect(result.kind).toBe("auth-failed");
+    expect(openBrowser).not.toHaveBeenCalled();
+    expect(stderr.write).toHaveBeenCalledWith(expect.stringContaining("OS user"));
   });
 
   it("starts the Vite dev server and prints its URL when --dev is set", async () => {
@@ -146,6 +235,7 @@ describe("runWebCommand", () => {
     expect(attachOrCreateHost).toHaveBeenCalledWith(
       expect.objectContaining({
         environment: {
+          OCTANT_WEB_URL: "http://127.0.0.1:5173",
           OCTANT_CODE_FILE_HELPER_PATH: "/repo/dist/octant-code-file-helper",
         },
       }),
@@ -216,6 +306,7 @@ describe("runWebCommand", () => {
     const directory = await mkdtemp(join(tmpdir(), "octant-web-secret-"));
     try {
       await writeFile(join(directory, "octant-bridge-secret"), bridgeSecret);
+      await writeOwnerReceipt(directory, "http://127.0.0.1:13773");
       const result = await runWebCommand(
         baseOptions({
           bridgeSecret: undefined,
@@ -235,13 +326,17 @@ describe("runWebCommand", () => {
   });
 
   it("uses the stable endpoint instead of restarting on a stale receipt port", async () => {
-    const attachOrCreateHost = vi.fn(async () => ({
-      kind: "started" as const,
-      url: new URL("http://127.0.0.1:13773"),
-      instanceId: "instance-1",
-      version: "0.0.0-dev",
-    }));
     const directory = await mkdtemp(join(tmpdir(), "octant-web-host-"));
+    const attachOrCreateHost = vi.fn(async () => {
+      // The host this command starts rewrites the stale receipt.
+      await writeOwnerReceipt(directory, "http://127.0.0.1:13773");
+      return {
+        kind: "started" as const,
+        url: new URL("http://127.0.0.1:13773"),
+        instanceId: "instance-1",
+        version: "0.0.0-dev",
+      };
+    });
     try {
       await writeFile(
         join(directory, "octant-host.json"),
@@ -275,6 +370,7 @@ describe("runWebCommand", () => {
     const directory = await mkdtemp(join(tmpdir(), "octant-web-explicit-port-"));
     const attachOrCreateHost = vi.fn(async (options: HostLauncherDependencies) => {
       expect(options.resolveAttachedHost).toBeUndefined();
+      await writeOwnerReceipt(directory, "http://127.0.0.1:14000");
       return {
         kind: "started" as const,
         url: new URL("http://127.0.0.1:14000"),
@@ -298,7 +394,10 @@ describe("runWebCommand", () => {
         }),
       );
 
-      expect(result).toMatchObject({ kind: "opened", url: new URL("http://127.0.0.1:14000/") });
+      expect(result.kind).toBe("opened");
+      expect(result.kind === "opened" ? result.url.origin : undefined).toBe(
+        "http://127.0.0.1:14000",
+      );
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
@@ -316,12 +415,9 @@ describe("runWebCommand", () => {
       baseOptions({
         bridgeSecret: undefined,
         attachOrCreateHost,
+        fetch: hostFetch(generatedSecret),
         generateBridgeSecret: () => generatedSecret,
-        bridgeSecretInput: {
-          env: {},
-          platform: "darwin",
-          home: "/nonexistent-home",
-        },
+        bridgeSecretInput: ownerInput,
       }),
     );
     expect(result.kind).toBe("opened");
@@ -340,10 +436,12 @@ describe("runWebCommand", () => {
     }));
     try {
       await writeFile(join(directory, "octant-bridge-secret"), staleSecret, { mode: 0o600 });
+      await writeOwnerReceipt(directory, "http://127.0.0.1:13773");
       const result = await runWebCommand(
         baseOptions({
           bridgeSecret: explicitSecret,
           attachOrCreateHost,
+          fetch: hostFetch(explicitSecret),
           bridgeSecretInput: {
             env: { OCTANT_DATA_DIR: directory },
             platform: "linux",
@@ -389,6 +487,7 @@ describe("runWebCommand", () => {
           hostname: undefined,
           port: undefined,
           attachOrCreateHost,
+          fetch: hostFetch(winningSecret),
           bridgeSecretInput: {
             env: { OCTANT_DATA_DIR: directory },
             platform: "linux",
@@ -397,27 +496,36 @@ describe("runWebCommand", () => {
         }),
       );
 
-      expect(result).toEqual({
-        kind: "opened",
-        url: new URL("http://127.0.0.1:4000/"),
-      });
+      // The launch token is minted with the winner's secret, read back from
+      // the owner-only runtime directory after the race settled.
+      expect(result.kind).toBe("opened");
+      expect(result.kind === "opened" ? result.url.origin : undefined).toBe(
+        "http://127.0.0.1:4000",
+      );
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
   });
 
-  it("opens a token-free bootstrap URL when --dev is set", async () => {
+  it("opens the Vite renderer with a launch token bound to the renderer origin when --dev is set", async () => {
+    const fetch = hostFetch();
     const startDevServer = vi.fn(async () => "http://127.0.0.1:5173");
     const openBrowser = vi.fn();
     const stdout = { write: vi.fn((chunk: string) => chunk.length > 0) };
     const result = await runWebCommand(
-      baseOptions({ dev: true, startDevServer, openBrowser, stdout }),
+      baseOptions({ dev: true, fetch, startDevServer, openBrowser, stdout }),
     );
     expect(result.kind).toBe("dev");
-    const openedUrl = openBrowser.mock.calls[0]![0] as URL;
+    const openedUrl = openBrowser.mock.calls[0]?.[0] as URL;
+    expect(openedUrl.origin).toBe("http://127.0.0.1:5173");
     expect(openedUrl.searchParams.get("serverUrl")).toBe("http://127.0.0.1:13773/");
-    expect(openedUrl.searchParams.has("developmentWebBootstrap")).toBe(false);
-    expect(openedUrl.hash).toBe("");
+    expect(openedUrl.hash).toBe(`#launchToken=${launchToken}`);
+    const minted = fetch.mock.calls.find(
+      ([url]) => url.pathname === "/api/desktop/launch-sessions",
+    );
+    expect(JSON.parse(String(minted?.[1].body))).toMatchObject({
+      origin: "http://127.0.0.1:5173",
+    });
   });
 
   it("uses an already-running canonical host without restarting it for Vite", async () => {
@@ -432,6 +540,31 @@ describe("runWebCommand", () => {
     );
 
     expect(result).toMatchObject({ kind: "dev" });
+  });
+
+  it("refuses to open a Vite renderer that an already-running host would refuse", async () => {
+    const fetch = vi.fn(async () => new Response(null, { status: 403 }));
+    const startDevServer = vi.fn(async () => "http://127.0.0.1:5173");
+    const openBrowser = vi.fn();
+    const stderr = { write: vi.fn((chunk: string) => chunk.length > 0) };
+
+    const result = await runWebCommand(
+      baseOptions({ dev: true, fetch, startDevServer, openBrowser, stderr }),
+    );
+
+    expect(result.kind).toBe("renderer-refused");
+    expect(fetch).toHaveBeenCalledWith(
+      new URL("http://127.0.0.1:13773/api/shell/local-session"),
+      expect.objectContaining({
+        method: "OPTIONS",
+        headers: expect.objectContaining({ origin: "http://127.0.0.1:5173" }),
+      }),
+    );
+    expect(startDevServer).not.toHaveBeenCalled();
+    expect(openBrowser).not.toHaveBeenCalled();
+    expect(stderr.write).toHaveBeenCalledWith(
+      expect.stringContaining("OCTANT_WEB_URL=http://127.0.0.1:5173"),
+    );
   });
 
   it("prints the URL manually when the browser opener throws", async () => {

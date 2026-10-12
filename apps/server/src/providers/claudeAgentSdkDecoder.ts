@@ -347,6 +347,27 @@ function decodeStreamEvent(value: unknown, allowedTools: readonly string[]): Cla
   throw protocol("Claude returned an unsupported runtime message.");
 }
 
+// The runtime records an interrupt in its transcript as a user message it
+// writes itself: one text block holding one of these markers. Claude Code
+// 2.1.296 sends the first when output was streaming and the second when a
+// tool was waiting, each just before the result that names
+// `aborted_streaming` or `aborted_tools`. Read as a tool result the marker
+// was refused, which ended every interrupted turn as a protocol failure
+// before that result arrived. The marker settles nothing, so it is dropped
+// and the result stays the turn's terminal statement.
+const INTERRUPTION_MARKERS: ReadonlySet<string> = new Set([
+  "[Request interrupted by user]",
+  "[Request interrupted by user for tool use]",
+]);
+
+function isInterruptionMarker(content: ReadonlyArray<unknown>): boolean {
+  if (content.length !== 1) return false;
+  const block = object(content[0]);
+  return (
+    block?.type === "text" && typeof block.text === "string" && INTERRUPTION_MARKERS.has(block.text)
+  );
+}
+
 function decodeToolResults(message: Record<string, unknown>): ClaudeDecodedMessage {
   const user = object(message.message);
   if (user === undefined || user.role !== "user" || message.parent_tool_use_id !== null) {
@@ -356,6 +377,7 @@ function decodeToolResults(message: Record<string, unknown>): ClaudeDecodedMessa
   if (!Array.isArray(user.content) || typeof message.session_id !== "string") {
     throw protocol("Claude returned an unsupported runtime message.");
   }
+  if (isInterruptionMarker(user.content)) return { kind: "ignored" };
   const results = user.content.map((value) => {
     const block = object(value);
     if (
@@ -388,6 +410,15 @@ function hasOnlyKeys(value: Record<string, unknown>, allowed: readonly string[])
   const allowedKeys = new Set(allowed);
   return Object.keys(value).every((key) => allowedKeys.has(key));
 }
+
+/** System subtypes `isHarmlessInformational` drops when their fields check out. */
+const INFORMATIONAL_SYSTEM_SUBTYPES: ReadonlySet<string> = new Set([
+  "api_retry",
+  "post_turn_summary",
+  "notification",
+  "thinking_tokens",
+  "informational",
+]);
 
 function isHarmlessInformational(message: Record<string, unknown>): boolean {
   if (message.type === "keep_alive") return hasOnlyKeys(message, ["type"]);
@@ -1117,6 +1148,8 @@ export function decodeMessage(
         (typeof info.rateLimitType !== "string" || !RATE_LIMIT_TYPES.has(info.rateLimitType)))
     )
       throw protocol("Claude returned an unsupported runtime message.");
+    const overageResetsAt = optionalNonNegativeNumber(info.overageResetsAt);
+    const overageStatus = info.overageStatus;
     return {
       kind: "rate-limit",
       sessionId: message.session_id,
@@ -1124,6 +1157,16 @@ export function decodeMessage(
       ...(resetsAt === undefined ? {} : { resetsAt }),
       ...(typeof info.rateLimitType === "string" ? { rateLimitType: info.rateLimitType } : {}),
       ...(utilization === undefined ? {} : { utilization }),
+      ...(overageStatus === "allowed" ||
+      overageStatus === "allowed_warning" ||
+      overageStatus === "rejected"
+        ? { overageStatus }
+        : {}),
+      ...(overageResetsAt === undefined ? {} : { overageResetsAt }),
+      ...(typeof info.overageDisabledReason === "string"
+        ? { overageDisabledReason: info.overageDisabledReason }
+        : {}),
+      ...(info.overageInUse === true || info.isUsingOverage === true ? { overageInUse: true } : {}),
     };
   }
   if (message.type === "auth_status") {
@@ -1168,6 +1211,30 @@ export function decodeMessage(
       ...(mode === "default" || mode === "bypassPermissions" || mode === "plan" || mode === "auto"
         ? { permissionMode: mode }
         : {}),
+    };
+  }
+  // Claude Code compacts its own session when the window nears its threshold
+  // (or on `/compact`) and marks the cut with a boundary. It used to end the
+  // turn as an unsupported message the moment a long turn compacted. The
+  // runtime sends fields its published type leaves out (`logical_parent_uuid`,
+  // summary bookkeeping), so only the fields read here are checked.
+  if (message.type === "system" && message.subtype === "compact_boundary") {
+    const metadata = object(message.compact_metadata);
+    if (
+      typeof message.session_id !== "string" ||
+      typeof message.uuid !== "string" ||
+      metadata === undefined ||
+      (metadata.trigger !== "auto" && metadata.trigger !== "manual") ||
+      nonNegativeInteger(metadata.pre_tokens) === undefined ||
+      (metadata.post_tokens !== undefined && nonNegativeInteger(metadata.post_tokens) === undefined)
+    ) {
+      throw protocol("Claude returned an unsupported runtime message.");
+    }
+    const postTokens = nonNegativeInteger(metadata.post_tokens);
+    return {
+      kind: "compaction",
+      sessionId: message.session_id,
+      ...(postTokens === undefined ? {} : { postTokens }),
     };
   }
   if (
@@ -1257,6 +1324,17 @@ export function decodeMessage(
   }
 
   if (isHarmlessInformational(message)) return { kind: "ignored" };
+  // A system subtype this decoder does not know says so in a sentence of its
+  // own. The subtype itself is runtime-supplied text and stays out of a
+  // failure the driver journals; a known subtype with refused fields stays
+  // generic.
+  if (
+    message.type === "system" &&
+    typeof message.subtype === "string" &&
+    !INFORMATIONAL_SYSTEM_SUBTYPES.has(message.subtype)
+  ) {
+    throw protocol("Claude returned an unsupported system message.");
+  }
   throw protocol("Claude returned an unsupported runtime message.");
 }
 

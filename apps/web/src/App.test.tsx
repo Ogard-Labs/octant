@@ -26,7 +26,7 @@ import type { ContextClient } from "@octant/client-runtime/context-client";
 import { applyWorkspaceOperation } from "@octant/domain/shell-policy";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { decodeChatCommandResult, type ChatThread } from "@octant/contracts/chat";
 import { DEFAULT_THEME_SETTINGS } from "@octant/contracts/theme";
 import type { OctantHostBridge } from "./shell/hostBridge";
@@ -87,8 +87,19 @@ vi.mock("./automation/automationCenterGate", () => ({
   },
 }));
 
+// Settings is a lazy chunk. The first test in the file to open it otherwise
+// waits on a cold import of the whole Settings module graph behind the
+// "Opening Settings" fallback, and under CI load that took longer than
+// findBy's 1 s default, so whichever Settings test ran first failed on its
+// first Settings query. Loading the chunk once here keeps that cost out of
+// every test's assertions; the lazy boundary still renders through Suspense.
+beforeAll(async () => {
+  await import("./shell/SettingsView");
+});
+
 afterEach(() => {
   automationGate.enabled = false;
+  vi.useRealTimers();
   vi.unstubAllGlobals();
   try {
     window.sessionStorage.clear();
@@ -520,23 +531,47 @@ describe("App", () => {
     );
   });
 
-  it("opens the canonical Machine directly in a browser without a launch token", async () => {
-    const browserCapability = `${"C".repeat(42)}A`;
+  it("asks for a launch from the desktop app or `octant web` when the address is typed, and asks the host nothing", async () => {
     const originalHref = window.location.href;
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      throw new Error(`unexpected fetch ${typeof input === "string" ? input : input.toString()}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      window.sessionStorage.clear();
+      window.history.replaceState(null, "", `${window.location.origin}/`);
+      render(
+        <App
+          chatClient={chats()}
+          codeClient={codes()}
+          projectClient={projects()}
+          providerClient={providers()}
+          shellClient={client(codeShellBootstrap())}
+        />,
+      );
+      expect(
+        await screen.findByText("Open Octant from the desktop app or run `octant web`"),
+      ).toBeVisible();
+      expect(fetchMock).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+      window.history.replaceState(null, "", originalHref);
+    }
+  });
+
+  it("opens a browser session from a one-time launch link and removes the token from the address bar", async () => {
+    const browserCapability = `${"C".repeat(42)}A`;
+    const launchToken = `${"T".repeat(42)}A`;
+    const originalHref = window.location.href;
+    let addressAtExchange: string | undefined;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = typeof input === "string" ? input : input.toString();
-      if (url.endsWith("/api/shell/local-session")) {
-        return new Response(
-          JSON.stringify({
-            windowId,
-            capability: browserCapability,
-            authentication: "local-session",
-          }),
-          {
-            status: 200,
-            headers: { "content-type": "application/json" },
-          },
-        );
+      if (url.endsWith("/api/shell/launch-session")) {
+        addressAtExchange = window.location.href;
+        return new Response(JSON.stringify({ windowId, capability: browserCapability }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
       }
       const canvasResponse = canvasFetchPassthrough(url);
       if (canvasResponse !== undefined) {
@@ -546,11 +581,16 @@ describe("App", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
     try {
-      const codeApi = codes();
+      window.sessionStorage.clear();
+      window.history.replaceState(
+        null,
+        "",
+        `${window.location.origin}/#launchToken=${launchToken}`,
+      );
       render(
         <App
           chatClient={chats()}
-          codeClient={codeApi}
+          codeClient={codes()}
           projectClient={projects()}
           providerClient={providers()}
           shellClient={client(codeShellBootstrap())}
@@ -562,9 +602,14 @@ describe("App", () => {
         }),
       ).toBeVisible();
       expect(fetchMock).toHaveBeenCalledWith(
-        new URL("/api/shell/local-session", window.location.origin),
-        expect.objectContaining({ method: "POST" }),
+        new URL("/api/shell/launch-session", window.location.origin),
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({ launchToken }),
+        }),
       );
+      expect(addressAtExchange).not.toContain(launchToken);
+      expect(window.location.href).not.toContain(launchToken);
     } finally {
       vi.unstubAllGlobals();
       window.history.replaceState(null, "", originalHref);
@@ -717,7 +762,12 @@ describe("App", () => {
   });
 
   it("hands off a sidebar thread without inserting operation text into the Project list", async () => {
-    const user = userEvent.setup();
+    // Fake timers from the start, so any timer the toast schedules is fake and
+    // the 8.2 s wait below elapses instantly. A real 8.2 s sleep outlived the
+    // default 5 s test timeout and left its act() scope open, which stopped the
+    // following tests in this file from rendering at all.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     const handOff = deferred<Response>();
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = typeof input === "string" ? input : input.toString();
@@ -753,7 +803,7 @@ describe("App", () => {
     );
     expect(progress.closest(".toast")).not.toBeNull();
     await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 8200));
+      await vi.advanceTimersByTimeAsync(8200);
     });
     expect(progress).toBeVisible();
     expect(within(projectsNavigation).queryByText(/Writing the hand-off document/)).toBeNull();
@@ -2041,6 +2091,9 @@ describe("App", () => {
     const contextApi: ContextClient = {
       inspect,
       execute: vi.fn(),
+      externalContentAvailable: false,
+      readExternalContent: vi.fn(),
+      clearExternalContent: vi.fn(),
     };
 
     render(
@@ -2134,6 +2187,9 @@ describe("App", () => {
         };
       }),
       execute: vi.fn(),
+      externalContentAvailable: false,
+      readExternalContent: vi.fn(),
+      clearExternalContent: vi.fn(),
     };
 
     render(

@@ -32,6 +32,7 @@ import { RemoteCredentialLifecycleService } from "../remoteCredentialLifecycleSe
 import {
   createRemoteRouteHandler,
   createRemoteRoutePolicy,
+  REMOTE_CANVAS_DESIGN_PAGE_ROUTE_ID,
   REMOTE_PROTOCOL_ROUTE_IDS,
   type RemoteRouteDefinition,
   type RemoteRouteFacts,
@@ -109,6 +110,12 @@ export interface RemoteGatewayServices {
    * routes fail closed with 503 until a real handler is supplied.
    */
   readonly productDispatch?: RemoteProductDispatch;
+  /**
+   * Serves a running Canvas design's page for its single-use ticket. The
+   * ticket is the page's only authority, so this route needs no session.
+   * Undefined answers not found.
+   */
+  readonly designPage?: (request: Request) => Promise<Response | undefined>;
   readonly serve: Serve;
   readonly now?: () => number;
   readonly uuid?: () => string;
@@ -575,7 +582,9 @@ function assembleServices(
     policy,
     webAssets: options.webAssets,
     preAuth: async (request, route, facts) =>
-      handlePreAuthRoute(request, route, facts, protocol, auth, clockPosture),
+      route.id === REMOTE_CANVAS_DESIGN_PAGE_ROUTE_ID
+        ? options.designPage?.(request)
+        : handlePreAuthRoute(request, route, facts, protocol, auth, clockPosture),
     authenticatedProduct: async (request, route, facts) =>
       handleAuthenticatedRoute(request, route, facts, auth),
   });

@@ -67,7 +67,8 @@ applies: a partial import describes only the records read so far.
 ## The stats line under every thread
 
 Under the composer of every Chat, Work, and Code thread, on every provider, a
-quiet line states what the thread has used so far:
+quiet line states what the thread has used so far. In a split workspace only the
+active pane shows the line, so a pane never shows another thread's figures:
 
 `↑ 48k in · ↓ 3.1k out · cache 92% · 41 tok/s · 0.9 s first token · $0.03 est.`
 
@@ -83,11 +84,17 @@ quiet line states what the thread has used so far:
   word, averaged over the turns that were measured.
 - **cost** says **est.** because Octant prices tokens at the standard API rates
   for the model. A cost the provider reported itself drops the **est.**.
+- **5h** and **Week** (or any other window the provider reports) lead the line
+  as small bars. Each shows how much of that account window is left. A bar
+  turns amber when less than a fifth is left, and red when none is left. Hover
+  for the full name and the percentage. Only windows the provider has reported
+  appear, and a window whose reset has passed drops out until the provider
+  reports it again.
 
 A figure the provider did not report, and one that cannot be measured, is left
-out: Octant never shows a zero it did not see. A provider that reports no usage
-shows no line at all. A thread with more than 50 turns prices its latest 50, and
-the cost tooltip says so.
+out: Octant never shows a zero it did not see. A provider that reports neither
+usage nor limit windows shows no line at all. A thread with more than 50 turns
+prices its latest 50, and the cost tooltip says so.
 
 Click the line, or choose **Turn details** in the context meter's popover, to
 open one turn at a time: input, cache read, cache write, output, and reasoning
@@ -119,9 +126,20 @@ model, and provider-instance scope are labeled separately; account limits can
 include usage from other applications.
 
 Codex supports a read-only account refresh while idle. That request creates no
-thread or model turn. Other providers contribute windows when their supported
-runtime or response headers report them. A provider that reports no quota data
-stays unavailable; Octant does not infer a balance from token history.
+thread or model turn. Claude subscription accounts report 5-hour, 7-day,
+per-model weekly, and overage windows from the Claude process itself. The
+numbers arrive with a turn you run on that account. **Refresh** also asks a
+Claude process directly, but a process that has not made a model request yet
+has no numbers to give, so the page then keeps the last reading. Octant
+never reads a Claude token or credential file to fetch those numbers, and
+never calls a vendor usage endpoint. Each Claude account shows its own limits, labeled by the account
+name, with reset time in local time and when the reading was last updated. An
+API-key Claude account says plan limits do not apply instead of drawing empty
+bars. A failed or missing refresh keeps the last reading and shows its age.
+
+Other providers contribute windows when their supported runtime or response
+headers report them. A provider that reports no quota data stays unavailable;
+Octant does not infer a balance from token history.
 
 An expired reset time means **Awaiting updated limits**, not an assumed refill.
 A failed refresh retains the previous reading with a stale label. Limits are

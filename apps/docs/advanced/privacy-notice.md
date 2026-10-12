@@ -43,10 +43,9 @@ On the host, Octant holds:
   and authorizes nothing.
 - **Credential references** — opaque Keychain pointers, never the secret
   values.
-- **Secrets in the credential store** — the API keys you entered, the key a
-  direct endpoint sign-in issued, and, only if you connected it, the Claude
-  for helpers token. They sit in the macOS Keychain (the Secret Service on
-  Linux) behind those references, never in the journal.
+- **Secrets in the credential store** — the API keys you entered and the key
+  a direct endpoint sign-in issued. They sit in the macOS Keychain (the
+  Secret Service on Linux) behind those references, never in the journal.
 - **Installed extension packages** under the host data directory.
 - **Logs** under the host logs directory.
 
@@ -85,47 +84,19 @@ and capabilities without sending a prompt. See
 
 Provider sign-in takes one of two forms. When the provider's own CLI or SDK
 handles the login, it stays in that runtime, and Octant never stores,
-refreshes, or journals those tokens, with one exception you opt into:
-[Claude for helpers](#claude-for-helpers-only-if-you-connect-it). When you
+refreshes, or journals those tokens. When you
 choose **Sign in** on a direct endpoint that offers it, which today is
 OpenRouter, Octant runs the sign-in itself and keeps what the provider issues:
 see [Sign in on a direct endpoint](#sign-in-on-a-direct-endpoint-only-if-you-choose-it).
 
-### Claude for helpers, only if you connect it
+### Claude subscription accounts
 
-Claude Code on a Claude subscription signs in through Claude's own runtime,
-and Octant never holds that login. A Plan turn, and every Chat subagent, runs
-confined, away from the keychain where that login lives.
-**Settings → Providers → Claude Code → Connect Claude for helpers** gives
-those runs a sign-in of their own. It is the one provider token Octant
-stores from a provider's own runtime, and it exists only if you press the
-button.
-
-- **What is stored.** The long-lived token that Claude's own
-  `claude setup-token` prints after you approve once in a browser window.
-  Octant runs that command on this Mac and reads the token from memory, so
-  you never copy it. It is never logged, placed in a process argument, or
-  written to the journal, an export, or diagnostics.
-- **Where.** In the host's credential store — the macOS Keychain, or the
-  Secret Service on Linux — under that Claude Code provider, reached through
-  the credential broker by an opaque reference. Settings shows whether the
-  token is connected, connecting, or expired, never the token.
-- **Who receives it.** Only the confined Claude runtime that Octant starts
-  for a Plan turn or Chat subagent on that provider. The token reaches it as
-  the `CLAUDE_CODE_OAUTH_TOKEN` environment variable for as long as that
-  launch lives, and the runtime presents it to Anthropic to sign in. Turns
-  that are not confined, and every other provider, never receive it, and no
-  Octant-operated service does.
-- **How to remove it.** Press **Disconnect**, which deletes the token from
-  the credential store and says so if the store cannot be reached. Removing
-  the Claude Code provider also tries to delete it, but the removal still
-  completes when the store is unreachable, and the token can then stay
-  there, so disconnect first. A token Claude refuses is replaced by an
-  expired marker, and Settings asks you to connect again. Only a window on
-  this Mac can connect or disconnect; a paired device cannot. Removing it
-  deletes Octant's copy only. Octant cannot revoke the token with Anthropic,
-  so the token itself stays valid there until it expires or is revoked
-  outside Octant.
+Claude Code on a Claude subscription signs in through Claude's own runtime
+with the unmodified `claude auth login` command in that account's assigned
+directory. Octant never reads those credential files, never stores a Claude
+OAuth token, and never injects `CLAUDE_CODE_OAUTH_TOKEN`. If you previously
+connected Claude for helpers, Octant deletes that leftover token on upgrade.
+Revoke it with Anthropic; Octant cannot.
 
 ### Sign in on a direct endpoint, only if you choose it
 
@@ -251,7 +222,9 @@ one thread you can already open. The JSON bundle (`octant.thread-bundle/1`)
 carries transcript, evidence, and provenance, and names the instant it was
 cut. Secrets, raw provider payloads, resume cursors, and filesystem paths
 are unrepresentable. Attachment bytes and other bulk content outside the
-journal are listed as omissions rather than inlined. A paired device may export
+journal are listed as omissions rather than inlined. Generated images and the
+thread's Browser captures are listed this way, and a capture's page address and
+title are in the file. A paired device may export
 only a thread it can already read. Chat Markdown remains a convenience
 copy, not the authoritative export.
 
@@ -302,12 +275,10 @@ journaled, never placed in process arguments, never exported, and never
 included in diagnostics. Headless or non-macOS sessions report Keychain
 cleanup as not integrated rather than writing secrets to disk.
 
-The Claude for helpers token, if you connect one, and the key a direct
-endpoint sign-in issues are held the same way and are never returned to the
-interface, journaled, exported, or included in diagnostics. See
-[Claude for helpers](#claude-for-helpers-only-if-you-connect-it) and
+The key a direct endpoint sign-in issues is held the same way and is never
+returned to the interface, journaled, exported, or included in diagnostics. See
 [Sign in on a direct endpoint](#sign-in-on-a-direct-endpoint-only-if-you-choose-it)
-for who receives them and how to remove them.
+for who receives it and how to remove it.
 
 ## Next steps
 

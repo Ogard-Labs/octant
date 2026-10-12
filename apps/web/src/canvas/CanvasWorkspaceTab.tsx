@@ -42,7 +42,11 @@ import { OctantDialog } from "../ui/base/OctantDialog";
 import { OctantMenu } from "../ui/base/OctantMenu";
 import { OctantPopover } from "../ui/base/OctantPopover";
 import { CanvasCommentsPanel } from "./CanvasCommentsPanel";
-import type { CanvasExportOfferList } from "@octant/contracts/canvas-export";
+import type {
+  CanvasExportOfferList,
+  CanvasExportPrepareRequest,
+  CanvasExportPrepareResult,
+} from "@octant/contracts/canvas-export";
 import { CanvasExportPanel } from "./CanvasExportPanel";
 import { useCanvasExportFolder } from "./useCanvasExportFolder";
 import { CanvasSharePanel } from "./CanvasSharePanel";
@@ -53,6 +57,8 @@ import {
 } from "./CanvasRefreshPanel";
 import { CanvasVersionHistoryPanel, ReviseCanvasDraft } from "./CanvasRevisionPanel";
 import type { DiagramBoardLayoutRuntime } from "./blocks/DiagramBoard";
+import { readWorkspaceFrameTheme, type DesignAssetRuntime } from "./blocks/designDocument";
+import { designRunRuntimeFor } from "./blocks/designRunningFrame";
 import type { PlanTaskRuntime } from "./blocks/PlanBlock";
 import { createCanvasActionRuntime } from "./canvasActionRuntime";
 import { CanvasView } from "./CanvasView";
@@ -341,6 +347,35 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
     tipVersionId,
   ]);
 
+  // A design's images are resolved by the host for the version on screen,
+  // each time it is drawn, under that version's own thread authority.
+  const designAssetRuntime = useMemo<DesignAssetRuntime | undefined>(() => {
+    const designAssets = props.client?.designAssets;
+    if (designAssets === undefined || selectedVersionId === undefined) return undefined;
+    const canvasId = props.tab.canvasId;
+    const versionId = String(selectedVersionId);
+    return {
+      resolve: async (blockId) => {
+        const outcome = await designAssets({ canvasId, versionId, blockId });
+        return outcome.kind === "ready" ? outcome.assets : undefined;
+      },
+    };
+  }, [props.client, props.tab.canvasId, selectedVersionId]);
+
+  // The sidebar is where a person goes to use a Canvas, so a prototype here
+  // runs as soon as it is shown, for the version on screen.
+  const designRunRuntime = useMemo(
+    () =>
+      selectedVersionId === undefined
+        ? undefined
+        : designRunRuntimeFor(props.client, {
+            canvasId: props.tab.canvasId,
+            versionId: String(selectedVersionId),
+            runsOnOpen: true,
+          }),
+    [props.client, props.tab.canvasId, selectedVersionId],
+  );
+
   // A plan task's status is a version of the selected head only, for the same
   // reasons as a drag: the host refuses an older version as stale.
   const planRuntime = useMemo<PlanTaskRuntime | undefined>(() => {
@@ -543,6 +578,25 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
       return result;
     },
     [props.client, loadShares],
+  );
+
+  // An exported file has no Octant page to read the theme from, so an HTML
+  // export of a Canvas that holds a design carries the tokens this window
+  // draws it with. The host bounds them and writes only a frame's own tokens.
+  const holdsDesign = definition?.blocks.some((block) => block.kind === "design") === true;
+  const prepareExport = props.client?.prepareExport;
+  const prepareExportInTheme = useCallback(
+    (request: CanvasExportPrepareRequest): Promise<CanvasExportPrepareResult> => {
+      if (prepareExport === undefined) {
+        return Promise.reject(new Error("Canvas export is unavailable on this host."));
+      }
+      return prepareExport(
+        holdsDesign && request.format === "html"
+          ? { ...request, frameTheme: readWorkspaceFrameTheme(document.documentElement) }
+          : request,
+      );
+    },
+    [holdsDesign, prepareExport],
   );
 
   const handleOpenShare = useCallback(
@@ -813,6 +867,8 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
             {...(actionRuntime === undefined ? {} : { actionRuntime })}
             {...(layoutRuntime === undefined ? {} : { layoutRuntime })}
             {...(planRuntime === undefined ? {} : { planRuntime })}
+            {...(designAssetRuntime === undefined ? {} : { designAssetRuntime })}
+            {...(designRunRuntime === undefined ? {} : { designRunRuntime })}
             {...(commentsAvailable
               ? { comments: { openCounts, openRowCounts, onOpen: openCommentsOn } }
               : {})}
@@ -899,11 +955,15 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
           <CanvasSharePanel
             canvasId={props.tab.canvasId}
             expectedSequence={expectedSequence}
+            holdsDesign={holdsDesign}
             onOpen={handleOpenShare}
             onRevoke={handleRevokeShare}
             onShare={handleShare}
             overview={shares}
             versionId={selectedVersionId}
+            {...(props.client?.sharedDesignPageUrl === undefined
+              ? {}
+              : { resolveDesignPage: props.client.sharedDesignPageUrl })}
           />
         ) : null}
       </OctantDialog>
@@ -924,7 +984,7 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
             offers={exportOffers}
             onDecide={props.client.decideExport}
             onExportFolderChosen={() => void loadExportOffers()}
-            onPrepare={props.client.prepareExport}
+            onPrepare={prepareExportInTheme}
           />
         ) : null}
       </OctantDialog>

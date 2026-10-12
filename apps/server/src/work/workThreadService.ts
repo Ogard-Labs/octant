@@ -41,12 +41,14 @@ import {
   assertProviderAllowedByProjectPolicy,
   hasWorkToolAuthority,
   ProjectProviderPolicyRejected,
+  workProjectKeepsStatusFile,
 } from "@octant/domain";
 import {
   completedThreadArchiveDue,
   decideCompleteThread,
   decideSnoozeThread,
 } from "@octant/domain/thread-completion-policy";
+import { isRoutineHostScope } from "../routineHostScope";
 import type {
   CompletedThreadArchiveInput,
   CompletedThreadArchiveOutcome,
@@ -444,10 +446,13 @@ export class WorkThreadService {
           createdAt: decodeTimestamp(this.#clock()),
           updatedAt: decodeTimestamp(this.#clock()),
         });
-        this.#append(created.id, 0, "work.thread-created@1", {
-          kind: "thread-created",
-          thread: created,
-        });
+        this.#append(
+          created.id,
+          0,
+          "work.thread-created@1",
+          { kind: "thread-created", thread: created },
+          isRoutineHostScope(authenticatedWindowId) ? "system" : "local-user",
+        );
         this.#projection.apply({ kind: "thread-created", thread: created });
         if (preparedIssue.status === "ready" && command.issueContext !== undefined) {
           try {
@@ -798,8 +803,9 @@ export class WorkThreadService {
   /**
    * A due date belongs to the Project, but the reminder lands on its newest
    * open thread — the place the person would pick the work up, the same rule
-   * the Work board follows (decision 0119). A Project whose status cannot be
-   * read simply carries no mark; it must not empty the sidebar.
+   * the Work board follows. Only a Project that keeps a status file is read; one
+   * whose status cannot be read simply carries no mark; it must not empty the
+   * sidebar.
    */
   async #dueRemindersByThread(
     threads: ReadonlyArray<WorkThread>,
@@ -819,7 +825,7 @@ export class WorkThreadService {
     await Promise.all(
       [...newestByProject.values()].map(async (thread) => {
         const project = this.#persistence.readProject(thread.projectId);
-        if (project?.type !== "work") return;
+        if (project?.type !== "work" || !workProjectKeepsStatusFile(project)) return;
         try {
           const item = await port(project.id, project.binding.canonicalRoot);
           if (item !== undefined) reminders.set(String(thread.id), item);

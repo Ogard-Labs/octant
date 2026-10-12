@@ -21,6 +21,7 @@ export class LaunchSessionError extends Error {
 interface LaunchSessionRecord {
   readonly windowId: WindowId;
   readonly capability: string;
+  readonly origin: string;
   readonly expiresAt: number;
   consumed: boolean;
 }
@@ -50,6 +51,8 @@ export interface LaunchSessionStoreOptions {
 export interface CreateLaunchSessionInput {
   readonly windowId: WindowId;
   readonly capability: string;
+  /** The renderer origin the launcher opens; only it may exchange the token. */
+  readonly origin: string;
   readonly ttlMs?: number;
 }
 
@@ -60,6 +63,8 @@ export interface LaunchSessionReceipt {
 
 export interface ExchangeLaunchSessionInput {
   readonly launchToken: string;
+  /** The exchanging page's Origin header, or `null` when it sent none. */
+  readonly origin: string | null;
   readonly now: number;
 }
 
@@ -102,6 +107,7 @@ export class LaunchSessionStore {
     this.#sessions.set(launchToken, {
       windowId: input.windowId,
       capability: input.capability,
+      origin: input.origin,
       expiresAt: now + ttlMs,
       consumed: false,
     });
@@ -135,6 +141,12 @@ export class LaunchSessionStore {
       throw new LaunchSessionError("invalid", "Launch session token is invalid.");
     }
     if (record.consumed) {
+      throw new LaunchSessionError("invalid", "Launch session token is invalid.");
+    }
+    if (input.origin !== record.origin) {
+      // A token presented by a page it was not minted for has leaked, so it is
+      // burned rather than left for a second attempt.
+      this.#sessions.delete(input.launchToken);
       throw new LaunchSessionError("invalid", "Launch session token is invalid.");
     }
     const exchange = { windowId: record.windowId, capability: record.capability };

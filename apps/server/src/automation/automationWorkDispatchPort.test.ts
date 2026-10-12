@@ -14,7 +14,7 @@ import {
   unavailableAutomationWorkDispatchPort,
 } from "./automationTestFixtures";
 
-const windowId = "00000000-0000-4000-8000-000000000601" as WindowId;
+const scopeId = "00000000-0000-4000-8000-000000000601" as WindowId;
 const threadId = decodeWorkThreadId("aa000000-0000-4000-8000-0000000000d0");
 const now = "2026-08-10T13:00:20.000Z" as UtcTimestamp;
 
@@ -71,12 +71,12 @@ describe("createAutomationWorkDispatchPort", () => {
       run,
       threadId,
       title: "Weekly summary",
-      windowId,
+      scopeId,
     });
 
     expect(port.available).toBe(true);
     expect(outcome).toEqual({ kind: "created", threadId, createdAt: now });
-    expect(threads.execute).toHaveBeenCalledWith(windowId, {
+    expect(threads.execute).toHaveBeenCalledWith(scopeId, {
       kind: "create-work-thread",
       threadId,
       projectId: run.definitionSnapshot.projectId,
@@ -110,7 +110,7 @@ describe("createAutomationWorkDispatchPort", () => {
       run: workRun(),
       threadId,
       title: "Weekly summary",
-      windowId,
+      scopeId,
     });
 
     expect(outcome).toEqual({ kind: "existing", threadId });
@@ -135,7 +135,7 @@ describe("createAutomationWorkDispatchPort", () => {
         run: workRun(),
         threadId,
         title: "Weekly summary",
-        windowId,
+        scopeId,
       }),
     ).resolves.toMatchObject({
       kind: "failed",
@@ -158,7 +158,7 @@ describe("createAutomationWorkDispatchPort", () => {
       threadId,
       firstTurnRequestId: run.firstTurnRequestId,
       promptDigest: "unused" as never,
-      windowId,
+      scopeId,
     });
 
     expect(outcome).toEqual({
@@ -167,7 +167,7 @@ describe("createAutomationWorkDispatchPort", () => {
       acceptedAt: now,
     });
     expect(turns.startFirstTurn).toHaveBeenCalledWith(
-      windowId,
+      scopeId,
       expect.objectContaining({
         kind: "start-work-thread-turn",
         requestId: run.firstTurnRequestId,
@@ -186,7 +186,39 @@ describe("createAutomationWorkDispatchPort", () => {
           modelId: run.definitionSnapshot.executionProfile.modelId,
         }),
       }),
+      { holdAskFirst: true },
     );
+  });
+
+  it("holds an unattended first turn ask-first unless the routine captured auto-accept-edits", async () => {
+    const turns = createTurns();
+    const port = createAutomationWorkDispatchPort({
+      threads: createThreads(),
+      turns,
+      clock: () => now,
+      uuid: () => "aa000000-0000-4000-8000-0000000000e0",
+    });
+    const gated = workRun();
+    const autoAccept: AutomationRun = {
+      ...gated,
+      authoritySnapshot: {
+        ...gated.authoritySnapshot,
+        effective: { ...gated.authoritySnapshot.effective, executionPolicy: "auto-accept-edits" },
+      },
+    };
+
+    for (const run of [gated, autoAccept]) {
+      await port.startOrRecoverFirstTurn({
+        run,
+        threadId,
+        firstTurnRequestId: run.firstTurnRequestId,
+        promptDigest: "unused" as never,
+        scopeId,
+      });
+    }
+
+    const holds = vi.mocked(turns.startFirstTurn).mock.calls.map((call) => call[2]?.holdAskFirst);
+    expect(holds).toEqual([true, false]);
   });
 
   it("is idempotent on firstTurnRequestId by returning the existing accepted turn", async () => {
@@ -212,14 +244,14 @@ describe("createAutomationWorkDispatchPort", () => {
       threadId,
       firstTurnRequestId: run.firstTurnRequestId,
       promptDigest: "unused" as never,
-      windowId,
+      scopeId,
     });
     const second = await port.startOrRecoverFirstTurn({
       run,
       threadId,
       firstTurnRequestId: run.firstTurnRequestId,
       promptDigest: "unused" as never,
-      windowId,
+      scopeId,
     });
 
     expect(first.kind).toBe("accepted");
@@ -250,7 +282,7 @@ describe("createAutomationWorkDispatchPort", () => {
         threadId,
         firstTurnRequestId: run.firstTurnRequestId,
         promptDigest: "unused" as never,
-        windowId,
+        scopeId,
       }),
     ).resolves.toEqual({
       kind: "waiting-capacity",
@@ -281,7 +313,7 @@ describe("createAutomationWorkDispatchPort", () => {
         threadId,
         firstTurnRequestId: run.firstTurnRequestId,
         promptDigest: "unused" as never,
-        windowId,
+        scopeId,
       }),
     ).resolves.toMatchObject({
       kind: "failed",
@@ -300,7 +332,7 @@ describe("unavailableAutomationWorkDispatchPort", () => {
         run: workRun(),
         threadId,
         title: "Weekly summary",
-        windowId,
+        scopeId,
       }),
     ).resolves.toMatchObject({ kind: "failed", reason: "unavailable" });
     await expect(
@@ -309,7 +341,7 @@ describe("unavailableAutomationWorkDispatchPort", () => {
         threadId,
         firstTurnRequestId: workRun().firstTurnRequestId,
         promptDigest: "unused" as never,
-        windowId,
+        scopeId,
       }),
     ).resolves.toMatchObject({ kind: "failed", reason: "provider-launch-failed" });
   });

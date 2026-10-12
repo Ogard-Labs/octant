@@ -43,6 +43,7 @@ import { WorkProjectStatusFiles } from "./workProjectStatusFiles";
 import type { WorkTurnRuntimePort } from "./workTurnRuntime";
 import type { TurnEndSummary } from "../metrics/turnEnd";
 import { ConcurrencyConflict } from "../persistence/journalErrors";
+import { ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
 
 const attachmentRoots: string[] = [];
 
@@ -220,6 +221,25 @@ describe("WorkTurnService", () => {
     );
     expect(onTurnRequested).not.toHaveBeenCalled();
     await fixture.waitForIdle(decodeWorkTurnRequestId("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1"));
+  });
+
+  it("journals a turn the host resumes as the system's, not an open window's", async () => {
+    const fixture = serviceFixture();
+
+    await fixture.service.startFirstTurn(ROUTINE_HOST_SCOPE_ID, startCommand(), {
+      limitRecovery: true,
+    });
+    expect(fixture.persistence.journal.append).toHaveBeenCalledWith(
+      expect.objectContaining({
+        events: [
+          expect.objectContaining({
+            eventName: "work.turn-accepted@1",
+            actor: expect.objectContaining({ kind: "system" }),
+          }),
+        ],
+      }),
+    );
+    await fixture.waitForIdle();
   });
 
   it("refuses a Work request that exceeds the provider-reported context window", async () => {
@@ -1243,16 +1263,16 @@ describe("WorkTurnService", () => {
     ).toHaveLength(1);
   });
 
-  it("opens every task with the Project's brief and status, and takes stock when the status is stale", async () => {
+  it("opens every task with the Project's status, and takes stock when the status is stale", async () => {
     const contexts: Array<ReadonlyArray<{ readonly kind: string; readonly text: string }>> = [];
     const disk = new Map<string, string>([
-      ["/private/tmp/knowledge/AGENTS.md", "# Acme\nAlways address Dana formally."],
       [
         "/private/tmp/knowledge/STATUS.md",
         "Last updated: 2026-07-01\n## Deadlines\n- 2026-08-01 Signed offer due\n",
       ],
     ]);
     const fixture = serviceFixture({
+      project: workProject({ statusFile: "enabled" }),
       projectStatusFiles: inMemoryStatusFiles(disk),
       turnRuntime: {
         run: async (input) => {
@@ -1269,33 +1289,54 @@ describe("WorkTurnService", () => {
     const sent = contexts.flat();
     expect(sent).toContainEqual({
       kind: "user-message",
-      text: expect.stringContaining("Always address Dana formally."),
-    });
-    expect(sent).toContainEqual({
-      kind: "user-message",
       text: expect.stringContaining("Signed offer due"),
     });
     const instruction = sent.find(
       (block) => block.kind === "instructions" && block.text.includes("Take stock first"),
     );
     expect(instruction?.text).toMatch(/not been updated for a while.*date has passed/);
-    // Nothing on disk was rewritten by reading it.
-    expect(disk.get("/private/tmp/knowledge/AGENTS.md")).toBe(
-      "# Acme\nAlways address Dana formally.",
-    );
+    expect(instruction?.text).not.toContain("AGENTS.md");
   });
 
-  it("seeds a Project's missing brief files on its first task", async () => {
+  it("carries no status instruction and writes no file in a Project that has not opted in", async () => {
+    const contexts: Array<ReadonlyArray<{ readonly kind: string; readonly text: string }>> = [];
+    // A STATUS.md left over from before the setting existed is not a signal to keep it.
+    const leftover = "Last updated: 2026-07-01\n## Deadlines\n- 2026-08-01 Signed offer due\n";
+    const disk = new Map<string, string>([["/private/tmp/knowledge/STATUS.md", leftover]]);
+    const fixture = serviceFixture({
+      projectStatusFiles: inMemoryStatusFiles(disk),
+      turnFileObserver: {
+        observe: () => ({ finish: () => ({ paths: ["offer.docx"], truncated: false }) }),
+      } as never,
+      turnRuntime: {
+        run: async (input) => {
+          contexts.push(input.context ?? []);
+          return { kind: "completed", response: "Provider reply" };
+        },
+      },
+    });
+
+    await fixture.service.startFirstTurn(ids.window, startCommand());
+    await fixture.waitForIdle();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    const sent = contexts.flat();
+    expect(sent.some((block) => block.text.includes("STATUS.md"))).toBe(false);
+    expect(sent.some((block) => block.text.includes("Signed offer due"))).toBe(false);
+    expect([...disk.entries()]).toEqual([["/private/tmp/knowledge/STATUS.md", leftover]]);
+  });
+
+  it("seeds STATUS.md and never AGENTS.md in a Project that opted in", async () => {
     const disk = new Map<string, string>();
-    const fixture = serviceFixture({ projectStatusFiles: inMemoryStatusFiles(disk) });
+    const fixture = serviceFixture({
+      project: workProject({ statusFile: "enabled" }),
+      projectStatusFiles: inMemoryStatusFiles(disk),
+    });
 
     await fixture.service.startFirstTurn(ids.window, startCommand());
     await fixture.waitForIdle();
 
-    expect([...disk.keys()].sort()).toEqual([
-      "/private/tmp/knowledge/AGENTS.md",
-      "/private/tmp/knowledge/STATUS.md",
-    ]);
+    expect([...disk.keys()]).toEqual(["/private/tmp/knowledge/STATUS.md"]);
     expect(disk.get("/private/tmp/knowledge/STATUS.md")).toContain("Last updated: 2026-08-11");
   });
 
@@ -1309,6 +1350,7 @@ describe("WorkTurnService", () => {
       }),
     };
     const fixture = serviceFixture({
+      project: workProject({ statusFile: "enabled" }),
       projectStatusFiles: inMemoryStatusFiles(disk),
       turnFileObserver: observer as never,
     });
@@ -1327,6 +1369,7 @@ describe("WorkTurnService", () => {
     const written = "Last updated: 2026-08-11\n## Current status\nAgent wrote this.\n";
     const disk = new Map<string, string>([["/private/tmp/knowledge/STATUS.md", written]]);
     const fixture = serviceFixture({
+      project: workProject({ statusFile: "enabled" }),
       projectStatusFiles: inMemoryStatusFiles(disk),
       turnFileObserver: {
         observe: () => ({
@@ -2355,9 +2398,10 @@ function serviceFixture(
   return { service, persistence, projection, threads, acquireInputs, waitForIdle };
 }
 
-/** The two brief files on a pretend disk keyed by absolute path. */
+/** The status file on a pretend disk keyed by absolute path. */
 function inMemoryStatusFiles(disk: Map<string, string>): WorkProjectStatusFiles {
   return new WorkProjectStatusFiles({
+    realpath: async (path) => path,
     lstat: async (path) => {
       const text = disk.get(path);
       if (text === undefined) throw new Error("ENOENT");
@@ -2379,7 +2423,9 @@ function inMemoryStatusFiles(disk: Map<string, string>): WorkProjectStatusFiles 
   });
 }
 
-function workProject(): Extract<Project, { readonly type: "work" }> {
+function workProject(
+  overrides: Partial<Extract<Project, { readonly type: "work" }>> = {},
+): Extract<Project, { readonly type: "work" }> {
   return {
     id: ids.project,
     type: "work",
@@ -2403,6 +2449,7 @@ function workProject(): Extract<Project, { readonly type: "work" }> {
         changedAt: now as never,
       },
     ],
+    ...overrides,
   } as Extract<Project, { readonly type: "work" }>;
 }
 

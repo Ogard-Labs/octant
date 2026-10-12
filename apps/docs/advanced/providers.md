@@ -67,12 +67,50 @@ filtering is only a convenience; it cannot bypass the server check. A provider
 must still be installed, enabled, authenticated, and ready regardless of its
 labels or whitelist entry.
 
+### Integration: Octant tools, activity, and resume
+
+Each runtime's details open with an **Integration** section of three facts.
+The host derives them from the runtime's driver and its last Connection Check;
+the page never infers them from what a picker can mention.
+
+- **Octant tools** says whether Octant's own tools, including Browser,
+  Computer, and selected MCP servers, reach the runtime's session, and through
+  which transport. When they do not, it says **Not available on this
+  runtime** with the reason: the check did not confirm them, the runtime's
+  version, platform, or setup did not confirm its transport, Octant has no way
+  to offer tools to it, or (for a direct endpoint) no model has been verified
+  yet. A direct endpoint with verified models shows **Verified models only**
+  and how many.
+- **Activity** is **Session events** with what the live session reports
+  (replies, tool calls, approvals, file changes, task progress), or **Nothing
+  observed** when no session runs on that runtime here.
+- **Resume** is **Precise** when a follow-up reopens the runtime's own
+  session, **Best effort** when the endpoint keeps no session and Octant sends
+  the thread's history again fitted to the model's context window, or **None**
+  when the runtime cannot reopen an earlier session.
+
+| Runtime                                               | Transport for Octant tools                                     |
+| ----------------------------------------------------- | -------------------------------------------------------------- |
+| OpenAI-compatible, Anthropic-compatible, Azure        | Tool definitions in each request; the model answers with calls |
+| Claude Code                                           | A tool server inside the Claude Agent SDK connection           |
+| Codex                                                 | Dynamic tools registered on the app-server thread              |
+| OpenCode and the ACP agents (Gemini, Kilo, and so on) | A loopback MCP server registered for that one session          |
+| Pi                                                    | A loopback bridge Pi's extension calls for that one session    |
+| Ollama, Oh My Pi                                      | None                                                           |
+
+Every transport belongs to one provider connection and ends with it. Octant
+never writes a runtime's MCP or hook configuration to offer its tools. A
+runtime whose transport is not confirmed by its check reports Octant tools as
+not available, and the composers then do not offer **@Browser** or
+**@Computer** for it; a typed reference is shown as blocked.
+
 ### App-managed browser tools
 
 The Browser view and an agent's browser access are separate capabilities.
 A tool-capable model can still lack an adapter for Octant's app-managed tools;
-check the provider's capability details before relying on agent browser control.
-Manual browser controls remain governed by the thread's normal policy.
+check **Octant tools** under the provider's Integration before relying on agent
+browser control. Manual browser controls remain governed by the thread's normal
+policy.
 
 Supported app-tool adapters can request an isolated browser session under
 **Ask for approvals** without changing the task to Full access. The request
@@ -83,6 +121,38 @@ was verified (1.18.21 and 2.0.22); on any other release it reports app-managed
 tools as unsupported, and its text and native-tool support do not imply an
 app-browser bridge. Changing the thread to Full access does not remove the
 isolation requirement.
+
+### Provider catalog
+
+**Settings → Provider catalog** lists every provider driver that ships with
+Octant: the agent runtimes, then the model endpoints. Each one is bundled, so
+it is already installed and trusted; the catalog says so and offers no install
+or trust action. Opening the catalog, or one driver's setup, only reads what
+Octant already knows. It does not scan the host or start a runtime.
+
+A driver's setup page shows four separate states: **Available** (Octant offers
+the driver on this host), **Enabled** (a provider for it is switched on),
+**Signed in**, and **Ready** (its last connection check passed). It also says
+what the driver can do in Chat, Work, and Code, and who runs the agent loop.
+Below that is one guided setup with a single next step:
+
+- **Look on this host** runs the same discovery scan as Providers & Models.
+  The scan reads each runtime's version under confinement.
+- **Add** connects the runtime the scan found. If a provider for that driver
+  already exists, setup continues with that provider and never creates a
+  second one. The host refuses to duplicate one too.
+- **Turn on** switches the provider on.
+- **Sign in** uses the runtime's own Providers & Models card, shown on the
+  setup page. A key you enter there is stored in the system keychain, never
+  in the catalog.
+- **Check connection** starts the runtime once to read its models and sign-in.
+  If the runtime cannot start at its configured path, the card's **Locate
+  binary…** fixes it.
+
+An endpoint driver (OpenAI-compatible, Anthropic-compatible, Azure AI Foundry,
+Ollama) is added under **Octant Harness → Model endpoints** with **Add
+endpoint**. A step that fails shows the host's reason and a **Try again**
+button.
 
 ### Discovery and auto-registration
 
@@ -163,20 +233,44 @@ available for profiles that support it. Mistral Vibe from Octant requires a
 Mistral API key entered in **Settings → Providers** because its confined launch
 does not read the macOS Keychain.
 
-Claude Code on a Claude subscription has one extra step for subagents and Plan
-turns. Those runs are read-only and cannot reach the keychain where your Claude
-sign-in lives, so **Settings → Providers → Claude Code** offers **Connect Claude
-for helpers**. Octant runs Claude's own `claude setup-token` on this Mac, you
-approve once in the browser window it opens, and Octant keeps the long-lived
-token it prints in its own credential store for that Claude Code provider. You
-never copy the token. Ordinary Claude turns keep using your normal sign-in.
-**Disconnect** removes the token from Octant, and removing the provider tries
-to; disconnect first, because removal completes even if the credential store
-cannot be reached. Neither revokes it with Anthropic. If Claude later refuses it, Settings shows it as
-expired and asks you to connect again. Connect only from the Mac that runs
-Octant, because the approval opens a browser there. The
-[privacy notice](/advanced/privacy-notice#claude-for-helpers-only-if-you-connect-it)
-states what is stored and who receives it.
+You can add more than one Claude account. Each account is its own provider
+in **Settings → Providers**: give it a name and an accent color so the model
+picker can tell them apart. Octant assigns the first subscription account
+Claude's default directory (`~/.claude`). Each additional account, and every
+API-key account, gets its own directory under `~/.claude-accounts/`. A
+directory you chose earlier keeps working until you re-assign it. Re-assigning
+starts a new login in the assigned directory, and threads that account already
+started stay in the old one and cannot continue. Sign in
+only with the unmodified `claude auth login` command in a terminal for that
+account — the provider card shows the exact command, including the
+directory variables Claude expects. Check status with `claude auth status`.
+Octant never reads, copies, stores, or injects Claude credentials or tokens.
+Connection check uses what the Claude CLI or SDK reports, not files in that
+directory. A thread stays on the account it started with. Octant does not
+fail over, rotate, or load-balance between accounts. An Anthropic API-key
+account still uses the key you store in Octant for that provider, on its
+assigned directory. Removing an account does not delete its directory. Octant
+tells you where it is; delete it yourself to remove that account's sign-in
+and history.
+
+You can add more than one Codex account the same way. Octant assigns the
+first account Codex's default directory (`~/.codex`). Each additional
+account gets its own directory under `~/.codex-accounts/`. Sign in only
+with the unmodified `codex login` command in a terminal for that account;
+check status with `codex login status`. The provider card shows the exact
+command, including `CODEX_HOME` for an extra account. Octant never reads
+`auth.json` or the keyring, and never writes Codex credential-store
+settings into your config. The first account still uses an API key
+already in your environment. Extra accounts do not inherit that key, and
+keep their thread state in their own directory even when `CODEX_SQLITE_HOME`
+is set. An AWS profile from your environment still applies to every account.
+An API key you store in Octant for that provider still reaches only
+that account. Each account runs its own
+Codex app-server. A thread stays on the account it started with. Octant
+does not fail over, rotate, or load-balance between accounts.
+
+If you previously connected Claude for helpers, Octant no longer stores that
+token. Revoke the leftover token with Anthropic.
 
 The **Update CLI** action is shown only for providers with a verified native
 update command. It runs that command against the same configured executable,
@@ -364,6 +458,32 @@ authentication; anonymous access is accepted only for loopback. OAuth and
 subscription modes work where the official runtime supports them and are
 never silently replaced by API-key modes.
 
+#### Several API keys
+
+A provider that takes an API key can hold several, each with a label you
+choose. Open the provider in Settings to see its **API keys**. One key is **active**:
+Octant sends it first. The list order decides which key is tried next if the
+active key runs out.
+
+- **Add key** adds a key to the end of the list and makes it the active key, so
+  the key you just saved is the one Octant sends. Saving a key from the edit
+  form works the same way, and no save removes a key by accident.
+- **Make active** sends a key first, and the list order stays the same.
+- **Move up** and **Move down** change the order in which the other keys are
+  tried. The first key cannot move up, and the last cannot move down.
+- **Replace key** changes one key's secret and keeps its label, place, and
+  active state. The replaced key is a new key to Octant, so a cooldown from its
+  old secret does not apply to it. **Rename** changes a label. **Remove** asks you to confirm
+  first. Removing the active key makes the first key left active.
+- When a key is refused because its quota, credit, or spend limit is used up,
+  Octant skips it for an hour and sends the next key in the list order. A rate limit skips a key
+  for a minute, or for the time the provider asks. A refusal for a bad key
+  (401) never skips a key, so fix or remove that key. A restart of the host
+  clears every skip, so the first key is tried again.
+- Anthropic-compatible, OpenAI-compatible, Azure AI Foundry, and image endpoints
+  switch keys within a turn. A command-line runtime, such as Claude Code or
+  Codex, uses the first key for now and does not switch.
+
 ### Signing in with a subscription
 
 An **OpenAI-compatible** endpoint can sign in with a subscription instead of
@@ -447,6 +567,25 @@ the composer's **"Provider and model"** button. The change applies as a
 turn. Readiness is validated before the change is recorded, thread identity
 and history are preserved with change provenance, and an active provider turn
 ends with the honest state **"Provider turn interrupted."**
+
+In a Code thread that has already had a reply, the same provider keeps its
+session: you can pick another of its models only when that provider can carry
+the session over. Choosing a **different provider** starts a new session on
+the next message. Octant hands over up to 23 recent messages from the thread
+as text, each labelled with the provider and model it came from, and says so
+under the composer before you send. The previous provider's session and its
+hidden reasoning, tool activity and attachments do not transfer. The reply
+then shows how many messages were handed over and which were left out, for
+example older messages, messages no longer stored, or messages too large to
+read. If nothing readable is left to hand over, the message is refused with
+the reason, and you can switch back or start a new task.
+
+A fork that switches provider also hands over the conversation it was forked
+from, up to the reply it was forked at, ahead of its own messages, within the
+same limit; the oldest messages are left out first. The reply says how many
+of the handed-over messages came from the original conversation. If that
+conversation can no longer be read from this window, for example because it
+moved to a Project you cannot open, the message is refused with the reason.
 
 ## Effort, reasoning and speed
 

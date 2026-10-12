@@ -36,11 +36,14 @@ import {
 import { Schema } from "effect";
 import type { CanvasProjection, CanvasProjectionEntry } from "./canvas/canvasProjection";
 import {
+  decodeBrowserThreadId,
   decodeImageGenerationScopeId,
+  type BrowserCapture,
+  type BrowserThreadId,
   type ImageGenerationScopeId,
   type ImageJob,
 } from "@octant/contracts";
-import { generatedImageExportAttachments } from "@octant/domain";
+import { browserCaptureExportAttachments, generatedImageExportAttachments } from "@octant/domain";
 
 const IN_PROGRESS = new Set(["queued", "streaming", "waiting", "running", "accepted"]);
 const MAX_CODE_EXPORT_CONVERSATION_PAGES = 100;
@@ -102,6 +105,10 @@ export interface ThreadExportServiceOptions {
   readonly generatedImages?: {
     readonly listByScope: (scopeId: ImageGenerationScopeId) => ReadonlyArray<ImageJob>;
   };
+  /** The thread's retained Browser captures, newest first. */
+  readonly browserCaptures?: {
+    readonly list: (threadId: BrowserThreadId) => ReadonlyArray<BrowserCapture>;
+  };
 }
 
 /**
@@ -119,6 +126,7 @@ export class ThreadExportService {
   readonly #code: ThreadExportCodePort;
   readonly #canvases: Pick<CanvasProjection, "byThread">;
   readonly #generatedImages: ThreadExportServiceOptions["generatedImages"];
+  readonly #browserCaptures: ThreadExportServiceOptions["browserCaptures"];
 
   constructor(options: ThreadExportServiceOptions) {
     this.#hostId = options.hostId;
@@ -128,6 +136,7 @@ export class ThreadExportService {
     this.#code = options.code;
     this.#canvases = options.canvases;
     this.#generatedImages = options.generatedImages;
+    this.#browserCaptures = options.browserCaptures;
   }
 
   async exportThread(
@@ -145,7 +154,10 @@ export class ThreadExportService {
     } catch {
       return decodeThreadExportOutcome({ kind: "refused", reason: "not-found" });
     }
-    const source = await this.#assemble(windowId, request);
+    // A paired device never reads a thread's Browser captures, so an export it
+    // asks for must not carry their page addresses and titles either.
+    const withCaptures = actorKind === "local-window";
+    const source = await this.#assemble(windowId, request, withCaptures);
     if (source === undefined) {
       return decodeThreadExportOutcome({ kind: "refused", reason: "not-found" });
     }
@@ -159,13 +171,16 @@ export class ThreadExportService {
   async #assemble(
     windowId: WindowId,
     request: ThreadExportRequest,
+    withCaptures: boolean,
   ): Promise<ThreadExportSource | undefined> {
-    if (request.mode === "chat") return this.#assembleChat(request.threadId);
-    if (request.mode === "work") return this.#assembleWork(windowId, request.threadId);
-    return this.#assembleCode(windowId, request.threadId);
+    if (request.mode === "chat") return this.#assembleChat(request.threadId, withCaptures);
+    if (request.mode === "work") {
+      return this.#assembleWork(windowId, request.threadId, withCaptures);
+    }
+    return this.#assembleCode(windowId, request.threadId, withCaptures);
   }
 
-  #assembleChat(threadId: ThreadExportId): ThreadExportSource | undefined {
+  #assembleChat(threadId: ThreadExportId, withCaptures: boolean): ThreadExportSource | undefined {
     const view = this.#chat.read(threadId);
     const access = decideThreadExportAccess({
       exists: view !== undefined && view.thread.lifecycle !== "deleted",
@@ -226,7 +241,7 @@ export class ThreadExportService {
         byteLength: attachment.byteLength,
         status: attachment.status,
       })),
-      ...this.#generatedAttachments(threadId),
+      ...this.#threadAttachments(threadId, withCaptures),
     ];
     const citations: ThreadExportCitation[] = view.citations.map((citation) => ({
       sourceTitle: citation.sourceTitle,
@@ -275,6 +290,7 @@ export class ThreadExportService {
   async #assembleWork(
     windowId: WindowId,
     threadId: ThreadExportId,
+    withCaptures: boolean,
   ): Promise<ThreadExportSource | undefined> {
     const read = await this.#work.read(windowId, threadId);
     const access = decideThreadExportAccess({
@@ -312,6 +328,7 @@ export class ThreadExportService {
         });
       }
     }
+    const attachments = this.#threadAttachments(threadId, withCaptures);
     const completion =
       read.thread.completionEvidence === undefined
         ? {}
@@ -331,12 +348,12 @@ export class ThreadExportService {
       updatedAt: read.thread.updatedAt,
       transcript: transcriptWithCounts(entries, 0),
       artifacts: this.#artifacts("work", read.thread.projectId, threadId),
-      attachments: this.#generatedAttachments(threadId),
+      attachments,
       citations: [],
       ...completion,
       omissions: collectOmissions({
         "in-progress": inProgress,
-        "attachment-bytes": this.#generatedAttachments(threadId).length,
+        "attachment-bytes": attachments.length,
       }),
     };
   }
@@ -344,6 +361,7 @@ export class ThreadExportService {
   async #assembleCode(
     windowId: WindowId,
     threadId: ThreadExportId,
+    withCaptures: boolean,
   ): Promise<ThreadExportSource | undefined> {
     const thread = await this.#code.readThread(windowId, threadId);
     const access = decideThreadExportAccess({
@@ -352,6 +370,7 @@ export class ThreadExportService {
     });
     if (access.kind === "refuse" || thread === undefined) return undefined;
     const conversation = await this.#readCodeConversation(windowId, decodeCodeThreadId(threadId));
+    const attachments = this.#threadAttachments(threadId, withCaptures);
     const branched =
       thread.forkedFrom === undefined
         ? {}
@@ -379,13 +398,13 @@ export class ThreadExportService {
       ...branched,
       transcript: transcriptWithCounts(conversation.entries, 0),
       artifacts: this.#artifacts("code", thread.projectId, threadId),
-      attachments: this.#generatedAttachments(threadId),
+      attachments,
       citations: [],
       omissions: collectOmissions({
         "in-progress": conversation.inProgress,
         "unreadable-content": conversation.unreadable,
         "truncated-conversation": conversation.truncated ? 1 : 0,
-        "attachment-bytes": this.#generatedAttachments(threadId).length,
+        "attachment-bytes": attachments.length,
         "bulk-outside-journal": 1,
       }),
     };
@@ -486,11 +505,34 @@ export class ThreadExportService {
     return normalized.length === 0 ? undefined : normalized;
   }
 
+  /** What the thread produced rather than what the person attached: images, then Browser captures. */
+  #threadAttachments(
+    threadId: string,
+    withCaptures: boolean,
+  ): ReadonlyArray<ThreadExportAttachment> {
+    return [
+      ...this.#generatedAttachments(threadId),
+      ...(withCaptures ? this.#captureAttachments(threadId) : []),
+    ];
+  }
+
   #generatedAttachments(threadId: string): ReadonlyArray<ThreadExportAttachment> {
     if (this.#generatedImages === undefined) return [];
     try {
       return generatedImageExportAttachments(
         this.#generatedImages.listByScope(decodeImageGenerationScopeId(threadId)),
+      );
+    } catch {
+      return [];
+    }
+  }
+
+  /** A capture list that cannot be read leaves the captures out; the export still succeeds. */
+  #captureAttachments(threadId: string): ReadonlyArray<ThreadExportAttachment> {
+    if (this.#browserCaptures === undefined) return [];
+    try {
+      return browserCaptureExportAttachments(
+        this.#browserCaptures.list(decodeBrowserThreadId(threadId)),
       );
     } catch {
       return [];

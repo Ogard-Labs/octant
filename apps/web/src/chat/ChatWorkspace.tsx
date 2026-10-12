@@ -27,7 +27,11 @@ import type { CanvasContextSelection } from "@octant/contracts/canvasContext";
 import type { PreviewContextSelection } from "@octant/contracts/previews";
 import type { ProviderObservedState, ProviderRegistrySnapshot } from "@octant/contracts/providers";
 import { decodeProviderModelId } from "@octant/contracts/providers";
-import { startedConversationPickerGroups, type PickerGroup } from "@octant/domain";
+import {
+  modelCarriesAppManagedTools,
+  startedConversationPickerGroups,
+  type PickerGroup,
+} from "@octant/domain";
 import { buildComposerPoolModel } from "@octant/domain/composer-pool-policy";
 import { useEffect, useRef, useState } from "react";
 import { useThreadMessageQueue } from "../messageQueue/useThreadMessageQueue";
@@ -64,8 +68,9 @@ import { useLinkedThreadParallelReview } from "../linkedThread/useLinkedThreadPa
 import { isReviewInParallelReference } from "../linkedThread/parseReviewInParallelDraft";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import type { ImageGenerationClient } from "@octant/client-runtime/image-generation-client";
+import { BrowserCaptureList } from "../browser/BrowserCaptureList";
 import { GeneratedImageList } from "../image/GeneratedImageList";
-import { decodeImageGenerationScopeId } from "@octant/contracts";
+import { decodeBrowserThreadId, decodeImageGenerationScopeId } from "@octant/contracts";
 import type { CanvasThreadReferenceCard } from "@octant/contracts/canvas-cards";
 import type { ThreadHandOffOutcome } from "@octant/contracts/thread-hand-off";
 import type { HostId } from "@octant/contracts/host";
@@ -318,8 +323,19 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
   const activeProvider = props.providerSnapshot?.instances.find(
     (instance) => String(instance.id) === String(activeThread?.providerInstanceId),
   );
+  const activeObservation = props.providerSnapshot?.observedStates.find(
+    (observed) => String(observed.instanceId) === String(activeThread?.providerInstanceId),
+  );
   const extensionDraft = useExtensionDraftSelections({
     ...(props.extensionClient === undefined ? {} : { client: props.extensionClient }),
+    ...(activeObservation === undefined || activeThread === undefined
+      ? {}
+      : {
+          providerCarriesTools: modelCarriesAppManagedTools(
+            activeObservation,
+            activeThread.modelId,
+          ),
+        }),
     ...(activeProvider === undefined
       ? {}
       : { providerFamily: activeProvider.driverKind as ExtensionProviderFamily }),
@@ -476,6 +492,12 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
   const providerState = providerPresentation(props.providerSnapshot, view);
   const activeAttempt = latestActiveAttempt(view);
   const isSending = activeAttempt !== undefined;
+  // The host would refuse to clear a thread's outside-content mark in any of
+  // these states; a paused queue with nothing waiting does not stop it.
+  const threadBusy =
+    isSending ||
+    view.turns.at(-1)?.attempts.at(-1)?.outcome === "waiting" ||
+    (messageQueue.snapshot?.items.length ?? 0) > 0;
   const queueFollowUp =
     isSending ||
     view.turns.at(-1)?.attempts.at(-1)?.outcome === "waiting" ||
@@ -976,6 +998,13 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
               threadKind="chat-thread"
             />
           )}
+          {props.browserAutomationClient === undefined ? null : (
+            <BrowserCaptureList
+              className="thread-column"
+              client={props.browserAutomationClient}
+              threadId={decodeBrowserThreadId(String(thread.id))}
+            />
+          )}
           <ChatTranscript
             {...(canvasClient === undefined
               ? {}
@@ -984,7 +1013,9 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
                     <ThreadCanvases
                       cards={canvasPlacement.byRow.get(String(turn.id))}
                       client={canvasClient}
-                      // Chat has no dock, so the Canvas opens as a tab beside the thread.
+                      // The shell shows Chat without a dock, so there is no dock
+                      // Canvas tool to open: the Canvas opens as a content tab
+                      // beside the thread instead.
                       {...(props.onOpenCanvas === undefined ? {} : { onOpen: props.onOpenCanvas })}
                       openLabel="Open Canvas"
                     />
@@ -1213,6 +1244,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
             : { onCaretIndexChange: props.controller.setPendingDraftCaret })}
           isSending={isSending}
           queueing={queueFollowUp}
+          threadBusy={threadBusy}
           queue={
             <ThreadMessageQueue
               connectionLost={connectionLost}

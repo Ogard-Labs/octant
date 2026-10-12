@@ -50,7 +50,7 @@ import {
 } from "@octant/domain/code-worktree-source-policy";
 import { suggestCodeDeliveryOutcome } from "@octant/domain/delivery-target-policy";
 import type { CodeDeliveryOutcomeKind } from "@octant/contracts/code";
-import { FolderOpen, GitBranch } from "lucide-react";
+import { FolderOpen } from "lucide-react";
 import {
   useCallback,
   useEffect,
@@ -246,11 +246,21 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     props.selectedModelId,
   );
 
+  const runtimeCarriesTools = pickerGroupCarriesAppManagedTools(
+    props.providerGroups,
+    props.selectedProviderInstanceId === undefined || props.selectedModelId === undefined
+      ? undefined
+      : {
+          providerInstanceId: props.selectedProviderInstanceId,
+          modelId: props.selectedModelId,
+        },
+  );
   const computer = useComputerUseMention({
     textarea: () => textareaRef.current,
     draft: prompt,
     onDraftChange: setPrompt,
     scopeKey: "code-draft",
+    providerCarriesTools: runtimeCarriesTools,
   });
   const selectedFamily = providerFamilyForThread(
     props.providerGroups,
@@ -259,6 +269,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
   const extensionDraft = useExtensionDraftSelections({
     ...(props.extensionClient === undefined ? {} : { client: props.extensionClient }),
     mode: "code",
+    providerCarriesTools: runtimeCarriesTools,
     projectId: props.projectId ?? null,
     ...(selectedFamily === undefined ? {} : { providerFamily: selectedFamily }),
   });
@@ -267,17 +278,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     draft: prompt,
     onDraftChange: setPrompt,
     scopeKey: "code-draft",
-    available:
-      props.browserAvailable === true &&
-      pickerGroupCarriesAppManagedTools(
-        props.providerGroups,
-        props.selectedProviderInstanceId === undefined || props.selectedModelId === undefined
-          ? undefined
-          : {
-              providerInstanceId: props.selectedProviderInstanceId,
-              modelId: props.selectedModelId,
-            },
-      ),
+    available: props.browserAvailable === true && runtimeCarriesTools,
     onChoose: () => void extensionDraft.resolveReference("@browser"),
   });
   const slash = useComposerSlashCommands({
@@ -669,6 +670,9 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
         <span>{props.projectName}</span>
       </span>
     ));
+  // A branch names a Project's checkout. With no Project chosen, a static
+  // "Default branch" chip named a branch of nothing and sat between the
+  // person and the prompt.
   const branchControl = hasProject ? (
     <CodeBranchSelector
       key={String(props.projectId)}
@@ -685,12 +689,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
       {...(worktreeRefs === undefined ? {} : { refs: worktreeRefs })}
       {...(props.creating === true ? { disabled: true } : {})}
     />
-  ) : (
-    <span className="composer-tray__item">
-      <GitBranch aria-hidden="true" size={12} strokeWidth={1.8} />
-      <span>{props.branchName ?? "Default branch"}</span>
-    </span>
-  );
+  ) : null;
   const environmentControl = (
     <HostSelector
       presentation="environment"

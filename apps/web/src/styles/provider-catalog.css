@@ -1,0 +1,138 @@
+/* Settings › Provider catalog. Rows, marks, states, and the setup page reuse
+   the Model endpoints list (`.endpoint-row`, `.endpoint-state`,
+   `.endpoint-detail`), so a driver's state draws the same dot shapes there and
+   here. This sheet only places what the catalog adds: the summary, the fact
+   lists, and the numbered setup steps. */
+
+.provider-catalog__intro {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--oct-space-1) var(--oct-space-3);
+}
+
+.provider-catalog__summary {
+  margin-left: auto;
+}
+
+.provider-catalog__facts {
+  display: grid;
+  margin: 0;
+}
+
+.provider-catalog__fact {
+  display: grid;
+  grid-template-columns: minmax(120px, 160px) minmax(0, 1fr);
+  align-items: baseline;
+  gap: var(--oct-space-1) var(--oct-space-4);
+  padding: var(--oct-space-2) 0;
+  border-top: 1px solid var(--oct-hairline);
+}
+
+.provider-catalog__fact > dt {
+  color: var(--oct-meta);
+  font-size: var(--oct-text-sm);
+}
+
+.provider-catalog__fact > dd {
+  min-width: 0;
+  margin: 0;
+  color: var(--oct-fg);
+  font-size: var(--oct-text-sm);
+  overflow-wrap: anywhere;
+}
+
+.provider-catalog__steps {
+  display: grid;
+  gap: var(--oct-space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.provider-catalog__step {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  align-items: start;
+  gap: var(--oct-space-3);
+  padding: var(--oct-space-2) 0;
+}
+
+.provider-catalog__step-marker {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--oct-hairline);
+  border-radius: 50%;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.provider-catalog__step[data-progress="current"] > .provider-catalog__step-marker {
+  border-color: currentColor;
+  color: var(--oct-fg);
+}
+
+.provider-catalog__step[data-progress="done"] > .provider-catalog__step-marker {
+  border-color: transparent;
+  background: var(--oct-fg-soft);
+  color: var(--oct-fg);
+}
+
+.provider-catalog__step-body {
+  display: grid;
+  gap: var(--oct-space-2);
+  min-width: 0;
+  padding-top: var(--oct-space-1);
+}
+
+.provider-catalog__step-title {
+  color: var(--oct-meta);
+  font-size: var(--oct-text-sm);
+}
+
+.provider-catalog__step[data-progress="current"] .provider-catalog__step-title {
+  color: var(--oct-fg);
+  font-weight: var(--oct-weight-medium);
+}
+
+.provider-catalog__step-note {
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
+.provider-catalog__current {
+  display: grid;
+  gap: var(--oct-space-2);
+}
+
+.provider-catalog__sentence {
+  margin: 0;
+  color: var(--oct-fg);
+  font-size: var(--oct-text-sm);
+}
+
+.provider-catalog__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--oct-space-2);
+}
+
+.provider-catalog__result:empty {
+  display: none;
+}
+
+/* At phone width a fact's value moves under its name, and the summary sits on
+   its own line under the introduction. */
+@media (max-width: 640px) {
+  .provider-catalog__fact {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .provider-catalog__summary {
+    margin-left: 0;
+  }
+}

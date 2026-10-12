@@ -1,3 +1,4 @@
+import { assignedClaudeAccountConfigDirectory, assignedCodexHome } from "@octant/domain";
 import {
   decodeProviderCatalogSnapshot,
   decodeProviderInstance,
@@ -11,7 +12,9 @@ import {
   type ProviderInstance,
 } from "@octant/contracts";
 import { existsSync, realpathSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { createServer as createHttpServer } from "node:http";
+import type { AddressInfo } from "node:net";
+import { homedir, tmpdir } from "node:os";
 import { basename, dirname } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { Effect, Queue, Stream } from "effect";
@@ -52,6 +55,18 @@ const capabilities = {
   nativeWebResearch: "supported",
   appManagedTools: "supported",
   citations: "supported",
+} as const;
+
+// What the server reports for the OpenCode fixture above: every capability is
+// supported, so its session bridge carries Octant's tools and its own session
+// resumes.
+const openCodeIntegration = {
+  tools: { status: "available", transport: "session-mcp-bridge" },
+  activity: {
+    source: "session",
+    observes: ["replies", "tool-calls", "approvals", "file-changes", "task-progress"],
+  },
+  resume: "precise",
 } as const;
 
 describe("ProviderService", () => {
@@ -685,9 +700,32 @@ describe("ProviderService", () => {
     await expect(fixture.service.bootstrap(windowId)).resolves.toEqual({
       instances: [provider()],
       defaults: { permissionPersistence: "current-session", version: 0 },
-      observedStates: [observed],
+      observedStates: [{ ...observed, integration: openCodeIntegration }],
     });
     expect(fixture.append).not.toHaveBeenCalled();
+  });
+
+  it("reports a runtime whose tool bridge was not confirmed as having no Octant tools, with the reason", async () => {
+    const observed = observation({
+      capabilities: { ...capabilities, appManagedTools: "unsupported", resume: "unsupported" },
+    });
+    const fixture = serviceFixture({ instances: [kimiProvider()], probeResult: observed });
+    const integration = {
+      tools: {
+        status: "unavailable",
+        transport: "session-mcp-bridge",
+        reason: "runtime-not-confirmed",
+      },
+      activity: openCodeIntegration.activity,
+      resume: "none",
+    };
+
+    await expect(fixture.service.probe(windowId, instanceId)).resolves.toMatchObject({
+      integration,
+    });
+    await expect(fixture.service.bootstrap(windowId)).resolves.toMatchObject({
+      observedStates: [{ integration }],
+    });
   });
 
   it("keeps Settings instances but contributes no models, tools, or capabilities when the driver plugin is not effective", async () => {
@@ -725,6 +763,16 @@ describe("ProviderService", () => {
             nativeWebResearch: "unavailable",
             appManagedTools: "unavailable",
             citations: "unavailable",
+          },
+          // The card still says, honestly, that nothing reaches the runtime.
+          integration: {
+            tools: {
+              status: "unavailable",
+              transport: "session-mcp-bridge",
+              reason: "not-confirmed",
+            },
+            activity: { source: "none" },
+            resume: "none",
           },
           message: "This provider driver is not available.",
           observedAt: now,
@@ -1165,6 +1213,132 @@ describe("ProviderService", () => {
     );
   });
 
+  it("assigns an extra Codex account its own home, creates it, and refuses any other home", async () => {
+    const fixture = serviceFixture();
+    const otherId = decodeProviderInstanceId("80000000-0000-4000-8000-000000000062");
+    await fixture.service.execute(windowId, {
+      kind: "create-codex-provider",
+      instanceId,
+      expectedVersion: 0,
+      displayName: "Codex personal",
+      binaryPath: "/opt/homebrew/bin/codex",
+    });
+    const created = await fixture.service.execute(windowId, {
+      kind: "create-codex-provider",
+      instanceId: otherId,
+      expectedVersion: 0,
+      displayName: "Codex work",
+      binaryPath: "/opt/homebrew/bin/codex",
+    });
+    expect(created).toMatchObject({
+      kind: "provider-created",
+      instance: {
+        id: otherId,
+        configuration: {
+          kind: "codex-cli",
+          codexHome: assignedCodexHome(homedir(), otherId),
+        },
+      },
+    });
+    // Codex refuses a home that does not exist, so the extra account's folder
+    // is created with it. The first account keeps the host profile.
+    expect(fixture.ensureAccountDirectory.mock.calls).toEqual([
+      [assignedCodexHome(homedir(), otherId)],
+    ]);
+    await expect(
+      fixture.service.execute(windowId, {
+        kind: "change-codex-configuration",
+        instanceId: otherId,
+        expectedVersion: 1,
+        configuration: {
+          kind: "codex-cli",
+          binaryPath: "/opt/homebrew/bin/codex",
+          codexHome: `${homedir()}/.codex`,
+        },
+      }),
+    ).rejects.toMatchObject({
+      failure: {
+        category: "invalid-configuration",
+        message: "Codex accounts use an Octant-assigned home. Re-assign the account to use it.",
+      },
+    });
+  });
+
+  it("gives the Codex host profile to a new account once no account holds it", async () => {
+    const fixture = serviceFixture();
+    const workId = decodeProviderInstanceId("80000000-0000-4000-8000-000000000062");
+    const laterId = decodeProviderInstanceId("80000000-0000-4000-8000-000000000063");
+    const create = (id: typeof instanceId, displayName: string) =>
+      fixture.service.execute(windowId, {
+        kind: "create-codex-provider",
+        instanceId: id,
+        expectedVersion: 0,
+        displayName,
+        binaryPath: "/opt/homebrew/bin/codex",
+      });
+    await create(instanceId, "Codex personal");
+    await create(workId, "Codex work");
+    await fixture.service.execute(windowId, {
+      kind: "remove-provider",
+      instanceId,
+      expectedVersion: 1,
+    });
+
+    const later = await create(laterId, "Codex later");
+
+    // Counting accounts instead would have assigned this one a new home and
+    // left the login in `~/.codex` with no account that can reach it.
+    expect(later).toMatchObject({ kind: "provider-created", instance: { id: laterId } });
+    expect(
+      later.kind === "provider-created" && later.instance.driverKind === "codex"
+        ? later.instance.configuration.codexHome
+        : "not-a-codex-account",
+    ).toBeUndefined();
+  });
+
+  it("recolours a Codex account during a session without stopping it", async () => {
+    const fixture = serviceFixture();
+    await fixture.service.execute(windowId, {
+      kind: "create-codex-provider",
+      instanceId,
+      expectedVersion: 0,
+      displayName: "Codex personal",
+      binaryPath: "/opt/homebrew/bin/codex",
+    });
+    fixture.runtime.setObservedState(observation());
+    fixture.runtime.setActiveSessionCount(instanceId, 1);
+    const invalidate = vi.spyOn(fixture.runtime, "invalidateRuntime");
+
+    await expect(
+      fixture.service.execute(windowId, {
+        kind: "change-codex-configuration",
+        instanceId,
+        expectedVersion: 1,
+        configuration: {
+          kind: "codex-cli",
+          binaryPath: "/opt/homebrew/bin/codex",
+          accent: "teal",
+        },
+      }),
+    ).resolves.toMatchObject({
+      kind: "provider-updated",
+      instance: { configuration: { accent: "teal" } },
+    });
+    expect(invalidate).not.toHaveBeenCalled();
+    expect(fixture.runtime.observedState(instanceId)).toMatchObject({ readiness: "ready" });
+
+    await expect(
+      fixture.service.execute(windowId, {
+        kind: "change-codex-configuration",
+        instanceId,
+        expectedVersion: 2,
+        configuration: { kind: "codex-cli", binaryPath: "/usr/local/bin/codex", accent: "teal" },
+      }),
+    ).rejects.toMatchObject({
+      failure: { message: "Stop active sessions before reconfiguring this provider." },
+    });
+  });
+
   it("creates disabled providers when the create command requests enabled false", async () => {
     const fixture = serviceFixture();
 
@@ -1280,6 +1454,910 @@ describe("ProviderService", () => {
     expect(JSON.stringify(fixture.append.mock.calls)).not.toMatch(
       /apiKey|oauthToken|credential|account/,
     );
+  });
+
+  it("refuses a Claude account directory that belongs to the host profile or another account", async () => {
+    const fixture = serviceFixture();
+    await fixture.service.execute(windowId, {
+      kind: "create-claude-provider",
+      instanceId,
+      expectedVersion: 0,
+      displayName: "Claude personal",
+      configuration: {
+        kind: "claude-agent-sdk",
+        binaryPath: "/opt/homebrew/bin/claude",
+        authentication: "subscription",
+      },
+    });
+    await expect(
+      fixture.service.execute(windowId, {
+        kind: "create-claude-provider",
+        instanceId: otherId,
+        expectedVersion: 0,
+        displayName: "Claude work",
+        configuration: {
+          kind: "claude-agent-sdk",
+          binaryPath: "/opt/homebrew/bin/claude",
+          authentication: "subscription",
+          configDirectory: `${homedir()}/.claude`,
+        },
+      }),
+    ).rejects.toMatchObject({
+      failure: {
+        category: "invalid-configuration",
+        message:
+          "Claude accounts use an Octant-assigned directory. Re-assign the account to use it.",
+      },
+    });
+    const directory = assignedClaudeAccountConfigDirectory(homedir(), otherId);
+    await fixture.service.execute(windowId, {
+      kind: "create-claude-provider",
+      instanceId: otherId,
+      expectedVersion: 0,
+      displayName: "Claude work",
+      configuration: {
+        kind: "claude-agent-sdk",
+        binaryPath: "/opt/homebrew/bin/claude",
+        authentication: "subscription",
+        configDirectory: directory,
+        accent: "teal",
+      },
+    });
+    await expect(
+      fixture.service.execute(windowId, {
+        kind: "change-claude-configuration",
+        instanceId,
+        expectedVersion: 1,
+        configuration: {
+          kind: "claude-agent-sdk",
+          binaryPath: "/opt/homebrew/bin/claude",
+          authentication: "subscription",
+          configDirectory: `${directory}/`,
+        },
+      }),
+    ).rejects.toMatchObject({
+      failure: {
+        category: "invalid-configuration",
+        message:
+          "Claude accounts use an Octant-assigned directory. Re-assign the account to use it.",
+      },
+    });
+    const defaultAccount = fixture.persistence.readProviderInstance(instanceId);
+    expect(defaultAccount).toMatchObject({
+      configuration: { authentication: "subscription" },
+    });
+    expect(
+      defaultAccount?.driverKind === "claude"
+        ? defaultAccount.configuration.configDirectory
+        : undefined,
+    ).toBeUndefined();
+  });
+
+  it("refuses a second Claude account whose id differs from the first only by letter case", async () => {
+    const fixture = serviceFixture();
+    const configuration = {
+      kind: "claude-agent-sdk",
+      binaryPath: "/opt/homebrew/bin/claude",
+      authentication: "api-key",
+    } as const;
+    await fixture.service.execute(windowId, {
+      kind: "create-claude-provider",
+      instanceId: decodeProviderInstanceId("abcdef01-0000-4000-8000-000000000012"),
+      expectedVersion: 0,
+      displayName: "Claude API",
+      configuration,
+    });
+    await expect(
+      fixture.service.execute(windowId, {
+        kind: "create-claude-provider",
+        instanceId: decodeProviderInstanceId("ABCDEF01-0000-4000-8000-000000000012"),
+        expectedVersion: 0,
+        displayName: "Claude API again",
+        configuration,
+      }),
+    ).rejects.toMatchObject({
+      failure: {
+        category: "invalid-configuration",
+        message: "Another Claude account already uses that config directory.",
+      },
+    });
+  });
+
+  it("refuses a Claude account directory Octant did not assign", async () => {
+    const fixture = serviceFixture();
+    await expect(
+      fixture.service.execute(windowId, {
+        kind: "create-claude-provider",
+        instanceId,
+        expectedVersion: 0,
+        displayName: "Claude personal",
+        configuration: {
+          kind: "claude-agent-sdk",
+          binaryPath: "/opt/homebrew/bin/claude",
+          authentication: "subscription",
+          configDirectory: `${homedir()}/Documents`,
+        },
+      }),
+    ).rejects.toMatchObject({
+      failure: {
+        category: "invalid-configuration",
+        message:
+          "Claude accounts use an Octant-assigned directory. Re-assign the account to use it.",
+      },
+    });
+  });
+
+  it("refuses a Claude account directory that matches the default account's host overlay", async () => {
+    const previous = process.env.CLAUDE_CONFIG_DIR;
+    process.env.CLAUDE_CONFIG_DIR = "/Users/example/.claude-host";
+    try {
+      const fixture = serviceFixture();
+      await fixture.service.execute(windowId, {
+        kind: "create-claude-provider",
+        instanceId,
+        expectedVersion: 0,
+        displayName: "Claude personal",
+        configuration: {
+          kind: "claude-agent-sdk",
+          binaryPath: "/opt/homebrew/bin/claude",
+          authentication: "subscription",
+        },
+      });
+      await expect(
+        fixture.service.execute(windowId, {
+          kind: "create-claude-provider",
+          instanceId: otherId,
+          expectedVersion: 0,
+          displayName: "Claude work",
+          configuration: {
+            kind: "claude-agent-sdk",
+            binaryPath: "/opt/homebrew/bin/claude",
+            authentication: "subscription",
+            configDirectory: "/Users/example/.claude-host",
+            accent: "teal",
+          },
+        }),
+      ).rejects.toMatchObject({
+        failure: {
+          category: "invalid-configuration",
+          message:
+            "Claude accounts use an Octant-assigned directory. Re-assign the account to use it.",
+        },
+      });
+    } finally {
+      if (previous === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+      else process.env.CLAUDE_CONFIG_DIR = previous;
+    }
+  });
+
+  it("refuses a Claude account directory that matches the default account's host secure-storage overlay", async () => {
+    const previousConfig = process.env.CLAUDE_CONFIG_DIR;
+    const previousSecure = process.env.CLAUDE_SECURESTORAGE_CONFIG_DIR;
+    delete process.env.CLAUDE_CONFIG_DIR;
+    process.env.CLAUDE_SECURESTORAGE_CONFIG_DIR = "/Users/example/.claude-secure";
+    try {
+      const fixture = serviceFixture();
+      await fixture.service.execute(windowId, {
+        kind: "create-claude-provider",
+        instanceId,
+        expectedVersion: 0,
+        displayName: "Claude personal",
+        configuration: {
+          kind: "claude-agent-sdk",
+          binaryPath: "/opt/homebrew/bin/claude",
+          authentication: "subscription",
+        },
+      });
+      await expect(
+        fixture.service.execute(windowId, {
+          kind: "create-claude-provider",
+          instanceId: otherId,
+          expectedVersion: 0,
+          displayName: "Claude work",
+          configuration: {
+            kind: "claude-agent-sdk",
+            binaryPath: "/opt/homebrew/bin/claude",
+            authentication: "subscription",
+            configDirectory: "/Users/example/.claude-secure",
+            accent: "teal",
+          },
+        }),
+      ).rejects.toMatchObject({
+        failure: {
+          category: "invalid-configuration",
+          message:
+            "Claude accounts use an Octant-assigned directory. Re-assign the account to use it.",
+        },
+      });
+    } finally {
+      if (previousConfig === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+      else process.env.CLAUDE_CONFIG_DIR = previousConfig;
+      if (previousSecure === undefined) delete process.env.CLAUDE_SECURESTORAGE_CONFIG_DIR;
+      else process.env.CLAUDE_SECURESTORAGE_CONFIG_DIR = previousSecure;
+    }
+  });
+
+  it("leaves the host profile to the first subscription account when an API-key account came first", async () => {
+    const fixture = serviceFixture();
+    await fixture.service.execute(windowId, {
+      kind: "create-claude-provider",
+      instanceId,
+      expectedVersion: 0,
+      displayName: "Claude API",
+      configuration: {
+        kind: "claude-agent-sdk",
+        binaryPath: "/opt/homebrew/bin/claude",
+        authentication: "api-key",
+      },
+    });
+    await expect(
+      fixture.service.execute(windowId, {
+        kind: "create-claude-provider",
+        instanceId: otherId,
+        expectedVersion: 0,
+        displayName: "Claude subscription",
+        configuration: {
+          kind: "claude-agent-sdk",
+          binaryPath: "/opt/homebrew/bin/claude",
+          authentication: "subscription",
+          accent: "teal",
+        },
+      }),
+    ).resolves.toSatisfy(
+      (result: { readonly instance?: { readonly configuration?: object } }) =>
+        result.instance?.configuration !== undefined &&
+        !("configDirectory" in result.instance.configuration),
+    );
+  });
+
+  it("refuses a replayed secondary Claude account that still shares the default directory", async () => {
+    const fixture = serviceFixture({
+      instances: [
+        claudeProvider(),
+        claudeProvider({
+          id: otherId,
+          displayName: "Claude work",
+          createdAt: "2026-07-14T11:00:00.000Z",
+          updatedAt: "2026-07-14T11:00:00.000Z",
+        }),
+      ],
+    });
+
+    await expect(fixture.service.bootstrap(windowId)).resolves.toMatchObject({
+      observedStates: expect.arrayContaining([
+        expect.objectContaining({
+          instanceId: otherId,
+          readiness: "incompatible",
+          message: "This Claude account needs its own config directory.",
+        }),
+      ]),
+    });
+    await expect(
+      fixture.service.execute(windowId, {
+        kind: "change-claude-configuration",
+        instanceId: otherId,
+        expectedVersion: 1,
+        configuration: {
+          kind: "claude-agent-sdk",
+          binaryPath: "/opt/homebrew/bin/claude",
+          authentication: "subscription",
+          configDirectory: `${homedir()}/.claude`,
+          accent: "teal",
+        },
+      }),
+    ).rejects.toMatchObject({
+      failure: {
+        category: "invalid-configuration",
+        message:
+          "Claude accounts use an Octant-assigned directory. Re-assign the account to use it.",
+      },
+    });
+  });
+
+  it("refuses to move the implicit Claude owner while a replayed secondary still needs a directory", async () => {
+    const fixture = serviceFixture({
+      instances: [
+        claudeProvider(),
+        claudeProvider({
+          id: otherId,
+          displayName: "Claude work",
+          createdAt: "2026-07-14T11:00:00.000Z",
+          updatedAt: "2026-07-14T11:00:00.000Z",
+        }),
+      ],
+    });
+
+    await expect(
+      fixture.service.execute(windowId, {
+        kind: "change-claude-configuration",
+        instanceId,
+        expectedVersion: 1,
+        configuration: {
+          kind: "claude-agent-sdk",
+          binaryPath: "/opt/homebrew/bin/claude",
+          authentication: "subscription",
+          configDirectory: assignedClaudeAccountConfigDirectory(homedir(), instanceId),
+          accent: "teal",
+        },
+      }),
+    ).rejects.toMatchObject({
+      failure: {
+        category: "invalid-configuration",
+        message:
+          "Give the other Claude accounts their own config directory before moving this one.",
+      },
+    });
+  });
+
+  it("refuses to remove the implicit Claude owner while a replayed secondary still needs a directory", async () => {
+    const fixture = serviceFixture({
+      instances: [
+        claudeProvider(),
+        claudeProvider({
+          id: otherId,
+          displayName: "Claude work",
+          createdAt: "2026-07-14T11:00:00.000Z",
+          updatedAt: "2026-07-14T11:00:00.000Z",
+        }),
+      ],
+    });
+
+    await expect(
+      fixture.service.execute(windowId, {
+        kind: "remove-provider",
+        instanceId,
+        expectedVersion: 1,
+      }),
+    ).rejects.toMatchObject({
+      failure: {
+        category: "invalid-configuration",
+        message:
+          "Give the other Claude accounts their own config directory before removing this one.",
+      },
+    });
+  });
+
+  it("lets a replayed secondary Claude account become usable after it gets its own directory", async () => {
+    const fixture = serviceFixture({
+      instances: [
+        claudeProvider(),
+        claudeProvider({
+          id: otherId,
+          displayName: "Claude work",
+          createdAt: "2026-07-14T11:00:00.000Z",
+          updatedAt: "2026-07-14T11:00:00.000Z",
+        }),
+      ],
+    });
+    const directory = assignedClaudeAccountConfigDirectory(homedir(), otherId);
+    await expect(
+      fixture.service.execute(windowId, {
+        kind: "change-claude-configuration",
+        instanceId: otherId,
+        expectedVersion: 1,
+        configuration: {
+          kind: "claude-agent-sdk",
+          binaryPath: "/opt/homebrew/bin/claude",
+          authentication: "subscription",
+          configDirectory: directory,
+          accent: "teal",
+        },
+      }),
+    ).resolves.toMatchObject({
+      kind: "provider-updated",
+      instance: {
+        id: otherId,
+        configuration: { configDirectory: directory },
+      },
+    });
+    await expect(fixture.service.bootstrap(windowId)).resolves.toMatchObject({
+      observedStates: expect.not.arrayContaining([
+        expect.objectContaining({
+          instanceId: otherId,
+          readiness: "incompatible",
+        }),
+      ]),
+    });
+  });
+
+  it("keeps an API-key account editable after a subscription account takes the host profile", async () => {
+    const fixture = serviceFixture();
+    await fixture.service.execute(windowId, {
+      kind: "create-claude-provider",
+      instanceId,
+      expectedVersion: 0,
+      displayName: "Claude API",
+      configuration: {
+        kind: "claude-agent-sdk",
+        binaryPath: "/opt/homebrew/bin/claude",
+        authentication: "api-key",
+      },
+    });
+    await fixture.service.execute(windowId, {
+      kind: "create-claude-provider",
+      instanceId: otherId,
+      expectedVersion: 0,
+      displayName: "Claude subscription",
+      configuration: {
+        kind: "claude-agent-sdk",
+        binaryPath: "/opt/homebrew/bin/claude",
+        authentication: "subscription",
+        accent: "teal",
+      },
+    });
+    await expect(
+      fixture.service.execute(windowId, {
+        kind: "change-claude-configuration",
+        instanceId,
+        expectedVersion: 1,
+        configuration: {
+          kind: "claude-agent-sdk",
+          binaryPath: "/usr/local/bin/claude",
+          authentication: "api-key",
+        },
+      }),
+    ).resolves.toMatchObject({
+      kind: "provider-updated",
+      instance: {
+        configuration: {
+          authentication: "api-key",
+          binaryPath: "/usr/local/bin/claude",
+        },
+      },
+    });
+  });
+
+  it("recolours a Claude account during a session without stopping it, and still refuses a runtime change", async () => {
+    const clearRuntimeUsageLimits = vi.fn();
+    const fixture = serviceFixture({ instances: [claudeProvider()], clearRuntimeUsageLimits });
+    fixture.runtime.setObservedState(observation());
+    fixture.runtime.setActiveSessionCount(instanceId, 1);
+    const invalidate = vi.spyOn(fixture.runtime, "invalidateRuntime");
+    const configuration = {
+      kind: "claude-agent-sdk",
+      binaryPath: "/opt/homebrew/bin/claude",
+      authentication: "subscription",
+    } as const;
+
+    await expect(
+      fixture.service.execute(windowId, {
+        kind: "change-claude-configuration",
+        instanceId,
+        expectedVersion: 1,
+        configuration: { ...configuration, accent: "teal" },
+      }),
+    ).resolves.toMatchObject({
+      kind: "provider-updated",
+      instance: { configuration: { accent: "teal" } },
+    });
+    expect(invalidate).not.toHaveBeenCalled();
+    expect(clearRuntimeUsageLimits).not.toHaveBeenCalled();
+    expect(fixture.runtime.observedState(instanceId)).toMatchObject({ readiness: "ready" });
+
+    await expect(
+      fixture.service.execute(windowId, {
+        kind: "change-claude-configuration",
+        instanceId,
+        expectedVersion: 2,
+        configuration: { ...configuration, binaryPath: "/usr/local/bin/claude", accent: "teal" },
+      }),
+    ).rejects.toMatchObject({
+      failure: { message: "Stop active sessions before reconfiguring this provider." },
+    });
+  });
+
+  it("assigns a separate Claude-owned directory to each additional Claude account", async () => {
+    const fixture = serviceFixture();
+    await fixture.service.execute(windowId, {
+      kind: "create-claude-provider",
+      instanceId,
+      expectedVersion: 0,
+      displayName: "Claude personal",
+      configuration: {
+        kind: "claude-agent-sdk",
+        binaryPath: "/opt/homebrew/bin/claude",
+        authentication: "subscription",
+      },
+    });
+    const created = await fixture.service.execute(windowId, {
+      kind: "create-claude-provider",
+      instanceId: otherId,
+      expectedVersion: 0,
+      displayName: "Claude work",
+      configuration: {
+        kind: "claude-agent-sdk",
+        binaryPath: "/opt/homebrew/bin/claude",
+        authentication: "subscription",
+        accent: "teal",
+      },
+    });
+    expect(created).toMatchObject({
+      kind: "provider-created",
+      instance: {
+        id: otherId,
+        displayName: "Claude work",
+        configuration: {
+          configDirectory: assignedClaudeAccountConfigDirectory(homedir(), otherId),
+          accent: "teal",
+          authentication: "subscription",
+        },
+      },
+    });
+    const first = await fixture.service.bootstrap(windowId);
+    const personal = first.instances.find((instance) => instance.id === instanceId);
+    const work = first.instances.find((instance) => instance.id === otherId);
+    expect(
+      personal?.driverKind === "claude" ? personal.configuration.configDirectory : undefined,
+    ).toBeUndefined();
+    expect(work?.driverKind === "claude" ? work.configuration.configDirectory : undefined).toBe(
+      assignedClaudeAccountConfigDirectory(homedir(), otherId),
+    );
+  });
+
+  it("assigns a directory when a secondary API-key instance switches to subscription", async () => {
+    const fixture = serviceFixture({
+      instances: [
+        claudeProvider(),
+        claudeProvider({
+          id: otherId,
+          displayName: "Claude API",
+          configuration: {
+            kind: "claude-agent-sdk",
+            binaryPath: "/opt/homebrew/bin/claude",
+            authentication: "api-key",
+          },
+        }),
+      ],
+    });
+
+    await expect(
+      fixture.service.execute(windowId, {
+        kind: "change-claude-configuration",
+        instanceId: otherId,
+        expectedVersion: 1,
+        configuration: {
+          kind: "claude-agent-sdk",
+          binaryPath: "/opt/homebrew/bin/claude",
+          authentication: "subscription",
+        },
+      }),
+    ).resolves.toMatchObject({
+      kind: "provider-updated",
+      instance: {
+        configuration: {
+          authentication: "subscription",
+          configDirectory: assignedClaudeAccountConfigDirectory(homedir(), otherId),
+        },
+      },
+    });
+  });
+
+  it("keeps the existing implicit Claude owner when an older API-key instance switches to subscription", async () => {
+    const fixture = serviceFixture({
+      instances: [
+        claudeProvider({
+          configuration: {
+            kind: "claude-agent-sdk",
+            binaryPath: "/opt/homebrew/bin/claude",
+            authentication: "api-key",
+          },
+          createdAt: "2026-07-14T09:00:00.000Z",
+        }),
+        claudeProvider({
+          id: otherId,
+          displayName: "Claude work",
+          createdAt: "2026-07-14T11:00:00.000Z",
+          updatedAt: "2026-07-14T11:00:00.000Z",
+        }),
+      ],
+    });
+
+    await expect(
+      fixture.service.execute(windowId, {
+        kind: "change-claude-configuration",
+        instanceId,
+        expectedVersion: 1,
+        configuration: {
+          kind: "claude-agent-sdk",
+          binaryPath: "/opt/homebrew/bin/claude",
+          authentication: "subscription",
+        },
+      }),
+    ).resolves.toMatchObject({
+      kind: "provider-updated",
+      instance: {
+        configuration: {
+          authentication: "subscription",
+          configDirectory: assignedClaudeAccountConfigDirectory(homedir(), instanceId),
+        },
+      },
+    });
+    const snapshot = await fixture.service.bootstrap(windowId);
+    const owner = snapshot.instances.find((instance) => instance.id === otherId);
+    expect(owner?.driverKind === "claude" ? owner.configuration.configDirectory : "missing").toBe(
+      undefined,
+    );
+  });
+
+  it("keeps a Claude account on its directory after rename, disable, and removal of another account", async () => {
+    const fixture = serviceFixture();
+    await fixture.service.execute(windowId, {
+      kind: "create-claude-provider",
+      instanceId,
+      expectedVersion: 0,
+      displayName: "Claude personal",
+      configuration: {
+        kind: "claude-agent-sdk",
+        binaryPath: "/opt/homebrew/bin/claude",
+        authentication: "subscription",
+      },
+    });
+    await fixture.service.execute(windowId, {
+      kind: "create-claude-provider",
+      instanceId: otherId,
+      expectedVersion: 0,
+      displayName: "Claude work",
+      configuration: {
+        kind: "claude-agent-sdk",
+        binaryPath: "/opt/homebrew/bin/claude",
+        authentication: "subscription",
+        accent: "teal",
+      },
+    });
+    const directory = assignedClaudeAccountConfigDirectory(homedir(), otherId);
+    await expect(
+      fixture.service.execute(windowId, {
+        kind: "rename-provider",
+        instanceId: otherId,
+        expectedVersion: 1,
+        displayName: "Claude office",
+      }),
+    ).resolves.toMatchObject({
+      kind: "provider-updated",
+      instance: {
+        id: otherId,
+        displayName: "Claude office",
+        configuration: { configDirectory: directory, accent: "teal" },
+      },
+    });
+    await expect(
+      fixture.service.execute(windowId, {
+        kind: "set-provider-enabled",
+        instanceId: otherId,
+        expectedVersion: 2,
+        enabled: false,
+      }),
+    ).resolves.toMatchObject({
+      kind: "provider-updated",
+      instance: {
+        id: otherId,
+        enabled: false,
+        configuration: { configDirectory: directory },
+      },
+    });
+    await expect(
+      fixture.service.execute(windowId, {
+        kind: "remove-provider",
+        instanceId: otherId,
+        expectedVersion: 3,
+      }),
+    ).resolves.toMatchObject({ kind: "provider-removed", instanceId: otherId });
+    const after = await fixture.service.bootstrap(windowId);
+    const personal = after.instances.find((instance) => instance.id === instanceId);
+    expect(after.instances.find((instance) => instance.id === otherId)).toBeUndefined();
+    expect(
+      personal?.driverKind === "claude" ? personal.configuration.configDirectory : undefined,
+    ).toBeUndefined();
+  });
+
+  it("keeps an isolated Claude directory when a later save omits it", async () => {
+    const fixture = serviceFixture();
+    await fixture.service.execute(windowId, {
+      kind: "create-claude-provider",
+      instanceId,
+      expectedVersion: 0,
+      displayName: "Claude personal",
+      configuration: {
+        kind: "claude-agent-sdk",
+        binaryPath: "/opt/homebrew/bin/claude",
+        authentication: "subscription",
+      },
+    });
+    await fixture.service.execute(windowId, {
+      kind: "create-claude-provider",
+      instanceId: otherId,
+      expectedVersion: 0,
+      displayName: "Claude work",
+      configuration: {
+        kind: "claude-agent-sdk",
+        binaryPath: "/opt/homebrew/bin/claude",
+        authentication: "subscription",
+        accent: "teal",
+      },
+    });
+    const directory = assignedClaudeAccountConfigDirectory(homedir(), otherId);
+    await expect(
+      fixture.service.execute(windowId, {
+        kind: "change-claude-configuration",
+        instanceId: otherId,
+        expectedVersion: 1,
+        configuration: {
+          kind: "claude-agent-sdk",
+          binaryPath: "/usr/local/bin/claude",
+          authentication: "subscription",
+          accent: "rose",
+        },
+      }),
+    ).resolves.toMatchObject({
+      kind: "provider-updated",
+      instance: {
+        id: otherId,
+        configuration: {
+          binaryPath: "/usr/local/bin/claude",
+          configDirectory: directory,
+          accent: "rose",
+        },
+      },
+    });
+  });
+
+  it("assigns ~/.claude-accounts/<id> when creating an extra subscription account", async () => {
+    const fixture = serviceFixture();
+    await fixture.service.execute(windowId, {
+      kind: "create-claude-provider",
+      instanceId,
+      expectedVersion: 0,
+      displayName: "Claude personal",
+      configuration: {
+        kind: "claude-agent-sdk",
+        binaryPath: "/opt/homebrew/bin/claude",
+        authentication: "subscription",
+      },
+    });
+    await expect(
+      fixture.service.execute(windowId, {
+        kind: "create-claude-provider",
+        instanceId: otherId,
+        expectedVersion: 0,
+        displayName: "Claude work",
+        configuration: {
+          kind: "claude-agent-sdk",
+          binaryPath: "/opt/homebrew/bin/claude",
+          authentication: "subscription",
+          accent: "teal",
+        },
+      }),
+    ).resolves.toMatchObject({
+      kind: "provider-created",
+      instance: {
+        configuration: {
+          configDirectory: assignedClaudeAccountConfigDirectory(homedir(), otherId),
+        },
+      },
+    });
+  });
+
+  it("assigns ~/.claude-accounts/<id> when creating an API-key account", async () => {
+    const fixture = serviceFixture();
+    await expect(
+      fixture.service.execute(windowId, {
+        kind: "create-claude-provider",
+        instanceId,
+        expectedVersion: 0,
+        displayName: "Claude API",
+        configuration: {
+          kind: "claude-agent-sdk",
+          binaryPath: "/opt/homebrew/bin/claude",
+          authentication: "api-key",
+        },
+      }),
+    ).resolves.toMatchObject({
+      kind: "provider-created",
+      instance: {
+        configuration: {
+          authentication: "api-key",
+          configDirectory: assignedClaudeAccountConfigDirectory(homedir(), instanceId),
+        },
+      },
+    });
+  });
+
+  it("writes the assigned leaf when reassignAccountDirectory is true", async () => {
+    const leftover = `${homedir()}/.claude-accounts/work`;
+    const fixture = serviceFixture({
+      instances: [
+        claudeProvider({
+          configuration: {
+            kind: "claude-agent-sdk",
+            binaryPath: "/opt/homebrew/bin/claude",
+            authentication: "subscription",
+            configDirectory: leftover,
+            accent: "teal",
+          },
+        }),
+      ],
+    });
+    await expect(
+      fixture.service.execute(windowId, {
+        kind: "change-claude-configuration",
+        instanceId,
+        expectedVersion: 1,
+        reassignAccountDirectory: true,
+        configuration: {
+          kind: "claude-agent-sdk",
+          binaryPath: "/opt/homebrew/bin/claude",
+          authentication: "subscription",
+          accent: "teal",
+        },
+      }),
+    ).resolves.toMatchObject({
+      kind: "provider-updated",
+      instance: {
+        configuration: {
+          configDirectory: assignedClaudeAccountConfigDirectory(homedir(), instanceId),
+        },
+      },
+    });
+  });
+
+  it("keeps a leftover custom directory until the account is reassigned", async () => {
+    const leftover = `${homedir()}/.claude-accounts/work`;
+    const fixture = serviceFixture({
+      instances: [
+        claudeProvider({
+          configuration: {
+            kind: "claude-agent-sdk",
+            binaryPath: "/opt/homebrew/bin/claude",
+            authentication: "subscription",
+            configDirectory: leftover,
+            accent: "teal",
+          },
+        }),
+      ],
+    });
+    await expect(
+      fixture.service.execute(windowId, {
+        kind: "change-claude-configuration",
+        instanceId,
+        expectedVersion: 1,
+        configuration: {
+          kind: "claude-agent-sdk",
+          binaryPath: "/usr/local/bin/claude",
+          authentication: "subscription",
+          accent: "rose",
+        },
+      }),
+    ).resolves.toMatchObject({
+      kind: "provider-updated",
+      instance: {
+        configuration: {
+          binaryPath: "/usr/local/bin/claude",
+          configDirectory: leftover,
+          accent: "rose",
+        },
+      },
+    });
+    await expect(
+      fixture.service.execute(windowId, {
+        kind: "change-claude-configuration",
+        instanceId,
+        expectedVersion: 2,
+        reassignAccountDirectory: true,
+        configuration: {
+          kind: "claude-agent-sdk",
+          binaryPath: "/usr/local/bin/claude",
+          authentication: "subscription",
+          accent: "rose",
+        },
+      }),
+    ).resolves.toMatchObject({
+      kind: "provider-updated",
+      instance: {
+        configuration: {
+          configDirectory: assignedClaudeAccountConfigDirectory(homedir(), instanceId),
+        },
+      },
+    });
   });
 
   it("creates, replays, and reconfigures a strict Mistral Vibe provider", async () => {
@@ -2131,9 +3209,7 @@ describe("ProviderService", () => {
         capabilities: unavailableCapabilities(),
       }),
     );
-    expect(JSON.stringify(fixture.append.mock.calls)).not.toMatch(
-      /apiKey|oauthToken|credential|account/,
-    );
+    expect(JSON.stringify(fixture.append.mock.calls)).not.toMatch(/apiKey|oauthToken|credential/);
   });
 
   it("clears API-key credential readiness when Claude changes to subscription mode", async () => {
@@ -2185,7 +3261,10 @@ describe("ProviderService", () => {
         kind: "change-claude-configuration",
         instanceId,
         expectedVersion: 1,
-        configuration: claudeProvider().configuration,
+        configuration: {
+          ...claudeProvider().configuration,
+          binaryPath: "/usr/local/bin/claude",
+        },
       }),
     ).rejects.toMatchObject({ failure: { category: "invalid-configuration" } });
     expect(active.append).not.toHaveBeenCalled();
@@ -2223,29 +3302,12 @@ describe("ProviderService", () => {
     expect(clearRuntimeUsageLimits).toHaveBeenCalledWith(instanceId);
   });
 
-  it("removes the Claude for helpers sign-in with the Claude provider that held it", async () => {
-    const clearClaudeHelperSignIn = vi.fn(async () => undefined);
-    const fixture = serviceFixture({ instances: [claudeProvider()], clearClaudeHelperSignIn });
-
-    await expect(
-      fixture.service.execute(windowId, {
-        kind: "remove-provider",
-        instanceId,
-        expectedVersion: 1,
-      }),
-    ).resolves.toMatchObject({ kind: "provider-removed", instanceId });
-
-    expect(clearClaudeHelperSignIn).toHaveBeenCalledWith(instanceId);
-  });
-
   it("preserves Claude resume identities when durable provider removal fails", async () => {
     const clearResumeIdentities = vi.fn(async () => undefined);
-    const clearClaudeHelperSignIn = vi.fn(async () => undefined);
     const fixture = serviceFixture({
       instances: [claudeProvider()],
       appendError: new Error("journal unavailable"),
       clearResumeIdentities,
-      clearClaudeHelperSignIn,
     });
 
     await expect(
@@ -2256,7 +3318,6 @@ describe("ProviderService", () => {
       }),
     ).rejects.toBeDefined();
     expect(clearResumeIdentities).not.toHaveBeenCalled();
-    expect(clearClaudeHelperSignIn).not.toHaveBeenCalled();
     expect(fixture.persistence.readProviderInstance(instanceId)).toBeDefined();
   });
 
@@ -2533,7 +3594,11 @@ describe("ProviderService", () => {
   it("stores only strict normalized probe results", async () => {
     const observed = observation();
     const fixture = serviceFixture({ instances: [provider()], probeResult: observed });
-    await expect(fixture.service.probe(windowId, instanceId)).resolves.toEqual(observed);
+    await expect(fixture.service.probe(windowId, instanceId)).resolves.toEqual({
+      ...observed,
+      integration: openCodeIntegration,
+    });
+    // The integration is derived when the runtime is reported, never stored.
     expect(fixture.runtime.observedStates()).toEqual([observed]);
   });
 
@@ -2792,7 +3857,10 @@ describe("ProviderService", () => {
       uuid: () => crypto.randomUUID(),
       clock: () => now,
     });
-    await expect(service.probe(windowId, instanceId)).resolves.toEqual(observation());
+    await expect(service.probe(windowId, instanceId)).resolves.toEqual({
+      ...observation(),
+      integration: openCodeIntegration,
+    });
     expect(probe).toHaveBeenCalledWith({ instanceId });
   });
 
@@ -3677,8 +4745,8 @@ function serviceFixture(
     readonly probe?: (instance: ProviderInstance) => Promise<unknown>;
     readonly driver?: NonNullable<ProviderServiceOptions["driver"]>;
     readonly clearResumeIdentities?: (providerId: typeof instanceId) => Promise<void>;
-    readonly clearClaudeHelperSignIn?: (providerId: typeof instanceId) => Promise<void>;
     readonly clearRuntimeUsageLimits?: (providerId: typeof instanceId) => void;
+    readonly clearProviderCredential?: (providerId: typeof instanceId) => Promise<void>;
     readonly withCatalogPersistence?: boolean;
     readonly initialCatalog?: ProviderCatalogSnapshot;
     readonly isDriverPluginEffective?: (driverKind: ProviderInstance["driverKind"]) => boolean;
@@ -3742,26 +4810,31 @@ function serviceFixture(
       (async (instance: ProviderInstance) =>
         options.probeResult ?? observation({ instanceId: instance.id })),
   );
+  // Records the account folders the service would create, so no test
+  // creates one under the real home.
+  const ensureAccountDirectory = vi.fn(async (_directory: string) => undefined);
   return {
     append,
     catalogs: () => catalogs,
     persistence,
     runtime,
     probe,
+    ensureAccountDirectory,
     service: new ProviderService({
       persistence,
       runtimeRegistry: runtime,
       probe,
+      ensureAccountDirectory,
       ...(options.driver === undefined ? {} : { driver: options.driver }),
       ...(options.clearResumeIdentities === undefined
         ? {}
         : { clearResumeIdentities: options.clearResumeIdentities }),
-      ...(options.clearClaudeHelperSignIn === undefined
-        ? {}
-        : { clearClaudeHelperSignIn: options.clearClaudeHelperSignIn }),
       ...(options.clearRuntimeUsageLimits === undefined
         ? {}
         : { clearRuntimeUsageLimits: options.clearRuntimeUsageLimits }),
+      ...(options.clearProviderCredential === undefined
+        ? {}
+        : { clearProviderCredential: options.clearProviderCredential }),
       ...(options.isDriverPluginEffective === undefined
         ? {}
         : { isDriverPluginEffective: options.isDriverPluginEffective }),
@@ -3981,3 +5054,220 @@ async function rejected(value: Promise<unknown>): Promise<any> {
   }
   throw new Error("expected rejection");
 }
+
+describe("a stored provider key and the base URL it was entered for", () => {
+  // Throwaway value: no real credential is used in these tests.
+  const storedKey = "throwaway-test-key-for-endpoint-a";
+
+  async function listenOnLoopback() {
+    const received: Array<string | undefined> = [];
+    const server = createHttpServer((request, response) => {
+      received.push(request.headers.authorization);
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ object: "list", data: [{ id: "model-a", object: "model" }] }));
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address() as AddressInfo;
+    return {
+      baseUrl: `http://127.0.0.1:${address.port}/v1/`,
+      received,
+      close: () => new Promise<void>((resolve) => server.close(() => resolve())),
+    };
+  }
+
+  function memoryCredentialStore() {
+    const keys = new Map<string, string>();
+    return {
+      keys,
+      has: async (id: string) => keys.has(id),
+      resolve: async (id: string) => {
+        const key = keys.get(id);
+        if (key === undefined) throw new Error("missing credential");
+        return key;
+      },
+      set: async (id: string, key: string) => {
+        keys.set(id, key);
+      },
+      delete: async (id: string) => {
+        keys.delete(id);
+      },
+    };
+  }
+
+  it("does not send the key stored for one endpoint to a base URL a window changes it to", async () => {
+    const endpointA = await listenOnLoopback();
+    const endpointB = await listenOnLoopback();
+    try {
+      const credentials = memoryCredentialStore();
+      await credentials.set(String(instanceId), storedKey);
+      const runtime = new ProviderRuntimeRegistry();
+      const fixture = serviceFixture({
+        instances: [
+          httpProvider({
+            configuration: {
+              kind: "openai-compatible-http",
+              baseUrl: endpointA.baseUrl,
+              authentication: "bearer",
+              protocol: "chat-completions",
+              manualModelIds: [],
+            },
+          }),
+        ],
+      });
+      const service = new ProviderService({
+        persistence: fixture.persistence,
+        runtimeRegistry: runtime,
+        driver: (instance) =>
+          makeOpenAiCompatibleDriver({
+            instanceId: instance.id,
+            configuration: instance.configuration as never,
+            runtimeRegistry: runtime,
+            credentialResolver: credentials,
+            clock: () => now,
+          }),
+        clearProviderCredential: credentials.delete,
+        uuid: () => crypto.randomUUID(),
+        clock: () => now,
+      });
+      const capability = "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBA";
+      const windowAuthorityStore = new WindowAuthorityStore();
+      windowAuthorityStore.register({ windowId, capability, now: 0 });
+      const route = createProviderRouteHandler({ service, windowAuthorityStore, now: () => 1 });
+      const headers = { "x-octant-window-capability": capability };
+      const probe = () =>
+        route(
+          new Request(`http://127.0.0.1/api/providers/${instanceId}/probe`, {
+            method: "POST",
+            headers,
+          }),
+        );
+
+      await probe();
+      expect(endpointA.received).toContain(`Bearer ${storedKey}`);
+
+      const change = await route(
+        new Request("http://127.0.0.1/api/providers/commands", {
+          method: "POST",
+          headers: { ...headers, "content-type": "application/json" },
+          body: JSON.stringify({
+            kind: "change-openai-compatible-configuration",
+            instanceId,
+            expectedVersion: 1,
+            configuration: {
+              kind: "openai-compatible-http",
+              baseUrl: endpointB.baseUrl,
+              authentication: "bearer",
+              protocol: "chat-completions",
+              manualModelIds: [],
+            },
+          }),
+        }),
+      );
+      expect(change?.status).toBe(200);
+      await probe();
+
+      expect(endpointB.received.some((value) => value?.includes(storedKey))).toBe(false);
+    } finally {
+      await endpointA.close();
+      await endpointB.close();
+    }
+  });
+  const endpoints = [
+    {
+      driverKind: "openai-compatible",
+      command: "change-openai-compatible-configuration",
+      configuration: (baseUrl: string) => ({
+        kind: "openai-compatible-http",
+        baseUrl,
+        authentication: "bearer",
+        protocol: "auto",
+        manualModelIds: ["model-a"],
+      }),
+    },
+    {
+      driverKind: "anthropic-compatible",
+      command: "change-anthropic-compatible-configuration",
+      configuration: (baseUrl: string) => ({
+        kind: "anthropic-compatible-http",
+        baseUrl,
+        authentication: "api-key",
+        protocol: "auto",
+        protocolVersion: "2023-06-01",
+        manualModelIds: ["model-a"],
+      }),
+    },
+    {
+      driverKind: "azure-foundry",
+      command: "change-azure-foundry-configuration",
+      configuration: (baseUrl: string) => ({
+        kind: "azure-foundry-openai-http",
+        baseUrl: `${baseUrl}openai/v1/`,
+        authentication: "api-key",
+        protocol: "auto",
+        manualModelIds: ["deployment-a"],
+      }),
+    },
+  ] as const;
+
+  it.each(endpoints)(
+    "removes the stored $driverKind key before the base URL moves, and keeps it when only other settings change",
+    async ({ driverKind, command, configuration }) => {
+      const clearProviderCredential = vi.fn(async () => undefined);
+      const fixture = serviceFixture({
+        instances: [
+          httpProvider({ driverKind, configuration: configuration("https://a.example/") }),
+        ],
+        clearProviderCredential,
+      });
+
+      await fixture.service.execute(windowId, {
+        kind: command,
+        instanceId,
+        expectedVersion: 1,
+        configuration: { ...configuration("https://a.example/"), manualModelIds: ["model-b"] },
+      } as never);
+      expect(clearProviderCredential).not.toHaveBeenCalled();
+
+      await fixture.service.execute(windowId, {
+        kind: command,
+        instanceId,
+        expectedVersion: 2,
+        configuration: configuration("https://b.example/"),
+      } as never);
+      expect(clearProviderCredential).toHaveBeenCalledExactlyOnceWith(instanceId);
+      expect(clearProviderCredential.mock.invocationCallOrder[0]).toBeLessThan(
+        fixture.append.mock.invocationCallOrder.at(-1) ?? 0,
+      );
+    },
+  );
+
+  it("refuses to move the base URL and keeps the old one when the stored key cannot be removed", async () => {
+    const fixture = serviceFixture({
+      instances: [httpProvider()],
+      clearProviderCredential: async () => {
+        throw new Error("credential store locked");
+      },
+    });
+
+    const failure = await rejected(
+      fixture.service.execute(windowId, {
+        kind: "change-openai-compatible-configuration",
+        instanceId,
+        expectedVersion: 1,
+        configuration: {
+          kind: "openai-compatible-http",
+          baseUrl: "https://other.example/v1/",
+          authentication: "bearer",
+          protocol: "auto",
+          manualModelIds: ["model-a"],
+        },
+      }),
+    );
+
+    expect(failure).toMatchObject({ failure: { category: "unavailable" } });
+    expect(fixture.append).not.toHaveBeenCalled();
+    expect(fixture.persistence.readProviderInstance(instanceId)?.configuration).toMatchObject({
+      baseUrl: "https://gateway.example/v1/",
+    });
+  });
+});

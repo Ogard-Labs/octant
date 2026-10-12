@@ -6,7 +6,8 @@ import { admittedBundledProviderDriverKinds } from "@octant/plugin-host/provider
 import type { ProviderDiscoveryDescriptor } from "@octant/provider-sdk/discovery";
 import { discoverableDescriptorsForAdmittedDrivers } from "@octant/provider-sdk/driver-plugins";
 import { execVersionRead, prepareConfinedVersionProbe } from "../process/confinedVersionProbe";
-import type { SeatbeltConfinementPort } from "../process/seatbeltProfile";
+import type { ProcessConfinementPort } from "../process/seatbeltProfile";
+import { snapshotClaudeHostEnvironment } from "./claudeAccountDirectory";
 
 // ── Budgets ─────────────────────────────────────────────────────────────────
 
@@ -81,7 +82,7 @@ export interface DiscoveryFsPort {
 export interface DiscoveryServiceOptions {
   readonly exec?: DiscoveryExecPort;
   /** Confinement for the version read of a candidate found on the host. */
-  readonly versionProbeConfinement?: SeatbeltConfinementPort;
+  readonly versionProbeConfinement?: ProcessConfinementPort;
   readonly fs?: DiscoveryFsPort;
   readonly environment?: NodeJS.ProcessEnv;
   readonly now?: () => number;
@@ -119,9 +120,13 @@ export function makeDiscoveryService(options: DiscoveryServiceOptions = {}): Dis
   const fs = options.fs ?? defaultFs;
   const now = options.now ?? Date.now;
   const hostId = options.hostId ?? "local";
-  const environment = options.environment ?? process.env;
+  const explicitEnvironment = options.environment;
   const admittedDriverKinds = options.admittedDriverKinds ?? admittedBundledProviderDriverKinds();
   const versionProbeConfinement = options.versionProbeConfinement;
+  const resolveEnvironment = async (): Promise<NodeJS.ProcessEnv> => {
+    if (explicitEnvironment !== undefined) return explicitEnvironment;
+    return await snapshotClaudeHostEnvironment();
+  };
 
   let lastScanCandidates: DiscoveryCandidate[] = [];
 
@@ -132,6 +137,7 @@ export function makeDiscoveryService(options: DiscoveryServiceOptions = {}): Dis
   let inFlightScan: Promise<DiscoverySnapshot> | undefined;
   const runScan = async (signal?: AbortSignal): Promise<DiscoverySnapshot> => {
     const startTime = now();
+    const environment = await resolveEnvironment();
     const descriptors = discoverableDescriptorsForAdmittedDrivers(admittedDriverKinds);
     const candidates: DiscoveryCandidate[] = [];
     const searchedDirectories: Array<
@@ -257,7 +263,7 @@ export function makeDiscoveryService(options: DiscoveryServiceOptions = {}): Dis
         descriptor,
         validated.canonicalPath,
         exec,
-        environment,
+        await resolveEnvironment(),
         versionProbeConfinement,
         signal,
       );
@@ -293,7 +299,7 @@ async function scanDescriptor(
   environment: NodeJS.ProcessEnv,
   now: () => number,
   startTime: number,
-  versionProbeConfinement: SeatbeltConfinementPort | undefined,
+  versionProbeConfinement: ProcessConfinementPort | undefined,
   signal?: AbortSignal,
 ): Promise<{
   readonly candidates: DiscoveryCandidate[];
@@ -401,7 +407,7 @@ async function readConfinedVersion(
   canonicalPath: string,
   exec: DiscoveryExecPort,
   environment: NodeJS.ProcessEnv,
-  versionProbeConfinement: SeatbeltConfinementPort | undefined,
+  versionProbeConfinement: ProcessConfinementPort | undefined,
   signal?: AbortSignal,
 ): Promise<string | undefined> {
   if (signal?.aborted) return undefined;

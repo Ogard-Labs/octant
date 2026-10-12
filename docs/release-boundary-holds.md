@@ -1,16 +1,10 @@
 # Release-boundary holds: connector marketplace and full LSP
 
-This note restates two holds already named by the Current Release Boundary in
-`AGENTS.md`. It does not authorize implementation. Opening either item still
-needs a documented approved design, published seams, and an explicit maintainer
-request.
-
-The first release remains the Apple Silicon technical preview with the
-provider-neutral plugin and skill marketplace (see also
-[architecture Current Release Boundary](architecture.md#current-release-boundary)
-and [roadmap Later](roadmap.md#later)). Cross-platform desktop sequencing lives
-in [0058](decisions/0058-cross-platform-desktop.md) and does not reopen these
-holds.
+This note holds the start gates for two deferrals named by the
+[Current Release Boundary in `AGENTS.md`](../AGENTS.md#current-release-boundary),
+which is the one statement of release scope. It does not authorize
+implementation. Opening either item still needs a documented approved design,
+published seams, and an explicit maintainer request.
 
 ## Connector / OAuth marketplace
 

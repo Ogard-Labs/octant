@@ -2,8 +2,8 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { access, mkdir, mkdtemp, readdir, realpath, rm } from "node:fs/promises";
 import { connect as connectTcp, createServer, type Socket } from "node:net";
-import { tmpdir } from "node:os";
-import { isAbsolute, resolve } from "node:path";
+import { homedir, tmpdir } from "node:os";
+import { isAbsolute, join, resolve } from "node:path";
 import { domainToASCII, fileURLToPath } from "node:url";
 import { deriveHostRuntimeHostId } from "@octant/host-runtime";
 import { createQuitAppleScript, waitForChildExit } from "./package-desktop";
@@ -693,9 +693,10 @@ async function smokePackagedLifecycle(
     );
     const temporaryDirectory = resolve(dataDirectory, "tmp");
     registerCleanup("temporary configuration", async () => {
-      const entries = await readdir(temporaryDirectory).catch(() => []);
+      const tmpEntries = await readdir(temporaryDirectory).catch(() => []);
+      const accountEntries = await readdir(join(homedir(), ".claude-accounts")).catch(() => []);
       try {
-        assertClaudeTemporaryConfigRemoved(entries);
+        assertClaudeTemporaryConfigRemoved([...tmpEntries, ...accountEntries]);
       } finally {
         await rm(dataDirectory, { recursive: true, force: true });
       }

@@ -1,5 +1,5 @@
 import { browserToolImage } from "./browserToolImage";
-import { BROWSER_TOOL_DEFINITION } from "./browserToolDefinition";
+import { BROWSER_TOOL_DEFINITION, BROWSER_TOOL_HELP } from "./browserToolDefinition";
 import type {
   BrowserActionRequest,
   BrowserAutomationSnapshot,
@@ -12,7 +12,7 @@ import type {
 } from "@octant/contracts";
 import { MAX_BROWSER_TABS_PER_CONTEXT, sameToolActionAuthority } from "@octant/contracts";
 import { isToolAllowedByAllowlist } from "@octant/domain";
-import type { AppManagedToolSet } from "../providers/appManagedToolSet";
+import { withToolFamilyHelp, type AppManagedToolSet } from "../providers/appManagedToolSet";
 import type { BrowserToolApprovalService } from "./browserToolApprovalService";
 
 export const BROWSER_TOOL_NAME = BROWSER_TOOL_DEFINITION.name;
@@ -52,6 +52,7 @@ export interface BrowserAppManagedToolsOptions {
     readonly act: (input: {
       readonly windowId: WindowId;
       readonly request: BrowserActionRequest;
+      readonly capturedBy?: "agent";
     }) => Promise<BrowserAutomationSnapshot>;
     readonly releaseThread: (
       windowId: WindowId,
@@ -125,7 +126,7 @@ export function createBrowserAppManagedTools(
   const definitions = isToolAllowedByAllowlist(options.toolConstraints ?? [], BROWSER_TOOL_NAME)
     ? [BROWSER_TOOL_DEFINITION]
     : [];
-  return {
+  const tools: AppManagedToolSet = {
     definitions,
     execute: async ({ inputJson, name, signal }) => {
       if (name !== BROWSER_TOOL_NAME || definitions.length === 0) {
@@ -249,7 +250,11 @@ export function createBrowserAppManagedTools(
       const request = browserAction(input, context);
       if (request === undefined) return failure("invalid-browser-input");
       if (signal?.aborted) return failure("tool-interrupted");
-      const acted = await options.browser.act({ windowId: options.windowId, request });
+      const acted = await options.browser.act({
+        windowId: options.windowId,
+        request,
+        capturedBy: "agent",
+      });
       if (signal?.aborted) return failure("tool-interrupted");
       if (!modelIsCurrent(options)) return failure("browser-model-stale");
       if (
@@ -261,6 +266,7 @@ export function createBrowserAppManagedTools(
       return browserResult(acted, input.operation === "screenshot");
     },
   };
+  return withToolFamilyHelp(tools, BROWSER_TOOL_HELP);
 }
 
 function modelIsCurrent(options: BrowserAppManagedToolsOptions): boolean {
@@ -467,6 +473,11 @@ function browserResult(snapshot: BrowserAutomationSnapshot, includeScreenshot = 
                 : { failedRequests: observation.failedRequests }),
               ...(includeScreenshot && image === undefined
                 ? { screenshotOmitted: "invalid-or-too-large" as const }
+                : {}),
+              // The screenshot reached the model either way; this only tells
+              // it the thread's Browser captures strip will not show it.
+              ...(observation.capture?.status === "not-kept"
+                ? { captureNotKept: observation.capture.reason }
                 : {}),
             },
           }),

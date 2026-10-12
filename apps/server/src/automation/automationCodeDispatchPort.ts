@@ -20,7 +20,7 @@ import { automationThreadTitle } from "./automationDispatchService";
 
 export interface AutomationCodeRouteService {
   readonly execute: (
-    windowId: WindowId,
+    scopeId: WindowId,
     command: unknown,
   ) => Promise<{
     readonly kind: string;
@@ -80,10 +80,10 @@ async function createManagedThread(
     readonly run: AutomationRun;
     readonly threadId: CodeThreadId;
     readonly title: string;
-    readonly windowId: WindowId;
+    readonly scopeId: WindowId;
   },
 ): Promise<AutomationThreadCreationOutcome> {
-  const existing = await readThreadIfPresent(options.codeService, input.windowId, input.threadId);
+  const existing = await readThreadIfPresent(options.codeService, input.scopeId, input.threadId);
   if (existing) {
     return { kind: "existing", threadId: input.threadId as never };
   }
@@ -107,7 +107,7 @@ async function createManagedThread(
   });
 
   try {
-    const created = await options.codeService.execute(input.windowId, {
+    const created = await options.codeService.execute(input.scopeId, {
       kind: "create-managed-code-thread",
       threadId: input.threadId,
       projectId: snapshot.projectId,
@@ -157,7 +157,7 @@ async function startOrRecover(
     readonly threadId: CodeThreadId;
     readonly firstTurnRequestId: string;
     readonly promptDigest: string;
-    readonly windowId: WindowId;
+    readonly scopeId: WindowId;
   },
 ): Promise<AutomationFirstTurnLaunchOutcome> {
   const prompt = options.evidence.put(input.run.definitionSnapshot.taskPrompt);
@@ -186,7 +186,7 @@ async function startOrRecover(
     prompt,
   };
   try {
-    const result = await options.operations.execute(input.windowId, command);
+    const result = await options.operations.execute(input.scopeId, command);
     if (
       result.kind === "provider-turn-state" &&
       (result.state === "running" || result.state === "waiting")
@@ -222,12 +222,12 @@ async function resolveCheckoutId(
   options: CreateAutomationCodeDispatchPortOptions,
   input: {
     readonly threadId: CodeThreadId;
-    readonly windowId: WindowId;
+    readonly scopeId: WindowId;
     readonly run: AutomationRun;
   },
 ): Promise<string | undefined> {
   try {
-    const bootstrap = await options.codeService.bootstrap(input.windowId);
+    const bootstrap = await options.codeService.bootstrap(input.scopeId);
     const match = bootstrap.threads.find((thread) => String(thread.id) === String(input.threadId));
     if (match !== undefined) return String(match.checkoutId);
   } catch {
@@ -238,11 +238,11 @@ async function resolveCheckoutId(
 
 async function readThreadIfPresent(
   codeService: AutomationCodeRouteService,
-  windowId: WindowId,
+  scopeId: WindowId,
   threadId: CodeThreadId,
 ): Promise<boolean> {
   try {
-    const bootstrap = await codeService.bootstrap(windowId);
+    const bootstrap = await codeService.bootstrap(scopeId);
     return bootstrap.threads.some((thread) => String(thread.id) === String(threadId));
   } catch {
     return false;

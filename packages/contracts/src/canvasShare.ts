@@ -1,6 +1,9 @@
 import { Schema } from "effect";
 import {
   CANVAS_MAX_BAR_LIST_ROWS,
+  CANVAS_MAX_DASHBOARD_CELLS,
+  CANVAS_MAX_DESIGN_FRAMES,
+  CANVAS_MAX_DASHBOARD_COLUMNS,
   CANVAS_MAX_CHART_CATEGORY_LABEL_LENGTH,
   CANVAS_MAX_HEATMAP_CELLS,
   CANVAS_MAX_HEATMAP_COLUMNS,
@@ -23,6 +26,10 @@ import {
   CanvasActor,
   CanvasBarListScale,
   CanvasBlock,
+  CanvasDesignFrame,
+  CanvasDesignMarkup,
+  CanvasDesignSize,
+  CanvasDesignTheme,
   CanvasDiagramLayoutKind,
   CanvasHeatmapDate,
   CanvasHeatmapScale,
@@ -39,6 +46,15 @@ import {
   canvasChartSeriesIssue,
   canvasChartUsesFlowTypes,
   canvasMockupUsesCatalog,
+  CANVAS_MAX_COLUMN_TRACKS,
+  CANVAS_MAX_TABS_LABEL_LENGTH,
+  CANVAS_MAX_TABS_PANES,
+  CANVAS_MIN_COLUMN_TRACKS,
+  isCanvasLayoutGroup,
+  CanvasDiagramEdgeStyle,
+  CanvasDiagramTone,
+  canvasDiagramUsesStyles,
+  canvasPlanUsesGantt,
   decodeCanvasDefinition,
   type CanvasDefinition,
   type CanvasVersion,
@@ -87,13 +103,30 @@ export const CANVAS_SHARE_MOCKUP_CATALOG_SCHEMA_VERSION = 6;
 // Version 7 accompanies Canvas schema version 14: a share may carry a funnel,
 // a radar, or a sankey chart, and a sankey's links.
 export const CANVAS_SHARE_FLOW_CHARTS_SCHEMA_VERSION = 7;
-export const CANVAS_SHARE_SCHEMA_VERSION = 7 as const;
+// Version 8 accompanies Canvas schema version 15: a share may carry a
+// dashboard, which names the blocks it places by their ids in the same share.
+export const CANVAS_SHARE_DASHBOARD_SCHEMA_VERSION = 8;
+// Version 9 accompanies Canvas schema version 19: a share may carry tabs and
+// columns, which name the shared blocks they hold, a diagram's edge styles and
+// tones and its group tones, and a plan's Gantt view.
+export const CANVAS_SHARE_LAYOUT_GROUPS_SCHEMA_VERSION = 9;
+// Version 10 carries a design's frames: its markup, shared as the author wrote
+// it. No new Canvas version accompanies it; a reader that never learned to
+// draw a shared frame under the frame policy refuses version 10 as a future
+// version, so a frame never reaches a viewer that would draw it any other way.
+export const CANVAS_SHARE_FRAMES_SCHEMA_VERSION = 10;
+export const CANVAS_SHARE_SCHEMA_VERSION = 10 as const;
 // The newest Canvas block version a share at this version names. Canvas
 // version 13 added only the table row id, which a share drops, so share
 // version 6 named a block authored at 13 as 12. Version 14 adds chart types a
-// share carries, so share version 7 names blocks up to 14. A later Canvas bump
-// that adds something a share carries bumps the share version again.
-export const CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION = 14 as const;
+// share carries, so share version 7 named blocks up to 14, and version 15 adds
+// the dashboard, so share version 8 named blocks up to 15. Canvas versions 16
+// through 18 add only design fields (the document size and theme, image
+// assets, then running script), and a share refuses a design, so they changed
+// nothing a share carries. Version 19 adds tabs and columns, so share version
+// 9 names blocks up to 19. A later Canvas bump that adds something a share
+// carries bumps the share version again.
+export const CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION = 19 as const;
 export const CanvasShareSchemaVersion = Schema.Literal(
   1,
   2,
@@ -101,6 +134,9 @@ export const CanvasShareSchemaVersion = Schema.Literal(
   4,
   5,
   6,
+  7,
+  8,
+  9,
   CANVAS_SHARE_SCHEMA_VERSION,
 );
 export type CanvasShareSchemaVersion = typeof CanvasShareSchemaVersion.Type;
@@ -127,6 +163,12 @@ export const CanvasShareConsent = Schema.Struct({
   acknowledgedOfflineSnapshot: Schema.Literal(true),
   /** Explicit operator acknowledgement that credentials and live host authority are excluded. */
   acknowledgedNoCredentials: Schema.Literal(true),
+  /**
+   * Explicit operator acknowledgement that a design's markup leaves as
+   * written. The secret filter reads values, not markup, so a Canvas that
+   * holds a design is shared only with this.
+   */
+  acknowledgedMarkupSharedAsWritten: Schema.optional(Schema.Literal(true)),
   acknowledgedAt: UtcTimestamp,
   acknowledgedBy: CanvasShareLocalUserActor,
 }).annotations(strict);
@@ -471,7 +513,7 @@ export const CanvasStaticExportBlock = Schema.Union(
     ...exportBlockFields,
     kind: Schema.Literal("plan"),
     title: ExportLabel,
-    view: Schema.optional(Schema.Literal("checklist", "kanban", "timeline")),
+    view: Schema.optional(Schema.Literal("checklist", "kanban", "timeline", "gantt")),
     phases: Schema.NonEmptyArray(
       Schema.Struct({
         phaseId: boundedToken("CanvasPlanPhaseId"),
@@ -519,6 +561,8 @@ export const CanvasStaticExportBlock = Schema.Union(
         source: boundedToken("CanvasNodeId"),
         target: boundedToken("CanvasNodeId"),
         label: Schema.optional(ExportLabel),
+        style: Schema.optional(CanvasDiagramEdgeStyle),
+        tone: Schema.optional(CanvasDiagramTone),
       }).annotations(strict),
     ).pipe(Schema.maxItems(1_024)),
     groups: Schema.optional(
@@ -527,6 +571,7 @@ export const CanvasStaticExportBlock = Schema.Union(
           groupId: boundedToken("CanvasGroupId"),
           label: ExportLabel,
           nodeIds: Schema.Array(boundedToken("CanvasNodeId")).pipe(Schema.maxItems(512)),
+          tone: Schema.optional(CanvasDiagramTone),
         }).annotations(strict),
       ).pipe(Schema.maxItems(64)),
     ),
@@ -891,9 +936,60 @@ export const CanvasStaticExportBlock = Schema.Union(
   }).annotations(strict),
   Schema.Struct({
     ...exportBlockFields,
+    kind: Schema.Literal("dashboard"),
+    title: ExportLabel,
+    columns: Schema.optional(Schema.Int.pipe(Schema.between(1, CANVAS_MAX_DASHBOARD_COLUMNS))),
+    cells: Schema.NonEmptyArray(
+      Schema.Struct({
+        blockId: boundedToken("CanvasBlockId"),
+        span: Schema.optional(Schema.Int.pipe(Schema.between(1, CANVAS_MAX_DASHBOARD_COLUMNS))),
+      }).annotations(strict),
+    ).pipe(Schema.maxItems(CANVAS_MAX_DASHBOARD_CELLS)),
+  }).annotations(strict),
+  Schema.Struct({
+    ...exportBlockFields,
     kind: Schema.Literal("image"),
     alt: ExportNonEmptyText,
     caption: Schema.optional(ExportText),
+  }).annotations(strict),
+  // Layout groups carry only block ids and short pane labels, so they leave
+  // as the author wrote them; the blocks they name are shared beside them.
+  Schema.Struct({
+    ...exportBlockFields,
+    kind: Schema.Literal("tabs"),
+    panes: Schema.Array(
+      Schema.Struct({
+        label: ExportLabel.pipe(Schema.maxLength(CANVAS_MAX_TABS_LABEL_LENGTH)),
+        blockIds: Schema.NonEmptyArray(boundedToken("CanvasBlockId")).pipe(Schema.maxItems(128)),
+      }).annotations(strict),
+    ).pipe(Schema.minItems(2), Schema.maxItems(CANVAS_MAX_TABS_PANES)),
+  }).annotations(strict),
+  Schema.Struct({
+    ...exportBlockFields,
+    kind: Schema.Literal("columns"),
+    tracks: Schema.Array(
+      Schema.Struct({
+        blockIds: Schema.NonEmptyArray(boundedToken("CanvasBlockId")).pipe(Schema.maxItems(128)),
+      }).annotations(strict),
+    ).pipe(Schema.minItems(CANVAS_MIN_COLUMN_TRACKS), Schema.maxItems(CANVAS_MAX_COLUMN_TRACKS)),
+  }).annotations(strict),
+  // A design leaves as its frames: markup, written as the author wrote it,
+  // which the viewer draws under the frame policy and nothing else. Its
+  // declared images do not leave: an asset names a Project file or an image
+  // job, which resolve only under this host's authority, so a shared frame
+  // draws a placeholder where one was named.
+  Schema.Struct({
+    ...exportBlockFields,
+    kind: Schema.Literal("design"),
+    title: ExportNonEmptyText,
+    size: CanvasDesignSize,
+    theme: Schema.optional(CanvasDesignTheme),
+    runsScript: Schema.optional(Schema.Literal(true)),
+    styles: Schema.optional(CanvasDesignMarkup),
+    frames: Schema.Array(CanvasDesignFrame).pipe(
+      Schema.minItems(1),
+      Schema.maxItems(CANVAS_MAX_DESIGN_FRAMES),
+    ),
   }).annotations(strict),
 );
 export type CanvasStaticExportBlock = typeof CanvasStaticExportBlock.Type;
@@ -968,6 +1064,32 @@ export const CanvasStaticExportDocument = Schema.Struct({
         document.schemaVersion >= CANVAS_SHARE_FLOW_CHARTS_SCHEMA_VERSION ||
         !document.blocks.some(canvasChartUsesFlowTypes),
       { message: () => "Funnel, radar, and sankey charts require Canvas share version 7." },
+    ),
+    Schema.filter(
+      (document) =>
+        document.schemaVersion >= CANVAS_SHARE_DASHBOARD_SCHEMA_VERSION ||
+        !document.blocks.some((block) => block.kind === "dashboard"),
+      { message: () => "Dashboard blocks require Canvas share version 8." },
+    ),
+    Schema.filter(
+      (document) =>
+        document.schemaVersion >= CANVAS_SHARE_LAYOUT_GROUPS_SCHEMA_VERSION ||
+        !document.blocks.some(
+          (block) =>
+            isCanvasLayoutGroup(block) ||
+            canvasDiagramUsesStyles(block) ||
+            canvasPlanUsesGantt(block),
+        ),
+      {
+        message: () =>
+          "Tabs, columns, diagram edge styles and tones, group tones, and the plan's Gantt view require Canvas share version 9.",
+      },
+    ),
+    Schema.filter(
+      (document) =>
+        document.schemaVersion >= CANVAS_SHARE_FRAMES_SCHEMA_VERSION ||
+        !document.blocks.some((block) => block.kind === "design"),
+      { message: () => "Design frames require Canvas share version 10." },
     ),
   );
 export type CanvasStaticExportDocument = typeof CanvasStaticExportDocument.Type;

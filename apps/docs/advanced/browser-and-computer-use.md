@@ -27,12 +27,43 @@ exactly one owning thread before it can create an isolated context.
 Observations are bounded: each entry renders only the title, URL, a SHA-256
 content hash, and a correlated-evidence count. No launch token, window
 capability, provider credential, typed value, page body, screenshot, or raw
-browser diagnostic enters committed evidence.
+browser diagnostic enters committed evidence. A kept screenshot is a separate
+thread capture, described under Browser captures below; the journal holds only a
+reference to it, never its bytes.
 
 The Browser pane provides an address bar, history controls, and the isolated
 page. Lifecycle and stop controls remain visible when a session needs them.
 The renderer requests lifecycle through authenticated routes; a denial creates
 no observation or evidence.
+
+### Browser captures
+
+When the agent takes a screenshot with its Browser, or you press **Screenshot**
+(the camera button in the Browser pane's toolbar), Octant keeps a copy with the
+thread. **Refresh preview** does not keep one. A **Browser captures** strip
+appears in the conversation beside any generated images, newest first, each
+with the page title and its origin. Choose one to see it full size with its
+address and time. The strip is absent until the thread has a capture.
+
+- Only a screenshot is kept. The picture the agent receives after other actions,
+  such as clicking or scrolling, is not.
+- A thread keeps its newest 32 captures; the oldest is dropped when a new one
+  arrives. Deleting the thread deletes its captures.
+- Captures stay on this computer, in Octant's data folder. **Settings → Data &
+  privacy** lists **Browser captures** under Caches with where they are stored. They are not added to Canvases, shared,
+  synced to your other computers, or included in diagnostics. Exporting a thread
+  includes them: each capture is listed with its page title, address, and time,
+  but not the picture itself. A paired device's export leaves them out.
+- The page you captured counts as outside content: a thread that has looked at
+  a page is already marked as having read outside content, and keeping a
+  picture of it changes nothing about that.
+- If a picture cannot be kept (too large, not a recognised image, a page with
+  no web address, no picture from the Browser, or a storage problem), the
+  screenshot still works. The agent is told the capture was not kept, the
+  Browser pane says so when you pressed Screenshot, and nothing is added to the
+  strip. The Browser gives no picture of a page it treats as sensitive, for
+  example one with a password field.
+- An archived thread still shows the captures it kept.
 
 Links inside a Work or Code conversation open in the app: following one
 creates a dedicated Browser context confined to that link's origin and opens
@@ -47,11 +78,11 @@ Agent control is separate from manual Browser availability. A provider needs a
 verified app-managed tool transport; an authenticated provider or a visible
 Browser tab alone does not prove that transport works.
 
-In any Chat, Work, or Code composer, type `@Browser` and choose the structured
+In a Work or Code composer, type `@Browser` and choose the structured
 Browser mention to tell the selected agent to use Octant's built-in Browser.
 The mention carries a host-owned selection; it never opens an origin or grants
 approval by itself. The existing Browser tool still requests origin approval at
-the first action that needs it.
+the first action that needs it. Chat does not offer Browser.
 
 Where supported, Octant registers `octant_browser` when the provider session
 starts. The agent does not need a separate browser skill, a debugging URL, or
@@ -62,14 +93,15 @@ include a revision that subsequent actions may use to refuse stale targets.
 
 The tool's built-in guidance tells the agent to navigate, inspect the page,
 act using the observed target and revision, and inspect the result to verify
-success. The same definition reaches supported providers in every mode.
-Installing a browser skill or configuring a global MCP server is unnecessary.
+success. The always-visible description stays short; the agent asks the tool's
+`help` operation for the full usage when it needs it, as it can for Computer
+use and Code's terminal, Apple, and Android tools. The same definition reaches
+supported providers in Work and Code. Installing a browser skill or configuring a global MCP server is unnecessary.
 
-Chat, Work, and approval-gated Code tasks may request an isolated browser
+Work and approval-gated Code tasks may request an isolated browser
 session for an origin through an inline approval. This does not change the task to Full
 access. Unsupported runtimes, expired grants, changed owners, and cancelled
-requests are refused explicitly. Chat keeps its virtual scope: Browser access
-adds no filesystem or shell authority. Background tasks retain their own
+requests are refused explicitly. Background tasks retain their own
 browser when the visible pane changes within the same Project. Switching the
 selected model requires a fresh origin approval before that model can use the
 existing page.
@@ -79,7 +111,7 @@ The host supplies the tool transport automatically for supported runtimes:
 | Runtime          | Transport and current boundary                                             |
 | ---------------- | -------------------------------------------------------------------------- |
 | Codex            | App-server dynamic tools                                                   |
-| Claude Code      | Agent SDK managed tools                                                    |
+| Claude Code      | Agent SDK in-process MCP server                                            |
 | OpenCode         | Private MCP profile, verified on 1.18.21 and 2.0.22 with macOS confinement |
 | ACP runtimes     | HTTP MCP when the runtime advertises and accepts it                        |
 | Pi               | Owned extension and verified CLI catalogue on 0.85.1                       |
@@ -122,11 +154,11 @@ the result. Protected fields and macOS permission controls remain for you to
 operate. Use **Stop computer use** or disable the plugin to revoke access.
 
 Octant bundles its own CuaDriver, including the native SDK, and does not require
-a separate installation. **Automatic updates** is enabled by default: Octant
-checks upstream daily, verifies the publisher, checksum, architecture, and
+a separate installation. **Automatic updates** is off by default. When you turn
+it on, Octant checks upstream daily, verifies the publisher, checksum, architecture, and
 driver compatibility, then upgrades after computer-use tasks finish. If the
 replacement cannot start, Octant retains the previous verified driver. You
-can turn automatic checks off or use **Check for updates** in Settings.
+can use **Check for updates** in Settings at any time.
 Checks send no task content or identifiers.
 
 When a session is active it renders the

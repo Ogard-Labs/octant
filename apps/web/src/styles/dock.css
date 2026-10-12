@@ -18,7 +18,6 @@
   min-height: 0;
   background: transparent;
   cursor: col-resize;
-  outline: 0;
 }
 
 .right-utility-dock__resize::before {
@@ -32,7 +31,8 @@
 }
 
 /* The same feedback the system's .split-handle gives: the hairline takes the
-   accent ink while grabbed. Keyboard focus remains visually quiet. */
+   accent ink while grabbed. Keyboard focus also draws the shared focus edge,
+   which is what tells it apart from the pointer. */
 .right-utility-dock__resize:hover::before,
 .right-utility-dock__resize:focus-visible::before {
   background: var(--oct-accent-fg);
@@ -841,7 +841,6 @@
   left: 0;
   height: 9px;
   cursor: row-resize;
-  outline: 0;
 }
 
 .bottom-utility-panel__resize::before {
@@ -1001,12 +1000,10 @@ html[data-octant-reduced-motion="true"] :is(.octant-dialog__popup, .octant-dialo
   }
 }
 
-@media (prefers-contrast: more) {
-  .right-utility-dock__toolbar,
-  .right-utility-dock__tabs,
-  .octant-dialog__popup {
-    border-color: var(--octant-border-strong);
-  }
+html[data-octant-increased-contrast="true"] .right-utility-dock__toolbar,
+html[data-octant-increased-contrast="true"] .right-utility-dock__tabs,
+html[data-octant-increased-contrast="true"] .octant-dialog__popup {
+  border-color: var(--octant-border-strong);
 }
 
 /* Navigator: the host-owned conversation, also embedded by Zen's assistant. */
@@ -1099,9 +1096,7 @@ html[data-octant-reduced-motion="true"] :is(.octant-dialog__popup, .octant-dialo
   font-size: var(--oct-text-xs);
 }
 
-@media (prefers-contrast: more) {
-  .navigator-panel__notice,
-  .navigator-panel__capability {
-    border-color: var(--octant-border-strong);
-  }
+html[data-octant-increased-contrast="true"] .navigator-panel__notice,
+html[data-octant-increased-contrast="true"] .navigator-panel__capability {
+  border-color: var(--octant-border-strong);
 }

@@ -498,6 +498,9 @@ function extensionClient(): ExtensionClient {
     importLocalPluginReceipt: vi.fn() as never,
     listToolApprovals: vi.fn(async () => []) as never,
     decideToolApproval: vi.fn(async () => true) as never,
+    toolGrantsAvailable: true,
+    listToolGrants: vi.fn(async () => []) as never,
+    revokeToolGrant: vi.fn(async () => true) as never,
   };
 }
 
@@ -532,7 +535,9 @@ describe("Chat host queue", () => {
       expect(screen.getByRole("button", { name: "Queue message" })).toBeEnabled(),
     );
     await user.click(screen.getByRole("button", { name: "Queue message" }));
-    expect(screen.getByLabelText("Message")).toHaveValue("");
+    // The draft clears only once the queue acknowledges the message, which
+    // lands after the click returns.
+    await waitFor(() => expect(screen.getByLabelText("Message")).toHaveValue(""));
     await user.type(screen.getByLabelText("Message"), "Second");
     expect(host.execute).toHaveBeenCalledOnce();
     await user.click(screen.getByRole("button", { name: "Queue message" }));
@@ -582,6 +587,11 @@ describe("Chat host queue", () => {
       new File(["image"], "first.png", { type: "image/png" }),
     );
     await screen.findByText("first.png");
+    // Sending stays disabled until the attachment finishes uploading, which
+    // lands after its name appears.
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Queue message" })).toBeEnabled(),
+    );
     await user.click(screen.getByRole("button", { name: "Queue message" }));
     await waitFor(() => expect(host.execute).toHaveBeenCalledOnce());
     expect(screen.getByLabelText("Message")).toHaveValue("First");
@@ -697,6 +707,11 @@ describe("Chat host queue", () => {
         new File(["first"], "first.png", { type: "image/png" }),
       );
       await screen.findByText("first.png");
+      // Sending stays disabled until the attachment finishes uploading, which
+      // lands after its name appears.
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "Queue message" })).toBeEnabled(),
+      );
       await user.click(screen.getByRole("button", { name: "Queue message" }));
       await screen.findByText(/host has not confirmed/);
       await user.clear(screen.getByLabelText("Message"));
@@ -709,7 +724,11 @@ describe("Chat host queue", () => {
       await user.click(screen.getByRole("button", { name: "Check queue" }));
       expect(screen.getByLabelText("Message")).toHaveValue("New draft");
       expect(base.discard).not.toHaveBeenCalled();
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "Queue message" })).toBeEnabled(),
+      );
       await user.click(screen.getByRole("button", { name: "Queue message" }));
+      await waitFor(() => expect(host.execute).toHaveBeenCalledTimes(3));
       const command = host.execute.mock.calls[2]?.[0];
       if (command?.kind !== "enqueue") throw new Error("Expected new enqueue");
       expect(command.payload.attachmentIds).toEqual(
@@ -989,6 +1008,9 @@ describe("ChatWorkspace", () => {
         new File(["image"], "owned.png", { type: "image/png" }),
       );
       await screen.findByText("owned.png");
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "Queue message" })).toBeEnabled(),
+      );
       await user.click(screen.getByRole("button", { name: "Queue message" }));
       await waitFor(() => expect(host.execute).toHaveBeenCalledOnce());
       const command = host.execute.mock.calls[0]?.[0];
@@ -1013,12 +1035,15 @@ describe("ChatWorkspace", () => {
       {
         approvalId: "44000000-0000-4000-8000-000000000010" as never,
         threadId: threadId as never,
+        extensionId: "44000000-0000-4000-8000-000000000011" as never,
         packageId: "44000000-0000-4000-8000-000000000012" as never,
         componentId: "server" as never,
+        serverName: "server",
         providerToolName: "plugin__server__read",
         mcpToolName: "read",
         inputJson: '{"path":"README.md"}',
         requestedAt: now as never,
+        rememberable: false,
       },
     ]);
     render(
@@ -1045,12 +1070,15 @@ describe("ChatWorkspace", () => {
     const approval = {
       approvalId: "44000000-0000-4000-8000-000000000010" as never,
       threadId: threadId as never,
+      extensionId: "44000000-0000-4000-8000-000000000011" as never,
       packageId: "44000000-0000-4000-8000-000000000012" as never,
       componentId: "server" as never,
+      serverName: "server",
       providerToolName: "plugin__server__read",
       mcpToolName: "read",
       inputJson: '{"path":"README.md"}',
       requestedAt: now as never,
+      rememberable: false,
     };
     vi.mocked(client.listToolApprovals).mockResolvedValue([approval]);
     const listToolApprovals = vi.mocked(client.listToolApprovals);

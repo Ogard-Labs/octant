@@ -45,6 +45,14 @@ integration or uncertain dependency impact needs full local `bun run verify`.
 Always run `git diff --check`. Existing tests may supply the required coverage;
 adding tests is justified by an uncovered behavior or concrete risk.
 
+A web UI test that passes locally but fails now and then in CI usually reads
+state that an async render has not produced yet. To make such reads fail far
+more often, run the web DOM tests from `apps/web` with
+`OCTANT_TEST_ASYNC_STRESS=1 bun run test [file]`. It removes the short wait
+after each user-event action; `waitFor` and `findBy*` are unaffected and are
+the fix. The stress mode is a local diagnostic, not a CI gate: a pass does not
+prove a test is race-free.
+
 Run real-provider smokes when the issue's outcome or affected provider boundary
 requires them and credentials are available. If a required smoke is unavailable,
 record the exact blocker; synthetic checks do not replace that acceptance.
@@ -97,8 +105,8 @@ Start from the [current design index](docs/design/README.md). Architecture owns
 system boundaries, Workspace owns navigation and interaction, and DESIGN.md
 owns presentation. Update the owning specification in place alongside an
 approved implementation change, and reconcile any conflicting summaries.
-Historical ADRs explain rationale; ordinary changes do not require a new ADR or
-supersession ceremony. A clear maintainer request to change the design authorizes
+Historical ADRs explain earlier rationale; the archive is closed, so no change
+adds or supersedes one. A clear maintainer request to change the design authorizes
 the corresponding specification update. Ask about unresolved consequential scope,
 not merely because an old document says something different.
 

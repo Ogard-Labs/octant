@@ -18,6 +18,7 @@ import {
 const windowId = "10000000-0000-4000-8000-000000000001" as WindowId;
 const threadId = "20000000-0000-4000-8000-000000000001";
 const checkoutId = "30000000-0000-4000-8000-000000000001";
+const simulatorId = "80000000-0000-4000-8000-000000000001";
 
 describe("Code app-managed tools", () => {
   it("runs a command in the stable thread terminal and returns its bounded transcript", async () => {
@@ -818,6 +819,7 @@ describe("Code app-managed tools", () => {
     expect(pressed.isError).toBe(false);
     expect(act).toHaveBeenLastCalledWith({
       windowId,
+      capturedBy: "agent",
       request: expect.objectContaining({
         kind: "press",
         value: "Enter",
@@ -830,6 +832,7 @@ describe("Code app-managed tools", () => {
     });
     expect(act).toHaveBeenLastCalledWith({
       windowId,
+      capturedBy: "agent",
       request: expect.objectContaining({ kind: "scroll", deltaX: 100, deltaY: -500 }),
     });
     act.mockClear();
@@ -1187,6 +1190,7 @@ describe("the Apple capability as an agent tool", () => {
   function appleTools(
     apple: Partial<Parameters<typeof createCodeAppManagedTools>[0]["apple"]> = {},
     threadOverrides: Partial<CodeThread> = {},
+    deviceApproval?: Parameters<typeof createCodeAppManagedTools>[0]["deviceApproval"],
   ) {
     const execute = vi.fn(async (..._args: ReadonlyArray<unknown>) => appleEvidence());
     const snapshot = vi.fn(async () => appleSnapshot());
@@ -1198,6 +1202,7 @@ describe("the Apple capability as an agent tool", () => {
       execute,
       snapshot,
       requestPaneOpen,
+      inputGrantIsOpen: () => false,
       ...apple,
     } as never;
     return {
@@ -1213,6 +1218,7 @@ describe("the Apple capability as an agent tool", () => {
         executeOperation: async () => ({}) as never,
         terminal: { read: async () => ({}) as never },
         apple: port,
+        ...(deviceApproval === undefined ? {} : { deviceApproval }),
       }),
     };
   }
@@ -1446,18 +1452,167 @@ describe("the Apple capability as an agent tool", () => {
     expect(execute).not.toHaveBeenCalled();
   });
 
-  it("stays unavailable to a thread that is not on full access", async () => {
-    const { execute, snapshot, tools } = appleTools({}, { executionPolicy: "plan" } as never);
+  it("lets an approval-gated thread take a Simulator screenshot without asking", async () => {
+    const request = vi.fn();
+    const readScreenshot = vi.fn(async () => Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10]));
+    const { execute, tools } = appleTools(
+      { readScreenshot },
+      { executionPolicy: "approval-gated" } as never,
+      { request },
+    );
 
     const outcome = await tools.execute({
       name: "octant_apple",
-      inputJson: JSON.stringify({ operation: "status" }),
-    } as never);
+      inputJson: JSON.stringify({ operation: "screenshot", simulatorId }),
+    });
 
-    expect(outcome.isError).toBe(true);
-    expect(outcome.result).toMatchObject({ error: "full-access-required" });
-    expect(snapshot).not.toHaveBeenCalled();
+    expect(outcome.isError).toBe(false);
+    expect(outcome.images).toHaveLength(1);
+    expect(request).not.toHaveBeenCalled();
+    expect(execute.mock.calls[0]?.[1]).toMatchObject({
+      kind: "screenshot",
+      approval: { kind: "not-required" },
+    });
+  });
+
+  it("holds an approval-gated boot until the person answers, and refuses it when they deny", async () => {
+    let answer: (outcome: { readonly status: "denied" }) => void = () => undefined;
+    const request = vi.fn(
+      (_effect: unknown) =>
+        new Promise<{ readonly status: "denied" }>((resolve) => {
+          answer = resolve;
+        }),
+    );
+    const { execute, requestPaneOpen, tools } = appleTools(
+      {},
+      { executionPolicy: "approval-gated" } as never,
+      { request },
+    );
+
+    const pending = tools.execute({
+      name: "octant_apple",
+      inputJson: JSON.stringify({ operation: "boot", simulatorId }),
+    });
+    await vi.waitFor(() => expect(request).toHaveBeenCalledTimes(1));
+    expect(request.mock.calls[0]?.[0]).toMatchObject({
+      kind: "apple-action",
+      request: { kind: "boot", simulatorId, threadId, checkoutId },
+    });
     expect(execute).not.toHaveBeenCalled();
+    expect(requestPaneOpen).not.toHaveBeenCalled();
+
+    answer({ status: "denied" });
+    const outcome = await pending;
+
+    expect(outcome).toMatchObject({ isError: true, result: { error: "device-approval-denied" } });
+    expect(execute).not.toHaveBeenCalled();
+    expect(requestPaneOpen).not.toHaveBeenCalled();
+  });
+
+  it("boots an approval-gated thread's Simulator with the one-use approval the person gave", async () => {
+    const approvalId = "d0000000-0000-4000-8000-000000000001";
+    const request = vi.fn(async () => ({
+      status: "approved" as const,
+      approvalId: approvalId as never,
+    }));
+    const { execute, tools } = appleTools({}, { executionPolicy: "approval-gated" } as never, {
+      request,
+    });
+
+    await tools.execute({
+      name: "octant_apple",
+      inputJson: JSON.stringify({ operation: "boot", simulatorId }),
+    });
+
+    const asked = (request.mock.calls[0] as unknown as [{ readonly request: object }])[0].request;
+    // The host receives the very request the person allowed, now carrying it.
+    expect(execute.mock.calls[0]?.[1]).toEqual({
+      ...asked,
+      approval: { kind: "approved", approvalId },
+    });
+  });
+
+  it("sends an approval-gated agent's tap on a live Allow input grant without asking again", async () => {
+    const request = vi.fn();
+    const inputGrantIsOpen = vi.fn(() => true);
+    const { execute, tools } = appleTools(
+      { inputGrantIsOpen },
+      { executionPolicy: "approval-gated" } as never,
+      { request },
+    );
+
+    await tools.execute({
+      name: "octant_apple",
+      inputJson: JSON.stringify({ operation: "tap", simulatorId, x: 10, y: 20 }),
+    });
+
+    expect(request).not.toHaveBeenCalled();
+    expect(inputGrantIsOpen).toHaveBeenCalledWith(windowId, threadId, simulatorId);
+    expect(execute.mock.calls[0]?.[1]).toMatchObject({
+      kind: "tap",
+      approval: { kind: "not-required" },
+    });
+  });
+
+  it.each(["plan", "approval-gated"] as const)(
+    "shows an already-booted Simulator's pane under %s without asking, since nothing on the device changes",
+    async (executionPolicy) => {
+      const request = vi.fn();
+      const snapshot = vi.fn(async () => ({
+        ...(appleSnapshot() as unknown as Record<string, unknown>),
+        simulators: [{ simulatorId, name: "iPhone", platform: "ios", state: "booted" }],
+      }));
+      const { execute, requestPaneOpen, tools } = appleTools(
+        { snapshot } as never,
+        { executionPolicy } as never,
+        { request },
+      );
+
+      const opened = await tools.execute({
+        name: "octant_apple",
+        inputJson: JSON.stringify({ operation: "open", simulatorId }),
+      });
+
+      expect(opened).toMatchObject({ isError: false, result: { opensInAppPane: true } });
+      expect(requestPaneOpen).toHaveBeenCalledOnce();
+      expect(request).not.toHaveBeenCalled();
+      expect(execute).not.toHaveBeenCalled();
+    },
+  );
+
+  it("refuses a boot in Plan mode while still reading the Simulator's status", async () => {
+    const request = vi.fn();
+    const { execute, requestPaneOpen, tools } = appleTools(
+      {
+        snapshot: vi.fn(async () => ({
+          ...(appleSnapshot() as unknown as Record<string, unknown>),
+          simulators: [{ simulatorId, name: "iPhone", platform: "ios", state: "shutdown" }],
+        })) as never,
+      },
+      { executionPolicy: "plan" } as never,
+      { request },
+    );
+
+    const booted = await tools.execute({
+      name: "octant_apple",
+      inputJson: JSON.stringify({ operation: "boot", simulatorId }),
+    });
+    const opened = await tools.execute({
+      name: "octant_apple",
+      inputJson: JSON.stringify({ operation: "open", simulatorId }),
+    });
+    const status = await tools.execute({
+      name: "octant_apple",
+      inputJson: JSON.stringify({ operation: "status" }),
+    });
+
+    expect(booted.result).toMatchObject({ error: "plan-mode-read-only" });
+    // Opening a shut-down Simulator would boot it.
+    expect(opened.result).toMatchObject({ error: "plan-mode-read-only" });
+    expect(status.isError).toBe(false);
+    expect(request).not.toHaveBeenCalled();
+    expect(execute).not.toHaveBeenCalled();
+    expect(requestPaneOpen).not.toHaveBeenCalled();
   });
 
   it("reports a refused action as an error rather than a silent success", async () => {
@@ -1623,6 +1778,7 @@ describe("the Android capability as an agent tool", () => {
   function androidTools(
     android: Partial<Parameters<typeof createCodeAppManagedTools>[0]["android"]> = {},
     threadOverrides: Partial<CodeThread> = {},
+    deviceApproval?: Parameters<typeof createCodeAppManagedTools>[0]["deviceApproval"],
   ) {
     const execute = vi.fn(async (..._args: ReadonlyArray<unknown>) => androidEvidence());
     const snapshot = vi.fn(async () => androidSnapshot());
@@ -1634,6 +1790,7 @@ describe("the Android capability as an agent tool", () => {
       execute,
       snapshot,
       requestPaneOpen,
+      inputGrantIsOpen: () => false,
       ...android,
     } as never;
     return {
@@ -1649,6 +1806,7 @@ describe("the Android capability as an agent tool", () => {
         executeOperation: async () => ({}) as never,
         terminal: { read: async () => ({}) as never },
         android: port,
+        ...(deviceApproval === undefined ? {} : { deviceApproval }),
       }),
     };
   }
@@ -1690,15 +1848,36 @@ describe("the Android capability as an agent tool", () => {
     ).not.toContain("octant_android");
   });
 
-  it("stays unavailable to a thread that is not on full access", async () => {
+  it("refuses a boot in Plan mode while still reading the emulator's status", async () => {
     const { execute, snapshot, tools } = androidTools({}, { executionPolicy: "plan" } as never);
-    const outcome = await tools.execute({
+    const booted = await tools.execute({
+      name: "octant_android",
+      inputJson: JSON.stringify({ operation: "boot", emulatorId: "Pixel_Test" }),
+    });
+    const status = await tools.execute({
       name: "octant_android",
       inputJson: JSON.stringify({ operation: "status" }),
-    } as never);
-    expect(outcome.isError).toBe(true);
-    expect(outcome.result).toMatchObject({ error: "full-access-required" });
-    expect(snapshot).not.toHaveBeenCalled();
+    });
+    expect(booted.result).toMatchObject({ error: "plan-mode-read-only" });
+    expect(status.isError).toBe(false);
+    expect(snapshot).toHaveBeenCalledTimes(1);
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it("holds an approval-gated emulator boot for the person and refuses it when they deny", async () => {
+    const request = vi.fn(async (_effect: unknown) => ({ status: "denied" as const }));
+    const { execute, tools } = androidTools({}, { executionPolicy: "approval-gated" } as never, {
+      request,
+    });
+    const outcome = await tools.execute({
+      name: "octant_android",
+      inputJson: JSON.stringify({ operation: "boot", emulatorId: "Pixel_Test" }),
+    });
+    expect(request.mock.calls[0]?.[0]).toMatchObject({
+      kind: "android-action",
+      request: { kind: "boot", emulatorId: "Pixel_Test" },
+    });
+    expect(outcome.result).toMatchObject({ error: "device-approval-denied" });
     expect(execute).not.toHaveBeenCalled();
   });
 
@@ -1998,6 +2177,148 @@ describe("the planner board and proposal as agent tools", () => {
         },
       },
     });
+  });
+});
+
+describe("Code tool families", () => {
+  function familyTools(threadOverrides: Partial<CodeThread> = {}) {
+    const ports = {
+      executeOperation: vi.fn(async () => ({}) as never),
+      terminalRead: vi.fn(async () => ({}) as never),
+      browserAct: vi.fn(async () => browserSnapshot(browserAuthority())),
+      browserCreate: vi.fn(async () => browserSnapshot(browserAuthority())),
+      appleExecute: vi.fn(async () => appleEvidence()),
+      appleDiscover: vi.fn(async () => appleDiscovery()),
+      androidExecute: vi.fn(async () => androidEvidence()),
+      androidDiscover: vi.fn(async () => androidDiscovery()),
+    };
+    const device = (execute: unknown, discover: unknown, snapshot: unknown) =>
+      ({
+        resolveAuthority: () => appleAuthority,
+        discover,
+        execute,
+        snapshot: async () => snapshot,
+        requestPaneOpen: async () => snapshot,
+        inputGrantIsOpen: () => false,
+      }) as never;
+    const tools = createCodeAppManagedTools({
+      windowId,
+      thread: thread(threadOverrides),
+      readThread: () => thread(threadOverrides),
+      uuid: uuidFactory(),
+      executeOperation: ports.executeOperation,
+      terminal: { read: ports.terminalRead },
+      browser: {
+        resolveAuthority: () => browserAuthority(),
+        inspectThread: () => browserSnapshot(browserAuthority()),
+        create: ports.browserCreate,
+        act: ports.browserAct,
+        releaseThread: vi.fn(),
+      },
+      apple: device(ports.appleExecute, ports.appleDiscover, appleSnapshot()),
+      android: device(ports.androidExecute, ports.androidDiscover, androidSnapshot()),
+    });
+    return { tools, ports };
+  }
+
+  it("keeps the always-visible Code tool prefix smaller than the catalogue it replaced", () => {
+    const { tools } = familyTools();
+    const families = tools.definitions.filter((definition) =>
+      ["octant_browser", "octant_terminal", "octant_apple", "octant_android"].includes(
+        definition.name,
+      ),
+    );
+    expect(families).toHaveLength(4);
+    // These four definitions serialized to 6,580 bytes before their detailed
+    // usage moved behind help. The budget catches a description growing back.
+    expect(JSON.stringify(families).length).toBeLessThanOrEqual(4_400);
+  });
+
+  it.each(["octant_browser", "octant_terminal", "octant_apple", "octant_android"])(
+    "returns %s's full usage from help without touching the host",
+    async (name) => {
+      const { tools, ports } = familyTools({ executionPolicy: "plan" });
+      const definition = tools.definitions.find((candidate) => candidate.name === name);
+      if (definition === undefined) throw new Error(`Expected ${name} to be offered.`);
+      const operations = (
+        definition.inputSchema as { properties: { operation: { enum: ReadonlyArray<string> } } }
+      ).properties.operation.enum;
+      expect(operations).toContain("help");
+
+      const outcome = await tools.execute({ name, inputJson: '{"operation":"help"}' });
+
+      expect(outcome.isError).toBe(false);
+      const help = (outcome.result as { help: string }).help;
+      expect(help.length).toBeGreaterThan(definition.description?.length ?? 0);
+      for (const port of Object.values(ports)) expect(port).not.toHaveBeenCalled();
+    },
+  );
+
+  it("still refuses an effect under a denied posture after help answered", async () => {
+    const { tools, ports } = familyTools({ executionPolicy: "plan" });
+
+    await tools.execute({ name: "octant_browser", inputJson: '{"operation":"help"}' });
+    const navigated = await tools.execute({
+      name: "octant_browser",
+      inputJson: JSON.stringify({ operation: "navigate", url: "https://example.com" }),
+    });
+    const booted = await tools.execute({
+      name: "octant_apple",
+      inputJson: JSON.stringify({ operation: "boot", simulatorId }),
+    });
+    const ran = await tools.execute({
+      name: CODE_TERMINAL_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "run", command: "ls" }),
+    });
+
+    expect(navigated).toEqual({ result: { error: "plan-mode-read-only" }, isError: true });
+    expect(booted.result).toMatchObject({ error: "plan-mode-read-only" });
+    expect(ran.isError).toBe(true);
+    expect(ports.browserCreate).not.toHaveBeenCalled();
+    expect(ports.browserAct).not.toHaveBeenCalled();
+    expect(ports.appleExecute).not.toHaveBeenCalled();
+    expect(ports.executeOperation).not.toHaveBeenCalled();
+  });
+
+  it("records no external content when help answers on a tainting thread", async () => {
+    const record = vi.fn();
+    const tools = createCodeAppManagedTools({
+      windowId,
+      thread: thread(),
+      readThread: () => thread(),
+      uuid: uuidFactory(),
+      executeOperation: vi.fn(),
+      terminal: { read: vi.fn() },
+      recordExternalContentIngestion: record,
+    });
+
+    const outcome = await tools.execute({
+      name: CODE_TERMINAL_TOOL_NAME,
+      inputJson: '{"operation":"help"}',
+    });
+
+    expect(outcome.isError).toBe(false);
+    expect(record).not.toHaveBeenCalled();
+  });
+
+  it("omits the browser family when the host lends no browser", async () => {
+    const tools = createCodeAppManagedTools({
+      windowId,
+      thread: thread(),
+      readThread: () => thread(),
+      uuid: uuidFactory(),
+      executeOperation: vi.fn(),
+      terminal: { read: vi.fn() },
+    });
+
+    expect(tools.definitions.map((definition) => definition.name)).not.toContain(
+      CODE_BROWSER_TOOL_NAME,
+    );
+    const outcome = await tools.execute({
+      name: CODE_BROWSER_TOOL_NAME,
+      inputJson: '{"operation":"help"}',
+    });
+    expect(outcome.isError).toBe(true);
   });
 });
 

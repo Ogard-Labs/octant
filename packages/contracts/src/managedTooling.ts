@@ -33,7 +33,7 @@ export const ManagedToolStatus = Schema.Struct({
 export type ManagedToolStatus = typeof ManagedToolStatus.Type;
 
 export const ManagedToolsSettings = Schema.Struct({
-  automaticUpdates: Schema.optionalWith(Schema.Boolean, { default: () => true }),
+  automaticUpdates: Schema.optionalWith(Schema.Boolean, { default: () => false }),
 }).annotations(strict);
 export type ManagedToolsSettings = typeof ManagedToolsSettings.Type;
 export const decodeManagedToolsSettings = Schema.decodeUnknownSync(ManagedToolsSettings);

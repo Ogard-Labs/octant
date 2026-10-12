@@ -105,6 +105,7 @@ interface SetupOptions {
   readonly config?: RemoteGatewayConfig;
   readonly productDispatch?: RemoteGatewayOptions["productDispatch"];
   readonly webAssets?: RemoteGatewayOptions["webAssets"];
+  readonly designPage?: RemoteGatewayOptions["designPage"];
   readonly serve?: Serve;
   readonly now?: () => number;
   readonly uuid?: () => string;
@@ -166,6 +167,7 @@ function setup(options: SetupOptions = {}) {
     signing,
     webAssets,
     ...(options.productDispatch === undefined ? {} : { productDispatch: options.productDispatch }),
+    ...(options.designPage === undefined ? {} : { designPage: options.designPage }),
     serve: options.serve ?? defaultServe,
     now: options.now ?? (() => nowMs),
     uuid,
@@ -802,6 +804,46 @@ describe("RemoteGateway — web assets served on non-API GET", () => {
     const body = await response.text();
     expect(body).toContain("app");
     await gateway.stop();
+  });
+});
+
+describe("RemoteGateway — a running design's page", () => {
+  it("hands a frame's ticketed load to the page route without a session, and answers not found without one", async () => {
+    const { serve, getFetch } = createCapturingServe();
+    const designPage = vi.fn(async (request: Request) => {
+      expect(request.headers.get("cookie")).toBeNull();
+      return new Response("<p>prototype</p>", {
+        headers: { "content-type": "text/html; charset=utf-8" },
+      });
+    });
+    const { gateway } = setup({ serve, designPage });
+    await gateway.start();
+    const page = `${ORIGIN}/api/canvas/design-page?ticket=${"a".repeat(43)}`;
+    const response = await getFetch()!(
+      new Request(page, {
+        headers: {
+          host: "192.168.1.20:9443",
+          "sec-fetch-site": "same-origin",
+          "sec-fetch-dest": "iframe",
+        },
+      }),
+      lanFacts,
+    );
+    expect(response.status).toBe(200);
+    expect(await response.text()).toContain("prototype");
+    expect(response.headers.get("content-security-policy")).toMatch(/^sandbox allow-scripts;/);
+    expect(designPage).toHaveBeenCalledOnce();
+    await gateway.stop();
+
+    const capture = createCapturingServe();
+    const bare = setup({ serve: capture.serve });
+    await bare.gateway.start();
+    const missing = await capture.getFetch()!(
+      new Request(page, { headers: { host: "192.168.1.20:9443" } }),
+      lanFacts,
+    );
+    expect(missing.status).toBe(404);
+    await bare.gateway.stop();
   });
 });
 

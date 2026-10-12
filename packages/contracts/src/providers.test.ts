@@ -490,9 +490,50 @@ describe("provider registry contracts", () => {
       }),
     ).toThrow();
 
-    for (const excessField of ["account", "token", "codexHome", "experimentalApi"] as const) {
+    for (const excessField of ["account", "token", "experimentalApi"] as const) {
       expect(() => decodeProviderInstance({ ...codex, [excessField]: "must-not-cross" })).toThrow();
     }
+    expect(
+      decodeProviderInstance({
+        ...codex,
+        configuration: {
+          ...codex.configuration,
+          codexHome: "/Users/example/.codex-accounts/11111111-1111-4111-8111-111111111111",
+          accent: "teal",
+        },
+      }).configuration,
+    ).toMatchObject({
+      kind: "codex-cli",
+      codexHome: "/Users/example/.codex-accounts/11111111-1111-4111-8111-111111111111",
+      accent: "teal",
+    });
+    expect(() =>
+      decodeProviderInstance({
+        ...codex,
+        configuration: { ...codex.configuration, codexHome: "/Users/example/.codex/auth.json" },
+      }),
+    ).toThrow();
+    expect(
+      decodeProviderRegistryCommand({
+        kind: "change-codex-configuration",
+        instanceId: ids.instance,
+        expectedVersion: 1,
+        configuration: {
+          kind: "codex-cli",
+          binaryPath: "/opt/homebrew/bin/codex",
+          codexHome: "/Users/example/.codex-accounts/11111111-1111-4111-8111-111111111111",
+          accent: "violet",
+        },
+        reassignAccountDirectory: true,
+      }),
+    ).toMatchObject({
+      kind: "change-codex-configuration",
+      reassignAccountDirectory: true,
+      configuration: {
+        kind: "codex-cli",
+        accent: "violet",
+      },
+    });
   });
 
   it("decodes only strict non-secret Claude instances, events, and commands", () => {
@@ -535,6 +576,48 @@ describe("provider registry contracts", () => {
         configuration: { ...claude.configuration, authentication: "api-key" },
       }),
     ).toMatchObject({ kind: "change-claude-configuration" });
+    const isolated = {
+      ...claude,
+      configuration: {
+        ...claude.configuration,
+        configDirectory: "/Users/example/.claude-accounts/00000000-0000-4000-8000-000000000001",
+        accent: "teal" as const,
+      },
+    };
+    expect(decodeProviderInstance(isolated)).toEqual(isolated);
+    expect(() =>
+      decodeProviderInstance({
+        ...claude,
+        configuration: {
+          ...claude.configuration,
+          configDirectory: "/Users/example/.claude/.credentials.json",
+        },
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeProviderInstance({
+        ...claude,
+        configuration: {
+          ...claude.configuration,
+          configDirectory: "/Users/example/.claude/.credentials.json////",
+        },
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeProviderInstance({
+        ...claude,
+        configuration: {
+          ...claude.configuration,
+          configDirectory: "C:\\Users\\example\\.claude-accounts\\work",
+        },
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeProviderInstance({
+        ...claude,
+        configuration: { ...claude.configuration, accent: "magenta" },
+      }),
+    ).toThrow();
 
     for (const excessField of [
       "oauthToken",
@@ -2214,6 +2297,72 @@ describe("provider registry contracts", () => {
     ).toMatchObject({ capabilities: { modelSwitch: "supported" } });
     expect(() =>
       decodeProviderObservedState({ ...observed, rawDiagnostics: { port: 1234 } }),
+    ).toThrow();
+  });
+
+  it("carries a runtime's integration and refuses one that claims tools without a transport", () => {
+    const observed = {
+      instanceId: ids.instance,
+      readiness: "ready",
+      processState: "stopped",
+      models: [],
+      capabilities: {
+        streaming: "supported",
+        resume: "supported",
+        interruption: "supported",
+        approvals: "supported",
+        userQuestions: "supported",
+        reasoning: "supported",
+        usage: "supported",
+        toolActivity: "supported",
+        fileChanges: "supported",
+        diffs: "supported",
+        taskProgress: "supported",
+        nativeChildAgents: "unavailable",
+        harnessAutoReview: "unsupported",
+        nativeAttachments: "supported",
+        nativeWebResearch: "unsupported",
+        appManagedTools: "supported",
+        citations: "supported",
+      },
+      observedAt: occurredAt,
+    } as const;
+    const integration = {
+      tools: { status: "available", transport: "session-mcp-bridge" },
+      activity: { source: "session", observes: ["replies", "tool-calls"] },
+      resume: "precise",
+    } as const;
+
+    expect(decodeProviderObservedState({ ...observed, integration })).toMatchObject({
+      integration,
+    });
+    expect(
+      decodeProviderObservedState({
+        ...observed,
+        integration: {
+          tools: { status: "unavailable", reason: "no-transport" },
+          activity: { source: "none" },
+          resume: "none",
+        },
+      }).integration?.tools,
+    ).toEqual({ status: "unavailable", reason: "no-transport" });
+    expect(() =>
+      decodeProviderObservedState({
+        ...observed,
+        integration: { ...integration, tools: { status: "available" } },
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeProviderObservedState({
+        ...observed,
+        integration: { ...integration, activity: { source: "screen" } },
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeProviderObservedState({
+        ...observed,
+        integration: { ...integration, resume: "maybe" },
+      }),
     ).toThrow();
   });
 });

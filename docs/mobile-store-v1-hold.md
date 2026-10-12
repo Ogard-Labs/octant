@@ -10,7 +10,8 @@ work.
 The Current Release Boundary in `AGENTS.md` states the first release is the
 Apple Silicon technical preview with the provider-neutral plugin/skill
 marketplace, and lists native mobile store distribution among items not to add
-unless a decision record and an explicit request authorize that scope.
+unless an explicit request authorizes that scope and the current specification
+documents its authority and release boundaries.
 [Roadmap Later](roadmap.md#later) defers mobile maturity (including public store
 distribution) until designed.
 
@@ -44,8 +45,8 @@ All of the following, in one coherent change set:
 
 1. Mobile maturity phases A–D dogfooded enough that store distribution is the
    remaining gap ([mobile-maturity-phases.md](mobile-maturity-phases.md)).
-2. A decision record updates or extends 0013 / the release boundary for public
-   listing, privacy copy, and signing ownership.
+2. The architecture's remote-access rules and the release boundary are updated
+   for public listing, privacy copy, and signing ownership.
 3. An explicit maintainer request authorizes that scoped store work.
 
 Until then the parent Later item's store-distribution slice stays a reviewable

@@ -6,6 +6,22 @@ import { describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { CodeComposerAdapter } from "./CodeComposerAdapter";
 import type { ProjectId } from "@octant/contracts/projects";
+import { decodeHostId, LOCAL_HOST_ID } from "@octant/contracts/host";
+
+const twoHosts = [
+  {
+    hostId: LOCAL_HOST_ID,
+    displayName: "This computer",
+    health: "healthy" as const,
+    capabilities: ["chat", "work", "code"],
+  },
+  {
+    hostId: decodeHostId("11111111-1111-4111-8111-111111111111"),
+    displayName: "Studio",
+    health: "healthy" as const,
+    capabilities: ["chat", "work", "code"],
+  },
+];
 
 type DraftAnchor = {
   readonly kind: "draft";
@@ -235,7 +251,7 @@ describe("CodeComposerAdapter", () => {
   });
 
   it("puts Project, branch, and Environment on the context row inside the composer, above the prompt", () => {
-    const { container } = render(<CodeComposerAdapter {...defaultProps} />);
+    const { container } = render(<CodeComposerAdapter {...defaultProps} hosts={twoHosts} />);
     const frame = container.querySelector(".composer");
     const dock = container.querySelector(".composer-tray");
     const row = container.querySelector(".composer-row");
@@ -327,6 +343,22 @@ describe("CodeComposerAdapter", () => {
     const trailing = container.querySelector(".composer-tray__trailing");
     expect(leading?.textContent).toContain("Choose a Project");
     expect(trailing?.textContent).not.toContain("Choose a Project");
+  });
+
+  it("hides the branch item on the Code start composer until a Project is chosen", () => {
+    const { projectId: _projectId, projectName: _projectName, ...rest } = defaultProps;
+    const { container } = render(
+      <CodeComposerAdapter {...rest} folderControl={<span>Choose a Project</span>} />,
+    );
+    const leading = container.querySelector(".composer-tray__leading");
+    expect(leading?.textContent).toContain("Choose a Project");
+    expect(leading?.textContent).not.toContain("Default branch");
+    expect(screen.queryByRole("button", { name: "Base branch" })).toBeNull();
+  });
+
+  it("shows the branch selector once a Project is chosen", () => {
+    render(<CodeComposerAdapter {...defaultProps} />);
+    expect(screen.getByRole("button", { name: "Base branch" })).toHaveTextContent("development");
   });
 
   it("keeps repository context on the context row inside the composer", () => {

@@ -402,8 +402,8 @@ html[data-octant-native-host="true"]
   display: inline-flex;
   height: 28px;
   align-items: center;
-  gap: 5px;
-  padding: 0 7px;
+  gap: var(--oct-space-1);
+  padding: 0 var(--oct-space-2);
   border: 1px solid var(--oct-border);
   border-radius: var(--oct-radius-md);
   /* Outlined, not filled. The fill named here was a token nothing defined, so
@@ -473,7 +473,7 @@ html[data-octant-native-host="true"]
   right: 0;
   display: grid;
   width: 180px;
-  padding: 5px;
+  padding: var(--oct-space-1);
   background: var(--oct-surface);
   border: 1px solid var(--oct-border);
   border-radius: var(--oct-radius-sm);
@@ -597,7 +597,6 @@ html[data-octant-native-host="true"]
   width: 7px;
   background: transparent;
   cursor: col-resize;
-  outline: 0;
 }
 
 .shell-frame__sidebar-resize::before {
@@ -611,7 +610,8 @@ html[data-octant-native-host="true"]
 }
 
 /* The same feedback the system's .split-handle gives: the hairline takes the
-   accent ink while grabbed. Keyboard focus remains visually quiet. */
+   accent ink while grabbed. Keyboard focus also draws the shared focus edge,
+   which is what tells it apart from the pointer. */
 .shell-frame__sidebar-resize:hover::before,
 .shell-frame__sidebar-resize:focus-visible::before {
   background: var(--oct-accent-fg);
@@ -1084,7 +1084,7 @@ html[data-octant-native-host="true"]
   min-width: 0;
   flex: 0 1 auto;
   align-items: center;
-  gap: 3px;
+  gap: var(--oct-space-1);
   color: var(--oct-meta);
   font-size: var(--oct-text-xs);
   line-height: 1.3;
@@ -1530,7 +1530,7 @@ html[data-octant-native-host="true"]
 }
 
 .thread-row-info-card__state {
-  padding: 2px 7px;
+  padding: 2px var(--oct-space-2);
   color: var(--oct-muted);
   background: var(--oct-fg-soft);
   border-radius: var(--oct-radius-pill);
@@ -1560,7 +1560,7 @@ html[data-octant-native-host="true"]
 .thread-row-info-card__facts {
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: var(--oct-space-1);
 }
 
 .thread-row-info-card__fact {
@@ -1677,7 +1677,7 @@ html[data-octant-native-host="true"]
 .thread-row-context-menu [role="menuitem"] {
   min-height: 26px;
   gap: var(--oct-space-2);
-  padding: 3px var(--oct-space-2);
+  padding: var(--oct-space-1) var(--oct-space-2);
   border-radius: var(--oct-radius-sm);
   font-size: var(--oct-text-detail);
   line-height: 1.25;
@@ -2339,11 +2339,9 @@ html[data-octant-native-host="true"]
   }
 }
 
-@media (prefers-contrast: more) {
-  .shell-frame > .window-chrome,
-  .shell-frame > .sidebar {
-    border-color: var(--octant-border-strong);
-  }
+html[data-octant-increased-contrast="true"] .shell-frame > .window-chrome,
+html[data-octant-increased-contrast="true"] .shell-frame > .sidebar {
+  border-color: var(--octant-border-strong);
 }
 
 /* Sidebar background image + scrim stacking context.
@@ -2617,7 +2615,7 @@ html[data-octant-native-host="true"]
   width: 100%;
   height: auto;
   min-height: 30px;
-  padding: 5px 8px;
+  padding: var(--oct-space-1) var(--oct-space-2);
   border-radius: var(--oct-radius-sm);
   color: var(--oct-fg);
   font-weight: 400;
@@ -2685,7 +2683,7 @@ html[data-octant-native-host="true"]
 .draft-thread__context-item {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: var(--oct-space-1);
   color: var(--octant-text-muted);
   font-size: var(--oct-text-detail);
   font-weight: 500;
@@ -3091,11 +3089,10 @@ form > .work-composer-adapter__attachments {
   gap: 8px;
   width: 100%;
   min-height: 28px;
-  padding: 5px 8px;
+  padding: var(--oct-space-1) var(--oct-space-2);
   color: var(--octant-text-primary);
   background: transparent;
   border: 0;
-  border-radius: var(--oct-radius-sm);
   cursor: pointer;
   font: inherit;
   font-size: var(--oct-text-detail);
@@ -3304,10 +3301,10 @@ form > .work-composer-adapter__attachments {
   display: flex;
   flex: 1 1 auto;
   align-items: center;
-  gap: 7px;
+  gap: var(--oct-space-2);
   min-width: 0;
   height: 28px;
-  padding: 0 9px;
+  padding: 0 var(--oct-space-2);
   border: 1px solid var(--oct-border-soft);
   border-radius: var(--oct-radius-sm);
   color: var(--oct-fg);
@@ -3400,7 +3397,7 @@ form > .work-composer-adapter__attachments {
   display: inline-flex;
   flex: 0 0 auto;
   align-items: center;
-  gap: 5px;
+  gap: var(--oct-space-1);
   color: var(--oct-muted);
   font-size: var(--oct-text-xs);
   white-space: nowrap;
@@ -3411,7 +3408,7 @@ form > .work-composer-adapter__attachments {
 }
 
 .browser-workspace__message {
-  padding: 7px 12px;
+  padding: var(--oct-space-2) var(--oct-space-3);
   color: var(--oct-warn-fg);
   border-bottom: 1px solid var(--octant-warning-border);
   background: var(--oct-warn-soft);
@@ -3722,8 +3719,8 @@ form > .work-composer-adapter__attachments {
   justify-content: stretch;
   justify-items: start;
   column-gap: 12px;
-  row-gap: 3px;
-  padding: 9px 8px;
+  row-gap: var(--oct-space-1);
+  padding: var(--oct-space-2) var(--oct-space-2);
   font-weight: 400;
   text-align: left;
   white-space: normal;
@@ -3822,7 +3819,7 @@ form > .work-composer-adapter__attachments {
 @container (max-width: 440px) {
   .code-home__row {
     row-gap: 4px;
-    padding: 9px 8px;
+    padding: var(--oct-space-2) var(--oct-space-2);
   }
 
   .code-home__row .code-home__badge[data-tone] {
@@ -4094,7 +4091,7 @@ form > .work-composer-adapter__attachments {
   min-width: 0;
   align-items: center;
   gap: 4px;
-  padding: 1px 7px;
+  padding: 1px var(--oct-space-2);
   border-radius: var(--oct-radius-pill);
   color: var(--oct-fg-2);
   background: var(--octant-control);

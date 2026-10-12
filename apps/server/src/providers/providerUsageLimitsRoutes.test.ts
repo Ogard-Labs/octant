@@ -35,7 +35,8 @@ describe("provider usage limit routes", () => {
     expect(listed?.status).toBe(200);
     expect(refreshed?.status).toBe(200);
     expect(service.snapshot).toHaveBeenCalledOnce();
-    expect(service.refresh).toHaveBeenCalledOnce();
+    // A person pressed refresh: the one call that may ask a costly source.
+    expect(service.refresh).toHaveBeenCalledExactlyOnceWith({ onDemand: true });
     expect(await listed?.json()).toEqual(snapshot);
   });
 

@@ -44,9 +44,11 @@ tombstone rather than leaving a hole with no explanation.
   sentence is Octant's, taken from a bounded code on the attempt, and the
   support correlation stays beside it. A call the app itself is running does
   not hang the turn past the turn's own deadline.
-- **Local clients**: reopening Electron or the canonical browser URL after
-  sleep or a host restart renews process-local client context automatically.
-  It does not create another store or require a recovery workflow.
+- **Local clients**: reopening Electron after sleep or a host restart renews
+  its client context automatically. A browser tab keeps its session across a
+  reload; after a host restart it asks you to open Octant from the desktop app
+  or run `octant web` again, because a browser session starts only from that
+  one-time link. Neither creates another store or needs a recovery workflow.
 - **Connection lost**: a Chat thread that cannot reach the host shows one notice,
   **Can't reach the host**, with **Retry now**, and changes to **Reconnected** for a
   moment when the host answers. The subagent card and the message queue only dim
@@ -58,8 +60,10 @@ tombstone rather than leaving a hole with no explanation.
   retains it and its attachments when you close the conversation. You can
   inspect, edit, reorder or remove pending messages from the queue. Normal
   completion starts the next message. A stopped or failed turn, changed access
-  or unavailable attachment holds the queue and explains why. After a host
-  restart, review the retained messages and choose **Resume queue**. Octant
+  or unavailable attachment holds the queue and explains why. While the host
+  holds queued follow-ups, the composer shows **Follow-up paused** with
+  **Resume** without opening the queue. After a host
+  restart, review the retained messages and choose **Resume**. Octant
   checks current access again and never blindly repeats an uncertain send.
   If the connection drops before confirmation, use **Check queue** after
   reconnecting. Octant keeps the original submission identity across navigation

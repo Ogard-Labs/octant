@@ -1,16 +1,22 @@
 import type { NativeMenuRequest, NativeMenuOutcome } from "@octant/contracts/shell";
 import type { OpenInApplicationId } from "@octant/contracts/shell";
 
-export interface MenuBarTask {
+/** The thread a window shows, or the one a menu-bar row asks it to open. */
+export interface MenuBarOpenThread {
   readonly mode: "chat" | "work" | "code";
   readonly threadId: string;
-  readonly title: string;
-  readonly activity: "working" | "attention" | "unread";
 }
 
 export type ResolvedSidebarMaterial = "opaque" | "translucent";
 export type BoundProjectType = "work" | "code";
 export type ProviderCredentialStatus = "stored" | "missing" | "unavailable";
+/** A key's label and id. The secret stays with the host and is never returned. */
+export interface ProviderApiKeySummary {
+  readonly id: string;
+  readonly label: string;
+  /** The key a request sends first. Exactly one key per provider is active. */
+  readonly active: boolean;
+}
 export type ProjectRootPickerResult =
   | Readonly<{ kind: "cancelled" }>
   | Readonly<{ kind: "selected"; receiptId: string; displayName: string }>;
@@ -352,10 +358,9 @@ export interface OctantHostBridge extends Partial<RemoteAccessAdministrationBrid
   readonly checkManagedToolUpdates?: (tool?: string) => Promise<unknown>;
   readonly setManagedToolAutomaticUpdates?: (enabled: boolean) => Promise<unknown>;
   readonly notifyAttention?: (request: AttentionNotificationRequest) => Promise<void>;
-  readonly setMenuBarTasks?: (tasks: ReadonlyArray<MenuBarTask>) => Promise<void>;
-  readonly subscribeMenuBarTask?: (
-    listener: (target: Pick<MenuBarTask, "mode" | "threadId">) => void,
-  ) => () => void;
+  /** Tells the menu bar which thread this window shows, so its done row clears. */
+  readonly setMenuBarOpenThread?: (thread: MenuBarOpenThread | null) => Promise<void>;
+  readonly subscribeMenuBarTask?: (listener: (target: MenuBarOpenThread) => void) => () => void;
   readonly setAttentionBadge?: (count: number) => Promise<void>;
   readonly attachBrowserSurface?: (request: BrowserSurfaceRequest) => Promise<BrowserSurfaceState>;
   readonly updateBrowserSurfaceBounds?: (request: BrowserSurfaceRequest) => Promise<void>;
@@ -438,6 +443,33 @@ export interface OctantHostBridge extends Partial<RemoteAccessAdministrationBrid
    */
   readonly selectRuntimeBinary?: () => Promise<LocalPluginFolderPickerResult>;
   readonly setProviderCredential: (providerInstanceId: string, credential: string) => Promise<void>;
+  readonly listProviderApiKeys: (
+    providerInstanceId: string,
+  ) => Promise<readonly ProviderApiKeySummary[]>;
+  /** Adds a key after the existing ones. Never replaces or removes a key. */
+  readonly addProviderApiKey: (
+    providerInstanceId: string,
+    credential: string,
+    label?: string,
+  ) => Promise<ProviderApiKeySummary>;
+  readonly renameProviderApiKey: (
+    providerInstanceId: string,
+    keyId: string,
+    label: string,
+  ) => Promise<void>;
+  readonly replaceProviderApiKey: (
+    providerInstanceId: string,
+    keyId: string,
+    credential: string,
+  ) => Promise<void>;
+  readonly removeProviderApiKey: (providerInstanceId: string, keyId: string) => Promise<void>;
+  readonly setActiveProviderApiKey: (providerInstanceId: string, keyId: string) => Promise<void>;
+  /** Swaps a key with its neighbour in the list. The first key up and the last key down do nothing. */
+  readonly moveProviderApiKey: (
+    providerInstanceId: string,
+    keyId: string,
+    direction: "up" | "down",
+  ) => Promise<void>;
   readonly setSidebarMaterialPreference: (preference: "opaque" | "system") => Promise<void> | void;
   readonly setSidebarVibrancyMode?: (mode: "off" | "subtle" | "strong") => Promise<void> | void;
   readonly subscribeResolvedMaterial: (
@@ -450,6 +482,11 @@ export interface OctantHostBridge extends Partial<RemoteAccessAdministrationBrid
    * translucency without host vibrancy shows the desktop behind sharp. Absent
    * on hosts that never apply vibrancy.
    */
+  /**
+   * The desktop's reserved shortcut for leaving a running Canvas prototype,
+   * read before the frame sees the key. Absent outside the desktop app.
+   */
+  readonly subscribeCanvasFrameFocusEscape?: (listener: () => void) => () => void;
   readonly subscribeResolvedSidebarVibrancy?: (
     listener: (vibrancy: "sidebar" | null) => void,
   ) => () => void;
@@ -478,7 +515,9 @@ export function getInjectedHostBridge(
     bridge === null ||
     typeof (bridge as Record<string, unknown>).setProviderCredential !== "function" ||
     typeof (bridge as Record<string, unknown>).providerCredentialStatus !== "function" ||
-    typeof (bridge as Record<string, unknown>).clearProviderCredential !== "function"
+    typeof (bridge as Record<string, unknown>).clearProviderCredential !== "function" ||
+    typeof (bridge as Record<string, unknown>).listProviderApiKeys !== "function" ||
+    typeof (bridge as Record<string, unknown>).addProviderApiKey !== "function"
   ) {
     throw new TypeError("Invalid Octant host bridge.");
   }

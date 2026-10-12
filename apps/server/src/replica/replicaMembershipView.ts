@@ -58,6 +58,8 @@ export function replicaMembershipView(input: {
   readonly computerName: ReplicaDisplayName;
   /** The restore of this computer's current identity, once one started. */
   readonly restore?: ReplicaRestoreProgress | undefined;
+  /** This identity's join confirmation read, once one started. */
+  readonly joinRead?: ReplicaRestoreProgress | undefined;
 }): ReplicaMembershipView {
   const { state } = input;
   const local = state.local;
@@ -111,7 +113,7 @@ export function replicaMembershipView(input: {
                 ]
               : [],
           ),
-    status: syncStatus(state, input.restore),
+    status: syncStatus(state, input.restore, input.joinRead),
   };
 }
 
@@ -199,6 +201,7 @@ function approvers(
 function syncStatus(
   state: ReplicaMembershipState,
   restore: ReplicaRestoreProgress | undefined,
+  joinRead: ReplicaRestoreProgress | undefined,
 ): ReplicaSyncStatus {
   const failure = state.lastStoreFailure;
   return {
@@ -206,6 +209,8 @@ function syncStatus(
     lastPull: { kind: "not-available" },
     queued: { kind: "not-available" },
     ...(restore === undefined ? {} : { restore }),
+    // A finished read has nothing left to show: the restore takes over.
+    ...(joinRead === undefined || joinRead.state === "finished" ? {} : { joinRead }),
     ...(failure === undefined
       ? {}
       : { lastError: { at: failure.at, phase: failure.phase, reason: failure.reason } }),

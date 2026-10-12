@@ -4,7 +4,12 @@ import {
   type CanvasDefinition,
 } from "@octant/contracts/canvas";
 import { MAX_ARTIFACT_PREVIEW_CHARACTERS } from "@octant/contracts/artifact-library";
-import { CHART_BAR_RADIUS, CHART_LINE_WIDTH } from "@octant/theme";
+import { CHART_BAR_RADIUS, CHART_LINE_WIDTH, DEFAULT_LIGHT_TOKENS } from "@octant/theme";
+import type { CanvasDiagramTone } from "@octant/contracts/canvas";
+import {
+  layoutCanvasDiagram,
+  type CanvasDiagramLayout,
+} from "@octant/domain/canvas-diagram-layout";
 import { layoutCanvasSankey } from "@octant/domain/canvas-sankey-layout";
 import { formatCanvasNumber } from "@octant/domain/canvas-number-format";
 import { layoutCanvasTreemap } from "@octant/domain/canvas-treemap-layout";
@@ -17,6 +22,11 @@ import {
   layoutCanvasBarList,
 } from "@octant/domain/canvas-bar-list-layout";
 import { layoutCanvasComparisonMatrix } from "@octant/domain/canvas-comparison-matrix";
+import {
+  canvasReadingOrder,
+  packCanvasDashboardGrid,
+  type CanvasReadingItem,
+} from "@octant/domain/canvas-dashboard-layout";
 import {
   canvasMockupCallouts,
   canvasMockupFrames,
@@ -150,10 +160,19 @@ export function renderArtifactSvg(
   ];
 
   let y = PADDING + 26;
-  for (const block of definition.blocks) {
+  // A tab's or column's children, a dashboard among them, draw in the group's
+  // order as they would at the top level.
+  const items = canvasReadingOrder(definition.blocks).flatMap((item) =>
+    item.kind === "group" ? item.sections.flat() : [item],
+  );
+  for (const item of items) {
     if (y > height - PADDING) break;
-    if (!DRAWN_KINDS.has(block.kind)) continue;
-    const drawn = drawBlock(block, y, palette, width);
+    const drawn =
+      item.kind === "dashboard"
+        ? dashboardGrid(item, y, palette, width, height - PADDING)
+        : DRAWN_KINDS.has(item.block.kind)
+          ? drawBlock(item.block, y, palette, width)
+          : undefined;
     if (drawn === undefined) continue;
     parts.push(drawn.markup);
     y += drawn.height + ROW_GAP;
@@ -221,7 +240,7 @@ function drawBlock(
     case "timeline":
       return { markup: timeline(y, width, palette), height: 18 };
     case "diagram":
-      return { markup: diagram(block, y, width, palette), height: 46 };
+      return diagram(block, y, width, palette);
     case "sequence":
       return { markup: sequence(block, y, width, palette), height: 64 };
     case "state":
@@ -261,6 +280,76 @@ function drawBlock(
     default:
       return undefined;
   }
+}
+
+const DASHBOARD_GAP = 6;
+const DASHBOARD_INSET = 4;
+/** The narrowest column a picture keeps before it draws fewer columns. */
+const DASHBOARD_MIN_COLUMN = 64;
+
+/**
+ * A dashboard as its title over a grid of framed cells, packed in reading
+ * order the way the screen's grid flows. Each cell draws its block exactly as
+ * the block draws alone, at the cell's width, inside a nested viewport (which
+ * clips by default), so a long label never spills into its neighbour. A narrow picture
+ * draws fewer columns, as the screen does.
+ */
+function dashboardGrid(
+  item: Extract<CanvasReadingItem<CanvasBlock>, { readonly kind: "dashboard" }>,
+  y: number,
+  palette: ArtifactThumbnailPalette,
+  canvasWidth: number,
+  bottom: number,
+): DrawnBlock {
+  const width = canvasWidth - PADDING * 2;
+  const fit = Math.max(
+    1,
+    Math.floor((width + DASHBOARD_GAP) / (DASHBOARD_MIN_COLUMN + DASHBOARD_GAP)),
+  );
+  const columns = Math.min(item.columns, fit);
+  const columnWidth = (width - DASHBOARD_GAP * (columns - 1)) / columns;
+  const parts = [
+    text(
+      PADDING,
+      y + 9,
+      clamp(item.dashboard.title, titleLength(canvasWidth)),
+      10,
+      palette.ink,
+      600,
+    ),
+  ];
+  const packed = packCanvasDashboardGrid(item.cells, columns).map((cell) => {
+    const cellWidth = columnWidth * cell.span + DASHBOARD_GAP * (cell.span - 1);
+    const innerWidth = Math.max(1, cellWidth - DASHBOARD_INSET * 2);
+    const drawn = DRAWN_KINDS.has(cell.block.kind)
+      ? drawBlock(cell.block, DASHBOARD_INSET, palette, innerWidth + PADDING * 2)
+      : undefined;
+    return { cell, cellWidth, drawn };
+  });
+  let rowY = y + 16;
+  const rows = new Set(packed.map(({ cell }) => cell.row));
+  for (const row of [...rows].sort((a, b) => a - b)) {
+    const inRow = packed.filter(({ cell }) => cell.row === row);
+    const rowHeight =
+      Math.max(...inRow.map(({ drawn }) => drawn?.height ?? 12)) + DASHBOARD_INSET * 2;
+    // The grid stops at the first row the picture cannot hold whole: a row
+    // cut through its cells reads as broken tiles, and the card's markup
+    // budget is better left to the rows a person can read.
+    if (row > 0 && rowY + rowHeight > bottom) break;
+    for (const { cell, cellWidth, drawn } of inRow) {
+      const x = PADDING + cell.column * (columnWidth + DASHBOARD_GAP);
+      parts.push(
+        `<svg x="${String(round(x))}" y="${String(round(rowY))}" width="${String(round(cellWidth))}" height="${String(rowHeight)}">` +
+          `<rect x="0.5" y="0.5" width="${String(round(cellWidth - 1))}" height="${String(rowHeight - 1)}" rx="3" fill="none" stroke="${palette.muted}"/>` +
+          (drawn === undefined
+            ? ""
+            : `<g transform="translate(${String(DASHBOARD_INSET - PADDING)} 0)">${drawn.markup}</g>`) +
+          "</svg>",
+      );
+    }
+    rowY += rowHeight + DASHBOARD_GAP;
+  }
+  return { markup: parts.join(""), height: rowY - DASHBOARD_GAP - y };
 }
 
 function lines(y: number, count: number, width: number, palette: ArtifactThumbnailPalette): string {
@@ -634,35 +723,151 @@ function timeline(y: number, width: number, palette: ArtifactThumbnailPalette): 
   );
 }
 
+/**
+ * A board drawn from the same domain layout the renderer uses, scaled into
+ * the band: the same nodes in the same places, with their shapes, edge
+ * styles, and group tones. Labels are drawn once the scale leaves them
+ * legible.
+ */
 function diagram(
   block: Extract<CanvasBlock, { readonly kind: "diagram" }>,
   y: number,
   width: number,
   palette: ArtifactThumbnailPalette,
+): DrawnBlock {
+  if (block.nodes.length === 0) return { markup: lines(y, 2, width, palette), height: 20 };
+  const layout = layoutCanvasDiagram(block);
+  const maxHeight = Math.round(width * 0.45);
+  const scale = Math.min(1, width / layout.width, maxHeight / layout.height);
+  return {
+    markup: drawCanvasDiagramLayout(layout, palette, {
+      x: PADDING,
+      y,
+      scale,
+      label: (value) => value,
+    }),
+    height: Math.ceil(layout.height * scale),
+  };
+}
+
+/** A tone's ink on the export's light card, read from the default theme. */
+function diagramToneInk(
+  tone: CanvasDiagramTone | undefined,
+  palette: ArtifactThumbnailPalette,
 ): string {
-  const nodes = block.nodes.slice(0, 5);
-  if (nodes.length === 0) return lines(y, 2, width, palette);
-  const slot = width / Math.max(nodes.length, 2);
-  const boxWidth = Math.max(24, Math.round(slot - 10));
-  const positions = nodes.map((_unused, index) => ({
-    x: Math.round(PADDING + index * slot),
-    y: index % 2 === 0 ? y : y + 24,
-  }));
-  const edges = positions
-    .slice(0, -1)
-    .map((position, index) => {
-      const next = positions[index + 1];
-      if (next === undefined) return "";
-      return `<line x1="${String(position.x + boxWidth)}" y1="${String(position.y + 9)}" x2="${String(next.x)}" y2="${String(next.y + 9)}" stroke="${palette.muted}" stroke-width="1"/>`;
-    })
-    .join("");
-  const boxes = positions
-    .map(
-      (position) =>
-        `<rect x="${String(position.x)}" y="${String(position.y)}" width="${String(boxWidth)}" height="18" rx="3" fill="none" stroke="${palette.accent}" stroke-width="1.2"/>`,
-    )
-    .join("");
-  return edges + boxes;
+  switch (tone) {
+    case "accent":
+      return DEFAULT_LIGHT_TOKENS["accent-text"] ?? palette.accent;
+    case "success":
+      return DEFAULT_LIGHT_TOKENS["success-text"] ?? palette.accent;
+    case "warning":
+      return DEFAULT_LIGHT_TOKENS["warning-text"] ?? palette.accent;
+    case "danger":
+      return DEFAULT_LIGHT_TOKENS["danger-text"] ?? palette.accent;
+    case "neutral":
+    case undefined:
+      return palette.muted;
+    default: {
+      const unhandled: never = tone;
+      return unhandled;
+    }
+  }
+}
+
+/**
+ * Draw a laid-out diagram as plain SVG elements: no ids, no markers, no
+ * script, so several can sit in one document. Arrowheads are drawn as small
+ * triangles on the last segment. `label` decides what text may leave the host.
+ */
+export function drawCanvasDiagramLayout(
+  layout: CanvasDiagramLayout,
+  palette: ArtifactThumbnailPalette,
+  placement: {
+    readonly x: number;
+    readonly y: number;
+    readonly scale: number;
+    readonly label: (value: string) => string;
+  },
+): string {
+  const { scale } = placement;
+  const at = (value: number, origin: number) => round(origin + value * scale);
+  const px = (value: number) => at(value, placement.x);
+  const py = (value: number) => at(value, placement.y);
+  const showLabels = scale >= 0.45;
+  const fontSize = round(Math.max(6, 12 * scale));
+  const parts: string[] = [];
+  for (const group of layout.groups) {
+    const ink = diagramToneInk(group.tone, palette);
+    const fill = group.tone === undefined ? "none" : ink;
+    parts.push(
+      `<rect x="${String(px(group.x))}" y="${String(py(group.y))}" width="${String(round(group.width * scale))}" height="${String(round(group.height * scale))}" rx="${String(round(8 * scale))}" fill="${fill}" fill-opacity="${group.tone === undefined ? "0" : "0.08"}" stroke="${ink}" stroke-width="1"${group.tone === undefined ? ' stroke-dasharray="4 3"' : ""}/>`,
+    );
+    if (showLabels) {
+      parts.push(
+        text(
+          px(group.x + 10),
+          py(group.y + 15),
+          placement.label(group.label),
+          fontSize,
+          palette.ink,
+        ),
+      );
+    }
+  }
+  for (const edge of layout.edges) {
+    const ink = edge.tone === undefined ? palette.muted : diagramToneInk(edge.tone, palette);
+    const points = edge.points.map((point) => `${String(px(point.x))},${String(py(point.y))}`);
+    parts.push(
+      `<polyline points="${points.join(" ")}" fill="none" stroke="${ink}" stroke-width="1.2"${edge.style === "dashed" ? ' stroke-dasharray="5 3"' : ""}/>`,
+    );
+    const end = edge.points.at(-1);
+    const before = edge.points.at(-2);
+    if (edge.style !== "line" && end !== undefined && before !== undefined) {
+      const angle = Math.atan2(end.y - before.y, end.x - before.x);
+      const size = Math.max(3, 8 * scale);
+      const tip = { x: px(end.x), y: py(end.y) };
+      const left = {
+        x: round(tip.x - size * Math.cos(angle - Math.PI / 7)),
+        y: round(tip.y - size * Math.sin(angle - Math.PI / 7)),
+      };
+      const right = {
+        x: round(tip.x - size * Math.cos(angle + Math.PI / 7)),
+        y: round(tip.y - size * Math.sin(angle + Math.PI / 7)),
+      };
+      parts.push(
+        `<path d="M${String(tip.x)} ${String(tip.y)} L${String(left.x)} ${String(left.y)} L${String(right.x)} ${String(right.y)} Z" fill="${ink}"/>`,
+      );
+    }
+    if (showLabels && edge.label !== undefined) {
+      parts.push(
+        text(
+          px(edge.labelX),
+          py(edge.labelY),
+          placement.label(edge.label),
+          fontSize,
+          palette.muted,
+        ),
+      );
+    }
+  }
+  for (const node of layout.nodes) {
+    const x = px(node.x);
+    const y = py(node.y);
+    const w = round(node.width * scale);
+    const h = round(node.height * scale);
+    const stroke = `fill="${palette.background}" stroke="${node.shape === "plain" ? palette.accent : palette.ink}" stroke-width="${node.shape === "plain" ? "1" : "1.3"}"`;
+    parts.push(
+      node.shape === "decision"
+        ? `<polygon data-node-id="${escapeXml(node.nodeId)}" points="${String(round(x + w / 2))},${String(y)} ${String(x + w)},${String(round(y + h / 2))} ${String(round(x + w / 2))},${String(y + h)} ${String(x)},${String(round(y + h / 2))}" ${stroke}/>`
+        : `<rect data-node-id="${escapeXml(node.nodeId)}" x="${String(x)}" y="${String(y)}" width="${String(w)}" height="${String(h)}" rx="${String(node.shape === "terminator" ? round(h / 2) : node.shape === "process" ? 1 : round(6 * scale))}" ${stroke}/>`,
+    );
+    if (showLabels) {
+      parts.push(
+        `<text x="${String(round(x + w / 2))}" y="${String(round(y + h / 2))}" font-size="${String(fontSize)}" fill="${palette.ink}" text-anchor="middle" dominant-baseline="middle">${escapeXml(placement.label(node.label))}</text>`,
+      );
+    }
+  }
+  return parts.join("");
 }
 
 function sequence(
@@ -1271,6 +1476,18 @@ function designFrames(
   palette: ArtifactThumbnailPalette,
 ): string {
   const height = 48;
+  if (block.size === "document") {
+    // A document is one page as wide as the Canvas: a sheet with a few lines.
+    return (
+      `<rect x="${String(PADDING)}" y="${String(y)}" width="${String(width)}" height="${String(height)}" rx="3" fill="none" stroke="${palette.accent}" stroke-width="1.2"/>` +
+      [0.4, 1, 0.62]
+        .map(
+          (share, index) =>
+            `<rect x="${String(PADDING + 8)}" y="${String(y + 9 + index * 10)}" width="${String(Math.round((width - 16) * share))}" height="${index === 0 ? "5" : "3"}" rx="1.5" fill="${palette.muted}" opacity="0.5"/>`,
+        )
+        .join("")
+    );
+  }
   const viewport = CANVAS_DESIGN_VIEWPORT[block.size];
   const frameWidth = Math.round((height * viewport.width) / viewport.height);
   const gap = 6;

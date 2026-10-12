@@ -203,6 +203,7 @@ describe("CodeService reads", () => {
         defaultPermissionPersistence: "current-session",
         requireGitRepository: true,
         allowDefaultFolderThreads: false,
+        defaultDiffLayout: "unified",
         version: 0,
         updatedAt: now,
       },
@@ -777,6 +778,7 @@ describe("CodeService commands", () => {
         expectedVersion: 0,
         defaultExecutionPolicy: "plan",
         defaultPermissionPersistence: "project-default",
+        defaultDiffLayout: "side-by-side",
         externalEditor: {
           executable: "/usr/local/bin/editor",
           arguments: ["--goto", "{file}:{line}:{column}"],
@@ -787,6 +789,7 @@ describe("CodeService commands", () => {
       settings: {
         defaultExecutionPolicy: "plan",
         defaultPermissionPersistence: "project-default",
+        defaultDiffLayout: "side-by-side",
         version: 1,
       },
     });
@@ -3364,6 +3367,61 @@ describe("CodeService checkout rebind", () => {
   });
 });
 
+describe("merging a fork's conversation back", () => {
+  const throughOperationId = "00000000-0000-4000-8000-000000005101";
+
+  it("hands an authorized fork to the host's merge and answers with its outcome", async () => {
+    const merge = vi.fn(async () => ({
+      status: "refused" as const,
+      reason: "already-merged" as const,
+    }));
+    const fixture = serviceFixture({ threads: [thread()], forkMergeBack: { merge } });
+
+    const result = await fixture.service.execute(ids.window, {
+      kind: "merge-code-fork-context",
+      threadId: ids.thread,
+      throughOperationId,
+    });
+
+    expect(merge).toHaveBeenCalledWith(ids.window, ids.thread, throughOperationId);
+    expect(result).toEqual({
+      kind: "fork-context-merge",
+      threadId: ids.thread,
+      outcome: { status: "refused", reason: "already-merged" },
+    });
+    // The thread record itself is never written by a merge.
+    expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+  });
+
+  it("refuses a fork in a Project this window may not reach before merging anything", async () => {
+    const merge = vi.fn();
+    const fixture = serviceFixture({
+      threads: [thread({ id: ids.unauthorizedThread, projectId: ids.unauthorizedProject })],
+      forkMergeBack: { merge },
+    });
+
+    await expect(
+      fixture.service.execute(ids.window, {
+        kind: "merge-code-fork-context",
+        threadId: ids.unauthorizedThread,
+        throughOperationId,
+      }),
+    ).rejects.toMatchObject({ failure: { category: "unauthorized" } });
+    expect(merge).not.toHaveBeenCalled();
+  });
+
+  it("answers unsupported on a host that cannot merge a fork back", async () => {
+    const fixture = serviceFixture({ threads: [thread()] });
+    expect(
+      await fixture.service.execute(ids.window, {
+        kind: "merge-code-fork-context",
+        threadId: ids.thread,
+        throughOperationId,
+      }),
+    ).toMatchObject({ outcome: { status: "refused", reason: "unsupported" } });
+  });
+});
+
 /**
  * Confined file listing (#code-file-explorer). Listing is a read, so Plan may
  * perform it; what gates it is the same root authority the save path uses.
@@ -4027,6 +4085,7 @@ function serviceFixture(
     readonly pullRequests?: CodeServiceOptions["pullRequests"];
     readonly gitHistory?: CodeServiceOptions["gitHistory"];
     readonly liveTurns?: CodeServiceOptions["liveTurns"];
+    readonly forkMergeBack?: CodeServiceOptions["forkMergeBack"];
   } = {},
 ) {
   const threads = options.threads ?? [thread()];
@@ -4133,6 +4192,7 @@ function serviceFixture(
     ...(options.gitHistory === undefined ? {} : { gitHistory: options.gitHistory }),
     ...(options.pullRequests === undefined ? {} : { pullRequests: options.pullRequests }),
     ...(options.liveTurns === undefined ? {} : { liveTurns: options.liveTurns }),
+    ...(options.forkMergeBack === undefined ? {} : { forkMergeBack: options.forkMergeBack }),
     ...(options.watcher === undefined
       ? {}
       : { watcher: options.watcher as unknown as NonNullable<CodeServiceOptions["watcher"]> }),

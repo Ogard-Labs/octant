@@ -16,6 +16,7 @@ import {
   type ManagedCodeThreadCreationDeps,
 } from "./managedCodeThreadCreation";
 import { ManagedRootGrantStore } from "./managedRootGrantStore";
+import type { CodeForkConversationReader } from "./codeForkHandoff";
 import type {
   ManagedWorktreeAuthorityPort,
   ManagedWorktreeFileSystemPort,
@@ -120,6 +121,8 @@ function harness(
     readonly fetch?: "fetched" | "failed" | "interrupted";
     readonly threads?: ReadonlyArray<CodeThread>;
     readonly forkPoint?: CodeForkPoint;
+    /** How a fork's conversation reads; defaults to a source whose history hands over. */
+    readonly forkConversation?: CodeForkConversationReader;
     readonly applySourceFiles?: ManagedCodeThreadCreationDeps["applySourceFiles"];
   } = {},
 ) {
@@ -224,6 +227,7 @@ function harness(
         ? {}
         : { applySourceFiles: options.applySourceFiles }),
     }),
+    forkConversation: options.forkConversation ?? readableForkConversation,
     ...(options.forkPoint === undefined
       ? {}
       : { forkPoints: { resolve: vi.fn(async () => options.forkPoint as CodeForkPoint) } }),
@@ -232,6 +236,34 @@ function harness(
 }
 
 const sourceThreadId = decodeCodeThreadId("60000000-0000-4000-8000-000000000070");
+
+/** A source whose conversation through the fork point can be handed over. */
+const readableForkConversation: CodeForkConversationReader = ({ source }) => ({
+  status: "available",
+  blocks: [
+    { kind: "conversation-summary", text: "summary" },
+    { kind: "user-message", text: "Forked conversation source: {}\nImplement this." },
+  ],
+  source: {
+    mode: "code",
+    threadId: String(source.id),
+    projectId: String(source.projectId),
+    threadVersion: source.version,
+    externalContentIngested: false,
+    point: {},
+  },
+  omissions: {
+    earlierMessages: 0,
+    unfinishedReplies: 0,
+    missingBodies: 0,
+    oversizedBodies: 0,
+    emptyBodies: 0,
+    attachments: 0,
+    truncatedMessages: 0,
+    truncatedCharacters: 0,
+    sourceTruncatedMessages: 0,
+  },
+});
 
 /** The thread a fork comes from, as the host holds it. */
 function sourceThread(): CodeThread {
@@ -344,6 +376,42 @@ describe("managed Code thread creation (composer submit -> worktree -> thread bi
     // A new thread holds no approval receipt, whatever the source was allowed.
     expect(result.thread.executionPolicy).toBe("approval-gated");
     expect(result.thread.permissionPersistence).toBe("current-session");
+  });
+
+  it("refuses before creating anything a fork whose conversation cannot be handed over", async () => {
+    const forkConversation = vi.fn<CodeForkConversationReader>(() => ({
+      status: "unavailable",
+      reason: "source-empty",
+    }));
+    const { codeService, git, journal } = harness({
+      threads: [sourceThread()],
+      forkPoint: {
+        status: "resolved",
+        head: "e".repeat(40),
+        files: { worktree: "f".repeat(40), index: "d".repeat(40) },
+      },
+      forkConversation,
+    });
+    const before = journal.append.mock.calls.length;
+
+    await expect(
+      codeService.execute(windowId, {
+        kind: "fork-code-thread",
+        threadId,
+        sourceThreadId,
+        throughOperationId: "60000000-0000-4000-8000-000000000071",
+        title: "Source (fork)",
+      }),
+    ).rejects.toMatchObject({
+      failure: { message: expect.stringContaining("no readable messages") },
+    });
+    // The source is read only through the fork point.
+    expect(forkConversation).toHaveBeenCalledWith({
+      source: expect.objectContaining({ id: sourceThreadId }),
+      throughOperationId: "60000000-0000-4000-8000-000000000071",
+    });
+    expect(git.addWorktree).not.toHaveBeenCalled();
+    expect(journal.append.mock.calls.length).toBe(before);
   });
 
   it("removes the new worktree and creates nothing when the forked files cannot be laid down", async () => {
