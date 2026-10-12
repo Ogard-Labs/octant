@@ -2942,7 +2942,18 @@ mechanisms are:
   a Work thread takes its access from Settings › Work when it is created —
   ask-first (the default) or auto-accept-edits — and keeps it; the host sets
   it, not the renderer, and a goal-loop round uses it only when the loop's own
-  ceiling allows auto-accept-edits too. Nothing else about a Work turn widens:
+  ceiling allows auto-accept-edits too. A goal-loop round runs as the host,
+  under the same per-process host scope a
+  [routine](#modes-chat-work-and-code) runs under, never through a window: it
+  runs with no window open, an open window lends it neither identity nor
+  Project binding, its turn is journaled as the host's `system` actor, and the
+  ordinary Work turn path still rechecks the thread, its active Work Project,
+  and the round's authority. A loop pauses while Work is turned off, since no
+  window stands in for the mode switch, and a round's turn rechecks the switch
+  at admission, so turning Work off while a round is being prepared refuses
+  it. An approval a round raises is
+  offered the way a routine's is, to the local windows bound to its Project.
+  Nothing else about a Work turn widens:
   it stays confined to the Project root, and providers without an auto-accept
   path keep asking;
   Full access is a remembered, per-Project decision. The host records that
