@@ -1030,7 +1030,10 @@ mode enabled the header is a single label and no control. Settings still
 offers a dropdown that names the current mode; a host that stored that choice
 keeps it. Code and Work keep separate Project View sets. The
 sidebar keeps Projects as a first-class destination alongside the active mode's
-compact thread list. The Projects directory and the selected Project overview
+compact thread list. When Work has no Chat or Work Projects but Code does, the
+empty Projects line says "Your Projects are in Code." with a Switch to Code
+link; starting a Work Project stays on the section header. Code does not
+mirror that hint. The Projects directory and the selected Project overview
 occupy the main workspace in turn, following the
 [workspace navigation rule](docs/design/workspace.md#navigation-and-projects).
 The directory provides search and All, Chat, Work, and Code filters. Project
