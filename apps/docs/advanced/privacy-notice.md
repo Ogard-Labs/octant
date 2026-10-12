@@ -43,10 +43,9 @@ On the host, Octant holds:
   and authorizes nothing.
 - **Credential references** — opaque Keychain pointers, never the secret
   values.
-- **Secrets in the credential store** — the API keys you entered, the key a
-  direct endpoint sign-in issued, and, only if you connected it, the Claude
-  for helpers token. They sit in the macOS Keychain (the Secret Service on
-  Linux) behind those references, never in the journal.
+- **Secrets in the credential store** — the API keys you entered and the key
+  a direct endpoint sign-in issued. They sit in the macOS Keychain (the
+  Secret Service on Linux) behind those references, never in the journal.
 - **Installed extension packages** under the host data directory.
 - **Logs** under the host logs directory.
 

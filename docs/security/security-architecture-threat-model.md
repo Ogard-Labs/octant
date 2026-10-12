@@ -376,14 +376,19 @@ guidance instead.
   - _Consequence._ A model-generated shell command inside either runtime reads that environment
     and those files with no Octant-owned OS boundary in the way, and a write the runtime's own sandbox permits
     without announcing is not one Octant's approvals can prompt for.
-- **A confined Claude launch may exec only `/usr/bin/security` and look up the security server.** The Claude runtime keeps
-  its subscription credential in the macOS Keychain rather than in its provider home, so a confined Plan
-  launch adds Seatbelt `extraRules` for `(allow process-exec (literal "/usr/bin/security"))` and
-  the security-server mach-lookup. Keychain files stay denied, as does every other exec including
-  `/bin/sh`. Residual risk: `/usr/bin/security` can return any item whose access list trusts that
-  tool. Linux confinement cannot take Seatbelt extra rules, so this carve-out is macOS-only.
-  Octant never reads, stores, or injects `CLAUDE_CODE_OAUTH_TOKEN`. A leftover helper-token
-  envelope is deleted on upgrade.
+- **A confined Claude subscription launch on macOS may fork, exec only `/usr/bin/security`, read the one login keychain
+  file, and look up the security server.** The Claude runtime keeps its subscription credential in the macOS Keychain
+  rather than in its provider home and reads it by running `security`. Measured on macOS 27.0.1 with Claude Code 2.1.296,
+  the runtime is signed out unless the profile allows all of `(allow process-exec (literal "/usr/bin/security"))`,
+  `(allow process-fork)`, read of the literal `~/Library/Keychains/login.keychain-db`, and the two security-server
+  mach-lookups; it needs no shell, no Keychain write, and no other file in that folder, and gets none. `/bin/sh` and every
+  other exec stay refused. Residual risk: `security` can return any item whose access list trusts that tool, and the
+  confined runtime can read the encrypted login keychain file, which protects its items only as well as the login
+  password does if a copy leaves the machine. Two things keep that grant from the model: the driver refuses a file tool
+  that names the folder, and the launch has no shell to copy the file with. A launch on an API key takes none of this.
+  Linux keeps the login in a file inside the account directory and takes no Seatbelt rule. A confined launch is preceded
+  by a sign-in check that runs inside the same sandbox. Octant never reads, stores, or injects
+  `CLAUDE_CODE_OAUTH_TOKEN`. A leftover helper-token envelope is deleted on upgrade.
 - Vibe disables its keyring lookup in the confined launch and receives its Mistral API key through
   Octant's `api-key` authentication instead.
 - **Version reads are confined; three readiness probes are not.** Every `--version` read prepares
