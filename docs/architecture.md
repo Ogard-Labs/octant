@@ -1368,6 +1368,19 @@ flowchart LR
   - On replay a clear deletes the thread's ingestion rows and zeroes its taint
     row, and the projection ignores an event at or below the last one it
     applied for that thread. A journal without the event replays unchanged.
+  - The surface is one notice in the composer of a Chat, Work, or Code thread
+    that a local window has open, drawn only while the thread is marked, with a
+    Review action. The notice reads the mark when the thread opens and again
+    when a turn starts or settles. Review lists the sources in plain words
+    with their counts and times (a row projected before the host recorded
+    times shows none), says that clearing removes nothing the model read and
+    that the next outside content marks the thread again, and holds Clear the
+    mark back while a turn is running or messages are queued. Every refusal
+    is shown as its own sentence, and a `stale` one reloads the list. A client
+    that is not on a loopback host (`externalContentAvailable`) neither
+    reads nor draws it. Approval prompts do not yet say that the mark is why
+    they ask: neither the MCP tool approval view nor the harness approval
+    carries that reason.
 - **Browser captures.** Only a screenshot the agent asks for with the browser
   tool, or the person takes with the Browser pane's Screenshot control, is kept
   with the thread that owns the Browser. The bytes live in the host's managed

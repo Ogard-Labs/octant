@@ -845,6 +845,7 @@ export function contextClient(): ContextClient {
       } as never;
     }),
     execute: vi.fn(),
+    externalContentAvailable: false,
     readExternalContent: vi.fn(),
     clearExternalContent: vi.fn(),
   };

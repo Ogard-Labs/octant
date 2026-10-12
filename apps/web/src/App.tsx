@@ -7255,6 +7255,7 @@ function LaunchedShell(
                       <ComposerContextMeterShortcut />
                       <ThreadStatsDetailDialog />
                       <WorkspaceView
+                        {...(contextClient === undefined ? {} : { contextClient })}
                         {...(welcomeBackdrop === undefined ? {} : { welcomeBackdrop })}
                         followUpSuggestions={{
                           client: followUpSuggestionClient,
