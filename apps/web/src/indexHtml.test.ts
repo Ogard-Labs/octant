@@ -41,6 +41,14 @@ describe("packaged renderer policy", () => {
     expect(directives.get("connect-src")).toBe(
       "'self' http://127.0.0.1:* http://localhost:* ws://127.0.0.1:* ws://localhost:*",
     );
+    // The app frames one page of its own: a running Canvas prototype, served
+    // by the loopback host to the packaged and Vite renderers, and by the same
+    // origin to a remote client, whose response policy narrows 'self' to that
+    // one path. Static designs are `srcdoc` frames, which frame-src does not
+    // govern.
+    expect(directives.get("frame-src")).toBe(
+      "'self' http://127.0.0.1:*/api/canvas/design-page http://localhost:*/api/canvas/design-page",
+    );
     expect(directives.has("frame-ancestors")).toBe(false);
     expect(csp).not.toMatch(/\[::1]/);
   });

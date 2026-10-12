@@ -182,6 +182,54 @@ leave the order the author listed, so the single column and keyboard focus both
 read in that order. Every placed chart keeps its disclosed data table. Under
 forced colours each cell keeps a CanvasText edge.
 
+**Tabs and columns.** A long Canvas arranges its blocks with `tabs` and
+`columns`, which hold blocks of the same document. Tabs use the
+shared surface tab strip (`.surface-tabs`): plain labels over a hairline, the
+selected tab in the foreground ink with a 2px underline, wrapping onto a second
+row rather than scrolling sideways. The strip is a `tablist`; the arrow keys,
+Home, and End move between tabs and Enter or Space opens one. The open tab is
+the reader's view state, so it is never written to the document and a shared or
+exported copy reads every tab in order. Columns are two to four equal tracks
+separated by the ordinary block gap, with no rule of their own; they fold to one
+track when the Canvas itself is narrower than the tracks need (a container
+query on the Canvas, not the window), so a sidebar Canvas on a wide display
+still reads as one column. Metric tiles inside a tab or a track gather into a
+tile row as they do in the document. A tab or a track may hold a KPI dashboard,
+drawn exactly as it is at the top level; a dashboard never holds tabs or
+columns, so nesting stops at tabs or columns, then a dashboard, then its tiles,
+and a block is placed in only one tab, track, or cell. Under forced colours only
+the open tab keeps an underline, in `Highlight`, so the selection never rests on
+hue.
+
+**Diagram marks.** A board's shapes say what a step is, not its colour: a
+process is a square-cornered box, a decision a diamond, a terminator a pill,
+and a node without a role the plain rounded box. The three shaped roles carry a
+slightly heavier rule in the secondary ink; every node keeps the surface fill
+and the foreground label. An edge is a 1.5px line in the axis ink; an `arrow`
+ends in a filled head, and a `dashed` edge is a 6/4 dashed arrow for an
+optional or asynchronous step, so the dash, not a hue, carries that. An edge or
+a group may take a tone, which is a theme role (`--oct-accent`,
+`--oct-success`, `--oct-warn`, `--oct-danger`, or the foreground for neutral),
+never an authored colour: a toned edge and its head take the role's ink, and a
+toned group is a region, a 9% wash of the role inside a solid 55% edge, with its
+name in the secondary ink. Each tone sits beside a label that says what it
+means. Groups never overlap, and an edge that would cross a box steps out
+beside the column. Under forced colours every node is Canvas with a CanvasText
+rule, edges and heads are CanvasText, and dashes and shapes keep the
+distinctions.
+
+**Gantt.** A plan's Gantt view is bars on days in a horizontally scrolling
+frame: a 200px title gutter, week ticks (four-week ticks, or a multiple of four
+weeks, on a long plan, so ticks stay a label apart) in hairline ink, and 16px
+bars with a 3px corner. The track stops widening at 4096px, past which days
+narrow below 2px and a bar keeps at least 2px. Days are calendar dates, named
+in UTC so no reader's time zone moves them. A bar takes the plan's status
+tones — to do is a faint foreground wash, doing the accent, blocked danger, and
+done success — and its status is also written after the title, so the tone is
+never the only channel. Dependency arrows are elbows in the axis ink. Tasks
+without dates are listed under the chart as ordinary task rows. Under forced
+colours bars are CanvasText, a to-do bar is outlined, and arrows are CanvasText.
+
 **Tables.** A table is columns of a declared type and rows in the order the
 author wrote. A column may name a `format` and a `display` of `text` (the plain
 reading, the default), `bar` (an in-cell bar whose length is the value's share
@@ -310,6 +358,6 @@ every theme.
   treemap, heatmap, bar-list, and comparison-matrix tests and snapshots beside
   their layouts in `packages/domain/src/`.
 - Palette and context-tone contracts: `apps/web/src/theme/visualLanguageContract.test.ts`.
-- Frame kit: `apps/web/src/canvas/blocks/designFrameKit.ts`.
+- Frame kit: `packages/domain/src/canvasDesignFrameKit.ts`.
 - Render changed blocks in light, dark, forced colours, and at phone width. A
   documentation-only move is not evidence of fresh rendered QA.

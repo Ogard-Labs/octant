@@ -822,9 +822,10 @@ type LimitLevel = "ok" | "near" | "spent";
 
 /**
  * One limit as a line and a bar: its name, when it resets, and how much is
- * used, over a bar that ranks it against the others at a glance. A limit near
- * its cap is marked on the row itself (`data-level`) and in the bar's value
- * text, so the warning ink is never the only sign.
+ * left, over a bar that ranks it against the others at a glance. The bar fills
+ * with the share left. A limit near its cap is marked on the row itself
+ * (`data-level`) and in the bar's value text, so the warning ink is never the
+ * only sign.
  */
 function LimitRow(props: {
   readonly level: LimitLevel;
@@ -856,11 +857,11 @@ function LimitRow(props: {
       </p>
       {props.percent === undefined ? null : (
         <span
-          aria-label={`${props.name} used`}
+          aria-label={`${props.name} left`}
           aria-valuemax={100}
           aria-valuemin={0}
           aria-valuenow={props.percent}
-          aria-valuetext={`${String(props.percent)}% used${levelText}`}
+          aria-valuetext={`${String(props.percent)}% left${levelText}`}
           className="context-window-popover__limit-meter"
           role="meter"
         >
@@ -893,18 +894,18 @@ function WindowLimitRow(props: {
 }) {
   const { limit } = props;
   const name = providerLimitWindowName(limit.window);
-  const percent = limit.utilization === undefined ? undefined : Math.round(limit.utilization * 100);
+  const used = limit.utilization === undefined ? undefined : Math.round(limit.utilization * 100);
   const level: LimitLevel =
     limit.status === "exhausted"
       ? "spent"
-      : limit.status === "warning" || (percent ?? 0) >= NEAR_LIMIT_PERCENT
+      : limit.status === "warning" || (used ?? 0) >= NEAR_LIMIT_PERCENT
         ? "near"
         : "ok";
   return (
     <LimitRow
       level={level}
       name={name.label}
-      {...(percent === undefined ? {} : { percent })}
+      {...(used === undefined ? {} : { percent: 100 - used })}
       {...(props.showScope && name.scope !== undefined ? { qualifier: name.scope } : {})}
       {...(limit.resetsAt === undefined
         ? {}
@@ -925,14 +926,14 @@ function BucketLimitRow(props: {
     return <LimitRow level="ok" name={props.label} value="Unavailable" />;
   }
   const { limit, remaining, resetsAt } = props.limit;
-  const percent = limit === 0 ? 0 : Math.round(((limit - remaining) / limit) * 100);
-  const level: LimitLevel =
-    remaining === 0 ? "spent" : percent >= NEAR_LIMIT_PERCENT ? "near" : "ok";
+  const left = limit === 0 ? 0 : Math.round((remaining / limit) * 100);
+  const used = 100 - left;
+  const level: LimitLevel = remaining === 0 ? "spent" : used >= NEAR_LIMIT_PERCENT ? "near" : "ok";
   return (
     <LimitRow
       level={level}
       name={props.label}
-      percent={percent}
+      percent={left}
       qualifier={`${compactTokens(remaining)} of ${compactTokens(limit)} left`}
       {...(resetsAt === undefined ? {} : { reset: resetCountdownLabel(resetsAt, props.now) })}
     />

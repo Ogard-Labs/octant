@@ -10,16 +10,15 @@
 policy, untrusted content, sandbox boundaries, credentials, subagents, extensions, and remote
 clients on one Octant host
 
-**Designs:**
-[`../specs/2026-07-13-octant-product-architecture-design.md`](../specs/2026-07-13-octant-product-architecture-design.md)
-(sections 7, 8, 16),
-[`../specs/2026-07-13-extensions-marketplace-design.md`](../specs/2026-07-13-extensions-marketplace-design.md)
-(section 4),
-[`../specs/2026-07-13-mixed-provider-subagents-design.md`](../specs/2026-07-13-mixed-provider-subagents-design.md)
+**Designs:** the current owners are
+[Architecture](../architecture.md): [security and authority](../architecture.md#security-and-authority),
+including subagents, and [modes](../architecture.md#modes-chat-work-and-code); and
+[extensions and skills](../architecture.md#extensions-and-skills).
 
 The Octant-managed endpoint agent loop, sustained Goal execution, editable egress rules, session
 fork/checkpoint/pause behavior, and CLI/GUI security ownership copy are further constrained by
-[`../specs/2026-08-12-octant-native-agent-harness-v1-design.md`](../specs/2026-08-12-octant-native-agent-harness-v1-design.md).
+the [native harness](../architecture.md#native-harness) rules in the architecture. (Earlier
+revisions of this model cited design files under `docs/specs/` that no longer exist.)
 
 **Companion feature threat models:**
 [`github-repository-onboarding-threat-model.md`](github-repository-onboarding-threat-model.md),
@@ -33,8 +32,10 @@ fork/checkpoint/pause behavior, and CLI/GUI security ownership copy are further 
 
 Octant is a local-first, server-authoritative workspace. Its security invariants were previously
 scattered across the original-rewrite design (tools/safety and remote access), the extensions trust
-design, and four feature-scoped threat models. This document consolidates them into one enforceable
-contract and specifies the remaining controls. It covers two threat families:
+design, and four feature-scoped threat models. This document gathers them into one threat summary.
+It is not a separate authority: the effective rules live in the
+[architecture](../architecture.md#security-and-authority), and where the two differ, the
+architecture wins and this summary is corrected. It covers two threat families:
 
 - **T-A Malicious tool calling.** Prompt injection through tool results, rogue MCP servers
   requesting undeclared capabilities, and model-invented tool invocations that were never defined
@@ -44,8 +45,9 @@ contract and specifies the remaining controls. It covers two threat families:
   parent, host, mode, or thread policy.
 
 Each control below names its enforcement layer and module and states whether it **exists today** in
-the repository or is **newly specified** by this design. Newly specified controls are the
-implementation backlog this design gates; nothing here weakens an existing control.
+the repository or was **newly specified** here. A newly specified control becomes a rule only when
+the architecture states it; until then it is a proposal tracked in Linear. Nothing here weakens an
+existing control.
 
 ## Assets
 
@@ -309,6 +311,20 @@ guidance instead.
   named reason (`search-query-refused-under-taint: …`) before any request leaves (Henrik decision
   2026-10-10). Residual risk: a short plain-word query can still leak a few words, but only to the
   endpoint the person chose. Revisit if a default hosted third-party search provider ships.
+- **A person may clear the mark.** The mark keeps its thread lifetime, and a person at a local
+  window may clear it after reviewing what the thread read (Henrik decision 2026-10-12). The clear
+  is journaled with who and when (`thread.external-content-cleared@1`: the thread, the window, the
+  cleared source labels, and the ingestion count, never content). It names the aggregate version the
+  person was shown, so an ingestion they have not seen refuses it, and it is refused while the
+  thread's turn is running, queued, or of unknown state. Only the local-only
+  `POST /api/thread-external-content` clears: a paired device is refused at the private listener
+  and at the handler, and the host's own scope, a tool, a command, model output, a structured
+  reference, an agent message, and a host-run turn cannot. It removes the mark only and holds for
+  nothing: the next ingestion marks the thread again, including content the thread had read before.
+  Residual risk: a clear removes nothing from the model's context, so content the person reviewed
+  can still steer the model, and every gate the mark was holding is open until the next ingestion.
+  It also changes nothing about a provider runtime's own tools, which run under the runtime's own
+  approvals and sandbox. Rules and replay in `docs/architecture.md`, Persistence.
 - **Structured references stay inert.** `@plugin` and `$skill` references cannot install, trust,
   enable, or elevate (exists today, `packages/plugin-host/src/composer.ts`); injected text that
   imitates them remains ordinary text.
@@ -593,6 +609,8 @@ Waived or skipped rows never count as passing (consistent with the Phase 4/16 ev
   capability class it did not declare.
 - An irreversible approval class auto-satisfied by a standing grant on a thread marked
   `external-content-ingested`.
+- A thread's `external-content-ingested` mark cleared by anything other than a person at a local
+  window.
 - Network egress from a tool subprocess whose resolved egress policy was `none`.
 
 ### Medium

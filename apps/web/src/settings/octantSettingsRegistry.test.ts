@@ -62,6 +62,7 @@ describe("octantSettingsRegistry", () => {
       "data-map",
       "thread-retention",
       "browser-site-approvals",
+      "tool-approvals",
     ]);
     expect(data?.keywords).toMatch(/backup/);
     expect(data?.keywords).toMatch(/retention/);

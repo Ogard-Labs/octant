@@ -54,6 +54,7 @@ describe("composeHostDataMap", () => {
     for (const relative of [
       "code-threads",
       "generated-images",
+      "browser-captures",
       "agent-messages",
       "agent-run-scratch",
       "agent-run-workspace-receipts",

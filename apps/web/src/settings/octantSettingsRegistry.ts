@@ -638,6 +638,13 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           keywords:
             "remembered websites browser origin site approval allow always forget revoke open page permission",
         },
+        {
+          id: settingId("tool-approvals"),
+          label: "Remembered tool approvals",
+          scope: "host",
+          keywords:
+            "remembered tool approvals mcp plugin extension server project allow always revoke ask again permission",
+        },
       ],
     },
     {

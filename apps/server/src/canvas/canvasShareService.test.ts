@@ -16,6 +16,7 @@ import {
 } from "@octant/contracts";
 import { EventActor } from "@octant/contracts/events";
 import {
+  cartPrototypeExample,
   commitsByHourExample,
   hottestFilesExample,
   onboardingFlowExample,
@@ -925,15 +926,37 @@ describe("CanvasShareService", () => {
     expect(JSON.stringify(opened.document.blocks)).not.toContain(ids.source);
   });
 
-  it("refuses to share a design as content a snapshot cannot carry, journaling nothing", () => {
+  it("refuses to share a design until the sharer acknowledges its markup is shared as written, journaling nothing", () => {
     const { service, shareEventNames } = harness({
       version: currentVersion({ blocks: [onboardingFlowExample] }),
     });
 
     const result = service.share(shareRequest(), context, project, localPrincipal);
 
-    expect(result).toMatchObject({ kind: "denied", denialCode: "unsafe-payload" });
+    expect(result).toMatchObject({ kind: "denied", denialCode: "consent-required" });
     expect(shareEventNames()).toHaveLength(0);
+  });
+
+  it("shares a design and a running prototype with that acknowledgement, and serves their frames to the audience", () => {
+    const blocks = [onboardingFlowExample, cartPrototypeExample];
+    const { service } = harness({ version: currentVersion({ blocks }) });
+    const request = shareRequest();
+
+    const shared = service.share(
+      {
+        ...request,
+        consent: { ...request.consent, acknowledgedMarkupSharedAsWritten: true },
+      },
+      context,
+      project,
+      localPrincipal,
+    );
+    expect(shared.kind).toBe("accepted");
+
+    const opened = service.access({ request: accessRequest(), principal: localPrincipal });
+    expect(opened.kind).toBe("allowed");
+    if (opened.kind !== "allowed") return;
+    expect(opened.document.blocks).toEqual(blocks);
   });
 
   it("answers a Canvas holding a block the snapshot format does not carry with a denial instead of throwing", () => {

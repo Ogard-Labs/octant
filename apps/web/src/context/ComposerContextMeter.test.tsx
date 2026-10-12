@@ -86,7 +86,7 @@ describe("ComposerContextMeter", () => {
         }),
       );
       const popover = screen.getByRole("dialog", { name: "Provider usage" });
-      expect(popover).toHaveTextContent("5-hour limit91%");
+      expect(popover).toHaveTextContent("5-hour limit9%");
       if (tokens === undefined) {
         expect(popover).toHaveTextContent("No usage has been reported for this thread.");
         expect(within(popover).getAllByText("Not reported").length).toBeGreaterThan(0);
@@ -658,7 +658,7 @@ describe("ComposerContextMeter", () => {
     expect(popover).toHaveTextContent(/not a context-window maximum/);
     expect(popover).not.toHaveTextContent("Context maximum");
     expect(popover).toHaveTextContent("Provider account limits");
-    expect(popover).toHaveTextContent(/5-hour limitResets now91%/);
+    expect(popover).toHaveTextContent(/5-hour limitResets now9%/);
   });
 
   it("moves the ring to its new share instead of snapping between renders", () => {
@@ -701,9 +701,9 @@ describe("ComposerContextMeter", () => {
     await user.click(
       screen.getByRole("button", { name: /Provider reported 25\.5K input and 38 output/i }),
     );
-    const meter = screen.getByRole("meter", { name: "5-hour limit used" });
-    expect(meter).toHaveAttribute("aria-valuetext", "91% used, running low");
-    expect((meter.firstElementChild as HTMLElement).style.width).toBe("91%");
+    const meter = screen.getByRole("meter", { name: "5-hour limit left" });
+    expect(meter).toHaveAttribute("aria-valuetext", "9% left, running low");
+    expect((meter.firstElementChild as HTMLElement).style.width).toBe("9%");
     // Near its cap is a fact on the row, not only the warning ink on the bar.
     expect(meter.closest(".context-window-popover__limit")).toHaveAttribute("data-level", "near");
   });
@@ -922,14 +922,14 @@ describe("ComposerContextMeter", () => {
       await user.click(screen.getByRole("button", { name: /Show context usage/i }));
       const popover = screen.getByRole("dialog", { name: "Provider usage" });
       // Two scopes are present, so each window keeps the provider's scope name.
-      expect(popover).toHaveTextContent("5-hour limitplan-aResets in 2 hr 18 min40%");
+      expect(popover).toHaveTextContent("5-hour limitplan-aResets in 2 hr 18 min60%");
       // Spent is a status, not a figure, so a reader relying on the visible
       // text alone (not the row's warning ink) still sees the provider's word.
-      expect(popover).toHaveTextContent("7-day limitplan-b100% · Spent");
+      expect(popover).toHaveTextContent("7-day limitplan-b0% · Spent");
       expect(popover).not.toHaveTextContent("primary");
-      expect(screen.getByRole("meter", { name: "7-day limit used" })).toHaveAttribute(
+      expect(screen.getByRole("meter", { name: "7-day limit left" })).toHaveAttribute(
         "aria-valuetext",
-        "100% used, spent",
+        "0% left, spent",
       );
     } finally {
       vi.useRealTimers();
@@ -955,7 +955,7 @@ describe("ComposerContextMeter", () => {
     const popover = screen.getByRole("dialog", { name: "Provider usage" });
     // The provider reports both a percentage and a "running low" status; the
     // percentage must not push the status word off the row.
-    expect(popover).toHaveTextContent("5-hour limit91% · Low");
+    expect(popover).toHaveTextContent("5-hour limit9% · Low");
   });
 
   it("opens the usage surface from a provider-reported panel and closes the panel", async () => {

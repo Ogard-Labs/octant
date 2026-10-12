@@ -1498,11 +1498,9 @@ button[aria-expanded="true"] > .project-overview-inspector__chevron {
   }
 }
 
-@media (prefers-contrast: more) {
-  .project-row[data-active="true"] {
-    box-shadow: none;
-    background: var(--octant-control-hover);
-  }
+html[data-octant-increased-contrast="true"] .project-row[data-active="true"] {
+  box-shadow: none;
+  background: var(--octant-control-hover);
 }
 
 .projects-page-layer {

@@ -1,4 +1,9 @@
-import { decodeCanvasId } from "@octant/contracts/canvas";
+import {
+  decodeCanvasId,
+  type CanvasDesignAssetResolution,
+  type CanvasDesignBlock,
+  type CanvasProvenance,
+} from "@octant/contracts/canvas";
 import type { ProviderToolImage } from "@octant/contracts";
 import { effectiveCanvasPresentation } from "@octant/domain";
 import { getDefaultToken } from "@octant/theme";
@@ -8,10 +13,12 @@ import type {
   CanvasService,
 } from "./canvasService";
 import {
+  canvasPreviewDesignWarnings,
   canvasPreviewWarnings,
   type CanvasPreviewPalette,
   type CanvasPreviewWarning,
 } from "./canvasPreviewWarnings";
+import { renderCanvasDesignPage } from "./canvasDesignPage";
 import type { CanvasPreviewRenderer } from "./canvasPreviewRenderer";
 
 /**
@@ -32,6 +39,15 @@ import type { CanvasPreviewRenderer } from "./canvasPreviewRenderer";
 export interface CanvasPreviewServiceOptions {
   readonly canvas: Pick<CanvasService, "get" | "history">;
   readonly renderer: CanvasPreviewRenderer;
+  /**
+   * Resolves a design's declared images under the version's own provenance,
+   * the same way a reader's draw does. Absent, every declared image reads as
+   * refused and is reported as a warning.
+   */
+  readonly resolveDesignAssets?: (
+    block: CanvasDesignBlock,
+    provenance: CanvasProvenance,
+  ) => Promise<ReadonlyArray<CanvasDesignAssetResolution>>;
   /** Milliseconds since the epoch; injectable so a test owns the clock. */
   readonly now?: () => number;
   readonly previewsPerWindow?: number;
@@ -152,7 +168,23 @@ export function createCanvasPreviewService(
         const presentation =
           request.width === "inline" ? "inline" : effectiveCanvasPresentation(definition);
         const palette = canvasPreviewPalette(request.theme);
-        const warnings = canvasPreviewWarnings({ definition, width, palette });
+        const designAssets = new Map<string, ReadonlyArray<CanvasDesignAssetResolution>>();
+        const resolveDesignAssets = options.resolveDesignAssets;
+        if (resolveDesignAssets !== undefined) {
+          for (const block of definition.blocks) {
+            if (block.kind !== "design" || (block.assets ?? []).length === 0) continue;
+            designAssets.set(
+              String(block.blockId),
+              await resolveDesignAssets(block, definition.provenance),
+            );
+          }
+        }
+        const warnings = canvasPreviewWarnings({
+          definition,
+          width,
+          palette,
+          designAssets,
+        });
         const base = {
           kind: "preview",
           canvasId: String(version.version.canvasId),
@@ -160,7 +192,11 @@ export function createCanvasPreviewService(
           width,
           warnings,
         } as const;
-        if (!request.imagesInToolResults) {
+        // A design's frame warnings are measured in the drawn page, so a
+        // Canvas that holds a design is drawn even for a model that is shown
+        // no picture; every other Canvas is read from its document alone.
+        const designs = definition.blocks.filter((block) => block.kind === "design");
+        if (!request.imagesInToolResults && designs.length === 0) {
           return { ...base, imageOmitted: "provider-cannot-take-images" };
         }
         if (!(await options.renderer.available())) {
@@ -171,6 +207,17 @@ export function createCanvasPreviewService(
           width,
           theme: request.theme,
           placement: presentation === "inline" ? "thread" : "document",
+          designAssets: [...designAssets].map(([blockId, assets]) => ({ blockId, assets })),
+          designPages: designs
+            .filter((block) => block.runsScript === true)
+            .map((block) => ({
+              blockId: String(block.blockId),
+              html: renderCanvasDesignPage(
+                block,
+                String(block.frames[0]?.frameId ?? ""),
+                designAssets.get(String(block.blockId)) ?? [],
+              ),
+            })),
         });
         if (rendered.kind !== "rendered") {
           return {
@@ -183,8 +230,15 @@ export function createCanvasPreviewService(
                   : "render-failed",
           };
         }
-        return {
+        const measured = {
           ...base,
+          warnings: [...warnings, ...canvasPreviewDesignWarnings(rendered.designs)],
+        };
+        if (!request.imagesInToolResults) {
+          return { ...measured, imageOmitted: "provider-cannot-take-images" };
+        }
+        return {
+          ...measured,
           height: rendered.height,
           image: { mimeType: "image/png", data: Buffer.from(rendered.png).toString("base64") },
         };
