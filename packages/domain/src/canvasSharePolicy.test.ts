@@ -1,6 +1,7 @@
 import { CANVAS_SCHEMA_VERSION, decodeCanvasVersion } from "@octant/contracts/canvas";
 import { decodeCanvasComment } from "@octant/contracts/canvas-board";
 import {
+  CANVAS_SHARE_LAYOUT_GROUPS_SCHEMA_VERSION,
   CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION,
   CANVAS_SHARE_SCHEMA_VERSION,
   decodeCanvasStaticExportDocument,
@@ -26,6 +27,7 @@ import {
   supportFlowExample,
 } from "./canvasDiagramExamples";
 import { heatmapExamples } from "./canvasHeatmapExamples";
+import { designBriefExample, launchGanttExample } from "./canvasLayoutExamples";
 import { metricExamples } from "./canvasMetricExamples";
 import { mockupExamples } from "./canvasMockupExamples";
 import { treemapExamples } from "./canvasTreemapExamples";
@@ -269,7 +271,7 @@ describe("Canvas share policy", () => {
       }),
       context,
     });
-    expect(receipt.document.schemaVersion).toBe(8);
+    expect(receipt.document.schemaVersion).toBe(CANVAS_SHARE_SCHEMA_VERSION);
     expect(receipt.document.blocks[0]).toEqual({
       ...opsDashboardExample[0],
       schemaVersion: CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION,
@@ -739,5 +741,65 @@ describe("Canvas share policy", () => {
         context,
       }),
     ).toThrowError(CanvasSharePolicyRejected);
+  });
+});
+
+describe("Canvas share of tabs, columns, diagram styles, and the Gantt view", () => {
+  const brief = decodeCanvasVersion({
+    ...current,
+    schemaVersion: CANVAS_SCHEMA_VERSION,
+    definition: {
+      ...current.definition,
+      schemaVersion: CANVAS_SCHEMA_VERSION,
+      blocks: [...designBriefExample, launchGanttExample],
+    },
+  });
+
+  it("round-trips the tabs, columns, every block they name, the styled diagrams, and the Gantt plan", () => {
+    const receipt = buildCanvasStaticExportReceipt({ request, current: brief, context });
+    expect(receipt.document.schemaVersion).toBe(CANVAS_SHARE_LAYOUT_GROUPS_SCHEMA_VERSION);
+    const decoded = decodeCanvasStaticExportDocument(JSON.parse(JSON.stringify(receipt.document)));
+    expect(decoded.blocks).toEqual([...designBriefExample, launchGanttExample]);
+  });
+
+  it("is refused by a decoder that declares the previous share version", () => {
+    const receipt = buildCanvasStaticExportReceipt({ request, current: brief, context });
+    // The same diagram without its styles is one an older decoder reads...
+    const plainLoop = receipt.document.blocks
+      .filter((block) => block.blockId === "loop")
+      .map((block) =>
+        block.kind === "diagram"
+          ? {
+              ...block,
+              schemaVersion: 14,
+              edges: block.edges.map(({ style: _style, tone: _tone, ...edge }) => edge),
+            }
+          : block,
+      );
+    expect(() =>
+      decodeCanvasStaticExportDocument({
+        ...receipt.document,
+        schemaVersion: CANVAS_SHARE_LAYOUT_GROUPS_SCHEMA_VERSION - 1,
+        blocks: plainLoop,
+      }),
+    ).not.toThrow();
+    // ...but a styled diagram or a Gantt view alone is refused.
+    for (const blockId of ["loop", "launch-plan"]) {
+      expect(() =>
+        decodeCanvasStaticExportDocument({
+          ...receipt.document,
+          schemaVersion: CANVAS_SHARE_LAYOUT_GROUPS_SCHEMA_VERSION - 1,
+          blocks: receipt.document.blocks
+            .filter((block) => block.blockId === blockId)
+            .map((block) => ({ ...block, schemaVersion: 14 })),
+        }),
+      ).toThrow();
+    }
+    expect(() =>
+      decodeCanvasStaticExportDocument({
+        ...receipt.document,
+        schemaVersion: CANVAS_SHARE_LAYOUT_GROUPS_SCHEMA_VERSION - 1,
+      }),
+    ).toThrow();
   });
 });

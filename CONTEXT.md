@@ -75,8 +75,7 @@ _Avoid_: Host, Station
 
 **Execution capsule**:
 A protected coding environment owned by one Code thread or one writing child
-AgentRun. Not built into threads: a tracer service exists
-(`apps/server/src/executionCapsule/`), but no thread runs in one yet.
+AgentRun. Not built.
 _Avoid_: Worktree, session, environment
 
 **Disposable Desktop**:

@@ -175,9 +175,11 @@ can share or export it. Any other Canvas appears there as a row that opens it.
 What you see in the thread is read-only, even expanded: dragging a board node
 or changing a plan's task happens in the sidebar, or in the Canvas tab in Chat,
 where comments and sharing are too. The agent can show a document of any length
-inline, but a Canvas with a diagram board (the generic diagram you can drag), a
-plan, a mockup, or a design always first appears as a row, because you work on
-those in the sidebar. Sequence, state, entity-relationship, swimlane, and mind
+inline, including an article or spec it wrote as a document-size design. A
+Canvas with a diagram board (the generic diagram you can drag), a plan, a
+mockup, a design at a device size (phone, tablet, desktop, or slide), or a
+running prototype always first appears as a row, because you work on those in
+the sidebar. Sequence, state, entity-relationship, swimlane, and mind
 map diagrams can be shown inline. If an inline Canvas gains one of those
 blocks, later or through your own edits, it turns back into a row. The agent is
 told when that happens.
@@ -214,6 +216,20 @@ warnings alone come back, and the result says the model could not be shown an
 image. The page Octant screenshots loads nothing from the network: it carries
 only Octant's own built files and the Canvas itself.
 
+### Tabs and columns
+
+A long Canvas can arrange its blocks in tabs or side-by-side columns. A tab
+strip holds two to twelve labelled tabs; click a tab, or move along the strip
+with the arrow keys, `Home`, and `End` and press `Enter`. Which tab is open is
+yours alone: switching saves nothing and makes no new version, so the person
+beside you can read another tab of the same Canvas. Columns hold two to four
+tracks and fold into one column when the Canvas is narrow, as it is in the
+sidebar. A tab or a column can hold a dashboard, which looks the same as it
+does anywhere else in the Canvas. Comments still sit on the blocks inside a tab
+or a column. A shared
+copy keeps the tabs, and an exported Markdown or HTML copy reads every tab in
+order under its label.
+
 ### Diagrams as boards
 
 A diagram block opens as a board. Zoom with the `+` and `−` controls, `⌘`/`Ctrl`
@@ -225,6 +241,18 @@ agent's revisions. Older versions stay intact and can still be opened; a board
 opened at an older version is read-only. If the host has moved on since you
 opened the board, the drag is refused, the board reloads, and you drag again on
 the current version. Boards keep the diagram budgets (512 nodes, 1,024 edges).
+
+A flowchart or a map of areas is a diagram too. Its nodes can be drawn as a
+process box, a decision diamond, or a start-and-end pill; a connection can be
+a plain line, an arrow, or a dashed arrow; and a connection or a group can take
+a tone such as success or danger, so a group of nodes reads as a region. The
+tones follow your theme, and the label beside each one still says what it
+means. Diagrams saved before shapes existed open as they did.
+
+A plan with dates can open as a Gantt chart: choose **Gantt** above the plan to
+see each task as a bar from its start to its due day, arrows from the tasks it
+waits on, and its status beside its title. Tasks without dates are listed under
+the chart. Choosing a view never changes the plan.
 
 A login or request flow is a sequence: participants across the top, messages
 in order down the page, an activation on a lifeline, and notes. A lifecycle
@@ -307,9 +335,39 @@ agent asks for your theme.
 - A deck shows **Present** instead. Use the arrow buttons, or the left and
   right arrow keys, to move between slides.
 - Some designs react to taps without changing screen, such as a card you can
-  select or a reminder you can tick. That is all they can do: a design runs no
-  script, loads nothing from the internet, and has no links that leave it.
-  Pictures in it are drawn by the agent.
+  select or a reminder you can tick. That is all an ordinary design can do: it
+  runs no script, loads nothing from the internet, and has no links that leave
+  it. A prototype, below, is the one kind that runs script.
+  Pictures in it are drawn by the agent, or are real images it names.
+- Ask for a working prototype, such as a checkout with a cart you can fill,
+  and the agent can make a design that runs its own script. Its header
+  calls it a prototype. In the sidebar it starts when you open it; in
+  the thread it starts when you press **Run**. While it runs, Octant shows
+  **Running** and **Stop** above it, outside the prototype. A prototype
+  cannot reach Octant or your files, and it cannot load a page, an image, or
+  data from the internet. One way out is not blocked yet: its script can open
+  a direct connection to another computer and send what the prototype itself
+  holds, which is its own screens and any image it shows. Octant says so under
+  every prototype. Run one only if you would be comfortable with that. If it stops responding, or tries to open another page, Octant
+  stops it and offers **Run again**. Script errors appear as text under it.
+- If a prototype holds on to the keyboard, press **Command-Escape**
+  (**Control-Escape** outside macOS) in the Octant app to move focus to its
+  **Stop** button. A prototype that keeps grabbing the keyboard back is
+  stopped.
+- In a web browser connected to your Mac, a prototype runs in the browser
+  and Octant cannot stop it from opening another page before it removes it,
+  so the **Run** control says it is not network-contained there. To leave a
+  prototype from the keyboard in a browser, use the browser's own focus keys
+  (such as **F6**) or the **Stop** button. If a prototype stopped responding
+  in a browser, open Octant in a new tab to run one again.
+- A design can show real images: a screenshot or other image file from the
+  thread's folder (Work) or checkout (Code), or an image generated in the same
+  Project. In a Chat Project it can show only images generated there. Octant
+  reads each image when you open the design, under the thread's access, and
+  draws it into the page, so the design itself still fetches nothing. An image
+  it cannot show (missing, outside the folder, from another Project, larger
+  than 3 MB, or not a PNG, JPEG, GIF, or WebP) appears as a labelled
+  placeholder.
 - A design cannot be shared as a snapshot yet. Exporting it writes the name
   of each screen, not the screens themselves.
 

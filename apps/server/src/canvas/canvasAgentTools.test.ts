@@ -217,6 +217,10 @@ describe("createCanvasAgentTools", () => {
     ["table", "{ id, cells }"],
     ["metric", "goodDirection"],
     ["dashboard", "blockId"],
+    ["tabs", "may hold a dashboard"],
+    ["columns", "2 to 4 tracks"],
+    ["plan", "view to gantt"],
+    ["diagram", "terminator (a pill)"],
   ])(
     "answers the %s guidance from describe instead of every turn's description",
     async (kind, phrase) => {
@@ -341,6 +345,45 @@ describe("createCanvasAgentTools", () => {
       expect.anything(),
       blocks,
     );
+  });
+
+  it("shows an agent a short tabbed document whose tabs name blocks it also holds", async () => {
+    const { create, set } = tools();
+    const described = await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "describe", blockKinds: ["tabs", "columns"] }),
+    });
+    expect(described.isError).not.toBe(true);
+    const result = described.result as {
+      blockSchema: unknown;
+      examples?: ReadonlyArray<ReadonlyArray<Record<string, unknown>>>;
+    };
+    expect(JSON.stringify(result.blockSchema)).toContain("panes");
+    expect(JSON.stringify(result.blockSchema)).toContain("tracks");
+    const example = result.examples?.[0] ?? [];
+    expect(example[0]).toMatchObject({ kind: "tabs" });
+    const created = await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "create", title: "Overview", blocks: example }),
+    });
+    expect(created.isError).not.toBe(true);
+    expect(create).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows an agent a styled flowchart, a toned zone map, and a Gantt plan that the policy admits", async () => {
+    const { set } = tools();
+    const described = await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "describe", blockKinds: ["diagram", "plan"] }),
+    });
+    expect(described.isError).not.toBe(true);
+    const result = described.result as { examples?: ReadonlyArray<Record<string, unknown>> };
+    const examples = result.examples ?? [];
+    expect(examples.map((example) => example.blockId)).toEqual(["loop", "zones", "launch-plan"]);
+    expect(JSON.stringify(examples)).toContain('"role":"decision"');
+    expect(JSON.stringify(examples)).toContain('"tone":"danger"');
+    expect(examples[2]).toMatchObject({ view: "gantt" });
+    for (const example of examples) expect(() => decodeCanvasBlock(example)).not.toThrow();
   });
 
   it("lets an agent create an entity-relationship, a swimlane, and a mind map from the examples describe returns", async () => {
@@ -1173,6 +1216,37 @@ describe("createCanvasAgentTools", () => {
       expect(outcome.isError).toBe(true);
       expect(outcome.result).toEqual({ error: "The Canvas Project is unavailable." });
       expect(create).not.toHaveBeenCalled();
+    });
+
+    const designGuidance = async (set: ReturnType<typeof tools>["set"]): Promise<string> => {
+      const described = await set.execute({
+        name: CANVAS_TOOL_NAME,
+        inputJson: JSON.stringify({ operation: "describe", blockKinds: ["design"] }),
+      });
+      return (described.result as { guidance?: Record<string, string> }).guidance?.design ?? "";
+    };
+
+    it("teaches a Work or Code agent to show a Project file in a design, and a Chat agent only generated images", async () => {
+      for (const mode of ["work", "code"] as const) {
+        const guidance = await designGuidance(boundTools(mode).set);
+        expect(guidance).toContain("octant-asset:home-shot");
+        expect(guidance).toContain('"kind": "project-file"');
+        expect(guidance).toContain('"kind": "generated-image"');
+        expect(guidance).toContain("3 MB each and 5 MB per design");
+      }
+      const chat = await designGuidance(tools().set);
+      expect(chat).toContain('"kind": "generated-image"');
+      expect(chat).not.toContain('"kind": "project-file"');
+      expect(chat).toContain("a file path is refused");
+    });
+
+    it("teaches every agent how to declare a running prototype, what stays refused, and that it has no network", async () => {
+      for (const mode of ["chat", "work", "code"] as const) {
+        const guidance = await designGuidance((mode === "chat" ? tools() : boundTools(mode)).set);
+        expect(guidance).toContain('"runsScript": true');
+        expect(guidance).toContain("<script src>");
+        expect(guidance).toContain("It has no network at all");
+      }
     });
 
     it("tells the agent to deliver substantial work as a Canvas bound to the thread's checkout", () => {

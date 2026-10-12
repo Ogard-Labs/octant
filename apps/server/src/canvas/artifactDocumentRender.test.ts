@@ -6,12 +6,16 @@ import {
 import { formatCanvasNumber } from "@octant/domain/canvas-number-format";
 import {
   chartExampleBlocks,
+  designBriefExample,
+  launchGanttExample,
+  layoutCanvasDiagram,
   notificationStatesExampleBlock,
   opsDashboardExampleBlocks,
   settingsScreenExampleBlock,
 } from "@octant/domain";
 import { describe, expect, it } from "vitest";
 import { renderArtifactHtml, renderArtifactMarkdown } from "./artifactDocumentRender";
+import { renderArtifactSidecarSvg } from "./artifactRender";
 
 function definition(blocks: ReadonlyArray<CanvasBlock>, title = "Launch plan") {
   return { title, blocks };
@@ -611,5 +615,108 @@ describe("rendering a canvas as a document", () => {
     ].map((needle) => html.body.indexOf(needle));
     expect(htmlOrder.every((index) => index >= 0)).toBe(true);
     expect([...htmlOrder].sort((a, b) => a - b)).toEqual(htmlOrder);
+  });
+});
+
+describe("rendering tabs and columns as a document", () => {
+  it("reads each tab under its label and each named block once, in the group", () => {
+    const blocks = designBriefExample.map((block) => decodeCanvasBlock(block));
+    const rendered = renderArtifactMarkdown(definition(blocks, "Design brief"));
+    if (rendered.kind !== "rendered") throw new Error("expected a rendered document");
+    const labels = ["Metrics", "Core loop", "World", "Economy", "Content", "Live ops", "Risks"];
+    const positions = labels.map((label) => rendered.body.indexOf(`### ${label}`));
+    expect(positions.every((position) => position >= 0)).toBe(true);
+    expect([...positions].sort((a, b) => a - b)).toEqual(positions);
+    // The question is placed in the last tab only, and the sign-off columns
+    // follow the tabs, each note once.
+    const question = "Does the keep unlock by level or by story progress?";
+    expect(rendered.body.split(question)).toHaveLength(2);
+    expect(rendered.body.indexOf(question)).toBeGreaterThan(
+      rendered.body.indexOf("### Open questions"),
+    );
+    expect(rendered.body.split("Design signs off the loop and the zone map.")).toHaveLength(2);
+  });
+
+  it("reads a dashboard in a tab as it reads at the top level: its title, then its tiles, once", () => {
+    const blocks = designBriefExample.map((block) => decodeCanvasBlock(block));
+    for (const format of ["markdown", "html"] as const) {
+      const rendered =
+        format === "markdown"
+          ? renderArtifactMarkdown(definition(blocks, "Design brief"))
+          : renderArtifactHtml(definition(blocks, "Design brief"));
+      if (rendered.kind !== "rendered") throw new Error("expected a rendered document");
+      const metricsTab = rendered.body.indexOf("Metrics");
+      const board = rendered.body.indexOf("Launch metrics");
+      const loopTab = rendered.body.indexOf("Core loop");
+      expect(metricsTab).toBeGreaterThanOrEqual(0);
+      expect(board).toBeGreaterThan(metricsTab);
+      expect(loopTab).toBeGreaterThan(board);
+      expect(rendered.body.split("Daily players")).toHaveLength(2);
+      expect(rendered.body.indexOf("Daily players")).toBeGreaterThan(board);
+      expect(rendered.body.indexOf("Daily players")).toBeLessThan(loopTab);
+    }
+    const markdown = renderArtifactMarkdown(definition(blocks, "Design brief"));
+    if (markdown.kind !== "rendered") throw new Error("expected a rendered document");
+    expect(markdown.body).toContain("## Launch metrics");
+  });
+});
+
+describe("exporting a styled diagram and a Gantt plan", () => {
+  const blocks = designBriefExample.map((block) => decodeCanvasBlock(block));
+  const loop = blocks.find((block) => block.blockId === "loop");
+  if (loop?.kind !== "diagram") throw new Error("fixture");
+  const layout = layoutCanvasDiagram(loop);
+
+  it("places the HTML picture's nodes where the board's layout places them", () => {
+    const html = renderArtifactHtml(definition([loop], "Core loop"));
+    if (html.kind !== "rendered") throw new Error("expected a rendered document");
+    for (const node of layout.nodes) {
+      const drawn = new RegExp(
+        `<(rect|polygon) data-node-id="${node.nodeId}"(?: x="(\\d+)" y="(\\d+)")?`,
+      ).exec(html.body);
+      expect(drawn?.[1]).toBe(node.shape === "decision" ? "polygon" : "rect");
+      if (drawn?.[1] === "rect") {
+        expect(Number(drawn[2])).toBe(Math.round(node.x));
+        expect(Number(drawn[3])).toBe(Math.round(node.y));
+      }
+    }
+    expect(html.body).toContain('stroke-dasharray="5 3"');
+    expect(html.body).not.toMatch(/<script|<marker|\sid="/i);
+  });
+
+  it("names each shaped node by its role in the Markdown reading", () => {
+    const markdown = renderArtifactMarkdown(definition([loop], "Core loop"));
+    if (markdown.kind !== "rendered") throw new Error("expected a rendered document");
+    expect(markdown.body).toContain("- Encounter? (decision)");
+    expect(markdown.body).toContain("- Start run (terminator)");
+    expect(markdown.body).toContain("Encounter? ⇢ Return to camp: flee");
+    expect(markdown.body).not.toContain("<svg");
+  });
+
+  it("draws the sidecar picture's nodes at the board's layout, scaled into the page", () => {
+    const svg = renderArtifactSidecarSvg({ title: "Core loop", blocks: [loop] });
+    const drawn = [...svg.matchAll(/<rect data-node-id="([^"]+)" x="(\d+)" y="(\d+)"/g)].map(
+      (match) => ({ nodeId: match[1], x: Number(match[2]), y: Number(match[3]) }),
+    );
+    const rects = layout.nodes.filter((node) => node.shape !== "decision");
+    expect(drawn.map((node) => node.nodeId)).toEqual(rects.map((node) => node.nodeId));
+    // Scaled, not rearranged: one shared column, and the same order down it.
+    expect(new Set(drawn.map((node) => node.x)).size).toBe(1);
+    const ys = drawn.map((node) => node.y);
+    expect([...ys].sort((a, b) => a - b)).toEqual(ys);
+    const [first, second] = drawn;
+    const [firstBox, secondBox] = rects;
+    const scale = ((second?.y ?? 0) - (first?.y ?? 0)) / ((secondBox?.y ?? 0) - (firstBox?.y ?? 1));
+    expect(scale).toBeGreaterThan(0);
+    expect(scale).toBeLessThanOrEqual(1);
+  });
+
+  it("reads a plan's days from the Gantt layout", () => {
+    const markdown = renderArtifactMarkdown(
+      definition([decodeCanvasBlock(launchGanttExample)], "Launch"),
+    );
+    if (markdown.kind !== "rendered") throw new Error("expected a rendered document");
+    expect(markdown.body).toContain("Build: Playable prototype (doing), 2026-06-08 → 2026-06-19");
+    expect(markdown.body).toContain("Ship: Store listing (todo)\n");
   });
 });

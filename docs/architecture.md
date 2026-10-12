@@ -416,8 +416,9 @@ designs they review (app screens, a site, a deck, a design system), and
 prototypes they try (a flow that reacts to input and keeps state). It does so
 in three tiers that an author mixes in one Canvas, using the lowest tier that
 delivers the result. The static frames' `document` size and workspace theme
-have shipped (Canvas schema version 16, described with the
-[`design` block](design/canvas.md#design-block)). The rest is accepted
+(Canvas schema version 16), their images named by asset id (version 17), and
+running frames (version 18) have shipped, as described with the
+[`design` block](design/canvas.md#design-block). The rest is accepted
 direction: each rule below replaces the matching shipped rule in
 [Canvas](design/canvas.md) when its slice ships, and until then the shipped
 rule holds. Each tier is a Canvas schema bump, so an older runtime refuses the
@@ -426,22 +427,22 @@ document as a future version. Frames follow the
 
 - **Typed blocks carry data.** Metrics, tables, charts, plans, and the diagram
   family stay the catalog, because comments anchor to them, revision edits
-  them, and shares keep their structure. The catalog gains `tabs` and
-  `columns`, which name existing child blocks one level deep (the selected tab
-  is view state and journals nothing); closed diagram node roles (process,
-  decision, terminator), edge styles, and group tones drawn by the one
-  deterministic layout; a Gantt view of `plan`; and import of a bounded
-  Mermaid subset into typed diagram blocks. Mermaid never renders; an unknown
-  construct fails closed and stays a code block.
+  them, and shares keep their structure. Shipped at schema version 19 (see
+  [Canvas](design/canvas.md)): `tabs` and `columns`, which name existing child
+  blocks, a dashboard among them; closed diagram node roles (process, decision,
+  terminator), edge styles, and group tones drawn by the one deterministic
+  layout; and a Gantt view of `plan`. Accepted, not yet shipped: import of a
+  bounded Mermaid subset into typed diagram blocks. Mermaid never renders; an
+  unknown construct fails closed and stays a code block.
 - **Static frames carry the look.** A `design` keeps a frame that runs
   nothing and has a `document` size whose height the host measures, which
   needs `allow-same-origin` and therefore never `allow-scripts`, and an opt-in
   workspace theme (semantic tokens, light or dark, the bundled fonts, and a
   first-party stylesheet for articles, cards, CSS-only tabs, badges, metric
-  tiles, tables, callouts, and code), unthemed by default at device sizes;
-  both have shipped. Not yet built: images named by asset id, which the server
-  resolves under the thread's mode and Project authority and the host inlines
-  before drawing. The frame itself loads nothing.
+  tiles, tables, callouts, and code), unthemed by default at device sizes,
+  and images named by asset id, which the server resolves under the thread's
+  mode and Project authority and the host inlines before drawing; all three
+  have shipped. The frame itself loads nothing.
 - **Running frames carry behavior.** A `design` may declare that it runs
   script. Its page comes from a host route fetched with a single-use ticket
   scoped to one Canvas version, never the session credential, with a
@@ -455,10 +456,12 @@ document as a future version. Frames follow the
   reserves a shortcut frame script cannot intercept to return focus to host
   chrome. A remote browser cannot cancel a frame's own navigation, so there a
   running frame is not network-contained; that exposure is accepted, bounded
-  by what the frame holds, and the Run control there says so.
+  by what the frame holds, and the Run control there says so. This tier has
+  shipped.
 - **The thread can hold the whole Canvas.** A person may expand any Canvas in
-  its thread; the agent may ask for `inline` on a reading document without the
-  12-block cap; a running frame in the thread starts only on **Run**. Editing,
+  its thread; the agent may ask for `inline` on a reading document, or on a
+  `document`-size design that runs no script, without the 12-block cap; a
+  running frame in the thread starts only on **Run**. Editing,
   comments, and sharing stay in the sidebar, and nothing drawn in the thread
   writes a version.
 - **Agents are taught and checked.** `describe` presents the tiers with a
@@ -2442,7 +2445,7 @@ native harness in `apps/server/src/harness`:
   resolved, edits require a prior read); `bash` writes the command to a
   script in its own subdirectory of `harness/scripts` and runs it through the
   same confined owned-process-group port as repository tests (Seatbelt on
-  macOS, the bubblewrap capsule on Linux), so a timeout or cancel ends the
+  macOS, the bubblewrap sandbox on Linux), so a timeout or cancel ends the
   whole tree. That port refuses a shell as a test command's `argv[0]`, so a
   test argv stays literal; the harness's only way to a shell is its separate
   script entry point, which the two harness ports alone enable and which runs
@@ -3441,32 +3444,6 @@ mechanisms are:
   Archiving the Project, relinking its root, turning its mode off, the window
   moving to another Project, or the window's authority ending closes it. On the desktop app the page is a live native view; elsewhere the
   host drives a headless page and shows its picture.
-- **Linux Station isolation tracer, not product-wired.** The server now has a
-  provider-neutral execution-capsule service plus a rootless Podman and gVisor
-  `systrap` driver. The tracer accepts only digest-pinned images, independent
-  clones created inside gVisor from owner-only source bundles, explicit
-  resource budgets, no network, and no host bind mounts. Each capsule's full
-  persistent Podman VFS graph store lives in an owner-only fixed-size ext4
-  image mounted through `fuse2fs`, so its image, dependencies, and clone share
-  one hard disk ceiling without privileged project-quota administration. Its
-  disposable Podman runroot is a short owned runtime directory preserved long
-  enough for recovery to inspect and stop a surviving runtime, then removed
-  through Podman's mapped user namespace on release. Intermediate Podman state
-  paths may be owner-controlled and traverse-only, while backing images remain
-  owner-only. A transient systemd
-  user scope owns the outer CPU, memory, and PID limits. The driver and
-  independent evidence derive their effective values from the live sandbox
-  process cgroup ancestry before accepting it. The tracer can
-  execute argv, verify and
-  export a Git bundle, stop without deleting the filesystem, recover only as
-  stopped after live-authority revalidation, briefly restart a stopped capsule
-  inside its verified budget to export it, and release the exact runtime after
-  an explicit export. A dedicated Linux CI job proves two real capsules
-  cannot see or signal one another. Ordinary Code threads do not use this
-  service yet: on a Linux host they run under Bubblewrap like every other
-  confined process (see Sandbox above), and only the protected capsule remains
-  an unavailable destination until the AgentRun and Station launch paths are
-  wired and revalidated.
 - **Side Chat reads.** A Side Chat may read its source thread's transcript,
   state, and files; it never inherits the source's Work or Code execution
   authority. The file tools (`octant_side_chat_list_files`,
@@ -3499,6 +3476,14 @@ mechanisms are:
   app-managed tools fails the start with a typed reason rather than dropping
   the tool. Each adapter turns its provider's own subagent feature off, because a child
   the provider starts itself runs outside the journal and the approval path.
+- **Canvas design images.** A design frame never loads anything itself. The
+  server resolves the images a design declares on every read, through the
+  authorized Canvas read and under the version's mode, Project, and thread: a
+  Chat Project reaches only images generated in its own threads, and Work and
+  Code files pass the Work confinement sequence. Only sniffed raster images
+  within the per-image and per-design budgets are returned, the renderer
+  inlines them as `data:` images, and the journal holds references only
+  ([Canvas HTML frames threat model](security/canvas-html-frames-threat-model.md), F5).
 - **Remote clients.** Pairing issues a revocable device key; the private
   listener is HTTPS on a LAN or Tailscale address with a host-owned identity.
   Remote requests are classified fail-closed by an admission policy and route

@@ -1,5 +1,8 @@
 import {
   CanvasBlock,
+  CANVAS_DESIGN_ASSET_MAX_BYTES,
+  CANVAS_DESIGN_ASSETS_MAX_BYTES,
+  CANVAS_MAX_DESIGN_ASSETS,
   CANVAS_SCHEMA_VERSION,
   decodeCanvasActor,
   decodeCanvasBlock,
@@ -42,6 +45,9 @@ import {
   comparisonMatrixExamples,
   mathExamples,
   metricExamples,
+  tabbedOverviewExample,
+  designBriefExample,
+  launchGanttExample,
   dashboardExamples,
   canvasInlineRefusal,
   effectiveCanvasPresentation,
@@ -140,7 +146,7 @@ const canvasDefinitionSchema = {
       type: "string",
       enum: ["inline", "sidebar"],
       description:
-        "For create and revise: inline draws the Canvas inside the conversation (any number of reading blocks; no diagram board, plan, mockup, or design); sidebar, the default, shows a card that opens it beside the thread. Revise keeps the current choice when omitted.",
+        "For create and revise: inline draws the Canvas inside the conversation (any reading blocks, or one document-size design without script; no diagram board, plan, mockup, or other design); sidebar, the default, shows a card that opens it beside the thread. Revise keeps the current choice when omitted.",
     },
   },
   required: ["operation"],
@@ -264,6 +270,15 @@ function describedExamples(kinds: ReadonlyArray<string>): ReadonlyArray<unknown>
     if (kind === "comparison-matrix") examples.push(...comparisonMatrixExamples);
     if (kind === "math") examples.push(...mathExamples);
     if (kind === "metric") examples.push(...metricExamples);
+    if (kind === "tabs" || kind === "columns") examples.push(tabbedOverviewExample);
+    if (kind === "diagram") {
+      examples.push(
+        ...designBriefExample.filter(
+          (block) => block.blockId === "loop" || block.blockId === "zones",
+        ),
+      );
+    }
+    if (kind === "plan") examples.push(launchGanttExample);
     if (kind === "dashboard") examples.push(...dashboardExamples);
   }
   return examples;
@@ -330,6 +345,21 @@ async function resolveCanvasTarget(
   };
 }
 
+const LAYOUT_GROUP_GUIDE =
+  "To arrange a long document, use tabs or columns. Both name blocks the same document holds, by blockId, and the document draws each named block inside its tab or column instead of in the block list. tabs has 2 to 12 panes, each with a short label and the blockIds it shows; columns has 2 to 4 tracks, each with the blockIds it stacks, and folds to one column when the Canvas is narrow. A block sits in at most one tab, track, or dashboard cell; a tab or track may hold a dashboard but never another tabs or columns block or an action. Which tab is open is the reader's choice and is never saved.";
+
+/**
+ * How a design shows a real image, in the words of the thread's mode: a Chat
+ * Project has no folder, so its designs reach only images generated in it.
+ */
+function designAssetGuidance(mode: "chat" | "work" | "code"): string {
+  const sources =
+    mode === "chat"
+      ? 'Each asset is a generated image made in this Chat Project, {"kind": "generated-image", "imageId": "<attachment id of a completed image>"}; a Chat Project has no folder, so a file path is refused.'
+      : `Each asset is a generated image made in this Project, {"kind": "generated-image", "imageId": "<attachment id of a completed image>"}, or a file in ${mode === "work" ? "this thread's folder" : "this thread's checkout"}, {"kind": "project-file", "path": "screens/home.png"} relative to its root (no .., no absolute path, no link that leaves it).`;
+  return `To show a real screenshot, a generated image, or a Project image in a design, declare it in the design's assets as {"assetId": "home-shot", "source": ...} and name it in a frame or in styles as octant-asset:home-shot in src, srcset, url(), or image-set(), written exactly like that. ${sources} The host reads PNG, JPEG, GIF, or WebP (not SVG; draw vector art inline) up to ${String(CANVAS_DESIGN_ASSET_MAX_BYTES / (1024 * 1024))} MB each and ${String(CANVAS_DESIGN_ASSETS_MAX_BYTES / (1024 * 1024))} MB per design, at most ${String(CANVAS_MAX_DESIGN_ASSETS)} per design, and draws a placeholder for one it cannot read; preview names it. The frame itself still loads nothing.`;
+}
+
 /**
  * Which block kind fits a need, and how to author it.
  *
@@ -343,7 +373,7 @@ const BLOCK_GUIDANCE: Readonly<Record<string, { readonly use: string; readonly d
     plan: {
       use: "A plan: phases and tasks with a status.",
       detail:
-        "For a plan, use a plan block: phases, and tasks that name their phase, with a status (todo, doing, blocked, done), and optional owner, estimate, acceptance notes, dates, and dependsOn. The person can work the plan too, so read the Canvas before revising it and keep their progress.",
+        "For a plan, use a plan block: phases, and tasks that name their phase, with a status (todo, doing, blocked, done), and optional owner, estimate, acceptance notes, dates, and dependsOn. Give tasks startAt and dueAt and set view to gantt to open the plan as bars on days with its dependency arrows; a task without dates is listed under the chart. The person can work the plan too, so read the Canvas before revising it and keep their progress.",
     },
     sequence: {
       use: "A login or request flow between participants.",
@@ -373,7 +403,7 @@ const BLOCK_GUIDANCE: Readonly<Record<string, { readonly use: string; readonly d
     diagram: {
       use: "A generic graph of nodes and edges.",
       detail:
-        "Use diagram for a generic graph of nodes and edges. Prefer sequence, state, er, swimlane, or mindmap when the drawing is one of those.",
+        "Use diagram for a generic graph of nodes and edges, such as a flowchart or a zone map: a node's role is process (a box), decision (a diamond), or terminator (a pill), or left out for a plain box; an edge's style is line, arrow, or dashed (a dashed arrow, for an optional or asynchronous step); an edge or a group may take a tone of neutral, accent, success, warning, or danger, and a toned group reads as a region. Tones are theme roles, never colours, and a label still says what the tone means. Prefer sequence, state, er, swimlane, or mindmap when the drawing is one of those.",
     },
     chart: {
       use: "A pie, donut, stacked or grouped bar, bar-line, funnel, radar, or sankey chart.",
@@ -425,10 +455,18 @@ const BLOCK_GUIDANCE: Readonly<Record<string, { readonly use: string; readonly d
       detail:
         "Headline numbers are metric blocks. Give each a label and a value, and add an optional format, unit, delta, a goodDirection of up, down, or neutral so a delta's tone is never guessed, a caption, and a sparkline of at most 256 recent readings. Consecutive metric blocks are gathered into a responsive tile row of two to four tiles.",
     },
+    tabs: {
+      use: "A long document arranged in labelled tabs.",
+      detail: LAYOUT_GROUP_GUIDE,
+    },
+    columns: {
+      use: "Blocks side by side in two to four columns.",
+      detail: LAYOUT_GROUP_GUIDE,
+    },
     dashboard: {
       use: "A KPI dashboard grid that places metric, progress, status, chart, and table blocks.",
       detail:
-        "A KPI dashboard is a dashboard block: a title that names the region, an optional number of columns from 1 to 4 (four when absent), and up to 24 cells, each naming the blockId of a metric, progress, status, chart, or table block elsewhere in the same Canvas, with an optional span of columns. Write the placed blocks as ordinary blocks and list them in reading order; each block sits in at most one cell, and a dashboard never places another dashboard. A tile takes one column and a chart or table two unless you give a span no wider than the grid. The grid is drawn where the dashboard sits and collapses to one column in a narrow dock or on a phone, in cell order.",
+        "A KPI dashboard is a dashboard block: a title that names the region, an optional number of columns from 1 to 4 (four when absent), and up to 24 cells, each naming the blockId of a metric, progress, status, chart, or table block elsewhere in the same Canvas, with an optional span of columns. Write the placed blocks as ordinary blocks and list them in reading order; each block sits in at most one cell, tab, or track, and a dashboard never places another dashboard, tabs, or columns. A tile takes one column and a chart or table two unless you give a span no wider than the grid. The grid is drawn where the dashboard sits and collapses to one column in a narrow dock or on a phone, in cell order.",
     },
   };
 
@@ -436,7 +474,11 @@ const RECIPE_GUIDE =
   'Match the request to a document recipe before inventing a shape: "write a plan" uses implementation-plan, "review this PR" uses code-review, "summarise research" uses research-brief, and "decide between designs" uses architecture-review. Fill a recipe\'s roles from block kinds that exist today, and do not invent a block kind the catalogue does not have.';
 
 const PREVIEW_GUIDE =
-  "Preview returns the same picture the person will see and the warnings it can measure: an inline document past its height cap, and on a chart clipped labels, legend overflow, empty series, or ink below its contrast target, and on a bar list clipped labels or empty series. Every other block kind gets no warnings, so read its picture yourself.";
+  "Preview returns the same picture the person will see and the warnings it can measure: an inline document past its height cap, and on a chart clipped labels, legend overflow, empty series, or ink below its contrast target, on a bar list clipped labels or empty series, and on a design each declared image the host could not draw, with the frames that name it. Every other block kind gets no warnings, so read its picture yourself.";
+
+/** When a design should run script, and what a running one still may not do. */
+const DESIGN_PROTOTYPE_GUIDANCE =
+  'When the person asks for a working prototype (state that changes as they click, such as a cart that fills or a form that validates), set "runsScript": true on the design. Its frames may then use inline <script> elements and event handlers (onclick and the like); keep everything in the design. Still refused: <script src>, remote images, fonts, stylesheets, and imports, <meta>, <base>, <link>, iframes and other embedded documents, links that leave the design, and theme workspace (style a prototype yourself). It has no network at all: fetch, XHR, WebSocket, forms, and new windows are blocked, so put its data in the script. The person starts it with Run in the thread, and Octant stops a prototype that stops responding or loads another page. Use it only when interaction needs state; a clickable flow between screens is a static design with href="#frameId" links.';
 
 function blockGuide(): Readonly<Record<string, string>> {
   return Object.fromEntries(
@@ -444,11 +486,20 @@ function blockGuide(): Readonly<Record<string, string>> {
   );
 }
 
-function describedGuidance(kinds: ReadonlyArray<string>): Readonly<Record<string, string>> {
+function describedGuidance(
+  kinds: ReadonlyArray<string>,
+  mode: "chat" | "work" | "code",
+): Readonly<Record<string, string>> {
   const guidance: Record<string, string> = {};
   for (const kind of kinds) {
     const detail = BLOCK_GUIDANCE[kind]?.detail;
-    if (detail !== undefined) guidance[kind] = detail;
+    if (detail === undefined) continue;
+    // Which images a design can reach depends on the thread's mode, so that
+    // part is written per describe rather than stored with the kind.
+    guidance[kind] =
+      kind === "design"
+        ? `${detail} ${designAssetGuidance(mode)} ${DESIGN_PROTOTYPE_GUIDANCE}`
+        : detail;
   }
   return guidance;
 }
@@ -477,9 +528,9 @@ function toolDescription(
       ? "When the request iterates on earlier work, revise the existing Canvas instead of creating another: list returns this run's Canvases, and read returns one's current blocks and sequence."
       : "When the request iterates on earlier work, revise the thread's existing Canvas instead of creating another: list returns this thread's Canvases, and read returns one's current blocks and sequence.",
     "Operations: describe, list, read, create, revise, preview. Before you author, call describe: with no block kinds it lists every kind, when to use the structured ones, the document recipes to start from, and a create example; with up to three blockKinds it returns their exact schemas, plus authoring guidance and examples for the kinds that have them. Start from a document recipe before inventing a shape.",
-    "Author the content in blocks, not in prompt. Use structured blocks rather than HTML, JavaScript, CSS, or Mermaid; only a design block's frames are HTML and CSS, and they run no script and load nothing. Text renders as plain text, not Markdown: give each section its own heading block (the Canvas title is already shown, so do not repeat it), and use key-value, table, status, or callout blocks instead of Markdown lists, bold, or code spans.",
+    "Author the content in blocks, not in prompt. Use structured blocks rather than HTML, JavaScript, CSS, or Mermaid; only a design block's frames are HTML and CSS; they load nothing, and run script only in a design that declares it. Text renders as plain text, not Markdown: give each section its own heading block (the Canvas title is already shown, so do not repeat it), and use key-value, table, status, or callout blocks instead of Markdown lists, bold, or code spans.",
     "A Canvas is a document: it grants no file, shell, Git, or network access. Creation adds a card to this thread and offers the Canvas in the thread's dock the first time it appears; the user can also select Open Canvas. Do not claim the user has read it or invent a download URL.",
-    "Choose where the thread shows it. Use presentation inline for a visual or a reading document that answers the question in place, such as a chart, a few metrics, a short table, a sequence or state diagram, or an article or brief made of reading blocks; it is drawn in the conversation just below your reply to this turn, so refer to it as below. A long one starts as a faded teaser the user can expand in place, and the user can still open it in the sidebar. Leave presentation out (sidebar) for plans, boards, mockups, designs, and anything the user will keep working on. Inline never holds a diagram board, plan, mockup, or design; when the host shows a card instead, the result says so in presentationNote.",
+    "Choose where the thread shows it. Use presentation inline for a visual or a reading document that answers the question in place, such as a chart, a few metrics, a short table, a sequence or state diagram, or an article or brief made of reading blocks or one document-size design; it is drawn in the conversation just below your reply to this turn, so refer to it as below. A long one starts as a faded teaser the user can expand in place, and the user can still open it in the sidebar. Leave presentation out (sidebar) for plans, boards, mockups, other designs, and anything the user will keep working on; inline never holds those, and when the host shows a card instead, the result says so in presentationNote.",
     "Revise with the canvasId, the last observed expectedSequence, and the complete replacement blocks; people edit Canvases too, so read before revising and keep their changes. Reference blocks require source ids already in the Canvas source manifest; create attaches no sources. Never invent file or artifact references.",
     "Preview once after you create or revise a chart, treemap, or inline Canvas, fix what its warnings or picture show with a revise, then reply. Look once per change: previewing an unchanged document only spends the host's browser and your context.",
   ].join(" ");
@@ -856,7 +907,7 @@ function canvasToolSet(options: {
         return {
           result: {
             blockSchema: JSONSchema.make(Schema.Union(...selected)),
-            guidance: describedGuidance(input.blockKinds ?? []),
+            guidance: describedGuidance(input.blockKinds ?? [], options.mode),
             ...(examples.length === 0 ? {} : { examples }),
           },
         };

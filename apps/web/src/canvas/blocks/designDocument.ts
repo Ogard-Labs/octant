@@ -1,8 +1,12 @@
 import {
+  CANVAS_DESIGN_ASSET_SCHEME,
   CANVAS_DESIGN_VIEWPORT,
+  type CanvasDesignAssetResolution,
+  type CanvasDesignAssetUnavailableReason,
   type CanvasDesignBlock,
   type CanvasDesignTheme,
 } from "@octant/contracts/canvas";
+import { getDefaultToken } from "@octant/theme";
 import { DESIGN_FRAME_KIT } from "./designFrameKit";
 
 /**
@@ -177,6 +181,120 @@ function workspaceScheme(document: Document): "light" | "dark" {
     : "light";
 }
 
+/**
+ * How a surface reaches the host for a design's images. The host resolves
+ * them under the thread's authority each time it is asked; a surface without
+ * one draws every declared image as a placeholder.
+ */
+export interface DesignAssetRuntime {
+  readonly resolve: (
+    blockId: string,
+  ) => Promise<ReadonlyArray<CanvasDesignAssetResolution> | undefined>;
+}
+
+/** What a placeholder says about why its image is not drawn. */
+export type DesignAssetPlaceholderReason =
+  | CanvasDesignAssetUnavailableReason
+  | "loading"
+  | "not-loaded";
+
+const PLACEHOLDER_LABEL: Record<DesignAssetPlaceholderReason, string> = {
+  loading: "Loading image",
+  "not-loaded": "Image not shown here",
+  missing: "Image not found",
+  refused: "Image not available to this Canvas",
+  "too-large": "Image too large",
+  "design-budget": "Design image budget spent",
+  "not-an-image": "Not an image",
+};
+
+/**
+ * The image drawn where a declared asset could not be: a hatched panel that
+ * names the asset and why, as a `data:` image so it stands in a `src`, a
+ * `srcset`, or a `url()` alike and the page still loads nothing.
+ */
+export function designAssetPlaceholder(
+  assetId: string,
+  reason: DesignAssetPlaceholderReason,
+): string {
+  // Asset ids are letters, digits, dots, dashes, and underscores, so they
+  // need no escaping in the markup below; anything else is not drawn.
+  const id = /^[A-Za-z0-9._-]{1,64}$/.test(assetId) ? assetId : "asset";
+  // An image cannot read the page's tokens, so the panel is drawn in the
+  // default light theme's neutrals, which read on a white or a themed page.
+  const ground = getDefaultToken("control-hover", "light");
+  const stripe = getDefaultToken("sidebar", "light");
+  const edge = getDefaultToken("border-strong", "light");
+  const ink = getDefaultToken("text-primary", "light");
+  const muted = getDefaultToken("text-secondary", "light");
+  const svg = [
+    '<svg xmlns="http://www.w3.org/2000/svg" width="320" height="200" viewBox="0 0 320 200">',
+    '<defs><pattern id="h" width="12" height="12" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">',
+    `<rect width="12" height="12" fill="${ground}"/><rect width="5" height="12" fill="${stripe}"/></pattern></defs>`,
+    '<rect width="320" height="200" fill="url(#h)"/>',
+    `<rect x="1" y="1" width="318" height="198" fill="none" stroke="${edge}" stroke-dasharray="6 4" stroke-width="2"/>`,
+    `<text x="160" y="96" text-anchor="middle" font-family="system-ui, sans-serif" font-size="15" font-weight="600" fill="${ink}">${PLACEHOLDER_LABEL[reason]}</text>`,
+    `<text x="160" y="120" text-anchor="middle" font-family="ui-monospace, monospace" font-size="12" fill="${muted}">${id}</text>`,
+    "</svg>",
+  ].join("");
+  return `data:image/svg+xml;base64,${btoa(svg)}`;
+}
+
+/**
+ * The address each declared asset is drawn from: the resolved image, or a
+ * placeholder that says why not. `resolved` undefined means the host has not
+ * answered yet (`loading`) or there is no host to ask (`not-loaded`).
+ */
+export function designAssetUrls(
+  block: Pick<CanvasDesignBlock, "assets">,
+  resolved: ReadonlyArray<CanvasDesignAssetResolution> | undefined,
+  pending: "loading" | "not-loaded",
+): ReadonlyMap<string, string> {
+  const urls = new Map<string, string>();
+  for (const asset of block.assets ?? []) {
+    const id = String(asset.assetId);
+    const outcome = resolved?.find((entry) => String(entry.assetId) === id);
+    urls.set(
+      id,
+      outcome === undefined
+        ? designAssetPlaceholder(id, resolved === undefined ? pending : "refused")
+        : outcome.status === "resolved"
+          ? `data:${outcome.mediaType};base64,${outcome.data}`
+          : designAssetPlaceholder(id, outcome.reason),
+    );
+  }
+  return urls;
+}
+
+// What stands right before an address the browser loads, in the positions the
+// host's markup policy admits a reference: a `url()`, a `src`, `srcset`,
+// `poster`, or `background` value (or a later srcset candidate), and a quoted
+// `image-set()` candidate. The same token in prose, `alt`, or any other
+// attribute is the author's text and is left as written.
+const ADDRESS_LEAD = String.raw`(?:url\(\s*["']?\s*|(?:^|[\s"'/])(?:src|srcset|poster|background)\s*=\s*["']?\s*|(?:^|[\s"'/])srcset\s*=\s*(?:"[^"]*?,\s*|'[^']*?,\s*)|image-set\((?:[^()]|\([^()]*\))*?["']\s*)`;
+const ASSET_REFERENCE = new RegExp(
+  `(?<=${ADDRESS_LEAD})${CANVAS_DESIGN_ASSET_SCHEME.replace(/[\\^$.*+?()[\]{}|-]/g, "\\$&")}([A-Za-z0-9][A-Za-z0-9._-]{0,63})`,
+  "gi",
+);
+
+/**
+ * Every literal `octant-asset:<id>` in an address position of markup or
+ * styles, replaced with the address it is drawn from. The host's markup policy
+ * admits only literal references to declared ids, so an id with no address
+ * here was not declared and is drawn as a placeholder rather than left for the
+ * browser to request. The lead is matched without regard to case, as a browser
+ * reads it, but only the scheme as written is replaced, the one spelling the
+ * policy admits.
+ */
+function withAssets(markup: string, urls: ReadonlyMap<string, string> | undefined): string {
+  if (!markup.includes(CANVAS_DESIGN_ASSET_SCHEME)) return markup;
+  return markup.replace(ASSET_REFERENCE, (reference: string, id: string) =>
+    reference.startsWith(CANVAS_DESIGN_ASSET_SCHEME)
+      ? (urls?.get(id) ?? designAssetPlaceholder(id, "refused"))
+      : reference,
+  );
+}
+
 export function designDocument(
   block: Pick<CanvasDesignBlock, "size" | "theme" | "styles" | "frames">,
   options: {
@@ -184,6 +302,8 @@ export function designDocument(
     readonly startFrameId?: string;
     /** The workspace theme a themed design is drawn in. */
     readonly theme?: DesignFrameThemeValues;
+    /** Where each declared asset is drawn from, from `designAssetUrls`. */
+    readonly assetUrls?: ReadonlyMap<string, string>;
   } = {},
 ): string {
   const isDocument = block.size === "document";
@@ -198,7 +318,7 @@ export function designDocument(
     .map((frame) => {
       const id = escapeAttribute(String(frame.frameId));
       const startMark = String(frame.frameId) === start ? " data-start" : "";
-      return `<div class="octant-frame" id="${id}"${startMark}>${withOwnAddress(frame.html)}</div>`;
+      return `<div class="octant-frame" id="${id}"${startMark}>${withOwnAddress(withAssets(frame.html, options.assetUrls))}</div>`;
     })
     .join("");
   return [
@@ -212,7 +332,7 @@ export function designDocument(
       : `<style>${UNTHEMED_PAGE}</style>`,
     // The host refuses a stylesheet that closes its element; this keeps that
     // true for a document that reached the renderer some other way.
-    `<style>${(block.styles ?? "").replace(/<\/style/gi, "<\\/style")}</style>`,
+    `<style>${withAssets(block.styles ?? "", options.assetUrls).replace(/<\/style/gi, "<\\/style")}</style>`,
     `</head><body>${frames}</body></html>`,
   ].join("");
 }

@@ -1,4 +1,10 @@
-import type { CanvasBlock, CanvasDefinition } from "@octant/contracts/canvas";
+import {
+  CANVAS_DESIGN_ASSET_SCHEME,
+  type CanvasBlock,
+  type CanvasDefinition,
+  type CanvasDesignAssetResolution,
+  type CanvasDesignAssetUnavailableReason,
+} from "@octant/contracts/canvas";
 import {
   canvasDashboardCellWidth,
   canvasReadingOrder,
@@ -45,6 +51,19 @@ export type CanvasPreviewWarning =
       readonly background: string;
       readonly ratio: number;
       readonly target: number;
+    }
+  | {
+      /**
+       * A declared image the host could not draw, so the frames that name it
+       * show a placeholder. Names the frames and the id, never the bytes.
+       * `frameIds` is every frame that names the asset; a reference in the
+       * shared stylesheet reaches every frame.
+       */
+      readonly kind: "design-asset-unavailable";
+      readonly blockId: string;
+      readonly assetId: string;
+      readonly reason: CanvasDesignAssetUnavailableReason;
+      readonly frameIds: ReadonlyArray<string>;
     };
 
 /**
@@ -73,6 +92,12 @@ export interface CanvasPreviewWarningInput {
   /** The drawn width in CSS pixels; the same number the renderer is given. */
   readonly width: number;
   readonly palette: CanvasPreviewPalette;
+  /**
+   * Each design's images as the host resolved them for this preview, by block
+   * id. A design missing here was not resolved, and its declared images read
+   * as refused, which is what a reader would see.
+   */
+  readonly designAssets?: ReadonlyMap<string, ReadonlyArray<CanvasDesignAssetResolution>>;
 }
 
 /** A categorical mark must clear the 3:1 a graphical object needs (WCAG 1.4.11). */
@@ -102,7 +127,11 @@ export function canvasPreviewWarnings(
   // document's, so it is measured there; otherwise a chart in a quarter of a
   // wide grid would clip labels that the full width would hold.
   const cellWidths = new Map<string, number>();
-  for (const item of canvasReadingOrder(input.definition.blocks)) {
+  // A dashboard inside a tab or column is measured the same way.
+  const items = canvasReadingOrder(input.definition.blocks).flatMap((item) =>
+    item.kind === "group" ? item.sections.flat() : [item],
+  );
+  for (const item of items) {
     if (item.kind !== "dashboard") continue;
     for (const cell of item.cells) {
       cellWidths.set(
@@ -132,6 +161,8 @@ function blockWarnings(
       return chartWarnings(block, input);
     case "bar-list":
       return barListWarnings(block, input);
+    case "design":
+      return designAssetWarnings(block, input);
     default:
       return [];
   }
@@ -217,6 +248,42 @@ function clippedChartLabels(
       label: String(point.x),
       availablePx: Math.round(availablePx),
     }));
+}
+
+function designAssetWarnings(
+  block: Extract<CanvasBlock, { readonly kind: "design" }>,
+  input: CanvasPreviewWarningInput,
+): ReadonlyArray<CanvasPreviewWarning> {
+  const resolved = input.designAssets?.get(String(block.blockId));
+  const warnings: CanvasPreviewWarning[] = [];
+  for (const asset of block.assets ?? []) {
+    const id = String(asset.assetId);
+    const outcome = resolved?.find((entry) => String(entry.assetId) === id);
+    if (outcome?.status === "resolved") continue;
+    const reference = `${CANVAS_DESIGN_ASSET_SCHEME}${id}`;
+    const named = (markup: string | undefined) =>
+      markup !== undefined && namesAsset(markup, reference);
+    warnings.push({
+      kind: "design-asset-unavailable",
+      blockId: String(block.blockId),
+      assetId: id,
+      reason: outcome?.reason ?? "refused",
+      frameIds: block.frames
+        .filter((frame) => named(block.styles) || named(frame.html))
+        .map((frame) => String(frame.frameId)),
+    });
+  }
+  return warnings;
+}
+
+/** Whether markup names this reference, not one whose id merely starts with it. */
+function namesAsset(markup: string, reference: string): boolean {
+  let at = markup.indexOf(reference);
+  while (at !== -1) {
+    if (!/[A-Za-z0-9._-]/.test(markup.charAt(at + reference.length))) return true;
+    at = markup.indexOf(reference, at + reference.length);
+  }
+  return false;
 }
 
 function barListWarnings(
