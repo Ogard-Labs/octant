@@ -1213,7 +1213,7 @@ describe("ProviderService", () => {
     );
   });
 
-  it("assigns an extra Codex account its own home and refuses a colliding home", async () => {
+  it("assigns an extra Codex account its own home, creates it, and refuses any other home", async () => {
     const fixture = serviceFixture();
     const otherId = decodeProviderInstanceId("80000000-0000-4000-8000-000000000062");
     await fixture.service.execute(windowId, {
@@ -1240,6 +1240,11 @@ describe("ProviderService", () => {
         },
       },
     });
+    // Codex refuses a home that does not exist, so the extra account's folder
+    // is created with it. The first account keeps the host profile.
+    expect(fixture.ensureAccountDirectory.mock.calls).toEqual([
+      [assignedCodexHome(homedir(), otherId)],
+    ]);
     await expect(
       fixture.service.execute(windowId, {
         kind: "change-codex-configuration",
@@ -1254,7 +1259,7 @@ describe("ProviderService", () => {
     ).rejects.toMatchObject({
       failure: {
         category: "invalid-configuration",
-        message: "Another Codex account already uses that home directory.",
+        message: "Codex accounts use an Octant-assigned home. Re-assign the account to use it.",
       },
     });
   });
@@ -4688,16 +4693,21 @@ function serviceFixture(
       (async (instance: ProviderInstance) =>
         options.probeResult ?? observation({ instanceId: instance.id })),
   );
+  // Records the account folders the service would create, so no test
+  // creates one under the real home.
+  const ensureAccountDirectory = vi.fn(async (_directory: string) => undefined);
   return {
     append,
     catalogs: () => catalogs,
     persistence,
     runtime,
     probe,
+    ensureAccountDirectory,
     service: new ProviderService({
       persistence,
       runtimeRegistry: runtime,
       probe,
+      ensureAccountDirectory,
       ...(options.driver === undefined ? {} : { driver: options.driver }),
       ...(options.clearResumeIdentities === undefined
         ? {}

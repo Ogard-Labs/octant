@@ -100,7 +100,7 @@ import {
 } from "@octant/domain";
 import { describeProviderRuntimeIntegration } from "@octant/domain/provider-runtime-integration";
 import { accessSync, constants, realpathSync, statSync } from "node:fs";
-import { mkdtemp, realpath, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import { Cause, Effect, Exit, Fiber, Option, Schema, Stream } from "effect";
@@ -215,6 +215,12 @@ export interface ProviderServiceOptions {
   readonly clearProviderCredential?: (instanceId: ProviderInstanceId) => Promise<void>;
   /** Clears process-local provider limit evidence when identity/configuration changes. */
   readonly clearRuntimeUsageLimits?: (instanceId: ProviderInstanceId) => void;
+  /**
+   * Creates an account's assigned state directory. Codex refuses a home that
+   * does not exist, so the folder has to be there before the sign-in command
+   * for it is shown. Defaults to creating it for the owner only.
+   */
+  readonly ensureAccountDirectory?: (directory: string) => Promise<void>;
   readonly runCliUpdate?: (input: ProviderCliUpdateInput) => Promise<ProviderCliUpdateOutput>;
   /** Read-only host fact used to refuse enabling a missing local CLI. */
   readonly isProviderExecutableAvailable?: (instance: ProviderInstance) => boolean;
@@ -247,6 +253,7 @@ export class ProviderService implements ProviderServiceApi {
   readonly #isDriverPluginEffective: (driverKind: ProviderDriverKind) => boolean;
   readonly #clearResumeIdentities: ProviderServiceOptions["clearResumeIdentities"];
   readonly #clearRuntimeUsageLimits: ProviderServiceOptions["clearRuntimeUsageLimits"];
+  readonly #ensureAccountDirectory: (directory: string) => Promise<void>;
   readonly #clearProviderCredential: ProviderServiceOptions["clearProviderCredential"];
   readonly #runCliUpdate: (input: ProviderCliUpdateInput) => Promise<ProviderCliUpdateOutput>;
   readonly #isProviderExecutableAvailable: (instance: ProviderInstance) => boolean;
@@ -282,6 +289,11 @@ export class ProviderService implements ProviderServiceApi {
       ((driverKind) => admittedBundledProviderDriverKinds().has(driverKind));
     this.#clearResumeIdentities = options.clearResumeIdentities;
     this.#clearRuntimeUsageLimits = options.clearRuntimeUsageLimits;
+    this.#ensureAccountDirectory =
+      options.ensureAccountDirectory ??
+      (async (directory) => {
+        await mkdir(directory, { recursive: true, mode: 0o700 });
+      });
     this.#clearProviderCredential = options.clearProviderCredential;
     this.#runCliUpdate = options.runCliUpdate ?? runProviderCliUpdate;
     this.#isProviderExecutableAvailable = options.isProviderExecutableAvailable ?? (() => true);
@@ -714,6 +726,7 @@ export class ProviderService implements ProviderServiceApi {
                   ...(assignedHome === undefined ? {} : { codexHome: assignedHome }),
                 });
                 this.#refuseTakenCodexHomes(this.#persistence.readProviderInstances(), instance);
+                if (assignedHome !== undefined) await this.#ensureCodexAccountHome(assignedHome);
                 break;
               }
               case "create-kimi-code-provider":
@@ -1124,6 +1137,11 @@ export class ProviderService implements ProviderServiceApi {
                     codexHome: assignedCodexHome(homedir(), current.id),
                   }
                 : command.configuration;
+            this.#refuseUnassignedCodexHome(
+              requestedConfiguration.codexHome,
+              current.id,
+              current.configuration.codexHome,
+            );
             const configuration = this.#assignedCodexConfigurationForChange(
               instances,
               current,
@@ -1146,6 +1164,9 @@ export class ProviderService implements ProviderServiceApi {
               instance,
               current.id,
             );
+            if (instance.driverKind === "codex" && instance.configuration.codexHome !== undefined) {
+              await this.#ensureCodexAccountHome(instance.configuration.codexHome);
+            }
             eventName = "provider.instance-configuration-changed@1";
           } else if (command.kind === "change-mistral-vibe-configuration") {
             if (current.driverKind !== "mistral-vibe") {
@@ -2034,6 +2055,37 @@ export class ProviderService implements ProviderServiceApi {
     });
     await previous.catch(() => undefined);
     return release;
+  }
+
+  /**
+   * Octant assigns each Codex account its home, by the same rule as a Claude
+   * account: a client may name only the account's own assigned home or the one
+   * it already stores. Codex loads `config.toml` from that folder, and two
+   * accounts on one folder share one login.
+   */
+  #refuseUnassignedCodexHome(
+    directory: string | undefined,
+    instanceId: ProviderInstanceId,
+    stored: string | undefined,
+  ): void {
+    if (directory === undefined) return;
+    const named = accountDirectoryIdentity(directory);
+    if (named === assignedCodexHome(homedir(), instanceId)) return;
+    if (stored !== undefined && named === accountDirectoryIdentity(stored)) return;
+    throw this.#invalid(
+      "Codex accounts use an Octant-assigned home. Re-assign the account to use it.",
+    );
+  }
+
+  async #ensureCodexAccountHome(directory: string): Promise<void> {
+    try {
+      await this.#ensureAccountDirectory(directory);
+    } catch {
+      throw new ProviderServiceError({
+        category: "unavailable",
+        message: "The Codex account folder could not be created, so nothing was saved. Try again.",
+      });
+    }
   }
 
   #assignedCodexConfigurationForChange(

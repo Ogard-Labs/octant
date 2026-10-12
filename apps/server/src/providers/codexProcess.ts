@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { accessSync, constants, statSync } from "node:fs";
+import { accessSync, constants, mkdirSync, statSync } from "node:fs";
 import { delimiter, dirname, isAbsolute } from "node:path";
 
 import type { ProviderFailure } from "@octant/contracts";
@@ -723,6 +723,21 @@ export function makeCodexProcessLive(options: CodexProcessOptions = {}): CodexPr
           (resolved.inheritedEnvironment === undefined
             ? undefined
             : codexProcessEnvironment(binaryPath, resolved.inheritedEnvironment));
+        // Codex never creates its home: it refuses one that is missing with
+        // "CODEX_HOME points to …, but that path does not exist" (codex-cli
+        // 0.162.1). An account's assigned home is new, so it has to exist
+        // before the first start, and before the person runs the sign-in
+        // command against it.
+        const accountHome = environment?.CODEX_HOME;
+        if (accountHome !== undefined && isAbsolute(accountHome)) {
+          try {
+            mkdirSync(accountHome, { recursive: true, mode: 0o700 });
+          } catch {
+            return Effect.fail(
+              failure("invalid-configuration", "Codex account home could not be created."),
+            );
+          }
+        }
         return Effect.acquireReleaseInterruptible(
           Effect.gen(function* () {
             const probe = yield* probeCodexBinary(binaryPath, {
