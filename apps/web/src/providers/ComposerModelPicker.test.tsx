@@ -449,6 +449,24 @@ describe("ComposerModelPicker", () => {
     expect(screen.getByRole("button", { name: "Set up a provider" })).toBeDisabled();
   });
 
+  it("keeps Set up a provider locked while a model selection is still pending", async () => {
+    const user = userEvent.setup();
+    const onSelect = vi.fn(() => new Promise<void>(() => {}));
+    const view = render(
+      <ComposerModelPicker groups={groups()} onOpenSettings={vi.fn()} onSelect={onSelect} />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Provider and model" }));
+    await user.click(await screen.findByRole("option", { name: "Model Two" }));
+    expect(onSelect).toHaveBeenCalledOnce();
+
+    view.rerender(
+      <ComposerModelPicker groups={[]} onOpenSettings={vi.fn()} onSelect={onSelect} />,
+    );
+
+    expect(screen.getByRole("button", { name: "Set up a provider" })).toBeDisabled();
+  });
+
   it("does not offer Set up a provider when ready providers were filtered out", () => {
     render(
       <ComposerModelPicker

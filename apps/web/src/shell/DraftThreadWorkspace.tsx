@@ -1181,6 +1181,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
                     <span className="composer-gap" aria-hidden="true" />
                     <ComposerModelPicker
                       ariaLabel="Provider and model"
+                      disabled={props.creating === true}
                       menuSide="bottom"
                       groups={props.providerGroups}
                       modelOptionValues={modelOptionValues}

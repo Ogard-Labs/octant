@@ -928,6 +928,11 @@ describe("DraftThreadWorkspace", () => {
     expect(screen.getByRole("textbox", { name: "First message" })).toBeDisabled();
   });
 
+  it("keeps Set up a provider locked while a Chat draft is creating", () => {
+    render(<DraftThreadWorkspace {...baseProps} creating onOpenSettings={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "Set up a provider" })).toBeDisabled();
+  });
+
   it.each([
     ["code", "Octant", "Knowledge"],
     ["work", "Knowledge", "Octant"],

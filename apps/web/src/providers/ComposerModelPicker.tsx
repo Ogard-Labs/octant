@@ -186,7 +186,7 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
         <OctantButton
           aria-label="Set up a provider"
           className="window-no-drag"
-          disabled={props.disabled === true}
+          disabled={controlsDisabled}
           onClick={props.onOpenSettings}
           size="sm"
           type="button"
