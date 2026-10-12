@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState } from "react";
+import { createContext, useCallback, useContext, useRef, useState } from "react";
 
 interface NewTaskDrafts {
   readonly read: (scope: string) => string;
@@ -27,16 +27,31 @@ export function createNewTaskDrafts(): NewTaskDrafts {
 export const NewTaskDraftsContext = createContext<NewTaskDrafts | undefined>(undefined);
 export const NewTaskDraftScopeContext = createContext<string | undefined>(undefined);
 
-/** Keep a pane's unsent text while navigation temporarily unmounts its composer. */
+/**
+ * Keep a pane's unsent text while navigation temporarily unmounts its composer.
+ *
+ * Writes go to the store in the setter, not an effect. Create can open the
+ * new thread and unmount this composer before React would flush a deferred
+ * write, and a later remount would otherwise restore the submitted prompt.
+ */
 export function useNewTaskPrompt() {
   const drafts = useContext(NewTaskDraftsContext);
   const scope = useContext(NewTaskDraftScopeContext);
-  const [prompt, setPrompt] = useState(() =>
+  const [prompt, setPromptState] = useState(() =>
     scope === undefined ? "" : (drafts?.read(scope) ?? ""),
   );
-  useEffect(() => {
-    if (scope === undefined || drafts === undefined) return;
-    drafts.write(scope, prompt);
-  }, [drafts, scope, prompt]);
+  const promptRef = useRef(prompt);
+  promptRef.current = prompt;
+  const setPrompt = useCallback(
+    (update: string | ((current: string) => string)) => {
+      const next = typeof update === "function" ? update(promptRef.current) : update;
+      promptRef.current = next;
+      if (scope !== undefined && drafts !== undefined) {
+        drafts.write(scope, next);
+      }
+      setPromptState(next);
+    },
+    [drafts, scope],
+  );
   return [prompt, setPrompt] as const;
 }

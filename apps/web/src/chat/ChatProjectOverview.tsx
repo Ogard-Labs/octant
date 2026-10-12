@@ -128,13 +128,16 @@ export function ChatProjectOverview(props: ChatProjectOverviewProps) {
     const normalized = draft.trim();
     if (!createAvailable || submitting || normalized === "") return;
     setSubmitting(true);
+    setDraft("");
     try {
       const created =
         Object.keys(modelOptionValues).length === 0
           ? await props.onCreateThread(normalized)
           : await props.onCreateThread(normalized, modelOptionValues);
-      if (created) setDraft("");
-      else setRestoreFocus(true);
+      if (!created) {
+        setDraft(normalized);
+        setRestoreFocus(true);
+      }
     } finally {
       setSubmitting(false);
     }

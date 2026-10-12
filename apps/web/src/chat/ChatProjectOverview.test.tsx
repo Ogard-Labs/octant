@@ -714,6 +714,38 @@ describe("ChatProjectOverview", () => {
     );
   });
 
+  it("does not restore a submitted quick-start draft after create opens the thread", async () => {
+    const drafts = createNewTaskDrafts();
+    let rendered: ReturnType<typeof render>;
+    function view() {
+      return (
+        <NewTaskDraftsContext.Provider value={drafts}>
+          <NewTaskDraftScopeContext.Provider value="chat-overview:test">
+            <ChatProjectOverview
+              model={model}
+              onCreateThread={async () => {
+                rendered.unmount();
+                return true;
+              }}
+            />
+          </NewTaskDraftScopeContext.Provider>
+        </NewTaskDraftsContext.Provider>
+      );
+    }
+
+    rendered = render(view());
+    fireEvent.change(screen.getByRole("textbox", { name: "Start a new Chat thread" }), {
+      target: { value: "Open a launch thread" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Start thread" }));
+    await waitFor(() => {
+      expect(screen.queryByRole("textbox", { name: "Start a new Chat thread" })).toBeNull();
+    });
+    render(view());
+
+    expect(screen.getByRole("textbox", { name: "Start a new Chat thread" })).toHaveValue("");
+  });
+
   it("opens Providers from Set up a provider on the Project composer", () => {
     const onOpenSettings = vi.fn();
     render(

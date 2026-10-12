@@ -361,6 +361,38 @@ describe("WorkOverview", () => {
     expect(screen.getByText("brief.png")).toBeVisible();
   });
 
+  it("does not restore a submitted quick-start draft after create opens the thread", async () => {
+    const drafts = createNewTaskDrafts();
+    let rendered: ReturnType<typeof render>;
+    function view() {
+      return (
+        <NewTaskDraftsContext.Provider value={drafts}>
+          <NewTaskDraftScopeContext.Provider value="work-overview:test">
+            <WorkOverview
+              model={emptyModel()}
+              onCreateThread={async () => {
+                rendered.unmount();
+                return true;
+              }}
+            />
+          </NewTaskDraftScopeContext.Provider>
+        </NewTaskDraftsContext.Provider>
+      );
+    }
+
+    rendered = render(view());
+    fireEvent.change(screen.getByRole("textbox", { name: "Start a new task" }), {
+      target: { value: "Open the quarterly notes" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Start task" }));
+    await waitFor(() => {
+      expect(screen.queryByRole("textbox", { name: "Start a new task" })).toBeNull();
+    });
+    render(view());
+
+    expect(screen.getByRole("textbox", { name: "Start a new task" })).toHaveValue("");
+  });
+
   it("keeps provider setup reachable when no Work provider is ready", async () => {
     const user = userEvent.setup();
     const onOpenSettings = vi.fn();

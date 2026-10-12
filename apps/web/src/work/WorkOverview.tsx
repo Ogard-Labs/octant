@@ -131,8 +131,10 @@ export function WorkOverview(props: WorkOverviewProps) {
     const normalized = draft.trim();
     if (!createAvailable || submitting || normalized === "") return;
     setSubmitting(true);
+    const staged = images.filesForSend();
+    setDraft("");
+    images.clearAfterAccepted();
     try {
-      const staged = images.filesForSend();
       const created =
         Object.keys(modelOptionValues).length > 0
           ? await props.onCreateThread(
@@ -143,9 +145,9 @@ export function WorkOverview(props: WorkOverviewProps) {
           : staged.length === 0
             ? await props.onCreateThread(normalized)
             : await props.onCreateThread(normalized, staged);
-      if (created) {
-        images.clearAfterAccepted();
-        setDraft("");
+      if (!created) {
+        setDraft(normalized);
+        if (staged.length > 0) images.restore(staged);
       }
     } finally {
       setSubmitting(false);
