@@ -762,9 +762,11 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
           </SidebarRowPropertiesContext.Provider>
         ) : (
           <>
-            {/* Grouping builds no sections when Work has no Projects, so the
-                empty affordance — and the Code-mode hint — would disappear. */}
-            {viewGrouping === "project" || projectRows.length === 0
+            {/* Grouping builds no sections when this mode has no Projects, so
+                the empty affordance — and the Code-mode hint — would disappear.
+                A saved view can hide every Project while the mode still has
+                some; that is not "No Projects yet." */}
+            {viewGrouping === "project" || props.projects.length === 0
               ? [
                   renderProjectGroup("Pinned", pinned),
                   renderProjectGroup("Projects", ordinary, { allowAdd: true }),
