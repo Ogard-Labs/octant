@@ -25,13 +25,17 @@ export function ThreadStats() {
     () => (scope.summary === undefined ? [] : threadStats(threadStatsInputOf(scope.summary))),
     [scope.summary],
   );
-  // The meter's figures belong to the active pane only: an inactive split pane
-  // must not show another thread's provider capacity. Read on every render, not
-  // memoized: a window whose reset passes must drop out of the line when the
-  // next render comes, not stay until the figures change.
-  const limits = meter.visible
-    ? composerLimitWindows({ now: Date.now(), snapshot: meter.snapshot, fallback: meter.fallback })
-    : [];
+  // The line belongs to the active pane only. The turn figures and the meter's
+  // limits come from one shell-wide scope, so an inactive split pane would
+  // otherwise show another thread's figures and provider capacity.
+  if (!meter.visible) return null;
+  // Read on every render, not memoized: a window whose reset passes must drop
+  // out of the line when the next render comes, not stay until the figures change.
+  const limits = composerLimitWindows({
+    now: Date.now(),
+    snapshot: meter.snapshot,
+    fallback: meter.fallback,
+  });
   const showLine = scope.lineVisible && (stats.length > 0 || limits.length > 0);
   return showLine ? (
     <ThreadStatsLine limits={limits} onHide={() => scope.setLineVisible(false)} stats={stats} />
