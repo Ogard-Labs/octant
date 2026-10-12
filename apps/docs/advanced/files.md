@@ -175,9 +175,11 @@ can share or export it. Any other Canvas appears there as a row that opens it.
 What you see in the thread is read-only, even expanded: dragging a board node
 or changing a plan's task happens in the sidebar, or in the Canvas tab in Chat,
 where comments and sharing are too. The agent can show a document of any length
-inline, but a Canvas with a diagram board (the generic diagram you can drag), a
-plan, a mockup, or a design always first appears as a row, because you work on
-those in the sidebar. Sequence, state, entity-relationship, swimlane, and mind
+inline, including an article or spec it wrote as a document-size design. A
+Canvas with a diagram board (the generic diagram you can drag), a plan, a
+mockup, a design at a device size (phone, tablet, desktop, or slide), or a
+running prototype always first appears as a row, because you work on those in
+the sidebar. Sequence, state, entity-relationship, swimlane, and mind
 map diagrams can be shown inline. If an inline Canvas gains one of those
 blocks, later or through your own edits, it turns back into a row. The agent is
 told when that happens.

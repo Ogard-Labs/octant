@@ -73,10 +73,12 @@ version, but the strict definition schema refuses an unknown field, so a
 runtime rolled back past them refuses a document that uses them rather than
 drawing it as plain text.
 The pure `canvasInlineRefusal` policy admits an author's `inline` request for
-reading blocks at any length within the ordinary block budget, and refuses one
-that holds a `diagram`, `plan`, `mockup` or `design`. When an author asks for
-`inline` with such a block, the host records `sidebar` and returns the reason as
-`presentationNote`. The refusal bounds only the author's unprompted request: a
+reading blocks at any length within the ordinary block budget, and for a
+`design` of the `document` size that runs no script, which is an article or
+spec and reads like one. It refuses a request that holds a `diagram`, `plan`,
+`mockup`, a device-size `design` (phone, tablet, desktop, or slide), or a
+`design` that runs script. When an author asks for `inline` with such a block,
+the host records `sidebar` and returns the reason as `presentationNote`. The refusal bounds only the author's unprompted request: a
 person may expand any Canvas in its thread, and that view preference never
 reaches the server
 (see [Canvas documents, designs, and prototypes](../architecture.md#canvas-documents-designs-and-prototypes)).
@@ -489,7 +491,9 @@ frame titles, not markup. A share also refuses an action block, whose command
 runs only on this host. Both refusals, and any block or field the share
 contract does not carry, are checked before the snapshot is journaled and
 reach the owner as an `unsafe-payload` denial: the Canvas cannot be shared, not
-a malformed request. A design is always a sidebar Canvas. An authored
+a malformed request. A device-size design, and any design that runs script, is
+always a sidebar Canvas for the author's own request; a `document` design that
+runs none may be asked for `inline`. An authored
 revision declares the current schema version on the version and its
 definition, so a Canvas written under an earlier version moves forward and can
 gain a design; a version append never moves a Canvas back. Agents writing
