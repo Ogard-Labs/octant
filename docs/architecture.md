@@ -1678,10 +1678,12 @@ scope a [routine](#modes-chat-work-and-code) runs under, never through a
 window: it resumes with no window open, and an open window lends it neither
 identity nor Project binding. The admission path still rechecks the thread's
 Project access (an inactive Project refuses and settles `failed`), mode, and
-posture exactly as for a person's retry; a Work continuation is journaled as
+posture exactly as for a person's retry, and a Work resume refuses while Work
+is turned off, since no window stands in for the mode switch; a Work continuation is journaled as
 the host's `system` actor. Any approval the resumed turn raises is offered the
 way a routine's is: a browser-origin or extension-tool prompt goes to every
-local window that may drive that thread (one bound to its Project), and
+local window that may drive that thread (one bound to the Project the prompt
+recorded), and
 answering settles only that prompt. This resume timer is deliberately narrow and separate from
 [routines](#modes-chat-work-and-code): an in-process host timer over journaled
 opt-ins that only continues a stopped turn — no cloud wake, no background claim

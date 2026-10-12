@@ -215,7 +215,8 @@ function dependencies(
   overrides: {
     readonly journal?: UsageResumePortDependencies["journal"];
     readonly chat?: UsageResumePortDependencies["chat"];
-    readonly work?: UsageResumePortDependencies["work"];
+    readonly work?: Omit<UsageResumePortDependencies["work"], "isEnabled">;
+    readonly workEnabled?: boolean;
     readonly code?: UsageResumePortDependencies["code"];
     readonly agentRun?: UsageResumePortDependencies["agentRun"];
   } = {},
@@ -230,12 +231,15 @@ function dependencies(
       readThreadView: () => undefined,
       execute: async () => ({}),
     },
-    work: overrides.work ?? {
-      readThread: () => undefined,
-      listTurns: () => [],
-      startFirstTurn: async () => ({
-        kind: "accepted",
-        turn: waitingWorkTurn(),
+    work: {
+      isEnabled: () => overrides.workEnabled ?? true,
+      ...(overrides.work ?? {
+        readThread: () => undefined,
+        listTurns: () => [],
+        startFirstTurn: async () => ({
+          kind: "accepted",
+          turn: waitingWorkTurn(),
+        }),
       }),
     },
     code: overrides.code ?? {
@@ -330,6 +334,29 @@ describe("usage-resume ports", () => {
     const scopes = [startFirstTurn.mock.calls[0]?.[0], executeOperation.mock.calls[0]?.[0]];
     expect(scopes).toEqual([ROUTINE_HOST_SCOPE_ID, ROUTINE_HOST_SCOPE_ID]);
     expect(scopes).not.toContain(ids.window);
+  });
+
+  it("refuses to resume a Work turn after Work was turned off", async () => {
+    const startFirstTurn = vi.fn(async () => ({
+      kind: "accepted" as const,
+      turn: waitingWorkTurn(),
+    }));
+    const ports = createUsageResumePorts(
+      dependencies({
+        workEnabled: false,
+        work: {
+          readThread: () => workThread(),
+          listTurns: () => [waitingWorkTurn()],
+          startFirstTurn,
+        },
+      }),
+    );
+
+    await expect(ports.work.dispatch(record())).resolves.toEqual({
+      kind: "refused",
+      detail: "Work is turned off on this host.",
+    });
+    expect(startFirstTurn).not.toHaveBeenCalled();
   });
 
   it("marks a Chat limit recovery retry as the host's own dispatch", async () => {

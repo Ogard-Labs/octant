@@ -4,6 +4,7 @@ import { ExtensionToolApprovalService } from "./extensionToolApprovalService";
 
 const windowId = "44000000-0000-4000-8000-000000000001" as never;
 const threadId = "44000000-0000-4000-8000-000000000002" as never;
+const projectId = "44000000-0000-4000-8000-000000000007";
 
 function request(service: ExtensionToolApprovalService, signal?: AbortSignal) {
   return service.request({
@@ -57,12 +58,16 @@ describe("extension tool approval service", () => {
       uuid: () => "44000000-0000-4000-8000-000000000005",
       now: () => Date.parse("2026-08-09T06:00:00.000Z"),
       isHostScope: isRoutineHostScope,
-      windowCanReachThread: (scope, thread) =>
-        String(scope) === String(windowId) && String(thread) === String(threadId),
+      // Only a window bound to the Project the prompt recorded reaches it.
+      windowCanReachThread: (scope, thread, project) =>
+        String(scope) === String(windowId) &&
+        String(thread) === String(threadId) &&
+        project === projectId,
     });
     const pending = service.request({
       windowId: ROUTINE_HOST_SCOPE_ID,
       threadId,
+      projectId,
       packageId: "44000000-0000-4000-8000-000000000003" as never,
       componentId: "server" as never,
       providerToolName: "plugin__server__read",

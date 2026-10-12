@@ -99,6 +99,8 @@ export interface UsageResumePortDependencies {
     ) => Promise<unknown>;
   };
   readonly work: {
+    /** Whether Work is enabled in the host's shell settings right now. */
+    readonly isEnabled: () => boolean;
     readonly readThread: (threadId: WorkThreadId) => WorkThread | undefined;
     readonly listTurns: (threadId: WorkThreadId) => ReadonlyArray<WorkTurnState>;
     readonly startFirstTurn: (
@@ -305,8 +307,14 @@ function workPort(deps: UsageResumePortDependencies): UsageResumeModePort {
     dispatch: async (record) => {
       // The resume runs as the host, never through a window: it needs none
       // open and borrows no window's identity or Project binding. The turn
-      // path still rechecks the thread's Project access, mode, and posture.
+      // path still rechecks the thread's Project access and posture.
       const scopeId = ROUTINE_HOST_SCOPE_ID;
+      // The Work turn path does not read the mode switch, and a window used
+      // to stand in for it (no window opens on a disabled mode). The host
+      // has no such stand-in, so it asks the switch itself.
+      if (!deps.work.isEnabled()) {
+        return refused("Work is turned off on this host.");
+      }
       const thread = deps.work.readThread(decodeWorkThreadId(record.threadId));
       const turn = stoppedTurn(record);
       if (thread === undefined || turn === undefined || thread.bindingRevisionId === undefined) {

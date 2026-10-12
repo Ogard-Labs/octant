@@ -31,8 +31,15 @@ export class ExtensionToolApprovalService {
        * to the windows that can see the thread.
        */
       readonly isHostScope?: (windowId: WindowId) => boolean;
-      /** Whether a local window may drive this thread, by its Project binding. */
-      readonly windowCanReachThread?: (windowId: WindowId, threadId: string) => boolean;
+      /**
+       * Whether a local window may drive this thread in the Project the
+       * prompt recorded, by that window's Project binding.
+       */
+      readonly windowCanReachThread?: (
+        windowId: WindowId,
+        threadId: string,
+        projectId: string | undefined,
+      ) => boolean;
     },
   ) {
     this.#ttlMs = Math.max(1_000, Math.min(options.ttlMs ?? DEFAULT_APPROVAL_TTL_MS, 10 * 60_000));
@@ -119,7 +126,7 @@ export class ExtensionToolApprovalService {
     ) {
       return false;
     }
-    return windowCanReachThread(windowId, pending.view.threadId);
+    return windowCanReachThread(windowId, pending.view.threadId, pending.view.projectId);
   }
 
   revokeWindow(windowId: WindowId): void {

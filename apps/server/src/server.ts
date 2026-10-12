@@ -1878,11 +1878,21 @@ export function startOctantServer(
       // selections as the host, so that turn's tool prompts go to the windows
       // bound to the thread's Project, as a routine's browser prompts do.
       isHostScope: isRoutineHostScope,
-      windowCanReachThread: (windowId, threadId) => {
+      // Routed by the Project the prompt recorded, never by trying each mode:
+      // Work and Code thread ids are separate namespaces, so a raw id alone
+      // could match an unrelated thread another window may drive.
+      windowCanReachThread: (windowId, threadId, projectId) => {
+        if (projectId === undefined) return false;
+        const project = persistence.readProject(decodeProjectId(projectId));
+        if (project === undefined || (project.type !== "work" && project.type !== "code")) {
+          return false;
+        }
         const thread = decodeBrowserThreadId(threadId);
+        const authority = browserAuthority.resolve(thread, project.type);
         return (
-          browserAuthority.canAccessWindow(windowId, thread, "work") ||
-          browserAuthority.canAccessWindow(windowId, thread, "code")
+          authority !== undefined &&
+          String(authority.projectId) === String(project.id) &&
+          browserAuthority.canAccessWindow(windowId, thread, project.type)
         );
       },
     });
@@ -7612,6 +7622,10 @@ export function startOctantServer(
           execute: (input, executionContext) => chatService.execute(input, executionContext),
         },
         work: {
+          isEnabled: () =>
+            enabledModes(
+              persistence.readShellSettings()?.settings ?? defaultShellSettings(),
+            ).includes("work"),
           readThread: (threadId) => workThreadProjection.read(threadId),
           listTurns: (threadId) => workTurnProjection.listForThread(threadId),
           startFirstTurn: (windowId, input, options) =>
