@@ -28,6 +28,16 @@ import {
   decodeBrowserAutomationFailure,
   type BrowserAutomationFailure,
 } from "@octant/contracts/browser-automation";
+import {
+  decodeBrowserCaptureImage,
+  decodeBrowserCaptureImageCommand,
+  decodeBrowserCapturesCommand,
+  decodeBrowserCapturesResponse,
+  type BrowserCaptureImage,
+  type BrowserCaptureImageCommand,
+  type BrowserCapturesCommand,
+  type BrowserCapturesResponse,
+} from "@octant/contracts/browser-capture";
 
 export interface BrowserAutomationClientOptions {
   readonly baseUrl: string;
@@ -59,6 +69,15 @@ export interface BrowserAutomationClient {
     signal?: AbortSignal,
   ): Promise<BrowserAutomationSnapshot>;
   stop(input: BrowserContextStopCommand, signal?: AbortSignal): Promise<BrowserAutomationSnapshot>;
+  /** The thread's kept screenshots, newest first. */
+  listCaptures?(
+    input: BrowserCapturesCommand,
+    signal?: AbortSignal,
+  ): Promise<BrowserCapturesResponse>;
+  readCapture?(
+    input: BrowserCaptureImageCommand,
+    signal?: AbortSignal,
+  ): Promise<BrowserCaptureImage>;
   listApprovals?(signal?: AbortSignal): Promise<BrowserToolApprovalList>;
   decideApproval?(decision: BrowserToolApprovalDecision): Promise<boolean>;
 }
@@ -144,6 +163,22 @@ export function createBrowserAutomationClient(
         "/api/browser/contexts/stop",
         decodeBrowserContextStopCommand(input),
         decodeBrowserAutomationSnapshot,
+        signal,
+      ),
+    listCaptures: (input, signal) =>
+      post(
+        options,
+        "/api/browser/captures",
+        decodeBrowserCapturesCommand(input),
+        decodeBrowserCapturesResponse,
+        signal,
+      ),
+    readCapture: (input, signal) =>
+      post(
+        options,
+        "/api/browser/captures/image",
+        decodeBrowserCaptureImageCommand(input),
+        decodeBrowserCaptureImage,
         signal,
       ),
     listApprovals: (signal) =>

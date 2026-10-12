@@ -17,6 +17,48 @@ const authority = {
 };
 
 describe("BrowserAutomationClient", () => {
+  it("lists a thread's captures and reads one as an image through the authenticated routes", async () => {
+    const captureId = "16000000-0000-4000-8000-000000000001";
+    const capture = {
+      captureId,
+      threadId,
+      origin: "https://example.com",
+      url: "https://example.com/",
+      hash: "a".repeat(64),
+      size: 4,
+      mime: "image/png",
+      capturedAt: "2026-10-12T09:00:00.000Z",
+    };
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(Response.json({ captures: [capture] }))
+      .mockResolvedValueOnce(Response.json({ captureId, dataUrl: "data:image/png;base64,AAAA" }));
+    const client = createBrowserAutomationClient({
+      baseUrl: "http://127.0.0.1:13773",
+      fetch,
+      windowCapability: capability,
+    });
+    await expect(client.listCaptures?.({ threadId: threadId as any })).resolves.toEqual({
+      captures: [capture],
+    });
+    await expect(
+      client.readCapture?.({ threadId: threadId as any, captureId: captureId as any }),
+    ).resolves.toEqual({ captureId, dataUrl: "data:image/png;base64,AAAA" });
+    expect(fetch).toHaveBeenNthCalledWith(
+      1,
+      new URL("http://127.0.0.1:13773/api/browser/captures"),
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({ "x-octant-window-capability": capability }),
+      }),
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      2,
+      new URL("http://127.0.0.1:13773/api/browser/captures/image"),
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+
   it("resolves thread authority through the authenticated server route", async () => {
     const fetch = vi.fn(async () => Response.json({ threadId, authority }));
     const client = createBrowserAutomationClient({

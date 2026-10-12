@@ -68,8 +68,9 @@ import { useLinkedThreadParallelReview } from "../linkedThread/useLinkedThreadPa
 import { isReviewInParallelReference } from "../linkedThread/parseReviewInParallelDraft";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import type { ImageGenerationClient } from "@octant/client-runtime/image-generation-client";
+import { BrowserCaptureList } from "../browser/BrowserCaptureList";
 import { GeneratedImageList } from "../image/GeneratedImageList";
-import { decodeImageGenerationScopeId } from "@octant/contracts";
+import { decodeBrowserThreadId, decodeImageGenerationScopeId } from "@octant/contracts";
 import type { CanvasThreadReferenceCard } from "@octant/contracts/canvas-cards";
 import type { ThreadHandOffOutcome } from "@octant/contracts/thread-hand-off";
 import type { HostId } from "@octant/contracts/host";
@@ -989,6 +990,12 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
               profiles={props.imageGenerationProfiles ?? []}
               scopeId={decodeImageGenerationScopeId(String(thread.id))}
               threadKind="chat-thread"
+            />
+          )}
+          {props.browserAutomationClient === undefined ? null : (
+            <BrowserCaptureList
+              client={props.browserAutomationClient}
+              threadId={decodeBrowserThreadId(String(thread.id))}
             />
           )}
           <ChatTranscript

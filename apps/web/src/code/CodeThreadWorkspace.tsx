@@ -29,9 +29,11 @@ import { ThreadComposer } from "../composer/ThreadComposer";
 import { ComposerAttachButton } from "../composer/ComposerAttachButton";
 import { ComposerVoiceButton } from "../voice/ComposerVoiceButton";
 import { appendTranscript } from "../voice/appendTranscript";
+import type { BrowserAutomationClient } from "@octant/client-runtime/browser-automation-client";
 import type { ImageGenerationClient } from "@octant/client-runtime/image-generation-client";
 import type { ImageGenerationProfileView } from "@octant/contracts";
-import { decodeImageGenerationScopeId } from "@octant/contracts";
+import { decodeBrowserThreadId, decodeImageGenerationScopeId } from "@octant/contracts";
+import { BrowserCaptureList } from "../browser/BrowserCaptureList";
 import { GeneratedImageList } from "../image/GeneratedImageList";
 import { useThreadMessageQueue } from "../messageQueue/useThreadMessageQueue";
 import { ThreadMessageQueue } from "../messageQueue/ThreadMessageQueue";
@@ -152,6 +154,8 @@ export interface CodeThreadWorkspaceProps {
   readonly canvasClient?: CanvasClient;
   readonly imageGenerationClient?: ImageGenerationClient;
   readonly imageGenerationProfiles?: ReadonlyArray<ImageGenerationProfileView>;
+  /** Lists and reads the thread's kept Browser screenshots. */
+  readonly browserAutomationClient?: BrowserAutomationClient;
   readonly onOpenSettings?: () => void;
   /** Opens the pull-request surface from the checkout bar. Absent hides the control. */
   readonly onCreatePullRequest?: () => void;
@@ -1673,6 +1677,12 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           profiles={props.imageGenerationProfiles}
           scopeId={decodeImageGenerationScopeId(String(thread.id))}
           threadKind="code-thread"
+        />
+      )}
+      {!displayReady || props.browserAutomationClient === undefined ? null : (
+        <BrowserCaptureList
+          client={props.browserAutomationClient}
+          threadId={decodeBrowserThreadId(String(thread.id))}
         />
       )}
       {props.controller.providerRequests.length === 0 ? null : (
