@@ -152,7 +152,7 @@ export function defaultShellSettings(): ShellSettings {
     lastContextSurface: null,
     sidebarMaterial: "system",
     workspaceMaterial: "opaque",
-    modeSwitcherPresentation: "dropdown",
+    modeSwitcherPresentation: "buttons",
     projectViewSwitcherPresentation: "dropdown",
     sidebarBackground: DEFAULT_SIDEBAR_BACKGROUND,
     sidebarDestinations: { order: [], visibility: [] },

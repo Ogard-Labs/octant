@@ -158,7 +158,7 @@ describe("shell settings policy", () => {
       lastContextSurface: null,
       sidebarMaterial: "system",
       workspaceMaterial: "opaque",
-      modeSwitcherPresentation: "dropdown",
+      modeSwitcherPresentation: "buttons",
       projectViewSwitcherPresentation: "dropdown",
       transcriptTextSize: "small",
       transcriptWidth: "narrow",

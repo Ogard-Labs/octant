@@ -1026,10 +1026,13 @@ same thing, and the notice landed on top of it.
 The app has three server-enforced modes—Chat, Work, and Code—shown as two:
 **Work**, which lists Chat and Work threads together and whose new-thread
 composer opens with a Chat / In a folder switch in its context tray, and
-**Code**. Work reopens on the kind last used. Mode switching is available as a
-labeled selector, compact list, or icon presentation according to the user's
-setting; with two modes the icon presentation shows the labels instead of
-icons in a faint tray after a larger "Octant", so the header reads Octant [Work | Code]. Code and Work keep separate Project View sets. The
+**Code**. Work reopens on the kind last used. Mode switching is two compact icon buttons in the sidebar header when Work
+and Code are both on: a conversation mark for Work and a code mark for Code.
+A tooltip names the mode on hover and keyboard focus. The active mode carries
+`aria-current="page"` and a fill plus hairline, not colour alone. With one
+mode enabled the header is a single label and no control. Settings still
+offers a dropdown that names the current mode; a host that stored that choice
+keeps it. Code and Work keep separate Project View sets. The
 sidebar keeps Projects as a first-class destination alongside the active mode's
 compact thread list. When Work has no Chat or Work Projects but Code does, the
 empty Projects line says "Your Projects are in Code." with a Switch to Code

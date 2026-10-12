@@ -4,6 +4,7 @@ import { ChevronDown, CodeXml, FolderOpen, MessageSquare, type LucideIcon } from
 import type { ReactNode } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantMenu, type OctantMenuItem } from "../ui/base/OctantMenu";
+import { OctantTooltip } from "../ui/base/OctantTooltip";
 import { visibleModeOf, visibleModes } from "./workKind";
 
 export const modeLabels: Readonly<Record<OctantMode, string>> = {
@@ -40,10 +41,10 @@ export interface ModeSwitcherProps {
 }
 
 /**
- * The setting keeps its stored "buttons"/"dropdown" values; visually they are
- * the design system's icons and menu presentations of the mode switcher. The
- * active surface is marked with `aria-current="page"` in both, so what a
- * screen reader announces never depends on which presentation is on.
+ * The setting keeps its stored "buttons"/"dropdown" values. Buttons is the
+ * compact icon pair; dropdown still names the current mode. The active
+ * surface is marked with `aria-current="page"` in both, so what a screen
+ * reader announces never depends on which presentation is on.
  */
 export function ModeSwitcher(props: ModeSwitcherProps) {
   const separate = props.separateChat === true;
@@ -56,7 +57,7 @@ export function ModeSwitcher(props: ModeSwitcherProps) {
   };
 
   const items: Array<OctantMenuItem> = modes.map((mode) => {
-    const ModeIcon = modeIcons[mode];
+    const ModeIcon = iconForVisibleMode(mode, separate);
     return {
       description: modeDescriptions[mode],
       icon: <ModeIcon size={16} strokeWidth={1.7} />,
@@ -64,6 +65,22 @@ export function ModeSwitcher(props: ModeSwitcherProps) {
       value: mode,
     };
   });
+
+  if (modes.length <= 1) {
+    const switcher = (
+      <p className="mode-switcher__solo window-no-drag">
+        <span className="mode-switcher__brand">Octant</span>
+        <span className="mode-switcher__context">{modeLabels[activeMode]}</span>
+      </p>
+    );
+    if (props.actions === undefined) return switcher;
+    return (
+      <div className="sidebar__chrome">
+        {switcher}
+        <div className="sidebar__chrome-actions">{props.actions}</div>
+      </div>
+    );
+  }
 
   const switcher =
     props.presentation === "buttons" ? (
@@ -74,28 +91,26 @@ export function ModeSwitcher(props: ModeSwitcherProps) {
         data-oct-modeswitch="icons"
         role="group"
       >
-        <span className="mode-switcher__brand">Octant</span>
         <span className="modeswitch__tray">
           {modes.map((mode) => {
-            const ModeIcon = modeIcons[mode];
+            const ModeIcon = iconForVisibleMode(mode, separate);
             const active = activeMode === mode;
             return (
-              <OctantButton
-                {...(active ? { "aria-current": "page" as const } : {})}
-                className="mode window-no-drag"
-                key={mode}
-                onClick={() => selectMode(mode)}
-                // The label is clipped to the accessible name in the icons
-                // presentation, so the tooltip carries it for sighted hovers.
-                title={modeLabels[mode]}
-                type="button"
-                variant="ghost"
-              >
-                <span aria-hidden="true" className="mode__icon-frame">
-                  <ModeIcon className="icon" size={16} strokeWidth={1.5} />
-                </span>
-                <span className="mode-label">{modeLabels[mode]}</span>
-              </OctantButton>
+              <OctantTooltip key={mode} label={modeLabels[mode]}>
+                <OctantButton
+                  {...(active ? { "aria-current": "page" as const } : {})}
+                  aria-label={modeLabels[mode]}
+                  className="mode window-no-drag"
+                  onClick={() => selectMode(mode)}
+                  type="button"
+                  variant="ghost"
+                >
+                  <span aria-hidden="true" className="mode__icon-frame">
+                    <ModeIcon className="icon" size={16} strokeWidth={1.5} />
+                  </span>
+                  <span className="mode-label">{modeLabels[mode]}</span>
+                </OctantButton>
+              </OctantTooltip>
             );
           })}
         </span>
@@ -132,4 +147,10 @@ export function ModeSwitcher(props: ModeSwitcherProps) {
       <div className="sidebar__chrome-actions">{props.actions}</div>
     </div>
   );
+}
+
+/** Work is a conversation surface beside Code; keep the folder mark when Chat stands apart. */
+function iconForVisibleMode(mode: OctantMode, separate: boolean): LucideIcon {
+  if (mode === "work" && !separate) return MessageSquare;
+  return modeIcons[mode];
 }

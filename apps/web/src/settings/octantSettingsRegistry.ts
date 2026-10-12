@@ -228,7 +228,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           id: settingId("mode-switcher"),
           label: "Mode switcher",
           scope: "app",
-          keywords: "mode switcher compact buttons dropdown sidebar navigation",
+          keywords: "mode switcher compact buttons icons dropdown sidebar navigation",
         },
         {
           id: settingId("thread-provider-icons"),
