@@ -31,6 +31,7 @@ import { decodeChatCommandResult, type ChatThread } from "@octant/contracts/chat
 import { DEFAULT_THEME_SETTINGS } from "@octant/contracts/theme";
 import type { OctantHostBridge } from "./shell/hostBridge";
 import { App } from "./App";
+import { composerThreadDrafts } from "./composer/composerThreadDraftStore";
 import {
   threadUtilityDockKey,
   writeUtilityDockPresentation,
@@ -1262,6 +1263,97 @@ describe("App", () => {
       "The first message could not be sent. Retry from the open thread.",
     );
     expect(await screen.findByRole("textbox", { name: "Message" })).toHaveValue(
+      "Prepare launch brief",
+    );
+  });
+
+  it("keeps the created Project Chat thread unsent when opening it is refused", async () => {
+    const user = userEvent.setup();
+    const chatApi = chats();
+    const chatProject = {
+      id: projectId,
+      type: "chat",
+      name: "Launch planning",
+      lifecycle: "active",
+      pinned: true,
+      rank: "0/1",
+      version: 1,
+      createdAt: "2026-07-20T08:00:00.000Z",
+      updatedAt: "2026-07-20T08:00:00.000Z",
+    } as never;
+    const projectApi = projects({
+      active: [chatProject],
+      archived: [],
+      availability: [],
+      memory: [],
+    });
+    projectApi.memory = vi.fn(async () => ({ projectId, active: [], history: [] }) as never);
+    const initial = chatShellBootstrap();
+    const layout = initial.workspace.layouts.chat;
+    if (layout.kind !== "pane") throw new Error("Expected the default Chat pane.");
+    const shellApi = client({
+      ...initial,
+      workspace: applyWorkspaceOperation(initial.workspace, {
+        kind: "open-surface",
+        mode: "chat",
+        paneId: layout.paneId,
+        surface: {
+          kind: "project",
+          id: "00000000-0000-4000-8000-000000000891" as never,
+          projectId,
+          mode: "chat",
+          title: "Launch planning",
+        },
+      }),
+    });
+    const shellExecute = vi.mocked(shellApi.execute);
+    const baseShell = shellExecute.getMockImplementation();
+    if (baseShell === undefined) throw new Error("Expected a shell fixture");
+    shellExecute.mockImplementation(async (command) => {
+      if (
+        command.kind === "apply-workspace-operation" &&
+        command.operation.kind === "open-surface" &&
+        command.operation.surface.kind === "chat-thread"
+      ) {
+        throw {
+          category: "invalid",
+          message: "Workspace changed. Try again.",
+        };
+      }
+      return await baseShell(command);
+    });
+
+    render(
+      <App
+        chatClient={chatApi}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projectApi}
+        projectWindowCapability={projectWindowCapability}
+        providerClient={providers()}
+        shellClient={shellApi}
+      />,
+    );
+
+    const quickStart = await screen.findByRole("region", { name: "Chat quick start" });
+    await user.type(
+      within(quickStart).getByRole("textbox", { name: "Start a new Chat thread" }),
+      "Prepare launch brief",
+    );
+    await user.click(within(quickStart).getByRole("button", { name: "Start thread" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "The chat was created, but it could not be opened. Open it from the sidebar to continue.",
+    );
+    expect(screen.queryByRole("region", { name: "Workspace pane: Exact created chat" })).toBeNull();
+    expect(chatApi.execute).toHaveBeenCalledWith({
+      kind: "create-chat-thread",
+      projectId,
+      title: "Prepare launch brief",
+    });
+    expect(chatApi.execute).not.toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "send-chat-turn" }),
+    );
+    expect(composerThreadDrafts.read("chat", createdChatThreadId)?.text).toBe(
       "Prepare launch brief",
     );
   });

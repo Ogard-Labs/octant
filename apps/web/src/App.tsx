@@ -3150,6 +3150,24 @@ function LaunchedShell(
     });
   }
 
+  async function openCreatedChatThread(
+    threadId: ChatThreadId,
+    title: string,
+    prompt: string,
+    projectId?: ProjectId,
+  ): Promise<boolean> {
+    const opened =
+      projectId === undefined
+        ? await controller.openChatThread(threadId, title)
+        : await controller.openChatThread(threadId, title, projectId);
+    if (opened) return true;
+    chatController.reportError(
+      "The chat was created, but it could not be opened. Open it from the sidebar to continue.",
+    );
+    seedOpenedComposerDraft("chat", String(threadId), prompt);
+    return false;
+  }
+
   const openCreatedFollowUp = ({
     mode,
     created,
@@ -5524,7 +5542,9 @@ function LaunchedShell(
     // A successful create is durable even if provider selection or the first
     // turn fails. Open its exact thread before either follow-up command so the
     // user can see the failure and retry instead of creating a duplicate.
-    await controller.openChatThread(thread.id, thread.title, project.id);
+    if (!(await openCreatedChatThread(thread.id, thread.title, prompt, project.id))) {
+      return true;
+    }
     try {
       if (
         selection !== undefined &&
@@ -5867,11 +5887,12 @@ function LaunchedShell(
             ...(modelOptionValues === undefined ? {} : { modelOptionValues }),
           });
           if (changed?.kind !== "thread-updated") {
-            await controller.openChatThread(thread.id, thread.title);
-            chatController.reportError(
-              "The selected Chat provider and model could not be applied. Retry from the open thread.",
-            );
-            seedOpenedComposerDraft("chat", String(thread.id), prompt);
+            if (await openCreatedChatThread(thread.id, thread.title, prompt)) {
+              chatController.reportError(
+                "The selected Chat provider and model could not be applied. Retry from the open thread.",
+              );
+              seedOpenedComposerDraft("chat", String(thread.id), prompt);
+            }
             return true;
           }
           thread = changed.thread;
@@ -5892,9 +5913,16 @@ function LaunchedShell(
             (sent) => ({ sent }),
             (error: unknown) => ({ error }),
           );
-        await controller.openChatThread(thread.id, thread.title);
+        const opened = await controller.openChatThread(thread.id, thread.title);
         const outcome = await sendOutcome;
-        if ("error" in outcome || outcome.sent === undefined) {
+        if (!opened) {
+          chatController.reportError(
+            "The chat was created, but it could not be opened. Open it from the sidebar to continue.",
+          );
+          if ("error" in outcome || outcome.sent === undefined) {
+            seedOpenedComposerDraft("chat", String(thread.id), prompt);
+          }
+        } else if ("error" in outcome || outcome.sent === undefined) {
           chatController.reportError(
             "The first message could not be sent. Retry from the open thread.",
           );
