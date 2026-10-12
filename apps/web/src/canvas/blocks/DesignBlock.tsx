@@ -623,14 +623,17 @@ function RunningDesignBlock({
     [block.blockId, runtime],
   );
 
-  // A new version is a new page; the sidebar starts it again on its own.
+  // A new version is a new page; the sidebar starts it again on its own. The
+  // page is what the design says, not which object says it: the same version
+  // read again arrives as a new object, and must not stop a running page.
   const runsOnOpen = runtime?.runsOnOpen === true;
+  const page = useMemo(() => JSON.stringify(block), [block]);
   useEffect(() => {
     generation.current += 1;
     setState({ kind: "idle" });
     setErrors([]);
     if (runsOnOpen) void run(false);
-  }, [block, run, runsOnOpen]);
+  }, [page, run, runsOnOpen]);
 
   const stop = useCallback((why: RunStopReason) => {
     generation.current += 1;
@@ -747,6 +750,15 @@ function RunningDesignBlock({
           page can reach the network before Octant stops it.
         </p>
       ) : null}
+      {/* Shown on every client and in every state: a page's policy does not
+          cover a peer connection, and the desktop's WebRTC policy stops UDP
+          only, so a sandboxed frame still reached a TCP listener there. */}
+      {runtime === undefined ? null : (
+        <p className="canvas-design__notice">
+          A prototype&apos;s script can still connect to another computer and send what the
+          prototype holds. Octant does not block that yet.
+        </p>
+      )}
       {state.kind === "stopped" ? (
         <p className="canvas-design__notice" role="status">
           {state.why.kind === "refused" ? state.why.reason : STOPPED_TEXT[state.why.kind]}
