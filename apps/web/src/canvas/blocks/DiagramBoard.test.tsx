@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { decodeCanvasBlock, type CanvasDiagramBlock } from "@octant/contracts/canvas";
+import { designBriefExample, layoutCanvasDiagram } from "@octant/domain";
 import { DiagramBoard, type DiagramBoardLayoutRuntime } from "./DiagramBoard";
 
 function diagram(): CanvasDiagramBlock {
@@ -108,5 +109,49 @@ describe("DiagramBoard", () => {
     await user.keyboard("{ArrowLeft}");
     expect(await screen.findByRole("alert")).toHaveTextContent(/changed on the host/);
     expect(nodeRect("API")).toEqual(before);
+  });
+});
+
+describe("DiagramBoard styles", () => {
+  function styled(): CanvasDiagramBlock {
+    const block = designBriefExample
+      .map((entry) => decodeCanvasBlock(entry))
+      .find((entry) => entry.blockId === "loop");
+    if (block?.kind !== "diagram") throw new Error("fixture is not a diagram");
+    return block;
+  }
+
+  it("draws each node as its role's shape where the domain layout placed it", () => {
+    render(<DiagramBoard block={styled()} />);
+    const layout = layoutCanvasDiagram(styled());
+    for (const box of layout.nodes) {
+      const shape = nodeElement(box.label).querySelector("[data-shape]");
+      expect(shape?.getAttribute("data-shape")).toBe(box.shape);
+    }
+    const decision = nodeElement("Encounter?").querySelector("polygon");
+    const fight = layout.nodes.find((box) => box.nodeId === "fight");
+    expect(decision?.getAttribute("points")?.split(" ")[0]).toBe(
+      `${String((fight?.x ?? 0) + (fight?.width ?? 0) / 2)},${String(fight?.y)}`,
+    );
+    expect(nodeRect("Start run")).toEqual({
+      x: layout.nodes[0]?.x,
+      y: layout.nodes[0]?.y,
+    });
+  });
+
+  it("ends an arrow or dashed edge in a toned arrowhead and leaves a plain line bare", () => {
+    const { container } = render(<DiagramBoard block={styled()} />);
+    const edges = [...container.querySelectorAll("polyline.canvas-block__diagram-edge")];
+    const flee = edges.find((edge) => edge.getAttribute("data-style") === "dashed");
+    expect(flee?.getAttribute("data-tone")).toBe("warning");
+    const marker = flee?.getAttribute("marker-end") ?? "";
+    const id = /url\(#(.+)\)/.exec(marker)?.[1] ?? "";
+    expect(container.querySelector(`marker[id="${id}"]`)?.getAttribute("data-tone")).toBe(
+      "warning",
+    );
+    expect(flee?.getAttribute("points")?.split(" ")).toHaveLength(4);
+    const { container: plain } = render(<DiagramBoard block={diagram()} />);
+    expect(plain.querySelector("polyline")?.getAttribute("marker-end")).toBeNull();
+    expect(plain.querySelector("marker")).toBeNull();
   });
 });

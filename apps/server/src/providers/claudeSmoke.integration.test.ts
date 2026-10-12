@@ -408,8 +408,8 @@ async function runInstalledClaudeSmoke(authentication: ClaudeAuthentication): Pr
         "API-key runtime did not use isolated configuration.",
       );
       assertSmoke(
-        metrics.configDirectoryCount >= 7,
-        "API-key config scopes were not independently owned.",
+        metrics.configDirectoryCount === 1,
+        "API-key launches did not all use the one assigned account directory.",
       );
     }
     assertSmoke(metrics.diagnostics >= 0, "Claude diagnostics counter was invalid.");

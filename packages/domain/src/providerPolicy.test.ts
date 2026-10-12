@@ -2198,6 +2198,19 @@ describe("provider instance policy", () => {
     expect(original).toEqual(claudeProvider());
   });
 
+  it("recolours a Claude account that has active sessions, because no process reads the accent", () => {
+    const original = claudeProvider();
+
+    const changed = changeClaudeConfiguration(original, {
+      configuration: { ...original.configuration, accent: "rose" },
+      activeSessionCount: 1,
+      updatedAt,
+    });
+
+    expect(changed.configuration).toEqual({ ...original.configuration, accent: "rose" });
+    expect(changed.version).toBe(2);
+  });
+
   it("rejects Claude reconfiguration before changing an instance with active sessions", () => {
     const original = claudeProvider();
 

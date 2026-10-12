@@ -36,6 +36,7 @@ import { openSqlite } from "./persistence/sqlitePort";
 import { CanvasEventStore } from "./canvas/canvasEventStore";
 import { CanvasProjection } from "./canvas/canvasProjection";
 import { CanvasService } from "./canvas/canvasService";
+import { CanvasDesignRunTickets } from "./canvas/canvasDesignPage";
 import { CanvasShareEventStore, registerCanvasShareEvents } from "./canvas/canvasShareEventStore";
 import { CanvasCommentService, registerCanvasCommentEvents } from "./canvas/canvasCommentService";
 import { CanvasShareService } from "./canvas/canvasShareService";
@@ -799,6 +800,203 @@ describe("canvas routes", () => {
     active = otherProjectId;
     expect((await ask(query)).body).toEqual({ kind: "unauthorized", canvasId: String(canvasId) });
     expect(resolveDesignAssets).not.toHaveBeenCalled();
+  });
+
+  it("serves a running design once, for one fresh ticket an authorized window asked for", async () => {
+    const projection = new CanvasProjection();
+    seedProjection(projection);
+    const current = projection.getById(canvasId)?.currentVersion;
+    if (current === undefined) throw new Error("expected a seeded Canvas");
+    const versionId = "33333333-3333-4333-8333-333333333333";
+    const checkout = {
+      blockId: "checkout" as never,
+      schemaVersion: CANVAS_SCHEMA_VERSION,
+      kind: "design" as const,
+      title: "Checkout",
+      size: "phone" as const,
+      runsScript: true as const,
+      assets: [
+        {
+          assetId: "hero" as never,
+          source: {
+            kind: "generated-image" as const,
+            imageId: "44444444-4444-4444-8444-444444444444" as never,
+          },
+        },
+      ],
+      frames: [
+        {
+          frameId: "cart" as never,
+          title: "Cart",
+          html: '<img src="octant-asset:hero" alt=""><button onclick="pay()">Pay</button><script>function pay() {}</script>',
+        },
+        { frameId: "done" as never, title: "Done", html: "<p>Paid</p>" },
+      ],
+    };
+    const still = { ...checkout, blockId: "still" as never, runsScript: undefined };
+    projection.applyVersionAppended({
+      canvasId,
+      version: {
+        ...current,
+        versionId: versionId as never,
+        sequence: 2,
+        definition: { ...current.definition, blocks: [checkout, still] },
+      },
+    });
+    const store = new WindowAuthorityStore();
+    store.register({ windowId, capability: windowCapability, now: 0 });
+    const canvasService = new CanvasService(
+      {
+        projection,
+        eventStore: {
+          appendVersion: () => {
+            throw new Error("not used");
+          },
+        } as never,
+        uuid: () => "ffffffff-ffff-4fff-8fff-ffffffffffff",
+        clock: () => later as never,
+      },
+      {
+        authorize: () => true,
+        resolveWorkspace: () => ({ kind: "chat-virtual", projectId: null }),
+      },
+    );
+    let clock = 1_000;
+    const tickets = new CanvasDesignRunTickets(() => clock);
+    const resolveDesignAssets = vi.fn(async () => [
+      {
+        assetId: "hero" as never,
+        status: "resolved" as const,
+        mediaType: "image/png" as const,
+        data: "iVBORw0KGgo=",
+      },
+    ]);
+    let active: { mode: "chat" | "work"; projectId: typeof projectId } = {
+      mode: "chat",
+      projectId,
+    };
+    const route = createCanvasRouteHandler({
+      canvasProjection: projection,
+      canvasService,
+      windowAuthorityStore: store,
+      resolveDesignAssets,
+      designRunTickets: tickets,
+      projects: {
+        bootstrap: async () => ({
+          active: [
+            {
+              id: projectId,
+              name: "Chat Project",
+              type: "chat",
+              lifecycle: "active",
+              pinned: false,
+              rank: "0/1" as never,
+              version: 1 as never,
+              createdAt: now as never,
+              updatedAt: now as never,
+            },
+          ],
+          archived: [],
+          availability: [],
+          memory: [],
+        }),
+      },
+      activeContextResolver: async () => active,
+      now: () => 1,
+    });
+    const run = async (body: Record<string, unknown>, capability = windowCapability) => {
+      const response = await route(
+        new Request("http://127.0.0.1/api/canvas/design-run", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-octant-window-capability": capability,
+          },
+          body: JSON.stringify(body),
+        }),
+      );
+      return { status: response?.status, body: JSON.parse((await response?.text()) ?? "{}") };
+    };
+    const load = async (page: string, headers: Record<string, string> = {}) => {
+      const response = await route(
+        new Request(`http://127.0.0.1${page}`, {
+          method: "GET",
+          headers: { "sec-fetch-dest": "iframe", ...headers },
+        }),
+      );
+      if (response === undefined) throw new Error("expected the page route");
+      return response;
+    };
+    const asked = { canvasId: String(canvasId), versionId, blockId: "checkout" };
+
+    const ready = await run({ ...asked, frameId: "done" });
+    expect(ready.status).toBe(200);
+    expect(ready.body).toMatchObject({ kind: "ready", versionId, blockId: "checkout" });
+    const page = ready.body.page as string;
+    expect(page).toMatch(/^\/api\/canvas\/design-page\?ticket=[A-Za-z0-9_-]{43}$/);
+    // The page address holds the ticket and nothing that names the window.
+    expect(page).not.toContain(windowCapability);
+
+    const served = await load(page);
+    expect(served.status).toBe(200);
+    expect(Object.fromEntries(served.headers)).toEqual({
+      "content-type": "text/html; charset=utf-8",
+      "content-security-policy":
+        "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'",
+      "referrer-policy": "no-referrer",
+      "cache-control": "no-store",
+      "x-content-type-options": "nosniff",
+    });
+    const html = await served.text();
+    // The bridge runs before the author's script, and the declared image is
+    // written in so the page requests nothing.
+    expect(html.indexOf("octant-design-frame@1")).toBeLessThan(html.indexOf("function pay()"));
+    expect(html).toContain('src="data:image/png;base64,iVBORw0KGgo="');
+    expect(html).not.toContain("octant-asset:");
+    expect(html).toMatch(/id="done" data-start/);
+    expect(resolveDesignAssets).toHaveBeenCalledWith(
+      expect.objectContaining({ blockId: "checkout" }),
+      expect.objectContaining({ mode: "chat", projectId, threadId }),
+    );
+
+    // A replayed ticket opens nothing, and the refusal carries the same policy.
+    const replayed = await load(page);
+    expect(replayed.status).toBe(403);
+    expect(replayed.headers.get("content-security-policy")).toContain("sandbox allow-scripts");
+    expect(await replayed.text()).not.toContain("function pay()");
+
+    // A ticket used after it expires opens nothing either.
+    const late = await run(asked);
+    clock += 10_001;
+    expect((await load(late.body.page as string)).status).toBe(403);
+
+    // Only a frame loads the page, and only by its ticket.
+    const fresh = await run(asked);
+    expect((await load(fresh.body.page as string, { "sec-fetch-dest": "document" })).status).toBe(
+      403,
+    );
+    expect((await load(`${fresh.body.page as string}&canvasId=x`)).status).toBe(400);
+    expect((await load(`/api/canvas/design-page?ticket=${"A".repeat(43)}`)).status).toBe(403);
+
+    // A static design, a design from another version, or a screen it lacks.
+    expect((await run({ ...asked, blockId: "still" })).body).toMatchObject({
+      kind: "unavailable",
+    });
+    expect(
+      (await run({ ...asked, versionId: "99999999-9999-4999-8999-999999999999" })).body.kind,
+    ).not.toBe("ready");
+    expect((await run({ ...asked, frameId: "missing" })).body).toMatchObject({
+      kind: "unavailable",
+    });
+    expect((await run({ ...asked, extra: true })).status).toBe(400);
+
+    // An unknown window, a window in another Project, or one in another mode
+    // gets no ticket.
+    expect((await run(asked, "B".repeat(43))).status).toBe(401);
+    active = { mode: "chat", projectId: otherProjectId };
+    expect((await run(asked)).body).toEqual({ kind: "unauthorized", canvasId: String(canvasId) });
+    active = { mode: "work", projectId };
+    expect((await run(asked)).body.kind).not.toBe("ready");
   });
 
   it("revises an authorized canvas and lists opaque version history", async () => {

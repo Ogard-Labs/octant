@@ -12,6 +12,7 @@ describe("composeHostDataMap", () => {
       serviceMode: "desktop",
       platform: "darwin",
       dataDirectory,
+      homeDirectory: "/Users/ada",
       credentialStore: desktopCredentialStore(),
       projects: [
         { id: "11111111-1111-4111-8111-111111111111", name: "Notes", type: "chat" },
@@ -35,6 +36,12 @@ describe("composeHostDataMap", () => {
       name: "Local provider usage history",
       location: { kind: "known", path: `${dataDirectory}/local-usage-cache.sqlite3` },
     });
+    // An extra provider account keeps its sign-in and history outside the
+    // store, in a folder Octant assigned and never deletes.
+    expect(decoded.host.caches).toContainEqual({
+      name: "Claude account folders",
+      location: { kind: "known", path: "/Users/ada/.claude-accounts" },
+    });
     // The host roots its chat stores at <dataDirectory>/chat, so a map that
     // names <dataDirectory>/scratch points at a directory nothing writes.
     expect(decoded.host.caches).toContainEqual({
@@ -54,6 +61,7 @@ describe("composeHostDataMap", () => {
     for (const relative of [
       "code-threads",
       "generated-images",
+      "browser-captures",
       "agent-messages",
       "agent-run-scratch",
       "agent-run-workspace-receipts",

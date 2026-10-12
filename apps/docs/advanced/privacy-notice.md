@@ -222,7 +222,9 @@ one thread you can already open. The JSON bundle (`octant.thread-bundle/1`)
 carries transcript, evidence, and provenance, and names the instant it was
 cut. Secrets, raw provider payloads, resume cursors, and filesystem paths
 are unrepresentable. Attachment bytes and other bulk content outside the
-journal are listed as omissions rather than inlined. A paired device may export
+journal are listed as omissions rather than inlined. Generated images and the
+thread's Browser captures are listed this way, and a capture's page address and
+title are in the file. A paired device may export
 only a thread it can already read. Chat Markdown remains a convenience
 copy, not the authoritative export.
 

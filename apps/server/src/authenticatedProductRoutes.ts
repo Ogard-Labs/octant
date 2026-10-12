@@ -132,6 +132,11 @@ export function classifyProductAction(request: Request): string | undefined {
     if (method === "POST" && path === "/api/canvas/share-access") {
       return "project.overview.read";
     }
+    // Asking for a running design's page is a read of that design: the route
+    // runs the Canvas read check and hands back a ticket for one page load.
+    if (method === "POST" && path === "/api/canvas/design-run") {
+      return "project.overview.read";
+    }
     if (
       method === "POST" &&
       (path.endsWith("/revise") || path.endsWith("/refresh") || path.endsWith("/refresh-cancel"))

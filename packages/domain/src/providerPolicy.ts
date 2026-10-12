@@ -1926,13 +1926,24 @@ interface ChangeCodexConfigurationInput {
   readonly updatedAt: UtcTimestamp;
 }
 
+type CodexRuntimeInputs = Pick<CodexConfigurationInput, "binaryPath" | "codexHome">;
+
+/**
+ * Whether a change leaves alone everything a Codex process reads: its binary
+ * and its account home. Only the accent is left, and that is how Octant draws
+ * the account, so a running session is unaffected.
+ */
+export function codexChangeKeepsRuntime(
+  current: CodexRuntimeInputs,
+  next: CodexRuntimeInputs,
+): boolean {
+  return current.binaryPath === next.binaryPath && current.codexHome === next.codexHome;
+}
+
 export function changeCodexConfiguration(
   current: CodexProviderInstance,
   input: ChangeCodexConfigurationInput,
 ): CodexProviderInstance {
-  if (input.activeSessionCount > 0) {
-    reject("active-sessions", "Stop active sessions before reconfiguring this provider.");
-  }
   const configuration =
     input.configuration.codexHome === undefined && current.configuration.codexHome !== undefined
       ? {
@@ -1940,6 +1951,12 @@ export function changeCodexConfiguration(
           codexHome: current.configuration.codexHome,
         }
       : input.configuration;
+  if (
+    input.activeSessionCount > 0 &&
+    !codexChangeKeepsRuntime(current.configuration, configuration)
+  ) {
+    reject("active-sessions", "Stop active sessions before reconfiguring this provider.");
+  }
   return {
     ...current,
     configuration: {
@@ -1953,13 +1970,31 @@ export function changeCodexConfiguration(
   };
 }
 
+type ClaudeRuntimeInputs = Pick<
+  ClaudeConfigurationInput,
+  "binaryPath" | "authentication" | "configDirectory"
+>;
+
+/**
+ * Whether a change leaves alone everything a Claude process reads: its binary,
+ * its authentication, and its account directory. Only the accent is left, and
+ * that is how Octant draws the account, so a running session is unaffected.
+ */
+export function claudeChangeKeepsRuntime(
+  current: ClaudeRuntimeInputs,
+  next: ClaudeRuntimeInputs,
+): boolean {
+  return (
+    current.binaryPath === next.binaryPath &&
+    current.authentication === next.authentication &&
+    current.configDirectory === next.configDirectory
+  );
+}
+
 export function changeClaudeConfiguration(
   current: ClaudeProviderInstance,
   input: ChangeClaudeConfigurationInput,
 ): ClaudeProviderInstance {
-  if (input.activeSessionCount > 0) {
-    reject("active-sessions", "Stop active sessions before reconfiguring this provider.");
-  }
   const configuration =
     input.configuration.configDirectory === undefined &&
     current.configuration.configDirectory !== undefined
@@ -1968,6 +2003,12 @@ export function changeClaudeConfiguration(
           configDirectory: current.configuration.configDirectory,
         }
       : input.configuration;
+  if (
+    input.activeSessionCount > 0 &&
+    !claudeChangeKeepsRuntime(current.configuration, configuration)
+  ) {
+    reject("active-sessions", "Stop active sessions before reconfiguring this provider.");
+  }
   return {
     ...current,
     configuration: normalizeClaudeConfiguration(configuration),

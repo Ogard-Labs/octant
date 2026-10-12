@@ -36,6 +36,7 @@ import {
   changeBflImageConfiguration,
   changeIdeogramImageConfiguration,
   changeClaudeConfiguration,
+  claudeChangeKeepsRuntime,
   changeDevinConfiguration,
   changeGeminiImageConfiguration,
   changeGrokConfiguration,
@@ -992,6 +993,9 @@ export class ProviderService implements ProviderServiceApi {
 
           let instance: ProviderInstance;
           let eventName: string;
+          // An accent is how Octant draws an account. A change to it alone
+          // leaves the running process, its readiness, and its models as they are.
+          let keepsRuntime = false;
           if (command.kind === "set-provider-data-tags") {
             instance = setProviderDataTags(current, command.dataTags, updatedAt);
             eventName = "provider.instance-data-tags-changed@1";
@@ -1115,7 +1119,8 @@ export class ProviderService implements ProviderServiceApi {
               hostSecureDirectory,
               current.id,
             );
-            await this.#runtime.invalidateRuntime(current.id);
+            keepsRuntime = claudeChangeKeepsRuntime(current.configuration, instance.configuration);
+            if (!keepsRuntime) await this.#runtime.invalidateRuntime(current.id);
             // Recheck after the await. Create/change on another instance can
             // claim the same directory while this runtime is invalidated.
             this.#refuseTakenClaudeAccountDirectories(
@@ -1358,6 +1363,7 @@ export class ProviderService implements ProviderServiceApi {
           this.#appendInstance(command.expectedVersion, eventName, instance);
           const authoritative = this.#authoritativeInstance(instance);
           if (
+            !keepsRuntime &&
             eventName !== "provider.instance-renamed@1" &&
             eventName !== "provider.instance-data-tags-changed@1"
           ) {
@@ -1370,15 +1376,16 @@ export class ProviderService implements ProviderServiceApi {
             this.#clearRuntimeUsageLimits?.(instance.id);
           }
           if (
-            command.kind === "change-claude-configuration" ||
-            command.kind === "change-mistral-vibe-configuration" ||
-            command.kind === "change-grok-configuration" ||
-            command.kind === "change-glm-configuration" ||
-            command.kind === "change-gemini-configuration" ||
-            command.kind === "change-cline-configuration" ||
-            command.kind === "change-qwen-configuration" ||
-            command.kind === "change-fx-configuration" ||
-            command.kind === "change-devin-configuration"
+            !keepsRuntime &&
+            (command.kind === "change-claude-configuration" ||
+              command.kind === "change-mistral-vibe-configuration" ||
+              command.kind === "change-grok-configuration" ||
+              command.kind === "change-glm-configuration" ||
+              command.kind === "change-gemini-configuration" ||
+              command.kind === "change-cline-configuration" ||
+              command.kind === "change-qwen-configuration" ||
+              command.kind === "change-fx-configuration" ||
+              command.kind === "change-devin-configuration")
           ) {
             this.#publishSelectedAuthenticationObservation(authoritative);
           }

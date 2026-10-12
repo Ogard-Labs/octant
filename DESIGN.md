@@ -380,8 +380,11 @@ the one-line reason, a collapsed "Prompt" disclosure, and one primary
 
 A thread's stats line sits under the follow-up composer, below the context strip
 and inside the same tray: one row of figures at the 12px meta step in the meta ink,
-separated by middle dots, with no hue on any number and no fill on the row. It wraps at
-narrow widths rather than scrolling, and a trailing quiet icon button hides it. A figure
+separated by middle dots, with no hue on any number and no fill on the row. When the
+provider reported account limit windows, they lead the row as short bars (a name such
+as 5h or Week, a three-pixel bar, and the share left), filled in the same
+inks as the context meter's popover. It wraps at narrow widths rather than scrolling,
+and a trailing quiet icon button hides it. A figure
 that is approximate carries a leading tilde and a dotted underline that explains it on
 hover; a figure the provider did not report is absent, never zero. The whole line is one
 button that opens the per-turn detail dialog, a plain definition list of tokens, timing,
@@ -612,6 +615,13 @@ extra typed lines and visible notices is intentional (0114). Repository, branch
 and PR actions stay visible below the input. Utility panels keep one resize
 boundary and a compact tab row without a second horizontal divider.
 
+A thread's Browser captures are a plain list of rows under a sentence-case
+section label (`oct-section-label`, "Browser captures"), not a card group: each
+row is a hairline-ringed object with a 72 x 48 picture, the page title in the
+medium weight, and the origin as mono meta, and the whole row is one `bare`
+button that opens the full picture. It uses the neutral hairline and surface
+tokens only, adds no colour, and draws no fill on hover or when open.
+
 Attachment and model controls sit on the left; access, context usage and send
 stay together at the right edge even when the controls wrap. Menus use compact
 interface text, and model choices stay in a bounded scrollable popup.
@@ -701,7 +711,8 @@ the mark and never on the chrome, every mark pairs its hue with a second
 channel, one formatter reads every number, and a block that cannot be drawn
 falls back to its plain reading and disclosed table. The marks, scales, block
 kinds (treemap, heatmap, bar list, comparison matrix, math, metric tiles, KPI
-dashboards, tables, funnel, radar, sankey), and their states are specified in
+dashboards, tabs and columns, diagram marks, the Gantt view, tables, funnel,
+radar, sankey), and their states are specified in
 [Canvas visuals](docs/design/canvas-visuals.md).
 
 ## Typography
@@ -1332,7 +1343,7 @@ is reads at a glance. It
 opens an opaque 320px popover: a header with the used and
 maximum figures and share, one 4px segmented bar whose empty track is the free
 space, a breakdown folded behind a chevron each time the popover opens, the
-provider's limits as a name, a reset countdown or weekday, a share, and a thin
+provider's limits as a name, a reset countdown or weekday, the share left, and a thin
 bar each, and a footer action to the fuller surface (the context inspector, or
 Usage for a provider the host does not plan). The breakdown lists only the
 parts the data attributes: planned threads show their manifest categories,
@@ -1377,7 +1388,7 @@ as the bar's empty track. Every part is named beside its swatch and carries its
 tokens and share, so hue never stands alone. The exception is scoped to these
 segments in `visualLanguageContract.test.ts`: in `context.css` palette colour
 may appear only on the tone rules, the ring and the limit bars. Limit bars fill
-in blue. A limit near its cap is marked on its row and in its bar's value text,
+in blue, by the share left. A limit near its cap is marked on its row and in its bar's value text,
 never by ink alone. Unknown or stale data is labeled as such and never rendered as zero.
 Where a provider runtime compacts the session by itself and has said where, one
 secondary line under the window bar reads `N until auto-compact` in the bar's
@@ -1587,7 +1598,11 @@ Inline provider, extension, and Browser permission requests use
 pending icon, readable summary and detail, wrapping action row, and inline
 failure announcement. The requesting feature supplies the scope, choices, and
 callbacks; the existing host or server still decides whether an action may
-proceed. Native Code approvals keep their isolated host-owned document.
+proceed. Native Code approvals keep their isolated host-owned document. The
+extension tool request names the plugin, its server, and the tool, and adds
+"Always allow in this Project" only when the host marks the call rememberable
+and the window is a local one. Settings › Data & privacy lists those answers by
+Project, each with Revoke, beside Remembered websites.
 
 Ordinary usage reset/retention, Git discard, and remote administration
 confirmations use the shared `OctantConfirmDialog` over `OctantDialog`. The

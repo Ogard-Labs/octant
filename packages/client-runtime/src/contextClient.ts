@@ -10,6 +10,14 @@ import {
   type ContextInspectorRequest,
   type ContextInspectorSnapshot,
 } from "@octant/contracts/context-rpc";
+import {
+  decodeThreadExternalContentClearOutcome,
+  decodeThreadExternalContentRequest,
+  decodeThreadExternalContentState,
+  type ThreadExternalContentClearOutcome,
+  type ThreadExternalContentRequest,
+  type ThreadExternalContentState,
+} from "@octant/contracts/content-provenance";
 import { bindFetchPort } from "./bindFetchPort";
 
 export interface ContextClientOptions {
@@ -24,6 +32,28 @@ export interface ContextClient {
     signal?: AbortSignal,
   ): Promise<ContextInspectorSnapshot>;
   execute(command: ContextCommand, signal?: AbortSignal): Promise<ContextCommandResult>;
+  /**
+   * The sources a thread took outside content from, with the version a clear
+   * must name. A local window only.
+   */
+  readExternalContent(
+    thread: ExternalContentThread,
+    signal?: AbortSignal,
+  ): Promise<ThreadExternalContentState>;
+  /**
+   * Records that the person reviewed what the thread read and takes its mark
+   * away. A refusal (a turn in flight, a newer ingestion) is an outcome, not a
+   * failure. A local window only.
+   */
+  clearExternalContent(
+    thread: ExternalContentThread & { readonly expectedVersion: number },
+    signal?: AbortSignal,
+  ): Promise<ThreadExternalContentClearOutcome>;
+}
+
+export interface ExternalContentThread {
+  readonly mode: ThreadExternalContentRequest["mode"];
+  readonly threadId: string;
 }
 
 export type ContextClientFailureCategory = ContextFailure["category"] | "interrupted" | "protocol";
@@ -106,7 +136,40 @@ export function createContextClient(options: ContextClientOptions): ContextClien
       acceptSequence(result.snapshot);
       return result;
     },
+    async readExternalContent(thread, signal) {
+      return post(
+        resolved,
+        "/api/thread-external-content",
+        externalContentRequest({ kind: "read", mode: thread.mode, threadId: thread.threadId }),
+        signal,
+        decodeThreadExternalContentState,
+        headers,
+      );
+    },
+    async clearExternalContent(thread, signal) {
+      return post(
+        resolved,
+        "/api/thread-external-content",
+        externalContentRequest({
+          kind: "clear",
+          mode: thread.mode,
+          threadId: thread.threadId,
+          expectedVersion: thread.expectedVersion,
+        }),
+        signal,
+        decodeThreadExternalContentClearOutcome,
+        headers,
+      );
+    },
   };
+}
+
+function externalContentRequest(input: unknown): ThreadExternalContentRequest {
+  try {
+    return decodeThreadExternalContentRequest(input);
+  } catch {
+    throw protocol("External-content request is invalid.");
+  }
 }
 
 function subjectKey(subject: ContextInspectorRequest["subject"]): string {

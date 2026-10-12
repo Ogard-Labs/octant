@@ -1,0 +1,87 @@
+/*
+ * The screenshots a thread kept sit beside the generated images in the
+ * transcript: quiet rows of a small picture, the page title, and its origin.
+ */
+.browser-captures {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oct-space-2);
+}
+
+.browser-captures__list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: var(--oct-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.browser-capture {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-3);
+  min-width: 0;
+  box-sizing: border-box;
+  padding: var(--oct-space-2);
+  border: 1px solid var(--octant-border);
+  border-radius: var(--oct-radius-md);
+  background: var(--octant-card, var(--octant-workspace));
+  color: var(--oct-fg);
+}
+
+/* The open control lies over the whole row; the content sits beneath it. */
+.browser-capture__hit {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  padding: 0;
+  border-radius: inherit;
+}
+
+.browser-capture__thumb {
+  display: block;
+  flex: none;
+  width: 72px;
+  height: 48px;
+  border-radius: var(--oct-radius-inset);
+  background: var(--octant-surface-canvas);
+  object-fit: cover;
+  object-position: top center;
+}
+
+.browser-capture__text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.browser-capture__title,
+.browser-capture__origin {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.browser-capture__title {
+  font-weight: var(--oct-weight-medium);
+}
+
+.browser-capture-view {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oct-space-2);
+  margin: 0;
+}
+
+.browser-capture-view__image {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--octant-border);
+  border-radius: var(--oct-radius-md);
+}

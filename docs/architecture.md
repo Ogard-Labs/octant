@@ -334,8 +334,10 @@ refuses on a runtime that predates them); a version is immutable, and a person's
 diagram layout) is journaled as a new head version with the `local-user` actor
 the host stamps itself; the host stamps comment authors, so a renderer never
 authors as an agent; only a host window moves board nodes; `preview` renders
-with the network off and no server address or credential; a `design` frame
-never receives `allow-scripts`; a share refuses a design or an action block; and
+with the network off and no server address or credential; a static `design`
+frame never receives `allow-scripts` and no frame has both `allow-scripts` and
+`allow-same-origin`; a share carries a design only with the sharer's
+acknowledgement that markup is shared as written, and refuses an action block; and
 nothing drawn inline in the thread can journal a version.
 
 Descriptions explain the existing presentation flows and distinguish creation,
@@ -416,8 +418,8 @@ designs they review (app screens, a site, a deck, a design system), and
 prototypes they try (a flow that reacts to input and keeps state). It does so
 in three tiers that an author mixes in one Canvas, using the lowest tier that
 delivers the result. The static frames' `document` size and workspace theme
-(Canvas schema version 16) and their images named by asset id (version 17)
-have shipped, as described with the
+(Canvas schema version 16), their images named by asset id (version 17), and
+running frames (version 18) have shipped, as described with the
 [`design` block](design/canvas.md#design-block). The rest is accepted
 direction: each rule below replaces the matching shipped rule in
 [Canvas](design/canvas.md) when its slice ships, and until then the shipped
@@ -427,13 +429,13 @@ document as a future version. Frames follow the
 
 - **Typed blocks carry data.** Metrics, tables, charts, plans, and the diagram
   family stay the catalog, because comments anchor to them, revision edits
-  them, and shares keep their structure. The catalog gains `tabs` and
-  `columns`, which name existing child blocks one level deep (the selected tab
-  is view state and journals nothing); closed diagram node roles (process,
-  decision, terminator), edge styles, and group tones drawn by the one
-  deterministic layout; a Gantt view of `plan`; and import of a bounded
-  Mermaid subset into typed diagram blocks. Mermaid never renders; an unknown
-  construct fails closed and stays a code block.
+  them, and shares keep their structure. Shipped at schema version 19 (see
+  [Canvas](design/canvas.md)): `tabs` and `columns`, which name existing child
+  blocks, a dashboard among them; closed diagram node roles (process, decision,
+  terminator), edge styles, and group tones drawn by the one deterministic
+  layout; a Gantt view of `plan`; and import of a bounded Mermaid subset into
+  typed diagram blocks. Mermaid never renders; an unknown construct fails
+  closed and stays a code block.
 - **Static frames carry the look.** A `design` keeps a frame that runs
   nothing and has a `document` size whose height the host measures, which
   needs `allow-same-origin` and therefore never `allow-scripts`, and an opt-in
@@ -456,21 +458,27 @@ document as a future version. Frames follow the
   reserves a shortcut frame script cannot intercept to return focus to host
   chrome. A remote browser cannot cancel a frame's own navigation, so there a
   running frame is not network-contained; that exposure is accepted, bounded
-  by what the frame holds, and the Run control there says so.
+  by what the frame holds, and the Run control there says so. This tier has
+  shipped.
 - **The thread can hold the whole Canvas.** A person may expand any Canvas in
-  its thread; the agent may ask for `inline` on a reading document without the
-  12-block cap; a running frame in the thread starts only on **Run**. Editing,
+  its thread; the agent may ask for `inline` on a reading document, or on a
+  `document`-size design that runs no script, without the 12-block cap; a
+  running frame in the thread starts only on **Run**. Editing,
   comments, and sharing stay in the sidebar, and nothing drawn in the thread
   writes a version.
 - **Agents are taught and checked.** `describe` presents the tiers with a
   finished example of each, in-tree recipes cover an article, a design brief,
   a design system, and a clickable prototype, and `preview` draws frames and
-  returns overflow, contrast, missing-asset, and script-error warnings.
+  returns overflow, contrast, missing-asset, and script-error warnings. This
+  has shipped (see [Canvas](design/canvas.md)).
 - **Shares and exports carry what they can draw safely.** Typed blocks travel
   as today. A frame travels in an authenticated snapshot only when the viewer
   draws it under the same frame policy and the sharer acknowledges that markup
-  is shared as written, because the secret filter reads values, not markup.
-  HTML export writes frames as sandboxed `srcdoc` pages with the policy inside;
+  is shared as written, because the secret filter reads values, not markup;
+  this has shipped at share version 10 (see [Canvas](design/canvas.md#shares)).
+  HTML export writes frames as sandboxed `srcdoc` pages with the policy
+  inside, the approval card names the markup it writes, and a themed design
+  is drawn in the theme the person's window hands over; this has shipped.
   Markdown export writes the title. Public links stay out.
 
 _Rationale:_ a `srcdoc` frame inherits the app policy (`script-src 'self'`),
@@ -607,7 +615,8 @@ server the person installed and enabled as an Octant plugin is selectable in
 Work and Code exactly as in Chat (see
 [Extensions and skills](#extensions-and-skills)). It runs in Octant's own
 supervised session rather than inside the provider, so the Work-mode launch
-confinement does not stop it, and every call it answers waits for a person.
+confinement does not stop it, and every call it answers waits for a person
+unless a remembered approval of that tool in that Project covers it.
 
 A Work or Code thread started without a chosen Project lands in the mode's
 **default Project**: the host provisions `<default folder>/Work` or
@@ -1207,24 +1216,57 @@ The settle journals `usage-resume.settled@1` on the run's aggregate and folds
 the outcome back into the run, so the opt-in's version stays the aggregate
 head and a stale `expectedVersion` cannot overwrite it.
 
-Broader structured messaging between AgentRuns and threads, beyond mention
-excerpts and beyond that Chat one-hop tool, is designed in
+Agent-to-agent messaging is a separate, host-delivered channel beside mention
+excerpts and that Chat one-hop tool. Its design is recorded in
 [decisions/0063-agent-to-agent-messaging.md](decisions/0063-agent-to-agent-messaging.md)
-and
-[security/agent-to-agent-messaging-threat-model.md](security/agent-to-agent-messaging-threat-model.md).
-Broader messaging still requires explicit maintainer approval of its design and
-threat-model sign-off; the journaled contracts, pure clamps, delivery service,
-Code turn tool registration, and the Agents center's messaging bounds view now
-exist so that review happens against real code, delivered behind the
-maintainer's explicit direction. The built shape follows the record: the host
-admits, clamps, journals, and delivers; bodies stay out of the journal, are
-stored under opaque references, and taint the recipient as untrusted external
-content; messaging grants no authority, starts no turn, and purged threads
-leave no resurrectable bodies. Admission is not delivery: before a message is
-delivered the server rechecks the sender's live grant and the recipient's
-lifecycle, and a revocation, close, or purge in between refuses it. Bounds are
-depth 2, eight open messages per sender, four recipients per send, and a
-64 KiB body. 0049 remains the Chat mention path.
+and its threats in
+[security/agent-to-agent-messaging-threat-model.md](security/agent-to-agent-messaging-threat-model.md),
+both approved by the maintainer on 2026-10-12. 0063 stays a Proposed historical
+record; this section is the effective rule, and it is narrower than the record.
+
+- **Who may message whom.** A thread may message only another active thread of
+  its own Project; any other id (unknown, another Project or mode, a child
+  run, itself) refuses `unauthorized` in the same words, so a refusal never
+  confirms a thread exists. Only Code turns are offered the
+  `octant_agent_message` tool and a Project has one mode, so today this means
+  Code to Code inside one Project. Chat threads, Work threads, and child runs
+  neither send nor receive.
+- **Sending.** The tool is omitted from a turn in Plan and from a profile whose
+  tool allowlist leaves it out, and a call made anyway, or after the thread
+  dropped to Plan mid-turn, is refused before anything is stored. An admitted
+  send journals `agent.message-sent@1` on the `agent-message` aggregate, one
+  message per recipient, and keeps the body in the host's store under an
+  opaque reference; bodies never enter the journal. The sender is told `sent`
+  and nothing more: sending starts no turn, grants no authority, and returns
+  no reply. Bounds are four recipients per send, a 64 KiB body, and eight
+  messages per sender that no turn has carried yet; a waiting message whose
+  recipient closed or left the Project is refused at the sender's next send,
+  so it stops holding a slot.
+- **Delivery.** Admission is not delivery. When the recipient's next Code turn
+  assembles its context, the host rechecks that the sender is still active,
+  that both threads still share a Project, and that the recipient is active,
+  and journals `agent.message-refused@1` otherwise. A message that passes
+  marks the recipient with `thread.external-content-ingested@1` and is added
+  to that turn as one context block: a host sentence naming only the sender's
+  thread id, then the body inside the shared external-data frame. A turn
+  carries the oldest waiting messages up to 64 KiB, at least one, and the rest
+  wait for the turn after. `agent.message-delivered@1` is journaled once the
+  provider has accepted that turn's prompt and context, not when the turn was
+  taken on: a turn that was refused, cancelled, or failed before its send, and
+  a host that stopped before it, leave the message waiting for the next turn.
+  Delivery is therefore at least once. A host that stops after the provider
+  accepted the turn and before the event is appended carries the same message
+  into the next turn too; a host stop never drops a message unread. The block
+  reaches every Code provider the way a `#thread` mention does and is part of
+  that turn only.
+- **Bodies.** A body lives only while its message waits: delivery and refusal
+  delete it, purging either thread deletes it with the message, and at start
+  the host keeps only the bodies of waiting messages. A message an earlier
+  host journaled as delivered without a turn carrying it stays as journaled
+  and is never offered.
+- **Not built.** Nothing journals `agent.message-acknowledged@1`, and a sender
+  has no tool to read what became of a message; the Agents center shows the
+  host's counts and latest refusal. 0049 remains the Chat mention path.
 
 ## Agent task display
 
@@ -1294,6 +1336,58 @@ flowchart LR
   projection rebuilds from the journal; session, turn, and restart boundaries
   never clear it. Irreversible or authority-bearing actions on a tainted thread
   still require fresh confirmation after replay.
+- **Clearing taint.** Taint keeps its thread lifetime, and a person at a local
+  window may clear it. A clear records that they reviewed what the thread read.
+  - It appends `thread.external-content-cleared@1` on the thread's
+    `thread-external-content` aggregate with actor `local-user`. The payload
+    holds the thread, the window, the cleared source labels, and the ingestion
+    count, never content.
+  - The request names the aggregate version the person was shown. A newer
+    ingestion refuses it as `stale`; an untainted thread answers
+    `already-clear` and journals nothing. It is refused while the thread's
+    turn is running or queued, when its last turn ended without the host
+    learning how (Code's `ambiguous`), and when the thread's own mode cannot
+    be read for that window. A message still in the thread's message queue
+    counts as a queued turn, whether the queue is moving, paused, or held.
+    The message queue answers all of this for every mode, and the check and
+    the append run under its per-thread ordering, so a send through the queue
+    cannot land between them.
+  - Only the local-only `POST /api/thread-external-content` clears. Its `read`
+    returns each source with its count and first and last time, and the
+    version a clear must name. The private listener answers a paired device
+    404, the handler refuses a paired device and the host's own scope, and the
+    route sits on the loopback chain only. No tool, command, model output,
+    structured reference, agent message, or host-run turn (routine, goal
+    loop, usage-limit resume, child-run delivery) can clear.
+  - One clear covers that thread and only it. A child run and a fork keep
+    their own taint.
+  - A clear removes the mark only. Nothing leaves the model's context and the
+    provider session is not restarted, so what the thread read can still steer
+    the model.
+  - A clear holds for nothing. The next ingestion taints the thread again,
+    including a content reference recorded before the clear: the clear
+    forgets the thread's ingestion rows, which are what deduplicate a
+    reference. Until then everything taint was gating applies as on an
+    untainted thread: Full access, remembered harness approval classes,
+    remembered MCP tool grants, computer-use grants, auto-review, and helper
+    starts.
+  - It covers every mode and provider because it changes only Octant's own
+    gate. It cannot cover a provider runtime's own tools: those run under the
+    runtime's approvals and sandbox, and a clear changes nothing about them.
+  - On replay a clear deletes the thread's ingestion rows and zeroes its taint
+    row, and the projection ignores an event at or below the last one it
+    applied for that thread. A journal without the event replays unchanged.
+- **Browser captures.** Only a screenshot the agent asks for with the browser
+  tool, or the person takes with the Browser pane's Screenshot control, is kept
+  with the thread that owns the Browser. The bytes live in the host's managed
+  attachment store and the journal holds only a reference, the page origin, URL,
+  title, content hash, and time. A thread keeps its newest 32 captures and they
+  are erased with the thread. Only a local window that can open the thread reads
+  them, never a paired device. They never reach a Canvas share, replica sync, or
+  a diagnostics export. They leave the host only in an export the local owner
+  takes: that thread's export, or the host-wide data export that embeds it. A capture adds no Project filesystem authority and no
+  second taint mechanism: the observation that produced it already taints the
+  thread. Detail is in [Browser captures](design/browser-captures.md).
 - **Recovery.** Sequence-based reconnect replay for local and remote clients —
   a dropped stream catches up from the authoritative snapshot before it reopens,
   keeps retrying while the host is unreachable, and a remote session whose window
@@ -1407,8 +1501,9 @@ flowchart LR
   the same `not-found` refusal, so an export never reveals a hidden thread.
   Secrets, raw provider payloads, and filesystem
   paths never appear; attachment bytes and other bulk content outside the
-  journal are listed as omissions. A local owner can also take one
-  `octant.host-export/1` cut of what this host holds: a thread bundle for
+  journal are listed as omissions. The thread's generated images and retained
+  Browser captures appear as attachment records without bytes. A local owner
+  can also take one `octant.host-export/1` cut of what this host holds: a thread bundle for
   every thread of every mode, Projects, Project memory, Canvases, a
   non-secret settings summary, usage export rows, and retention windows
   with purge tombstones. That call is a host-control read on the loopback
@@ -1651,7 +1746,12 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   extra account, and every API-key account, uses its assigned leaf.
   A leftover custom directory keeps working until the person
   explicitly re-assigns it; Octant never silently points that login
-  at another path. Sign-in is the unmodified CLI command in a
+  at another path. Removing an account leaves its assigned directory
+  in place, with that account's sign-in and history: Octant says
+  where it is, the host data map lists `~/.claude-accounts`, and
+  deleting it is the person's step. An accent is presentation only:
+  changing it alone neither stops a running session nor resets the
+  account's readiness. Sign-in is the unmodified CLI command in a
   terminal for that account. Connection check uses what the CLI or
   SDK reports. Two instances of the same driver cannot share one
   effective state directory after trailing-slash identity, including
@@ -1802,12 +1902,21 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
 - **Credentials.** API keys live in the host credential store — macOS Keychain
   on macOS, freedesktop Secret Service on Linux — and are reached only
   through the host's loopback credential broker by opaque UUID reference.
+  A provider instance holds one stored value: a plain key, or a JSON pool of
+  labelled keys in list order with one active key ([`apiKeyPool.ts`](../packages/host-runtime/src/apiKeyPool.ts)).
+  A request sends the active key first, then the others in list order.
+  Labels may reach the renderer; secrets may not, and only the host reads the
+  pool and chooses the key. A quota, credit, or spend refusal cools that key for
+  an hour, and a rate limit for a minute or the provider's `Retry-After`; the next
+  attempt uses the next key. A refusal for a bad key never cools a key. Cooldowns
+  are host memory and are not journaled.
   Provider OAuth has two postures ([0111](decisions/0111-host-driven-provider-oauth.md)).
   **Delegated** (`delegated-oauth`, including CLI `subscription`): login stays
   on the provider's own runtime; Octant never stores, refreshes, or journals
   those tokens. The account profile names the sign-in command; Octant never
   reads, stores, or injects that provider's credentials, including Claude
-  OAuth tokens. A leftover helper-token envelope is deleted on upgrade.
+  OAuth tokens. A leftover helper-token envelope is deleted on upgrade,
+  also for an account that was removed before the upgrade.
   **Host-driven** (`subscription-oauth`, direct HTTP drivers):
   the host runs a generic authorization-code PKCE runner and a device-code
   runner from a provider descriptor (endpoints, scopes, and a public client
@@ -2498,7 +2607,7 @@ native harness in `apps/server/src/harness`:
   resolved, edits require a prior read); `bash` writes the command to a
   script in its own subdirectory of `harness/scripts` and runs it through the
   same confined owned-process-group port as repository tests (Seatbelt on
-  macOS, the bubblewrap capsule on Linux), so a timeout or cancel ends the
+  macOS, the bubblewrap sandbox on Linux), so a timeout or cancel ends the
   whole tree. That port refuses a shell as a test command's `argv[0]`, so a
   test argv stays literal; the harness's only way to a shell is its separate
   script entry point, which the two harness ports alone enable and which runs
@@ -2550,7 +2659,9 @@ native harness in `apps/server/src/harness`:
   confirmation is single-use: a remembered "always" approval stops covering
   its class the moment the thread is tainted, and an "always" answered then
   covers only that call, so surfaces offer no "for this session" choice
-  (`singleUse` on the approval). `web-search` does not ask under taint: it
+  (`singleUse` on the approval). A person's clear ends this until the next
+  result that taints ([Persistence](#persistence), Clearing taint).
+  `web-search` does not ask under taint: it
   reaches only the search endpoint the person configured, so the tool-call
   policy instead refuses a tainted thread's query that looks like it carries
   data, under every posture and before any request leaves, with a named
@@ -2820,11 +2931,55 @@ prompt, schema, tool, route, model, or capability.
   the provider's app-managed tool transport. The host resolves the selection
   against the thread's own mode scope, connects the supervised session for
   that scope, offers only the selected tools, and refuses the turn when the
-  provider or model cannot carry Octant's tools. Every call waits for a
-  one-time approval in the turn's window, shown in the open thread. An MCP
+  provider or model cannot carry Octant's tools. Every call waits for an
+  approval in the turn's window, shown in the open thread, unless a
+  remembered approval covers it (next item). An MCP
   server's launch command starts the server, not a shell the model holds, so
   a stdio server is declared `mcp`, not `shell`, whichever package format
   carried it.
+- **Remembered MCP tool approvals.** A person may answer a tool's prompt with
+  "always allow in this Project". That journals a grant for that one tool in
+  that one Project (`extension.tool-grant-recorded@1` on the Project's
+  `extension-tool-grant` aggregate), never for the whole server. The grant
+  binds the Project, extension, package, component, and MCP tool name, the
+  package version and digest, and a SHA-256 of the tool's name, description,
+  and input schema as its server listed them at connect; the provider-facing
+  tool name is not part of it, because that name embeds the thread. A later
+  call in any thread of the Project that matches all of it runs unasked,
+  under the calling turn's own authority and only while the component is
+  effective and selected on that send. Any mismatch asks again, so a package
+  update or a changed listing is a new question
+  (`decideExtensionToolGrant` in `@octant/domain`). The payloads hold
+  identifiers and digests, never a call's arguments or result.
+  - A grant grows only through that answer from a local window. No route,
+    command, manifest field, structured reference, tool call, model output,
+    paired device, or host-owned turn (a routine, a goal loop, a usage-limit
+    resume, a child-run delivery) can create one. A host-owned turn in the
+    Project may use one, but the prompt it raises is approved once and is
+    never remembered, even when a person at a local window answers it:
+    nobody chose to send that turn.
+  - A thread with no Project and a Plan turn are asked for every call, and
+    the answer covers that call alone. An answer that asks to be remembered
+    where it cannot be is refused and the call keeps waiting.
+  - On a thread that has taken in outside content, a grant holds only for a
+    stdio server, which Octant launches with no network and writes limited to
+    its plugin data. A network (HTTP) server's tool asks for every call there
+    and the answer is single use, because its arguments can carry out what
+    the thread has read. Every MCP result taints its thread, so a network
+    tool's grant spares the prompt only until that thread's first tool result.
+  - Disabling the plugin or component, archiving the Project, or switching a
+    mode off leaves grants stored and unused. Uninstall, withdrawn source
+    trust, and rollback revoke them (`extension.tool-grant-revoked@1`), so
+    installing or trusting the package again restores nothing. A person
+    revokes one through the local-only `/api/extensions/tool-grants`, which
+    lists and revokes and has no request that adds a grant. Settings › Data &
+    privacy lists them by Project with Revoke, and the prompt offers "always
+    allow" only to a client on a loopback host.
+  - This covers only the tools Octant itself calls. An MCP server that a
+    provider runtime starts from the person's own configuration (for example
+    a Codex Work or Code thread using `~/.codex/config.toml`) is called
+    inside that runtime, is never seen by Octant, and stays under the
+    runtime's own approvals.
 - Core capabilities (browser/computer use, tests, Apple validation, approvals,
   memory, subagents) are app-managed and provider-neutral; no core capability
   depends on an optional extension. Computer use is destination-shaped: the
@@ -3003,7 +3158,9 @@ mechanisms are:
 - **Approvals.** Independent categories — project file writes, shell commands,
   network access, external application observation or control, destructive
   actions, credential access, access outside the bound root, privilege or
-  sandbox changes. Grants are scoped and journaled. Code starts approval-gated;
+  sandbox changes. Grants are scoped and journaled; a remembered approval of
+  one MCP tool in one Project follows the rules in
+  [Extensions and skills](#extensions-and-skills). Code starts approval-gated;
   Plan mode is read-only; auto-accept-edits waives only project file writes;
   a Work thread takes its access from Settings › Work when it is created —
   ask-first (the default) or auto-accept-edits — and keeps it; the host sets
@@ -3451,32 +3608,6 @@ mechanisms are:
   Archiving the Project, relinking its root, turning its mode off, the window
   moving to another Project, or the window's authority ending closes it. On the desktop app the page is a live native view; elsewhere the
   host drives a headless page and shows its picture.
-- **Linux Station isolation tracer, not product-wired.** The server now has a
-  provider-neutral execution-capsule service plus a rootless Podman and gVisor
-  `systrap` driver. The tracer accepts only digest-pinned images, independent
-  clones created inside gVisor from owner-only source bundles, explicit
-  resource budgets, no network, and no host bind mounts. Each capsule's full
-  persistent Podman VFS graph store lives in an owner-only fixed-size ext4
-  image mounted through `fuse2fs`, so its image, dependencies, and clone share
-  one hard disk ceiling without privileged project-quota administration. Its
-  disposable Podman runroot is a short owned runtime directory preserved long
-  enough for recovery to inspect and stop a surviving runtime, then removed
-  through Podman's mapped user namespace on release. Intermediate Podman state
-  paths may be owner-controlled and traverse-only, while backing images remain
-  owner-only. A transient systemd
-  user scope owns the outer CPU, memory, and PID limits. The driver and
-  independent evidence derive their effective values from the live sandbox
-  process cgroup ancestry before accepting it. The tracer can
-  execute argv, verify and
-  export a Git bundle, stop without deleting the filesystem, recover only as
-  stopped after live-authority revalidation, briefly restart a stopped capsule
-  inside its verified budget to export it, and release the exact runtime after
-  an explicit export. A dedicated Linux CI job proves two real capsules
-  cannot see or signal one another. Ordinary Code threads do not use this
-  service yet: on a Linux host they run under Bubblewrap like every other
-  confined process (see Sandbox above), and only the protected capsule remains
-  an unavailable destination until the AgentRun and Station launch paths are
-  wired and revalidated.
 - **Side Chat reads.** A Side Chat may read its source thread's transcript,
   state, and files; it never inherits the source's Work or Code execution
   authority. The file tools (`octant_side_chat_list_files`,

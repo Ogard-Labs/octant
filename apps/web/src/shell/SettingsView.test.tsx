@@ -1523,6 +1523,55 @@ describe("SettingsView", () => {
     expect(screen.getByRole("button", { name: "Stop host" })).toBeEnabled();
   });
 
+  it("lists remembered tool approvals beside remembered websites, with the Project's name", async () => {
+    const projectId = "44000000-0000-4000-8000-0000000000a1";
+    const extensionClient = {
+      toolGrantsAvailable: true,
+      snapshot: vi.fn(async () => ({ packages: [] })),
+      listToolGrants: vi.fn(async () => [
+        {
+          grantId: `sha256:${"1".repeat(64)}`,
+          projectId,
+          extensionId: "44000000-0000-4000-8000-000000000011",
+          packageId: "44000000-0000-4000-8000-000000000012",
+          componentId: "files-server",
+          mcpToolName: "read_file",
+          version: "1.0.0",
+          digest: `sha256:${"a".repeat(64)}`,
+          definitionDigest: `sha256:${"c".repeat(64)}`,
+          grantedAt: "2026-10-12T10:00:00.000Z",
+        },
+      ]),
+      revokeToolGrant: vi.fn(async () => true),
+    };
+    renderSettings({
+      extensionClient: extensionClient as never,
+      projectNames: new Map([[projectId, "Octant"]]),
+    });
+    navigateTo("Data & privacy");
+
+    expect(screen.getByRole("heading", { name: "Remembered websites" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Remembered tool approvals" })).toBeVisible();
+    expect(await screen.findByRole("group", { name: "Octant" })).toHaveTextContent("read_file");
+  });
+
+  it("leaves remembered tool approvals out for a client that is not a local window", () => {
+    const extensionClient = {
+      toolGrantsAvailable: false,
+      snapshot: vi.fn(async () => ({ packages: [] })),
+      listToolGrants: vi.fn(),
+      revokeToolGrant: vi.fn(),
+    };
+    renderSettings({ extensionClient: extensionClient as never });
+    navigateTo("Data & privacy");
+
+    expect(screen.getByRole("heading", { name: "Remembered websites" })).toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: "Remembered tool approvals" }),
+    ).not.toBeInTheDocument();
+    expect(extensionClient.listToolGrants).not.toHaveBeenCalled();
+  });
+
   it("explains that host controls stay on the host when no client is available", () => {
     renderSettings();
     navigateTo("Host");
