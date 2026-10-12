@@ -441,6 +441,28 @@ describe("ComposerModelPicker", () => {
     expect(screen.queryByText("No provider ready")).not.toBeInTheDocument();
   });
 
+  it("keeps Set up a provider locked while the composer is busy", () => {
+    render(
+      <ComposerModelPicker disabled groups={[]} onOpenSettings={vi.fn()} onSelect={vi.fn()} />,
+    );
+
+    expect(screen.getByRole("button", { name: "Set up a provider" })).toBeDisabled();
+  });
+
+  it("does not offer Set up a provider when ready providers were filtered out", () => {
+    render(
+      <ComposerModelPicker
+        groups={[]}
+        onOpenSettings={vi.fn()}
+        onSelect={vi.fn()}
+        providersReady
+      />,
+    );
+
+    expect(screen.queryByRole("button", { name: "Set up a provider" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Provider and model" })).toBeDisabled();
+  });
+
   it("keeps the provider control visible but disabled when configuration cannot be opened", () => {
     render(<ComposerModelPicker groups={[]} onSelect={vi.fn()} />);
 

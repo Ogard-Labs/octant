@@ -1933,6 +1933,9 @@ function renderNonCodeTab(
                     : { onSelectProvider: props.onDraftSelectProvider })}
                   projectId={project.id}
                   projectName={project.name}
+                  {...((props.workProviderGroups ?? props.draftProviderGroups ?? []).length > 0
+                    ? { providersReady: true }
+                    : {})}
                   providerGroups={providerGroupsForProject(
                     project,
                     props.workProviderGroups ?? props.draftProviderGroups ?? [],
@@ -2383,6 +2386,7 @@ function WorkProjectOverviewSlot(props: {
     modelOptionValues?: import("@octant/contracts/providers").ProviderModelOptionValues,
   ) => boolean | Promise<boolean>;
   readonly onOpenSettings?: () => void;
+  readonly providersReady?: boolean;
   readonly onOpenThread?: (threadId: string) => void;
   readonly onSelectProvider?: (selection: {
     readonly providerInstanceId: import("@octant/contracts/providers").ProviderInstanceId;
@@ -2498,6 +2502,7 @@ function WorkProjectOverviewSlot(props: {
       onCreateStarterArtifact={handleCreateStarterArtifact}
       onCreateThread={props.onCreateThread}
       {...(props.onOpenSettings === undefined ? {} : { onOpenSettings: props.onOpenSettings })}
+      {...(props.providersReady === undefined ? {} : { providersReady: props.providersReady })}
       {...(props.onOpenThread === undefined ? {} : { onOpenThread: props.onOpenThread })}
       {...(props.onSelectProvider === undefined
         ? {}

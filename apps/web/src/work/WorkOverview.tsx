@@ -79,6 +79,7 @@ export interface WorkOverviewProps {
   ) => boolean | Promise<boolean>;
   readonly onOpenThread?: (threadId: string) => void;
   readonly onOpenSettings?: () => void;
+  readonly providersReady?: boolean;
   readonly projectName?: string;
   readonly projectId?: ProjectId;
   readonly providerGroups?: ReadonlyArray<PickerGroup>;
@@ -217,6 +218,9 @@ export function WorkOverview(props: WorkOverviewProps) {
               {...(props.onOpenSettings === undefined
                 ? {}
                 : { onOpenSettings: props.onOpenSettings })}
+              {...(props.providersReady === undefined
+                ? {}
+                : { providersReady: props.providersReady })}
               modelOptionValues={modelOptionValues}
               onModelOptionChange={(id, value) => {
                 const rest = Object.fromEntries(

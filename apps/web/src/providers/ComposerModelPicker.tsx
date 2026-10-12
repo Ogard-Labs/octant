@@ -60,6 +60,13 @@ export interface ComposerModelPickerProps {
   /** Existing threads return the promise that confirms or refuses the model change. */
   readonly onSelect: (selection: ModelPickerSelection) => void | Promise<void>;
   readonly onOpenSettings?: () => void;
+  /**
+   * Empty `groups` can mean no instance is ready, or a Project policy hid
+   * every ready one. Setup is only the first of those; pass true when ready
+   * instances exist before policy so the picker does not send the user to
+   * add another provider.
+   */
+  readonly providersReady?: boolean;
   /** Opens Model roles on Settings › Octant Harness, linked from the Octant entry's note. */
   readonly onOpenHarnessSettings?: () => void;
   readonly disabled?: boolean;
@@ -156,7 +163,8 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
   }, [open, props.groups, selectedGroup, harnessGroups.length]);
 
   if (props.groups.length === 0) {
-    if (props.onOpenSettings === undefined) {
+    const offerSetup = props.onOpenSettings !== undefined && props.providersReady !== true;
+    if (!offerSetup) {
       return (
         <div className="composer-model-picker composer-model-picker--empty">
           <OctantButton
@@ -178,6 +186,7 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
         <OctantButton
           aria-label="Set up a provider"
           className="window-no-drag"
+          disabled={props.disabled === true}
           onClick={props.onOpenSettings}
           size="sm"
           type="button"
