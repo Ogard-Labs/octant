@@ -1358,6 +1358,56 @@ describe("App", () => {
     );
   });
 
+  it("clears the Chat welcome composer after create succeeds but opening is refused", async () => {
+    const user = userEvent.setup();
+    const chatApi = chats();
+    const shellApi = client(chatShellBootstrap());
+    const shellExecute = vi.mocked(shellApi.execute);
+    const baseShell = shellExecute.getMockImplementation();
+    if (baseShell === undefined) throw new Error("Expected a shell fixture");
+    shellExecute.mockImplementation(async (command) => {
+      if (
+        command.kind === "apply-workspace-operation" &&
+        command.operation.kind === "open-surface" &&
+        command.operation.surface.kind === "chat-thread"
+      ) {
+        throw {
+          category: "invalid",
+          message: "Workspace changed. Try again.",
+        };
+      }
+      return await baseShell(command);
+    });
+
+    render(
+      <App
+        chatClient={chatApi}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projects()}
+        projectWindowCapability={projectWindowCapability}
+        providerClient={providers()}
+        shellClient={shellApi}
+      />,
+    );
+
+    const welcome = await screen.findByRole("region", { name: "Chat welcome" });
+    await user.type(within(welcome).getByRole("textbox", { name: "First message" }), "Keep going");
+    await user.click(within(welcome).getByRole("button", { name: "Start chat" }));
+
+    const remainingWelcome = await screen.findByRole("region", { name: "Chat welcome" });
+    expect(await within(remainingWelcome).findByRole("alert")).toHaveTextContent(
+      "The chat was created, but it could not be opened. Open it from the sidebar to continue.",
+    );
+    expect(within(remainingWelcome).getByRole("textbox", { name: "First message" })).toHaveValue(
+      "",
+    );
+    expect(within(remainingWelcome).getByRole("button", { name: "Start chat" })).toBeDisabled();
+    expect(chatApi.execute).not.toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "send-chat-turn" }),
+    );
+    expect(composerThreadDrafts.read("chat", createdChatThreadId)?.text).toBe("Keep going");
+  });
+
   it("applies the selected Chat provider and model before starting the first turn", async () => {
     const user = userEvent.setup();
     const chatApi = chats();
