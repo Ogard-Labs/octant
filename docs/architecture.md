@@ -1755,7 +1755,8 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   explicitly re-assigns it; Octant never silently points that login
   at another path. Removing an account leaves its assigned directory
   in place, with that account's sign-in and history: Octant says
-  where it is, the host data map lists `~/.claude-accounts`, and
+  where it is, the host data map lists `~/.claude-accounts` and
+  `~/.codex-accounts`, and
   deleting it is the person's step. An accent is presentation only:
   changing it alone neither stops a running session nor resets the
   account's readiness. Sign-in is the unmodified CLI command in a
