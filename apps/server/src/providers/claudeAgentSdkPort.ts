@@ -561,12 +561,16 @@ const PLAN_USAGE_TIMEOUT_MS = 5_000;
  * the caller falls back to the last session snapshot, never to credentials.
  */
 async function askPlanUsage(query: ClaudeAgentSdkQueryLike): Promise<unknown> {
-  const read = query.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET;
-  if (read === undefined) return undefined;
+  if (query.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET === undefined) {
+    return undefined;
+  }
   let timer: number | undefined;
   try {
+    // Call through the query. The process method uses its receiver for the
+    // control request; extracting it makes `this` undefined and the catch
+    // below would hide that as a missing answer.
     return await Promise.race([
-      read({ skipBehaviors: true }),
+      query.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET({ skipBehaviors: true }),
       new Promise<undefined>((resolve) => {
         timer = setTimeout(resolve, PLAN_USAGE_TIMEOUT_MS);
       }),
