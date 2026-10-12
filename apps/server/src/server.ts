@@ -1874,6 +1874,27 @@ export function startOctantServer(
     const extensionToolApprovalService = new ExtensionToolApprovalService({
       uuid: randomUUID,
       now: Date.now,
+      // A usage-limit resume replays its stopped Work turn's extension
+      // selections as the host, so that turn's tool prompts go to the windows
+      // bound to the thread's Project, as a routine's browser prompts do.
+      isHostScope: isRoutineHostScope,
+      // Routed by the Project the prompt recorded, never by trying each mode:
+      // Work and Code thread ids are separate namespaces, so a raw id alone
+      // could match an unrelated thread another window may drive.
+      windowCanReachThread: (windowId, threadId, projectId) => {
+        if (projectId === undefined) return false;
+        const project = persistence.readProject(decodeProjectId(projectId));
+        if (project === undefined || (project.type !== "work" && project.type !== "code")) {
+          return false;
+        }
+        const thread = decodeBrowserThreadId(threadId);
+        const authority = browserAuthority.resolve(thread, project.type);
+        return (
+          authority !== undefined &&
+          String(authority.projectId) === String(project.id) &&
+          browserAuthority.canAccessWindow(windowId, thread, project.type)
+        );
+      },
     });
     let browserToolApprovalService: BrowserToolApprovalService | undefined;
     const codeSessionAuthority = new CodeSessionAuthorityStore();
@@ -7609,13 +7630,16 @@ export function startOctantServer(
         journal: persistence.journal,
         clock: () => new Date(),
         uuid: randomUUID,
-        windowId: firstRegisteredWindowId,
         chat: {
           readThread: (threadId) => persistence.readChatThread(threadId),
           readThreadView: (threadId) => persistence.readChatThreadView(threadId),
           execute: (input, executionContext) => chatService.execute(input, executionContext),
         },
         work: {
+          isEnabled: () =>
+            enabledModes(
+              persistence.readShellSettings()?.settings ?? defaultShellSettings(),
+            ).includes("work"),
           readThread: (threadId) => workThreadProjection.read(threadId),
           listTurns: (threadId) => workTurnProjection.listForThread(threadId),
           startFirstTurn: (windowId, input, options) =>

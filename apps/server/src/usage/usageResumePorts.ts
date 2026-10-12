@@ -53,6 +53,7 @@ import type { Journal } from "../persistence/journal";
 import { readAggregateVersion } from "../persistence/chatProjection";
 import type { ProjectedCodeRuntimeWork } from "../persistence/codeProjection";
 import type { SqliteConnection } from "../persistence/sqlitePort";
+import { ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
 import type {
   UsageResumeModePort,
   UsageResumePorts,
@@ -89,8 +90,6 @@ export interface UsageResumePortDependencies {
   readonly journal: Pick<Journal, "replayAggregate">;
   readonly clock: () => Date;
   readonly uuid: () => string;
-  /** Any registered local window; the turn path rechecks access itself. */
-  readonly windowId: () => WindowId | undefined;
   readonly chat: {
     readonly readThread: (threadId: ChatThread["id"]) => ChatThread | undefined;
     readonly readThreadView: (threadId: ChatThread["id"]) => ChatThreadView | undefined;
@@ -100,6 +99,8 @@ export interface UsageResumePortDependencies {
     ) => Promise<unknown>;
   };
   readonly work: {
+    /** Whether Work is enabled in the host's shell settings right now. */
+    readonly isEnabled: () => boolean;
     readonly readThread: (threadId: WorkThreadId) => WorkThread | undefined;
     readonly listTurns: (threadId: WorkThreadId) => ReadonlyArray<WorkTurnState>;
     readonly startFirstTurn: (
@@ -164,9 +165,6 @@ export interface UsageResumePortDependencies {
 
 const invalid = (detail: string) => ({ kind: "invalid" as const, detail });
 const refused = (detail: string) => ({ kind: "refused" as const, detail });
-// The opt-in is still valid but cannot fire yet; the scheduler keeps it
-// armed and re-checks instead of settling a durable record away.
-const deferred = (detail: string) => ({ kind: "deferred" as const, detail });
 const refusalDetail = (error: unknown): string =>
   error instanceof Error ? error.message : "The continuation could not be admitted.";
 
@@ -307,9 +305,15 @@ function workPort(deps: UsageResumePortDependencies): UsageResumeModePort {
       return { kind: "ready" };
     },
     dispatch: async (record) => {
-      const windowId = deps.windowId();
-      if (windowId === undefined) {
-        return deferred("No local window is registered for this host.");
+      // The resume runs as the host, never through a window: it needs none
+      // open and borrows no window's identity or Project binding. The turn
+      // path still rechecks the thread's Project access and posture.
+      const scopeId = ROUTINE_HOST_SCOPE_ID;
+      // The Work turn path does not read the mode switch, and a window used
+      // to stand in for it (no window opens on a disabled mode). The host
+      // has no such stand-in, so it asks the switch itself.
+      if (!deps.work.isEnabled()) {
+        return refused("Work is turned off on this host.");
       }
       const thread = deps.work.readThread(decodeWorkThreadId(record.threadId));
       const turn = stoppedTurn(record);
@@ -318,7 +322,7 @@ function workPort(deps: UsageResumePortDependencies): UsageResumeModePort {
       }
       try {
         const result = await deps.work.startFirstTurn(
-          windowId,
+          scopeId,
           {
             kind: "start-work-thread-turn",
             requestId: decodeWorkTurnRequestId(deps.uuid()),
@@ -466,10 +470,7 @@ function codePort(deps: UsageResumePortDependencies): UsageResumeModePort {
       return { kind: "ready" };
     },
     dispatch: async (record) => {
-      const windowId = deps.windowId();
-      if (windowId === undefined) {
-        return deferred("No local window is registered for this host.");
-      }
+      const scopeId = ROUTINE_HOST_SCOPE_ID;
       const threadId = decodeCodeThreadId(record.threadId);
       const thread = deps.code.readThread(threadId);
       const stopped = codeStoppedTurnState(deps, record.turnId);
@@ -484,7 +485,7 @@ function codePort(deps: UsageResumePortDependencies): UsageResumeModePort {
         return refused("The recorded stop's preserved prompt is unavailable.");
       }
       try {
-        const batch = await deps.code.readOperationContents(windowId, {
+        const batch = await deps.code.readOperationContents(scopeId, {
           threadId,
           items: [
             { operationId: decodeCodeOperationId(record.turnId), contentId: evidence.contentId },
@@ -494,9 +495,9 @@ function codePort(deps: UsageResumePortDependencies): UsageResumeModePort {
         if (text === undefined || text.trim().length === 0) {
           return refused("The recorded stop's preserved prompt is unavailable.");
         }
-        const prompt = await deps.code.stageEvidence(windowId, threadId, text);
+        const prompt = await deps.code.stageEvidence(scopeId, threadId, text);
         const result = await deps.code.executeOperation(
-          windowId,
+          scopeId,
           {
             kind: "start-provider-turn",
             operationId: decodeCodeOperationId(deps.uuid()),
