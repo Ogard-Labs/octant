@@ -413,7 +413,7 @@ describe("running prototype", () => {
     expect(within(region).getByRole("button", { name: "Run again" })).toBeVisible();
   });
 
-  it("runs on open in the sidebar without taking focus, and says nothing about containment in the desktop app", async () => {
+  it("runs on open in the sidebar without taking focus, and in the desktop app says only that its script can still connect out", async () => {
     const { start, runtime } = runRuntime({ runsOnOpen: true, contained: true });
     render(
       <CanvasDocument
@@ -425,6 +425,9 @@ describe("running prototype", () => {
     expect(start).toHaveBeenCalledOnce();
     expect(frame).toHaveAttribute("tabindex", "-1");
     expect(screen.queryByText(/not network-contained/)).toBeNull();
+    // No client stops a peer connection over TCP, the desktop app included,
+    // so the person is told while it runs as well as before.
+    expect(screen.getByText(/can still connect to another computer/)).toBeVisible();
   });
 
   it("cannot run where the host serves no prototypes, and shows why a refused run stopped", async () => {

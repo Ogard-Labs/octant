@@ -355,16 +355,20 @@ agent asks for your theme.
 - A deck shows **Present** instead. Use the arrow buttons, or the left and
   right arrow keys, to move between slides.
 - Some designs react to taps without changing screen, such as a card you can
-  select or a reminder you can tick. That is all they can do: a design runs no
-  script, loads nothing from the internet, and has no links that leave it.
+  select or a reminder you can tick. That is all an ordinary design can do: it
+  runs no script, loads nothing from the internet, and has no links that leave
+  it. A prototype, below, is the one kind that runs script.
   Pictures in it are drawn by the agent, or are real images it names.
 - Ask for a working prototype, such as a checkout with a cart you can fill,
   and the agent can make a design that runs its own script. Its header
   calls it a prototype. In the sidebar it starts when you open it; in
   the thread it starts when you press **Run**. While it runs, Octant shows
-  **Running** and **Stop** above it, outside the prototype. A prototype still
-  loads nothing from the internet and cannot reach Octant, your files, or
-  other pages. If it stops responding, or tries to open another page, Octant
+  **Running** and **Stop** above it, outside the prototype. A prototype
+  cannot reach Octant or your files, and it cannot load a page, an image, or
+  data from the internet. One way out is not blocked yet: its script can open
+  a direct connection to another computer and send what the prototype itself
+  holds, which is its own screens and any image it shows. Octant says so under
+  every prototype. Run one only if you would be comfortable with that. If it stops responding, or tries to open another page, Octant
   stops it and offers **Run again**. Script errors appear as text under it.
 - If a prototype holds on to the keyboard, press **Command-Escape**
   (**Control-Escape** outside macOS) in the Octant app to move focus to its

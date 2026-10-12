@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { CanvasDocument, type CanvasDocumentComments } from "./CanvasDocument";
 import type { CanvasActionRuntime } from "./canvasActionRuntime";
 import type { DiagramBoardLayoutRuntime } from "./blocks/DiagramBoard";
@@ -33,7 +34,10 @@ export function CanvasView({
   comments,
   placement,
 }: CanvasViewProps) {
-  const gate = decodeCanvasForRender(input);
+  // Validating builds a new definition, block by block. Doing it on every
+  // draw handed each block a new identity whenever anything around the Canvas
+  // redrew, which a running prototype read as a new version and restarted.
+  const gate = useMemo(() => decodeCanvasForRender(input), [input]);
   if (!gate.ok) {
     return (
       <OctantAlert className="canvas-view__denied" tone="warning">

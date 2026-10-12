@@ -529,8 +529,9 @@ as its content, and an optional `theme`: `workspace` or `none`, defaulting to
 `workspace` for a document and `none` for a device size, so a product screen
 keeps its own brand. The renderer draws each frame in an `iframe` with a
 `srcdoc` page whose policy loads nothing but inline styles and `data:` images
-and fonts, on top of the app policy the page inherits. The sandbox never
-includes `allow-scripts`. A device-size frame that is not themed has an empty
+and fonts, on top of the app policy the page inherits. A static frame's
+sandbox never includes `allow-scripts`; a design that declares `runsScript`
+is drawn in a different frame, described below. A device-size frame that is not themed has an empty
 `sandbox`; a document or a themed frame has `allow-same-origin` and nothing
 else, so the host can read the page: it measures the document's body with a
 `ResizeObserver` and sets the frame's height to it (up to 12,000px, past which
