@@ -1,6 +1,9 @@
 import { DEFAULT_THEME_SETTINGS } from "@octant/contracts/theme";
 import { act, render } from "@testing-library/react";
+import { readdirSync, readFileSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
+import { followSystemIncreasedContrast } from "./increasedContrastAttribute";
 import { ThemeSettingsProvider } from "./ThemeSettingsProvider";
 
 describe("ThemeSettingsProvider", () => {
@@ -133,6 +136,13 @@ describe("ThemeSettingsProvider", () => {
     const host = window as unknown as { octantHost?: unknown };
     host.octantHost = {
       setProviderCredential: vi.fn(),
+      addProviderApiKey: vi.fn(),
+      listProviderApiKeys: vi.fn(async () => []),
+      renameProviderApiKey: vi.fn(),
+      replaceProviderApiKey: vi.fn(),
+      removeProviderApiKey: vi.fn(),
+      setActiveProviderApiKey: vi.fn(),
+      moveProviderApiKey: vi.fn(),
       providerCredentialStatus: vi.fn(),
       clearProviderCredential: vi.fn(),
       setApprovalSurfacePalette,
@@ -152,6 +162,136 @@ describe("ThemeSettingsProvider", () => {
     }
   });
 
+  it("applies the high-contrast text with the in-app setting alone, and drops it when the setting is turned off", () => {
+    const root = document.documentElement;
+    for (const mode of ["light", "dark"] as const) {
+      const result = render(
+        <ThemeSettingsProvider
+          settings={{ ...DEFAULT_THEME_SETTINGS, mode, increasedContrast: true }}
+        >
+          <div>Theme content</div>
+        </ThemeSettingsProvider>,
+      );
+      expect(root.getAttribute("data-octant-increased-contrast")).toBe("true");
+      // The stylesheet maps the text roles to their high-contrast values under
+      // this attribute; an inline colour would outrank that rule.
+      expect(root.style.getPropertyValue("--octant-text-primary")).toBe("");
+      expect(root.style.getPropertyValue("--octant-text-muted")).toBe("");
+
+      // Another appearance change leaves the contrast state where it was.
+      result.rerender(
+        <ThemeSettingsProvider
+          settings={{ ...DEFAULT_THEME_SETTINGS, mode, glassTint: 30, increasedContrast: true }}
+        >
+          <div>Theme content</div>
+        </ThemeSettingsProvider>,
+      );
+      expect(root.getAttribute("data-octant-increased-contrast")).toBe("true");
+
+      result.rerender(
+        <ThemeSettingsProvider settings={{ ...DEFAULT_THEME_SETTINGS, mode }}>
+          <div>Theme content</div>
+        </ThemeSettingsProvider>,
+      );
+      expect(root.getAttribute("data-octant-increased-contrast")).toBe("false");
+      expect(root.style.getPropertyValue("--octant-text-primary")).not.toBe("");
+      result.unmount();
+    }
+  });
+
+  it("keeps increased contrast on while the system asks for more contrast, whatever the setting says", () => {
+    const listeners = new Set<() => void>();
+    let systemMore = true;
+    vi.stubGlobal("matchMedia", (query: string) => ({
+      get matches() {
+        return query === "(prefers-contrast: more)" && systemMore;
+      },
+      media: query,
+      addEventListener: (_type: string, listener: () => void) => listeners.add(listener),
+      removeEventListener: (_type: string, listener: () => void) => listeners.delete(listener),
+    }));
+    const root = document.documentElement;
+    try {
+      const result = render(
+        <ThemeSettingsProvider settings={{ ...DEFAULT_THEME_SETTINGS, increasedContrast: false }}>
+          <div>Theme content</div>
+        </ThemeSettingsProvider>,
+      );
+      expect(root.getAttribute("data-octant-increased-contrast")).toBe("true");
+      expect(root.style.getPropertyValue("--octant-text-primary")).toBe("");
+
+      systemMore = false;
+      act(() => {
+        for (const listener of listeners) listener();
+      });
+      expect(root.getAttribute("data-octant-increased-contrast")).toBe("false");
+      expect(root.style.getPropertyValue("--octant-text-primary")).not.toBe("");
+      result.unmount();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("draws the system's increased contrast before the settings load and after they unmount", () => {
+    const listeners = new Set<() => void>();
+    let systemMore = true;
+    vi.stubGlobal("matchMedia", (query: string) => ({
+      get matches() {
+        return query === "(prefers-contrast: more)" && systemMore;
+      },
+      media: query,
+      addEventListener: (_type: string, listener: () => void) => listeners.add(listener),
+      removeEventListener: (_type: string, listener: () => void) => listeners.delete(listener),
+    }));
+    const root = document.documentElement;
+    const stopFollowing = followSystemIncreasedContrast();
+    try {
+      // Loading, pairing, and disconnected screens render before any settings
+      // provider mounts; the system preference must already reach them.
+      expect(root.getAttribute("data-octant-increased-contrast")).toBe("true");
+
+      const result = render(
+        <ThemeSettingsProvider settings={{ ...DEFAULT_THEME_SETTINGS, increasedContrast: false }}>
+          <div>Theme content</div>
+        </ThemeSettingsProvider>,
+      );
+      expect(root.getAttribute("data-octant-increased-contrast")).toBe("true");
+      // Returning to the disconnected screen unmounts the provider.
+      result.unmount();
+      expect(root.getAttribute("data-octant-increased-contrast")).toBe("true");
+
+      systemMore = false;
+      for (const listener of listeners) listener();
+      expect(root.getAttribute("data-octant-increased-contrast")).toBe("false");
+      systemMore = true;
+      for (const listener of listeners) listener();
+      expect(root.getAttribute("data-octant-increased-contrast")).toBe("true");
+    } finally {
+      stopFollowing();
+      expect(listeners.size).toBe(0);
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("keys every high-contrast stylesheet rule off the attribute the setting and the system preference share", () => {
+    const sheets: Array<string> = [];
+    const walk = (directory: string) => {
+      for (const entry of readdirSync(directory, { withFileTypes: true })) {
+        const path = join(directory, entry.name);
+        if (entry.isDirectory()) walk(path);
+        else if (entry.name.endsWith(".css")) sheets.push(path);
+      }
+    };
+    walk(resolve(process.cwd(), "src"));
+    for (const sheet of sheets) {
+      expect(readFileSync(sheet, "utf8"), sheet).not.toMatch(/prefers-contrast/);
+    }
+    const tokens = readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8");
+    const block = /:root\[data-octant-increased-contrast="true"\] \{([^}]*)\}/.exec(tokens)?.[1];
+    expect(block).toContain("--octant-text-primary: var(--octant-text-primary-high-contrast);");
+    expect(block).toContain("--octant-text-secondary: var(--octant-text-secondary-high-contrast);");
+    expect(block).toContain("--octant-text-muted: var(--octant-text-muted-high-contrast);");
+  });
   it("follows a live system appearance change while set to follow the system, and stops listening when it is not", () => {
     const listeners = new Set<() => void>();
     const query = {
@@ -161,9 +301,12 @@ describe("ThemeSettingsProvider", () => {
         listeners.delete(listener),
       ),
     };
+    // Only the appearance query is under test; the contrast query keeps its
+    // own listener, so it answers from a separate object.
+    const otherQuery = { matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() };
     vi.stubGlobal(
       "matchMedia",
-      vi.fn(() => query),
+      vi.fn((media: string) => (media === "(prefers-color-scheme: dark)" ? query : otherQuery)),
     );
     const root = document.documentElement;
     const switchSystemAppearance = (dark: boolean) =>

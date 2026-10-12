@@ -26,7 +26,7 @@
 
 .usage-dashboard__filter-count {
   min-width: 18px;
-  padding-inline: 5px;
+  padding-inline: var(--oct-space-1);
   color: var(--oct-fg);
   background: var(--oct-selection);
   border-radius: var(--oct-radius-sm);
@@ -325,7 +325,7 @@
 
 .usage-dashboard__table--narrow th,
 .usage-dashboard__table--narrow td {
-  padding-inline: 3px;
+  padding-inline: var(--oct-space-1);
 }
 
 @media (max-width: 680px) {
@@ -345,12 +345,10 @@
   }
 }
 
-@media (prefers-contrast: more) {
-  .usage-dashboard__quality-badge,
-  .usage-dashboard__unavailable-note,
-  .usage-dashboard__error {
-    border-color: var(--oct-fg);
-  }
+html[data-octant-increased-contrast="true"] .usage-dashboard__quality-badge,
+html[data-octant-increased-contrast="true"] .usage-dashboard__unavailable-note,
+html[data-octant-increased-contrast="true"] .usage-dashboard__error {
+  border-color: var(--oct-fg);
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -400,7 +400,7 @@ export const EnvironmentSectionDescriptor = Schema.Struct({
 export type EnvironmentSectionDescriptor = typeof EnvironmentSectionDescriptor.Type;
 
 /**
- * Host-owned first-run state (`BOOT-01`).
+ * Host-owned first-run state.
  *
  * `pending` is the only state a clean store can produce, so a first run is
  * detected from projected host state rather than from renderer storage. The

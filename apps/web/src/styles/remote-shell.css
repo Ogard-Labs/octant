@@ -227,14 +227,12 @@
   }
 }
 
-@media (prefers-contrast: more) {
-  .remote-shell__stale-banner {
-    border-color: var(--oct-fg);
-  }
+html[data-octant-increased-contrast="true"] .remote-shell__stale-banner {
+  border-color: var(--oct-fg);
+}
 
-  .remote-shell__surface-card,
-  .remote-shell__mode-panel,
-  .remote-shell__device-panel {
-    border-color: var(--oct-fg-2);
-  }
+html[data-octant-increased-contrast="true"] .remote-shell__surface-card,
+html[data-octant-increased-contrast="true"] .remote-shell__mode-panel,
+html[data-octant-increased-contrast="true"] .remote-shell__device-panel {
+  border-color: var(--oct-fg-2);
 }

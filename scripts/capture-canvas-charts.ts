@@ -96,10 +96,16 @@ if (executable === undefined) {
 // `--only=mockup` captures the mockup blocks alone, as `canvas-mockup-*.png`,
 // `--only=flow` the funnel, radar, and sankey charts, as `canvas-flow-*.png`,
 // `--only=table` a wide table grouped, summarised, pinned, with one group
-// collapsed and the grid scrolled sideways, as `canvas-table-*.png`, and
+// collapsed and the grid scrolled sideways, as `canvas-table-*.png`,
 // `--only=dashboard` the ops dashboard and release health board, as
-// `canvas-dashboard-*.png`.
-const ONLY_SETS = ["mockup", "flow", "table", "dashboard"] as const;
+// `canvas-dashboard-*.png`, `--only=design` the design documents and a
+// phone design, one image per design block, as `canvas-design-*.png`, and
+// `--only=layout` the tabbed design brief and a Gantt plan, as
+// `canvas-layout-*.png`: one element capture per listed tab, the columns, and
+// the Gantt plan, each scrolled into view, because a full-page capture of a
+// long page can leave content below the fold unpainted.
+const ONLY_SETS = ["mockup", "flow", "table", "dashboard", "design", "layout"] as const;
+const LAYOUT_TABS = ["Metrics", "Core loop", "World", "Economy"] as const;
 const onlyArg = process.argv.find((arg) => arg.startsWith("--only="))?.slice("--only=".length);
 const only = ONLY_SETS.find((set) => set === onlyArg);
 if (onlyArg !== undefined && only === undefined) {
@@ -109,6 +115,7 @@ if (onlyArg !== undefined && only === undefined) {
   process.exit(1);
 }
 const onlyMockups = only === "mockup";
+const onlyDesigns = only === "design";
 const port = pickPort();
 const harnessUrl = `http://localhost:${String(port)}/chart-visuals-evidence.html${only === undefined ? "" : `?only=${only}`}`;
 const serverProcess = Bun.spawn(
@@ -144,7 +151,7 @@ try {
     page.setDefaultTimeout(15_000);
     await page.goto(harnessUrl, { waitUntil: "domcontentloaded" });
     await page.waitForSelector(
-      "main[data-canvas-chart-evidence='all'] .canvas-mockup, main[data-canvas-chart-evidence='all'] .canvas-dashboard, main[data-canvas-chart-evidence='all'] .canvas-block__chart, main[data-canvas-chart-evidence='all'] .canvas-block__heatmap, main[data-canvas-chart-evidence='all'] .canvas-block__bar-list, main[data-canvas-chart-evidence='all'] .canvas-block__matrix, main[data-canvas-chart-evidence='all'] .canvas-block__math, main[data-canvas-chart-evidence='all'] .canvas-block__table, main[data-canvas-chart-evidence='all'] .canvas-block__kind-diagram",
+      "main[data-canvas-chart-evidence='all'] .canvas-tabs, main[data-canvas-chart-evidence='all'] .canvas-mockup, main[data-canvas-chart-evidence='all'] .canvas-dashboard, main[data-canvas-chart-evidence='all'] .canvas-block__chart, main[data-canvas-chart-evidence='all'] .canvas-block__heatmap, main[data-canvas-chart-evidence='all'] .canvas-block__bar-list, main[data-canvas-chart-evidence='all'] .canvas-block__matrix, main[data-canvas-chart-evidence='all'] .canvas-block__math, main[data-canvas-chart-evidence='all'] .canvas-block__table, main[data-canvas-chart-evidence='all'] .canvas-block__kind-diagram, main[data-canvas-chart-evidence='all'] .canvas-design",
     );
     // The dev server injects the stylesheet after the first paint, and a chart
     // measured before it lands keeps the narrow width it drew at; let the page
@@ -195,13 +202,60 @@ try {
     }
 
     for (const scenario of SCENARIOS) {
-      await page.emulateMedia({ forcedColors: scenario === "forced" ? "active" : "none" });
+      // The app's Contrast theme is the system's increased-contrast
+      // preference: `styles.css` swaps the text roles for their
+      // high-contrast values under `prefers-contrast: more`. The harness
+      // attribute alone changes no colour, so emulate the preference too.
+      await page.emulateMedia({
+        forcedColors: scenario === "forced" ? "active" : "none",
+        contrast: scenario === "contrast" ? "more" : "no-preference",
+      });
       await page.evaluate((value: Scenario) => {
         window.__applyChartTheme?.(value === "forced" ? "default-light" : value);
       }, scenario);
-      // Let fonts and any layout settle before the capture.
-      await page.waitForTimeout(150);
-      const path = join(evidenceDir, `canvas-${only ?? "charts"}-${scenario}${suffix}.png`);
+      // Let fonts and any layout settle before the capture. A themed design
+      // page reloads in the new theme, then takes its fonts and its height.
+      await page.waitForTimeout(onlyDesigns ? 600 : 150);
+      const name = `canvas-${only ?? "charts"}-${scenario}${suffix}`;
+      if (onlyDesigns) {
+        // Headless Chromium leaves a sandboxed, cross-origin frame blank in a
+        // full-page screenshot when it sits below the fold: the frame never
+        // painted. Scroll each design into the viewport, let its frames paint,
+        // and capture the design element itself.
+        const designs = await page.locator(".canvas-design").all();
+        for (const [index, design] of designs.entries()) {
+          await design.scrollIntoViewIfNeeded();
+          await page.waitForTimeout(400);
+          const path = join(evidenceDir, `${name}-${String(index + 1)}.png`);
+          await design.screenshot({ path });
+          written.push(path);
+        }
+        continue;
+      }
+      if (only === "layout") {
+        for (const tab of LAYOUT_TABS) {
+          await page.getByRole("tab", { name: tab }).click();
+          await page.waitForTimeout(100);
+          const tabs = page.locator(".canvas-tabs");
+          await tabs.scrollIntoViewIfNeeded();
+          const slug = tab.toLowerCase().replace(/\s+/g, "-");
+          const path = join(evidenceDir, `canvas-layout-${slug}-${scenario}${suffix}.png`);
+          await tabs.screenshot({ path });
+          written.push(path);
+        }
+        for (const [name, selector] of [
+          ["columns", ".canvas-columns"],
+          ["gantt", ".canvas-plan"],
+        ] as const) {
+          const element = page.locator(selector);
+          await element.scrollIntoViewIfNeeded();
+          const path = join(evidenceDir, `canvas-layout-${name}-${scenario}${suffix}.png`);
+          await element.screenshot({ path });
+          written.push(path);
+        }
+        continue;
+      }
+      const path = join(evidenceDir, `${name}.png`);
       await page.screenshot({ path, fullPage: true });
       written.push(path);
     }

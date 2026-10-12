@@ -632,6 +632,13 @@ export interface CodeOperationTurnPort {
     readonly extensionTools?: AppManagedToolSet;
     /** The host rechecks this after runtime preparation, before launching. */
     readonly admissionCurrent?: () => boolean;
+    /**
+     * Told once a provider has accepted this turn's prompt and context. A
+     * start that returns `running` has only taken the turn on: the context is
+     * still in memory, and a host that stops before the send has delivered
+     * nothing.
+     */
+    readonly onContextDelivered?: () => void;
     /** Consume feedback synchronously only after the runtime's final admission check. */
     readonly takeProductFeedback?: () => {
       readonly context?: string;
@@ -824,6 +831,17 @@ export interface CodeOperationServiceOptions {
   readonly takeIssueContextFramed?: (threadId: string) => FramedExternalContent | undefined;
   readonly peekIssueContextFramed?: (threadId: string) => FramedExternalContent | undefined;
   readonly consumeIssueContextFramed?: (threadId: string) => void;
+  /**
+   * The agent messages waiting for a thread, as the host admits them into the
+   * turn about to start: rechecked against the sender and the recipient as
+   * they stand now, recorded as external content on the thread, and framed as
+   * data. Reading them delivers nothing by itself.
+   */
+  readonly carryAgentMessages?: (
+    threadId: string,
+  ) => Promise<ReadonlyArray<{ readonly messageId: string; readonly text: string }>>;
+  /** Records that a provider has accepted the turn carrying those messages. */
+  readonly confirmAgentMessagesDelivered?: (messageIds: ReadonlyArray<string>) => Promise<void>;
   /**
    * Loads skills named by the thread's snapshotted profile allowlist. Absent
    * on a host that cannot resolve skills, where a profile still injects its
@@ -2843,6 +2861,14 @@ export class CodeOperationService {
         "refused",
       );
     }
+    // Read last, after every refusal above: carrying a message marks this
+    // thread as having ingested external content, and a turn that was never
+    // going to start should not do that. A failed read costs the turn its
+    // messages, not the person their turn; the messages wait for the next one.
+    const agentMessages = await (
+      this.#options.carryAgentMessages?.(String(thread.id)) ?? Promise.resolve([])
+    ).catch(() => []);
+    for (const message of agentMessages) context.push({ kind: "user-message", text: message.text });
     const takeProductFeedback = this.#options.takeProductFeedbackForTurn;
     const turn = await this.#options.turns.start({
       windowId,
@@ -2857,6 +2883,20 @@ export class CodeOperationService {
       ...(attachments.length === 0 ? {} : { attachments }),
       ...(extensionTools === undefined ? {} : { extensionTools }),
       ...(admissionCurrent === undefined ? {} : { admissionCurrent }),
+      // A message is delivered when a provider has it, not when the turn was
+      // taken on: the runtime launches after this call returns, and a host
+      // that stopped in between would have journaled a delivery, dropped the
+      // body, and sent nothing. Until the send, the message stays waiting and
+      // the next turn, or this one recovered after a restart, carries it.
+      ...(agentMessages.length === 0
+        ? {}
+        : {
+            onContextDelivered: () => {
+              void this.#options
+                .confirmAgentMessagesDelivered?.(agentMessages.map((message) => message.messageId))
+                .catch(() => undefined);
+            },
+          }),
       ...(takeProductFeedback === undefined
         ? {}
         : {
@@ -3361,6 +3401,8 @@ function evidenceReferences(event: CodeOperationEvent): readonly CodeEvidenceRef
       return [event.content];
     case "context-handoff-attached":
       return event.reason === "fork-native-session" ? [] : [event.content];
+    case "fork-context-merged":
+      return [event.content];
     case "operation-result":
       return resultEvidenceReferences(event.result);
     default:

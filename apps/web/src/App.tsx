@@ -2752,7 +2752,7 @@ function LaunchedShell(
   // so a clean store is the only thing that can produce it.
   // The readiness line and the notice under it read the same discovery record,
   // so first run cannot say "nothing is configured" above a scan it is still
-  // running (`BOOT-02`).
+  // running.
   const firstRunDiscovery = useMemo<FirstRunDiscoveryInput>(
     () => ({
       scanning: discoveryController.scanning,
@@ -3909,6 +3909,12 @@ function LaunchedShell(
   const workingNowModes = useMemo(
     () => (activeMode === "code" ? (["code"] as const) : (["chat", "work"] as const)),
     [activeMode],
+  );
+  // Every Project, archived ones too: a grant outlives the Project's listing.
+  const projectNamesById = useMemo(
+    () =>
+      new Map(projectController.allProjects.map((project) => [String(project.id), project.name])),
+    [projectController.allProjects],
   );
   const workingNowProjectNames = useMemo(
     () => new Map(projectController.projects.map((project) => [String(project.id), project.name])),
@@ -6347,6 +6353,7 @@ function LaunchedShell(
       codeController={codeController}
       discoveryController={discoveryController}
       extensionClient={extensionClient}
+      projectNames={projectNamesById}
       {...(props.hostBridge?.selectLocalPluginFolder === undefined
         ? {}
         : {

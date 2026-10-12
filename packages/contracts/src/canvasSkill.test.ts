@@ -217,4 +217,27 @@ describe("CanvasSkillContribution contract", () => {
     ).toThrow();
     expect(() => decodeCanvasDocumentRecipeCatalog({ recipes: [], hostPath: "/" })).toThrow();
   });
+
+  it("lets a design slot name the size it is drawn at, and no other slot", () => {
+    const recipe = {
+      id: "essay",
+      title: "Essay",
+      whenToUse: "When a trusted skill offers an essay.",
+      skeleton: [{ kind: "design", size: "document", role: "The essay as one document." }],
+    };
+    const catalog = decodeCanvasDocumentRecipeCatalog({ recipes: [recipe] });
+    expect(catalog.recipes[0]?.skeleton[0]).toMatchObject({ kind: "design", size: "document" });
+    expect(() =>
+      decodeCanvasDocumentRecipeCatalog({
+        recipes: [
+          { ...recipe, skeleton: [{ kind: "rich-text", size: "document", role: "Text." }] },
+        ],
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeCanvasDocumentRecipeCatalog({
+        recipes: [{ ...recipe, skeleton: [{ kind: "design", size: "poster", role: "A poster." }] }],
+      }),
+    ).toThrow();
+  });
 });

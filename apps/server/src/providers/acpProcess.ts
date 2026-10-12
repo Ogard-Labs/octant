@@ -20,12 +20,12 @@ import { AcpFailure, makeAcpClient, type AcpClient, type AcpInitializeResult } f
 import type { ProviderProcessStartedListener } from "./providerRuntimeRegistry";
 import { prepareConfinedVersionProbe } from "../process/confinedVersionProbe";
 import {
-  makeSeatbeltConfinementLive,
-  SeatbeltConfinementError,
+  makeProcessConfinementLive,
+  ProcessConfinementError,
   requireSandboxExec,
   seatbeltDenyRule,
   wrapCommandInSandboxExec,
-  type SeatbeltConfinementPort,
+  type ProcessConfinementPort,
 } from "../process/seatbeltProfile";
 import { buildLinuxAllowDefaultDenyLaunch } from "../process/linuxConfinement";
 import {
@@ -97,7 +97,7 @@ export interface AcpProcessPort {
 export interface AcpProcessOptions {
   readonly confinement?: AcpConfinementPort;
   /** Confinement for the version read, which the runtime's port does not cover. */
-  readonly versionProbeConfinement?: SeatbeltConfinementPort;
+  readonly versionProbeConfinement?: ProcessConfinementPort;
   readonly inheritedEnvironment?: NodeJS.ProcessEnv;
   readonly onDiagnostic?: (message: string) => void;
   readonly shutdownTimeoutMs?: number;
@@ -119,7 +119,7 @@ export interface AcpProbeOptions {
   readonly outputBytes?: number;
   readonly shutdownTimeoutMs?: number;
   readonly timeoutMs?: number;
-  readonly confinement?: SeatbeltConfinementPort;
+  readonly confinement?: ProcessConfinementPort;
 }
 
 export interface AcpBinaryProbe {
@@ -427,18 +427,17 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
                   { bwrapPath: sandboxPath },
                 );
               }
-              throw new SeatbeltConfinementError(
+              throw new ProcessConfinementError(
                 "incompatible",
                 `${name} Full access extension denials require macOS or Linux.`,
               );
             },
             catch: (error) =>
               failure(
-                error instanceof SeatbeltConfinementError &&
-                  error.reason === "invalid-configuration"
+                error instanceof ProcessConfinementError && error.reason === "invalid-configuration"
                   ? "invalid-configuration"
                   : "incompatible",
-                error instanceof SeatbeltConfinementError
+                error instanceof ProcessConfinementError
                   ? error.message
                   : `${name} Full access extension denials could not be prepared.`,
               ),
@@ -464,7 +463,7 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
                 executionPolicy: input.executionPolicy,
               }),
         );
-        const confinement = makeSeatbeltConfinementLive({
+        const confinement = makeProcessConfinementLive({
           platform,
           sandboxPath,
         });
@@ -530,10 +529,10 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
             }),
           catch: (error) =>
             failure(
-              error instanceof SeatbeltConfinementError && error.reason === "invalid-configuration"
+              error instanceof ProcessConfinementError && error.reason === "invalid-configuration"
                 ? "invalid-configuration"
                 : "incompatible",
-              error instanceof SeatbeltConfinementError
+              error instanceof ProcessConfinementError
                 ? error.message
                 : `${name} private-path confinement could not be prepared.`,
             ),

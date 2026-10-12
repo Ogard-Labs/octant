@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { decodeGoalLoop, decodeGoalLoopCommand, decodeGoalLoopResult } from "./goalLoop";
+import {
+  decodeGoalLoop,
+  decodeGoalLoopCommand,
+  decodeGoalLoopResult,
+  decodeGoalLoopRound,
+} from "./goalLoop";
 
 const ceiling = {
   filesystem: true,
@@ -76,5 +81,33 @@ describe("what a goal loop is on the wire", () => {
         message: "A running loop's ceiling can only narrow.",
       }),
     ).toMatchObject({ reason: "would-widen" });
+  });
+
+  it("records a round without a checkpoint only when every write needed a person", () => {
+    const round = {
+      roundId: "55555555-0000-4000-8000-000000000001",
+      loopId: loop.id,
+      sequence: 1,
+      authority: ceiling,
+      outcome: "ran",
+      tokensSpent: 10,
+      startedAt: "2026-08-19T09:00:00.000Z",
+      endedAt: "2026-08-19T09:01:00.000Z",
+    };
+
+    expect(decodeGoalLoopRound(round).checkpointId).toBeUndefined();
+    expect(() =>
+      decodeGoalLoopRound({
+        ...round,
+        authority: { ...ceiling, executionPolicy: "auto-accept-edits" },
+      }),
+    ).toThrow();
+    expect(
+      decodeGoalLoopRound({
+        ...round,
+        checkpointId: "checkpoint-1",
+        authority: { ...ceiling, executionPolicy: "auto-accept-edits" },
+      }).checkpointId,
+    ).toBe("checkpoint-1");
   });
 });

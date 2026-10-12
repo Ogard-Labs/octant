@@ -434,6 +434,32 @@ authentication; anonymous access is accepted only for loopback. OAuth and
 subscription modes work where the official runtime supports them and are
 never silently replaced by API-key modes.
 
+#### Several API keys
+
+A provider that takes an API key can hold several, each with a label you
+choose. Open the provider in Settings to see its **API keys**. One key is **active**:
+Octant sends it first. The list order decides which key is tried next if the
+active key runs out.
+
+- **Add key** adds a key to the end of the list and makes it the active key, so
+  the key you just saved is the one Octant sends. Saving a key from the edit
+  form works the same way, and no save removes a key by accident.
+- **Make active** sends a key first, and the list order stays the same.
+- **Move up** and **Move down** change the order in which the other keys are
+  tried. The first key cannot move up, and the last cannot move down.
+- **Replace key** changes one key's secret and keeps its label, place, and
+  active state. The replaced key is a new key to Octant, so a cooldown from its
+  old secret does not apply to it. **Rename** changes a label. **Remove** asks you to confirm
+  first. Removing the active key makes the first key left active.
+- When a key is refused because its quota, credit, or spend limit is used up,
+  Octant skips it for an hour and sends the next key in the list order. A rate limit skips a key
+  for a minute, or for the time the provider asks. A refusal for a bad key
+  (401) never skips a key, so fix or remove that key. A restart of the host
+  clears every skip, so the first key is tried again.
+- Anthropic-compatible, OpenAI-compatible, Azure AI Foundry, and image endpoints
+  switch keys within a turn. A command-line runtime, such as Claude Code or
+  Codex, uses the first key for now and does not switch.
+
 ### Signing in with a subscription
 
 An **OpenAI-compatible** endpoint can sign in with a subscription instead of
@@ -529,6 +555,13 @@ then shows how many messages were handed over and which were left out, for
 example older messages, messages no longer stored, or messages too large to
 read. If nothing readable is left to hand over, the message is refused with
 the reason, and you can switch back or start a new task.
+
+A fork that switches provider also hands over the conversation it was forked
+from, up to the reply it was forked at, ahead of its own messages, within the
+same limit; the oldest messages are left out first. The reply says how many
+of the handed-over messages came from the original conversation. If that
+conversation can no longer be read from this window, for example because it
+moved to a Project you cannot open, the message is refused with the reason.
 
 ## Effort, reasoning and speed
 

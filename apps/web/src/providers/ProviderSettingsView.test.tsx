@@ -721,10 +721,11 @@ describe("ProviderSettingsView", () => {
     "clears the real controller-backed Claude key input after host storage %s",
     async (outcome) => {
       const user = userEvent.setup();
-      const setProviderCredential = vi.fn(async () => {
+      const addProviderApiKey = vi.fn(async () => {
         if (outcome === "failure") throw new Error("private-value raw Keychain diagnostic");
+        return { id: "7d444840-9dc0-11d1-b245-5ffdce74fad2", label: "Key 1", active: true };
       });
-      const host = controllerHost(setProviderCredential);
+      const host = controllerHost(addProviderApiKey);
       const client = controllerClient();
       render(<ControllerBackedProviderSettings client={client} host={host} />);
       await user.click(await screen.findByRole("button", { name: "Add provider manually" }));
@@ -748,7 +749,7 @@ describe("ProviderSettingsView", () => {
       await user.click(within(create).getByRole("button", { name: "Add Claude" }));
 
       await waitFor(() => expect(apiKey).toHaveValue(""));
-      expect(setProviderCredential).toHaveBeenCalledWith(expect.any(String), "private-value");
+      expect(addProviderApiKey).toHaveBeenCalledWith(expect.any(String), "private-value");
       expect(document.body.textContent).not.toContain("private-value");
       if (outcome === "failure") {
         expect(screen.getByRole("alert")).toHaveTextContent(
@@ -1234,6 +1235,72 @@ describe("ProviderSettingsView", () => {
     expect(within(diagnostics).getByText("API key (bearer)")).toBeInTheDocument();
     expect(within(page).queryByLabelText(/Binary path/)).not.toBeInTheDocument();
   });
+
+  it.each([
+    ["OpenAI-compatible", httpProvider(), /^API base URL for /],
+    ["Anthropic-compatible", anthropicProvider(), /^API base URL for /],
+    ["Azure AI Foundry", foundryProvider(), /^Foundry OpenAI v1 base URL for /],
+  ] as const)(
+    "says a new address removes the stored key of an %s endpoint, then shows it needs the key",
+    async (_label, instance, addressName) => {
+      const user = userEvent.setup();
+      const props = fixture({ instance });
+      const { rerender } = renderExpanded(<ModelEndpointSettingsView {...props} />);
+      const page = screen.getByRole("region", { name: instance.displayName });
+      const address = within(page).getByRole("textbox", { name: addressName });
+      const note = /removes this endpoint's stored API key/;
+
+      // Only a changed address says so; the saved one reads as before.
+      expect(within(page).queryByText(note)).toBeNull();
+      await user.type(address, "x");
+      expect(within(page).getByText(note)).toBeVisible();
+      expect(address).toHaveAccessibleDescription(note);
+      await user.type(address, "{Backspace}");
+      expect(within(page).queryByText(note)).toBeNull();
+
+      // The trailing slash is spelling only: the host keeps the key for it.
+      await user.type(address, "{Backspace}");
+      expect(within(page).queryByText(note)).toBeNull();
+      await user.type(address, "/");
+
+      await user.clear(address);
+      await user.type(address, "http://127.0.0.1:9/v1/");
+      expect(within(page).getByText(note)).toBeVisible();
+      const save = within(page).getAllByRole("button", { name: /^Save .* settings for / })[0]!;
+      await user.click(save);
+      const change = (
+        instance.driverKind === "anthropic-compatible"
+          ? props.onChangeAnthropicCompatibleConfiguration
+          : instance.driverKind === "azure-foundry"
+            ? props.onChangeAzureFoundryConfiguration
+            : props.onChangeOpenAiCompatibleConfiguration
+      ) as ReturnType<typeof vi.fn>;
+      await waitFor(() => expect(change).toHaveBeenCalledOnce());
+
+      // The host saved the address and deleted the key with it; nothing has
+      // been checked since, so the row says what is needed rather than "Not checked yet".
+      vi.mocked(props.onProviderCredentialStatus).mockResolvedValue("missing");
+      const saved = [
+        {
+          ...instance,
+          configuration: { ...instance.configuration, baseUrl: "http://127.0.0.1:9/v1/" },
+          version: 2 as never,
+        } as ProviderInstance,
+      ];
+      rerender(<ModelEndpointSettingsView {...props} busy instances={saved} />);
+      rerender(<ModelEndpointSettingsView {...props} instances={saved} />);
+      await user.click(screen.getByRole("button", { name: "Back to Octant Harness" }));
+      expect(
+        await screen.findByRole("link", {
+          name: new RegExp(`^${instance.displayName}, needs key`),
+        }),
+      ).toBeVisible();
+      expect(screen.getByText("No API key is saved for it.")).toBeVisible();
+      expect(
+        screen.getByRole("button", { name: `Add key for ${instance.displayName}` }),
+      ).toBeVisible();
+    },
+  );
 
   it("offers an optional context window per model under Model endpoints that shows what Octant found", async () => {
     const user = userEvent.setup();
@@ -3541,7 +3608,7 @@ function controllerClient(): ProviderClient {
 }
 
 function controllerHost(
-  setProviderCredential: OctantHostBridge["setProviderCredential"],
+  addProviderApiKey: OctantHostBridge["addProviderApiKey"],
 ): OctantHostBridge {
   return {
     clearProviderCredential: vi.fn(async () => undefined),
@@ -3552,9 +3619,16 @@ function controllerHost(
     providerCredentialStatus: vi.fn(async () => "missing" as const),
     resetBounds: vi.fn(),
     selectProjectRoot: vi.fn(async () => ({ kind: "cancelled" as const })),
-    setProviderCredential,
+    addProviderApiKey,
+    setProviderCredential: vi.fn(),
     setSidebarMaterialPreference: vi.fn(),
     subscribeResolvedMaterial: vi.fn(() => vi.fn()),
+    listProviderApiKeys: vi.fn(async () => []),
+    renameProviderApiKey: vi.fn(),
+    replaceProviderApiKey: vi.fn(),
+    removeProviderApiKey: vi.fn(),
+    setActiveProviderApiKey: vi.fn(),
+    moveProviderApiKey: vi.fn(),
   };
 }
 

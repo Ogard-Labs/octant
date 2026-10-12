@@ -1,11 +1,23 @@
 import type { CredentialPurgeAttempt } from "@octant/domain";
+import type { KeyRejection } from "@octant/host-runtime";
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const PURGE_FAILURE_KINDS = new Set(["locked", "unavailable", "indeterminate", "failed"]);
 
+/**
+ * One request's use of a stored API key. `reportRejected` tells the pool that
+ * the provider refused this key, so the next attempt can use another one.
+ */
+export interface ProviderCredentialLease {
+  readonly credential: string;
+  readonly reportRejected: (rejection: KeyRejection) => void;
+}
+
 export interface ProviderCredentialResolver {
   readonly has: (providerInstanceId: string) => Promise<boolean>;
   readonly resolve: (providerInstanceId: string) => Promise<string>;
+  /** Present when the store holds a key pool. Each attempt takes its own lease. */
+  readonly lease?: ((providerInstanceId: string) => Promise<ProviderCredentialLease>) | undefined;
 }
 
 export interface CredentialBrokerClientOptions {
