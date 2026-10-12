@@ -1010,6 +1010,31 @@ describe("App", () => {
     expect(sendCallOrder!).toBeLessThan(openCallOrder!);
   });
 
+  it("does not restore the Chat welcome prompt after a thread is created", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <App
+        chatClient={chats()}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projects()}
+        projectWindowCapability={projectWindowCapability}
+        providerClient={providers()}
+        shellClient={client(chatShellBootstrap())}
+      />,
+    );
+
+    const welcome = await screen.findByRole("region", { name: "Chat welcome" });
+    await user.type(within(welcome).getByRole("textbox", { name: "First message" }), "New chat");
+    await user.click(within(welcome).getByRole("button", { name: "Start chat" }));
+    expect(
+      await screen.findByRole("region", { name: "Workspace pane: Exact created chat" }),
+    ).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: "New chat" }));
+    expect(await screen.findByRole("textbox", { name: "First message" })).toHaveValue("");
+  });
+
   it.each(["accepted", "refused"] as const)(
     "keeps quick-start sending conditional on reasoning settings being %s",
     async (outcome) => {
@@ -1825,6 +1850,89 @@ describe("App", () => {
         }),
       }),
     );
+  });
+
+  it("opens the created Work thread when the first turn cannot start", async () => {
+    const user = userEvent.setup();
+    const shellApi = client(workShellBootstrap());
+    const workThreadClient = {
+      bootstrap: vi.fn(async () => ({ threads: [] })),
+      execute: vi.fn(async () => ({
+        kind: "thread-created" as const,
+        thread: decodeWorkThread({
+          id: workThreadId,
+          projectId: workProjectId,
+          title: "Draft brief",
+          lifecycle: "active",
+          providerInstanceId: "90000000-0000-4000-8000-000000000001" as never,
+          modelId: "gpt-5" as never,
+          bindingRevisionId: "30000000-0000-4000-8000-000000000001" as never,
+          workingDirectory: "." as never,
+          version: 1,
+          createdAt: "2026-07-26T09:30:00.000Z" as never,
+          updatedAt: "2026-07-26T09:30:00.000Z" as never,
+        }),
+      })),
+    };
+    const workTurnClient = {
+      startFirstTurn: vi.fn(async () => {
+        throw new Error("The first turn could not start.");
+      }),
+      lookupFirstTurn: vi.fn(),
+      cancelFirstTurn: vi.fn(),
+      transcript: vi.fn(async () => ({ threadId: workThreadId, turns: [] })),
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = typeof input === "string" ? input : input.toString();
+        if (url.includes("/api/work/overview")) {
+          return new Response(
+            JSON.stringify({
+              projectId: workProjectId,
+              filesAndArtifacts: [],
+              workflowsAndThreads: [],
+              approvals: [],
+              versions: [],
+              validation: [],
+              exports: [],
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          );
+        }
+        const canvasResponse = canvasFetchPassthrough(url);
+        if (canvasResponse !== undefined) {
+          return canvasResponse;
+        }
+        throw new Error(`unexpected fetch ${url}`);
+      }),
+    );
+
+    render(
+      <App
+        contextClient={contextClient()}
+        workThreadClient={workThreadClient as never}
+        workTurnClient={workTurnClient as never}
+        hostClient={hostClient() as never}
+        isNarrow={false}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={workProjects()}
+        projectWindowCapability={projectWindowCapability}
+        providerClient={providersWithToolModel()}
+        shellClient={shellApi}
+      />,
+    );
+
+    await user.type(
+      await screen.findByRole("textbox", { name: "Start a new task" }),
+      "Draft brief",
+    );
+    await user.click(screen.getByRole("button", { name: "Start task" }));
+
+    expect(
+      await screen.findByRole("region", { name: "Workspace pane: Draft brief" }),
+    ).toBeVisible();
+    expect(screen.queryByRole("textbox", { name: "Start a new task" })).toBeNull();
   });
 
   it("preserves the Work overview draft when authoritative create fails", async () => {

@@ -933,6 +933,7 @@ function LaunchedShell(
       const scope = `${mode}:${String(paneId)}`;
       newTaskDrafts.write(scope, "");
       newTaskDrafts.writeImages(scope, []);
+      if (mode === "chat") newTaskDrafts.write(`chat-welcome:${String(paneId)}`, "");
     }
     if (mode === "code") {
       setDraftExecutionPolicy(undefined);
@@ -5404,8 +5405,9 @@ function LaunchedShell(
     const providerInstanceId = workProviderChoice?.instanceId;
     const modelId = workProviderChoice?.modelId;
     if (providerInstanceId === undefined || modelId === undefined) return false;
+    let created;
     try {
-      const created = await workThreadClient.execute({
+      created = await workThreadClient.execute({
         kind: "create-work-thread",
         threadId: decodeWorkThreadId(globalThis.crypto.randomUUID()),
         projectId: project.id,
@@ -5417,9 +5419,15 @@ function LaunchedShell(
         bindingRevisionId,
         workingDirectory: decodeThreadWorkingDirectory("."),
       });
-      if (!("kind" in created) || created.kind !== "thread-created") return false;
-      // A successful create is durable even if the first turn fails. Open the
-      // exact thread before starting the turn so the user can see recovery UI.
+    } catch {
+      return false;
+    }
+    if (!("kind" in created) || created.kind !== "thread-created") return false;
+    // A successful create is durable even if the first turn fails. Open the
+    // exact thread before starting the turn so the user can see recovery UI.
+    // Return true so the overview does not restore a prompt that already
+    // created a thread.
+    try {
       await controller.openWorkThread(
         created.thread.id,
         created.thread.title,
@@ -5428,7 +5436,7 @@ function LaunchedShell(
       );
       await workNavigation.refresh();
       const attachmentIds = await stageWorkImages(created.thread.id, images ?? []);
-      const started = await workTurnClient.startFirstTurn({
+      await workTurnClient.startFirstTurn({
         kind: "start-work-thread-turn",
         requestId: decodeWorkTurnRequestId(globalThis.crypto.randomUUID()),
         threadId: created.thread.id,
@@ -5448,11 +5456,10 @@ function LaunchedShell(
           ? {}
           : { threadMentionIds }),
       });
-      if (started.kind !== "accepted") return false;
-      return true;
     } catch {
-      return false;
+      // Attachment or first-turn failures stay on the opened thread.
     }
+    return true;
   }
 
   async function stageWorkImages(
@@ -5503,35 +5510,40 @@ function LaunchedShell(
     // A successful create is durable even if provider selection or the first
     // turn fails. Open its exact thread before either follow-up command so the
     // user can see the failure and retry instead of creating a duplicate.
-    if (!(await controller.openChatThread(thread.id, thread.title, project.id))) return false;
-    if (
-      selection !== undefined &&
-      (thread.providerInstanceId !== selection.providerInstanceId ||
-        thread.modelId !== selection.modelId ||
-        modelOptionValues !== undefined)
-    ) {
-      const changed = await chatController.execute({
-        kind: "change-chat-provider",
+    await controller.openChatThread(thread.id, thread.title, project.id);
+    try {
+      if (
+        selection !== undefined &&
+        (thread.providerInstanceId !== selection.providerInstanceId ||
+          thread.modelId !== selection.modelId ||
+          modelOptionValues !== undefined)
+      ) {
+        const changed = await chatController.execute({
+          kind: "change-chat-provider",
+          threadId: thread.id,
+          expectedVersion: thread.version,
+          providerInstanceId: selection.providerInstanceId,
+          modelId: selection.modelId,
+          ...(modelOptionValues === undefined ? {} : { modelOptionValues }),
+        });
+        if (changed?.kind !== "thread-updated") return true;
+        thread = changed.thread;
+      }
+      const sent = await chatController.execute({
+        kind: "send-chat-turn",
         threadId: thread.id,
         expectedVersion: thread.version,
-        providerInstanceId: selection.providerInstanceId,
-        modelId: selection.modelId,
-        ...(modelOptionValues === undefined ? {} : { modelOptionValues }),
+        prompt,
       });
-      if (changed?.kind !== "thread-updated") return false;
-      thread = changed.thread;
-    }
-    const sent = await chatController.execute({
-      kind: "send-chat-turn",
-      threadId: thread.id,
-      expectedVersion: thread.version,
-      prompt,
-    });
-    if (sent === undefined) {
+      if (sent === undefined) {
+        chatController.reportError(
+          "The first message could not be sent. Retry from the open thread.",
+        );
+      }
+    } catch {
       chatController.reportError(
         "The first message could not be sent. Retry from the open thread.",
       );
-      return false;
     }
     return true;
   }
@@ -5816,6 +5828,7 @@ function LaunchedShell(
           setDraftError(chatController.errorMessage ?? "The chat thread could not be created.");
           return;
         }
+        resetNewTaskDraft("chat");
         let thread = result.thread;
         if (
           draftSelection !== undefined &&
