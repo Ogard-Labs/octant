@@ -57,7 +57,7 @@ import { ComposerContextMeterGate } from "../context/composerContextMeterScope";
 import { SplitWorkspace, type PaneFacts } from "./SplitWorkspace";
 import { ProjectOverview } from "../projects/ProjectOverview";
 import { providerGroupsForProject } from "../projects/ProjectProviderPolicySection";
-import { pickerHasListedModel } from "../providers/ComposerModelPicker";
+import { pickerHasReadyInstance } from "../providers/ComposerModelPicker";
 import type { OctantHostBridge } from "./hostBridge";
 import type { ProviderController } from "../providers/useProviderController";
 import { ShellState } from "./ShellState";
@@ -2029,7 +2029,7 @@ function renderNonCodeTab(
                     : { onSelectProvider: props.onDraftSelectProvider })}
                   projectId={project.id}
                   projectName={project.name}
-                  {...(pickerHasListedModel(
+                  {...(pickerHasReadyInstance(
                     props.workProviderGroups ?? props.draftProviderGroups ?? [],
                   )
                     ? { providersReady: true }

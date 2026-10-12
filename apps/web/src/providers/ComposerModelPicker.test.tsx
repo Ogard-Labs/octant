@@ -432,7 +432,11 @@ describe("ComposerModelPicker", () => {
   it("offers Set up a provider when retained groups list no models", async () => {
     const user = userEvent.setup();
     const onOpenSettings = vi.fn();
-    const unready = groups().map((group) => ({ ...group, sections: [] }));
+    const unready = groups().map((group) => ({
+      ...group,
+      sections: [],
+      readiness: "unavailable" as const,
+    }));
     render(
       <ComposerModelPicker groups={unready} onOpenSettings={onOpenSettings} onSelect={vi.fn()} />,
     );
@@ -441,6 +445,16 @@ describe("ComposerModelPicker", () => {
     expect(setup).toBeEnabled();
     await user.click(setup);
     expect(onOpenSettings).toHaveBeenCalledOnce();
+  });
+
+  it("does not offer Set up a provider when a ready instance lists no models", () => {
+    const readyHidden = groups().map((group) => ({ ...group, sections: [] }));
+    render(
+      <ComposerModelPicker groups={readyHidden} onOpenSettings={vi.fn()} onSelect={vi.fn()} />,
+    );
+
+    expect(screen.queryByRole("button", { name: "Set up a provider" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Provider and model" })).toBeDisabled();
   });
 
   it("offers Set up a provider when no providers are ready", async () => {

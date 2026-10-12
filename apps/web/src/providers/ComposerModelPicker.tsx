@@ -107,6 +107,11 @@ export function pickerHasListedModel(groups: ReadonlyArray<PickerGroup>): boolea
   return groups.some((group) => group.sections.some((section) => section.models.length > 0));
 }
 
+/** A ready or degraded instance can answer even when every model is hidden. */
+export function pickerHasReadyInstance(groups: ReadonlyArray<PickerGroup>): boolean {
+  return groups.some((group) => group.readiness === "ready" || group.readiness === "degraded");
+}
+
 interface ModelRow {
   readonly picker: PickerModel;
   readonly sectionId: string;
@@ -167,7 +172,10 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
   }, [open, props.groups, selectedGroup, harnessGroups.length]);
 
   if (!pickerHasListedModel(props.groups)) {
-    const offerSetup = props.onOpenSettings !== undefined && props.providersReady !== true;
+    const offerSetup =
+      props.onOpenSettings !== undefined &&
+      props.providersReady !== true &&
+      !pickerHasReadyInstance(props.groups);
     if (!offerSetup) {
       return (
         <div className="composer-model-picker composer-model-picker--empty">
