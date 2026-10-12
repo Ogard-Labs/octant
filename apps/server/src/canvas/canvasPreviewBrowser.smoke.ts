@@ -166,6 +166,7 @@ try {
   peer.createOffer().then((offer) => peer.setLocalDescription(offer)).catch(() => undefined);
 } catch (_) {}
 setTimeout(() => { location.href = ${inScript(`${beaconOrigin}/self-navigation`)}; }, 300);
+for (let late = 1; late <= 5; late += 1) setTimeout(() => { throw new Error("later " + String(late)); }, 20 * late);
 missingFunction();
 `;
 const designs = decodeCanvasDefinition({
@@ -241,8 +242,10 @@ const results = {
     screen?.overflow[0]?.frameId === "home" && (screen.overflow[0]?.overflowPx ?? 0) >= 500,
   staticFrameFaintTextMeasured:
     screen?.contrast[0]?.foreground === "#cccccc" && screen.contrast[0]?.target === 4.5,
-  prototypeRanAndReportedItsError:
-    ran?.scriptErrors.some((message) => message.includes("missingFunction")) === true,
+  prototypeRanAndReportedItsError: ran?.scriptErrors[0]?.includes("missingFunction") === true,
+  // The app's own list keeps the latest three; the preview keeps the first
+  // ones, so the error that started it is still there after five more.
+  prototypeKeptItsFirstErrors: ran?.scriptErrors.length === 6,
   nothingLeftThePreviewBrowser: arrivals.length === 0,
 };
 const failed = Object.entries(results).filter(([, ok]) => !ok);

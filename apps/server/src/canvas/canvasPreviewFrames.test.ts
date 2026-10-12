@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { boundedFrameReading } from "./canvasPreviewFrames";
+import { boundedFrameReading, boundedScriptErrors } from "./canvasPreviewFrames";
+import { canvasPreviewDesignWarnings } from "./canvasPreviewWarnings";
 
 describe("a design frame's reading", () => {
   it("keeps an overflow and the worst text of a frame as the page reported them", () => {
@@ -93,5 +94,46 @@ describe("a design frame's reading", () => {
   it("reads a frame that did not answer as nothing measured", () => {
     expect(boundedFrameReading(undefined)).toEqual({ overflow: [], contrast: [] });
     expect(boundedFrameReading("hung")).toEqual({ overflow: [], contrast: [] });
+  });
+});
+
+describe("a preview's script errors", () => {
+  it("keeps the first errors of each design, which is where the root cause is", () => {
+    const recorded = JSON.stringify({
+      cart: Array.from({ length: 12 }, (_unused, index) => `error ${String(index + 1)}`),
+      form: ["x".repeat(1_000)],
+    });
+    const errors = boundedScriptErrors(recorded);
+    expect(errors.get("cart")).toEqual([
+      "error 1",
+      "error 2",
+      "error 3",
+      "error 4",
+      "error 5",
+      "error 6",
+      "error 7",
+      "error 8",
+    ]);
+    expect(errors.get("form")?.[0]).toHaveLength(280);
+  });
+
+  it("reads a record that is missing, malformed, or the wrong shape as no errors", () => {
+    expect(boundedScriptErrors(null).size).toBe(0);
+    expect(boundedScriptErrors("{not json").size).toBe(0);
+    expect(boundedScriptErrors('["cart"]').size).toBe(0);
+    expect(boundedScriptErrors('{"cart": [1, null, {"message": "x"}]}').size).toBe(0);
+  });
+});
+
+describe("a design the look could not finish reading", () => {
+  it("is reported as not measured instead of being left out as if it were clean", () => {
+    expect(
+      canvasPreviewDesignWarnings([
+        { blockId: "late", measured: false, scriptErrors: ["boom"], overflow: [], contrast: [] },
+      ]),
+    ).toEqual([
+      { kind: "design-script-error", blockId: "late", message: "boom" },
+      { kind: "design-not-measured", blockId: "late" },
+    ]);
   });
 });

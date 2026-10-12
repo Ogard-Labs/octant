@@ -125,8 +125,12 @@ the page settles the host reads each drawn frame and adds a
 `design-frame-overflow` warning for a frame whose content is wider than its
 page, a `design-contrast-below-target` warning for the text that reads worst
 in a frame (4.5:1, or 3:1 for large text; text over an image or gradient is
-left unmeasured), and a `design-script-error` warning for each uncaught error
-a running design threw as it loaded. A running design runs in the preview as
+left unmeasured), and a `design-script-error` warning for each of the first
+uncaught errors a running design threw as it loaded (the preview page records
+them from the bridge itself, because the app's list under a prototype keeps
+only the latest few). Every design the page drew is read; if reading them
+passes its time budget, each remaining design gets a `design-not-measured`
+warning rather than being left out as if it were clean. A running design runs in the preview as
 it does for a reader: the host builds its page with `renderCanvasDesignPage`,
 answers it at a path under the preview page's own origin with the page
 route's headers, and the preview page draws it in a frame sandboxed to

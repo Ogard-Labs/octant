@@ -92,6 +92,14 @@ export type CanvasPreviewWarning =
       readonly kind: "design-script-error";
       readonly blockId: string;
       readonly message: string;
+    }
+  | {
+      /**
+       * A design the look ran out of time to read. Its frames may overflow or
+       * read badly; nothing was measured either way.
+       */
+      readonly kind: "design-not-measured";
+      readonly blockId: string;
     };
 
 /**
@@ -106,6 +114,10 @@ export function canvasPreviewDesignWarnings(
   for (const design of designs) {
     for (const message of design.scriptErrors) {
       warnings.push({ kind: "design-script-error", blockId: design.blockId, message });
+    }
+    if (!design.measured) {
+      warnings.push({ kind: "design-not-measured", blockId: design.blockId });
+      continue;
     }
     for (const frame of design.overflow) {
       warnings.push({ kind: "design-frame-overflow", blockId: design.blockId, ...frame });

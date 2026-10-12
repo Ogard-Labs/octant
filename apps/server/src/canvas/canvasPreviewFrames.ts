@@ -1,4 +1,8 @@
-import { CANVAS_DESIGN_BRIDGE_MAX_ERROR_LENGTH } from "@octant/contracts/canvas";
+import {
+  CANVAS_DESIGN_BRIDGE_MAX_ERROR_LENGTH,
+  CANVAS_MAX_BLOCKS,
+  CANVAS_MAX_DESIGN_FRAMES,
+} from "@octant/contracts/canvas";
 import type { Frame, Page } from "playwright-core";
 
 /**
@@ -17,7 +21,12 @@ import type { Frame, Page } from "playwright-core";
  */
 export interface CanvasPreviewDesignReading {
   readonly blockId: string;
-  /** Uncaught errors the running design's bridge reported, as text. */
+  /**
+   * False when the look ran out of time before this design's frames were
+   * read, so the absence of a warning about it says nothing.
+   */
+  readonly measured: boolean;
+  /** The first uncaught errors the running design's bridge reported, as text. */
   readonly scriptErrors: ReadonlyArray<string>;
   readonly overflow: ReadonlyArray<CanvasPreviewFrameOverflow>;
   readonly contrast: ReadonlyArray<CanvasPreviewFrameContrast>;
@@ -39,13 +48,18 @@ export interface CanvasPreviewFrameContrast {
   readonly target: number;
 }
 
-/** A Canvas holds few designs; a preview measures no more than this many. */
-const MAX_DESIGNS = 16;
-/** And no more than this many frames of one design. */
-const MAX_FRAMES_PER_DESIGN = 24;
-const MAX_ERRORS_PER_DESIGN = 8;
+/** A design holds at most this many frames. */
+const MAX_FRAMES_PER_DESIGN = CANVAS_MAX_DESIGN_FRAMES;
+/** The first errors of a design are kept; the root cause is among them. */
+export const CANVAS_PREVIEW_MAX_SCRIPT_ERRORS = 8;
 /** A frame that has not answered by now is left unmeasured. */
 const FRAME_READ_TIMEOUT_MS = 2_000;
+/**
+ * How long reading every design's frames may take. Every design the page drew
+ * is read, however many; past this the rest are reported as not measured
+ * rather than left out as if they were clean.
+ */
+const FRAME_READ_BUDGET_MS = 10_000;
 const FRAME_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const HEX_COLOR = /^#[0-9a-f]{6}$/;
 
@@ -234,15 +248,22 @@ export function boundedFrameReading(value: unknown): {
  */
 export async function readPreviewDesignFrames(
   page: Page,
+  now: () => number = Date.now,
 ): Promise<ReadonlyArray<CanvasPreviewDesignReading>> {
   const readings: CanvasPreviewDesignReading[] = [];
+  const errors = boundedScriptErrors(
+    await page.getAttribute("html", CANVAS_PREVIEW_SCRIPT_ERRORS_ATTRIBUTE),
+  );
+  const deadline = now() + FRAME_READ_BUDGET_MS;
   const designs = await page.locator("section.canvas-design[data-canvas-design]").all();
-  for (const design of designs.slice(0, MAX_DESIGNS)) {
+  for (const design of designs.slice(0, CANVAS_MAX_BLOCKS)) {
     const blockId = await design.getAttribute("data-canvas-design");
     if (blockId === null) continue;
-    const scriptErrors = (await design.locator(".canvas-design__errors li").allTextContents())
-      .slice(0, MAX_ERRORS_PER_DESIGN)
-      .map((message) => message.slice(0, CANVAS_DESIGN_BRIDGE_MAX_ERROR_LENGTH));
+    const scriptErrors = errors.get(blockId) ?? [];
+    if (now() >= deadline) {
+      readings.push({ blockId, measured: false, scriptErrors, overflow: [], contrast: [] });
+      continue;
+    }
     const overflow: CanvasPreviewFrameOverflow[] = [];
     const contrast: CanvasPreviewFrameContrast[] = [];
     const frames = await design.locator("iframe").elementHandles();
@@ -253,9 +274,38 @@ export async function readPreviewDesignFrames(
       overflow.push(...reading.overflow);
       contrast.push(...reading.contrast);
     }
-    readings.push({ blockId, scriptErrors, overflow, contrast });
+    readings.push({ blockId, measured: true, scriptErrors, overflow, contrast });
   }
   return readings;
+}
+
+/**
+ * Where the preview page records the script errors each running design's
+ * bridge reported, as JSON keyed by block id. The page keeps the first of
+ * them itself: the app's own list under a prototype shows only the latest
+ * few, which is the wrong end for finding what broke first.
+ */
+export const CANVAS_PREVIEW_SCRIPT_ERRORS_ATTRIBUTE = "data-canvas-preview-script-errors";
+
+/** The recorded errors, kept only in the shape and bounds asked for. */
+export function boundedScriptErrors(recorded: string | null): ReadonlyMap<string, string[]> {
+  const errors = new Map<string, string[]>();
+  if (recorded === null) return errors;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(recorded);
+  } catch {
+    return errors;
+  }
+  if (!isRecord(parsed)) return errors;
+  for (const [blockId, messages] of Object.entries(parsed).slice(0, CANVAS_MAX_BLOCKS)) {
+    const kept = asArray(messages)
+      .filter((message): message is string => typeof message === "string" && message.length > 0)
+      .slice(0, CANVAS_PREVIEW_MAX_SCRIPT_ERRORS)
+      .map((message) => message.slice(0, CANVAS_DESIGN_BRIDGE_MAX_ERROR_LENGTH));
+    if (kept.length > 0) errors.set(blockId, kept);
+  }
+  return errors;
 }
 
 async function readFrame(frame: Frame): Promise<unknown> {

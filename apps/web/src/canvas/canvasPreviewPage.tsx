@@ -12,7 +12,7 @@ import {
   type CanvasDefinition,
 } from "@octant/contracts/canvas";
 import type { DesignAssetRuntime } from "./blocks/designDocument";
-import type { DesignRunRuntime } from "./blocks/designRunningFrame";
+import { readDesignBridgeMessage, type DesignRunRuntime } from "./blocks/designRunningFrame";
 import { DEFAULT_THEME_SETTINGS } from "@octant/contracts/theme";
 import { ThemeSettingsProvider } from "../theme/ThemeSettingsProvider";
 import { CanvasDocument } from "./CanvasDocument";
@@ -57,6 +57,33 @@ const decodeDesignPages = Schema.decodeUnknownSync(
     }),
   ),
 );
+
+// The list the app draws under a prototype keeps its latest few errors. A
+// preview is looking for what broke first, so the page records each running
+// design's first errors itself, as its bridge reports them, where the host
+// reads them. They are the same typed, bounded messages the app accepts, from
+// that frame's own window.
+const SCRIPT_ERRORS_PER_DESIGN = 8;
+const scriptErrors = new Map<string, string[]>();
+window.addEventListener("message", (event) => {
+  const frames = document.querySelectorAll<HTMLIFrameElement>(
+    "section.canvas-design[data-canvas-design] iframe",
+  );
+  for (const frame of frames) {
+    if (frame.contentWindow === null || frame.contentWindow !== event.source) continue;
+    const message = readDesignBridgeMessage(event, frame.contentWindow);
+    const blockId = frame.closest("section.canvas-design")?.getAttribute("data-canvas-design");
+    if (message?.type !== "error" || blockId === null || blockId === undefined) return;
+    const kept = scriptErrors.get(blockId) ?? [];
+    if (kept.length >= SCRIPT_ERRORS_PER_DESIGN) return;
+    scriptErrors.set(blockId, [...kept, message.message]);
+    document.documentElement.setAttribute(
+      "data-canvas-preview-script-errors",
+      JSON.stringify(Object.fromEntries(scriptErrors)),
+    );
+    return;
+  }
+});
 
 type CanvasPreviewReading =
   | { readonly kind: "ready"; readonly input: CanvasPreviewInput }
