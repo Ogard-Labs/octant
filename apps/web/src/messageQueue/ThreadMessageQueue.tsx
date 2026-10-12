@@ -68,12 +68,32 @@ export function ThreadMessageQueue({
   const message = queue.message ?? (queue.available || quiet ? undefined : QUEUE_UNAVAILABLE);
   const disabled = quiet || !queue.available || queue.busy || queue.uncertain;
   const queued = snapshot?.items.filter((item) => item.status === "queued") ?? [];
+  const held = snapshot !== undefined && (snapshot.paused || snapshot.holdReason !== undefined);
+  const showHoldChip = held && queued.length > 0;
+  const resume = () =>
+    void queue.change({
+      kind: "resume",
+    });
   return (
     <section
       aria-label="Message queue"
       className="thread-message-queue"
       data-connection={quiet ? "lost" : "ok"}
     >
+      {showHoldChip ? (
+        <div className="thread-message-queue__hold" role="status">
+          <span>Follow-up paused</span>
+          <OctantButton
+            type="button"
+            size="sm"
+            variant="ghost"
+            disabled={disabled}
+            onClick={resume}
+          >
+            Resume
+          </OctantButton>
+        </div>
+      ) : null}
       <div className="thread-message-queue__heading">
         <OctantButton
           type="button"
