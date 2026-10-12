@@ -1216,24 +1216,57 @@ The settle journals `usage-resume.settled@1` on the run's aggregate and folds
 the outcome back into the run, so the opt-in's version stays the aggregate
 head and a stale `expectedVersion` cannot overwrite it.
 
-Broader structured messaging between AgentRuns and threads, beyond mention
-excerpts and beyond that Chat one-hop tool, is designed in
+Agent-to-agent messaging is a separate, host-delivered channel beside mention
+excerpts and that Chat one-hop tool. Its design is recorded in
 [decisions/0063-agent-to-agent-messaging.md](decisions/0063-agent-to-agent-messaging.md)
-and
-[security/agent-to-agent-messaging-threat-model.md](security/agent-to-agent-messaging-threat-model.md).
-Broader messaging still requires explicit maintainer approval of its design and
-threat-model sign-off; the journaled contracts, pure clamps, delivery service,
-Code turn tool registration, and the Agents center's messaging bounds view now
-exist so that review happens against real code, delivered behind the
-maintainer's explicit direction. The built shape follows the record: the host
-admits, clamps, journals, and delivers; bodies stay out of the journal, are
-stored under opaque references, and taint the recipient as untrusted external
-content; messaging grants no authority, starts no turn, and purged threads
-leave no resurrectable bodies. Admission is not delivery: before a message is
-delivered the server rechecks the sender's live grant and the recipient's
-lifecycle, and a revocation, close, or purge in between refuses it. Bounds are
-depth 2, eight open messages per sender, four recipients per send, and a
-64 KiB body. 0049 remains the Chat mention path.
+and its threats in
+[security/agent-to-agent-messaging-threat-model.md](security/agent-to-agent-messaging-threat-model.md),
+both approved by the maintainer on 2026-10-12. 0063 stays a Proposed historical
+record; this section is the effective rule, and it is narrower than the record.
+
+- **Who may message whom.** A thread may message only another active thread of
+  its own Project; any other id (unknown, another Project or mode, a child
+  run, itself) refuses `unauthorized` in the same words, so a refusal never
+  confirms a thread exists. Only Code turns are offered the
+  `octant_agent_message` tool and a Project has one mode, so today this means
+  Code to Code inside one Project. Chat threads, Work threads, and child runs
+  neither send nor receive.
+- **Sending.** The tool is omitted from a turn in Plan and from a profile whose
+  tool allowlist leaves it out, and a call made anyway, or after the thread
+  dropped to Plan mid-turn, is refused before anything is stored. An admitted
+  send journals `agent.message-sent@1` on the `agent-message` aggregate, one
+  message per recipient, and keeps the body in the host's store under an
+  opaque reference; bodies never enter the journal. The sender is told `sent`
+  and nothing more: sending starts no turn, grants no authority, and returns
+  no reply. Bounds are four recipients per send, a 64 KiB body, and eight
+  messages per sender that no turn has carried yet; a waiting message whose
+  recipient closed or left the Project is refused at the sender's next send,
+  so it stops holding a slot.
+- **Delivery.** Admission is not delivery. When the recipient's next Code turn
+  assembles its context, the host rechecks that the sender is still active,
+  that both threads still share a Project, and that the recipient is active,
+  and journals `agent.message-refused@1` otherwise. A message that passes
+  marks the recipient with `thread.external-content-ingested@1` and is added
+  to that turn as one context block: a host sentence naming only the sender's
+  thread id, then the body inside the shared external-data frame. A turn
+  carries the oldest waiting messages up to 64 KiB, at least one, and the rest
+  wait for the turn after. `agent.message-delivered@1` is journaled once the
+  provider has accepted that turn's prompt and context, not when the turn was
+  taken on: a turn that was refused, cancelled, or failed before its send, and
+  a host that stopped before it, leave the message waiting for the next turn.
+  Delivery is therefore at least once. A host that stops after the provider
+  accepted the turn and before the event is appended carries the same message
+  into the next turn too; a host stop never drops a message unread. The block
+  reaches every Code provider the way a `#thread` mention does and is part of
+  that turn only.
+- **Bodies.** A body lives only while its message waits: delivery and refusal
+  delete it, purging either thread deletes it with the message, and at start
+  the host keeps only the bodies of waiting messages. A message an earlier
+  host journaled as delivered without a turn carrying it stays as journaled
+  and is never offered.
+- **Not built.** Nothing journals `agent.message-acknowledged@1`, and a sender
+  has no tool to read what became of a message; the Agents center shows the
+  host's counts and latest refusal. 0049 remains the Chat mention path.
 
 ## Agent task display
 
@@ -1303,6 +1336,17 @@ flowchart LR
   projection rebuilds from the journal; session, turn, and restart boundaries
   never clear it. Irreversible or authority-bearing actions on a tainted thread
   still require fresh confirmation after replay.
+- **Browser captures.** Only a screenshot the agent asks for with the browser
+  tool, or the person takes with the Browser pane's Screenshot control, is kept
+  with the thread that owns the Browser. The bytes live in the host's managed
+  attachment store and the journal holds only a reference, the page origin, URL,
+  title, content hash, and time. A thread keeps its newest 32 captures and they
+  are erased with the thread. Only a local window that can open the thread reads
+  them, never a paired device. They never reach a Canvas share, replica sync, or
+  a diagnostics export, and are not yet in the thread export. A capture adds no
+  Project filesystem authority and no second taint mechanism: the observation
+  that produced it already taints the thread. Detail is in
+  [Browser captures](design/browser-captures.md).
 - **Recovery.** Sequence-based reconnect replay for local and remote clients —
   a dropped stream catches up from the authoritative snapshot before it reopens,
   keeps retrying while the host is unreachable, and a remote session whose window
