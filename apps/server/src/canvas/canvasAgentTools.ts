@@ -453,6 +453,10 @@ const RECIPE_GUIDE =
 const PREVIEW_GUIDE =
   "Preview returns the same picture the person will see and the warnings it can measure: an inline document past its height cap, and on a chart clipped labels, legend overflow, empty series, or ink below its contrast target, on a bar list clipped labels or empty series, and on a design each declared image the host could not draw, with the frames that name it. Every other block kind gets no warnings, so read its picture yourself.";
 
+/** When a design should run script, and what a running one still may not do. */
+const DESIGN_PROTOTYPE_GUIDANCE =
+  'When the person asks for a working prototype (state that changes as they click, such as a cart that fills or a form that validates), set "runsScript": true on the design. Its frames may then use inline <script> elements and event handlers (onclick and the like); keep everything in the design. Still refused: <script src>, remote images, fonts, stylesheets, and imports, <meta>, <base>, <link>, iframes and other embedded documents, links that leave the design, and theme workspace (style a prototype yourself). It has no network at all: fetch, XHR, WebSocket, forms, and new windows are blocked, so put its data in the script. The person starts it with Run in the thread, and Octant stops a prototype that stops responding or loads another page. Use it only when interaction needs state; a clickable flow between screens is a static design with href="#frameId" links.';
+
 function blockGuide(): Readonly<Record<string, string>> {
   return Object.fromEntries(
     Object.entries(BLOCK_GUIDANCE).map(([kind, guidance]) => [kind, guidance.use]),
@@ -469,7 +473,10 @@ function describedGuidance(
     if (detail === undefined) continue;
     // Which images a design can reach depends on the thread's mode, so that
     // part is written per describe rather than stored with the kind.
-    guidance[kind] = kind === "design" ? `${detail} ${designAssetGuidance(mode)}` : detail;
+    guidance[kind] =
+      kind === "design"
+        ? `${detail} ${designAssetGuidance(mode)} ${DESIGN_PROTOTYPE_GUIDANCE}`
+        : detail;
   }
   return guidance;
 }
@@ -498,7 +505,7 @@ function toolDescription(
       ? "When the request iterates on earlier work, revise the existing Canvas instead of creating another: list returns this run's Canvases, and read returns one's current blocks and sequence."
       : "When the request iterates on earlier work, revise the thread's existing Canvas instead of creating another: list returns this thread's Canvases, and read returns one's current blocks and sequence.",
     "Operations: describe, list, read, create, revise, preview. Before you author, call describe: with no block kinds it lists every kind, when to use the structured ones, the document recipes to start from, and a create example; with up to three blockKinds it returns their exact schemas, plus authoring guidance and examples for the kinds that have them. Start from a document recipe before inventing a shape.",
-    "Author the content in blocks, not in prompt. Use structured blocks rather than HTML, JavaScript, CSS, or Mermaid; only a design block's frames are HTML and CSS, and they run no script and load nothing. Text renders as plain text, not Markdown: give each section its own heading block (the Canvas title is already shown, so do not repeat it), and use key-value, table, status, or callout blocks instead of Markdown lists, bold, or code spans.",
+    "Author the content in blocks, not in prompt. Use structured blocks rather than HTML, JavaScript, CSS, or Mermaid; only a design block's frames are HTML and CSS; they load nothing, and run script only in a design that declares it. Text renders as plain text, not Markdown: give each section its own heading block (the Canvas title is already shown, so do not repeat it), and use key-value, table, status, or callout blocks instead of Markdown lists, bold, or code spans.",
     "A Canvas is a document: it grants no file, shell, Git, or network access. Creation adds a card to this thread and offers the Canvas in the thread's dock the first time it appears; the user can also select Open Canvas. Do not claim the user has read it or invent a download URL.",
     "Choose where the thread shows it. Use presentation inline for a visual or a reading document that answers the question in place, such as a chart, a few metrics, a short table, a sequence or state diagram, or an article or brief made of reading blocks; it is drawn in the conversation just below your reply to this turn, so refer to it as below. A long one starts as a faded teaser the user can expand in place, and the user can still open it in the sidebar. Leave presentation out (sidebar) for plans, boards, mockups, designs, and anything the user will keep working on. Inline never holds a diagram board, plan, mockup, or design; when the host shows a card instead, the result says so in presentationNote.",
     "Revise with the canvasId, the last observed expectedSequence, and the complete replacement blocks; people edit Canvases too, so read before revising and keep their changes. Reference blocks require source ids already in the Canvas source manifest; create attaches no sources. Never invent file or artifact references.",

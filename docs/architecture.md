@@ -416,8 +416,8 @@ designs they review (app screens, a site, a deck, a design system), and
 prototypes they try (a flow that reacts to input and keeps state). It does so
 in three tiers that an author mixes in one Canvas, using the lowest tier that
 delivers the result. The static frames' `document` size and workspace theme
-(Canvas schema version 16) and their images named by asset id (version 17)
-have shipped, as described with the
+(Canvas schema version 16), their images named by asset id (version 17), and
+running frames (version 18) have shipped, as described with the
 [`design` block](design/canvas.md#design-block). The rest is accepted
 direction: each rule below replaces the matching shipped rule in
 [Canvas](design/canvas.md) when its slice ships, and until then the shipped
@@ -456,7 +456,8 @@ document as a future version. Frames follow the
   reserves a shortcut frame script cannot intercept to return focus to host
   chrome. A remote browser cannot cancel a frame's own navigation, so there a
   running frame is not network-contained; that exposure is accepted, bounded
-  by what the frame holds, and the Run control there says so.
+  by what the frame holds, and the Run control there says so. This tier has
+  shipped.
 - **The thread can hold the whole Canvas.** A person may expand any Canvas in
   its thread; the agent may ask for `inline` on a reading document without the
   12-block cap; a running frame in the thread starts only on **Run**. Editing,

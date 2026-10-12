@@ -10,6 +10,7 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { CanvasActionPanel } from "./CanvasActionPanel";
 import type { CanvasActionRuntime } from "./canvasActionRuntime";
 import type { DesignAssetRuntime } from "./blocks/designDocument";
+import type { DesignRunRuntime } from "./blocks/designRunningFrame";
 
 export interface CanvasDocumentProps {
   readonly definition: CanvasDefinition;
@@ -31,6 +32,11 @@ export interface CanvasDocumentProps {
    * draw. Without it a design draws each image as a placeholder.
    */
   readonly designAssetRuntime?: DesignAssetRuntime;
+  /**
+   * Host-owned tickets for a prototype's page. Without it a design that runs
+   * script says it cannot run here.
+   */
+  readonly designRunRuntime?: DesignRunRuntime;
   /**
    * Comment markers beside each block and on each table row that carries an
    * id. Offered only when the host journals comments; `openCounts` holds the
@@ -93,6 +99,7 @@ export function CanvasDocument({
   layoutRuntime,
   planRuntime,
   designAssetRuntime,
+  designRunRuntime,
   comments,
   placement = "document",
 }: CanvasDocumentProps) {
@@ -112,6 +119,7 @@ export function CanvasDocument({
         {...(planRuntime === undefined ? {} : { planRuntime })}
         {...(actionRuntime === undefined ? {} : { actionRuntime })}
         {...(designAssetRuntime === undefined ? {} : { designAssetRuntime })}
+        {...(designRunRuntime === undefined ? {} : { designRunRuntime })}
         {...(comments === undefined || block.kind !== "table"
           ? {}
           : {

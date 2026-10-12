@@ -8,13 +8,14 @@ import {
   Minimize2,
   PanelRightOpen,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantTooltip } from "../ui/base/OctantTooltip";
 import { CanvasThreadReferenceCard as CanvasReferenceRow } from "./CanvasThreadReferenceCard";
 import { CanvasView } from "./CanvasView";
 import { canvasDigest } from "./canvasDigest";
 import { useCanvasDefinition } from "./useCanvasDefinition";
+import { designRunRuntimeFor } from "./blocks/designRunningFrame";
 
 const SHOWN_AS_CARD_KEY = "octant.canvas.shown-as-card.v1";
 const EXPANDED_KEY = "octant.canvas.expanded.v1";
@@ -132,6 +133,19 @@ export function InlineThreadCanvas(props: InlineThreadCanvasProps) {
     view !== "card" && (inline || view === "expanded"),
   );
   const digest = loaded.kind === "ready" ? canvasDigest(loaded.definition) : undefined;
+  // A prototype in the thread waits for the person to press Run.
+  const loadedVersionId = loaded.kind === "ready" ? String(loaded.versionId) : undefined;
+  const designRunRuntime = useMemo(
+    () =>
+      loadedVersionId === undefined
+        ? undefined
+        : designRunRuntimeFor(client, {
+            canvasId: card.canvasId,
+            versionId: loadedVersionId,
+            runsOnOpen: false,
+          }),
+    [card.canvasId, client, loadedVersionId],
+  );
   const [clipped, setClipped] = useState(false);
   const [wheelInCanvas, setWheelInCanvas] = useState(false);
   const bodyRef = useRef<HTMLDivElement>(null);
@@ -295,7 +309,11 @@ export function InlineThreadCanvas(props: InlineThreadCanvasProps) {
             data-clipped={clipped ? "true" : "false"}
             ref={bodyRef}
           >
-            <CanvasView input={loaded.definition} placement="thread" />
+            <CanvasView
+              input={loaded.definition}
+              placement="thread"
+              {...(designRunRuntime === undefined ? {} : { designRunRuntime })}
+            />
           </div>
           {/* Outside the faded body, so the offer itself is never faded. */}
           {clipped ? (

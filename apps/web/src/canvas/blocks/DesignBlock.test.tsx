@@ -9,6 +9,50 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { CanvasDocument } from "../CanvasDocument";
 import { canvasFixture } from "../test-fixtures";
 import { designAssetPlaceholder, type DesignAssetRuntime } from "./designDocument";
+import {
+  readDesignBridgeMessage,
+  RUNNING_DESIGN_FIRST_HEARTBEAT_MS,
+  RUNNING_DESIGN_HEARTBEAT_TIMEOUT_MS,
+  RUNNING_DESIGN_MAX_MESSAGES_PER_SECOND,
+  type DesignRunRuntime,
+} from "./designRunningFrame";
+
+const PAGE = `http://127.0.0.1:3773/api/canvas/design-page?ticket=${"a".repeat(43)}`;
+
+function prototype(size: CanvasDesignBlock["size"] = "phone"): CanvasDesignBlock {
+  const block = decodeCanvasBlock({
+    blockId: "checkout",
+    schemaVersion: 18,
+    kind: "design",
+    title: "Checkout",
+    size,
+    runsScript: true,
+    frames: [
+      {
+        frameId: "cart",
+        title: "Cart",
+        html: '<p id="n">0</p><button onclick="n.textContent = String(Number(n.textContent) + 1)">Add</button>',
+      },
+    ],
+  });
+  if (block.kind !== "design") throw new Error("Fixture is not a design.");
+  return block;
+}
+
+function runRuntime(fields: Partial<DesignRunRuntime> = {}) {
+  const start = vi.fn<DesignRunRuntime["start"]>(async () => ({ kind: "ready", url: PAGE }));
+  return { start, runtime: { start, contained: true, runsOnOpen: false, ...fields } };
+}
+
+function bridge(frame: HTMLIFrameElement, data: Record<string, unknown>, source?: unknown) {
+  window.dispatchEvent(
+    new MessageEvent("message", {
+      data: { channel: "octant-design-frame@1", ...data },
+      origin: "null",
+      source: (source ?? frame.contentWindow) as Window,
+    }),
+  );
+}
 
 function frames(container: ParentNode): ReadonlyArray<HTMLIFrameElement> {
   return Array.from(container.querySelectorAll("iframe"));
@@ -21,6 +65,8 @@ function design(fields: Partial<Pick<CanvasDesignBlock, "size" | "theme">>): Can
 }
 
 afterEach(() => {
+  vi.useRealTimers();
+  delete (window as { octantHost?: unknown }).octantHost;
   const root = document.documentElement;
   delete root.dataset.octantThemeMode;
   root.style.removeProperty("--oct-fg");
@@ -205,6 +251,40 @@ describe("design block", () => {
     }
   });
 
+  it("draws a running prototype in a frame sandboxed to script alone, beside static frames that never run script", async () => {
+    // The same rule as above, with running frames among them: no frame is
+    // ever given both script and Octant's origin, on any size.
+    for (const size of ["phone", "tablet", "desktop", "slide", "document"] as const) {
+      const { runtime } = runRuntime({ runsOnOpen: true });
+      render(
+        <CanvasDocument
+          definition={{
+            ...canvasFixture,
+            blocks: [prototype(size), onboardingFlowExampleBlock, searchSpecExampleBlock],
+          }}
+          designRunRuntime={runtime}
+        />,
+      );
+      const running = await screen.findByTitle("Checkout, running prototype");
+      expect(running.getAttribute("sandbox")).toBe("allow-scripts");
+      expect(running.getAttribute("src")).toBe(PAGE);
+      expect(running).toHaveAttribute("referrerpolicy", "no-referrer");
+      const drawn = frames(document);
+      expect(drawn.length).toBeGreaterThan(2);
+      for (const frame of drawn) {
+        expect(frame.hasAttribute("sandbox")).toBe(true);
+        const tokens = (frame.getAttribute("sandbox") ?? "").split(/\s+/).filter(Boolean);
+        expect(tokens.includes("allow-scripts") && tokens.includes("allow-same-origin")).toBe(
+          false,
+        );
+        for (const token of tokens) {
+          expect(["allow-scripts", "allow-same-origin"]).toContain(token);
+        }
+      }
+      cleanup();
+    }
+  });
+
   it("reads a document in place in the workspace theme, with the frame kit and no inner scrollbar", async () => {
     const root = document.documentElement;
     root.dataset.octantThemeMode = "dark";
@@ -302,5 +382,307 @@ describe("design block", () => {
     expect(themed?.getAttribute("sandbox")).toBe("allow-same-origin");
     expect(themed?.srcdoc).toContain(".oct-tabs");
     expect(themed?.srcdoc).toContain("background: var(--oct-bg);");
+  });
+});
+
+describe("running prototype", () => {
+  it("starts in the thread only when the person presses Run, and says where it is not network-contained", async () => {
+    const { start, runtime } = runRuntime({ contained: false });
+    render(
+      <CanvasDocument
+        definition={{ ...canvasFixture, blocks: [prototype()] }}
+        designRunRuntime={runtime}
+        placement="thread"
+      />,
+    );
+    const region = screen.getByRole("region", { name: "Checkout, Phone prototype" });
+    expect(frames(region)).toHaveLength(0);
+    expect(start).not.toHaveBeenCalled();
+    expect(within(region).getByText(/not network-contained/)).toBeVisible();
+
+    fireEvent.click(within(region).getByRole("button", { name: "Run" }));
+    const frame = await within(region).findByTitle("Checkout, running prototype");
+    expect(start).toHaveBeenCalledWith("checkout");
+    // Pressed by the person, so the frame may take focus.
+    expect(frame).not.toHaveAttribute("tabindex");
+    expect(within(region).getByRole("status")).toHaveTextContent("Running");
+    expect(within(region).queryByText(/not network-contained/)).toBeNull();
+
+    fireEvent.click(within(region).getByRole("button", { name: "Stop" }));
+    expect(frames(region)).toHaveLength(0);
+    expect(within(region).getByRole("button", { name: "Run again" })).toBeVisible();
+  });
+
+  it("runs on open in the sidebar without taking focus, and says nothing about containment in the desktop app", async () => {
+    const { start, runtime } = runRuntime({ runsOnOpen: true, contained: true });
+    render(
+      <CanvasDocument
+        definition={{ ...canvasFixture, blocks: [prototype()] }}
+        designRunRuntime={runtime}
+      />,
+    );
+    const frame = await screen.findByTitle("Checkout, running prototype");
+    expect(start).toHaveBeenCalledOnce();
+    expect(frame).toHaveAttribute("tabindex", "-1");
+    expect(screen.queryByText(/not network-contained/)).toBeNull();
+  });
+
+  it("cannot run where the host serves no prototypes, and shows why a refused run stopped", async () => {
+    render(<CanvasDocument definition={{ ...canvasFixture, blocks: [prototype()] }} />);
+    expect(screen.queryByRole("button", { name: "Run" })).toBeNull();
+    expect(screen.getByText(/runs only in Octant/)).toBeVisible();
+    cleanup();
+
+    const { runtime } = runRuntime({
+      start: async () => ({
+        kind: "refused",
+        reason: "That prototype is not in this Canvas version.",
+      }),
+    });
+    render(
+      <CanvasDocument
+        definition={{ ...canvasFixture, blocks: [prototype()] }}
+        designRunRuntime={runtime}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Run" }));
+    expect(await screen.findByText("That prototype is not in this Canvas version.")).toBeVisible();
+    expect(frames(document)).toHaveLength(0);
+  });
+
+  it("removes a frame that stops sending its heartbeat and offers to run it again", async () => {
+    vi.useFakeTimers();
+    const { runtime } = runRuntime({ runsOnOpen: true });
+    render(
+      <CanvasDocument
+        definition={{ ...canvasFixture, blocks: [prototype()] }}
+        designRunRuntime={runtime}
+      />,
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+    const frame = screen.getByTitle<HTMLIFrameElement>("Checkout, running prototype");
+    fireEvent.load(frame);
+
+    // A page that keeps beating keeps running well past the allowance.
+    for (let second = 0; second < 12; second += 1) {
+      act(() => {
+        bridge(frame, { type: "heartbeat" });
+        vi.advanceTimersByTime(1_000);
+      });
+    }
+    expect(frames(document)).toHaveLength(1);
+
+    // Beats from any other window do not keep it alive.
+    for (let second = 0; second <= RUNNING_DESIGN_HEARTBEAT_TIMEOUT_MS / 1_000 + 1; second += 1) {
+      act(() => {
+        bridge(frame, { type: "heartbeat" }, window);
+        vi.advanceTimersByTime(1_000);
+      });
+    }
+    expect(frames(document)).toHaveLength(0);
+    expect(screen.getByText(/stopped responding/)).toBeVisible();
+    expect(screen.getByRole("button", { name: "Run again" })).toBeVisible();
+  });
+
+  it("gives a new page time for its first heartbeat, then stops it", async () => {
+    vi.useFakeTimers();
+    const { runtime } = runRuntime({ runsOnOpen: true });
+    render(
+      <CanvasDocument
+        definition={{ ...canvasFixture, blocks: [prototype()] }}
+        designRunRuntime={runtime}
+      />,
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+    act(() => vi.advanceTimersByTime(RUNNING_DESIGN_HEARTBEAT_TIMEOUT_MS + 1_000));
+    expect(frames(document)).toHaveLength(1);
+    act(() => vi.advanceTimersByTime(RUNNING_DESIGN_FIRST_HEARTBEAT_MS));
+    expect(frames(document)).toHaveLength(0);
+  });
+
+  it("removes a frame that floods the bridge, so the person can still press Stop", async () => {
+    vi.useFakeTimers();
+    const { runtime } = runRuntime({ runsOnOpen: true });
+    render(
+      <CanvasDocument
+        definition={{ ...canvasFixture, blocks: [prototype("document")] }}
+        designRunRuntime={runtime}
+      />,
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+    const frame = screen.getByTitle<HTMLIFrameElement>("Checkout, running prototype");
+    // A busy page that resizes and fails every animation frame keeps running.
+    for (let second = 0; second < 3; second += 1) {
+      act(() => {
+        for (let tick = 0; tick < 60; tick += 1) {
+          bridge(frame, { type: "size", height: 400 + tick });
+          bridge(frame, { type: "error", message: "boom" });
+        }
+        vi.advanceTimersByTime(1_000);
+      });
+    }
+    expect(frames(document)).toHaveLength(1);
+
+    act(() => {
+      for (let sent = 0; sent <= RUNNING_DESIGN_MAX_MESSAGES_PER_SECOND; sent += 1) {
+        bridge(frame, { type: "error", message: `boom ${String(sent)}` });
+      }
+    });
+    expect(frames(document)).toHaveLength(0);
+    expect(screen.getByText(/sent too many messages/)).toBeVisible();
+  });
+
+  it("removes a frame that loads a second page", async () => {
+    const { runtime } = runRuntime({ runsOnOpen: true });
+    render(
+      <CanvasDocument
+        definition={{ ...canvasFixture, blocks: [prototype()] }}
+        designRunRuntime={runtime}
+      />,
+    );
+    const frame = await screen.findByTitle("Checkout, running prototype");
+    fireEvent.load(frame);
+    expect(frames(document)).toHaveLength(1);
+    fireEvent.load(frame);
+    expect(frames(document)).toHaveLength(0);
+    expect(screen.getByText(/tried to load another page/)).toBeVisible();
+  });
+
+  it("sizes a running document from its bridge within bounds, and shows its script errors as text", async () => {
+    const { runtime } = runRuntime({ runsOnOpen: true });
+    render(
+      <CanvasDocument
+        definition={{ ...canvasFixture, blocks: [prototype("document")] }}
+        designRunRuntime={runtime}
+      />,
+    );
+    // The frame listens for its bridge from an effect, so the start settles
+    // inside act: waiting for the frame alone returned before that effect ran
+    // on a loaded machine, and the first message was posted to nobody.
+    await act(async () => {
+      await Promise.resolve();
+    });
+    const frame = screen.getByTitle<HTMLIFrameElement>("Checkout, running prototype");
+    act(() => bridge(frame, { type: "size", height: 640 }));
+    expect(frame.style.height).toBe("640px");
+    act(() => bridge(frame, { type: "size", height: 10_000_000 }));
+    expect(frame.style.height).toBe("12000px");
+    // A forged source, a wrong channel, or a wrong shape changes nothing.
+    act(() => bridge(frame, { type: "size", height: 300 }, window));
+    act(() => bridge(frame, { channel: "other", type: "size", height: 300 }));
+    act(() => bridge(frame, { type: "size", height: "300" }));
+    expect(frame.style.height).toBe("12000px");
+
+    act(() => bridge(frame, { type: "error", message: `<b>boom</b>${"x".repeat(1_000)}` }));
+    const errors = screen.getByRole("list", { name: "Prototype script errors" });
+    expect(errors.textContent?.startsWith("<b>boom</b>")).toBe(true);
+    expect(errors.querySelector("b")).toBeNull();
+    expect(errors.textContent?.length).toBeLessThanOrEqual(280);
+  });
+
+  it("hands focus to Stop when the desktop's reserved shortcut fires while the frame holds it", async () => {
+    let escape: (() => void) | undefined;
+    (window as { octantHost?: unknown }).octantHost = {
+      setProviderCredential: () => undefined,
+      providerCredentialStatus: () => undefined,
+      clearProviderCredential: () => undefined,
+      subscribeCanvasFrameFocusEscape: (listener: () => void) => {
+        escape = listener;
+        return () => {
+          escape = undefined;
+        };
+      },
+    };
+    const { runtime } = runRuntime();
+    render(
+      <CanvasDocument
+        definition={{ ...canvasFixture, blocks: [prototype()] }}
+        designRunRuntime={runtime}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Run" }));
+    const frame = await screen.findByTitle<HTMLIFrameElement>("Checkout, running prototype");
+    frame.focus();
+    expect(document.activeElement).toBe(frame);
+    act(() => escape?.());
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Stop" }));
+  });
+});
+
+describe("running prototype focus", () => {
+  it("stops a frame that takes the keyboard straight back after the reserved shortcut", async () => {
+    let escape: (() => void) | undefined;
+    (window as { octantHost?: unknown }).octantHost = {
+      setProviderCredential: () => undefined,
+      providerCredentialStatus: () => undefined,
+      clearProviderCredential: () => undefined,
+      subscribeCanvasFrameFocusEscape: (listener: () => void) => {
+        escape = listener;
+        return () => undefined;
+      },
+    };
+    const { runtime } = runRuntime();
+    render(
+      <CanvasDocument
+        definition={{ ...canvasFixture, blocks: [prototype()] }}
+        designRunRuntime={runtime}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Run" }));
+    const frame = await screen.findByTitle<HTMLIFrameElement>("Checkout, running prototype");
+    vi.useFakeTimers();
+    frame.focus();
+    act(() => escape?.());
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Stop" }));
+    // The page refocuses itself, as one listening for blur can.
+    frame.focus();
+    act(() => vi.advanceTimersByTime(200));
+    expect(frames(document)).toHaveLength(0);
+    expect(screen.getByText(/kept taking the keyboard back/)).toBeVisible();
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Run again" }));
+  });
+});
+
+describe("design bridge messages", () => {
+  it("accepts only typed, bounded messages from the frame's own window", () => {
+    const frame = {} as Window;
+    const other = {} as Window;
+    const message = (data: unknown, source: Window = frame, origin = "null") =>
+      readDesignBridgeMessage({ data, source, origin }, frame);
+    const channel = "octant-design-frame@1";
+    expect(message({ channel, type: "heartbeat" })).toEqual({ type: "heartbeat" });
+    expect(message({ channel, type: "size", height: 12.2 })).toEqual({ type: "size", height: 48 });
+    expect(message({ channel, type: "size", height: 400.2 })).toEqual({
+      type: "size",
+      height: 401,
+    });
+    expect(message({ channel, type: "error", message: "  " })).toEqual({
+      type: "error",
+      message: "Script error",
+    });
+    for (const rejected of [
+      message({ channel, type: "heartbeat" }, other),
+      message({ channel, type: "heartbeat" }, frame, "http://127.0.0.1:3773"),
+      message({ channel: "other", type: "heartbeat" }),
+      message({ channel, type: "navigate", url: "https://example.test" }),
+      message({ channel, type: "size", height: Number.NaN }),
+      message({ channel, type: "size", height: Number.POSITIVE_INFINITY }),
+      message({ channel, type: "error", message: 3 }),
+      message("heartbeat"),
+      message([channel, "heartbeat"]),
+      message(null),
+      readDesignBridgeMessage(
+        { data: { channel, type: "heartbeat" }, source: frame, origin: "null" },
+        null,
+      ),
+    ]) {
+      expect(rejected).toBeUndefined();
+    }
   });
 });

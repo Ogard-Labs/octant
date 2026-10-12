@@ -8,6 +8,7 @@ import {
   CANVAS_BAR_LIST_SCHEMA_VERSION,
   CANVAS_COMPARISON_MATRIX_SCHEMA_VERSION,
   CANVAS_DESIGN_ASSET_SCHEMA_VERSION,
+  CANVAS_DESIGN_RUNNING_SCHEMA_VERSION,
   CANVAS_DESIGN_ASSETS_MAX_BYTES,
   CANVAS_DESIGN_DOCUMENT_SCHEMA_VERSION,
   CANVAS_MAX_DESIGN_ASSETS,
@@ -56,6 +57,7 @@ import {
   decodeCanvasCreated,
   decodeCanvasDefinition,
   decodeCanvasDesignAssetsOutcome,
+  decodeCanvasDesignRunOutcome,
   decodeCanvasSourceManifestEntry,
   decodeCanvasVersion,
   decodeCanvasVersionAppended,
@@ -304,7 +306,55 @@ describe("Canvas contracts", () => {
       decodeCanvasDefinition({ ...definition, blocks: [{ ...mockup, assets: tooMany }] }),
     ).toThrow();
     expect(CANVAS_DESIGN_ASSET_SCHEMA_VERSION).toBe(17);
-    expect(CANVAS_SCHEMA_VERSION).toBe(17);
+  });
+
+  it("admits a running design only under the version that declared it", () => {
+    const prototype = {
+      blockId: "checkout",
+      schemaVersion: CANVAS_DESIGN_RUNNING_SCHEMA_VERSION,
+      kind: "design",
+      title: "Checkout",
+      size: "phone",
+      runsScript: true,
+      frames: [{ frameId: "cart", title: "Cart", html: "<button>Pay</button>" }],
+    } as const;
+    expect(decodeCanvasDefinition({ ...definition, blocks: [prototype] })).toMatchObject({
+      blocks: [prototype],
+    });
+    // An older runtime reads a running design as a newer document, never as a
+    // static design whose script it would silently drop.
+    expect(() =>
+      decodeCanvasDefinition({
+        ...definition,
+        schemaVersion: CANVAS_DESIGN_ASSET_SCHEMA_VERSION,
+        blocks: [{ ...prototype, schemaVersion: CANVAS_DESIGN_ASSET_SCHEMA_VERSION }],
+      }),
+    ).toThrow();
+    // A static design says so by leaving the field out; there is no false.
+    expect(() =>
+      decodeCanvasDefinition({ ...definition, blocks: [{ ...prototype, runsScript: false }] }),
+    ).toThrow();
+    expect(CANVAS_DESIGN_RUNNING_SCHEMA_VERSION).toBe(18);
+    expect(CANVAS_SCHEMA_VERSION).toBe(18);
+  });
+
+  it("offers a running design's page only as a ticketed path on the host", () => {
+    const ready = {
+      kind: "ready",
+      canvasId: "22222222-2222-4222-8222-222222222222",
+      versionId: "33333333-3333-4333-8333-333333333333",
+      blockId: "checkout",
+      page: `/api/canvas/design-page?ticket=${"a".repeat(43)}`,
+    };
+    expect(decodeCanvasDesignRunOutcome(ready)).toEqual(ready);
+    for (const page of [
+      "https://example.test/api/canvas/design-page?ticket=" + "a".repeat(43),
+      "/api/canvas/design-page?ticket=short",
+      `/api/canvas/design-page?ticket=${"a".repeat(43)}&windowCapability=x`,
+      `//example.test/api/canvas/design-page?ticket=${"a".repeat(43)}`,
+    ]) {
+      expect(() => decodeCanvasDesignRunOutcome({ ...ready, page })).toThrow();
+    }
   });
 
   it("keeps one design's resolved images inside what a paired client's gateway forwards", () => {

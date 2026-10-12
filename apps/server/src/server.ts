@@ -472,6 +472,7 @@ import type {
   CanvasDesignBlock,
   CanvasProvenance,
 } from "@octant/contracts/canvas";
+import { CanvasDesignRunTickets } from "./canvas/canvasDesignPage";
 import {
   readCanvasDesignAssetFile,
   resolveCanvasDesignAssets,
@@ -9265,6 +9266,7 @@ export function startOctantServer(
       canvasProjection: persistence.canvasProjection,
       canvasService,
       resolveDesignAssets,
+      designRunTickets: new CanvasDesignRunTickets(),
       canvasShareService,
       canvasExportService,
       // A host with no usable `gh` has no GitHub state to read; the gist
@@ -10037,6 +10039,20 @@ export function startOctantServer(
         signing: identity.signing,
         webAssets,
         productDispatch: authenticatedProductDispatch,
+        // The page's ticket is its only authority, so the request reaches the
+        // Canvas route as a loopback load carrying nothing but its address
+        // and what the browser said it is loading.
+        designPage: async (request) => {
+          const source = new URL(request.url);
+          const destination = request.headers.get("sec-fetch-dest");
+          return await canvasRoutes(
+            new Request(`http://127.0.0.1${source.pathname}${source.search}`, {
+              method: request.method,
+              headers: destination === null ? {} : { "sec-fetch-dest": destination },
+              signal: request.signal,
+            }),
+          );
+        },
         pushTokenStore: pushNotificationTokenStore,
       };
     };

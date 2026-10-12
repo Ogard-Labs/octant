@@ -4,6 +4,8 @@ import {
   decodeCanvasActionResult,
   decodeCanvasBlockId,
   decodeCanvasDesignAssetsOutcome,
+  decodeCanvasDesignRunOutcome,
+  decodeCanvasDesignRunRequest,
   decodeCanvasGetOutcome,
   decodeCanvasHistoryOutcome,
   decodeCanvasId,
@@ -29,6 +31,8 @@ import {
   type CanvasDesignAssetResolution,
   type CanvasDesignAssetsOutcome,
   type CanvasDesignBlock,
+  type CanvasDesignRunOutcome,
+  type CanvasDesignRunRequest,
   type CanvasGetOutcome,
   type CanvasProvenance,
   type CanvasInventoryEntry,
@@ -54,6 +58,13 @@ import type { CanvasShareService } from "./canvas/canvasShareService";
 import type { CanvasExportService } from "./canvas/canvasExportService";
 import type { CanvasExportFolderService } from "./canvas/canvasExportFolderService";
 import { canvasExportEventActor } from "./canvas/canvasExportActor";
+import {
+  canvasDesignPageHeaders,
+  canvasDesignPagePath,
+  canvasDesignPageRefusal,
+  renderCanvasDesignPage,
+  type CanvasDesignRunTickets,
+} from "./canvas/canvasDesignPage";
 import { OCTANT_LOCAL_ACTOR_ID } from "./shellService";
 import type { CanvasProjection, CanvasProjectionEntry } from "./canvas/canvasProjection";
 import type { ClientPrincipal } from "./clientPrincipal";
@@ -108,6 +119,11 @@ export interface CanvasRouteDependencies {
     block: CanvasDesignBlock,
     provenance: CanvasProvenance,
   ) => Promise<ReadonlyArray<CanvasDesignAssetResolution>>;
+  /**
+   * Single-use tickets for running designs' pages. Absent on a host that does
+   * not serve them, and a running design then answers that it cannot run here.
+   */
+  readonly designRunTickets?: CanvasDesignRunTickets;
   readonly windowAuthorityStore: WindowAuthorityStore;
   readonly projects: Pick<ProjectService, "bootstrap">;
   readonly activeContextResolver: (
@@ -166,6 +182,8 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
       route !== "inventory" &&
       route !== "get" &&
       route !== "design-assets" &&
+      route !== "design-run" &&
+      route !== "design-page" &&
       route !== "history" &&
       route !== "revise" &&
       route !== "layout-revise" &&
@@ -194,6 +212,10 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
     if (!isLoopbackHostname(url.hostname)) {
       return failureResponse("Canvas API requests must use loopback.", 400, null);
     }
+    // A frame loads a running design's page by address alone, so it carries
+    // no window credential; the single-use ticket is the whole authority, and
+    // it was issued only after the same read check as the Canvas itself.
+    if (route === "design-page") return serveDesignPage(dependencies, request, url);
     if (origin !== null && !isAllowedOrigin(origin)) {
       return failureResponse("Renderer origin is not allowed.", 400, null);
     }
@@ -304,6 +326,19 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
           parsed,
         );
         return jsonResponse(decodeCanvasDesignAssetsOutcome(outcome), 200, origin);
+      }
+
+      if (route === "design-run" && request.method === "POST") {
+        const body = await readJson(request);
+        let parsed: CanvasDesignRunRequest;
+        try {
+          if (body.kind !== "ok") throw new Error("invalid");
+          parsed = decodeCanvasDesignRunRequest(body.value);
+        } catch {
+          return failureResponse("Canvas design run request is invalid.", 400, origin);
+        }
+        const outcome = await issueDesignRun(dependencies, authenticatedWindowId, parsed);
+        return jsonResponse(decodeCanvasDesignRunOutcome(outcome), 200, origin);
       }
 
       if (route === "history" && request.method === "GET") {
@@ -1525,6 +1560,96 @@ async function resolveDesignAssetsForWindow(
     blockId: block.blockId,
     assets,
   };
+}
+
+/**
+ * A ticket for one running design's page. Issuing one runs the same read
+ * check `get` does, for the version the reader is drawing, so a window or a
+ * paired device can run only a design it could already read. The design must
+ * declare that it runs script; a static design is never served this way.
+ */
+async function issueDesignRun(
+  dependencies: CanvasRouteDependencies,
+  windowId: WindowId,
+  input: CanvasDesignRunRequest,
+): Promise<CanvasDesignRunOutcome> {
+  const unavailable = (reason: string): CanvasDesignRunOutcome => ({
+    kind: "unavailable",
+    canvasId: input.canvasId,
+    reason,
+  });
+  const tickets = dependencies.designRunTickets;
+  if (tickets === undefined) return unavailable("This host does not run prototypes.");
+  const read = await resolveCanvasGet(dependencies, windowId, input.canvasId, input.versionId);
+  if (read.kind === "unauthorized") return { kind: "unauthorized", canvasId: input.canvasId };
+  if (read.kind !== "ready")
+    return unavailable("Canvas is unavailable. Reopen it from the Project.");
+  const definition = read.version.definition;
+  const block = definition.blocks.find(
+    (candidate): candidate is CanvasDesignBlock =>
+      candidate.kind === "design" && String(candidate.blockId) === String(input.blockId),
+  );
+  if (block === undefined || block.runsScript !== true) {
+    return unavailable("That prototype is not in this Canvas version.");
+  }
+  const startFrameId = input.frameId ?? block.frames[0]?.frameId;
+  if (
+    startFrameId === undefined ||
+    !block.frames.some((frame) => String(frame.frameId) === String(startFrameId))
+  ) {
+    return unavailable("That screen is not in this prototype.");
+  }
+  const ticket = tickets.issue({
+    canvasId: input.canvasId,
+    versionId: read.version.versionId,
+    blockId: block.blockId,
+    startFrameId: String(startFrameId),
+    block,
+    provenance: definition.provenance,
+  });
+  return {
+    kind: "ready",
+    canvasId: input.canvasId,
+    versionId: read.version.versionId,
+    blockId: block.blockId,
+    page: canvasDesignPagePath(ticket),
+  };
+}
+
+/**
+ * A running design's page, for the one load its ticket allows. Anything but a
+ * plain load of a fresh ticket by a frame is refused with a page that runs
+ * nothing, under the same policy.
+ */
+async function serveDesignPage(
+  dependencies: CanvasRouteDependencies,
+  request: Request,
+  url: URL,
+): Promise<Response> {
+  const refuse = (status: number) =>
+    new Response(request.method === "HEAD" ? null : canvasDesignPageRefusal(), {
+      status,
+      headers: canvasDesignPageHeaders("text/html; charset=utf-8"),
+    });
+  if (request.method !== "GET") return refuse(405);
+  const keys = [...url.searchParams.keys()];
+  const ticket = url.searchParams.get("ticket");
+  if (keys.length !== 1 || ticket === null || !/^[A-Za-z0-9_-]{43}$/.test(ticket)) {
+    return refuse(400);
+  }
+  // A browser names what it is loading; the page is only ever a frame.
+  const destination = request.headers.get("sec-fetch-dest");
+  if (destination !== null && destination !== "iframe") return refuse(403);
+  const grant = dependencies.designRunTickets?.redeem(ticket);
+  if (grant === undefined) return refuse(403);
+  const assets =
+    (grant.block.assets ?? []).length === 0 || dependencies.resolveDesignAssets === undefined
+      ? []
+      : await dependencies.resolveDesignAssets(grant.block, grant.provenance);
+  return new Response(renderCanvasDesignPage(grant.block, grant.startFrameId, assets), {
+    status: 200,
+    headers: canvasDesignPageHeaders("text/html; charset=utf-8"),
+  });
 }
 
 function toInventoryEntry(entry: CanvasProjectionEntry): CanvasInventoryEntry {
