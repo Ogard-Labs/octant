@@ -1,4 +1,8 @@
-import { useNewTaskPrompt } from "../composer/useNewTaskPrompt";
+import {
+  NewTaskDraftsContext,
+  NewTaskDraftScopeContext,
+  useNewTaskPrompt,
+} from "../composer/useNewTaskPrompt";
 import { useDraftModelOptions } from "../providers/useDraftModelOptions";
 import { ComposerAttachButton } from "../composer/ComposerAttachButton";
 import type {
@@ -10,7 +14,7 @@ import type {
 import type { WorkProjectStatus, WorkStatusDatedItem } from "@octant/contracts/work-project-status";
 import type { CreateHostViewScope, PickerGroup, ModelPickerSelection } from "@octant/domain";
 import { CalendarClock, FolderOpen, ShieldCheck } from "lucide-react";
-import { useState, type ClipboardEvent, type FormEvent, type ReactNode } from "react";
+import { useContext, useState, type ClipboardEvent, type FormEvent, type ReactNode } from "react";
 import { clipboardHasImage } from "../chat/composerImagePaste";
 import { selectedModelReadsImages, useWorkComposerImages } from "./composer/useWorkComposerImages";
 import { WorkImageAttachmentChips } from "./composer/WorkImageAttachmentChips";
@@ -106,6 +110,8 @@ export function WorkOverview(props: WorkOverviewProps) {
       section.models.some((model) => model.unavailableReason === undefined),
     ),
   );
+  const drafts = useContext(NewTaskDraftsContext);
+  const draftScope = useContext(NewTaskDraftScopeContext);
   const [draft, setDraft] = useNewTaskPrompt();
   const { modelKey, modelOptionValues, setModelChoice } = useDraftModelOptions(
     props.providerGroups ?? [],
@@ -146,8 +152,14 @@ export function WorkOverview(props: WorkOverviewProps) {
             ? await props.onCreateThread(normalized)
             : await props.onCreateThread(normalized, staged);
       if (!created) {
-        setDraft(normalized);
-        if (staged.length > 0) images.restore(staged);
+        const currentText =
+          drafts === undefined || draftScope === undefined ? "" : drafts.read(draftScope);
+        const currentFiles =
+          drafts === undefined || draftScope === undefined ? [] : drafts.readImages(draftScope);
+        if (currentText.trim() === "" && currentFiles.length === 0) {
+          setDraft(normalized);
+          if (staged.length > 0) images.restore(staged);
+        }
       }
     } finally {
       setSubmitting(false);

@@ -393,6 +393,66 @@ describe("WorkOverview", () => {
     expect(screen.getByRole("textbox", { name: "Start a new task" })).toHaveValue("");
   });
 
+  it("does not restore a refused quick-start draft over a newer prompt in the same Project", async () => {
+    const drafts = createNewTaskDrafts();
+    let finishCreate: (created: boolean) => void = () => {};
+    const pending = new Promise<boolean>((resolve) => {
+      finishCreate = resolve;
+    });
+    render(
+      <NewTaskDraftsContext.Provider value={drafts}>
+        <NewTaskDraftScopeContext.Provider value="work-overview:shared">
+          <WorkOverview model={emptyModel()} onCreateThread={async () => pending} />
+          <WorkOverview model={emptyModel()} onCreateThread={vi.fn(async () => true)} />
+        </NewTaskDraftScopeContext.Provider>
+      </NewTaskDraftsContext.Provider>,
+    );
+
+    const inputs = screen.getAllByPlaceholderText("Describe the next task…");
+    const starts = screen.getAllByRole("button", { name: "Start task" });
+    fireEvent.change(inputs[0]!, { target: { value: "First submission" } });
+    fireEvent.click(starts[0]!);
+    await waitFor(() => expect(inputs[0]).toHaveValue(""));
+    fireEvent.change(inputs[1]!, { target: { value: "Newer prompt" } });
+    finishCreate(false);
+    await waitFor(() => expect(inputs[1]).toHaveValue("Newer prompt"));
+    expect(inputs[0]).toHaveValue("Newer prompt");
+  });
+
+  it("does not restore refused attachments over newer files in the same Project", async () => {
+    const user = userEvent.setup();
+    const drafts = createNewTaskDrafts();
+    let finishCreate: (created: boolean) => void = () => {};
+    const pending = new Promise<boolean>((resolve) => {
+      finishCreate = resolve;
+    });
+    render(
+      <NewTaskDraftsContext.Provider value={drafts}>
+        <NewTaskDraftScopeContext.Provider value="work-overview:shared">
+          <WorkOverview model={emptyModel()} onCreateThread={async () => pending} />
+          <WorkOverview model={emptyModel()} onCreateThread={vi.fn(async () => true)} />
+        </NewTaskDraftScopeContext.Provider>
+      </NewTaskDraftsContext.Provider>,
+    );
+
+    const inputs = screen.getAllByPlaceholderText("Describe the next task…");
+    const starts = screen.getAllByRole("button", { name: "Start task" });
+    const choosers = screen.getAllByLabelText("Choose attachment file");
+    fireEvent.change(inputs[0]!, { target: { value: "First submission" } });
+    await user.upload(choosers[0]!, new File([new Uint8Array([1])], "first.png", { type: "image/png" }));
+    fireEvent.click(starts[0]!);
+    await waitFor(() => expect(screen.queryByText("first.png")).toBeNull());
+    fireEvent.change(inputs[1]!, { target: { value: "Newer prompt" } });
+    await user.upload(
+      choosers[1]!,
+      new File([new Uint8Array([2])], "newer.png", { type: "image/png" }),
+    );
+    finishCreate(false);
+    await waitFor(() => expect(screen.getAllByText("newer.png").length).toBeGreaterThan(0));
+    expect(screen.queryByText("first.png")).toBeNull();
+    expect(inputs[0]).toHaveValue("Newer prompt");
+  });
+
   it("keeps provider setup reachable when no Work provider is ready", async () => {
     const user = userEvent.setup();
     const onOpenSettings = vi.fn();

@@ -1,4 +1,8 @@
-import { useNewTaskPrompt } from "../composer/useNewTaskPrompt";
+import {
+  NewTaskDraftsContext,
+  NewTaskDraftScopeContext,
+  useNewTaskPrompt,
+} from "../composer/useNewTaskPrompt";
 import { useDraftModelOptions } from "../providers/useDraftModelOptions";
 import { ChatClientFailure, type ChatClient } from "@octant/client-runtime/chat-client";
 import { ProjectClientFailure, type ProjectClient } from "@octant/client-runtime/project-client";
@@ -9,7 +13,15 @@ import type {
   ProviderModelOptionValues,
 } from "@octant/contracts/providers";
 import type { ModelPickerSelection, PickerGroup } from "@octant/domain";
-import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from "react";
+import {
+  useContext,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type FormEvent,
+  type ReactNode,
+} from "react";
 import { ComposerModelPicker } from "../providers/ComposerModelPicker";
 import { ThreadComposer } from "../composer/ThreadComposer";
 import { ComposerVoiceButton } from "../voice/ComposerVoiceButton";
@@ -104,6 +116,8 @@ export function ChatProjectOverview(props: ChatProjectOverviewProps) {
   const model = props.model ?? loadedModel;
   const input = useRef<HTMLTextAreaElement>(null);
   const inputId = useId();
+  const drafts = useContext(NewTaskDraftsContext);
+  const draftScope = useContext(NewTaskDraftScopeContext);
   const [draft, setDraft] = useNewTaskPrompt();
   const { modelKey, modelOptionValues, setModelChoice } = useDraftModelOptions(
     props.providerGroups ?? [],
@@ -135,7 +149,9 @@ export function ChatProjectOverview(props: ChatProjectOverviewProps) {
           ? await props.onCreateThread(normalized)
           : await props.onCreateThread(normalized, modelOptionValues);
       if (!created) {
-        setDraft(normalized);
+        const current =
+          drafts === undefined || draftScope === undefined ? "" : drafts.read(draftScope);
+        if (current.trim() === "") setDraft(normalized);
         setRestoreFocus(true);
       }
     } finally {
