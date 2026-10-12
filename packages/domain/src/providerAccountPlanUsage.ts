@@ -7,6 +7,10 @@
  * reuse this shape without a second model.
  */
 
+import type { ProviderInstance } from "@octant/contracts";
+
+import { CLAUDE_ACCOUNT_PROFILE, defaultProviderAccountDirectory } from "./providerAccountProfile";
+
 export const PROVIDER_PLAN_USAGE_WINDOW_IDS = [
   "five_hour",
   "seven_day",
@@ -56,6 +60,24 @@ export function accountPlanUsageKey(input: {
     throw new Error("Account plan-usage key needs the instance and its state directory.");
   }
   return `${input.instanceId}:${directory}`;
+}
+
+/**
+ * The state directory a Claude subscription account's plan usage is kept
+ * under, or nothing for an account plan limits do not apply to. An API-key
+ * account is billed per request, and it can keep the directory it had as a
+ * subscription account, so a snapshot stored back then is not its plan.
+ */
+export function claudePlanUsageStateDirectory(
+  instance: ProviderInstance,
+  homeDirectory: string,
+): string | undefined {
+  if (instance.driverKind !== "claude") return undefined;
+  if (instance.configuration.authentication !== "subscription") return undefined;
+  return (
+    instance.configuration.configDirectory ??
+    defaultProviderAccountDirectory(CLAUDE_ACCOUNT_PROFILE, homeDirectory)
+  );
 }
 
 /** Process payloads report percent used (0–100). Store the share Octant already uses (0–1). */

@@ -1729,10 +1729,16 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   snapshot stays. Octant never reads a token or credential file to
   fetch those numbers, and never calls a vendor usage endpoint
   itself. Each account keeps its own snapshot, keyed by
-  the instance and the state directory that session ran under. An
+  the instance and the state directory that session ran under. The
+  snapshots live in `providers/plan-usage.json` in the host store,
+  readable by its owner only and listed in the host data map; removing
+  an account removes its snapshots. An
   API-key account reports that plan limits do not apply rather than
-  drawing empty bars. A failed or missing refresh keeps the last
-  snapshot and shows its age. Claude is the first adopter.
+  drawing empty bars, also when it kept the directory it had as a
+  subscription account. Overage reads as in use once something was
+  spent, not when it is merely switched on. A failed or missing
+  refresh keeps the last snapshot and shows its age. Claude is the
+  first adopter.
   Claude is the first adopter (`CLAUDE_CONFIG_DIR` and
   `CLAUDE_SECURESTORAGE_CONFIG_DIR`, default `~/.claude`, extras
   `~/.claude-accounts/<instanceId>`, `claude auth login` /

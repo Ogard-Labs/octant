@@ -115,10 +115,14 @@ function decodeOverageWindow(
   if (value === undefined || value === null) return undefined;
   if (typeof value !== "object" || Array.isArray(value)) return undefined;
   const record = value as Record<string, unknown>;
+  // `is_enabled` says the account may spend past its plan, not that it has.
+  // An account with overage switched off has no overage window to show.
+  if (record.is_enabled !== true) return undefined;
   const utilization = utilizationFromProcess(record.utilization);
-  const enabled = record.is_enabled === true;
-  const status: ProviderPlanUsageWindowStatus =
-    enabled && utilization !== undefined ? planUsageWindowStatus(utilization) : "allowed";
+  const spent =
+    (typeof record.used_credits === "number" && record.used_credits > 0) ||
+    (utilization !== undefined && utilization > 0);
+  const status: ProviderPlanUsageWindowStatus = planUsageWindowStatus(utilization);
   return {
     window: "overage",
     status,
@@ -126,7 +130,7 @@ function decodeOverageWindow(
     observedAt,
     overage: {
       status,
-      inUse: enabled,
+      ...(spent ? { inUse: true } : {}),
     },
   };
 }

@@ -835,8 +835,7 @@ import {
   enabledModes,
   formatThreadMentionContext,
   isAgentRunActiveStatus,
-  CLAUDE_ACCOUNT_PROFILE,
-  defaultProviderAccountDirectory,
+  claudePlanUsageStateDirectory,
   isImageProfileDriverKind,
   isNativeHarnessDriverKind,
   isProviderAllowedByProjectPolicy,
@@ -3866,12 +3865,6 @@ export function startOctantServer(
       join(providerDataDirectory, "providers", "plan-usage.json"),
     );
     void providerAccountPlanUsageStore.load().catch(() => undefined);
-    const claudePlanUsageStateDirectory = (instance: ProviderInstance): string | undefined => {
-      if (instance.driverKind !== "claude") return undefined;
-      const stored = instance.configuration.configDirectory;
-      if (typeof stored === "string" && stored.trim().length > 0) return stored;
-      return defaultProviderAccountDirectory(CLAUDE_ACCOUNT_PROFILE, homedir());
-    };
     const recordProviderRuntimeUsage = (event: ProviderRuntimeEvent): void => {
       providerRuntimeUsageLimitsStore.record(event);
       if (event.kind !== "rate-limit-window") return;
@@ -3879,7 +3872,7 @@ export function startOctantServer(
         .readProviderInstances()
         .find((candidate) => String(candidate.id) === String(event.instanceId));
       if (instance === undefined) return;
-      const directory = claudePlanUsageStateDirectory(instance);
+      const directory = claudePlanUsageStateDirectory(instance, homedir());
       if (directory === undefined) return;
       void providerAccountPlanUsageStore.recordWindow(event, directory).catch(() => undefined);
     };
@@ -4358,7 +4351,14 @@ export function startOctantServer(
           agentRunSessionStore.removeProviderIdentities(instanceId, signal),
         ]);
       },
-      clearRuntimeUsageLimits: (instanceId) => providerRuntimeUsageLimitsStore.clear(instanceId),
+      clearRuntimeUsageLimits: (instanceId) => {
+        providerRuntimeUsageLimitsStore.clear(instanceId);
+        // This also runs when a provider is reconfigured or probed. The saved
+        // plan snapshot outlives those, and goes only with the account.
+        if (persistence.readProviderInstance(instanceId) === undefined) {
+          void providerAccountPlanUsageStore.forget(instanceId).catch(() => undefined);
+        }
+      },
       ...(credentialResolver === undefined
         ? {}
         : { clearProviderCredential: (instanceId) => credentialResolver.delete(instanceId) }),
@@ -4614,7 +4614,7 @@ export function startOctantServer(
           throw outcome.left;
         }
         const limits = outcome.right;
-        const directory = claudePlanUsageStateDirectory(instance);
+        const directory = claudePlanUsageStateDirectory(instance, homedir());
         if (directory !== undefined) {
           await providerAccountPlanUsageStore.replace({
             instanceId: instance.id,
@@ -4634,7 +4634,7 @@ export function startOctantServer(
           .readProviderInstances()
           .find((candidate) => String(candidate.id) === String(instanceId));
         if (instance === undefined) return undefined;
-        const directory = claudePlanUsageStateDirectory(instance);
+        const directory = claudePlanUsageStateDirectory(instance, homedir());
         return directory === undefined
           ? undefined
           : providerAccountPlanUsageStore.serviceLimits(instanceId, directory, observedAt);

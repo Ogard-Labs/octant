@@ -1,4 +1,4 @@
-import { mkdtemp, readFile } from "node:fs/promises";
+import { mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -173,5 +173,96 @@ describe("provider account plan-usage store", () => {
       rateLimitWindows: [expect.objectContaining({ window: "five_hour", utilization: 0.3 })],
       updatedAt: occurredAt,
     });
+  });
+
+  it("keeps the readable windows of a saved file and leaves out one that no longer decodes", async () => {
+    const { filePath } = await openStore();
+    const readable = {
+      window: "five_hour",
+      status: "allowed",
+      utilization: 0.3,
+      observedAt: occurredAt,
+    };
+    await writeFile(
+      filePath,
+      JSON.stringify({
+        version: 1,
+        entries: [
+          {
+            instanceId: String(firstId),
+            stateDirectory: "/Users/example/.claude",
+            available: true,
+            source: "session-event",
+            observedAt: occurredAt,
+            windows: [readable, { window: "seven_day", status: "from-a-newer-build" }],
+          },
+          {
+            instanceId: String(secondId),
+            stateDirectory: "/Users/example/.claude-accounts/work",
+            available: true,
+            source: "session-event",
+            observedAt: "not a timestamp",
+            windows: [readable],
+          },
+        ],
+      }),
+    );
+    const store = new ProviderAccountPlanUsageStore(filePath);
+    await store.load();
+
+    expect(
+      store.serviceLimits(firstId, "/Users/example/.claude", occurredAt)?.rateLimitWindows,
+    ).toEqual([readable]);
+    expect(
+      store.serviceLimits(secondId, "/Users/example/.claude-accounts/work", occurredAt),
+    ).toBeUndefined();
+  });
+
+  it("forgets a removed account and keeps the others", async () => {
+    const { store, filePath } = await openStore();
+    await store.recordWindow(
+      windowEvent({
+        instanceId: firstId,
+        sessionId: "00000000-0000-4000-8000-000000000001",
+        correlationId: "00000000-0000-4000-8000-000000000011",
+        status: "allowed",
+        utilization: 0.2,
+      }),
+      "/Users/example/.claude",
+    );
+    await store.recordWindow(
+      windowEvent({
+        instanceId: secondId,
+        sessionId: "00000000-0000-4000-8000-000000000002",
+        correlationId: "00000000-0000-4000-8000-000000000012",
+        status: "warning",
+        utilization: 0.8,
+      }),
+      "/Users/example/.claude-accounts/work",
+    );
+
+    await store.forget(firstId);
+
+    expect(store.snapshot(firstId, "/Users/example/.claude")).toBeUndefined();
+    const body = JSON.parse(await readFile(filePath, "utf8")) as {
+      readonly entries: ReadonlyArray<{ readonly instanceId: string }>;
+    };
+    expect(body.entries.map((entry) => entry.instanceId)).toEqual([String(secondId)]);
+  });
+
+  it("saves the file readable by its owner only", async () => {
+    const { store, filePath } = await openStore();
+    await store.recordWindow(
+      windowEvent({
+        instanceId: firstId,
+        sessionId: "00000000-0000-4000-8000-000000000001",
+        correlationId: "00000000-0000-4000-8000-000000000011",
+        status: "allowed",
+        utilization: 0.2,
+      }),
+      "/Users/example/.claude",
+    );
+
+    expect((await stat(filePath)).mode & 0o777).toBe(0o600);
   });
 });

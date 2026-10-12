@@ -2,12 +2,13 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import {
   decodeProviderServiceLimits,
+  ProviderRateLimitWindow,
+  UtcTimestamp,
   type ProviderInstanceId,
-  type ProviderRateLimitWindow,
   type ProviderRuntimeEvent,
   type ProviderServiceLimits,
-  type UtcTimestamp,
 } from "@octant/contracts";
+import { Either, Schema } from "effect";
 import { accountPlanUsageKey, type ProviderPlanUsageSource } from "@octant/domain";
 import { canonicalRateLimitWindowId } from "./rateLimitWindowIdentity";
 
@@ -63,8 +64,9 @@ export class ProviderAccountPlanUsageStore {
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return;
     const file = parsed as Partial<PersistedFile>;
     if (file.version !== SCHEMA_VERSION || !Array.isArray(file.entries)) return;
-    for (const entry of file.entries) {
-      if (!isSnapshot(entry)) continue;
+    for (const candidate of file.entries) {
+      const entry = readSnapshot(candidate);
+      if (entry === undefined) continue;
       this.#entries.set(
         accountPlanUsageKey({
           instanceId: entry.instanceId,
@@ -74,6 +76,18 @@ export class ProviderAccountPlanUsageStore {
       );
       if (this.#entries.size >= MAX_ACCOUNTS) break;
     }
+  }
+
+  /** Drops every snapshot of an account that no longer exists. */
+  async forget(instanceId: ProviderInstanceId): Promise<void> {
+    await this.load();
+    let forgotten = false;
+    for (const [key, entry] of this.#entries) {
+      if (entry.instanceId !== String(instanceId)) continue;
+      this.#entries.delete(key);
+      forgotten = true;
+    }
+    if (forgotten) await this.#persist();
   }
 
   snapshot(instanceId: ProviderInstanceId, stateDirectory: string): PersistedSnapshot | undefined {
@@ -190,8 +204,11 @@ export class ProviderAccountPlanUsageStore {
         entries: [...this.#entries.values()],
       } satisfies PersistedFile);
       await mkdir(dirname(this.#filePath), { recursive: true });
+      // The file says which accounts exist and how much of each plan is
+      // used, so only its owner may read it. The temporary file is new on
+      // every write, which is what lets the mode apply.
       const temporary = `${this.#filePath}.tmp`;
-      await writeFile(temporary, body, "utf8");
+      await writeFile(temporary, body, { encoding: "utf8", mode: 0o600 });
       await rename(temporary, this.#filePath);
     });
     this.#persistTail = next.catch(() => undefined);
@@ -209,17 +226,38 @@ export class ProviderAccountPlanUsageStore {
   }
 }
 
-function isSnapshot(value: unknown): value is PersistedSnapshot {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
-  const entry = value as PersistedSnapshot;
-  return (
-    typeof entry.instanceId === "string" &&
-    typeof entry.stateDirectory === "string" &&
-    typeof entry.available === "boolean" &&
-    (entry.source === "session-event" || entry.source === "process-refresh") &&
-    typeof entry.observedAt === "string" &&
-    Array.isArray(entry.windows)
-  );
+const decodeStoredWindow = Schema.decodeUnknownEither(ProviderRateLimitWindow);
+const isStoredTimestamp = Schema.is(UtcTimestamp);
+
+/**
+ * One stored snapshot, or nothing when it cannot be read. A window that no
+ * longer decodes is left out and the rest are kept: serving one undecodable
+ * window used to fail the limits answer for every provider.
+ */
+function readSnapshot(value: unknown): PersistedSnapshot | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+  const entry = value as Partial<Record<keyof PersistedSnapshot, unknown>>;
+  if (
+    typeof entry.instanceId !== "string" ||
+    typeof entry.stateDirectory !== "string" ||
+    typeof entry.available !== "boolean" ||
+    (entry.source !== "session-event" && entry.source !== "process-refresh") ||
+    !isStoredTimestamp(entry.observedAt) ||
+    !Array.isArray(entry.windows)
+  ) {
+    return undefined;
+  }
+  return {
+    instanceId: entry.instanceId,
+    stateDirectory: entry.stateDirectory,
+    available: entry.available,
+    source: entry.source,
+    observedAt: entry.observedAt,
+    windows: entry.windows.slice(0, MAX_WINDOWS).flatMap((window) => {
+      const decoded = decodeStoredWindow(window);
+      return Either.isRight(decoded) ? [decoded.right] : [];
+    }),
+  };
 }
 
 function stripTrailingSlashes(value: string): string {

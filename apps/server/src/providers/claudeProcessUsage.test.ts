@@ -40,6 +40,31 @@ describe("Claude process plan usage", () => {
     );
   });
 
+  it("calls overage in use only once something was spent, and shows none when it is switched off", () => {
+    const overageOf = (extra_usage: unknown) => {
+      const decoded = decodeClaudeProcessPlanUsage(
+        { rate_limits_available: true, rate_limits: { extra_usage } },
+        observedAt,
+      );
+      return decoded?.available === true
+        ? decoded.windows.find((window) => window.window === "overage")
+        : undefined;
+    };
+
+    expect(
+      overageOf({ is_enabled: true, monthly_limit: 50, used_credits: 0, utilization: 0 }),
+    ).toMatchObject({ status: "allowed", overage: { status: "allowed" } });
+    expect(
+      overageOf({ is_enabled: true, monthly_limit: 50, used_credits: 0, utilization: 0 })?.overage,
+    ).not.toHaveProperty("inUse");
+    expect(
+      overageOf({ is_enabled: true, monthly_limit: 50, used_credits: 5, utilization: null }),
+    ).toMatchObject({ overage: { inUse: true } });
+    expect(
+      overageOf({ is_enabled: false, monthly_limit: null, used_credits: null, utilization: null }),
+    ).toBeUndefined();
+  });
+
   it("says plan limits do not apply when the process reports they are unavailable", () => {
     expect(
       decodeClaudeProcessPlanUsage({ rate_limits_available: false, rate_limits: null }, observedAt),
