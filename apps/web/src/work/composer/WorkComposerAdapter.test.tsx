@@ -31,6 +31,16 @@ const baseProps = {
 };
 
 describe("WorkComposerAdapter", () => {
+  it("shows Set up a provider on the Work start composer until a provider is ready", async () => {
+    const user = userEvent.setup();
+    const onOpenSettings = vi.fn();
+    render(<WorkComposerAdapter {...baseProps} onOpenSettings={onOpenSettings} />);
+    const setup = screen.getByRole("button", { name: "Set up a provider" });
+    expect(setup).toBeEnabled();
+    await user.click(setup);
+    expect(onOpenSettings).toHaveBeenCalledOnce();
+  });
+
   it("submits the selected reasoning level with the first Work message", async () => {
     const user = userEvent.setup();
     const onCreateThread = vi.fn();

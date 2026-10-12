@@ -23,7 +23,11 @@ selected, and whether that mode has a model it can actually use. When all
 three hold, **Start a task** opens the new-task composer in that Project. A
 missing prerequisite opens its exact setup surface — provider settings,
 Project create, or the Model step — and returns to the same draft when that
-surface closes. Skip does not mark the host ready or start a thread.
+surface closes. Skip does not mark the host ready or start a thread. After Skip, or in a
+later session with no ready provider, the New task composer in Work and Code
+shows **Set up a provider**. It opens Providers & Models and returns to the
+same draft when that surface closes. The action leaves once any instance is
+ready.
 
 ## Configure a provider
 

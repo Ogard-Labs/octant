@@ -156,24 +156,33 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
   }, [open, props.groups, selectedGroup, harnessGroups.length]);
 
   if (props.groups.length === 0) {
+    if (props.onOpenSettings === undefined) {
+      return (
+        <div className="composer-model-picker composer-model-picker--empty">
+          <OctantButton
+            aria-label={ariaLabel}
+            className="composer-model-picker__trigger window-no-drag"
+            disabled
+            size="sm"
+            title="Configure and check a provider in Settings."
+            type="button"
+            variant="ghost"
+          >
+            <span className="composer-model-picker__trigger-label">No provider ready</span>
+          </OctantButton>
+        </div>
+      );
+    }
     return (
       <div className="composer-model-picker composer-model-picker--empty">
         <OctantButton
-          aria-label={ariaLabel}
-          className="composer-model-picker__trigger window-no-drag"
-          disabled={props.disabled || props.onOpenSettings === undefined}
+          aria-label="Set up a provider"
+          className="window-no-drag"
           onClick={props.onOpenSettings}
           size="sm"
-          title={
-            props.onOpenSettings === undefined
-              ? "Configure and check a provider in Settings."
-              : "Open provider settings"
-          }
           type="button"
-          variant="ghost"
         >
-          <span className="composer-model-picker__trigger-label">No provider ready</span>
-          <ChevronDown aria-hidden="true" className="composer-model-picker__chevron" size={12} />
+          Set up a provider
         </OctantButton>
       </div>
     );

@@ -1426,6 +1426,7 @@ function renderNonCodeTab(
           {...(props.onOpenCodeSettings === undefined
             ? {}
             : { onOpenCodeSettings: props.onOpenCodeSettings })}
+          {...(openProviderSettings === undefined ? {} : { onOpenSettings: openProviderSettings })}
           {...(props.codeDefaultFolderThreads === undefined
             ? {}
             : { codeDefaultFolderThreads: props.codeDefaultFolderThreads })}
@@ -2052,7 +2053,7 @@ function renderNonCodeTab(
         {...(props.onDraftSelectProvider === undefined
           ? {}
           : { onSelectProvider: props.onDraftSelectProvider })}
-        {...(props.onOpenSettings === undefined ? {} : { onOpenSettings: props.onOpenSettings })}
+        {...(openProviderSettings === undefined ? {} : { onOpenSettings: openProviderSettings })}
         onRetry={props.chatController.retry}
         status={props.chatController.status}
       />

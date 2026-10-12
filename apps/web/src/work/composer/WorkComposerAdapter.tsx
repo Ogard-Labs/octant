@@ -89,6 +89,8 @@ export interface WorkComposerAdapterProps {
     readonly providerInstanceId: ProviderInstanceId;
     readonly modelId: ProviderModelId;
   }) => void;
+  /** Opens Providers & Models from the start composer while none is ready. */
+  readonly onOpenSettings?: () => void;
   readonly onCreateThread: (
     prompt: string,
     images?: ReadonlyArray<File>,
@@ -535,6 +537,9 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
                         setOptionState({ key: modelKey, values });
                       }}
                       onSelect={props.onSelectProvider}
+                      {...(props.onOpenSettings === undefined
+                        ? {}
+                        : { onOpenSettings: props.onOpenSettings })}
                       {...(props.selectedModelId === undefined
                         ? {}
                         : { selectedModelId: props.selectedModelId })}

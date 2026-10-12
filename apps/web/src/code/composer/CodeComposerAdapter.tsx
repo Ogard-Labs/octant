@@ -140,6 +140,8 @@ export interface CodeComposerAdapterProps {
     readonly providerInstanceId: ProviderInstanceId;
     readonly modelId: ProviderModelId;
   }) => void;
+  /** Opens Providers & Models from the start composer while none is ready. */
+  readonly onOpenSettings?: () => void;
   readonly onCreateThread: (
     input: CodeComposerSubmitInput,
   ) => boolean | void | Promise<boolean | void>;
@@ -892,6 +894,9 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
                         }}
                         menuSide="bottom"
                         onSelect={props.onSelectProvider}
+                        {...(props.onOpenSettings === undefined
+                          ? {}
+                          : { onOpenSettings: props.onOpenSettings })}
                         {...(props.selectedModelId === undefined
                           ? {}
                           : { selectedModelId: props.selectedModelId })}

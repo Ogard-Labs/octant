@@ -342,8 +342,7 @@ describe("WorkOverview", () => {
     );
 
     const composer = screen.getByRole("region", { name: "Work quick start" });
-    const providerSetup = within(composer).getByRole("button", { name: "Provider and model" });
-    expect(providerSetup).toHaveTextContent("No provider ready");
+    const providerSetup = within(composer).getByRole("button", { name: "Set up a provider" });
     expect(providerSetup).toBeEnabled();
 
     await user.click(providerSetup);

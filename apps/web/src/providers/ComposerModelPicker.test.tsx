@@ -429,15 +429,16 @@ describe("ComposerModelPicker", () => {
     );
   });
 
-  it("offers Settings when no providers are ready", async () => {
+  it("offers Set up a provider when no providers are ready", async () => {
     const user = userEvent.setup();
     const onOpenSettings = vi.fn();
     render(<ComposerModelPicker groups={[]} onOpenSettings={onOpenSettings} onSelect={vi.fn()} />);
 
-    const trigger = screen.getByRole("button", { name: "Provider and model" });
-    expect(trigger).toHaveTextContent("No provider ready");
-    await user.click(trigger);
+    const setup = screen.getByRole("button", { name: "Set up a provider" });
+    expect(setup).toBeEnabled();
+    await user.click(setup);
     expect(onOpenSettings).toHaveBeenCalled();
+    expect(screen.queryByText("No provider ready")).not.toBeInTheDocument();
   });
 
   it("keeps the provider control visible but disabled when configuration cannot be opened", () => {

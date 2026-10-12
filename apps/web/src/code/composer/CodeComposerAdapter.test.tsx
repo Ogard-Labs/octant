@@ -334,6 +334,18 @@ describe("CodeComposerAdapter", () => {
     });
   });
 
+  it("shows Set up a provider on the Code start composer until a provider is ready", async () => {
+    const user = userEvent.setup();
+    const onOpenSettings = vi.fn();
+    render(
+      <CodeComposerAdapter {...defaultProps} providerGroups={[]} onOpenSettings={onOpenSettings} />,
+    );
+    const setup = screen.getByRole("button", { name: "Set up a provider" });
+    expect(setup).toBeEnabled();
+    await user.click(setup);
+    expect(onOpenSettings).toHaveBeenCalledOnce();
+  });
+
   it("puts the Project picker first on the upper tray when none is selected", () => {
     const { projectId: _projectId, projectName: _projectName, ...rest } = defaultProps;
     const { container } = render(

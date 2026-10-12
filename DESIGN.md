@@ -427,7 +427,11 @@ Project folder, and a model — and ends in one primary action, Start a task,
 that opens the new-task composer in that Project. Every step is optional from
 the first one. Skipping preserves settled answers, waits for pending writes,
 grants no authority, and creates no thread: provider, Project, model, and
-permission readiness are checked again when work is requested. Profile,
+permission readiness are checked again when work is requested. After Skip, or
+in a later session with no ready instance, the New task composer in Work and
+Code shows a primary **Set up a provider** action that opens Providers &
+Models and returns to the same draft. The action leaves once any instance is
+ready; the model picker takes its place. Profile,
 appearance, the mode switches, and Navigator are not first-run steps: Profile
 and Appearance live in Settings › Personal, and Navigator in its own Settings
 section. No display name is inferred from the OS account. Continue retains

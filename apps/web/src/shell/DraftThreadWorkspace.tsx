@@ -170,6 +170,8 @@ export interface DraftThreadWorkspaceProps {
   ) => void;
   readonly onAttachFolder?: () => void;
   readonly onOpenCodeSettings?: () => void;
+  /** Opens Providers & Models from the start composer while none is ready. */
+  readonly onOpenSettings?: () => void;
   /**
    * Reports the Project the composer now targets. The draft is unmounted
    * while Settings covers the workspace, so the shell keeps this choice and
@@ -813,6 +815,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
             ? {}
             : { selectedModelId: props.selectedModelId })}
           onSelectProvider={props.onSelectProvider}
+          {...(props.onOpenSettings === undefined ? {} : { onOpenSettings: props.onOpenSettings })}
           {...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl })}
           {...(props.windowCapability === undefined
             ? {}
@@ -889,6 +892,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
             ? {}
             : { selectedModelId: props.selectedModelId })}
           onSelectProvider={props.onSelectProvider}
+          {...(props.onOpenSettings === undefined ? {} : { onOpenSettings: props.onOpenSettings })}
           {...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl })}
           {...(props.windowCapability === undefined
             ? {}
@@ -1190,6 +1194,9 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
                         });
                       }}
                       onSelect={props.onSelectProvider}
+                      {...(props.onOpenSettings === undefined
+                        ? {}
+                        : { onOpenSettings: props.onOpenSettings })}
                       {...(props.selectedModelId === undefined
                         ? {}
                         : { selectedModelId: props.selectedModelId })}

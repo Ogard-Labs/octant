@@ -178,8 +178,8 @@ describe("ChatWelcome", () => {
     const onOpenSettings = vi.fn();
     render(<ChatWelcome onCreateChat={vi.fn()} onOpenSettings={onOpenSettings} />);
 
-    const providerControl = screen.getByRole("button", { name: "Provider and model" });
-    expect(providerControl).toHaveTextContent("No provider ready");
+    const providerControl = screen.getByRole("button", { name: "Set up a provider" });
+    expect(providerControl).toBeEnabled();
     await user.click(providerControl);
     expect(onOpenSettings).toHaveBeenCalledOnce();
   });
