@@ -63,7 +63,7 @@ const SUMMARY_ICONS = {
  * Only `none-configured` and `action-required` are findings: the host reported
  * on every provider and none can answer. `checking` and `authority-unavailable`
  * are unknowns, so they say so rather than converting a missing answer into a
- * negative one the status above would contradict (`BOOT-02`).
+ * negative one the status above would contradict.
  */
 const CAVEATS: Partial<Record<Exclude<FirstRunReadinessOverall, "ready">, string>> = {
   checking:
@@ -80,7 +80,7 @@ const CAVEATS: Partial<Record<Exclude<FirstRunReadinessOverall, "ready">, string
  * colour-blind users and under Increased Contrast. It claims nothing the host
  * has not reported: while readiness is still being checked, or while the
  * provider registry is unreachable, it names the unknown instead of saying
- * Chat cannot answer (`BOOT-02`).
+ * Chat cannot answer.
  */
 export const FirstRunProviderStep = forwardRef<HTMLButtonElement, FirstRunProviderStepProps>(
   function FirstRunProviderStep(props, ref) {

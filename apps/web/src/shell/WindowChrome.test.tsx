@@ -91,6 +91,15 @@ function cssRule(selector: string, occurrence = 0): string {
   return matches[occurrence]?.[2] ?? "";
 }
 
+/** Every rule the Increased contrast setting or system preference turns on. */
+function increasedContrastRules(source = styles): string {
+  const rules = [...source.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
+    .filter((match) => match[1]?.includes('[data-octant-increased-contrast="true"]'))
+    .map((match) => `${match[1]?.trim() ?? ""} {${match[2] ?? ""}}`);
+  expect(rules, "missing increased contrast rules").not.toHaveLength(0);
+  return rules.join("\n");
+}
+
 function atRuleBlock(atRule: string, source = styles): string {
   const start = source.indexOf(atRule);
   expect(start, `missing CSS at-rule ${atRule}`).toBeGreaterThanOrEqual(0);
@@ -475,11 +484,9 @@ describe("WindowChrome", () => {
 
   it("keeps reduced transparency independent from increased contrast", () => {
     const reducedTransparency = atRuleBlock("@media (prefers-reduced-transparency: reduce)");
-    const increasedContrast = atRuleBlock("@media (prefers-contrast: more)");
+    const increasedContrast = increasedContrastRules();
 
-    expect(styles).not.toContain(
-      "@media (prefers-reduced-transparency: reduce), (prefers-contrast: more)",
-    );
+    expect(styles).not.toContain("prefers-contrast");
     expect(reducedTransparency).toContain(".shell--material-translucent.shell-frame > .sidebar");
     expect(reducedTransparency).toContain(
       '.shell--material-translucent[data-octant-sidebar-vibrancy="subtle"].shell-frame > .sidebar',
@@ -492,30 +499,26 @@ describe("WindowChrome", () => {
     expect(reducedTransparency).not.toContain("--octant-text-");
     expect(reducedTransparency).not.toContain("box-shadow:");
     expect(increasedContrast).toContain(
-      "--octant-text-primary: var(--octant-text-primary-high-contrast) !important;",
+      "--octant-text-primary: var(--octant-text-primary-high-contrast);",
     );
     expect(increasedContrast).toContain(
-      "--octant-text-secondary: var(--octant-text-secondary-high-contrast) !important;",
+      "--octant-text-secondary: var(--octant-text-secondary-high-contrast);",
     );
     expect(increasedContrast).toContain(
-      "--octant-text-muted: var(--octant-text-muted-high-contrast) !important;",
+      "--octant-text-muted: var(--octant-text-muted-high-contrast);",
     );
     expect(increasedContrast).toContain("border-color: var(--octant-border-strong);");
     expect(increasedContrast).toContain("background: var(--octant-control-hover);");
     expect(increasedContrast).not.toContain("box-shadow: inset 0 0 0 1px");
   });
 
-  it("overrides inline theme text tokens for OS Increased Contrast", () => {
-    const increasedContrast = atRuleBlock("@media (prefers-contrast: more)");
-    expect(increasedContrast).toContain(
-      "--octant-text-primary: var(--octant-text-primary-high-contrast) !important;",
+  it("maps the text roles to their high-contrast values under Increased contrast", () => {
+    const tokens = cssRule(':root[data-octant-increased-contrast="true"]');
+    expect(tokens).toContain("--octant-text-primary: var(--octant-text-primary-high-contrast);");
+    expect(tokens).toContain(
+      "--octant-text-secondary: var(--octant-text-secondary-high-contrast);",
     );
-    expect(increasedContrast).toContain(
-      "--octant-text-secondary: var(--octant-text-secondary-high-contrast) !important;",
-    );
-    expect(increasedContrast).toContain(
-      "--octant-text-muted: var(--octant-text-muted-high-contrast) !important;",
-    );
+    expect(tokens).toContain("--octant-text-muted: var(--octant-text-muted-high-contrast);");
   });
 
   it("keeps transient project dialogs as compact centered overlays", () => {
@@ -591,22 +594,14 @@ describe("WindowChrome", () => {
     expect(styles).toContain(".workspace-split__resize::before,");
     expect(styles).toContain(".project-memory-inspector *");
     expect(styles).toContain("@media (prefers-reduced-transparency: reduce)");
-    expect(styles).toContain("@media (prefers-contrast: more)");
     expect(styles).toContain(".shell--material-translucent.shell-frame > .sidebar");
-    expect(atRuleBlock("@media (prefers-contrast: more)")).toContain(".environment-checkout");
-    // The card outlines' override sits after their own borders, in the sheet
-    // that loads last, or the base hairline wins at equal specificity.
-    const environmentContrast = environmentStyles.slice(
-      environmentStyles.lastIndexOf("@media (prefers-contrast: more)"),
-    );
-    expect(environmentStyles.lastIndexOf("@media (prefers-contrast: more)")).toBeGreaterThan(
-      environmentStyles.indexOf(".environment-card__rows {"),
-    );
+    expect(increasedContrastRules()).toContain(".environment-checkout");
+    const environmentContrast = increasedContrastRules(environmentStyles);
     expect(environmentContrast).toContain(".thread-environment-dock__header");
     expect(environmentContrast).toContain(".environment-card__rows");
-    expect(cssRule('.project-row[data-active="true"]', 1)).toContain(
-      "background: var(--octant-control-hover);",
-    );
+    expect(
+      cssRule('html[data-octant-increased-contrast="true"] .project-row[data-active="true"]'),
+    ).toContain("background: var(--octant-control-hover);");
     expect(cssRule('.workspace-pane[data-active="true"] .workspace-pane__header')).toContain(
       "box-shadow: none;",
     );
@@ -622,14 +617,14 @@ describe("WindowChrome", () => {
     expect(cssRule(".shell--sidebar-collapsed .workspace-pane__header")).toContain(
       "padding-left: var(--octant-window-chrome-leading-width",
     );
-    expect(cssRule('.workspace-pane[data-active="true"]')).toContain(
-      "background: var(--octant-control-hover);",
-    );
-    expect(cssRule('.workspace-pane[data-active="true"]')).not.toMatch(/accent|purple/i);
-    expect(atRuleBlock("@media (prefers-contrast: more)")).toContain(".workspace-pane__header");
-    expect(atRuleBlock("@media (prefers-contrast: more)")).toContain(
-      '.workspace-pane[data-active="true"]',
-    );
+    expect(
+      cssRule('html[data-octant-increased-contrast="true"] .workspace-pane[data-active="true"]'),
+    ).toContain("background: var(--octant-control-hover);");
+    expect(
+      cssRule('html[data-octant-increased-contrast="true"] .workspace-pane[data-active="true"]'),
+    ).not.toMatch(/accent|purple/i);
+    expect(increasedContrastRules()).toContain(".workspace-pane__header");
+    expect(increasedContrastRules()).toContain('.workspace-pane[data-active="true"]');
   });
 
   it("keeps every Environment row on one unfilled grammar", () => {

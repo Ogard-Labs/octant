@@ -28,9 +28,9 @@ import { Cause, Effect, Exit, Option, type Scope } from "effect";
 import { childProcessEnvironment } from "../childProcessEnvironment";
 import { prepareConfinedVersionProbe } from "../process/confinedVersionProbe";
 import {
-  makeSeatbeltConfinementLive,
-  SeatbeltConfinementError,
-  type SeatbeltConfinementPort,
+  makeProcessConfinementLive,
+  ProcessConfinementError,
+  type ProcessConfinementPort,
 } from "../process/seatbeltProfile";
 import {
   materializeOsNetworkEgress,
@@ -91,7 +91,7 @@ export interface OpenCodeProcessPort {
 
 export interface OpenCodeProcessOptions {
   readonly inheritedEnvironment?: NodeJS.ProcessEnv;
-  readonly confinement?: SeatbeltConfinementPort;
+  readonly confinement?: ProcessConfinementPort;
   /**
    * The platform `confinement` confines for — the dialect launch-local rules
    * are written in, not necessarily the platform this process runs on.
@@ -105,7 +105,7 @@ export interface OpenCodeProcessOptions {
 }
 
 export interface OpenCodeProbeOptions {
-  readonly confinement?: SeatbeltConfinementPort;
+  readonly confinement?: ProcessConfinementPort;
 }
 
 export interface OpenCodeProcessDependencies {
@@ -173,7 +173,7 @@ type OpenCodeChild = ChildProcessByStdio<null, Readable, Readable>;
 interface ResolvedOpenCodeProcessOptions {
   readonly inheritedEnvironment: NodeJS.ProcessEnv | undefined;
   readonly runtimeConfig: PrivateRuntimeConfig;
-  readonly confinement: SeatbeltConfinementPort;
+  readonly confinement: ProcessConfinementPort;
   readonly platform: NodeJS.Platform;
   readonly onDiagnostic: ((message: string) => void) | undefined;
   readonly shutdownTimeoutMs: number;
@@ -905,7 +905,7 @@ function prepareGitStandinDirectory(profile: PrivateOpenCodeProfile): string {
 function prepareOpenCodeLaunch(
   input: OpenCodeProcessStartInput,
   profile: PrivateOpenCodeProfile,
-  confinement: SeatbeltConfinementPort,
+  confinement: ProcessConfinementPort,
   runtime: OpenCodeRuntime,
   port: number,
   platform: NodeJS.Platform,
@@ -1044,10 +1044,10 @@ function prepareOpenCodeLaunch(
     },
     catch: (error) =>
       failure(
-        error instanceof SeatbeltConfinementError && error.reason === "invalid-configuration"
+        error instanceof ProcessConfinementError && error.reason === "invalid-configuration"
           ? "invalid-configuration"
           : "incompatible",
-        error instanceof SeatbeltConfinementError ||
+        error instanceof ProcessConfinementError ||
           (error instanceof Error && error.message.includes("tool bridge port"))
           ? error.message
           : "OpenCode process confinement could not be prepared.",
@@ -1486,7 +1486,7 @@ export function makeOpenCodeProcessLive(
     startupTimeoutMs: options.startupTimeoutMs ?? DEFAULT_STARTUP_TIMEOUT_MS,
     terminateProcessGroup: dependencies.terminateProcessGroup,
     reserveLoopbackPort: dependencies.reserveLoopbackPort ?? reserveLoopbackPort,
-    confinement: options.confinement ?? makeSeatbeltConfinementLive(),
+    confinement: options.confinement ?? makeProcessConfinementLive(),
     platform: options.platform ?? process.platform,
   };
 

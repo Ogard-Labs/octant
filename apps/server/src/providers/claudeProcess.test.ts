@@ -24,8 +24,8 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createFakeSandboxConfinement } from "../process/fakeSandboxConfinement";
 import {
   seatbeltExecRule,
-  type SeatbeltConfinementPort,
-  type SeatbeltConfinementPrepareInput,
+  type ProcessConfinementPort,
+  type ProcessConfinementPrepareInput,
 } from "../process/seatbeltProfile";
 import {
   makeClaudeProcessLive,
@@ -44,7 +44,7 @@ const directories: string[] = [];
  * with the confinement passed straight through. Cases that assert the runtime
  * profile pass the shimmed builder instead.
  */
-const passthroughConfinement: SeatbeltConfinementPort = {
+const passthroughConfinement: ProcessConfinementPort = {
   prepare: (input) => ({ command: input.executable, args: input.args }),
 };
 
@@ -445,13 +445,13 @@ describe("ClaudeProcessPort spawn", () => {
 
 describe("Claude runtime confinement", () => {
   function recordingConfinement(): {
-    readonly port: SeatbeltConfinementPort;
-    readonly prepared: SeatbeltConfinementPrepareInput[];
+    readonly port: ProcessConfinementPort;
+    readonly prepared: ProcessConfinementPrepareInput[];
     readonly sandboxPath: string;
   } {
     const fake = createFakeSandboxConfinement("octant-claude-confinement-");
     directories.push(fake.root);
-    const prepared: SeatbeltConfinementPrepareInput[] = [];
+    const prepared: ProcessConfinementPrepareInput[] = [];
     return {
       prepared,
       sandboxPath: fake.sandboxPath,

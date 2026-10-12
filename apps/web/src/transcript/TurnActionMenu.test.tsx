@@ -109,7 +109,9 @@ describe("the turn action menu", () => {
     expect(block).toContain("opacity: 0");
     expect(block).not.toContain("display: none");
     expect(block).toMatch(/@media \(max-width: 680px\)[\s\S]*opacity: 1/);
-    expect(block).toMatch(/@media \(prefers-contrast: more\)[\s\S]*opacity: 1/);
+    expect(block).toMatch(
+      /\[data-octant-increased-contrast="true"\] \.turn-action-menu__more \{[^}]*opacity: 1/,
+    );
   });
 
   it("copies a message from the action beside its timestamp", async () => {

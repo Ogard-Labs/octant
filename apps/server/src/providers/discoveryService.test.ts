@@ -12,14 +12,14 @@ import {
   type DiscoveryExecPort,
   type DiscoveryFsPort,
 } from "./discoveryService";
-import type { SeatbeltConfinementPort } from "../process/seatbeltProfile";
+import type { ProcessConfinementPort } from "../process/seatbeltProfile";
 
 /**
  * These cases assert what the scan finds and what it hands a candidate, not
  * the profile. The live builder refuses on a host without `sandbox-exec`, and
  * a wrapped command would no longer match the fake exec's key.
  */
-const passthroughConfinement: SeatbeltConfinementPort = {
+const passthroughConfinement: ProcessConfinementPort = {
   prepare: (input) => ({ command: input.executable, args: input.args }),
 };
 

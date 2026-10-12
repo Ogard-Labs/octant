@@ -618,6 +618,94 @@ describe("createAgentRunSessionRuntime", () => {
     }
   });
 
+  it("does not cut off a child run while it waits for a person's approval", async () => {
+    vi.useFakeTimers();
+    try {
+      const provider = fakeProvider();
+      let answer: (approved: boolean) => void = () => undefined;
+      const { timeoutMs: _bounded, ...withoutDeadline } = runtimeOptions(provider, {
+        interactions: {
+          approve: () =>
+            new Promise<boolean>((resolve) => {
+              answer = resolve;
+            }),
+        },
+      });
+      const runtime = createAgentRunSessionRuntime(withoutDeadline);
+      let outcome: AgentRunSessionOutcome | undefined;
+      runtime.start(agentRun()).onSettled((value) => {
+        outcome = value;
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(provider.turns.length).toBe(1);
+
+      await vi.advanceTimersByTimeAsync(10 * 60_000);
+      await provider.emit({
+        kind: "approval-request",
+        sessionId,
+        requestId: "permission-1",
+        action: "shell",
+        description: "Run tests",
+      });
+      await vi.advanceTimersByTimeAsync(2 * MANAGED_AGENT_RUN_TURN_DEADLINE_MS);
+      expect(outcome).toBeUndefined();
+
+      answer(true);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(provider.answeredApprovals).toMatchObject([{ approved: true }]);
+      await provider.emit({ kind: "text-delta", sessionId, text: "Done." });
+      await provider.emit({ kind: "completed", sessionId });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(outcome?.kind).toBe("completed");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("still cuts off a child that works past the deadline", async () => {
+    vi.useFakeTimers();
+    try {
+      const provider = fakeProvider();
+      let answer: (approved: boolean) => void = () => undefined;
+      const { timeoutMs: _bounded, ...withoutDeadline } = runtimeOptions(provider, {
+        interactions: {
+          approve: () =>
+            new Promise<boolean>((resolve) => {
+              answer = resolve;
+            }),
+        },
+      });
+      const runtime = createAgentRunSessionRuntime(withoutDeadline);
+      let outcome: AgentRunSessionOutcome | undefined;
+      runtime.start(agentRun()).onSettled((value) => {
+        outcome = value;
+      });
+      await vi.advanceTimersByTimeAsync(10 * 60_000);
+      await provider.emit({
+        kind: "approval-request",
+        sessionId,
+        requestId: "permission-1",
+        action: "shell",
+        description: "Run tests",
+      });
+      await vi.advanceTimersByTimeAsync(60 * 60_000);
+      answer(true);
+      await vi.advanceTimersByTimeAsync(0);
+
+      // Ten working minutes before the wait count toward the bound; the hour
+      // spent waiting for the person does not.
+      await vi.advanceTimersByTimeAsync(MANAGED_AGENT_RUN_TURN_DEADLINE_MS - 10 * 60_000 - 1_000);
+      expect(outcome).toBeUndefined();
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(outcome).toMatchObject({
+        kind: "interrupted",
+        reason: "Managed AgentRun turn exceeded its runtime deadline.",
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("publishes managed response deltas without changing the terminal outcome", async () => {
     const provider = fakeProvider();
     const started: string[] = [];

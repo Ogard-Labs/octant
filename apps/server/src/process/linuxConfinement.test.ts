@@ -17,10 +17,10 @@ import { spawnSync } from "node:child_process";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   buildLinuxAllowDefaultDenyLaunch,
-  buildLinuxConfinementLaunch,
+  buildBubblewrapLaunch,
   DEFAULT_BWRAP_PATH,
 } from "./linuxConfinement";
-import { SeatbeltConfinementError } from "./seatbeltProfile";
+import { ProcessConfinementError } from "./seatbeltProfile";
 
 const directories: string[] = [];
 
@@ -117,7 +117,7 @@ describe("Linux Full access extension denials", () => {
 describe("Linux Bubblewrap confinement", () => {
   it("uses a private tmpfs for /tmp instead of binding the host directory", () => {
     const { boundRoot, bwrapPath } = fixture();
-    const launch = buildLinuxConfinementLaunch(
+    const launch = buildBubblewrapLaunch(
       {
         executable: "/bin/true",
         args: [],
@@ -138,7 +138,7 @@ describe("Linux Bubblewrap confinement", () => {
 
   it("still binds a dedicated temporary directory after hiding host /tmp", () => {
     const { boundRoot, temporaryDirectory, bwrapPath } = fixture();
-    const launch = buildLinuxConfinementLaunch(
+    const launch = buildBubblewrapLaunch(
       {
         executable: "/bin/true",
         args: [],
@@ -162,7 +162,7 @@ describe("Linux Bubblewrap confinement", () => {
     const readRoot = join(root, "readable");
     const denied = join(readRoot, "secret");
     mkdirSync(denied, { recursive: true });
-    const launch = buildLinuxConfinementLaunch(
+    const launch = buildBubblewrapLaunch(
       {
         executable: "/bin/true",
         args: [],
@@ -185,7 +185,7 @@ describe("Linux Bubblewrap confinement", () => {
     const executable = join(root, "true");
     writeFileSync(executable, "#!/bin/sh\n", { mode: 0o700 });
     chmodSync(executable, 0o700);
-    const launch = buildLinuxConfinementLaunch(
+    const launch = buildBubblewrapLaunch(
       {
         executable,
         args: [],
@@ -221,7 +221,7 @@ describe("Linux Bubblewrap confinement", () => {
     const executable = join(root, "tool");
     writeFileSync(executable, "#!/bin/sh\n", { mode: 0o700 });
     chmodSync(executable, 0o700);
-    const launch = buildLinuxConfinementLaunch(
+    const launch = buildBubblewrapLaunch(
       {
         executable,
         args: [],
@@ -250,7 +250,7 @@ describe("Linux Bubblewrap confinement", () => {
     const trapFile = join(root, "seccomp-trap");
     writeFileSync(trapFile, "untouched", { mode: 0o600 });
     symlinkSync(trapFile, predictablePath);
-    const launch = buildLinuxConfinementLaunch(
+    const launch = buildBubblewrapLaunch(
       {
         executable: "/bin/true",
         args: [],
@@ -277,7 +277,7 @@ describe("Linux Bubblewrap confinement", () => {
     mkdirSync(realTemporaryDirectory);
     symlinkSync(realTemporaryDirectory, linkedTemporaryDirectory);
     expect(() =>
-      buildLinuxConfinementLaunch(
+      buildBubblewrapLaunch(
         {
           executable: "/bin/true",
           args: [],
@@ -289,12 +289,12 @@ describe("Linux Bubblewrap confinement", () => {
         },
         { bwrapPath },
       ),
-    ).toThrow(SeatbeltConfinementError);
+    ).toThrow(ProcessConfinementError);
   });
 
   it("does not install a process-deny seccomp filter when exec and fork stay allowed", () => {
     const { boundRoot, temporaryDirectory, bwrapPath } = fixture();
-    const launch = buildLinuxConfinementLaunch(
+    const launch = buildBubblewrapLaunch(
       {
         executable: "/bin/true",
         args: [],
@@ -313,7 +313,7 @@ describe("Linux Bubblewrap confinement", () => {
   it("fails closed when Plan process denial runs on an unsupported architecture", () => {
     const { boundRoot, temporaryDirectory, bwrapPath } = fixture();
     expect(() =>
-      buildLinuxConfinementLaunch(
+      buildBubblewrapLaunch(
         {
           executable: "/bin/true",
           args: [],
@@ -326,13 +326,13 @@ describe("Linux Bubblewrap confinement", () => {
         },
         { bwrapPath, processArch: "ia32" },
       ),
-    ).toThrow(SeatbeltConfinementError);
+    ).toThrow(ProcessConfinementError);
   });
 
   it("fails closed when bubblewrap is missing", () => {
     const { boundRoot, temporaryDirectory, root } = fixture();
     expect(() =>
-      buildLinuxConfinementLaunch(
+      buildBubblewrapLaunch(
         {
           executable: "/bin/true",
           args: [],
@@ -342,7 +342,7 @@ describe("Linux Bubblewrap confinement", () => {
         },
         { bwrapPath: join(root, "missing-bwrap") },
       ),
-    ).toThrow(SeatbeltConfinementError);
+    ).toThrow(ProcessConfinementError);
   });
 
   it.runIf(process.platform === "linux" && canRunHostBwrap())(
@@ -354,7 +354,7 @@ describe("Linux Bubblewrap confinement", () => {
       directories.push(sentinel);
       const result = spawnSync(
         DEFAULT_BWRAP_PATH,
-        buildLinuxConfinementLaunch({
+        buildBubblewrapLaunch({
           executable: "/bin/sh",
           args: ["-c", 'test ! -r "$1" && printf confined', "sh", sentinel],
           boundRoot,
@@ -373,7 +373,7 @@ describe("Linux Bubblewrap confinement", () => {
     "still launches a Plan command after installing the process-deny filter",
     () => {
       const { boundRoot, temporaryDirectory } = fixture();
-      const launch = buildLinuxConfinementLaunch({
+      const launch = buildBubblewrapLaunch({
         executable: "/bin/true",
         args: [],
         boundRoot,
@@ -393,7 +393,7 @@ describe("Linux Bubblewrap confinement", () => {
     "blocks a Plan subshell from forking after the command has started",
     () => {
       const { boundRoot, temporaryDirectory } = fixture();
-      const launch = buildLinuxConfinementLaunch({
+      const launch = buildBubblewrapLaunch({
         executable: "/bin/sh",
         args: ["-c", "printf parent; (printf nested)"],
         boundRoot,
@@ -414,7 +414,7 @@ describe("Linux Bubblewrap confinement", () => {
     const { root, boundRoot, temporaryDirectory, bwrapPath } = fixture();
     const shellStateDirectory = join(root, "shell-state");
     mkdirSync(shellStateDirectory);
-    const launch = buildLinuxConfinementLaunch(
+    const launch = buildBubblewrapLaunch(
       {
         executable: "/bin/bash",
         args: ["-l"],
@@ -432,7 +432,7 @@ describe("Linux Bubblewrap confinement", () => {
     expect(launch.args).not.toContain("--new-session");
     expect(launch.args).toContain("--dev");
 
-    const nonTerminal = buildLinuxConfinementLaunch(
+    const nonTerminal = buildBubblewrapLaunch(
       {
         executable: "/bin/bash",
         args: ["-l"],
@@ -450,7 +450,7 @@ describe("Linux Bubblewrap confinement", () => {
     const shellStateDirectory = join(root, "shell-state");
     mkdirSync(shellStateDirectory);
     expect(() =>
-      buildLinuxConfinementLaunch(
+      buildBubblewrapLaunch(
         {
           executable: "/bin/bash",
           args: ["-l"],
@@ -462,7 +462,7 @@ describe("Linux Bubblewrap confinement", () => {
         },
         { bwrapPath },
       ),
-    ).toThrow(SeatbeltConfinementError);
+    ).toThrow(ProcessConfinementError);
   });
 });
 

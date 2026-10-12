@@ -13,10 +13,10 @@ import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
-  SeatbeltConfinementError,
+  ProcessConfinementError,
   buildDenyDefaultSeatbeltProfile,
   escapeSeatbeltPath,
-  makeSeatbeltConfinementLive,
+  makeProcessConfinementLive,
   privateHomeDenyReadRules,
   requireSandboxExec,
   seatbeltAllowLiteralReadRule,
@@ -398,7 +398,7 @@ describe("shared Seatbelt profile builder", () => {
         allowFileReadStar: true,
         privateHomeAllowPaths: [],
       }),
-    ).toThrow(SeatbeltConfinementError);
+    ).toThrow(ProcessConfinementError);
   });
 
   it("builds a deny-default profile with exactly one bound root write plus private temp", () => {
@@ -608,7 +608,7 @@ describe("shared Seatbelt profile builder", () => {
         networkEgress: "none",
         privateHomeAllowPaths: [],
       }),
-    ).toThrow(SeatbeltConfinementError);
+    ).toThrow(ProcessConfinementError);
   });
 
   it("refuses a launch root equal to a denied sensitive path", () => {
@@ -619,7 +619,7 @@ describe("shared Seatbelt profile builder", () => {
         networkEgress: "none",
         privateHomeAllowPaths: [],
       }),
-    ).toThrow(SeatbeltConfinementError);
+    ).toThrow(ProcessConfinementError);
   });
 
   it("still allows a launch root that is a descendant of a denied sensitive path", () => {
@@ -696,16 +696,16 @@ describe("shared Seatbelt profile builder", () => {
     const root = temporaryRoot();
     const missing = join(root, "missing-sandbox-exec");
     expect(() => requireSandboxExec({ platform: "darwin", sandboxPath: missing })).toThrow(
-      SeatbeltConfinementError,
+      ProcessConfinementError,
     );
     expect(() =>
       requireSandboxExec({ platform: "linux", sandboxPath: "/usr/bin/sandbox-exec" }),
-    ).toThrow(SeatbeltConfinementError);
+    ).toThrow(ProcessConfinementError);
 
     const notExecutable = join(root, "sandbox-exec");
     writeFileSync(notExecutable, "#!/bin/sh\n", { mode: 0o600 });
     expect(() => requireSandboxExec({ platform: "darwin", sandboxPath: notExecutable })).toThrow(
-      SeatbeltConfinementError,
+      ProcessConfinementError,
     );
   });
 
@@ -719,7 +719,7 @@ describe("shared Seatbelt profile builder", () => {
     writeFileSync(sandboxPath, "#!/bin/sh\n", { mode: 0o700 });
     chmodSync(sandboxPath, 0o700);
 
-    const confinement = makeSeatbeltConfinementLive({
+    const confinement = makeProcessConfinementLive({
       platform: "darwin",
       sandboxPath,
       homeDirectory: root,
@@ -741,7 +741,7 @@ describe("shared Seatbelt profile builder", () => {
     expect(launch.args[1]).not.toContain("(allow network*)");
     expect(launch.args.slice(2, 4)).toEqual(["--", "/usr/bin/true"]);
 
-    const missing = makeSeatbeltConfinementLive({
+    const missing = makeProcessConfinementLive({
       platform: "darwin",
       sandboxPath: join(root, "absent"),
       homeDirectory: root,
@@ -755,7 +755,7 @@ describe("shared Seatbelt profile builder", () => {
         temporaryDirectory,
         networkEgress: "allow",
       }),
-    ).toThrow(SeatbeltConfinementError);
+    ).toThrow(ProcessConfinementError);
     expect(existsSync(join(root, "absent"))).toBe(false);
   });
 
@@ -886,7 +886,7 @@ describe("shared Seatbelt profile builder", () => {
     writeFileSync(sandboxPath, "#!/bin/sh\n", { mode: 0o700 });
     chmodSync(sandboxPath, 0o700);
 
-    const launch = makeSeatbeltConfinementLive({
+    const launch = makeProcessConfinementLive({
       platform: "darwin",
       sandboxPath,
       homeDirectory: root,
@@ -926,7 +926,7 @@ describe("shared Seatbelt profile builder", () => {
     writeFileSync(interpreter, "#!/bin/sh\n", { mode: 0o700 });
     writeFileSync(script, "#!/usr/bin/env node\nconsole.log(1)\n", { mode: 0o700 });
 
-    const launch = makeSeatbeltConfinementLive({
+    const launch = makeProcessConfinementLive({
       platform: "darwin",
       sandboxPath,
       homeDirectory: root,
@@ -974,7 +974,7 @@ describe("shared Seatbelt profile builder", () => {
     symlinkSync(interpreter, launcher);
     writeFileSync(script, "#!/usr/bin/env node\nconsole.log(1)\n", { mode: 0o700 });
 
-    const launch = makeSeatbeltConfinementLive({
+    const launch = makeProcessConfinementLive({
       platform: "darwin",
       sandboxPath,
       homeDirectory: root,
@@ -1016,7 +1016,7 @@ describe("shared Seatbelt profile builder", () => {
       mode: 0o700,
     });
 
-    const launch = makeSeatbeltConfinementLive({
+    const launch = makeProcessConfinementLive({
       platform: "darwin",
       sandboxPath,
       homeDirectory: root,
@@ -1055,7 +1055,7 @@ describe("shared Seatbelt profile builder", () => {
     writeFileSync(companion, "#!/bin/sh\n", { mode: 0o700 });
     writeFileSync(script, `#!${interpreter}\n`, { mode: 0o700 });
 
-    const launch = makeSeatbeltConfinementLive({
+    const launch = makeProcessConfinementLive({
       platform: "darwin",
       sandboxPath,
       homeDirectory: root,
@@ -1084,7 +1084,7 @@ describe("shared Seatbelt profile builder", () => {
     mkdirSync(temporaryDirectory);
     writeFileSync(sandboxPath, "#!/bin/sh\n", { mode: 0o700 });
 
-    const launch = makeSeatbeltConfinementLive({
+    const launch = makeProcessConfinementLive({
       platform: "darwin",
       sandboxPath,
       homeDirectory: root,
@@ -1113,7 +1113,7 @@ describe("shared Seatbelt profile builder", () => {
     mkdirSync(shellStateDirectory, { recursive: true });
     writeFileSync(sandboxPath, "#!/bin/sh\n", { mode: 0o700 });
 
-    const launch = makeSeatbeltConfinementLive({
+    const launch = makeProcessConfinementLive({
       platform: "darwin",
       sandboxPath,
       homeDirectory: root,

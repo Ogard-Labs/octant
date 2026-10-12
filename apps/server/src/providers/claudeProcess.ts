@@ -22,10 +22,10 @@ import { Effect } from "effect";
 
 import { prepareConfinedVersionProbe } from "../process/confinedVersionProbe";
 import {
-  makeSeatbeltConfinementLive,
-  SeatbeltConfinementError,
+  makeProcessConfinementLive,
+  ProcessConfinementError,
   seatbeltExecRule,
-  type SeatbeltConfinementPort,
+  type ProcessConfinementPort,
 } from "../process/seatbeltProfile";
 import {
   materializeOsNetworkEgress,
@@ -75,7 +75,7 @@ export interface ClaudeProcessPort {
 
 export interface ClaudeProcessOptions {
   readonly inheritedEnvironment?: NodeJS.ProcessEnv;
-  readonly confinement?: SeatbeltConfinementPort;
+  readonly confinement?: ProcessConfinementPort;
   readonly onDiagnostic?: (message: string) => void;
   readonly probeOutputBytes?: number;
   readonly probeTimeoutMs?: number;
@@ -95,7 +95,7 @@ type ProbeKind = "authentication" | "version";
 
 interface ResolvedClaudeProcessOptions {
   readonly inheritedEnvironment: NodeJS.ProcessEnv;
-  readonly confinement: SeatbeltConfinementPort;
+  readonly confinement: ProcessConfinementPort;
   readonly onDiagnostic: ((message: string) => void) | undefined;
   readonly probeOutputBytes: number;
   readonly probeTimeoutMs: number;
@@ -433,7 +433,7 @@ function planStateDirectories(
       path.startsWith(`${boundRoot}${sep}`) ||
       boundRoot.startsWith(`${path}${sep}`)
     ) {
-      throw new SeatbeltConfinementError(
+      throw new ProcessConfinementError(
         "invalid-configuration",
         "Claude Plan confinement cannot grant a runtime state directory that overlaps the checkout.",
       );
@@ -470,7 +470,7 @@ function confineClaudeLaunch(
     return { spawnOptions, release: () => undefined };
   }
   if (!isAbsolute(confinement.projectRoot) || !existsSync(confinement.projectRoot)) {
-    throw new SeatbeltConfinementError(
+    throw new ProcessConfinementError(
       "invalid-configuration",
       "Claude runtime confinement requires an existing absolute project root.",
     );
@@ -485,7 +485,7 @@ function confineClaudeLaunch(
   try {
     temporaryRoot = realpathSync(spawnOptions.env.TMPDIR ?? tmpdir());
   } catch {
-    throw new SeatbeltConfinementError(
+    throw new ProcessConfinementError(
       "invalid-configuration",
       "Claude runtime confinement could not create a private temporary directory.",
     );
@@ -495,7 +495,7 @@ function confineClaudeLaunch(
   // folder the caller named outranks the bound root's denial. Refuse it before
   // anything is created there.
   if (temporaryRoot === boundRoot || temporaryRoot.startsWith(`${boundRoot}${sep}`)) {
-    throw new SeatbeltConfinementError(
+    throw new ProcessConfinementError(
       "invalid-configuration",
       "Claude runtime confinement requires a temporary directory outside the checkout.",
     );
@@ -504,7 +504,7 @@ function confineClaudeLaunch(
   try {
     temporaryDirectory = realpathSync(mkdtempSync(join(temporaryRoot, "octant-claude-plan-")));
   } catch {
-    throw new SeatbeltConfinementError(
+    throw new ProcessConfinementError(
       "invalid-configuration",
       "Claude runtime confinement could not create a private temporary directory.",
     );
@@ -728,7 +728,7 @@ function spawnOwnedClaudeProcess(
 export function makeClaudeProcessLive(options: ClaudeProcessOptions = {}): ClaudeProcessPort {
   const resolved: ResolvedClaudeProcessOptions = {
     inheritedEnvironment: { ...(options.inheritedEnvironment ?? process.env) },
-    confinement: options.confinement ?? makeSeatbeltConfinementLive(),
+    confinement: options.confinement ?? makeProcessConfinementLive(),
     onDiagnostic: options.onDiagnostic,
     probeOutputBytes: options.probeOutputBytes ?? DEFAULT_PROBE_OUTPUT_BYTES,
     probeTimeoutMs: options.probeTimeoutMs ?? DEFAULT_PROBE_TIMEOUT_MS,

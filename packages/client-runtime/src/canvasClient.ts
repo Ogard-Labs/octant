@@ -1,5 +1,6 @@
 import {
   decodeCanvasActionResult,
+  decodeCanvasDesignAssetsOutcome,
   decodeCanvasGetOutcome,
   decodeCanvasHistoryOutcome,
   decodeCanvasCreateResult,
@@ -19,6 +20,7 @@ import {
   type CanvasActionCancelRequest,
   type CanvasActionRequest,
   type CanvasActionResult,
+  type CanvasDesignAssetsOutcome,
   type CanvasGetOutcome,
   type CanvasHistoryOutcome,
   type CanvasId,
@@ -75,6 +77,16 @@ export interface CanvasClient {
   inventory(projectId: ProjectId, query?: string): Promise<CanvasInventoryList>;
   get(canvasId: CanvasId, versionId?: string): Promise<CanvasGetOutcome>;
   history(canvasId: CanvasId): Promise<CanvasHistoryOutcome>;
+  /**
+   * One design's declared images, resolved by the host for this reader now.
+   * Asked again on every draw; a host without the route omits it and designs
+   * draw placeholders.
+   */
+  designAssets?(input: {
+    readonly canvasId: CanvasId;
+    readonly versionId: string;
+    readonly blockId: string;
+  }): Promise<CanvasDesignAssetsOutcome>;
   revise(request: CanvasReviseRequest): Promise<CanvasReviseResult>;
   /**
    * Journal a user's node positions as a new immutable version of a board.
@@ -172,6 +184,18 @@ export function createCanvasClient(options: CanvasClientOptions): CanvasClient {
         url.toString(),
         { method: "GET", headers },
         decodeCanvasGetOutcome,
+      );
+    },
+    designAssets(input) {
+      const url = new URL("/api/canvas/design-assets", options.baseUrl);
+      url.searchParams.set("canvasId", String(input.canvasId));
+      url.searchParams.set("versionId", input.versionId);
+      url.searchParams.set("blockId", input.blockId);
+      return request(
+        options.fetch,
+        url.toString(),
+        { method: "GET", headers, cache: "no-store" },
+        decodeCanvasDesignAssetsOutcome,
       );
     },
     history(canvasId) {

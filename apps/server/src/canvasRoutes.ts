@@ -2,6 +2,8 @@ import { decodeCanvasDocumentRecipeCatalog } from "@octant/contracts/canvas-skil
 import {
   type CanvasId,
   decodeCanvasActionResult,
+  decodeCanvasBlockId,
+  decodeCanvasDesignAssetsOutcome,
   decodeCanvasGetOutcome,
   decodeCanvasHistoryOutcome,
   decodeCanvasId,
@@ -24,7 +26,11 @@ import {
   decodeCanvasShareResult,
   decodeCanvasVersionId,
   decodeProjectId,
+  type CanvasDesignAssetResolution,
+  type CanvasDesignAssetsOutcome,
+  type CanvasDesignBlock,
   type CanvasGetOutcome,
+  type CanvasProvenance,
   type CanvasInventoryEntry,
   type ProjectId,
   type ShellBootstrap,
@@ -92,6 +98,16 @@ export interface CanvasRouteDependencies {
   readonly resolveFolderCandidate?: (windowId: WindowId, input: unknown) => Promise<string>;
   /** Comment journal; a host without it serves boards without a conversation. */
   readonly canvasCommentService?: CanvasCommentService;
+  /**
+   * Resolves a design's declared images under the authority of the Canvas
+   * version holding it. Absent on a host that cannot, and every design is then
+   * drawn with placeholders: the route answers that the images are
+   * unavailable rather than guessing.
+   */
+  readonly resolveDesignAssets?: (
+    block: CanvasDesignBlock,
+    provenance: CanvasProvenance,
+  ) => Promise<ReadonlyArray<CanvasDesignAssetResolution>>;
   readonly windowAuthorityStore: WindowAuthorityStore;
   readonly projects: Pick<ProjectService, "bootstrap">;
   readonly activeContextResolver: (
@@ -149,6 +165,7 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
     if (
       route !== "inventory" &&
       route !== "get" &&
+      route !== "design-assets" &&
       route !== "history" &&
       route !== "revise" &&
       route !== "layout-revise" &&
@@ -261,6 +278,32 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
           versionId,
         );
         return jsonResponse(decodeCanvasGetOutcome(outcome), 200, origin);
+      }
+
+      if (route === "design-assets" && request.method === "GET") {
+        const keys = [...url.searchParams.keys()];
+        if (
+          keys.length !== 3 ||
+          !keys.every((key) => key === "canvasId" || key === "versionId" || key === "blockId")
+        ) {
+          return failureResponse("Canvas design assets request is invalid.", 400, origin);
+        }
+        let parsed;
+        try {
+          parsed = {
+            canvasId: decodeCanvasId(url.searchParams.get("canvasId") ?? ""),
+            versionId: decodeCanvasVersionId(url.searchParams.get("versionId") ?? ""),
+            blockId: decodeCanvasBlockId(url.searchParams.get("blockId") ?? ""),
+          };
+        } catch {
+          return failureResponse("Canvas design assets request is invalid.", 400, origin);
+        }
+        const outcome = await resolveDesignAssetsForWindow(
+          dependencies,
+          authenticatedWindowId,
+          parsed,
+        );
+        return jsonResponse(decodeCanvasDesignAssetsOutcome(outcome), 200, origin);
       }
 
       if (route === "history" && request.method === "GET") {
@@ -1427,6 +1470,61 @@ async function resolveCanvasGet(
     context.project,
     versionId,
   );
+}
+
+/**
+ * One design's images for this reader, now. The read runs the same
+ * authorization `get` does, for the version the reader is drawing, and the
+ * images resolve under that version's own provenance: its mode, Project, and
+ * thread. Nothing is cached, so a paired device or a window asks through the
+ * same checks every time it draws the design.
+ */
+async function resolveDesignAssetsForWindow(
+  dependencies: CanvasRouteDependencies,
+  windowId: WindowId,
+  input: {
+    readonly canvasId: CanvasId;
+    readonly versionId: ReturnType<typeof decodeCanvasVersionId>;
+    readonly blockId: ReturnType<typeof decodeCanvasBlockId>;
+  },
+): Promise<CanvasDesignAssetsOutcome> {
+  const read = await resolveCanvasGet(dependencies, windowId, input.canvasId, input.versionId);
+  if (read.kind === "unauthorized") return { kind: "unauthorized", canvasId: input.canvasId };
+  if (read.kind !== "ready") {
+    return {
+      kind: "unavailable",
+      canvasId: input.canvasId,
+      reason: "Canvas is unavailable. Reopen it from the Project.",
+    };
+  }
+  const definition = read.version.definition;
+  const block = definition.blocks.find(
+    (candidate): candidate is CanvasDesignBlock =>
+      candidate.kind === "design" && String(candidate.blockId) === String(input.blockId),
+  );
+  if (block === undefined) {
+    return {
+      kind: "unavailable",
+      canvasId: input.canvasId,
+      reason: "That design is not in this Canvas version.",
+    };
+  }
+  const resolve = dependencies.resolveDesignAssets;
+  const assets =
+    resolve === undefined
+      ? (block.assets ?? []).map((asset) => ({
+          assetId: asset.assetId,
+          status: "unavailable" as const,
+          reason: "refused" as const,
+        }))
+      : await resolve(block, definition.provenance);
+  return {
+    kind: "ready",
+    canvasId: input.canvasId,
+    versionId: read.version.versionId,
+    blockId: block.blockId,
+    assets,
+  };
 }
 
 function toInventoryEntry(entry: CanvasProjectionEntry): CanvasInventoryEntry {

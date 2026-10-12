@@ -54,7 +54,7 @@ import {
 
 const DEFAULT_MAX_EVENTS = 256;
 /**
- * The longest one managed child turn may run, from acquiring the provider to
+ * The longest one managed child turn may work, from acquiring the provider to
  * its terminal event.
  *
  * A child doing real work reads, edits, and runs checks for many minutes, and a
@@ -63,7 +63,12 @@ const DEFAULT_MAX_EVENTS = 256;
  * capacity reservation until it fires, and nothing else ends a silent turn.
  * Thirty minutes is long enough for a bounded implementation or review task and
  * short enough that a stuck child frees its slot within one working session.
- * A child waiting on a person's approval or answer is inside this bound too.
+ *
+ * Time spent waiting for a person's approval or answer does not count: a child
+ * cut off while its approval card sat unanswered loses its work through no
+ * fault of its own, and the person, not the provider, is the one holding it.
+ * There is no separate wall-time bound; a waiting child keeps its slot until
+ * the person answers, someone cancels it, or the host restarts.
  */
 export const MANAGED_AGENT_RUN_TURN_DEADLINE_MS = 30 * 60_000;
 /**
@@ -1266,13 +1271,73 @@ interface ManagedSessionState {
   acquired: boolean;
   /** Whether the runtime deadline, rather than the provider, ended the turn. */
   timedOut: boolean;
+  /** Stops the turn's deadline until the returned release is called. */
+  readonly awaitPerson: () => () => void;
 }
 
 /**
- * Runs one managed session under a single runtime deadline.
+ * A deadline that counts only the time a turn spends working.
+ *
+ * Each person wait — an approval or a question — stops the clock, and the clock
+ * resumes with the working time that remained once every overlapping wait has
+ * been answered.
+ */
+interface WorkingTimeDeadline {
+  /** Resolves once the turn has worked for the whole bound. */
+  readonly reached: Promise<void>;
+  readonly awaitPerson: () => () => void;
+  readonly dispose: () => void;
+}
+
+function startWorkingTimeDeadline(boundMs: number): WorkingTimeDeadline {
+  let remainingMs = boundMs;
+  let workingSince = Date.now();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let personWaits = 0;
+  let settled = false;
+  let reach = (): void => undefined;
+  const reached = new Promise<void>((resolve) => {
+    reach = resolve;
+  });
+  const work = (): void => {
+    workingSince = Date.now();
+    timer = setTimeout(() => {
+      settled = true;
+      timer = undefined;
+      reach();
+    }, remainingMs);
+  };
+  work();
+  return {
+    reached,
+    awaitPerson: () => {
+      if (personWaits === 0 && timer !== undefined) {
+        clearTimeout(timer);
+        timer = undefined;
+        remainingMs = Math.max(0, remainingMs - (Date.now() - workingSince));
+      }
+      personWaits += 1;
+      let released = false;
+      return () => {
+        if (released) return;
+        released = true;
+        personWaits -= 1;
+        if (personWaits === 0 && !settled) work();
+      };
+    },
+    dispose: () => {
+      settled = true;
+      if (timer !== undefined) clearTimeout(timer);
+      timer = undefined;
+    },
+  };
+}
+
+/**
+ * Runs one managed session under a single working-time deadline.
  *
  * The deadline covers acquisition, startup, the first send, and collection
- * together, because a provider that wedges before it ever emits an event is
+ * together, pausing only while the turn waits for a person, because a provider that wedges before it ever emits an event is
  * exactly the case a collection-only deadline cannot see: the run would stay
  * active and hold its capacity reservation until a user cancels or the host
  * restarts. Expiry is reported as `interrupted` — the contract's honest state
@@ -1283,6 +1348,8 @@ function runManagedSession(
 ): Effect.Effect<AgentRunSessionOutcome, ProviderFailure, never> {
   return Effect.scoped(
     Effect.gen(function* () {
+      const deadline = startWorkingTimeDeadline(input.timeoutMs);
+      yield* Effect.addFinalizer(() => Effect.sync(deadline.dispose));
       const state: ManagedSessionState = {
         outcome: undefined,
         responseText: "",
@@ -1295,6 +1362,7 @@ function runManagedSession(
         handledEvents: 0,
         acquired: false,
         timedOut: false,
+        awaitPerson: deadline.awaitPerson,
       };
 
       let released = false;
@@ -1368,12 +1436,9 @@ function runManagedSession(
         }),
       );
 
-      const finished = yield* runSessionTurn(input, state, releaseCapacity).pipe(
-        Effect.timeoutTo({
-          duration: input.timeoutMs,
-          onTimeout: () => "timed-out" as const,
-          onSuccess: (outcome: AgentRunSessionOutcome) => outcome,
-        }),
+      const finished = yield* Effect.raceFirst(
+        runSessionTurn(input, state, releaseCapacity),
+        Effect.promise(() => deadline.reached).pipe(Effect.as("timed-out" as const)),
       );
       const evidence = sessionEvidence(state);
       if (finished === "timed-out") {
@@ -1717,13 +1782,18 @@ function collectSessionEvents(
                   const approved = yield* Effect.tryPromise({
                     try: async (signal) => {
                       interactionSignal = AbortSignal.any([signal, toolAbort.signal]);
-                      return (
-                        (await input.interactions?.approve?.({
-                          run: input.run,
-                          event,
-                          signal: interactionSignal,
-                        })) ?? false
-                      );
+                      const resumeDeadline = state.awaitPerson();
+                      try {
+                        return (
+                          (await input.interactions?.approve?.({
+                            run: input.run,
+                            event,
+                            signal: interactionSignal,
+                          })) ?? false
+                        );
+                      } finally {
+                        resumeDeadline();
+                      }
                     },
                     catch: (): ProviderFailure => ({
                       category: "unavailable",
@@ -1749,11 +1819,16 @@ function collectSessionEvents(
                   const answer = yield* Effect.tryPromise({
                     try: async (signal) => {
                       interactionSignal = AbortSignal.any([signal, toolAbort.signal]);
-                      return input.interactions?.askUser?.({
-                        run: input.run,
-                        event,
-                        signal: interactionSignal,
-                      });
+                      const resumeDeadline = state.awaitPerson();
+                      try {
+                        return await input.interactions?.askUser?.({
+                          run: input.run,
+                          event,
+                          signal: interactionSignal,
+                        });
+                      } finally {
+                        resumeDeadline();
+                      }
                     },
                     catch: (): ProviderFailure => ({
                       category: "unavailable",

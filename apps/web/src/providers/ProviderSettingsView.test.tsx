@@ -1409,6 +1409,72 @@ describe("ProviderSettingsView", () => {
     expect(within(page).queryByLabelText(/Binary path/)).not.toBeInTheDocument();
   });
 
+  it.each([
+    ["OpenAI-compatible", httpProvider(), /^API base URL for /],
+    ["Anthropic-compatible", anthropicProvider(), /^API base URL for /],
+    ["Azure AI Foundry", foundryProvider(), /^Foundry OpenAI v1 base URL for /],
+  ] as const)(
+    "says a new address removes the stored key of an %s endpoint, then shows it needs the key",
+    async (_label, instance, addressName) => {
+      const user = userEvent.setup();
+      const props = fixture({ instance });
+      const { rerender } = renderExpanded(<ModelEndpointSettingsView {...props} />);
+      const page = screen.getByRole("region", { name: instance.displayName });
+      const address = within(page).getByRole("textbox", { name: addressName });
+      const note = /removes this endpoint's stored API key/;
+
+      // Only a changed address says so; the saved one reads as before.
+      expect(within(page).queryByText(note)).toBeNull();
+      await user.type(address, "x");
+      expect(within(page).getByText(note)).toBeVisible();
+      expect(address).toHaveAccessibleDescription(note);
+      await user.type(address, "{Backspace}");
+      expect(within(page).queryByText(note)).toBeNull();
+
+      // The trailing slash is spelling only: the host keeps the key for it.
+      await user.type(address, "{Backspace}");
+      expect(within(page).queryByText(note)).toBeNull();
+      await user.type(address, "/");
+
+      await user.clear(address);
+      await user.type(address, "http://127.0.0.1:9/v1/");
+      expect(within(page).getByText(note)).toBeVisible();
+      const save = within(page).getAllByRole("button", { name: /^Save .* settings for / })[0]!;
+      await user.click(save);
+      const change = (
+        instance.driverKind === "anthropic-compatible"
+          ? props.onChangeAnthropicCompatibleConfiguration
+          : instance.driverKind === "azure-foundry"
+            ? props.onChangeAzureFoundryConfiguration
+            : props.onChangeOpenAiCompatibleConfiguration
+      ) as ReturnType<typeof vi.fn>;
+      await waitFor(() => expect(change).toHaveBeenCalledOnce());
+
+      // The host saved the address and deleted the key with it; nothing has
+      // been checked since, so the row says what is needed rather than "Not checked yet".
+      vi.mocked(props.onProviderCredentialStatus).mockResolvedValue("missing");
+      const saved = [
+        {
+          ...instance,
+          configuration: { ...instance.configuration, baseUrl: "http://127.0.0.1:9/v1/" },
+          version: 2 as never,
+        } as ProviderInstance,
+      ];
+      rerender(<ModelEndpointSettingsView {...props} busy instances={saved} />);
+      rerender(<ModelEndpointSettingsView {...props} instances={saved} />);
+      await user.click(screen.getByRole("button", { name: "Back to Octant Harness" }));
+      expect(
+        await screen.findByRole("link", {
+          name: new RegExp(`^${instance.displayName}, needs key`),
+        }),
+      ).toBeVisible();
+      expect(screen.getByText("No API key is saved for it.")).toBeVisible();
+      expect(
+        screen.getByRole("button", { name: `Add key for ${instance.displayName}` }),
+      ).toBeVisible();
+    },
+  );
+
   it("offers an optional context window per model under Model endpoints that shows what Octant found", async () => {
     const user = userEvent.setup();
     const onModelContextWindowChange = vi.fn(async () => true);

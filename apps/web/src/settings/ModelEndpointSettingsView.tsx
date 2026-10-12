@@ -20,6 +20,7 @@ import { AddEndpointDialog, EndpointChoices, SIGN_IN_ENDPOINTS } from "./harness
 import {
   endpointModelCount,
   endpointStatus,
+  endpointTakesKey,
   endpointSubLine,
   type EndpointFixKind,
   type EndpointStatus,
@@ -88,6 +89,42 @@ export function ModelEndpointSettingsView(props: ModelEndpointSettingsViewProps)
       }),
     [endpoints],
   );
+  // A keyed endpoint nothing has checked yet, as the host's credential store
+  // sees it: the host deletes the key when an address changes, and the check
+  // that would say so has not run. Read again after each change settles, so a
+  // key just added stops reading as missing, and after a remount.
+  const [missingKeys, setMissingKeys] = useState<ReadonlySet<string>>(new Set());
+  const { credentialManagementAvailable, onProviderCredentialStatus } = props;
+  const unchecked = endpoints.filter(
+    (instance) =>
+      instance.enabled &&
+      endpointTakesKey(instance) &&
+      signInOfferOf(instance) === undefined &&
+      props.observedByInstance.get(instance.id) === undefined,
+  );
+  const uncheckedIds = unchecked.map((instance) => String(instance.id)).join(" ");
+  const settled = !props.busy;
+  useEffect(() => {
+    if (!credentialManagementAvailable || !settled || uncheckedIds === "") return undefined;
+    let current = true;
+    for (const id of uncheckedIds.split(" ")) {
+      void onProviderCredentialStatus(decodeProviderInstanceId(id)).then(
+        (status) => {
+          if (!current) return;
+          setMissingKeys((known) => {
+            const next = new Set(known);
+            if (status === "missing") next.add(id);
+            else next.delete(id);
+            return next;
+          });
+        },
+        () => undefined,
+      );
+    }
+    return () => {
+      current = false;
+    };
+  }, [credentialManagementAvailable, onProviderCredentialStatus, settled, uncheckedIds]);
   const { signIns, record } = useEndpointSignIns(signInTargets, props.onProviderOAuth);
   const presentation = props.presentationObservedByInstance ?? props.observedByInstance;
   const hiddenModels = props.defaults.hiddenModels ?? [];
@@ -111,6 +148,7 @@ export function ModelEndpointSettingsView(props: ModelEndpointSettingsViewProps)
       props.probingIds.has(instance.id) || props.updatingIds?.has(instance.id) === true;
     const status = endpointStatus({
       instance,
+      keyMissing: missingKeys.has(String(instance.id)),
       observed: props.observedByInstance.get(instance.id),
       checking,
       keysHere: props.credentialManagementAvailable,

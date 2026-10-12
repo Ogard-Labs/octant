@@ -1,7 +1,9 @@
 # Apple physical devices and distribution path
 
-Design only. Does not pull TestFlight or App Store submission into the
-technical preview. The first-release Apple loop stays Simulator and local macOS
+Design only. Covers the Apple workbench for a person's own apps and does not
+pull their TestFlight or App Store submission into the technical preview.
+Octant's own internal TestFlight track for its mobile remote client is separate
+and authorized; see [architecture](architecture.md#process-topology). The first-release Apple loop stays Simulator and local macOS
 on Apple Silicon ([0043](decisions/0043-simulator-follows-the-active-thread.md),
 superseding surface of [0014](decisions/0014-apple-development-capability.md)).
 

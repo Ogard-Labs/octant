@@ -15,7 +15,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { execVersionRead, prepareConfinedVersionProbe } from "./confinedVersionProbe";
-import { makeSeatbeltConfinementLive, seatbeltAllowRule } from "./seatbeltProfile";
+import { makeProcessConfinementLive, seatbeltAllowRule } from "./seatbeltProfile";
 
 const directories: string[] = [];
 
@@ -39,7 +39,7 @@ function host(): {
   readonly root: string;
   readonly home: string;
   readonly binaryPath: string;
-  readonly confinement: ReturnType<typeof makeSeatbeltConfinementLive>;
+  readonly confinement: ReturnType<typeof makeProcessConfinementLive>;
   readonly temporaryRoot: string;
 } {
   const root = temporaryRoot();
@@ -62,7 +62,7 @@ function host(): {
     home,
     binaryPath,
     temporaryRoot: scratchRoot,
-    confinement: makeSeatbeltConfinementLive({
+    confinement: makeProcessConfinementLive({
       platform: "darwin",
       sandboxPath,
       homeDirectory: home,
@@ -167,7 +167,7 @@ describe("confined version probe", () => {
       binaryPath: target.binaryPath,
       displayName: "Example",
       environment: () => ({}),
-      confinement: makeSeatbeltConfinementLive({
+      confinement: makeProcessConfinementLive({
         platform: "darwin",
         sandboxPath: join(target.root, "absent"),
       }),
@@ -298,7 +298,7 @@ describe("confined version probe", () => {
       binaryPath: target.binaryPath,
       displayName: "Example",
       environment: () => ({ PATH: "/usr/bin:/bin" }),
-      confinement: makeSeatbeltConfinementLive({ platform: "linux", sandboxPath: bwrap }),
+      confinement: makeProcessConfinementLive({ platform: "linux", sandboxPath: bwrap }),
       temporaryRoot: target.temporaryRoot,
       homeDirectory: target.home,
     });
@@ -399,7 +399,7 @@ describe("confined version probe", () => {
         binaryPath,
         displayName: "Example",
         environment: () => ({ PATH: "/usr/bin:/bin" }),
-        confinement: makeSeatbeltConfinementLive({
+        confinement: makeProcessConfinementLive({
           platform: "darwin",
           homeDirectory: home,
           usersDirectory: root,

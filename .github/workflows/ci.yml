@@ -40,6 +40,7 @@ jobs:
       # recipe change is most likely to break, so they belong on the PR and
       # not only in a local `bun run verify`.
       - run: bun run ui:check
+      - run: bun run style:check
       - run: bun run decisions:check
       - run: bun run typecheck --filter=!@octant/desktop --filter=!@octant/scripts
       # scripts tests build the Swift helpers and package the app; they run on the macOS job.
