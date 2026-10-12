@@ -2,6 +2,7 @@ import {
   decideExtensionToolGrant,
   type ExtensionToolGrantDecision,
 } from "@octant/domain/extension-tool-grant-policy";
+import type { WindowId } from "@octant/contracts";
 import type { ExtensionToolGrantSubject } from "../persistence/extensionToolGrantProjection";
 import type { ExtensionToolCall } from "./agentPluginMcpSessionManager";
 import type { ExtensionToolApprovalService } from "./extensionToolApprovalService";
@@ -16,6 +17,12 @@ import type { ExtensionToolGrantStore } from "./extensionToolGrantStore";
 export function createExtensionToolCallAuthorizer(options: {
   readonly grants: Pick<ExtensionToolGrantStore, "read" | "record">;
   readonly approvals: Pick<ExtensionToolApprovalService, "request">;
+  /**
+   * Whether the scope a turn runs under is the host acting on its own (a
+   * routine, a goal loop, a usage-limit resume, a child-run delivery). Such a
+   * turn's prompt is approved once and never remembered.
+   */
+  readonly isHostScope: (windowId: WindowId) => boolean;
   /** Whether the thread has taken in outside content, from the journal's taint. */
   readonly threadTainted: (threadId: string) => boolean;
 }): (call: ExtensionToolCall) => Promise<boolean> {
@@ -41,6 +48,7 @@ export function createExtensionToolCallAuthorizer(options: {
       subject,
       decision: decideExtensionToolGrant({
         inProject: subject !== undefined,
+        hostOwnedTurn: call.windowId !== undefined && options.isHostScope(call.windowId),
         planTurn: call.thread.planTurn === true,
         threadTainted: options.threadTainted(call.thread.id),
         reach: call.reach,

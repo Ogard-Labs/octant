@@ -2788,10 +2788,12 @@ prompt, schema, tool, route, model, or capability.
     command, manifest field, structured reference, tool call, model output,
     paired device, or host-owned turn (a routine, a goal loop, a usage-limit
     resume, a child-run delivery) can create one. A host-owned turn in the
-    Project may use one, and a person at a local window may still answer that
-    turn's prompt.
+    Project may use one, but the prompt it raises is approved once and is
+    never remembered, even when a person at a local window answers it:
+    nobody chose to send that turn.
   - A thread with no Project and a Plan turn are asked for every call, and
-    the answer covers that call alone.
+    the answer covers that call alone. An answer that asks to be remembered
+    where it cannot be is refused and the call keeps waiting.
   - On a thread that has taken in outside content, a grant holds only for a
     stdio server, which Octant launches with no network and writes limited to
     its plugin data. A network (HTTP) server's tool asks for every call there

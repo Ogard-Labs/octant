@@ -180,6 +180,7 @@ function openHost(
     authorizeToolCall: createExtensionToolCallAuthorizer({
       grants,
       approvals,
+      isHostScope: isRoutineHostScope,
       threadTainted: (threadId) =>
         readThreadExternalContentTaint(connection, threadId).externalContentIngested,
     }),
@@ -481,7 +482,7 @@ describe("an MCP tool a person always allows in a Project", () => {
     ).resolves.not.toMatchObject({ isError: true });
   });
 
-  it("does not let the host's own scope turn an answer into a grant", async () => {
+  it("approves a host-run turn's prompt once and never remembers it, whoever answers", async () => {
     const host = openHost(temporaryDirectory());
     const routine = host.call({
       threadId: threadOne,
@@ -489,20 +490,37 @@ describe("an MCP tool a person always allows in a Project", () => {
       from: ROUTINE_HOST_SCOPE_ID,
     });
     const pending = await host.prompt();
+    expect(pending).toMatchObject({ projectId: projectA, rememberable: false });
 
-    expect(
-      host.approvals.decide(ROUTINE_HOST_SCOPE_ID, {
-        approvalId: pending.approvalId,
-        decision: "approved",
-        remember: true,
-      }),
-    ).toBe(false);
+    // Neither the host's own scope nor a person at a window that may drive
+    // the thread can turn this answer into a grant; the call keeps waiting.
+    for (const answering of [ROUTINE_HOST_SCOPE_ID, windowId]) {
+      expect(
+        host.approvals.decide(answering, {
+          approvalId: pending.approvalId,
+          decision: "approved",
+          remember: true,
+        }),
+      ).toBe(false);
+      expect(host.approvals.list(windowId)).toHaveLength(1);
+      expect(host.grants.list()).toEqual([]);
+    }
+
+    expect(await host.answer(false)).toBe(true);
+    await expect(routine).resolves.not.toMatchObject({ isError: true });
     expect(host.grants.list()).toEqual([]);
+  });
 
-    // A person at a window that may drive the thread still can.
-    expect(await host.answer(true)).toBe(true);
-    await routine;
-    expect(host.grants.list()).toHaveLength(1);
+  it("lets a host-run turn use a grant a person recorded from their own turn", async () => {
+    const host = openHost(temporaryDirectory());
+    await rememberSearch(host);
+
+    await host.unprompted({
+      threadId: threadTwo,
+      projectId: projectA,
+      from: ROUTINE_HOST_SCOPE_ID,
+    });
+    expect(host.server.calls).toEqual(["search", "search"]);
   });
 
   it("asks again after the person revokes the grant", async () => {
@@ -644,6 +662,7 @@ describe("the grant a call is checked against", () => {
     const authorize = createExtensionToolCallAuthorizer({
       grants: host.grants,
       approvals: host.approvals,
+      isHostScope: isRoutineHostScope,
       threadTainted: () => true,
     });
     const tool = {

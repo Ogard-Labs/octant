@@ -69,8 +69,9 @@ export const ExtensionToolApproval = Schema.Struct({
   requestedAt: UtcTimestamp,
   /**
    * Whether this prompt may be answered with `remember`. False when the
-   * thread has no Project, on a Plan turn, and for a network tool on a thread
-   * that took in outside content: those are approved one call at a time.
+   * thread has no Project, on a Plan turn, on a turn the host started as
+   * itself, and for a network tool on a thread that took in outside content:
+   * those are approved one call at a time.
    */
   rememberable: Schema.Boolean,
 }).annotations(strict);

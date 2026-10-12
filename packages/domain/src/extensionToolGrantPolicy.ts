@@ -18,6 +18,11 @@ export interface ExtensionToolBinding {
 export interface ExtensionToolGrantFacts {
   /** A thread with no Project has nowhere to remember an approval. */
   readonly inProject: boolean;
+  /**
+   * The host started this turn as itself: a routine, a goal-loop round, a
+   * usage-limit resume, or a child run's result delivered to its parent.
+   */
+  readonly hostOwnedTurn: boolean;
   readonly planTurn: boolean;
   /** The thread has taken in outside content: a tool result or external text. */
   readonly threadTainted: boolean;
@@ -64,17 +69,22 @@ export function decideExtensionToolGrant(
   if (facts.threadTainted && facts.reach !== "confined-stdio") {
     return { kind: "ask", reason: "network-tool-on-tainted-thread", rememberable: false };
   }
+  // Nobody chose to send a host-owned turn, so the prompt it raises is not a
+  // person asking for this tool. It may use a grant a person already made,
+  // but its own prompt approves one call, whoever answers. Host ownership is
+  // never why a call asks, so it adds no reason of its own.
+  const rememberable = !facts.hostOwnedTurn;
   const grant = facts.grant;
-  if (grant === undefined) return { kind: "ask", reason: "not-granted", rememberable: true };
-  if (grant.revoked) return { kind: "ask", reason: "revoked", rememberable: true };
+  if (grant === undefined) return { kind: "ask", reason: "not-granted", rememberable };
+  if (grant.revoked) return { kind: "ask", reason: "revoked", rememberable };
   // Update rule. A grant is for the package the person approved; an update
   // is different code under the same name, so it asks again. This branch is
   // the whole rule.
   if (grant.version !== facts.offered.version || grant.digest !== facts.offered.digest) {
-    return { kind: "ask", reason: "package-changed", rememberable: true };
+    return { kind: "ask", reason: "package-changed", rememberable };
   }
   if (grant.definitionDigest !== facts.offered.definitionDigest) {
-    return { kind: "ask", reason: "tool-definition-changed", rememberable: true };
+    return { kind: "ask", reason: "tool-definition-changed", rememberable };
   }
   return { kind: "covered" };
 }

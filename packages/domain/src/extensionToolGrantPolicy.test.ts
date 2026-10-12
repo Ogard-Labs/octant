@@ -14,6 +14,7 @@ const seen = {
 function facts(overrides: Partial<ExtensionToolGrantFacts> = {}): ExtensionToolGrantFacts {
   return {
     inProject: true,
+    hostOwnedTurn: false,
     planTurn: false,
     threadTainted: false,
     reach: "network",
@@ -48,6 +49,27 @@ describe("remembered MCP tool approval", () => {
     expect(decideExtensionToolGrant(facts({ planTurn: true }))).toEqual({
       kind: "ask",
       reason: "plan-turn",
+      rememberable: false,
+    });
+  });
+
+  it("lets a host-owned turn use a grant", () => {
+    expect(decideExtensionToolGrant(facts({ hostOwnedTurn: true }))).toEqual({ kind: "covered" });
+  });
+
+  it.each([
+    ["no grant", { grant: undefined }, "not-granted"],
+    ["a revoked grant", { grant: { ...seen, revoked: true } }, "revoked"],
+    ["an updated package", { offered: { ...seen, version: "1.3.0" } }, "package-changed"],
+    [
+      "a changed listing",
+      { offered: { ...seen, definitionDigest: `sha256:${"d".repeat(64)}` } },
+      "tool-definition-changed",
+    ],
+  ] as const)("asks a host-owned turn with %s for that call alone", (_name, changed, reason) => {
+    expect(decideExtensionToolGrant(facts({ hostOwnedTurn: true, ...changed }))).toEqual({
+      kind: "ask",
+      reason,
       rememberable: false,
     });
   });
