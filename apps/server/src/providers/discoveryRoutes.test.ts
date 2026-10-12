@@ -12,7 +12,7 @@ import { canLocateRuntimeBinary, createCodexProvider } from "@octant/domain";
 import { DISCOVERY_DESCRIPTORS } from "@octant/provider-sdk/discovery";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LocalPluginImportReceiptStore } from "../extensions/localPluginImportReceiptStore";
-import type { SeatbeltConfinementPort } from "../process/seatbeltProfile";
+import type { ProcessConfinementPort } from "../process/seatbeltProfile";
 import { createDiscoveryRouteHandler } from "./discoveryRoutes";
 import { makeDiscoveryService, type DiscoveryService } from "./discoveryService";
 import type { WindowAuthorityStore } from "../windowAuthorityStore";
@@ -306,7 +306,7 @@ describe("locate binary", () => {
   const instanceId = decodeProviderInstanceId("7d444840-9dc0-11d1-b245-5ffdce74fad2");
   // The version probe runs the stub for real; only the Seatbelt wrapper is
   // left out, because the live builder refuses on a host without sandbox-exec.
-  const passthroughConfinement: SeatbeltConfinementPort = {
+  const passthroughConfinement: ProcessConfinementPort = {
     prepare: (input) => ({ command: input.executable, args: input.args }),
   };
   let directory: string;

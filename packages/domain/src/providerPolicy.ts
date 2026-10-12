@@ -447,6 +447,24 @@ export function assignedClaudeAccountConfigDirectory(
   return assignedProviderAccountDirectory(CLAUDE_ACCOUNT_PROFILE, home, instanceId);
 }
 
+/**
+ * The directory a Claude account launches with, or `undefined` for the host
+ * profile. An API-key account always has its assigned leaf, including one
+ * stored before accounts carried a directory: the probe, the launch, resume
+ * lookup and usage history must all name the same folder for it.
+ */
+export function effectiveClaudeAccountConfigDirectory(
+  instance: Extract<ProviderInstance, { readonly driverKind: "claude" }>,
+  homeDirectory: string,
+): string | undefined {
+  if (instance.configuration.configDirectory !== undefined) {
+    return instance.configuration.configDirectory;
+  }
+  return instance.configuration.authentication === "api-key"
+    ? assignedClaudeAccountConfigDirectory(homeDirectory, instance.id)
+    : undefined;
+}
+
 /** Unmodified Claude CLI sign-in. Octant never wraps or replaces this flow. */
 export function claudeAuthLoginArgv(binaryPath: string): ReadonlyArray<string> {
   return [normalizeBinaryPath(binaryPath), ...CLAUDE_ACCOUNT_PROFILE.signInArgv];

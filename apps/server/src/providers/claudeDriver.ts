@@ -1302,7 +1302,6 @@ function makeConnection(
         const environment = await runSetupEffect(
           environmentFactory(options.authentication, {
             ...(apiKey !== undefined ? { apiKey } : {}),
-            instanceId: options.instanceId,
             ...(options.configDirectory === undefined
               ? {}
               : { configDirectory: options.configDirectory }),

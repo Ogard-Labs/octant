@@ -7,17 +7,31 @@ The precedence and authorization rules live in [AGENTS.md](../../AGENTS.md#missi
 
 ## Sources of truth
 
-| Area                 | Owner                                                  | Read when                                                                                                                 |
-| -------------------- | ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------- |
-| System architecture  | [Architecture](../architecture.md)                     | Changing processes, authority, modes, persistence, providers, plugins, or release boundaries; follow the relevant section |
-| Workspace behavior   | [Workspace](workspace.md)                              | Changing navigation, Projects, panes, content tabs, tool presentation, or workspace lifecycle                             |
-| Visual design        | [Design system](../../DESIGN.md)                       | Changing typography, colour, materials, Settings composition, controls, or accessibility                                  |
-| Release holds        | [Release-boundary holds](../release-boundary-holds.md) | Considering connector marketplace or full language-tooling scope                                                          |
-| Historical rationale | [Decision archive](../decisions/README.md)             | Investigating why a choice was made, a rejected alternative, or detail not yet consolidated                               |
+| Area                   | Owner                                                       | Read when                                                                                                                 |
+| ---------------------- | ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| System architecture    | [Architecture](../architecture.md)                          | Changing processes, authority, modes, persistence, providers, plugins, or release boundaries; follow the relevant section |
+| Workspace behavior     | [Workspace](workspace.md)                                   | Changing navigation, Projects, panes, content tabs, tool presentation, or workspace lifecycle                             |
+| Canvas                 | [Canvas](canvas.md)                                         | Changing the Canvas tool, recipes, preview, block catalogue, boards, comments, or the `design` block                      |
+| Artifact replica sync  | [Artifact replica sync](artifact-replica-sync.md)           | Changing replica entries, stores, membership, publish, pull, restore, the synced library, or store selection              |
+| Provider runtimes      | [Provider runtimes](provider-runtimes.md)                   | Changing OpenCode's version-specific routes, the local-server adapter, or a subscription sign-in dialect                  |
+| Device workbench       | [Device workbench](device-workbench.md)                     | Changing Simulator or emulator panes, capture, input delivery, keyboard layouts, or managed device tools                  |
+| Tainted search queries | [Search queries on a tainted thread](search-query-taint.md) | Changing which `web-search` queries the native harness refuses on a tainted thread                                        |
+| Visual design          | [Design system](../../DESIGN.md)                            | Changing typography, colour, materials, Settings composition, controls, or accessibility                                  |
+| Start screen           | [Start screen](start-screen.md)                             | Changing start-screen tiles, tabs, cards, or Code's agent home; the rule set is in Workspace                              |
+| Canvas visuals         | [Canvas visuals](canvas-visuals.md)                         | Changing Canvas charts, tables, metric blocks, mockups, designs, or the design frame kit                                  |
+| Provider settings      | [Providers and model endpoints](model-endpoints.md)         | Changing Provider catalog or the Octant Harness model endpoint rows, detail pages, or Add endpoint                        |
+| Host names             | [Host reads and commands](host-reads-and-commands.md)       | Looking up or renaming a route, server command, or wire value a workspace surface uses                                    |
+| Release holds          | [Release-boundary holds](../release-boundary-holds.md)      | Considering connector marketplace or full language-tooling scope                                                          |
+| Historical rationale   | [Decision archive](../decisions/README.md)                  | Investigating why a choice was made, a rejected alternative, or detail not yet consolidated                               |
 
-Architecture owns system and authority boundaries. Workspace owns navigation and
+Architecture owns system and authority boundaries; each architecture topic
+specification above owns the implementation detail of one area and links back to
+the architecture section that states its boundary. Workspace owns navigation and
 interaction behavior. DESIGN.md owns presentation and shared component rules.
 A summary elsewhere links to that owner; it does not establish a competing rule.
+The start-screen, Canvas-visuals, and provider-settings topics hold the detail
+of one area so their owner can state its rules briefly. Host reads and commands
+is a lookup of route, command, and wire names, not a behavior owner.
 User guides describe available behavior, while Linear tracks delivery progress.
 
 ## Changing the design
@@ -73,9 +87,9 @@ record numbered after the last archived one.
 
 ## Historical detail and consolidation
 
-Workspace behavior and visual design are the first consolidated topics. Other
-areas use the relevant architecture section, with existing historical links
-available for detailed rationale. The archive remains at its existing paths to
+Workspace behavior, visual design, and the architecture topics above are the
+consolidated topics. Other areas use the relevant architecture section, with
+existing historical links available for detailed rationale. The archive remains at its existing paths to
 preserve code comments and external links; it is not a second design authority.
 
 When a task exposes a rule missing from a current specification, inspect the

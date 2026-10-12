@@ -65,7 +65,9 @@ renderer.
 
 A model endpoint's key is kept only for the endpoint URL you entered it for.
 If you change the URL later, Octant deletes the saved key, and you enter the
-key again with the new URL.
+key again with the new URL. The address field says so as soon as it differs
+from the saved one, and after you save, the endpoint reads Needs key until you
+add it.
 
 Closing Settings returns to first run with the answers you already gave.
 

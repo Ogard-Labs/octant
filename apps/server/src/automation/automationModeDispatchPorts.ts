@@ -51,14 +51,16 @@ export interface AutomationCodeDispatchPort {
     readonly run: AutomationRun;
     readonly threadId: CodeThreadId;
     readonly title: string;
-    readonly windowId: WindowId;
+    /** The routine host scope; a routine never acts through a window. */
+    readonly scopeId: WindowId;
   }) => Promise<AutomationThreadCreationOutcome>;
   readonly startOrRecoverFirstTurn: (input: {
     readonly run: AutomationRun;
     readonly threadId: CodeThreadId;
     readonly firstTurnRequestId: AutomationFirstTurnRequestId;
     readonly promptDigest: AutomationDigest;
-    readonly windowId: WindowId;
+    /** The routine host scope; a routine never acts through a window. */
+    readonly scopeId: WindowId;
   }) => Promise<AutomationFirstTurnLaunchOutcome>;
 }
 
@@ -73,20 +75,17 @@ export interface AutomationWorkDispatchPort {
     readonly run: AutomationRun;
     readonly threadId: WorkThreadId;
     readonly title: string;
-    readonly windowId: WindowId;
+    /** The routine host scope; a routine never acts through a window. */
+    readonly scopeId: WindowId;
   }) => Promise<AutomationThreadCreationOutcome>;
   readonly startOrRecoverFirstTurn: (input: {
     readonly run: AutomationRun;
     readonly threadId: WorkThreadId;
     readonly firstTurnRequestId: AutomationFirstTurnRequestId;
     readonly promptDigest: AutomationDigest;
-    readonly windowId: WindowId;
+    /** The routine host scope; a routine never acts through a window. */
+    readonly scopeId: WindowId;
   }) => Promise<AutomationFirstTurnLaunchOutcome>;
-}
-
-export interface AutomationDispatchWindowPort {
-  /** Resolve a local window that may authorize Project-bound thread creation. */
-  readonly resolveWindowForProject: (projectId: string) => WindowId | undefined;
 }
 
 export interface AutomationCapacityAdmissionPort {

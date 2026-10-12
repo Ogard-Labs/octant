@@ -2,7 +2,7 @@ import { decodeCanvasDocumentRecipeCatalog } from "@octant/contracts/canvas-skil
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { Schema } from "effect";
 import {
   CANVAS_SCHEMA_VERSION,
@@ -662,6 +662,143 @@ describe("canvas routes", () => {
     // The scope crosses the wire through the strict outcome schema, so a
     // client can echo it on a mutation instead of inferring one.
     expect(body.workspace).toEqual({ kind: "chat-virtual", projectId: null });
+  });
+
+  it("resolves a design's images for an authorized window from the version's own provenance, and nothing for another Project", async () => {
+    const projection = new CanvasProjection();
+    seedProjection(projection);
+    const current = projection.getById(canvasId)?.currentVersion;
+    if (current === undefined) throw new Error("expected a seeded Canvas");
+    const versionId = "33333333-3333-4333-8333-333333333333";
+    projection.applyVersionAppended({
+      canvasId,
+      version: {
+        ...current,
+        versionId: versionId as never,
+        sequence: 2,
+        definition: {
+          ...current.definition,
+          blocks: [
+            {
+              blockId: "phone" as never,
+              schemaVersion: CANVAS_SCHEMA_VERSION,
+              kind: "design",
+              title: "Onboarding",
+              size: "phone",
+              assets: [
+                {
+                  assetId: "hero" as never,
+                  source: {
+                    kind: "generated-image",
+                    imageId: "44444444-4444-4444-8444-444444444444" as never,
+                  },
+                },
+              ],
+              frames: [
+                {
+                  frameId: "home" as never,
+                  title: "Home",
+                  html: '<img src="octant-asset:hero" alt="">',
+                },
+              ],
+            },
+          ],
+        },
+      },
+    });
+    const store = new WindowAuthorityStore();
+    store.register({ windowId, capability: windowCapability, now: 0 });
+    const canvasService = new CanvasService(
+      {
+        projection,
+        eventStore: {
+          appendVersion: () => {
+            throw new Error("not used");
+          },
+        } as never,
+        uuid: () => "ffffffff-ffff-4fff-8fff-ffffffffffff",
+        clock: () => later as never,
+      },
+      {
+        authorize: () => true,
+        resolveWorkspace: () => ({ kind: "chat-virtual", projectId: null }),
+      },
+    );
+    const resolveDesignAssets = vi.fn(async () => [
+      {
+        assetId: "hero" as never,
+        status: "resolved" as const,
+        mediaType: "image/png" as const,
+        data: "iVBORw0KGgo=",
+      },
+    ]);
+    let active = projectId;
+    const route = createCanvasRouteHandler({
+      canvasProjection: projection,
+      canvasService,
+      windowAuthorityStore: store,
+      resolveDesignAssets,
+      projects: {
+        bootstrap: async () => ({
+          active: [
+            {
+              id: projectId,
+              name: "Chat Project",
+              type: "chat",
+              lifecycle: "active",
+              pinned: false,
+              rank: "0/1" as never,
+              version: 1 as never,
+              createdAt: now as never,
+              updatedAt: now as never,
+            },
+          ],
+          archived: [],
+          availability: [],
+          memory: [],
+        }),
+      },
+      activeContextResolver: async () => ({ mode: "chat", projectId: active }),
+      now: () => 1,
+    });
+    const ask = async (query: string) => {
+      const response = await route(
+        new Request(`http://127.0.0.1/api/canvas/design-assets?${query}`, {
+          method: "GET",
+          headers: { "x-octant-window-capability": windowCapability },
+        }),
+      );
+      return { status: response?.status, body: JSON.parse((await response?.text()) ?? "{}") };
+    };
+    const query = `canvasId=${String(canvasId)}&versionId=${versionId}&blockId=phone`;
+
+    const ready = await ask(query);
+    expect(ready.status).toBe(200);
+    expect(ready.body).toEqual({
+      kind: "ready",
+      canvasId: String(canvasId),
+      versionId,
+      blockId: "phone",
+      assets: [
+        { assetId: "hero", status: "resolved", mediaType: "image/png", data: "iVBORw0KGgo=" },
+      ],
+    });
+    expect(resolveDesignAssets).toHaveBeenCalledWith(
+      expect.objectContaining({ blockId: "phone" }),
+      expect.objectContaining({ mode: "chat", projectId, threadId }),
+    );
+
+    // A block that is not a design, and a request that names more than it should.
+    expect(
+      (await ask(`canvasId=${String(canvasId)}&versionId=${versionId}&blockId=nope`)).body,
+    ).toMatchObject({ kind: "unavailable" });
+    expect((await ask(`${query}&path=/etc/hosts`)).status).toBe(400);
+
+    // A window looking at another Project is told nothing and resolves nothing.
+    resolveDesignAssets.mockClear();
+    active = otherProjectId;
+    expect((await ask(query)).body).toEqual({ kind: "unauthorized", canvasId: String(canvasId) });
+    expect(resolveDesignAssets).not.toHaveBeenCalled();
   });
 
   it("revises an authorized canvas and lists opaque version history", async () => {

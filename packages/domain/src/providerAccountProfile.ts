@@ -60,7 +60,11 @@ export function assignedProviderAccountDirectory(
   if (!isPosixAbsolutePath(home)) {
     throw new Error("Account home must be an absolute directory.");
   }
-  return `${home}/${profile.extraAccountsDirectoryName}/${instanceId}`;
+  // Instance ids are client-chosen UUIDs and decode in either letter case. The
+  // default macOS volume folds case, so two ids that differ only by case would
+  // name one folder and share one login. Lower-casing gives them one leaf, and
+  // the uniqueness check then refuses the second account.
+  return `${home}/${profile.extraAccountsDirectoryName}/${String(instanceId).toLowerCase()}`;
 }
 
 export function defaultProviderAccountDirectory(

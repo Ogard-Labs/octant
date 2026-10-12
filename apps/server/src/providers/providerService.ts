@@ -58,8 +58,6 @@ import {
   createBflImageProvider,
   createIdeogramImageProvider,
   assignedClaudeAccountConfigDirectory,
-  CLAUDE_ACCOUNT_PROFILE,
-  defaultProviderAccountDirectory,
   implicitClaudeAccountOwnerId,
   createClaudeProvider,
   createDevinProvider,
@@ -700,13 +698,15 @@ export class ProviderService implements ProviderServiceApi {
                 instance = createKimiCodeProvider({ ...common, binaryPath: command.binaryPath });
                 break;
               case "create-claude-provider": {
-                const existingClaudeCount = instances.filter(
-                  (candidate) => candidate.driverKind === "claude",
-                ).length;
+                // The host profile belongs to one subscription account. An
+                // API-key account never takes it, so one created first does
+                // not push the first subscription account onto a new leaf
+                // and a second sign-in.
                 const assignedDirectory =
                   command.configuration.configDirectory !== undefined
                     ? command.configuration.configDirectory
-                    : command.configuration.authentication === "api-key" || existingClaudeCount > 0
+                    : command.configuration.authentication === "api-key" ||
+                        implicitClaudeAccountOwnerId(instances) !== undefined
                       ? assignedClaudeAccountConfigDirectory(homedir(), command.instanceId)
                       : undefined;
                 const hostEnvironment = await snapshotClaudeHostEnvironment();
@@ -716,7 +716,6 @@ export class ProviderService implements ProviderServiceApi {
                   command.configuration.configDirectory,
                   command.instanceId,
                   undefined,
-                  [hostConfigDirectory, hostSecureDirectory],
                 );
                 instance = createClaudeProvider({
                   ...common,
@@ -1054,15 +1053,10 @@ export class ProviderService implements ProviderServiceApi {
                     configDirectory: assignedClaudeAccountConfigDirectory(homedir(), current.id),
                   }
                 : command.configuration;
-            const hostEnvironmentForDirectory = await snapshotClaudeHostEnvironment();
             this.#refuseUnassignedClaudeDirectory(
               requestedConfiguration.configDirectory,
               current.id,
               current.configuration.configDirectory,
-              [
-                hostClaudeConfigDirectory(hostEnvironmentForDirectory),
-                hostClaudeSecureStorageDirectory(hostEnvironmentForDirectory),
-              ],
             );
             const configuration = this.#assignedClaudeConfigurationForChange(
               instances,
@@ -1889,27 +1883,21 @@ export class ProviderService implements ProviderServiceApi {
   }
 
   /**
-   * Octant assigns each Claude account its directory. A client may name the
-   * assigned leaf, the default host directory, or the directory the account
-   * already stores, or the host's own overlay: a leftover keeps working until it
-   * is re-assigned. Any other path would receive the Plan write grant for a folder
-   * Octant did not pick.
+   * Octant assigns each Claude account its directory. A client may name only
+   * the account's own assigned leaf or the directory the account already
+   * stores, which is what a change that leaves the directory alone sends back.
+   * Any other path, the host profile included, would put the Plan write grant
+   * or another account's login behind a folder Octant did not pick for it.
    */
   #refuseUnassignedClaudeDirectory(
     directory: string | undefined,
     instanceId: ProviderInstanceId,
     stored: string | undefined,
-    hostDirectories: ReadonlyArray<string | undefined>,
   ): void {
     if (directory === undefined) return;
-    const home = homedir();
-    const allowed = [
-      assignedClaudeAccountConfigDirectory(home, instanceId),
-      defaultProviderAccountDirectory(CLAUDE_ACCOUNT_PROFILE, home),
-      ...(stored === undefined ? [] : [stored]),
-      ...hostDirectories.filter((path): path is string => path !== undefined),
-    ].map(withoutTrailingSlashes);
-    if (allowed.includes(withoutTrailingSlashes(directory))) return;
+    const named = accountDirectoryIdentity(directory);
+    if (named === assignedClaudeAccountConfigDirectory(homedir(), instanceId)) return;
+    if (stored !== undefined && named === accountDirectoryIdentity(stored)) return;
     throw this.#invalid(
       "Claude accounts use an Octant-assigned directory. Re-assign the account to use it.",
     );
@@ -2126,10 +2114,6 @@ export class ProviderService implements ProviderServiceApi {
       message: "Octant Provider service is unavailable.",
     });
   }
-}
-
-function withoutTrailingSlashes(path: string): string {
-  return path.replace(/\/+$/, "") || "/";
 }
 
 /**

@@ -34,7 +34,7 @@ import type {
   ProviderModelId,
   ProviderObservedState,
 } from "@octant/contracts";
-import { isImageProfileDriverKind } from "@octant/domain";
+import { implicitClaudeAccountOwnerId, isImageProfileDriverKind } from "@octant/domain";
 import type { ReactNode } from "react";
 import type { ProviderUsageLimitsClient } from "@octant/client-runtime/provider-usage-limits-client";
 import { SettingsSection } from "../settings/primitives";
@@ -409,9 +409,7 @@ export function ProviderSettingsView(props: ProviderSettingsViewProps) {
           <ProviderCreateForm
             allowedProviderTypes={GENERAL_PROVIDER_TYPES}
             busy={props.busy}
-            existingClaudeAccountCount={
-              props.instances.filter((instance) => instance.driverKind === "claude").length
-            }
+            claudeHostProfileTaken={implicitClaudeAccountOwnerId(props.instances) !== undefined}
             heading="Agent runtime"
             hint="Installed runtimes are detected automatically. Use this for an unusual executable location or a runtime the scan missed. Model endpoints such as OpenAI-compatible APIs are added under Octant Harness › Model endpoints."
             credentialManagementAvailable={props.credentialManagementAvailable}

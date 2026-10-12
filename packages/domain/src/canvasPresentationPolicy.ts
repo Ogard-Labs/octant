@@ -1,16 +1,10 @@
 import type { CanvasDefinition, CanvasPresentation } from "@octant/contracts/canvas";
 
 /**
- * How many blocks a Canvas may hold and still be drawn inside the
- * conversation. Past this it reads as a document, and a document belongs in
- * the sidebar where it can be read, commented on and kept.
- */
-export const CANVAS_INLINE_MAX_BLOCKS = 12;
-
-/**
- * Blocks a person works in rather than reads. Inline, a board's wheel zoom
- * would fight the thread's own scrolling, and a plan, mockup, or design asks
- * for the room and the controls only the sidebar gives it.
+ * Blocks a person works in rather than reads. The agent may not put these in
+ * the thread on its own: a board, plan, mockup, or design asks for the room
+ * and the controls only the sidebar gives it. A person can still expand any
+ * Canvas in its thread; this bounds only what the agent asks for unprompted.
  */
 const SIDEBAR_ONLY_BLOCK_KINDS: ReadonlySet<CanvasDefinition["blocks"][number]["kind"]> = new Set([
   "diagram",
@@ -20,13 +14,13 @@ const SIDEBAR_ONLY_BLOCK_KINDS: ReadonlySet<CanvasDefinition["blocks"][number]["
 ]);
 
 /**
- * Why a Canvas cannot be drawn inside the thread, or `undefined` when it can.
- * The reason is written for the agent that asked, so it can choose differently.
+ * Why the agent's request to draw a Canvas inside the thread is refused, or
+ * `undefined` when it is admitted. Reading blocks are admitted at any length
+ * the definition schema's ordinary block budget allows; the thread shows a
+ * long one as a faded teaser the person can expand in place. The reason is
+ * written for the agent that asked, so it can choose differently.
  */
 export function canvasInlineRefusal(blocks: CanvasDefinition["blocks"]): string | undefined {
-  if (blocks.length > CANVAS_INLINE_MAX_BLOCKS) {
-    return `A Canvas shown in the thread holds at most ${String(CANVAS_INLINE_MAX_BLOCKS)} blocks; this one has ${String(blocks.length)}, so it opens in the sidebar.`;
-  }
   const sidebarOnly = blocks.find((block) => SIDEBAR_ONLY_BLOCK_KINDS.has(block.kind));
   if (sidebarOnly !== undefined) {
     return `A ${sidebarOnly.kind} block is worked on in the sidebar, so this Canvas opens there.`;
@@ -36,8 +30,8 @@ export function canvasInlineRefusal(blocks: CanvasDefinition["blocks"]): string 
 
 /**
  * Where the thread shows this Canvas now. A Canvas asked for inline that has
- * since grown past the bound (a later revision, or a person's own edit) falls
- * back to the sidebar instead of stretching the conversation.
+ * since gained a worked-on block (a later revision, or a person's own edit)
+ * falls back to the sidebar instead of being drawn in the conversation.
  */
 export function effectiveCanvasPresentation(definition: CanvasDefinition): CanvasPresentation {
   if (definition.presentation !== "inline") return "sidebar";

@@ -4,7 +4,7 @@ import {
   type ProviderFailure,
   type ProviderInstance,
 } from "@octant/contracts";
-import { isImageProfileDriverKind } from "@octant/domain";
+import { effectiveClaudeAccountConfigDirectory, isImageProfileDriverKind } from "@octant/domain";
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
 import { lastClaudeHostEnvironmentSnapshot } from "./claudeAccountDirectory";
 import {
@@ -138,13 +138,16 @@ export function makeProviderDriver(
           "Another Claude account already uses that config directory.",
         );
       }
+      // An API-key account stored before accounts carried a directory has
+      // none on record. Resolving its leaf here gives the probe, the launch
+      // and resume lookup one folder; the probe otherwise refused such an
+      // account as "requires an assigned account directory".
+      const configDirectory = effectiveClaudeAccountConfigDirectory(instance, homedir());
       return makeClaudeDriver({
         instanceId: instance.id,
         binaryPath: instance.configuration.binaryPath,
         authentication: instance.configuration.authentication,
-        ...(instance.configuration.configDirectory === undefined
-          ? {}
-          : { configDirectory: instance.configuration.configDirectory }),
+        ...(configDirectory === undefined ? {} : { configDirectory }),
         process: options.claudeProcess,
         sdk: options.claudeSdk,
         runtimeRegistry: options.runtimeRegistry,
