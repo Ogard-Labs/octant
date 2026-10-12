@@ -223,10 +223,12 @@ wording, and reads are specified in [Start screen](start-screen.md).
   listening**; Pull requests six, then **+N more** (Pull requests); CI failures
   five, most recently failed first; Computers four, then **+N more**.
 - **Reads.** A card reads only what the window's own authority returns. Needs
-  you, Working now, Pull requests, and CI failures read on mount and on change
-  signals and add no timer; Running services (every five seconds) and Computers
-  (about every ten) poll only while mounted and the window is visible. Signals
-  that arrive during a read become one more read once it lands.
+  you and Working now read on mount and on change signals and add no timer;
+  signals that arrive during a read become one more read once it lands. Pull
+  requests and CI failures read the cached pull-request snapshot once on mount
+  and never poll; only an explicit refresh or a Project's opt-in cadence moves
+  that snapshot. Running services (every five seconds) and Computers (about
+  every ten) poll only while mounted and the window is visible.
 - **No authority.** Answers, Open, Stop, and Start a fix go through the commands
   and confirmations the open thread or Environment already uses. An option is
   words sent as the thread's next turn, never an action. Start a fix opens a
@@ -240,9 +242,10 @@ wording, and reads are specified in [Start screen](start-screen.md).
   executing thread and agent run with **Open** and a confirmed **Stop**, hides
   the composer without unmounting it, reads only while open, and adds no
   persisted state or authority.
-- **Needs you elsewhere.** Board cards, the command palette, the Inbox, the
-  Review page, and the desktop menu bar read the same host list and answer
-  through the same commands; see
+- **Needs you elsewhere.** Board cards, the command palette, the Inbox, and the
+  Review page read the same host list and answer in place through the same
+  commands. The desktop menu bar lists the same waiting threads but only opens
+  a thread; it answers nothing. See
   [Needs you across surfaces](start-screen.md#needs-you-across-surfaces).
 
 ## Tool lifecycles
