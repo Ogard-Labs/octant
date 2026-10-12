@@ -334,13 +334,37 @@ describe("selected MCP servers in Work and Code", () => {
         result.tools.execute({ name: "notes_search", inputJson: '{"q":"plan"}' }),
       ).resolves.toEqual({ result: "framed notes" });
       expect(test.execute).toHaveBeenCalledWith({
-        thread: { id: String(thread.id), projectId: String(thread.projectId) },
+        thread: { id: String(thread.id), projectId: String(thread.projectId), planTurn: false },
         windowId,
         name: "notes_search",
         inputJson: '{"q":"plan"}',
       });
     },
   );
+
+  it("tells the tool call when a Code turn runs under Plan, so no remembered approval covers it", async () => {
+    const test = mcpFixture("code");
+    for (const [executionPolicy, planTurn] of [
+      ["plan", true],
+      ["approval-gated", false],
+      ["full-access", false],
+    ] as const) {
+      const result = await test.resolve({
+        mode: "code",
+        // The thread a Code turn resolves with carries that turn's posture.
+        thread: { ...thread, executionPolicy } as never,
+        selections: [test.selection],
+        windowId,
+      });
+      if (result.kind !== "resolved" || result.tools === undefined) {
+        throw new Error(`Expected tools, got ${JSON.stringify(result)}`);
+      }
+      await result.tools.execute({ name: "notes_search", inputJson: "{}" });
+      expect(test.execute).toHaveBeenLastCalledWith(
+        expect.objectContaining({ thread: expect.objectContaining({ planTurn }) }),
+      );
+    }
+  });
 
   it("refuses a tool the turn did not select", async () => {
     const test = mcpFixture("work");

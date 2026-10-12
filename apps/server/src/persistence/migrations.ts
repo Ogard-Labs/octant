@@ -2070,6 +2070,29 @@ ALTER TABLE code_runtime_projection
       ALTER TABLE usage_record_projection
       ADD COLUMN cost_kind TEXT CHECK(cost_kind IS NULL OR cost_kind IN ('provider-recorded', 'api-estimate'));`,
   },
+  {
+    version: 74,
+    name: "create_extension_tool_grant_projection",
+    sql: `
+      CREATE TABLE extension_tool_grant_projection (
+        grant_id TEXT PRIMARY KEY CHECK(length(trim(grant_id)) > 0),
+        project_id TEXT NOT NULL CHECK(length(trim(project_id)) > 0),
+        extension_id TEXT NOT NULL CHECK(length(trim(extension_id)) > 0),
+        package_id TEXT NOT NULL CHECK(length(trim(package_id)) > 0),
+        component_id TEXT NOT NULL CHECK(length(trim(component_id)) > 0),
+        mcp_tool_name TEXT NOT NULL CHECK(length(trim(mcp_tool_name)) > 0),
+        package_version TEXT NOT NULL CHECK(length(trim(package_version)) > 0),
+        package_digest TEXT NOT NULL CHECK(length(trim(package_digest)) > 0),
+        definition_digest TEXT NOT NULL CHECK(length(trim(definition_digest)) > 0),
+        revocation_reason TEXT CHECK(revocation_reason IS NULL OR revocation_reason IN ('person', 'plugin-uninstalled', 'trust-revoked', 'rolled-back')),
+        granted_at TEXT NOT NULL CHECK(length(trim(granted_at)) > 0),
+        aggregate_version INTEGER NOT NULL CHECK(aggregate_version > 0),
+        last_sequence INTEGER NOT NULL CHECK(last_sequence > 0)
+      ) STRICT;
+      CREATE INDEX extension_tool_grant_extension_idx
+        ON extension_tool_grant_projection(extension_id);
+    `,
+  },
 ];
 
 interface AppliedMigrationRow {
