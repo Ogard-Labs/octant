@@ -1731,7 +1731,12 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   extra account, and every API-key account, uses its assigned leaf.
   A leftover custom directory keeps working until the person
   explicitly re-assigns it; Octant never silently points that login
-  at another path. Sign-in is the unmodified CLI command in a
+  at another path. Removing an account leaves its assigned directory
+  in place, with that account's sign-in and history: Octant says
+  where it is, the host data map lists `~/.claude-accounts`, and
+  deleting it is the person's step. An accent is presentation only:
+  changing it alone neither stops a running session nor resets the
+  account's readiness. Sign-in is the unmodified CLI command in a
   terminal for that account. Connection check uses what the CLI or
   SDK reports. Two instances of the same driver cannot share one
   effective state directory after trailing-slash identity, including
@@ -1895,7 +1900,8 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   on the provider's own runtime; Octant never stores, refreshes, or journals
   those tokens. The account profile names the sign-in command; Octant never
   reads, stores, or injects that provider's credentials, including Claude
-  OAuth tokens. A leftover helper-token envelope is deleted on upgrade.
+  OAuth tokens. A leftover helper-token envelope is deleted on upgrade,
+  also for an account that was removed before the upgrade.
   **Host-driven** (`subscription-oauth`, direct HTTP drivers):
   the host runs a generic authorization-code PKCE runner and a device-code
   runner from a provider descriptor (endpoints, scopes, and a public client
