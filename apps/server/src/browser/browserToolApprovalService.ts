@@ -28,6 +28,11 @@ interface BrowserToolApprovalServiceOptions {
    * forgotten in Settings stops satisfying this at once.
    */
   readonly isOriginRemembered?: (origin: string) => boolean;
+  /**
+   * Whether a requesting scope is the host acting for a routine. Nobody sits at
+   * that scope, so its approvals go to the windows that can see the thread.
+   */
+  readonly isHostScope?: (windowId: WindowId) => boolean;
 }
 
 interface PendingApproval {
@@ -44,7 +49,7 @@ interface PendingApproval {
 /**
  * Host-owned, provider-neutral origin approval for managed Browser calls.
  * Pending entries are scoped to the requesting window and exact thread
- * authority. A decision is one-shot; abort, expiry, and window revocation all
+ * authority; a routine's entries go to the windows that can see its thread. A decision is one-shot; abort, expiry, and window revocation all
  * settle as denial so a late answer cannot resume a browser effect.
  */
 export class BrowserToolApprovalService {
@@ -109,23 +114,40 @@ export class BrowserToolApprovalService {
   list(windowId: WindowId): ReadonlyArray<BrowserToolApproval> {
     this.#expire();
     return [...this.#pending.values()]
-      .filter((pending) => pending.windowId === windowId)
+      .filter((pending) => this.#answerableBy(pending, windowId))
       .map((pending) => pending.view);
   }
 
   decide(windowId: WindowId, decision: BrowserToolApprovalDecision): boolean {
     this.#expire();
     const pending = this.#pending.get(String(decision.approvalId));
-    if (pending === undefined || pending.windowId !== windowId) return false;
+    if (pending === undefined || !this.#answerableBy(pending, windowId)) return false;
     if (!this.#options.authorityIsCurrent(pending.threadId, pending.authority, pending.windowId)) {
       pending.resolve("denied");
       return false;
     }
     pending.resolve(decision.decision);
     if (decision.decision === "approved" && decision.remember === true) {
-      this.#options.rememberOrigin?.(pending.view.origin, pending.windowId);
+      // The answering window journals the grant: for a routine it is the
+      // person who saw the prompt, not the host scope that raised it.
+      this.#options.rememberOrigin?.(pending.view.origin, windowId);
     }
     return true;
+  }
+
+  /**
+   * A window answers its own prompts. A routine's prompt has no window of its
+   * own, so any window that may drive that thread's browser answers it; the
+   * answer settles only this prompt and lends the window nothing else of the
+   * host scope.
+   */
+  #answerableBy(pending: PendingApproval, windowId: WindowId): boolean {
+    if (pending.windowId === windowId) return true;
+    const isHostScope = this.#options.isHostScope;
+    if (isHostScope === undefined || !isHostScope(pending.windowId) || isHostScope(windowId)) {
+      return false;
+    }
+    return this.#options.authorityIsCurrent(pending.threadId, pending.authority, windowId);
   }
 
   /**

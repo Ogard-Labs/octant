@@ -124,7 +124,8 @@ export interface ProviderCreateFormPresentationProps {
    * form must not show the default-account sign-in command until that
    * directory is known, and must not invent a binary path.
    */
-  readonly existingClaudeAccountCount?: number;
+  /** A subscription account already holds Claude's host profile. */
+  readonly claudeHostProfileTaken?: boolean;
   readonly existingCodexAccountCount?: number;
 }
 
@@ -854,7 +855,9 @@ export function ProviderCreateForm(
                 <ClaudeAccountSettingsFields
                   accent={claudeAccent}
                   binaryPath={claudeBinaryPath}
-                  extraAccount={(props.existingClaudeAccountCount ?? 0) > 0}
+                  extraAccount={
+                    claudeAuthentication === "api-key" || props.claudeHostProfileTaken === true
+                  }
                   onAccentChange={setClaudeAccent}
                   showSignInCommand={claudeAuthentication === "subscription"}
                 />

@@ -98,10 +98,42 @@ describe("deciding whether a goal loop may take another round", () => {
     expect(decision.decision).toBe("run");
   });
 
-  it("does not start a round it cannot checkpoint first", () => {
-    expect(decideGoalLoopRound(facts({ checkpointAvailable: false }))).toEqual({
-      decision: "pause",
-      reason: "checkpoint-unavailable",
+  it("does not start a round that would accept edits on its own without a checkpoint", () => {
+    const autoAccept = { ...fullCeiling, executionPolicy: "auto-accept-edits" as const };
+    expect(
+      decideGoalLoopRound(
+        facts({
+          declaredCeiling: autoAccept,
+          liveThreadAuthority: autoAccept,
+          checkpointAvailable: false,
+        }),
+      ),
+    ).toEqual({ decision: "pause", reason: "checkpoint-unavailable" });
+  });
+
+  it("does not start a Plan round without a checkpoint, since Work cannot hold it read-only", () => {
+    expect(
+      decideGoalLoopRound(
+        facts({ liveThreadAuthority: readOnlyCeiling, checkpointAvailable: false }),
+      ),
+    ).toEqual({ decision: "pause", reason: "checkpoint-unavailable" });
+  });
+
+  it("runs a round without a checkpoint only when a person approves every write", () => {
+    const autoAccept = { ...fullCeiling, executionPolicy: "auto-accept-edits" as const };
+    // The thread asks first, so the intersection asks first even though the
+    // declared ceiling would have allowed auto-accepted edits.
+    const decision = decideGoalLoopRound(
+      facts({
+        declaredCeiling: autoAccept,
+        liveThreadAuthority: fullCeiling,
+        checkpointAvailable: false,
+      }),
+    );
+
+    expect(decision).toMatchObject({
+      decision: "run",
+      authority: { executionPolicy: "approval-gated" },
     });
   });
 

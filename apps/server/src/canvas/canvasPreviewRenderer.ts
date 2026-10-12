@@ -2,7 +2,7 @@ import { constants } from "node:fs";
 import { access, readFile } from "node:fs/promises";
 import { extname, resolve, sep } from "node:path";
 import { chromium, type Browser } from "playwright-core";
-import type { CanvasDefinition } from "@octant/contracts/canvas";
+import type { CanvasDefinition, CanvasDesignAssetResolution } from "@octant/contracts/canvas";
 import { DEFAULT_BROWSER_EXECUTABLE_CANDIDATES } from "../browser/playwrightBrowserRuntime";
 
 /**
@@ -31,6 +31,17 @@ export interface CanvasPreviewRenderRequest {
   readonly theme: "light" | "dark";
   /** `thread` draws the Canvas as it sits inline in a thread, without its title. */
   readonly placement: "document" | "thread";
+  /**
+   * Each design's images, already resolved by the host under the thread's
+   * authority, so the picture shows what a reader sees. The page inlines
+   * them; it still requests nothing.
+   */
+  readonly designAssets?: ReadonlyArray<CanvasPreviewDesignAssets>;
+}
+
+export interface CanvasPreviewDesignAssets {
+  readonly blockId: string;
+  readonly assets: ReadonlyArray<CanvasDesignAssetResolution>;
 }
 
 export type CanvasPreviewRenderOutcome =
@@ -122,6 +133,7 @@ export function createPlaywrightCanvasPreviewRenderer(
         definition: request.definition,
         theme: request.theme,
         placement: request.placement,
+        designAssets: request.designAssets ?? [],
       });
       if (page === undefined) return { kind: "unavailable", reason: "no-renderer" };
 
@@ -208,6 +220,7 @@ export function canvasPreviewPageWithInput(
     readonly definition: CanvasDefinition;
     readonly theme: "light" | "dark";
     readonly placement: "document" | "thread";
+    readonly designAssets?: ReadonlyArray<CanvasPreviewDesignAssets>;
   },
 ): string | undefined {
   const headEnd = pageMarkup.indexOf("</head>");

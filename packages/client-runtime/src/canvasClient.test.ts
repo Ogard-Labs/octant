@@ -109,6 +109,35 @@ describe("createCanvasClient", () => {
     if (history.kind === "ready") expect(history.history.entries.length).toBeGreaterThan(0);
   });
 
+  it("asks the host for a design's images with the window capability and no cache", async () => {
+    const outcome = {
+      kind: "ready",
+      canvasId: String(canvasId),
+      versionId: "22222222-2222-4222-8222-222222222222",
+      blockId: "phone",
+      assets: [{ assetId: "shot", status: "unavailable", reason: "refused" }],
+    };
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify(outcome), { status: 200 }));
+    const client = createCanvasClient({
+      baseUrl: "http://127.0.0.1:3000",
+      fetch: fetchImpl as unknown as typeof fetch,
+      windowCapability: "capability",
+    });
+    const received = await client.designAssets?.({
+      canvasId,
+      versionId: outcome.versionId,
+      blockId: "phone",
+    });
+    expect(received).toEqual(outcome);
+    expect(fetchImpl).toHaveBeenCalledWith(
+      `http://127.0.0.1:3000/api/canvas/design-assets?canvasId=${String(canvasId)}&versionId=${outcome.versionId}&blockId=phone`,
+      expect.objectContaining({
+        cache: "no-store",
+        headers: { "x-octant-window-capability": "capability" },
+      }),
+    );
+  });
+
   it("reads the recipes a Canvas can start from with the window capability", async () => {
     const fetchImpl = vi.fn(
       async (_input: RequestInfo | URL, _init?: RequestInit) =>

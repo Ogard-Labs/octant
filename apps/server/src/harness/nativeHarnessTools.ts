@@ -24,8 +24,6 @@ import {
   type NativeHarnessGoalArguments,
   type NativeHarnessGoalCheckArguments,
   type NativeHarnessGrepArguments,
-  type NativeHarnessJournalLookupRequest,
-  type NativeHarnessJournalLookupResult,
   type NativeHarnessReadArguments,
   type NativeHarnessSecondOpinionArguments,
   type NativeHarnessTodoItem,
@@ -172,9 +170,6 @@ export interface NativeHarnessToolPorts {
     readonly replace: (items: ReadonlyArray<NativeHarnessTodoItem>) => Promise<void>;
   };
   readonly contextRemaining?: () => NativeHarnessContextRemaining | undefined;
-  readonly journalLookup?: (
-    request: NativeHarnessJournalLookupRequest,
-  ) => Promise<NativeHarnessJournalLookupResult>;
   readonly secondOpinion?: (input: {
     readonly question: string;
     readonly signal?: AbortSignal;
@@ -435,8 +430,6 @@ function isOffered(
       return ports.todo !== undefined;
     case "context-remaining":
       return ports.contextRemaining !== undefined;
-    case "journal-lookup":
-      return ports.journalLookup !== undefined;
     case "second-opinion":
       return ports.secondOpinion !== undefined;
     case "delegate":
@@ -531,10 +524,6 @@ async function execute(
     case "context-remaining": {
       const remaining = ports.contextRemaining!();
       return remaining === undefined ? refused("context-unavailable") : ok(remaining);
-    }
-    case "journal-lookup": {
-      const request = args as NativeHarnessJournalLookupRequest;
-      return ok(await ports.journalLookup!(request));
     }
     case "second-opinion": {
       const input = args as NativeHarnessSecondOpinionArguments;

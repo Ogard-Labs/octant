@@ -35,7 +35,7 @@ import type {
   ProviderModelId,
   ProviderObservedState,
 } from "@octant/contracts";
-import { isImageProfileDriverKind } from "@octant/domain";
+import { implicitClaudeAccountOwnerId, isImageProfileDriverKind } from "@octant/domain";
 import type { ReactNode } from "react";
 import { SettingsSection } from "../settings/primitives";
 import { OctantButton } from "../ui/base/OctantButton";
@@ -414,9 +414,7 @@ export function ProviderSettingsView(props: ProviderSettingsViewProps) {
           <ProviderCreateForm
             allowedProviderTypes={GENERAL_PROVIDER_TYPES}
             busy={props.busy}
-            existingClaudeAccountCount={
-              props.instances.filter((instance) => instance.driverKind === "claude").length
-            }
+            claudeHostProfileTaken={implicitClaudeAccountOwnerId(props.instances) !== undefined}
             existingCodexAccountCount={
               props.instances.filter((instance) => instance.driverKind === "codex").length
             }

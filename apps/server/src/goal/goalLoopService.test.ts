@@ -223,16 +223,64 @@ describe("taking a round", () => {
     expect(journaled(h.journal)).toEqual(["goal-loop-started@1", "goal-loop-round-recorded@1"]);
   });
 
-  it("does not start a round it could not checkpoint", async () => {
-    const h = harness();
+  it("a goal loop completes a round in a Work Project, whose folder has no checkpoint", async () => {
+    // A Work folder has no checkpoint to mark; an ask-first round still runs,
+    // because a person approves every write it makes.
+    const h = harness({ checkpoint: undefined });
     await started(h);
-    h.markCheckpoint.mockResolvedValueOnce(undefined);
+
+    const round = await h.service.advance(threadId);
+
+    expect(h.runRound).toHaveBeenCalledOnce();
+    expect(round).toMatchObject({
+      outcome: "ran",
+      sequence: 1,
+      authority: { executionPolicy: "approval-gated" },
+    });
+    expect(round).not.toHaveProperty("checkpointId");
+    expect(h.service.read(threadId).loop).toMatchObject({ status: "running", roundsRun: 1 });
+  });
+
+  it("pauses and says why when a round that auto-accepts edits has no checkpoint", async () => {
+    const autoAccept = { ...ceiling, executionPolicy: "auto-accept-edits" as const };
+    const h = harness({ checkpoint: undefined, authority: autoAccept });
+    await h.service.execute({
+      kind: "start-goal-loop",
+      threadId,
+      expectedVersion: 0,
+      loopId,
+      goalId,
+      ceiling: autoAccept,
+      trigger: { kind: "continuous" },
+    });
 
     const outcome = await h.service.advance(threadId);
 
     expect(outcome).toEqual({ paused: "checkpoint-unavailable" });
     expect(h.runRound).not.toHaveBeenCalled();
+    expect(h.service.read(threadId).loop).toMatchObject({
+      status: "paused",
+      pauseReason: "checkpoint-unavailable",
+    });
     expect(journaled(h.journal)).toContain("goal-loop-paused@1");
+  });
+
+  it("treats a checkpoint that failed to mark as missing, not as taken", async () => {
+    const autoAccept = { ...ceiling, executionPolicy: "auto-accept-edits" as const };
+    const h = harness({ authority: autoAccept });
+    await h.service.execute({
+      kind: "start-goal-loop",
+      threadId,
+      expectedVersion: 0,
+      loopId,
+      goalId,
+      ceiling: autoAccept,
+      trigger: { kind: "continuous" },
+    });
+    h.markCheckpoint.mockRejectedValueOnce(new Error("disk full"));
+
+    expect(await h.service.advance(threadId)).toEqual({ paused: "checkpoint-unavailable" });
+    expect(h.runRound).not.toHaveBeenCalled();
   });
 
   it("spends against the budget and stops before the round that would exceed it", async () => {

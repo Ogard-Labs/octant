@@ -30,9 +30,9 @@ import { approvedHomeBinDirs } from "./discoveryService";
 import { makePiRpcClient, type PiRpcClient } from "./piRpcClient";
 import type { ProviderProcessStartedListener } from "./providerRuntimeRegistry";
 import {
-  makeSeatbeltConfinementLive,
-  SeatbeltConfinementError,
-  type SeatbeltConfinementPort,
+  makeProcessConfinementLive,
+  ProcessConfinementError,
+  type ProcessConfinementPort,
 } from "../process/seatbeltProfile";
 import {
   execVersionRead,
@@ -107,7 +107,7 @@ export interface PiConfinementOptions {
 export interface PiProcessOptions {
   readonly confinement?: PiConfinementPort;
   /** Confinement for the version read, which the runtime's port does not cover. */
-  readonly versionProbeConfinement?: SeatbeltConfinementPort;
+  readonly versionProbeConfinement?: ProcessConfinementPort;
   readonly inheritedEnvironment?: NodeJS.ProcessEnv;
   readonly shutdownTimeoutMs?: number;
   readonly versionTimeoutMs?: number;
@@ -622,7 +622,7 @@ export function makePiConfinementLive(options: PiConfinementOptions = {}): PiCon
           ...(existsSync(credentialPath) ? [credentialPath] : []),
           ...(existsSync(modelsPath) ? [modelsPath] : []),
         ];
-        const confinement = makeSeatbeltConfinementLive({
+        const confinement = makeProcessConfinementLive({
           platform,
           sandboxPath,
         });
@@ -664,10 +664,10 @@ export function makePiConfinementLive(options: PiConfinementOptions = {}): PiCon
             }),
           catch: (error) =>
             failure(
-              error instanceof SeatbeltConfinementError && error.reason === "invalid-configuration"
+              error instanceof ProcessConfinementError && error.reason === "invalid-configuration"
                 ? "invalid-configuration"
                 : "incompatible",
-              error instanceof SeatbeltConfinementError
+              error instanceof ProcessConfinementError
                 ? error.message
                 : "Pi private-path confinement could not be prepared.",
             ),

@@ -98,18 +98,22 @@ export function decideGoalLoopRound(facts: GoalLoopRoundFacts): GoalLoopRoundDec
     return { decision: "pause", reason: "approval-required" };
   }
 
-  if (!facts.checkpointAvailable) {
+  const authority = intersectAuthority(facts.declaredCeiling, facts.liveThreadAuthority);
+
+  // The checkpoint is the safety net for writes nobody approved. A Work folder
+  // has none to mark — its turn record names changed paths, not their
+  // contents, and Work holds no Git — so a round without one runs only when a
+  // person approves every write it makes, and never under auto-accept.
+  if (!facts.checkpointAvailable && !everyWriteNeedsAPerson(authority)) {
     return { decision: "pause", reason: "checkpoint-unavailable" };
   }
 
   // Spend is the fact a token budget turns on, so it is checked before the
-  // authority intersection: a loop whose ceiling cannot be trusted to have
-  // spent anything must not take another round on a token budget's word.
+  // widening check: a loop whose ceiling cannot be trusted to have spent
+  // anything must not take another round on a token budget's word.
   if (facts.budget.tokenBudget !== undefined && !facts.roundSpendObserved) {
     return { decision: "pause", reason: "spend-unreported" };
   }
-
-  const authority = intersectAuthority(facts.declaredCeiling, facts.liveThreadAuthority);
 
   // Narrowing under a running loop is fine and needs no gesture — the loop
   // simply does less. Widening is a person changing the terms mid-flight, and
@@ -229,7 +233,7 @@ export function goalLoopPauseText(reason: GoalLoopPauseReason): string {
     case "approval-required":
       return "The next step needs an approval. The loop stopped and recorded the request.";
     case "checkpoint-unavailable":
-      return "The next round could not be checkpointed, so it was not started.";
+      return "There is no checkpoint to return to, so a round that would accept edits on its own was not started. A loop that asks before each edit can run without one.";
     case "spend-unreported":
       return "This provider did not report what the last round spent, so a token budget cannot be trusted to stop the loop.";
     case "paused-by-user":
@@ -237,6 +241,13 @@ export function goalLoopPauseText(reason: GoalLoopPauseReason): string {
     case "stopped-by-user":
       return "Stopped.";
   }
+}
+
+// Only approval-gated qualifies. A Work round has no read-only path, so a Plan
+// round runs asking first and an approved edit still lands; counting Plan here
+// would record a round as read-only while it wrote without a checkpoint.
+function everyWriteNeedsAPerson(authority: AgentRunAuthority): boolean {
+  return authority.executionPolicy === "approval-gated";
 }
 
 function hasAnyCeiling(budget: ThreadGoalBudget): boolean {

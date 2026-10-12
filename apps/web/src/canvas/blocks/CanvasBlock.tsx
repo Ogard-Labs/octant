@@ -22,12 +22,14 @@ import { BarListBlock } from "./BarListBlock";
 import { ComparisonMatrixBlock } from "./ComparisonMatrixBlock";
 import { MathBlock } from "./MathBlock";
 import type { CanvasActionRuntime } from "../canvasActionRuntime";
+import type { DesignAssetRuntime } from "./designDocument";
 
 export function CanvasBlockRenderer({
   block,
   layoutRuntime,
   planRuntime,
   actionRuntime,
+  designAssetRuntime,
   rowComments,
 }: {
   readonly block: CanvasBlock;
@@ -40,6 +42,8 @@ export function CanvasBlockRenderer({
    * its file; absent on surfaces that cannot dispatch one.
    */
   readonly actionRuntime?: CanvasActionRuntime;
+  /** Reaches the host for a design's images; absent, they draw as placeholders. */
+  readonly designAssetRuntime?: DesignAssetRuntime;
   /** Comment markers on a table's rows that carry an id; absent where comments are not journaled. */
   readonly rowComments?: TableRowComments;
 }) {
@@ -86,7 +90,12 @@ export function CanvasBlockRenderer({
     case "heatmap":
       return <HeatmapBlock block={block} />;
     case "design":
-      return <DesignBlock block={block} />;
+      return (
+        <DesignBlock
+          block={block}
+          {...(designAssetRuntime === undefined ? {} : { assetRuntime: designAssetRuntime })}
+        />
+      );
     case "bar-list":
       return (
         <BarListBlock block={block} {...(actionRuntime === undefined ? {} : { actionRuntime })} />

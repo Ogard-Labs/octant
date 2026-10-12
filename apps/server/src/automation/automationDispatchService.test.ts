@@ -8,7 +8,6 @@ import {
   type AutomationDefinition,
   type AutomationRun,
   type UtcTimestamp,
-  type WindowId,
 } from "@octant/contracts";
 import { EventActor } from "@octant/contracts/events";
 import { isAutomationMutationAllowed } from "@octant/domain";
@@ -29,7 +28,6 @@ import type {
   AutomationCapacityAdmissionPort,
   AutomationCodeDispatchPort,
   AutomationWorkDispatchPort,
-  AutomationDispatchWindowPort,
 } from "./automationModeDispatchPorts";
 import {
   AUTOMATION_TEST_IDS,
@@ -39,6 +37,7 @@ import {
   unavailableAutomationWorkDispatchPort,
 } from "./automationTestFixtures";
 import { buildAutomationAuthorityFactsFromHost } from "./automationDispatchService";
+import { ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
 
 const directories: Array<string> = [];
 
@@ -239,12 +238,6 @@ function alwaysAdmit(): AutomationCapacityAdmissionPort {
   };
 }
 
-function fixedWindow(): AutomationDispatchWindowPort {
-  return {
-    resolveWindowForProject: () => "aa000000-0000-4000-8000-0000000000f0" as WindowId,
-  };
-}
-
 describe("AutomationDispatchService", () => {
   it("creates exactly one Code thread per occurrence and links the dispatch intent", async () => {
     const session = openSession();
@@ -256,7 +249,6 @@ describe("AutomationDispatchService", () => {
       projection: session.projection,
       code: code.port,
       work: unavailableAutomationWorkDispatchPort(),
-      windows: fixedWindow(),
       capacity: alwaysAdmit(),
       resolveFacts: () => matchingFacts(definition),
       now: () => "2026-08-10T13:00:20.000Z" as UtcTimestamp,
@@ -288,7 +280,6 @@ describe("AutomationDispatchService", () => {
       projection: session.projection,
       code: code.port,
       work: unavailableAutomationWorkDispatchPort(),
-      windows: fixedWindow(),
       capacity: alwaysAdmit(),
       resolveFacts: () => ({
         ...matchingFacts(definition),
@@ -320,7 +311,6 @@ describe("AutomationDispatchService", () => {
       projection: session.projection,
       code: code.port,
       work,
-      windows: fixedWindow(),
       capacity: alwaysAdmit(),
       resolveFacts: () => matchingFacts(definition),
       now: () => "2026-08-10T13:00:20.000Z" as UtcTimestamp,
@@ -360,7 +350,6 @@ describe("AutomationDispatchService", () => {
       projection: session.projection,
       code: createCodePort().port,
       work,
-      windows: fixedWindow(),
       capacity: alwaysAdmit(),
       resolveFacts: () => matchingFacts(definition),
       now: () => "2026-08-10T13:00:20.000Z" as UtcTimestamp,
@@ -380,6 +369,54 @@ describe("AutomationDispatchService", () => {
     session.connection.close();
   });
 
+  it("runs a due routine with no window open, acting as the host for Code and Work", async () => {
+    // The dispatcher is given no window or window registry at all: a routine's
+    // thread and first turn are the host's, so nothing about which windows are
+    // open can stop the run or lend it an identity.
+    for (const definition of [codeDefinition(), workDefinition()]) {
+      const session = openSession();
+      const run = claimQueuedRun(session, definition);
+      const code = createCodePort();
+      const workCreate = vi.fn(async (input: { readonly threadId: string }) => ({
+        kind: "created" as const,
+        threadId: input.threadId as never,
+        createdAt: "2026-08-10T13:00:20.000Z" as UtcTimestamp,
+      }));
+      const workLaunch = vi.fn(async () => ({
+        kind: "accepted" as const,
+        runtimeReceipt: "work-turn:test",
+        acceptedAt: "2026-08-10T13:00:30.000Z" as UtcTimestamp,
+      }));
+      const dispatcher = new AutomationDispatchService({
+        store: session.store,
+        projection: session.projection,
+        code: code.port,
+        work: {
+          available: true,
+          unavailableReason: undefined,
+          createThread: workCreate,
+          startOrRecoverFirstTurn: workLaunch,
+        },
+        capacity: alwaysAdmit(),
+        resolveFacts: () => matchingFacts(definition),
+        now: () => "2026-08-10T13:00:20.000Z" as UtcTimestamp,
+      });
+
+      await dispatcher.dispatchNow(definition.id, run.id);
+
+      expect(session.projection.getRun(run.id)?.lifecycle).toBe("running");
+      const [create, launch] =
+        definition.mode === "code" ? [code.create, code.launch] : [workCreate, workLaunch];
+      expect(create).toHaveBeenCalledWith(
+        expect.objectContaining({ scopeId: ROUTINE_HOST_SCOPE_ID }),
+      );
+      expect(launch).toHaveBeenCalledWith(
+        expect.objectContaining({ scopeId: ROUTINE_HOST_SCOPE_ID }),
+      );
+      session.connection.close();
+    }
+  });
+
   it("waits on provider capacity without accepting a first turn", async () => {
     const session = openSession();
     const definition = codeDefinition();
@@ -390,7 +427,6 @@ describe("AutomationDispatchService", () => {
       projection: session.projection,
       code: code.port,
       work: unavailableAutomationWorkDispatchPort(),
-      windows: fixedWindow(),
       capacity: {
         admit: () => ({ kind: "waiting", message: "Provider capacity exhausted." }),
       },
@@ -419,7 +455,6 @@ describe("AutomationDispatchService", () => {
       projection: session.projection,
       code: code.port,
       work: unavailableAutomationWorkDispatchPort(),
-      windows: fixedWindow(),
       capacity: alwaysAdmit(),
       resolveFacts: () => matchingFacts(definition),
       now: () => "2026-08-10T13:00:20.000Z" as UtcTimestamp,
@@ -438,7 +473,6 @@ describe("AutomationDispatchService", () => {
       projection: rebuilt,
       code: code.port,
       work: unavailableAutomationWorkDispatchPort(),
-      windows: fixedWindow(),
       capacity: alwaysAdmit(),
       resolveFacts: () => matchingFacts(definition),
       now: () => "2026-08-10T13:05:00.000Z" as UtcTimestamp,
@@ -503,7 +537,6 @@ describe("AutomationDispatchService", () => {
       projection: session.projection,
       code: code.port,
       work: unavailableAutomationWorkDispatchPort(),
-      windows: fixedWindow(),
       capacity: alwaysAdmit(),
       resolveFacts: () => matchingFacts(definition),
       now: () => "2026-08-10T13:00:20.000Z" as UtcTimestamp,

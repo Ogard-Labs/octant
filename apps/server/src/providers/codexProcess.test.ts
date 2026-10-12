@@ -26,7 +26,7 @@ import {
   type CodexProbeOptions,
   type CodexProcessOptions,
 } from "./codexProcess";
-import type { SeatbeltConfinementPort } from "../process/seatbeltProfile";
+import type { ProcessConfinementPort } from "../process/seatbeltProfile";
 
 const fakeCliPath = fileURLToPath(new URL("./fixtures/fakeCodexCli.ts", import.meta.url));
 const directories: string[] = [];
@@ -37,7 +37,7 @@ const directories: string[] = [];
  * fixture the records file it writes beside itself, so the launch is prepared
  * with the confinement passed straight through.
  */
-const passthroughConfinement: SeatbeltConfinementPort = {
+const passthroughConfinement: ProcessConfinementPort = {
   prepare: (input) => ({ command: input.executable, args: input.args }),
 };
 
