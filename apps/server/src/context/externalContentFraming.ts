@@ -50,10 +50,13 @@ export function assertExternalContentNotInInstructionSection(input: {
  * model would read whatever followed as text outside the data. The body used to
  * be inserted verbatim, so a GitHub issue, a Linear issue, or an MCP result
  * could do exactly that. Only the three angle brackets that open a delimiter
- * are rewritten, so the body's words stay readable as data and here-strings or
- * conflict markers in tool output are left alone.
+ * are rewritten, so the body's words stay readable as data. The match allows
+ * spaces before the name and any letter case, because a model reads a near
+ * copy as the delimiter too; it stops at the end of the name and never spans a
+ * line, so a here-string such as `<<< OCTANT_EXTERNAL_DATASET` and conflict
+ * markers in tool output are left alone.
  */
-const FRAME_DELIMITER_OPENING = /<<<(?=\s*(?:END_)?OCTANT_EXTERNAL_DATA)/gi;
+const FRAME_DELIMITER_OPENING = /<<<(?=[ \t]*(?:END_)?OCTANT_EXTERNAL_DATA\b)/gi;
 
 function withoutFrameDelimiters(body: string): string {
   return body.replace(FRAME_DELIMITER_OPENING, "&lt;&lt;&lt;");
