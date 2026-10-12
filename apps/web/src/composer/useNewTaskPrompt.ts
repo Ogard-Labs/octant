@@ -71,6 +71,32 @@ export function discardNewTaskDraftForOverview(
   discardNewTaskDraftScope(drafts, `${mode}-overview:${projectId}`);
 }
 
+export interface ProjectOverviewDraftRef {
+  readonly mode: "chat" | "work";
+  readonly projectId: string;
+}
+
+/**
+ * Overview drafts to drop after a workspace update. A Project that is still
+ * open in any pane keeps its draft; Settings remounts start from an empty
+ * previous list and therefore keep every current overview.
+ */
+export function projectOverviewDraftsToDiscard(
+  previous: ReadonlyArray<ProjectOverviewDraftRef>,
+  next: ReadonlyArray<ProjectOverviewDraftRef>,
+): ReadonlyArray<ProjectOverviewDraftRef> {
+  const remaining = new Set(next.map((surface) => `${surface.mode}:${surface.projectId}`));
+  const dropped: ProjectOverviewDraftRef[] = [];
+  const seen = new Set<string>();
+  for (const surface of previous) {
+    const key = `${surface.mode}:${surface.projectId}`;
+    if (remaining.has(key) || seen.has(key)) continue;
+    seen.add(key);
+    dropped.push(surface);
+  }
+  return dropped;
+}
+
 const emptySubscribe = () => () => {};
 
 /**

@@ -6,6 +6,7 @@ import {
   discardNewTaskDraftForPane,
   NewTaskDraftsContext,
   NewTaskDraftScopeContext,
+  projectOverviewDraftsToDiscard,
   useNewTaskPrompt,
 } from "./useNewTaskPrompt";
 
@@ -104,5 +105,29 @@ describe("useNewTaskPrompt", () => {
     expect(drafts.read("work-overview:project-b")).toBe("Beta task");
     expect(drafts.readImages("work-overview:project-b")).toHaveLength(1);
     expect(drafts.read("chat-overview:project-a")).toBe("Chat notes");
+  });
+
+  it("drops an overview draft only when that Project is no longer open", () => {
+    expect(
+      projectOverviewDraftsToDiscard(
+        [
+          { mode: "chat", projectId: "project-a" },
+          { mode: "work", projectId: "project-b" },
+        ],
+        [{ mode: "work", projectId: "project-b" }],
+      ),
+    ).toEqual([{ mode: "chat", projectId: "project-a" }]);
+    expect(
+      projectOverviewDraftsToDiscard(
+        [{ mode: "chat", projectId: "project-a" }],
+        [
+          { mode: "chat", projectId: "project-a" },
+          { mode: "chat", projectId: "project-a" },
+        ],
+      ),
+    ).toEqual([]);
+    expect(projectOverviewDraftsToDiscard([], [{ mode: "chat", projectId: "project-a" }])).toEqual(
+      [],
+    );
   });
 });

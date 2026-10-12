@@ -4,7 +4,9 @@ import {
   discardNewTaskDraftForPane,
   NewTaskDraftsContext,
   NewTaskDraftScopeContext,
+  projectOverviewDraftsToDiscard,
   type NewTaskDrafts,
+  type ProjectOverviewDraftRef,
 } from "../composer/useNewTaskPrompt";
 import { ComposerNoticeProvider } from "../composer/ComposerNotice";
 import { ComposerSubagentsContext } from "../composer/ComposerSubagents";
@@ -66,7 +68,9 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -511,6 +515,15 @@ export interface WorkspaceViewProps {
 
 export function WorkspaceView(props: WorkspaceViewProps) {
   const newTaskDrafts = useContext(NewTaskDraftsContext);
+  const previousProjectOverviews = useRef<ReadonlyArray<ProjectOverviewDraftRef>>([]);
+  useLayoutEffect(() => {
+    const current = collectProjectOverviews(props.workspace);
+    const dropped = projectOverviewDraftsToDiscard(previousProjectOverviews.current, current);
+    previousProjectOverviews.current = current;
+    for (const surface of dropped) {
+      discardNewTaskDraftForOverview(newTaskDrafts, surface.mode, surface.projectId);
+    }
+  }, [newTaskDrafts, props.workspace]);
   const [pendingCanvasSelections, setPendingCanvasSelections] = useState<
     ReadonlyArray<CanvasContextSelection>
   >([]);
@@ -2372,6 +2385,27 @@ function ChatThreadWorkspace(props: {
       />
     </ChatThreadEnvironment>
   );
+}
+
+function collectProjectOverviews(
+  workspace: WorkspaceViewProps["workspace"],
+): ReadonlyArray<ProjectOverviewDraftRef> {
+  const found: ProjectOverviewDraftRef[] = [];
+  const visit = (layout: WorkspaceLayoutNode): void => {
+    if (layout.kind === "pane") {
+      const surface = layout.surface;
+      if (surface.kind === "project" && (surface.mode === "chat" || surface.mode === "work")) {
+        found.push({ mode: surface.mode, projectId: String(surface.projectId) });
+      }
+      return;
+    }
+    visit(layout.first);
+    visit(layout.second);
+  };
+  visit(workspace.layouts.chat);
+  visit(workspace.layouts.work);
+  visit(workspace.layouts.code);
+  return found;
 }
 
 function findWorkspacePane(
