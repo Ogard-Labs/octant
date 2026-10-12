@@ -12,6 +12,7 @@ import {
   type ProviderExecutionPolicy,
   type ToolActionAuthority,
 } from "@octant/contracts";
+import { ExternalContentClearStore } from "../context/externalContentClearStore";
 import { ExternalContentIngestionStore } from "../context/externalContentIngestionStore";
 import { readThreadExternalContentTaint } from "../context/externalContentTaintProjection";
 import { Journal } from "../persistence/journal";
@@ -106,6 +107,7 @@ function temporaryDirectory(prefix: string): string {
 function taintJournal(): {
   readonly connection: SqliteConnection;
   readonly store: ExternalContentIngestionStore;
+  readonly clears: ExternalContentClearStore;
 } {
   const connection = openSqlite(join(temporaryDirectory("octant-egress-taint-"), "octant.sqlite3"));
   applyMigrations(connection, MIGRATIONS, () => now);
@@ -126,7 +128,17 @@ function taintJournal(): {
       actorId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
     }),
   });
-  return { connection, store };
+  const clears = new ExternalContentClearStore({
+    journal,
+    connection,
+    uuid: randomUUID,
+    clock: () => now,
+    actor: Schema.decodeUnknownSync(EventActor)({
+      kind: "local-user",
+      actorId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+    }),
+  });
+  return { connection, store, clears };
 }
 
 const authority = {
@@ -195,7 +207,7 @@ async function hostileCodeLead(options: {
       results: [{ title: "Bun workspaces", url: "https://bun.sh/docs", content: "Workspaces." }],
     }),
   }));
-  const { connection, store } = taintJournal();
+  const { connection, store, clears } = taintJournal();
   const threadId = randomUUID();
   const checkoutRoot = temporaryDirectory("octant-egress-checkout-");
   writeFileSync(join(checkoutRoot, "README.md"), "hello\n");
@@ -283,6 +295,15 @@ async function hostileCodeLead(options: {
     pageSeen: page.seen,
     searchSeen: search.seen,
     tainted: () => readThreadExternalContentTaint(connection, threadId).externalContentIngested,
+    /** A person at a local window reviews what the idle thread read and clears it. */
+    clear: () =>
+      clears.clear({
+        threadId,
+        windowId: randomUUID(),
+        expectedVersion: clears.read(threadId).version,
+        principal: "local-window",
+        turn: "idle",
+      }),
   };
 }
 
@@ -415,6 +436,52 @@ describe("native harness hostile content", () => {
       INJECTED_COMMAND,
       "bun test",
       "bun test",
+    ]);
+  });
+
+  it("runs a full-access command unasked after a person clears the thread, until the next fetch", async () => {
+    const lead = await hostileCodeLead({ posture: "full-access", answers: ["approve", "approve"] });
+    await lead.call("web-fetch", { url: lead.pageUrl });
+    expect(lead.tainted()).toBe(true);
+
+    // Marked: full access no longer covers the shell, and the answer is single use.
+    expect(await lead.call("bash", { command: "bun test" })).toMatchObject({ isError: false });
+    expect(lead.asked).toEqual([
+      expect.objectContaining({
+        toolName: "bash",
+        approvalClass: "shell-commands",
+        singleUse: true,
+      }),
+    ]);
+
+    expect(lead.clear()).toMatchObject({ kind: "cleared" });
+    expect(lead.tainted()).toBe(false);
+    // Cleared: full access applies again, on this turn's tools and the next turn's.
+    expect(await lead.call("bash", { command: "bun run lint" })).toMatchObject({ isError: false });
+    expect(
+      await lead.call("bash", { command: "bun run typecheck" }, lead.nextTurn()),
+    ).toMatchObject({ isError: false });
+    expect(lead.asked).toHaveLength(1);
+
+    // The clear holds for nothing. The same page, the same bytes, marks the
+    // thread again, and the next command asks once more.
+    expect(await lead.call("web-fetch", { url: lead.pageUrl })).toMatchObject({ isError: false });
+    expect(lead.asked).toHaveLength(1);
+    expect(lead.tainted()).toBe(true);
+    expect(await lead.call("bash", { command: INJECTED_COMMAND })).toMatchObject({
+      isError: false,
+    });
+    expect(lead.asked).toHaveLength(2);
+    expect(lead.asked[1]).toMatchObject({
+      toolName: "bash",
+      approvalClass: "shell-commands",
+      singleUse: true,
+    });
+    expect(lead.shell.commands).toEqual([
+      "bun test",
+      "bun run lint",
+      "bun run typecheck",
+      INJECTED_COMMAND,
     ]);
   });
 

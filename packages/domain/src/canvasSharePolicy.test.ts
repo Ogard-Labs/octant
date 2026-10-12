@@ -1,6 +1,7 @@
 import { CANVAS_SCHEMA_VERSION, decodeCanvasVersion } from "@octant/contracts/canvas";
 import { decodeCanvasComment } from "@octant/contracts/canvas-board";
 import {
+  CANVAS_SHARE_LAYOUT_GROUPS_SCHEMA_VERSION,
   CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION,
   CANVAS_SHARE_SCHEMA_VERSION,
   decodeCanvasStaticExportDocument,
@@ -17,7 +18,11 @@ import {
 import { comparisonMatrixExamples } from "./canvasComparisonMatrixExamples";
 import { opsDashboardExample } from "./canvasDashboardExamples";
 import { mathExamples } from "./canvasMathExamples";
-import { launchDeckExample, onboardingFlowExample } from "./canvasDesignExamples";
+import {
+  cartPrototypeExample,
+  launchDeckExample,
+  onboardingFlowExample,
+} from "./canvasDesignExamples";
 import {
   loginSequenceExample,
   orderSchemaExample,
@@ -26,6 +31,7 @@ import {
   supportFlowExample,
 } from "./canvasDiagramExamples";
 import { heatmapExamples } from "./canvasHeatmapExamples";
+import { designBriefExample, launchGanttExample } from "./canvasLayoutExamples";
 import { metricExamples } from "./canvasMetricExamples";
 import { mockupExamples } from "./canvasMockupExamples";
 import { treemapExamples } from "./canvasTreemapExamples";
@@ -269,7 +275,7 @@ describe("Canvas share policy", () => {
       }),
       context,
     });
-    expect(receipt.document.schemaVersion).toBe(8);
+    expect(receipt.document.schemaVersion).toBe(CANVAS_SHARE_SCHEMA_VERSION);
     expect(receipt.document.blocks[0]).toEqual({
       ...opsDashboardExample[0],
       schemaVersion: CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION,
@@ -338,7 +344,7 @@ describe("Canvas share policy", () => {
     expect(receipt.document.blocks).toEqual(blocks);
   });
 
-  it("shares every block an agent is shown as an example, and refuses a design", () => {
+  it("shares every block an agent is shown as an example, and a design only once its markup is acknowledged", () => {
     const atCurrentVersion = (blocks: ReadonlyArray<unknown>) => ({
       ...current,
       schemaVersion: CANVAS_SCHEMA_VERSION,
@@ -374,13 +380,122 @@ describe("Canvas share policy", () => {
       })),
     );
 
-    for (const design of [onboardingFlowExample, launchDeckExample]) {
+    const acknowledged = {
+      ...request,
+      consent: { ...request.consent, acknowledgedMarkupSharedAsWritten: true },
+    };
+    for (const design of [onboardingFlowExample, launchDeckExample, cartPrototypeExample]) {
+      // The secret filter reads values, not markup, so a design leaves only
+      // when the sharer has said they know it leaves as written.
       expect(
         shareDenial(() =>
           buildCanvasStaticExportReceipt({ request, current: atCurrentVersion([design]), context }),
         ),
-      ).toBe("unsafe-payload");
+      ).toBe("consent-required");
+      const shared = buildCanvasStaticExportReceipt({
+        request: acknowledged,
+        current: atCurrentVersion([design]),
+        context,
+      });
+      expect(decodeCanvasStaticExportDocument(shared.document).blocks).toEqual([design]);
     }
+  });
+
+  it("shares a design without the images it declares, which resolve only on this host", () => {
+    const design = {
+      ...onboardingFlowExample,
+      assets: [{ assetId: "shot", source: { kind: "project-file", path: "screens/home.png" } }],
+    };
+    const shared = buildCanvasStaticExportReceipt({
+      request: {
+        ...request,
+        consent: { ...request.consent, acknowledgedMarkupSharedAsWritten: true },
+      },
+      current: {
+        ...current,
+        schemaVersion: CANVAS_SCHEMA_VERSION,
+        definition: {
+          ...current.definition,
+          schemaVersion: CANVAS_SCHEMA_VERSION,
+          provenance: { ...current.definition.provenance, mode: "work" },
+          blocks: [design],
+        },
+      },
+      context,
+    });
+    expect(shared.document.blocks[0]).not.toHaveProperty("assets");
+    expect(JSON.stringify(shared.document)).not.toContain("screens/home.png");
+  });
+
+  it("refuses an acknowledged design whose own id or frame id reads as a credential", () => {
+    const share = (design: unknown) =>
+      shareDenial(() =>
+        buildCanvasStaticExportReceipt({
+          request: {
+            ...request,
+            consent: { ...request.consent, acknowledgedMarkupSharedAsWritten: true },
+          },
+          current: {
+            ...current,
+            schemaVersion: CANVAS_SCHEMA_VERSION,
+            definition: {
+              ...current.definition,
+              schemaVersion: CANVAS_SCHEMA_VERSION,
+              blocks: [design],
+            },
+          },
+          context,
+        }),
+      );
+    // An id is not markup, so the acknowledgement does not cover it.
+    expect(
+      share({ ...onboardingFlowExample, blockId: "ghp_abcdefghijklmnopqrstuvwxyz0123456789" }),
+    ).toBe("unsafe-payload");
+    expect(
+      share({
+        ...onboardingFlowExample,
+        frames: [
+          {
+            frameId: "ghp_abcdefghijklmnopqrstuvwxyz0123456789",
+            title: "Welcome",
+            html: "<p>Hello</p>",
+          },
+        ],
+      }),
+    ).toBe("unsafe-payload");
+  });
+
+  it("refuses an acknowledged design whose markup holds what reads as a credential", () => {
+    const leaking = {
+      ...onboardingFlowExample,
+      frames: [
+        {
+          frameId: "welcome",
+          title: "Welcome",
+          html: "<p>Use ghp_abcdefghijklmnopqrstuvwxyz0123456789 to sign in.</p>",
+        },
+      ],
+    };
+    expect(
+      shareDenial(() =>
+        buildCanvasStaticExportReceipt({
+          request: {
+            ...request,
+            consent: { ...request.consent, acknowledgedMarkupSharedAsWritten: true },
+          },
+          current: {
+            ...current,
+            schemaVersion: CANVAS_SCHEMA_VERSION,
+            definition: {
+              ...current.definition,
+              schemaVersion: CANVAS_SCHEMA_VERSION,
+              blocks: [leaking],
+            },
+          },
+          context,
+        }),
+      ),
+    ).toBe("unsafe-payload");
   });
 
   it("excludes board comments from a static export by default", () => {
@@ -739,5 +854,67 @@ describe("Canvas share policy", () => {
         context,
       }),
     ).toThrowError(CanvasSharePolicyRejected);
+  });
+});
+
+describe("Canvas share of tabs, columns, diagram styles, and the Gantt view", () => {
+  const brief = decodeCanvasVersion({
+    ...current,
+    schemaVersion: CANVAS_SCHEMA_VERSION,
+    definition: {
+      ...current.definition,
+      schemaVersion: CANVAS_SCHEMA_VERSION,
+      blocks: [...designBriefExample, launchGanttExample],
+    },
+  });
+
+  it("round-trips the tabs, columns, every block they name, the styled diagrams, and the Gantt plan", () => {
+    const receipt = buildCanvasStaticExportReceipt({ request, current: brief, context });
+    expect(receipt.document.schemaVersion).toBeGreaterThanOrEqual(
+      CANVAS_SHARE_LAYOUT_GROUPS_SCHEMA_VERSION,
+    );
+    const decoded = decodeCanvasStaticExportDocument(JSON.parse(JSON.stringify(receipt.document)));
+    expect(decoded.blocks).toEqual([...designBriefExample, launchGanttExample]);
+  });
+
+  it("is refused by a decoder that declares the previous share version", () => {
+    const receipt = buildCanvasStaticExportReceipt({ request, current: brief, context });
+    // The same diagram without its styles is one an older decoder reads...
+    const plainLoop = receipt.document.blocks
+      .filter((block) => block.blockId === "loop")
+      .map((block) =>
+        block.kind === "diagram"
+          ? {
+              ...block,
+              schemaVersion: 14,
+              edges: block.edges.map(({ style: _style, tone: _tone, ...edge }) => edge),
+            }
+          : block,
+      );
+    expect(() =>
+      decodeCanvasStaticExportDocument({
+        ...receipt.document,
+        schemaVersion: CANVAS_SHARE_LAYOUT_GROUPS_SCHEMA_VERSION - 1,
+        blocks: plainLoop,
+      }),
+    ).not.toThrow();
+    // ...but a styled diagram or a Gantt view alone is refused.
+    for (const blockId of ["loop", "launch-plan"]) {
+      expect(() =>
+        decodeCanvasStaticExportDocument({
+          ...receipt.document,
+          schemaVersion: CANVAS_SHARE_LAYOUT_GROUPS_SCHEMA_VERSION - 1,
+          blocks: receipt.document.blocks
+            .filter((block) => block.blockId === blockId)
+            .map((block) => ({ ...block, schemaVersion: 14 })),
+        }),
+      ).toThrow();
+    }
+    expect(() =>
+      decodeCanvasStaticExportDocument({
+        ...receipt.document,
+        schemaVersion: CANVAS_SHARE_LAYOUT_GROUPS_SCHEMA_VERSION - 1,
+      }),
+    ).toThrow();
   });
 });

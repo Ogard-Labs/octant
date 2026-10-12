@@ -34,6 +34,7 @@ describe("remote access policy", () => {
     "host.store.data-map",
     "host.store.export",
     "host.store.spend-ceiling",
+    "thread.external-content.clear",
   ])("requires a local principal for %s", (action) => {
     expect(authorizePrincipalAction({ principalKind: "remote-device", action })).toMatchObject({
       kind: "deny",

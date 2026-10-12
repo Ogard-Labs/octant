@@ -15,6 +15,7 @@ The precedence and authorization rules live in [AGENTS.md](../../AGENTS.md#missi
 | Artifact replica sync  | [Artifact replica sync](artifact-replica-sync.md)           | Changing replica entries, stores, membership, publish, pull, restore, the synced library, or store selection              |
 | Provider runtimes      | [Provider runtimes](provider-runtimes.md)                   | Changing OpenCode's version-specific routes, the local-server adapter, or a subscription sign-in dialect                  |
 | Device workbench       | [Device workbench](device-workbench.md)                     | Changing Simulator or emulator panes, capture, input delivery, keyboard layouts, or managed device tools                  |
+| Browser captures       | [Browser captures](browser-captures.md)                     | Changing which Browser screenshots a thread keeps, their retention, the capture routes, or the Browser captures strip     |
 | Tainted search queries | [Search queries on a tainted thread](search-query-taint.md) | Changing which `web-search` queries the native harness refuses on a tainted thread                                        |
 | Visual design          | [Design system](../../DESIGN.md)                            | Changing typography, colour, materials, Settings composition, controls, or accessibility                                  |
 | Start screen           | [Start screen](start-screen.md)                             | Changing start-screen tiles, tabs, cards, or Code's agent home; the rule set is in Workspace                              |

@@ -5,8 +5,9 @@ import {
   type ProviderModel,
   type ProviderReadiness,
 } from "@octant/contracts";
-import type { ProviderCredentialResolver } from "./credentialBrokerClient";
+import type { ProviderCredentialLease, ProviderCredentialResolver } from "./credentialBrokerClient";
 import { CONTEXT_OVERFLOW_FAILURE_MESSAGE } from "./endpointRetry";
+import { acquireProviderCredential, reportKeyRejection } from "./providerApiKeyPool";
 import { resolveModelInputModalities } from "@octant/domain/model-context-window";
 
 const MAX_RETRY_AFTER_MS = 3_600_000;
@@ -218,6 +219,7 @@ async function performRequest(
   const callerSignal = init.signal;
   if (isAborted(callerSignal)) throw interrupted();
   const deadline = makeRequestDeadline(callerSignal, endpoint.limits.connectionTimeoutMs);
+  const attempt: { lease?: ProviderCredentialLease | undefined } = {};
 
   try {
     const headers = new Headers(init.headers);
@@ -225,9 +227,14 @@ async function performRequest(
     if (endpoint.configuration.authentication !== "none") {
       let credential: string;
       try {
-        const resolution = Promise.resolve().then(
-          async () => (await endpoint.credentialResolver?.resolve(endpoint.instanceId)) ?? "",
-        );
+        const resolution = Promise.resolve().then(async () => {
+          const acquired = await acquireProviderCredential(
+            endpoint.credentialResolver,
+            endpoint.instanceId,
+          );
+          attempt.lease = acquired.lease;
+          return acquired.credential;
+        });
         credential = await Promise.race([resolution, deadline.failure]);
       } catch (error) {
         if (isProviderFailure(error)) throw error;
@@ -276,6 +283,7 @@ async function performRequest(
       await cancelResponseBody(response);
       throw fail("invalid-configuration", "The configured endpoint returned a redirect.");
     }
+    await reportKeyRejection(attempt.lease, response);
     return boundResponse(response, endpoint.limits, callerSignal);
   } finally {
     deadline.close();

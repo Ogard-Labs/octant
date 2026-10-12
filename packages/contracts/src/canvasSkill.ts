@@ -1,5 +1,5 @@
 import { Schema } from "effect";
-import { CanvasBlockKind, CanvasSourceKind } from "./canvas";
+import { CanvasBlockKind, CanvasDesignSize, CanvasSourceKind } from "./canvas";
 import { CanvasCardSchemaVersion } from "./canvasCards";
 import {
   ExtensionContentDigest,
@@ -94,8 +94,10 @@ export type CanvasSkillPresentationRule = typeof CanvasSkillPresentationRule.Typ
  * One block in a document recipe.
  *
  * `kind` must already exist in the block catalogue. `role` says what that
- * block is for. A skeleton carries neither a source id nor a body, so a
- * recipe cannot attach a file, invent a reference, or name a block that
+ * block is for. A `design` slot may also name the `size` it is drawn at,
+ * because a document, a phone screen, and a slide are different pieces of
+ * work under one kind. A skeleton carries neither a source id nor a body, so
+ * a recipe cannot attach a file, invent a reference, or name a block that
  * does not exist.
  */
 export const CanvasDocumentRecipeId = boundedToken("CanvasDocumentRecipeId");
@@ -104,7 +106,14 @@ export type CanvasDocumentRecipeId = typeof CanvasDocumentRecipeId.Type;
 export const CanvasDocumentRecipeSkeletonBlock = Schema.Struct({
   kind: CanvasBlockKind,
   role: boundedText(CANVAS_DOCUMENT_RECIPE_ROLE_MAX_CHARS),
-}).annotations(strict);
+  size: Schema.optional(CanvasDesignSize),
+})
+  .annotations(strict)
+  .pipe(
+    Schema.filter((block) => block.size === undefined || block.kind === "design", {
+      message: () => "Only a design slot names a size.",
+    }),
+  );
 export type CanvasDocumentRecipeSkeletonBlock = typeof CanvasDocumentRecipeSkeletonBlock.Type;
 
 export const CanvasDocumentRecipe = Schema.Struct({

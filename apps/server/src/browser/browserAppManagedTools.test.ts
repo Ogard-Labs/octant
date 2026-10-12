@@ -495,7 +495,10 @@ describe("browser diagnostics reach the provider-facing result", () => {
     };
   }
 
-  function toolsFor(observation: unknown) {
+  function toolsFor(
+    observation: unknown,
+    act?: Parameters<typeof createBrowserAppManagedTools>[0]["browser"]["act"],
+  ) {
     const running = snapshot({
       status: "running",
       context: activeContext(),
@@ -513,7 +516,7 @@ describe("browser diagnostics reach the provider-facing result", () => {
       browser: {
         inspectThread: () => running,
         create: vi.fn(async () => running),
-        act: vi.fn(async () => running),
+        act: act ?? vi.fn(async () => running),
         releaseThread: vi.fn(async () => running),
       },
       approvals: { request: vi.fn(async () => "approved" as const) } as never,
@@ -552,6 +555,36 @@ describe("browser diagnostics reach the provider-facing result", () => {
       isError: false,
     });
     expect(JSON.stringify(result.result)).not.toContain("aGVsbG8=");
+  });
+
+  it("names the agent as the one asking for the screenshot the host may keep", async () => {
+    const act = vi.fn(async () =>
+      snapshot({
+        status: "running",
+        context: activeContext(),
+        observation: { revision: 12, screenshotDataUrl: "data:image/png;base64,aGVsbG8=" } as never,
+      }),
+    );
+    const tools = toolsFor({ revision: 11 }, act);
+    await tools.execute({ name: "octant_browser", inputJson: '{"operation":"screenshot"}' });
+    expect(act).toHaveBeenCalledWith(expect.objectContaining({ capturedBy: "agent" }));
+  });
+
+  it("returns the screenshot and says when the thread did not keep a capture of it", async () => {
+    const tools = toolsFor({
+      revision: 12,
+      screenshotDataUrl: "data:image/png;base64,aGVsbG8=",
+      capture: { status: "not-kept", reason: "unavailable" },
+    });
+    const result = await tools.execute({
+      name: "octant_browser",
+      inputJson: '{"operation":"screenshot"}',
+    });
+    expect(result).toMatchObject({
+      images: [{ mimeType: "image/png", data: "aGVsbG8=" }],
+      isError: false,
+      result: { page: { captureNotKept: "unavailable" } },
+    });
   });
 
   it("passes what the page logged and failed to load through to the result", async () => {

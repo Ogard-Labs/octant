@@ -187,6 +187,21 @@ above the composer of the thread that asked; nothing runs until you approve
 it. A model that cannot use Octant's tools refuses the turn instead of quietly
 dropping the server.
 
+The card names the plugin, its server, and the tool. **Approve once** runs that
+one call. **Always allow in this Project** also makes Octant run that one tool
+in that one Project without asking; other tools of the same plugin, and the
+same tool in other Projects, still ask. It appears only where Octant can
+remember the answer: not in a thread with no Project, not in Plan, not for a
+network tool in a thread that has already read outside content, and not from a
+paired device. A plugin update, or a change to how the server describes the
+tool, makes Octant ask again, and removing the plugin forgets every answer
+about it.
+
+To see or take back what you allowed, open **Settings → Data & privacy →
+Remembered tool approvals**. It lists each tool under its Project with a
+**Revoke** button; after revoking, the next call of that tool asks again. The
+list is available at a window on the host, not from a paired device.
+
 ## Skills
 
 Skills are prompt-only, non-executable instruction content that still

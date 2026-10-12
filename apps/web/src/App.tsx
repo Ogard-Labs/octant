@@ -3910,6 +3910,12 @@ function LaunchedShell(
     () => (activeMode === "code" ? (["code"] as const) : (["chat", "work"] as const)),
     [activeMode],
   );
+  // Every Project, archived ones too: a grant outlives the Project's listing.
+  const projectNamesById = useMemo(
+    () =>
+      new Map(projectController.allProjects.map((project) => [String(project.id), project.name])),
+    [projectController.allProjects],
+  );
   const workingNowProjectNames = useMemo(
     () => new Map(projectController.projects.map((project) => [String(project.id), project.name])),
     [projectController.projects],
@@ -6347,6 +6353,7 @@ function LaunchedShell(
       codeController={codeController}
       discoveryController={discoveryController}
       extensionClient={extensionClient}
+      projectNames={projectNamesById}
       {...(props.hostBridge?.selectLocalPluginFolder === undefined
         ? {}
         : {

@@ -8,6 +8,7 @@ import {
   ExtensionPackageManifest,
   ExtensionPackageVersion,
 } from "./extensions";
+import { ProjectId } from "./projects";
 import { ToolExtensionId } from "./toolActions";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
@@ -137,3 +138,65 @@ export const ExtensionLifecycleEvent = Schema.Struct({
 export type ExtensionLifecycleEvent = typeof ExtensionLifecycleEvent.Type;
 
 export const decodeExtensionLifecycleEvent = Schema.decodeUnknownSync(ExtensionLifecycleEvent);
+
+export const EXTENSION_TOOL_GRANT_AGGREGATE = "extension-tool-grant";
+export const EXTENSION_TOOL_GRANT_EVENT_NAMES = {
+  recorded: "extension.tool-grant-recorded@1",
+  revoked: "extension.tool-grant-revoked@1",
+} as const;
+
+const sha256Digest = Schema.String.pipe(Schema.pattern(/^sha256:[a-f0-9]{64}$/));
+export const ExtensionToolGrantId = sha256Digest.pipe(Schema.brand("ExtensionToolGrantId"));
+export type ExtensionToolGrantId = typeof ExtensionToolGrantId.Type;
+/** SHA-256 of one MCP tool's name, description, and input schema as its server listed them. */
+export const ExtensionToolDefinitionDigest = sha256Digest.pipe(
+  Schema.brand("ExtensionToolDefinitionDigest"),
+);
+export type ExtensionToolDefinitionDigest = typeof ExtensionToolDefinitionDigest.Type;
+export const ExtensionMcpToolName = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256));
+
+/**
+ * One MCP tool in one Project. The provider-facing tool name is left out on
+ * purpose: it embeds the thread, and a grant holds across a Project's threads.
+ */
+const toolGrantSubject = {
+  projectId: ProjectId,
+  extensionId: ToolExtensionId,
+  packageId: ExtensionPackageId,
+  componentId: ExtensionComponentId,
+  mcpToolName: ExtensionMcpToolName,
+};
+/** What the person saw when they answered: any difference asks again. */
+const toolGrantBinding = {
+  version: ExtensionPackageVersion,
+  digest: ExtensionContentDigest,
+  definitionDigest: ExtensionToolDefinitionDigest,
+};
+
+/** Identifiers and digests only: never the arguments or result of a call. */
+export const ExtensionToolGrantRecorded = Schema.Struct({
+  grantId: ExtensionToolGrantId,
+  ...toolGrantSubject,
+  ...toolGrantBinding,
+}).annotations(strict);
+export type ExtensionToolGrantRecorded = typeof ExtensionToolGrantRecorded.Type;
+
+export const ExtensionToolGrantRevocationReason = Schema.Literal(
+  "person",
+  "plugin-uninstalled",
+  "trust-revoked",
+  "rolled-back",
+);
+export type ExtensionToolGrantRevocationReason = typeof ExtensionToolGrantRevocationReason.Type;
+
+export const ExtensionToolGrantRevoked = Schema.Struct({
+  grantId: ExtensionToolGrantId,
+  projectId: ProjectId,
+  reason: ExtensionToolGrantRevocationReason,
+}).annotations(strict);
+export type ExtensionToolGrantRevoked = typeof ExtensionToolGrantRevoked.Type;
+
+export const decodeExtensionToolGrantRecorded = Schema.decodeUnknownSync(
+  ExtensionToolGrantRecorded,
+);
+export const decodeExtensionToolGrantRevoked = Schema.decodeUnknownSync(ExtensionToolGrantRevoked);

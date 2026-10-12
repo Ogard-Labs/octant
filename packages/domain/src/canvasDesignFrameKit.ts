@@ -430,3 +430,90 @@ pre {
   }
 }
 `;
+
+/**
+ * The workspace tokens a themed frame receives, read from Octant's own page
+ * when the frame is drawn. These are the semantic `--oct-*` roles the frame
+ * kit reads; an author may read them too.
+ */
+export const DESIGN_FRAME_THEME_TOKENS: ReadonlyArray<string> = [
+  "--oct-bg",
+  "--oct-surface",
+  "--oct-surface-warm",
+  "--oct-fg",
+  "--oct-fg-2",
+  "--oct-fg-soft",
+  "--oct-muted",
+  "--oct-meta",
+  "--oct-border",
+  "--oct-border-soft",
+  "--oct-selection",
+  "--oct-accent",
+  "--oct-accent-fg",
+  "--oct-accent-on",
+  "--oct-accent-soft",
+  "--oct-success",
+  "--oct-success-fg",
+  "--oct-success-soft",
+  "--oct-warn",
+  "--oct-warn-fg",
+  "--oct-warn-soft",
+  "--oct-danger",
+  "--oct-danger-fg",
+  "--oct-danger-soft",
+  "--oct-series-1",
+  "--oct-series-2",
+  "--oct-series-3",
+  "--oct-series-4",
+  "--oct-series-5",
+  "--oct-series-6",
+  "--oct-font-body",
+  "--oct-font-mono",
+  "--oct-text-xs",
+  "--oct-text-sm",
+  "--oct-text-base",
+  "--oct-text-lg",
+  "--oct-text-xl",
+  "--oct-text-2xl",
+  "--oct-text-3xl",
+  "--oct-leading-body",
+  "--oct-leading-tight",
+  "--oct-leading-heading",
+  "--oct-leading-snug",
+  "--oct-leading-code",
+  "--oct-weight-medium",
+  "--oct-weight-strong",
+  "--oct-tracking-tight",
+  "--oct-tracking-snug",
+  "--oct-tracking-wide",
+  "--oct-space-1",
+  "--oct-space-2",
+  "--oct-space-3",
+  "--oct-space-4",
+  "--oct-space-6",
+  "--oct-space-8",
+  "--oct-radius-sm",
+  "--oct-radius-md",
+  "--oct-radius-pill",
+];
+
+/** The workspace's scheme and token values, as a themed frame is drawn with them. */
+export interface DesignFrameThemeValues {
+  readonly scheme: "light" | "dark";
+  readonly tokens: ReadonlyArray<readonly [name: string, value: string]>;
+}
+
+/**
+ * Whether a token's value may be written into a frame's stylesheet. The value
+ * is a claim wherever it comes from: the app reads it from its own page, and
+ * an export is handed it by a window. One that could end its declaration or
+ * its rule, or name something to load, is left out rather than written.
+ */
+export function designFrameTokenValueIsSafe(value: string): boolean {
+  return (
+    value.length > 0 &&
+    value.length <= 512 &&
+    !/[<>{};\\]/.test(value) &&
+    !/url\s*\(|@import|expression\s*\(/i.test(value)
+  );
+}

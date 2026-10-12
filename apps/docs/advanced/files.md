@@ -80,10 +80,14 @@ short pointer; brief answers stay in the conversation. A follow-up such as "add
 a risks section" revises the existing Canvas: the read-only `list` operation
 returns the thread's Canvases and `read` returns one's current blocks and
 sequence. The tool's always-visible description stays short; its read-only
-`describe` operation carries the detail. Without block kinds it lists the
+`describe` operation carries the detail. Without block kinds it explains the
+three ways a Canvas carries work (typed blocks for data, a design frame for the
+look, and a running design for a prototype you can try) and tells the agent to
+use the simplest one that does the job. It then lists the
 supported kinds and when to use the structured ones, the document recipes an agent should
 start from, and a creation example. Asking to write a plan, review a pull
-request, or summarise research starts from the matching recipe. Requesting up
+request, summarise research, write an article, pitch a product, show a design
+system, or build a prototype you can try starts from the matching recipe. Requesting up
 to three `blockKinds` returns their exact schemas from the host's block
 contracts, plus how to author and worked examples for the kinds that carry
 them (plain kinds such as `rich-text` return their schema alone):
@@ -103,12 +107,15 @@ appear only in a design's frames.
 In a Chat thread, choose **Show canvas** from the **Thread actions** menu. Under
 **Start from**, pick **Blank** or a recipe: an implementation plan, a design
 spec, an architecture review, a code review, an audit or test report, a
-postmortem, a research brief, a dashboard, and the others the host offers,
+postmortem, a research brief, a dashboard, an article, a design brief, a
+design system, a clickable prototype, and the others the host offers,
 including any an enabled skill adds. Each shows one line about what it holds
 and a small outline of its sections. Use the arrow keys to move between them.
 
 A Canvas started from a recipe opens with the recipe's sections: its headings,
-and a "To fill" note for every other block saying what belongs there. With
+and a "To fill" note for every other block saying what belongs there. A recipe
+that is a document, such as the article, opens as that document in your theme,
+with a title and section headings waiting for the text. With
 **Ask this thread's agent to fill it in** ticked, Octant also sends a message on
 the thread asking its agent to fill the new Canvas, with the Canvas attached.
 The message appears in the thread like one you typed, and the agent works with
@@ -175,16 +182,18 @@ can share or export it. Any other Canvas appears there as a row that opens it.
 What you see in the thread is read-only, even expanded: dragging a board node
 or changing a plan's task happens in the sidebar, or in the Canvas tab in Chat,
 where comments and sharing are too. The agent can show a document of any length
-inline, but a Canvas with a diagram board (the generic diagram you can drag), a
-plan, a mockup, or a design always first appears as a row, because you work on
-those in the sidebar. Sequence, state, entity-relationship, swimlane, and mind
+inline, including an article or spec it wrote as a document-size design. A
+Canvas with a diagram board (the generic diagram you can drag), a plan, a
+mockup, a design at a device size (phone, tablet, desktop, or slide), or a
+running prototype always first appears as a row, because you work on those in
+the sidebar. Sequence, state, entity-relationship, swimlane, and mind
 map diagrams can be shown inline. If an inline Canvas gains one of those
 blocks, later or through your own edits, it turns back into a row. The agent is
 told when that happens.
 
 ### The agent looks at a Canvas before it replies
 
-After building a chart, a treemap, or a small inline Canvas, the agent can look
+After building a chart, a treemap, a design, or a small inline Canvas, the agent can look
 at the shipped drawing before it writes back, using the read-only `preview`
 operation:
 
@@ -198,8 +207,14 @@ can name a `version` sequence to look at an earlier version instead of the
 current one. Preview returns a screenshot of the Canvas drawn by the same
 renderer the thread uses, at that width and in that theme, and a list of layout
 warnings: a label too long for its slot, a legend that overflows its row,
-a chart with an empty series, and text or marks below their contrast target. The agent fixes what the warnings name
-with a revision, then replies.
+a chart with an empty series, and text or marks below their contrast target. For
+a design it also reports a screen whose content is wider than the screen, the
+hardest-to-read text on each screen, an image it could not show, and, for a
+running prototype, each error its script threw as it started. To find those
+errors Octant runs the prototype once in the preview browser, which is started
+with no way to reach the network or other programs on your Mac. An error that
+only happens after a click is not seen by a preview. The agent fixes what the
+warnings name with a revision, then replies.
 
 Preview is bounded so a loop cannot spend your machine or the model's attention
 on the same page: one preview runs at a time per thread, and only a few are
@@ -214,6 +229,20 @@ warnings alone come back, and the result says the model could not be shown an
 image. The page Octant screenshots loads nothing from the network: it carries
 only Octant's own built files and the Canvas itself.
 
+### Tabs and columns
+
+A long Canvas can arrange its blocks in tabs or side-by-side columns. A tab
+strip holds two to twelve labelled tabs; click a tab, or move along the strip
+with the arrow keys, `Home`, and `End` and press `Enter`. Which tab is open is
+yours alone: switching saves nothing and makes no new version, so the person
+beside you can read another tab of the same Canvas. Columns hold two to four
+tracks and fold into one column when the Canvas is narrow, as it is in the
+sidebar. A tab or a column can hold a dashboard, which looks the same as it
+does anywhere else in the Canvas. Comments still sit on the blocks inside a tab
+or a column. A shared
+copy keeps the tabs, and an exported Markdown or HTML copy reads every tab in
+order under its label.
+
 ### Diagrams as boards
 
 A diagram block opens as a board. Zoom with the `+` and `−` controls, `⌘`/`Ctrl`
@@ -225,6 +254,25 @@ agent's revisions. Older versions stay intact and can still be opened; a board
 opened at an older version is read-only. If the host has moved on since you
 opened the board, the drag is refused, the board reloads, and you drag again on
 the current version. Boards keep the diagram budgets (512 nodes, 1,024 edges).
+
+A flowchart or a map of areas is a diagram too. Its nodes can be drawn as a
+process box, a decision diamond, or a start-and-end pill; a connection can be
+a plain line, an arrow, or a dashed arrow; and a connection or a group can take
+a tone such as success or danger, so a group of nodes reads as a region. The
+tones follow your theme, and the label beside each one still says what it
+means. Diagrams saved before shapes existed open as they did.
+
+A plan with dates can open as a Gantt chart: choose **Gantt** above the plan to
+see each task as a bar from its start to its due day, arrows from the tasks it
+waits on, and its status beside its title. Tasks without dates are listed under
+the chart. Choosing a view never changes the plan.
+
+If the agent already has a diagram written in Mermaid, it can hand it to the
+Canvas as a Mermaid code block: a flowchart, sequence, state, entity-relationship,
+or mind map in the supported subset becomes the matching Canvas diagram, drawn
+by Octant, so you can comment on it and share it like any other. Octant never
+draws Mermaid itself; a diagram outside the subset (another chart type, custom
+styling, links) stays a code block.
 
 A login or request flow is a sequence: participants across the top, messages
 in order down the page, an activation on a lifeline, and notes. A lifecycle
@@ -307,11 +355,50 @@ agent asks for your theme.
 - A deck shows **Present** instead. Use the arrow buttons, or the left and
   right arrow keys, to move between slides.
 - Some designs react to taps without changing screen, such as a card you can
-  select or a reminder you can tick. That is all they can do: a design runs no
-  script, loads nothing from the internet, and has no links that leave it.
-  Pictures in it are drawn by the agent.
-- A design cannot be shared as a snapshot yet. Exporting it writes the name
-  of each screen, not the screens themselves.
+  select or a reminder you can tick. That is all an ordinary design can do: it
+  runs no script, loads nothing from the internet, and has no links that leave
+  it. A prototype, below, is the one kind that runs script.
+  Pictures in it are drawn by the agent, or are real images it names.
+- Ask for a working prototype, such as a checkout with a cart you can fill,
+  and the agent can make a design that runs its own script. Its header
+  calls it a prototype. In the sidebar it starts when you open it; in
+  the thread it starts when you press **Run**. While it runs, Octant shows
+  **Running** and **Stop** above it, outside the prototype. A prototype
+  cannot reach Octant or your files, and it cannot load a page, an image, or
+  data from the internet. One way out is not blocked yet: its script can open
+  a direct connection to another computer and send what the prototype itself
+  holds, which is its own screens and any image it shows. Octant says so under
+  every prototype. Run one only if you would be comfortable with that. If it stops responding, or tries to open another page, Octant
+  stops it and offers **Run again**. Script errors appear as text under it.
+- If a prototype holds on to the keyboard, press **Command-Escape**
+  (**Control-Escape** outside macOS) in the Octant app to move focus to its
+  **Stop** button. A prototype that keeps grabbing the keyboard back is
+  stopped.
+- In a web browser connected to your Mac, a prototype runs in the browser
+  and Octant cannot stop it from opening another page before it removes it,
+  so the **Run** control says it is not network-contained there. To leave a
+  prototype from the keyboard in a browser, use the browser's own focus keys
+  (such as **F6**) or the **Stop** button. If a prototype stopped responding
+  in a browser, open Octant in a new tab to run one again.
+- A design can show real images: a screenshot or other image file from the
+  thread's folder (Work) or checkout (Code), or an image generated in the same
+  Project. In a Chat Project it can show only images generated there. Octant
+  reads each image when you open the design, under the thread's access, and
+  draws it into the page, so the design itself still fetches nothing. An image
+  it cannot show (missing, outside the folder, from another Project, larger
+  than 3 MB, or not a PNG, JPEG, GIF, or WebP) appears as a labelled
+  placeholder.
+- Sharing a Canvas that holds a design asks for one more tick: its markup is
+  shared exactly as written, and Octant does not check markup for secrets. The
+  snapshot shows the design's screens and runs a prototype when you press
+  **Run**, under the same limits as in the Canvas. Images the design took from
+  your Project or from generated images are not shared; their places show a
+  placeholder. Exporting to HTML writes the design's screens into the file,
+  and a prototype runs there with no way to reach the network; the approval
+  card says the file includes the design's markup exactly as written. A design
+  drawn in your theme is exported in the theme your window shows at that
+  moment, without Octant's own fonts. A Markdown export still writes the name
+  of each screen instead.
 
 Comments, versions, and **Compare with** work on a design as on any other
 block. To change it, ask the agent: "make the buttons rounder" revises the
@@ -340,8 +427,9 @@ paired phone or browser). A comment whose block has since left the canvas is
 kept and marked rather than dropped, and so is one whose table row was removed. Shared snapshots never include comments.
 A shared snapshot keeps every block, including charts (funnels, radars, and
 sankeys too), dashboards, tables, treemaps,
-heatmaps, bar lists, comparison matrices, and formulas, with their number formats. A design, or an action block
-that runs a command on this Mac, stops a share: Share then says the canvas
+heatmaps, bar lists, comparison matrices, and formulas, with their number formats. A design is
+shared once you tick that its markup is shared as written. An action block
+that runs a command on this Mac stops a share: Share then says the canvas
 cannot be shared safely.
 A treemap or bar list in a shared snapshot offers no **Open file**, because
 those files are on your Mac.

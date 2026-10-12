@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { CANVAS_FRAME_FOCUS_ESCAPE_CHANNEL } from "./canvasFrameGuard";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("electron", () => ({ contextBridge: {}, ipcRenderer: {} }));
@@ -174,6 +175,7 @@ describe("desktop preload bridge", () => {
     expect(key).toBe(HOST_BRIDGE_KEY);
     expect(Object.keys(bridge).sort()).toEqual([
       "acknowledgeWhatsNew",
+      "addProviderApiKey",
       "approveRemotePairingRequest",
       "attachBrowserSurface",
       "cancelCodeOperationApproval",
@@ -197,10 +199,12 @@ describe("desktop preload bridge", () => {
       "initialProjectTarget",
       "installAppUpdate",
       "listOpenInApplications",
+      "listProviderApiKeys",
       "listRemotePairingRequests",
       "maximizeOrRestore",
       "minimize",
       "mintRemotePairingTicket",
+      "moveProviderApiKey",
       "notifyAttention",
       "openBrowserExternal",
       "openCodeCheckoutInApplication",
@@ -214,7 +218,10 @@ describe("desktop preload bridge", () => {
       "readBundledWhatsNew",
       "reconcileExpiredRemoteDevices",
       "recoverRemoteHostIdentity",
+      "removeProviderApiKey",
+      "renameProviderApiKey",
       "renameRemoteDevice",
+      "replaceProviderApiKey",
       "requestCodeOperationApproval",
       "requestComputerUsePermissions",
       "resetBounds",
@@ -225,6 +232,7 @@ describe("desktop preload bridge", () => {
       "selectLocalPluginFolder",
       "selectProjectRoot",
       "selectRuntimeBinary",
+      "setActiveProviderApiKey",
       "setAppUpdateRing",
       "setApprovalSurfacePalette",
       "setAttentionBadge",
@@ -236,6 +244,7 @@ describe("desktop preload bridge", () => {
       "setSidebarVibrancyMode",
       "subscribeAppUpdateState",
       "subscribeBrowserSurfaceState",
+      "subscribeCanvasFrameFocusEscape",
       "subscribeCodeDeepLinks",
       "subscribeMenuBarTask",
       "subscribeOpenSettings",
@@ -703,6 +712,28 @@ describe("desktop preload bridge", () => {
       IPC_CHANNELS.resolvedSidebarVibrancy,
       registered,
     );
+  });
+
+  it("relays the reserved Canvas frame shortcut on the channel the main process sends it on", () => {
+    let registered: ((event: unknown) => void) | undefined;
+    const ipc: IpcRendererPort = {
+      invoke: vi.fn(),
+      on: vi.fn((_channel, listener) => {
+        registered = listener;
+      }),
+      removeListener: vi.fn(),
+    };
+    const listener = vi.fn();
+    const unsubscribe = createHostBridge(
+      ipc,
+      projectWindowCapability,
+    ).subscribeCanvasFrameFocusEscape(listener);
+    expect(IPC_CHANNELS.canvasFrameFocusEscape).toBe(CANVAS_FRAME_FOCUS_ESCAPE_CHANNEL);
+    expect(ipc.on).toHaveBeenCalledWith(CANVAS_FRAME_FOCUS_ESCAPE_CHANNEL, registered);
+    registered?.({});
+    expect(listener).toHaveBeenCalledWith();
+    unsubscribe();
+    expect(ipc.removeListener).toHaveBeenCalledWith(CANVAS_FRAME_FOCUS_ESCAPE_CHANNEL, registered);
   });
 
   it("relays only a valid replacement Project window capability", () => {

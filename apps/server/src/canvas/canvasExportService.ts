@@ -182,7 +182,13 @@ export class CanvasExportService {
       );
     }
 
-    const rendered = renderArtifactDocument(document, request.format);
+    // A design's frames are written into the HTML form, and the card below
+    // says so: approving it is the person's acknowledgement that markup
+    // leaves as written, which the share filter cannot check.
+    const rendered = renderArtifactDocument(document, request.format, {
+      frames: "as-written",
+      ...(request.frameTheme === undefined ? {} : { frameTheme: request.frameTheme }),
+    });
     if (rendered.kind === "too-large") {
       return decodeCanvasExportPrepareResult(
         refused("too-large", "The rendered document is too large to export."),
@@ -243,6 +249,7 @@ export class CanvasExportService {
         ? {}
         : { destinationVisibility: destination.visibility }),
       ...(destination?.note === undefined ? {} : { destinationNote: destination.note }),
+      ...(rendered.writesDesignMarkup ? { writesDesignMarkup: true } : {}),
       payload: rendered.body,
       payloadDigest,
       byteLength,

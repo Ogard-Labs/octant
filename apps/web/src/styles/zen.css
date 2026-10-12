@@ -1120,7 +1120,7 @@ img.zen-appearance__thumb {
 
 /* Reduced transparency, increased contrast, or no backdrop blur: an opaque
    window with a plain edge, as every other Zen surface falls back. */
-@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
+@media (prefers-reduced-transparency: reduce) {
   .zen-surface .zen-el,
   .zen-surface .zen-research:not(.zen-research--collapsed) {
     background-color: var(--oct-surface);
@@ -1128,6 +1128,16 @@ img.zen-appearance__thumb {
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
   }
+}
+
+html[data-octant-increased-contrast="true"] .zen-surface .zen-el,
+html[data-octant-increased-contrast="true"]
+  .zen-surface
+  .zen-research:not(.zen-research--collapsed) {
+  background-color: var(--oct-surface);
+  background-image: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
 /* The dock, the collapsed pill, the spaces pill, and every sheet are the
@@ -1173,7 +1183,7 @@ img.zen-appearance__thumb {
   }
 }
 
-@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
+@media (prefers-reduced-transparency: reduce) {
   .zen-surface .zen-bar,
   .zen-surface .zen-pill,
   .zen-surface .zen-surface__empty,
@@ -1183,6 +1193,16 @@ img.zen-appearance__thumb {
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
   }
+}
+
+html[data-octant-increased-contrast="true"] .zen-surface .zen-bar,
+html[data-octant-increased-contrast="true"] .zen-surface .zen-pill,
+html[data-octant-increased-contrast="true"] .zen-surface .zen-surface__empty,
+html[data-octant-increased-contrast="true"] .zen-surface [data-slot="card"][data-variant="glass"] {
+  background-color: var(--oct-surface);
+  background-image: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
 /* The dock is a row of round icon keys, the way a system dock is: a word per

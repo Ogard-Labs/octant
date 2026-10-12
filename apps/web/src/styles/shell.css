@@ -2339,11 +2339,9 @@ html[data-octant-native-host="true"]
   }
 }
 
-@media (prefers-contrast: more) {
-  .shell-frame > .window-chrome,
-  .shell-frame > .sidebar {
-    border-color: var(--octant-border-strong);
-  }
+html[data-octant-increased-contrast="true"] .shell-frame > .window-chrome,
+html[data-octant-increased-contrast="true"] .shell-frame > .sidebar {
+  border-color: var(--octant-border-strong);
 }
 
 /* Sidebar background image + scrim stacking context.
