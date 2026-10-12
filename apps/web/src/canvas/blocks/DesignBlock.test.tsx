@@ -141,24 +141,19 @@ describe("design block", () => {
     expect(frames(article)[0]?.srcdoc).toContain("color-scheme: light;");
   });
 
-  it("redraws a document in the Contrast theme when the system asks for more contrast", async () => {
-    // Contrast is the system preference: the stylesheet swaps the text roles
-    // under `prefers-contrast: more`, so no theme attribute on the root moves
-    // and only the computed tokens change.
-    const preferences = new Map<string, EventTarget>();
-    vi.stubGlobal(
-      "matchMedia",
-      vi.fn().mockImplementation((query: string) => {
-        const preference = preferences.get(query) ?? new EventTarget();
-        preferences.set(query, preference);
-        return Object.assign(preference, { matches: false });
-      }),
-    );
-    let foreground = "rgb(240, 240, 240)";
+  it("redraws a document in high contrast when Increased contrast turns on, and back when it turns off", async () => {
+    // The Settings toggle and the system preference publish one root
+    // attribute, and the stylesheet swaps the text roles under it, so the
+    // attribute is the only thing that moves besides the computed tokens.
+    const root = document.documentElement;
     const computedStyle = window.getComputedStyle.bind(window);
     vi.spyOn(window, "getComputedStyle").mockImplementation((element, pseudo) => {
       const style = computedStyle(element, pseudo);
-      if (element !== document.documentElement) return style;
+      if (element !== root) return style;
+      const foreground =
+        root.dataset.octantIncreasedContrast === "true"
+          ? "rgb(255, 255, 255)"
+          : "rgb(240, 240, 240)";
       return new Proxy(style, {
         get: (target, key) =>
           key === "getPropertyValue"
@@ -174,14 +169,19 @@ describe("design block", () => {
       expect(frames(article)[0]?.srcdoc).toContain("--oct-fg: rgb(240, 240, 240);");
 
       await act(async () => {
-        foreground = "rgb(255, 255, 255)";
-        preferences.get("(prefers-contrast: more)")?.dispatchEvent(new Event("change"));
+        root.dataset.octantIncreasedContrast = "true";
         await Promise.resolve();
       });
       expect(frames(article)[0]?.srcdoc).toContain("--oct-fg: rgb(255, 255, 255);");
+
+      await act(async () => {
+        root.dataset.octantIncreasedContrast = "false";
+        await Promise.resolve();
+      });
+      expect(frames(article)[0]?.srcdoc).toContain("--oct-fg: rgb(240, 240, 240);");
     } finally {
       vi.restoreAllMocks();
-      vi.unstubAllGlobals();
+      delete root.dataset.octantIncreasedContrast;
     }
   });
 

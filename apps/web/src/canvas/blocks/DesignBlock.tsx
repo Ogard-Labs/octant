@@ -467,20 +467,18 @@ function useWorkspaceFrameTheme(enabled: boolean): DesignFrameThemeValues | unde
     read();
     const observer = new MutationObserver(read);
     observer.observe(root, { attributes: true });
-    // The Contrast theme is the system's increased-contrast preference: the
-    // stylesheet swaps the text roles under `prefers-contrast: more` and no
-    // attribute on the root moves, so the frame listens for it as well.
-    const preferences =
+    // Increased contrast needs no listener of its own: the Settings toggle and
+    // the system preference publish `data-octant-increased-contrast` on the
+    // root, which the observer above sees. A system light/dark switch moves no
+    // attribute while the theme follows the system, so that one is listened for.
+    const systemDark =
       typeof window.matchMedia === "function"
-        ? [
-            window.matchMedia("(prefers-color-scheme: dark)"),
-            window.matchMedia("(prefers-contrast: more)"),
-          ]
-        : [];
-    for (const preference of preferences) preference.addEventListener("change", read);
+        ? window.matchMedia("(prefers-color-scheme: dark)")
+        : undefined;
+    systemDark?.addEventListener("change", read);
     return () => {
       observer.disconnect();
-      for (const preference of preferences) preference.removeEventListener("change", read);
+      systemDark?.removeEventListener("change", read);
     };
   }, [enabled]);
   return theme;
