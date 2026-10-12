@@ -423,7 +423,7 @@ import { createLinkedThreadRuntime } from "./linkedThread/linkedThreadRuntime";
 import { FolderBrowseService } from "./folderBrowseService";
 import { ProjectService } from "./projectService";
 import { CodeProjectAccess } from "./codeProjectAccess";
-import { isRoutineHostScope, ROUTINE_HOST_SCOPE_ID } from "./routineHostScope";
+import { isRoutineHostScope } from "./routineHostScope";
 import { ProjectRootPort } from "./projectRootPort";
 import { ProjectTerminalService } from "./code/projectTerminalService";
 import { ProjectBrowserService } from "./browser/projectBrowserService";
@@ -7357,20 +7357,13 @@ export function startOctantServer(
       // interrupted when its provider session ends, so each round's requests
       // end with that round. Shell and Git never ask in Work.
       pendingApproval: () => undefined,
-      markCheckpoint: async (threadId) => {
-        const marked = await threadCheckpointService
-          .execute(ROUTINE_HOST_SCOPE_ID, {
-            kind: "mark-thread-checkpoint",
-            threadKind: "work",
-            threadId,
-            checkpointId: randomUUID(),
-            label: "Goal loop round",
-          })
-          .catch(() => undefined);
-        return marked === undefined || marked.kind !== "checkpoint-marked"
-          ? undefined
-          : String(marked.checkpoint.id);
-      },
+      // A Work folder has no checkpoint to mark. Checkpoints anchor a Chat turn
+      // or a Code operation; a Work turn records which paths changed, never
+      // their contents, so it cannot restore the folder, and Work holds no
+      // Git. Asking the checkpoint service anyway was refused every time and
+      // paused every loop before its first round. The policy runs a round
+      // without one only when a person approves every write it makes.
+      markCheckpoint: async () => undefined,
       runRound: createGoalLoopWorkRoundRunner({
         turns: workTurnService,
         usage: workTurnUsageStore,
