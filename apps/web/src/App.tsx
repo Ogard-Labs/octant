@@ -6951,6 +6951,19 @@ function LaunchedShell(
                           onRetryThreads: () => projectThreadsAccess.onRetry?.(),
                         })}
                     projects={workSide ? workSideProjects : projectController.projects}
+                    {...(workSide &&
+                    workSideProjects.length === 0 &&
+                    projectController.allProjects.some(
+                      (project) => project.type === "code" && project.lifecycle === "active",
+                    )
+                      ? {
+                          otherModeProjectsHint: {
+                            message: "Your Projects are in Code.",
+                            actionLabel: "Switch to Code",
+                            onSwitch: () => handleSelectMode("code"),
+                          },
+                        }
+                      : {})}
                   />
                 )}
               </>
