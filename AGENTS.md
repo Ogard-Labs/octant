@@ -375,7 +375,8 @@ The first release is the Apple Silicon technical preview with the
 provider-neutral plugin/skill marketplace. It is
 signed with a Developer ID, notarized, and updates itself — those three are one
 deliverable, because an updater on an unsigned app is an unauthenticated
-code-delivery channel and macOS refuses the replacement anyway. Cross-platform
+code-delivery channel and macOS refuses the replacement anyway. A local package
+built without maintainer signing credentials is unsigned. Cross-platform
 desktop (macOS, Linux, Windows) remains authorized: Linux desktop shell next, Windows Work/Code only after an
 explicitly approved Windows confinement design is documented. Do not add native mobile store distribution, hosted
 relay, connector/OAuth marketplace, or full LSP/extension host unless an explicit
@@ -383,5 +384,6 @@ request authorizes that scope and the current specification documents its
 authority and release boundaries. The person's confirmed pull-request merge from
 a local window and host-local routines (Automation Center) are in scope under the
 [architecture's rules](docs/architecture.md#modes-chat-work-and-code); other
-pull-request mutation, agent-initiated merge, and cloud scheduling are not.
+pull-request mutation, agent-initiated merge, cloud scheduling, and a hosted
+wake service are not.
 Existing scoped exceptions remain documented in the architecture.

@@ -392,6 +392,8 @@ the project and working folder instead of Git controls. Full paths require a
 matching project binding revision; missing metadata never borrows another root.
 The strip stays mounted while metadata loads, and full paths are available in
 tooltips. Code retains its checkout, branch, diff, and pull-request controls.
+Pane headers show thread titles without repeated project labels. Workspace and
+dock tabs share one compact recipe for geometry, selection, and close controls.
 
 Chat, Work, and Code open on the same screen: a greeting and one raised
 composer. The hero says only the greeting for the hour and the person's name
@@ -669,7 +671,9 @@ hairline message surface across Chat, Work, and Code. Feedback above the toolbar
 appears only when it has content; empty feedback consumes no space. Long notices
 remain accessible and scrollable. The access menu holds the optional provider
 approval-review choice and starting-profile detail. The Code checkout strip is
-attached underneath, rather than floating above the input. Input growth from
+attached underneath, rather than floating above the input. It keeps its height
+and border when checkout metadata is unavailable: missing project, branch and
+diff values stay blank, and unavailable checkout actions are not shown. Input growth from
 extra typed lines and visible notices is intentional (0114). Repository, branch
 and PR actions stay visible below the input. Utility panels keep one resize
 boundary and a compact tab row without a second horizontal divider.
