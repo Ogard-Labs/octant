@@ -439,7 +439,10 @@ describe("WorkOverview", () => {
     const starts = screen.getAllByRole("button", { name: "Start task" });
     const choosers = screen.getAllByLabelText("Choose attachment file");
     fireEvent.change(inputs[0]!, { target: { value: "First submission" } });
-    await user.upload(choosers[0]!, new File([new Uint8Array([1])], "first.png", { type: "image/png" }));
+    await user.upload(
+      choosers[0]!,
+      new File([new Uint8Array([1])], "first.png", { type: "image/png" }),
+    );
     fireEvent.click(starts[0]!);
     await waitFor(() => expect(screen.queryByText("first.png")).toBeNull());
     fireEvent.change(inputs[1]!, { target: { value: "Newer prompt" } });
