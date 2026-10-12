@@ -115,6 +115,8 @@ describe("useNewTaskPrompt", () => {
           { mode: "work", projectId: "project-b" },
         ],
         [{ mode: "work", projectId: "project-b" }],
+        1,
+        2,
       ),
     ).toEqual([{ mode: "chat", projectId: "project-a" }]);
     expect(
@@ -124,10 +126,21 @@ describe("useNewTaskPrompt", () => {
           { mode: "chat", projectId: "project-a" },
           { mode: "chat", projectId: "project-a" },
         ],
+        1,
+        2,
       ),
     ).toEqual([]);
-    expect(projectOverviewDraftsToDiscard([], [{ mode: "chat", projectId: "project-a" }])).toEqual(
-      [],
-    );
+    expect(
+      projectOverviewDraftsToDiscard([], [{ mode: "chat", projectId: "project-a" }], 1, 2),
+    ).toEqual([]);
+  });
+
+  it("keeps overview drafts across an uncommitted workspace change", () => {
+    expect(
+      projectOverviewDraftsToDiscard([{ mode: "chat", projectId: "project-a" }], [], 1, 1),
+    ).toEqual([]);
+    expect(
+      projectOverviewDraftsToDiscard([{ mode: "chat", projectId: "project-a" }], [], 1),
+    ).toEqual([]);
   });
 });

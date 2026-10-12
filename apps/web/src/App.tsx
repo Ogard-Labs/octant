@@ -7597,6 +7597,9 @@ function LaunchedShell(
                         projects={projectController.allProjects}
                         providerController={providerController}
                         workspace={controller.workspace}
+                        {...(controller.workspaceVersion === undefined
+                          ? {}
+                          : { workspaceVersion: controller.workspaceVersion })}
                         mode={controller.workspace.activeMode}
                         {...(controller.crossContextOffer === undefined
                           ? {}

@@ -2143,7 +2143,7 @@ describe("WorkspaceView Chat surfaces", () => {
       projectId: project.id,
     } as WorkspaceTab;
     const base = propsFor(tab);
-    const view = (surface: WorkspaceTab) => {
+    const view = (surface: WorkspaceTab, workspaceVersion: number) => {
       const layout = {
         kind: "pane" as const,
         nodeId: ids.node,
@@ -2174,25 +2174,105 @@ describe("WorkspaceView Chat surfaces", () => {
                 },
               },
             }}
+            workspaceVersion={workspaceVersion as never}
           />
         </NewTaskDraftsContext.Provider>
       );
     };
 
-    const rendered = render(view(tab));
+    const rendered = render(view(tab, 1));
     expect(await screen.findByRole("region", { name: "Chat quick start" })).toBeVisible();
     expect(drafts.read(`chat-overview:${projectId}`)).toBe("Abandoned brief");
 
     rendered.rerender(
-      view({
-        id: ids.tab,
-        kind: "welcome",
-        mode: "chat",
-        title: "Welcome to Chat",
-      } as WorkspaceTab),
+      view(
+        {
+          id: ids.tab,
+          kind: "welcome",
+          mode: "chat",
+          title: "Welcome to Chat",
+        } as WorkspaceTab,
+        2,
+      ),
     );
 
     expect(drafts.read(`chat-overview:${projectId}`)).toBe("");
+  });
+
+  it("keeps a Chat Project overview draft when a replace rolls back", async () => {
+    const drafts = createNewTaskDrafts();
+    const projectId = "00000000-0000-4000-8000-000000000919";
+    drafts.write(`chat-overview:${projectId}`, "Keep this brief");
+    const project = {
+      id: projectId,
+      type: "chat",
+      name: "Launch planning",
+      lifecycle: "active",
+      pinned: true,
+      rank: "0/1",
+      version: 1,
+      createdAt: now,
+      updatedAt: now,
+    } as never as ProjectSummary;
+    const tab = {
+      id: ids.tab,
+      kind: "project",
+      mode: "chat",
+      title: project.name,
+      projectId: project.id,
+    } as WorkspaceTab;
+    const welcome = {
+      id: ids.tab,
+      kind: "welcome",
+      mode: "chat",
+      title: "Welcome to Chat",
+    } as WorkspaceTab;
+    const base = propsFor(tab);
+    const view = (surface: WorkspaceTab, workspaceVersion: number) => {
+      const layout = {
+        kind: "pane" as const,
+        nodeId: ids.node,
+        paneId: ids.pane,
+        surface,
+      };
+      return (
+        <NewTaskDraftsContext.Provider value={drafts}>
+          <WorkspaceView
+            {...base}
+            chatController={
+              { ...base.chatController, bootstrap: { threads: [] }, status: "ready" } as never
+            }
+            layout={layout as never}
+            mode="chat"
+            projects={[project]}
+            workspace={{
+              ...base.workspace,
+              activeMode: "chat",
+              layouts: { chat: layout, work: layout, code: layout },
+              contextByMode: {
+                ...base.workspace.contextByMode,
+                chat: {
+                  host: "local" as never,
+                  mode: "chat",
+                  projectId: project.id,
+                  boundRoot: null,
+                },
+              },
+            }}
+            workspaceVersion={workspaceVersion as never}
+          />
+        </NewTaskDraftsContext.Provider>
+      );
+    };
+
+    const rendered = render(view(tab, 1));
+    expect(await screen.findByRole("region", { name: "Chat quick start" })).toBeVisible();
+
+    rendered.rerender(view(welcome, 1));
+    expect(drafts.read(`chat-overview:${projectId}`)).toBe("Keep this brief");
+
+    rendered.rerender(view(tab, 1));
+    expect(drafts.read(`chat-overview:${projectId}`)).toBe("Keep this brief");
   });
 
   it("disables Chat Project quick start for an archived Project", async () => {

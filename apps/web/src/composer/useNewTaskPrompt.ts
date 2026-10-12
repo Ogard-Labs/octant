@@ -77,14 +77,25 @@ export interface ProjectOverviewDraftRef {
 }
 
 /**
- * Overview drafts to drop after a workspace update. A Project that is still
- * open in any pane keeps its draft; Settings remounts start from an empty
- * previous list and therefore keep every current overview.
+ * Overview drafts to drop after a committed workspace update. A Project that
+ * is still open in any pane keeps its draft. Settings remounts start from an
+ * empty previous list and therefore keep every current overview. An optimistic
+ * preview reuses the committed version, so a refused open or close can roll
+ * the Project back without this treating the preview as a permanent drop.
  */
 export function projectOverviewDraftsToDiscard(
   previous: ReadonlyArray<ProjectOverviewDraftRef>,
   next: ReadonlyArray<ProjectOverviewDraftRef>,
+  previousCommit?: string | number,
+  nextCommit?: string | number,
 ): ReadonlyArray<ProjectOverviewDraftRef> {
+  if (
+    previousCommit === undefined ||
+    nextCommit === undefined ||
+    String(previousCommit) === String(nextCommit)
+  ) {
+    return [];
+  }
   const remaining = new Set(next.map((surface) => `${surface.mode}:${surface.projectId}`));
   const dropped: ProjectOverviewDraftRef[] = [];
   const seen = new Set<string>();

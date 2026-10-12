@@ -17,6 +17,7 @@ import {
 import type {
   LayoutNodeId,
   PaneId,
+  ShellBootstrap,
   WindowWorkspace,
   WorkspaceLayoutNode,
   WorkspacePane,
@@ -360,6 +361,11 @@ export interface WorkspaceViewProps {
     placement: "before" | "after",
   ) => void;
   readonly workspace: WindowWorkspace;
+  /**
+   * The shell's committed workspace version. Optimistic open/close previews
+   * reuse this value until the host accepts or rolls the mutation back.
+   */
+  readonly workspaceVersion?: ShellBootstrap["workspaceVersion"];
   readonly crossContextOffer?: {
     readonly message: string;
     readonly canOpenInNewWindow: boolean;
@@ -516,14 +522,29 @@ export interface WorkspaceViewProps {
 export function WorkspaceView(props: WorkspaceViewProps) {
   const newTaskDrafts = useContext(NewTaskDraftsContext);
   const previousProjectOverviews = useRef<ReadonlyArray<ProjectOverviewDraftRef>>([]);
+  const previousWorkspaceVersion = useRef<ShellBootstrap["workspaceVersion"] | undefined>(
+    undefined,
+  );
   useLayoutEffect(() => {
     const current = collectProjectOverviews(props.workspace);
-    const dropped = projectOverviewDraftsToDiscard(previousProjectOverviews.current, current);
-    previousProjectOverviews.current = current;
+    const dropped = projectOverviewDraftsToDiscard(
+      previousProjectOverviews.current,
+      current,
+      previousWorkspaceVersion.current,
+      props.workspaceVersion,
+    );
+    if (
+      previousWorkspaceVersion.current === undefined ||
+      props.workspaceVersion === undefined ||
+      String(previousWorkspaceVersion.current) !== String(props.workspaceVersion)
+    ) {
+      previousProjectOverviews.current = current;
+      previousWorkspaceVersion.current = props.workspaceVersion;
+    }
     for (const surface of dropped) {
       discardNewTaskDraftForOverview(newTaskDrafts, surface.mode, surface.projectId);
     }
-  }, [newTaskDrafts, props.workspace]);
+  }, [newTaskDrafts, props.workspace, props.workspaceVersion]);
   const [pendingCanvasSelections, setPendingCanvasSelections] = useState<
     ReadonlyArray<CanvasContextSelection>
   >([]);
