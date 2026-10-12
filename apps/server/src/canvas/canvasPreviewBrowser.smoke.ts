@@ -140,11 +140,22 @@ await new Promise<void>((done) => udp.bind(0, "127.0.0.1", done));
 const udpPort = udp.address().port;
 const beaconOrigin = `http://127.0.0.1:${String(beacon.port)}`;
 
+/**
+ * A string as script source inside a page: JSON, with every character that
+ * could end the script element or a line written as an escape.
+ */
+function inScript(value: string): string {
+  return JSON.stringify(value).replace(
+    /[<>/\u2028\u2029]/g,
+    (character) => `\\u${character.charCodeAt(0).toString(16).padStart(4, "0")}`,
+  );
+}
+
 const hostile = `
-fetch(${JSON.stringify(`${beaconOrigin}/fetch`)}).catch(() => undefined);
-try { const x = new XMLHttpRequest(); x.open("GET", ${JSON.stringify(`${beaconOrigin}/xhr`)}); x.send(); } catch (_) {}
-try { new WebSocket(${JSON.stringify(`ws://127.0.0.1:${String(beacon.port)}/ws`)}); } catch (_) {}
-new Image().src = ${JSON.stringify(`${beaconOrigin}/image`)};
+fetch(${inScript(`${beaconOrigin}/fetch`)}).catch(() => undefined);
+try { const x = new XMLHttpRequest(); x.open("GET", ${inScript(`${beaconOrigin}/xhr`)}); x.send(); } catch (_) {}
+try { new WebSocket(${inScript(`ws://127.0.0.1:${String(beacon.port)}/ws`)}); } catch (_) {}
+new Image().src = ${inScript(`${beaconOrigin}/image`)};
 try {
   const peer = new RTCPeerConnection({ iceServers: [
     { urls: "stun:127.0.0.1:${String(udpPort)}" },
@@ -154,7 +165,7 @@ try {
   peer.createDataChannel("out");
   peer.createOffer().then((offer) => peer.setLocalDescription(offer)).catch(() => undefined);
 } catch (_) {}
-setTimeout(() => { location.href = ${JSON.stringify(`${beaconOrigin}/self-navigation`)}; }, 300);
+setTimeout(() => { location.href = ${inScript(`${beaconOrigin}/self-navigation`)}; }, 300);
 missingFunction();
 `;
 const designs = decodeCanvasDefinition({
