@@ -131,8 +131,9 @@ These need a brokered AI Gateway key, which this probe did not have.
   during the probe, so no model call, no permission round trip, and no
   cancellation were executed against fx's backend.
 - Managed-home relocation depends on fx resolving its profile through `$HOME`
-  rather than a platform home API. The probe proves it for `v0.0.10`; a future
-  release that changes that resolution is a new probe, not an assumption.
+  rather than a platform home API. The probes prove it for `v0.0.10` and
+  `v0.0.13`; any other release that changes that resolution is a new probe,
+  not an assumption.
 - `FX_PERMISSION_MODE=ask` and the ACP session mode are both set. `permission_mode`
   is a profile-owned key that a project `.fx.json` cannot raise, so the two
   cannot disagree in fx's favour.
