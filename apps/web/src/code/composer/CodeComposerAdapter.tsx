@@ -391,9 +391,11 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     onDraftChange: (next) => setPrompt(next),
     attachDroppedThread: threadMentions.attachDroppedThread,
   });
-  const [executionPolicy, setExecutionPolicy] = useState(props.defaultExecutionPolicy);
+  const [executionPolicy, setExecutionPolicy] = useState(
+    storedCheckout?.executionPolicy ?? props.defaultExecutionPolicy,
+  );
   const [permissionPersistence, setPermissionPersistence] = useState(
-    props.defaultPermissionPersistence,
+    storedCheckout?.permissionPersistence ?? props.defaultPermissionPersistence,
   );
   // F2: the default delivery branch must never collide with the base branch
   // (e.g. `development`), which normally exists. Derive a unique
@@ -550,11 +552,22 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     drafts.writeCodeCheckout(draftScope, {
       baseBranch,
       baseBranchChosen: baseBranchChosen.current,
+      executionPolicy,
+      permissionPersistence,
       ...(workspaceOverride === undefined ? {} : { workspaceOverride }),
       ...(worktreeRemote === undefined ? {} : { worktreeRemote }),
       ...(startFromOriginOverride === undefined ? {} : { startFromOriginOverride }),
     });
-  }, [baseBranch, drafts, draftScope, startFromOriginOverride, worktreeRemote, workspaceOverride]);
+  }, [
+    baseBranch,
+    drafts,
+    draftScope,
+    executionPolicy,
+    permissionPersistence,
+    startFromOriginOverride,
+    worktreeRemote,
+    workspaceOverride,
+  ]);
   const structuredDraftScope = useRef(draftScope);
   useLayoutEffect(() => {
     if (drafts === undefined || draftScope === undefined) return;

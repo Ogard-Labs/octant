@@ -1055,4 +1055,25 @@ describe("CodeComposerAdapter interactions", () => {
       "true",
     );
   });
+
+  it("keeps a pane's access posture after Settings remounts the draft", async () => {
+    const user = userEvent.setup();
+    const drafts = createNewTaskDrafts();
+    const view = (
+      <NewTaskDraftsContext.Provider value={drafts}>
+        <NewTaskDraftScopeContext.Provider value="code:pane">
+          <CodeComposerAdapter {...defaultProps} defaultExecutionPolicy="full-access" />
+        </NewTaskDraftScopeContext.Provider>
+      </NewTaskDraftsContext.Provider>
+    );
+    const rendered = render(view);
+    await user.click(screen.getByRole("button", { name: "Access policy" }));
+    await user.click(await screen.findByRole("menuitemradio", { name: /Plan/ }));
+    expect(screen.getByRole("button", { name: "Access policy" })).toHaveTextContent("Plan");
+
+    rendered.unmount();
+    render(view);
+
+    expect(screen.getByRole("button", { name: "Access policy" })).toHaveTextContent("Plan");
+  });
 });

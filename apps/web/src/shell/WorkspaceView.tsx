@@ -625,7 +625,14 @@ export function WorkspaceView(props: WorkspaceViewProps) {
         discardNewTaskDraftForPane(newTaskDrafts, surface.mode, String(paneId));
       }
       if (surface?.kind === "project" && (surface.mode === "chat" || surface.mode === "work")) {
-        discardNewTaskDraftForOverview(newTaskDrafts, surface.mode, String(surface.projectId));
+        const stillOpenElsewhere =
+          collectProjectOverviews(props.workspace).filter(
+            (overview) =>
+              overview.mode === surface.mode && overview.projectId === String(surface.projectId),
+          ).length > 1;
+        if (!stillOpenElsewhere) {
+          discardNewTaskDraftForOverview(newTaskDrafts, surface.mode, String(surface.projectId));
+        }
       }
       if (
         surface?.kind === "browser" &&

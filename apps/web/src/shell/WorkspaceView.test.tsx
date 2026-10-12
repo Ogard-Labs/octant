@@ -2428,6 +2428,187 @@ describe("WorkspaceView Chat surfaces", () => {
     expect(drafts.read(`chat-overview:${projectId}`)).toBe("Keep this brief");
   });
 
+  it("keeps a Chat Project overview draft when another pane still shows that Project", async () => {
+    const drafts = createNewTaskDrafts();
+    const projectId = "00000000-0000-4000-8000-000000000920";
+    drafts.write(`chat-overview:${projectId}`, "Shared brief");
+    const project = {
+      id: projectId,
+      type: "chat",
+      name: "Launch planning",
+      lifecycle: "active",
+      pinned: true,
+      rank: "0/1",
+      version: 1,
+      createdAt: now,
+      updatedAt: now,
+    } as never as ProjectSummary;
+    const leftTab = {
+      id: ids.tab,
+      kind: "project",
+      mode: "chat",
+      title: "Launch planning",
+      projectId: project.id,
+    } as WorkspaceTab;
+    const rightTab = {
+      id: decodeWorkspaceTabId(codeIds.thread),
+      kind: "project",
+      mode: "chat",
+      title: "Launch planning copy",
+      projectId: project.id,
+    } as WorkspaceTab;
+    const otherPane = "10000000-0000-4000-8000-000000000034";
+    const base = propsFor(leftTab);
+    const split = {
+      kind: "split",
+      nodeId: "10000000-0000-4000-8000-000000000035",
+      orientation: "horizontal",
+      ratio: 0.5,
+      first: base.layout,
+      second: {
+        kind: "pane",
+        nodeId: "10000000-0000-4000-8000-000000000036",
+        paneId: otherPane,
+        surface: rightTab,
+      },
+    } as never as WorkspaceViewProps["layout"];
+    const idle = {
+      kind: "pane" as const,
+      nodeId: "10000000-0000-4000-8000-000000000040",
+      paneId: "10000000-0000-4000-8000-000000000041",
+      surface: {
+        id: decodeWorkspaceTabId("10000000-0000-4000-8000-000000000042"),
+        kind: "welcome",
+        mode: "work",
+        title: "Welcome to Work",
+      },
+    };
+    render(
+      <NewTaskDraftsContext.Provider value={drafts}>
+        <WorkspaceView
+          {...base}
+          chatController={
+            { ...base.chatController, bootstrap: { threads: [] }, status: "ready" } as never
+          }
+          layout={split}
+          mode="chat"
+          projects={[project]}
+          workspace={{
+            ...base.workspace,
+            activeMode: "chat",
+            layouts: { chat: split, work: idle, code: idle },
+            contextByMode: {
+              ...base.workspace.contextByMode,
+              chat: {
+                host: "local" as never,
+                mode: "chat",
+                projectId: project.id,
+                boundRoot: null,
+              },
+            },
+          }}
+        />
+      </NewTaskDraftsContext.Provider>,
+    );
+
+    expect(
+      await screen.findByRole("region", { name: "Workspace pane: Launch planning" }),
+    ).toBeVisible();
+    await closePaneShowing("Launch planning");
+    expect(base.onClosePane).toHaveBeenCalledWith(ids.pane);
+    expect(drafts.read(`chat-overview:${projectId}`)).toBe("Shared brief");
+  });
+
+  it("discards a Chat Project overview draft when its last pane closes", async () => {
+    const drafts = createNewTaskDrafts();
+    const projectId = "00000000-0000-4000-8000-000000000921";
+    drafts.write(`chat-overview:${projectId}`, "Last overview");
+    const project = {
+      id: projectId,
+      type: "chat",
+      name: "Solo planning",
+      lifecycle: "active",
+      pinned: true,
+      rank: "0/1",
+      version: 1,
+      createdAt: now,
+      updatedAt: now,
+    } as never as ProjectSummary;
+    const tab = {
+      id: ids.tab,
+      kind: "project",
+      mode: "chat",
+      title: "Solo planning",
+      projectId: project.id,
+    } as WorkspaceTab;
+    const welcome = {
+      id: decodeWorkspaceTabId(codeIds.thread),
+      kind: "welcome",
+      mode: "chat",
+      title: "Welcome to Chat",
+    } as WorkspaceTab;
+    const otherPane = "10000000-0000-4000-8000-000000000037";
+    const base = propsFor(tab);
+    const split = {
+      kind: "split",
+      nodeId: "10000000-0000-4000-8000-000000000038",
+      orientation: "horizontal",
+      ratio: 0.5,
+      first: base.layout,
+      second: {
+        kind: "pane",
+        nodeId: "10000000-0000-4000-8000-000000000039",
+        paneId: otherPane,
+        surface: welcome,
+      },
+    } as never as WorkspaceViewProps["layout"];
+    const idle = {
+      kind: "pane" as const,
+      nodeId: "10000000-0000-4000-8000-000000000043",
+      paneId: "10000000-0000-4000-8000-000000000044",
+      surface: {
+        id: decodeWorkspaceTabId("10000000-0000-4000-8000-000000000045"),
+        kind: "welcome",
+        mode: "work",
+        title: "Welcome to Work",
+      },
+    };
+    render(
+      <NewTaskDraftsContext.Provider value={drafts}>
+        <WorkspaceView
+          {...base}
+          chatController={
+            { ...base.chatController, bootstrap: { threads: [] }, status: "ready" } as never
+          }
+          layout={split}
+          mode="chat"
+          projects={[project]}
+          workspace={{
+            ...base.workspace,
+            activeMode: "chat",
+            layouts: { chat: split, work: idle, code: idle },
+            contextByMode: {
+              ...base.workspace.contextByMode,
+              chat: {
+                host: "local" as never,
+                mode: "chat",
+                projectId: project.id,
+                boundRoot: null,
+              },
+            },
+          }}
+        />
+      </NewTaskDraftsContext.Provider>,
+    );
+
+    expect(
+      await screen.findByRole("region", { name: "Workspace pane: Solo planning" }),
+    ).toBeVisible();
+    await closePaneShowing("Solo planning");
+    expect(base.onClosePane).toHaveBeenCalledWith(ids.pane);
+    expect(drafts.read(`chat-overview:${projectId}`)).toBe("");
+  });
+
   it("disables Chat Project quick start for an archived Project", async () => {
     const project = {
       id: "00000000-0000-4000-8000-000000000913",
