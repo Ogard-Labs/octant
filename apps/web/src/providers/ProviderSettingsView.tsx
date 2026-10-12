@@ -35,7 +35,11 @@ import type {
   ProviderModelId,
   ProviderObservedState,
 } from "@octant/contracts";
-import { implicitClaudeAccountOwnerId, isImageProfileDriverKind } from "@octant/domain";
+import {
+  implicitClaudeAccountOwnerId,
+  implicitCodexAccountOwnerId,
+  isImageProfileDriverKind,
+} from "@octant/domain";
 import type { ReactNode } from "react";
 import { SettingsSection } from "../settings/primitives";
 import { OctantButton } from "../ui/base/OctantButton";
@@ -415,9 +419,7 @@ export function ProviderSettingsView(props: ProviderSettingsViewProps) {
             allowedProviderTypes={GENERAL_PROVIDER_TYPES}
             busy={props.busy}
             claudeHostProfileTaken={implicitClaudeAccountOwnerId(props.instances) !== undefined}
-            existingCodexAccountCount={
-              props.instances.filter((instance) => instance.driverKind === "codex").length
-            }
+            codexHostProfileTaken={implicitCodexAccountOwnerId(props.instances) !== undefined}
             heading="Agent runtime"
             hint="Installed runtimes are detected automatically. Use this for an unusual executable location or a runtime the scan missed. Model endpoints such as OpenAI-compatible APIs are added under Octant Harness › Model endpoints."
             credentialManagementAvailable={props.credentialManagementAvailable}

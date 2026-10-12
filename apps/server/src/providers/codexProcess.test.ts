@@ -245,6 +245,32 @@ describe("sanitizeCodexEnvironment", () => {
     expect(JSON.stringify(environment)).not.toMatch(/cli_auth_credentials_store|auth\.json/i);
   });
 
+  it("keeps an extra account's thread state out of the host's database and leaves the AWS profile alone", () => {
+    const hostEnvironment = {
+      PATH: "/usr/bin",
+      CODEX_SQLITE_HOME: "/Users/test/.codex-state",
+      AWS_PROFILE: "work",
+      AWS_REGION: "eu-north-1",
+    };
+
+    const extra = codexAccountProcessEnvironment({
+      binaryPath: "/opt/homebrew/bin/codex",
+      hostEnvironment,
+      codexHome: "/Users/test/.codex-accounts/work",
+    });
+    expect(extra.CODEX_SQLITE_HOME).toBeUndefined();
+    expect(extra.AWS_PROFILE).toBe("work");
+    expect(extra.AWS_REGION).toBe("eu-north-1");
+
+    const first = codexAccountProcessEnvironment({
+      binaryPath: "/opt/homebrew/bin/codex",
+      hostEnvironment,
+      codexHome: "/Users/test/.codex",
+      inheritHostAuth: true,
+    });
+    expect(first.CODEX_SQLITE_HOME).toBe("/Users/test/.codex-state");
+  });
+
   it("injects only a broker-resolved API key after stripping inherited auth", () => {
     const environment = codexAccountProcessEnvironment({
       binaryPath: "/opt/homebrew/bin/codex",

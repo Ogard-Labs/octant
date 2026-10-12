@@ -3020,7 +3020,11 @@ export function useProviderController(options: ProviderControllerOptions) {
         // Removing the account does not delete it, so the person is told
         // where the sign-in and history still are.
         const accountDirectory =
-          instance.driverKind === "claude" ? instance.configuration.configDirectory : undefined;
+          instance.driverKind === "claude"
+            ? instance.configuration.configDirectory
+            : instance.driverKind === "codex"
+              ? instance.configuration.codexHome
+              : undefined;
         if (accountDirectory !== undefined && mounted.current) {
           setMessage(
             `${instance.displayName} was removed. Its folder ${accountDirectory} still holds that account's sign-in and history. Delete the folder to remove them.`,

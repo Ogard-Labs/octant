@@ -316,14 +316,23 @@ const ACCOUNT_AUTH_VARIABLES = [
 ] as const;
 
 /**
- * Per-account app-server environment. Extra assigned homes strip inherited
- * auth so they cannot share the host key. The host-overlay first account
- * keeps those variables: existing installs authenticate that way, and
- * Settings has no Codex API-key field to populate the broker.
+ * Per-account app-server environment. An extra account, on its assigned home,
+ * loses the inherited auth variables so it cannot share the host's key, and
+ * loses `CODEX_SQLITE_HOME`, which would point its thread state database at
+ * the host's instead of at its own home. The first account, on the host
+ * profile, keeps them: existing installs authenticate and store state that
+ * way, and Settings has no Codex API-key field to populate the broker.
+ *
+ * The AWS profile and file variables stay for every account. They choose
+ * among the AWS identities of the one operating-system user and hold no
+ * login of their own, so removing them would move an extra account to the
+ * default AWS profile without separating anything.
  *
  * Octant never reads `auth.json` or the keyring, and never writes
- * `cli_auth_credentials_store` into the user's config. Codex keys the keyring
- * entry on `CODEX_HOME`, so isolation holds without forcing file storage.
+ * `cli_auth_credentials_store` into the user's config. Codex names its
+ * keyring entry by a hash of the canonical `CODEX_HOME` path (read in the
+ * Codex source at `rust-v0.162.1`, `login/src/auth/storage.rs`), so two homes
+ * hold two logins without forcing file storage.
  */
 export function codexAccountProcessEnvironment(input: {
   readonly binaryPath: string;
@@ -337,6 +346,7 @@ export function codexAccountProcessEnvironment(input: {
     for (const name of ACCOUNT_AUTH_VARIABLES) {
       delete environment[name];
     }
+    delete environment.CODEX_SQLITE_HOME;
   }
   environment.CODEX_HOME = input.codexHome;
   if (input.brokerApiKey !== undefined && input.brokerApiKey.trim() !== "") {

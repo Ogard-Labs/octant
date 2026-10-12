@@ -126,7 +126,8 @@ export interface ProviderCreateFormPresentationProps {
    */
   /** A subscription account already holds Claude's host profile. */
   readonly claudeHostProfileTaken?: boolean;
-  readonly existingCodexAccountCount?: number;
+  /** An account already holds Codex's host profile. */
+  readonly codexHostProfileTaken?: boolean;
 }
 
 export function ProviderCreateForm(
@@ -867,7 +868,7 @@ export function ProviderCreateForm(
               <CodexAccountSettingsFields
                 accent={codexAccent}
                 binaryPath={codexBinaryPath}
-                extraAccount={(props.existingCodexAccountCount ?? 0) > 0}
+                extraAccount={props.codexHostProfileTaken === true}
                 onAccentChange={setCodexAccent}
               />
             ) : null}

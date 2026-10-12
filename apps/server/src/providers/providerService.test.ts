@@ -1264,6 +1264,81 @@ describe("ProviderService", () => {
     });
   });
 
+  it("gives the Codex host profile to a new account once no account holds it", async () => {
+    const fixture = serviceFixture();
+    const workId = decodeProviderInstanceId("80000000-0000-4000-8000-000000000062");
+    const laterId = decodeProviderInstanceId("80000000-0000-4000-8000-000000000063");
+    const create = (id: typeof instanceId, displayName: string) =>
+      fixture.service.execute(windowId, {
+        kind: "create-codex-provider",
+        instanceId: id,
+        expectedVersion: 0,
+        displayName,
+        binaryPath: "/opt/homebrew/bin/codex",
+      });
+    await create(instanceId, "Codex personal");
+    await create(workId, "Codex work");
+    await fixture.service.execute(windowId, {
+      kind: "remove-provider",
+      instanceId,
+      expectedVersion: 1,
+    });
+
+    const later = await create(laterId, "Codex later");
+
+    // Counting accounts instead would have assigned this one a new home and
+    // left the login in `~/.codex` with no account that can reach it.
+    expect(later).toMatchObject({ kind: "provider-created", instance: { id: laterId } });
+    expect(
+      later.kind === "provider-created" && later.instance.driverKind === "codex"
+        ? later.instance.configuration.codexHome
+        : "not-a-codex-account",
+    ).toBeUndefined();
+  });
+
+  it("recolours a Codex account during a session without stopping it", async () => {
+    const fixture = serviceFixture();
+    await fixture.service.execute(windowId, {
+      kind: "create-codex-provider",
+      instanceId,
+      expectedVersion: 0,
+      displayName: "Codex personal",
+      binaryPath: "/opt/homebrew/bin/codex",
+    });
+    fixture.runtime.setObservedState(observation());
+    fixture.runtime.setActiveSessionCount(instanceId, 1);
+    const invalidate = vi.spyOn(fixture.runtime, "invalidateRuntime");
+
+    await expect(
+      fixture.service.execute(windowId, {
+        kind: "change-codex-configuration",
+        instanceId,
+        expectedVersion: 1,
+        configuration: {
+          kind: "codex-cli",
+          binaryPath: "/opt/homebrew/bin/codex",
+          accent: "teal",
+        },
+      }),
+    ).resolves.toMatchObject({
+      kind: "provider-updated",
+      instance: { configuration: { accent: "teal" } },
+    });
+    expect(invalidate).not.toHaveBeenCalled();
+    expect(fixture.runtime.observedState(instanceId)).toMatchObject({ readiness: "ready" });
+
+    await expect(
+      fixture.service.execute(windowId, {
+        kind: "change-codex-configuration",
+        instanceId,
+        expectedVersion: 2,
+        configuration: { kind: "codex-cli", binaryPath: "/usr/local/bin/codex", accent: "teal" },
+      }),
+    ).rejects.toMatchObject({
+      failure: { message: "Stop active sessions before reconfiguring this provider." },
+    });
+  });
+
   it("creates disabled providers when the create command requests enabled false", async () => {
     const fixture = serviceFixture();
 

@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import { decodeProjectId } from "@octant/contracts";
-import { CLAUDE_ACCOUNT_PROFILE } from "@octant/domain";
+import { CLAUDE_ACCOUNT_PROFILE, CODEX_ACCOUNT_PROFILE } from "@octant/domain";
 import { localHostDisplayName } from "./localHostDisplayName";
 import type {
   HostDataMap,
@@ -52,6 +52,7 @@ const CACHE_DIRECTORIES: ReadonlyArray<{ readonly name: string; readonly relativ
 // the map names where those folders live.
 const ACCOUNT_DIRECTORIES: ReadonlyArray<{ readonly name: string; readonly relative: string }> = [
   { name: "Claude account folders", relative: CLAUDE_ACCOUNT_PROFILE.extraAccountsDirectoryName },
+  { name: "Codex account homes", relative: CODEX_ACCOUNT_PROFILE.extraAccountsDirectoryName },
 ];
 
 const RELATED_RETENTION = {

@@ -61,6 +61,7 @@ import {
   assignedClaudeAccountConfigDirectory,
   assignedCodexHome,
   changeCodexConfiguration,
+  codexChangeKeepsRuntime,
   implicitClaudeAccountOwnerId,
   implicitCodexAccountOwnerId,
   createClaudeProvider,
@@ -713,13 +714,13 @@ export class ProviderService implements ProviderServiceApi {
                 instance = createOpenCodeProvider({ ...common, binaryPath: command.binaryPath });
                 break;
               case "create-codex-provider": {
-                const existingCodexCount = instances.filter(
-                  (candidate) => candidate.driverKind === "codex",
-                ).length;
+                // The host profile goes to the first account, and again to a new
+                // one once no account holds it, so `~/.codex` never ends up with
+                // a login no account in Settings can reach.
                 const assignedHome =
-                  existingCodexCount > 0
-                    ? assignedCodexHome(homedir(), command.instanceId)
-                    : undefined;
+                  implicitCodexAccountOwnerId(instances) === undefined
+                    ? undefined
+                    : assignedCodexHome(homedir(), command.instanceId);
                 instance = createCodexProvider({
                   ...common,
                   binaryPath: command.binaryPath,
@@ -1163,7 +1164,8 @@ export class ProviderService implements ProviderServiceApi {
               instance,
               current.id,
             );
-            await this.#runtime.invalidateRuntime(current.id);
+            keepsRuntime = codexChangeKeepsRuntime(current.configuration, instance.configuration);
+            if (!keepsRuntime) await this.#runtime.invalidateRuntime(current.id);
             this.#refuseTakenCodexHomes(
               this.#persistence.readProviderInstances(),
               instance,

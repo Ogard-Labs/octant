@@ -1726,12 +1726,19 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   `~/.codex-accounts/<instanceId>`, `codex login` /
   `codex login status`). Octant never reads Codex `auth.json` or
   the keyring, and never writes `cli_auth_credentials_store` into
-  the user's config: the keyring entry is keyed on `CODEX_HOME`,
-  so isolation holds without forcing file storage. The first
+  the user's config: Codex names its keyring entry by a hash of the
+  canonical `CODEX_HOME` path (read in the Codex source at
+  `rust-v0.162.1`), so two homes hold two logins without forcing
+  file storage. The first account holds the host profile, and a new
+  account takes it again once no account holds it. The first
   account keeps inherited `OPENAI_API_KEY` and the other Codex
   auth variables (existing installs authenticate that way). Extra
   assigned homes strip those variables so they cannot share the
-  host key. An explicit API-key instance still receives only the
+  host key, and strip `CODEX_SQLITE_HOME` so their thread state
+  database is not the host's. The AWS profile and file variables
+  stay for every account: they choose among the AWS identities of
+  the one operating-system user and hold no login of their own. An
+  explicit API-key instance still receives only the
   broker-resolved key. Each Codex account has its own
   long-lived app-server and never shares that process with another
   account. Codex Plan uses Codex's own read-only sandbox, not an
