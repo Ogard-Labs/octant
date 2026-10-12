@@ -173,6 +173,7 @@ function DesignDocumentBlock({
       aria-label={`${block.title}, document`}
       aria-roledescription="design"
       className="canvas-design"
+      data-canvas-design={String(block.blockId)}
     >
       <header className="canvas-design__header">
         <div className="canvas-design__heading">
@@ -210,6 +211,7 @@ function DesignBoard({
       aria-label={`${block.title}, ${SIZE_NAME[block.size]} design`}
       aria-roledescription="design"
       className="canvas-design"
+      data-canvas-design={String(block.blockId)}
     >
       <header className="canvas-design__header">
         <div className="canvas-design__heading">
@@ -694,6 +696,7 @@ function RunningDesignBlock({
       aria-label={`${block.title}, ${SIZE_NAME[block.size]} prototype`}
       aria-roledescription="design"
       className="canvas-design"
+      data-canvas-design={String(block.blockId)}
     >
       <header className="canvas-design__header">
         <div className="canvas-design__heading">

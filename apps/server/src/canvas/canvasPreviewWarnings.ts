@@ -10,6 +10,7 @@ import {
   canvasReadingOrder,
 } from "@octant/domain/canvas-dashboard-layout";
 import { contrastRatio } from "@octant/theme";
+import type { CanvasPreviewDesignReading } from "./canvasPreviewFrames";
 
 /**
  * What an agent should fix before it replies.
@@ -21,10 +22,13 @@ import { contrastRatio } from "@octant/theme";
  * them: the thread shows a long inline document as a teaser the person expands. Each is a value, not a sentence: the tool
  * reports the kind and the measurement, and the agent decides what to change.
  *
- * The warnings are computed from the document and the target width alone, so
+ * Most warnings are computed from the document and the target width alone, so
  * they are reported whether or not a browser rendered the picture. That is what
  * makes a warnings-only build honest rather than empty: the layout reading does
- * not depend on the raster.
+ * not depend on the raster. A design frame is the exception, because it is
+ * markup: its overflow, its text contrast, and a running design's script errors
+ * are read from the drawn frames (`canvasPreviewDesignWarnings`), so they are
+ * reported only when a browser drew the page.
  */
 export type CanvasPreviewWarning =
   | {
@@ -64,7 +68,54 @@ export type CanvasPreviewWarning =
       readonly assetId: string;
       readonly reason: CanvasDesignAssetUnavailableReason;
       readonly frameIds: ReadonlyArray<string>;
+    }
+  | {
+      /** A design frame whose content is wider than the page it is drawn in. */
+      readonly kind: "design-frame-overflow";
+      readonly blockId: string;
+      readonly frameId: string;
+      readonly overflowPx: number;
+    }
+  | {
+      /** The text that reads worst in a design frame, below its target. */
+      readonly kind: "design-contrast-below-target";
+      readonly blockId: string;
+      readonly frameId: string;
+      readonly text: string;
+      readonly foreground: string;
+      readonly background: string;
+      readonly ratio: number;
+      readonly target: number;
+    }
+  | {
+      /** An uncaught error a running design threw as it loaded, from its bridge. */
+      readonly kind: "design-script-error";
+      readonly blockId: string;
+      readonly message: string;
     };
+
+/**
+ * What the browser measured in the drawn design frames, as warnings, in the
+ * order the designs were drawn: each design's script errors, then its frames
+ * that overflow, then its worst-reading text per frame.
+ */
+export function canvasPreviewDesignWarnings(
+  designs: ReadonlyArray<CanvasPreviewDesignReading>,
+): ReadonlyArray<CanvasPreviewWarning> {
+  const warnings: CanvasPreviewWarning[] = [];
+  for (const design of designs) {
+    for (const message of design.scriptErrors) {
+      warnings.push({ kind: "design-script-error", blockId: design.blockId, message });
+    }
+    for (const frame of design.overflow) {
+      warnings.push({ kind: "design-frame-overflow", blockId: design.blockId, ...frame });
+    }
+    for (const frame of design.contrast) {
+      warnings.push({ kind: "design-contrast-below-target", blockId: design.blockId, ...frame });
+    }
+  }
+  return warnings;
+}
 
 /**
  * The colours a preview is drawn against, resolved from the chosen theme.

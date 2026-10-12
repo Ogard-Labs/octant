@@ -10,6 +10,7 @@ import {
   createChildCanvasAgentTools,
 } from "./canvasAgentTools";
 import { inTreeCanvasDocumentRecipes } from "./canvasDocumentRecipes";
+import { createCanvasPreviewService } from "./canvasPreviewService";
 
 const windowId = "11111111-1111-4111-8111-111111111111" as never;
 const projectId = "22222222-2222-4222-8222-222222222222";
@@ -238,6 +239,67 @@ describe("createCanvasAgentTools", () => {
       expect(create).not.toHaveBeenCalled();
     },
   );
+
+  it("teaches the three tiers and the new recipes when describe names no kinds", async () => {
+    const { set } = tools();
+    const outcome = await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "describe" }),
+    });
+
+    const result = outcome.result as {
+      tierGuide: string;
+      recipeGuide: string;
+      previewGuide: string;
+      blockKinds: ReadonlyArray<string>;
+      recipes: ReadonlyArray<{
+        id: string;
+        skeleton: ReadonlyArray<{ kind: string; size?: string }>;
+      }>;
+    };
+    expect(result.tierGuide).toContain("lowest tier");
+    expect(result.tierGuide).toContain("Typed blocks");
+    expect(result.tierGuide).toContain("static design frame");
+    expect(result.tierGuide).toContain("running design frame");
+    for (const kind of ["tabs", "columns", "design"]) expect(result.blockKinds).toContain(kind);
+    const ids = result.recipes.map((recipe) => recipe.id);
+    for (const id of ["article", "design-brief", "design-system", "clickable-prototype"]) {
+      expect(ids).toContain(id);
+    }
+    // An agent reads which size a design slot is drawn at.
+    expect(result.recipes.find((recipe) => recipe.id === "article")?.skeleton[0]).toMatchObject({
+      kind: "design",
+      size: "document",
+    });
+    expect(result.recipeGuide).toContain('"write an article" uses article');
+    expect(result.recipeGuide).toContain("clickable-prototype");
+    expect(result.previewGuide).toContain("script error");
+  });
+
+  it("returns a finished running prototype with the design examples and states the bridge's limits", async () => {
+    const { create, set } = tools();
+    const described = await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "describe", blockKinds: ["design"] }),
+    });
+
+    const result = described.result as {
+      examples?: ReadonlyArray<Record<string, unknown>>;
+      guidance?: Record<string, string>;
+    };
+    const prototype = (result.examples ?? []).find((example) => example.runsScript === true);
+    expect(prototype).toMatchObject({ kind: "design", runsScript: true });
+    expect(result.guidance?.design).toContain("oct-article");
+    expect(result.guidance?.design).toContain("octant-asset:");
+    expect(result.guidance?.design).toContain("heartbeat");
+
+    const created = await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "create", title: "Cart", blocks: [prototype] }),
+    });
+    expect(created.isError).not.toBe(true);
+    expect(create).toHaveBeenCalledTimes(1);
+  });
 
   it("says which block kind fits each need when describe names no kinds", async () => {
     const { set } = tools();
@@ -670,7 +732,12 @@ describe("createCanvasAgentTools", () => {
       blockSchema?: unknown;
     };
     const examples = result.examples ?? [];
-    expect(examples.map((example) => example.size)).toEqual(["phone", "slide", "document"]);
+    expect(examples.map((example) => example.size)).toEqual([
+      "phone",
+      "slide",
+      "document",
+      "phone",
+    ]);
     // The schema an agent reads names the document size and the theme field.
     expect(JSON.stringify(result.blockSchema)).toContain('"document"');
     expect(JSON.stringify(result.blockSchema)).toContain('"workspace"');
@@ -1594,6 +1661,105 @@ describe("Canvas preview through the tool", () => {
     expect(outcome.result).toMatchObject({
       imagesInToolResults: true,
       imageIncluded: true,
+    });
+  });
+
+  it("carries a prototype from describe to create to a preview that returns the error it threw", async () => {
+    // What the preview browser read from this prototype, recorded from the
+    // real-browser smoke: the bridge's report of the uncaught error.
+    const recorded = {
+      blockId: "cart-prototype",
+      scriptErrors: ["Uncaught ReferenceError: missingFunction is not defined"],
+      overflow: [],
+      contrast: [],
+    };
+    let written: ReadonlyArray<unknown> = [];
+    const render = vi.fn(async () => ({
+      kind: "rendered" as const,
+      png: new Uint8Array([1]),
+      height: 400,
+      designs: [recorded],
+    }));
+    const { create, set } = tools({
+      imagesInToolResults: vi.fn(() => true),
+      preview: createCanvasPreviewService({
+        canvas: {
+          get: () => ({
+            kind: "ready" as const,
+            version: {
+              canvasId: previewCanvasId,
+              versionId: "version-1",
+              sequence: 1,
+              definition: { blocks: written, provenance: {} },
+            },
+          }),
+          history: () => ({ kind: "ready" as const, history: { entries: [] } }),
+        } as never,
+        renderer: { available: async () => true, render },
+      }),
+    });
+
+    const overview = await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "describe" }),
+    });
+    const { recipes, tierGuide } = overview.result as {
+      tierGuide: string;
+      recipes: ReadonlyArray<{ id: string; skeleton: ReadonlyArray<{ kind: string }> }>;
+    };
+    expect(tierGuide).toContain("running design frame");
+    const recipe = recipes.find((entry) => entry.id === "clickable-prototype");
+    expect(recipe?.skeleton[0]?.kind).toBe("design");
+
+    const described = await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "describe", blockKinds: ["design"] }),
+    });
+    const example = (
+      described.result as { examples: ReadonlyArray<Record<string, unknown>> }
+    ).examples.find((entry) => entry.runsScript === true);
+    if (example === undefined) throw new Error("Describe returned no running prototype.");
+    const frames = example.frames as ReadonlyArray<{ html: string }>;
+    const prototype = {
+      ...example,
+      frames: frames.map((frame) => ({
+        ...frame,
+        html: `${frame.html}<script>missingFunction()</script>`,
+      })),
+    };
+
+    const created = await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "create", title: "Cart", blocks: [prototype] }),
+    });
+    expect(created.isError).not.toBe(true);
+    written = create.mock.calls[0]?.[3] as ReadonlyArray<unknown>;
+
+    const looked = await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "preview", canvasId: previewCanvasId }),
+    });
+    expect(looked.isError).not.toBe(true);
+    // The preview ran the page a reader's frame is served, with its bridge.
+    expect(render).toHaveBeenCalledWith(
+      expect.objectContaining({
+        designPages: [
+          {
+            blockId: "cart-prototype",
+            html: expect.stringContaining("<script>missingFunction()</script>"),
+          },
+        ],
+      }),
+    );
+    expect(looked.result).toMatchObject({
+      imageIncluded: true,
+      warnings: [
+        {
+          kind: "design-script-error",
+          blockId: "cart-prototype",
+          message: "Uncaught ReferenceError: missingFunction is not defined",
+        },
+      ],
     });
   });
 

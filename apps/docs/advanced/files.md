@@ -80,10 +80,14 @@ short pointer; brief answers stay in the conversation. A follow-up such as "add
 a risks section" revises the existing Canvas: the read-only `list` operation
 returns the thread's Canvases and `read` returns one's current blocks and
 sequence. The tool's always-visible description stays short; its read-only
-`describe` operation carries the detail. Without block kinds it lists the
+`describe` operation carries the detail. Without block kinds it explains the
+three ways a Canvas carries work (typed blocks for data, a design frame for the
+look, and a running design for a prototype you can try) and tells the agent to
+use the simplest one that does the job. It then lists the
 supported kinds and when to use the structured ones, the document recipes an agent should
 start from, and a creation example. Asking to write a plan, review a pull
-request, or summarise research starts from the matching recipe. Requesting up
+request, summarise research, write an article, pitch a product, show a design
+system, or build a prototype you can try starts from the matching recipe. Requesting up
 to three `blockKinds` returns their exact schemas from the host's block
 contracts, plus how to author and worked examples for the kinds that carry
 them (plain kinds such as `rich-text` return their schema alone):
@@ -103,12 +107,15 @@ appear only in a design's frames.
 In a Chat thread, choose **Show canvas** from the **Thread actions** menu. Under
 **Start from**, pick **Blank** or a recipe: an implementation plan, a design
 spec, an architecture review, a code review, an audit or test report, a
-postmortem, a research brief, a dashboard, and the others the host offers,
+postmortem, a research brief, a dashboard, an article, a design brief, a
+design system, a clickable prototype, and the others the host offers,
 including any an enabled skill adds. Each shows one line about what it holds
 and a small outline of its sections. Use the arrow keys to move between them.
 
 A Canvas started from a recipe opens with the recipe's sections: its headings,
-and a "To fill" note for every other block saying what belongs there. With
+and a "To fill" note for every other block saying what belongs there. A recipe
+that is a document, such as the article, opens as that document in your theme,
+with a title and section headings waiting for the text. With
 **Ask this thread's agent to fill it in** ticked, Octant also sends a message on
 the thread asking its agent to fill the new Canvas, with the Canvas attached.
 The message appears in the thread like one you typed, and the agent works with
@@ -186,7 +193,7 @@ told when that happens.
 
 ### The agent looks at a Canvas before it replies
 
-After building a chart, a treemap, or a small inline Canvas, the agent can look
+After building a chart, a treemap, a design, or a small inline Canvas, the agent can look
 at the shipped drawing before it writes back, using the read-only `preview`
 operation:
 
@@ -200,8 +207,14 @@ can name a `version` sequence to look at an earlier version instead of the
 current one. Preview returns a screenshot of the Canvas drawn by the same
 renderer the thread uses, at that width and in that theme, and a list of layout
 warnings: a label too long for its slot, a legend that overflows its row,
-a chart with an empty series, and text or marks below their contrast target. The agent fixes what the warnings name
-with a revision, then replies.
+a chart with an empty series, and text or marks below their contrast target. For
+a design it also reports a screen whose content is wider than the screen, the
+hardest-to-read text on each screen, an image it could not show, and, for a
+running prototype, each error its script threw as it started. To find those
+errors Octant runs the prototype once in the preview browser, which is started
+with no way to reach the network or other programs on your Mac. An error that
+only happens after a click is not seen by a preview. The agent fixes what the
+warnings name with a revision, then replies.
 
 Preview is bounded so a loop cannot spend your machine or the model's attention
 on the same page: one preview runs at a time per thread, and only a few are
