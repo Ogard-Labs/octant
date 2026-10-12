@@ -328,7 +328,11 @@ Pull requests reads and adds no poll.
 
 ### Computers
 
-**Computers** follows CI failures, on by default, on Chat, Work, and Code. It lists every
+**Computers** follows CI failures, on by default, on Chat, Work, and Code. It
+leaves the grid while the only computer is this one and no agent is running
+on it, including while that count is still landing, so a quiet start screen
+does not open on host gauges. It comes back when a second computer is
+connected or an agent is running. Customize still lists it. It lists every
 host this window is connected to: this computer, paired remote hosts, devboxes,
 and servers. A row names the host and says whether it is connected,
 reconnecting, or offline — the word, not colour alone. A connected or

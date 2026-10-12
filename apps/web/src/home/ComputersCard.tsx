@@ -65,9 +65,26 @@ export function createComputersCard(source: ComputersCardSource): HomeCardDefini
     icon: Monitor,
     defaultOn: true,
     available: true,
+    hideWhenEmpty: true,
     emptyLabel: "No computers are connected.",
     useContent: () => useComputersContent(source),
   };
+}
+
+/**
+ * True when the start screen has nothing to look at: this computer alone,
+ * and no agent running on it. An unknown launch-host count is treated as
+ * quiet so gauges do not flash while the shared run read is still landing.
+ */
+function isQuietLaunchHost(
+  hosts: ReadonlyArray<ComputersCardHost>,
+  launchHostId: string,
+  runningAgents: number | undefined,
+): boolean {
+  if (hosts.length !== 1) return false;
+  const only = hosts[0];
+  if (only === undefined || only.hostId !== launchHostId) return false;
+  return runningAgents === undefined || runningAgents === 0;
 }
 
 function useComputersContent(source: ComputersCardSource): HomeCardContent {
@@ -77,12 +94,20 @@ function useComputersContent(source: ComputersCardSource): HomeCardContent {
       ? { ...host, runningAgents: runs.length }
       : host,
   );
-  const snapshots = useVisibleResourceReads(
+  const launchHost = hosts.find((host) => host.hostId === source.launchHostId);
+  const quiet = isQuietLaunchHost(
     hosts,
+    source.launchHostId,
+    runs !== undefined ? runs.length : launchHost?.runningAgents,
+  );
+  // Hidden cards must not poll host figures. HomeCard still mounts while the
+  // card is on, so the read list is emptied here rather than after the hook.
+  const snapshots = useVisibleResourceReads(
+    quiet ? [] : hosts,
     source.readResources,
     source.pollMs ?? RESOURCE_POLL_MS,
   );
-  if (hosts.length === 0) return { status: "ready", count: 0, body: null };
+  if (hosts.length === 0 || quiet) return { status: "ready", count: 0, body: null };
   return {
     status: "ready",
     count: hosts.length,
