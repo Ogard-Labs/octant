@@ -731,13 +731,11 @@ describe("Claude runtime confinement", () => {
     expect(pids(target.root)).toEqual([]);
   });
 
-  it("grants a Plan turn a dedicated temporary API-key account leaf", () => {
+  it("grants a Plan turn its account folder as a write root", () => {
     const target = fixture();
-    const home = process.env.HOME;
-    if (home === undefined) throw new Error("Expected HOME for the API-key Plan grant.");
-    const parent = join(home, ".claude-accounts");
-    mkdirSync(parent, { recursive: true, mode: 0o700 });
-    const configDirectory = mkdtempSync(join(parent, "octant-claude-config-"));
+    // A folder of the test's own. This used to be made inside the person's
+    // real `~/.claude-accounts`, which a test has no business touching.
+    const configDirectory = mkdtempSync(join(tmpdir(), "octant-claude-account-"));
     directories.push(configDirectory);
     const confinement = recordingConfinement();
 
