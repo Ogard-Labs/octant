@@ -4,8 +4,10 @@ import { decodeWorkTurnRequestId, decodeWorkTurnId } from "@octant/contracts";
 import type { GoalLoopWorkTurnPort } from "./goalLoopWorkRoundRunner";
 import { createGoalLoopWorkRoundRunner } from "./goalLoopWorkRoundRunner";
 import { WorkTurnUsageStore } from "../work/workTurnUsageStore";
+import { isRoutineHostScope, ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
 
-const windowId = "00000000-0000-4000-8000-000000000901" as WindowId;
+/** A local window that happens to be open while the loop runs. */
+const openWindowId = "00000000-0000-4000-8000-000000000901" as WindowId;
 const threadId = "22222222-0000-4000-8000-000000000001";
 const turnId = "88888888-0000-4000-8000-000000000001";
 
@@ -59,7 +61,6 @@ function harness(
   const run = createGoalLoopWorkRoundRunner({
     turns,
     usage,
-    windowId: () => windowId,
     command: (input) => ({
       kind: "start-work-thread-turn",
       requestId: `77777777-0000-4000-8000-00000000000${(n += 1)}`,
@@ -224,35 +225,31 @@ describe("createGoalLoopWorkRoundRunner", () => {
     });
   });
 
-  it("reports a failed round when no local window can own the turn", async () => {
-    const turns: GoalLoopWorkTurnPort = {
-      startFirstTurn: vi.fn(async () =>
-        acceptedTurn("77777777-0000-4000-8000-000000000001", "running"),
-      ),
-      liveCursor: vi.fn(() => 0),
-      subscribe: vi.fn(async function* () {}),
-    };
-    const run = createGoalLoopWorkRoundRunner({
-      turns,
-      usage: new WorkTurnUsageStore(),
-      windowId: () => undefined,
-      command: (input) => ({
-        kind: "start-work-thread-turn",
-        requestId: "77777777-0000-4000-8000-000000000001",
-        threadId: input.threadId,
-        turnId,
-        prompt: input.objective,
-        authority: {},
-      }),
-      uuid: () => turnId,
+  it("runs a goal round with no window open", async () => {
+    const h = harness({
+      frames: (async function* () {
+        const accepted = acceptedTurn("77777777-0000-4000-8000-000000000001", "running");
+        yield settledFrame({ ...accepted.turn, status: "completed" });
+      })(),
     });
 
-    const outcome = await run({ threadId, objective: "Get the migration passing" });
+    const outcome = await h.run({ threadId, objective: "Get the migration passing" });
 
-    expect(outcome).toMatchObject({
-      outcome: "failed",
-      detail: "No local window is available to run the round.",
-    });
-    expect(turns.startFirstTurn).not.toHaveBeenCalled();
+    expect(outcome).toMatchObject({ outcome: "ran" });
+    expect(h.turns.startFirstTurn).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(h.turns.startFirstTurn).mock.calls[0]?.[0]).toBe(ROUTINE_HOST_SCOPE_ID);
+  });
+
+  it("does not borrow an open window to run a round", async () => {
+    const h = harness();
+
+    await h.run({ threadId, objective: "Get the migration passing" });
+
+    const started = vi.mocked(h.turns.startFirstTurn).mock.calls[0]?.[0];
+    const subscribed = vi.mocked(h.turns.subscribe).mock.calls[0]?.[0];
+    expect(String(started)).not.toBe(String(openWindowId));
+    expect(String(subscribed)).not.toBe(String(openWindowId));
+    expect(isRoutineHostScope(started as WindowId)).toBe(true);
+    expect(isRoutineHostScope(subscribed as WindowId)).toBe(true);
   });
 });

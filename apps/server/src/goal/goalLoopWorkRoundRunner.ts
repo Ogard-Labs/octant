@@ -7,6 +7,7 @@ import type {
 import { decodeWorkTurnRequestId } from "@octant/contracts";
 import type { GoalLoopRoundOutcome } from "./goalLoopService";
 import type { WorkTurnUsageStore } from "../work/workTurnUsageStore";
+import { ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
 
 /** The Work turn surface the runner drives, narrowed to what a round needs. */
 export interface GoalLoopWorkTurnPort {
@@ -36,8 +37,6 @@ export interface GoalLoopWorkRoundInput {
 export interface CreateGoalLoopWorkRoundRunnerOptions {
   readonly turns: GoalLoopWorkTurnPort;
   readonly usage: WorkTurnUsageStore;
-  /** The window the turn runs in; absent means no local renderer can own it. */
-  readonly windowId: () => WindowId | undefined;
   /** Builds the ordinary Work turn command for this thread and objective. */
   readonly command: (input: GoalLoopWorkRoundInput) => {
     readonly kind: "start-work-thread-turn";
@@ -69,16 +68,12 @@ export function createGoalLoopWorkRoundRunner(
 ): (input: GoalLoopWorkRoundInput) => Promise<GoalLoopRoundOutcome> {
   const now = options.now ?? Date.now;
   return async (input) => {
-    const windowId = options.windowId();
-    if (windowId === undefined) {
-      return {
-        outcome: "failed",
-        tokensSpent: 0,
-        elapsedMs: 0,
-        detail: "No local window is available to run the round.",
-        usageReported: false,
-      };
-    }
+    // A goal loop is the host's own background work, so its round runs as
+    // the host, as a routine's run does. It used to borrow whichever local
+    // window was registered: with none open the round failed, and with one
+    // open it took that window's identity. The ordinary turn path still
+    // rechecks the thread, its Work Project, and the round's authority.
+    const scopeId = ROUTINE_HOST_SCOPE_ID;
     const controller = new AbortController();
     const startedAt = now();
     let settled: Extract<WorkTurnLookupResult, { kind: "accepted" }> | undefined;
@@ -91,7 +86,7 @@ export function createGoalLoopWorkRoundRunner(
       // provider's first event would see a frame gap and be sent home with a
       // snapshot-required instead of the settlement this runner waits for.
       const frames = options.turns.subscribe(
-        windowId,
+        scopeId,
         input.threadId as never as WorkThreadId,
         options.turns.liveCursor(input.threadId as never as WorkThreadId),
         controller.signal,
@@ -99,7 +94,7 @@ export function createGoalLoopWorkRoundRunner(
       // A round runs under the loop's effective authority. The thread's
       // auto-accept reaches it only when the loop's ceiling allows it too;
       // otherwise the round asks first, as every Work round did before.
-      const accepted = await options.turns.startFirstTurn(windowId, command, {
+      const accepted = await options.turns.startFirstTurn(scopeId, command, {
         holdAskFirst: input.authority?.executionPolicy !== "auto-accept-edits",
       });
       if (accepted.kind !== "accepted") {
