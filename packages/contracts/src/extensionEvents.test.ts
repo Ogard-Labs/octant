@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { decodeExtensionLifecycleEvent } from "./extensionEvents";
+import {
+  decodeExtensionLifecycleEvent,
+  decodeExtensionToolGrantRecorded,
+  decodeExtensionToolGrantRevoked,
+} from "./extensionEvents";
+import {
+  decodeExtensionToolApproval,
+  decodeExtensionToolApprovalDecision,
+  decodeExtensionToolGrantRequest,
+} from "./extensionRpc";
 
 const extensionId = "10000000-0000-4000-8000-000000000001";
 const packageId = "20000000-0000-4000-8000-000000000001";
@@ -126,5 +135,93 @@ describe("extension lifecycle events", () => {
         },
       }),
     ).toThrow();
+  });
+});
+
+describe("remembered MCP tool approvals", () => {
+  const grantId = `sha256:${"b".repeat(64)}`;
+  const recorded = {
+    grantId,
+    projectId: "40000000-0000-4000-8000-000000000001",
+    extensionId,
+    packageId,
+    componentId: "mcp-notes",
+    mcpToolName: "search",
+    version: "1.0.0",
+    digest,
+    definitionDigest: `sha256:${"c".repeat(64)}`,
+  };
+
+  it("records which tool in which Project and what the person saw, and nothing of a call", () => {
+    expect(decodeExtensionToolGrantRecorded(recorded)).toEqual(recorded);
+    for (const leaked of [
+      { inputJson: '{"q":"plan"}' },
+      { result: "notes" },
+      { providerToolName: "ext_mcp_notes_search_0123456789abcdef" },
+      { threadId: "50000000-0000-4000-8000-000000000001" },
+    ]) {
+      expect(() => decodeExtensionToolGrantRecorded({ ...recorded, ...leaked })).toThrow();
+    }
+    expect(() => decodeExtensionToolGrantRecorded({ ...recorded, projectId: undefined })).toThrow();
+  });
+
+  it("revokes a grant only for a named reason", () => {
+    for (const reason of ["person", "plugin-uninstalled", "trust-revoked", "rolled-back"]) {
+      expect(
+        decodeExtensionToolGrantRevoked({ grantId, projectId: recorded.projectId, reason }).reason,
+      ).toBe(reason);
+    }
+    expect(() =>
+      decodeExtensionToolGrantRevoked({
+        grantId,
+        projectId: recorded.projectId,
+        reason: "expired",
+      }),
+    ).toThrow();
+  });
+
+  it("lets only an approval be remembered", () => {
+    const approvalId = "60000000-0000-4000-8000-000000000001";
+    expect(decodeExtensionToolApprovalDecision({ approvalId, decision: "approved" })).toEqual({
+      approvalId,
+      decision: "approved",
+    });
+    expect(
+      decodeExtensionToolApprovalDecision({ approvalId, decision: "approved", remember: true })
+        .remember,
+    ).toBe(true);
+    expect(() =>
+      decodeExtensionToolApprovalDecision({ approvalId, decision: "denied", remember: true }),
+    ).toThrow();
+  });
+
+  it("tells the prompt which server asks and whether the answer may be remembered", () => {
+    const approval = {
+      approvalId: "60000000-0000-4000-8000-000000000001",
+      threadId: "50000000-0000-4000-8000-000000000001",
+      extensionId,
+      packageId,
+      componentId: "mcp-notes",
+      serverName: "notes",
+      providerToolName: "ext_mcp_notes_search_0123456789abcdef",
+      mcpToolName: "search",
+      inputJson: "{}",
+      requestedAt: "2026-10-12T10:00:00.000Z",
+      rememberable: false,
+    };
+    expect(decodeExtensionToolApproval(approval)).toEqual(approval);
+    const { rememberable: _rememberable, ...withoutAnswerScope } = approval;
+    expect(() => decodeExtensionToolApproval(withoutAnswerScope)).toThrow();
+  });
+
+  it("offers a window no request that creates a grant", () => {
+    expect(decodeExtensionToolGrantRequest({ kind: "list" })).toEqual({ kind: "list" });
+    expect(decodeExtensionToolGrantRequest({ kind: "revoke", grantId })).toEqual({
+      kind: "revoke",
+      grantId,
+    });
+    for (const kind of ["record", "grant", "create", "set"]) {
+      expect(() => decodeExtensionToolGrantRequest({ ...recorded, kind })).toThrow();
+    }
   });
 });

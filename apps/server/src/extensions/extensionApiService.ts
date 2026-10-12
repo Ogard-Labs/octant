@@ -54,7 +54,9 @@ export class ExtensionApiService {
   readonly #resolver: ExtensionPackageResolverPort;
   readonly #skills: StandaloneSkillService | undefined;
   readonly #activation: ExtensionActivationServicePort | undefined;
-  readonly #onStateChanged: ((snapshot: ExtensionSnapshot) => void | Promise<void>) | undefined;
+  readonly #onStateChanged:
+    | ((snapshot: ExtensionSnapshot, command: ExtensionCommand) => void | Promise<void>)
+    | undefined;
   readonly #inspections = new Map<string, InspectedExtensionPackage>();
 
   constructor(options: {
@@ -62,7 +64,11 @@ export class ExtensionApiService {
     readonly resolver: ExtensionPackageResolverPort;
     readonly skills?: StandaloneSkillService;
     readonly activation?: ExtensionActivationServicePort;
-    readonly onStateChanged?: (snapshot: ExtensionSnapshot) => void | Promise<void>;
+    /** Told which command changed the state, so its consequences can follow it. */
+    readonly onStateChanged?: (
+      snapshot: ExtensionSnapshot,
+      command: ExtensionCommand,
+    ) => void | Promise<void>;
   }) {
     this.#lifecycle = options.lifecycle;
     this.#resolver = options.resolver;
@@ -108,23 +114,29 @@ export class ExtensionApiService {
         case "install-package": {
           const inspection = this.#inspections.get(commandKey(command));
           if (inspection === undefined) return inspectionRequired();
-          return await this.#stateUpdated(await this.#lifecycle.install(inspection));
+          return await this.#stateUpdated(await this.#lifecycle.install(inspection), command);
         }
         case "update-package": {
           const inspection = this.#inspections.get(commandKey(command));
           if (inspection === undefined) return inspectionRequired();
-          return await this.#stateUpdated(await this.#lifecycle.update(inspection));
+          return await this.#stateUpdated(await this.#lifecycle.update(inspection), command);
         }
         case "rollback-package":
-          return await this.#stateUpdated(await this.#lifecycle.rollback(command));
+          return await this.#stateUpdated(await this.#lifecycle.rollback(command), command);
         case "uninstall-package":
-          return await this.#stateUpdated(await this.#lifecycle.uninstall(command.extensionId));
+          return await this.#stateUpdated(
+            await this.#lifecycle.uninstall(command.extensionId),
+            command,
+          );
         case "set-plugin-desired":
-          return await this.#stateUpdated(await this.#lifecycle.setPluginDesired(command));
+          return await this.#stateUpdated(await this.#lifecycle.setPluginDesired(command), command);
         case "set-source-trust":
-          return await this.#stateUpdated(await this.#lifecycle.setSourceTrust(command));
+          return await this.#stateUpdated(await this.#lifecycle.setSourceTrust(command), command);
         case "set-component-desired":
-          return await this.#stateUpdated(await this.#lifecycle.setComponentDesired(command));
+          return await this.#stateUpdated(
+            await this.#lifecycle.setComponentDesired(command),
+            command,
+          );
         case "query-effective-state":
           if (this.#activation === undefined) return unsupportedCommand();
           return {
@@ -150,7 +162,7 @@ export class ExtensionApiService {
           {
             const result = await this.#skills.execute(command, signal);
             return result.kind === "extension-state-updated"
-              ? await this.#stateUpdated(result.snapshot)
+              ? await this.#stateUpdated(result.snapshot, command)
               : result;
           }
       }
@@ -197,9 +209,12 @@ export class ExtensionApiService {
     return inspection;
   }
 
-  async #stateUpdated(snapshot: ExtensionSnapshot): Promise<ExtensionCommandResult> {
+  async #stateUpdated(
+    snapshot: ExtensionSnapshot,
+    command: ExtensionCommand,
+  ): Promise<ExtensionCommandResult> {
     if (this.#onStateChanged !== undefined) {
-      await this.#onStateChanged(snapshot);
+      await this.#onStateChanged(snapshot, command);
     }
     return { kind: "extension-state-updated", snapshot };
   }
