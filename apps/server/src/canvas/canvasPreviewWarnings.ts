@@ -1,9 +1,16 @@
-import type { CanvasBlock, CanvasDefinition } from "@octant/contracts/canvas";
+import {
+  CANVAS_DESIGN_ASSET_SCHEME,
+  type CanvasBlock,
+  type CanvasDefinition,
+  type CanvasDesignAssetResolution,
+  type CanvasDesignAssetUnavailableReason,
+} from "@octant/contracts/canvas";
 import {
   canvasDashboardCellWidth,
   canvasReadingOrder,
 } from "@octant/domain/canvas-dashboard-layout";
 import { contrastRatio } from "@octant/theme";
+import type { CanvasPreviewDesignReading } from "./canvasPreviewFrames";
 
 /**
  * What an agent should fix before it replies.
@@ -15,10 +22,13 @@ import { contrastRatio } from "@octant/theme";
  * them: the thread shows a long inline document as a teaser the person expands. Each is a value, not a sentence: the tool
  * reports the kind and the measurement, and the agent decides what to change.
  *
- * The warnings are computed from the document and the target width alone, so
+ * Most warnings are computed from the document and the target width alone, so
  * they are reported whether or not a browser rendered the picture. That is what
  * makes a warnings-only build honest rather than empty: the layout reading does
- * not depend on the raster.
+ * not depend on the raster. A design frame is the exception, because it is
+ * markup: its overflow, its text contrast, and a running design's script errors
+ * are read from the drawn frames (`canvasPreviewDesignWarnings`), so they are
+ * reported only when a browser drew the page.
  */
 export type CanvasPreviewWarning =
   | {
@@ -45,7 +55,79 @@ export type CanvasPreviewWarning =
       readonly background: string;
       readonly ratio: number;
       readonly target: number;
+    }
+  | {
+      /**
+       * A declared image the host could not draw, so the frames that name it
+       * show a placeholder. Names the frames and the id, never the bytes.
+       * `frameIds` is every frame that names the asset; a reference in the
+       * shared stylesheet reaches every frame.
+       */
+      readonly kind: "design-asset-unavailable";
+      readonly blockId: string;
+      readonly assetId: string;
+      readonly reason: CanvasDesignAssetUnavailableReason;
+      readonly frameIds: ReadonlyArray<string>;
+    }
+  | {
+      /** A design frame whose content is wider than the page it is drawn in. */
+      readonly kind: "design-frame-overflow";
+      readonly blockId: string;
+      readonly frameId: string;
+      readonly overflowPx: number;
+    }
+  | {
+      /** The text that reads worst in a design frame, below its target. */
+      readonly kind: "design-contrast-below-target";
+      readonly blockId: string;
+      readonly frameId: string;
+      readonly text: string;
+      readonly foreground: string;
+      readonly background: string;
+      readonly ratio: number;
+      readonly target: number;
+    }
+  | {
+      /** An uncaught error a running design threw as it loaded, from its bridge. */
+      readonly kind: "design-script-error";
+      readonly blockId: string;
+      readonly message: string;
+    }
+  | {
+      /**
+       * A design the look could not read in full: it ran out of time, or a
+       * frame did not answer. An unread frame may overflow or read badly and
+       * nothing says so; warnings from the frames that were read still follow.
+       */
+      readonly kind: "design-not-measured";
+      readonly blockId: string;
     };
+
+/**
+ * What the browser measured in the drawn design frames, as warnings, in the
+ * order the designs were drawn: each design's script errors, then its frames
+ * that overflow, then its worst-reading text per frame.
+ */
+export function canvasPreviewDesignWarnings(
+  designs: ReadonlyArray<CanvasPreviewDesignReading>,
+): ReadonlyArray<CanvasPreviewWarning> {
+  const warnings: CanvasPreviewWarning[] = [];
+  for (const design of designs) {
+    for (const message of design.scriptErrors) {
+      warnings.push({ kind: "design-script-error", blockId: design.blockId, message });
+    }
+    if (!design.measured) {
+      warnings.push({ kind: "design-not-measured", blockId: design.blockId });
+    }
+    for (const frame of design.overflow) {
+      warnings.push({ kind: "design-frame-overflow", blockId: design.blockId, ...frame });
+    }
+    for (const frame of design.contrast) {
+      warnings.push({ kind: "design-contrast-below-target", blockId: design.blockId, ...frame });
+    }
+  }
+  return warnings;
+}
 
 /**
  * The colours a preview is drawn against, resolved from the chosen theme.
@@ -73,6 +155,12 @@ export interface CanvasPreviewWarningInput {
   /** The drawn width in CSS pixels; the same number the renderer is given. */
   readonly width: number;
   readonly palette: CanvasPreviewPalette;
+  /**
+   * Each design's images as the host resolved them for this preview, by block
+   * id. A design missing here was not resolved, and its declared images read
+   * as refused, which is what a reader would see.
+   */
+  readonly designAssets?: ReadonlyMap<string, ReadonlyArray<CanvasDesignAssetResolution>>;
 }
 
 /** A categorical mark must clear the 3:1 a graphical object needs (WCAG 1.4.11). */
@@ -102,7 +190,11 @@ export function canvasPreviewWarnings(
   // document's, so it is measured there; otherwise a chart in a quarter of a
   // wide grid would clip labels that the full width would hold.
   const cellWidths = new Map<string, number>();
-  for (const item of canvasReadingOrder(input.definition.blocks)) {
+  // A dashboard inside a tab or column is measured the same way.
+  const items = canvasReadingOrder(input.definition.blocks).flatMap((item) =>
+    item.kind === "group" ? item.sections.flat() : [item],
+  );
+  for (const item of items) {
     if (item.kind !== "dashboard") continue;
     for (const cell of item.cells) {
       cellWidths.set(
@@ -132,6 +224,8 @@ function blockWarnings(
       return chartWarnings(block, input);
     case "bar-list":
       return barListWarnings(block, input);
+    case "design":
+      return designAssetWarnings(block, input);
     default:
       return [];
   }
@@ -217,6 +311,42 @@ function clippedChartLabels(
       label: String(point.x),
       availablePx: Math.round(availablePx),
     }));
+}
+
+function designAssetWarnings(
+  block: Extract<CanvasBlock, { readonly kind: "design" }>,
+  input: CanvasPreviewWarningInput,
+): ReadonlyArray<CanvasPreviewWarning> {
+  const resolved = input.designAssets?.get(String(block.blockId));
+  const warnings: CanvasPreviewWarning[] = [];
+  for (const asset of block.assets ?? []) {
+    const id = String(asset.assetId);
+    const outcome = resolved?.find((entry) => String(entry.assetId) === id);
+    if (outcome?.status === "resolved") continue;
+    const reference = `${CANVAS_DESIGN_ASSET_SCHEME}${id}`;
+    const named = (markup: string | undefined) =>
+      markup !== undefined && namesAsset(markup, reference);
+    warnings.push({
+      kind: "design-asset-unavailable",
+      blockId: String(block.blockId),
+      assetId: id,
+      reason: outcome?.reason ?? "refused",
+      frameIds: block.frames
+        .filter((frame) => named(block.styles) || named(frame.html))
+        .map((frame) => String(frame.frameId)),
+    });
+  }
+  return warnings;
+}
+
+/** Whether markup names this reference, not one whose id merely starts with it. */
+function namesAsset(markup: string, reference: string): boolean {
+  let at = markup.indexOf(reference);
+  while (at !== -1) {
+    if (!/[A-Za-z0-9._-]/.test(markup.charAt(at + reference.length))) return true;
+    at = markup.indexOf(reference, at + reference.length);
+  }
+  return false;
 }
 
 function barListWarnings(

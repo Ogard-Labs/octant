@@ -4,8 +4,10 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { decodeCanvasDefinition } from "@octant/contracts/canvas";
 import {
+  CANVAS_PREVIEW_BROWSER_ARGS,
   CANVAS_PREVIEW_ORIGIN,
   canvasPreviewAssetPath,
+  canvasPreviewDesignPageIndex,
   canvasPreviewPageWithInput,
   createPlaywrightCanvasPreviewRenderer,
 } from "./canvasPreviewRenderer";
@@ -32,6 +34,32 @@ describe("canvas preview requests", () => {
     ).toBeUndefined();
     expect(canvasPreviewAssetPath(`${CANVAS_PREVIEW_ORIGIN}/`, root)).toBeUndefined();
     expect(canvasPreviewAssetPath("data:text/html,hi", root)).toBeUndefined();
+  });
+});
+
+describe("a running design's page in the preview", () => {
+  it("is answered only at its position under the preview origin", () => {
+    expect(canvasPreviewDesignPageIndex(`${CANVAS_PREVIEW_ORIGIN}/design-page/0`)).toBe(0);
+    expect(canvasPreviewDesignPageIndex(`${CANVAS_PREVIEW_ORIGIN}/design-page/12`)).toBe(12);
+    for (const url of [
+      "http://example.test/design-page/0",
+      `${CANVAS_PREVIEW_ORIGIN}/design-page/`,
+      `${CANVAS_PREVIEW_ORIGIN}/design-page/0?ticket=x`,
+      `${CANVAS_PREVIEW_ORIGIN}/design-page/../canvas-preview.html`,
+      `${CANVAS_PREVIEW_ORIGIN}/design-page/1e3`,
+      "not a url",
+    ]) {
+      expect(canvasPreviewDesignPageIndex(url), url).toBeUndefined();
+    }
+  });
+
+  it("starts the preview browser with no route out for what interception cannot see", () => {
+    expect(CANVAS_PREVIEW_BROWSER_ARGS).toEqual([
+      "--proxy-server=socks5://127.0.0.1:1",
+      "--proxy-bypass-list=<-loopback>",
+      "--host-resolver-rules=MAP * ~NOTFOUND",
+      "--webrtc-ip-handling-policy=disable_non_proxied_udp",
+    ]);
   });
 });
 

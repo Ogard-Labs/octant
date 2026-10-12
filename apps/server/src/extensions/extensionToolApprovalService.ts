@@ -10,6 +10,7 @@ const DEFAULT_APPROVAL_TTL_MS = 5 * 60_000;
 interface PendingApproval {
   readonly view: ExtensionToolApproval;
   readonly windowId: WindowId;
+  readonly remember?: () => boolean;
   readonly resolve: (approved: boolean) => void;
   readonly timer: ReturnType<typeof setTimeout>;
   readonly signal?: AbortSignal;
@@ -49,11 +50,19 @@ export class ExtensionToolApprovalService {
     readonly windowId: WindowId;
     readonly threadId: string;
     readonly projectId?: string;
+    readonly extensionId: string;
     readonly packageId: string;
     readonly componentId: string;
+    readonly serverName: string;
     readonly providerToolName: string;
     readonly mcpToolName: string;
     readonly inputJson: string;
+    /**
+     * Records "always allow in this Project" for this tool and says whether it
+     * was recorded. Absent when this call can only be approved once; the
+     * prompt then offers no such answer and one sent anyway is refused.
+     */
+    readonly remember?: () => boolean;
     readonly signal?: AbortSignal;
   }): Promise<boolean> {
     if (input.signal?.aborted) return Promise.resolve(false);
@@ -62,12 +71,15 @@ export class ExtensionToolApprovalService {
       approvalId,
       threadId: input.threadId,
       ...(input.projectId === undefined ? {} : { projectId: input.projectId }),
+      extensionId: input.extensionId,
       packageId: input.packageId,
       componentId: input.componentId,
+      serverName: input.serverName,
       providerToolName: input.providerToolName,
       mcpToolName: input.mcpToolName,
       inputJson: input.inputJson,
       requestedAt: new Date(this.options.now()).toISOString(),
+      rememberable: input.remember !== undefined,
     });
     return new Promise<boolean>((resolve) => {
       const settle = (approved: boolean) => {
@@ -86,6 +98,7 @@ export class ExtensionToolApprovalService {
       this.#pending.set(approvalId, {
         view,
         windowId: input.windowId,
+        ...(input.remember === undefined ? {} : { remember: input.remember }),
         resolve: settle,
         timer,
         ...(input.signal === undefined ? {} : { signal: input.signal }),
@@ -105,6 +118,21 @@ export class ExtensionToolApprovalService {
   decide(windowId: WindowId, decision: ExtensionToolApprovalDecision): boolean {
     const pending = this.#pending.get(decision.approvalId);
     if (pending === undefined || !this.#answerableBy(pending, windowId)) return false;
+    if (decision.remember === true) {
+      // A remembered approval grows only from a person's answer at a window,
+      // to a prompt that offered it: one a host-owned turn raised arrives
+      // with no `remember`, whoever answers. The host's own scope is nobody,
+      // so it may settle its prompt but never remember one. A refused or
+      // failed `remember` leaves the call waiting, to be approved once.
+      if (
+        decision.decision !== "approved" ||
+        pending.remember === undefined ||
+        this.options.isHostScope?.(windowId) === true ||
+        !pending.remember()
+      ) {
+        return false;
+      }
+    }
     pending.resolve(decision.decision === "approved");
     return true;
   }

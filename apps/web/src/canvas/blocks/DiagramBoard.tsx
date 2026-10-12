@@ -1,9 +1,10 @@
 import type { CanvasDiagramBlock } from "@octant/contracts/canvas";
 import type { CanvasDiagramNodePosition } from "@octant/contracts/canvas-board";
-import { layoutCanvasDiagram } from "@octant/domain";
+import { layoutCanvasDiagram, type CanvasDiagramNodeBox } from "@octant/domain";
 import {
   useCallback,
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -117,6 +118,14 @@ export function DiagramBoard(props: DiagramBoardProps) {
   });
   const [viewport, setViewport] = useState<Viewport>(fitViewport);
   const [message, setMessage] = useState<string>();
+  // One arrowhead per tone the edges use, so a toned arrow's head matches its
+  // line; ids are scoped to this board because several boards share a page.
+  const markerScope = useId().replace(/[^A-Za-z0-9_-]/g, "");
+  const arrowTones = [
+    ...new Set(
+      layout.edges.filter((edge) => edge.style !== "line").map((edge) => edge.tone ?? "neutral"),
+    ),
+  ];
   const [pending, setPending] = useState(false);
   const dragRef = useRef<Drag | undefined>(undefined);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -331,8 +340,28 @@ export function DiagramBoard(props: DiagramBoardProps) {
         ref={svgRef}
         viewBox={viewBox}
       >
+        {arrowTones.length === 0 ? null : (
+          <defs>
+            {arrowTones.map((tone) => (
+              <marker
+                className="canvas-block__diagram-arrowhead"
+                data-tone={tone}
+                id={`${markerScope}-arrow-${tone}`}
+                key={tone}
+                markerHeight={8}
+                markerWidth={8}
+                orient="auto-start-reverse"
+                refX={9}
+                refY={5}
+                viewBox="0 0 10 10"
+              >
+                <path d="M 0 0 L 10 5 L 0 10 z" />
+              </marker>
+            ))}
+          </defs>
+        )}
         {layout.groups.map((group) => (
-          <g key={group.groupId} className="canvas-block__diagram-group">
+          <g key={group.groupId} className="canvas-block__diagram-group" data-tone={group.tone}>
             <rect x={group.x} y={group.y} width={group.width} height={group.height} rx={8} />
             <text x={group.x + 10} y={group.y + 15}>
               {group.label}
@@ -341,12 +370,16 @@ export function DiagramBoard(props: DiagramBoardProps) {
         ))}
         {layout.edges.map((edge) => (
           <g key={edge.edgeId}>
-            <line
-              x1={edge.x1}
-              y1={edge.y1}
-              x2={edge.x2}
-              y2={edge.y2}
+            <polyline
               className="canvas-block__diagram-edge"
+              data-style={edge.style}
+              data-tone={edge.tone}
+              markerEnd={
+                edge.style === "line"
+                  ? undefined
+                  : `url(#${markerScope}-arrow-${edge.tone ?? "neutral"})`
+              }
+              points={edge.points.map((point) => `${point.x},${point.y}`).join(" ")}
             />
             {edge.label === undefined ? null : (
               <text x={edge.labelX} y={edge.labelY} className="canvas-block__diagram-edge-label">
@@ -366,7 +399,7 @@ export function DiagramBoard(props: DiagramBoardProps) {
             role={editable ? "button" : undefined}
             tabIndex={editable ? 0 : undefined}
           >
-            <rect x={node.x} y={node.y} width={node.width} height={node.height} rx={6} />
+            <DiagramNodeShape node={node} />
             <text x={node.x + node.width / 2} y={node.y + node.height / 2}>
               {node.label}
             </text>
@@ -379,5 +412,34 @@ export function DiagramBoard(props: DiagramBoardProps) {
         </OctantAlert>
       )}
     </div>
+  );
+}
+
+/**
+ * A node drawn as its role's shape: a process a square-cornered box, a
+ * decision a diamond, a terminator a pill, and a node without a role the
+ * rounded box every diagram had before roles were drawn.
+ */
+export function DiagramNodeShape({ node }: { readonly node: CanvasDiagramNodeBox }) {
+  if (node.shape === "decision") {
+    const midX = node.x + node.width / 2;
+    const midY = node.y + node.height / 2;
+    return (
+      <polygon
+        data-shape="decision"
+        points={`${midX},${node.y} ${node.x + node.width},${midY} ${midX},${node.y + node.height} ${node.x},${midY}`}
+      />
+    );
+  }
+  const radius = node.shape === "terminator" ? node.height / 2 : node.shape === "process" ? 2 : 6;
+  return (
+    <rect
+      data-shape={node.shape}
+      height={node.height}
+      rx={radius}
+      width={node.width}
+      x={node.x}
+      y={node.y}
+    />
   );
 }

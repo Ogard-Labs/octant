@@ -25,7 +25,7 @@ import type { HostExportPage } from "@octant/contracts/host-export";
 import { decodeUtcTimestamp } from "@octant/contracts/events";
 import { decodeHostId } from "@octant/contracts/host";
 import { decodeProviderInstanceId, decodeProviderModelId } from "@octant/contracts/providers";
-import { decodeImageGenerationScopeId } from "@octant/contracts";
+import { decodeBrowserThreadId, decodeImageGenerationScopeId } from "@octant/contracts";
 import { decodeThreadRetentionThreadId } from "@octant/contracts/thread-retention";
 import type { CodeConversationPage } from "@octant/contracts/code-operations";
 import {
@@ -39,6 +39,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { ChatAttachmentStore } from "./chat/chatAttachmentStore";
 import { WorkAttachmentStore } from "./work/workAttachmentStore";
 import { CodeAttachmentStore } from "./code/codeAttachmentStore";
+import { BrowserCaptureStore } from "./browser/browserCaptureStore";
 import { GeneratedImageStore } from "./image/generatedImageStore";
 import { managedWorktreeRoot } from "./code/managedWorktreeService";
 import { readChatThreadView, writeChatContent } from "./persistence/chatProjection";
@@ -284,6 +285,8 @@ describe("data-rights smoke: export, purge, re-export on a throwaway host", () =
             }
             return new GeneratedImageStore(store.directory).purgeScope(scopeId);
           },
+          purgeBrowserCaptures: (id) =>
+            new BrowserCaptureStore(store.directory).purgeThread(decodeBrowserThreadId(id)),
           purgeAgentMessages: async () => undefined,
         }),
     });
@@ -322,6 +325,7 @@ describe("data-rights smoke: export, purge, re-export on a throwaway host", () =
     );
     // The generated-image scope is gone too; a purge failure would escape and fail here.
     expect(readdirSync(join(store.directory, "generated-images"))).not.toContain(threads.chat.id);
+    expect(readdirSync(join(store.directory, "browser-captures"))).not.toContain(threads.chat.id);
 
     const second = await exportNdjson(exportService);
     // No content trace of the purged thread survives in the next cut.
@@ -442,6 +446,9 @@ function seedAttachments(directory: string): void {
   const imageFile = join(directory, "generated-images", threads.chat.id, randomUUID());
   mkdirSync(imageFile, { recursive: true, mode: 0o700 });
   writeFileSync(join(imageFile, "finalized.bin"), threads.chat.marker);
+  const captureFile = join(directory, "browser-captures", threads.chat.id, randomUUID());
+  mkdirSync(captureFile, { recursive: true, mode: 0o700 });
+  writeFileSync(join(captureFile, "finalized.bin"), threads.chat.marker);
 }
 
 const projectMemoryMarker = "marker-project-memory-kept";

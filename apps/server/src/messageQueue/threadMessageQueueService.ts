@@ -47,6 +47,13 @@ export interface ThreadMessageQueueServiceOptions {
   readonly actor: EventActor;
   readonly clock?: () => string;
 }
+/**
+ * Whether a thread owes a turn. `active` is a turn its mode is running or has
+ * queued, or a message still in this queue, whether the queue is moving,
+ * paused, or held. `unconfirmed` is a last turn that ended without the host
+ * learning how. `unavailable` is a thread this window cannot read.
+ */
+export type ThreadTurnStanding = "idle" | "active" | "unconfirmed" | "unavailable";
 interface LiveAuthorization {
   readonly windowId: WindowId;
   readonly scope: ThreadMessageQueueScope;
@@ -80,6 +87,31 @@ export class ThreadMessageQueueService {
     if (inspected.status === "held") return { status: "refused", reason: inspected.reason };
     if (this.#store.purged(scope)) return { status: "refused", reason: "thread-unavailable" };
     return { status: "ready", snapshot: this.#store.snapshot(scope) };
+  }
+  /**
+   * Tells a caller that must act only on an idle thread where the thread
+   * stands, and runs `act` under this thread's queue ordering, so no enqueue,
+   * resume, or dispatch lands between the answer and what is done with it.
+   * The mode alone cannot answer: it sees the turns it admitted, not a message
+   * waiting here behind a pause or a hold.
+   */
+  async withTurnStanding<T>(
+    windowId: WindowId,
+    scope: ThreadMessageQueueScope,
+    act: (standing: ThreadTurnStanding) => T | Promise<T>,
+  ): Promise<T> {
+    return this.#serial(scope, async () => {
+      const inspection = await this.#inspect({ scope, windowId, intent: "read" });
+      if (
+        inspection.status === "held" ||
+        this.#purging.has(queueId(scope)) ||
+        this.#store.purged(scope)
+      )
+        return act("unavailable");
+      if (inspection.status === "busy" || this.#store.state(scope).items.length > 0)
+        return act("active");
+      return act(inspection.tail?.unconfirmed === true ? "unconfirmed" : "idle");
+    });
   }
   async execute(
     windowId: WindowId,

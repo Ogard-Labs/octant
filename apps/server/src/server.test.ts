@@ -2462,6 +2462,74 @@ describe("startOctantServer", () => {
     );
   });
 
+  it("registers the local-only route that clears a thread's outside-content mark", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "octant-server-"));
+    directories.push(directory);
+    let routeHandler: ((request: Request) => Response | Promise<Response>) | undefined;
+    const capability = "A".repeat(43);
+    const threadId = "00000000-0000-4000-8000-000000000481";
+    const post = (body: unknown, windowCapability: string) =>
+      Promise.resolve(
+        routeHandler?.(
+          new Request("http://127.0.0.1:13773/api/thread-external-content", {
+            method: "POST",
+            headers: {
+              "content-type": "application/json",
+              "x-octant-window-capability": windowCapability,
+            },
+            body: JSON.stringify(body),
+          }),
+        ),
+      ).then(assertResponse);
+
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          yield* startOctantServer({
+            hostname: "127.0.0.1",
+            port: 0,
+            desktopBridgeSecret: "desktop-secret",
+            serve: (options) => {
+              routeHandler = options.fetch;
+              return { url: new URL("http://127.0.0.1:13773"), stop: () => undefined };
+            },
+          });
+          yield* Effect.promise(() =>
+            Promise.resolve(
+              routeHandler?.(
+                new Request("http://127.0.0.1:13773/api/desktop/window-authorities", {
+                  method: "POST",
+                  headers: { "x-octant-desktop-secret": "desktop-secret" },
+                  body: JSON.stringify({
+                    windowId: "00000000-0000-4000-8000-000000000480",
+                    capability,
+                  }),
+                }),
+              ),
+            ),
+          );
+          const clear = { kind: "clear", mode: "chat", threadId, expectedVersion: 0 };
+
+          const unauthenticated = yield* Effect.promise(() => post(clear, "B".repeat(43)));
+          expect(unauthenticated.status).toBe(401);
+
+          // The thread's own mode is asked through the composed message queue
+          // read: no such thread exists, so there is nothing to show or clear.
+          const read = yield* Effect.promise(() =>
+            post({ kind: "read", mode: "chat", threadId }, capability),
+          );
+          expect(read.status).toBe(404);
+          const cleared = yield* Effect.promise(() => post(clear, capability));
+          expect(cleared.status).toBe(200);
+          expect(yield* Effect.promise(() => cleared.json())).toEqual({
+            kind: "refused",
+            reason: "thread-unavailable",
+          });
+        }).pipe(Effect.provide(makePersistenceLive({ dataDirectory: directory }))),
+      ),
+    );
+  });
+
   it("wires Claude runtime ports into authenticated provider routes", async () => {
     const directory = mkdtempSync(join(tmpdir(), "octant-server-"));
     directories.push(directory);

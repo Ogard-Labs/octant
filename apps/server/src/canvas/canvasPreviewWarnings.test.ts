@@ -49,6 +49,70 @@ function warningsFor(
 }
 
 describe("canvasPreviewWarnings", () => {
+  it("names the frames and the id of each design image the host could not draw, never the bytes", () => {
+    const design = block({
+      blockId: "phone",
+      schemaVersion: 17,
+      kind: "design",
+      title: "Onboarding",
+      size: "phone",
+      styles: ".brand { background: url(octant-asset:logo); }",
+      assets: [
+        { assetId: "shot", source: { kind: "project-file", path: "screens/home.png" } },
+        { assetId: "shot-2", source: { kind: "project-file", path: "screens/two.png" } },
+        { assetId: "logo", source: { kind: "project-file", path: "logo.png" } },
+        {
+          assetId: "hero",
+          source: { kind: "generated-image", imageId: "11111111-1111-4111-8111-111111111111" },
+        },
+      ],
+      frames: [
+        { frameId: "home", title: "Home", html: '<img src="octant-asset:shot" alt="">' },
+        { frameId: "two", title: "Two", html: '<img src="octant-asset:shot-2" alt="">' },
+      ],
+    });
+    const warnings = canvasPreviewWarnings({
+      definition: { blocks: [design] },
+      width: 720,
+      palette: canvasPreviewPalette("light"),
+      designAssets: new Map([
+        [
+          "phone",
+          [
+            { assetId: "shot", status: "unavailable", reason: "refused" },
+            { assetId: "shot-2", status: "resolved", mediaType: "image/png", data: "iVBORw0KGgo=" },
+            { assetId: "logo", status: "unavailable", reason: "missing" },
+          ] as never,
+        ],
+      ]),
+    });
+    expect(warnings).toEqual([
+      {
+        kind: "design-asset-unavailable",
+        blockId: "phone",
+        assetId: "shot",
+        reason: "refused",
+        frameIds: ["home"],
+      },
+      {
+        kind: "design-asset-unavailable",
+        blockId: "phone",
+        assetId: "logo",
+        reason: "missing",
+        frameIds: ["home", "two"],
+      },
+      // Not resolved at all reads as refused, as a reader would see it.
+      {
+        kind: "design-asset-unavailable",
+        blockId: "phone",
+        assetId: "hero",
+        reason: "refused",
+        frameIds: [],
+      },
+    ]);
+    expect(JSON.stringify(warnings)).not.toContain("iVBOR");
+  });
+
   it("reports nothing for a document that reads cleanly", () => {
     const blocks = [
       richText("summary"),

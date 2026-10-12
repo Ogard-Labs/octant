@@ -1540,6 +1540,46 @@ describe("CodeOperationService", () => {
     expect(consumeIssueContextFramed).toHaveBeenCalledExactlyOnceWith(String(ids.thread));
   });
 
+  it("carries a waiting agent message in the turn's context and records it delivered only when told a provider accepted the turn", async () => {
+    const waiting = [{ messageId: "message-1", text: "<framed agent message>" }];
+    const carryAgentMessages = vi.fn(async () => waiting);
+    const confirmAgentMessagesDelivered = vi.fn(async () => undefined);
+    const fixture = providerTurnFixture({ carryAgentMessages, confirmAgentMessagesDelivered });
+
+    await expect(fixture.service.execute(ids.window, startProviderTurn)).resolves.toMatchObject({
+      kind: "provider-turn-state",
+      state: "running",
+    });
+
+    expect(carryAgentMessages).toHaveBeenCalledWith(String(ids.thread));
+    const start = fixture.turns.start.mock.lastCall?.[0];
+    expect(start?.context).toEqual(
+      expect.arrayContaining([{ kind: "user-message", text: "<framed agent message>" }]),
+    );
+    // A turn the runtime took on has sent nothing yet: the context is still
+    // in memory, so the message stays waiting until the runtime reports the
+    // provider has it.
+    expect(confirmAgentMessagesDelivered).not.toHaveBeenCalled();
+    start?.onContextDelivered?.();
+    expect(confirmAgentMessagesDelivered).toHaveBeenCalledExactlyOnceWith(["message-1"]);
+  });
+
+  it("starts the person's turn without agent messages when they cannot be read", async () => {
+    const confirmAgentMessagesDelivered = vi.fn(async () => undefined);
+    const fixture = providerTurnFixture({
+      carryAgentMessages: async () => {
+        throw new Error("The message journal is unavailable.");
+      },
+      confirmAgentMessagesDelivered,
+    });
+
+    await expect(fixture.service.execute(ids.window, startProviderTurn)).resolves.toMatchObject({
+      kind: "provider-turn-state",
+      state: "running",
+    });
+    expect(confirmAgentMessagesDelivered).not.toHaveBeenCalled();
+  });
+
   it("sends the images the journal recorded, and refuses ones no turn may claim", async () => {
     const reference = {
       attachmentId: "40000000-0000-4000-8000-000000000001",
@@ -2450,6 +2490,8 @@ function providerTurnFixture(
       | "isProviderModelAllowed"
       | "agentRuns"
       | "consumeIssueContextFramed"
+      | "carryAgentMessages"
+      | "confirmAgentMessagesDelivered"
       | "takeProductFeedbackForTurn"
     >
   > & { readonly thread?: CodeThread; readonly recordEvents?: boolean } = {},

@@ -117,13 +117,29 @@ export class AgentMessageProjection {
   }
 
   countInFlightForSender(senderThreadId: string): number {
-    let count = 0;
-    for (const record of this.#byMessage.values()) {
-      if (String(record.senderThreadId) === senderThreadId && record.state === "in-flight") {
-        count += 1;
-      }
-    }
-    return count;
+    return this.openForSender(senderThreadId).length;
+  }
+
+  /** The messages this sender has admitted that no turn has carried yet. */
+  openForSender(senderThreadId: string): ReadonlyArray<AgentMessageRecord> {
+    return this.inFlight().filter((record) => String(record.senderThreadId) === senderThreadId);
+  }
+
+  /**
+   * The messages waiting for this thread's next turn, oldest first. Only an
+   * in-flight message waits: one journaled `delivered` is settled, including
+   * every message an earlier host journaled as delivered without a turn ever
+   * carrying it, and is never offered again.
+   */
+  awaitingRecipient(recipientThreadId: string): ReadonlyArray<AgentMessageRecord> {
+    return this.inFlight().filter(
+      (record) => String(record.recipientThreadId) === recipientThreadId,
+    );
+  }
+
+  /** Every admitted message still waiting, in the order the journal admitted them. */
+  inFlight(): ReadonlyArray<AgentMessageRecord> {
+    return [...this.#byMessage.values()].filter((record) => record.state === "in-flight");
   }
 
   /**

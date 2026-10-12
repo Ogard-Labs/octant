@@ -26,7 +26,10 @@ import {
   EXTERNAL_CONTENT_FRAME_OPEN_PREFIX,
 } from "../context/externalContentFraming";
 import type { ExternalContentIngestionResult } from "../context/externalContentIngestionStore";
-import { AgentPluginMcpSessionManager } from "./agentPluginMcpSessionManager";
+import {
+  AgentPluginMcpSessionManager,
+  extensionToolDefinitionDigest,
+} from "./agentPluginMcpSessionManager";
 import { LocalPluginFolderRegistry } from "./localPluginFolderRegistry";
 import { CodexPluginPackageResolver } from "./codexPluginResolver";
 import { inspectExtensionPackage } from "./packageInspector";
@@ -1526,8 +1529,17 @@ describe("Agent Plugin MCP session manager", () => {
     expect(authorizeToolCall).toHaveBeenCalledWith({
       windowId: "17000000-0000-4000-8000-000000000097",
       thread: { id: effective.scope.threadId },
+      extensionId: "15000000-0000-4000-8000-000000000001",
       packageId: "15000000-0000-4000-8000-000000000002",
       componentId: "mcp-mutating",
+      serverName: "mutating",
+      version: "1.0.0",
+      digest: `sha256:${"c".repeat(64)}`,
+      definitionDigest: extensionToolDefinitionDigest({
+        name: "mutate",
+        inputSchema: { type: "object" },
+      }),
+      reach: "network",
       providerToolName: definition!.name,
       mcpToolName: "mutate",
       inputJson: '{"target":"production"}',

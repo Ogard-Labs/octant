@@ -21,6 +21,7 @@ const LOCAL_ONLY_PROBES = [
   { path: "/api/replica-store/commands", method: "POST" },
   { path: "/api/replica-membership/commands", method: "POST" },
   { path: "/api/replica-membership/state", method: "GET" },
+  { path: "/api/thread-external-content", method: "POST" },
 ] as const;
 
 /**
@@ -55,6 +56,7 @@ const PRODUCT_PROBES = [
   { path: "/api/automations/list", method: "GET" },
   { path: "/api/automations/commands", method: "POST" },
   { path: "/api/canvas/share-access", method: "POST" },
+  { path: "/api/canvas/design-run", method: "POST" },
   { path: "/api/agent-profiles", method: "GET" },
   { path: "/api/replica-sync/status", method: "GET" },
 ] as const;

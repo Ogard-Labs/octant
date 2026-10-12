@@ -225,14 +225,12 @@
   }
 }
 
-@media (prefers-contrast: more) {
-  .preview-viewer__chrome,
-  .preview-table th,
-  .preview-table td,
-  .preview-pdf__page,
-  .preview-slides__slide {
-    border-color: var(--oct-fg);
-  }
+html[data-octant-increased-contrast="true"] .preview-viewer__chrome,
+html[data-octant-increased-contrast="true"] .preview-table th,
+html[data-octant-increased-contrast="true"] .preview-table td,
+html[data-octant-increased-contrast="true"] .preview-pdf__page,
+html[data-octant-increased-contrast="true"] .preview-slides__slide {
+  border-color: var(--oct-fg);
 }
 
 @media (prefers-reduced-motion: reduce) {
