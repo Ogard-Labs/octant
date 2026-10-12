@@ -17,6 +17,38 @@ const authority = {
 };
 
 describe("BrowserAutomationClient", () => {
+  it("takes a capture through its own route and reports a refusal as an unauthorized failure", async () => {
+    const request = {
+      actionId: "70000000-0000-4000-8000-000000000001",
+      contextId,
+      correlationId: "80000000-0000-4000-8000-000000000001",
+      authority,
+      kind: "screenshot",
+    };
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(Response.json({ status: "running", threadId, evidence: [] }))
+      .mockResolvedValueOnce(
+        Response.json({ category: "unauthorized", message: "Not here." }, { status: 403 }),
+      );
+    const client = createBrowserAutomationClient({
+      baseUrl: "http://127.0.0.1:13773",
+      fetch,
+      windowCapability: capability,
+    });
+    await expect(
+      client.takeCapture?.({ threadId: threadId as any, request: request as any }),
+    ).resolves.toMatchObject({ status: "running" });
+    expect(fetch).toHaveBeenNthCalledWith(
+      1,
+      new URL("http://127.0.0.1:13773/api/browser/captures/take"),
+      expect.objectContaining({ method: "POST" }),
+    );
+    await expect(client.listCaptures?.({ threadId: threadId as any })).rejects.toMatchObject({
+      category: "unauthorized",
+    });
+  });
+
   it("lists a thread's captures and reads one as an image through the authenticated routes", async () => {
     const captureId = "16000000-0000-4000-8000-000000000001";
     const capture = {

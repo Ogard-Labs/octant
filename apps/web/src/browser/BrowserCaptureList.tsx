@@ -1,4 +1,7 @@
-import type { BrowserAutomationClient } from "@octant/client-runtime/browser-automation-client";
+import {
+  BrowserAutomationClientFailure,
+  type BrowserAutomationClient,
+} from "@octant/client-runtime/browser-automation-client";
 import type { BrowserCapture, BrowserThreadId } from "@octant/contracts";
 import { useEffect, useState } from "react";
 import { documentIsVisible, scheduleVisibleInterval } from "../polling/documentVisibility";
@@ -34,8 +37,10 @@ export function BrowserCaptureList(props: BrowserCaptureListProps) {
     if (listCaptures === undefined) return;
     const controller = new AbortController();
     let inFlight = false;
+    let refused = false;
+    let stop = () => {};
     const refresh = () => {
-      if (!documentIsVisible() || inFlight) return;
+      if (refused || !documentIsVisible() || inFlight) return;
       inFlight = true;
       void listCaptures
         .call(props.client, { threadId: props.threadId }, controller.signal)
@@ -45,15 +50,24 @@ export function BrowserCaptureList(props: BrowserCaptureListProps) {
             samePollingData(current, response.captures) ? current : response.captures,
           );
         })
-        .catch(() => {
-          // Background polling: keep the last list and try again on the next
-          // beat rather than parking an error above the composer.
+        .catch((error: unknown) => {
+          // A host that refuses this window will refuse the next beat too, so
+          // stop asking for this thread. Any other failure is transient: keep
+          // the last list and try again rather than parking an error above
+          // the composer.
+          if (
+            error instanceof BrowserAutomationClientFailure &&
+            error.category === "unauthorized"
+          ) {
+            refused = true;
+            stop();
+          }
         })
         .finally(() => {
           inFlight = false;
         });
     };
-    const stop = scheduleVisibleInterval(refresh, CAPTURE_POLL_MS, { runImmediately: true });
+    stop = scheduleVisibleInterval(refresh, CAPTURE_POLL_MS, { runImmediately: true });
     return () => {
       controller.abort();
       stop();

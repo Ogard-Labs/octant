@@ -21,6 +21,7 @@ import {
 import {
   decodeBrowserCaptureImage,
   decodeBrowserCaptureImageCommand,
+  decodeBrowserCaptureTakeCommand,
   decodeBrowserCapturesCommand,
   decodeBrowserCapturesResponse,
 } from "@octant/contracts/browser-capture";
@@ -261,6 +262,39 @@ export function createBrowserAutomationRouteHandler(
           origin,
         );
       }
+      if (url.pathname === "/api/browser/captures/take") {
+        // The person's Screenshot control. The ordinary action route keeps
+        // nothing, and a model cannot reach this path through tool input.
+        const input = decodeBrowserCaptureTakeCommand(decoded.value);
+        const refusal = captureRefusal(windowId, callerKind, input.threadId, origin);
+        if (refusal !== undefined) return refusal;
+        if (input.request.kind !== "screenshot") {
+          return failure(
+            { category: "invalid", message: "Only a screenshot can be taken as a capture." },
+            400,
+            origin,
+          );
+        }
+        // The context must be this thread's, not merely this window's.
+        const owned = dependencies.service.inspect(
+          windowId,
+          input.threadId,
+          input.request.contextId,
+        );
+        if (owned.failure?.category === "unauthorized") {
+          return failure(owned.failure, 403, origin);
+        }
+        return success(
+          decodeBrowserAutomationSnapshot(
+            await dependencies.service.act({
+              windowId,
+              request: input.request,
+              capturedBy: "person",
+            }),
+          ),
+          origin,
+        );
+      }
       if (url.pathname === "/api/browser/captures/image") {
         const input = decodeBrowserCaptureImageCommand(decoded.value);
         const refusal = captureRefusal(windowId, callerKind, input.threadId, origin);
@@ -304,13 +338,7 @@ export function createBrowserAutomationRouteHandler(
         }
         return success(
           decodeBrowserAutomationSnapshot(
-            await dependencies.service.act({
-              windowId,
-              request: input,
-              // Only a local window is the person at the pane; a paired device
-              // never causes a capture to be kept on the host.
-              ...(callerKind === "local-window" ? { capturedBy: "person" as const } : {}),
-            }),
+            await dependencies.service.act({ windowId, request: input }),
           ),
           origin,
         );

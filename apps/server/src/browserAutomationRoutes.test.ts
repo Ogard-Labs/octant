@@ -458,26 +458,69 @@ describe("browser automation routes", () => {
       expect(response?.status).toBe(404);
     });
 
-    it("asks the service to keep a screenshot only when a local window took it", async () => {
-      const screenshot = () =>
+    const screenshotRequest = {
+      actionId: "70000000-0000-4000-8000-000000000001",
+      contextId,
+      correlationId: "80000000-0000-4000-8000-000000000001",
+      authority,
+      kind: "screenshot",
+    };
+
+    it("keeps nothing for an ordinary screenshot action, so refreshing a preview saves no picture", async () => {
+      const response = await handler(
         new Request("http://127.0.0.1/api/browser/actions", {
           method: "POST",
           headers,
-          body: JSON.stringify({
-            actionId: "70000000-0000-4000-8000-000000000001",
-            contextId,
-            correlationId: "80000000-0000-4000-8000-000000000001",
-            authority,
-            kind: "screenshot",
-          }),
-        });
-      expect((await handler(screenshot()))?.status).toBe(200);
+          body: JSON.stringify(screenshotRequest),
+        }),
+      );
+      expect(response?.status).toBe(200);
+      expect(service.act.mock.lastCall?.[0]).not.toHaveProperty("capturedBy");
+    });
+
+    it("keeps a screenshot as the person's only through the explicit take route", async () => {
+      const { handler: capturing } = withCaptures();
+      const response = await capturing(post("/take", { threadId, request: screenshotRequest }));
+      expect(response?.status).toBe(200);
+      expect(await response?.json()).toEqual(snapshot);
       expect(service.act).toHaveBeenLastCalledWith(
         expect.objectContaining({ windowId, capturedBy: "person" }),
       );
+    });
 
-      expect((await handler(asPairedDevice(screenshot())))?.status).toBe(200);
-      expect(service.act.mock.lastCall?.[0]).not.toHaveProperty("capturedBy");
+    it("refuses to take a capture of anything but a screenshot", async () => {
+      const { handler: capturing } = withCaptures();
+      const response = await capturing(
+        post("/take", { threadId, request: { ...screenshotRequest, kind: "navigate" } }),
+      );
+      expect(response?.status).toBe(400);
+      expect(await response?.json()).toMatchObject({ category: "invalid" });
+      expect(service.act).not.toHaveBeenCalled();
+    });
+
+    it("refuses to take a capture without capability, for another thread's window, or from a paired device", async () => {
+      const { handler: capturing } = withCaptures();
+      const body = { threadId, request: screenshotRequest };
+      expect(
+        (await capturing(post("/take", body, { "x-octant-window-capability": "wrong" })))?.status,
+      ).toBe(401);
+      expect((await capturing(asPairedDevice(post("/take", body))))?.status).toBe(403);
+      const { handler: isolated } = withCaptures(false);
+      expect((await isolated(post("/take", body)))?.status).toBe(403);
+      expect(service.act).not.toHaveBeenCalled();
+    });
+
+    it("refuses to take a capture through a context that belongs to another thread", async () => {
+      service.inspect.mockReturnValue({
+        status: "failed",
+        threadId,
+        evidence: [],
+        failure: { category: "unauthorized", message: "Browser context is not owned." },
+      });
+      const { handler: capturing } = withCaptures();
+      const response = await capturing(post("/take", { threadId, request: screenshotRequest }));
+      expect(response?.status).toBe(403);
+      expect(service.act).not.toHaveBeenCalled();
     });
   });
 

@@ -1,5 +1,6 @@
 import { Schema } from "effect";
 import {
+  BrowserActionRequest,
   BrowserCaptureId,
   BrowserThreadId,
   MAX_BROWSER_SCREENSHOT_DATA_URL_CHARACTERS,
@@ -62,6 +63,17 @@ export const BrowserCapturesResponse = Schema.Struct({
 }).annotations(strict);
 export type BrowserCapturesResponse = typeof BrowserCapturesResponse.Type;
 
+/**
+ * The person's Screenshot control. It wraps the ordinary action request rather
+ * than adding a field to it, so a model cannot reach this path through tool
+ * input, and names the thread so the host checks the window against it.
+ */
+export const BrowserCaptureTakeCommand = Schema.Struct({
+  threadId: BrowserThreadId,
+  request: BrowserActionRequest,
+}).annotations(strict);
+export type BrowserCaptureTakeCommand = typeof BrowserCaptureTakeCommand.Type;
+
 export const BrowserCaptureImageCommand = Schema.Struct({
   threadId: BrowserThreadId,
   captureId: BrowserCaptureId,
@@ -80,6 +92,7 @@ export const decodeBrowserCapture = Schema.decodeUnknownSync(BrowserCapture);
 export const decodeBrowserCaptureKept = Schema.decodeUnknownSync(BrowserCaptureKept);
 export const decodeBrowserCapturesCommand = Schema.decodeUnknownSync(BrowserCapturesCommand);
 export const decodeBrowserCapturesResponse = Schema.decodeUnknownSync(BrowserCapturesResponse);
+export const decodeBrowserCaptureTakeCommand = Schema.decodeUnknownSync(BrowserCaptureTakeCommand);
 export const decodeBrowserCaptureImageCommand = Schema.decodeUnknownSync(
   BrowserCaptureImageCommand,
 );

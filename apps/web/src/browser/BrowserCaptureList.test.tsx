@@ -1,7 +1,10 @@
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
-import type { BrowserAutomationClient } from "@octant/client-runtime/browser-automation-client";
+import {
+  BrowserAutomationClientFailure,
+  type BrowserAutomationClient,
+} from "@octant/client-runtime/browser-automation-client";
 import type { BrowserCapture, BrowserThreadId } from "@octant/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WorkspaceContentViewContext } from "../shell/WorkspaceContentView";
@@ -113,6 +116,39 @@ describe("BrowserCaptureList", () => {
     expect(screen.queryByTestId("browser-capture-list")).not.toBeInTheDocument();
 
     await act(async () => vi.advanceTimersByTimeAsync(5_000));
+    expect(screen.getByTestId("browser-capture-list")).toBeVisible();
+  });
+
+  it("stops asking for a thread once the host refuses this window, but retries a transient failure", async () => {
+    vi.useFakeTimers();
+    const refused = vi
+      .fn()
+      .mockRejectedValue(new BrowserAutomationClientFailure("unauthorized", "No."));
+    render(<BrowserCaptureList client={{ listCaptures: refused } as never} threadId={threadId} />);
+    await act(async () => vi.advanceTimersByTimeAsync(20_000));
+    expect(refused).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId("browser-capture-list")).not.toBeInTheDocument();
+
+    const flaky = vi
+      .fn()
+      .mockRejectedValueOnce(new BrowserAutomationClientFailure("unavailable", "Down."))
+      .mockResolvedValue({ captures: [capture(1)] });
+    render(
+      <BrowserCaptureList
+        client={
+          {
+            listCaptures: flaky,
+            readCapture: vi.fn(async () => ({
+              captureId: "x",
+              dataUrl: "data:image/png;base64,AAAA",
+            })),
+          } as never
+        }
+        threadId={threadId}
+      />,
+    );
+    await act(async () => vi.advanceTimersByTimeAsync(5_000));
+    expect(flaky).toHaveBeenCalledTimes(2);
     expect(screen.getByTestId("browser-capture-list")).toBeVisible();
   });
 
