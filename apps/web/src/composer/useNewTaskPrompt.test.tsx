@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import {
   createNewTaskDrafts,
+  discardNewTaskDraftForOverview,
   discardNewTaskDraftForPane,
   NewTaskDraftsContext,
   NewTaskDraftScopeContext,
@@ -82,5 +83,26 @@ describe("useNewTaskPrompt", () => {
     expect(drafts.read("chat:pane-b")).toBe("Unsent in B");
     expect(drafts.read("chat-welcome:pane-b")).toBe("Welcome B");
     expect(drafts.readImages("chat:pane-b")).toHaveLength(1);
+  });
+
+  it("discards only the named Project overview draft", () => {
+    const drafts = createNewTaskDrafts();
+    drafts.write("work-overview:project-a", "Alpha task");
+    drafts.writeImages("work-overview:project-a", [
+      new File([new Uint8Array([1])], "alpha.png", { type: "image/png" }),
+    ]);
+    drafts.write("work-overview:project-b", "Beta task");
+    drafts.writeImages("work-overview:project-b", [
+      new File([new Uint8Array([2])], "beta.png", { type: "image/png" }),
+    ]);
+    drafts.write("chat-overview:project-a", "Chat notes");
+
+    discardNewTaskDraftForOverview(drafts, "work", "project-a");
+
+    expect(drafts.read("work-overview:project-a")).toBe("");
+    expect(drafts.readImages("work-overview:project-a")).toEqual([]);
+    expect(drafts.read("work-overview:project-b")).toBe("Beta task");
+    expect(drafts.readImages("work-overview:project-b")).toHaveLength(1);
+    expect(drafts.read("chat-overview:project-a")).toBe("Chat notes");
   });
 });

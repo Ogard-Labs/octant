@@ -181,7 +181,38 @@ describe("WorkspaceView welcome", () => {
     await user.keyboard("{Escape}");
 
     expect(view.onClosePane).toHaveBeenCalledWith(ids.pane);
-    expect(drafts.readImages(`code:${ids.pane}`)).toEqual([]);
+    await waitFor(() => expect(drafts.readImages(`code:${ids.pane}`)).toEqual([]));
+  });
+
+  it("keeps a canceled draft's attachments when closing the pane is refused", async () => {
+    const user = userEvent.setup();
+    const drafts = createNewTaskDrafts();
+    drafts.writeImages(`code:${ids.pane}`, [
+      new File([new Uint8Array([1])], "brief.png", { type: "image/png" }),
+    ]);
+    const tab = {
+      kind: "draft-thread",
+      id: decodeWorkspaceTabId(ids.tab),
+      mode: "code",
+      title: "New Code thread",
+    } as WorkspaceTab;
+    const view = {
+      ...propsFor(tab),
+      onClosePane: vi.fn(() => false),
+    };
+    render(
+      <NewTaskDraftsContext.Provider value={drafts}>
+        <WorkspaceView {...view} />
+      </NewTaskDraftsContext.Provider>,
+    );
+
+    expect(await screen.findByText("brief.png")).toBeVisible();
+    await user.click(screen.getByRole("textbox", { name: "First message" }));
+    await user.keyboard("{Escape}");
+
+    expect(view.onClosePane).toHaveBeenCalledWith(ids.pane);
+    expect(drafts.readImages(`code:${ids.pane}`)).toHaveLength(1);
+    expect(screen.getByText("brief.png")).toBeVisible();
   });
 
   it("keeps the selected Code Project context in the shared composer", async () => {

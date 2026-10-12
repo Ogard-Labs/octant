@@ -41,6 +41,11 @@ export function createNewTaskDrafts(): NewTaskDrafts {
 export const NewTaskDraftsContext = createContext<NewTaskDrafts | undefined>(undefined);
 export const NewTaskDraftScopeContext = createContext<string | undefined>(undefined);
 
+function discardNewTaskDraftScope(drafts: NewTaskDrafts, scope: string): void {
+  drafts.write(scope, "");
+  drafts.writeImages(scope, []);
+}
+
 /**
  * Drop a pane's persisted new-task text and images after that pane is
  * permanently closed. Settings unmounts leave the store alone so the same
@@ -52,13 +57,18 @@ export function discardNewTaskDraftForPane(
   paneId: string,
 ): void {
   if (drafts === undefined) return;
-  const scope = `${mode}:${paneId}`;
-  drafts.write(scope, "");
-  drafts.writeImages(scope, []);
-  if (mode === "chat") {
-    drafts.write(`chat-welcome:${paneId}`, "");
-    drafts.writeImages(`chat-welcome:${paneId}`, []);
-  }
+  discardNewTaskDraftScope(drafts, `${mode}:${paneId}`);
+  if (mode === "chat") discardNewTaskDraftScope(drafts, `chat-welcome:${paneId}`);
+}
+
+/** Drop a Chat or Work Project overview draft after that surface is closed. */
+export function discardNewTaskDraftForOverview(
+  drafts: NewTaskDrafts | undefined,
+  mode: "chat" | "work",
+  projectId: string,
+): void {
+  if (drafts === undefined) return;
+  discardNewTaskDraftScope(drafts, `${mode}-overview:${projectId}`);
 }
 
 const emptySubscribe = () => () => {};

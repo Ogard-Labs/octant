@@ -1,5 +1,6 @@
 import type { WorkspaceContentTabs } from "./workspaceContentTabs";
 import {
+  discardNewTaskDraftForOverview,
   discardNewTaskDraftForPane,
   NewTaskDraftsContext,
   NewTaskDraftScopeContext,
@@ -569,6 +570,9 @@ export function WorkspaceView(props: WorkspaceViewProps) {
         (surface.kind === "draft-thread" || surface.kind === "welcome")
       ) {
         discardNewTaskDraftForPane(newTaskDrafts, surface.mode, String(paneId));
+      }
+      if (surface?.kind === "project" && (surface.mode === "chat" || surface.mode === "work")) {
+        discardNewTaskDraftForOverview(newTaskDrafts, surface.mode, String(surface.projectId));
       }
       if (
         surface?.kind === "browser" &&
@@ -1457,8 +1461,10 @@ function renderNonCodeTab(
             ? {}
             : { onEnsureDefaultProject: props.onEnsureDefaultProject })}
           onCancel={() => {
-            discardNewTaskDraftForPane(drafts, tab.mode, String(paneId));
-            void props.onClosePane(paneId);
+            void Promise.resolve(props.onClosePane(paneId)).then((closed) => {
+              if (closed === false) return;
+              discardNewTaskDraftForPane(drafts, tab.mode, String(paneId));
+            });
           }}
           {...(props.onDraftCreating === undefined ? {} : { creating: props.onDraftCreating })}
           {...(props.onDraftError === undefined ? {} : { errorMessage: props.onDraftError })}
