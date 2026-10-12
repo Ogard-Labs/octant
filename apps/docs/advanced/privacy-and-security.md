@@ -131,6 +131,20 @@ Grants are scoped and recorded. Child agents can never exceed their parent's
 policy. A remote principal can never convert to a local principal or mint
 native receipts; desktop admin routes are loopback-only.
 
+### Outside content
+
+When a thread reads content from outside, such as a web page, a tool's result,
+an issue, or a message from another agent, Octant marks it. While a thread is
+marked, some actions ask each time and some remembered approvals stop applying.
+A notice above the message box says so, with a **Review** button. Review lists
+where the thread read from, how often, and when. **Clear the mark** tells Octant
+you looked at it, so those actions stop asking because of it.
+
+Clearing removes nothing from what the model already read, and the next outside
+content marks the thread again. A running or queued turn holds the button back
+until the thread is idle. You can clear a mark only at a window on the computer
+that hosts the thread, not from a paired phone or browser.
+
 ## Confinement
 
 - **Work** uses OS-enforced macOS project confinement for one bound root.
