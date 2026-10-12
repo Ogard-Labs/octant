@@ -66,8 +66,30 @@ the Browser pane
 - A confirmed thread purge erases the aggregate with the thread's other
   aggregates (its events carry `threadId`) and removes the thread's directory.
 - Captures are not in Canvas shares, replica sync, or the diagnostics export,
-  none of which read the aggregate or the directory. The thread export does not
-  include them yet.
+  none of which read the aggregate or the directory.
+
+## Thread export
+
+- A thread export carries the thread's retained captures, and nowhere else does
+  a capture leave the host. A page can show personal data, so a capture's URL
+  and title leave only when the person exports that thread.
+- Each capture is one attachment record beside the thread's generated images:
+  media type, size, and a `capture` block with the capture id, page origin, URL,
+  title (absent when the page had none), and capture time. Bytes stay omitted
+  like every attachment's, so the bundle counts them under `attachment-bytes`
+  rather than inlining a picture.
+- The file name is `browser-capture-<capture id>.<extension>`, from the id and
+  media type alone. A page title or URL never names a file.
+- Records follow the strip: the retained window, newest first. A capture list
+  that cannot be read leaves the captures out and the export still succeeds. A
+  thread with no captures exports unchanged.
+- No new route. The export route already requires that the caller can open the
+  thread, and only a local window's export carries captures: a paired device
+  never reads them, so its export leaves them out. The host-wide data export is
+  a local-owner read that embeds each thread's bundle, so it carries the same
+  records.
+- Implemented by `browserCaptureExportAttachments` in the domain package and the
+  `browserCaptures` option of the server's thread export service.
 
 ## Reads
 
@@ -101,4 +123,4 @@ the Browser pane
 
 `browserCapturePolicy.test.ts`, `browserCaptureService.test.ts`,
 `browserAutomationService.test.ts`, `browserAutomationRoutes.test.ts`,
-`threadPurge.test.ts`, `BrowserCaptureList.test.tsx`, and `BrowserWorkspace.test.tsx`.
+`threadPurge.test.ts`, `threadExportService.test.ts`, `BrowserCaptureList.test.tsx`, and `BrowserWorkspace.test.tsx`.
