@@ -1,4 +1,5 @@
 import {
+  CANVAS_MAX_MOCKUP_TEXT_LENGTH,
   CANVAS_SCHEMA_VERSION,
   decodeCanvasBlock,
   type CanvasBlock,
@@ -33,16 +34,19 @@ export function canvasRecipeStarterBlocks(
       });
     }
     if (entry.kind === "design" && entry.size === "document") {
+      // A recipe's title may be longer than a design's; the page keeps all of
+      // it in its heading and the design is named by as much as fits.
+      const title = recipe.title.slice(0, CANVAS_MAX_MOCKUP_TEXT_LENGTH).trim();
       return decodeCanvasBlock({
         blockId,
         schemaVersion: CANVAS_SCHEMA_VERSION,
         kind: "design",
-        title: recipe.title,
+        title,
         size: "document",
         frames: [
           {
             frameId: "document",
-            title: recipe.title,
+            title,
             html: [
               '<article class="oct-article">',
               '<p class="oct-eyebrow">To fill</p>',

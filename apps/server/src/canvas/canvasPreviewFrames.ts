@@ -264,19 +264,34 @@ export async function readPreviewDesignFrames(
       readings.push({ blockId, measured: false, scriptErrors, overflow: [], contrast: [] });
       continue;
     }
-    const overflow: CanvasPreviewFrameOverflow[] = [];
-    const contrast: CanvasPreviewFrameContrast[] = [];
+    const answers: unknown[] = [];
     const frames = await design.locator("iframe").elementHandles();
     for (const element of frames.slice(0, MAX_FRAMES_PER_DESIGN)) {
       const frame = await element.contentFrame();
-      if (frame === null) continue;
-      const reading = boundedFrameReading(await readFrame(frame));
-      overflow.push(...reading.overflow);
-      contrast.push(...reading.contrast);
+      answers.push(frame === null ? undefined : await readFrame(frame));
     }
-    readings.push({ blockId, measured: true, scriptErrors, overflow, contrast });
+    readings.push({ blockId, scriptErrors, ...designFrameReadings(answers) });
   }
   return readings;
+}
+
+/**
+ * One design from what each of its frames answered. A frame that threw, hung,
+ * or held no page answers `undefined`, and the design is then not measured:
+ * that frame may overflow or read badly and nothing says so. The frames that
+ * did answer keep what they found.
+ */
+export function designFrameReadings(
+  answers: ReadonlyArray<unknown>,
+): Pick<CanvasPreviewDesignReading, "measured" | "overflow" | "contrast"> {
+  const overflow: CanvasPreviewFrameOverflow[] = [];
+  const contrast: CanvasPreviewFrameContrast[] = [];
+  for (const answer of answers) {
+    const reading = boundedFrameReading(answer);
+    overflow.push(...reading.overflow);
+    contrast.push(...reading.contrast);
+  }
+  return { measured: !answers.includes(undefined), overflow, contrast };
 }
 
 /**
