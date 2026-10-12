@@ -33,6 +33,12 @@ export interface ContextClient {
   ): Promise<ContextInspectorSnapshot>;
   execute(command: ContextCommand, signal?: AbortSignal): Promise<ContextCommandResult>;
   /**
+   * Whether this client may read and clear a thread's outside-content mark.
+   * True for a local window; the host refuses a paired device, so the client
+   * does not offer it off a loopback host.
+   */
+  readonly externalContentAvailable: boolean;
+  /**
    * The sources a thread took outside content from, with the version a clear
    * must name. A local window only.
    */
@@ -83,7 +89,9 @@ export function createContextClient(options: ContextClientOptions): ContextClien
     }
     acceptedSequences.set(key, snapshot.sequence);
   };
+  const externalContentAvailable = isLoopbackHttp(options.baseUrl);
   return {
+    externalContentAvailable,
     async inspect(input, signal) {
       let request: ContextInspectorRequest;
       try {
@@ -137,6 +145,7 @@ export function createContextClient(options: ContextClientOptions): ContextClien
       return result;
     },
     async readExternalContent(thread, signal) {
+      if (!externalContentAvailable) throw notOnThisHost();
       return post(
         resolved,
         "/api/thread-external-content",
@@ -147,6 +156,7 @@ export function createContextClient(options: ContextClientOptions): ContextClien
       );
     },
     async clearExternalContent(thread, signal) {
+      if (!externalContentAvailable) throw notOnThisHost();
       return post(
         resolved,
         "/api/thread-external-content",
@@ -162,6 +172,25 @@ export function createContextClient(options: ContextClientOptions): ContextClien
       );
     },
   };
+}
+
+function isLoopbackHttp(baseUrl: string): boolean {
+  try {
+    const url = new URL(baseUrl);
+    return (
+      url.protocol === "http:" &&
+      (url.hostname === "127.0.0.1" || url.hostname === "localhost" || url.hostname === "[::1]")
+    );
+  } catch {
+    return false;
+  }
+}
+
+function notOnThisHost(): ContextClientFailure {
+  return new ContextClientFailure(
+    "unavailable",
+    "A thread's outside content is reviewed at a window on the host.",
+  );
 }
 
 function externalContentRequest(input: unknown): ThreadExternalContentRequest {

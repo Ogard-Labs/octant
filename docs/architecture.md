@@ -1377,6 +1377,19 @@ flowchart LR
   - On replay a clear deletes the thread's ingestion rows and zeroes its taint
     row, and the projection ignores an event at or below the last one it
     applied for that thread. A journal without the event replays unchanged.
+  - The surface is one notice in the composer of a Chat, Work, or Code thread
+    that a local window has open, drawn only while the thread is marked, with a
+    Review action. The notice reads the mark when the thread opens and again
+    when a turn starts or settles. Review lists the sources in plain words
+    with their counts and times (a row projected before the host recorded
+    times shows none), says that clearing removes nothing the model read and
+    that the next outside content marks the thread again, and holds Clear the
+    mark back while a turn is running or messages are queued. Every refusal
+    is shown as its own sentence, and a `stale` one reloads the list. A client
+    that is not on a loopback host (`externalContentAvailable`) neither
+    reads nor draws it. Approval prompts do not yet say that the mark is why
+    they ask: neither the MCP tool approval view nor the harness approval
+    carries that reason.
 - **Browser captures.** Only a screenshot the agent asks for with the browser
   tool, or the person takes with the Browser pane's Screenshot control, is kept
   with the thread that owns the Browser. The bytes live in the host's managed
@@ -3783,6 +3796,16 @@ mechanisms are:
   deleted, and a request the plan route's profile cannot express is refused
   before send. The wire details are in
   [Provider runtimes](design/provider-runtimes.md#subscription-sign-in-dialects).
+
+**Proposed, not accepted: Claude sign-in inside Anthropic's terms.** Octant
+would not mint, store, or inject a Claude setup or OAuth token. Claude
+subscription sign-in would stay in Anthropic's own flow, and confined Claude
+launches would sign in from a Claude-owned config directory. Step 0 of the
+plan was measured on 12 Oct 2026, and the maintainer chose the Keychain read
+it found. The rule is still not in force: it needs Anthropic's Commercial
+Terms or an explicit Anthropic exception. Until that is recorded, the rules
+in this document describe the build as it ships. The steps, the open questions, and the rejected alternatives live in
+[the remediation plan](plans/claude-inside-anthropics-terms.md).
 
 ## Package map
 

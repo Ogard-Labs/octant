@@ -55,7 +55,11 @@ function anchor(): Extract<CodeOperationApprovalAnchor, { readonly kind: "thread
   };
 }
 
-function makeFixture() {
+// The controller expires requests on the wall clock, so an expiry short enough
+// to wait for is also one a stalled runner reaches by accident: a 139 ms run of
+// a test with a 100 ms expiry retired its active request before the assertion.
+// A test about expiry asks for a short one and drives it with fake timers.
+function makeFixture(options: { readonly expiryMs?: number } = {}) {
   const sent: Array<[string, unknown]> = [];
   const loaded: string[] = [];
   const view: CodeOperationApprovalViewPort = {
@@ -92,7 +96,7 @@ function makeFixture() {
     cancel,
     token: () => "approval-view-token",
     anchorWaitMs: 25,
-    expiryMs: 100,
+    expiryMs: options.expiryMs ?? 60_000,
   });
   return { cancel, controller, confirm, host, loaded, prepare, sent, view, window: {} };
 }
@@ -180,7 +184,7 @@ describe("Code operation approval view controller", () => {
   it("expires a request even while the host is still preparing its challenge", async () => {
     vi.useFakeTimers();
     try {
-      const fixture = makeFixture();
+      const fixture = makeFixture({ expiryMs: 100 });
       fixture.prepare.mockImplementation(() => new Promise(() => undefined));
       fixture.controller.updateAnchor({
         window: fixture.window,
@@ -207,7 +211,7 @@ describe("Code operation approval view controller", () => {
   it("does not extend request expiry when navigating between approvals", async () => {
     vi.useFakeTimers();
     try {
-      const fixture = makeFixture();
+      const fixture = makeFixture({ expiryMs: 100 });
       fixture.controller.updateAnchor({
         window: fixture.window,
         windowId: "window-1",
@@ -667,6 +671,8 @@ describe("Code operation approval palette", () => {
     const document = decodeURIComponent(fixture.loaded[0] ?? "");
     expect(document).toContain("--approval-bg:#112233");
     expect(document).not.toContain("prefers-color-scheme");
+    // Retires the request so its expiry timer does not outlive the test.
+    fixture.controller.closeWindow("window-1");
   });
 
   it("reads only a complete palette of hex colors", () => {

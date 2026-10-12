@@ -607,7 +607,10 @@ mark (spinner, check, cross), parted by hairlines and indented together; a
 settled turn folds them behind "N tool calls". A Code turn that changed files ends with one card, the only card in a reply: "N files changed while this ran", then a 28px row per path with the folder in the meta ink, the name in the primary ink, and the added and removed line counts in the diff inks at the right. It folds after five rows, says "Showing n of N" when the record is incomplete rather than summing rows it never saw, and never says who wrote a file (0141). A turn paused on the person uses a neutral composer-adjacent request row with
 an icon and explicit answer controls. Follow-up composers use one compact
 hairline message surface across Chat, Work, and Code. Feedback above the toolbar
-appears only when it has content; empty feedback consumes no space. Long notices
+appears only when it has content; empty feedback consumes no space. A held
+message queue with items still waiting shows a compact **Follow-up paused**
+chip and **Resume** next to the composer; the expandable queue still lists
+the items and the specific hold sentence. Long notices
 remain accessible and scrollable. The access menu holds the optional provider
 approval-review choice and starting-profile detail. The Code checkout strip is
 attached underneath, rather than floating above the input. It keeps its height
@@ -1024,7 +1027,10 @@ labeled selector, compact list, or icon presentation according to the user's
 setting; with two modes the icon presentation shows the labels instead of
 icons in a faint tray after a larger "Octant", so the header reads Octant [Work | Code]. Code and Work keep separate Project View sets. The
 sidebar keeps Projects as a first-class destination alongside the active mode's
-compact thread list. The Projects directory and the selected Project overview
+compact thread list. When Work has no Chat or Work Projects but Code does, the
+empty Projects line says "Your Projects are in Code." with a Switch to Code
+link; starting a Work Project stays on the section header. Code does not
+mirror that hint. The Projects directory and the selected Project overview
 occupy the main workspace in turn, following the
 [workspace navigation rule](docs/design/workspace.md#navigation-and-projects).
 The directory provides search and All, Chat, Work, and Code filters. Project
