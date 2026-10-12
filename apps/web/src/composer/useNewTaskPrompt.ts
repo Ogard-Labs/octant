@@ -1,16 +1,35 @@
+import type { GithubIssueContextRequest, LinearIssueContextRequest } from "@octant/contracts";
 import { createContext, useCallback, useContext, useState, useSyncExternalStore } from "react";
+
+export type NewTaskCreateFromSelection =
+  | {
+      readonly kind: "github";
+      readonly request: GithubIssueContextRequest;
+      readonly label: string;
+    }
+  | {
+      readonly kind: "linear";
+      readonly request: LinearIssueContextRequest;
+      readonly label: string;
+    };
 
 export interface NewTaskDrafts {
   readonly read: (scope: string) => string;
   readonly write: (scope: string, text: string) => void;
   readonly readImages: (scope: string) => ReadonlyArray<File>;
   readonly writeImages: (scope: string, files: ReadonlyArray<File>) => void;
+  readonly readCreateFrom: (scope: string) => NewTaskCreateFromSelection | undefined;
+  readonly writeCreateFrom: (
+    scope: string,
+    selection: NewTaskCreateFromSelection | undefined,
+  ) => void;
   readonly subscribe: (onStoreChange: () => void) => () => void;
 }
 
 export function createNewTaskDrafts(): NewTaskDrafts {
   const drafts = new Map<string, string>();
   const images = new Map<string, ReadonlyArray<File>>();
+  const createFrom = new Map<string, NewTaskCreateFromSelection>();
   const listeners = new Set<() => void>();
   const notify = () => {
     for (const listener of listeners) listener();
@@ -29,6 +48,11 @@ export function createNewTaskDrafts(): NewTaskDrafts {
       if (files.length === 0) images.delete(scope);
       else images.set(scope, files);
     },
+    readCreateFrom: (scope) => createFrom.get(scope),
+    writeCreateFrom: (scope, selection) => {
+      if (selection === undefined) createFrom.delete(scope);
+      else createFrom.set(scope, selection);
+    },
     subscribe: (onStoreChange) => {
       listeners.add(onStoreChange);
       return () => {
@@ -44,6 +68,7 @@ export const NewTaskDraftScopeContext = createContext<string | undefined>(undefi
 function discardNewTaskDraftScope(drafts: NewTaskDrafts, scope: string): void {
   drafts.write(scope, "");
   drafts.writeImages(scope, []);
+  drafts.writeCreateFrom(scope, undefined);
 }
 
 /**

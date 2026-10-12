@@ -1,5 +1,10 @@
 import { useDraftModelOptions } from "../providers/useDraftModelOptions";
-import { useNewTaskPrompt } from "../composer/useNewTaskPrompt";
+import {
+  NewTaskDraftsContext,
+  NewTaskDraftScopeContext,
+  useNewTaskPrompt,
+  type NewTaskCreateFromSelection,
+} from "../composer/useNewTaskPrompt";
 import {
   ComposerSlashTypeahead,
   useComposerSlashCommands,
@@ -57,7 +62,16 @@ import {
   type PickerGroup,
 } from "@octant/domain";
 import { FolderOpen, GitBranch, ShieldCheck } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import {
+  useCallback,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent,
+} from "react";
 import { joinDefaultFolderDisplayPath } from "../settings/defaultFolderDisplay";
 import { CodeHome, type CodeHomeProps } from "../code/CodeHome";
 import {
@@ -314,18 +328,20 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
     }
   };
   useEffect(() => setLocalProjectId(props.projectId), [props.projectId]);
-  type CreateFromSelection =
-    | {
-        readonly kind: "github";
-        readonly request: GithubIssueContextRequest;
-        readonly label: string;
-      }
-    | {
-        readonly kind: "linear";
-        readonly request: LinearIssueContextRequest;
-        readonly label: string;
-      };
-  const [createFromSelection, setCreateFromSelection] = useState<CreateFromSelection>();
+  const drafts = useContext(NewTaskDraftsContext);
+  const draftScope = useContext(NewTaskDraftScopeContext);
+  const [createFromSelection, setCreateFromSelectionState] = useState<
+    NewTaskCreateFromSelection | undefined
+  >(() => (draftScope === undefined ? undefined : drafts?.readCreateFrom(draftScope)));
+  useLayoutEffect(() => {
+    setCreateFromSelectionState(
+      draftScope === undefined ? undefined : drafts?.readCreateFrom(draftScope),
+    );
+  }, [drafts, draftScope]);
+  const setCreateFromSelection = (selection: NewTaskCreateFromSelection | undefined) => {
+    setCreateFromSelectionState(selection);
+    if (draftScope !== undefined) drafts?.writeCreateFrom(draftScope, selection);
+  };
   const [promptRequest, setPromptRequest] = useState<{
     readonly text: string;
     readonly revision: number;

@@ -76,15 +76,27 @@ describe("useNewTaskPrompt", () => {
     drafts.writeImages("chat:pane-b", [
       new File([new Uint8Array([2])], "b.png", { type: "image/png" }),
     ]);
+    drafts.writeCreateFrom("chat:pane-a", {
+      kind: "linear",
+      request: { id: "11111111-1111-4111-8111-111111111111" as never },
+      label: "ENG-12",
+    });
+    drafts.writeCreateFrom("chat:pane-b", {
+      kind: "linear",
+      request: { id: "22222222-2222-4222-8222-222222222222" as never },
+      label: "ENG-13",
+    });
 
     discardNewTaskDraftForPane(drafts, "chat", "pane-a");
 
     expect(drafts.read("chat:pane-a")).toBe("");
     expect(drafts.read("chat-welcome:pane-a")).toBe("");
     expect(drafts.readImages("chat:pane-a")).toEqual([]);
+    expect(drafts.readCreateFrom("chat:pane-a")).toBeUndefined();
     expect(drafts.read("chat:pane-b")).toBe("Unsent in B");
     expect(drafts.read("chat-welcome:pane-b")).toBe("Welcome B");
     expect(drafts.readImages("chat:pane-b")).toHaveLength(1);
+    expect(drafts.readCreateFrom("chat:pane-b")?.label).toBe("ENG-13");
   });
 
   it("discards only the named Project overview draft", () => {
