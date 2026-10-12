@@ -305,7 +305,7 @@ export function createAppUpdateService(options: AppUpdateServiceOptions) {
             "This platform has no signed update channel yet, so Octant will not install an update.",
         });
       }
-      if (!verifier.configured) {
+      if (!verifier.configured(ring)) {
         // No release key compiled in means nothing can be proven, so nothing is
         // offered. A build in this state is not a build that updates quietly.
         return publishWithoutOffer({

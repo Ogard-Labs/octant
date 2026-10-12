@@ -3819,6 +3819,36 @@ mechanisms are:
   deleted, and a request the plan route's profile cannot express is refused
   before send. The wire details are in
   [Provider runtimes](design/provider-runtimes.md#subscription-sign-in-dialects).
+- **Update feed signing keys are per ring.** The desktop updater verifies a
+  feed's Ed25519 signature against the compiled-in keys of the ring the signed
+  release names, before any other field is believed. Stable trusts only the
+  stable key (`OCTANT_UPDATE_PUBLIC_KEY`); preview and candidate trust the
+  preview key (`OCTANT_UPDATE_PREVIEW_PUBLIC_KEY`) and the stable key. The
+  preview workflow builds unreviewed `main` without an approval gate, so
+  anything merged there can read the key it signs with; a shared key would let
+  that code sign a `ring: "stable"` feed and make the stable approval
+  meaningless. The stable key may sign previews because its holder can already
+  sign stable, and it is how installs that predate the preview key reach a
+  build that knows it. Those installs read `<ring>/<platform>-<arch>.json`;
+  key-aware builds read preview and candidate feeds at
+  `<ring>/<platform>-<arch>.preview-key.json`, which is all the preview
+  workflow writes. The old name holds a bridge feed that the
+  approval-gated `release-preview-bridge.yml` signs once with the stable key,
+  pointing at a published build that ships the preview key and reads the new
+  name. Nothing overwrites it, so an install offline for any length of time
+  still finds a release it can verify. The release wizard mints a ring's key
+  only when the app ships none for it: replacing a deployed key strands every
+  install that trusts it, and rotation would need a staged overlap. The private
+  halves are environment secrets:
+  `OCTANT_UPDATE_FEED_PRIVATE_KEY` only in `stable`,
+  `OCTANT_UPDATE_FEED_PREVIEW_PRIVATE_KEY` only in `preview`.
+  `scripts/sign-update-feed.ts` reads the secret for the ring it signs and
+  refuses a key whose public half the app does not trust for that ring, so an
+  unset preview public key fails the release job instead of publishing a feed
+  no install can verify. The signed ring must still equal the ring the app
+  follows. The feed's publish credential is not part of this trust: a writer
+  that can replace a feed file can withhold a ring's updates, never install
+  something no trusted key signed.
 
 **Proposed, not accepted: Claude sign-in inside Anthropic's terms.** Octant
 would not mint, store, or inject a Claude setup or OAuth token. Claude

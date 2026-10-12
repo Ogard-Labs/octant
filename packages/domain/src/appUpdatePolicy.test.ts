@@ -62,10 +62,10 @@ describe("resolveUpdateOffer", () => {
   });
 
   it("refuses a correctly signed release published to another ring", () => {
-    // Both rings are signed by the same key, so a preview document served at
-    // the stable address verifies. The signed ring is what keeps the streams
-    // apart, and refusing here is what stops unreviewed main from reaching
-    // everyone who chose stable.
+    // The stable key may also sign preview releases, so a genuine preview
+    // document served at the stable address verifies. The signed ring is what
+    // keeps the streams apart, and refusing here is what stops unreviewed main
+    // from reaching everyone who chose stable.
     const result = resolveUpdateOffer({
       document: feed({ release: { ring: "preview" } }),
       app,
@@ -83,6 +83,23 @@ describe("resolveUpdateOffer", () => {
     });
 
     expect(result.kind).toBe("offer");
+  });
+
+  it("verifies the signature against the keys of the ring the release claims", () => {
+    // Each ring trusts its own keys. A document claiming stable is judged
+    // against the stable keys even when a preview app fetched it, so a key that
+    // may only sign previews cannot vouch for it.
+    const asked: Array<string> = [];
+    resolveUpdateOffer({
+      document: feed(),
+      app: { ...app, ring: "preview" },
+      verifySignature: (_message, _signature, ring) => {
+        asked.push(ring);
+        return false;
+      },
+    });
+
+    expect(asked).toEqual(["stable"]);
   });
 
   it("covers the ring with the signature, so moving a feed invalidates it", () => {

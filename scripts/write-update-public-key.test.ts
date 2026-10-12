@@ -4,7 +4,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { generateFeedKeyPair } from "./sign-update-feed";
-import { replaceUpdatePublicKey, writeUpdatePublicKey } from "./write-update-public-key";
+import {
+  compiledUpdatePublicKey,
+  replaceUpdatePublicKey,
+  writeUpdatePublicKey,
+} from "./write-update-public-key";
 
 const FEED_SOURCE = join(import.meta.dirname, "../apps/desktop/src/appUpdateFeed.ts");
 const WRITER = join(import.meta.dirname, "write-update-public-key.ts");
@@ -47,6 +51,36 @@ describe("writing the update public key into the desktop source", () => {
       status: "replaced",
       source: `export const OCTANT_UPDATE_PUBLIC_KEY = "${publicKey}";\n`,
     });
+  });
+
+  it("writes the preview key without touching the stable key", async () => {
+    const { publicKey } = generateFeedKeyPair();
+    const before = await readFile(copy, "utf8");
+    const stable = /OCTANT_UPDATE_PUBLIC_KEY\s*=\s*"([^"]*)"/.exec(before)?.[1];
+
+    const result = await writeUpdatePublicKey(copy, publicKey, "preview");
+
+    expect(result.status).toBe("written");
+    const after = await readFile(copy, "utf8");
+    expect(/OCTANT_UPDATE_PREVIEW_PUBLIC_KEY\s*=\s*"([^"]*)"/.exec(after)?.[1]).toBe(publicKey);
+    expect(/OCTANT_UPDATE_PUBLIC_KEY\s*=\s*"([^"]*)"/.exec(after)?.[1]).toBe(stable);
+  });
+
+  it("reports the key each ring ships with, so the wizard keeps a deployed key", async () => {
+    const source = await readFile(FEED_SOURCE, "utf8");
+
+    expect(compiledUpdatePublicKey(source, "stable")).toMatch(/^MCowBQYDK2VwAyEA/);
+    expect(
+      compiledUpdatePublicKey('export const OCTANT_UPDATE_PREVIEW_PUBLIC_KEY = "";', "preview"),
+    ).toBe("");
+    // Unknown is not absent: a renamed constant must not read as "mint one".
+    expect(compiledUpdatePublicKey("export const NOTHING_HERE = 1;", "stable")).toBeUndefined();
+
+    const run = spawnSync("bun", [WRITER, "--print", FEED_SOURCE, "stable"], { encoding: "utf8" });
+    expect(run.status).toBe(0);
+    expect(run.stdout.trim()).toBe(compiledUpdatePublicKey(source, "stable"));
+    await writeFile(copy, "export const NOTHING_HERE = 1;\n");
+    expect(spawnSync("bun", [WRITER, "--print", copy, "preview"]).status).not.toBe(0);
   });
 
   it("refuses and leaves the file untouched when the constant cannot be found", async () => {
