@@ -35,12 +35,13 @@ here is merged or being hardened for it.
 - **Unified subagents** — managed children run as in-process provider sessions
   with clamped authority, isolated worktrees, hierarchy panel, and durable
   results.
-- **Agent-to-agent messaging** — shipped: journaled contracts, pure clamps,
-  the delivery service, and the Agents center bounds view, and every Code turn
-  is offered the `octant_agent_message` tool with no separate activation gate.
-  Maintainer approval of its design and threat-model sign-off
-  ([threat model](security/agent-to-agent-messaging-threat-model.md)) are
-  still pending.
+- **Agent-to-agent messaging** — a Code thread's agent can leave a bounded
+  message for another thread of the same Project through
+  `octant_agent_message`; the host delivers it as framed, untrusted data at
+  the start of that thread's next turn, and the Agents center shows the
+  bounds. Design and
+  [threat model](security/agent-to-agent-messaging-threat-model.md) approved
+  2026-10-12; messaging across Projects, modes, or child runs is not offered.
 - **Remote access** — pairing, revocable device keys, HTTPS private listener on
   LAN or Tailscale, fail-closed remote route policy, paired-browser client.
 - **Shell and appearance** — borderless macOS shell, dockable tabs and splits,
