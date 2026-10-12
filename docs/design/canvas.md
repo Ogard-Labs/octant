@@ -422,7 +422,8 @@ participant, activate and deactivate) into a `sequence`; a `stateDiagram`
 (transitions, `[*]` as a start and an end with their own ids, `state "…" as`,
 composite states) into a `state`; an `erDiagram` (relationships with
 cardinalities, attribute blocks, `PK`) into an `er`; and a
-`mindmap` (tree by indentation) into a `mindmap`. Anything else — another
+`mindmap` (tree by indentation; a square, rounded, or circle topic keeps
+its text and drops its id and shape) into a `mindmap`. Anything else — another
 diagram type, styling, classes, `click`, loops and alternatives, other shapes
 and links, a nested subgraph, a note spanning two participants, an `FK` or
 `UK` key, a non-identifying (`..`) relationship, two ids that would collide, a source over 32,768
