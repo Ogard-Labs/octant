@@ -229,7 +229,11 @@ A later Plan or ordinary turn has to find the same session files;
 mixing the per-thread root with the account root makes the saved
 cursor `stale-resume`. Do not use a throwaway
 per-launch config directory: resume has to find the same session
-files after a restart. That session directory is thread-owned. The
+files after a restart. That session directory is thread-owned. A
+child agent run gets a root of its own, not its parent thread's:
+two children of one parent can run at once, and a shared root would
+let each read the other's transcript. Keep that identity for resume
+and purge. The
 host allocates it beneath a host-owned, provider/thread-scoped
 root. The driver does not choose or register an arbitrary
 filesystem path: a receipt that named `/`, home, or a checkout
@@ -429,6 +433,13 @@ only that account `settings.json`, never `.credentials.json` or
 another credential file; copy only the same disable-only names
 and spellings this step already preserves from the host
 environment; write those into the thread root's `settings.json`.
+Carry the settings-only survey switch as well: a `feedbackSurveyRate`
+of `0` has no environment spelling, so copy it or write
+`CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY=1` in its place.
+Do this before every launch, not once when the root is created: a
+person can change the account's settings after a thread has started.
+Add a value the account now sets, and remove a copied value the
+account no longer sets.
 Do not copy credentials, session files, unknown keys, or values
 that leave telemetry or surveys on.
 
@@ -514,9 +525,11 @@ HTTP endpoint. Do not add Claude subscription OAuth there.
   session-quality surveys, release-note checks, PR/MR badge checks,
   and availability checks, including third-party logging or error
   tracking Anthropic documents) and every channel that stays off
-  (feature-flag evaluation, Remote Control, advisor, artifact access,
+  (feature-flag fetching, Remote Control, advisor, artifact access,
   account plugin/skill sync, background plugin `command` runs,
   `/feedback`, `/bug`, `/share`, and Claude-drafted feedback).
+  Say fetching, not evaluation: with fetching off the binary still
+  evaluates its flags from the defaults it ships with.
   The current "no telemetry" and enumerated-destination promises
   cannot remain after that traffic is allowed.
 
