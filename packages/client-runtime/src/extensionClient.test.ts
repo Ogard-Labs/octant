@@ -192,6 +192,47 @@ describe("extension client", () => {
       }),
     ).resolves.toBe(true);
   });
+
+  it("lists remembered tool approvals and revokes one, and can ask for nothing that adds one", async () => {
+    const grantId = `sha256:${"b".repeat(64)}`;
+    const grant = {
+      grantId,
+      projectId: "44000000-0000-4000-8000-000000000020",
+      extensionId: "44000000-0000-4000-8000-000000000002",
+      packageId: "44000000-0000-4000-8000-000000000003",
+      componentId: "mcp-notes",
+      mcpToolName: "search",
+      version: "1.0.0",
+      digest: `sha256:${"a".repeat(64)}`,
+      definitionDigest: `sha256:${"c".repeat(64)}`,
+      grantedAt: "2026-10-12T10:00:00.000Z",
+    };
+    const requests: Array<{ readonly url: string; readonly body: unknown }> = [];
+    const fetch: typeof globalThis.fetch = async (input, init) => {
+      const body = JSON.parse(String(init?.body));
+      requests.push({ url: String(input), body });
+      return response(body.kind === "list" ? [grant] : { revoked: requests.length === 2 });
+    };
+    const client = createExtensionClient({
+      baseUrl: "http://127.0.0.1",
+      fetch,
+      windowCapability: capability,
+    });
+
+    await expect(client.listToolGrants()).resolves.toEqual([grant]);
+    await expect(client.revokeToolGrant(grantId)).resolves.toBe(true);
+    // Already gone: the grant is not there either way.
+    await expect(client.revokeToolGrant(grantId)).resolves.toBe(false);
+    expect(requests).toEqual([
+      { url: "http://127.0.0.1/api/extensions/tool-grants", body: { kind: "list" } },
+      { url: "http://127.0.0.1/api/extensions/tool-grants", body: { kind: "revoke", grantId } },
+      { url: "http://127.0.0.1/api/extensions/tool-grants", body: { kind: "revoke", grantId } },
+    ]);
+    await expect(client.revokeToolGrant("not-a-grant-id")).rejects.toMatchObject({
+      category: "invalid",
+    });
+    expect(requests).toHaveLength(3);
+  });
 });
 
 function catalogEntry() {

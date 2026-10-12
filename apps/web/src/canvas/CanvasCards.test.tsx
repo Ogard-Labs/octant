@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { CanvasCreationContext } from "./CreateCanvasDraft";
@@ -743,6 +743,61 @@ describe("Canvas create panel and card list", () => {
       await user.click(screen.getByRole("button", { name: "Show as card" }));
       expect(screen.queryByRole("region", { name: "Launch review content" })).toBeNull();
       expect(screen.getByTestId("canvas-card-title")).toHaveTextContent("Launch review");
+      localStorage.clear();
+    });
+
+    it("runs a prototype expanded in its thread when the person presses Run, and keeps it running while they use the frame", async () => {
+      const user = userEvent.setup();
+      localStorage.clear();
+      const prototype = {
+        blockId: "cart",
+        schemaVersion: 18,
+        kind: "design",
+        title: "Cart",
+        size: "phone",
+        runsScript: true,
+        frames: [{ frameId: "cart", title: "Cart", html: '<button onclick="add()">Add</button>' }],
+      };
+      const runDesign = vi.fn(async () => ({
+        kind: "ready" as const,
+        url: "http://127.0.0.1:13773/api/canvas/design-page?ticket=t",
+      }));
+      const client = {
+        get: vi.fn().mockResolvedValue({
+          kind: "ready",
+          version: {
+            schemaVersion: 18,
+            canvasId: "20000000-0000-4000-8000-000000000002",
+            versionId: "20000000-0000-4000-8000-000000000003",
+            sequence: 1,
+            definition: { ...definition, schemaVersion: 18, blocks: [prototype] },
+            createdBy: definition.provenance.actor,
+            createdAt: "2026-08-01T21:00:00.000Z",
+          },
+        }),
+        runDesign,
+      } as unknown as CanvasClient;
+      // A design that runs script is always a row first; the person expands it.
+      const view = render(<ThreadCanvases cards={[rowCard()]} client={client} />);
+      await user.click(await screen.findByRole("button", { name: "Expand in thread" }));
+
+      // In the thread a prototype waits for the person.
+      expect(screen.queryByTitle("Cart, running prototype")).toBeNull();
+      expect(runDesign).not.toHaveBeenCalled();
+      await user.click(await screen.findByRole("button", { name: "Run" }));
+      const frame = await screen.findByTitle("Cart, running prototype");
+      expect(frame).toHaveAttribute("sandbox", "allow-scripts");
+
+      // The thread redraws around the frame all the time: a new turn, a
+      // scroll, a focus. The Canvas is the same version, so the prototype
+      // keeps running with its state instead of going back to Run.
+      view.rerender(<ThreadCanvases cards={[rowCard()]} client={client} />);
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(screen.getByTitle("Cart, running prototype")).toBe(frame);
+      expect(screen.queryByRole("button", { name: "Run" })).toBeNull();
+      expect(runDesign).toHaveBeenCalledTimes(1);
       localStorage.clear();
     });
 

@@ -294,7 +294,9 @@ row. In Work and Code the frame also holds **Open in sidebar**, which opens
 the same Canvas in the dock tool, and a row opens it there too. Chat has no
 dock, so there the frame holds **Open Canvas**, and the frame and a row open
 the Canvas as a content tab beside the thread. Editing, comments, and sharing stay there.
-A design that runs script is a prototype: wherever it is drawn, its header
+A design that runs script is a prototype: wherever it is drawn, it says that
+its script can still connect to another computer, on every client and in
+every state, until a prototype's peer connections are contained, and its header
 shows a **Running** label and **Stop** while it runs, and **Run again** with
 the reason once it stops (stopped responding, loaded another page, or kept
 taking the keyboard back). In the thread it starts only when the person
