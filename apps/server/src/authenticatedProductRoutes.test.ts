@@ -355,6 +355,7 @@ describe("authenticated product route dispatch", () => {
       "/api/extensions/lifecycle",
       "/api/extensions/skills",
       "/api/extensions/tool-approvals",
+      "/api/extensions/tool-grants",
       "/api/extensions/import-local",
     ]) {
       expect(
@@ -394,6 +395,7 @@ describe("authenticated product route dispatch", () => {
       "/api/extensions/lifecycle",
       "/api/extensions/skills",
       "/api/extensions/tool-approvals",
+      "/api/extensions/tool-grants",
       "/api/extensions/import-local",
     ]) {
       const response = await product(handoff(path, "POST"));

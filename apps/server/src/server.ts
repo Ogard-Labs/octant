@@ -687,6 +687,8 @@ import { AgentPluginMcpSessionManager } from "./extensions/agentPluginMcpSession
 import { LocalPluginFolderRegistry } from "./extensions/localPluginFolderRegistry";
 import { LocalPluginImportReceiptStore } from "./extensions/localPluginImportReceiptStore";
 import { ExtensionToolApprovalService } from "./extensions/extensionToolApprovalService";
+import { createExtensionToolCallAuthorizer } from "./extensions/extensionToolCallAuthorizer";
+import { ExtensionToolGrantStore } from "./extensions/extensionToolGrantStore";
 import {
   BrowserAutomationService,
   createBrowserToolCallAuthorityService,
@@ -3984,20 +3986,25 @@ export function startOctantServer(
           isMarketplaceFetchAllowed,
         }),
       });
+    const extensionToolGrantStore = new ExtensionToolGrantStore({
+      journal: persistence.journal,
+      connection: persistence.connection,
+      uuid: randomUUID,
+      clock: () => new Date().toISOString(),
+      actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+    });
     const agentPluginMcpSessionManager =
       options.agentPluginMcpSessionManager ??
       new AgentPluginMcpSessionManager({
         store: extensionPackageStore,
-        authorizeToolCall: async ({ windowId, thread, signal, ...tool }) =>
-          windowId === undefined
-            ? false
-            : extensionToolApprovalService.request({
-                windowId,
-                threadId: String(thread.id),
-                ...(thread.projectId === undefined ? {} : { projectId: String(thread.projectId) }),
-                ...tool,
-                ...(signal === undefined ? {} : { signal }),
-              }),
+        authorizeToolCall: createExtensionToolCallAuthorizer({
+          grants: extensionToolGrantStore,
+          approvals: extensionToolApprovalService,
+          isHostScope: isRoutineHostScope,
+          threadTainted: (threadId) =>
+            readThreadExternalContentTaint(persistence.connection, threadId)
+              .externalContentIngested,
+        }),
         recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
         ...(extensionSupervisor instanceof ExtensionSupervisor
           ? { stdioSupervisor: extensionSupervisor }
@@ -4055,7 +4062,10 @@ export function startOctantServer(
             extensionActivationService.resolve(snapshot, query),
           ),
       },
-      onStateChanged: async (snapshot) => {
+      onStateChanged: async (snapshot, command) => {
+        // Uninstall, rollback, and withdrawn trust end the package's remembered
+        // tool approvals, so bringing it back restores none of them.
+        extensionToolGrantStore.revokeForLifecycleChange(command);
         // Settings has no thread authority. Drain only package/components whose
         // lifecycle state changed; unrelated in-flight MCP calls remain intact.
         await agentPluginMcpSessionManager.reconcileLifecycleSnapshot(snapshot);
@@ -4105,6 +4115,7 @@ export function startOctantServer(
       localPluginFolderRegistry,
       localPluginImportReceipts: new LocalPluginImportReceiptStore(),
       toolApprovals: extensionToolApprovalService,
+      toolGrants: extensionToolGrantStore,
     });
     const managedWorktreePorts = createManagedWorktreeNodePorts();
     const managedWorktreeService = new ManagedWorktreeService({
