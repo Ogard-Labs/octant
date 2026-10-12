@@ -689,6 +689,8 @@ function er(_header: Statement, body: ReadonlyArray<Statement>, blockId: CanvasB
 
 /** A topic: plain text, or `id[text]`, `id(text)`, `id((text))` with the shape dropped. */
 const TOPIC = /^(?:[A-Za-z0-9_-]+)?(?:\(\((.+)\)\)|\[(.+)\]|\((.+)\))$/;
+/** A cloud `)text(` or a bang `))text((`, bare or after an id: shapes with no topic to keep. */
+const UNREAD_TOPIC_SHAPE = /^[A-Za-z0-9_-]*\)/;
 
 function mindmap(_header: Statement, body: ReadonlyArray<Statement>, blockId: CanvasBlockId) {
   const nodes: Array<Record<string, unknown>> = [];
@@ -699,7 +701,7 @@ function mindmap(_header: Statement, body: ReadonlyArray<Statement>, blockId: Ca
       text.startsWith("::") ||
       text.includes(":::") ||
       text.includes("{{") ||
-      text.startsWith(")")
+      UNREAD_TOPIC_SHAPE.test(text)
     ) {
       throw unsupported(statement);
     }

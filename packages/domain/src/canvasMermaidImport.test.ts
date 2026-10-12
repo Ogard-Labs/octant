@@ -279,6 +279,19 @@ describe("importing the other Mermaid diagram kinds", () => {
     expect(refusal("mindmap\n  Root\n  Second root").reason).toBe("unsupported-construct");
   });
 
+  it("refuses a cloud or bang topic, with or without an id, instead of importing its markup as the label", () => {
+    for (const topic of [")Cloud(", "))Bang((", "id)Cloud(", "id))Bang((", "id{{Hexagon}}"]) {
+      expect(refusal(`mindmap\n  Root\n    ${topic}`).reason).toBe("unsupported-construct");
+    }
+    expect(imported("mindmap\n  Root\n    id(Rounded)\n    Plain (with an aside)")).toMatchObject({
+      nodes: [
+        { nodeId: "t1", label: "Root" },
+        { nodeId: "t2", label: "Rounded", parentId: "t1" },
+        { nodeId: "t3", label: "Plain (with an aside)", parentId: "t1" },
+      ],
+    });
+  });
+
   it("keeps a semicolon in a mind map topic as part of the topic", () => {
     // A flowchart ends a statement with a semicolon; a mind map topic is its line.
     expect(imported("mindmap\n  Release\n    Scope; risks")).toMatchObject({
