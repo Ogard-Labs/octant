@@ -12,6 +12,8 @@ import {
 } from "../composer/useNewTaskPrompt";
 import { ComposerNoticeProvider } from "../composer/ComposerNotice";
 import { ComposerSubagentsContext } from "../composer/ComposerSubagents";
+import { OutsideContentContext, type OutsideContentThread } from "../composer/OutsideContentNotice";
+import type { ContextClient } from "@octant/client-runtime/context-client";
 import {
   FollowUpSuggestionContext,
   type ComposerOffers,
@@ -163,6 +165,8 @@ type CodeWorkspaceProps = import("../code/CodeWorkspace").CodeWorkspaceProps;
 export interface WorkspaceViewProps {
   readonly appleToolchainClient?: AppleToolchainClient;
   readonly agentRunClient?: AgentRunClient;
+  /** Reads and clears an open local thread's outside-content mark, over its composer. */
+  readonly contextClient?: ContextClient;
   readonly nativeHarnessClient?: NativeHarnessClient;
   /** Opens the Agents tool; with a run id, on that subagent's page. */
   readonly onOpenSubagent?: (runId?: string) => void;
@@ -770,11 +774,15 @@ export function WorkspaceView(props: WorkspaceViewProps) {
                       paneId={paneId}
                       surface={surface}
                     >
-                      {onWelcomeGround(
-                        surface,
-                        props.welcomeBackdrop,
-                        renderTab(surface, props, paneId, canvasContext, newTaskDrafts),
-                      )}
+                      <OutsideContentContext
+                        value={outsideContentFor(surface, props.contextClient)}
+                      >
+                        {onWelcomeGround(
+                          surface,
+                          props.welcomeBackdrop,
+                          renderTab(surface, props, paneId, canvasContext, newTaskDrafts),
+                        )}
+                      </OutsideContentContext>
                     </SurfaceLinkActionsProvider>
                   </ComposerContextMeterGate>
                 </ComposerNoticeProvider>
@@ -870,6 +878,20 @@ function followUpSuggestionsFor(
   if ("hostId" in surface && surface.hostId !== undefined) return undefined;
   if (!("threadId" in surface)) return undefined;
   return { ...host, threadId: String(surface.threadId), mode: surface.mode };
+}
+
+/**
+ * The thread whose outside-content mark the composer's notice reads. A pane
+ * showing a thread on another host has no local mark to show.
+ */
+function outsideContentFor(
+  surface: WorkspaceTab,
+  client: ContextClient | undefined,
+): OutsideContentThread | undefined {
+  if (client === undefined || !offersThreadComposer(surface)) return undefined;
+  if ("hostId" in surface && surface.hostId !== undefined) return undefined;
+  if (!("threadId" in surface)) return undefined;
+  return { client, mode: surface.mode, threadId: String(surface.threadId) };
 }
 
 /**

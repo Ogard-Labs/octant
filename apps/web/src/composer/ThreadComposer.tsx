@@ -1,6 +1,7 @@
 import { ComposerFollowUpSuggestions } from "../followUps/FollowUpSuggestionChips";
 import { useComposerNotice } from "./ComposerNotice";
 import { ComposerSubagents } from "./ComposerSubagents";
+import { ComposerOutsideContentNotice } from "./OutsideContentNotice";
 import type { ReactNode } from "react";
 import { ArrowUp, Square } from "lucide-react";
 import { ComposerContextMeter } from "../context/ComposerContextMeter";
@@ -101,6 +102,12 @@ export interface ThreadComposerProps {
    */
   readonly startContext?: ReactNode;
   readonly queue?: ReactNode;
+  /**
+   * A turn is running or messages are queued on the thread around this
+   * composer. The outside-content review cannot clear the thread's mark
+   * meanwhile, and re-reads it when this changes.
+   */
+  readonly threadBusy?: boolean;
   /** Attachment and mention chips shown above the input. */
   readonly chips?: ReactNode;
   readonly label?: ThreadComposerLabel | undefined;
@@ -161,6 +168,7 @@ export function ThreadComposer(props: ThreadComposerProps) {
   const body = followUp ? (
     <>
       <div className="thread-composer__surface">
+        <ComposerOutsideContentNotice busy={props.threadBusy === true} />
         {message}
         <div className="thread-composer__feedback">{props.footer}</div>
         {controls}

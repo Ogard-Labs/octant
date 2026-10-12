@@ -492,6 +492,12 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
   const providerState = providerPresentation(props.providerSnapshot, view);
   const activeAttempt = latestActiveAttempt(view);
   const isSending = activeAttempt !== undefined;
+  // The host would refuse to clear a thread's outside-content mark in any of
+  // these states; a paused queue with nothing waiting does not stop it.
+  const threadBusy =
+    isSending ||
+    view.turns.at(-1)?.attempts.at(-1)?.outcome === "waiting" ||
+    (messageQueue.snapshot?.items.length ?? 0) > 0;
   const queueFollowUp =
     isSending ||
     view.turns.at(-1)?.attempts.at(-1)?.outcome === "waiting" ||
@@ -1238,6 +1244,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
             : { onCaretIndexChange: props.controller.setPendingDraftCaret })}
           isSending={isSending}
           queueing={queueFollowUp}
+          threadBusy={threadBusy}
           queue={
             <ThreadMessageQueue
               connectionLost={connectionLost}

@@ -11,6 +11,8 @@ export function OctantConfirmDialog(props: {
   readonly cancelLabel?: string;
   readonly destructive?: boolean;
   readonly pending?: boolean;
+  /** Holds the confirm back while the caller shows, in `details`, why. */
+  readonly confirmDisabled?: boolean;
   readonly restoreFocus?: RefObject<HTMLElement | null>;
   readonly onCancel: () => void;
   readonly onConfirm: () => void;
@@ -58,7 +60,7 @@ export function OctantConfirmDialog(props: {
           {props.cancelLabel ?? "Cancel"}
         </OctantButton>
         <OctantButton
-          disabled={props.pending}
+          disabled={props.pending || props.confirmDisabled}
           onClick={props.onConfirm}
           size="sm"
           type="button"

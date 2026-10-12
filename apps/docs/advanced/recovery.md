@@ -60,8 +60,10 @@ tombstone rather than leaving a hole with no explanation.
   retains it and its attachments when you close the conversation. You can
   inspect, edit, reorder or remove pending messages from the queue. Normal
   completion starts the next message. A stopped or failed turn, changed access
-  or unavailable attachment holds the queue and explains why. After a host
-  restart, review the retained messages and choose **Resume queue**. Octant
+  or unavailable attachment holds the queue and explains why. While the host
+  holds queued follow-ups, the composer shows **Follow-up paused** with
+  **Resume** without opening the queue. After a host
+  restart, review the retained messages and choose **Resume**. Octant
   checks current access again and never blindly repeats an uncertain send.
   If the connection drops before confirmation, use **Check queue** after
   reconnecting. Octant keeps the original submission identity across navigation
