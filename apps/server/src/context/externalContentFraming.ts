@@ -45,6 +45,20 @@ export function assertExternalContentNotInInstructionSection(input: {
   }
 }
 
+/**
+ * A body that repeats a frame delimiter would end its own frame early, and the
+ * model would read whatever followed as text outside the data. The body used to
+ * be inserted verbatim, so a GitHub issue, a Linear issue, or an MCP result
+ * could do exactly that. Only the three angle brackets that open a delimiter
+ * are rewritten, so the body's words stay readable as data and here-strings or
+ * conflict markers in tool output are left alone.
+ */
+const FRAME_DELIMITER_OPENING = /<<<(?=\s*(?:END_)?OCTANT_EXTERNAL_DATA)/gi;
+
+function withoutFrameDelimiters(body: string): string {
+  return body.replace(FRAME_DELIMITER_OPENING, "&lt;&lt;&lt;");
+}
+
 export interface FramedExternalContent {
   readonly section: DataContextSection;
   readonly text: string;
@@ -79,6 +93,6 @@ export function frameExternalContentForModel(input: {
   const open = `${EXTERNAL_CONTENT_FRAME_OPEN_PREFIX} origin="${input.origin}" source="${input.sourceLabel}">>>`;
   return {
     section: input.section as DataContextSection,
-    text: `${open}\n${input.body}\n${EXTERNAL_CONTENT_FRAME_CLOSE}`,
+    text: `${open}\n${withoutFrameDelimiters(input.body)}\n${EXTERNAL_CONTENT_FRAME_CLOSE}`,
   };
 }
