@@ -12,7 +12,7 @@ import type {
 import type { ProviderUsageLimit } from "@octant/contracts/providers";
 import type { ThreadCheckpoint } from "@octant/contracts/thread-checkpoints";
 import { activeChatTurns } from "@octant/domain/chat-policy";
-import type { PickerGroup } from "@octant/domain";
+import { providerKeepsConversation, type PickerGroup } from "@octant/domain";
 import { providerModelLabel } from "../providers/providerModelLabel";
 import { TurnHeader, TurnTime, turnWorkedFor } from "../transcript/TurnHeader";
 import { HarnessRetryStatus } from "../transcript/HarnessRetryStatus";
@@ -351,6 +351,12 @@ export function ChatTranscript(props: ChatTranscriptProps) {
             return content === undefined ? [] : [content.body];
           }),
         );
+        const branchable = chatTurnBranchable(
+          props.providerGroups,
+          props.view.thread.providerInstanceId,
+          turn,
+        );
+        const canBranch = branchable && props.onBranchTurn !== undefined;
         const actions = editing
           ? []
           : chatTurnActions({
@@ -359,10 +365,11 @@ export function ChatTranscript(props: ChatTranscriptProps) {
                 userContent !== undefined &&
                 delivery === undefined &&
                 props.onEditTurn !== undefined,
-              canBranch: props.onBranchTurn !== undefined,
+              canBranch,
               canCopyMarkdown: assistantBodies.some((body) => body.trim().length > 0),
               checkpointsAvailable: checkpoints !== undefined,
               checkpointBusy: checkpoints?.busy === true,
+              canRestore: branchable,
               marked: marked !== undefined,
             });
 
@@ -458,11 +465,7 @@ export function ChatTranscript(props: ChatTranscriptProps) {
                   attempt={attempt}
                   contentById={contentById}
                   key={attempt.id}
-                  onFork={
-                    props.onBranchTurn === undefined
-                      ? undefined
-                      : () => props.onBranchTurn?.(turn.id)
-                  }
+                  onFork={canBranch ? () => props.onBranchTurn?.(turn.id) : undefined}
                   forkDisabled={props.busy === true}
                   onAnswerQuestion={props.onAnswerQuestion}
                   onDismissQuestion={props.onDismissQuestion}
@@ -509,6 +512,7 @@ function chatTurnActions(input: {
   readonly canCopyMarkdown: boolean;
   readonly checkpointsAvailable: boolean;
   readonly checkpointBusy: boolean;
+  readonly canRestore: boolean;
   readonly marked: boolean;
 }): ReadonlyArray<TurnAction> {
   const checkpointDisabled = input.busy || input.checkpointBusy;
@@ -532,11 +536,13 @@ function chatTurnActions(input: {
   }
   if (input.checkpointsAvailable) {
     if (input.marked) {
-      actions.push({
-        label: "Restore from here",
-        value: "checkpoint-restore",
-        ...(checkpointDisabled ? { disabled: true } : {}),
-      });
+      if (input.canRestore) {
+        actions.push({
+          label: "Restore from here",
+          value: "checkpoint-restore",
+          ...(checkpointDisabled ? { disabled: true } : {}),
+        });
+      }
       actions.push({
         label: "Forget",
         value: "checkpoint-forget",
@@ -552,6 +558,33 @@ function chatTurnActions(input: {
   }
   actions.push({ label: "Copy turn with sources", value: "copy-references" });
   return actions;
+}
+
+/**
+ * Whether a branch through this turn could continue. Fork and a checkpoint's
+ * Restore both start such a branch, and the host refuses it when the thread's
+ * provider, or the provider of the last completed reply the branch would carry,
+ * keeps the conversation in its own session: that session already holds the
+ * later turns, so the branch could only refuse its first message. Those
+ * actions are omitted rather than offered and refused. A provider the picker
+ * does not list (disabled, not ready, or removed) is left for the host to
+ * decide, so nothing the host would accept is hidden.
+ */
+function chatTurnBranchable(
+  groups: ReadonlyArray<PickerGroup> | undefined,
+  threadProviderInstanceId: ChatThreadView["thread"]["providerInstanceId"],
+  turn: ChatThreadView["turns"][number],
+): boolean {
+  if (groups === undefined) return true;
+  const keepsConversation = (providerInstanceId: string): boolean => {
+    const group = groups.find((candidate) => String(candidate.instance.id) === providerInstanceId);
+    return group !== undefined && providerKeepsConversation(group.instance.driverKind);
+  };
+  const carried = turn.attempts.filter((attempt) => attempt.outcome === "completed").at(-1);
+  return !(
+    keepsConversation(String(threadProviderInstanceId)) ||
+    (carried !== undefined && keepsConversation(String(carried.providerInstanceId)))
+  );
 }
 
 function chatTurnReferenceText(input: {
