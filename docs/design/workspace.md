@@ -24,6 +24,10 @@ Projects opens its searchable directory in the main workspace. Selecting a Proje
 replaces that directory with the Project overview; Projects in primary navigation
 returns to the directory. Neither view adds a second sidebar. Other destinations
 replace the directory while preserving the underlying Project selection.
+Work's sidebar lists Chat and Work Projects only. When it has none and Code
+has at least one, the empty Projects line says the Projects are in Code and
+offers Switch to Code; a host with no Projects in any mode keeps "No Projects
+yet."
 
 The Add folder browser reads one directory at a time from the confined home root.
 Because a filesystem call on a cloud-synced or network-mounted entry can block
