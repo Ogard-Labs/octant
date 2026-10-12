@@ -59,11 +59,11 @@ describe("API key pool", () => {
     expect(second.key.label).toBe("Key 2");
   });
 
-  it("keeps a plain key as the first pool entry when a second key is added", () => {
+  it("keeps a plain key in the list and makes the newly added key active", () => {
     const added = addApiKey(FIRST, { secret: SECOND, label: "Team" });
     expect(listApiKeys(added.stored)).toEqual([
-      { id: "default", label: "Default", active: true },
-      { id: added.key.id, label: "Team", active: false },
+      { id: "default", label: "Default", active: false },
+      { id: added.key.id, label: "Team", active: true },
     ]);
     expect(readApiKeyPool(added.stored).map((key) => key.secret)).toEqual([FIRST, SECOND]);
   });
@@ -166,14 +166,24 @@ describe("active key and order", () => {
     return { stored: third.stored, ids: [first.key.id, second.key.id, third.key.id] };
   }
 
-  it("makes the first key active when a pool is created", () => {
+  it("makes each newly added key active, so the last key saved is the one sent", () => {
     const { stored, ids } = threeKeys();
     expect(listApiKeys(stored).map((key) => [key.label, key.active])).toEqual([
-      ["Work", true],
+      ["Work", false],
       ["Personal", false],
-      ["Client", false],
+      ["Client", true],
     ]);
-    expect(apiKeysInUseOrder(stored)[0]?.id).toBe(ids[0]);
+    expect(apiKeysInUseOrder(stored)[0]?.id).toBe(ids[2]);
+  });
+
+  it("gives a replaced key a new id and keeps its label, place, and active state", () => {
+    const { stored, ids } = threeKeys();
+    const replaced = replaceApiKeySecret(stored, ids[2] ?? "", "sk-rotated-3333");
+    const list = listApiKeys(replaced);
+    expect(list.map((key) => key.label)).toEqual(["Work", "Personal", "Client"]);
+    expect(list[2]?.id).not.toBe(ids[2]);
+    expect(list[2]?.active).toBe(true);
+    expect(readApiKeyPool(replaced)[2]?.secret).toBe("sk-rotated-3333");
   });
 
   it("sends the active key first without changing the list order", () => {
@@ -192,7 +202,7 @@ describe("active key and order", () => {
     const { stored, ids } = threeKeys();
     const movedDown = moveApiKey(stored, ids[0] ?? "", "down");
     expect(listApiKeys(movedDown).map((key) => key.label)).toEqual(["Personal", "Work", "Client"]);
-    expect(listApiKeys(movedDown).find((key) => key.active)?.label).toBe("Work");
+    expect(listApiKeys(movedDown).find((key) => key.active)?.label).toBe("Client");
     const movedUp = moveApiKey(movedDown, ids[2] ?? "", "up");
     expect(listApiKeys(movedUp).map((key) => key.label)).toEqual(["Personal", "Client", "Work"]);
   });
@@ -295,9 +305,18 @@ describe("refusal classification", () => {
     expect(keyCooldownMs({ status: 503, body: "overloaded" })).toBeUndefined();
   });
 
-  it("reads Retry-After only as whole seconds", () => {
-    expect(parseRetryAfterSeconds("12")).toBe(12);
-    expect(parseRetryAfterSeconds("Wed, 21 Oct 2026 07:28:00 GMT")).toBeUndefined();
-    expect(parseRetryAfterSeconds(null)).toBeUndefined();
+  it("reads Retry-After as seconds or as an HTTP date, measured from now", () => {
+    const now = Date.parse("Wed, 21 Oct 2026 07:27:00 GMT");
+    expect(parseRetryAfterSeconds("12", now)).toBe(12);
+    expect(parseRetryAfterSeconds("Wed, 21 Oct 2026 07:28:00 GMT", now)).toBe(60);
+    expect(parseRetryAfterSeconds("Wed, 21 Oct 2026 07:20:00 GMT", now)).toBe(0);
+    expect(parseRetryAfterSeconds("not a date", now)).toBeUndefined();
+    expect(parseRetryAfterSeconds(null, now)).toBeUndefined();
+  });
+
+  it("does not treat a bare mention of billing as an exhausted key", () => {
+    expect(
+      keyCooldownMs({ status: 400, body: "billing is not enabled for this project" }),
+    ).toBeUndefined();
   });
 });

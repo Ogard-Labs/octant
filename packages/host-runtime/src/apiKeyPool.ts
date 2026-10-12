@@ -35,7 +35,7 @@ const MAX_RETRY_AFTER_COOLDOWN_MS = 10 * 60_000;
  * 429, so the status alone does not say whether the limit lifts on its own.
  */
 const QUOTA_EXHAUSTED_TEXT =
-  /credit balance is too low|insufficient[_ ]quota|exceeded your current quota|billing|spend[ _]limit|usage limits? (?:has been )?reached|reached your specified|out of credits/i;
+  /credit balance is too low|insufficient[_ ]quota|exceeded your current quota|spend[ _]limit|usage limits? (?:has been )?reached|reached your specified|out of credits/i;
 
 export interface ApiKeyEntry {
   readonly id: string;
@@ -110,9 +110,9 @@ export function listApiKeys(stored: string): readonly ApiKeySummary[] {
 }
 
 /**
- * Appends a key to the end of the list. A label is "Key N" unless the person
- * chose one. The first key of a pool becomes active; later keys do not change
- * which key is active.
+ * Appends a key to the end of the list and makes it the active key, so the key
+ * just saved is the one a request sends. A label is "Key N" unless the person
+ * chose one.
  */
 export function addApiKey(
   stored: string | undefined,
@@ -126,9 +126,8 @@ export function addApiKey(
     label,
     secret: input.secret.trim(),
   };
-  const activeId = state.entries.length === 0 ? key.id : activeIdOf(state);
-  const next = writePool([...entries, key], activeId);
-  return { stored: next, key: { id: key.id, label: key.label, active: activeId === key.id } };
+  const next = writePool([...entries, key], key.id);
+  return { stored: next, key: { id: key.id, label: key.label, active: true } };
 }
 
 export function renameApiKey(stored: string, keyId: string, label: string): string {
@@ -140,13 +139,20 @@ export function renameApiKey(stored: string, keyId: string, label: string): stri
   return writePool(entries, activeIdOf(state));
 }
 
+/**
+ * Replaces one key's secret. The key gets a new id, so a cooldown the host
+ * recorded for the old secret cannot hold back the new one. The label, the
+ * place in the list, and the active state carry over.
+ */
 export function replaceApiKeySecret(stored: string, keyId: string, secret: string): string {
   const state = readEditablePool(stored);
+  requireKnownKey(state.entries, keyId);
+  const newId = globalThis.crypto.randomUUID();
   const entries = state.entries.map((entry) =>
-    entry.id === keyId ? { ...entry, secret: secret.trim() } : entry,
+    entry.id === keyId ? { id: newId, label: entry.label, secret: secret.trim() } : entry,
   );
-  requireKnownKey(entries, keyId);
-  return writePool(entries, activeIdOf(state));
+  const active = activeIdOf(state);
+  return writePool(entries, active === keyId ? newId : active);
 }
 
 /**
@@ -237,10 +243,20 @@ export function keyCooldownMs(rejection: KeyRejection): number | undefined {
   return Math.min(rejection.retryAfterSeconds * 1000, MAX_RETRY_AFTER_COOLDOWN_MS);
 }
 
-/** A `Retry-After` header in seconds. HTTP dates are not read, so they count as absent. */
-export function parseRetryAfterSeconds(value: string | null): number | undefined {
-  if (value === null || !/^\d+$/.test(value.trim())) return undefined;
-  return Number(value.trim());
+/**
+ * A `Retry-After` header as seconds from `nowMs`. It is either a count of
+ * seconds or an HTTP date (RFC 9110 §10.2.3); a date already past counts as zero.
+ */
+export function parseRetryAfterSeconds(
+  value: string | null,
+  nowMs: number = Date.now(),
+): number | undefined {
+  if (value === null) return undefined;
+  const trimmed = value.trim();
+  if (/^\d+$/.test(trimmed)) return Number(trimmed);
+  const untilMs = Date.parse(trimmed);
+  if (Number.isNaN(untilMs)) return undefined;
+  return Math.max(0, Math.ceil((untilMs - nowMs) / 1000));
 }
 
 interface PoolState {

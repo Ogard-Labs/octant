@@ -80,6 +80,39 @@ export async function acquireProviderCredential(
   return { credential: (await resolver?.resolve(providerInstanceId)) ?? "" };
 }
 
+const REJECTION_BODY_BYTES = 4096;
+
+/**
+ * The first few kilobytes of a refused response. Only that prefix is read from
+ * the copy, so a large error body is never buffered whole; the caller's own
+ * read of the response still enforces its size limit.
+ */
+async function readRejectionPrefix(response: Response): Promise<string> {
+  const copy = response.clone().body;
+  if (copy === null) return "";
+  const reader = copy.getReader();
+  const chunks: Uint8Array[] = [];
+  let length = 0;
+  try {
+    while (length < REJECTION_BODY_BYTES) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      length += value.byteLength;
+    }
+  } finally {
+    reader.cancel().catch(() => undefined);
+  }
+  const bytes = new Uint8Array(Math.min(length, REJECTION_BODY_BYTES));
+  let offset = 0;
+  for (const chunk of chunks) {
+    const take = Math.min(chunk.byteLength, bytes.byteLength - offset);
+    bytes.set(chunk.subarray(0, take), offset);
+    offset += take;
+  }
+  return new TextDecoder().decode(bytes);
+}
+
 /**
  * Records a refused response against the key that was sent, so the next
  * attempt can use another. Reading the body is best effort: a body that cannot
@@ -92,7 +125,7 @@ export async function reportKeyRejection(
   if (lease === undefined || response.ok) return;
   let body = "";
   try {
-    body = (await response.clone().text()).slice(0, 4096);
+    body = await readRejectionPrefix(response);
   } catch {
     body = "";
   }

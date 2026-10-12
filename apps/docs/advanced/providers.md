@@ -441,13 +441,15 @@ choose. Open the provider in Settings to see its **API keys**. One key is **acti
 Octant sends it first. The list order decides which key is tried next if the
 active key runs out.
 
-- **Add key** adds a key to the end of the list. Saving a key from the edit
-  form adds it too, so no save removes a key by accident.
+- **Add key** adds a key to the end of the list and makes it the active key, so
+  the key you just saved is the one Octant sends. Saving a key from the edit
+  form works the same way, and no save removes a key by accident.
 - **Make active** sends a key first, and the list order stays the same.
 - **Move up** and **Move down** change the order in which the other keys are
   tried. The first key cannot move up, and the last cannot move down.
 - **Replace key** changes one key's secret and keeps its label, place, and
-  active state. **Rename** changes a label. **Remove** asks you to confirm
+  active state. The replaced key is a new key to Octant, so a cooldown from its
+  old secret does not apply to it. **Rename** changes a label. **Remove** asks you to confirm
   first. Removing the active key makes the first key left active.
 - When a key is refused because its quota, credit, or spend limit is used up,
   Octant skips it for an hour and sends the next key in the list order. A rate limit skips a key

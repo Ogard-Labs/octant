@@ -17,7 +17,7 @@ import {
   requestGeneration,
   type CompatibleFetch,
 } from "./openAiCompatibleEndpoint";
-import { makeProviderApiKeyPool } from "./providerApiKeyPool";
+import { makeProviderApiKeyPool, reportKeyRejection } from "./providerApiKeyPool";
 
 const instanceId = "pool-test-instance";
 const FIRST = "sk-first-0000";
@@ -219,5 +219,16 @@ describe("pool through the OpenAI-compatible endpoint", () => {
     await requestGeneration(endpoint, { path: "chat/completions", body: {} });
 
     expect(sent).toEqual([`Bearer ${FIRST}`, `Bearer ${SECOND}`]);
+  });
+});
+
+describe("reporting a refused response", () => {
+  it("cools a key for a quota refusal whose words are near the start of a long body", async () => {
+    const store = twoKeyStore();
+    const pool = makeProviderApiKeyPool(store);
+    const lease = await pool.lease(instanceId);
+    const body = SPEND_LIMIT_BODY + " ".repeat(64 * 1024);
+    await reportKeyRejection(lease, new Response(body, { status: 429 }));
+    expect(await pool.resolve(instanceId)).toBe(SECOND);
   });
 });
