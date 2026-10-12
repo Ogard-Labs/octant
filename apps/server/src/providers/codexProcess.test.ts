@@ -1,4 +1,13 @@
-import { accessSync, chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  accessSync,
+  chmodSync,
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -411,6 +420,27 @@ describe("codexAppServerArgs", () => {
 });
 
 describe("CodexProcessPort", () => {
+  it("creates an account home that does not exist yet before starting Codex", async () => {
+    const target = fixture();
+    const accountHome = join(target.root, "codex-accounts", "work");
+    expect(existsSync(accountHome)).toBe(false);
+
+    await Effect.runPromise(
+      Effect.scoped(
+        makePort()
+          .start({
+            binaryPath: target.binaryPath,
+            environment: { ...process.env, CODEX_HOME: accountHome },
+          })
+          .pipe(Effect.asVoid),
+      ),
+    );
+
+    // Codex refuses a missing home, so the folder must be there first, and
+    // only its owner may read a folder that will hold a login.
+    expect(statSync(accountHome).mode & 0o777).toBe(0o700);
+  });
+
   it("spawns stdio app-server and completes the stable handshake exactly once", async () => {
     const target = fixture();
     const environment = {
