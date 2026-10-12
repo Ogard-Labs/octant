@@ -477,10 +477,9 @@ document as a future version. Frames follow the
   is shared as written, because the secret filter reads values, not markup;
   this has shipped at share version 10 (see [Canvas](design/canvas.md#shares)).
   HTML export writes frames as sandboxed `srcdoc` pages with the policy
-  inside, and the approval card names the markup it writes; this has shipped
-  for designs that are not drawn in the workspace theme. Accepted, not yet
-  shipped: exporting a themed design as a frame, which needs the export to
-  carry the theme. Markdown export writes the title. Public links stay out.
+  inside, the approval card names the markup it writes, and a themed design
+  is drawn in the theme the person's window hands over; this has shipped.
+  Markdown export writes the title. Public links stay out.
 
 _Rationale:_ a `srcdoc` frame inherits the app policy (`script-src 'self'`),
 so a running frame needs a page the host serves, and a frame sandboxed without

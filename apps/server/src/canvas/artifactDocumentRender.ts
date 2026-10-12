@@ -40,6 +40,7 @@ import {
 import { layoutCanvasDiagram } from "@octant/domain/canvas-diagram-layout";
 import { layoutCanvasPlanGantt } from "@octant/domain/canvas-plan-gantt-layout";
 import { DEFAULT_ARTIFACT_PALETTE, drawCanvasDiagramLayout, escapeXml } from "./artifactRender";
+import type { DesignFrameThemeValues } from "@octant/domain";
 import { renderCanvasDesignExportFrames } from "./canvasDesignPage";
 
 /**
@@ -69,6 +70,11 @@ export type ArtifactDocumentRender =
  */
 export interface ArtifactDocumentOptions {
   readonly frames?: "as-written";
+  /**
+   * The theme a design drawn in the workspace theme is exported in, handed
+   * over by the person's window. Without it such a design reads as its titles.
+   */
+  readonly frameTheme?: DesignFrameThemeValues;
 }
 
 export function renderArtifactMarkdown(
@@ -304,7 +310,7 @@ function renderDocument(
   // acknowledgement; a design the export cannot draw reads as its titles.
   const read = (block: CanvasBlock): ReadonlyArray<Piece> =>
     block.kind === "design" && format === "html" && options.frames === "as-written"
-      ? (designFramePieces(block) ?? piecesFor(block))
+      ? (designFramePieces(block, options.frameTheme) ?? piecesFor(block))
       : piecesFor(block);
   // A dashboard reads where it sits: its title, then each placed block in
   // cell order, which is the order the screen's grid reads at one column. A
@@ -342,8 +348,9 @@ function renderDocument(
 /** A design as its title and its drawn frames, when the export can draw it. */
 function designFramePieces(
   block: Extract<CanvasBlock, { readonly kind: "design" }>,
+  theme: DesignFrameThemeValues | undefined,
 ): ReadonlyArray<Piece> | undefined {
-  const frames = renderCanvasDesignExportFrames(block);
+  const frames = renderCanvasDesignExportFrames(block, theme);
   if (frames === undefined) return undefined;
   return [
     { kind: "heading", level: 2, text: reading(block.title) },

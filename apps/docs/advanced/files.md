@@ -392,8 +392,9 @@ agent asks for your theme.
   placeholder. Exporting to HTML writes the design's screens into the file,
   and a prototype runs there with no way to reach the network; the approval
   card says the file includes the design's markup exactly as written. A design
-  drawn in your theme (a document-size design, unless it turns the theme off)
-  and every Markdown export still write the name of each screen instead.
+  drawn in your theme is exported in the theme your window shows at that
+  moment, without Octant's own fonts. A Markdown export still writes the name
+  of each screen instead.
 
 Comments, versions, and **Compare with** work on a design as on any other
 block. To change it, ask the agent: "make the buttons rounder" revises the

@@ -609,9 +609,19 @@ frame, which is not one, still draws. A `srcdoc` page inherits the document's
 policy, so the document admits inline script only when it draws a running
 frame. The export approval card says when the document writes design markup
 (`writesDesignMarkup`), so approving it is the person's acknowledgement that
-markup leaves as written. A declared image draws a placeholder, and a design
-in the workspace theme still exports as its titles, because an exported file
-carries neither the theme's tokens nor the frame kit. A share refuses an action block, whose
+markup leaves as written. A declared image draws a placeholder. A design in
+the workspace theme is exported in the theme the person's window draws it
+with: an HTML export of a Canvas that holds a design carries `frameTheme`, the
+scheme and the frame's token values, because an exported file has no Octant
+page to read them from. They are values to bound, not markup: the contract
+admits only token-shaped names and values that cannot end a declaration, and
+the host writes only the tokens a frame receives
+(`DESIGN_FRAME_THEME_TOKENS`), checks each value again
+(`designFrameTokenValueIsSafe`, which the app's own frames use), and adds the
+frame kit, which lives in `packages/domain` so the app and the export share
+one copy. An export handed no theme writes a themed design as its titles. An
+exported document frame cannot be measured, so it scrolls at a fixed height,
+and it does not carry Octant's fonts; the tokens' own fallbacks apply. A share refuses an action block, whose
 command runs only on this host. That refusal, and any block or field the share
 contract does not carry, are checked before the snapshot is journaled and
 reach the owner as an `unsafe-payload` denial: the Canvas cannot be shared, not

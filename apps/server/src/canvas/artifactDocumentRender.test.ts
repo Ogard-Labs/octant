@@ -617,25 +617,60 @@ describe("rendering a canvas as a document", () => {
       expect(html.body).not.toContain("44444444-4444-4444-8444-444444444444");
     });
 
-    it("still writes a design drawn in the workspace theme as its titles, because an export carries no theme", () => {
-      const spec = decodeCanvasBlock({
-        blockId: "spec",
-        schemaVersion: CANVAS_SCHEMA_VERSION,
-        kind: "design",
-        title: "Spec",
-        size: "document",
-        frames: [
-          {
-            frameId: "spec",
-            title: "Spec",
-            html: '<article class="oct-article"><h1>Ranking</h1></article>',
-          },
-        ],
-      });
+    const spec = decodeCanvasBlock({
+      blockId: "spec",
+      schemaVersion: CANVAS_SCHEMA_VERSION,
+      kind: "design",
+      title: "Spec",
+      size: "document",
+      frames: [
+        {
+          frameId: "spec",
+          title: "Spec",
+          html: '<article class="oct-article"><h1>Ranking</h1></article>',
+        },
+      ],
+    });
+
+    it("writes a design drawn in the workspace theme as its titles when the export was handed no theme", () => {
       const html = renderArtifactHtml(definition([spec]), frames);
       if (html.kind !== "rendered") throw new Error("The export did not render.");
       expect(html.body).not.toContain("<iframe");
       expect(html.body).toContain("<h2>Spec</h2><ol><li>Spec</li></ol>");
+      expect(html.writesDesignMarkup).toBe(false);
+    });
+
+    it("draws a themed document with the theme the person's window handed over, and the frame kit", () => {
+      const html = renderArtifactHtml(definition([spec]), {
+        ...frames,
+        frameTheme: {
+          scheme: "dark",
+          tokens: [
+            ["--oct-bg", "#1a1a1a"],
+            ["--oct-fg", "rgb(240, 240, 240)"],
+            ["--oct-font-body", '"Geist", system-ui, sans-serif'],
+            // Not a token a frame receives, and values that try to leave
+            // their declaration or load something: none is written.
+            ["--oct-made-up", "red"],
+            ["--oct-accent", "red; } html { background: url(https://example.test/x)"],
+            ["--oct-border", "url(https://example.test/x)"],
+          ],
+        },
+      });
+      if (html.kind !== "rendered") throw new Error("The export did not render.");
+      expect(html.body.match(/<iframe sandbox="" /g)).toHaveLength(1);
+      const [page] = srcdocs(html.body);
+      expect(page).toContain("color-scheme: dark;");
+      expect(page).toContain("--oct-bg: #1a1a1a;");
+      expect(page).toContain("--oct-fg: rgb(240, 240, 240);");
+      expect(page).toContain('--oct-font-body: "Geist", system-ui, sans-serif;');
+      expect(page).not.toContain("--oct-made-up");
+      expect(page).not.toContain("example.test");
+      // The kit an article is built from travels with it.
+      expect(page).toContain(".oct-article");
+      expect(page).toContain('<article class="oct-article"><h1>Ranking</h1></article>');
+      expect(page).toContain("default-src 'none'; style-src 'unsafe-inline'");
+      expect(html.writesDesignMarkup).toBe(true);
     });
 
     it("keeps Markdown to the titles", () => {

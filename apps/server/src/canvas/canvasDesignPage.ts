@@ -16,6 +16,12 @@ import {
   type CanvasVersionId,
 } from "@octant/contracts/canvas";
 import type { CanvasStaticExportDocument } from "@octant/contracts/canvas-share";
+import {
+  DESIGN_FRAME_KIT,
+  DESIGN_FRAME_THEME_TOKENS,
+  designFrameTokenValueIsSafe,
+  type DesignFrameThemeValues,
+} from "@octant/domain";
 import { getDefaultToken } from "@octant/theme";
 
 /**
@@ -290,21 +296,41 @@ export interface CanvasDesignExportFrame {
 
 /**
  * A design as an exported HTML file draws it, or `undefined` for a design the
- * export cannot draw as written: one in the workspace theme, whose tokens and
- * frame kit an exported file does not carry.
+ * export cannot draw as written: one in the workspace theme when the export
+ * was handed no theme to draw it in.
  *
  * A static design is one page per screen, each holding that screen alone and
  * running nothing. A running design is one page holding every screen, because
- * its script is one program. Neither names an image: a declared image
- * resolves only under this host's authority, so its place draws a placeholder.
- * The bridge is left out; an exported page has no host to report to.
+ * its script is one program. A design in the workspace theme gets the tokens
+ * the person's window drew it with and the frame kit, ahead of its own styles,
+ * as in the app; only the tokens a frame receives are written, and each value
+ * is checked again here. Neither names an image: a declared image resolves
+ * only under this host's authority, so its place draws a placeholder. The
+ * bridge is left out; an exported page has no host to report to.
  */
 export function renderCanvasDesignExportFrames(
   block: CanvasDesignBlock,
+  theme?: DesignFrameThemeValues,
 ): ReadonlyArray<CanvasDesignExportFrame> | undefined {
   const themed =
     (block.theme ?? (block.size === "document" ? "workspace" : "none")) === "workspace";
-  if (themed) return undefined;
+  if (themed && theme === undefined) return undefined;
+  const themeStyles =
+    themed && theme !== undefined
+      ? [
+          `<style>:root { color-scheme: ${theme.scheme === "dark" ? "dark" : "light"}; ${theme.tokens
+            .filter(
+              ([name, value]) =>
+                DESIGN_FRAME_THEME_TOKENS.includes(name) && designFrameTokenValueIsSafe(value),
+            )
+            .map(([name, value]) => `${name}: ${value};`)
+            .join(" ")} }`,
+          // An exported page stands alone, so it paints the workspace ground
+          // itself where the app's frame sits on the Canvas surface.
+          "html { background: var(--oct-bg); }</style>",
+          `<style>${DESIGN_FRAME_KIT}</style>`,
+        ].join("")
+      : `<style>${UNTHEMED_PAGE}</style>`;
   const isDocument = block.size === "document";
   const viewport = block.size === "document" ? undefined : CANVAS_DESIGN_VIEWPORT[block.size];
   const running = block.runsScript === true;
@@ -322,8 +348,8 @@ export function renderCanvasDesignExportFrames(
       '<html><head><meta charset="utf-8">',
       `<meta http-equiv="Content-Security-Policy" content="${running ? CANVAS_DESIGN_EXPORT_RUNNING_POLICY : CANVAS_DESIGN_EXPORT_STATIC_POLICY}">`,
       `<meta name="viewport" content="width=${viewport === undefined ? "device-width" : String(viewport.width)}">`,
-      `<style>${isDocument ? DOCUMENT_FRAME_RULES : DEVICE_FRAME_RULES}</style>`,
-      `<style>${UNTHEMED_PAGE}</style>`,
+      `<style>${isDocument ? `${DOCUMENT_FRAME_RULES}\n${EXPORT_DOCUMENT_INSET}` : DEVICE_FRAME_RULES}</style>`,
+      themeStyles,
       `<style>${withAssets(block.styles ?? "", budget).replace(/<\/style/gi, "<\\/style")}</style>`,
       `</head><body>${body}</body></html>`,
     ].join("");
@@ -342,6 +368,13 @@ export function renderCanvasDesignExportFrames(
     page: page([frame], String(frame.frameId)),
   }));
 }
+
+/**
+ * In the app a document sits on the Canvas surface and needs no edge of its
+ * own. An exported frame is a bordered box with its own ground, so its text
+ * would touch that border; the page keeps it off.
+ */
+const EXPORT_DOCUMENT_INSET = "body { padding: 24px; }";
 
 /** An exported document frame cannot be measured, so it scrolls at this height. */
 const EXPORT_DOCUMENT_HEIGHT = 640;
