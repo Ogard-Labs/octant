@@ -32,8 +32,10 @@ revisions of this model cited design files under `docs/specs/` that no longer ex
 
 Octant is a local-first, server-authoritative workspace. Its security invariants were previously
 scattered across the original-rewrite design (tools/safety and remote access), the extensions trust
-design, and four feature-scoped threat models. This document consolidates them into one enforceable
-contract and specifies the remaining controls. It covers two threat families:
+design, and four feature-scoped threat models. This document gathers them into one threat summary.
+It is not a separate authority: the effective rules live in the
+[architecture](../architecture.md#security-and-authority), and where the two differ, the
+architecture wins and this summary is corrected. It covers two threat families:
 
 - **T-A Malicious tool calling.** Prompt injection through tool results, rogue MCP servers
   requesting undeclared capabilities, and model-invented tool invocations that were never defined
@@ -43,8 +45,9 @@ contract and specifies the remaining controls. It covers two threat families:
   parent, host, mode, or thread policy.
 
 Each control below names its enforcement layer and module and states whether it **exists today** in
-the repository or is **newly specified** by this design. Newly specified controls are the
-implementation backlog this design gates; nothing here weakens an existing control.
+the repository or was **newly specified** here. A newly specified control becomes a rule only when
+the architecture states it; until then it is a proposal tracked in Linear. Nothing here weakens an
+existing control.
 
 ## Assets
 
