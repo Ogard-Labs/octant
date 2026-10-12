@@ -24,6 +24,10 @@ Projects opens its searchable directory in the main workspace. Selecting a Proje
 replaces that directory with the Project overview; Projects in primary navigation
 returns to the directory. Neither view adds a second sidebar. Other destinations
 replace the directory while preserving the underlying Project selection.
+Work's sidebar lists Chat and Work Projects only. When it has none and Code
+has at least one, the empty Projects line says the Projects are in Code and
+offers Switch to Code; a host with no Projects in any mode keeps "No Projects
+yet."
 
 The Add folder browser reads one directory at a time from the confined home root.
 Because a filesystem call on a cloud-synced or network-mounted entry can block
@@ -211,7 +215,10 @@ wording, and reads are specified in [Start screen](start-screen.md).
   pull-request capability (the gate that refuses the Pull requests
   destination's read). Working now is never unavailable.
 - **Empty states.** Needs you and CI failures leave the grid while they have
-  nothing to show. Working now says "Nothing is running right now." Pull requests
+  nothing to show. Computers leaves the grid while the only computer is this
+  one and no agent is running on it (or while that count is still landing, so
+  the gauges do not flash). It comes back when a second computer is connected
+  or an agent is running. Working now says "Nothing is running right now." Pull requests
   says "Nothing is waiting on you." only after a successful read that a refresh
   has carried to every connected Project; otherwise it says it could not read or
   has not checked yet. Running services says it could not check rather than that
