@@ -1,6 +1,10 @@
 import { CANVAS_DESIGN_ASSETS_MAX_BYTES, type CanvasDesignBlock } from "@octant/contracts/canvas";
 import { describe, expect, it } from "vitest";
-import { renderCanvasDesignPage } from "./canvasDesignPage";
+import {
+  CanvasDesignRunTickets,
+  issueSharedDesignRun,
+  renderCanvasDesignPage,
+} from "./canvasDesignPage";
 
 function checkout(html: string): CanvasDesignBlock {
   return {
@@ -55,5 +59,53 @@ describe("a running design's page", () => {
     expect(page).toContain(
       '<img src="data:image/png;base64,iVBORw0KGgo=" alt="octant-asset:hero">',
     );
+  });
+});
+
+describe("a shared prototype's page", () => {
+  const canvasId = "11111111-1111-4111-8111-111111111111";
+  const versionId = "22222222-2222-4222-8222-222222222222";
+  const prototype = {
+    blockId: "cart",
+    schemaVersion: 18,
+    kind: "design",
+    title: "Cart",
+    size: "phone",
+    runsScript: true,
+    frames: [
+      { frameId: "cart", title: "Cart", html: '<button onclick="add()">Add</button>' },
+      { frameId: "paid", title: "Paid", html: "<p>Paid</p>" },
+    ],
+  };
+  const still = { ...prototype, blockId: "still", runsScript: undefined };
+  const document = { canvasId, versionId, blocks: [prototype, still] } as never;
+
+  it("is ticketed once for a running design the snapshot holds, from the frame asked for", () => {
+    const tickets = new CanvasDesignRunTickets();
+    const page = issueSharedDesignRun(tickets, document, {
+      blockId: "cart" as never,
+      frameId: "paid" as never,
+    });
+    expect(page).toMatch(/^\/api\/canvas\/design-page\?ticket=[A-Za-z0-9_-]{43}$/);
+    const grant = tickets.redeem(page?.split("ticket=")[1] ?? "");
+    expect(grant).toMatchObject({ canvasId, versionId, blockId: "cart", startFrameId: "paid" });
+    // A shared design names no image and so needs no authority to resolve one.
+    expect(grant?.provenance).toBeUndefined();
+    expect(grant?.block.assets).toBeUndefined();
+    // The ticket opened once.
+    expect(tickets.redeem(page?.split("ticket=")[1] ?? "")).toBeUndefined();
+  });
+
+  it("is not offered for a static design, an unknown block, an unknown frame, or a host without tickets", () => {
+    const tickets = new CanvasDesignRunTickets();
+    expect(issueSharedDesignRun(tickets, document, { blockId: "still" as never })).toBeUndefined();
+    expect(issueSharedDesignRun(tickets, document, { blockId: "gone" as never })).toBeUndefined();
+    expect(
+      issueSharedDesignRun(tickets, document, {
+        blockId: "cart" as never,
+        frameId: "nowhere" as never,
+      }),
+    ).toBeUndefined();
+    expect(issueSharedDesignRun(undefined, document, { blockId: "cart" as never })).toBeUndefined();
   });
 });

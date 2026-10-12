@@ -23,7 +23,9 @@ import {
   decodeCanvasExportOfferList,
   decodeCanvasExportPrepareRequest,
   decodeCanvasExportPrepareResult,
+  decodeCanvasShareAccessRequest,
   decodeCanvasShareAccessResult,
+  type CanvasShareAccessRequest,
   decodeCanvasShareOverview,
   decodeCanvasShareResult,
   decodeCanvasVersionId,
@@ -62,6 +64,7 @@ import {
   canvasDesignPageHeaders,
   canvasDesignPagePath,
   canvasDesignPageRefusal,
+  issueSharedDesignRun,
   renderCanvasDesignPage,
   type CanvasDesignRunTickets,
 } from "./canvas/canvasDesignPage";
@@ -1006,7 +1009,21 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
           principal,
           ...(userAgent === null ? {} : { userAgent }),
         });
-        return jsonResponse(decodeCanvasShareAccessResult(result), 200, origin);
+        // A reader allowed to open the snapshot may run a prototype it holds:
+        // the page is ticketed from the snapshot's own design, after the same
+        // decision and the same access-log entry as the read itself.
+        const run = result.kind === "allowed" ? sharedDesignRunAsked(body.value) : undefined;
+        const designPage =
+          result.kind === "allowed" && run !== undefined
+            ? issueSharedDesignRun(dependencies.designRunTickets, result.document, run)
+            : undefined;
+        return jsonResponse(
+          decodeCanvasShareAccessResult(
+            designPage === undefined ? result : { ...result, designPage },
+          ),
+          200,
+          origin,
+        );
       }
 
       if (route === "export-targets" && request.method === "GET") {
@@ -1616,6 +1633,15 @@ async function issueDesignRun(
   };
 }
 
+/** The prototype a share access asked to run, when it asked for one. */
+function sharedDesignRunAsked(body: unknown): CanvasShareAccessRequest["runDesign"] {
+  try {
+    return decodeCanvasShareAccessRequest(body).runDesign;
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * A running design's page, for the one load its ticket allows. Anything but a
  * plain load of a fresh ticket by a frame is refused with a page that runs
@@ -1643,7 +1669,9 @@ async function serveDesignPage(
   const grant = dependencies.designRunTickets?.redeem(ticket);
   if (grant === undefined) return refuse(403);
   const assets =
-    (grant.block.assets ?? []).length === 0 || dependencies.resolveDesignAssets === undefined
+    (grant.block.assets ?? []).length === 0 ||
+    grant.provenance === undefined ||
+    dependencies.resolveDesignAssets === undefined
       ? []
       : await dependencies.resolveDesignAssets(grant.block, grant.provenance);
   return new Response(renderCanvasDesignPage(grant.block, grant.startFrameId, assets), {

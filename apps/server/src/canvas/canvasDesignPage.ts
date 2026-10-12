@@ -15,6 +15,7 @@ import {
   type CanvasProvenance,
   type CanvasVersionId,
 } from "@octant/contracts/canvas";
+import type { CanvasStaticExportDocument } from "@octant/contracts/canvas-share";
 import { getDefaultToken } from "@octant/theme";
 
 /**
@@ -53,7 +54,11 @@ export interface CanvasDesignRunGrant {
   readonly startFrameId: string;
   /** The version is immutable, so the design is kept as it was authorized. */
   readonly block: CanvasDesignBlock;
-  readonly provenance: CanvasProvenance;
+  /**
+   * The authority the design's declared images resolve under. Absent for a
+   * design read from a shared snapshot, which carries no image to resolve.
+   */
+  readonly provenance?: CanvasProvenance;
 }
 
 // A reader asks for a ticket just before it loads the page, so only a handful
@@ -102,6 +107,42 @@ export class CanvasDesignRunTickets {
       if (now >= entry.expiresAt) this.#tickets.delete(ticket);
     }
   }
+}
+
+/**
+ * A ticketed page for one of a shared snapshot's prototypes, or `undefined`
+ * when there is none to offer: the snapshot holds no running design by that
+ * id, the frame is not one of its frames, or this host issues no tickets. The
+ * caller has already decided, and journaled, that this reader may open the
+ * snapshot; the page is that snapshot's own design and nothing else.
+ */
+export function issueSharedDesignRun(
+  tickets: CanvasDesignRunTickets | undefined,
+  document: Pick<CanvasStaticExportDocument, "canvasId" | "versionId" | "blocks">,
+  run: { readonly blockId: CanvasBlockId; readonly frameId?: string | undefined },
+): string | undefined {
+  if (tickets === undefined) return undefined;
+  const block = document.blocks.find(
+    (candidate) => candidate.kind === "design" && String(candidate.blockId) === String(run.blockId),
+  );
+  if (block?.kind !== "design" || block.runsScript !== true) return undefined;
+  const startFrameId = run.frameId ?? block.frames[0]?.frameId;
+  if (
+    startFrameId === undefined ||
+    !block.frames.some((frame) => String(frame.frameId) === String(startFrameId))
+  ) {
+    return undefined;
+  }
+  return canvasDesignPagePath(
+    tickets.issue({
+      canvasId: document.canvasId,
+      versionId: document.versionId,
+      blockId: run.blockId,
+      startFrameId: String(startFrameId),
+      // A shared design is a design without declared images.
+      block: block as CanvasDesignBlock,
+    }),
+  );
 }
 
 /** The path a reader loads a ticket's page from. */

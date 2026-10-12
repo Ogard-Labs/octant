@@ -2064,8 +2064,8 @@ export const CANVAS_DESIGN_VIEWPORT: Readonly<
   slide: { width: 1920, height: 1080 },
 };
 
-const CanvasDesignFrameId = boundedToken("CanvasDesignFrameId");
-const CanvasDesignMarkup = boundedText(CANVAS_MAX_DESIGN_MARKUP_LENGTH);
+export const CanvasDesignFrameId = boundedToken("CanvasDesignFrameId");
+export const CanvasDesignMarkup = boundedText(CANVAS_MAX_DESIGN_MARKUP_LENGTH);
 
 /**
  * One screen or slide. `html` is the body of a static page and `frameId` is

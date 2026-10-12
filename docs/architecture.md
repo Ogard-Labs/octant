@@ -334,8 +334,10 @@ refuses on a runtime that predates them); a version is immutable, and a person's
 diagram layout) is journaled as a new head version with the `local-user` actor
 the host stamps itself; the host stamps comment authors, so a renderer never
 authors as an agent; only a host window moves board nodes; `preview` renders
-with the network off and no server address or credential; a `design` frame
-never receives `allow-scripts`; a share refuses a design or an action block; and
+with the network off and no server address or credential; a static `design`
+frame never receives `allow-scripts` and no frame has both `allow-scripts` and
+`allow-same-origin`; a share carries a design only with the sharer's
+acknowledgement that markup is shared as written, and refuses an action block; and
 nothing drawn inline in the thread can journal a version.
 
 Descriptions explain the existing presentation flows and distinguish creation,
@@ -472,9 +474,11 @@ document as a future version. Frames follow the
 - **Shares and exports carry what they can draw safely.** Typed blocks travel
   as today. A frame travels in an authenticated snapshot only when the viewer
   draws it under the same frame policy and the sharer acknowledges that markup
-  is shared as written, because the secret filter reads values, not markup.
-  HTML export writes frames as sandboxed `srcdoc` pages with the policy inside;
-  Markdown export writes the title. Public links stay out.
+  is shared as written, because the secret filter reads values, not markup;
+  this has shipped at share version 10 (see [Canvas](design/canvas.md#shares)).
+  Accepted, not yet shipped: HTML export writes frames as sandboxed `srcdoc`
+  pages with the policy inside. Markdown export writes the title. Public links
+  stay out.
 
 _Rationale:_ a `srcdoc` frame inherits the app policy (`script-src 'self'`),
 so a running frame needs a page the host serves, and a frame sandboxed without

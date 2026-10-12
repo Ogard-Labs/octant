@@ -345,8 +345,9 @@ version 6.
 
 ## Shares
 
-A share carries every block kind and field a Canvas holds except source ids
-and the design and action blocks it refuses (see the `design` block). A table
+A share carries every block kind and field a Canvas holds except source ids,
+a design's declared images, and the action block it refuses (see the `design`
+block). A table
 column keeps its number format and display, a table row leaves as its cells
 without the `id` comments anchor to, and a board keeps its own layout. Because
 the row id is the only Canvas version 13 field and a share drops it, a share at
@@ -355,7 +356,8 @@ carried the version-14 chart types, so it named blocks up to version 14, share
 version 8 carries the version-15 dashboard, so it named blocks up to version
 15, and share version 9 carries tabs, columns, diagram styles, and the Gantt
 view, so it names blocks up to version 19
-(`CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION`).
+(`CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION`). Share version 10 carries a design's
+frames and accompanies no Canvas version.
 Share documents version independently of Canvas documents: a treemap, a
 heatmap, a bar list, a chart's or a table column's number format, a table
 column's display, and a board's layout arrive with share version 3, and a
@@ -363,7 +365,8 @@ comparison matrix with share version 4, math with share version 5, the
 mockup catalog with share version 6, the funnel, radar, and sankey charts
 with share version 7 (whose blocks may name Canvas version 14), the dashboard
 with share version 8, and tabs, columns, a diagram's edge styles and tones,
-its group tones, and a plan's `gantt` view with share version 9, so a share
+its group tones, and a plan's `gantt` view with share version 9, and a
+design's frames with share version 10, so a share
 that declares an older version
 and carries one is refused as a future version.
 A `tabs` block has 2 to 12 panes, each a short label and the block ids it
@@ -573,10 +576,26 @@ each literal reference with a `data:` image before writing the page, so the
 frame still loads nothing; an image that is loading, missing, refused, too
 large, or not an image draws a labelled placeholder, and the agent's
 `preview` reports a `design-asset-unavailable` warning naming the block, the
-asset id, the reason, and the frames that name it, never the bytes. A share
-refuses a design, and Markdown or HTML export writes
-frame titles, not markup. A share also refuses an action block, whose command
-runs only on this host. Both refusals, and any block or field the share
+asset id, the reason, and the frames that name it, never the bytes. An
+authenticated snapshot carries a design's frames, static or running, from
+share version 10, as the author wrote them. The secret filter reads values,
+not markup, so a Canvas that holds a design is shared only when the sharer
+acknowledges that its markup is shared as written
+(`acknowledgedMarkupSharedAsWritten`); without it the share is refused as
+`consent-required`, and markup that holds a token or key in a recognisable
+shape is refused as `unsafe-payload` even then. A shared design carries no
+declared images: an asset names a Project file or an image job, which resolve
+only under this host's authority, so a frame that named one draws a
+placeholder. The snapshot viewer draws a shared design with the same block
+the live Canvas uses, so its frames get the same sandbox and page policy, and
+a reader that only knows share version 9 refuses the snapshot as a future
+version rather than drawing a frame any other way. A shared prototype runs
+from a page the host tickets on a share access that names it (`runDesign`):
+the access is decided and journaled like any read of the snapshot, the ticket
+is the page route's own single-use ticket, and the page is that snapshot's
+design. It waits for **Run**, as in the thread. Markdown or HTML export still
+writes frame titles, not markup. A share refuses an action block, whose
+command runs only on this host. That refusal, and any block or field the share
 contract does not carry, are checked before the snapshot is journaled and
 reach the owner as an `unsafe-payload` denial: the Canvas cannot be shared, not
 a malformed request. A device-size design, and any design that runs script, is

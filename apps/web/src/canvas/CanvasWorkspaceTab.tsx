@@ -932,11 +932,15 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
           <CanvasSharePanel
             canvasId={props.tab.canvasId}
             expectedSequence={expectedSequence}
+            holdsDesign={definition?.blocks.some((block) => block.kind === "design") === true}
             onOpen={handleOpenShare}
             onRevoke={handleRevokeShare}
             onShare={handleShare}
             overview={shares}
             versionId={selectedVersionId}
+            {...(props.client?.sharedDesignPageUrl === undefined
+              ? {}
+              : { resolveDesignPage: props.client.sharedDesignPageUrl })}
           />
         ) : null}
       </OctantDialog>
