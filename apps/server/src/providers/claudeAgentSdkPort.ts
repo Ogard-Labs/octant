@@ -490,7 +490,9 @@ export interface ClaudeAgentSdkQueryLike extends AsyncIterable<unknown> {
    * Experimental control request (`get_usage`). The name is the process's;
    * Octant only calls it through `readPlanUsage`.
    */
-  readonly usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET?: () => Promise<unknown>;
+  readonly usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET?: (options?: {
+    readonly skipBehaviors?: boolean;
+  }) => Promise<unknown>;
   readonly close: () => void;
 }
 
@@ -564,13 +566,11 @@ async function askPlanUsage(query: ClaudeAgentSdkQueryLike): Promise<unknown> {
   }
   let timer: number | undefined;
   try {
+    // Call through the query. The process method uses its receiver for the
+    // control request; extracting it makes `this` undefined and the catch
+    // below would hide that as a missing answer.
     return await Promise.race([
-      // Called on the query, never detached. It is a method that reads `this`:
-      // detached, it rejected with "Cannot read properties of undefined
-      // (reading 'request')" before asking the process anything, and the
-      // catch below turned every reading into "unavailable". It takes no
-      // arguments in the pinned SDK.
-      query.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET(),
+      query.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET({ skipBehaviors: true }),
       new Promise<undefined>((resolve) => {
         timer = setTimeout(resolve, PLAN_USAGE_TIMEOUT_MS);
       }),

@@ -38,6 +38,7 @@ export class ProviderAccountPlanUsageStore {
   readonly #filePath: string;
   readonly #entries = new Map<string, PersistedSnapshot>();
   #loaded = false;
+  #persistTail: Promise<void> = Promise.resolve();
 
   constructor(filePath: string) {
     this.#filePath = filePath;
@@ -183,14 +184,18 @@ export class ProviderAccountPlanUsageStore {
   }
 
   async #persist(): Promise<void> {
-    const body = JSON.stringify({
-      version: SCHEMA_VERSION,
-      entries: [...this.#entries.values()],
-    } satisfies PersistedFile);
-    await mkdir(dirname(this.#filePath), { recursive: true });
-    const temporary = `${this.#filePath}.tmp`;
-    await writeFile(temporary, body, "utf8");
-    await rename(temporary, this.#filePath);
+    const next = this.#persistTail.then(async () => {
+      const body = JSON.stringify({
+        version: SCHEMA_VERSION,
+        entries: [...this.#entries.values()],
+      } satisfies PersistedFile);
+      await mkdir(dirname(this.#filePath), { recursive: true });
+      const temporary = `${this.#filePath}.tmp`;
+      await writeFile(temporary, body, "utf8");
+      await rename(temporary, this.#filePath);
+    });
+    this.#persistTail = next.catch(() => undefined);
+    await next;
   }
 
   #bound(): void {
