@@ -307,8 +307,9 @@ agent asks for your theme.
 - A deck shows **Present** instead. Use the arrow buttons, or the left and
   right arrow keys, to move between slides.
 - Some designs react to taps without changing screen, such as a card you can
-  select or a reminder you can tick. That is all they can do: a design runs no
-  script, loads nothing from the internet, and has no links that leave it.
+  select or a reminder you can tick. That is all an ordinary design can do: it
+  runs no script, loads nothing from the internet, and has no links that leave
+  it. A prototype, below, is the one kind that runs script.
   Pictures in it are drawn by the agent, or are real images it names.
 - Ask for a working prototype, such as a checkout with a cart you can fill,
   and the agent can make a design that runs its own script. Its header

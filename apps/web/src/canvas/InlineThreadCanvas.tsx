@@ -299,7 +299,11 @@ export function InlineThreadCanvas(props: InlineThreadCanvasProps) {
             role="region"
             tabIndex={0}
           >
-            <CanvasView input={loaded.definition} placement="thread" />
+            <CanvasView
+              input={loaded.definition}
+              placement="thread"
+              {...(designRunRuntime === undefined ? {} : { designRunRuntime })}
+            />
           </div>
         </div>
       ) : (

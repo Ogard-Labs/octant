@@ -623,14 +623,17 @@ function RunningDesignBlock({
     [block.blockId, runtime],
   );
 
-  // A new version is a new page; the sidebar starts it again on its own.
+  // A new version is a new page; the sidebar starts it again on its own. The
+  // page is what the design says, not which object says it: the same version
+  // read again arrives as a new object, and must not stop a running page.
   const runsOnOpen = runtime?.runsOnOpen === true;
+  const page = useMemo(() => JSON.stringify(block), [block]);
   useEffect(() => {
     generation.current += 1;
     setState({ kind: "idle" });
     setErrors([]);
     if (runsOnOpen) void run(false);
-  }, [block, run, runsOnOpen]);
+  }, [page, run, runsOnOpen]);
 
   const stop = useCallback((why: RunStopReason) => {
     generation.current += 1;
