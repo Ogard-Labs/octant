@@ -1,7 +1,7 @@
 import { HarnessRetryEventFields } from "./harnessRetry";
 import { ProviderChildActivityEvent } from "./providers";
 import { Schema } from "effect";
-import { AgentRunResultDeliveryMark } from "./agentRun";
+import { AgentRunResultDeliveryMark, MAX_AGENT_RUN_ADMITTED_CONTEXT_BLOCKS } from "./agentRun";
 import { ExtensionSelection } from "./extensions";
 import { AppleActionRequest } from "./appleToolchain";
 import { AndroidEmulatorRequest } from "./androidToolchain";
@@ -25,6 +25,7 @@ import {
   CodeTerminalId,
   CodeTestRunId,
   CodeThread,
+  CodeThreadForkOrigin,
   CodeThreadId,
   CreateManagedCodeThreadCommand,
   MAX_CODE_TURN_ATTACHMENTS,
@@ -1330,8 +1331,206 @@ const ProviderSessionReadyEvent = Schema.Struct({
   resumeCursor: Schema.optional(ProviderResumeCursor),
 }).annotations(strict);
 
+const nonNegativeCount = Schema.Int.pipe(Schema.nonNegative());
+
+/**
+ * What a handoff left out of the conversation it carried, by cause. Every
+ * count is explicit so a reader never mistakes a short handoff for a short
+ * conversation: purged bodies are `missingBodies`, bodies over the read bound
+ * are `oversizedBodies`, and replies a turn never finished are
+ * `unfinishedReplies`.
+ */
+export const CodeContextHandoffOmissions = Schema.Struct({
+  earlierMessages: nonNegativeCount,
+  unfinishedReplies: nonNegativeCount,
+  missingBodies: nonNegativeCount,
+  oversizedBodies: nonNegativeCount,
+  emptyBodies: nonNegativeCount,
+  attachments: nonNegativeCount,
+  truncatedMessages: nonNegativeCount,
+  truncatedCharacters: nonNegativeCount,
+  sourceTruncatedMessages: nonNegativeCount,
+}).annotations(strict);
+export type CodeContextHandoffOmissions = typeof CodeContextHandoffOmissions.Type;
+
+const handoffMessages = Schema.Int.pipe(
+  Schema.between(1, MAX_AGENT_RUN_ADMITTED_CONTEXT_BLOCKS - 1),
+);
+
+/**
+ * The disclosed summary of a provider-switch handoff, as the conversation page
+ * shows it beside the turn that carried it. The handed-over text itself stays
+ * in the content store the event names.
+ */
+const ProviderSwitchHandoff = Schema.Struct({
+  reason: Schema.Literal("provider-switch"),
+  previousProviderInstanceId: ProviderInstanceId,
+  previousModelId: ProviderModelId,
+  /** Conversation messages the handoff carried, not counting its summary. */
+  messages: handoffMessages,
+  omissions: CodeContextHandoffOmissions,
+  /** Whether the thread had taken in outside content when the handoff was read. */
+  externalContentIngested: Schema.Boolean,
+  /**
+   * Present when the thread is a fork: the handoff also carried the source's
+   * conversation through the fork point, ahead of the thread's own turns.
+   * `messages` and `omissions` above cover both; these say how much of the
+   * carried text came from the source.
+   */
+  inherited: Schema.optional(
+    Schema.Struct({
+      forkedFrom: CodeThreadForkOrigin,
+      /** Carried messages that came from the source; may be 0 after the budget. */
+      messages: Schema.Int.pipe(Schema.between(0, MAX_AGENT_RUN_ADMITTED_CONTEXT_BLOCKS - 1)),
+      /** Whether the source thread had taken in outside content when it was read. */
+      externalContentIngested: Schema.Boolean,
+    }).annotations(strict),
+  ),
+}).annotations(strict);
+
+/**
+ * A fork's first turn read the source thread's conversation through the fork
+ * point as text, because its provider could not take up the source's own
+ * session there. Each carried message names the provider and model that wrote
+ * it, so the summary does not repeat them.
+ */
+const ForkTextHandoff = Schema.Struct({
+  reason: Schema.Literal("fork"),
+  forkedFrom: CodeThreadForkOrigin,
+  messages: handoffMessages,
+  omissions: CodeContextHandoffOmissions,
+  /** Whether the source thread had taken in outside content when it was read. */
+  externalContentIngested: Schema.Boolean,
+}).annotations(strict);
+
+/**
+ * A fork's first turn resumed a copy of the source's own provider session cut
+ * at the fork point, so the provider kept its messages and tool activity
+ * rather than reading a text excerpt.
+ */
+const ForkNativeSessionHandoff = Schema.Struct({
+  reason: Schema.Literal("fork-native-session"),
+  forkedFrom: CodeThreadForkOrigin,
+}).annotations(strict);
+
+/**
+ * The most fork merges one turn carries; any later ones wait for the next
+ * turn. Each merge is a full bounded handoff (up to 24 blocks of 4,000
+ * characters), so a turn never takes an unbounded pile of them at once.
+ */
+export const MAX_CODE_FORK_MERGE_BACKS_PER_TURN = 2;
+
+/**
+ * The disclosed summary of a fork's conversation merged back into the thread
+ * it was forked from: the fork's own turns after the fork point, or after its
+ * previous merge back, through the named fork turn. Each carried message names
+ * the provider and model that wrote it. Only conversation moves this way; the
+ * fork's file changes reach the source only through Git review.
+ */
+export const CodeForkMergeBack = Schema.Struct({
+  forkThreadId: CodeThreadId,
+  /** The fork turn the previous merge back ended at; absent for the first one. */
+  afterOperationId: Schema.optional(CodeOperationId),
+  throughOperationId: CodeOperationId,
+  messages: handoffMessages,
+  omissions: CodeContextHandoffOmissions,
+  /** Whether the fork had taken in outside content when it was read. */
+  externalContentIngested: Schema.Boolean,
+}).annotations(strict);
+export type CodeForkMergeBack = typeof CodeForkMergeBack.Type;
+
+/** What a turn started its session with that it did not write itself, by cause. */
+export const CodeConversationTurnHandoff = Schema.Union(
+  ProviderSwitchHandoff,
+  ForkTextHandoff,
+  ForkNativeSessionHandoff,
+);
+export type CodeConversationTurnHandoff = typeof CodeConversationTurnHandoff.Type;
+
+/**
+ * A turn moved the thread to a provider that cannot take up the previous
+ * provider's session, so it starts a new session with a bounded, attributed
+ * text handoff of the thread's own earlier conversation. Journaled on the
+ * turn's operation before the provider is sent anything, so the handoff a
+ * turn ran with is never re-chosen: a recovered start reads this record back.
+ * The two `false` fields are fixed: Octant never carries a provider's native
+ * session or hidden reasoning across providers, and says so in the record.
+ */
+const ProviderSwitchHandoffAttachedEvent = Schema.Struct({
+  ...ProviderSwitchHandoff.fields,
+  kind: Schema.Literal("context-handoff-attached"),
+  previousSessionId: ProviderSessionId,
+  providerInstanceId: ProviderInstanceId,
+  modelId: ProviderModelId,
+  /** The handed-over context blocks, as JSON, in the content store. */
+  content: CodeEvidenceReference,
+  nativeSessionTransferred: Schema.Literal(false),
+  hiddenReasoningTransferred: Schema.Literal(false),
+}).annotations(strict);
+
+/**
+ * A fork's first turn started a new session with the source's conversation
+ * through the fork point as text. Journaled like a provider switch's handoff,
+ * before the prompt is sent, and read back by a recovered start.
+ */
+const ForkTextHandoffAttachedEvent = Schema.Struct({
+  ...ForkTextHandoff.fields,
+  kind: Schema.Literal("context-handoff-attached"),
+  providerInstanceId: ProviderInstanceId,
+  modelId: ProviderModelId,
+  content: CodeEvidenceReference,
+  nativeSessionTransferred: Schema.Literal(false),
+  hiddenReasoningTransferred: Schema.Literal(false),
+}).annotations(strict);
+
+/**
+ * A fork's first turn started from a copy of the source's own provider session
+ * through the fork point. No text was handed over, so there is no content.
+ */
+const ForkNativeSessionHandoffAttachedEvent = Schema.Struct({
+  ...ForkNativeSessionHandoff.fields,
+  kind: Schema.Literal("context-handoff-attached"),
+  providerInstanceId: ProviderInstanceId,
+  modelId: ProviderModelId,
+  nativeSessionTransferred: Schema.Literal(true),
+}).annotations(strict);
+
+/**
+ * A person merged a fork's conversation back into the thread it was forked
+ * from. Journaled on that source thread, under an operation of its own, before
+ * anything is sent: the source's next turn carries it, and records that with
+ * `fork-context-delivered`. The handed-over text stays in the content store.
+ */
+const ForkContextMergedEvent = Schema.Struct({
+  ...CodeForkMergeBack.fields,
+  kind: Schema.Literal("fork-context-merged"),
+  content: CodeEvidenceReference,
+  nativeSessionTransferred: Schema.Literal(false),
+  hiddenReasoningTransferred: Schema.Literal(false),
+}).annotations(strict);
+
+/**
+ * The source turn that carried a merged fork's conversation, journaled on that
+ * turn's operation before the prompt is sent. A recovered start reads these
+ * back rather than choosing pending merges again.
+ */
+const ForkContextDeliveredEvent = Schema.Struct({
+  ...CodeForkMergeBack.fields,
+  kind: Schema.Literal("fork-context-delivered"),
+  mergeOperationId: CodeOperationId,
+}).annotations(strict);
+
+const ContextHandoffAttachedEvent = Schema.Union(
+  ProviderSwitchHandoffAttachedEvent,
+  ForkTextHandoffAttachedEvent,
+  ForkNativeSessionHandoffAttachedEvent,
+);
+
 export const CodeOperationEvent = Schema.Union(
   ProviderSessionReadyEvent,
+  ContextHandoffAttachedEvent,
+  ForkContextMergedEvent,
+  ForkContextDeliveredEvent,
   ConversationTurnStartedEvent,
   ConversationTurnChangedFilesEvent,
   OperationStateEvent,
@@ -1479,6 +1678,20 @@ export const CodeConversationTurn = Schema.Struct({
   ),
   /** Whether the turn journaled more steps than `steps` carries. */
   stepsTruncated: Schema.optional(Schema.Boolean),
+  /**
+   * What this turn's new provider session started with beyond its own prompt:
+   * a provider switch's text handoff, or a fork's text handoff or copied
+   * native session. Absent on every turn that continued its session or
+   * started an unforked thread.
+   */
+  handoff: Schema.optional(CodeConversationTurnHandoff),
+  /**
+   * Forks of this thread whose conversation this turn carried because a
+   * person merged it back, oldest first. Absent on every other turn.
+   */
+  forkMergeBacks: Schema.optional(
+    Schema.Array(CodeForkMergeBack).pipe(Schema.maxItems(MAX_CODE_FORK_MERGE_BACKS_PER_TURN)),
+  ),
   /**
    * What changed in the checkout while this turn ran. Absent when the host
    * could not observe it: a Plan turn, a checkout it could not read, a turn

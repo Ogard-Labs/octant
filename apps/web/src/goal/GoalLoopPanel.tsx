@@ -81,8 +81,9 @@ export function GoalLoopPanel(props: GoalLoopPanelProps) {
       <section aria-label="Goal loop" className="goal-loop">
         <h4 className="goal-loop__title">Work on this on its own</h4>
         <p className="goal-loop__note">
-          Each round is an ordinary turn in this thread, checkpointed first. It stops at the budget,
-          at any approval, and if this thread&rsquo;s access widens.
+          Each round is an ordinary turn in this thread. A folder has no checkpoint to go back to,
+          so every round asks before each edit. It stops at the budget, at any approval, and if this
+          thread&rsquo;s access widens.
         </p>
         <OctantButton
           disabled={busy}

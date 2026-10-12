@@ -147,6 +147,13 @@ import { useEffect, useId, useMemo, useRef, useState } from "react";
 
 type ThreadGroupId = "recents" | "all" | "unfiled";
 
+/** Work-only empty-state hint when the other visible mode already has Projects. */
+interface OtherModeProjectsHint {
+  readonly message: string;
+  readonly actionLabel: string;
+  readonly onSwitch: () => void;
+}
+
 /** Thread rows a Project or the Chats group shows before folding behind Show more. */
 const SIDEBAR_THREAD_LIMIT = 8;
 type ProjectSort = "manual" | "updated" | "name";
@@ -317,6 +324,12 @@ export interface ProjectSidebarSectionProps {
     readonly view: "activity" | "completed";
     readonly sequence: number;
   }>;
+  /**
+   * Work-only: when this sidebar has no Projects of its own but another mode
+   * does, replace the blank "No Projects yet" line. The section does not
+   * count the other mode's Projects; the window already holds that fact.
+   */
+  readonly otherModeProjectsHint?: OtherModeProjectsHint;
 }
 
 export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
@@ -627,6 +640,9 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
           ? { addProjectLabel: props.addProjectLabel }
           : {})}
         {...(options.allowAdd === true ? { onSortChange: setProjectSort } : {})}
+        {...(options.allowAdd === true && props.otherModeProjectsHint !== undefined
+          ? { otherModeProjectsHint: props.otherModeProjectsHint }
+          : {})}
         onToggleProject={toggleProject}
         {...(props.onSelectThread === undefined ? {} : { onSelectThread: props.onSelectThread })}
         {...(props.threadActions === undefined ? {} : { threadActions: props.threadActions })}
@@ -746,7 +762,11 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
           </SidebarRowPropertiesContext.Provider>
         ) : (
           <>
-            {viewGrouping === "project"
+            {/* Grouping builds no sections when this mode has no Projects, so
+                the empty affordance — and the Code-mode hint — would disappear.
+                A saved view can hide every Project while the mode still has
+                some; that is not "No Projects yet." */}
+            {viewGrouping === "project" || props.projects.length === 0
               ? [
                   renderProjectGroup("Pinned", pinned),
                   renderProjectGroup("Projects", ordinary, { allowAdd: true }),
@@ -911,6 +931,7 @@ function ProjectGroup(props: {
   ) => void;
   readonly onProjectOpen: (project: ProjectSummary) => void;
   readonly onSortChange?: (sort: ProjectSort) => void;
+  readonly otherModeProjectsHint?: OtherModeProjectsHint;
   readonly onSelectThread?: (threadId: string) => void;
   readonly threadActions?: ThreadRowActions;
   readonly onRenameThread?: (threadId: string, title: string) => void;
@@ -974,12 +995,27 @@ function ProjectGroup(props: {
       </div>
       {props.projects.length === 0 ? (
         <p className="project-nav__empty" role="status">
-          No Projects yet.
-          {props.onAddProject === undefined ? null : (
+          {props.otherModeProjectsHint === undefined ? (
             <>
-              {" "}
-              <OctantButton onClick={props.onAddProject} type="button" variant="link">
-                {props.addProjectLabel === "chat-project" ? "Start one" : "Add a folder"}
+              No Projects yet.
+              {props.onAddProject === undefined ? null : (
+                <>
+                  {" "}
+                  <OctantButton onClick={props.onAddProject} type="button" variant="link">
+                    {props.addProjectLabel === "chat-project" ? "Start one" : "Add a folder"}
+                  </OctantButton>
+                </>
+              )}
+            </>
+          ) : (
+            <>
+              {props.otherModeProjectsHint.message}{" "}
+              <OctantButton
+                onClick={props.otherModeProjectsHint.onSwitch}
+                type="button"
+                variant="link"
+              >
+                {props.otherModeProjectsHint.actionLabel}
               </OctantButton>
             </>
           )}

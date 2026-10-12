@@ -8,10 +8,9 @@ tracker; this document records direction.
 
 ## Now — technical preview
 
-The first release is an Apple Silicon technical preview. Declared releases
-are signed with a Developer ID, notarized, and update themselves. A local
-package is unsigned because signing needs maintainer credentials.
-Everything here is merged or being hardened for it.
+What the first release includes and defers is stated once, in the
+[Current Release Boundary](../AGENTS.md#current-release-boundary). Everything
+here is merged or being hardened for it.
 
 - **Chat, Work, and Code as server-enforced modes** — virtual Chat Projects, one
   confined root per Work Project, one confined directory per Code Project,
@@ -36,6 +35,13 @@ Everything here is merged or being hardened for it.
 - **Unified subagents** — managed children run as in-process provider sessions
   with clamped authority, isolated worktrees, hierarchy panel, and durable
   results.
+- **Agent-to-agent messaging** — a Code thread's agent can leave a bounded
+  message for another thread of the same Project through
+  `octant_agent_message`; the host delivers it as framed, untrusted data at
+  the start of that thread's next turn, and the Agents center shows the
+  bounds. Design and
+  [threat model](security/agent-to-agent-messaging-threat-model.md) approved
+  2026-10-12; messaging across Projects, modes, or child runs is not offered.
 - **Remote access** — pairing, revocable device keys, HTTPS private listener on
   LAN or Tailscale, fail-closed remote route policy, paired-browser client.
 - **Shell and appearance** — borderless macOS shell, dockable tabs and splits,
@@ -44,8 +50,10 @@ Everything here is merged or being hardened for it.
 - **Routines (Automation Center)** — host-local, Project-bound schedules that
   start ordinary Work or Code threads under a capped authority, with durable
   occurrence recovery and no cloud wake.
-- **Operations** — usage dashboard, optional Project and thread token spend
-  ceilings with atomic reservation at turn admission, diagnostics export,
+- **Operations** — usage dashboard, optional Project and thread spend
+  ceilings over tokens, turns, run time, and money, checked at turn admission
+  (tokens by atomic reservation; money, turns, and run time against recorded
+  and in-flight spend), thread retention windows and confirmed purge, diagnostics export,
   first-run onboarding, packaged desktop smoke scripts, and What's new from
   bundled notes plus a signed summary when an update is offered.
 
@@ -62,6 +70,9 @@ Hardening in progress for the preview:
 - Internal TestFlight packaging for the existing mobile remote client: signing,
   protected CI, Apple processing, and real-device acceptance are separate
   gates under [0147](decisions/0147-internal-testflight-carries-the-existing-remote-client.md).
+- Four shipped features take bug fixes only until the preview ships: artifact
+  replica sync, the artifact mirror, model role slots, and local provider usage
+  history.
 
 ## Next
 
@@ -84,17 +95,16 @@ Hardening in progress for the preview:
   - First bundled plugins: an appearance pack (Octant theme preset) and
     structured preview viewers, as proof those points work. Extracting the
     thread board and GitHub behind typed server ports remains later sequenced
-    work. Linear is not an extraction: it is added as a bundled-off plugin
-    through the Integration kind and must not be compiled into the host first.
-    The shared integration port and a renderer seam that actually renders
-    plugin Settings sections and sidebar destinations land before Linear.
-    Linear Settings OAuth now uses those ports as a bundled-off plugin; tokens
-    stay in the host credential service.
-- **Linear integration** — the first bundled-off integration plugin, after
-  those host seams: Settings connection (OAuth tokens stored only as host
-  credential-service opaque refs, never in plugin state) is in; read-only issue
-  browse in Code first, then issue intake and delivery-target sync, with the
-  same authority model as GitHub. Chat or Work Linear browsing is a separate
+    work. Linear is not an extraction: it is a bundled plugin through the
+    Integration kind, built on the shared integration port and the renderer
+    seam for plugin Settings sections and sidebar destinations; tokens stay in
+    the host credential service.
+- **Linear integration** — the first bundled Integration plugin, enabled by
+  default like GitHub; nothing reaches Linear until the person connects an
+  account. Settings connection (OAuth tokens stored only as host
+  credential-service opaque refs, never in plugin state), read-only issue
+  browse in Code, and issue intake through `Create from…` are in;
+  delivery-target sync is next, with the same authority model as GitHub. Chat or Work Linear browsing is a separate
   host mode-policy change, not a plugin side effect. Not a connector/OAuth
   marketplace.
 - **Headless host and multi-host federation** — run the server and web client
@@ -102,12 +112,10 @@ Hardening in progress for the preview:
   hosts, show an `All Hosts` view, and choose the destination host per new
   thread. Hosts never trust each other; offline host data is stale and
   read-only.
-  - The first isolation tracer is in progress: a Linux Station owns one gVisor
-    execution capsule per Code thread or writing child, with independent clones,
-    fixed-size private disk images, resource admission, deny-default networking,
-    reviewed bundle export, and explicit release. Product thread wiring,
-    Station provisioning, Devices and Machines navigation, and E2B Disposable
-    Desktops remain separate follow-up deliveries.
+  - Per-thread isolation on a Linux Station is not built: Code threads on a
+    Linux host run under the same Bubblewrap confinement as every other
+    confined process. Station provisioning, Devices and Machines navigation,
+    and E2B Disposable Desktops remain separate follow-up deliveries.
 - **Canvas artifacts** — provider-neutral interactive reports, dashboards, and
   agent controls with journaled lifecycle; sharing only after secure local use.
 - **Native agent harness** — Octant-owned agent loop for direct and local
@@ -117,7 +125,7 @@ Hardening in progress for the preview:
 
 ## Later
 
-Explicitly deferred by the current release boundary, except where a later
+Explicitly deferred by the [Current Release Boundary](../AGENTS.md#current-release-boundary), except where a later
 decision opens a slice. Each remaining item needs its own design before work
 starts.
 
@@ -146,14 +154,8 @@ starts.
 - **Provider identity extensions** — Azure Entra ID/OAuth and full Amazon
   Bedrock Converse/IAM adapters beyond the API-key paths. Design:
   [enterprise-provider-identity.md](enterprise-provider-identity.md).
-- **Remote SSH development environments**, **live guest sharing**, **thread
-  retention and purge**, and **agent-to-agent messaging** (authority model in
-  [decisions/0063-agent-to-agent-messaging.md](decisions/0063-agent-to-agent-messaging.md);
-  implementation waits on acceptance) — each waits on the foundation named in
-  its own design note.
-- **Monetary spend ceilings** — token ceilings are enforced
-  ([0060](decisions/0060-usage-spend-ceilings.md)); money waits until scoped
-  pricing metadata is actually configured on a host.
+- **Remote SSH development environments** and **live guest sharing** — each
+  waits on the foundation named in its own design note.
 
 ## Not planned
 

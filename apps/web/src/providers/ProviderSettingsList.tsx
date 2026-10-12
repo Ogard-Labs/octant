@@ -9,8 +9,11 @@ import type {
   ProviderModelId,
   ProviderObservedState,
 } from "@octant/contracts";
+import { ProviderRuntimeIntegrationFacts } from "./ProviderRuntimeIntegrationFacts";
 import {
   canLocateRuntimeBinary,
+  claudeAccountUsesAssignedDirectory,
+  codexAccountUsesAssignedDirectory,
   isImageProfileDriverKind,
   supportsProviderCliUpdate,
 } from "@octant/domain";
@@ -24,11 +27,13 @@ import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
 import { SettingRow, SettingsSection } from "../settings/primitives";
+import { ProviderUsageLimitsPanel } from "../usage/ProviderUsageLimitsPanel";
 import { ProviderGlyph } from "./ProviderGlyph";
 import {
   AnthropicConfigurationForm,
   BflImageConfigurationForm,
   ClaudeConfigurationForm,
+  CodexConfigurationForm,
   DevinConfigurationForm,
   FoundryConfigurationForm,
   GeminiImageConfigurationForm,
@@ -51,6 +56,7 @@ import {
   VibeConfigurationForm,
 } from "./ProviderSettingsConfiguration";
 import { credentialStatusLabel, useCredentialStatus } from "./ProviderSettingsCredentials";
+import { ProviderApiKeyEditor, acceptsApiKeyPool } from "./ProviderApiKeyEditor";
 import {
   capabilityLabels,
   driverLabel,
@@ -80,7 +86,9 @@ export type ProviderSettingsListProps = Pick<
   | "onRename"
   | "onChangeBinary"
   | "onLocateBinary"
+  | "usageLimitsClient"
   | "onChangeClaudeConfiguration"
+  | "onChangeCodexConfiguration"
   | "onChangeDevinConfiguration"
   | "onChangeKiloConfiguration"
   | "onChangePiConfiguration"
@@ -105,7 +113,6 @@ export type ProviderSettingsListProps = Pick<
   | "onProviderCredentialStatus"
   | "onClearProviderCredential"
   | "onProviderOAuth"
-  | "onClaudeHelpers"
   | "onBeginProviderAuthentication"
   | "onOpenExternalUrl"
   | "onCompleteProviderAuthentication"
@@ -239,6 +246,11 @@ export function ProviderSettingsList(props: ProviderSettingsListProps) {
         count={ordered.length}
         credentialManagementAvailable={props.credentialManagementAvailable}
         index={index}
+        extraClaudeAccount={claudeAccountUsesAssignedDirectory(ordered, instance)}
+        extraCodexAccount={codexAccountUsesAssignedDirectory(ordered, instance)}
+        {...(props.usageLimitsClient === undefined
+          ? {}
+          : { usageLimitsClient: props.usageLimitsClient })}
         instance={instance}
         key={instance.id}
         {...(props.discoverySnapshot === undefined
@@ -250,6 +262,7 @@ export function ProviderSettingsList(props: ProviderSettingsListProps) {
         onChangeBinary={props.onChangeBinary}
         {...(props.onLocateBinary === undefined ? {} : { onLocateBinary: props.onLocateBinary })}
         onChangeClaudeConfiguration={props.onChangeClaudeConfiguration}
+        onChangeCodexConfiguration={props.onChangeCodexConfiguration}
         onChangeMistralVibeConfiguration={props.onChangeMistralVibeConfiguration}
         onChangeGrokConfiguration={props.onChangeGrokConfiguration}
         onChangeGooseConfiguration={props.onChangeGooseConfiguration}
@@ -273,7 +286,6 @@ export function ProviderSettingsList(props: ProviderSettingsListProps) {
         onChangeIdeogramImageConfiguration={props.onChangeIdeogramImageConfiguration}
         onClearProviderCredential={props.onClearProviderCredential}
         {...(props.onProviderOAuth === undefined ? {} : { onProviderOAuth: props.onProviderOAuth })}
-        {...(props.onClaudeHelpers === undefined ? {} : { onClaudeHelpers: props.onClaudeHelpers })}
         onBeginProviderAuthentication={props.onBeginProviderAuthentication}
         onOpenExternalUrl={props.onOpenExternalUrl}
         onCompleteProviderAuthentication={props.onCompleteProviderAuthentication}
@@ -557,6 +569,9 @@ function AgentEligibleModelsControls(props: {
 }
 
 interface ProviderRowProps {
+  readonly extraClaudeAccount: boolean;
+  readonly extraCodexAccount: boolean;
+  readonly usageLimitsClient?: ProviderSettingsViewProps["usageLimitsClient"];
   readonly instance: ProviderInstance;
   readonly observed?: ProviderObservedState;
   readonly discoverySnapshot?: DiscoverySnapshot;
@@ -572,6 +587,7 @@ interface ProviderRowProps {
   readonly onChangeBinary: ProviderSettingsViewProps["onChangeBinary"];
   readonly onLocateBinary?: ProviderSettingsViewProps["onLocateBinary"];
   readonly onChangeClaudeConfiguration: ProviderSettingsViewProps["onChangeClaudeConfiguration"];
+  readonly onChangeCodexConfiguration: ProviderSettingsViewProps["onChangeCodexConfiguration"];
   readonly onChangeDevinConfiguration: ProviderSettingsViewProps["onChangeDevinConfiguration"];
   readonly onChangeKiloConfiguration: ProviderSettingsViewProps["onChangeKiloConfiguration"];
   readonly onChangePiConfiguration: ProviderSettingsViewProps["onChangePiConfiguration"];
@@ -596,7 +612,6 @@ interface ProviderRowProps {
   readonly onProviderCredentialStatus: ProviderSettingsViewProps["onProviderCredentialStatus"];
   readonly onClearProviderCredential: ProviderSettingsViewProps["onClearProviderCredential"];
   readonly onProviderOAuth?: ProviderSettingsViewProps["onProviderOAuth"];
-  readonly onClaudeHelpers?: ProviderSettingsViewProps["onClaudeHelpers"];
   readonly onBeginProviderAuthentication: ProviderSettingsViewProps["onBeginProviderAuthentication"];
   readonly onOpenExternalUrl?: ProviderSettingsViewProps["onOpenExternalUrl"];
   readonly onCompleteProviderAuthentication: ProviderSettingsViewProps["onCompleteProviderAuthentication"];
@@ -672,9 +687,8 @@ function ProviderRow(props: ProviderRowProps) {
         : "The latest scan did not check this provider — you can still enable it; the host checks the binary first."
       : undefined;
   const isCli =
-    props.instance.driverKind === "codex" ||
-    props.instance.driverKind === "opencode" ||
-    props.instance.driverKind === "kimi-code";
+    props.instance.driverKind === "opencode" || props.instance.driverKind === "kimi-code";
+  const isCodex = props.instance.driverKind === "codex";
   const isClaude = props.instance.driverKind === "claude";
   const isVibe = props.instance.driverKind === "mistral-vibe";
   const isGrok = props.instance.driverKind === "grok";
@@ -733,7 +747,7 @@ function ProviderRow(props: ProviderRowProps) {
       ? "ACP"
       : isPi || isOhMyPi
         ? "RPC"
-        : isCli
+        : isCli || isCodex
           ? "CLI"
           : isImageProfile
             ? "Image"
@@ -896,6 +910,16 @@ function ProviderRow(props: ProviderRowProps) {
                 <p className="provider-card__credential-status">
                   Credential: <strong>{credentialStatusLabel(credential.status)}</strong>
                 </p>
+              ) : null}
+              {usesCredential && acceptsApiKeyPool(props.instance) ? (
+                <ProviderApiKeyEditor
+                  disabled={disabled}
+                  displayName={name}
+                  instanceId={props.instance.id}
+                  onChanged={(status) =>
+                    credential.finishMutation(credential.beginMutation(), true, status)
+                  }
+                />
               ) : null}
             </section>
           ) : null}
@@ -1100,12 +1124,18 @@ function ProviderRow(props: ProviderRowProps) {
                   credential={credential}
                   credentialManagementAvailable={props.credentialManagementAvailable}
                   disabled={disabled}
+                  extraAccount={props.extraClaudeAccount}
                   instance={props.instance}
                   key={`claude:${props.instance.version}`}
                   onChange={props.onChangeClaudeConfiguration}
-                  {...(props.onClaudeHelpers === undefined
-                    ? {}
-                    : { onClaudeHelpers: props.onClaudeHelpers })}
+                />
+              ) : isCodex ? (
+                <CodexConfigurationForm
+                  disabled={disabled}
+                  extraAccount={props.extraCodexAccount}
+                  instance={props.instance}
+                  key={`codex:${props.instance.version}`}
+                  onChange={props.onChangeCodexConfiguration}
                 />
               ) : isVibe ? (
                 <VibeConfigurationForm
@@ -1542,6 +1572,13 @@ function ProviderRow(props: ProviderRowProps) {
                         ? "Anthropic API key"
                         : "Claude subscription"}
                     </span>
+                    {props.usageLimitsClient === undefined ? null : (
+                      <ProviderUsageLimitsPanel
+                        client={props.usageLimitsClient}
+                        compact
+                        instances={[props.instance]}
+                      />
+                    )}
                   </div>
                 )}
                 {!isVibe ? null : (
@@ -1683,6 +1720,12 @@ function ProviderRow(props: ProviderRowProps) {
                     Project” does not extend provider authority.
                   </p>
                 ) : null}
+                {props.observed === undefined ? null : (
+                  <ProviderRuntimeIntegrationFacts
+                    instanceId={String(props.instance.id)}
+                    observed={props.observed}
+                  />
+                )}
                 {props.observed === undefined ? null : (
                   <section
                     aria-labelledby={`capabilities-${props.instance.id}`}

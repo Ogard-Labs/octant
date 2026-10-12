@@ -48,6 +48,7 @@ import {
   decideCompleteThread,
   decideSnoozeThread,
 } from "@octant/domain/thread-completion-policy";
+import { isRoutineHostScope } from "../routineHostScope";
 import type {
   CompletedThreadArchiveInput,
   CompletedThreadArchiveOutcome,
@@ -445,10 +446,13 @@ export class WorkThreadService {
           createdAt: decodeTimestamp(this.#clock()),
           updatedAt: decodeTimestamp(this.#clock()),
         });
-        this.#append(created.id, 0, "work.thread-created@1", {
-          kind: "thread-created",
-          thread: created,
-        });
+        this.#append(
+          created.id,
+          0,
+          "work.thread-created@1",
+          { kind: "thread-created", thread: created },
+          isRoutineHostScope(authenticatedWindowId) ? "system" : "local-user",
+        );
         this.#projection.apply({ kind: "thread-created", thread: created });
         if (preparedIssue.status === "ready" && command.issueContext !== undefined) {
           try {

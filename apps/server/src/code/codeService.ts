@@ -1,5 +1,10 @@
 import { unsupportedModelOptionValues } from "@octant/domain";
 import {
+  CODE_FORK_HANDOFF_REFUSALS,
+  selectCodeForkHandoff,
+  type CodeForkConversationReader,
+} from "./codeForkHandoff";
+import {
   decodeGitHistoryQuery,
   type GitHistoryQuery,
   type GitHistoryResult,
@@ -43,6 +48,7 @@ import {
   type CodeCommand,
   type CodeCommandResult,
   type ForkCodeThreadCommand,
+  type CodeForkMergeBackOutcome,
   type CodeThreadCheckoutRebindRefusal,
   type CodeRepositoryId,
   type CodeWorktreeSourcePreview,
@@ -65,6 +71,7 @@ import {
   type CodeSettings,
   type CodeThread,
   type CodeThreadActivity,
+  type CodeThreadForkOrigin,
   type CodeThreadId,
   type CodeThreadView,
   type CodeOperationEventFrame,
@@ -170,6 +177,7 @@ import {
   type CodeApprovalValidationPort,
 } from "./codeOperationApprovalStore";
 import { CodeSessionAuthorityStore } from "./codeSessionAuthorityStore";
+import { isRoutineHostScope } from "../routineHostScope";
 
 const decodeEventId = Schema.decodeUnknownSync(EventId);
 const decodeAggregateId = Schema.decodeUnknownSync(AggregateId);
@@ -607,6 +615,22 @@ export interface CodeServiceOptions {
   readonly managedThreadCreation?: ManagedCodeThreadCreationPort;
   /** Where a fork starts; without it a fork refuses as unavailable. */
   readonly forkPoints?: CodeForkPointPort;
+  /**
+   * Reads the conversation a fork would carry over as text. A fork whose
+   * conversation cannot be read is refused before anything is created.
+   */
+  readonly forkConversation?: CodeForkConversationReader;
+  /**
+   * Merges a fork's conversation back into the thread it was forked from.
+   * Without it a merge is refused as unsupported.
+   */
+  readonly forkMergeBack?: {
+    readonly merge: (
+      authenticatedWindowId: WindowId,
+      forkThreadId: CodeThreadId,
+      throughOperationId: string,
+    ) => Promise<CodeForkMergeBackOutcome>;
+  };
   readonly probeProvider?: (
     providerInstanceId: CodeThread["providerInstanceId"],
   ) => Promise<ProviderProbeResult>;
@@ -790,6 +814,8 @@ export class CodeService {
   readonly #worktreeRefs: CodeWorktreeRefsPort | undefined;
   readonly #managedThreadCreation: ManagedCodeThreadCreationPort | undefined;
   readonly #forkPoints: CodeForkPointPort | undefined;
+  readonly #forkMergeBack: CodeServiceOptions["forkMergeBack"];
+  readonly #forkConversation: CodeForkConversationReader | undefined;
   readonly #probeProvider: CodeServiceOptions["probeProvider"];
   readonly #isProviderModelAllowed: CodeServiceOptions["isProviderModelAllowed"];
   readonly #workingDirectories: CodeServiceOptions["workingDirectories"];
@@ -837,6 +863,8 @@ export class CodeService {
     this.#worktreeRefs = options.worktreeRefs;
     this.#managedThreadCreation = options.managedThreadCreation;
     this.#forkPoints = options.forkPoints;
+    this.#forkMergeBack = options.forkMergeBack;
+    this.#forkConversation = options.forkConversation;
     this.#probeProvider = options.probeProvider;
     this.#isProviderModelAllowed = options.isProviderModelAllowed;
     this.#workingDirectories = options.workingDirectories;
@@ -1109,6 +1137,20 @@ export class CodeService {
         command = fork.command;
         sourceFiles = fork.files;
       }
+      if (command.kind === "merge-code-fork-context") {
+        const fork = this.#persistence.readCodeThread(command.threadId);
+        if (fork === undefined) throw this.#failure("invalid", "Code thread was not found.");
+        await this.#authorizeThread(authenticatedWindowId, fork);
+        const outcome =
+          this.#forkMergeBack === undefined
+            ? ({ status: "refused", reason: "unsupported" } as const)
+            : await this.#forkMergeBack.merge(
+                authenticatedWindowId,
+                fork.id,
+                command.throughOperationId,
+              );
+        return { kind: "fork-context-merge", threadId: fork.id, outcome };
+      }
       if (command.kind === "preview-code-worktree-source") {
         if (this.#worktreeSourcePreview === undefined) {
           throw this.#failure(
@@ -1365,10 +1407,14 @@ export class CodeService {
             { kind: "checkout-observed", checkout },
           );
           checkoutJournaled = true;
-          this.#append("code-thread", thread.id, 0, "code.thread-created@1", {
-            kind: "thread-created",
-            thread: durableThread,
-          });
+          this.#append(
+            "code-thread",
+            thread.id,
+            0,
+            "code.thread-created@1",
+            { kind: "thread-created", thread: durableThread },
+            isRoutineHostScope(authenticatedWindowId) ? "system" : "local-user",
+          );
         } catch {
           if (checkoutJournaled) {
             // Compensate the orphan checkout so replay/projections stay clean.
@@ -1519,6 +1565,7 @@ export class CodeService {
           requireGitRepository: command.requireGitRepository ?? current.requireGitRepository,
           allowDefaultFolderThreads:
             command.allowDefaultFolderThreads ?? current.allowDefaultFolderThreads,
+          defaultDiffLayout: command.defaultDiffLayout ?? current.defaultDiffLayout,
           version: command.expectedVersion + 1,
           updatedAt: decodeTimestamp(this.#clock()),
         });
@@ -2976,6 +3023,7 @@ export class CodeService {
       defaultPermissionPersistence: "current-session",
       requireGitRepository: true,
       allowDefaultFolderThreads: false,
+      defaultDiffLayout: "unified",
       version: 0 as AggregateVersion,
       updatedAt: decodeTimestamp(this.#clock()),
     };
@@ -3481,11 +3529,17 @@ export class CodeService {
    * A fork origin names a thread the host holds, in the same Project, other
    * than the new thread itself. The renderer supplies it; the host must not
    * take it on trust, because the first turn reads the named thread's history.
+   *
+   * The provider the new thread starts on may not be able to take up the
+   * source's own session at the fork point, and which can is only known once
+   * its first turn runs. The text handoff is what every fork can fall back to,
+   * so a fork whose handoff cannot be built now is refused here, before a
+   * worktree or thread exists, rather than created to answer from nothing.
    */
   #requireForkOrigin(
     projectId: string,
     threadId: string,
-    forkedFrom: { readonly threadId: CodeThreadId } | undefined,
+    forkedFrom: CodeThreadForkOrigin | undefined,
   ): void {
     if (forkedFrom === undefined) return;
     if (String(forkedFrom.threadId) === String(threadId)) {
@@ -3494,6 +3548,17 @@ export class CodeService {
     const parent = this.#persistence.readCodeThread(forkedFrom.threadId);
     if (parent === undefined || String(parent.projectId) !== String(projectId)) {
       throw this.#failure("invalid", "A fork must come from a thread in the same Project.");
+    }
+    const handoff = selectCodeForkHandoff(this.#forkConversation, {
+      source: parent,
+      origin: forkedFrom,
+      projectId: parent.projectId,
+    });
+    if (handoff.status === "refused") {
+      throw this.#failure(
+        handoff.reason === "unsupported" ? "unavailable" : "conflict",
+        CODE_FORK_HANDOFF_REFUSALS[handoff.reason],
+      );
     }
   }
 

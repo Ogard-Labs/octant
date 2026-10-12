@@ -1,4 +1,11 @@
 import type { AggregateVersion, UtcTimestamp } from "@octant/contracts/events";
+import { CLAUDE_ACCOUNT_ACCENTS } from "@octant/contracts/providers";
+import {
+  assignedProviderAccountDirectory,
+  CLAUDE_ACCOUNT_PROFILE,
+  CODEX_ACCOUNT_PROFILE,
+  formatProviderAccountSignInCommand,
+} from "./providerAccountProfile";
 import type {
   AnthropicCompatibleProviderConfiguration,
   AnthropicCompatibleProviderInstance,
@@ -6,9 +13,11 @@ import type {
   AzureFoundryProviderInstance,
   BflImageProviderConfiguration,
   BflImageProviderInstance,
+  ClaudeAccountAccent,
   ClaudeAuthentication,
   ClaudeProviderConfiguration,
   ClaudeProviderInstance,
+  CodexProviderConfiguration,
   CodexProviderInstance,
   DevinProviderConfiguration,
   DevinProviderInstance,
@@ -79,6 +88,8 @@ export type ProviderPolicyRejectionCode =
   | "invalid-model-id"
   | "invalid-model-ids"
   | "invalid-name"
+  | "invalid-config-directory"
+  | "invalid-accent"
   | "invalid-timestamp"
   | "name-conflict";
 
@@ -415,6 +426,101 @@ export interface ClaudeConfigurationInput {
   readonly kind: ClaudeProviderConfiguration["kind"];
   readonly binaryPath: string;
   readonly authentication: ClaudeAuthentication;
+  readonly configDirectory?: string | undefined;
+  readonly accent?: ClaudeAccountAccent | undefined;
+}
+
+/** Closed accent set mirrored from the contract so Settings can list it. */
+export const CLAUDE_ACCOUNT_ACCENT_VALUES: ReadonlyArray<ClaudeAccountAccent> =
+  CLAUDE_ACCOUNT_ACCENTS;
+
+/**
+ * Directory Claude owns for an additional account. The first/default instance
+ * omits this and keeps Claude's usual `~/.claude` (or host `CLAUDE_CONFIG_DIR`).
+ */
+export function assignedClaudeAccountConfigDirectory(
+  homeDirectory: string,
+  instanceId: ProviderInstanceId,
+): string {
+  const home = stripTrailingSlashes(homeDirectory.trim());
+  if (!isPosixAbsolutePath(home)) {
+    reject("invalid-config-directory", "Claude account home must be an absolute directory.");
+  }
+  return assignedProviderAccountDirectory(CLAUDE_ACCOUNT_PROFILE, home, instanceId);
+}
+
+export function assignedCodexHome(homeDirectory: string, instanceId: ProviderInstanceId): string {
+  const home = stripTrailingSlashes(homeDirectory.trim());
+  if (!isPosixAbsolutePath(home)) {
+    reject("invalid-config-directory", "Codex account home must be an absolute directory.");
+  }
+  return assignedProviderAccountDirectory(CODEX_ACCOUNT_PROFILE, home, instanceId);
+}
+
+/**
+ * The directory a Claude account launches with, or `undefined` for the host
+ * profile. An API-key account always has its assigned leaf, including one
+ * stored before accounts carried a directory: the probe, the launch, resume
+ * lookup and usage history must all name the same folder for it.
+ */
+export function effectiveClaudeAccountConfigDirectory(
+  instance: Extract<ProviderInstance, { readonly driverKind: "claude" }>,
+  homeDirectory: string,
+): string | undefined {
+  if (instance.configuration.configDirectory !== undefined) {
+    return instance.configuration.configDirectory;
+  }
+  return instance.configuration.authentication === "api-key"
+    ? assignedClaudeAccountConfigDirectory(homeDirectory, instance.id)
+    : undefined;
+}
+
+/** Unmodified Claude CLI sign-in. Octant never wraps or replaces this flow. */
+export function claudeAuthLoginArgv(binaryPath: string): ReadonlyArray<string> {
+  return [normalizeBinaryPath(binaryPath), ...CLAUDE_ACCOUNT_PROFILE.signInArgv];
+}
+
+export function formatClaudeAuthLoginCommand(input: {
+  readonly binaryPath: string;
+  readonly configDirectory?: string;
+}): string {
+  return formatProviderAccountSignInCommand({
+    profile: CLAUDE_ACCOUNT_PROFILE,
+    binaryPath: normalizeBinaryPath(input.binaryPath),
+    ...(input.configDirectory === undefined ? {} : { stateDirectory: input.configDirectory }),
+  });
+}
+
+/** Linear scan. A `/+$` replace is polynomial in the trailing slashes. */
+function stripTrailingSlashes(path: string): string {
+  let end = path.length;
+  while (end > 0 && path.charAt(end - 1) === "/") {
+    end -= 1;
+  }
+  return path.slice(0, end);
+}
+
+function isPosixAbsolutePath(path: string): boolean {
+  return path.startsWith("/");
+}
+
+function pathBasename(path: string): string {
+  const trimmed = stripTrailingSlashes(path);
+  const slash = trimmed.lastIndexOf("/");
+  return slash === -1 ? trimmed : trimmed.slice(slash + 1);
+}
+
+function normalizeClaudeConfigDirectory(path: string | undefined): string | undefined {
+  if (path === undefined) return undefined;
+  const normalized = path.trim();
+  if (normalized.length === 0) return undefined;
+  if (!isPosixAbsolutePath(normalized)) {
+    reject("invalid-config-directory", "Claude config directory must be an absolute path.");
+  }
+  if (pathBasename(normalized) === ".credentials.json") {
+    reject("invalid-config-directory", "Claude config directory cannot be a credential file.");
+  }
+  return normalized;
 }
 
 export interface MistralVibeConfigurationInput {
@@ -700,10 +806,19 @@ function normalizeClaudeConfiguration(
   ) {
     reject("invalid-authentication", "Claude authentication must be subscription or api-key.");
   }
+  if (
+    configuration.accent !== undefined &&
+    !CLAUDE_ACCOUNT_ACCENT_VALUES.includes(configuration.accent)
+  ) {
+    reject("invalid-accent", "Claude account accent must be one of the named swatches.");
+  }
+  const configDirectory = normalizeClaudeConfigDirectory(configuration.configDirectory);
   return {
     kind: "claude-agent-sdk",
     binaryPath: normalizeBinaryPath(configuration.binaryPath),
     authentication: configuration.authentication,
+    ...(configDirectory === undefined ? {} : { configDirectory }),
+    ...(configuration.accent === undefined ? {} : { accent: configuration.accent }),
   };
 }
 
@@ -1613,7 +1728,12 @@ export function createOpenCodeProvider(input: CreateProviderInput): ProviderInst
   };
 }
 
-export function createCodexProvider(input: CreateProviderInput): ProviderInstance {
+export function createCodexProvider(
+  input: CreateProviderInput & {
+    readonly accent?: ClaudeAccountAccent;
+    readonly codexHome?: string;
+  },
+): ProviderInstance {
   const { binaryPath, ...normalized } = normalizeProviderCreation(input);
   return {
     ...normalized,
@@ -1621,6 +1741,8 @@ export function createCodexProvider(input: CreateProviderInput): ProviderInstanc
     configuration: {
       kind: "codex-cli",
       binaryPath,
+      ...(input.accent === undefined ? {} : { accent: input.accent }),
+      ...(input.codexHome === undefined ? {} : { codexHome: input.codexHome }),
     },
   };
 }
@@ -1791,16 +1913,105 @@ interface ChangeClaudeConfigurationInput {
   readonly updatedAt: UtcTimestamp;
 }
 
-export function changeClaudeConfiguration(
-  current: ClaudeProviderInstance,
-  input: ChangeClaudeConfigurationInput,
-): ClaudeProviderInstance {
-  if (input.activeSessionCount > 0) {
+export interface CodexConfigurationInput {
+  readonly kind: CodexProviderConfiguration["kind"];
+  readonly binaryPath: string;
+  readonly codexHome?: string | undefined;
+  readonly accent?: ClaudeAccountAccent | undefined;
+}
+
+interface ChangeCodexConfigurationInput {
+  readonly configuration: CodexConfigurationInput;
+  readonly activeSessionCount: number;
+  readonly updatedAt: UtcTimestamp;
+}
+
+type CodexRuntimeInputs = Pick<CodexConfigurationInput, "binaryPath" | "codexHome">;
+
+/**
+ * Whether a change leaves alone everything a Codex process reads: its binary
+ * and its account home. Only the accent is left, and that is how Octant draws
+ * the account, so a running session is unaffected.
+ */
+export function codexChangeKeepsRuntime(
+  current: CodexRuntimeInputs,
+  next: CodexRuntimeInputs,
+): boolean {
+  return current.binaryPath === next.binaryPath && current.codexHome === next.codexHome;
+}
+
+export function changeCodexConfiguration(
+  current: CodexProviderInstance,
+  input: ChangeCodexConfigurationInput,
+): CodexProviderInstance {
+  const configuration =
+    input.configuration.codexHome === undefined && current.configuration.codexHome !== undefined
+      ? {
+          ...input.configuration,
+          codexHome: current.configuration.codexHome,
+        }
+      : input.configuration;
+  if (
+    input.activeSessionCount > 0 &&
+    !codexChangeKeepsRuntime(current.configuration, configuration)
+  ) {
     reject("active-sessions", "Stop active sessions before reconfiguring this provider.");
   }
   return {
     ...current,
-    configuration: normalizeClaudeConfiguration(input.configuration),
+    configuration: {
+      kind: "codex-cli",
+      binaryPath: normalizeBinaryPath(configuration.binaryPath),
+      ...(configuration.accent === undefined ? {} : { accent: configuration.accent }),
+      ...(configuration.codexHome === undefined ? {} : { codexHome: configuration.codexHome }),
+    },
+    version: nextVersion(current.version),
+    updatedAt: input.updatedAt,
+  };
+}
+
+type ClaudeRuntimeInputs = Pick<
+  ClaudeConfigurationInput,
+  "binaryPath" | "authentication" | "configDirectory"
+>;
+
+/**
+ * Whether a change leaves alone everything a Claude process reads: its binary,
+ * its authentication, and its account directory. Only the accent is left, and
+ * that is how Octant draws the account, so a running session is unaffected.
+ */
+export function claudeChangeKeepsRuntime(
+  current: ClaudeRuntimeInputs,
+  next: ClaudeRuntimeInputs,
+): boolean {
+  return (
+    current.binaryPath === next.binaryPath &&
+    current.authentication === next.authentication &&
+    current.configDirectory === next.configDirectory
+  );
+}
+
+export function changeClaudeConfiguration(
+  current: ClaudeProviderInstance,
+  input: ChangeClaudeConfigurationInput,
+): ClaudeProviderInstance {
+  const configuration =
+    input.configuration.configDirectory === undefined &&
+    current.configuration.configDirectory !== undefined
+      ? {
+          ...input.configuration,
+          configDirectory: current.configuration.configDirectory,
+        }
+      : input.configuration;
+  if (
+    input.activeSessionCount > 0 &&
+    !claudeChangeKeepsRuntime(current.configuration, configuration)
+  ) {
+    reject("active-sessions", "Stop active sessions before reconfiguring this provider.");
+  }
+  return {
+    ...current,
+    configuration: normalizeClaudeConfiguration(configuration),
     version: nextVersion(current.version),
     updatedAt: input.updatedAt,
   };

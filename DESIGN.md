@@ -189,8 +189,8 @@ gutters keep the back's own material, so the picture never reads as a second
 copy beside the cards. With Cover the sidebar on, the ground runs under the
 whole window and one frost lies over it with the card's rectangle cut out, so
 the sidebar and gutters frost as one piece with no seam where they meet; the
-dither stays inside the card either way. A pane header and the dock head share the 38px
-title rail, and the card draws the one hairline under both. At 680px and below the
+dither stays inside the card either way. A pane header and the dock head share the
+title rail (`--oct-title-rail-h`), and the card draws the one hairline under both. At 680px and below the
 workspace sidebar is an overlay drawer and the frame stays flat, with a scrim
 (`--octant-scrim`) dimming the page behind it. The drawer
 starts closed on every load, closes on Escape, on a tap outside it, and on
@@ -229,7 +229,9 @@ opens with Model endpoints, every endpoint Octant calls over an API itself
 by model roles and helper agents; with no endpoint yet it offers three ways
 in instead (Sign in with ChatGPT, Sign in with OpenRouter, Add endpoint), each
 sign-in one click with its terms as a consent line under the button. Image
-generation holds the image profiles and custom image sources. A sign-in
+generation holds the image profiles and custom image sources. Provider catalog lists
+every bundled driver of both kinds and sends each one to the page that
+configures it. A sign-in
 endpoint's row says who is signed in, its detail page offers sign out and
 sign in again, and its configuration fixes the base URL and asks for no key. The
 instances, commands, and credentials are the same on every page. A setting lives
@@ -378,8 +380,11 @@ the one-line reason, a collapsed "Prompt" disclosure, and one primary
 
 A thread's stats line sits under the follow-up composer, below the context strip
 and inside the same tray: one row of figures at the 12px meta step in the meta ink,
-separated by middle dots, with no hue on any number and no fill on the row. It wraps at
-narrow widths rather than scrolling, and a trailing quiet icon button hides it. A figure
+separated by middle dots, with no hue on any number and no fill on the row. When the
+provider reported account limit windows, they lead the row as short bars (a name such
+as 5h or Week, a three-pixel bar, and the share left), filled in the same
+inks as the context meter's popover. It wraps at narrow widths rather than scrolling,
+and a trailing quiet icon button hides it. A figure
 that is approximate carries a leading tilde and a dotted underline that explains it on
 hover; a figure the provider did not report is absent, never zero. The whole line is one
 button that opens the per-turn detail dialog, a plain definition list of tokens, timing,
@@ -390,6 +395,7 @@ the project and working folder instead of Git controls. Full paths require a
 matching project binding revision; missing metadata never borrows another root.
 The strip stays mounted while metadata loads, and full paths are available in
 tooltips. Code retains its checkout, branch, diff, and pull-request controls.
+Pane headers show thread titles without repeated project labels.
 
 Chat, Work, and Code open on the same screen: a greeting and one raised
 composer. The hero says only the greeting for the hour and the person's name
@@ -404,7 +410,9 @@ grows; its toolbar row holds how the thread runs (attach and image on the
 left; model and access on the right, next to send). Where the thread runs
 (Project, base branch, checkout, Environment, repository) is the first row
 inside the card, above the prompt, as small bordered chips on a faint fill
-(the `--oct-radius-sm` step), so the composer stays a single object. The chip
+(the `--oct-radius-sm` step), so the composer stays a single object. Code's
+base-branch chip is absent until a Project is chosen: with no Project it
+would name a branch of nothing. The chip
 is painted on the plain element that holds each control, never on the shared
 trigger inside it. The row wraps rather than grows: a control that needs a
 list ("Create from…") floats over the page. A thread's own follow-up
@@ -412,77 +420,12 @@ composer keeps its context strip beneath the card. Nothing about delivery is
 asked up front; it is derived from the chips and shown on the thread once it
 exists.
 
-Under the composer, Work and Code start screens offer a row of action tiles and
-then the card area (Chat's start screens carry the card area alone), both on the composer's measure and ahead of Code's prompt
-suggestions, so a running thread is never under the fold. The tiles are
-always a three-column grid, one column under 560px, so one or two tiles keep a
-tile's width instead of stretching across the row; a detail line wraps to a
-second line before it is cut. A tile is a card
-button: a 36px icon square, the action as a row label, and one detail line.
-Code offers **Add a folder** (Bind a repository as a Project), **Open
-terminal** (A shell on this computer, in Octant) once a Project is selected,
-and **Review N changes** (Finished threads that wait for you) when N is above
-zero, where N counts unread threads that are not running or rested, the
-sidebar's To review rule. Open terminal starts a Project terminal and pins it in
-Zen, the only place one lives. Work offers the same tiles without a terminal,
-because Work has no shell. Review opens the Review page. The tiles leave when they
-have nothing to show.
-
-Above the composer, the two start-screen tabs (**New task**, **Running** with
-the sidebar's count as tabular meta text) use the plain-text underline tabs
-(`surface-tabs`) on the composer's top-left edge. They never wrap, and the
-selected tab is carried by ink and the underline, with no fill or hue. The
-Running tab's body is one hairline-ringed list on the card fill: each row is the
-Working now row face with **Open** and **Stop** ghost buttons at the extra-small
-step, and the stop question takes its own line under the row with a destructive
-**Stop** and a ghost **Keep running**. See
-[Workspace](docs/design/workspace.md#start-screen-cards) for behavior.
-
-The card area is a ghost **Customize** button right-aligned under the tiles
-(icon at the 14px step and the label), then a grid of cards, two columns and one
-under 560px. A card uses the card recipe (`OctantCard`: hairline ring, no
-shadow, the card fill) at a compact 12px rhythm. Its header is an icon at the
-16px step in secondary ink, the title as a section label, and a count as
-tabular meta text; its body is rows or one quiet line in the detail step. No
-card has a hue of its own: the default theme stays monochrome, and a state is
-carried by wording and weight. A row is a bare card-shaped button whose face
-fills at 5% ink on hover and focus, the provider mark and a row label on its
-first line, and a mono meta line for what is happening. The Customize panel is a
-popover at most 340px wide: one row per card with a drag grip, the icon, the
-title, up and down icon buttons, and a switch, then **Reset to default**; a
-dragged row marks its drop target with a hairline above it. **Needs you**
-comes first and leaves the grid while nothing waits: each row is the provider
-mark (or the mode's glyph), the thread title, "Waiting 4m" with a pause glyph
-at the 12px step, the Project as meta text, and the request text clamped to two
-lines, with small buttons below (Approve filled, Deny ghost; a question's
-choices as outline buttons with a leading number, then a ghost Reply…; a
-decision's options the same way, the recommended one first with a trailing
-"Recommended" in meta text rather than a hue). Rows
-are told apart by a hairline, never a tinted fill, and the waiting state is a
-glyph and words with no hue. **Working now**
-lists up to five rows of threads and agent runs in progress, each with the
-provider mark, the title, a time, and a one-line step; it says "Nothing is
-running right now." when empty. A running tool is shown in mono
-(`Command: bun run test`); a turn waiting on the person is plain prose. A turn's
-time says "Running 12m" from the start time the host reports, and "Active 4m
-ago" only for a host that reports none; a fact the host does not report is left
-out rather than invented. **Pull requests** lists up to six rows on a Code
-start screen, in Waiting on your review and Yours. Each row is the title, a
-short repository and number, and the words for checks and review — never
-colour alone. It is absent when that read is not allowed. It never says
-"Nothing is waiting on you." for a list it has not seen: a failed read says it
-could not read, and until a refresh has reached every connected Project the
-quiet line says so, with an **Open Pull requests** link under it. A snapshot
-whose latest refresh failed carries its age as meta text. **CI failures**
-lists up to five failing checks from that same read, the check name, the
-repository or branch, and how long ago it failed. It is absent when nothing is
-failing, and absent when that read is not allowed. **Start a fix** opens a
-draft; it does not send. Under the Vivid style the tiles'
-icon squares take the blue, orange, and purple palette hues. Code's five prompt
-suggestions are one compact row of label-only chips under the cards, and
-Work's Write, Learn, Plan, and Explore starters use the same chip (the outline
-button: hairline, resting fill, hover and focus fill); the prompt rides as the
-chip's tooltip and description and fills the composer when chosen, nothing more.
+Around the composer, a start screen shows two underline tabs (**New task**,
+**Running**) on its top-left edge, then under it a row of action tiles (Work
+and Code only), the card area, and one row of outline prompt chips (Code's
+suggestions, Work's starters). Their anatomy is in
+[Start screen: presentation](docs/design/start-screen.md#presentation); their
+behavior is in [Workspace](docs/design/workspace.md#start-screen-cards).
 
 First-run setup asks only what a first task needs — a usable provider, a
 Project folder, and a model — and ends in one primary action, Start a task,
@@ -609,7 +552,7 @@ the style, its density, and the three divergences kept from it. This
 keeps the interaction backend accessible and editable while preserving the
 shadcn composition and visual vocabulary. Feature code imports `ui/base`, not
 `ui/shadcn` or `@base-ui/react` directly. Project and split-workspace context
-menus now use the shared `OctantContextMenu` adapter; do not add a new direct
+menus use the shared `OctantContextMenu` adapter; do not add a new direct
 primitive import.
 
 Desktop context menus and ordinary dropdown menus (including More, the account
@@ -664,13 +607,25 @@ mark (spinner, check, cross), parted by hairlines and indented together; a
 settled turn folds them behind "N tool calls". A Code turn that changed files ends with one card, the only card in a reply: "N files changed while this ran", then a 28px row per path with the folder in the meta ink, the name in the primary ink, and the added and removed line counts in the diff inks at the right. It folds after five rows, says "Showing n of N" when the record is incomplete rather than summing rows it never saw, and never says who wrote a file (0141). A turn paused on the person uses a neutral composer-adjacent request row with
 an icon and explicit answer controls. Follow-up composers use one compact
 hairline message surface across Chat, Work, and Code. Feedback above the toolbar
-appears only when it has content; empty feedback consumes no space. Long notices
+appears only when it has content; empty feedback consumes no space. A held
+message queue with items still waiting shows a compact **Follow-up paused**
+chip and **Resume** next to the composer; the expandable queue still lists
+the items and the specific hold sentence. Long notices
 remain accessible and scrollable. The access menu holds the optional provider
 approval-review choice and starting-profile detail. The Code checkout strip is
-attached underneath, rather than floating above the input. Input growth from
+attached underneath, rather than floating above the input. It keeps its height
+and border when checkout metadata is unavailable: missing project, branch and
+diff values stay blank, and unavailable checkout actions are not shown. Input growth from
 extra typed lines and visible notices is intentional (0114). Repository, branch
 and PR actions stay visible below the input. Utility panels keep one resize
 boundary and a compact tab row without a second horizontal divider.
+
+A thread's Browser captures are a plain list of rows under a sentence-case
+section label (`oct-section-label`, "Browser captures"), not a card group: each
+row is a hairline-ringed object with a 72 x 48 picture, the page title in the
+medium weight, and the origin as mono meta, and the whole row is one `bare`
+button that opens the full picture. It uses the neutral hairline and surface
+tokens only, adds no colour, and draws no fill on hover or when open.
 
 Attachment and model controls sit on the left; access, context usage and send
 stay together at the right edge even when the controls wrap. Menus use compact
@@ -756,210 +711,14 @@ validated semantic roles; incomplete or low-contrast imports fall back safely.
 
 ## Data visualisation
 
-Charts, metric blocks, tables, and timelines are one visual system, so a Canvas
-reads as one document whatever kinds it mixes. These rules own the mark, the
-ink, and the reading; a later block (treemap, heatmap, bar list, comparison
-matrix) builds on them
-rather than inventing a second chart language.
-
-**Hue is for marks only.** Data colour appears on the mark — a bar, a line, a
-slice, a scale cell — never on the chrome. The Default style keeps its
-monochrome chrome, and a chart in the default theme still draws its series in
-the palette hues, because the series are the data. Every mark pairs its hue
-with a second channel: a dash pattern on a line, a label in the legend, a value
-in the disclosed table. Colour alone never carries a distinction, and under
-forced colours the marks fall to system colours while the dash pattern and the
-labels keep them apart.
-
-**Categorical series order.** Six hues, assigned in a fixed order so a series
-keeps the same colour across charts and legends: brass, teal, rose, violet,
-green, blue (`--oct-series-1..6`, each pinned per mode). A seventh series
-restarts the order, and the legend, the dash pattern, and the data table keep
-them apart. A series label is drawn in `--oct-fg-2`, never in the series hue: a
-12px label needs text contrast the mark's hue does not carry.
-
-**Scales.** Ordered data — a heatmap cell, a bar list's length — uses one of two
-scales, exposed as theme roles and derived from the palette
-(`packages/theme/src/chartScales.ts`):
-
-- `--octant-chart-sequential-1..5`, one hue from low to high, the teal family.
-- `--octant-chart-diverging-1..5`, the red family through a neutral midpoint to
-  the blue family: 1 the strongest negative, 3 the neutral, 5 the strongest
-  positive.
-
-Every step clears 3:1 against the workspace in light and dark, so a scale cell
-reads on the surface it sits on. A custom theme inherits both scales or
-overrides any step through a semantic override.
-
-**Marks.** One set of specs (`packages/theme/src/chartMarks.ts`) is shared by the
-on-screen renderer and the static SVG export:
-
-- Bars: a 2px top corner, a 2px gap between bars in one category; bars touch
-  only when a distribution's density is the subject.
-- Lines: a 2px stroke with round caps and joins.
-- Dots: a 3px radius, on a scatter point and on each line vertex.
-
-**Axis and grid ink.** The axis is `--oct-chart-axis`, a hairline that reads as
-a rule. The grid behind a cartesian chart is `--oct-chart-grid`, deliberately
-fainter than `--oct-border-soft`: it repeats four times inside one small frame
-and at border weight it reads as a table. The grid is a backdrop, never a frame;
-gridlines stop short of the plot edges.
-
-**Reading numbers.** One formatter (`formatCanvasNumber`) reads every number a
-Canvas shows, in the renderer and in the static export. A chart, a metric block,
-and a table column may name an optional `format`: `number` (the default, locale
-grouping — 1,234,567), `compact` (1.36M), `percent` (a ratio where 1 is 100%),
-`bytes` (base-1024 — 1.5 KB), and `duration` (seconds — 1h 2m 5s). Numbers use
-tabular numerals so a column of readings aligns. A label longer than its slot
-truncates with an ellipsis rather than wrapping or shrinking.
-
-**One tooltip.** Every chart mark has one hover and focus tooltip that names the
-series and its formatted value. It is placed from the mark's own plotted
-coordinates, offset above (or below near the top), so it never covers the
-pointer, and it follows keyboard focus as well as the pointer. It has no
-entrance motion.
-
-**Path labels.** A file label is read from the right: the directory is dimmed and
-the file name is at full ink, in the code font.
-
-**Treemap.** A hierarchy is drawn as squarified rectangles
-(`packages/domain/src/canvasTreemapLayout.ts`): each leaf's area is a size
-measure and its colour is a colour measure, and a group's reading is the sum of
-its children, so the picture never states a total the leaves do not. The screen
-renderer and the static SVG export draw the same deterministic layout. The size
-and colour measures are switches in the block header; those switches, and a zoom
-into a group (by click, breadcrumb, Escape, or right-click; arrow keys move
-between cells and Enter zooms in), are view state and revise nothing. A colour
-scale is sequential, diverging (centred on the mid-point of the colour domain),
-or categorical by top-level group, and reads through the shared scale roles.
-Cell labels are drawn only where they fit, and the disclosed table is the
-accessible reading, sortable by each measure.
-
-**Heatmap.** A grid is coloured by value
-(`packages/domain/src/canvasHeatmapLayout.ts`). A `matrix` names its rows and
-columns and carries a cell per coordinate with a value and an optional short
-note; a `calendar` carries one reading per date and lays the days out on a week
-grid whose first day comes from the locale, drawn at its own size and scaled
-down only to fit a narrower Canvas. A matrix row label longer than its gutter
-is shortened with an ellipsis; the table carries it in full. Both read a value through one of the
-same two scale roles — sequential or diverging — with a legend that shows a
-scale bar and its bounds. A coordinate the block does not list is drawn as an
-empty dashed cell, apart from a zero reading. The screen renderer and the static
-SVG export draw the same deterministic layout. A matrix's rows can be sorted by
-their total and the cells can be walked with the arrow keys; these are view
-state and revise nothing. The disclosed table is the accessible reading, and it
-shows a missing coordinate as an empty cell rather than a zero.
-
-**Bar list.** A ranking of magnitudes — the "hottest files" or "slowest tests"
-panel (`packages/domain/src/canvasBarListLayout.ts`). Each row is a label, a
-value, an optional second value, and an optional manifest source. Rows sort
-largest first by default and a reader can flip the ranking to smallest first; a
-tie keeps the author's order. The list shows a top N with Show all up to the row
-budget, and both the order and the number shown are view state. A bar's length is its share of the largest value — the reading is
-the length, so bars use the neutral ink, or the sequential scale when the
-magnitude is the subject; a value is never negative. A label that reads as a
-path uses the shared path style: the directory is dimmed and the file name keeps
-full ink in the code font. A row that names a manifest source offers Open file
-through the allowlisted open-source action, which the host reauthorizes. The
-screen renderer, the static SVG export, and the Markdown and HTML export rank
-the same list. The disclosed
-table is the accessible reading of every row, including the rows Show all holds
-back.
-
-**Comparison matrix.** Options across the top, criteria down the side, and a
-weighted score under each option (`packages/domain/src/canvasComparisonMatrix.ts`).
-It is a native table on its own card. The card's ground is opaque, so the
-criteria column stays pinned while the options scroll beneath it at phone width.
-The region scrolls inside itself and takes keyboard focus. A cell reads as a
-score, a short text, or a yes, partial, or no glyph. The glyphs differ in shape
-(a filled check, a half disc, an empty ring with a dash) and are always written
-beside the word, so colour never carries the reading. A score and each weighted
-score draw a neutral-ink meter of their share of the criterion. A
-lower-is-better criterion is turned round first, so a longer meter always reads
-better. The highest score is set in strong ink and marked Highest. A full tie
-marks none. The recommended option is the author's call, not the arithmetic's.
-Its column is tinted with the foreground, ruled along the top, and badged with
-an inverted Recommended pill, so emphasis is ink in the monochrome default. An
-empty coordinate reads as not assessed, never as a zero or a no. Cell notes are
-numbered in reading order and listed under the table. Ordering the options by
-score is view state. The disclosed table reads one row per option. Under forced
-colours the column keeps a system-ink rule, the badge an outline, and the meters
-a framed track.
-
-**Math.** A formula is typeset by KaTeX in the reading ink, never in a colour
-of its own: fraction rules, radicals, and delimiters all take the current
-colour, so a formula follows the theme, dark mode, and forced colours, and the
-source may not pick a colour. A display formula sits on its own line inside a
-focusable region that scrolls sideways, so a long line never widens the page at
-phone width, with its caption centred beneath in secondary ink. An inline
-formula sits in the prose line at the prose size. The drawn glyphs are hidden
-from assistive technology and MathML carries the reading. **View source**
-discloses the source as plain monospace text. A formula KaTeX refuses shows its
-source in a dashed frame with "This formula could not be drawn." rather than
-KaTeX's red error text. Under forced colours the formula is CanvasText and the
-refused frame keeps a system-ink border.
-
-**Metric tiles.** Consecutive metric blocks are gathered into one responsive
-row of two to four tiles, and a metric's value is set large in tabular numerals
-so a row of numbers aligns. A metric may name how its value reads (`format`), a
-unit, a `delta`, and a `goodDirection` of `up`, `down`, or `neutral` so a
-delta's tone is never guessed: a direction that agrees with the change reads in
-`--oct-success`, one that disagrees in `--oct-danger`, and an absent or
-`neutral` direction keeps the neutral ink so the arrow and the signed value
-carry the reading. It may also carry a `sparkline` of at most 256 recent
-readings, drawn as a glance with no axis, and a short `caption`. The value, the
-delta, and the caption are the accessible numbers; the sparkline is decorative.
-
-**Tables.** A table is columns of a declared type and rows in the order the
-author wrote. A column may name a `format` and a `display` of `text` (the plain
-reading, the default), `bar` (an in-cell bar whose length is the value's share
-of the column's largest reading), `heat` (a tint on the shared sequential
-scale), or `status` (the value drawn as a badge). The value is always drawn with
-the mark, never instead of it, so a bar and a tint are scan aids: under forced
-colours they fall to system ink and the plain value remains the reading. A text
-column whose values read as a path uses the shared path style, and a number
-column is right-aligned in tabular numerals. Sorting (each sorted header
-announces its direction with `aria-sort`; hiding the sorted column drops the
-sort), a text filter, and hidden columns are view state and revise nothing, so the exported and static forms keep the order
-the author wrote. The header sticks through a scrolling table. Where comments
-are available, a row the author gave an `id` carries a comment marker in a
-leading gutter pinned to the left edge, so it stays in view while a wide table
-scrolls sideways; the gutter takes the header's warm surface so the scrolled
-columns never show through it. Like a
-block's marker it shows on row hover or keyboard focus, and always with its
-count once the row holds an open thread. A row without an id has an empty
-gutter cell, and a table with no ids draws no gutter.
-
-**Motion.** A chart transitions only on a state change — a legend toggle, a zoom
-— never on entrance. A transition lasts at most 200ms and is off under
-`prefers-reduced-motion: reduce` and when the workspace sets
-`data-octant-reduced-motion="true"`.
-
-**Funnel, radar, and sankey.** These draw at the figure's measured width in the
-same system. A funnel centres each stage as a bar whose width is its share of
-the first stage, with a faint neck of the stage hue between neighbours; the
-stage name sits at the left in `--oct-fg-2` and the value with its share of the
-first stage at the right, the share in `--oct-meta`. A funnel is one series and
-draws no legend. A radar draws rings at round values from zero and a spoke per
-axis in the grid ink, each series as an outline in its hue and dash over a 14%
-wash, with a vertex dot per axis; focusing a vertex lists every visible series at
-that axis in the one tooltip, and the legend toggles series. A sankey draws its
-nodes as 10px columns and each flow as a translucent band in the hue of the node
-it leaves, so a source can be followed to its endings; a hovered band, or every
-band through a hovered node, darkens. Node names read into the gap beside their
-column in text ink, and where two columns face across one gap they share it; a
-node's total joins its name only where both fit. A crowded column closes its
-gaps and the picture grows taller rather than squeezing a node below 4px, and a
-chain with more columns than the figure holds at 56px apart draws wider and
-scrolls sideways. The legend toggles nodes.
-Under forced colours the washes fall away: radar areas and funnel necks become
-outlines, and sankey bands become system-ink outlines told apart by their dash.
-
-**Empty and error states.** A chart with no series, a table with no rows, and a
-timeline with no items keep their block's height and say so in `--oct-muted` text
-rather than collapsing, so a document does not jump as data arrives. A block that
-cannot be drawn fails closed to its plain reading and its disclosed data table;
-it never shows a broken mark.
+Charts, metric blocks, tables, and timelines are one visual system: hue lives on
+the mark and never on the chrome, every mark pairs its hue with a second
+channel, one formatter reads every number, and a block that cannot be drawn
+falls back to its plain reading and disclosed table. The marks, scales, block
+kinds (treemap, heatmap, bar list, comparison matrix, math, metric tiles, KPI
+dashboards, tabs and columns, diagram marks, the Gantt view, tables, funnel,
+radar, sankey), and their states are specified in
+[Canvas visuals](docs/design/canvas-visuals.md).
 
 ## Typography
 
@@ -1035,22 +794,16 @@ fresh install reads Small and Narrow, so a question, its reply, and the
 composer under them all read at 13px, never under the chrome around them. The column uses
 `width: min(100% - 40px, measure)` with automatic horizontal margins. Welcome composers share a 768px maximum so
 Chat, Work, and Code start from the same prompt geometry independently of the
-reading-width preference. Canvas documents use a 62ch measure. A mockup is a
-screen drawn from a closed catalog in a desktop, browser, tablet, phone, dock
-panel, or custom-size frame — window, header, sidebar, navigation, stack, row,
-grid, card, tabs, list, list row, heading, text, form field, select, button,
-toggle, checkbox, badge, avatar, icon, image placeholder, table, modal, and
-toast — and those controls are inert. The wireframe fidelity uses neutral ink,
-hairline, and surface, never a hue; a tone is drawn as emphasis (a filled or
-heavier outline). The styled fidelity draws the same tree with the active
-theme's accent, status roles, and surfaces, so it follows light, dark, and an
-imported theme. Variants sit side by side and wrap below 260px each. Numbered
-callouts are ink marks on their node with the notes listed under the frame. In
-forced colours every hairline is the system frame and a filled mark is system
-text. A design is the author's own screens or slides: Octant draws
-only the frame around them (a hairline, the surface behind, and a numbered
-caption) and never restyles what is inside. Its player is a near-full-window
-dialog that scales the screen to fit with the stage padding around it.
+reading-width preference. Canvas documents use the `--oct-canvas-measure`
+(62ch) measure; mockups and designs inside a Canvas follow
+[Canvas visuals](docs/design/canvas-visuals.md#mockups-and-designs).
+
+### Design frame kit
+
+A design drawn in the workspace theme receives the workspace's semantic tokens,
+scheme, and bundled faces, plus a first-party `oct-` class kit that sets no
+colour of its own. The kit's contents are in
+[Canvas visuals](docs/design/canvas-visuals.md#design-frame-kit).
 
 ## Spacing, shapes, and depth
 
@@ -1070,11 +823,11 @@ whole 2px (`h-[round(1.75rem,2px)]`), or a control lands between pixels. The she
 grid, named by the `--oct-title-rail-h`, `--oct-rail-tab-h`,
 `--oct-rail-button-h`, `--oct-nav-head-h`, `--oct-nav-row-h`, and
 `--oct-nav-inset` tokens in `octant.css`: the title band, the window
-controls, the right dock head, and the bottom panel toolbar share one 38px
-rail, on which a 30px tab and a 28px icon control sit on one centreline and
-the band's hairline meets the dock's; the sidebar runs 32px navigation,
-Project, and thread rows between a 40px header row and a 40px account row,
-with every leading icon on a 12px inset and its section labels at 12px in the
+controls, the right dock head, and the bottom panel toolbar share one title
+rail, on which a rail tab and a rail icon control sit on one centreline and
+the band's hairline meets the dock's; the sidebar runs navigation, Project, and
+thread rows at the nav row height between a header row (`--oct-nav-head-h`)
+and a 40px account row, with every leading icon on the nav inset and its section labels at 12px in the
 meta ink with a 20px gap above, so a label never reads as one more row. A
 thread row that carries a facts line is two lines of type and takes 8px above
 and below them (about 56px). Hover-only actions (add, more, pin, archive,
@@ -1098,7 +851,8 @@ The rail never appears below the drawer breakpoint, where a collapsed sidebar
 is a closed drawer. The right dock defaults to 420px when open. A fresh window
 starts with it
 closed; choosing a tool or restoring an explicit prior choice opens it. The
-pane/title control rail is 38px in the native host and the status bar is 26px.
+pane/title control rail is `--oct-title-rail-h` in the native host and the status
+bar is `--oct-statusbar-h`.
 While a route or tool is still loading, its state is one quiet line (spinner,
 then the title) on the page ground, never a raised card: a card with a title
 and a sentence reads as a finished empty state.
@@ -1114,13 +868,17 @@ Chat, Work, and Code welcome composers share the `.composer` frame (`--oct-radiu
 composer. Starter actions appear only when recent work does not already give
 the person a next step. In light the card is workspace white on the
 `--octant-app-background` well, not the grey floating fill — that fill reads
-as a sunken field. Code welcome keeps one stable question while Project,
-base branch, and Environment sit on the context row above the composer
+as a sunken field. Code welcome keeps one stable question while Project and
+Environment sit on the context row above the composer
 (`.composer-tray--above`, rendered beside the card inside `.composer-stack`),
-on the page ground with no band chrome. Environment is the
+on the page ground with no band chrome. The base-branch chip joins that row
+once a Project is chosen. Environment is the
 create-facing presentation of Octant's authoritative host federation: its
 dropdown selects This computer, devbox, or another healthy capable host without
-creating a second environment model. Workspace remains on that rear card after the three primary choices;
+creating a second environment model. Every create composer shows Environment
+only when more than one host is known. With one host there is nothing to
+choose, so no Environment control or label appears. With several, an existing
+Project's fixed host reads as a label instead of a dropdown. Workspace remains on that rear card after the three primary choices;
 nothing about delivery is asked up front (see "Language"). The Project
 control is one menu: saved Projects to search, then New Project from folder
 and New Project from GitHub repository. Choosing GitHub swaps the menu's body
@@ -1139,25 +897,9 @@ and explains the refusal in the surface's status line. It never opens the file
 chooser or uploads while refused. Model, access, and destination controls keep
 one type scale. Access labels read "Plan · read-only"
 and "Ask for approvals" in both new and existing threads.
-Under the Code composer the start screen is an agent home rather than a
-blank prompt: suggested prompts as small hairline cards on the card fill (a
-label and the sentence they fill in), never bare text on the ground; then
-three sections that share one card grid (Continue's rows share one card), two
-across at the composer's width. Each card opens with a badge naming what it
-is (Issue, Pull request, Review requested, Linear, or a thread's delivery
-state: Running, PR #n, Merged, Done, Waiting), the repository or identifier
-in mono, and the age at the trailing edge; then the title and one line of
-facts. Up next holds what is in flight for the person (review requests,
-their own open pull requests, assigned GitHub issues, assigned Linear
-issues), each badge naming why it is there, and says "You're all caught up"
-in a panel when empty, with Open Inbox at the section's trailing edge. Start
-something new holds open GitHub and Linear issues nobody has picked up, with
-Browse all issues beside it. Continue holds the latest Board cards: the badge
-is the thread's own state (Running, Done, Waiting, In progress, Ready) with
-changed lines, and the facts line names the Project, the branch (marked
-worktree when managed), the linked pull request with its number and state as
-a chip, and the provider last. Picking an item fills the prompt and attaches
-the issue as the thread's Create from context. The start screen has no image-generation control: generation lives on
+The Code start screen's agent home (suggested prompts, Up next, Start something
+new, and Continue) is laid out in
+[Start screen: Code agent home](docs/design/start-screen.md#code-agent-home). The start screen has no image-generation control: generation lives on
 its own surface. Attaching an image is a composer affordance and is available here.
 The prompt itself is frameless:
 `OctantTextarea` drops the shadcn field recipe when it wears `.composer-input`.
@@ -1189,6 +931,17 @@ read through:
 
 Its tint, stroke, and highlight are theme roles. Reduced transparency and
 unsupported `backdrop-filter` resolve every one of them to an opaque surface.
+
+The translucent workspace is the `workspaceMaterial` shell setting
+(`"system" | "opaque"`, default and absent value `"opaque"`), shown as
+the Window section's Glass cards switch, disabled until Glass is on. It takes effect only
+when the sidebar's own material already resolved translucent
+(`resolveWorkspaceMaterial`), so every accessibility, performance, and
+host-support gate on the sidebar applies to it too; it requests no second
+native material and frosts at the sidebar's vibrancy tier (subtle or strong).
+It repaints only the workspace layer and the Projects pane background; menus,
+dialogs, popovers, and other controls drawn on them stay opaque semantic
+surfaces.
 
 Shadow tokens are `--octant-shadow-hairline`, `--octant-shadow-xs`,
 `--octant-shadow-sm`, `--octant-shadow-md`, `--octant-shadow-lg`,
@@ -1274,7 +1027,10 @@ labeled selector, compact list, or icon presentation according to the user's
 setting; with two modes the icon presentation shows the labels instead of
 icons in a faint tray after a larger "Octant", so the header reads Octant [Work | Code]. Code and Work keep separate Project View sets. The
 sidebar keeps Projects as a first-class destination alongside the active mode's
-compact thread list. The Projects directory and the selected Project overview
+compact thread list. When Work has no Chat or Work Projects but Code does, the
+empty Projects line says "Your Projects are in Code." with a Switch to Code
+link; starting a Work Project stays on the section header. Code does not
+mirror that hint. The Projects directory and the selected Project overview
 occupy the main workspace in turn, following the
 [workspace navigation rule](docs/design/workspace.md#navigation-and-projects).
 The directory provides search and All, Chat, Work, and Code filters. Project
@@ -1324,8 +1080,7 @@ Project Overview are real features, not
 decorative shortcuts.
 
 The sidebar header carries the mode switcher, Search, and New thread (New
-chat in Chat, New task in Work and Code); the New thread row no longer
-repeats it. Under the header sit four count tiles in a 2×2 grid: Inbox (the
+chat in Chat, New task in Work and Code); no New thread row repeats it. Under the header sit four count tiles in a 2×2 grid: Inbox (the
 threads that need the person), Running (threads the host projects as
 executing), To review (finished turns not opened since), and Done today
 (threads completed since local midnight). Each tile is one button whose name
@@ -1413,64 +1168,11 @@ exists and only for a runtime whose version probe the host can run. Its
 answer is one quiet line under the actions (the version the host read), or a
 warning box saying why the host refused the file.
 
-Octant Harness lists its model endpoints differently: as rows in one list,
-never two-up cards. A row is a single link named with its state ("Team
-gateway, not working, open details") and holds the source mark (the bundled
-mark keyed by the endpoint's sign-in, a monogram otherwise), the name, a
-sub-line (who is signed in, or the host and "API key" or "No key"), the state
-in words beside a dot whose shape carries it (filled for ready, a ring when it
-needs you, a dashed ring for off, a muted ring for not checked, a turning ring
-for checking that is a static dotted ring under reduced motion, and a diamond
-for failed), and the model count ("12 of 63 shown"). The states are Ready,
-Sign in to use, Signed out, Checking…, Can't connect, Key refused, Key needed,
-Not working, No models yet, Not checked yet, and Off. One that needs you adds
-one plain sentence and exactly one fix button under the link (Sign in, Sign in
-again, Try again, Replace key, Add key, Edit address, Add model IDs, Check
-now), announced through a polite live region on that row; a failed check never
-raises a page-level banner. The enable switch is the detail page's Use switch,
-and an endpoint that is off says "Off · kept, not offered" on its row. Opening
-a row replaces the page with the endpoint's detail sub-page (breadcrumb
-Settings / Octant Harness / endpoint, a Back control, and Escape), whose h1 is
-the endpoint's name; Back returns focus to the row. The sub-page leads with
-the state, Check now, and Use, then the one fix, then Sign-in or API key,
-Models (search, a Shown / Hidden / All filter, a switch per model, and the
-plain tags "Reads images" and "Chat only · Verify tools"), Where your data
-goes (two labelled checkboxes the person sets, with per-model overrides in a
-disclosure), Name and address, Diagnostics (a disclosure that opens by itself
-only while the endpoint is failing, holding the address, protocol,
-authentication, last check with the host's precise answer, tool use, and
-capabilities), and Remove last, confirmed in a dialog that starts on Keep and
-names the model roles that lose a model. Precise terms (protocol names,
-bearer, capability names) appear only in Diagnostics. Add endpoint opens a
-dialog: the sign-ins first, then a guided flow with a numbered strip of steps.
-Kind is four cards (Azure AI Foundry, OpenAI-compatible, Anthropic-compatible,
-Local (Ollama)). Connect asks for a name, the address, and the key, each with a
-one-line hint, and no control is greyed out without a sentence saying why;
-protocol, how the key is sent, and "It takes no key" sit under Advanced, and
-an Azure address entered as OpenAI-compatible offers Switch to Azure AI
-Foundry. Azure also names at least one deployment, as chips, because the host
-cannot add it without one. Check and add adds the endpoint and shows its row
-state in the dialog, with its fix; from then on the endpoint exists, and
-closing the dialog keeps it. Models lists a short catalogue whole and chosen; a
-long one is searched, lists at most eight matches with a count of the rest,
-starts with nothing chosen, and has an Add by ID row; models left unchosen are
-hidden from the model picker. Azure edits its deployment chips; Local lists
-the models installed in Ollama, with no Add by ID. Verify tools checks each
-chosen model, one request at a time, after a button that says how many
-requests it sends; each model reads Checking…, Verified, or "Chat only" with
-the reason and Retry, and a failed check never stops the endpoint being
-added. Ollama models are Chat only without a request, with the reason said
-once. Agents is optional: only verified models can be offered to helper agents
-or given an Octant Harness role (a Chat only model is listed with its
-checkbox off and a sentence saying why; role choices list verified models
-only, and Reading images only those that read images). A chosen role makes the
-model its first choice and keeps what it had as backups, saved with the roles'
-version; a stale version reloads the roles and asks again. In a browser, a kind
-that needs a key is added without one and reads Needs key, sending the person
-to the desktop app; Local works fully. "Chat only · Verify tools" is the one
-label for an unverified model on the endpoint row (when no shown model is
-verified), the endpoint's Models, the model pickers, and Add endpoint.
-Targets are 44px tall at phone width.
+Provider catalog and the Octant Harness model endpoints (rows, detail
+sub-pages, and Add endpoint) follow
+[Providers and model endpoints](docs/design/model-endpoints.md): one link per
+row named with its state, the state in words beside a dot whose shape carries
+it, one plain fix per problem, and precise protocol terms only in Diagnostics.
 Skill rows show the source class and one effective state;
 filesystem paths, qualified identifiers, hashes, requested/effective
 breakdowns, and content size live behind Details. Usage opens on requests,
@@ -1503,7 +1205,8 @@ Project. The Model step writes to what a new task in that mode already starts
 from: Work's default model in Work settings, and the composer's remembered
 model for Code. The readiness view reports provider, Project, and model
 separately; a missing fact opens its exact setup surface, and Start a task
-appears only when all three hold. Answers still write through to the settings
+appears only when all three hold. Its heading reads Ready to start only then and
+otherwise names what is missing (Needs a provider and a model). Answers still write through to the settings
 that own them. First run records its outcome only after every answer has landed. When
 the host refused an answer, the first press of Skip setup or the primary action
 says so in a warning notice and records nothing; the next press goes on without
@@ -1615,8 +1318,8 @@ turning arc while any card in the column is executing and a filled dot when
 none is, Waiting a filled dot, Done a check. Under the Vivid style the marks
 take palette colours (Ready stays grey, In Progress orange, Waiting purple,
 Done green). A Board/List toggle leads the toolbar, and every control on it
-(the segmented choices, search, Filters, Refresh, View) is one 28px rail
-control. A card is a raised object inside its well: the card fill, a hairline,
+(the segmented choices, search, Filters, Refresh, View) is one rail control
+(`--oct-rail-button-h`). A card is a raised object inside its well: the card fill, a hairline,
 `--oct-radius-inset`, and 12px of padding. It carries the Project as an
 eyebrow, the title, and, while the thread is executing, a live line under the
 title (a small turning arc and the latest sub-agent line in the mono meta voice,
@@ -1649,7 +1352,7 @@ is reads at a glance. It
 opens an opaque 320px popover: a header with the used and
 maximum figures and share, one 4px segmented bar whose empty track is the free
 space, a breakdown folded behind a chevron each time the popover opens, the
-provider's limits as a name, a reset countdown or weekday, a share, and a thin
+provider's limits as a name, a reset countdown or weekday, the share left, and a thin
 bar each, and a footer action to the fuller surface (the context inspector, or
 Usage for a provider the host does not plan). The breakdown lists only the
 parts the data attributes: planned threads show their manifest categories,
@@ -1669,7 +1372,7 @@ the remainder after an estimate is marked the same way. Counts (tools, MCP, memo
 files, skills, agents) use the harness breakdown's row style; tools the runtime
 knows but has not loaded read `N deferred` and take no share of the bar.
 
-Categorical colour (the maintainer's decision, 2026-10-06): the parts of a
+Categorical colour: the parts of a
 context window are categorical data, so they carry hue in every style, Default
 included, beside the context ring as the second colour exception in that
 style. Each category has one tone, taken from the palette roles in seven hues
@@ -1684,17 +1387,17 @@ and MCP tools, Octant tools and system tools, provider framing and system
 prompt, a profile's instructions and Octant instructions, workspace context and
 attachments, what nothing accounts for) shares one tone. Neighbour contrast is
 measured, not judged by eye: every tone holds at least 5.2:1 against the popover
-in light and dark, and the worst neighbouring pair is 0.134 apart in OKLab.
+in light and dark, and every neighbouring pair stays clearly apart in OKLab.
 Adjacent lightness ratios stay under 2:1, because seven hues that each clear 5:1
 cannot also sit 3:1 from one another; the one-pixel gap and the name beside every
-swatch carry the rest. `visualLanguageContract.test.ts` computes both numbers
-from the stylesheet. Red is left to the ring's near-full warning. **Free space and Reserved stay
+swatch carry the rest. `visualLanguageContract.test.ts` computes both from the
+stylesheet and owns the enforced floors. Red is left to the ring's near-full warning. **Free space and Reserved stay
 neutral**: no hue, the panel's ink mixed into its ground, with Free space drawn
 as the bar's empty track. Every part is named beside its swatch and carries its
 tokens and share, so hue never stands alone. The exception is scoped to these
 segments in `visualLanguageContract.test.ts`: in `context.css` palette colour
 may appear only on the tone rules, the ring and the limit bars. Limit bars fill
-in blue. A limit near its cap is marked on its row and in its bar's value text,
+in blue, by the share left. A limit near its cap is marked on its row and in its bar's value text,
 never by ink alone. Unknown or stale data is labeled as such and never rendered as zero.
 Where a provider runtime compacts the session by itself and has said where, one
 secondary line under the window bar reads `N until auto-compact` in the bar's
@@ -1727,8 +1430,8 @@ widest viewport its behavior applies to:
 | 680px       | `useSidebarDrawerViewport`, shell.css (`min-width: 681px`) | The workspace sidebar becomes an overlay drawer, the window frame goes flat, and pane headers drop their Project and branch chips.                                                                                                               |
 
 Inside a surface, layouts reflow at component breakpoints rather than shell
-ones: 920px (two-to-four column grids and the Project overview gutter),
-720px (Settings fact lists and gutters, issue rows), and 560px (start-screen
+ones: `--oct-bp-lg` 920px (two-to-four column grids and the Project overview gutter),
+`--oct-bp-md` 720px (Settings fact lists and gutters, issue rows), and `--oct-bp-sm` 560px (start-screen
 tiles and cards to one column, compact Settings title bars, 44px Project
 rows and always-visible thread row actions). Other widths in feature stylesheets are local to that
 surface. The mobile app has a separate design system under
@@ -1904,7 +1607,11 @@ Inline provider, extension, and Browser permission requests use
 pending icon, readable summary and detail, wrapping action row, and inline
 failure announcement. The requesting feature supplies the scope, choices, and
 callbacks; the existing host or server still decides whether an action may
-proceed. Native Code approvals keep their isolated host-owned document.
+proceed. Native Code approvals keep their isolated host-owned document. The
+extension tool request names the plugin, its server, and the tool, and adds
+"Always allow in this Project" only when the host marks the call rememberable
+and the window is a local one. Settings › Data & privacy lists those answers by
+Project, each with Revoke, beside Remembered websites.
 
 Ordinary usage reset/retention, Git discard, and remote administration
 confirmations use the shared `OctantConfirmDialog` over `OctantDialog`. The
@@ -1981,6 +1688,14 @@ request from the person.
 - Loading, unavailable, stale, denied, empty, and error states keep stable
   geometry and explain the next action. Never turn a refused server command
   into a silent no-op.
+- Increased contrast is one state with two triggers: the Appearance setting
+  or the system's `prefers-contrast: more`. `ThemeSettingsProvider` publishes
+  either as `data-octant-increased-contrast="true"` on the root, and every
+  high-contrast rule keys off that attribute rather than the media query, so
+  both triggers draw the same rules: the text roles take their
+  `--octant-text-*-high-contrast` values and hairlines step up to
+  `--octant-border-strong`. Script that adapts to contrast reads
+  `useIncreasedContrast()`, not the media query.
 - Theme, typography, density, translucency, contrast, and reduced-motion
   settings are persisted through the server-authoritative journal and applied
   through the providers. Renderer state is presentation only.
@@ -2144,7 +1859,9 @@ within that thread/checkout presentation, not the URL or journal. Search results
 show individual nodes rather than inventing graph edges across omitted commits.
 Loading, unavailable, no-result, shallow, and truncated states remain explicit.
 Historical file inspection is read-only. Existing unified diffs and Monaco own
-diff presentation; file disclosures mount only their open preview.
+diff presentation; file disclosures mount only their open preview. Unified and
+Side by side are a compact Settings row on Code, used only until this window
+stores a layout for that thread.
 
 ### Compact task controls
 

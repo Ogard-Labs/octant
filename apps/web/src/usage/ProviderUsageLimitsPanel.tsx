@@ -17,6 +17,7 @@ import "../styles/usage.css";
 export function ProviderUsageLimitsPanel(props: {
   readonly client: ProviderUsageLimitsClient;
   readonly instances: ReadonlyArray<ProviderInstance>;
+  readonly compact?: boolean;
 }) {
   const [reading, setReading] = useState<{
     readonly client: ProviderUsageLimitsClient;
@@ -99,25 +100,9 @@ export function ProviderUsageLimitsPanel(props: {
     return () => clearTimeout(timer);
   }, [snapshot, now]);
 
-  return (
-    <SurfaceSection
-      actions={
-        <OctantButton
-          aria-label="Refresh provider limits"
-          disabled={busy}
-          onClick={() => void load(true)}
-          size="sm"
-          type="button"
-          variant="ghost"
-        >
-          <RefreshCw aria-hidden="true" size={14} />
-          Refresh
-        </OctantButton>
-      }
-      className="provider-limits"
-      label="Provider limits"
-      note="Provider-reported limits can include usage from other apps. An unreported window stays unknown; a reset requires a fresh reading."
-    >
+  const visible = snapshot?.entries.filter((entry) => names.has(String(entry.providerInstanceId)));
+  const body = (
+    <>
       {message === undefined ? null : (
         <p className="surface-section__note" role="status">
           {message}
@@ -128,14 +113,14 @@ export function ProviderUsageLimitsPanel(props: {
           Loading provider limits…
         </p>
       ) : null}
-      {snapshot?.entries.length === 0 ? (
+      {visible?.length === 0 ? (
         <p className="surface-section__note" role="status">
           No configured providers have reported limits.
         </p>
       ) : null}
-      {snapshot === undefined || snapshot.entries.length === 0 ? null : (
+      {visible === undefined || visible.length === 0 ? null : (
         <ul className="surface-list provider-limits__list">
-          {snapshot.entries.map((entry) => {
+          {visible.map((entry) => {
             const instance = names.get(String(entry.providerInstanceId));
             return (
               <li
@@ -169,6 +154,35 @@ export function ProviderUsageLimitsPanel(props: {
           })}
         </ul>
       )}
+    </>
+  );
+  if (props.compact === true) {
+    return (
+      <div className="provider-limits provider-limits--compact" data-account-usage="">
+        {body}
+      </div>
+    );
+  }
+  return (
+    <SurfaceSection
+      actions={
+        <OctantButton
+          aria-label="Refresh provider limits"
+          disabled={busy}
+          onClick={() => void load(true)}
+          size="sm"
+          type="button"
+          variant="ghost"
+        >
+          <RefreshCw aria-hidden="true" size={14} />
+          Refresh
+        </OctantButton>
+      }
+      className="provider-limits"
+      label="Provider limits"
+      note="Provider-reported limits can include usage from other apps. An unreported window stays unknown; a reset requires a fresh reading."
+    >
+      {body}
     </SurfaceSection>
   );
 }
@@ -196,6 +210,8 @@ function unavailableCopy(
       return "Runs locally, no account limits";
     case "endpoint-silent":
       return "No rate-limit headers on the last request";
+    case "plan-limits-do-not-apply":
+      return "Plan limits do not apply";
   }
 }
 
@@ -223,6 +239,8 @@ const WINDOW_LABELS: Readonly<Record<string, string>> = {
   seven_day: "7-day window",
   seven_day_opus: "7-day Opus window",
   seven_day_sonnet: "7-day Sonnet window",
+  seven_day_overage_included: "7-day overage included",
+  overage: "Overage",
 };
 
 const DURATION_UNITS: Readonly<Record<string, string>> = { m: "minute", h: "hour", d: "day" };
@@ -277,6 +295,9 @@ function EntryDetails({
         </div>
       ) : null}
       {limits === undefined ? <p>Unavailable</p> : <LimitBuckets limits={limits} now={now} />}
+      <p className="provider-limits__updated">
+        Last updated {formatTime(limits?.updatedAt ?? entry.observedAt)}
+      </p>
     </div>
   );
 }
@@ -317,6 +338,7 @@ function LimitBuckets({
             ? {}
             : { remainingPercent: Math.floor((1 - window.utilization) * 100 + 1e-9) })}
           {...(window.resetsAt === undefined ? {} : { resetsAt: window.resetsAt })}
+          {...(window.overage === undefined ? {} : { overage: overageCopy(window.overage) })}
         />
       ))}
       {limits.retry.status === "active" ? (
@@ -352,6 +374,7 @@ function QuotaWindow(props: {
   readonly remainingPercent?: number;
   readonly resetsAt?: string;
   readonly detail?: string;
+  readonly overage?: string;
 }) {
   const expired = props.resetsAt !== undefined && Date.parse(props.resetsAt) <= props.now;
   const remaining = expired ? undefined : props.remainingPercent;
@@ -376,13 +399,25 @@ function QuotaWindow(props: {
         </span>
         {props.resetsAt === undefined || expired ? null : (
           <time dateTime={props.resetsAt} title={formatTime(props.resetsAt)}>
-            {resetCountdown(props.resetsAt, props.now)}
+            {formatTime(props.resetsAt)} · {resetCountdown(props.resetsAt, props.now)}
           </time>
         )}
       </div>
+      {props.overage === undefined || expired ? null : <p>{props.overage}</p>}
       {props.detail === undefined || expired ? null : <p>{props.detail}</p>}
     </div>
   );
+}
+
+function overageCopy(
+  overage: NonNullable<ProviderServiceLimits["rateLimitWindows"]>[number]["overage"],
+): string {
+  if (overage === undefined) return "Overage available";
+  if (overage.disabledReason !== undefined) return `Overage: ${overage.disabledReason}`;
+  if (overage.inUse === true) return "Overage in use";
+  if (overage.status === "exhausted") return "Overage exhausted";
+  if (overage.status === "warning") return "Overage warning";
+  return "Overage available";
 }
 
 function resetCountdown(resetsAt: string, now: number): string {

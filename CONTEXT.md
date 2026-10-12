@@ -1,37 +1,40 @@
 # Octant domain language
 
-Octant separates the device a person controls from the machine that owns
-their work, and the isolated places where that work executes.
+Octant separates the device a person controls from the host that owns their
+work, and the isolated places where that work executes. These terms follow the
+codebase (`HostId`, `@octant/host-runtime`, `HostSelector`); a few older
+comments and messages still say "Machine" for a host.
 
 ## Control and ownership
 
 **Device**:
-A phone, browser, laptop, or desktop app used to control one Machine. Device
-type, renderer mode, and development tooling use the canonical Machine and
+A phone, browser, laptop, or desktop app used to control one host. Device
+type, renderer mode, and development tooling use the canonical host and
 authoritative store by default; an explicitly named isolated data directory is
 the documented exception.
 _Avoid_: Host, environment
 
-**Machine**:
+**Host**:
 A computer with one canonical Octant identity and authoritative store that owns
 Projects, threads, credentials, and execution for every connected Device.
-_Avoid_: Device, environment
+_Avoid_: Device, environment, Machine (in new code and copy)
 
 **Client context**:
 A Device-local presentation context such as its active panes, layout, focus,
 and unsaved drafts. It never owns or partitions Projects, threads, or history.
-_Avoid_: Machine, Project
+_Avoid_: Host, Project
 
 **This Mac**:
-The local desktop Machine running the current Octant app.
+The label for the local desktop host running the current Octant app.
 _Avoid_: Local device
 
-**Remote Mac**:
-Another paired macOS Machine.
+**Remote host**:
+Another paired host.
 _Avoid_: Remote device
 
 **Station**:
-A persistent headless Linux Machine.
+A persistent headless Linux host. Not built: the isolation tracer names it, but
+no Station is provisioned or shown in navigation.
 _Avoid_: Cloud, server container, orb
 
 ## Places work lives
@@ -68,14 +71,14 @@ _Avoid_: Reminder, digest, catch-up
 
 **Environment**:
 The thread's current execution context and status summary.
-_Avoid_: Machine, Station
+_Avoid_: Host, Station
 
 **Execution capsule**:
 A protected coding environment owned by one Code thread or one writing child
-AgentRun.
+AgentRun. Not built.
 _Avoid_: Worktree, session, environment
 
 **Disposable Desktop**:
 A temporary interactive desktop leased by one thread for graphical testing and
-shared agent or user control.
+shared agent or user control. Not built.
 _Avoid_: Station, execution capsule

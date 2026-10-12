@@ -410,6 +410,45 @@ describe("ComposerModelPicker", () => {
     expect(onSelect).not.toHaveBeenCalled();
   });
 
+  it("marks a Claude account rail with its accent color", async () => {
+    const user = userEvent.setup();
+    const instances = [
+      instance("opencode", providerA, "Local agent"),
+      decodeProviderInstance({
+        ...instance("claude", providerB, "Work Claude"),
+        configuration: {
+          kind: "claude-agent-sdk",
+          binaryPath: "/opt/homebrew/bin/claude",
+          authentication: "subscription",
+          accent: "teal",
+        },
+      }),
+    ];
+    const observedByInstance = new Map([
+      [
+        providerA,
+        observation(providerA, [model(modelOne, "Model One"), model(modelTwo, "Model Two")]),
+      ],
+      [providerB, observation(providerB, [model(modelThree, "Model Three")])],
+    ]);
+    render(
+      <ComposerModelPicker
+        groups={buildModelPickerGroups({
+          instances,
+          observedByInstance,
+          mode: "chat",
+        })}
+        onSelect={vi.fn()}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Provider and model" }));
+    const rail = await screen.findByRole("option", { name: "Work Claude" });
+    expect(rail.querySelector("[data-accent='teal']")).not.toBeNull();
+    expect(
+      screen.getByRole("option", { name: "Local agent" }).querySelector("[data-accent]"),
+    ).toBeNull();
+  });
+
   it("shows readiness labels on providers that are not fully ready", async () => {
     const user = userEvent.setup();
     render(<ComposerModelPicker groups={groups({ degraded: true })} onSelect={vi.fn()} />);

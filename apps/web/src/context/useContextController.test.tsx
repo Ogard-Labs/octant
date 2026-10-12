@@ -332,6 +332,9 @@ function fakeClient(overrides: Partial<ContextClient> = {}): ContextClient {
   return {
     inspect: vi.fn(async () => contextFixture()),
     execute: vi.fn(async () => ({ kind: "context-rebuilt" as const, snapshot: contextFixture() })),
+    externalContentAvailable: false,
+    readExternalContent: vi.fn(),
+    clearExternalContent: vi.fn(),
     ...overrides,
   };
 }

@@ -7,6 +7,7 @@ import {
   type AzureFoundryProviderConfiguration,
   type BflImageProviderConfiguration,
   type ClaudeProviderConfiguration,
+  type CodexProviderConfiguration,
   type DevinProviderConfiguration,
   type GrokProviderConfiguration,
   type GlmProviderConfiguration,
@@ -45,9 +46,8 @@ import {
   ProviderClientFailure,
   type ProviderClient,
 } from "@octant/client-runtime/provider-client";
+import { parseClaudeAccountAccent } from "./configuration/claudeAccountValues";
 import { runProviderOAuthCommand } from "./providerOAuthClient";
-import { runClaudeHelperCommand } from "./claudeHelperSignInClient";
-import type { ClaudeHelperCommand } from "./ClaudeHelperSignIn";
 import type { ProviderOAuthCommand } from "./ProviderOAuthSignIn";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { failureMessage } from "../lib/failureMessage";
@@ -399,6 +399,7 @@ export function useProviderController(options: ProviderControllerOptions) {
         | "copilot",
       displayName: string,
       binaryPath: string,
+      accent?: string,
     ) =>
       execute(() => {
         const instanceId = decodeProviderInstanceId(crypto.randomUUID());
@@ -477,6 +478,9 @@ export function useProviderController(options: ProviderControllerOptions) {
           expectedVersion,
           displayName,
           binaryPath,
+          ...(driverKind === "codex" && parseClaudeAccountAccent(accent ?? "") !== undefined
+            ? { accent: parseClaudeAccountAccent(accent ?? "") }
+            : {}),
         };
       }),
     [execute],
@@ -521,7 +525,7 @@ export function useProviderController(options: ProviderControllerOptions) {
             return false;
           }
           try {
-            await hostBridge.setProviderCredential(instanceId, credentialValue);
+            await hostBridge.addProviderApiKey(instanceId, credentialValue);
             return true;
           } catch {
             if (mounted.current) {
@@ -571,7 +575,7 @@ export function useProviderController(options: ProviderControllerOptions) {
             return false;
           }
           try {
-            await hostBridge.setProviderCredential(instanceId, credentialValue);
+            await hostBridge.addProviderApiKey(instanceId, credentialValue);
             return true;
           } catch {
             if (mounted.current) {
@@ -629,7 +633,7 @@ export function useProviderController(options: ProviderControllerOptions) {
           }
           if (hostBridge === undefined) return true;
           try {
-            await hostBridge.setProviderCredential(instanceId, credentialValue);
+            await hostBridge.addProviderApiKey(instanceId, credentialValue);
             return true;
           } catch {
             if (mounted.current) {
@@ -682,7 +686,7 @@ export function useProviderController(options: ProviderControllerOptions) {
             return false;
           }
           try {
-            await hostBridge.setProviderCredential(instanceId, credentialValue);
+            await hostBridge.addProviderApiKey(instanceId, credentialValue);
             return true;
           } catch {
             if (mounted.current) {
@@ -735,7 +739,7 @@ export function useProviderController(options: ProviderControllerOptions) {
             return false;
           }
           try {
-            await hostBridge.setProviderCredential(instanceId, credentialValue);
+            await hostBridge.addProviderApiKey(instanceId, credentialValue);
             return true;
           } catch {
             if (mounted.current) {
@@ -788,7 +792,7 @@ export function useProviderController(options: ProviderControllerOptions) {
             return false;
           }
           try {
-            await hostBridge.setProviderCredential(instanceId, credentialValue);
+            await hostBridge.addProviderApiKey(instanceId, credentialValue);
             return true;
           } catch {
             if (mounted.current) {
@@ -841,7 +845,7 @@ export function useProviderController(options: ProviderControllerOptions) {
             return false;
           }
           try {
-            await hostBridge.setProviderCredential(instanceId, credentialValue);
+            await hostBridge.addProviderApiKey(instanceId, credentialValue);
             return true;
           } catch {
             if (mounted.current) {
@@ -903,7 +907,7 @@ export function useProviderController(options: ProviderControllerOptions) {
             );
             created = true;
             if (configuration.authentication === "api-key") {
-              await hostBridge!.setProviderCredential(instanceId, credentialValue);
+              await hostBridge!.addProviderApiKey(instanceId, credentialValue);
             }
             return true;
           } catch (error) {
@@ -959,7 +963,7 @@ export function useProviderController(options: ProviderControllerOptions) {
             );
             created = true;
             if (configuration.authentication === "api-key") {
-              await hostBridge!.setProviderCredential(instanceId, credentialValue);
+              await hostBridge!.addProviderApiKey(instanceId, credentialValue);
             }
             return true;
           } catch (error) {
@@ -1015,7 +1019,7 @@ export function useProviderController(options: ProviderControllerOptions) {
             );
             created = true;
             if (configuration.authentication === "api-key") {
-              await hostBridge!.setProviderCredential(instanceId, credentialValue);
+              await hostBridge!.addProviderApiKey(instanceId, credentialValue);
             }
             return true;
           } catch (error) {
@@ -1072,7 +1076,7 @@ export function useProviderController(options: ProviderControllerOptions) {
             );
             created = true;
             if (apiKeyHost !== undefined) {
-              await apiKeyHost.setProviderCredential(instanceId, credentialValue);
+              await apiKeyHost.addProviderApiKey(instanceId, credentialValue);
             }
             return true;
           } catch (error) {
@@ -1130,7 +1134,7 @@ export function useProviderController(options: ProviderControllerOptions) {
             );
             created = true;
             if (apiKeyHost !== undefined) {
-              await apiKeyHost.setProviderCredential(instanceId, credentialValue);
+              await apiKeyHost.addProviderApiKey(instanceId, credentialValue);
             }
             return true;
           } catch (error) {
@@ -1187,7 +1191,7 @@ export function useProviderController(options: ProviderControllerOptions) {
             );
             created = true;
             if (apiKeyHost !== undefined) {
-              await apiKeyHost.setProviderCredential(instanceId, credentialValue);
+              await apiKeyHost.addProviderApiKey(instanceId, credentialValue);
             }
             return true;
           } catch (error) {
@@ -1244,7 +1248,7 @@ export function useProviderController(options: ProviderControllerOptions) {
             );
             created = true;
             if (apiKeyHost !== undefined) {
-              await apiKeyHost.setProviderCredential(instanceId, credentialValue);
+              await apiKeyHost.addProviderApiKey(instanceId, credentialValue);
             }
             return true;
           } catch (error) {
@@ -1300,7 +1304,7 @@ export function useProviderController(options: ProviderControllerOptions) {
               install,
             );
             created = true;
-            await hostBridge.setProviderCredential(instanceId, credentialValue);
+            await hostBridge.addProviderApiKey(instanceId, credentialValue);
             return true;
           } catch (error) {
             if (created) {
@@ -1430,11 +1434,31 @@ export function useProviderController(options: ProviderControllerOptions) {
     },
     [client, install],
   );
+  const changeCodexConfiguration = useCallback(
+    (
+      instanceId: ProviderInstanceId,
+      configuration: CodexProviderConfiguration,
+      options?: { readonly reassignAccountDirectory?: boolean },
+    ) =>
+      execute((current) => {
+        const instance = findProvider(current, instanceId);
+        if (instance?.driverKind !== "codex") return undefined;
+        return {
+          kind: "change-codex-configuration",
+          instanceId,
+          expectedVersion: instance.version,
+          configuration,
+          ...(options?.reassignAccountDirectory === true ? { reassignAccountDirectory: true } : {}),
+        };
+      }),
+    [execute],
+  );
   const changeClaudeConfiguration = useCallback(
     (
       instanceId: ProviderInstanceId,
       configuration: ClaudeProviderConfiguration,
       credential: TransientProviderCredential,
+      options?: { readonly reassignAccountDirectory?: boolean },
     ) =>
       queueProviderMutation(mutationQueue, mounted, setBusy, setMessage, () =>
         withTransientCredential(credential, async (credentialValue) => {
@@ -1476,7 +1500,7 @@ export function useProviderController(options: ProviderControllerOptions) {
           // key to connect with and nothing able to put it back.
           if (mustSet && bridge !== undefined) {
             try {
-              await bridge.setProviderCredential(instanceId, credentialValue);
+              await bridge.addProviderApiKey(instanceId, credentialValue);
             } catch {
               if (mounted.current) {
                 setMessage(
@@ -1493,6 +1517,9 @@ export function useProviderController(options: ProviderControllerOptions) {
                 instanceId,
                 expectedVersion: instance.version,
                 configuration,
+                ...(options?.reassignAccountDirectory === true
+                  ? { reassignAccountDirectory: true }
+                  : {}),
               }),
               current,
               install,
@@ -1528,6 +1555,9 @@ export function useProviderController(options: ProviderControllerOptions) {
                         instanceId,
                         expectedVersion: refreshedInstance.version,
                         configuration,
+                        ...(options?.reassignAccountDirectory === true
+                          ? { reassignAccountDirectory: true }
+                          : {}),
                       }),
                       refreshed,
                       install,
@@ -1611,7 +1641,7 @@ export function useProviderController(options: ProviderControllerOptions) {
           // key to connect with and nothing able to put it back.
           if (mustSet && bridge !== undefined) {
             try {
-              await bridge.setProviderCredential(instanceId, credentialValue);
+              await bridge.addProviderApiKey(instanceId, credentialValue);
             } catch {
               if (mounted.current) {
                 setMessage(
@@ -1707,7 +1737,7 @@ export function useProviderController(options: ProviderControllerOptions) {
           // key to connect with and nothing able to put it back.
           if (mustSet && bridge !== undefined) {
             try {
-              await bridge.setProviderCredential(instanceId, credentialValue);
+              await bridge.addProviderApiKey(instanceId, credentialValue);
             } catch {
               if (mounted.current) {
                 setMessage(
@@ -1825,7 +1855,7 @@ export function useProviderController(options: ProviderControllerOptions) {
           }
           if (mustSet) {
             try {
-              await hostBridge!.setProviderCredential(instanceId, credentialValue);
+              await hostBridge!.addProviderApiKey(instanceId, credentialValue);
             } catch {
               const rolledBackCurrent = authoritative.current;
               const rolledBackInstance =
@@ -1929,7 +1959,7 @@ export function useProviderController(options: ProviderControllerOptions) {
           }
           if (mustSet) {
             try {
-              await hostBridge!.setProviderCredential(instanceId, credentialValue);
+              await hostBridge!.addProviderApiKey(instanceId, credentialValue);
             } catch {
               const rolledBackCurrent = authoritative.current;
               const rolledBackInstance =
@@ -2033,7 +2063,7 @@ export function useProviderController(options: ProviderControllerOptions) {
           }
           if (mustSet) {
             try {
-              await hostBridge!.setProviderCredential(instanceId, credentialValue);
+              await hostBridge!.addProviderApiKey(instanceId, credentialValue);
             } catch {
               const rolledBackCurrent = authoritative.current;
               const rolledBackInstance =
@@ -2137,7 +2167,7 @@ export function useProviderController(options: ProviderControllerOptions) {
           }
           if (mustSet) {
             try {
-              await hostBridge!.setProviderCredential(instanceId, credentialValue);
+              await hostBridge!.addProviderApiKey(instanceId, credentialValue);
             } catch {
               const rolledBackCurrent = authoritative.current;
               const rolledBackInstance =
@@ -2227,7 +2257,7 @@ export function useProviderController(options: ProviderControllerOptions) {
           }
           if (mustSet) {
             try {
-              await hostBridge!.setProviderCredential(instanceId, credentialValue);
+              await hostBridge!.addProviderApiKey(instanceId, credentialValue);
             } catch {
               const rolledBackCurrent = authoritative.current;
               const rolledBackInstance =
@@ -2423,7 +2453,7 @@ export function useProviderController(options: ProviderControllerOptions) {
             return false;
           }
           try {
-            await hostBridge.setProviderCredential(instanceId, credentialValue);
+            await hostBridge.addProviderApiKey(instanceId, credentialValue);
             return true;
           } catch {
             if (mounted.current) {
@@ -2477,7 +2507,7 @@ export function useProviderController(options: ProviderControllerOptions) {
             return false;
           }
           try {
-            await hostBridge.setProviderCredential(instanceId, credentialValue);
+            await hostBridge.addProviderApiKey(instanceId, credentialValue);
             return true;
           } catch {
             if (mounted.current) {
@@ -2531,7 +2561,7 @@ export function useProviderController(options: ProviderControllerOptions) {
             return false;
           }
           try {
-            await hostBridge.setProviderCredential(instanceId, credentialValue);
+            await hostBridge.addProviderApiKey(instanceId, credentialValue);
             return true;
           } catch {
             if (mounted.current) {
@@ -2585,7 +2615,7 @@ export function useProviderController(options: ProviderControllerOptions) {
             return false;
           }
           try {
-            await hostBridge.setProviderCredential(instanceId, credentialValue);
+            await hostBridge.addProviderApiKey(instanceId, credentialValue);
             return true;
           } catch {
             if (mounted.current) {
@@ -2639,7 +2669,7 @@ export function useProviderController(options: ProviderControllerOptions) {
             return false;
           }
           try {
-            await hostBridge.setProviderCredential(instanceId, credentialValue);
+            await hostBridge.addProviderApiKey(instanceId, credentialValue);
             return true;
           } catch {
             if (mounted.current) {
@@ -2690,6 +2720,10 @@ export function useProviderController(options: ProviderControllerOptions) {
           const mustSet =
             (nextAuthentication === "api-key" || nextAuthentication === "bearer") &&
             credentialValue.length > 0;
+          // The host deletes the stored key when the base URL moves, so a key
+          // stored first would be the one deleted. Store it after the change.
+          const setAfterChange =
+            mustSet && configuration.baseUrl !== instance.configuration.baseUrl;
           if ((mustClear || mustSet) && hostBridge === undefined) {
             if (mounted.current) {
               setMessage("Provider credential management is unavailable on this host.");
@@ -2698,7 +2732,9 @@ export function useProviderController(options: ProviderControllerOptions) {
           }
           try {
             if (mustClear) await hostBridge!.clearProviderCredential(instanceId);
-            if (mustSet) await hostBridge!.setProviderCredential(instanceId, credentialValue);
+            if (mustSet && !setAfterChange) {
+              await hostBridge!.addProviderApiKey(instanceId, credentialValue);
+            }
           } catch {
             if (mounted.current) {
               setMessage(
@@ -2720,9 +2756,20 @@ export function useProviderController(options: ProviderControllerOptions) {
               current,
               install,
             );
-            return true;
           } catch (error) {
             await recoverRegistryFailure(error, "Provider configuration could not be updated.");
+            return false;
+          }
+          if (!setAfterChange) return true;
+          try {
+            await hostBridge!.addProviderApiKey(instanceId, credentialValue);
+            return true;
+          } catch {
+            if (mounted.current) {
+              setMessage(
+                "Provider configuration was saved, but its credential could not be stored. Enter the API key again.",
+              );
+            }
             return false;
           }
         }),
@@ -2754,30 +2801,43 @@ export function useProviderController(options: ProviderControllerOptions) {
             return false;
           }
           const priorConfiguration = instance.configuration;
+          let priorKeyDeleted = false;
           // Validate the configuration server-side before rotating the Keychain credential so a
           // rejected /openai/v1/ URL or stale version leaves the prior key intact.
           try {
-            applyResult(
-              await client.execute({
-                kind: "change-azure-foundry-configuration",
-                instanceId,
-                expectedVersion: instance.version,
-                configuration,
-              }),
-              current,
-              install,
-            );
+            const result = await client.execute({
+              kind: "change-azure-foundry-configuration",
+              instanceId,
+              expectedVersion: instance.version,
+              configuration,
+            });
+            // The host deleted the prior key if the saved base URL moved.
+            priorKeyDeleted =
+              result.kind === "provider-updated" &&
+              result.instance.driverKind === "azure-foundry" &&
+              result.instance.configuration.baseUrl !== priorConfiguration.baseUrl;
+            applyResult(result, current, install);
           } catch (error) {
             await recoverRegistryFailure(error, "Provider configuration could not be updated.");
             return false;
           }
           if (mustSet) {
             try {
-              await hostBridge!.setProviderCredential(instanceId, credentialValue);
+              await hostBridge!.addProviderApiKey(instanceId, credentialValue);
             } catch {
-              // The new endpoint is committed but its key could not be stored.
-              // Roll back the configuration so the prior endpoint and prior key
-              // stay paired instead of leaving a new endpoint with a stale key.
+              // The prior key went with the prior base URL, so rolling back
+              // would only restore an endpoint without a key.
+              if (priorKeyDeleted) {
+                if (mounted.current) {
+                  setMessage(
+                    "The new endpoint was saved, but its API key could not be stored. Enter the API key again.",
+                  );
+                }
+                return false;
+              }
+              // The new configuration is committed but its key could not be
+              // stored. Roll back the configuration so the prior settings and
+              // prior key stay paired.
               const rolledBackCurrent = authoritative.current;
               const rolledBackInstance =
                 rolledBackCurrent === undefined
@@ -2953,7 +3013,22 @@ export function useProviderController(options: ProviderControllerOptions) {
                 "The provider was removed, but its stored credential could not be cleared. Retry cleanup from the Octant host.",
               );
             }
+            return true;
           }
+        }
+        // Octant assigned this folder and the provider's own CLI filled it.
+        // Removing the account does not delete it, so the person is told
+        // where the sign-in and history still are.
+        const accountDirectory =
+          instance.driverKind === "claude"
+            ? instance.configuration.configDirectory
+            : instance.driverKind === "codex"
+              ? instance.configuration.codexHome
+              : undefined;
+        if (accountDirectory !== undefined && mounted.current) {
+          setMessage(
+            `${instance.displayName} was removed. Its folder ${accountDirectory} still holds that account's sign-in and history. Delete the folder to remove them.`,
+          );
         }
         return true;
       }),
@@ -3222,6 +3297,7 @@ export function useProviderController(options: ProviderControllerOptions) {
     createIdeogramImage,
     rename,
     changeBinary,
+    changeCodexConfiguration,
     changeClaudeConfiguration,
     changeDevinConfiguration,
     changeKiloConfiguration,
@@ -3267,16 +3343,6 @@ export function useProviderController(options: ProviderControllerOptions) {
         return Promise.resolve(undefined);
       }
       return runProviderOAuthCommand({
-        baseUrl: options.serverUrl,
-        windowCapability: options.windowCapability,
-        command,
-      }).catch(() => undefined);
-    },
-    claudeHelpers: (command: ClaudeHelperCommand) => {
-      if (options.serverUrl === undefined || options.windowCapability === undefined) {
-        return Promise.resolve(undefined);
-      }
-      return runClaudeHelperCommand({
         baseUrl: options.serverUrl,
         windowCapability: options.windowCapability,
         command,

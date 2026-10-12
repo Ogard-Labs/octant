@@ -1000,12 +1000,10 @@ html[data-octant-reduced-motion="true"] :is(.octant-dialog__popup, .octant-dialo
   }
 }
 
-@media (prefers-contrast: more) {
-  .right-utility-dock__toolbar,
-  .right-utility-dock__tabs,
-  .octant-dialog__popup {
-    border-color: var(--octant-border-strong);
-  }
+html[data-octant-increased-contrast="true"] .right-utility-dock__toolbar,
+html[data-octant-increased-contrast="true"] .right-utility-dock__tabs,
+html[data-octant-increased-contrast="true"] .octant-dialog__popup {
+  border-color: var(--octant-border-strong);
 }
 
 /* Navigator: the host-owned conversation, also embedded by Zen's assistant. */
@@ -1098,9 +1096,7 @@ html[data-octant-reduced-motion="true"] :is(.octant-dialog__popup, .octant-dialo
   font-size: var(--oct-text-xs);
 }
 
-@media (prefers-contrast: more) {
-  .navigator-panel__notice,
-  .navigator-panel__capability {
-    border-color: var(--octant-border-strong);
-  }
+html[data-octant-increased-contrast="true"] .navigator-panel__notice,
+html[data-octant-increased-contrast="true"] .navigator-panel__capability {
+  border-color: var(--octant-border-strong);
 }

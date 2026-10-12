@@ -197,6 +197,19 @@ describe("authenticated product route dispatch", () => {
     expect(dispatch).not.toHaveBeenCalled();
   });
 
+  it("refuses a paired device the menu-bar fleet read before the route sees it", async () => {
+    const dispatch = vi.fn(async () => Response.json({ ok: true }));
+    const product = createAuthenticatedProductDispatch({ dispatch });
+
+    expect(
+      classifyProductAction(new Request("https://octant.example/api/fleet-activity")),
+    ).toBeUndefined();
+    const response = await product(handoff("/api/fleet-activity"));
+
+    expect(response?.status).toBe(403);
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
   it("refuses a paired device a Project browser before the route sees it", async () => {
     const dispatch = vi.fn(async () => Response.json({ ok: true }));
     const product = createAuthenticatedProductDispatch({ dispatch });
@@ -272,6 +285,17 @@ describe("authenticated product route dispatch", () => {
         classifyProductAction(new Request(`https://octant.example${path}`, { method: "POST" })),
       ).toBeUndefined();
     }
+    // A kept screenshot is a picture of a page on the host, so reading or taking
+    // one stays with the host's own window.
+    for (const path of [
+      "/api/browser/captures",
+      "/api/browser/captures/image",
+      "/api/browser/captures/take",
+    ]) {
+      expect(
+        classifyProductAction(new Request(`https://octant.example${path}`, { method: "POST" })),
+      ).toBeUndefined();
+    }
   });
 
   it("dispatches a browser observation and gesture for a paired device but not a session change", async () => {
@@ -342,7 +366,9 @@ describe("authenticated product route dispatch", () => {
       "/api/extensions/lifecycle",
       "/api/extensions/skills",
       "/api/extensions/tool-approvals",
+      "/api/extensions/tool-grants",
       "/api/extensions/import-local",
+      "/api/thread-external-content",
     ]) {
       expect(
         classifyProductAction(new Request(`https://octant.example${path}`, { method: "POST" })),
@@ -381,7 +407,9 @@ describe("authenticated product route dispatch", () => {
       "/api/extensions/lifecycle",
       "/api/extensions/skills",
       "/api/extensions/tool-approvals",
+      "/api/extensions/tool-grants",
       "/api/extensions/import-local",
+      "/api/thread-external-content",
     ]) {
       const response = await product(handoff(path, "POST"));
       expect(response?.status).toBe(403);

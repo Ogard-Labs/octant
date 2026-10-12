@@ -20,7 +20,13 @@ import {
 import { makeClaudeProcessLive, type ClaudeProcessPort } from "./claudeProcess";
 import { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
 
-export const claudeSmokeBinaryPath = "/opt/homebrew/bin/claude";
+/**
+ * The installed CLI the smoke drives. Anthropic's native installer puts it
+ * under `~/.local/bin` rather than Homebrew's prefix, so a host can name its
+ * own with `OCTANT_CLAUDE_SMOKE_BINARY`.
+ */
+export const claudeSmokeBinaryPath =
+  process.env.OCTANT_CLAUDE_SMOKE_BINARY ?? "/opt/homebrew/bin/claude";
 export const claudeSmokeMinimumRuntimeVersion = "2.1.210";
 export const claudeSmokeOuterTimeoutMs = 900_000;
 export const claudeSmokeCleanupMarginMs = 45_000;
@@ -105,6 +111,13 @@ export async function createClaudeSmokeHarness(
   const canonicalTmp = await realpath(tmpdir());
   const createdRoot = await mkdtemp(join(canonicalTmp, `octant-claude-${authentication}-`));
   const projectRoot = await realpath(createdRoot);
+  // An API-key account launches from one folder Octant assigned to it. The
+  // smoke assigns a throwaway one, so the person's own Claude folder is not
+  // used and the launch has a folder to be confined to.
+  const accountDirectory =
+    authentication === "api-key"
+      ? await realpath(await mkdtemp(join(canonicalTmp, "octant-claude-account-")))
+      : undefined;
   const registry = new ProviderRuntimeRegistry();
   const activeConnections = new Set<AcquiredClaudeConnection>();
   const resumeIdentities = new Map<string, ClaudeResumeIdentity>();
@@ -129,9 +142,9 @@ export async function createClaudeSmokeHarness(
   });
   const processPort: ClaudeProcessPort = {
     probeVersion: liveProcess.probeVersion,
-    probeSubscription: (path, environment) => {
+    probeSubscription: (path, environment, confinement) => {
       subscriptionProbeCalls += 1;
-      return liveProcess.probeSubscription(path, environment);
+      return liveProcess.probeSubscription(path, environment, confinement);
     },
     spawn: (confinement) => (input) => {
       runtimeStarts += 1;
@@ -139,9 +152,8 @@ export async function createClaudeSmokeHarness(
         const configDirectory = input.env.CLAUDE_CONFIG_DIR;
         apiCredentialInjected ||= input.env.ANTHROPIC_API_KEY === apiKey;
         apiEnvironmentIsolated &&=
-          configDirectory !== undefined &&
-          isPathInside(canonicalTmp, configDirectory) &&
-          input.env.CLAUDE_SECURESTORAGE_CONFIG_DIR === undefined &&
+          configDirectory === accountDirectory &&
+          input.env.CLAUDE_SECURESTORAGE_CONFIG_DIR === accountDirectory &&
           input.env.ANTHROPIC_AUTH_TOKEN === undefined &&
           input.env.CLAUDE_CODE_OAUTH_TOKEN === undefined;
         if (configDirectory !== undefined) configDirectories.add(configDirectory);
@@ -189,6 +201,7 @@ export async function createClaudeSmokeHarness(
     process: processPort,
     sdk,
     ...(authentication === "api-key" ? { credentialResolver } : {}),
+    ...(accountDirectory === undefined ? {} : { configDirectory: accountDirectory }),
     runtimeRegistry: registry,
     resumeIdentityPort: makeResumeIdentityPort(resumeIdentities),
     permissionPersistence: () => "current-session",
@@ -237,7 +250,12 @@ export async function createClaudeSmokeHarness(
         operation,
       ),
     cleanupOwnedResources,
-    removeTemporaryRepository: () => rm(projectRoot, { recursive: true, force: true }),
+    removeTemporaryRepository: async () => {
+      await rm(projectRoot, { recursive: true, force: true });
+      if (accountDirectory !== undefined) {
+        await rm(accountDirectory, { recursive: true, force: true });
+      }
+    },
     activeSessionCount: () => registry.activeSessionCount(instanceId),
     resumeIdentityCount: () => resumeIdentities.size,
     survivingConfigDirectories: async () => {
@@ -471,12 +489,6 @@ function isProjectConfinedPath(projectRoot: string, candidate: string): boolean 
       !pathFromRoot.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`) &&
       !isAbsolute(pathFromRoot))
   );
-}
-
-function isPathInside(parent: string, candidate: string): boolean {
-  if (!isAbsolute(candidate)) return false;
-  const pathFromParent = relative(parent, candidate);
-  return pathFromParent !== "" && pathFromParent !== ".." && !pathFromParent.startsWith("../");
 }
 
 async function initializeRepository(projectRoot: string): Promise<void> {

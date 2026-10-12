@@ -204,6 +204,75 @@ const inTreeCanvasDocumentRecipeDocuments = [
       { kind: "callout", role: "What needs attention now." },
     ],
   },
+  {
+    id: "article",
+    title: "Article",
+    summary: "A finished article in the workspace theme: a title, a lede, and sections.",
+    whenToUse:
+      "When someone asks for an article, an essay, a write-up, a blog post, or a long explanation to read.",
+    skeleton: [
+      {
+        kind: "design",
+        size: "document",
+        role: "The article as one themed document: a title, a lede, and sections of prose, built from the frame kit.",
+      },
+    ],
+  },
+  {
+    id: "design-brief",
+    title: "Design brief",
+    summary:
+      "A product or game brief: the pitch, then its areas in tabs with numbers, flows, and a plan.",
+    whenToUse:
+      "When someone asks for a product brief, a game design document, a concept, or a pitch for something to build.",
+    skeleton: [
+      {
+        kind: "design",
+        size: "document",
+        role: "The pitch as a themed document: what it is, who it is for, and the pillars.",
+      },
+      { kind: "tabs", role: "One tab per area, each naming the blocks below that belong to it." },
+      { kind: "metric", role: "A target number for the brief, with its unit." },
+      { kind: "diagram", role: "The core loop or main flow, with node roles and edge styles." },
+      { kind: "table", role: "The content or feature list, one row per item." },
+      { kind: "plan", role: "Milestones with dates, shown as a Gantt view." },
+      { kind: "callout", role: "The biggest risk, and what would reduce it." },
+    ],
+  },
+  {
+    id: "design-system",
+    title: "Design system",
+    summary:
+      "Colour, type, spacing, and components shown as a themed document, with a token table.",
+    whenToUse:
+      "When someone asks for a design system, a style guide, a component library overview, or brand guidelines.",
+    skeleton: [
+      {
+        kind: "design",
+        size: "document",
+        role: "The system as a themed document: colour, type scale, spacing, and components with their states.",
+      },
+      { kind: "heading", role: "Tokens" },
+      { kind: "table", role: "Each token: its name, its value, and where it is used." },
+      { kind: "heading", role: "Rules" },
+      { kind: "rich-text", role: "How to use the system, and what is still open." },
+    ],
+  },
+  {
+    id: "clickable-prototype",
+    title: "Clickable prototype",
+    summary: "A prototype that reacts and keeps state as you click, with notes on what is real.",
+    whenToUse:
+      "When someone asks for a working prototype, a demo they can try, or an interaction that keeps state, such as a cart, a form that validates, or a small game.",
+    skeleton: [
+      {
+        kind: "design",
+        role: "A design with runsScript true: one frame per screen, its state in inline script, no network.",
+      },
+      { kind: "heading", role: "Notes" },
+      { kind: "rich-text", role: "What the prototype shows, what is faked, and what to try." },
+    ],
+  },
 ] as const;
 
 const inTreeRecipes = inTreeCanvasDocumentRecipeDocuments.map((recipe) =>

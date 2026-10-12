@@ -8,6 +8,7 @@
  */
 
 import { Schema } from "effect";
+import { BrowserCaptureId } from "./browserAutomation";
 import { UtcTimestamp } from "./events";
 import { HostId } from "./host";
 import { ImageArtifactId, ImageJobId } from "./imageGeneration";
@@ -89,12 +90,27 @@ export const ThreadExportAttachmentGeneration = Schema.Struct({
 }).annotations(strict);
 export type ThreadExportAttachmentGeneration = typeof ThreadExportAttachmentGeneration.Type;
 
+/**
+ * Where a Browser capture came from: the page it pictures and when it was
+ * taken. The page URL and title are personal data, so they ride only on an
+ * export of the thread that kept the capture.
+ */
+export const ThreadExportAttachmentCapture = Schema.Struct({
+  captureId: BrowserCaptureId,
+  origin: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(2048)),
+  url: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(4096)),
+  title: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1024))),
+  capturedAt: UtcTimestamp,
+}).annotations(strict);
+export type ThreadExportAttachmentCapture = typeof ThreadExportAttachmentCapture.Type;
+
 export const ThreadExportAttachment = Schema.Struct({
   displayName: Schema.NonEmptyTrimmedString,
   mediaType: Schema.NonEmptyTrimmedString,
   byteLength: NonNegativeInt,
   status: Schema.NonEmptyTrimmedString,
   generation: Schema.optional(ThreadExportAttachmentGeneration),
+  capture: Schema.optional(ThreadExportAttachmentCapture),
 }).annotations(strict);
 export type ThreadExportAttachment = typeof ThreadExportAttachment.Type;
 

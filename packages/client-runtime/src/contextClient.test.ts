@@ -296,3 +296,109 @@ function snapshot(): ContextInspectorSnapshot {
     capabilities: { loadedTools: 2, availableTools: 8, loadedMcp: 0, availableMcp: 3 },
   };
 }
+
+describe("ContextClient and a thread's outside-content mark", () => {
+  const threadId = "40000000-0000-4000-8000-000000000001";
+  const state = {
+    threadId,
+    externalContentIngested: true,
+    version: 2,
+    ingestionCount: 2,
+    sources: [
+      {
+        sourceLabel: "web-fetch",
+        ingestionCount: 2,
+        firstIngestedAt: "2026-10-12T10:00:00.000Z",
+        lastIngestedAt: "2026-10-12T10:05:00.000Z",
+      },
+    ],
+  };
+
+  it("reads the sources and clears at the version shown over the one local route", async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>(async (_input, init) =>
+      String(init?.body).includes('"clear"')
+        ? Response.json({ kind: "refused", reason: "stale", state })
+        : Response.json(state),
+    );
+    const client = createContextClient({
+      baseUrl: "http://127.0.0.1:13773",
+      fetch,
+      windowCapability: capability,
+    });
+
+    await expect(client.readExternalContent({ mode: "code", threadId })).resolves.toEqual(state);
+    await expect(
+      client.clearExternalContent({ mode: "code", threadId, expectedVersion: 1 }),
+    ).resolves.toEqual({ kind: "refused", reason: "stale", state });
+    expect(fetch.mock.calls.map(([input, init]) => [String(input), String(init?.body)])).toEqual([
+      [
+        "http://127.0.0.1:13773/api/thread-external-content",
+        JSON.stringify({ kind: "read", mode: "code", threadId }),
+      ],
+      [
+        "http://127.0.0.1:13773/api/thread-external-content",
+        JSON.stringify({ kind: "clear", mode: "code", threadId, expectedVersion: 1 }),
+      ],
+    ]);
+    for (const [, init] of fetch.mock.calls) {
+      expect(init?.headers).toMatchObject({ "x-octant-window-capability": capability });
+    }
+  });
+
+  it("refuses a malformed clear before transport and a reply that is not an outcome", async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>(async () => Response.json({ cleared: true }));
+    const client = createContextClient({
+      baseUrl: "http://127.0.0.1:13773",
+      fetch,
+      windowCapability: capability,
+    });
+    await expect(
+      client.clearExternalContent({ mode: "code", threadId, expectedVersion: -1 }),
+    ).rejects.toMatchObject({ category: "protocol" });
+    expect(fetch).not.toHaveBeenCalled();
+    await expect(
+      client.clearExternalContent({ mode: "code", threadId, expectedVersion: 1 }),
+    ).rejects.toMatchObject({ category: "protocol" });
+  });
+
+  it("offers the review only at a loopback host and sends nothing from a remote one", async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>(async () => Response.json(state));
+    const options = { fetch, windowCapability: capability };
+    expect(
+      createContextClient({ ...options, baseUrl: "http://127.0.0.1:13773" })
+        .externalContentAvailable,
+    ).toBe(true);
+    expect(
+      createContextClient({ ...options, baseUrl: "http://localhost:13773" })
+        .externalContentAvailable,
+    ).toBe(true);
+    const remote = createContextClient({ ...options, baseUrl: "https://host.example.test" });
+    expect(remote.externalContentAvailable).toBe(false);
+
+    await expect(remote.readExternalContent({ mode: "code", threadId })).rejects.toMatchObject({
+      category: "unavailable",
+    });
+    await expect(
+      remote.clearExternalContent({ mode: "code", threadId, expectedVersion: 2 }),
+    ).rejects.toMatchObject({ category: "unavailable" });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("reports a paired device's refusal as unauthorized", async () => {
+    const client = createContextClient({
+      baseUrl: "http://127.0.0.1:13773",
+      fetch: async () =>
+        Response.json(
+          { category: "unauthorized", message: "External-content request is unauthorized." },
+          { status: 401 },
+        ),
+      windowCapability: capability,
+    });
+    await expect(client.readExternalContent({ mode: "work", threadId })).rejects.toBeInstanceOf(
+      ContextClientFailure,
+    );
+    await expect(client.readExternalContent({ mode: "work", threadId })).rejects.toMatchObject({
+      category: "unauthorized",
+    });
+  });
+});

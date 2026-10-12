@@ -10,8 +10,8 @@ every mode and on every surface: web, desktop, phone, and the `octant` CLI.
 ## What the model gets
 
 Nine working tools — `read`, `grep`, `glob`, `bash`, `edit`, `write`,
-`web-fetch`, `web-search`, `todo-write` — four harness reads:
-`context-remaining`, `journal-lookup`, `second-opinion`, and `delegate` — and
+`web-fetch`, `web-search`, `todo-write` — three harness reads:
+`context-remaining`, `second-opinion`, and `delegate` — and
 `ask-user`, which lets the lead stop and ask you something — plus `goal` and
 `goal-check` for the thread's goal (see [Goals](#goals)). Each mode trims
 the set to what it may reach:
@@ -390,6 +390,8 @@ table.
   has no tool loop, so it is not offered as a slot candidate until it does.
 - Context is reduced by the host's planner; each prune and cut is journaled
   with the cache cost it paid, and the lead can read `context-remaining` to
-  checkpoint before one. An endpoint that never reports the model's window,
+  checkpoint before one. What a cut leaves out is gone from the lead's view:
+  there is no tool to read it back, so the lead keeps its progress in its task
+  list and the files on disk. An endpoint that never reports the model's window,
   such as some Azure AI Foundry deployments, gives the lead no figure: the tool
   says the context is unavailable instead of reporting room against an estimate.

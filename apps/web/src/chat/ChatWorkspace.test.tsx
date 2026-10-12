@@ -498,6 +498,9 @@ function extensionClient(): ExtensionClient {
     importLocalPluginReceipt: vi.fn() as never,
     listToolApprovals: vi.fn(async () => []) as never,
     decideToolApproval: vi.fn(async () => true) as never,
+    toolGrantsAvailable: true,
+    listToolGrants: vi.fn(async () => []) as never,
+    revokeToolGrant: vi.fn(async () => true) as never,
   };
 }
 
@@ -1032,12 +1035,15 @@ describe("ChatWorkspace", () => {
       {
         approvalId: "44000000-0000-4000-8000-000000000010" as never,
         threadId: threadId as never,
+        extensionId: "44000000-0000-4000-8000-000000000011" as never,
         packageId: "44000000-0000-4000-8000-000000000012" as never,
         componentId: "server" as never,
+        serverName: "server",
         providerToolName: "plugin__server__read",
         mcpToolName: "read",
         inputJson: '{"path":"README.md"}',
         requestedAt: now as never,
+        rememberable: false,
       },
     ]);
     render(
@@ -1064,12 +1070,15 @@ describe("ChatWorkspace", () => {
     const approval = {
       approvalId: "44000000-0000-4000-8000-000000000010" as never,
       threadId: threadId as never,
+      extensionId: "44000000-0000-4000-8000-000000000011" as never,
       packageId: "44000000-0000-4000-8000-000000000012" as never,
       componentId: "server" as never,
+      serverName: "server",
       providerToolName: "plugin__server__read",
       mcpToolName: "read",
       inputJson: '{"path":"README.md"}',
       requestedAt: now as never,
+      rememberable: false,
     };
     vi.mocked(client.listToolApprovals).mockResolvedValue([approval]);
     const listToolApprovals = vi.mocked(client.listToolApprovals);

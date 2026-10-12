@@ -357,6 +357,10 @@ export const CodeExternalEditor = Schema.Struct({
 }).annotations(strict);
 export type CodeExternalEditor = typeof CodeExternalEditor.Type;
 
+/** How Review shows a checkout diff: stacked files, or one file beside its pair. */
+export const CodeDiffLayout = Schema.Literal("unified", "side-by-side");
+export type CodeDiffLayout = typeof CodeDiffLayout.Type;
+
 export const CodeSettings = Schema.Struct({
   defaultExecutionPolicy: ProviderExecutionPolicy,
   defaultPermissionPersistence: PermissionPersistence,
@@ -377,6 +381,11 @@ export const CodeSettings = Schema.Struct({
    * whose thread could never start. Off for a store persisted before it existed.
    */
   allowDefaultFolderThreads: Schema.optionalWith(Schema.Boolean, { default: () => false }),
+  /**
+   * The Review layout a Code thread uses until this window stores one for it.
+   * A store persisted before the choice existed decodes to unified.
+   */
+  defaultDiffLayout: Schema.optionalWith(CodeDiffLayout, { default: () => "unified" }),
   version: AggregateVersion,
   updatedAt: UtcTimestamp,
 }).annotations(strict);
@@ -535,6 +544,21 @@ export const ForkCodeThreadCommand = Schema.Struct({
 }).annotations(strict);
 export type ForkCodeThreadCommand = typeof ForkCodeThreadCommand.Type;
 
+/**
+ * Merge a fork's conversation back into the thread it was forked from: the
+ * fork's turns after the fork point, or after its previous merge back, through
+ * the named fork turn. The host reads them itself and journals them on the
+ * source, whose next turn carries them. It adds context only: nothing runs,
+ * and the fork's file changes still reach the source only through Git review.
+ */
+export const MergeCodeForkContextCommand = Schema.Struct({
+  kind: Schema.Literal("merge-code-fork-context"),
+  /** The fork. */
+  threadId: CodeThreadId,
+  throughOperationId: Schema.UUID,
+}).annotations(strict);
+export type MergeCodeForkContextCommand = typeof MergeCodeForkContextCommand.Type;
+
 export const CodeCommand = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("prepare-code-project-checkout"),
@@ -559,6 +583,7 @@ export const CodeCommand = Schema.Union(
   }).annotations(strict),
   CreateManagedCodeThreadCommand,
   ForkCodeThreadCommand,
+  MergeCodeForkContextCommand,
   Schema.Struct({
     kind: Schema.Literal("update-code-settings"),
     expectedVersion: AggregateVersion,
@@ -567,6 +592,7 @@ export const CodeCommand = Schema.Union(
     externalEditor: Schema.optional(CodeExternalEditor),
     requireGitRepository: Schema.optional(Schema.Boolean),
     allowDefaultFolderThreads: Schema.optional(Schema.Boolean),
+    defaultDiffLayout: Schema.optional(CodeDiffLayout),
   }).annotations(strict),
   CreateCodeThreadCommand,
   Schema.Struct({
@@ -1001,6 +1027,46 @@ export const CodeThreadCheckoutRebound = Schema.Struct({
 }).annotations(strict);
 export type CodeThreadCheckoutRebound = typeof CodeThreadCheckoutRebound.Type;
 
+/**
+ * Why a fork's conversation was not merged back. Each is an expected answer
+ * the person can act on, so it is a value rather than a fault.
+ */
+export const CodeForkMergeBackRefusal = Schema.Literal(
+  "unsupported",
+  "not-a-fork",
+  "source-unavailable",
+  "source-unauthorized",
+  "foreign-project",
+  "point-unavailable",
+  "already-merged",
+  "nothing-new",
+  "merges-pending",
+  "fork-unreadable",
+  "unsaved",
+);
+export type CodeForkMergeBackRefusal = typeof CodeForkMergeBackRefusal.Type;
+
+export const CodeForkMergeBackOutcome = Schema.Union(
+  Schema.Struct({
+    status: Schema.Literal("merged"),
+    sourceThreadId: CodeThreadId,
+    /** Conversation messages merged, not counting the summary. */
+    messages: Schema.Int.pipe(Schema.positive()),
+  }).annotations(strict),
+  Schema.Struct({
+    status: Schema.Literal("refused"),
+    reason: CodeForkMergeBackRefusal,
+  }).annotations(strict),
+);
+export type CodeForkMergeBackOutcome = typeof CodeForkMergeBackOutcome.Type;
+
+export const CodeForkContextMerged = Schema.Struct({
+  kind: Schema.Literal("fork-context-merge"),
+  threadId: CodeThreadId,
+  outcome: CodeForkMergeBackOutcome,
+}).annotations(strict);
+export type CodeForkContextMerged = typeof CodeForkContextMerged.Type;
+
 export const CodeCommandResult = Schema.Union(
   CodePublicEvent,
   CodeCheckoutPrepared,
@@ -1009,6 +1075,7 @@ export const CodeCommandResult = Schema.Union(
   CodeWorktreeRemoteFactsRetrieved,
   CodeWorktreeRefsListed,
   CodeThreadCheckoutRebound,
+  CodeForkContextMerged,
 );
 export type CodeCommandResult = typeof CodeCommandResult.Type;
 

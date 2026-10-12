@@ -1,4 +1,4 @@
-import { useMenuBarTasks } from "./shell/useMenuBarTasks";
+import { useMenuBarThread } from "./shell/useMenuBarThread";
 import {
   MODEL_CHOICE_CHANGED,
   readLastModelChoice,
@@ -548,7 +548,7 @@ export function App(props: AppProps) {
     ...(injectedCapability === undefined && launch !== undefined
       ? { serverUrl: launch.serverUrl }
       : {}),
-    onExchanged: clearLaunchTokenFragment,
+    onLaunchTokenRead: clearLaunchTokenFragment,
   });
 
   // A launch address the capability must not travel to is explained here,
@@ -605,6 +605,21 @@ export function App(props: AppProps) {
             message="Establishing the authenticated Octant browser session."
             state="loading"
             title="Opening Octant"
+          />
+        </main>
+      );
+    }
+    if (launchSession.launchRequired === true) {
+      // A browser session opens only from a one-time link the desktop app or
+      // `octant web` mints with a secret readable by the host's OS user, so a
+      // typed address, an expired tab, or a restarted host lands here.
+      return (
+        <main className="shell-boundary">
+          <ShellState
+            eyebrow="Browser session"
+            message="Octant opens a browser session only from the one-time link that the desktop app or `octant web` creates; typing the address is not enough."
+            state="warning"
+            title="Open Octant from the desktop app or run `octant web`"
           />
         </main>
       );
@@ -2737,7 +2752,7 @@ function LaunchedShell(
   // so a clean store is the only thing that can produce it.
   // The readiness line and the notice under it read the same discovery record,
   // so first run cannot say "nothing is configured" above a scan it is still
-  // running (`BOOT-02`).
+  // running.
   const firstRunDiscovery = useMemo<FirstRunDiscoveryInput>(
     () => ({
       scanning: discoveryController.scanning,
@@ -3895,6 +3910,12 @@ function LaunchedShell(
     () => (activeMode === "code" ? (["code"] as const) : (["chat", "work"] as const)),
     [activeMode],
   );
+  // Every Project, archived ones too: a grant outlives the Project's listing.
+  const projectNamesById = useMemo(
+    () =>
+      new Map(projectController.allProjects.map((project) => [String(project.id), project.name])),
+    [projectController.allProjects],
+  );
   const workingNowProjectNames = useMemo(
     () => new Map(projectController.projects.map((project) => [String(project.id), project.name])),
     [projectController.projects],
@@ -3956,12 +3977,11 @@ function LaunchedShell(
           onSwitch: switchWorkKind,
         };
 
-  useMenuBarTasks({
+  useMenuBarThread({
     bridge: props.hostBridge,
     ready: controller.status === "ready",
-    chat: navigationModel.markedChatNavigation,
-    work: navigationModel.workProjectThreads,
-    code: navigationModel.codeProjectThreads,
+    open:
+      watchedThreadId === undefined ? undefined : { mode: activeMode, threadId: watchedThreadId },
     onSelect: (target) => {
       if (controller.status !== "ready") return;
       if (target.mode === "chat") selectChatThread(target.threadId);
@@ -5286,7 +5306,10 @@ function LaunchedShell(
     // work modes dismisses it.
     if (mode === "chat") setAutomationCenterOpen(false);
     if (mode === "chat") return;
-    const hasProject = projectController.projects.some(
+    // `projects` is the mode currently on screen. Switching Work → Code must
+    // see Code Projects that already exist, or Switch to Code also opens an
+    // unscoped draft over the Code workspace.
+    const hasProject = projectController.allProjects.some(
       (project) => project.type === mode && project.lifecycle === "active",
     );
     if (!hasProject) {
@@ -6333,6 +6356,7 @@ function LaunchedShell(
       codeController={codeController}
       discoveryController={discoveryController}
       extensionClient={extensionClient}
+      projectNames={projectNamesById}
       {...(props.hostBridge?.selectLocalPluginFolder === undefined
         ? {}
         : {
@@ -6937,6 +6961,19 @@ function LaunchedShell(
                           onRetryThreads: () => projectThreadsAccess.onRetry?.(),
                         })}
                     projects={workSide ? workSideProjects : projectController.projects}
+                    {...(workSide &&
+                    workSideProjects.length === 0 &&
+                    projectController.allProjects.some(
+                      (project) => project.type === "code" && project.lifecycle === "active",
+                    )
+                      ? {
+                          otherModeProjectsHint: {
+                            message: "Your Projects are in Code.",
+                            actionLabel: "Switch to Code",
+                            onSwitch: () => handleSelectMode("code"),
+                          },
+                        }
+                      : {})}
                   />
                 )}
               </>
@@ -7241,6 +7278,7 @@ function LaunchedShell(
                       <ComposerContextMeterShortcut />
                       <ThreadStatsDetailDialog />
                       <WorkspaceView
+                        {...(contextClient === undefined ? {} : { contextClient })}
                         {...(welcomeBackdrop === undefined ? {} : { welcomeBackdrop })}
                         followUpSuggestions={{
                           client: followUpSuggestionClient,

@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { CANVAS_FRAME_FOCUS_ESCAPE_CHANNEL } from "./canvasFrameGuard";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("electron", () => ({ contextBridge: {}, ipcRenderer: {} }));
@@ -174,6 +175,7 @@ describe("desktop preload bridge", () => {
     expect(key).toBe(HOST_BRIDGE_KEY);
     expect(Object.keys(bridge).sort()).toEqual([
       "acknowledgeWhatsNew",
+      "addProviderApiKey",
       "approveRemotePairingRequest",
       "attachBrowserSurface",
       "cancelCodeOperationApproval",
@@ -197,10 +199,12 @@ describe("desktop preload bridge", () => {
       "initialProjectTarget",
       "installAppUpdate",
       "listOpenInApplications",
+      "listProviderApiKeys",
       "listRemotePairingRequests",
       "maximizeOrRestore",
       "minimize",
       "mintRemotePairingTicket",
+      "moveProviderApiKey",
       "notifyAttention",
       "openBrowserExternal",
       "openCodeCheckoutInApplication",
@@ -214,7 +218,10 @@ describe("desktop preload bridge", () => {
       "readBundledWhatsNew",
       "reconcileExpiredRemoteDevices",
       "recoverRemoteHostIdentity",
+      "removeProviderApiKey",
+      "renameProviderApiKey",
       "renameRemoteDevice",
+      "replaceProviderApiKey",
       "requestCodeOperationApproval",
       "requestComputerUsePermissions",
       "resetBounds",
@@ -225,17 +232,19 @@ describe("desktop preload bridge", () => {
       "selectLocalPluginFolder",
       "selectProjectRoot",
       "selectRuntimeBinary",
+      "setActiveProviderApiKey",
       "setAppUpdateRing",
       "setApprovalSurfacePalette",
       "setAttentionBadge",
       "setAutomaticAppUpdateChecks",
       "setManagedToolAutomaticUpdates",
-      "setMenuBarTasks",
+      "setMenuBarOpenThread",
       "setProviderCredential",
       "setSidebarMaterialPreference",
       "setSidebarVibrancyMode",
       "subscribeAppUpdateState",
       "subscribeBrowserSurfaceState",
+      "subscribeCanvasFrameFocusEscape",
       "subscribeCodeDeepLinks",
       "subscribeMenuBarTask",
       "subscribeOpenSettings",
@@ -705,6 +714,28 @@ describe("desktop preload bridge", () => {
     );
   });
 
+  it("relays the reserved Canvas frame shortcut on the channel the main process sends it on", () => {
+    let registered: ((event: unknown) => void) | undefined;
+    const ipc: IpcRendererPort = {
+      invoke: vi.fn(),
+      on: vi.fn((_channel, listener) => {
+        registered = listener;
+      }),
+      removeListener: vi.fn(),
+    };
+    const listener = vi.fn();
+    const unsubscribe = createHostBridge(
+      ipc,
+      projectWindowCapability,
+    ).subscribeCanvasFrameFocusEscape(listener);
+    expect(IPC_CHANNELS.canvasFrameFocusEscape).toBe(CANVAS_FRAME_FOCUS_ESCAPE_CHANNEL);
+    expect(ipc.on).toHaveBeenCalledWith(CANVAS_FRAME_FOCUS_ESCAPE_CHANNEL, registered);
+    registered?.({});
+    expect(listener).toHaveBeenCalledWith();
+    unsubscribe();
+    expect(ipc.removeListener).toHaveBeenCalledWith(CANVAS_FRAME_FOCUS_ESCAPE_CHANNEL, registered);
+  });
+
   it("relays only a valid replacement Project window capability", () => {
     let registered: ((event: unknown, capability: unknown) => void) | undefined;
     const ipc: IpcRendererPort = {
@@ -780,14 +811,13 @@ describe("desktop preload bridge", () => {
       removeListener: vi.fn(),
     };
     const bridge = createHostBridge(ipc, projectWindowCapability);
-    const task = {
+    await bridge.setMenuBarOpenThread({ mode: "work", threadId: "thread-a" });
+    expect(ipc.invoke).toHaveBeenCalledWith(IPC_CHANNELS.menuBarOpenThread, {
+      mode: "work",
       threadId: "thread-a",
-      title: "Review plan",
-      mode: "work" as const,
-      activity: "attention" as const,
-    };
-    await bridge.setMenuBarTasks([task]);
-    expect(ipc.invoke).toHaveBeenCalledWith(IPC_CHANNELS.menuBarTasks, [task]);
+    });
+    await bridge.setMenuBarOpenThread(null);
+    expect(ipc.invoke).toHaveBeenLastCalledWith(IPC_CHANNELS.menuBarOpenThread, null);
     const listener = vi.fn();
     const unsubscribe = bridge.subscribeMenuBarTask(listener);
     receive?.({}, { mode: "unknown", threadId: "a" });
@@ -795,7 +825,7 @@ describe("desktop preload bridge", () => {
     expect(listener).toHaveBeenCalledExactlyOnceWith({ mode: "work", threadId: "thread-a" });
     unsubscribe();
     expect(ipc.removeListener).toHaveBeenCalledWith(IPC_CHANNELS.menuBarTask, receive);
-    await expect(bridge.setMenuBarTasks(Array.from({ length: 19 }, () => task))).rejects.toThrow();
+    await expect(bridge.setMenuBarOpenThread({ mode: "work", threadId: "" })).rejects.toThrow();
   });
 
   it("forwards native Settings menu events without exposing IPC", () => {

@@ -122,7 +122,7 @@
 .settings-view .provider-settings__create > label,
 .settings-view .image-generation-settings__provider-form label {
   display: grid;
-  gap: 5px;
+  gap: var(--oct-space-1);
   color: var(--octant-text-secondary);
   font-size: var(--oct-text-detail);
 }

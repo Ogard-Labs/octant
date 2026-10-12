@@ -160,7 +160,34 @@ function sharedBlockVersion(block: CanvasStaticExportBlock): CanvasStaticExportB
     : block;
 }
 
-function sanitizeBlock(block: CanvasBlock): CanvasStaticExportBlock {
+/**
+ * A design as it leaves: its frames, as written. The secret filter reads
+ * values, and markup is not one, so only what a pattern can still recognise
+ * anywhere in text is refused here: a token or key in a known shape. Host
+ * paths are not searched for, because every closing tag reads as one.
+ */
+function sharedDesign(
+  block: Extract<CanvasBlock, { readonly kind: "design" }>,
+): CanvasStaticExportBlock {
+  const { assets: _assets, ...design } = block;
+  const markup = [design.styles ?? "", ...design.frames.map((frame) => frame.html)];
+  if (markup.some((text) => SECRET_VALUE_PATTERN.test(text))) {
+    reject(
+      "unsafe-payload",
+      `Canvas design ${block.blockId} holds what reads as a credential in its markup.`,
+    );
+  }
+  // Everything about the design that is not markup is a value like any other
+  // block's, ids included, and the acknowledgement does not cover it.
+  const { styles: _styles, frames, ...values } = design;
+  assertNoSecretShape(
+    { ...values, frames: frames.map(({ html: _html, ...frame }) => frame) },
+    `block.${block.blockId}`,
+  );
+  return design as CanvasStaticExportBlock;
+}
+
+function sanitizeBlock(block: CanvasBlock, markupAcknowledged: boolean): CanvasStaticExportBlock {
   // Drop live source ids from reference-like blocks so the offline snapshot
   // cannot be used to re-resolve host-local authority later.
   switch (block.kind) {
@@ -179,13 +206,15 @@ function sanitizeBlock(block: CanvasBlock): CanvasStaticExportBlock {
       return rest as CanvasStaticExportBlock;
     }
     case "design":
-      // A design's markup is only ever drawn inside Octant's sandboxed frame.
-      // A snapshot would hand it to a viewer this host does not control, and
-      // the secret filter cannot read markup, so a design does not leave.
-      return reject(
-        "unsafe-payload",
-        `Canvas design ${block.blockId} cannot be shared; its screens draw only inside Octant.`,
-      );
+      // A design's markup leaves as written, so it leaves only when the
+      // person sharing it has said they know that.
+      if (!markupAcknowledged) {
+        return reject(
+          "consent-required",
+          `Canvas design ${block.blockId} is markup, which is shared as written; sharing it needs that acknowledgement.`,
+        );
+      }
+      return sharedDesign(block);
     case "plan": {
       const tasks = block.tasks.map(({ sourceIds: _sourceIds, ...task }) => task);
       const shared = { ...block, tasks };
@@ -328,7 +357,10 @@ export function buildCanvasStaticExportDocument(input: {
   readonly exportedAt: UtcTimestamp | string;
 }): CanvasStaticExportDocument {
   const definition = input.current.definition;
-  const blocks = definition.blocks.map((block) => sharedBlockVersion(sanitizeBlock(block)));
+  const markupAcknowledged = input.request.consent.acknowledgedMarkupSharedAsWritten === true;
+  const blocks = definition.blocks.map((block) =>
+    sharedBlockVersion(sanitizeBlock(block, markupAcknowledged)),
+  );
   assertNoSecretShape(definition.title, "title");
   const exportedAtRaw = String(input.exportedAt);
   if (

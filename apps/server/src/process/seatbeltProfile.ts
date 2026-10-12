@@ -29,11 +29,11 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { basename, delimiter, dirname, isAbsolute, join, resolve, sep } from "node:path";
-import { buildLinuxConfinementLaunch, DEFAULT_BWRAP_PATH } from "./linuxConfinement";
+import { buildBubblewrapLaunch, DEFAULT_BWRAP_PATH } from "./linuxConfinement";
 import type { OsNetworkEgress } from "./threadEgressPolicy";
 
-export class SeatbeltConfinementError extends Error {
-  override readonly name = "SeatbeltConfinementError";
+export class ProcessConfinementError extends Error {
+  override readonly name = "ProcessConfinementError";
 
   constructor(
     readonly reason: "incompatible" | "invalid-configuration",
@@ -62,19 +62,6 @@ export interface SeatbeltProfileInput {
   readonly execAllowPaths?: ReadonlyArray<string>;
   readonly allowFileReadStar?: boolean;
   readonly writeBoundRoot?: boolean;
-  /**
-   * Whether this launch is a provider runtime that resolves its own subscription
-   * credential from the platform secret store.
-   *
-   * The Claude runtime keeps its subscription credential in the macOS Keychain
-   * rather than in its provider home, so a deny-default launch reports itself
-   * signed out and no turn starts. This opens the security server's lookup and
-   * nothing else: `/Library/Keychains` and the user's own `~/Library/Keychains`
-   * stay denied as files, so a confined process still cannot read the store off
-   * disk, and the daemon's per-item ACL hands back only the item this binary is
-   * already trusted for. Off by default, and never set for a tool launch.
-   */
-  readonly allowProviderCredentialLookup?: boolean;
   /**
    * Whether this process drives the iOS Simulator.
    *
@@ -132,7 +119,7 @@ export interface ConfinedProcessLaunch {
   readonly args: ReadonlyArray<string>;
 }
 
-export interface SeatbeltConfinementPrepareInput {
+export interface ProcessConfinementPrepareInput {
   readonly executable: string;
   readonly args: ReadonlyArray<string>;
   readonly boundRoot: string;
@@ -148,8 +135,6 @@ export interface SeatbeltConfinementPrepareInput {
   readonly writeBoundRoot?: boolean;
   /** See {@link SeatbeltProfileInput.allowSimulatorControl}. */
   readonly allowSimulatorControl?: boolean;
-  /** See {@link SeatbeltProfileInput.allowProviderCredentialLookup}. */
-  readonly allowProviderCredentialLookup?: boolean;
   /** See {@link SeatbeltProfileInput.additionalDenyReadPaths}. */
   readonly additionalDenyReadPaths?: ReadonlyArray<string>;
   /** See {@link SeatbeltProfileInput.additionalDenyWritePaths}. */
@@ -166,11 +151,11 @@ export interface SeatbeltConfinementPrepareInput {
   readonly terminal?: Readonly<{ shellStateDirectory: string }>;
 }
 
-export interface SeatbeltConfinementPort {
-  readonly prepare: (input: SeatbeltConfinementPrepareInput) => ConfinedProcessLaunch;
+export interface ProcessConfinementPort {
+  readonly prepare: (input: ProcessConfinementPrepareInput) => ConfinedProcessLaunch;
 }
 
-export interface SeatbeltConfinementOptions {
+export interface ProcessConfinementOptions {
   readonly platform?: NodeJS.Platform;
   /** Override the runtime path: `sandbox-exec` on macOS, `bwrap` on Linux. */
   readonly sandboxPath?: string;
@@ -503,7 +488,7 @@ export function privateHomeDenyReadRules(
         }
       } else if (entry.isDirectory()) visit(child);
       if (rules.length > MAX_PRIVATE_DENY_RULES) {
-        throw new SeatbeltConfinementError(
+        throw new ProcessConfinementError(
           "incompatible",
           "Seatbelt private-path confinement profile is too large.",
         );
@@ -600,19 +585,6 @@ export function buildDenyDefaultSeatbeltProfile(input: SeatbeltProfileInput): st
           '(allow mach-lookup (global-name "com.apple.trustd.agent"))',
           seatbeltAllowRule("file-read*", "/System/Library/Keychains"),
           seatbeltAllowRule("file-read*", "/System/Library/Security"),
-        ]
-      : []),
-    // A provider runtime that keeps its own subscription credential in the
-    // platform secret store asks the security server for it over XPC; the
-    // daemon, not this process, opens the keychain file. Both service names are
-    // listed because the modern and legacy entry points are both in use and
-    // which one a given runtime takes could not be measured here. The keychain
-    // files stay denied above and below, so this opens the lookup and not the
-    // store (0145).
-    ...(input.allowProviderCredentialLookup === true
-      ? [
-          '(allow mach-lookup (global-name "com.apple.SecurityServer"))',
-          '(allow mach-lookup (global-name "com.apple.securityd.xpc"))',
         ]
       : []),
     // Driving the Simulator needs three things, and the failure without them is
@@ -737,13 +709,13 @@ export function wrapCommandInSandboxExec(
   input: WrapCommandInSandboxExecInput,
 ): ConfinedProcessLaunch {
   if (!isAbsolute(input.sandboxPath)) {
-    throw new SeatbeltConfinementError(
+    throw new ProcessConfinementError(
       "invalid-configuration",
       "Seatbelt sandbox-exec path must be absolute.",
     );
   }
   if (!isAbsolute(input.executable)) {
-    throw new SeatbeltConfinementError(
+    throw new ProcessConfinementError(
       "invalid-configuration",
       "Seatbelt-confined executable path must be absolute.",
     );
@@ -757,13 +729,13 @@ export function wrapCommandInSandboxExec(
 
 export function requireSandboxExec(input: RequireSandboxExecInput): void {
   if (input.platform !== "darwin") {
-    throw new SeatbeltConfinementError(
+    throw new ProcessConfinementError(
       "incompatible",
       "Seatbelt confinement requires the macOS sandbox-exec runtime.",
     );
   }
   if (!isAbsolute(input.sandboxPath)) {
-    throw new SeatbeltConfinementError(
+    throw new ProcessConfinementError(
       "invalid-configuration",
       "Seatbelt sandbox-exec path must be absolute.",
     );
@@ -771,28 +743,28 @@ export function requireSandboxExec(input: RequireSandboxExecInput): void {
   try {
     accessSync(input.sandboxPath, constants.X_OK);
   } catch {
-    throw new SeatbeltConfinementError(
+    throw new ProcessConfinementError(
       "incompatible",
       "Seatbelt confinement requires an executable sandbox-exec.",
     );
   }
 }
 
-export function makeSeatbeltConfinementLive(
-  options: SeatbeltConfinementOptions = {},
-): SeatbeltConfinementPort {
+export function makeProcessConfinementLive(
+  options: ProcessConfinementOptions = {},
+): ProcessConfinementPort {
   const platform = options.platform ?? process.platform;
   const sandboxPath =
     options.sandboxPath ?? (platform === "darwin" ? DEFAULT_SANDBOX_PATH : DEFAULT_BWRAP_PATH);
   return {
     prepare: (input) => {
       if (platform === "darwin") {
-        return prepareDarwinSeatbelt(input, { ...options, sandboxPath });
+        return prepareSeatbeltLaunch(input, { ...options, sandboxPath });
       }
       if (platform === "linux") {
-        return buildLinuxConfinementLaunch(input, { bwrapPath: sandboxPath });
+        return buildBubblewrapLaunch(input, { bwrapPath: sandboxPath });
       }
-      throw new SeatbeltConfinementError(
+      throw new ProcessConfinementError(
         "incompatible",
         "Confinement is supported only on macOS and Linux.",
       );
@@ -800,9 +772,9 @@ export function makeSeatbeltConfinementLive(
   };
 }
 
-function prepareDarwinSeatbelt(
-  input: SeatbeltConfinementPrepareInput,
-  options: SeatbeltConfinementOptions,
+function prepareSeatbeltLaunch(
+  input: ProcessConfinementPrepareInput,
+  options: ProcessConfinementOptions,
 ): ConfinedProcessLaunch {
   const sandboxPath = options.sandboxPath ?? DEFAULT_SANDBOX_PATH;
   requireSandboxExec({ platform: "darwin", sandboxPath });
@@ -837,9 +809,6 @@ function prepareDarwinSeatbelt(
     ...(input.allowSimulatorControl === undefined
       ? {}
       : { allowSimulatorControl: input.allowSimulatorControl }),
-    ...(input.allowProviderCredentialLookup === undefined
-      ? {}
-      : { allowProviderCredentialLookup: input.allowProviderCredentialLookup }),
     ...(input.additionalDenyReadPaths === undefined
       ? {}
       : { additionalDenyReadPaths: input.additionalDenyReadPaths }),
@@ -893,7 +862,7 @@ function writeGrantsBeneathBoundRoot(
 
 function assertAbsolute(path: string, label: string): void {
   if (!isAbsolute(path)) {
-    throw new SeatbeltConfinementError(
+    throw new ProcessConfinementError(
       "invalid-configuration",
       `Seatbelt ${label} must be an absolute path.`,
     );
@@ -904,7 +873,7 @@ function assertNotAncestorOfDeniedPath(path: string, label: string): void {
   const prefix = path.endsWith(sep) ? path : `${path}${sep}`;
   for (const denied of DEFAULT_DENY_READ_PATHS) {
     if (path === denied || denied.startsWith(prefix)) {
-      throw new SeatbeltConfinementError(
+      throw new ProcessConfinementError(
         "invalid-configuration",
         `Seatbelt ${label} "${path}" is equal to or an ancestor of the denied sensitive path "${denied}"; its read-allow rule would be emitted after that denial and reopen the whole subtree.`,
       );
