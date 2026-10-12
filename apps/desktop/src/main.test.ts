@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("electron", () => ({
   app: {
+    commandLine: { hasSwitch: vi.fn(() => false), getSwitchValue: vi.fn(), appendSwitch: vi.fn() },
     getPath: vi.fn(() => "/tmp"),
     on: vi.fn(),
     quit: vi.fn(),

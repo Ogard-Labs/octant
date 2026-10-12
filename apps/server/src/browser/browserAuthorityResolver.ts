@@ -14,6 +14,7 @@ import {
 import { Schema } from "effect";
 import type { WorkThreadProjection } from "../work/workThreadProjection";
 import type { PersistenceService } from "../persistence/persistenceService";
+import { isRoutineHostScope } from "../routineHostScope";
 import type { BrowserAuthorityResolver } from "./browserAutomationService";
 
 const decodeToolHostId = Schema.decodeUnknownSync(ToolHostId);
@@ -110,6 +111,9 @@ export class ServerBrowserAuthorityResolver implements BrowserAuthorityResolver 
     mode: ToolActionAuthority["mode"],
   ): boolean {
     const authority = this.resolve(threadId, mode);
+    // A routine's turn runs as the host, which owns every Project; its thread
+    // is still bound to the routine's Project by the authority resolved above.
+    if (authority !== undefined && isRoutineHostScope(windowId)) return true;
     const readWindowWorkspace = this.#options.persistence.readWindowWorkspace;
     if (authority === undefined || readWindowWorkspace === undefined) return false;
     const projected = readWindowWorkspace(windowId);

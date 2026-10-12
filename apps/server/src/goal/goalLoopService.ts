@@ -75,7 +75,11 @@ export interface GoalLoopDependencies {
   readonly modePosture: (threadId: string) => AgentRunAuthority | undefined;
   /** An approval the thread is already waiting on, when the host knows of one. */
   readonly pendingApproval: (threadId: string) => ToolApprovalClass | undefined;
-  /** Mark a checkpoint before the round. Returns its id, or undefined if it could not. */
+  /**
+   * Mark a checkpoint before the round. Returns its id, or undefined when the
+   * thread has none to mark; policy then decides whether the round may run
+   * without one, and a loop it pauses carries `checkpoint-unavailable`.
+   */
   readonly markCheckpoint: (threadId: string) => Promise<string | undefined>;
   /** Run one ordinary turn against the objective, under exactly this authority. */
   readonly runRound: (input: {
@@ -210,8 +214,9 @@ export class GoalLoopService {
     if (live === undefined) return this.#pause(record, "stopped-by-user");
 
     // The checkpoint is a fact the decision turns on, so it is taken before
-    // deciding rather than after: a round that cannot be checkpointed is a
-    // round that must not start, and asking afterwards would have started it.
+    // deciding rather than after: whether a round without one may start is
+    // policy's call, and asking afterwards would have started it. A marker
+    // that fails reads as no checkpoint, never as one taken.
     const checkpointId = await this.#dependencies.markCheckpoint(threadId).catch(() => undefined);
 
     const pendingApproval = this.#dependencies.pendingApproval(threadId);
@@ -273,7 +278,7 @@ export class GoalLoopService {
         roundId: this.#dependencies.uuid(),
         loopId: record.loop.id,
         sequence: record.loop.roundsRun + 1,
-        checkpointId: checkpointId as string,
+        ...(checkpointId === undefined ? {} : { checkpointId }),
         authority: decision.authority,
         outcome: usageRecorded ? outcome.outcome : "failed",
         ...(usageRecorded

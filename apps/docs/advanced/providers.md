@@ -554,6 +554,13 @@ example older messages, messages no longer stored, or messages too large to
 read. If nothing readable is left to hand over, the message is refused with
 the reason, and you can switch back or start a new task.
 
+A fork that switches provider also hands over the conversation it was forked
+from, up to the reply it was forked at, ahead of its own messages, within the
+same limit; the oldest messages are left out first. The reply says how many
+of the handed-over messages came from the original conversation. If that
+conversation can no longer be read from this window, for example because it
+moved to a Project you cannot open, the message is refused with the reason.
+
 ## Effort, reasoning and speed
 
 Chat also offers these levels on its start screen, before the first message.

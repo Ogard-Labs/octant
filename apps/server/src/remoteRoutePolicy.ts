@@ -1,3 +1,6 @@
+import { CANVAS_DESIGN_PAGE_PATH } from "@octant/contracts/canvas";
+import { CANVAS_DESIGN_PAGE_POLICY } from "./canvas/canvasDesignPage";
+
 const DEFAULT_BODY_BYTES = 1_048_576;
 const DEFAULT_RESPONSE_BYTES = 8 * 1_024 * 1_024;
 const DEFAULT_CONCURRENT_REQUESTS = 32;
@@ -22,11 +25,21 @@ const LOCAL_ONLY_PREFIXES = [
   "/api/folders",
   "/api/extensions/lifecycle",
   "/api/extensions/skills",
+  "/api/extensions/tool-grants",
   "/api/providers/discovery",
   "/api/host-control",
   "/api/replica-store",
   "/api/replica-membership",
 ] as const;
+
+/**
+ * A running Canvas design's page. A frame loads it by address, so it can send
+ * neither the session proof nor any header of ours; the single-use ticket in
+ * its query is the whole authority, issued by the authenticated Canvas route.
+ * Its responses keep the page's own sandbox policy in place of the remote
+ * default, which would refuse the frame and admit no script.
+ */
+export const REMOTE_CANVAS_DESIGN_PAGE_ROUTE_ID = "canvas-design-page";
 
 export const REMOTE_PROTOCOL_ROUTE_IDS = {
   hello: "remote-protocol-hello",
@@ -36,6 +49,15 @@ export const REMOTE_PROTOCOL_ROUTE_IDS = {
 } as const;
 
 const DEFAULT_PRE_AUTH_ROUTES: readonly RemoteRouteDefinition[] = [
+  {
+    id: REMOTE_CANVAS_DESIGN_PAGE_ROUTE_ID,
+    match: { kind: "exact", path: CANVAS_DESIGN_PAGE_PATH },
+    surface: "pre-auth",
+    methods: ["GET"],
+    allowQuery: true,
+    allowedRequestHeaders: [],
+    responsePolicy: CANVAS_DESIGN_PAGE_POLICY,
+  },
   {
     id: "health",
     match: { kind: "exact", path: "/health" },
@@ -326,6 +348,8 @@ export interface RemoteRouteDefinition {
   readonly allowQuery?: boolean;
   readonly maxBodyBytes?: number;
   readonly maxResponseBytes?: number;
+  /** The Content-Security-Policy this route's responses carry instead of the default. */
+  readonly responsePolicy?: string;
 }
 
 export type RemoteRouteResponse = Response | undefined;
@@ -549,11 +573,17 @@ function inspectRequest(
   if (pathSurface === "web-assets") {
     if (method !== "GET" && method !== "HEAD") return reject(405, facts);
     if (hasBody(request)) return reject(413, facts);
+    const headers = remoteHeaders(headerOrigin === null ? undefined : headerOrigin, []);
+    // The app frames one thing: a running design's page on this same origin.
+    headers.set(
+      "content-security-policy",
+      `${REMOTE_SECURITY_POLICY.csp}; frame-src ${origin.origin}${CANVAS_DESIGN_PAGE_PATH}`,
+    );
     return allow(
       "web-assets",
       undefined,
       facts,
-      remoteHeaders(headerOrigin === null ? undefined : headerOrigin, []),
+      headers,
       defaultMaxBodyBytes,
       defaultMaxResponseBytes,
     );
@@ -570,14 +600,18 @@ function inspectRequest(
     return reject(413, facts);
   }
   if (hasBody(request) && !contentTypeAllowed(request, route)) return reject(415, facts);
+  const headers = remoteHeaders(
+    headerOrigin === null ? undefined : headerOrigin,
+    route.allowedRequestHeaders ?? REMOTE_REQUEST_HEADERS,
+  );
+  if (route.responsePolicy !== undefined) {
+    headers.set("content-security-policy", route.responsePolicy);
+  }
   return allow(
     route.surface,
     route,
     facts,
-    remoteHeaders(
-      headerOrigin === null ? undefined : headerOrigin,
-      route.allowedRequestHeaders ?? REMOTE_REQUEST_HEADERS,
-    ),
+    headers,
     bodyLimit,
     Math.min(route.maxResponseBytes ?? defaultMaxResponseBytes, defaultMaxResponseBytes),
   );

@@ -4,7 +4,7 @@ import type {
   CanvasNumberFormat,
 } from "@octant/contracts/canvas";
 import { ArrowDownRight, ArrowUpRight, Minus } from "lucide-react";
-import { Fragment } from "react";
+import { Fragment, useId } from "react";
 import { formatCanvasValue, formatScalar } from "../canvasRuntime";
 
 type Block = Extract<
@@ -46,14 +46,7 @@ export function DataBlocks({ block }: { readonly block: Block }) {
         </div>
       );
     case "progress":
-      return (
-        <div className="canvas-block__progress">
-          <span className="canvas-block__progress-label">{block.label}</span>
-          <progress max="1" value={block.value}>
-            {Math.round(block.value * 100)}%
-          </progress>
-        </div>
-      );
+      return <ProgressBlock block={block} />;
     case "status":
       return (
         <div
@@ -77,6 +70,41 @@ export function DataBlocks({ block }: { readonly block: Block }) {
         </dl>
       );
   }
+}
+
+/**
+ * A labelled progress bar. The visible label sitting beside a `<progress>`
+ * names nothing on its own, so a screen reader announced an unnamed bar; the
+ * label names it and the detail, when present, describes it.
+ */
+function ProgressBlock({
+  block,
+}: {
+  readonly block: Extract<Block, { readonly kind: "progress" }>;
+}) {
+  const id = useId();
+  const labelId = `${id}-label`;
+  const detailId = `${id}-detail`;
+  return (
+    <div className="canvas-block__progress">
+      <span className="canvas-block__progress-label" id={labelId}>
+        {block.label}
+      </span>
+      <progress
+        aria-describedby={block.detail === undefined ? undefined : detailId}
+        aria-labelledby={labelId}
+        max="1"
+        value={block.value}
+      >
+        {Math.round(block.value * 100)}%
+      </progress>
+      {block.detail === undefined ? null : (
+        <span className="canvas-block__progress-detail" id={detailId}>
+          {block.detail}
+        </span>
+      )}
+    </div>
+  );
 }
 
 /**

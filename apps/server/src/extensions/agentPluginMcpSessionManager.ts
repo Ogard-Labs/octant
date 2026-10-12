@@ -13,6 +13,7 @@ import {
   type ProviderToolDefinition,
   type WindowId,
 } from "@octant/contracts";
+import type { ExtensionToolReach } from "@octant/domain/extension-tool-grant-policy";
 import {
   connectAgentPluginMcpSession,
   type AgentPluginMcpSession,
@@ -43,6 +44,31 @@ export interface AgentPluginMcpSessionRecord extends AgentPluginMcpSessionKey {
   readonly serverName: string;
   readonly session: AgentPluginMcpSession;
   readonly tools: ReadonlyArray<McpToolDefinition>;
+  readonly reach: ExtensionToolReach;
+  /** Each tool's definition digest, taken once from the listing at connect. */
+  readonly toolDefinitionDigests: ReadonlyMap<string, string>;
+}
+
+/**
+ * One MCP tool call as the host must judge it: who asks, which tool of which
+ * package version, how that tool was listed when its session connected, and
+ * where its server can reach.
+ */
+export interface ExtensionToolCall {
+  readonly windowId?: WindowId;
+  readonly thread: ExtensionToolThread;
+  readonly extensionId: string;
+  readonly packageId: string;
+  readonly componentId: string;
+  readonly serverName: string;
+  readonly version: string;
+  readonly digest: string;
+  readonly definitionDigest: string;
+  readonly reach: ExtensionToolReach;
+  readonly providerToolName: string;
+  readonly mcpToolName: string;
+  readonly inputJson: string;
+  readonly signal?: AbortSignal;
 }
 
 export interface AgentPluginMcpSessionManagerOptions {
@@ -56,16 +82,7 @@ export interface AgentPluginMcpSessionManagerOptions {
   readonly idleTimeoutMs?: number;
   readonly stdioSupervisor?: Pick<ExtensionSupervisor, "startInteractive">;
   readonly baseEnv?: Readonly<Record<string, string>>;
-  readonly authorizeToolCall?: (input: {
-    readonly windowId?: WindowId;
-    readonly thread: ExtensionToolThread;
-    readonly packageId: string;
-    readonly componentId: string;
-    readonly providerToolName: string;
-    readonly mcpToolName: string;
-    readonly inputJson: string;
-    readonly signal?: AbortSignal;
-  }) => Promise<boolean>;
+  readonly authorizeToolCall?: (call: ExtensionToolCall) => Promise<boolean>;
   readonly recordExternalContentIngestion?: (
     input: RecordExternalContentIngestionInput,
   ) => ExternalContentIngestionResult;
@@ -207,14 +224,21 @@ export class AgentPluginMcpSessionManager {
         ) {
           return { result: { error: "extension-tool-authority-mismatch" }, isError: true };
         }
+        const definitionDigest = record.toolDefinitionDigests.get(indexed.toolName);
         const approved =
-          this.#authorizeToolCall === undefined
+          this.#authorizeToolCall === undefined || definitionDigest === undefined
             ? false
             : await this.#authorizeToolCall({
                 thread,
                 ...(windowId === undefined ? {} : { windowId }),
+                extensionId: record.extensionId,
                 packageId: record.packageId,
                 componentId: record.componentId,
+                serverName: record.serverName,
+                version: record.version,
+                digest: record.digest,
+                definitionDigest,
+                reach: record.reach,
                 providerToolName: name,
                 mcpToolName: indexed.toolName,
                 inputJson,
@@ -486,6 +510,12 @@ export class AgentPluginMcpSessionManager {
       serverName: launch.name,
       session,
       tools: session.tools,
+      // A stdio server only ever starts through `supervisedStdioProcessPort`,
+      // which denies it the network and confines its writes to plugin data.
+      reach: session.transport === "stdio" ? "confined-stdio" : "network",
+      toolDefinitionDigests: new Map(
+        session.tools.map((tool) => [tool.name, extensionToolDefinitionDigest(tool)]),
+      ),
     };
     const key = sessionKey(target);
     if (!this.#desired.has(key) || this.#sessions.has(key)) {
@@ -672,6 +702,35 @@ function supervisedStdioProcessPort(input: {
       };
     },
   };
+}
+
+/**
+ * What a person approves when they remember a tool: its name, description,
+ * and input schema exactly as the server listed them. A server that later
+ * lists the same name with another description or schema is offering a
+ * different tool, and the changed digest makes the next call ask again.
+ */
+export function extensionToolDefinitionDigest(tool: McpToolDefinition): string {
+  const listed = canonicalJson({
+    name: tool.name,
+    description: tool.description ?? null,
+    inputSchema: tool.inputSchema ?? null,
+  });
+  return `sha256:${createHash("sha256").update(listed).digest("hex")}`;
+}
+
+/** JSON with object keys in a fixed order, so equal listings hash equally. */
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (typeof value === "object" && value !== null) {
+    const entries = Object.entries(value)
+      .filter(([, entry]) => entry !== undefined)
+      .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0));
+    return `{${entries
+      .map(([key, entry]) => `${JSON.stringify(key)}:${canonicalJson(entry)}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value) ?? "null";
 }
 
 function sessionKey(target: AgentPluginMcpSessionKey): string {

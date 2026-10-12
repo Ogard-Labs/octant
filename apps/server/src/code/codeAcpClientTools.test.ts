@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { CodeThread, WindowId } from "@octant/contracts";
-import { makeSeatbeltConfinementLive } from "../process/seatbeltProfile";
+import { makeProcessConfinementLive } from "../process/seatbeltProfile";
 import { liveCodeTestSourcePort, type CodeTestSourcePort } from "./codeDirectoryPort";
 import { createCodeAcpClientTools, type CodeAcpTerminalConfinement } from "./codeAcpClientTools";
 
@@ -365,7 +365,7 @@ describe("ACP Code client tools", () => {
         HOME: process.env.HOME ?? "/tmp",
         TMPDIR: process.env.TMPDIR ?? tmpdir(),
       };
-      const confinement = makeSeatbeltConfinementLive({ platform: "darwin" });
+      const confinement = makeProcessConfinementLive({ platform: "darwin" });
       try {
         const appTools = tools(root, "full-access", {
           environment,

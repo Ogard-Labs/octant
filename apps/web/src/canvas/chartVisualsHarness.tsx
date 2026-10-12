@@ -1,7 +1,12 @@
 import "../styles.css";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { CANVAS_SCHEMA_VERSION, decodeCanvasBlock } from "@octant/contracts/canvas";
+import { Schema } from "effect";
+import {
+  CANVAS_SCHEMA_VERSION,
+  CanvasDesignAssetResolution,
+  decodeCanvasBlock,
+} from "@octant/contracts/canvas";
 import {
   chartExampleBlocks,
   treemapExampleBlocks,
@@ -11,15 +16,22 @@ import {
   mathExampleBlocks,
   metricExampleBlocks,
   notificationStatesExampleBlock,
+  onboardingFlowExampleBlock,
+  searchSpecExampleBlock,
   settingsScreenExampleBlock,
   orderSchemaBlock,
   supportFlowBlock,
   releaseMindmapBlock,
+  designBriefExample,
+  launchGanttExample,
   opsDashboardExampleBlocks,
   releaseHealthBoardExampleBlocks,
 } from "@octant/domain";
 import { DEFAULT_DARK_TOKENS, DEFAULT_LIGHT_TOKENS, getThemePreset } from "@octant/theme";
 import { CanvasDocument } from "./CanvasDocument";
+import type { DesignAssetRuntime } from "./blocks/designDocument";
+
+const decodeCanvasDesignAssetResolution = Schema.decodeUnknownSync(CanvasDesignAssetResolution);
 import { canvasFixture } from "./test-fixtures";
 
 /**
@@ -296,6 +308,106 @@ const dashboardMockup = decodeCanvasBlock({
   ],
 });
 
+/**
+ * A long article drawn as a themed document: headings, a lede, prose, a
+ * quote, a list, a figure caption, cards, a callout, and code, so a capture
+ * shows the kit's reading rhythm and that the page grows to its content.
+ */
+const articleBlock = decodeCanvasBlock({
+  ...base,
+  blockId: "article",
+  kind: "design",
+  title: "Why local-first",
+  size: "document",
+  frames: [
+    {
+      frameId: "article",
+      title: "Article",
+      html: [
+        '<article class="oct-article">',
+        '<p class="oct-eyebrow">Essay · 6 min read</p>',
+        "<h1>Why a workspace should keep working offline</h1>",
+        '<p class="oct-lede">The network is a convenience, not a dependency. Here is what changes when the work lives on your machine first.</p>',
+        "<p>Every tool that waits on a server before it shows you your own notes teaches you to wait. A local-first workspace answers from disk, then reconciles. The difference is not speed alone: it is that nothing you wrote is ever hostage to a connection.</p>",
+        "<h2>What stays on the machine</h2>",
+        "<p>Threads, Canvases, and the journal that records them are written locally before anything else happens. A remote client reads them through the host, under the same authority the host enforces for itself.</p>",
+        "<ul><li>The event journal is the source of truth.</li><li>Projections are rebuilt from it and can be thrown away.</li><li>Exports are explicit and name what leaves.</li></ul>",
+        '<blockquote>"Offline is not an edge case. It is the case where you find out what you actually own."</blockquote>',
+        '<div class="oct-grid"><div class="oct-card"><p class="oct-card__title">Journal</p><p>Append-only, replayable, and the only thing that is authoritative.</p></div><div class="oct-card"><p class="oct-card__title">Projections</p><p>Fast to read and safe to rebuild whenever the schema moves.</p></div><div class="oct-card"><p class="oct-card__title">Exports</p><p>Written on request, with the reader named before anything leaves.</p></div></div>',
+        "<h2>What it costs</h2>",
+        "<p>Conflict resolution moves from the server into the client, and every schema change needs a story for documents written by an older version. That is why each Canvas carries a schema version, and why an older runtime refuses a newer document instead of guessing.</p>",
+        '<div class="oct-callout"><p class="oct-callout__title">Rule of thumb</p><p>If a feature cannot explain what it does with no network, it is not finished.</p></div>',
+        '<pre class="oct-code"><code>if (declared > SUPPORTED) refuse("unsupported-schema-version");</code></pre>',
+        "<h3>Further reading</h3>",
+        '<p>The architecture notes cover persistence and replay in more depth; see <a href="#article">the top of this essay</a> for the summary.</p>',
+        "<hr>",
+        '<p class="oct-muted">Written for the Octant team. Comments welcome.</p>',
+        "</article>",
+      ].join(""),
+    },
+  ],
+});
+
+/**
+ * A phone mockup that shows a Project screenshot by asset id beside one the
+ * host refused, so a capture shows the inlined image and the placeholder.
+ * The harness stands in for the host: it answers with fixture bytes, and the
+ * frame still loads nothing.
+ */
+const assetMockupBlock = decodeCanvasBlock({
+  ...base,
+  schemaVersion: 17,
+  blockId: "asset-mockup",
+  kind: "design",
+  title: "Release notes app",
+  size: "phone",
+  theme: "workspace",
+  styles: [
+    "body { margin: 0; font-family: var(--oct-font-body); color: var(--oct-fg); }",
+    ".screen { padding: 28px 24px; }",
+    ".screen h1 { font-size: 26px; margin: 0 0 8px; }",
+    ".screen p { margin: 0 0 18px; color: var(--oct-muted); }",
+    ".shot { display: block; width: 100%; border-radius: 18px; border: 1px solid var(--oct-border); }",
+    ".hero { height: 220px; border-radius: 18px; background: url(octant-asset:hero) center / cover; }",
+  ].join("\n"),
+  assets: [
+    { assetId: "home-shot", source: { kind: "project-file", path: "screens/home.png" } },
+    { assetId: "hero", source: { kind: "project-file", path: "../outside/hero.png" } },
+  ],
+  frames: [
+    {
+      frameId: "home",
+      title: "Home screenshot",
+      html: '<div class="screen"><h1>What shipped</h1><p>The home screen, as it runs today.</p><img class="shot" src="octant-asset:home-shot" alt="Home screen"></div>',
+    },
+    {
+      frameId: "hero",
+      title: "Refused hero",
+      html: '<div class="screen"><h1>Launch hero</h1><p>An image outside the folder draws a placeholder.</p><div class="hero" role="img" aria-label="Hero"></div></div>',
+    },
+  ],
+});
+
+const HOME_SHOT_PNG =
+  "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";
+
+const harnessDesignAssets: DesignAssetRuntime = {
+  resolve: async (blockId) =>
+    blockId === "asset-mockup"
+      ? [
+          { assetId: "home-shot", status: "resolved", mediaType: "image/png", data: HOME_SHOT_PNG },
+          { assetId: "hero", status: "unavailable", reason: "refused" },
+        ].map((entry) => decodeCanvasDesignAssetResolution(entry))
+      : undefined,
+};
+
+const designBlocks = [
+  articleBlock,
+  searchSpecExampleBlock,
+  onboardingFlowExampleBlock,
+  assetMockupBlock,
+];
+
 const mockupBlocks = [
   settingsScreenExampleBlock,
   notificationStatesExampleBlock,
@@ -508,10 +620,15 @@ const tableComments = {
 };
 
 // `?only=mockup` draws the mockups alone, `?only=flow` the funnel, radar, and
-// sankey charts alone, `?only=table` the grouped and pinned table alone, and
-// `?only=dashboard` the two example dashboards, so
-// their capture is not a page of every chart.
+// sankey charts alone, `?only=table` the grouped and pinned table alone,
+// `?only=dashboard` the two example dashboards, `?only=design` the designs,
+// and `?only=layout` the tabbed design brief and a Gantt plan, so their
+// capture is not a page of every chart.
 const only = new URLSearchParams(window.location.search).get("only");
+
+const layoutBlocks = [...designBriefExample, launchGanttExample].map((block) =>
+  decodeCanvasBlock(block),
+);
 
 const definition =
   only === "mockup"
@@ -522,35 +639,39 @@ const definition =
         ? { ...canvasFixture, blocks: [wideTable] }
         : only === "dashboard"
           ? { ...canvasFixture, blocks: dashboardBlocks }
-          : {
-              ...canvasFixture,
-              blocks: [
-                line,
-                bar,
-                area,
-                scatter,
-                distribution,
-                ...chartExampleBlocks,
-                budgetSankey,
-                loneRadar,
-                longFunnel,
-                ...treemapExampleBlocks,
-                ...heatmapExampleBlocks,
-                ...barListExampleBlocks,
-                hotFiles,
-                ...comparisonMatrixExampleBlocks,
-                ...mathExampleBlocks,
-                ...metricExampleBlocks,
-                metric,
-                table,
-                timeline,
-                orderSchemaBlock,
-                supportFlowBlock,
-                releaseMindmapBlock,
-                ...mockupBlocks,
-                ...dashboardBlocks,
-              ],
-            };
+          : only === "design"
+            ? { ...canvasFixture, blocks: designBlocks }
+            : only === "layout"
+              ? { ...canvasFixture, blocks: layoutBlocks }
+              : {
+                  ...canvasFixture,
+                  blocks: [
+                    line,
+                    bar,
+                    area,
+                    scatter,
+                    distribution,
+                    ...chartExampleBlocks,
+                    budgetSankey,
+                    loneRadar,
+                    longFunnel,
+                    ...treemapExampleBlocks,
+                    ...heatmapExampleBlocks,
+                    ...barListExampleBlocks,
+                    hotFiles,
+                    ...comparisonMatrixExampleBlocks,
+                    ...mathExampleBlocks,
+                    ...metricExampleBlocks,
+                    metric,
+                    table,
+                    timeline,
+                    orderSchemaBlock,
+                    supportFlowBlock,
+                    releaseMindmapBlock,
+                    ...mockupBlocks,
+                    ...dashboardBlocks,
+                  ],
+                };
 
 type ChartThemeScenario = "default-light" | "default-dark" | "vivid" | "contrast";
 
@@ -601,6 +722,7 @@ createRoot(rootElement).render(
     <main data-canvas-chart-evidence="all">
       <CanvasDocument
         definition={definition}
+        designAssetRuntime={harnessDesignAssets}
         {...(only === "table" ? { comments: tableComments } : {})}
       />
     </main>

@@ -56,6 +56,11 @@ export interface ExtensionMaterialLoaderPort {
 export interface ExtensionToolThread {
   readonly id: string;
   readonly projectId?: string | undefined;
+  /**
+   * The turn runs under Plan, the read-only posture. A remembered tool
+   * approval never covers a call from such a turn; a person is asked.
+   */
+  readonly planTurn?: boolean;
 }
 
 export interface ExtensionToolExecutionPort {

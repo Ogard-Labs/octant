@@ -66,7 +66,7 @@ export interface FirstRunReadinessInput {
   /**
    * What the host's search of this Mac has produced so far. Required, because
    * an empty registry means "nothing is configured" only once that search has
-   * answered; before then it means the search has not run yet (`BOOT-02`).
+   * answered; before then it means the search has not run yet.
    */
   readonly discovery: FirstRunDiscoveryInput;
 }
@@ -128,7 +128,7 @@ const DETAILS: Record<FirstRunProviderState, string> = {
  * is reported as unchecked rather than optimistically ready; a stored
  * credential Octant cannot read is reported as unavailable rather than as a
  * plain sign-in prompt, because unlocking the keychain and re-authenticating
- * are different remedies (`BOOT-02`).
+ * are different remedies.
  */
 export function describeProviderReadiness(
   instance: ProviderInstance,
@@ -241,7 +241,7 @@ export function summarizeFirstRunReadiness(
     // Discovery, not the registry, is what knows whether this Mac has a
     // provider on it. Until it has answered, an empty registry is a missing
     // answer, and first run names it as one rather than converting it into
-    // "nothing is configured" (`BOOT-02`).
+    // "nothing is configured".
     const progress = describeFirstRunDiscoveryProgress(input.discovery);
     if (progress !== "searched") {
       return {
@@ -286,8 +286,8 @@ export interface FirstRunDiscoveryNotice {
  *
  * A cancelled, partial, or failed scan still produces a candidate list, and
  * presenting that list silently would imply the Mac was fully searched. Each
- * incomplete outcome is named and offered a retry so the user can act on it
- * (`BOOT-02`); none of them changes what the host will let a provider do.
+ * incomplete outcome is named and offered a retry so the user can act on it;
+ * none of them changes what the host will let a provider do.
  *
  * A running scan is reported first, because the outcome of the scan it
  * replaces is no longer what is happening: leaving the retried outcome up for
