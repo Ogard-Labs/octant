@@ -95,7 +95,6 @@ export function ClaudeAccountSettingsFields(props: {
     <ProviderAccountSettingsFields
       {...props}
       defaultDirectoryDescription="Octant assigns the first subscription account Claude's default directory."
-      extraDirectoryDescription="Octant assigns this account its own directory. Sign in only with the command below."
       profile={CLAUDE_ACCOUNT_PROFILE}
       settingPrefix={
         props.instanceId === undefined ? "provider-create-claude" : `provider-${props.instanceId}`
@@ -119,7 +118,6 @@ export function CodexAccountSettingsFields(props: {
     <ProviderAccountSettingsFields
       {...props}
       defaultDirectoryDescription="Octant assigns the first Codex account Codex's default directory."
-      extraDirectoryDescription="Octant assigns this account its own directory. Sign in only with the command below."
       profile={CODEX_ACCOUNT_PROFILE}
       settingPrefix={
         props.instanceId === undefined ? "provider-create-codex" : `provider-${props.instanceId}`
@@ -133,7 +131,6 @@ function ProviderAccountSettingsFields(props: {
   readonly profile: ProviderAccountProfile;
   readonly settingPrefix: string;
   readonly defaultDirectoryDescription: string;
-  readonly extraDirectoryDescription: string;
   readonly signInDescription: string;
   readonly instanceId?: ProviderInstanceId;
   readonly binaryPath: string;
@@ -175,6 +172,13 @@ function ProviderAccountSettingsFields(props: {
         ...(commandDirectory === undefined ? {} : { stateDirectory: commandDirectory }),
       })
     : undefined;
+  // The create form has no directory yet, so it has no command to point at.
+  const assignedDirectoryDescription =
+    signInCommand !== undefined
+      ? "Octant assigns this account its own directory. Sign in only with the command below."
+      : props.showSignInCommand === false
+        ? "Octant assigns this account its own directory."
+        : "Octant assigns this account its own directory. Its sign-in command appears once the account is added.";
   return (
     <>
       <SettingRow
@@ -183,7 +187,7 @@ function ProviderAccountSettingsFields(props: {
             ? "This account still uses a directory you chose, so it keeps that login. Re-assign to Octant's directory only if you want a new login on the assigned path. Threads this account already started stay in the old directory and cannot continue after that."
             : displayed.kind === "assigned-default"
               ? props.defaultDirectoryDescription
-              : props.extraDirectoryDescription
+              : assignedDirectoryDescription
         }
         label="Account directory"
         scope="host"
