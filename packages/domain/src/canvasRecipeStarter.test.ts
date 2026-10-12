@@ -91,6 +91,20 @@ describe("canvasRecipeStarterBlocks", () => {
     expect(() => validateCanvasDefinition(definitionWith([block]))).not.toThrow();
   });
 
+  it("opens a recipe whose title is longer than a design's title may be", () => {
+    const long = decodeCanvasDocumentRecipe({
+      id: "long-title",
+      title: "A long title ".repeat(19).trim(),
+      whenToUse: "When a skill names its recipe at length.",
+      skeleton: [{ kind: "design", size: "document", role: "The article." }],
+    });
+    const [block] = canvasRecipeStarterBlocks(long);
+    if (block?.kind !== "design") throw new Error("The recipe did not open as a design.");
+    expect(block.title).toHaveLength(120);
+    expect(block.frames[0]?.html).toContain(`<h1>${long.title}</h1>`);
+    expect(() => validateCanvasDefinition(definitionWith([block]))).not.toThrow();
+  });
+
   it("keeps a design slot that names no size, or a device size, as a placeholder to fill", () => {
     const screens = decodeCanvasDocumentRecipe({
       id: "screens",

@@ -1357,12 +1357,14 @@ describe("createCanvasAgentTools", () => {
       expect(chat).toContain("a file path is refused");
     });
 
-    it("teaches every agent how to declare a running prototype, what stays refused, and that it has no network", async () => {
+    it("teaches every agent how to declare a running prototype, what stays refused, and that it is not private", async () => {
       for (const mode of ["chat", "work", "code"] as const) {
         const guidance = await designGuidance((mode === "chat" ? tools() : boundTools(mode)).set);
         expect(guidance).toContain('"runsScript": true');
         expect(guidance).toContain("<script src>");
-        expect(guidance).toContain("It has no network at all");
+        expect(guidance).toContain("Fetch, XHR, WebSocket, forms, and new windows are blocked");
+        expect(guidance).toContain("never tell the person it cannot reach the network");
+        expect(guidance).not.toContain("no network at all");
       }
     });
 

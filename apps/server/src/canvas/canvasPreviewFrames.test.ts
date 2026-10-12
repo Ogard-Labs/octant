@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { boundedFrameReading, boundedScriptErrors } from "./canvasPreviewFrames";
+import {
+  boundedFrameReading,
+  boundedScriptErrors,
+  designFrameReadings,
+} from "./canvasPreviewFrames";
 import { canvasPreviewDesignWarnings } from "./canvasPreviewWarnings";
 
 describe("a design frame's reading", () => {
@@ -135,5 +139,27 @@ describe("a design the look could not finish reading", () => {
       { kind: "design-script-error", blockId: "late", message: "boom" },
       { kind: "design-not-measured", blockId: "late" },
     ]);
+  });
+
+  it("is not measured when one of its frames did not answer, and keeps what the others found", () => {
+    const reading = designFrameReadings([
+      { overflow: [{ frameId: "home", overflowPx: 40 }], contrast: [] },
+      undefined,
+    ]);
+    expect(reading).toEqual({
+      measured: false,
+      overflow: [{ frameId: "home", overflowPx: 40 }],
+      contrast: [],
+    });
+    expect(
+      canvasPreviewDesignWarnings([{ blockId: "half", scriptErrors: [], ...reading }]),
+    ).toEqual([
+      { kind: "design-not-measured", blockId: "half" },
+      { kind: "design-frame-overflow", blockId: "half", frameId: "home", overflowPx: 40 },
+    ]);
+  });
+
+  it("is measured when every frame answered", () => {
+    expect(designFrameReadings([{ overflow: [], contrast: [] }]).measured).toBe(true);
   });
 });
