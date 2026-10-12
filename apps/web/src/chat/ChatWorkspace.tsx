@@ -994,6 +994,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
           )}
           {props.browserAutomationClient === undefined ? null : (
             <BrowserCaptureList
+              className="thread-column"
               client={props.browserAutomationClient}
               threadId={decodeBrowserThreadId(String(thread.id))}
             />

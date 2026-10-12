@@ -19,6 +19,12 @@ const CAPTURE_POLL_MS = 5_000;
 export interface BrowserCaptureListProps {
   readonly client: BrowserAutomationClient;
   readonly threadId: BrowserThreadId;
+  /**
+   * The column the strip sits in. Chat and Code lay each transcript block in
+   * the thread column themselves; Work's trail is already inside it. Without
+   * it the strip ran to the pane's edge, clear of the messages.
+   */
+  readonly className?: string;
 }
 
 /**
@@ -89,7 +95,9 @@ export function BrowserCaptureList(props: BrowserCaptureListProps) {
   return (
     <section
       aria-label="Browser captures"
-      className="browser-captures"
+      className={
+        props.className === undefined ? "browser-captures" : `browser-captures ${props.className}`
+      }
       data-testid="browser-capture-list"
     >
       <h3 className="oct-section-label">Browser captures</h3>

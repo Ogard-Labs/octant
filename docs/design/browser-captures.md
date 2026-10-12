@@ -88,7 +88,7 @@ the Browser pane
 
 - A thread with captures shows a "Browser captures" strip in its transcript
   beside the generated images (Chat, Work, and Code); it is absent until there
-  is one.
+  is one. It sits in the thread column, in line with the messages.
 - Each row is a small picture, the page title (the origin when there is none),
   and the origin. Choosing it opens the full picture with its URL and time as a
   workspace content view, or in place where none is available.

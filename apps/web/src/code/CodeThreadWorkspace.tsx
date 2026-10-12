@@ -1681,6 +1681,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
       )}
       {!displayReady || props.browserAutomationClient === undefined ? null : (
         <BrowserCaptureList
+          className="thread-column"
           client={props.browserAutomationClient}
           threadId={decodeBrowserThreadId(String(thread.id))}
         />
