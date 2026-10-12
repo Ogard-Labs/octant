@@ -38,8 +38,9 @@ no observation or evidence.
 
 ### Browser captures
 
-When the agent takes a screenshot with its Browser, or you take one in the
-Browser pane, Octant keeps a copy with the thread. A **Browser captures** strip
+When the agent takes a screenshot with its Browser, or you press **Screenshot**
+(the camera button in the Browser pane's toolbar), Octant keeps a copy with the
+thread. **Refresh preview** does not keep one. A **Browser captures** strip
 appears in the conversation beside any generated images, newest first, each
 with the page title and its origin. Choose one to see it full size with its
 address and time. The strip is absent until the thread has a capture.
@@ -48,8 +49,8 @@ address and time. The strip is absent until the thread has a capture.
   such as clicking or scrolling, is not.
 - A thread keeps its newest 32 captures; the oldest is dropped when a new one
   arrives. Deleting the thread deletes its captures.
-- Captures stay on this computer, in Octant's data folder, and are listed under
-  **Settings → Data & privacy**. They are not added to Canvases, shared,
+- Captures stay on this computer, in Octant's data folder. **Settings → Data &
+  privacy** lists **Browser captures** under Caches with where they are stored. They are not added to Canvases, shared,
   synced to your other computers, or included in diagnostics. A thread export
   does not include them yet.
 - The page you captured counts as outside content: a thread that has looked at

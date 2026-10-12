@@ -64,11 +64,11 @@ Hand off is `POST /api/threads/hand-off`. The behavior rule is in
 
 ## Browser captures
 
-A thread's kept Browser screenshots are `POST /api/browser/captures` (the
-retained list, newest first) and `POST /api/browser/captures/image` (one
-picture as an image data URL). Both are local-window only. The behavior rule is
-in [Workspace: tool lifecycles](workspace.md#tool-lifecycles); retention and
-authority are in [Architecture: persistence](../architecture.md#persistence).
+A thread's kept Browser screenshots use three local-window routes:
+`POST /api/browser/captures` (the retained list, newest first),
+`POST /api/browser/captures/image` (one picture as an image data URL), and
+`POST /api/browser/captures/take` (the Screenshot control). The behavior rule is
+in [Browser captures](browser-captures.md).
 
 ## GitHub issues
 

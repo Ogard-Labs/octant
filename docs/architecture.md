@@ -1293,49 +1293,17 @@ flowchart LR
   projection rebuilds from the journal; session, turn, and restart boundaries
   never clear it. Irreversible or authority-bearing actions on a tainted thread
   still require fresh confirmation after replay.
-- **Browser captures.** A screenshot the model asks for with the browser tool's
-  `screenshot` operation, and one the person takes with the Browser pane's own
-  screenshot control, is kept as a capture of the thread that owns the Browser.
-  The picture the model receives after any other action is not kept, and a
-  caller that does not say who asked keeps nothing. A capture is the same
-  picture the model received, so its size is bounded by the screenshot envelope
-  (about 40 KiB), not by a second limit. The bytes live in the managed
-  attachment store under `browser-captures/<thread id>/<capture id>`, with the
-  media type sniffed from the bytes rather than read from the data URL. The
-  journal records `browser.capture-kept@1` on one `browser-capture` aggregate
-  per thread (aggregate id = thread id): the capture id, page origin, URL,
-  title, SHA-256 content hash, size, media type, and time, never bytes or a data
-  URL. The envelope actor says who took it: the agent (provider instance and
-  thread) or the local person. A capture is kept only after the observation
-  that produced it was recorded, so the thread is already tainted by
-  `thread.external-content-ingested@1`; a capture adds no second taint
-  mechanism, only the origin it came from. Keeping is best effort: the
-  screenshot succeeds either way, and a capture that was not kept says why on
-  the observation (`too-large`, `not-an-image`, `no-page-origin`,
-  `unavailable`) and as `captureNotKept` in the tool result. A thread keeps its
-  newest 32 captures. Retention is a rule over the journal, not state beside
-  it: the newest 32 aggregate versions survive, listing reads exactly that
-  window, and deleting the bytes of an older capture is cleanup that can be
-  repeated, so `recover` at host start finishes any removal a crash cut short.
-  The capture is the thread's, not the Canvas library's: a confirmed thread
-  purge erases its events with the thread's other aggregates and removes its
-  `browser-captures/<thread id>` directory, and nothing about a capture reaches
-  a Canvas share, replica sync, or a diagnostics export, none of which read
-  that aggregate or directory. The thread export does not include captures yet.
-  The Browser captures strip reads them from `POST /api/browser/captures` (the
-  list, newest first) and `POST /api/browser/captures/image` (one picture as an
-  image data URL). Both answer only a local window that can open the thread:
-  a window of another thread is refused with 403, a capture id the thread does
-  not retain is 404, and a paired device is refused (the product route
-  classifier leaves both paths unlisted, so a remote caller is also stopped
-  before the route). A paired device's screenshot gesture keeps nothing.
-  Keeping writes only under Octant's data directory, never a Project, so it adds
-  no filesystem authority; Plan mode still refuses the agent's Browser
-  operations as stated under managed tool transport. The thread-less Project
-  browser keeps nothing. Rationale: a separate "capture dropped" event would
-  make the allowance a second source of truth that has to agree with the
-  bytes; deriving it from the aggregate version leaves one rule that a rebuild,
-  a recovery pass, and a listing all apply identically.
+- **Browser captures.** Only a screenshot the agent asks for with the browser
+  tool, or the person takes with the Browser pane's Screenshot control, is kept
+  with the thread that owns the Browser. The bytes live in the host's managed
+  attachment store and the journal holds only a reference, the page origin, URL,
+  title, content hash, and time. A thread keeps its newest 32 captures and they
+  are erased with the thread. Only a local window that can open the thread reads
+  them, never a paired device. They never reach a Canvas share, replica sync, or
+  a diagnostics export, and are not yet in the thread export. A capture adds no
+  Project filesystem authority and no second taint mechanism: the observation
+  that produced it already taints the thread. Detail is in
+  [Browser captures](design/browser-captures.md).
 - **Recovery.** Sequence-based reconnect replay for local and remote clients —
   a dropped stream catches up from the authoritative snapshot before it reopens,
   keeps retrying while the host is unreachable, and a remote session whose window
