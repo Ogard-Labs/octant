@@ -1,8 +1,10 @@
 name: CI
 
+# No `push` trigger for `main`: the branch rules admit a commit only through
+# the merge queue, and the queue's commit is the one that lands, so its
+# `merge_group` run has already checked that exact commit. A run on push
+# repeated every job for the same commit.
 on:
-  push:
-    branches: [main]
   pull_request:
   merge_group:
   workflow_dispatch:
