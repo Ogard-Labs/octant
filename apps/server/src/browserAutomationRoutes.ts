@@ -54,6 +54,16 @@ export interface BrowserAutomationRouteDependencies {
     Partial<Pick<BrowserAutomationService, "peekThread">>;
   /** The thread's kept screenshots; absent on a host that keeps none. */
   readonly captures?: Pick<BrowserCaptureService, "list" | "read">;
+  /**
+   * Whether this window can open the thread, archived or not. Reading what a
+   * thread kept asks this rather than live Browser authority, which an archived
+   * thread, an archived Project, and a switched-off provider all lose. Absent
+   * means nobody can read captures.
+   */
+  readonly windowCanOpenThread?: (
+    windowId: WindowId,
+    threadId: BrowserThreadId,
+  ) => Promise<boolean>;
   readonly authority: BrowserAuthorityResolver;
   readonly approvals?: {
     list(windowId: WindowId): ReadonlyArray<BrowserToolApproval>;
@@ -68,10 +78,29 @@ export interface BrowserAutomationRouteDependencies {
 export function createBrowserAutomationRouteHandler(
   dependencies: BrowserAutomationRouteDependencies,
 ): (request: Request) => Promise<Response | undefined> {
+  const notThisWindowsThread = (origin: string | null): Response =>
+    failure(
+      { category: "unauthorized", message: "Browser thread is not owned by this window." },
+      403,
+      origin,
+    );
   // A capture is a picture of a page the person browsed, so only a local
   // window that can open the thread reads one: not a paired device, and not a
-  // window of another thread.
-  const captureRefusal = (
+  // window of another thread. The thread need not be live: captures are its
+  // history, and an archived thread opened from the archive still shows them.
+  const captureReadRefusal = async (
+    windowId: WindowId,
+    callerKind: "local-window" | "remote-device",
+    threadId: BrowserThreadId,
+    origin: string | null,
+  ): Promise<Response | undefined> =>
+    callerKind === "local-window" &&
+    (await dependencies.windowCanOpenThread?.(windowId, threadId)) === true
+      ? undefined
+      : notThisWindowsThread(origin);
+  // Taking a capture drives the Browser, so it needs the thread's live Browser
+  // authority, which reading does not.
+  const captureTakeRefusal = (
     windowId: WindowId,
     callerKind: "local-window" | "remote-device",
     threadId: BrowserThreadId,
@@ -80,11 +109,7 @@ export function createBrowserAutomationRouteHandler(
     callerKind === "local-window" &&
     BROWSER_MODES.some((mode) => dependencies.authority.canAccessWindow(windowId, threadId, mode))
       ? undefined
-      : failure(
-          { category: "unauthorized", message: "Browser thread is not owned by this window." },
-          403,
-          origin,
-        );
+      : notThisWindowsThread(origin);
 
   return async (request) => {
     const url = new URL(request.url);
@@ -253,7 +278,7 @@ export function createBrowserAutomationRouteHandler(
       }
       if (url.pathname === "/api/browser/captures") {
         const input = decodeBrowserCapturesCommand(decoded.value);
-        const refusal = captureRefusal(windowId, callerKind, input.threadId, origin);
+        const refusal = await captureReadRefusal(windowId, callerKind, input.threadId, origin);
         if (refusal !== undefined) return refusal;
         return success(
           decodeBrowserCapturesResponse({
@@ -266,7 +291,7 @@ export function createBrowserAutomationRouteHandler(
         // The person's Screenshot control. The ordinary action route keeps
         // nothing, and a model cannot reach this path through tool input.
         const input = decodeBrowserCaptureTakeCommand(decoded.value);
-        const refusal = captureRefusal(windowId, callerKind, input.threadId, origin);
+        const refusal = captureTakeRefusal(windowId, callerKind, input.threadId, origin);
         if (refusal !== undefined) return refusal;
         if (input.request.kind !== "screenshot") {
           return failure(
@@ -297,7 +322,7 @@ export function createBrowserAutomationRouteHandler(
       }
       if (url.pathname === "/api/browser/captures/image") {
         const input = decodeBrowserCaptureImageCommand(decoded.value);
-        const refusal = captureRefusal(windowId, callerKind, input.threadId, origin);
+        const refusal = await captureReadRefusal(windowId, callerKind, input.threadId, origin);
         if (refusal !== undefined) return refusal;
         const found = await dependencies.captures?.read(input.threadId, input.captureId);
         if (found === undefined) {

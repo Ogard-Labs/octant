@@ -693,6 +693,28 @@ describe("BrowserAutomationService", () => {
       expect(survived.failure).toBeUndefined();
       expect(survived.observation?.capture).toEqual({ status: "not-kept", reason: "unavailable" });
     });
+
+    it("says no picture was kept when the runtime withholds the screenshot", async () => {
+      const captures = { keep: keep() };
+      const { runtime, service } = harness({ captures });
+      await service.create({ windowId, threadId: threadOne, action: action(), policy });
+      // The runtime leaves the picture out on its own judgement, for example
+      // when a frame on the page holds a credential field.
+      vi.mocked(runtime.act).mockResolvedValueOnce({
+        url: "https://example.com/sign-in",
+        title: "Sign in",
+        contentHash: "withheld",
+      });
+      const completed = await service.act({
+        windowId,
+        request: request({ kind: "screenshot" }),
+        capturedBy: "person",
+      });
+
+      expect(completed.failure).toBeUndefined();
+      expect(captures.keep).not.toHaveBeenCalled();
+      expect(completed.observation?.capture).toEqual({ status: "not-kept", reason: "no-picture" });
+    });
   });
 
   it("records correlated evidence and marks process death stale", async () => {

@@ -544,7 +544,11 @@ export class BrowserAutomationService {
   ): Promise<BrowserCaptureOutcome | undefined> {
     const takenBy = browserCaptureTaker(input.request.kind, input.capturedBy);
     if (takenBy === undefined || this.#captures === undefined) return undefined;
-    if (observed.screenshotDataUrl === undefined) return undefined;
+    // Someone asked for a capture and the runtime withheld the picture. Saying
+    // nothing here left the pane looking as if the capture had been kept.
+    if (observed.screenshotDataUrl === undefined) {
+      return { status: "not-kept", reason: "no-picture" };
+    }
     try {
       return await this.#captures.keep({
         threadId: owned.threadId,

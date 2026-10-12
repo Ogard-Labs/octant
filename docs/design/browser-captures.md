@@ -45,7 +45,9 @@ the Browser pane
 
 - Keeping is best effort. The screenshot succeeds either way.
 - A capture that was not kept says why on the observation (`too-large`,
-  `not-an-image`, `no-page-origin`, `unavailable`). The agent sees
+  `not-an-image`, `no-page-origin`, `no-picture`, `unavailable`). `no-picture`
+  is the runtime withholding the screenshot itself, as it does when a frame on
+  the page holds a credential field. The agent sees
   `captureNotKept` in the tool result, and the pane says "This screenshot could
   not be kept" with the reason in words.
 
@@ -71,11 +73,16 @@ the Browser pane
 
 - `POST /api/browser/captures` lists the retained captures, newest first.
   `POST /api/browser/captures/image` returns one as an image data URL.
-- Both, and the take route, answer only a local window that can open the thread
-  (403 otherwise). A capture id the thread does not retain is 404. The product
-  route classifier leaves all three unlisted, so a paired device is stopped
-  before the route too.
-- The take route also requires the context to belong to the named thread.
+- Both answer only a local window that can open the thread (403 otherwise),
+  under the same rule that lets a window read the thread's generated images.
+  The thread need not be live: an archived thread, a thread in an archived
+  Project, and a thread whose provider is switched off still show what they
+  kept. A capture id the thread does not retain is 404.
+- The take route drives the Browser, so it needs the thread's live Browser
+  authority as well, and the context must belong to the named thread. An
+  archived thread shows its captures and takes no new one.
+- The product route classifier leaves all three unlisted, so a paired device is
+  stopped before the route too.
 
 ## Strip
 

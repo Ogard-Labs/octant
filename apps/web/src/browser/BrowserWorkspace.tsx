@@ -898,6 +898,7 @@ function captureNotKeptNotice(reason: BrowserCaptureNotKeptReason): string {
     "too-large": "the picture is too large",
     "not-an-image": "the host did not recognise it as an image",
     "no-page-origin": "the page has no web address",
+    "no-picture": "the Browser gave no picture of this page",
     unavailable: "the host could not store it",
   };
   return `This screenshot could not be kept: ${why[reason]}.`;

@@ -160,6 +160,9 @@ export const BrowserCaptureNotKeptReason = Schema.Literal(
   "too-large",
   "not-an-image",
   "no-page-origin",
+  // The runtime produced no picture at all, as it does on its own judgement
+  // when a frame on the page holds a credential field.
+  "no-picture",
   "unavailable",
 );
 export type BrowserCaptureNotKeptReason = typeof BrowserCaptureNotKeptReason.Type;

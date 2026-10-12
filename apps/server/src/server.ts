@@ -8004,9 +8004,54 @@ export function startOctantServer(
       windowAuthorityStore,
       maxJsonBodySize: MAX_JSON_REQUEST_BODY_SIZE,
     });
+    // Which threads a window can open, archived ones included. What a thread
+    // kept (generated images, Browser captures) is read under this rather than
+    // under a live tool authority, which an archived thread no longer has.
+    const windowCanOpenThread = async (
+      windowId: WindowId,
+      threadKind: "chat-thread" | "work-thread" | "code-thread",
+      threadId: string,
+    ): Promise<boolean> => {
+      try {
+        if (threadKind === "chat-thread") {
+          const view = chatService.read(decodeChatThreadId(threadId));
+          const workspace = persistence.readWindowWorkspace(windowId)?.workspace;
+          return chatImageScopeAllowedForWindow({
+            chatContext: workspace?.contextByMode.chat,
+            thread: view?.thread,
+          });
+        }
+        if (threadKind === "work-thread") {
+          const bootstrap = await workThreadService.bootstrap(windowId);
+          return bootstrap.threads.some((thread) => String(thread.id) === threadId);
+        }
+        const view = await routeCodeService.read(windowId, decodeCodeThreadId(threadId));
+        return view !== undefined;
+      } catch {
+        return false;
+      }
+    };
     const browserAutomationRoutes = createBrowserAutomationRouteHandler({
       service: browserAutomationService,
       captures: browserCaptures,
+      windowCanOpenThread: async (windowId, threadId) => {
+        const id = String(threadId);
+        // A capture names only its thread. The projections say which kind of
+        // thread it is, so one check runs instead of all three on every read.
+        let threadKind: "chat-thread" | "work-thread" | "code-thread" | undefined;
+        try {
+          if (persistence.readChatThread(decodeChatThreadId(id)) !== undefined) {
+            threadKind = "chat-thread";
+          } else if (persistence.readCodeThread(decodeCodeThreadId(id)) !== undefined) {
+            threadKind = "code-thread";
+          } else if (workThreadProjection.read(decodeWorkThreadId(id)) !== undefined) {
+            threadKind = "work-thread";
+          }
+        } catch {
+          return false;
+        }
+        return threadKind !== undefined && (await windowCanOpenThread(windowId, threadKind, id));
+      },
       projectBrowsers: liveProjectBrowsers,
       authority: browserAuthority,
       approvals: requireBrowserToolApprovalService(),
@@ -8089,24 +8134,7 @@ export function startOctantServer(
         // The library is host-wide: window capability already proved the
         // caller is a registered window, and the scope id is fixed.
         if (threadKind === "image-library") return threadId === String(IMAGE_LIBRARY_SCOPE_ID);
-        try {
-          if (threadKind === "chat-thread") {
-            const view = chatService.read(decodeChatThreadId(threadId));
-            const workspace = persistence.readWindowWorkspace(windowId)?.workspace;
-            return chatImageScopeAllowedForWindow({
-              chatContext: workspace?.contextByMode.chat,
-              thread: view?.thread,
-            });
-          }
-          if (threadKind === "work-thread") {
-            const bootstrap = await workThreadService.bootstrap(windowId);
-            return bootstrap.threads.some((thread) => String(thread.id) === threadId);
-          }
-          const view = await routeCodeService.read(windowId, decodeCodeThreadId(threadId));
-          return view !== undefined;
-        } catch {
-          return false;
-        }
+        return windowCanOpenThread(windowId, threadKind, threadId);
       },
       saveToProject: async (input) => {
         if (input.threadKind === "chat-thread") {

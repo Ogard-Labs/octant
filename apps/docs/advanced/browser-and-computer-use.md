@@ -57,8 +57,12 @@ address and time. The strip is absent until the thread has a capture.
   a page is already marked as having read outside content, and keeping a
   picture of it changes nothing about that.
 - If a picture cannot be kept (too large, not a recognised image, a page with
-  no web address, or a storage problem), the screenshot still works. The agent
-  is told the capture was not kept, and nothing is added to the strip.
+  no web address, no picture from the Browser, or a storage problem), the
+  screenshot still works. The agent is told the capture was not kept, the
+  Browser pane says so when you pressed Screenshot, and nothing is added to the
+  strip. The Browser gives no picture of a page it treats as sensitive, for
+  example one with a password field.
+- An archived thread still shows the captures it kept.
 
 Links inside a Work or Code conversation open in the app: following one
 creates a dedicated Browser context confined to that link's origin and opens
