@@ -334,7 +334,11 @@ chrome. It holds a skeleton at the page's aspect ratio until the
 first frame and never prints status prose. It reads the same host snapshot the
 Browser pane reads, asks for a fresh picture only while it is on screen, pauses
 with the window, and backs off while the page does not change. Computer Use keeps
-its separate card. The iOS Simulator and Android emulator are separate device destinations. An
+its separate card. **Browser captures.** The Browser pane toolbar has a
+Screenshot button (a camera icon beside Open in default browser) that keeps the
+page's picture with the thread, and a thread that kept screenshots shows a
+_Browser captures_ strip in its transcript beside the generated images. The
+rules are in [Browser captures](browser-captures.md). The iOS Simulator and Android emulator are separate device destinations. An
 agent's device open raises the relevant in-app pane once per request. Both use
 one device-first pane that adapts to its container's width: a toolbar (device
 switcher, OS and state in words, Back on Android, Home, Screenshot, Lock when
