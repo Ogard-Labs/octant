@@ -143,7 +143,7 @@ const canvasDefinitionSchema = {
       type: "string",
       enum: ["inline", "sidebar"],
       description:
-        "For create and revise: inline draws the Canvas inside the conversation (any number of reading blocks; no diagram board, plan, mockup, or design); sidebar, the default, shows a card that opens it beside the thread. Revise keeps the current choice when omitted.",
+        "For create and revise: inline draws the Canvas inside the conversation (any reading blocks, or one document-size design without script; no diagram board, plan, mockup, or other design); sidebar, the default, shows a card that opens it beside the thread. Revise keeps the current choice when omitted.",
     },
   },
   required: ["operation"],
