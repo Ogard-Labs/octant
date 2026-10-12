@@ -535,6 +535,48 @@ describe("provider registry contracts", () => {
         configuration: { ...claude.configuration, authentication: "api-key" },
       }),
     ).toMatchObject({ kind: "change-claude-configuration" });
+    const isolated = {
+      ...claude,
+      configuration: {
+        ...claude.configuration,
+        configDirectory: "/Users/example/.claude-accounts/00000000-0000-4000-8000-000000000001",
+        accent: "teal" as const,
+      },
+    };
+    expect(decodeProviderInstance(isolated)).toEqual(isolated);
+    expect(() =>
+      decodeProviderInstance({
+        ...claude,
+        configuration: {
+          ...claude.configuration,
+          configDirectory: "/Users/example/.claude/.credentials.json",
+        },
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeProviderInstance({
+        ...claude,
+        configuration: {
+          ...claude.configuration,
+          configDirectory: "/Users/example/.claude/.credentials.json////",
+        },
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeProviderInstance({
+        ...claude,
+        configuration: {
+          ...claude.configuration,
+          configDirectory: "C:\\Users\\example\\.claude-accounts\\work",
+        },
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeProviderInstance({
+        ...claude,
+        configuration: { ...claude.configuration, accent: "magenta" },
+      }),
+    ).toThrow();
 
     for (const excessField of [
       "oauthToken",

@@ -12,6 +12,7 @@ import type {
 import { ProviderRuntimeIntegrationFacts } from "./ProviderRuntimeIntegrationFacts";
 import {
   canLocateRuntimeBinary,
+  claudeAccountUsesAssignedDirectory,
   isImageProfileDriverKind,
   supportsProviderCliUpdate,
 } from "@octant/domain";
@@ -107,7 +108,6 @@ export type ProviderSettingsListProps = Pick<
   | "onProviderCredentialStatus"
   | "onClearProviderCredential"
   | "onProviderOAuth"
-  | "onClaudeHelpers"
   | "onBeginProviderAuthentication"
   | "onOpenExternalUrl"
   | "onCompleteProviderAuthentication"
@@ -241,6 +241,7 @@ export function ProviderSettingsList(props: ProviderSettingsListProps) {
         count={ordered.length}
         credentialManagementAvailable={props.credentialManagementAvailable}
         index={index}
+        extraClaudeAccount={claudeAccountUsesAssignedDirectory(ordered, instance)}
         instance={instance}
         key={instance.id}
         {...(props.discoverySnapshot === undefined
@@ -275,7 +276,6 @@ export function ProviderSettingsList(props: ProviderSettingsListProps) {
         onChangeIdeogramImageConfiguration={props.onChangeIdeogramImageConfiguration}
         onClearProviderCredential={props.onClearProviderCredential}
         {...(props.onProviderOAuth === undefined ? {} : { onProviderOAuth: props.onProviderOAuth })}
-        {...(props.onClaudeHelpers === undefined ? {} : { onClaudeHelpers: props.onClaudeHelpers })}
         onBeginProviderAuthentication={props.onBeginProviderAuthentication}
         onOpenExternalUrl={props.onOpenExternalUrl}
         onCompleteProviderAuthentication={props.onCompleteProviderAuthentication}
@@ -559,6 +559,7 @@ function AgentEligibleModelsControls(props: {
 }
 
 interface ProviderRowProps {
+  readonly extraClaudeAccount: boolean;
   readonly instance: ProviderInstance;
   readonly observed?: ProviderObservedState;
   readonly discoverySnapshot?: DiscoverySnapshot;
@@ -598,7 +599,6 @@ interface ProviderRowProps {
   readonly onProviderCredentialStatus: ProviderSettingsViewProps["onProviderCredentialStatus"];
   readonly onClearProviderCredential: ProviderSettingsViewProps["onClearProviderCredential"];
   readonly onProviderOAuth?: ProviderSettingsViewProps["onProviderOAuth"];
-  readonly onClaudeHelpers?: ProviderSettingsViewProps["onClaudeHelpers"];
   readonly onBeginProviderAuthentication: ProviderSettingsViewProps["onBeginProviderAuthentication"];
   readonly onOpenExternalUrl?: ProviderSettingsViewProps["onOpenExternalUrl"];
   readonly onCompleteProviderAuthentication: ProviderSettingsViewProps["onCompleteProviderAuthentication"];
@@ -1112,12 +1112,10 @@ function ProviderRow(props: ProviderRowProps) {
                   credential={credential}
                   credentialManagementAvailable={props.credentialManagementAvailable}
                   disabled={disabled}
+                  extraAccount={props.extraClaudeAccount}
                   instance={props.instance}
                   key={`claude:${props.instance.version}`}
                   onChange={props.onChangeClaudeConfiguration}
-                  {...(props.onClaudeHelpers === undefined
-                    ? {}
-                    : { onClaudeHelpers: props.onClaudeHelpers })}
                 />
               ) : isVibe ? (
                 <VibeConfigurationForm

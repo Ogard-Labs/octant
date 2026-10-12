@@ -11,6 +11,7 @@ import type {
   ProviderFailure,
   ProviderToolDefinition,
 } from "@octant/contracts";
+import { withClaudeAccountDirectory } from "./claudeAccountDirectory";
 import { createManagedMcpTools, type ManagedToolAnswer } from "./managedMcpTools";
 import { Effect, Stream, type Scope } from "effect";
 
@@ -373,6 +374,7 @@ export interface ClaudeAgentSdkPort {
   readonly findSession: (input: {
     readonly sessionId: string;
     readonly projectRoot: string;
+    readonly configDirectory?: string;
   }) => Effect.Effect<ClaudeSessionMetadata | undefined, ProviderFailure>;
 }
 
@@ -480,7 +482,10 @@ export interface ClaudeAgentSdkQueryLike extends AsyncIterable<unknown> {
 
 export interface ClaudeAgentSdkBridge {
   readonly query: (input: ClaudeAgentSdkQueryInvocation) => ClaudeAgentSdkQueryLike;
-  readonly listSessions: (options: { readonly dir: string }) => Promise<unknown>;
+  readonly listSessions: (options: {
+    readonly dir: string;
+    readonly includeWorktrees: false;
+  }) => Promise<unknown>;
 }
 
 export interface ClaudeAgentSdkPortOptions {
@@ -1112,11 +1117,17 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
       });
       return Effect.acquireRelease(acquire, (query, _exit) => query.close());
     },
-    findSession: ({ sessionId, projectRoot }) =>
+    findSession: ({ sessionId, projectRoot, configDirectory }) =>
       Effect.tryPromise({
         try: async () => {
+          // Only a session whose own root is this Project counts, so the
+          // other worktrees are not listed. Listing them runs Git first, and
+          // the account directory stays overlaid on process.env for that
+          // long: measured about 90 ms with worktrees and 8 ms without.
           const sessions = decodeSessions(
-            await sdk.listSessions({ dir: projectRoot }),
+            await withClaudeAccountDirectory(configDirectory, () =>
+              sdk.listSessions({ dir: projectRoot, includeWorktrees: false }),
+            ),
             projectRoot,
           );
           return sessions.find((session) => session.sessionId === sessionId);

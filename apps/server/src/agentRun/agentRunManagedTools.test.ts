@@ -438,7 +438,7 @@ describe("agents managed tools", () => {
   it("tells the parent what to do about a failed child on wait and status, bounded and without private paths", async () => {
     const failed = queuedRun({
       lifecycleStatus: "failed",
-      recoveryReason: `unauthenticated: Connect Claude for helpers in Settings › Claude Code. Config at /Users/someone/.claude token=abc123 ${"x".repeat(1_000)}`,
+      recoveryReason: `unauthenticated: Claude authentication is required. Config at /Users/someone/.claude token=abc123 ${"x".repeat(1_000)}`,
     });
     const { set } = tool({
       runs: [failed],
@@ -474,7 +474,7 @@ describe("agents managed tools", () => {
 
     expect(waited.result).toMatchObject({ status: "failed", runId: ids.run });
     for (const reason of [waitedReason, listedReason]) {
-      expect(reason.startsWith("Connect Claude for helpers in Settings › Claude Code.")).toBe(true);
+      expect(reason.startsWith("Claude authentication is required.")).toBe(true);
       expect(reason).not.toContain("unauthenticated");
       expect(reason).not.toContain("/Users/someone");
       expect(reason).not.toContain("abc123");

@@ -43,14 +43,11 @@ Connection Check probes readiness without sending a prompt.
 
 Where a provider runtime supports OAuth or subscription login, Octant
 delegates that login to the provider's own CLI or SDK. Octant never
-stores, refreshes, or journals those tokens, with one exception you opt
-into: if you choose **Connect Claude for helpers**, Octant keeps the
-long-lived token Claude's own `claude setup-token` prints in its credential
-store and hands it only to the confined Claude runtime that signs in with it,
-which presents it to Anthropic. A direct endpoint's **Sign in** (today
+stores, refreshes, or journals those tokens. Octant never reads, stores, or
+injects a provider CLI's credentials. A direct endpoint's **Sign in** (today
 OpenRouter) is the other case: Octant runs it and keeps the issued API key,
 which goes to that endpoint. See the
-[privacy notice](/advanced/privacy-notice#claude-for-helpers-only-if-you-connect-it).
+[privacy notice](/advanced/privacy-notice#claude-subscription-accounts).
 Auto-registration of a detected local runtime never enables the provider,
 never stores credentials, and never logs in.
 

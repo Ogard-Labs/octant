@@ -34,7 +34,7 @@ import type {
   ProviderModelId,
   ProviderObservedState,
 } from "@octant/contracts";
-import { isImageProfileDriverKind } from "@octant/domain";
+import { implicitClaudeAccountOwnerId, isImageProfileDriverKind } from "@octant/domain";
 import type { ReactNode } from "react";
 import { SettingsSection } from "../settings/primitives";
 import { OctantButton } from "../ui/base/OctantButton";
@@ -212,6 +212,7 @@ export interface ProviderSettingsViewProps {
     instanceId: ProviderInstanceId,
     configuration: ClaudeProviderConfiguration,
     credential: TransientProviderCredential,
+    options?: { readonly reassignAccountDirectory?: boolean },
   ) => Promise<boolean>;
   readonly onChangeMistralVibeConfiguration: (
     instanceId: ProviderInstanceId,
@@ -288,8 +289,6 @@ export interface ProviderSettingsViewProps {
     instanceId: ProviderInstanceId,
   ) => Promise<ProviderCredentialStatus>;
   readonly onClearProviderCredential: (instanceId: ProviderInstanceId) => Promise<boolean>;
-  /** "Connect Claude for helpers" on a Claude Code subscription instance. */
-  readonly onClaudeHelpers?: import("./ClaudeHelperSignIn").RunClaudeHelperCommand;
   readonly onProviderOAuth?: (
     command: import("./ProviderOAuthSignIn").ProviderOAuthCommand,
   ) => Promise<import("./ProviderOAuthSignIn").ProviderOAuthCommandResult | undefined>;
@@ -408,6 +407,7 @@ export function ProviderSettingsView(props: ProviderSettingsViewProps) {
           <ProviderCreateForm
             allowedProviderTypes={GENERAL_PROVIDER_TYPES}
             busy={props.busy}
+            claudeHostProfileTaken={implicitClaudeAccountOwnerId(props.instances) !== undefined}
             heading="Agent runtime"
             hint="Installed runtimes are detected automatically. Use this for an unusual executable location or a runtime the scan missed. Model endpoints such as OpenAI-compatible APIs are added under Octant Harness › Model endpoints."
             credentialManagementAvailable={props.credentialManagementAvailable}
@@ -481,7 +481,6 @@ export function ProviderSettingsView(props: ProviderSettingsViewProps) {
         onChangePiConfiguration={props.onChangePiConfiguration}
         onClearProviderCredential={props.onClearProviderCredential}
         {...(props.onProviderOAuth === undefined ? {} : { onProviderOAuth: props.onProviderOAuth })}
-        {...(props.onClaudeHelpers === undefined ? {} : { onClaudeHelpers: props.onClaudeHelpers })}
         onCompleteProviderAuthentication={props.onCompleteProviderAuthentication}
         {...(props.onUpdateProviderCli === undefined
           ? {}

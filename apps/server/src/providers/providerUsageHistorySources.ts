@@ -17,6 +17,7 @@ export { createCodexLocalUsageHistorySource } from "./codexUsageHistory";
 export function createLocalUsageHistorySourceForDriver(input: {
   readonly driverKind: ProviderDriverKind;
   readonly home: string;
+  readonly claudeConfigDirectory?: string;
   readonly checkpointStore?: LocalUsageHistoryCheckpointStore;
 }): ProviderLocalUsageHistorySource | undefined {
   if (input.driverKind === "codex") {
@@ -30,7 +31,7 @@ export function createLocalUsageHistorySourceForDriver(input: {
   }
   if (input.driverKind === "claude") {
     return createClaudeLocalUsageHistorySource({
-      root: join(input.home, ".claude", "projects"),
+      root: join(input.claudeConfigDirectory ?? join(input.home, ".claude"), "projects"),
       ...(input.checkpointStore === undefined
         ? {}
         : { checkpointStore: input.checkpointStore, checkpointRevision: LOCAL_PRICING_REVISION }),

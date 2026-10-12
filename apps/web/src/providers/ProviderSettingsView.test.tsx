@@ -570,6 +570,86 @@ describe("ProviderSettingsView", () => {
     expect(document.body.textContent).not.toContain("private-value");
   });
 
+  it("creates a Claude account with a name and accent and no free-text directory field", async () => {
+    const user = userEvent.setup();
+    const props = fixture({ instance: claudeProvider() });
+    renderExpanded(<ProviderSettingsView {...props} />);
+
+    await chooseSelectFieldOption(user, screen.getByLabelText("Provider type"), "Claude Agent SDK");
+    const create = screen.getByRole("form", { name: "Add Claude provider" });
+    await user.type(within(create).getByLabelText("Provider name"), "Work Claude");
+    await user.type(within(create).getByLabelText("Claude binary"), "/opt/homebrew/bin/claude");
+    const directory = within(create).getByLabelText("Account directory");
+    expect(directory).toHaveAttribute("readonly");
+    expect(directory).toHaveValue("~/.claude-accounts/<assigned on create>");
+    expect(within(create).queryByLabelText("Claude config directory")).toBeNull();
+    await user.click(within(create).getByRole("radio", { name: "Teal" }));
+    expect(within(create).queryByLabelText("Account sign-in command")).toBeNull();
+    await user.click(within(create).getByRole("button", { name: "Add Claude" }));
+    expect(props.onCreateClaude).toHaveBeenLastCalledWith(
+      "Work Claude",
+      {
+        kind: "claude-agent-sdk",
+        binaryPath: "/opt/homebrew/bin/claude",
+        authentication: "subscription",
+        accent: "teal",
+      },
+      expect.objectContaining({ value: "" }),
+    );
+  });
+
+  it("clears the Claude create fields after a successful add so the next account starts blank", async () => {
+    const user = userEvent.setup();
+    const props = fixture({ instance: claudeProvider() });
+    renderExpanded(<ProviderSettingsView {...props} />);
+
+    await chooseSelectFieldOption(user, screen.getByLabelText("Provider type"), "Claude Agent SDK");
+    const create = screen.getByRole("form", { name: "Add Claude provider" });
+    await user.type(within(create).getByLabelText("Provider name"), "Work Claude");
+    await user.type(within(create).getByLabelText("Claude binary"), "/opt/homebrew/bin/claude");
+    await user.click(within(create).getByRole("radio", { name: "Teal" }));
+    await user.click(within(create).getByRole("button", { name: "Add Claude" }));
+    await waitFor(() => {
+      expect(within(create).getByLabelText("Claude binary")).toHaveValue("");
+    });
+    expect(within(create).getByLabelText("Account directory")).toHaveValue(
+      "~/.claude-accounts/<assigned on create>",
+    );
+    expect(within(create).queryByLabelText("Account sign-in command")).toBeNull();
+  });
+
+  it("shows a read-only account directory and no free-text directory when adding another Claude account", async () => {
+    const user = userEvent.setup();
+    const props = fixture({ instance: claudeProvider() });
+    renderExpanded(<ProviderSettingsView {...props} />);
+
+    await chooseSelectFieldOption(user, screen.getByLabelText("Provider type"), "Claude Agent SDK");
+    const create = screen.getByRole("form", { name: "Add Claude provider" });
+    const directory = within(create).getByLabelText("Account directory");
+    expect(directory).toHaveAttribute("readonly");
+    expect(directory).toHaveValue("~/.claude-accounts/<assigned on create>");
+    expect(within(create).queryByLabelText("Claude config directory")).toBeNull();
+    expect(within(create).queryByLabelText("Account sign-in command")).toBeNull();
+    await user.type(within(create).getByLabelText("Claude binary"), "/usr/local/bin/claude");
+    expect(within(create).queryByLabelText("Account sign-in command")).toBeNull();
+  });
+
+  it("hides the Claude sign-in command until the binary path is absolute", async () => {
+    const user = userEvent.setup();
+    renderExpanded(<ProviderSettingsView {...fixture()} />);
+
+    await chooseSelectFieldOption(user, screen.getByLabelText("Provider type"), "Claude Agent SDK");
+    const create = screen.getByRole("form", { name: "Add Claude provider" });
+    expect(within(create).queryByLabelText("Account sign-in command")).toBeNull();
+    await user.type(within(create).getByLabelText("Claude binary"), "claude");
+    expect(within(create).queryByLabelText("Account sign-in command")).toBeNull();
+    await user.clear(within(create).getByLabelText("Claude binary"));
+    await user.type(within(create).getByLabelText("Claude binary"), "/opt/homebrew/bin/claude");
+    expect(within(create).getByLabelText("Account sign-in command")).toHaveValue(
+      "'/opt/homebrew/bin/claude' auth login",
+    );
+  });
+
   it("creates Mistral Vibe with API-key authentication only", async () => {
     const user = userEvent.setup();
     const props = fixture({ instance: vibeProvider() });
@@ -1114,6 +1194,11 @@ describe("ProviderSettingsView", () => {
     expect(within(card).getByLabelText("Claude authentication for Claude local")).toHaveTextContent(
       "Claude subscription",
     );
+    expect(within(card).getByLabelText("Account directory")).toHaveAttribute("readonly");
+    expect(within(card).getByLabelText("Account directory")).toHaveValue("~/.claude");
+    expect(within(card).getByLabelText("Account sign-in command")).toHaveValue(
+      "'/opt/homebrew/bin/claude' auth login",
+    );
     expect(
       within(card).queryByLabelText("Anthropic API key for Claude local"),
     ).not.toBeInTheDocument();
@@ -1135,6 +1220,95 @@ describe("ProviderSettingsView", () => {
     expect(within(card).getByText(/replace.*Anthropic API key/i)).toHaveTextContent(/write-only/i);
     expect(within(card).getByText(/replace.*Anthropic API key/i)).toHaveTextContent(/Keychain/i);
     expect(card.textContent).not.toMatch(/official Claude Code|Claude subscription login/i);
+  });
+
+  it("updates the Claude sign-in command while the binary path is being edited", async () => {
+    const user = userEvent.setup();
+    const props = fixture({
+      instance: decodeProviderInstance({
+        ...claudeProvider(),
+        displayName: "Claude work",
+        configuration: {
+          kind: "claude-agent-sdk",
+          binaryPath: "/opt/homebrew/bin/claude",
+          authentication: "subscription",
+          configDirectory: "/Users/example/.claude-accounts/work",
+        },
+      }),
+    });
+    renderExpanded(<ProviderSettingsView {...props} />);
+    const card = screen.getByRole("article", { name: "Claude work" });
+    const binary = within(card).getByLabelText("Claude binary for Claude work");
+    await user.clear(binary);
+    await user.type(binary, "/usr/local/bin/claude");
+    expect(within(card).getByLabelText("Account sign-in command")).toHaveValue(
+      "CLAUDE_CONFIG_DIR='/Users/example/.claude-accounts/work' CLAUDE_SECURESTORAGE_CONFIG_DIR='/Users/example/.claude-accounts/work' '/usr/local/bin/claude' auth login",
+    );
+  });
+
+  it("shows a leftover custom directory as read-only and never offers a free-text directory field", async () => {
+    const props = fixture({
+      instance: decodeProviderInstance({
+        ...claudeProvider(),
+        displayName: "Claude work",
+        configuration: {
+          kind: "claude-agent-sdk",
+          binaryPath: "/opt/homebrew/bin/claude",
+          authentication: "subscription",
+          configDirectory: "/Users/example/.claude-accounts/work",
+          accent: "teal",
+        },
+      }),
+    });
+    renderExpanded(<ProviderSettingsView {...props} />);
+    const card = screen.getByRole("article", { name: "Claude work" });
+    const directory = within(card).getByLabelText("Account directory");
+    expect(directory).toHaveAttribute("readonly");
+    expect(directory).toHaveValue("/Users/example/.claude-accounts/work");
+    expect(within(card).queryByLabelText("Claude config directory")).toBeNull();
+    expect(within(card).getByLabelText("Account sign-in command")).toHaveValue(
+      "CLAUDE_CONFIG_DIR='/Users/example/.claude-accounts/work' CLAUDE_SECURESTORAGE_CONFIG_DIR='/Users/example/.claude-accounts/work' '/opt/homebrew/bin/claude' auth login",
+    );
+    expect(within(card).queryByRole("button", { name: /Connect Claude for helpers/ })).toBeNull();
+    expect(
+      within(card).getByRole("button", { name: "Use Octant's assigned directory" }),
+    ).toBeVisible();
+  });
+
+  it("shows a read-only default account directory and the unmodified sign-in command", async () => {
+    const props = fixture({ instance: claudeProvider() });
+    renderExpanded(<ProviderSettingsView {...props} />);
+    const card = screen.getByRole("article", { name: "Claude local" });
+    const directory = within(card).getByLabelText("Account directory");
+    expect(directory).toHaveAttribute("readonly");
+    expect(directory).toHaveValue("~/.claude");
+    expect(within(card).queryByLabelText("Claude config directory")).toBeNull();
+    expect(within(card).getByLabelText("Account sign-in command")).toHaveValue(
+      "'/opt/homebrew/bin/claude' auth login",
+    );
+    expect(within(card).queryByRole("button", { name: /Connect Claude for helpers/ })).toBeNull();
+  });
+
+  it("offers no sign-in command for an extra account that has no stored directory", () => {
+    const owner = claudeProvider();
+    const extra = decodeProviderInstance({
+      ...owner,
+      id: "80000000-0000-4000-8000-0000000000aa",
+      displayName: "Claude work",
+      createdAt: "2030-01-01T00:00:00.000Z",
+      updatedAt: "2030-01-01T00:00:00.000Z",
+    });
+    renderExpanded(
+      <ProviderSettingsView {...fixture({ instance: owner })} instances={[owner, extra]} />,
+    );
+    const card = screen.getByRole("article", { name: "Claude work" });
+    // Claude keys a login on the exact directory string, so a path Octant only
+    // displays must never be offered as a command to run.
+    expect(within(card).getByLabelText("Account directory")).toHaveValue(
+      `~/.claude-accounts/${extra.id}`,
+    );
+    expect(within(card).queryByLabelText("Account sign-in command")).toBeNull();
+    expect(within(card).queryByLabelText("Account status command")).toBeNull();
   });
 
   it("edits Claude authentication with a write-only key and constrains remote key management", async () => {

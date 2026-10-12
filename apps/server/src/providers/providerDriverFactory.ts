@@ -1,13 +1,19 @@
+import { homedir } from "node:os";
 import {
   type PermissionPersistence,
   type ProviderFailure,
   type ProviderInstance,
 } from "@octant/contracts";
-import { isImageProfileDriverKind } from "@octant/domain";
+import { effectiveClaudeAccountConfigDirectory, isImageProfileDriverKind } from "@octant/domain";
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
+import { lastClaudeHostEnvironmentSnapshot } from "./claudeAccountDirectory";
+import {
+  claudeAccountNeedsOwnConfigDirectory,
+  claudeAccountOverlapsPeerLaunchDirectory,
+  hostClaudeDirectoryOverlayIsRelative,
+} from "./providerService";
 import type { ClaudeAgentSdkPort } from "./claudeAgentSdkPort";
 import { makeClaudeDriver, type ClaudeResumeIdentityPort } from "./claudeDriver";
-import type { ClaudeHelperSignInPort } from "./claudeHelperSignIn";
 import type { ClaudeProcessPort } from "./claudeProcess";
 import { makeCodexDriver } from "./codexDriver";
 import type { CodexProcessPort } from "./codexProcess";
@@ -42,20 +48,23 @@ export interface ProviderDriverFactoryOptions {
   readonly claudeSdk?: ClaudeAgentSdkPort;
   readonly credentialResolver?: ProviderCredentialResolver;
   readonly claudeResumeIdentityPort?: ClaudeResumeIdentityPort;
-  readonly claudeHelperSignIn?: ClaudeHelperSignInPort;
   readonly isProjectConfinedPath?: (projectRoot: string, absolutePath: string) => boolean;
   readonly permissionPersistence: () => PermissionPersistence;
+  readonly claudeInstances?: ReadonlyArray<ProviderInstance>;
+  /** Host Claude env from the snapshot gate. Omit to use the last gated copy. */
+  readonly claudeHostEnvironment?: NodeJS.ProcessEnv;
 }
 
 export class ProviderDriverConfigurationError extends Error {
   override readonly name = "ProviderDriverConfigurationError";
-  readonly failure: ProviderFailure = {
-    category: "invalid-configuration",
-    message: "Provider driver configuration is invalid.",
-  };
+  readonly failure: ProviderFailure;
 
-  constructor() {
-    super("Provider driver configuration is invalid.");
+  constructor(message = "Provider driver configuration is invalid.") {
+    super(message);
+    this.failure = {
+      category: "invalid-configuration",
+      message,
+    };
   }
 }
 
@@ -95,10 +104,50 @@ export function makeProviderDriver(
       ) {
         throw new ProviderDriverConfigurationError();
       }
+      // A missing snapshot would skip the secondary-account guard and let a
+      // replayed directory-less instance launch against the default login.
+      if (options.claudeInstances === undefined) {
+        throw new ProviderDriverConfigurationError();
+      }
+      if (claudeAccountNeedsOwnConfigDirectory(options.claudeInstances, instance)) {
+        throw new ProviderDriverConfigurationError(
+          "This Claude account needs its own config directory.",
+        );
+      }
+      const hostEnvironment = options.claudeHostEnvironment ?? lastClaudeHostEnvironmentSnapshot();
+      // Isolated and directory-less API-key launches overwrite both
+      // directory variables with absolute paths. Only the implicit
+      // directory-less subscription account inherits the host overlay.
+      const inheritsHostOverlay =
+        instance.configuration.authentication === "subscription" &&
+        instance.configuration.configDirectory === undefined;
+      if (inheritsHostOverlay && hostClaudeDirectoryOverlayIsRelative(hostEnvironment)) {
+        throw new ProviderDriverConfigurationError(
+          "Claude host config directories must be absolute.",
+        );
+      }
+      if (
+        claudeAccountOverlapsPeerLaunchDirectory(
+          options.claudeInstances,
+          instance,
+          homedir(),
+          hostEnvironment,
+        )
+      ) {
+        throw new ProviderDriverConfigurationError(
+          "Another Claude account already uses that config directory.",
+        );
+      }
+      // An API-key account stored before accounts carried a directory has
+      // none on record. Resolving its leaf here gives the probe, the launch
+      // and resume lookup one folder; the probe otherwise refused such an
+      // account as "requires an assigned account directory".
+      const configDirectory = effectiveClaudeAccountConfigDirectory(instance, homedir());
       return makeClaudeDriver({
         instanceId: instance.id,
         binaryPath: instance.configuration.binaryPath,
         authentication: instance.configuration.authentication,
+        ...(configDirectory === undefined ? {} : { configDirectory }),
         process: options.claudeProcess,
         sdk: options.claudeSdk,
         runtimeRegistry: options.runtimeRegistry,
@@ -108,9 +157,6 @@ export function makeProviderDriver(
         ...(options.credentialResolver === undefined
           ? {}
           : { credentialResolver: options.credentialResolver }),
-        ...(options.claudeHelperSignIn === undefined
-          ? {}
-          : { helperSignIn: options.claudeHelperSignIn }),
       });
     case "pi":
       if (options.piProcess === undefined || options.piHome === undefined) {

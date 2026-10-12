@@ -22,14 +22,11 @@ import type {
 } from "./claudeAgentSdkPort";
 import { claudeExecutionOptions, makeClaudeDriver } from "./claudeDriver";
 import type { ClaudeResumeIdentity, ClaudeResumeIdentityPort } from "./claudeDriver";
-import type { ClaudeEnvironmentScope } from "./claudeEnvironment";
 import {
-  CLAUDE_HELPER_EXPIRED_MESSAGE,
-  CLAUDE_HELPER_NOT_CONNECTED_MESSAGE,
-  encodeClaudeHelperSignIn,
-  type ClaudeHelperSignInPort,
-} from "./claudeHelperSignIn";
-import type { ClaudeProcessPort } from "./claudeProcess";
+  type ClaudeEnvironmentScope,
+  type ClaudeEnvironmentScopeOptions,
+} from "./claudeEnvironment";
+import { claudeLoginKeychainPath, type ClaudeProcessPort } from "./claudeProcess";
 import { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
 
 const instanceId = decodeProviderInstanceId("80000000-0000-4000-8000-000000000701");
@@ -38,7 +35,6 @@ const sessionId = decodeProviderSessionId("80000000-0000-4000-8000-000000000703"
 const otherSessionId = decodeProviderSessionId("80000000-0000-4000-8000-000000000704");
 const modelId = "claude-sonnet" as ProviderModelId;
 const projectRoot = "/tmp/octant-claude-project";
-const HELPER_TOKEN = "helper-token-sentinel-0123456789";
 const observedAt = "2026-07-16T12:00:00.000Z";
 const readyCapabilities = {
   streaming: "supported",
@@ -182,6 +178,11 @@ function harness(
   options: {
     readonly models?: ClaudeQueryPort["initialization"]["models"];
     readonly autoCompactThreshold?: number;
+    readonly configDirectory?: string;
+    readonly makeEnvironmentScope?: (
+      authentication: ClaudeAuthentication,
+      options?: ClaudeEnvironmentScopeOptions,
+    ) => Effect.Effect<ClaudeEnvironmentScope, ProviderFailure, Scope.Scope>;
   } = {},
 ) {
   const queries: FakeQuery[] = [];
@@ -229,32 +230,32 @@ function harness(
     has: vi.fn(async () => true),
     resolve: vi.fn(async () => "api-key-secret-sentinel"),
   };
-  // Confined subscription launches sign in with the connected helper token;
-  // most cases here are about something else, so it starts connected.
-  const helperSignIn = {
-    read: vi.fn<ClaudeHelperSignInPort["read"]>(async () => ({
-      kind: "connected",
-      token: HELPER_TOKEN,
-    })),
-    markExpired: vi.fn<ClaudeHelperSignInPort["markExpired"]>(async () => undefined),
-  };
   const releasedEnvironments: NodeJS.ProcessEnv[] = [];
   const makeEnvironmentScope = (
     mode: ClaudeAuthentication,
-    options?: { readonly apiKey?: string; readonly oauthToken?: string },
+    options?: {
+      readonly apiKey?: string;
+      readonly configDirectory?: string;
+    },
   ): Effect.Effect<ClaudeEnvironmentScope, ProviderFailure, Scope.Scope> =>
     Effect.acquireRelease(
       Effect.sync(() => ({
         environment:
-          mode === "api-key"
-            ? { PATH: "/usr/bin", ANTHROPIC_API_KEY: options?.apiKey }
-            : {
+          options?.configDirectory !== undefined
+            ? {
                 PATH: "/usr/bin",
-                CLAUDE_CONFIG_DIR: "/provider-native",
-                ...(options?.oauthToken === undefined
-                  ? {}
-                  : { CLAUDE_CODE_OAUTH_TOKEN: options.oauthToken }),
-              },
+                CLAUDE_CONFIG_DIR: options.configDirectory,
+                CLAUDE_SECURESTORAGE_CONFIG_DIR: options.configDirectory,
+                ...(mode === "api-key" && options.apiKey !== undefined
+                  ? { ANTHROPIC_API_KEY: options.apiKey }
+                  : {}),
+              }
+            : mode === "api-key"
+              ? { PATH: "/usr/bin", ANTHROPIC_API_KEY: options?.apiKey }
+              : {
+                  PATH: "/usr/bin",
+                  CLAUDE_CONFIG_DIR: "/provider-native",
+                },
       })),
       ({ environment }) =>
         Effect.sync(() => {
@@ -305,14 +306,16 @@ function harness(
       instanceId,
       binaryPath: "/opt/homebrew/bin/claude",
       authentication: selectedAuthentication,
+      ...(options.configDirectory === undefined
+        ? {}
+        : { configDirectory: options.configDirectory }),
       process,
       sdk,
       credentialResolver,
-      helperSignIn,
       runtimeRegistry,
       resumeIdentityPort,
       permissionPersistence: () => permissionPersistence,
-      makeEnvironmentScope,
+      makeEnvironmentScope: options.makeEnvironmentScope ?? makeEnvironmentScope,
       isProjectConfinedPath: (root, absolutePath) => absolutePath.startsWith(`${root}/`),
       clock: () => observedAt,
       correlationId: () => "80000000-0000-4000-8000-000000000710",
@@ -325,7 +328,6 @@ function harness(
   const driver = makeDriver();
   return {
     credentialResolver,
-    helperSignIn,
     driver,
     makeEnvironmentScope,
     makeDriver,
@@ -4246,11 +4248,11 @@ describe("Claude exact resume", () => {
   });
 });
 
-describe("Claude for helpers", () => {
-  it("never hands a stored helper token to an API-key launch as its key", async () => {
+describe("Claude account sign-in", () => {
+  it("never hands a leftover helper envelope to an API-key launch as its key", async () => {
     const f = harness("api-key");
     vi.mocked(f.credentialResolver.resolve).mockResolvedValue(
-      encodeClaudeHelperSignIn({ state: "connected", token: HELPER_TOKEN }),
+      JSON.stringify({ kind: "claude-helper-sign-in" }),
     );
     const acquired = await acquire(f.driver);
     try {
@@ -4264,79 +4266,183 @@ describe("Claude for helpers", () => {
     expect(f.opens).toHaveLength(0);
   });
 
-  it("signs a confined subscription launch in with the connected helper token and nothing else", async () => {
+  it("never sets CLAUDE_CODE_OAUTH_TOKEN on a default subscription confined Plan launch", async () => {
     const f = harness("subscription");
     const acquired = await acquire(f.driver, "chat");
     try {
       await Effect.runPromise(
         acquired.connection.start({ sessionId, modelId, executionPolicy: "plan" }),
       );
+    } finally {
+      await acquired.close();
+    }
+
+    expect(f.opens[0]?.authEnvironment.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
+    expect(JSON.stringify(f.opens[0]?.authEnvironment)).not.toContain("CLAUDE_CODE_OAUTH_TOKEN");
+  });
+
+  it("never sets CLAUDE_CODE_OAUTH_TOKEN on an isolated account launch", async () => {
+    const accountDirectory = "/Users/example/.claude-accounts/work";
+    const f = harness("subscription", "current-session", { configDirectory: accountDirectory });
+    const acquired = await acquire(f.driver, "chat");
+    try {
       await Effect.runPromise(
-        acquired.connection.start({
-          sessionId: otherSessionId,
-          modelId,
-          executionPolicy: "approval-gated",
+        acquired.connection.start({ sessionId, modelId, executionPolicy: "plan" }),
+      );
+    } finally {
+      await acquired.close();
+    }
+
+    expect(f.opens[0]?.authEnvironment.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
+    expect(f.opens[0]?.authEnvironment.CLAUDE_CONFIG_DIR).toBe(accountDirectory);
+  });
+
+  it("refuses a Plan launch whose sign-in cannot be read inside the Plan sandbox", async () => {
+    const accountDirectory = "/Users/example/.claude-accounts/work";
+    const f = harness("subscription", "current-session", { configDirectory: accountDirectory });
+    vi.mocked(f.process.probeSubscription).mockReturnValue(Effect.succeed("unauthenticated"));
+    const acquired = await acquire(f.driver, "chat");
+    try {
+      const exit = await Effect.runPromiseExit(
+        acquired.connection.start({ sessionId, modelId, executionPolicy: "plan" }),
+      );
+      expect(String(exit)).toContain(
+        "Claude could not read this account's sign-in inside the Plan sandbox.",
+      );
+    } finally {
+      await acquired.close();
+    }
+    // The check ran inside the confinement the launch would have used, and
+    // nothing was launched on a sign-in the sandbox could not read.
+    expect(vi.mocked(f.process.probeSubscription).mock.calls[0]?.[2]).toEqual({
+      projectRoot,
+      executionPolicy: "plan",
+    });
+    expect(f.opens).toHaveLength(0);
+  });
+
+  it("checks sign-in outside the sandbox for a launch Octant does not confine", async () => {
+    const f = harness();
+    vi.mocked(f.process.probeSubscription).mockReturnValue(Effect.succeed("unauthenticated"));
+    const acquired = await acquire(f.driver);
+    try {
+      const exit = await Effect.runPromiseExit(
+        acquired.connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+      );
+      expect(String(exit)).toContain("Claude authentication is required.");
+    } finally {
+      await acquired.close();
+    }
+    expect(vi.mocked(f.process.probeSubscription).mock.calls[0]?.[2]).toBeUndefined();
+    expect(f.opens).toHaveLength(0);
+  });
+
+  it("refuses a file tool that names the login keychain folder, even from inside the Project", async () => {
+    const f = harness();
+    const acquired = await acquire(f.driver);
+    try {
+      await Effect.runPromise(
+        acquired.connection.start({ sessionId, modelId, executionPolicy: "plan" }),
+      );
+      const open = f.opens[0]!;
+      const signal = new AbortController().signal;
+      // The harness judges confinement by prefix, so this path counts as
+      // inside the Project, the way the real file would for a Project that
+      // contains the home folder. It resolves to the login keychain file.
+      const keychainThroughProject = `${projectRoot}/../..${claudeLoginKeychainPath()}`;
+      await expect(
+        open.preToolUse({
+          sessionId: "sdk-session-1",
+          projectRoot,
+          toolName: "Read",
+          input: { file_path: keychainThroughProject },
+          toolUseId: "read-keychain",
+          signal,
         }),
-      );
+      ).resolves.toMatchObject({ behavior: "deny" });
+      await expect(
+        open.preToolUse({
+          sessionId: "sdk-session-1",
+          projectRoot,
+          toolName: "Read",
+          input: { file_path: `${projectRoot}/README.md` },
+          toolUseId: "read-project-file",
+          signal,
+        }),
+      ).resolves.toEqual({ behavior: "allow" });
     } finally {
       await acquired.close();
     }
-
-    expect(f.opens[0]?.authEnvironment.CLAUDE_CODE_OAUTH_TOKEN).toBe(HELPER_TOKEN);
-    // An unconfined launch keeps the runtime's own sign-in.
-    expect(f.opens[1]?.authEnvironment.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
-    // The connected token stands in for the keychain probe it could not pass.
-    expect(f.process.probeSubscription).toHaveBeenCalledOnce();
   });
 
-  it("refuses a confined launch with the step that connects Claude for helpers", async () => {
-    for (const [state, message] of [
-      [{ kind: "not-connected" }, CLAUDE_HELPER_NOT_CONNECTED_MESSAGE],
-      [{ kind: "expired" }, CLAUDE_HELPER_EXPIRED_MESSAGE],
-    ] as const) {
-      const f = harness("subscription");
-      f.helperSignIn.read.mockResolvedValue(state);
-      const acquired = await acquire(f.driver, "chat");
-      try {
-        const exit = await Effect.runPromiseExit(
-          acquired.connection.start({ sessionId, modelId, executionPolicy: "plan" }),
-        );
-        expect(String(exit)).toContain(message);
-      } finally {
-        await acquired.close();
-      }
-      expect(f.opens).toHaveLength(0);
-    }
-  });
-
-  it("retires a helper token the runtime refuses and says to reconnect", async () => {
-    const f = harness("subscription");
+  it("refuses a Plan turn whose isolated account directory is inside the checkout", async () => {
+    const f = harness("subscription", "current-session", {
+      configDirectory: `${projectRoot}/.claude-accounts/work`,
+    });
     const acquired = await acquire(f.driver, "chat");
     try {
-      await Effect.runPromise(
+      const exit = await Effect.runPromiseExit(
         acquired.connection.start({ sessionId, modelId, executionPolicy: "plan" }),
       );
-      const terminalEvent = Effect.runPromise(
-        collectTerminal(Stream.unwrapScoped(acquired.connection.subscribe)),
-      );
-      await Effect.runPromise(
-        acquired.connection.send({ sessionId, prompt: "hello", attachments: [], tools: [] }),
-      );
-      await f.queries[0]!.emit({
-        kind: "authentication",
-        sessionId: "sdk-session-1",
-        authenticating: false,
-        failed: true,
-      } as ClaudeDecodedMessage);
-      await expect(terminalEvent).resolves.toMatchObject({
-        value: {
-          kind: "failed",
-          failure: { category: "unauthenticated", message: CLAUDE_HELPER_EXPIRED_MESSAGE },
-        },
-      });
+      expect(String(exit)).toContain("overlaps the checkout");
     } finally {
       await acquired.close();
     }
-    expect(f.helperSignIn.markExpired).toHaveBeenCalledWith(String(instanceId), HELPER_TOKEN);
+    expect(f.opens).toHaveLength(0);
+  });
+
+  it("refuses a Plan turn whose account directory uses .. to land inside the checkout", async () => {
+    const f = harness("subscription", "current-session", {
+      configDirectory: `${projectRoot}/.claude-accounts/work/../../new-state`,
+    });
+    const acquired = await acquire(f.driver, "chat");
+    try {
+      const exit = await Effect.runPromiseExit(
+        acquired.connection.start({ sessionId, modelId, executionPolicy: "plan" }),
+      );
+      expect(String(exit)).toContain("overlaps the checkout");
+    } finally {
+      await acquired.close();
+    }
+    expect(f.opens).toHaveLength(0);
+  });
+
+  it("refuses a Plan turn whose isolated account directory is an ancestor of the checkout", async () => {
+    const f = harness("subscription", "current-session", { configDirectory: "/tmp" });
+    const acquired = await acquire(f.driver, "chat");
+    try {
+      const exit = await Effect.runPromiseExit(
+        acquired.connection.start({ sessionId, modelId, executionPolicy: "plan" }),
+      );
+      expect(String(exit)).toContain("overlaps the checkout");
+    } finally {
+      await acquired.close();
+    }
+    expect(f.opens).toHaveLength(0);
+  });
+
+  it("resumes an isolated Claude account from that account's directory", async () => {
+    const accountDirectory = "/Users/example/.claude-accounts/work";
+    const f = harness("subscription", "current-session", { configDirectory: accountDirectory });
+    const acquired = await acquire(f.driver, "chat");
+    const started = await Effect.runPromise(
+      acquired.connection.start({ sessionId, modelId, executionPolicy: "plan" }),
+    );
+    await Effect.runPromise(acquired.connection.stop(sessionId));
+    await acquired.close();
+    const recreated = await acquire(f.makeDriver(), "chat");
+    await Effect.runPromise(
+      recreated.connection.resume({
+        sessionId,
+        resumeCursor: started.resumeCursor!,
+        executionPolicy: "plan",
+      }),
+    );
+    expect(f.sdk.findSession).toHaveBeenCalledWith({
+      sessionId: "sdk-session-1",
+      projectRoot,
+      configDirectory: accountDirectory,
+    });
+    await recreated.close();
   });
 });
