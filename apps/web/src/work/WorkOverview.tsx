@@ -1,3 +1,4 @@
+import { useNewTaskPrompt } from "../composer/useNewTaskPrompt";
 import { useDraftModelOptions } from "../providers/useDraftModelOptions";
 import { ComposerAttachButton } from "../composer/ComposerAttachButton";
 import type {
@@ -105,7 +106,7 @@ export function WorkOverview(props: WorkOverviewProps) {
       section.models.some((model) => model.unavailableReason === undefined),
     ),
   );
-  const [draft, setDraft] = useState("");
+  const [draft, setDraft] = useNewTaskPrompt();
   const { modelKey, modelOptionValues, setModelChoice } = useDraftModelOptions(
     props.providerGroups ?? [],
     props.selectedProviderInstanceId,

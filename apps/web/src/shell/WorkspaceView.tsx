@@ -2467,52 +2467,54 @@ function WorkProjectOverviewSlot(props: {
     [controller, createStarterArtifactAvailable, props.mutationClient, props.projectId],
   );
   return (
-    <WorkOverview
-      projectId={props.projectId}
-      {...(props.researchClient === undefined
-        ? {}
-        : {
-            research: (
-              <WorkResearchPanel
-                briefs={researchController.briefs}
-                status={researchController.status}
-                onRetry={researchController.reload}
-                onCreateBrief={researchController.createBrief}
-                onAddSource={researchController.addSource}
-                onRevokeSource={researchController.revokeSource}
-                onRecordEvidence={researchController.recordEvidence}
-                onRecordClaim={researchController.recordClaim}
-                {...(props.mutationClient === undefined
-                  ? {}
-                  : { onFinalizeReport: researchController.finalizeReport })}
-              />
-            ),
-          })}
-      createStarterArtifactAvailable={createStarterArtifactAvailable}
-      createThreadAvailable={props.createThreadAvailable}
-      {...(props.hosts === undefined ? {} : { hosts: props.hosts })}
-      {...(props.selectedHostId === undefined ? {} : { selectedHostId: props.selectedHostId })}
-      {...(props.fixedHostId === undefined ? {} : { fixedHostId: props.fixedHostId })}
-      {...(props.lastSelectedHealthyHostId === undefined
-        ? {}
-        : { lastSelectedHealthyHostId: props.lastSelectedHealthyHostId })}
-      {...(props.viewScope === undefined ? {} : { viewScope: props.viewScope })}
-      {...(props.onSelectHost === undefined ? {} : { onSelectHost: props.onSelectHost })}
-      model={model}
-      onCreateStarterArtifact={handleCreateStarterArtifact}
-      onCreateThread={props.onCreateThread}
-      {...(props.onOpenSettings === undefined ? {} : { onOpenSettings: props.onOpenSettings })}
-      {...(props.providersReady === undefined ? {} : { providersReady: props.providersReady })}
-      {...(props.onOpenThread === undefined ? {} : { onOpenThread: props.onOpenThread })}
-      {...(props.onSelectProvider === undefined
-        ? {}
-        : { onSelectProvider: props.onSelectProvider })}
-      projectName={props.projectName}
-      providerGroups={props.providerGroups}
-      {...(props.selectedModelId === undefined ? {} : { selectedModelId: props.selectedModelId })}
-      {...(props.selectedProviderInstanceId === undefined
-        ? {}
-        : { selectedProviderInstanceId: props.selectedProviderInstanceId })}
-    />
+    <NewTaskDraftScopeContext.Provider value={`work-overview:${String(props.projectId)}`}>
+      <WorkOverview
+        projectId={props.projectId}
+        {...(props.researchClient === undefined
+          ? {}
+          : {
+              research: (
+                <WorkResearchPanel
+                  briefs={researchController.briefs}
+                  status={researchController.status}
+                  onRetry={researchController.reload}
+                  onCreateBrief={researchController.createBrief}
+                  onAddSource={researchController.addSource}
+                  onRevokeSource={researchController.revokeSource}
+                  onRecordEvidence={researchController.recordEvidence}
+                  onRecordClaim={researchController.recordClaim}
+                  {...(props.mutationClient === undefined
+                    ? {}
+                    : { onFinalizeReport: researchController.finalizeReport })}
+                />
+              ),
+            })}
+        createStarterArtifactAvailable={createStarterArtifactAvailable}
+        createThreadAvailable={props.createThreadAvailable}
+        {...(props.hosts === undefined ? {} : { hosts: props.hosts })}
+        {...(props.selectedHostId === undefined ? {} : { selectedHostId: props.selectedHostId })}
+        {...(props.fixedHostId === undefined ? {} : { fixedHostId: props.fixedHostId })}
+        {...(props.lastSelectedHealthyHostId === undefined
+          ? {}
+          : { lastSelectedHealthyHostId: props.lastSelectedHealthyHostId })}
+        {...(props.viewScope === undefined ? {} : { viewScope: props.viewScope })}
+        {...(props.onSelectHost === undefined ? {} : { onSelectHost: props.onSelectHost })}
+        model={model}
+        onCreateStarterArtifact={handleCreateStarterArtifact}
+        onCreateThread={props.onCreateThread}
+        {...(props.onOpenSettings === undefined ? {} : { onOpenSettings: props.onOpenSettings })}
+        {...(props.providersReady === undefined ? {} : { providersReady: props.providersReady })}
+        {...(props.onOpenThread === undefined ? {} : { onOpenThread: props.onOpenThread })}
+        {...(props.onSelectProvider === undefined
+          ? {}
+          : { onSelectProvider: props.onSelectProvider })}
+        projectName={props.projectName}
+        providerGroups={props.providerGroups}
+        {...(props.selectedModelId === undefined ? {} : { selectedModelId: props.selectedModelId })}
+        {...(props.selectedProviderInstanceId === undefined
+          ? {}
+          : { selectedProviderInstanceId: props.selectedProviderInstanceId })}
+      />
+    </NewTaskDraftScopeContext.Provider>
   );
 }

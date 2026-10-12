@@ -8,6 +8,11 @@ import {
   type ProviderObservedState,
 } from "@octant/contracts";
 import { buildModelPickerGroups } from "@octant/domain";
+import {
+  createNewTaskDrafts,
+  NewTaskDraftsContext,
+  NewTaskDraftScopeContext,
+} from "../composer/useNewTaskPrompt";
 import { WorkOverview, type WorkOverviewModel, type OverviewSectionStatus } from "./WorkOverview";
 
 describe("WorkOverview", () => {
@@ -325,6 +330,29 @@ describe("WorkOverview", () => {
     expect(
       within(composer).getByText("Thread creation is unavailable for this Project."),
     ).toBeVisible();
+  });
+
+  it("keeps the quick-start draft after the overview remounts", async () => {
+    const user = userEvent.setup();
+    const drafts = createNewTaskDrafts();
+    function view() {
+      return (
+        <NewTaskDraftsContext.Provider value={drafts}>
+          <NewTaskDraftScopeContext.Provider value="work-overview:test">
+            <WorkOverview model={emptyModel()} onCreateThread={vi.fn(async () => true)} />
+          </NewTaskDraftScopeContext.Provider>
+        </NewTaskDraftsContext.Provider>
+      );
+    }
+
+    const rendered = render(view());
+    await user.type(screen.getByRole("textbox", { name: "Start a new task" }), "Keep this draft");
+    rendered.unmount();
+    render(view());
+
+    expect(screen.getByRole("textbox", { name: "Start a new task" })).toHaveValue(
+      "Keep this draft",
+    );
   });
 
   it("keeps provider setup reachable when no Work provider is ready", async () => {
