@@ -1176,8 +1176,8 @@ describe("provider API key host operations", () => {
     const { call, values } = installKeys(new Map([[providerInstanceId, FIRST]]));
     await call("add", providerInstanceId, SECOND, "Team");
     expect(await call("list", providerInstanceId)).toEqual([
-      { id: "default", label: "Default", active: true },
-      expect.objectContaining({ label: "Team" }),
+      { id: "default", label: "Default", active: false },
+      expect.objectContaining({ label: "Team", active: true }),
     ]);
     expect(values.get(providerInstanceId)).toContain(FIRST);
   });

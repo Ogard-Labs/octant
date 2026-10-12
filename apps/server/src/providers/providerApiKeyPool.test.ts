@@ -55,7 +55,7 @@ function memoryStore(
 function twoKeyStore(): ProviderCredentialStore {
   const first = addApiKey(undefined, { secret: FIRST, label: "Work" });
   const second = addApiKey(first.stored, { secret: SECOND, label: "Personal" });
-  return memoryStore(second.stored);
+  return memoryStore(setActiveApiKey(second.stored, first.key.id));
 }
 
 function clock(start = 1_000) {
