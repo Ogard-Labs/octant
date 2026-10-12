@@ -24,6 +24,29 @@ describe("in-tree Canvas document recipes", () => {
     for (const recipe of recipes) expect(recipe.summary).toBeDefined();
   });
 
+  it("offers an article, a design brief, a design system, and a clickable prototype", () => {
+    const recipes = new Map(
+      inTreeCanvasDocumentRecipes().map((recipe) => [String(recipe.id), recipe] as const),
+    );
+    for (const id of ["article", "design-brief", "design-system", "clickable-prototype"]) {
+      expect(recipes.get(id)?.summary, id).toBeDefined();
+    }
+    // The brief arranges typed blocks in tabs; the prototype is a design that runs.
+    expect(recipes.get("design-brief")?.skeleton.map((block) => block.kind)).toContain("tabs");
+    expect(recipes.get("clickable-prototype")?.skeleton[0]).toMatchObject({ kind: "design" });
+    expect(recipes.get("clickable-prototype")?.skeleton[0]?.role).toContain("runsScript");
+  });
+
+  it("opens the article recipe as a themed document frame with headings that wait for content", () => {
+    const article = inTreeCanvasDocumentRecipes().find((recipe) => String(recipe.id) === "article");
+    if (article === undefined) throw new Error("The article recipe is not offered.");
+    const [frame] = canvasRecipeStarterBlocks(article);
+    expect(frame).toMatchObject({ kind: "design", size: "document" });
+    if (frame?.kind !== "design") throw new Error("The article did not open as a design.");
+    expect(frame.frames[0]?.html).toContain("<h1>Article</h1>");
+    expect(frame.frames[0]?.html).toContain("<h2>");
+  });
+
   it("weighs an architecture review's options in a comparison matrix", () => {
     const review = inTreeCanvasDocumentRecipes().find(
       (recipe) => String(recipe.id) === "architecture-review",

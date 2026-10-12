@@ -14,6 +14,7 @@ import {
  * Consumed by the tool-call policy engine step 7 (S1) and approval paths.
  * Canonical: docs/security/security-architecture-threat-model.md § Untrusted-Content Policy
  * Approved Decision #3: taint scope is thread lifetime (does not clear on session/turn).
+ * A person at a local window may clear it; the next ingestion marks the thread again.
  */
 
 /** Design §8.4 approval categories. */
@@ -41,6 +42,7 @@ export type ThreadContentTaintEvent =
       readonly kind: "content-ingested";
       readonly provenance: ContentProvenance;
     }
+  | { readonly kind: "content-cleared" }
   | { readonly kind: "session-boundary" }
   | { readonly kind: "turn-boundary" };
 
@@ -71,7 +73,9 @@ export function originTaintsThread(origin: ContentOrigin): boolean {
 
 /**
  * Fold provenance events into the thread-lifetime taint projection.
- * Session and turn boundaries never clear `externalContentIngested`.
+ * Session and turn boundaries never clear `externalContentIngested`. A
+ * person's clear does, and it forgets the sources with the mark, so the next
+ * ingestion names only what the thread read after the review.
  */
 export function projectThreadContentTaint(
   state: ThreadExternalContentTaint,
@@ -79,6 +83,9 @@ export function projectThreadContentTaint(
 ): ThreadExternalContentTaint {
   if (event.kind === "session-boundary" || event.kind === "turn-boundary") {
     return state;
+  }
+  if (event.kind === "content-cleared") {
+    return emptyThreadContentTaint();
   }
   if (!originTaintsThread(event.provenance.origin)) {
     return state;
@@ -116,6 +123,53 @@ export function decideExternalContentIngestion(input: {
     return { kind: "already-recorded" };
   }
   return { kind: "record" };
+}
+
+export type ExternalContentClearDecision =
+  | { readonly kind: "clear" }
+  | { readonly kind: "already-clear" }
+  | {
+      readonly kind: "refuse";
+      readonly reason:
+        | "unauthorized"
+        | "thread-unavailable"
+        | "turn-active"
+        | "turn-unconfirmed"
+        | "stale";
+    };
+
+/**
+ * Whether a thread's outside-content mark may be taken away now. Clearing
+ * records that a person reviewed what the thread read; it removes nothing
+ * from the model's context, so the checks are about who asks and whether
+ * they have seen everything, not about the content.
+ */
+export function decideExternalContentClear(input: {
+  /** `host` is the host's own scope: a routine, goal loop, resume, or child delivery. */
+  readonly principal: "local-window" | "remote-device" | "host";
+  /**
+   * `active` is a running or queued turn. `unconfirmed` is a turn that ended
+   * without the host learning how. `unknown` is a thread the host cannot read.
+   */
+  readonly turn: "idle" | "active" | "unconfirmed" | "unknown";
+  readonly tainted: boolean;
+  /** The aggregate version the person was shown, and the thread's own now. */
+  readonly shownVersion: number;
+  readonly currentVersion: number;
+}): ExternalContentClearDecision {
+  // Only a person at this machine reviews. Decided first, so a refused
+  // caller learns nothing about the thread.
+  if (input.principal !== "local-window") return { kind: "refuse", reason: "unauthorized" };
+  if (input.turn === "unknown") return { kind: "refuse", reason: "thread-unavailable" };
+  // A turn in flight may be reading more while the person looks, and the
+  // gates it is waiting on must not open under it.
+  if (input.turn === "active") return { kind: "refuse", reason: "turn-active" };
+  // Nobody can say the thread is idle, so it is not treated as idle.
+  if (input.turn === "unconfirmed") return { kind: "refuse", reason: "turn-unconfirmed" };
+  if (!input.tainted) return { kind: "already-clear" };
+  // An ingestion the person was never shown is not one they reviewed.
+  if (input.shownVersion !== input.currentVersion) return { kind: "refuse", reason: "stale" };
+  return { kind: "clear" };
 }
 
 /**

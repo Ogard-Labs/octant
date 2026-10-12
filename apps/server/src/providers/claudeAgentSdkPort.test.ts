@@ -650,7 +650,7 @@ describe("Claude Agent SDK port", () => {
     expect(harness.query.close).toHaveBeenCalledOnce();
   });
 
-  test("finds only an exact-root explicit session through listSessions({ dir })", async () => {
+  test("finds only an exact-root session and does not list the other worktrees", async () => {
     const harness = makeHarness();
     await expect(
       Effect.runPromise(harness.port.findSession({ sessionId: "session-1", projectRoot: "/repo" })),
@@ -660,7 +660,7 @@ describe("Claude Agent SDK port", () => {
       lastModified: 123,
       createdAt: 100,
     });
-    expect(harness.listSessions).toHaveBeenCalledWith({ dir: "/repo" });
+    expect(harness.listSessions).toHaveBeenCalledWith({ dir: "/repo", includeWorktrees: false });
 
     await expect(
       Effect.runPromise(

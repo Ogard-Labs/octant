@@ -10,7 +10,7 @@ import {
   CanvasShareSnapshotId,
   CanvasShareSnapshotSummary,
 } from "./canvasShareSnapshot";
-import { CanvasId } from "./canvas";
+import { CanvasBlockId, CanvasDesignFrameId, CanvasId } from "./canvas";
 import { UtcTimestamp } from "./events";
 import { HostId } from "./host";
 import { ProjectId } from "./projects";
@@ -104,6 +104,17 @@ export const CanvasShareAccessRequest = Schema.Struct({
   canvasId: CanvasId,
   hostId: HostId,
   projectId: ProjectId,
+  /**
+   * Asks for a page to run one of the snapshot's prototypes from. It is the
+   * same read as opening the snapshot, decided and journaled the same way,
+   * and names only a design the snapshot already holds.
+   */
+  runDesign: Schema.optional(
+    Schema.Struct({
+      blockId: CanvasBlockId,
+      frameId: Schema.optional(CanvasDesignFrameId),
+    }).annotations(strict),
+  ),
 }).annotations(strict);
 export type CanvasShareAccessRequest = typeof CanvasShareAccessRequest.Type;
 
@@ -118,6 +129,14 @@ export const CanvasShareAccessResult = Schema.Union(
     kind: Schema.Literal("allowed"),
     document: CanvasStaticExportDocument,
     event: CanvasShareAccessLogEvent,
+    /**
+     * Present when the request asked to run a prototype and the host could
+     * offer it: a path on the host holding a single-use ticket, loaded in a
+     * frame sandboxed to scripts alone, as for a live Canvas.
+     */
+    designPage: Schema.optional(
+      Schema.String.pipe(Schema.pattern(/^\/api\/canvas\/design-page\?ticket=[A-Za-z0-9_-]{43}$/)),
+    ),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("denied"),

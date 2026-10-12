@@ -1781,6 +1781,45 @@ describe("ProviderService", () => {
     });
   });
 
+  it("recolours a Claude account during a session without stopping it, and still refuses a runtime change", async () => {
+    const clearRuntimeUsageLimits = vi.fn();
+    const fixture = serviceFixture({ instances: [claudeProvider()], clearRuntimeUsageLimits });
+    fixture.runtime.setObservedState(observation());
+    fixture.runtime.setActiveSessionCount(instanceId, 1);
+    const invalidate = vi.spyOn(fixture.runtime, "invalidateRuntime");
+    const configuration = {
+      kind: "claude-agent-sdk",
+      binaryPath: "/opt/homebrew/bin/claude",
+      authentication: "subscription",
+    } as const;
+
+    await expect(
+      fixture.service.execute(windowId, {
+        kind: "change-claude-configuration",
+        instanceId,
+        expectedVersion: 1,
+        configuration: { ...configuration, accent: "teal" },
+      }),
+    ).resolves.toMatchObject({
+      kind: "provider-updated",
+      instance: { configuration: { accent: "teal" } },
+    });
+    expect(invalidate).not.toHaveBeenCalled();
+    expect(clearRuntimeUsageLimits).not.toHaveBeenCalled();
+    expect(fixture.runtime.observedState(instanceId)).toMatchObject({ readiness: "ready" });
+
+    await expect(
+      fixture.service.execute(windowId, {
+        kind: "change-claude-configuration",
+        instanceId,
+        expectedVersion: 2,
+        configuration: { ...configuration, binaryPath: "/usr/local/bin/claude", accent: "teal" },
+      }),
+    ).rejects.toMatchObject({
+      failure: { message: "Stop active sessions before reconfiguring this provider." },
+    });
+  });
+
   it("assigns a separate Claude-owned directory to each additional Claude account", async () => {
     const fixture = serviceFixture();
     await fixture.service.execute(windowId, {
@@ -3096,7 +3135,10 @@ describe("ProviderService", () => {
         kind: "change-claude-configuration",
         instanceId,
         expectedVersion: 1,
-        configuration: claudeProvider().configuration,
+        configuration: {
+          ...claudeProvider().configuration,
+          binaryPath: "/usr/local/bin/claude",
+        },
       }),
     ).rejects.toMatchObject({ failure: { category: "invalid-configuration" } });
     expect(active.append).not.toHaveBeenCalled();

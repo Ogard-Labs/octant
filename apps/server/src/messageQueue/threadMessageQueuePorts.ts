@@ -76,6 +76,14 @@ function tailStatus(status: string): ThreadMessageQueueTail["status"] {
   return "active";
 }
 
+function tailOf(id: string, status: string): ThreadMessageQueueTail {
+  return {
+    id,
+    status: tailStatus(status),
+    ...(status === "ambiguous" ? { unconfirmed: true as const } : {}),
+  };
+}
+
 function readFacts(
   deps: ThreadMessageQueuePortDependencies,
   scope: ThreadMessageQueueScope,
@@ -100,9 +108,7 @@ function readFacts(
         personalityInstructions: thread.personalityInstructions,
         multiModelPool: thread.multiModelPool,
       },
-      ...(attempt === undefined
-        ? {}
-        : { tail: { id: String(attempt.id), status: tailStatus(attempt.outcome) } }),
+      ...(attempt === undefined ? {} : { tail: tailOf(String(attempt.id), attempt.outcome) }),
     };
   }
   if (scope.mode === "work") {
@@ -121,9 +127,7 @@ function readFacts(
         workingDirectory: thread.workingDirectory,
         access: thread.access,
       },
-      ...(turn === undefined
-        ? {}
-        : { tail: { id: String(turn.turnId), status: tailStatus(turn.status) } }),
+      ...(turn === undefined ? {} : { tail: tailOf(String(turn.turnId), turn.status) }),
     };
   }
   const id = decodeCodeThreadId(scope.threadId);
@@ -150,9 +154,7 @@ function readFacts(
       ownershipReceiptId:
         checkout?.kind === "managed-worktree" ? checkout.ownershipReceiptId : undefined,
     },
-    ...(latest === undefined
-      ? {}
-      : { tail: { id: String(latest.id), status: tailStatus(latest.state) } }),
+    ...(latest === undefined ? {} : { tail: tailOf(String(latest.id), latest.state) }),
     checkoutAvailable: checkout?.availability === "available",
   };
 }

@@ -25,21 +25,25 @@ const strict = { parseOptions: { onExcessProperty: "error" as const } };
 // the math block, version 12 the mockup catalog, version 13 the stable
 // table row id a comment anchors to, version 14 the funnel, radar, and
 // sankey chart types, version 15 the dashboard layout block, version 16 the
-// design document size and workspace theme, and version 17 the design's
-// declared image assets. A version-gated kind or hint is only valid inside a
-// document declaring the version that introduced it, so a rolled-back older
+// design document size and workspace theme, version 17 the design's declared
+// image assets, version 18 the design that runs script, and version 19 the
+// tabs and columns layout groups. A version-gated
+// kind or hint is only valid inside a document declaring the version that
+// introduced it, so a rolled-back older
 // runtime refuses it as a declared future version instead of reading it as
 // corrupt. Each gated block kind is admitted from the version that introduced
 // it: every earlier document (including mockup-carrying v3, presentation v4,
 // treemap-carrying v5, heatmap-carrying v6, bar-list-carrying v7,
 // diagram-kind-carrying v8, design-carrying v9, matrix-carrying v10,
 // math-carrying v11, catalog-carrying v12, row-id-carrying v13,
-// flow-chart-carrying v14, dashboard-carrying v15, and
-// design-document-carrying v16 documents) remains decodable so a host does
-// not lose its history at the bump. The literal set names each earlier
-// version explicitly and ends at the current one, so a future bump cannot
-// silently drop an intermediate version from the set that decodes.
-export const CANVAS_SCHEMA_VERSION = 17 as const;
+// flow-chart-carrying v14, dashboard-carrying v15,
+// design-document-carrying v16, design-asset-carrying v17, and
+// running-design-carrying v18 documents)
+// remains decodable so a host does not lose its history at the bump. The
+// literal set names each earlier version explicitly and ends at the current
+// one, so a future bump cannot silently drop an intermediate version from the
+// set that decodes.
+export const CANVAS_SCHEMA_VERSION = 19 as const;
 export const CanvasSchemaVersion = Schema.Literal(
   1,
   2,
@@ -57,6 +61,8 @@ export const CanvasSchemaVersion = Schema.Literal(
   14,
   15,
   16,
+  17,
+  18,
   CANVAS_SCHEMA_VERSION,
 );
 export type CanvasSchemaVersion = typeof CanvasSchemaVersion.Type;

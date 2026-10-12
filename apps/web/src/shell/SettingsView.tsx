@@ -82,6 +82,7 @@ import {
   HostSettingsSection,
   type PrivacyTarget,
 } from "../host/HostSettingsSection";
+import { RememberedToolApprovalsPanel } from "../extensions/RememberedToolApprovalsPanel";
 import { RemoteAccessSettingsSection } from "../host/RemoteAccessSettingsSection";
 import { SyncSettingsSection } from "../settings/SyncSettingsSection";
 import type { FolderBrowseClient } from "@octant/client-runtime/folder-browse-client";
@@ -200,6 +201,8 @@ export interface SettingsViewProps {
   readonly githubClient?: GithubClient;
   readonly integrationClient?: IntegrationClient;
   readonly extensionClient?: ExtensionClient;
+  /** Project names by Project id, to head the remembered tool approvals. */
+  readonly projectNames?: ReadonlyMap<string, string>;
   readonly pickLocalPluginFolder?: () => Promise<
     Readonly<{ receiptId: string; displayName: string }> | undefined
   >;
@@ -224,6 +227,8 @@ export interface SettingsViewProps {
    */
   readonly effectivePlugins?: ReadonlyMap<FirstPartyPluginComponentId, boolean>;
 }
+
+const NO_PROJECT_NAMES: ReadonlyMap<string, string> = new Map();
 
 const SECTION_LABELS: Readonly<Partial<Record<SettingsSectionId, string>>> = Object.fromEntries(
   octantSettingsRegistry.sections.map((s) => [s.id, s.label]),
@@ -1162,6 +1167,13 @@ function ActiveSectionContent({
               })
             }
           />
+          {props.extensionClient === undefined ? null : (
+            <RememberedToolApprovalsPanel
+              client={props.extensionClient}
+              projectNames={props.projectNames ?? NO_PROJECT_NAMES}
+              {...(focusedSetting === undefined ? {} : { focusedSetting })}
+            />
+          )}
           {props.hostControlClient !== undefined ? (
             <HostDataSettingsSection
               client={props.hostControlClient}

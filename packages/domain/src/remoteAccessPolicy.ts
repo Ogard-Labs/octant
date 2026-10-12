@@ -149,6 +149,9 @@ const LOCAL_HOST_ACTIONS = new Set([
   "host.store.export",
   "host.store.spend-ceiling",
   "diagnostics.export",
+  // Taking a thread's outside-content mark away records that a person read
+  // what the thread took in, and reopens every gate the mark was holding.
+  "thread.external-content.clear",
 ]);
 
 export function classifyRemoteAction(action: string): RemoteActionDecision {

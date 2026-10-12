@@ -34,16 +34,19 @@
 
 ## Threats and mitigations
 
-| ID  | Threat                                                             | Mitigation                                                                                                    |
-| --- | ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------- |
-| A1  | Credential or path leakage in audience/export labels               | Privacy-safe label/text filters at contract decode and receipt note sanitize                                  |
-| A2  | Revoked share remains usable via malformed active+revokedAt record | Lifecycle variants require `revokedAt` only for `status: "revoked"`                                           |
-| A3  | Wrong document bound under authorized envelope                     | Snapshot record filter binds export/canvas/version/sequence/host/project/source manifest to embedded document |
-| A4  | Access log records wrong denial reason                             | Policy maps access evaluation denial codes to exact outcomes                                                  |
-| A5  | Privacy-preserving logs cannot validate audience outcomes          | Authenticated `principalId` is accepted separately from optional `audienceLabel`                              |
-| A6  | Later revocation invalidates historical allowed events             | Validate lifecycle at `occurredAt` vs `revokedAt`/`expiresAt`                                                 |
-| A7  | Deleted source still appears allowed                               | Dedicated `denied-deleted-source` outcome independent of audience membership                                  |
-| A8  | Targeted scope probing of a valid snapshot id stays invisible      | Scope-mismatched reads journal a `denied-scope-mismatch` event on the snapshot's own scope before refusing    |
+| ID  | Threat                                                              | Mitigation                                                                                                                                                                       |
+| --- | ------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A1  | Credential or path leakage in audience/export labels                | Privacy-safe label/text filters at contract decode and receipt note sanitize                                                                                                     |
+| A2  | Revoked share remains usable via malformed active+revokedAt record  | Lifecycle variants require `revokedAt` only for `status: "revoked"`                                                                                                              |
+| A3  | Wrong document bound under authorized envelope                      | Snapshot record filter binds export/canvas/version/sequence/host/project/source manifest to embedded document                                                                    |
+| A4  | Access log records wrong denial reason                              | Policy maps access evaluation denial codes to exact outcomes                                                                                                                     |
+| A5  | Privacy-preserving logs cannot validate audience outcomes           | Authenticated `principalId` is accepted separately from optional `audienceLabel`                                                                                                 |
+| A6  | Later revocation invalidates historical allowed events              | Validate lifecycle at `occurredAt` vs `revokedAt`/`expiresAt`                                                                                                                    |
+| A7  | Deleted source still appears allowed                                | Dedicated `denied-deleted-source` outcome independent of audience membership                                                                                                     |
+| A8  | Targeted scope probing of a valid snapshot id stays invisible       | Scope-mismatched reads journal a `denied-scope-mismatch` event on the snapshot's own scope before refusing                                                                       |
+| A9  | A design's markup carries a secret the filter cannot read           | A Canvas holding a design is shared only with `acknowledgedMarkupSharedAsWritten`; markup holding a token or key in a recognisable shape is refused; declared images never leave |
+| A10 | A shared frame is drawn outside the frame policy                    | Frames travel only from share version 10, which an older reader refuses as a future version; the viewer draws them with the live Canvas's own design block                       |
+| A11 | A shared prototype's page is opened without the snapshot's audience | The page is ticketed only on an allowed, journaled share access that names a running design the snapshot holds; the ticket is single-use and expires in 10 seconds               |
 
 ## Runtime surface
 

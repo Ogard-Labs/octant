@@ -138,6 +138,59 @@ describe("createCanvasClient", () => {
     );
   });
 
+  it("asks for a running design's page with the window capability and resolves it on this host", async () => {
+    const ticket = "a".repeat(43);
+    const fetchImpl = vi.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit) =>
+        new Response(
+          JSON.stringify({
+            kind: "ready",
+            canvasId: String(canvasId),
+            versionId: "22222222-2222-4222-8222-222222222222",
+            blockId: "checkout",
+            page: `/api/canvas/design-page?ticket=${ticket}`,
+          }),
+          { status: 200 },
+        ),
+    );
+    const client = createCanvasClient({
+      baseUrl: "https://octant.example:8443",
+      fetch: fetchImpl as unknown as typeof fetch,
+      windowCapability: "capability",
+    });
+    const started = await client.runDesign?.({
+      canvasId,
+      versionId: "22222222-2222-4222-8222-222222222222",
+      blockId: "checkout",
+    });
+    expect(started).toEqual({
+      kind: "ready",
+      url: `https://octant.example:8443/api/canvas/design-page?ticket=${ticket}`,
+    });
+    const [url, init] = fetchImpl.mock.calls[0] ?? [];
+    expect(url).toBe("https://octant.example:8443/api/canvas/design-run");
+    expect(init).toMatchObject({
+      method: "POST",
+      cache: "no-store",
+      headers: { "x-octant-window-capability": "capability" },
+    });
+    // The capability travels as a header and never in the page address.
+    expect(String(started?.kind === "ready" ? started.url : "")).not.toContain("capability");
+
+    fetchImpl.mockResolvedValueOnce(
+      new Response(JSON.stringify({ kind: "unauthorized", canvasId: String(canvasId) }), {
+        status: 200,
+      }),
+    );
+    expect(
+      await client.runDesign?.({
+        canvasId,
+        versionId: "22222222-2222-4222-8222-222222222222",
+        blockId: "x",
+      }),
+    ).toMatchObject({ kind: "refused" });
+  });
+
   it("reads the recipes a Canvas can start from with the window capability", async () => {
     const fetchImpl = vi.fn(
       async (_input: RequestInfo | URL, _init?: RequestInit) =>

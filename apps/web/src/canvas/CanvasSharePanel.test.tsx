@@ -5,7 +5,7 @@ import type {
   CanvasShareSnapshotRequest,
 } from "@octant/contracts/canvas-share-snapshot";
 import { commitsByHourExample, hottestFilesExample, repositoryMapExample } from "@octant/domain";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { chooseSelectFieldOption } from "../test/chooseSelectFieldOption.test-support";
@@ -95,7 +95,9 @@ function renderPanel(props: {
   readonly overview: CanvasShareOverview;
   readonly onShare?: (request: CanvasShareSnapshotRequest) => Promise<CanvasShareResult>;
   readonly onRevoke?: () => Promise<CanvasShareResult>;
-  readonly onOpen?: () => Promise<never>;
+  readonly onOpen?: (request: { readonly runDesign?: unknown }) => Promise<never>;
+  readonly holdsDesign?: boolean;
+  readonly resolveDesignPage?: (path: string) => string;
 }) {
   const accepted: CanvasShareResult = {
     kind: "denied",
@@ -113,6 +115,10 @@ function renderPanel(props: {
       onShare={props.onShare ?? (async () => accepted)}
       overview={props.overview}
       versionId={versionId}
+      {...(props.holdsDesign === undefined ? {} : { holdsDesign: props.holdsDesign })}
+      {...(props.resolveDesignPage === undefined
+        ? {}
+        : { resolveDesignPage: props.resolveDesignPage })}
     />,
   );
 }
@@ -144,6 +150,113 @@ describe("CanvasSharePanel", () => {
     expect(request.hostId).toBe("local");
     expect(request.expiresAt).toBe("2026-08-01T22:00:00.000Z");
     expect(await screen.findByTestId("canvas-share-status")).toHaveTextContent("Snapshot shared.");
+  });
+
+  it("asks for a third acknowledgement before sharing a Canvas that holds a design, and sends it", async () => {
+    const onShare = vi.fn(
+      async (_request: CanvasShareSnapshotRequest): Promise<CanvasShareResult> =>
+        ({ kind: "accepted", snapshot: activeSnapshot() }) as unknown as CanvasShareResult,
+    );
+    renderPanel({ overview: overview(), onShare, holdsDesign: true });
+
+    fireEvent.click(screen.getByTestId("canvas-share-consent-snapshot"));
+    fireEvent.click(screen.getByTestId("canvas-share-consent-audience"));
+    fireEvent.click(screen.getByTestId("canvas-share-submit"));
+    // The two ordinary ticks are not enough: markup leaves as written.
+    expect(onShare).not.toHaveBeenCalled();
+
+    const markup = screen.getByTestId("canvas-share-consent-markup");
+    expect(markup.closest("label")).toHaveTextContent("shared exactly as written");
+    fireEvent.click(markup);
+    fireEvent.click(screen.getByTestId("canvas-share-submit"));
+
+    await waitFor(() => expect(onShare).toHaveBeenCalledTimes(1));
+    expect(onShare.mock.calls[0]?.[0].consent).toMatchObject({
+      acknowledgedMarkupSharedAsWritten: true,
+    });
+  });
+
+  it("asks for no markup acknowledgement when the Canvas holds no design", async () => {
+    const onShare = vi.fn(
+      async (_request: CanvasShareSnapshotRequest): Promise<CanvasShareResult> =>
+        ({ kind: "accepted", snapshot: activeSnapshot() }) as unknown as CanvasShareResult,
+    );
+    renderPanel({ overview: overview(), onShare });
+
+    expect(screen.queryByTestId("canvas-share-consent-markup")).toBeNull();
+    fireEvent.click(screen.getByTestId("canvas-share-consent-snapshot"));
+    fireEvent.click(screen.getByTestId("canvas-share-consent-audience"));
+    fireEvent.click(screen.getByTestId("canvas-share-submit"));
+    await waitFor(() => expect(onShare).toHaveBeenCalledTimes(1));
+    expect(onShare.mock.calls[0]?.[0].consent).not.toHaveProperty(
+      "acknowledgedMarkupSharedAsWritten",
+    );
+  });
+
+  it("draws a shared design under the frame policy and runs a shared prototype from a page ticketed for the snapshot", async () => {
+    const page = `/api/canvas/design-page?ticket=${"a".repeat(43)}`;
+    const shared = {
+      ...exportDocument(),
+      schemaVersion: 10,
+      blocks: [
+        {
+          blockId: "spec",
+          schemaVersion: 16,
+          kind: "design",
+          title: "Spec",
+          size: "document",
+          frames: [{ frameId: "spec", title: "Spec", html: "<article><h1>Ranking</h1></article>" }],
+        },
+        {
+          blockId: "cart",
+          schemaVersion: 18,
+          kind: "design",
+          title: "Cart",
+          size: "phone",
+          runsScript: true,
+          frames: [
+            { frameId: "cart", title: "Cart", html: '<button onclick="add()">Add</button>' },
+          ],
+        },
+      ],
+    };
+    const onOpen = vi.fn(
+      async (request: { readonly runDesign?: unknown }) =>
+        ({
+          kind: "allowed",
+          document: shared,
+          event: { eventId: "x" },
+          ...(request.runDesign === undefined ? {} : { designPage: page }),
+        }) as never,
+    );
+    renderPanel({
+      overview: overview({ snapshots: [activeSnapshot()] }),
+      onOpen,
+      resolveDesignPage: (path) => `http://127.0.0.1:13773${path}`,
+    });
+
+    fireEvent.click(screen.getByTestId(`canvas-share-open-${snapshotId}`));
+    const view = await screen.findByTestId("canvas-share-snapshot-view");
+
+    // The static frame is the same srcdoc frame the live Canvas draws: no
+    // script, and nothing it can load.
+    const still = within(view).getByTitle<HTMLIFrameElement>("Spec, document");
+    expect(still.getAttribute("sandbox")).toBe("allow-same-origin");
+    expect(still.srcdoc).toContain("default-src 'none'");
+
+    // The prototype waits for the person, then runs from the ticketed page.
+    expect(within(view).queryByTitle("Cart, running prototype")).toBeNull();
+    fireEvent.click(within(view).getByRole("button", { name: "Run" }));
+    const running = await within(view).findByTitle<HTMLIFrameElement>("Cart, running prototype");
+    expect(running.getAttribute("sandbox")).toBe("allow-scripts");
+    expect(running.getAttribute("src")).toBe(`http://127.0.0.1:13773${page}`);
+    expect(onOpen).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        kind: "canvas-share-access",
+        snapshotId,
+        runDesign: { blockId: "cart" },
+      }),
+    );
   });
 
   it("says plainly when the host does not share and offers no control", () => {
