@@ -108,6 +108,48 @@ describe("provider account plan-usage store", () => {
     expect(JSON.parse(body).entries[0].stateDirectory).toBe("/Users/example/.claude");
   });
 
+  it("keeps both accounts when two snapshots persist at the same time", async () => {
+    const { store, filePath } = await openStore();
+    await Promise.all([
+      store.replace({
+        instanceId: firstId,
+        stateDirectory: "/Users/example/.claude",
+        source: "process-refresh",
+        observedAt: occurredAt,
+        available: true,
+        windows: [
+          {
+            window: "five_hour",
+            status: "allowed",
+            utilization: 0.2,
+            observedAt: occurredAt,
+          },
+        ],
+      }),
+      store.recordWindow(
+        windowEvent({
+          instanceId: secondId,
+          sessionId: "00000000-0000-4000-8000-000000000002",
+          correlationId: "00000000-0000-4000-8000-000000000012",
+          status: "warning",
+          utilization: 0.7,
+        }),
+        `/Users/example/.claude-accounts/${secondId}`,
+      ),
+    ]);
+
+    expect(store.snapshot(firstId, "/Users/example/.claude")?.windows).toEqual([
+      expect.objectContaining({ window: "five_hour", utilization: 0.2 }),
+    ]);
+    expect(
+      store.snapshot(secondId, `/Users/example/.claude-accounts/${secondId}`)?.windows,
+    ).toEqual([expect.objectContaining({ window: "five_hour", utilization: 0.7 })]);
+    const body = JSON.parse(await readFile(filePath, "utf8")) as {
+      readonly entries: ReadonlyArray<{ readonly instanceId: string }>;
+    };
+    expect(body.entries).toHaveLength(2);
+  });
+
   it("restores the last snapshot after a process restart", async () => {
     const { store, filePath } = await openStore();
     await store.replace({
