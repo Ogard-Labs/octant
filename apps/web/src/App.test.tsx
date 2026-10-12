@@ -18,6 +18,7 @@ import {
 import type { NavigatorAssistantClient } from "@octant/client-runtime/navigator-assistant-client";
 import type { ProjectClient } from "@octant/client-runtime/project-client";
 import type { ChatClient } from "@octant/client-runtime/chat-client";
+import type { ShellClient } from "@octant/client-runtime/shell-client";
 import type { CodeClient } from "@octant/client-runtime/code-client";
 import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
 import { decodeAgentRunId, decodeAgentRunParentThreadId } from "@octant/contracts/agent-run";
@@ -1309,6 +1310,7 @@ describe("App", () => {
     const shellExecute = vi.mocked(shellApi.execute);
     const baseShell = shellExecute.getMockImplementation();
     if (baseShell === undefined) throw new Error("Expected a shell fixture");
+    const continueShell = baseShell as ShellClient["execute"];
     shellExecute.mockImplementation(async (command) => {
       if (
         command.kind === "apply-workspace-operation" &&
@@ -1320,7 +1322,7 @@ describe("App", () => {
           message: "Workspace changed. Try again.",
         };
       }
-      return await baseShell(command);
+      return await continueShell(command);
     });
 
     render(
@@ -1365,6 +1367,7 @@ describe("App", () => {
     const shellExecute = vi.mocked(shellApi.execute);
     const baseShell = shellExecute.getMockImplementation();
     if (baseShell === undefined) throw new Error("Expected a shell fixture");
+    const continueShell = baseShell as ShellClient["execute"];
     shellExecute.mockImplementation(async (command) => {
       if (
         command.kind === "apply-workspace-operation" &&
@@ -1376,7 +1379,7 @@ describe("App", () => {
           message: "Workspace changed. Try again.",
         };
       }
-      return await baseShell(command);
+      return await continueShell(command);
     });
 
     render(

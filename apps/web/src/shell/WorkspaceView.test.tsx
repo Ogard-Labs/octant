@@ -3,7 +3,12 @@ import {
   type ProjectAvailability,
   type ProjectSummary,
 } from "@octant/contracts/projects";
-import { decodeWorkspaceTabId, type WorkspaceTab } from "@octant/contracts/shell";
+import {
+  decodeLayoutNodeId,
+  decodePaneId,
+  decodeWorkspaceTabId,
+  type WorkspaceTab,
+} from "@octant/contracts/shell";
 import { decodeChatBootstrap, decodeChatThreadView } from "@octant/contracts/chat";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -22,8 +27,8 @@ import {
 
 const ids = {
   checkout: "10000000-0000-4000-8000-000000000001",
-  pane: "10000000-0000-4000-8000-000000000002",
-  node: "10000000-0000-4000-8000-000000000003",
+  pane: decodePaneId("10000000-0000-4000-8000-000000000002"),
+  node: decodeLayoutNodeId("10000000-0000-4000-8000-000000000003"),
   tab: "10000000-0000-4000-8000-000000000004",
   thread: "10000000-0000-4000-8000-000000000005",
   project: "10000000-0000-4000-8000-000000000007",
@@ -2474,12 +2479,12 @@ describe("WorkspaceView Chat surfaces", () => {
     } as never as WorkspaceViewProps["layout"];
     const idle = {
       kind: "pane" as const,
-      nodeId: "10000000-0000-4000-8000-000000000040",
-      paneId: "10000000-0000-4000-8000-000000000041",
+      nodeId: decodeLayoutNodeId("10000000-0000-4000-8000-000000000040"),
+      paneId: decodePaneId("10000000-0000-4000-8000-000000000041"),
       surface: {
         id: decodeWorkspaceTabId("10000000-0000-4000-8000-000000000042"),
-        kind: "welcome",
-        mode: "work",
+        kind: "welcome" as const,
+        mode: "work" as const,
         title: "Welcome to Work",
       },
     };
@@ -2564,12 +2569,12 @@ describe("WorkspaceView Chat surfaces", () => {
     } as never as WorkspaceViewProps["layout"];
     const idle = {
       kind: "pane" as const,
-      nodeId: "10000000-0000-4000-8000-000000000043",
-      paneId: "10000000-0000-4000-8000-000000000044",
+      nodeId: decodeLayoutNodeId("10000000-0000-4000-8000-000000000043"),
+      paneId: decodePaneId("10000000-0000-4000-8000-000000000044"),
       surface: {
         id: decodeWorkspaceTabId("10000000-0000-4000-8000-000000000045"),
-        kind: "welcome",
-        mode: "work",
+        kind: "welcome" as const,
+        mode: "work" as const,
         title: "Welcome to Work",
       },
     };

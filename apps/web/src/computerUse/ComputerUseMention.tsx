@@ -87,10 +87,13 @@ function useApplicationMention(
 ) {
   const listId = useId();
   const [token, setToken] = useState<Token>();
-  const [chosen, setChosen] = useState<{
-    readonly scope: string;
-    readonly selection: ExtensionSelection;
-  }>(() =>
+  const [chosen, setChosen] = useState<
+    | {
+        readonly scope: string;
+        readonly selection: ExtensionSelection;
+      }
+    | undefined
+  >(() =>
     input.initialSelection === undefined
       ? undefined
       : { scope: input.scopeKey, selection: input.initialSelection },
