@@ -29,6 +29,11 @@ import type {
 } from "./canvasPreviewService";
 import { inTreeCanvasDocumentRecipes } from "./canvasDocumentRecipes";
 import {
+  importCanvasMermaid,
+  isCanvasMermaidLanguage,
+  type CanvasMermaidRefusalReason,
+} from "@octant/domain/canvas-mermaid-import";
+import {
   loginSequenceExample,
   orderStateExample,
   orderSchemaExample,
@@ -455,6 +460,11 @@ const BLOCK_GUIDANCE: Readonly<Record<string, { readonly use: string; readonly d
       detail:
         "Headline numbers are metric blocks. Give each a label and a value, and add an optional format, unit, delta, a goodDirection of up, down, or neutral so a delta's tone is never guessed, a caption, and a sparkline of at most 256 recent readings. Consecutive metric blocks are gathered into a responsive tile row of two to four tiles.",
     },
+    "code-excerpt": {
+      use: "Code, or a Mermaid diagram you already have, which the host imports as a typed diagram.",
+      detail:
+        "A Mermaid diagram you already have may be passed as a code-excerpt block with language mermaid: the host translates a flowchart or graph (TD or LR; [ ] process, { } decision, ([ ]) terminator, ( ) plain; -->, ---, and -.-> links with labels; one level of subgraph), a sequenceDiagram (participants, actors, messages, notes, activate and deactivate), a stateDiagram (transitions, [*] start and end, aliases, composite states), an erDiagram (relationships with cardinalities, attributes, PK), or a mindmap into the matching typed block under the same blockId. Anything else, such as styling, click, loops, or another diagram type, keeps the code block, and the result's mermaid list says which blocks were imported and why any were not. Mermaid itself is never drawn.",
+    },
     tabs: {
       use: "A long document arranged in labelled tabs.",
       detail: LAYOUT_GROUP_GUIDE,
@@ -528,16 +538,28 @@ function toolDescription(
       ? "When the request iterates on earlier work, revise the existing Canvas instead of creating another: list returns this run's Canvases, and read returns one's current blocks and sequence."
       : "When the request iterates on earlier work, revise the thread's existing Canvas instead of creating another: list returns this thread's Canvases, and read returns one's current blocks and sequence.",
     "Operations: describe, list, read, create, revise, preview. Before you author, call describe: with no block kinds it lists every kind, when to use the structured ones, the document recipes to start from, and a create example; with up to three blockKinds it returns their exact schemas, plus authoring guidance and examples for the kinds that have them. Start from a document recipe before inventing a shape.",
-    "Author the content in blocks, not in prompt. Use structured blocks rather than HTML, JavaScript, CSS, or Mermaid; only a design block's frames are HTML and CSS; they load nothing, and run script only in a design that declares it. Text renders as plain text, not Markdown: give each section its own heading block (the Canvas title is already shown, so do not repeat it), and use key-value, table, status, or callout blocks instead of Markdown lists, bold, or code spans.",
+    "Author the content in blocks, not in prompt. Use structured blocks rather than HTML, JavaScript, or CSS; only a design block's frames are HTML and CSS; they load nothing, and run script only in a design that declares it. Mermaid is never drawn; describe code-excerpt for how a Mermaid diagram you already have becomes a typed diagram. Text renders as plain text, not Markdown: give each section its own heading block (the Canvas title is already shown, so do not repeat it), and use key-value, table, status, or callout blocks instead of Markdown lists, bold, or code spans.",
     "A Canvas is a document: it grants no file, shell, Git, or network access. Creation adds a card to this thread and offers the Canvas in the thread's dock the first time it appears; the user can also select Open Canvas. Do not claim the user has read it or invent a download URL.",
     "Choose where the thread shows it. Use presentation inline for a visual or a reading document that answers the question in place, such as a chart, a few metrics, a short table, a sequence or state diagram, or an article or brief made of reading blocks or one document-size design; it is drawn in the conversation just below your reply to this turn, so refer to it as below. A long one starts as a faded teaser the user can expand in place, and the user can still open it in the sidebar. Leave presentation out (sidebar) for plans, boards, mockups, other designs, and anything the user will keep working on; inline never holds those, and when the host shows a card instead, the result says so in presentationNote.",
     "Revise with the canvasId, the last observed expectedSequence, and the complete replacement blocks; people edit Canvases too, so read before revising and keep their changes. Reference blocks require source ids already in the Canvas source manifest; create attaches no sources. Never invent file or artifact references.",
-    "Preview once after you create or revise a chart, treemap, or inline Canvas, fix what its warnings or picture show with a revise, then reply. Look once per change: previewing an unchanged document only spends the host's browser and your context.",
+    "Preview once after you create or revise a chart, treemap, or inline Canvas, revise to fix what its warnings or picture show, then reply. Look once per change: an unchanged document previews the same.",
   ].join(" ");
 }
 
+/** What became of each Mermaid code block an authoring call carried. */
+type CanvasMermaidOutcome =
+  | { readonly blockId: string; readonly status: "imported"; readonly kind: string }
+  | {
+      readonly blockId: string;
+      readonly status: "kept-as-code";
+      readonly reason: CanvasMermaidRefusalReason;
+      readonly line?: number;
+      readonly detail: string;
+    };
+
 interface CanvasAuthoringInput {
   readonly operation: "create" | "revise";
+  readonly mermaid?: ReadonlyArray<CanvasMermaidOutcome>;
   readonly title?: string;
   readonly canvasId?: string;
   readonly expectedSequence?: number;
@@ -695,14 +717,40 @@ function parseInput(inputJson: string): CanvasToolInput | { readonly error: stri
     };
   }
   const decoded: CanvasBlock[] = [];
+  const mermaid: CanvasMermaidOutcome[] = [];
   for (const [index, block] of blocks.entries()) {
+    let typed: CanvasBlock;
     try {
-      decoded.push(decodeCanvasBlock(block));
+      typed = decodeCanvasBlock(block);
     } catch {
       // Naming the block that failed is what lets an author fix it; the
       // catalog itself is what refuses anything outside it.
       return { error: `Block ${String(index + 1)} is not a Canvas block this host accepts.` };
     }
+    // A Mermaid code block is translated into the typed diagram it describes,
+    // under the same block id, when it stays inside the imported subset. A
+    // source that does not keeps its code block, and the author is told why.
+    // Mermaid itself is never drawn.
+    if (
+      typed.kind === "code-excerpt" &&
+      typed.sourceId === undefined &&
+      isCanvasMermaidLanguage(typed.language)
+    ) {
+      const outcome = importCanvasMermaid(typed.code, typed.blockId);
+      if (outcome.status === "imported") {
+        typed = outcome.block;
+        mermaid.push({ blockId: String(typed.blockId), status: "imported", kind: typed.kind });
+      } else {
+        mermaid.push({
+          blockId: String(typed.blockId),
+          status: "kept-as-code",
+          reason: outcome.reason,
+          ...(outcome.line === undefined ? {} : { line: outcome.line }),
+          detail: outcome.detail,
+        });
+      }
+    }
+    decoded.push(typed);
   }
   const presentation = record["presentation"];
   if (presentation !== undefined && presentation !== "inline" && presentation !== "sidebar") {
@@ -715,6 +763,7 @@ function parseInput(inputJson: string): CanvasToolInput | { readonly error: stri
   return {
     operation,
     blocks: decoded,
+    ...(mermaid.length === 0 ? {} : { mermaid }),
     ...(presentation === undefined ? {} : { presentation }),
     ...(typeof title === "string" ? { title: title.slice(0, MAX_TITLE_CHARS) } : {}),
     ...(typeof canvasId === "string" ? { canvasId } : {}),
@@ -1046,6 +1095,7 @@ function canvasToolSet(options: {
             sequence: 1,
             blocks: input.blocks.length,
             presentation: result.card.presentation ?? "sidebar",
+            ...(input.mermaid === undefined ? {} : { mermaid: input.mermaid }),
             ...(placed.note === undefined ? {} : { presentationNote: placed.note }),
             ...(result.card.presentation === "inline" ? { whereShown: INLINE_WHERE_SHOWN } : {}),
           },
@@ -1113,6 +1163,7 @@ function canvasToolSet(options: {
           canvasId: input.canvasId,
           versionId: result.receipt.versionId,
           sequence: result.receipt.sequence,
+          ...(input.mermaid === undefined ? {} : { mermaid: input.mermaid }),
           ...(effective === undefined ? {} : { presentation: effective }),
           ...(note === undefined ? {} : { presentationNote: note }),
           ...(effective === "inline" ? { whereShown: INLINE_WHERE_SHOWN } : {}),

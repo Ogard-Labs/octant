@@ -24,6 +24,7 @@ export * from "./deliveryTargetPolicy";
 export * from "./canvasPolicy";
 export * from "./canvasDiagramLayout";
 export * from "./canvasPlanGanttLayout";
+export * from "./canvasMermaidImport";
 export * from "./canvasKindLayout";
 export * from "./canvasTreemapLayout";
 export * from "./canvasHeatmapLayout";

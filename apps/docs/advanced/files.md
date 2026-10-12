@@ -254,6 +254,13 @@ see each task as a bar from its start to its due day, arrows from the tasks it
 waits on, and its status beside its title. Tasks without dates are listed under
 the chart. Choosing a view never changes the plan.
 
+If the agent already has a diagram written in Mermaid, it can hand it to the
+Canvas as a Mermaid code block: a flowchart, sequence, state, entity-relationship,
+or mind map in the supported subset becomes the matching Canvas diagram, drawn
+by Octant, so you can comment on it and share it like any other. Octant never
+draws Mermaid itself; a diagram outside the subset (another chart type, custom
+styling, links) stays a code block.
+
 A login or request flow is a sequence: participants across the top, messages
 in order down the page, an activation on a lifeline, and notes. A lifecycle
 such as an order is a state machine: states that may nest, labeled
