@@ -177,8 +177,11 @@ function sharedDesign(
       `Canvas design ${block.blockId} holds what reads as a credential in its markup.`,
     );
   }
+  // Everything about the design that is not markup is a value like any other
+  // block's, ids included, and the acknowledgement does not cover it.
+  const { styles: _styles, frames, ...values } = design;
   assertNoSecretShape(
-    { title: design.title, frames: design.frames.map((frame) => frame.title) },
+    { ...values, frames: frames.map(({ html: _html, ...frame }) => frame) },
     `block.${block.blockId}`,
   );
   return design as CanvasStaticExportBlock;

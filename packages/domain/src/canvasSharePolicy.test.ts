@@ -427,6 +427,44 @@ describe("Canvas share policy", () => {
     expect(JSON.stringify(shared.document)).not.toContain("screens/home.png");
   });
 
+  it("refuses an acknowledged design whose own id or frame id reads as a credential", () => {
+    const share = (design: unknown) =>
+      shareDenial(() =>
+        buildCanvasStaticExportReceipt({
+          request: {
+            ...request,
+            consent: { ...request.consent, acknowledgedMarkupSharedAsWritten: true },
+          },
+          current: {
+            ...current,
+            schemaVersion: CANVAS_SCHEMA_VERSION,
+            definition: {
+              ...current.definition,
+              schemaVersion: CANVAS_SCHEMA_VERSION,
+              blocks: [design],
+            },
+          },
+          context,
+        }),
+      );
+    // An id is not markup, so the acknowledgement does not cover it.
+    expect(
+      share({ ...onboardingFlowExample, blockId: "ghp_abcdefghijklmnopqrstuvwxyz0123456789" }),
+    ).toBe("unsafe-payload");
+    expect(
+      share({
+        ...onboardingFlowExample,
+        frames: [
+          {
+            frameId: "ghp_abcdefghijklmnopqrstuvwxyz0123456789",
+            title: "Welcome",
+            html: "<p>Hello</p>",
+          },
+        ],
+      }),
+    ).toBe("unsafe-payload");
+  });
+
   it("refuses an acknowledged design whose markup holds what reads as a credential", () => {
     const leaking = {
       ...onboardingFlowExample,
