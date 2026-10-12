@@ -3989,6 +3989,7 @@ export function startOctantServer(
         authorizeToolCall: createExtensionToolCallAuthorizer({
           grants: extensionToolGrantStore,
           approvals: extensionToolApprovalService,
+          isHostScope: isRoutineHostScope,
           threadTainted: (threadId) =>
             readThreadExternalContentTaint(persistence.connection, threadId)
               .externalContentIngested,

@@ -119,10 +119,11 @@ export class ExtensionToolApprovalService {
     const pending = this.#pending.get(decision.approvalId);
     if (pending === undefined || !this.#answerableBy(pending, windowId)) return false;
     if (decision.remember === true) {
-      // A remembered approval grows only from a person's answer at a window.
-      // The host's own scope is nobody, so it may settle its prompt but never
-      // remember one. A refused or failed `remember` leaves the call waiting,
-      // so the person can still approve it once.
+      // A remembered approval grows only from a person's answer at a window,
+      // to a prompt that offered it: one a host-owned turn raised arrives
+      // with no `remember`, whoever answers. The host's own scope is nobody,
+      // so it may settle its prompt but never remember one. A refused or
+      // failed `remember` leaves the call waiting, to be approved once.
       if (
         decision.decision !== "approved" ||
         pending.remember === undefined ||
