@@ -31,7 +31,7 @@ import {
 } from "../ProviderSettingsCredentials";
 import { driverLabel } from "../providerSettingsPresentation";
 import type { ProviderSettingsViewProps } from "../ProviderSettingsView";
-import { ClaudeAccountSettingsFields } from "./ClaudeAccountFields";
+import { ClaudeAccountSettingsFields, CodexAccountSettingsFields } from "./ClaudeAccountFields";
 import { claudeConfigurationFromFields } from "./claudeAccountValues";
 import {
   configurationFrom,
@@ -126,6 +126,8 @@ export interface ProviderCreateFormPresentationProps {
    */
   /** A subscription account already holds Claude's host profile. */
   readonly claudeHostProfileTaken?: boolean;
+  /** An account already holds Codex's host profile. */
+  readonly codexHostProfileTaken?: boolean;
 }
 
 export function ProviderCreateForm(
@@ -142,6 +144,8 @@ export function ProviderCreateForm(
     useState<ClaudeAuthentication>("subscription");
   const [claudeAccent, setClaudeAccent] = useState<ClaudeAccountAccent | "">("");
   const [claudeBinaryPath, setClaudeBinaryPath] = useState("");
+  const [codexAccent, setCodexAccent] = useState<ClaudeAccountAccent | "">("");
+  const [codexBinaryPath, setCodexBinaryPath] = useState("");
   const vibeAuthentication: MistralVibeAuthentication = "api-key";
   const [grokAuthentication, setGrokAuthentication] = useState<GrokAuthentication>("subscription");
   const [glmAuthentication, setGlmAuthentication] = useState<GlmAuthentication>("provider-owned");
@@ -282,7 +286,6 @@ export function ProviderCreateForm(
               let operation: Promise<boolean>;
               if (
                 providerType === "opencode" ||
-                providerType === "codex" ||
                 providerType === "kimi-code" ||
                 providerType === "devin" ||
                 providerType === "kilo" ||
@@ -295,6 +298,14 @@ export function ProviderCreateForm(
                   providerType,
                   String(data.get("displayName") ?? ""),
                   String(data.get("binaryPath") ?? ""),
+                );
+              } else if (providerType === "codex") {
+                const accent = String(data.get("accent") ?? "").trim();
+                operation = props.onCreate(
+                  providerType,
+                  String(data.get("displayName") ?? ""),
+                  String(data.get("binaryPath") ?? ""),
+                  ...(accent === "" ? [] : [accent]),
                 );
               } else if (providerType === "claude") {
                 const configuration = claudeConfigurationFromFields({
@@ -474,6 +485,8 @@ export function ProviderCreateForm(
                     setClaudeAuthentication("subscription");
                     setClaudeAccent("");
                     setClaudeBinaryPath("");
+                    setCodexAccent("");
+                    setCodexBinaryPath("");
                   }
                 })
                 .finally(() => setCreating(false));
@@ -572,11 +585,17 @@ export function ProviderCreateForm(
                   onChange={
                     providerType === "claude"
                       ? (event) => setClaudeBinaryPath(event.currentTarget.value)
-                      : undefined
+                      : providerType === "codex"
+                        ? (event) => setCodexBinaryPath(event.currentTarget.value)
+                        : undefined
                   }
                   placeholder={`/absolute/path/to/${selectedBinaryName}`}
                   required
-                  {...(providerType === "claude" ? { value: claudeBinaryPath } : {})}
+                  {...(providerType === "claude"
+                    ? { value: claudeBinaryPath }
+                    : providerType === "codex"
+                      ? { value: codexBinaryPath }
+                      : {})}
                 />
               </label>
             ) : providerType === "ollama" ? (
@@ -844,6 +863,14 @@ export function ProviderCreateForm(
                   showSignInCommand={claudeAuthentication === "subscription"}
                 />
               </>
+            ) : null}
+            {providerType === "codex" ? (
+              <CodexAccountSettingsFields
+                accent={codexAccent}
+                binaryPath={codexBinaryPath}
+                extraAccount={props.codexHostProfileTaken === true}
+                onAccentChange={setCodexAccent}
+              />
             ) : null}
             {providerType === "mistral-vibe" ? (
               <VibeCreateAuthenticationFields

@@ -4,10 +4,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
+import type { ProviderInstanceId } from "@octant/contracts";
 import {
   createClaudeLocalUsageHistorySource,
   createCodexLocalUsageHistorySource,
   createLocalUsageHistorySourceForDriver,
+  localUsageHistorySourceKey,
 } from "./providerUsageHistorySources";
 import { readLocalUsageHistory } from "./localUsageHistoryReader";
 
@@ -125,6 +127,42 @@ describe("local provider usage history", () => {
     expect(result.records[1]?.modelId).toBe("gpt-5.6-luna");
     expect(result.records[1]?.cacheWriteInputTokens).toBe(0);
     expect(result.coverage.status).toBe("ready");
+  });
+
+  it("reads Codex usage from the account home rather than the host default", async () => {
+    const root = await codexFixtureRoot("octant-codex-account-home-");
+    await writeFile(
+      join(
+        root,
+        "sessions",
+        "rollout-2026-09-09T10-00-00-00000000-0000-4000-8000-000000000009.jsonl",
+      ),
+      JSON.stringify({
+        timestamp: "2026-09-09T10:00:00.000Z",
+        type: "event_msg",
+        payload: {
+          type: "token_count",
+          info: {
+            last_token_usage: { input_tokens: 7, output_tokens: 2 },
+          },
+        },
+      }),
+    );
+    const source = createLocalUsageHistorySourceForDriver({
+      driverKind: "codex",
+      home: join(tmpdir(), "unused-codex-home"),
+      codexHome: root,
+    });
+    if (source === undefined) {
+      throw new Error("expected a Codex usage source");
+    }
+    const result = await Effect.runPromise(source.read(request));
+    expect(result.records).toEqual([
+      expect.objectContaining({
+        inputTokens: 7,
+        outputTokens: 2,
+      }),
+    ]);
   });
 
   it("scans only Codex sessions and archived_sessions directories", async () => {
@@ -749,5 +787,28 @@ describe("local provider usage history", () => {
     expect(unchanged.coverage.status).toBe("partial");
     expect(unchanged.coverage.omittedRecordCount).toBe(result.coverage.omittedRecordCount);
     expect(unchanged.coverage.scannedFileCount).toBe(0);
+  });
+
+  it("keeps a local usage source for each Codex account", () => {
+    const first = "11111111-1111-4111-8111-111111111111" as ProviderInstanceId;
+    const second = "22222222-2222-4222-8222-222222222222" as ProviderInstanceId;
+    const seen = new Set<string>();
+    for (const instanceId of [first, second]) {
+      seen.add(
+        localUsageHistorySourceKey({
+          driverKind: "codex",
+          instanceId,
+          sourceKind: "codex",
+        }),
+      );
+    }
+    expect(seen.size).toBe(2);
+    expect(
+      localUsageHistorySourceKey({
+        driverKind: "opencode",
+        instanceId: first,
+        sourceKind: "opencode",
+      }),
+    ).toBe("opencode");
   });
 });

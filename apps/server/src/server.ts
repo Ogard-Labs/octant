@@ -571,7 +571,10 @@ import { createSpendCeilingRouteHandler } from "./spendCeilingRoutes";
 import { CacheStatsProjection } from "./cacheStatsProjection";
 import { createUsageDashboardRouteHandler } from "./usageDashboardRoutes";
 import { createLocalUsageHistoryRouteHandler } from "./localUsageHistoryRoutes";
-import { createLocalUsageHistorySourceForDriver } from "./providers/providerUsageHistorySources";
+import {
+  createLocalUsageHistorySourceForDriver,
+  localUsageHistorySourceKey,
+} from "./providers/providerUsageHistorySources";
 import { resolveWindowProjectScope, type UsageProjectScope } from "./usageProjectScope";
 import { SideChatSidecarStore } from "./chat/sideChatSidecarStore";
 import {
@@ -1009,6 +1012,7 @@ interface ConfiguredProviderDriverOptions {
   readonly claudeResumeIdentityPort?: ClaudeResumeIdentityPort;
   readonly isProjectConfinedPath?: (projectRoot: string, absolutePath: string) => boolean;
   readonly claudeInstances?: ReadonlyArray<ProviderInstance>;
+  readonly codexInstances?: ReadonlyArray<ProviderInstance>;
   readonly runtimeRegistry: ProviderRuntimeRegistry;
   readonly permissionPersistence: () => PermissionPersistence;
   readonly credentialResolver?: ProviderCredentialResolver;
@@ -1112,6 +1116,7 @@ export function makeConfiguredProviderDriver(
       ...(options.claudeInstances === undefined
         ? {}
         : { claudeInstances: options.claudeInstances }),
+      ...(options.codexInstances === undefined ? {} : { codexInstances: options.codexInstances }),
       ...(options.credentialResolver === undefined
         ? {}
         : { credentialResolver: options.credentialResolver }),
@@ -4357,6 +4362,7 @@ export function startOctantServer(
             claudeResumeIdentityPort: claudeResumeIdentityStore,
             isProjectConfinedPath,
             claudeInstances: persistence.readProviderInstances(),
+            codexInstances: persistence.readProviderInstances(),
             runtimeRegistry: providerRuntimeRegistry,
             permissionPersistence: () => persistence.readProviderDefaults().permissionPersistence,
             onRuntimeEvent: (event) => providerRuntimeUsageLimitsStore.record(event),
@@ -4493,12 +4499,18 @@ export function startOctantServer(
           driverKind: instance.driverKind,
           home: homedir(),
           ...(claudeConfigDirectory === undefined ? {} : { claudeConfigDirectory }),
+          ...(instance.driverKind === "codex" && instance.configuration.codexHome !== undefined
+            ? { codexHome: instance.configuration.codexHome }
+            : {}),
           checkpointStore: createLocalUsageHistoryCheckpointStore(
             join(persistence.dataDirectory, "local-usage-cache.sqlite3"),
           ),
         });
       },
       get claudeInstances() {
+        return persistence.readProviderInstances();
+      },
+      get codexInstances() {
         return persistence.readProviderInstances();
       },
     };
@@ -4526,10 +4538,11 @@ export function startOctantServer(
           }
           const source = driver.localUsageHistory;
           if (source === undefined) continue;
-          const sourceKey =
-            instance.driverKind === "claude"
-              ? `${source.sourceKind}:${String(instance.id)}`
-              : source.sourceKind;
+          const sourceKey = localUsageHistorySourceKey({
+            driverKind: instance.driverKind,
+            instanceId: instance.id,
+            sourceKind: source.sourceKind,
+          });
           if (seen.has(sourceKey)) continue;
           seen.add(sourceKey);
           sources.push(source);

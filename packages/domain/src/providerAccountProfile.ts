@@ -6,8 +6,8 @@ import type { ProviderDriverKind, ProviderInstance, ProviderInstanceId } from "@
  * and a sign-in command. Octant never reads, stores, or injects that
  * provider's credentials.
  *
- * Claude is the only adopter in this change. Other drivers stay single-account
- * until they declare a profile.
+ * Claude and Codex declare profiles. Other drivers stay single-account until
+ * they declare one.
  */
 export interface ProviderAccountProfile {
   readonly driverKind: ProviderDriverKind;
@@ -35,8 +35,19 @@ export const CLAUDE_ACCOUNT_PROFILE: ProviderAccountProfile = {
   statusArgv: ["auth", "status"],
 };
 
+export const CODEX_ACCOUNT_PROFILE: ProviderAccountProfile = {
+  driverKind: "codex",
+  supportsMultipleAccounts: true,
+  stateDirectoryEnvVars: ["CODEX_HOME"],
+  defaultHostDirectoryName: ".codex",
+  extraAccountsDirectoryName: ".codex-accounts",
+  signInArgv: ["login"],
+  statusArgv: ["login", "status"],
+};
+
 const PROFILES: Readonly<Partial<Record<ProviderDriverKind, ProviderAccountProfile>>> = {
   claude: CLAUDE_ACCOUNT_PROFILE,
+  codex: CODEX_ACCOUNT_PROFILE,
 };
 
 export function providerAccountProfile(
@@ -120,10 +131,7 @@ export function formatProviderAccountStatusCommand(input: {
   });
 }
 
-/**
- * Accent on a provider instance, when that driver's configuration carries one.
- * Claude is the only driver that stores an accent today.
- */
+/** Accent on a provider instance, when that driver's configuration carries one. */
 export function providerAccountAccent(instance: ProviderInstance): string | undefined {
   const configuration = instance.configuration;
   if (configuration === undefined || !("accent" in configuration)) return undefined;
@@ -134,19 +142,22 @@ export function providerAccountAccent(instance: ProviderInstance): string | unde
 export function implicitClaudeAccountOwnerId(
   instances: ReadonlyArray<ProviderInstance>,
 ): ProviderInstanceId | undefined {
-  const candidates = instances.filter(
-    (instance) =>
-      instance.driverKind === "claude" &&
+  return implicitAccountOwnerId(instances, (instance) => {
+    if (instance.driverKind !== "claude") return false;
+    return (
       instance.configuration.configDirectory === undefined &&
-      instance.configuration.authentication === "subscription",
-  );
-  if (candidates.length === 0) return undefined;
-  const [owner] = [...candidates].sort((left, right) => {
-    const created = left.createdAt.localeCompare(right.createdAt);
-    if (created !== 0) return created;
-    return String(left.id).localeCompare(String(right.id));
+      instance.configuration.authentication === "subscription"
+    );
   });
-  return owner?.id;
+}
+
+export function implicitCodexAccountOwnerId(
+  instances: ReadonlyArray<ProviderInstance>,
+): ProviderInstanceId | undefined {
+  return implicitAccountOwnerId(instances, (instance) => {
+    if (instance.driverKind !== "codex") return false;
+    return instance.configuration.codexHome === undefined;
+  });
 }
 
 /** Extra Claude accounts, and every API-key account, use an assigned leaf. */
@@ -159,6 +170,31 @@ export function claudeAccountUsesAssignedDirectory(
   if (instance.configuration.configDirectory !== undefined) return true;
   const ownerId = implicitClaudeAccountOwnerId(instances);
   return ownerId !== undefined && String(instance.id) !== String(ownerId);
+}
+
+/** Extra Codex accounts use an assigned leaf. The first login keeps `~/.codex`. */
+export function codexAccountUsesAssignedDirectory(
+  instances: ReadonlyArray<ProviderInstance>,
+  instance: ProviderInstance,
+): boolean {
+  if (instance.driverKind !== "codex") return false;
+  if (instance.configuration.codexHome !== undefined) return true;
+  const ownerId = implicitCodexAccountOwnerId(instances);
+  return ownerId !== undefined && String(instance.id) !== String(ownerId);
+}
+
+function implicitAccountOwnerId(
+  instances: ReadonlyArray<ProviderInstance>,
+  matches: (instance: ProviderInstance) => boolean,
+): ProviderInstanceId | undefined {
+  const candidates = instances.filter(matches);
+  if (candidates.length === 0) return undefined;
+  const [owner] = [...candidates].sort((left, right) => {
+    const created = left.createdAt.localeCompare(right.createdAt);
+    if (created !== 0) return created;
+    return String(left.id).localeCompare(String(right.id));
+  });
+  return owner?.id;
 }
 
 export function isAssignedProviderAccountDirectory(input: {

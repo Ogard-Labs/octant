@@ -84,6 +84,127 @@ describe("makeProviderDriver", () => {
     expect(fixture.openCodeStart).not.toHaveBeenCalled();
   });
 
+  it("refuses to construct a Codex driver without the account snapshot", () => {
+    const fixture = factoryFixture();
+    const { codexInstances: _ignored, ...withoutSnapshot } = fixture.options;
+
+    expect(() => makeProviderDriver(provider("codex"), withoutSnapshot)).toThrowError(
+      ProviderDriverConfigurationError,
+    );
+    expect(fixture.codexStart).not.toHaveBeenCalled();
+  });
+
+  it("refuses a replayed secondary Codex account that still lacks its own home", () => {
+    const fixture = factoryFixture();
+    const owner = provider("codex");
+    const secondary = decodeProviderInstance({
+      id: "80000000-0000-4000-8000-000000000062",
+      displayName: "Codex secondary",
+      driverKind: "codex",
+      configuration: {
+        kind: "codex-cli",
+        binaryPath: "/missing/codex",
+      },
+      enabled: true,
+      environmentPolicy: "inherit-host",
+      version: 1,
+      createdAt: "2026-07-16T11:00:00.000Z",
+      updatedAt: "2026-07-16T11:00:00.000Z",
+    });
+
+    expect(() =>
+      makeProviderDriver(secondary, { ...fixture.options, codexInstances: [owner, secondary] }),
+    ).toThrow(/own home directory/);
+    expect(fixture.codexStart).not.toHaveBeenCalled();
+  });
+
+  it("starts each Codex account as its own app-server with an isolated home", async () => {
+    const fixture = factoryFixture();
+    const extraId = decodeProviderInstanceId("80000000-0000-4000-8000-000000000062");
+    const extraHome = "/Users/test/.codex-accounts/80000000-0000-4000-8000-000000000062";
+    const owner = provider("codex");
+    const extra = decodeProviderInstance({
+      id: extraId,
+      displayName: "Codex work",
+      driverKind: "codex",
+      configuration: {
+        kind: "codex-cli",
+        binaryPath: "/missing/codex",
+        codexHome: extraHome,
+      },
+      enabled: true,
+      environmentPolicy: "inherit-host",
+      version: 1,
+      createdAt: "2026-07-16T11:00:00.000Z",
+      updatedAt: "2026-07-16T11:00:00.000Z",
+    });
+    const options = {
+      ...fixture.options,
+      codexInstances: [owner, extra],
+      codexHostEnvironment: {
+        PATH: "/usr/bin",
+        CODEX_HOME: "/Users/test/.codex",
+        OPENAI_API_KEY: "inherited-must-not-cross",
+        CODEX_ACCESS_TOKEN: "inherited-must-not-cross",
+        CODEX_API_KEY: "inherited-must-not-cross",
+        AWS_BEARER_TOKEN_BEDROCK: "inherited-must-not-cross",
+      },
+    };
+
+    await expect(runProbe(makeProviderDriver(owner, options))).rejects.toThrow(
+      /Codex process selected/,
+    );
+    expect(fixture.codexStart).toHaveBeenCalledOnce();
+    const ownerLaunch = fixture.codexStart.mock.calls[0]?.[0] as {
+      readonly environment?: NodeJS.ProcessEnv;
+    };
+    expect(ownerLaunch.environment?.CODEX_HOME).toBe("/Users/test/.codex");
+    expect(ownerLaunch.environment?.OPENAI_API_KEY).toBe("inherited-must-not-cross");
+    expect(ownerLaunch.environment?.CODEX_ACCESS_TOKEN).toBe("inherited-must-not-cross");
+    expect(ownerLaunch.environment?.CODEX_API_KEY).toBe("inherited-must-not-cross");
+    expect(ownerLaunch.environment?.AWS_BEARER_TOKEN_BEDROCK).toBe("inherited-must-not-cross");
+
+    fixture.codexStart.mockClear();
+    await expect(
+      Effect.runPromise(
+        Effect.scoped(makeProviderDriver(extra, options).probe({ instanceId: extraId })),
+      ),
+    ).rejects.toThrow(/Codex process selected/);
+    expect(fixture.codexStart).toHaveBeenCalledOnce();
+    const extraLaunch = fixture.codexStart.mock.calls[0]?.[0] as {
+      readonly environment?: NodeJS.ProcessEnv;
+    };
+    expect(extraLaunch.environment?.CODEX_HOME).toBe(extraHome);
+    expect(extraLaunch.environment?.OPENAI_API_KEY).toBeUndefined();
+    expect(extraLaunch.environment?.CODEX_HOME).not.toBe(ownerLaunch.environment?.CODEX_HOME);
+  });
+
+  it("injects only a broker-resolved Codex API key into that account's app-server", async () => {
+    const fixture = factoryFixture();
+    const owner = provider("codex");
+    await expect(
+      runProbe(
+        makeProviderDriver(owner, {
+          ...fixture.options,
+          codexInstances: [owner],
+          codexHostEnvironment: {
+            PATH: "/usr/bin",
+            OPENAI_API_KEY: "inherited-must-not-cross",
+          },
+          credentialResolver: {
+            has: async () => true,
+            resolve: async () => "broker-resolved-key",
+          },
+        }),
+      ),
+    ).rejects.toThrow(/Codex process selected/);
+    const launch = fixture.codexStart.mock.calls[0]?.[0] as {
+      readonly environment?: NodeJS.ProcessEnv;
+    };
+    expect(launch.environment?.OPENAI_API_KEY).toBe("broker-resolved-key");
+    expect(launch.environment?.CODEX_ACCESS_TOKEN).toBeUndefined();
+  });
+
   it("selects the injected Claude ports only for a Claude instance", async () => {
     const fixture = factoryFixture();
     const driver = makeProviderDriver(provider("claude"), fixture.options);
@@ -544,6 +665,7 @@ function factoryFixture(): {
     isProjectConfinedPath: (root: string, path: string) => path.startsWith(`${root}/`),
     permissionPersistence: () => "current-session" as const,
     claudeInstances: [provider("claude")],
+    codexInstances: [provider("codex")],
   } as unknown as ProviderDriverFactoryOptions;
   return {
     openCodeStart,

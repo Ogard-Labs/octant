@@ -42,6 +42,10 @@ describe("composeHostDataMap", () => {
       name: "Claude account folders",
       location: { kind: "known", path: "/Users/ada/.claude-accounts" },
     });
+    expect(decoded.host.caches).toContainEqual({
+      name: "Codex account homes",
+      location: { kind: "known", path: "/Users/ada/.codex-accounts" },
+    });
     // The host roots its chat stores at <dataDirectory>/chat, so a map that
     // names <dataDirectory>/scratch points at a directory nothing writes.
     expect(decoded.host.caches).toContainEqual({

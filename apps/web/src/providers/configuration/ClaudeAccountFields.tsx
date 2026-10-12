@@ -2,8 +2,10 @@ import type { ClaudeAccountAccent, ProviderInstanceId } from "@octant/contracts"
 import {
   CLAUDE_ACCOUNT_ACCENT_VALUES,
   CLAUDE_ACCOUNT_PROFILE,
+  CODEX_ACCOUNT_PROFILE,
   formatProviderAccountSignInCommand,
   formatProviderAccountStatusCommand,
+  type ProviderAccountProfile,
 } from "@octant/domain";
 import { OctantButton } from "../../ui/base/OctantButton";
 import { OctantInput } from "../../ui/base/OctantInput";
@@ -37,6 +39,7 @@ export function ClaudeAccountAccentPicker(props: {
 }
 
 export function displayAssignedAccountDirectory(input: {
+  readonly profile: ProviderAccountProfile;
   readonly instanceId?: ProviderInstanceId;
   readonly storedDirectory?: string;
   readonly extraAccount: boolean;
@@ -48,28 +51,32 @@ export function displayAssignedAccountDirectory(input: {
   if (
     stored.length > 0 &&
     input.instanceId !== undefined &&
-    !stored.endsWith(`/.claude-accounts/${String(input.instanceId).toLowerCase()}`) &&
-    !stored.endsWith("/.claude")
+    !stored.endsWith(
+      `/${input.profile.extraAccountsDirectoryName}/${String(input.instanceId).toLowerCase()}`,
+    ) &&
+    !stored.endsWith(`/${input.profile.defaultHostDirectoryName}`)
   ) {
     return { path: stored, kind: "legacy-custom" };
   }
   if (stored.length > 0) {
     return {
       path: stored,
-      kind: stored.endsWith("/.claude") ? "assigned-default" : "assigned-extra",
+      kind: stored.endsWith(`/${input.profile.defaultHostDirectoryName}`)
+        ? "assigned-default"
+        : "assigned-extra",
     };
   }
   if (input.extraAccount) {
     return {
       path:
         input.instanceId === undefined
-          ? `~/${CLAUDE_ACCOUNT_PROFILE.extraAccountsDirectoryName}/<assigned on create>`
-          : `~/${CLAUDE_ACCOUNT_PROFILE.extraAccountsDirectoryName}/${input.instanceId}`,
+          ? `~/${input.profile.extraAccountsDirectoryName}/<assigned on create>`
+          : `~/${input.profile.extraAccountsDirectoryName}/${input.instanceId}`,
       kind: "assigned-extra",
     };
   }
   return {
-    path: `~/${CLAUDE_ACCOUNT_PROFILE.defaultHostDirectoryName}`,
+    path: `~/${input.profile.defaultHostDirectoryName}`,
     kind: "assigned-default",
   };
 }
@@ -84,10 +91,59 @@ export function ClaudeAccountSettingsFields(props: {
   readonly showSignInCommand?: boolean;
   readonly onReassignDirectory?: () => void;
 }) {
-  const settingPrefix =
-    props.instanceId === undefined ? "provider-create-claude" : `provider-${props.instanceId}`;
+  return (
+    <ProviderAccountSettingsFields
+      {...props}
+      defaultDirectoryDescription="Octant assigns the first subscription account Claude's default directory."
+      profile={CLAUDE_ACCOUNT_PROFILE}
+      settingPrefix={
+        props.instanceId === undefined ? "provider-create-claude" : `provider-${props.instanceId}`
+      }
+      signInDescription="Sign in only with this unmodified command in a terminal for this account. Octant never reads, stores, or injects provider credentials. If you previously connected Claude for helpers, revoke that leftover token with Anthropic."
+    />
+  );
+}
+
+export function CodexAccountSettingsFields(props: {
+  readonly instanceId?: ProviderInstanceId;
+  readonly binaryPath: string;
+  readonly accent: ClaudeAccountAccent | "";
+  readonly onAccentChange: (accent: ClaudeAccountAccent) => void;
+  readonly storedDirectory?: string;
+  readonly extraAccount: boolean;
+  readonly showSignInCommand?: boolean;
+  readonly onReassignDirectory?: () => void;
+}) {
+  return (
+    <ProviderAccountSettingsFields
+      {...props}
+      defaultDirectoryDescription="Octant assigns the first Codex account Codex's default directory."
+      profile={CODEX_ACCOUNT_PROFILE}
+      settingPrefix={
+        props.instanceId === undefined ? "provider-create-codex" : `provider-${props.instanceId}`
+      }
+      signInDescription="Sign in only with this unmodified command in a terminal for this account. Octant never reads, stores, or injects provider credentials, including auth.json and the keyring."
+    />
+  );
+}
+
+function ProviderAccountSettingsFields(props: {
+  readonly profile: ProviderAccountProfile;
+  readonly settingPrefix: string;
+  readonly defaultDirectoryDescription: string;
+  readonly signInDescription: string;
+  readonly instanceId?: ProviderInstanceId;
+  readonly binaryPath: string;
+  readonly accent: ClaudeAccountAccent | "";
+  readonly onAccentChange: (accent: ClaudeAccountAccent) => void;
+  readonly storedDirectory?: string;
+  readonly extraAccount: boolean;
+  readonly showSignInCommand?: boolean;
+  readonly onReassignDirectory?: () => void;
+}) {
   const binaryPath = props.binaryPath.trim();
   const displayed = displayAssignedAccountDirectory({
+    profile: props.profile,
     extraAccount: props.extraAccount,
     ...(props.instanceId === undefined ? {} : { instanceId: props.instanceId }),
     ...(props.storedDirectory === undefined ? {} : { storedDirectory: props.storedDirectory }),
@@ -104,14 +160,14 @@ export function ClaudeAccountSettingsFields(props: {
   const commandDirectory = storedDirectory.length > 0 ? storedDirectory : undefined;
   const signInCommand = commandReady
     ? formatProviderAccountSignInCommand({
-        profile: CLAUDE_ACCOUNT_PROFILE,
+        profile: props.profile,
         binaryPath,
         ...(commandDirectory === undefined ? {} : { stateDirectory: commandDirectory }),
       })
     : undefined;
   const statusCommand = commandReady
     ? formatProviderAccountStatusCommand({
-        profile: CLAUDE_ACCOUNT_PROFILE,
+        profile: props.profile,
         binaryPath,
         ...(commandDirectory === undefined ? {} : { stateDirectory: commandDirectory }),
       })
@@ -130,12 +186,12 @@ export function ClaudeAccountSettingsFields(props: {
           displayed.kind === "legacy-custom"
             ? "This account still uses a directory you chose, so it keeps that login. Re-assign to Octant's directory only if you want a new login on the assigned path. Threads this account already started stay in the old directory and cannot continue after that."
             : displayed.kind === "assigned-default"
-              ? "Octant assigns the first subscription account Claude's default directory."
+              ? props.defaultDirectoryDescription
               : assignedDirectoryDescription
         }
         label="Account directory"
         scope="host"
-        settingId={`${settingPrefix}-config-directory`}
+        settingId={`${props.settingPrefix}-config-directory`}
       >
         <OctantInput
           aria-label="Account directory"
@@ -159,11 +215,11 @@ export function ClaudeAccountSettingsFields(props: {
         description="Shown as a color on this account in the model picker."
         label="Account accent"
         scope="host"
-        settingId={`${settingPrefix}-accent`}
+        settingId={`${props.settingPrefix}-accent`}
       >
         <OctantInput name="accent" type="hidden" value={props.accent} />
         <ClaudeAccountAccentPicker
-          id={`${settingPrefix}-accent`}
+          id={`${props.settingPrefix}-accent`}
           label="Account accent"
           onChange={props.onAccentChange}
           value={props.accent}
@@ -171,10 +227,10 @@ export function ClaudeAccountSettingsFields(props: {
       </SettingRow>
       {signInCommand === undefined ? null : (
         <SettingRow
-          description="Sign in only with this unmodified command in a terminal for this account. Octant never reads, stores, or injects provider credentials. If you previously connected Claude for helpers, revoke that leftover token with Anthropic."
+          description={props.signInDescription}
           label="Sign in"
           scope="host"
-          settingId={`${settingPrefix}-auth-login`}
+          settingId={`${props.settingPrefix}-auth-login`}
         >
           <OctantInput
             aria-label="Account sign-in command"
@@ -189,7 +245,7 @@ export function ClaudeAccountSettingsFields(props: {
           description="Check this account's sign-in with the unmodified CLI."
           label="Status"
           scope="host"
-          settingId={`${settingPrefix}-auth-status`}
+          settingId={`${props.settingPrefix}-auth-status`}
         >
           <OctantInput
             aria-label="Account status command"

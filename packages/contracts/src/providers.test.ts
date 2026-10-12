@@ -490,9 +490,50 @@ describe("provider registry contracts", () => {
       }),
     ).toThrow();
 
-    for (const excessField of ["account", "token", "codexHome", "experimentalApi"] as const) {
+    for (const excessField of ["account", "token", "experimentalApi"] as const) {
       expect(() => decodeProviderInstance({ ...codex, [excessField]: "must-not-cross" })).toThrow();
     }
+    expect(
+      decodeProviderInstance({
+        ...codex,
+        configuration: {
+          ...codex.configuration,
+          codexHome: "/Users/example/.codex-accounts/11111111-1111-4111-8111-111111111111",
+          accent: "teal",
+        },
+      }).configuration,
+    ).toMatchObject({
+      kind: "codex-cli",
+      codexHome: "/Users/example/.codex-accounts/11111111-1111-4111-8111-111111111111",
+      accent: "teal",
+    });
+    expect(() =>
+      decodeProviderInstance({
+        ...codex,
+        configuration: { ...codex.configuration, codexHome: "/Users/example/.codex/auth.json" },
+      }),
+    ).toThrow();
+    expect(
+      decodeProviderRegistryCommand({
+        kind: "change-codex-configuration",
+        instanceId: ids.instance,
+        expectedVersion: 1,
+        configuration: {
+          kind: "codex-cli",
+          binaryPath: "/opt/homebrew/bin/codex",
+          codexHome: "/Users/example/.codex-accounts/11111111-1111-4111-8111-111111111111",
+          accent: "violet",
+        },
+        reassignAccountDirectory: true,
+      }),
+    ).toMatchObject({
+      kind: "change-codex-configuration",
+      reassignAccountDirectory: true,
+      configuration: {
+        kind: "codex-cli",
+        accent: "violet",
+      },
+    });
   });
 
   it("decodes only strict non-secret Claude instances, events, and commands", () => {

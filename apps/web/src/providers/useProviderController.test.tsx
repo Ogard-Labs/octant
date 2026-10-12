@@ -2156,6 +2156,38 @@ describe("useProviderController", () => {
     }
   });
 
+  it("says where a removed Codex account's home still is", async () => {
+    const instance = provider({
+      displayName: "Codex work",
+      driverKind: "codex",
+      configuration: {
+        kind: "codex-cli",
+        binaryPath: "/opt/homebrew/bin/codex",
+        codexHome: "/Users/ada/.codex-accounts/extra",
+      },
+    } as Partial<ProviderInstance>);
+    const api = client(snapshot([instance]));
+    vi.mocked(api.execute).mockResolvedValue({
+      kind: "provider-removed",
+      instanceId: id,
+      version: 2 as never,
+    });
+    const host = credentialHost([]);
+    const { result, unmount } = renderHook(() =>
+      useProviderController({ client: api, hostBridge: host }),
+    );
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    await act(async () => {
+      await expect(result.current.remove(id)).resolves.toBe(true);
+    });
+
+    expect(result.current.message).toBe(
+      "Codex work was removed. Its folder /Users/ada/.codex-accounts/extra still holds that account's sign-in and history. Delete the folder to remove them.",
+    );
+    unmount();
+  });
+
   it("clears Anthropic-compatible credentials after removal", async () => {
     for (const authentication of ["api-key", "bearer", "none"] as const) {
       const calls: string[] = [];

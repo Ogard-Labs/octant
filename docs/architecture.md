@@ -1734,7 +1734,29 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   Claude is the first adopter (`CLAUDE_CONFIG_DIR` and
   `CLAUDE_SECURESTORAGE_CONFIG_DIR`, default `~/.claude`, extras
   `~/.claude-accounts/<instanceId>`, `claude auth login` /
-  `claude auth status`). Extra Claude accounts are a
+  `claude auth status`). Codex uses the same profile
+  (`CODEX_HOME`, default `~/.codex`, extras
+  `~/.codex-accounts/<instanceId>`, `codex login` /
+  `codex login status`). Octant never reads Codex `auth.json` or
+  the keyring, and never writes `cli_auth_credentials_store` into
+  the user's config: Codex names its keyring entry by a hash of the
+  canonical `CODEX_HOME` path (read in the Codex source at
+  `rust-v0.162.1`), so two homes hold two logins without forcing
+  file storage. The first account holds the host profile, and a new
+  account takes it again once no account holds it. The first
+  account keeps inherited `OPENAI_API_KEY` and the other Codex
+  auth variables (existing installs authenticate that way). Extra
+  assigned homes strip those variables so they cannot share the
+  host key, and strip `CODEX_SQLITE_HOME` so their thread state
+  database is not the host's. The AWS profile and file variables
+  stay for every account: they choose among the AWS identities of
+  the one operating-system user and hold no login of their own. An
+  explicit API-key instance still receives only the
+  broker-resolved key. Each Codex account has its own
+  long-lived app-server and never shares that process with another
+  account. Codex Plan uses Codex's own read-only sandbox, not an
+  OS wrap; the account `CODEX_HOME` is the only extra path that
+  launch receives. Extra Claude accounts are a
   maintainer-approved exception to the rule that a CLI uses its
   documented host profile and does not take a second login
   ([0121](decisions/0121-provider-owned-cli-runtime-and-updates.md)):
@@ -1746,7 +1768,8 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   explicitly re-assigns it; Octant never silently points that login
   at another path. Removing an account leaves its assigned directory
   in place, with that account's sign-in and history: Octant says
-  where it is, the host data map lists `~/.claude-accounts`, and
+  where it is, the host data map lists `~/.claude-accounts` and
+  `~/.codex-accounts`, and
   deleting it is the person's step. An accent is presentation only:
   changing it alone neither stops a running session nor resets the
   account's readiness. Sign-in is the unmodified CLI command in a
