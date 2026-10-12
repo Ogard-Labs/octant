@@ -115,6 +115,9 @@ import {
   DiagnosticsFailureIncidentRecorded,
   DiagnosticsFailureIncidentRecordedV1,
   ExtensionLifecycleEvent,
+  EXTENSION_TOOL_GRANT_EVENT_NAMES,
+  ExtensionToolGrantRecorded,
+  ExtensionToolGrantRevoked,
   ProductFeedbackCaptured,
   ProductFeedbackDelivered,
   PROJECT_TERMINAL_EVENT_NAMES,
@@ -130,9 +133,12 @@ import {
   IMAGE_JOB_STATUS_CHANGED,
   ImageJobQueued,
   ImageJobStatusChanged,
+  BROWSER_CAPTURE_KEPT,
+  BrowserCaptureKept,
   THREAD_RETENTION_EVENT_NAMES,
   ThreadRetentionThreadPurged,
   ThreadRetentionWindowSet,
+  ContentClearedPayload,
   ContentIngestedPayload,
   THREAD_EXTERNAL_CONTENT_EVENT_NAMES,
   SPEND_CEILING_EVENT_NAMES,
@@ -182,6 +188,7 @@ import { CodeUsageProjection, UsageProjection } from "./usageProjection";
 import { ValidationEvidenceProjection } from "../validation/validationEvidenceProjection";
 import { ThemeProjection } from "./themeProjection";
 import { ExtensionProjection, EXTENSION_LIFECYCLE_EVENT } from "./extensionProjection";
+import { ExtensionToolGrantProjection } from "./extensionToolGrantProjection";
 import { RemoteAccessProjection } from "./remoteAccessProjection";
 import {
   PRODUCT_FEEDBACK_CAPTURED,
@@ -396,6 +403,8 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register("validation.report-completed@1", 1, ValidationReportCompleted)
     .register("theme.settings-updated@1", 1, ThemeSettingsUpdated)
     .register(EXTENSION_LIFECYCLE_EVENT, 1, ExtensionLifecycleEvent)
+    .register(EXTENSION_TOOL_GRANT_EVENT_NAMES.recorded, 1, ExtensionToolGrantRecorded)
+    .register(EXTENSION_TOOL_GRANT_EVENT_NAMES.revoked, 1, ExtensionToolGrantRevoked)
     .register(REMOTE_ACCESS_EVENT_NAMES.hostIdentityInitialized, 1, HostIdentityInitializedV1)
     .register(REMOTE_ACCESS_EVENT_NAMES.deviceRegistered, 1, DeviceRegisteredV1)
     .register(REMOTE_ACCESS_EVENT_NAMES.deviceKeyRotated, 1, DeviceKeyRotatedV1)
@@ -417,9 +426,11 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register(GITHUB_CLONE_TRANSITIONED, 1, GithubCloneTransitioned)
     .register(IMAGE_JOB_QUEUED, 1, ImageJobQueued)
     .register(IMAGE_JOB_STATUS_CHANGED, 1, ImageJobStatusChanged)
+    .register(BROWSER_CAPTURE_KEPT, 1, BrowserCaptureKept)
     .register(THREAD_RETENTION_EVENT_NAMES.windowSet, 1, ThreadRetentionWindowSet)
     .register(THREAD_RETENTION_EVENT_NAMES.threadPurged, 1, ThreadRetentionThreadPurged)
     .register(THREAD_EXTERNAL_CONTENT_EVENT_NAMES.ingested, 1, ContentIngestedPayload)
+    .register(THREAD_EXTERNAL_CONTENT_EVENT_NAMES.cleared, 1, ContentClearedPayload)
     .register(SPEND_CEILING_EVENT_NAMES.set, 1, SpendCeilingSet)
     .register(SPEND_CEILING_EVENT_NAMES.raised, 1, SpendCeilingRaised)
     .register(SPEND_CEILING_EVENT_NAMES.cleared, 1, SpendCeilingCleared)
@@ -484,6 +495,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
       .register(new ValidationEvidenceProjection())
       .register(new ThemeProjection())
       .register(new ExtensionProjection())
+      .register(new ExtensionToolGrantProjection())
       .register(new RemoteAccessProjection())
       .register(new ThreadCheckpointProjection())
       .register(new ProductFeedbackProjection())

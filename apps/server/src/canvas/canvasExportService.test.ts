@@ -290,6 +290,46 @@ describe("canvas export service", () => {
     connection.close();
   });
 
+  it("writes a prototype's frame into an HTML export and names its markup on the card the person approves", () => {
+    const doc = {
+      ...document(),
+      blocks: [
+        {
+          blockId: "cart",
+          schemaVersion: 18,
+          kind: "design",
+          title: "Cart",
+          size: "phone",
+          runsScript: true,
+          frames: [
+            { frameId: "cart", title: "Cart", html: '<button onclick="add()">Add</button>' },
+          ],
+        },
+      ] as unknown as ReadonlyArray<CanvasBlock>,
+    };
+    const { service, connection } = harness(undefined, { doc });
+    const request = (format: "html" | "markdown") =>
+      decodeCanvasExportPrepareRequest({ ...prepareRequest(), format });
+
+    const html = service.prepare(request("html"), true);
+    expect(html.kind).toBe("approval");
+    if (html.kind === "approval") {
+      // Approving this card is the acknowledgement that markup leaves as written.
+      expect(html.card.writesDesignMarkup).toBe(true);
+      expect(html.card.payload).toContain('<iframe sandbox="allow-scripts" ');
+      expect(html.card.payload).toContain("connect-src &apos;none&apos;");
+    }
+
+    // The Markdown form carries titles only, so its card names no markup.
+    const markdown = service.prepare(request("markdown"), true);
+    expect(markdown.kind).toBe("approval");
+    if (markdown.kind === "approval") {
+      expect(markdown.card).not.toHaveProperty("writesDesignMarkup");
+      expect(markdown.card.payload).not.toContain("onclick");
+    }
+    connection.close();
+  });
+
   it("calls the destination only after approval and journals the receipt under the local actor", async () => {
     const { calls, service, eventStore, envelopes, connection } = harness();
     const prepared = service.prepare(prepareRequest(), true);

@@ -297,9 +297,17 @@ row. In Work and Code the frame also holds **Open in sidebar**, which opens
 the same Canvas in the dock tool, and a row opens it there too. Chat has no
 dock, so there the frame holds **Open Canvas**, and the frame and a row open
 the Canvas as a content tab beside the thread. Editing, comments, and sharing stay there.
-Accepted but not yet built: a running design frame starts in the thread only
-when the person presses **Run** (see
-[Canvas documents, designs, and prototypes](../architecture.md#canvas-documents-designs-and-prototypes)). An
+A design that runs script is a prototype: wherever it is drawn, it says that
+its script can still connect to another computer, on every client and in
+every state, until a prototype's peer connections are contained, and its header
+shows a **Running** label and **Stop** while it runs, and **Run again** with
+the reason once it stops (stopped responding, loaded another page, or kept
+taking the keyboard back). In the thread it starts only when the person
+presses **Run**; the sidebar runs it when it is shown, and the frame takes no
+focus until the person presses Run or clicks into it. On desktop,
+Command-Escape (Control-Escape elsewhere) moves focus from a running prototype
+to its Stop. In a browser the Run control says the prototype is not
+network-contained. An
 agent-authored Canvas belongs to the thread's own scope as the host resolves
 it: the active Chat Project, the Work thread's confined root, or the Code
 thread's checkout; a thread whose binding the host cannot resolve is refused
@@ -329,7 +337,11 @@ chrome. It holds a skeleton at the page's aspect ratio until the
 first frame and never prints status prose. It reads the same host snapshot the
 Browser pane reads, asks for a fresh picture only while it is on screen, pauses
 with the window, and backs off while the page does not change. Computer Use keeps
-its separate card. The iOS Simulator and Android emulator are separate device destinations. An
+its separate card. **Browser captures.** The Browser pane toolbar has a
+Screenshot button (a camera icon beside Open in default browser) that keeps the
+page's picture with the thread, and a thread that kept screenshots shows a
+_Browser captures_ strip in its transcript beside the generated images. The
+rules are in [Browser captures](browser-captures.md). The iOS Simulator and Android emulator are separate device destinations. An
 agent's device open raises the relevant in-app pane once per request. Both use
 one device-first pane that adapts to its container's width: a toolbar (device
 switcher, OS and state in words, Back on Android, Home, Screenshot, Lock when
@@ -538,7 +550,13 @@ owns budget enforcement, provenance, native-session identity, and journal rules.
 
 Under the composer of every thread, in Chat, Work, and Code and for every provider, a
 quiet stats line states what the thread used: input and output tokens, the cache
-hit, output speed, time to first token, and cost. It reads the host's recorded
+hit, output speed, time to first token, and cost. When the provider reported account
+limit windows, the line leads with one bar per window, showing the share left
+(`composerLimitWindows` in `apps/web/src/context`, read from the context snapshot and
+falling back to the Code thread's own report). A provider that reported neither windows
+nor usage shows no line. In a split workspace the line shows in the active pane only: the
+figures and limits come from one shell-wide scope, so an inactive pane shows no line rather
+than another thread's numbers. It reads the host's recorded
 turns and is worded by one shared module in `packages/domain`
 (`turnMetricsDisplay.ts`), which the composer, the usage page, the Octant Harness
 session card, the terminal footer, and the phone's session panel all call, so

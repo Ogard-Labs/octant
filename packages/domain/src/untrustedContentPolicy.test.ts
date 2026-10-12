@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { MAX_NAMED_INGESTED_SOURCES } from "@octant/contracts";
+import { decideExtensionToolGrant } from "./extensionToolGrantPolicy";
 import {
+  decideExternalContentClear,
   decideExternalContentIngestion,
   emptyThreadContentTaint,
   formatTaintedApprovalPrompt,
@@ -305,5 +307,113 @@ describe("searchQueryRefusalUnderTaint", () => {
     ]) {
       expect(searchQueryRefusalUnderTaint(query), query).toBeUndefined();
     }
+  });
+});
+
+describe("a person's clear of a thread's outside-content mark", () => {
+  const reviewed = {
+    principal: "local-window",
+    turn: "idle",
+    tainted: true,
+    shownVersion: 3,
+    currentVersion: 3,
+  } as const;
+
+  it("clears for a person at a local window who saw every ingestion, on an idle thread", () => {
+    expect(decideExternalContentClear(reviewed)).toEqual({ kind: "clear" });
+  });
+
+  it("refuses a paired device and the host's own scope whatever else is true", () => {
+    for (const principal of ["remote-device", "host"] as const) {
+      for (const tainted of [true, false]) {
+        expect(decideExternalContentClear({ ...reviewed, principal, tainted })).toEqual({
+          kind: "refuse",
+          reason: "unauthorized",
+        });
+      }
+    }
+  });
+
+  it("refuses while a turn is running or queued, or when the host cannot tell", () => {
+    expect(decideExternalContentClear({ ...reviewed, turn: "active" })).toEqual({
+      kind: "refuse",
+      reason: "turn-active",
+    });
+    expect(decideExternalContentClear({ ...reviewed, turn: "unconfirmed" })).toEqual({
+      kind: "refuse",
+      reason: "turn-unconfirmed",
+    });
+    expect(decideExternalContentClear({ ...reviewed, turn: "unknown" })).toEqual({
+      kind: "refuse",
+      reason: "thread-unavailable",
+    });
+  });
+
+  it("answers already clear for an unmarked thread, whatever version was named", () => {
+    expect(decideExternalContentClear({ ...reviewed, tainted: false, shownVersion: 1 })).toEqual({
+      kind: "already-clear",
+    });
+  });
+
+  it("refuses a clear that names a version older or newer than the thread's own", () => {
+    for (const shownVersion of [2, 4]) {
+      expect(decideExternalContentClear({ ...reviewed, shownVersion })).toEqual({
+        kind: "refuse",
+        reason: "stale",
+      });
+    }
+  });
+
+  it("holds for nothing: the next ingestion marks the thread again with only its own source", () => {
+    let state = emptyThreadContentTaint();
+    for (const sourceLabel of ["web-fetch", "mcp-tool"]) {
+      state = projectThreadContentTaint(state, {
+        kind: "content-ingested",
+        provenance: { origin: "tool-result", sourceLabel },
+      });
+    }
+    state = projectThreadContentTaint(state, { kind: "content-cleared" });
+    expect(state).toEqual(emptyThreadContentTaint());
+
+    state = projectThreadContentTaint(state, {
+      kind: "content-ingested",
+      provenance: { origin: "tool-result", sourceLabel: "mcp-tool" },
+    });
+    expect(state).toEqual({ externalContentIngested: true, ingestedSources: ["mcp-tool"] });
+  });
+
+  it("lets a remembered network MCP approval cover one call after a clear, then asks again", () => {
+    const binding = {
+      version: "1.2.0",
+      digest: `sha256:${"a".repeat(64)}`,
+      definitionDigest: `sha256:${"b".repeat(64)}`,
+    };
+    const decide = (taint: ReturnType<typeof emptyThreadContentTaint>) =>
+      decideExtensionToolGrant({
+        inProject: true,
+        hostOwnedTurn: false,
+        planTurn: false,
+        threadTainted: taint.externalContentIngested,
+        reach: "network",
+        offered: binding,
+        grant: { ...binding, revoked: false },
+      });
+    const ingested = {
+      kind: "content-ingested",
+      provenance: { origin: "tool-result", sourceLabel: "mcp-tool" },
+    } as const;
+
+    const tainted = projectThreadContentTaint(emptyThreadContentTaint(), ingested);
+    expect(decide(tainted)).toMatchObject({ kind: "ask", rememberable: false });
+
+    const cleared = projectThreadContentTaint(tainted, { kind: "content-cleared" });
+    expect(decide(cleared)).toEqual({ kind: "covered" });
+
+    // That covered call's own result is the next ingestion.
+    expect(decide(projectThreadContentTaint(cleared, ingested))).toEqual({
+      kind: "ask",
+      reason: "network-tool-on-tainted-thread",
+      rememberable: false,
+    });
   });
 });

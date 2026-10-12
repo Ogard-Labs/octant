@@ -347,6 +347,27 @@ function decodeStreamEvent(value: unknown, allowedTools: readonly string[]): Cla
   throw protocol("Claude returned an unsupported runtime message.");
 }
 
+// The runtime records an interrupt in its transcript as a user message it
+// writes itself: one text block holding one of these markers. Claude Code
+// 2.1.296 sends the first when output was streaming and the second when a
+// tool was waiting, each just before the result that names
+// `aborted_streaming` or `aborted_tools`. Read as a tool result the marker
+// was refused, which ended every interrupted turn as a protocol failure
+// before that result arrived. The marker settles nothing, so it is dropped
+// and the result stays the turn's terminal statement.
+const INTERRUPTION_MARKERS: ReadonlySet<string> = new Set([
+  "[Request interrupted by user]",
+  "[Request interrupted by user for tool use]",
+]);
+
+function isInterruptionMarker(content: ReadonlyArray<unknown>): boolean {
+  if (content.length !== 1) return false;
+  const block = object(content[0]);
+  return (
+    block?.type === "text" && typeof block.text === "string" && INTERRUPTION_MARKERS.has(block.text)
+  );
+}
+
 function decodeToolResults(message: Record<string, unknown>): ClaudeDecodedMessage {
   const user = object(message.message);
   if (user === undefined || user.role !== "user" || message.parent_tool_use_id !== null) {
@@ -356,6 +377,7 @@ function decodeToolResults(message: Record<string, unknown>): ClaudeDecodedMessa
   if (!Array.isArray(user.content) || typeof message.session_id !== "string") {
     throw protocol("Claude returned an unsupported runtime message.");
   }
+  if (isInterruptionMarker(user.content)) return { kind: "ignored" };
   const results = user.content.map((value) => {
     const block = object(value);
     if (

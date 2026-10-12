@@ -26,6 +26,7 @@ import {
   CanvasEventStoreError,
 } from "./canvasEventStore";
 import { CanvasProjection } from "./canvasProjection";
+import { resolveCanvasDesignAssets } from "./canvasDesignAssets";
 
 const directories: Array<string> = [];
 const now = "2026-08-01T21:00:00.000Z";
@@ -225,6 +226,48 @@ describe("CanvasEventStore", () => {
         occurredAt: later as never,
       }),
     ).toThrow(CanvasEventStoreError);
+  });
+
+  it("journals a design's asset references and never the images it resolves to", async () => {
+    const connection = openConnection();
+    const store = createStore(connection);
+    const imageId = "12121212-1212-4212-8212-121212121212";
+    const v1 = version({
+      definition: {
+        ...definition,
+        blocks: [
+          {
+            blockId: "phone",
+            schemaVersion: CANVAS_SCHEMA_VERSION,
+            kind: "design",
+            title: "Onboarding",
+            size: "phone",
+            assets: [{ assetId: "hero", source: { kind: "generated-image", imageId } }],
+            frames: [
+              { frameId: "home", title: "Home", html: '<img src="octant-asset:hero" alt="">' },
+            ],
+          },
+        ],
+      },
+    });
+    store.appendCreate({ canvasId, version: v1, occurredAt: now as never });
+    const design = v1.definition.blocks[0];
+    if (design?.kind !== "design") throw new Error("expected a design");
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 9, 9, 9]);
+    const resolved = await resolveCanvasDesignAssets(design, v1.definition.provenance, {
+      generatedImage: async () => ({ status: "read", bytes: png }),
+      projectFile: async () => ({ status: "unavailable", reason: "refused" }),
+    });
+    const encoded = Buffer.from(png).toString("base64");
+    expect(resolved[0]).toMatchObject({ status: "resolved", data: encoded });
+
+    const replay = createStore(connection).replayCanvas({ canvasId, afterVersion: 0, limit: 10 });
+    if (replay.status !== "ok") throw new Error("expected a replay");
+    const journaled = JSON.stringify(replay.events.map((event) => event.payload));
+    expect(journaled).toContain(`"imageId":"${imageId}"`);
+    expect(journaled).toContain("octant-asset:hero");
+    expect(journaled).not.toContain(encoded);
+    expect(journaled).not.toContain("data:image");
   });
 
   it("replays a canvas's events in order after restart from journal truth", () => {

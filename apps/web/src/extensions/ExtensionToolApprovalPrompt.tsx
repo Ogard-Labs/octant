@@ -1,11 +1,11 @@
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
 import type { ExtensionToolApproval } from "@octant/contracts/extension-rpc";
-import { CirclePause } from "lucide-react";
 import { useEffect, useState } from "react";
 import { documentIsVisible, scheduleVisibleInterval } from "../polling/documentVisibility";
 import { samePollingData } from "../polling/samePollingData";
+import { OctantApprovalCard } from "../ui/base/OctantApprovalCard";
 import { OctantButton } from "../ui/base/OctantButton";
-import { OctantAlert } from "../ui/base/OctantAlert";
+import { pluginNameIn, UNNAMED_PLUGIN } from "./toolGrantLabels";
 
 const ACTIVE_TOOL_APPROVAL_POLL_MS = 500;
 const IDLE_TOOL_APPROVAL_POLL_MS = 5_000;
@@ -26,6 +26,7 @@ export function ExtensionToolApprovalPrompt(props: {
   const [approvals, setApprovals] = useState<ReadonlyArray<ExtensionToolApproval>>([]);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string>();
+  const [pluginName, setPluginName] = useState<string>();
   useEffect(() => {
     if (client === undefined || threadId === undefined) {
       setApprovals([]);
@@ -62,14 +63,39 @@ export function ExtensionToolApprovalPrompt(props: {
   }, [client, threadId, turnActive]);
 
   const pending = approvals[0];
-  if (pending === undefined || client === undefined) return null;
+  const pendingPackageId = pending === undefined ? undefined : String(pending.packageId);
+  useEffect(() => {
+    setPluginName(undefined);
+    if (client === undefined || pendingPackageId === undefined) return;
+    let current = true;
+    // The prompt names the plugin, which only the installed package list
+    // knows. Without it the prompt still names the server and the tool.
+    client
+      .snapshot()
+      .then((snapshot) => {
+        if (current) setPluginName(pluginNameIn(snapshot, pendingPackageId));
+      })
+      .catch(() => undefined);
+    return () => {
+      current = false;
+    };
+  }, [client, pendingPackageId]);
 
-  async function decide(decision: "approved" | "denied") {
+  if (pending === undefined || client === undefined) return null;
+  // Remembering an answer is a local window's authority; the host refuses it
+  // from a paired device, so it is not offered there at all.
+  const canRemember = pending.rememberable && client.toolGrantsAvailable;
+
+  async function decide(decision: "approved" | "denied", remember?: true) {
     if (pending === undefined || client === undefined || busy) return;
     setBusy(true);
     setMessage(undefined);
     try {
-      await client.decideToolApproval({ approvalId: pending.approvalId, decision });
+      await client.decideToolApproval({
+        approvalId: pending.approvalId,
+        decision,
+        ...(remember === undefined ? {} : { remember }),
+      });
       setApprovals((current) =>
         current.filter((approval) => approval.approvalId !== pending.approvalId),
       );
@@ -82,44 +108,54 @@ export function ExtensionToolApprovalPrompt(props: {
     }
   }
 
+  const server = `Server: ${pending.serverName}.`;
   return (
-    <section
-      aria-label="Extension tool approval"
-      className={`approval-row approval-row--request ${props.className}`}
-      role="group"
+    <OctantApprovalCard
+      actions={
+        <>
+          <OctantButton
+            disabled={busy}
+            onClick={() => void decide("approved")}
+            size="sm"
+            type="button"
+          >
+            Approve once
+          </OctantButton>
+          {canRemember ? (
+            <OctantButton
+              disabled={busy}
+              onClick={() => void decide("approved", true)}
+              size="sm"
+              type="button"
+              variant="secondary"
+            >
+              Always allow in this Project
+            </OctantButton>
+          ) : null}
+          <OctantButton
+            disabled={busy}
+            onClick={() => void decide("denied")}
+            size="sm"
+            type="button"
+            variant="ghost"
+          >
+            Deny
+          </OctantButton>
+        </>
+      }
+      className={props.className}
+      detail={
+        canRemember
+          ? `${server} Always allow means Octant will run this tool in this Project without asking.`
+          : server
+      }
+      error={message}
+      label="Extension tool approval"
+      summary={`Allow ${pending.mcpToolName} from ${pluginName ?? UNNAMED_PLUGIN}?`}
     >
-      <CirclePause aria-hidden="true" size={14} strokeWidth={1.8} />
-      <span className="approval-row__text">
-        Allow {pending.mcpToolName}?
-        <span className="approval-row__detail">One-time extension tool request</span>
-      </span>
-      <div className="approval-row__actions">
-        <OctantButton
-          disabled={busy}
-          onClick={() => void decide("approved")}
-          size="sm"
-          type="button"
-        >
-          Approve once
-        </OctantButton>
-        <OctantButton
-          disabled={busy}
-          onClick={() => void decide("denied")}
-          size="sm"
-          type="button"
-          variant="ghost"
-        >
-          Deny
-        </OctantButton>
-      </div>
       <code className="approval-row__code">
         {pending.inputJson === "" ? "(empty input)" : pending.inputJson}
       </code>
-      {message === undefined ? null : (
-        <OctantAlert className="approval-row__detail" tone="warning">
-          {message}
-        </OctantAlert>
-      )}
-    </section>
+    </OctantApprovalCard>
   );
 }

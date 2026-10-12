@@ -15,14 +15,16 @@ import {
 } from "@octant/domain/untrusted-content-policy";
 import { Journal } from "../persistence/journal";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
-import { catchUpProjection } from "../persistence/projection";
+import { catchUpProjection, rebuildProjection } from "../persistence/projection";
 import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
 import { openSqlite, type SqliteConnection } from "../persistence/sqlitePort";
+import { ExternalContentClearStore } from "./externalContentClearStore";
 import { ExternalContentIngestionStore } from "./externalContentIngestionStore";
 import {
   ExternalContentTaintProjection,
   applyProvenanceToThreadTaint,
   hasThreadExternalContentReference,
+  readThreadExternalContentState,
   readThreadExternalContentTaint,
 } from "./externalContentTaintProjection";
 
@@ -78,6 +80,46 @@ function envelope(input: {
       contentReference: input.contentReference,
     },
   });
+}
+
+function clearedEnvelope(input: {
+  readonly threadId: string;
+  readonly version: number;
+  readonly sequence: number;
+}) {
+  return decodeEnvelope({
+    eventId: `00000000-0000-4000-8000-0000000000c${input.version}`,
+    globalSequence: input.sequence,
+    aggregateType: THREAD_EXTERNAL_CONTENT_AGGREGATE,
+    aggregateId: input.threadId,
+    aggregateVersion: input.version,
+    eventName: THREAD_EXTERNAL_CONTENT_EVENT_NAMES.cleared,
+    eventVersion: 1,
+    hostId: "local",
+    correlationId,
+    actor: { kind: "local-user", actorId },
+    occurredAt: now,
+    payload: {
+      threadId: input.threadId,
+      windowId: "66666666-6666-4666-8666-666666666666",
+      clearedSources: ["mcp-tool"],
+      ingestionCount: 1,
+    },
+  });
+}
+
+function projectionRows(connection: SqliteConnection) {
+  return {
+    taint: connection
+      .prepare("SELECT * FROM thread_external_content_taint_projection ORDER BY thread_id")
+      .all(),
+    ingestions: connection
+      .prepare(
+        `SELECT * FROM thread_external_content_ingestion_projection
+         ORDER BY thread_id, content_reference`,
+      )
+      .all(),
+  };
 }
 
 describe("ExternalContentTaintProjection", () => {
@@ -183,6 +225,194 @@ describe("ExternalContentTaintProjection", () => {
     } finally {
       connection.close();
     }
+  });
+});
+
+describe("a cleared thread in the taint projection", () => {
+  const mcp = { origin: "tool-result", sourceLabel: "mcp-tool" } as const;
+
+  it("forgets the thread's ingestions at the clear and ignores an older event applied again", () => {
+    const connection = openMigrated();
+    try {
+      const projection = new ExternalContentTaintProjection();
+      const first = envelope({
+        threadId,
+        version: 1,
+        sequence: 1,
+        provenance: mcp,
+        contentReference: "mcp-result-1",
+      });
+      const other = envelope({
+        threadId: otherThreadId,
+        version: 1,
+        sequence: 2,
+        provenance: mcp,
+        contentReference: "mcp-result-1",
+      });
+      const cleared = clearedEnvelope({ threadId, version: 2, sequence: 3 });
+      projection.apply(connection, first);
+      projection.apply(connection, other);
+      projection.apply(connection, cleared);
+
+      expect(readThreadExternalContentTaint(connection, threadId)).toEqual(
+        emptyThreadContentTaint(),
+      );
+      expect(hasThreadExternalContentReference(connection, threadId, "mcp-result-1")).toBe(false);
+      // The clear covers its own thread only.
+      expect(readThreadExternalContentTaint(connection, otherThreadId)).toEqual({
+        externalContentIngested: true,
+        ingestedSources: ["mcp-tool"],
+      });
+      expect(hasThreadExternalContentReference(connection, otherThreadId, "mcp-result-1")).toBe(
+        true,
+      );
+
+      const afterClear = projectionRows(connection);
+      projection.apply(connection, first);
+      projection.apply(connection, cleared);
+      expect(projectionRows(connection)).toEqual(afterClear);
+
+      // The same reference, journaled after the clear, marks the thread again.
+      projection.apply(
+        connection,
+        envelope({
+          threadId,
+          version: 3,
+          sequence: 4,
+          provenance: mcp,
+          contentReference: "mcp-result-1",
+        }),
+      );
+      expect(readThreadExternalContentTaint(connection, threadId)).toEqual({
+        externalContentIngested: true,
+        ingestedSources: ["mcp-tool"],
+      });
+    } finally {
+      connection.close();
+    }
+  });
+
+  it("rebuilds and restarts into the same cleared-then-marked rows", () => {
+    const directory = mkdtempSync(join(tmpdir(), "octant-taint-clear-replay-"));
+    directories.push(directory);
+    const path = join(directory, "octant.sqlite3");
+    const open = () => {
+      const connection = openSqlite(path);
+      applyMigrations(connection, MIGRATIONS, () => now);
+      const runtime = createPhase1RuntimeRegistries();
+      const journal = new Journal({
+        connection,
+        registry: runtime.events,
+        projections: runtime.projections,
+        clock: () => now,
+      });
+      return { connection, runtime, journal };
+    };
+    const first = open();
+    let nextEvent = 0;
+    const uuid = () => `77777777-7777-4777-8777-${String(++nextEvent).padStart(12, "0")}`;
+    const ingestions = new ExternalContentIngestionStore({
+      journal: first.journal,
+      connection: first.connection,
+      uuid,
+      clock: () => now,
+      actor: decodeActor({ kind: "system", actorId }),
+    });
+    const clears = new ExternalContentClearStore({
+      journal: first.journal,
+      connection: first.connection,
+      uuid,
+      clock: () => now,
+      actor: decodeActor({ kind: "local-user", actorId }),
+    });
+    const ingest = (thread: string, sourceLabel: string, contentReference: string) =>
+      ingestions.record({
+        threadId: thread,
+        provenance: { origin: "tool-result", sourceLabel },
+        contentReference,
+        correlationId,
+        authorized: true,
+      });
+    ingest(threadId, "mcp-tool", "mcp-result-1");
+    ingest(threadId, "web-fetch", "page-1");
+    ingest(otherThreadId, "mcp-tool", "mcp-result-1");
+
+    // A journal that holds no clear projects the rows it always did.
+    expect(
+      first.connection
+        .prepare(
+          `SELECT thread_id, external_content_ingested, ingested_sources_json,
+                  aggregate_version, last_sequence
+           FROM thread_external_content_taint_projection ORDER BY thread_id`,
+        )
+        .all(),
+    ).toEqual([
+      {
+        thread_id: threadId,
+        external_content_ingested: 1,
+        ingested_sources_json: '["mcp-tool","web-fetch"]',
+        aggregate_version: 2,
+        last_sequence: 2,
+      },
+      {
+        thread_id: otherThreadId,
+        external_content_ingested: 1,
+        ingested_sources_json: '["mcp-tool"]',
+        aggregate_version: 1,
+        last_sequence: 3,
+      },
+    ]);
+    const withoutClear = projectionRows(first.connection);
+    rebuildProjection({
+      connection: first.connection,
+      journal: first.journal,
+      projection: new ExternalContentTaintProjection(),
+      clock: () => now,
+    });
+    expect(projectionRows(first.connection)).toEqual(withoutClear);
+
+    expect(
+      clears.clear({
+        threadId,
+        windowId: "66666666-6666-4666-8666-666666666666",
+        expectedVersion: 2,
+        principal: "local-window",
+        turn: "idle",
+      }),
+    ).toMatchObject({ kind: "cleared" });
+    expect(ingest(threadId, "mcp-tool", "mcp-result-1")).toMatchObject({ kind: "recorded" });
+
+    const live = projectionRows(first.connection);
+    expect(readThreadExternalContentTaint(first.connection, threadId)).toEqual({
+      externalContentIngested: true,
+      ingestedSources: ["mcp-tool"],
+    });
+    expect(readThreadExternalContentState(first.connection, threadId)).toMatchObject({
+      version: 4,
+      ingestionCount: 1,
+    });
+    for (let replay = 0; replay < 2; replay += 1) {
+      rebuildProjection({
+        connection: first.connection,
+        journal: first.journal,
+        projection: new ExternalContentTaintProjection(),
+        clock: () => now,
+      });
+      expect(projectionRows(first.connection)).toEqual(live);
+    }
+    first.connection.close();
+
+    const restarted = open();
+    for (const projection of restarted.runtime.projections.all()) {
+      catchUpProjection({
+        connection: restarted.connection,
+        journal: restarted.journal,
+        projection,
+        clock: () => now,
+      });
+    }
+    expect(projectionRows(restarted.connection)).toEqual(live);
+    restarted.connection.close();
   });
 });
 

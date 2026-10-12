@@ -37,6 +37,55 @@ describe("dashboard reading order", () => {
   });
 });
 
+describe("tabs and columns reading order", () => {
+  it("reads a dashboard inside a tab pane with its cells, and neither again at its own position", () => {
+    const tabs = {
+      blockId: "brief",
+      kind: "tabs",
+      panes: [
+        { label: "Metrics", blockIds: ["board"] },
+        { label: "Notes", blockIds: ["note"] },
+      ],
+    };
+    const board = { blockId: "board", kind: "dashboard", title: "B", cells: [{ blockId: "a" }] };
+    const tile = { blockId: "a", kind: "metric" };
+    const note = { blockId: "note", kind: "rich-text" };
+    const outro = { blockId: "outro", kind: "rich-text" };
+    const items = canvasReadingOrder([tabs, board, tile, note, outro]);
+    expect(items.map((item) => item.kind)).toEqual(["group", "block"]);
+    const group = items[0];
+    if (group?.kind !== "group") throw new Error("expected a group");
+    const [metrics, notes] = group.sections;
+    expect(metrics?.map((item) => item.kind)).toEqual(["dashboard"]);
+    const placed = metrics?.[0];
+    expect(
+      placed?.kind === "dashboard" ? placed.cells.map((cell) => cell.block.blockId) : [],
+    ).toEqual(["a"]);
+    expect(notes?.map((item) => (item.kind === "block" ? item.block.blockId : ""))).toEqual([
+      "note",
+    ]);
+  });
+
+  it("reads each column's children in track order and skips a group named inside a group", () => {
+    const row = {
+      blockId: "row",
+      kind: "columns",
+      tracks: [{ blockIds: ["left", "inner"] }, { blockIds: ["right"] }],
+    };
+    const inner = { blockId: "inner", kind: "columns", tracks: [] };
+    const left = { blockId: "left", kind: "rich-text" };
+    const right = { blockId: "right", kind: "rich-text" };
+    const items = canvasReadingOrder([row, inner, left, right]);
+    const group = items[0];
+    if (group?.kind !== "group") throw new Error("expected a group");
+    expect(
+      group.sections.map((section) =>
+        section.map((item) => (item.kind === "block" ? item.block.blockId : "")),
+      ),
+    ).toEqual([["left"], ["right"]]);
+  });
+});
+
 describe("dashboard cell spans", () => {
   it("gives a tile one column and a chart or table two unless the author says otherwise", () => {
     expect(canvasDashboardCellSpan("metric", undefined, 4)).toBe(1);

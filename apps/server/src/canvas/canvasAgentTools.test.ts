@@ -10,6 +10,7 @@ import {
   createChildCanvasAgentTools,
 } from "./canvasAgentTools";
 import { inTreeCanvasDocumentRecipes } from "./canvasDocumentRecipes";
+import { createCanvasPreviewService } from "./canvasPreviewService";
 
 const windowId = "11111111-1111-4111-8111-111111111111" as never;
 const projectId = "22222222-2222-4222-8222-222222222222";
@@ -217,6 +218,11 @@ describe("createCanvasAgentTools", () => {
     ["table", "{ id, cells }"],
     ["metric", "goodDirection"],
     ["dashboard", "blockId"],
+    ["tabs", "may hold a dashboard"],
+    ["columns", "2 to 4 tracks"],
+    ["plan", "view to gantt"],
+    ["diagram", "terminator (a pill)"],
+    ["code-excerpt", "language mermaid"],
   ])(
     "answers the %s guidance from describe instead of every turn's description",
     async (kind, phrase) => {
@@ -233,6 +239,67 @@ describe("createCanvasAgentTools", () => {
       expect(create).not.toHaveBeenCalled();
     },
   );
+
+  it("teaches the three tiers and the new recipes when describe names no kinds", async () => {
+    const { set } = tools();
+    const outcome = await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "describe" }),
+    });
+
+    const result = outcome.result as {
+      tierGuide: string;
+      recipeGuide: string;
+      previewGuide: string;
+      blockKinds: ReadonlyArray<string>;
+      recipes: ReadonlyArray<{
+        id: string;
+        skeleton: ReadonlyArray<{ kind: string; size?: string }>;
+      }>;
+    };
+    expect(result.tierGuide).toContain("lowest tier");
+    expect(result.tierGuide).toContain("Typed blocks");
+    expect(result.tierGuide).toContain("static design frame");
+    expect(result.tierGuide).toContain("running design frame");
+    for (const kind of ["tabs", "columns", "design"]) expect(result.blockKinds).toContain(kind);
+    const ids = result.recipes.map((recipe) => recipe.id);
+    for (const id of ["article", "design-brief", "design-system", "clickable-prototype"]) {
+      expect(ids).toContain(id);
+    }
+    // An agent reads which size a design slot is drawn at.
+    expect(result.recipes.find((recipe) => recipe.id === "article")?.skeleton[0]).toMatchObject({
+      kind: "design",
+      size: "document",
+    });
+    expect(result.recipeGuide).toContain('"write an article" uses article');
+    expect(result.recipeGuide).toContain("clickable-prototype");
+    expect(result.previewGuide).toContain("script error");
+  });
+
+  it("returns a finished running prototype with the design examples and states the bridge's limits", async () => {
+    const { create, set } = tools();
+    const described = await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "describe", blockKinds: ["design"] }),
+    });
+
+    const result = described.result as {
+      examples?: ReadonlyArray<Record<string, unknown>>;
+      guidance?: Record<string, string>;
+    };
+    const prototype = (result.examples ?? []).find((example) => example.runsScript === true);
+    expect(prototype).toMatchObject({ kind: "design", runsScript: true });
+    expect(result.guidance?.design).toContain("oct-article");
+    expect(result.guidance?.design).toContain("octant-asset:");
+    expect(result.guidance?.design).toContain("heartbeat");
+
+    const created = await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "create", title: "Cart", blocks: [prototype] }),
+    });
+    expect(created.isError).not.toBe(true);
+    expect(create).toHaveBeenCalledTimes(1);
+  });
 
   it("says which block kind fits each need when describe names no kinds", async () => {
     const { set } = tools();
@@ -341,6 +408,94 @@ describe("createCanvasAgentTools", () => {
       expect.anything(),
       blocks,
     );
+  });
+
+  it("shows an agent a short tabbed document whose tabs name blocks it also holds", async () => {
+    const { create, set } = tools();
+    const described = await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "describe", blockKinds: ["tabs", "columns"] }),
+    });
+    expect(described.isError).not.toBe(true);
+    const result = described.result as {
+      blockSchema: unknown;
+      examples?: ReadonlyArray<ReadonlyArray<Record<string, unknown>>>;
+    };
+    expect(JSON.stringify(result.blockSchema)).toContain("panes");
+    expect(JSON.stringify(result.blockSchema)).toContain("tracks");
+    const example = result.examples?.[0] ?? [];
+    expect(example[0]).toMatchObject({ kind: "tabs" });
+    const created = await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "create", title: "Overview", blocks: example }),
+    });
+    expect(created.isError).not.toBe(true);
+    expect(create).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows an agent a styled flowchart, a toned zone map, and a Gantt plan that the policy admits", async () => {
+    const { set } = tools();
+    const described = await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "describe", blockKinds: ["diagram", "plan"] }),
+    });
+    expect(described.isError).not.toBe(true);
+    const result = described.result as { examples?: ReadonlyArray<Record<string, unknown>> };
+    const examples = result.examples ?? [];
+    expect(examples.map((example) => example.blockId)).toEqual(["loop", "zones", "launch-plan"]);
+    expect(JSON.stringify(examples)).toContain('"role":"decision"');
+    expect(JSON.stringify(examples)).toContain('"tone":"danger"');
+    expect(examples[2]).toMatchObject({ view: "gantt" });
+    for (const example of examples) expect(() => decodeCanvasBlock(example)).not.toThrow();
+  });
+
+  it("imports a Mermaid flowchart as a typed diagram and keeps an unsupported one as code", async () => {
+    const { create, set } = tools();
+    const created = await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({
+        operation: "create",
+        title: "Flows",
+        blocks: [
+          {
+            blockId: "loop",
+            schemaVersion: CANVAS_SCHEMA_VERSION,
+            kind: "code-excerpt",
+            language: "mermaid",
+            code: "flowchart TD\n  a([Start]) --> b{Ready?}\n  b -->|yes| c[Ship]",
+          },
+          {
+            blockId: "styled",
+            schemaVersion: CANVAS_SCHEMA_VERSION,
+            kind: "code-excerpt",
+            language: "mermaid",
+            code: 'flowchart TD\n  a --> b\n  click a href "https://example.com"',
+          },
+        ],
+      }),
+    });
+    expect(created.isError).not.toBe(true);
+    expect(created.result).toMatchObject({
+      mermaid: [
+        { blockId: "loop", status: "imported", kind: "diagram" },
+        { blockId: "styled", status: "kept-as-code", reason: "unsupported-construct", line: 3 },
+      ],
+    });
+    const blocks = create.mock.calls[0]?.[3] as ReadonlyArray<Record<string, unknown>>;
+    expect(blocks[0]).toMatchObject({
+      blockId: "loop",
+      kind: "diagram",
+      nodes: [
+        { nodeId: "a", role: "terminator" },
+        { nodeId: "b", role: "decision" },
+        { nodeId: "c", role: "process" },
+      ],
+    });
+    expect(blocks[1]).toMatchObject({
+      blockId: "styled",
+      kind: "code-excerpt",
+      language: "mermaid",
+    });
   });
 
   it("lets an agent create an entity-relationship, a swimlane, and a mind map from the examples describe returns", async () => {
@@ -577,7 +732,12 @@ describe("createCanvasAgentTools", () => {
       blockSchema?: unknown;
     };
     const examples = result.examples ?? [];
-    expect(examples.map((example) => example.size)).toEqual(["phone", "slide", "document"]);
+    expect(examples.map((example) => example.size)).toEqual([
+      "phone",
+      "slide",
+      "document",
+      "phone",
+    ]);
     // The schema an agent reads names the document size and the theme field.
     expect(JSON.stringify(result.blockSchema)).toContain('"document"');
     expect(JSON.stringify(result.blockSchema)).toContain('"workspace"');
@@ -1175,6 +1335,39 @@ describe("createCanvasAgentTools", () => {
       expect(create).not.toHaveBeenCalled();
     });
 
+    const designGuidance = async (set: ReturnType<typeof tools>["set"]): Promise<string> => {
+      const described = await set.execute({
+        name: CANVAS_TOOL_NAME,
+        inputJson: JSON.stringify({ operation: "describe", blockKinds: ["design"] }),
+      });
+      return (described.result as { guidance?: Record<string, string> }).guidance?.design ?? "";
+    };
+
+    it("teaches a Work or Code agent to show a Project file in a design, and a Chat agent only generated images", async () => {
+      for (const mode of ["work", "code"] as const) {
+        const guidance = await designGuidance(boundTools(mode).set);
+        expect(guidance).toContain("octant-asset:home-shot");
+        expect(guidance).toContain('"kind": "project-file"');
+        expect(guidance).toContain('"kind": "generated-image"');
+        expect(guidance).toContain("3 MB each and 5 MB per design");
+      }
+      const chat = await designGuidance(tools().set);
+      expect(chat).toContain('"kind": "generated-image"');
+      expect(chat).not.toContain('"kind": "project-file"');
+      expect(chat).toContain("a file path is refused");
+    });
+
+    it("teaches every agent how to declare a running prototype, what stays refused, and that it is not private", async () => {
+      for (const mode of ["chat", "work", "code"] as const) {
+        const guidance = await designGuidance((mode === "chat" ? tools() : boundTools(mode)).set);
+        expect(guidance).toContain('"runsScript": true');
+        expect(guidance).toContain("<script src>");
+        expect(guidance).toContain("Fetch, XHR, WebSocket, forms, and new windows are blocked");
+        expect(guidance).toContain("never tell the person it cannot reach the network");
+        expect(guidance).not.toContain("no network at all");
+      }
+    });
+
     it("tells the agent to deliver substantial work as a Canvas bound to the thread's checkout", () => {
       const description = boundTools("code").set.definitions[0]?.description ?? "";
       expect(description).toContain("deliver it as a Canvas rather than as a long reply");
@@ -1470,6 +1663,106 @@ describe("Canvas preview through the tool", () => {
     expect(outcome.result).toMatchObject({
       imagesInToolResults: true,
       imageIncluded: true,
+    });
+  });
+
+  it("carries a prototype from describe to create to a preview that returns the error it threw", async () => {
+    // What the preview browser read from this prototype, recorded from the
+    // real-browser smoke: the bridge's report of the uncaught error.
+    const recorded = {
+      blockId: "cart-prototype",
+      measured: true,
+      scriptErrors: ["Uncaught ReferenceError: missingFunction is not defined"],
+      overflow: [],
+      contrast: [],
+    };
+    let written: ReadonlyArray<unknown> = [];
+    const render = vi.fn(async () => ({
+      kind: "rendered" as const,
+      png: new Uint8Array([1]),
+      height: 400,
+      designs: [recorded],
+    }));
+    const { create, set } = tools({
+      imagesInToolResults: vi.fn(() => true),
+      preview: createCanvasPreviewService({
+        canvas: {
+          get: () => ({
+            kind: "ready" as const,
+            version: {
+              canvasId: previewCanvasId,
+              versionId: "version-1",
+              sequence: 1,
+              definition: { blocks: written, provenance: {} },
+            },
+          }),
+          history: () => ({ kind: "ready" as const, history: { entries: [] } }),
+        } as never,
+        renderer: { available: async () => true, render },
+      }),
+    });
+
+    const overview = await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "describe" }),
+    });
+    const { recipes, tierGuide } = overview.result as {
+      tierGuide: string;
+      recipes: ReadonlyArray<{ id: string; skeleton: ReadonlyArray<{ kind: string }> }>;
+    };
+    expect(tierGuide).toContain("running design frame");
+    const recipe = recipes.find((entry) => entry.id === "clickable-prototype");
+    expect(recipe?.skeleton[0]?.kind).toBe("design");
+
+    const described = await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "describe", blockKinds: ["design"] }),
+    });
+    const example = (
+      described.result as { examples: ReadonlyArray<Record<string, unknown>> }
+    ).examples.find((entry) => entry.runsScript === true);
+    if (example === undefined) throw new Error("Describe returned no running prototype.");
+    const frames = example.frames as ReadonlyArray<{ html: string }>;
+    const prototype = {
+      ...example,
+      frames: frames.map((frame) => ({
+        ...frame,
+        html: `${frame.html}<script>missingFunction()</script>`,
+      })),
+    };
+
+    const created = await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "create", title: "Cart", blocks: [prototype] }),
+    });
+    expect(created.isError).not.toBe(true);
+    written = create.mock.calls[0]?.[3] as ReadonlyArray<unknown>;
+
+    const looked = await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "preview", canvasId: previewCanvasId }),
+    });
+    expect(looked.isError).not.toBe(true);
+    // The preview ran the page a reader's frame is served, with its bridge.
+    expect(render).toHaveBeenCalledWith(
+      expect.objectContaining({
+        designPages: [
+          {
+            blockId: "cart-prototype",
+            html: expect.stringContaining("<script>missingFunction()</script>"),
+          },
+        ],
+      }),
+    );
+    expect(looked.result).toMatchObject({
+      imageIncluded: true,
+      warnings: [
+        {
+          kind: "design-script-error",
+          blockId: "cart-prototype",
+          message: "Uncaught ReferenceError: missingFunction is not defined",
+        },
+      ],
     });
   });
 

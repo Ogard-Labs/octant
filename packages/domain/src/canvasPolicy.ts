@@ -48,9 +48,18 @@ import {
   CANVAS_MATH_SCHEMA_VERSION,
   CANVAS_TABLE_ROW_ID_SCHEMA_VERSION,
   CANVAS_FLOW_CHARTS_SCHEMA_VERSION,
+  CANVAS_LAYOUT_GROUPS_SCHEMA_VERSION,
+  CANVAS_DIAGRAM_STYLES_SCHEMA_VERSION,
+  canvasDiagramUsesStyles,
+  canvasPlanUsesGantt,
+  isCanvasDiagramNodeRole,
+  canvasLayoutGroupChildIds,
+  isCanvasLayoutGroup,
   CANVAS_DASHBOARD_SCHEMA_VERSION,
   CANVAS_MAX_DASHBOARD_CELLS,
   CANVAS_DESIGN_DOCUMENT_SCHEMA_VERSION,
+  CANVAS_DESIGN_ASSET_SCHEMA_VERSION,
+  CANVAS_DESIGN_RUNNING_SCHEMA_VERSION,
   CANVAS_MAX_CHART_CATEGORY_LABEL_LENGTH,
   CANVAS_MAX_FUNNEL_STAGES,
   CANVAS_MAX_RADAR_AXES,
@@ -60,6 +69,8 @@ import {
   CanvasBlock,
   canvasChartUsesFlowTypes,
   CanvasDefinition,
+  canvasDesignUsesAssets,
+  canvasDesignRunsScript,
   canvasDesignUsesDocumentFields,
   canvasMockupUsesCatalog,
   type CanvasMockupComponent,
@@ -76,6 +87,7 @@ import {
 import { canvasDesignMarkupRefusal, canvasDesignStylesheetRefusal } from "./canvasDesignPolicy";
 import { canvasMathSourceRefusal } from "./canvasMathPolicy";
 import { canvasDashboardColumns, isCanvasDashboardCellKind } from "./canvasDashboardLayout";
+import { canonicalizeWorkRelativePath, WorkConfinementRejected } from "./workConfinementPolicy";
 
 const encoder = new TextEncoder();
 
@@ -98,6 +110,9 @@ const SUPPORTED_CANVAS_SCHEMA_VERSIONS: readonly number[] = [
   CANVAS_TABLE_ROW_ID_SCHEMA_VERSION,
   CANVAS_FLOW_CHARTS_SCHEMA_VERSION,
   CANVAS_DASHBOARD_SCHEMA_VERSION,
+  CANVAS_DESIGN_DOCUMENT_SCHEMA_VERSION,
+  CANVAS_DESIGN_ASSET_SCHEMA_VERSION,
+  CANVAS_DESIGN_RUNNING_SCHEMA_VERSION,
   CANVAS_SCHEMA_VERSION,
 ];
 
@@ -117,6 +132,8 @@ const VERSION_GATED_BLOCK_KINDS: ReadonlyArray<{ readonly kind: string; readonly
     { kind: "comparison-matrix", since: CANVAS_COMPARISON_MATRIX_SCHEMA_VERSION },
     { kind: "math", since: CANVAS_MATH_SCHEMA_VERSION },
     { kind: "dashboard", since: CANVAS_DASHBOARD_SCHEMA_VERSION },
+    { kind: "tabs", since: CANVAS_LAYOUT_GROUPS_SCHEMA_VERSION },
+    { kind: "columns", since: CANVAS_LAYOUT_GROUPS_SCHEMA_VERSION },
   ];
 
 export type CanvasPolicyRejectionCode =
@@ -185,6 +202,8 @@ export type CanvasPolicyRejectionCode =
   | "design-markup-budget-exceeded"
   | "duplicate-design-frame-id"
   | "design-markup-refused"
+  | "design-asset-refused"
+  | "design-run-refused"
   | "bar-list-rows-budget-exceeded"
   | "duplicate-bar-list-label"
   | "bar-list-negative-value"
@@ -225,7 +244,12 @@ export type CanvasPolicyRejectionCode =
   | "dangling-dashboard-cell"
   | "dashboard-cell-kind-refused"
   | "duplicate-dashboard-cell"
-  | "dashboard-span-exceeds-columns";
+  | "dashboard-span-exceeds-columns"
+  | "dangling-layout-child"
+  | "repeated-layout-child"
+  | "nested-layout-group"
+  | "unknown-diagram-role"
+  | "block-placed-twice";
 
 export class CanvasPolicyRejected extends Error {
   override readonly name = "CanvasPolicyRejected";
@@ -428,7 +452,8 @@ function calculateBudgetUsage(
  * seen — either a future schema version or a version-gated field (a mockup
  * block from version 3, a thread presentation from version 4, a treemap from
  * version 5, a heatmap from version 6, a design block from version 9, a design
- * document or theme from version 16) inside a
+ * document or theme from version 16, design assets from version 17, a
+ * design that runs script from version 18) inside a
  * document that declares an older version — must fail closed as an
  * unsupported schema version, before any content is read, rather than
  * collapsing into a generic "corrupt" decode failure. Works on both a
@@ -472,7 +497,14 @@ function declaredSchemaRejection(input: unknown): CanvasPolicyRejectionCode | un
           (declared < CANVAS_FLOW_CHARTS_SCHEMA_VERSION &&
             canvasChartUsesFlowTypes(block as Record<string, unknown>)) ||
           (declared < CANVAS_DESIGN_DOCUMENT_SCHEMA_VERSION &&
-            canvasDesignUsesDocumentFields(block as Record<string, unknown>))),
+            canvasDesignUsesDocumentFields(block as Record<string, unknown>)) ||
+          (declared < CANVAS_DESIGN_ASSET_SCHEMA_VERSION &&
+            canvasDesignUsesAssets(block as Record<string, unknown>)) ||
+          (declared < CANVAS_DESIGN_RUNNING_SCHEMA_VERSION &&
+            canvasDesignRunsScript(block as Record<string, unknown>)) ||
+          (declared < CANVAS_DIAGRAM_STYLES_SCHEMA_VERSION &&
+            (canvasDiagramUsesStyles(block as Record<string, unknown>) ||
+              canvasPlanUsesGantt(block as Record<string, unknown>)))),
     )
   ) {
     return "unsupported-schema-version";
@@ -975,6 +1007,19 @@ function validateCrossReferences(definition: CanvasDefinition): void {
           reject("duplicate-node-id", `Canvas diagram ${block.blockId} has duplicate nodes.`);
         }
         nodes.add(node.nodeId);
+        // A role was free text before the layout drew roles as shapes. A block
+        // written since may only name a shape the layout draws; an older block
+        // keeps its text and draws as the plain box.
+        if (
+          node.role !== undefined &&
+          block.schemaVersion >= CANVAS_DIAGRAM_STYLES_SCHEMA_VERSION &&
+          !isCanvasDiagramNodeRole(node.role)
+        ) {
+          reject(
+            "unknown-diagram-role",
+            `Canvas diagram ${block.blockId} gives node ${node.nodeId} the role ${node.role}; a node role is process, decision, or terminator.`,
+          );
+        }
       }
       const edges = new Set<string>();
       for (const edge of block.edges) {
@@ -1019,7 +1064,7 @@ function validateCrossReferences(definition: CanvasDefinition): void {
     if (block.kind === "swimlane") validateSwimlane(block);
     if (block.kind === "mindmap") validateMindmap(block);
     if (block.kind === "mockup") validateMockup(block, definition.schemaVersion);
-    if (block.kind === "design") validateDesign(block);
+    if (block.kind === "design") validateDesign(block, definition.provenance.mode);
     if (block.kind === "treemap") validateTreemap(block);
     if (block.kind === "heatmap") validateHeatmap(block);
     if (block.kind === "bar-list") validateBarList(block);
@@ -1028,6 +1073,8 @@ function validateCrossReferences(definition: CanvasDefinition): void {
     if (block.kind === "metric") validateMetric(block);
   }
   validateDashboards(definition);
+  validateLayoutGroups(definition);
+  validatePlacedOnce(definition);
 }
 
 /**
@@ -1059,6 +1106,12 @@ function validateDashboards(definition: CanvasDefinition): void {
           `Canvas dashboard ${block.blockId} places block ${id}, which the Canvas does not hold.`,
         );
       }
+      if (kind === "tabs" || kind === "columns") {
+        reject(
+          "nested-layout-group",
+          `Canvas dashboard ${block.blockId} cannot place ${kind} ${id}; tabs and columns may hold a dashboard, never the reverse.`,
+        );
+      }
       if (!isCanvasDashboardCellKind(kind)) {
         reject(
           "dashboard-cell-kind-refused",
@@ -1083,14 +1136,124 @@ function validateDashboards(definition: CanvasDefinition): void {
 }
 
 /**
+ * Tabs and columns arrange blocks the document already holds. A child that
+ * names no block would draw an empty pane; a child named twice would draw one
+ * block in two places, so a comment on it would have two homes; and a group
+ * inside a group would hide a pane behind a pane, which no reader can
+ * navigate. A pane or track may hold a dashboard, which a dashboard refuses
+ * in return, so nesting stops at tabs or columns, then a dashboard, then its
+ * tiles. Each fails closed with its reason.
+ */
+function validateLayoutGroups(definition: CanvasDefinition): void {
+  const kinds = new Map(definition.blocks.map((block) => [String(block.blockId), block]));
+  const placed = new Set<string>();
+  for (const block of definition.blocks) {
+    if (block.kind !== "tabs" && block.kind !== "columns") continue;
+    for (const childId of canvasLayoutGroupChildIds(block)) {
+      const child = kinds.get(String(childId));
+      if (child === undefined) {
+        reject(
+          "dangling-layout-child",
+          `Canvas ${block.kind} ${block.blockId} names block ${childId}, which the document does not hold.`,
+        );
+      }
+      if (isCanvasLayoutGroup(child) || child.kind === "action") {
+        reject(
+          "nested-layout-group",
+          `Canvas ${block.kind} ${block.blockId} holds ${child.kind} ${childId}; tabs and columns never hold tabs, columns, or an action.`,
+        );
+      }
+      if (placed.has(String(childId))) {
+        reject(
+          "repeated-layout-child",
+          `Canvas block ${childId} is placed in more than one tab, track, or group.`,
+        );
+      }
+      placed.add(String(childId));
+    }
+  }
+}
+
+/**
+ * Dashboards, tabs, and columns all place blocks by id, and each refuses a
+ * block it places twice. Across them the rule is the same: a block is drawn
+ * in one place, so its comment marker has one home and an export reads it
+ * once. The refusal names the block and both blocks that place it.
+ */
+function validatePlacedOnce(definition: CanvasDefinition): void {
+  const placedBy = new Map<string, CanvasBlock>();
+  for (const block of definition.blocks) {
+    const childIds =
+      block.kind === "dashboard"
+        ? block.cells.map((cell) => cell.blockId)
+        : block.kind === "tabs" || block.kind === "columns"
+          ? canvasLayoutGroupChildIds(block)
+          : [];
+    for (const childId of childIds) {
+      const id = String(childId);
+      const first = placedBy.get(id);
+      if (first !== undefined) {
+        reject(
+          "block-placed-twice",
+          `Canvas block ${id} is placed by both ${first.kind} ${first.blockId} and ${block.kind} ${block.blockId}; a block is placed once.`,
+        );
+      }
+      placedBy.set(id, block);
+    }
+  }
+}
+
+/**
  * Frames are linked by id, so two frames sharing one would make a link land
  * on whichever came first. Markup a sandboxed frame could not draw as written
  * is refused with the reason, so the author can fix it rather than ship a
- * broken screen.
+ * broken screen. Declared assets are checked for what the definition alone
+ * can show: a unique id, and a Project file only where the mode has a folder
+ * and only as a path that stays inside it. The host still resolves every
+ * asset under the thread's authority when the design is drawn; this only
+ * tells the author early. A running design is served as the author's own page,
+ * so it cannot take the workspace theme, which the reader's renderer writes.
  */
-function validateDesign(block: Extract<CanvasBlock, { readonly kind: "design" }>): void {
+function validateDesign(
+  block: Extract<CanvasBlock, { readonly kind: "design" }>,
+  mode: CanvasDefinition["provenance"]["mode"],
+): void {
+  const runsScript = block.runsScript === true;
+  if (runsScript && block.theme === "workspace") {
+    reject(
+      "design-run-refused",
+      `Canvas design ${block.blockId} runs script and is drawn as its own page; leave out theme "workspace" and style it in the design.`,
+    );
+  }
+  const assetIds = new Set<string>();
+  for (const asset of block.assets ?? []) {
+    const id = String(asset.assetId);
+    if (assetIds.has(id)) {
+      reject(
+        "design-asset-refused",
+        `Canvas design ${block.blockId} declares the asset ${id} twice.`,
+      );
+    }
+    assetIds.add(id);
+    if (asset.source.kind !== "project-file") continue;
+    if (mode === "chat") {
+      reject(
+        "design-asset-refused",
+        `Canvas design ${block.blockId} asset ${id} names a Project file; a Chat Project has no folder, so use a generated image.`,
+      );
+    }
+    try {
+      canonicalizeWorkRelativePath(asset.source.path);
+    } catch (error) {
+      if (!(error instanceof WorkConfinementRejected)) throw error;
+      reject(
+        "design-asset-refused",
+        `Canvas design ${block.blockId} asset ${id} path must be relative to the thread's folder and stay inside it.`,
+      );
+    }
+  }
   if (block.styles !== undefined) {
-    const refusal = canvasDesignStylesheetRefusal(block.styles);
+    const refusal = canvasDesignStylesheetRefusal(block.styles, assetIds);
     if (refusal !== undefined) {
       reject("design-markup-refused", `Canvas design ${block.blockId} stylesheet ${refusal}`);
     }
@@ -1105,7 +1268,7 @@ function validateDesign(block: Extract<CanvasBlock, { readonly kind: "design" }>
       );
     }
     frameIds.add(id);
-    const refusal = canvasDesignMarkupRefusal(frame.html);
+    const refusal = canvasDesignMarkupRefusal(frame.html, assetIds, runsScript);
     if (refusal !== undefined) {
       reject("design-markup-refused", `Canvas design ${block.blockId} frame ${id} ${refusal}`);
     }

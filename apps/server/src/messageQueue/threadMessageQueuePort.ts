@@ -12,6 +12,12 @@ import type {
 export interface ThreadMessageQueueTail {
   readonly id: string;
   readonly status: "active" | "completed" | "failed" | "cancelled";
+  /**
+   * The mode never learned how this tail ended (Code's `ambiguous`). The queue
+   * holds on it as it does on a failure; a reader that must know the thread is
+   * idle cannot take it for one.
+   */
+  readonly unconfirmed?: true;
 }
 export interface ThreadMessageQueueInspectionInput {
   readonly scope: ThreadMessageQueueScope;

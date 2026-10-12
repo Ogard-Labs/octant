@@ -906,6 +906,76 @@ describe("CanvasWorkspaceTab", () => {
     fireEvent.click(screen.getByRole("button", { name: "Revise" }));
     await waitFor(() => expect(exportOffers).toHaveBeenCalledTimes(2));
   });
+  it("sends this window's frame theme with an HTML export of a Canvas that holds a design, and with no other export", async () => {
+    const offers = (formats: ReadonlyArray<string>) =>
+      vi.fn(async () => ({
+        schemaVersion: 1 as const,
+        kind: "canvas-export-offers" as const,
+        canvasId: quarterlyCanvasId,
+        versionId: quarterlyInventoryEntry.currentVersionId,
+        sequence: quarterlyInventoryEntry.currentSequence,
+        targets: [{ targetId: "reading-copy", label: "Reading copy", formats, status: "ready" }],
+      }));
+    const withDesign = {
+      ...readyVersion,
+      version: {
+        ...readyVersion.version,
+        definition: {
+          ...readyVersion.version.definition,
+          blocks: [
+            {
+              blockId: "spec",
+              schemaVersion: 16,
+              kind: "design",
+              title: "Spec",
+              size: "document",
+              frames: [
+                { frameId: "spec", title: "Spec", html: "<article><h1>Ranking</h1></article>" },
+              ],
+            },
+          ],
+        },
+      },
+    };
+    const review = async (version: unknown, formats: ReadonlyArray<string>) => {
+      const prepareExport = vi.fn(async (_request: { readonly frameTheme?: unknown }) => ({
+        kind: "refused" as const,
+        code: "refused" as const,
+        message: "Not this time.",
+      }));
+      const view = render(
+        <CanvasWorkspaceTab
+          tab={canvasTab}
+          client={createCanvasClient(version as typeof readyVersion, undefined, {
+            exportOffers: offers(formats),
+            prepareExport,
+            decideExport: vi.fn(),
+          } as unknown as Partial<CanvasClient>)}
+        />,
+      );
+      await openCanvasTool("Export…");
+      fireEvent.click(await screen.findByRole("button", { name: "Review export" }));
+      await waitFor(() => expect(prepareExport).toHaveBeenCalledTimes(1));
+      view.unmount();
+      return prepareExport.mock.calls[0]?.[0];
+    };
+
+    // The export has no Octant page to read the theme from, so the window
+    // hands over the scheme and tokens it draws the design with.
+    document.documentElement.style.setProperty("--oct-fg", "rgb(240, 240, 240)");
+    try {
+      const themed = await review(withDesign, ["html"]);
+      expect(themed?.frameTheme).toMatchObject({
+        scheme: expect.stringMatching(/^(light|dark)$/),
+        tokens: expect.arrayContaining([["--oct-fg", "rgb(240, 240, 240)"]]),
+      });
+      expect(await review(withDesign, ["markdown"])).not.toHaveProperty("frameTheme");
+      expect(await review(readyVersion, ["html"])).not.toHaveProperty("frameTheme");
+    } finally {
+      document.documentElement.style.removeProperty("--oct-fg");
+    }
+  });
+
   it("resets an open export review when the canvas advances to a new version", async () => {
     const nextVersionId = "99999999-9999-4999-8999-999999999999";
     const offerFor = (versionId: string, sequence: number) => ({
