@@ -1,0 +1,56 @@
+/*
+ * The mark's notice sits at the top of the composer surface, beside the
+ * follow-up offers, so it reads as part of what the person types next. The
+ * recipe is the system's `.callout`; this only places it and fits it to the
+ * composer's inset.
+ */
+.outside-content-notice {
+  margin: var(--oct-space-3) var(--oct-space-4) 0;
+}
+
+/* Both are compact: the mark, its sentence, and the action share one line
+   while they fit, and the action drops under the sentence on a narrow screen
+   instead of leaving the mark alone on a line of its own. */
+.outside-content-notice,
+.outside-content-review__message {
+  align-items: center;
+  gap: var(--oct-space-2) var(--oct-space-3);
+  padding: var(--oct-space-3) var(--oct-space-4);
+}
+
+.outside-content-notice > .callout__body,
+.outside-content-review__message > .callout__body {
+  flex-basis: 200px;
+}
+
+.outside-content-review {
+  display: grid;
+  gap: var(--oct-space-3);
+}
+
+.outside-content-sources {
+  display: grid;
+  gap: var(--oct-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.outside-content-sources__row {
+  display: grid;
+  gap: var(--oct-space-1);
+  min-width: 0;
+}
+
+.outside-content-sources__name {
+  color: var(--oct-fg);
+  font-size: var(--oct-text-sm);
+  overflow-wrap: anywhere;
+}
+
+.outside-content-sources__meta,
+.outside-content-review__reason {
+  margin: 0;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+}

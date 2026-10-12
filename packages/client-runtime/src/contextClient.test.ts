@@ -361,6 +361,29 @@ describe("ContextClient and a thread's outside-content mark", () => {
     ).rejects.toMatchObject({ category: "protocol" });
   });
 
+  it("offers the review only at a loopback host and sends nothing from a remote one", async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>(async () => Response.json(state));
+    const options = { fetch, windowCapability: capability };
+    expect(
+      createContextClient({ ...options, baseUrl: "http://127.0.0.1:13773" })
+        .externalContentAvailable,
+    ).toBe(true);
+    expect(
+      createContextClient({ ...options, baseUrl: "http://localhost:13773" })
+        .externalContentAvailable,
+    ).toBe(true);
+    const remote = createContextClient({ ...options, baseUrl: "https://host.example.test" });
+    expect(remote.externalContentAvailable).toBe(false);
+
+    await expect(remote.readExternalContent({ mode: "code", threadId })).rejects.toMatchObject({
+      category: "unavailable",
+    });
+    await expect(
+      remote.clearExternalContent({ mode: "code", threadId, expectedVersion: 2 }),
+    ).rejects.toMatchObject({ category: "unavailable" });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it("reports a paired device's refusal as unauthorized", async () => {
     const client = createContextClient({
       baseUrl: "http://127.0.0.1:13773",
