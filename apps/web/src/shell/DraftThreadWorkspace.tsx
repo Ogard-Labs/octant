@@ -1033,8 +1033,8 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
   useEffect(() => {
     if (draftScope === undefined || drafts === undefined) return;
     if (structuredDraftScope.current !== draftScope) return;
-    drafts.writeComputerSelection(draftScope, computer.selection);
-  }, [computer.selection, drafts, draftScope]);
+    drafts.writeComputerSelection(draftScope, computer.stagedSelection);
+  }, [computer.stagedSelection, drafts, draftScope]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   // A Chat draft is a first-message composer like Work's and Code's, so it
   // offers the same host command list rather than only the @Computer mention.

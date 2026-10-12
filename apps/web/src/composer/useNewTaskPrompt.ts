@@ -111,6 +111,14 @@ export interface NewTaskDrafts {
   readonly subscribe: (onStoreChange: () => void) => () => void;
 }
 
+const NO_IMAGES: ReadonlyArray<File> = [];
+
+function sameDraftFiles(left: ReadonlyArray<File>, right: ReadonlyArray<File>): boolean {
+  if (left === right) return true;
+  if (left.length !== right.length) return false;
+  return left.every((file, index) => file === right[index]);
+}
+
 export function createNewTaskDrafts(): NewTaskDrafts {
   const drafts = new Map<string, string>();
   const images = new Map<string, ReadonlyArray<File>>();
@@ -132,10 +140,13 @@ export function createNewTaskDrafts(): NewTaskDrafts {
       else drafts.set(scope, text);
       notify();
     },
-    readImages: (scope) => images.get(scope) ?? [],
+    readImages: (scope) => images.get(scope) ?? NO_IMAGES,
     writeImages: (scope, files) => {
+      const current = images.get(scope) ?? NO_IMAGES;
+      if (sameDraftFiles(current, files)) return;
       if (files.length === 0) images.delete(scope);
       else images.set(scope, files);
+      notify();
     },
     readCreateFrom: (scope) => createFrom.get(scope),
     writeCreateFrom: (scope, selection) => {

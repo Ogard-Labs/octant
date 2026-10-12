@@ -4,7 +4,15 @@ import {
   WORK_ATTACHMENT_MEDIA_TYPES,
 } from "@octant/contracts";
 import type { PickerGroup } from "@octant/domain";
-import { useCallback, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import {
   clipboardHasImage,
   collectPastedImages,
@@ -78,6 +86,15 @@ function stagePersistedFiles(files: ReadonlyArray<File>): ReadonlyArray<StagedWo
   }));
 }
 
+const NO_IMAGES: ReadonlyArray<File> = [];
+const emptySubscribe = () => () => {};
+
+function sameDraftFiles(left: ReadonlyArray<File>, right: ReadonlyArray<File>): boolean {
+  if (left === right) return true;
+  if (left.length !== right.length) return false;
+  return left.every((file, index) => file === right[index]);
+}
+
 export function useWorkComposerImages(): WorkComposerImages {
   const drafts = useContext(NewTaskDraftsContext);
   const scope = useContext(NewTaskDraftScopeContext);
@@ -86,32 +103,40 @@ export function useWorkComposerImages(): WorkComposerImages {
   const [staged, setStaged] = useState<ReadonlyArray<StagedWorkImage>>([]);
   const [message, setMessage] = useState<string | undefined>(undefined);
   current.current = staged;
+  const storedFiles = useSyncExternalStore(
+    drafts?.subscribe ?? emptySubscribe,
+    () => (scope === undefined || drafts === undefined ? NO_IMAGES : drafts.readImages(scope)),
+    () => NO_IMAGES,
+  );
 
   // Restore after commit so StrictMode's discarded initializer cannot mint
   // object URLs or a second ID list that the Remove control cannot see.
+  // Skip when this instance already holds the stored files so a write from
+  // this pane does not remint IDs, while a sibling pane on the same scope
+  // still picks the change up.
   useLayoutEffect(() => {
-    const files = scope === undefined ? [] : (drafts?.readImages(scope) ?? []);
+    if (
+      sameDraftFiles(
+        storedFiles,
+        current.current.map((attachment) => attachment.file),
+      )
+    ) {
+      return;
+    }
     for (const attachment of current.current) {
       if (!previews.current.delete(attachment.previewUrl)) continue;
       URL.revokeObjectURL(attachment.previewUrl);
     }
-    if (files.length === 0) {
+    if (storedFiles.length === 0) {
       current.current = [];
       setStaged([]);
       return;
     }
-    const restored = stagePersistedFiles(files);
+    const restored = stagePersistedFiles(storedFiles);
     current.current = restored;
     for (const attachment of restored) previews.current.add(attachment.previewUrl);
     setStaged(restored);
-    return () => {
-      for (const attachment of restored) {
-        if (!previews.current.delete(attachment.previewUrl)) continue;
-        URL.revokeObjectURL(attachment.previewUrl);
-      }
-      if (current.current === restored) current.current = [];
-    };
-  }, [drafts, scope]);
+  }, [storedFiles]);
 
   const apply = useCallback(
     (next: (list: ReadonlyArray<StagedWorkImage>) => ReadonlyArray<StagedWorkImage>) => {

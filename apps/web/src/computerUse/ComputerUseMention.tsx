@@ -103,7 +103,8 @@ function useApplicationMention(
   const available = enabled && (input.available ?? app.available);
   // A mention chosen before the composer moved to a runtime that cannot carry
   // it (or before the application went away) must not ride the next send.
-  const selection = available && chosen?.scope === input.scopeKey ? chosen.selection : undefined;
+  const stagedSelection = chosen?.scope === input.scopeKey ? chosen.selection : undefined;
+  const selection = available ? stagedSelection : undefined;
   const scopeKey = input.scopeKey;
   const currentScope = useRef(scopeKey);
   currentScope.current = scopeKey;
@@ -154,6 +155,7 @@ function useApplicationMention(
     open,
     available,
     selection,
+    stagedSelection,
     choose,
     clear,
     listId,

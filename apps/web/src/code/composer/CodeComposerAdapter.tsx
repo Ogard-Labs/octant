@@ -582,8 +582,14 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     if (structuredDraftScope.current !== draftScope) return;
     drafts.writeMentionChips(draftScope, mentionChipsToDraft(threadMentions.chips));
     drafts.writeExtensionReceipts(draftScope, extensionDraft.stagedReceipts);
-    drafts.writeComputerSelection(draftScope, computer.selection);
-  }, [computer.selection, drafts, draftScope, extensionDraft.stagedReceipts, threadMentions.chips]);
+    drafts.writeComputerSelection(draftScope, computer.stagedSelection);
+  }, [
+    computer.stagedSelection,
+    drafts,
+    draftScope,
+    extensionDraft.stagedReceipts,
+    threadMentions.chips,
+  ]);
   const loadWorktreeRefs = useCallback(() => {
     if (projectId === undefined || execute === undefined) return;
     const requestedProjectId = projectId;

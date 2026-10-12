@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { StrictMode, useRef } from "react";
 import { describe, expect, it } from "vitest";
 import {
@@ -113,6 +113,30 @@ describe("useWorkComposerImages", () => {
     expect(screen.getByLabelText("images")).toHaveTextContent("captured.png");
     fireEvent.click(screen.getByRole("button", { name: "remove captured.png" }));
     expect(screen.getByLabelText("images")).toHaveTextContent("");
+  });
+
+  it("shows an attachment added on another pane that shares the draft scope", () => {
+    const drafts = createNewTaskDrafts();
+    render(
+      <NewTaskDraftsContext.Provider value={drafts}>
+        <NewTaskDraftScopeContext.Provider value="work-overview:shared">
+          <div>
+            <section aria-label="pane a">
+              <Harness />
+            </section>
+            <section aria-label="pane b">
+              <Harness />
+            </section>
+          </div>
+        </NewTaskDraftScopeContext.Provider>
+      </NewTaskDraftsContext.Provider>,
+    );
+
+    const paneA = screen.getByRole("region", { name: "pane a" });
+    const paneB = screen.getByRole("region", { name: "pane b" });
+    fireEvent.click(within(paneA).getByRole("button", { name: "attach" }));
+    expect(within(paneA).getByLabelText("images")).toHaveTextContent("captured.png");
+    expect(within(paneB).getByLabelText("images")).toHaveTextContent("captured.png");
   });
 
   it("does not keep attachments after the draft scope changes", () => {
