@@ -1,3 +1,4 @@
+import { useNewTaskPrompt } from "../composer/useNewTaskPrompt";
 import { useDraftModelOptions } from "../providers/useDraftModelOptions";
 import { ChatClientFailure, type ChatClient } from "@octant/client-runtime/chat-client";
 import { ProjectClientFailure, type ProjectClient } from "@octant/client-runtime/project-client";
@@ -103,7 +104,7 @@ export function ChatProjectOverview(props: ChatProjectOverviewProps) {
   const model = props.model ?? loadedModel;
   const input = useRef<HTMLTextAreaElement>(null);
   const inputId = useId();
-  const [draft, setDraft] = useState("");
+  const [draft, setDraft] = useNewTaskPrompt();
   const { modelKey, modelOptionValues, setModelChoice } = useDraftModelOptions(
     props.providerGroups ?? [],
     props.selectedProviderInstanceId,

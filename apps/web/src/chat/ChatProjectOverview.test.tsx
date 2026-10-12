@@ -2,6 +2,11 @@ import { ProjectClientFailure } from "@octant/client-runtime/project-client";
 import { ChatClientFailure } from "@octant/client-runtime/chat-client";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import {
+  createNewTaskDrafts,
+  NewTaskDraftsContext,
+  NewTaskDraftScopeContext,
+} from "../composer/useNewTaskPrompt";
 import { ChatProjectOverview, type ChatProjectOverviewModel } from "./ChatProjectOverview";
 
 const model: ChatProjectOverviewModel = {
@@ -683,6 +688,30 @@ describe("ChatProjectOverview", () => {
         "Refreshed Project decision",
       ),
     ).toBeVisible();
+  });
+
+  it("keeps the quick-start draft after the overview remounts", async () => {
+    const drafts = createNewTaskDrafts();
+    function view() {
+      return (
+        <NewTaskDraftsContext.Provider value={drafts}>
+          <NewTaskDraftScopeContext.Provider value="chat-overview:test">
+            <ChatProjectOverview model={model} onCreateThread={vi.fn()} />
+          </NewTaskDraftScopeContext.Provider>
+        </NewTaskDraftsContext.Provider>
+      );
+    }
+
+    const rendered = render(view());
+    fireEvent.change(screen.getByRole("textbox", { name: "Start a new Chat thread" }), {
+      target: { value: "Keep this draft" },
+    });
+    rendered.unmount();
+    render(view());
+
+    expect(screen.getByRole("textbox", { name: "Start a new Chat thread" })).toHaveValue(
+      "Keep this draft",
+    );
   });
 
   it("opens Providers from Set up a provider on the Project composer", () => {

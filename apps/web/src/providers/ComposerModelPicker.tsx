@@ -103,6 +103,10 @@ function railIdFor(group: PickerGroup | undefined): RailId | undefined {
   return group.runtime === "octant-harness" ? OCTANT_RAIL_ID : group.instance.id;
 }
 
+function pickerHasListedModel(groups: ReadonlyArray<PickerGroup>): boolean {
+  return groups.some((group) => group.sections.some((section) => section.models.length > 0));
+}
+
 interface ModelRow {
   readonly picker: PickerModel;
   readonly sectionId: string;
@@ -162,7 +166,7 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
     });
   }, [open, props.groups, selectedGroup, harnessGroups.length]);
 
-  if (props.groups.length === 0) {
+  if (!pickerHasListedModel(props.groups)) {
     const offerSetup = props.onOpenSettings !== undefined && props.providersReady !== true;
     if (!offerSetup) {
       return (

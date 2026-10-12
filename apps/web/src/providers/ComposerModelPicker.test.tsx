@@ -429,6 +429,20 @@ describe("ComposerModelPicker", () => {
     );
   });
 
+  it("offers Set up a provider when retained groups list no models", async () => {
+    const user = userEvent.setup();
+    const onOpenSettings = vi.fn();
+    const unready = groups().map((group) => ({ ...group, sections: [] }));
+    render(
+      <ComposerModelPicker groups={unready} onOpenSettings={onOpenSettings} onSelect={vi.fn()} />,
+    );
+
+    const setup = screen.getByRole("button", { name: "Set up a provider" });
+    expect(setup).toBeEnabled();
+    await user.click(setup);
+    expect(onOpenSettings).toHaveBeenCalledOnce();
+  });
+
   it("offers Set up a provider when no providers are ready", async () => {
     const user = userEvent.setup();
     const onOpenSettings = vi.fn();

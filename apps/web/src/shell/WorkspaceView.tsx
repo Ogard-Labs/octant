@@ -1762,60 +1762,65 @@ function renderNonCodeTab(
         {...(project.type === "chat"
           ? {
               chatOverview: (
-                <ChatProjectOverview
-                  client={props.chatClient}
-                  controller={props.chatController}
-                  {...(project.lifecycle === "active" &&
-                  props.chatController.status === "ready" &&
-                  props.onCreateChatProjectThread !== undefined
-                    ? {
-                        onCreateThread: (draft, modelOptionValues) =>
-                          props.onCreateChatProjectThread?.(project.id, draft, modelOptionValues) ??
-                          false,
-                      }
-                    : {})}
-                  {...(props.onOpenChatThread === undefined
-                    ? {}
-                    : {
-                        onOpenThread: (threadId: string) => {
-                          const thread = props.chatController.bootstrap?.threads.find(
-                            (candidate) => String(candidate.id) === threadId,
-                          );
-                          if (thread !== undefined) {
-                            props.onOpenChatThread?.(thread.id, thread.title, project.id);
-                          }
-                        },
-                      })}
-                  {...(project.lifecycle !== "active" ||
-                  props.onViewAllChatProjectThreads === undefined
-                    ? {}
-                    : {
-                        onViewAllProjectThreads: () =>
-                          props.onViewAllChatProjectThreads?.(project.id),
-                      })}
-                  {...(props.projectClient === undefined
-                    ? {}
-                    : { projectClient: props.projectClient })}
-                  {...(props.memoryRevision === undefined
-                    ? {}
-                    : { memoryRevision: props.memoryRevision })}
-                  {...(props.draftProviderGroups === undefined
-                    ? {}
-                    : { providerGroups: props.draftProviderGroups })}
-                  {...(props.draftSelectedProviderInstanceId === undefined
-                    ? {}
-                    : { selectedProviderInstanceId: props.draftSelectedProviderInstanceId })}
-                  {...(props.draftSelectedModelId === undefined
-                    ? {}
-                    : { selectedModelId: props.draftSelectedModelId })}
-                  {...(props.onDraftSelectProvider === undefined
-                    ? {}
-                    : { onSelectProvider: props.onDraftSelectProvider })}
-                  {...(openProviderSettings === undefined
-                    ? {}
-                    : { onOpenSettings: openProviderSettings })}
-                  projectId={project.id}
-                />
+                <NewTaskDraftScopeContext.Provider value={`chat-overview:${String(project.id)}`}>
+                  <ChatProjectOverview
+                    client={props.chatClient}
+                    controller={props.chatController}
+                    {...(project.lifecycle === "active" &&
+                    props.chatController.status === "ready" &&
+                    props.onCreateChatProjectThread !== undefined
+                      ? {
+                          onCreateThread: (draft, modelOptionValues) =>
+                            props.onCreateChatProjectThread?.(
+                              project.id,
+                              draft,
+                              modelOptionValues,
+                            ) ?? false,
+                        }
+                      : {})}
+                    {...(props.onOpenChatThread === undefined
+                      ? {}
+                      : {
+                          onOpenThread: (threadId: string) => {
+                            const thread = props.chatController.bootstrap?.threads.find(
+                              (candidate) => String(candidate.id) === threadId,
+                            );
+                            if (thread !== undefined) {
+                              props.onOpenChatThread?.(thread.id, thread.title, project.id);
+                            }
+                          },
+                        })}
+                    {...(project.lifecycle !== "active" ||
+                    props.onViewAllChatProjectThreads === undefined
+                      ? {}
+                      : {
+                          onViewAllProjectThreads: () =>
+                            props.onViewAllChatProjectThreads?.(project.id),
+                        })}
+                    {...(props.projectClient === undefined
+                      ? {}
+                      : { projectClient: props.projectClient })}
+                    {...(props.memoryRevision === undefined
+                      ? {}
+                      : { memoryRevision: props.memoryRevision })}
+                    {...(props.draftProviderGroups === undefined
+                      ? {}
+                      : { providerGroups: props.draftProviderGroups })}
+                    {...(props.draftSelectedProviderInstanceId === undefined
+                      ? {}
+                      : { selectedProviderInstanceId: props.draftSelectedProviderInstanceId })}
+                    {...(props.draftSelectedModelId === undefined
+                      ? {}
+                      : { selectedModelId: props.draftSelectedModelId })}
+                    {...(props.onDraftSelectProvider === undefined
+                      ? {}
+                      : { onSelectProvider: props.onDraftSelectProvider })}
+                    {...(openProviderSettings === undefined
+                      ? {}
+                      : { onOpenSettings: openProviderSettings })}
+                    projectId={project.id}
+                  />
+                </NewTaskDraftScopeContext.Provider>
               ),
             }
           : {})}
@@ -2004,62 +2009,64 @@ function renderNonCodeTab(
     const recentThreads = draftRecentThreads("chat", props);
     const home = props.homeStart;
     return (
-      <ChatWelcome
-        greetingName={props.greetingName}
-        {...(home?.composerTabs === undefined ? {} : { composerTabs: home.composerTabs })}
-        {...(home?.cards === undefined
-          ? {}
-          : {
-              homeStart: (
-                <HomeStart
-                  actions={[]}
-                  dashboard={
-                    <HomeDashboard
-                      cards={home.cards}
-                      customization={home.cardCustomization}
-                      onCustomizationChange={home.onCardCustomizationChange}
-                    />
-                  }
-                />
-              ),
-            })}
-        {...(recentThreads.length === 0 ? {} : { recentThreads })}
-        {...(props.hosts === undefined ? {} : { hosts: props.hosts })}
-        {...(props.selectedCreateHostId === undefined
-          ? {}
-          : { selectedHostId: props.selectedCreateHostId })}
-        {...(props.lastSelectedHealthyHostId === undefined
-          ? {}
-          : { lastSelectedHealthyHostId: props.lastSelectedHealthyHostId })}
-        {...(props.createHostViewScope === undefined
-          ? {}
-          : { viewScope: props.createHostViewScope })}
-        {...(props.onSelectCreateHost === undefined
-          ? {}
-          : { onSelectHost: props.onSelectCreateHost })}
-        {...(props.chatWelcomeError === undefined
-          ? props.chatController.errorMessage === undefined
+      <NewTaskDraftScopeContext.Provider value={`chat-welcome:${String(paneId)}`}>
+        <ChatWelcome
+          greetingName={props.greetingName}
+          {...(home?.composerTabs === undefined ? {} : { composerTabs: home.composerTabs })}
+          {...(home?.cards === undefined
             ? {}
-            : { errorMessage: props.chatController.errorMessage }
-          : { errorMessage: props.chatWelcomeError })}
-        {...(props.chatWelcomeCreating === undefined
-          ? {}
-          : { creating: props.chatWelcomeCreating })}
-        onCreateChat={props.onCreateChat}
-        providerGroups={props.draftProviderGroups ?? []}
-        {...(props.draftSelectedProviderInstanceId === undefined
-          ? {}
-          : { selectedProviderInstanceId: props.draftSelectedProviderInstanceId })}
-        {...(props.draftSelectedModelId === undefined
-          ? {}
-          : { selectedModelId: props.draftSelectedModelId })}
-        {...(props.onDraftSelectProvider === undefined
-          ? {}
-          : { onSelectProvider: props.onDraftSelectProvider })}
-        {...(openProviderSettings === undefined ? {} : { onOpenSettings: openProviderSettings })}
-        onRetry={props.chatController.retry}
-        status={props.chatController.status}
-      />
+            : {
+                homeStart: (
+                  <HomeStart
+                    actions={[]}
+                    dashboard={
+                      <HomeDashboard
+                        cards={home.cards}
+                        customization={home.cardCustomization}
+                        onCustomizationChange={home.onCardCustomizationChange}
+                      />
+                    }
+                  />
+                ),
+              })}
+          {...(recentThreads.length === 0 ? {} : { recentThreads })}
+          {...(props.hosts === undefined ? {} : { hosts: props.hosts })}
+          {...(props.selectedCreateHostId === undefined
+            ? {}
+            : { selectedHostId: props.selectedCreateHostId })}
+          {...(props.lastSelectedHealthyHostId === undefined
+            ? {}
+            : { lastSelectedHealthyHostId: props.lastSelectedHealthyHostId })}
+          {...(props.createHostViewScope === undefined
+            ? {}
+            : { viewScope: props.createHostViewScope })}
+          {...(props.onSelectCreateHost === undefined
+            ? {}
+            : { onSelectHost: props.onSelectCreateHost })}
+          {...(props.chatWelcomeError === undefined
+            ? props.chatController.errorMessage === undefined
+              ? {}
+              : { errorMessage: props.chatController.errorMessage }
+            : { errorMessage: props.chatWelcomeError })}
+          {...(props.chatWelcomeCreating === undefined
+            ? {}
+            : { creating: props.chatWelcomeCreating })}
+          onCreateChat={props.onCreateChat}
+          providerGroups={props.draftProviderGroups ?? []}
+          {...(props.draftSelectedProviderInstanceId === undefined
+            ? {}
+            : { selectedProviderInstanceId: props.draftSelectedProviderInstanceId })}
+          {...(props.draftSelectedModelId === undefined
+            ? {}
+            : { selectedModelId: props.draftSelectedModelId })}
+          {...(props.onDraftSelectProvider === undefined
+            ? {}
+            : { onSelectProvider: props.onDraftSelectProvider })}
+          {...(openProviderSettings === undefined ? {} : { onOpenSettings: openProviderSettings })}
+          onRetry={props.chatController.retry}
+          status={props.chatController.status}
+        />
+      </NewTaskDraftScopeContext.Provider>
     );
   }
   return (
