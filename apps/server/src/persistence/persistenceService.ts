@@ -126,6 +126,7 @@ import {
   readProviderCatalogs,
   readProviderInstance,
   readProviderInstances,
+  readRemovedProviderInstanceIds,
 } from "../providers/providerProjection";
 import { createPhase1RuntimeRegistries } from "./runtimeRegistry";
 import {
@@ -189,6 +190,7 @@ export interface PersistenceService {
   readonly readProjectMemory: (projectId: ProjectId) => ProjectMemoryView;
   readonly readProviderInstance: (instanceId: ProviderInstanceId) => ProviderInstance | undefined;
   readonly readProviderInstances: () => ReadonlyArray<ProviderInstance>;
+  readonly readRemovedProviderInstanceIds?: () => ReadonlyArray<string>;
   readonly readProviderDefaults: () => ProviderDefaults;
   readonly readProviderCatalog?: (
     instanceId: ProviderInstanceId,
@@ -428,6 +430,7 @@ async function acquirePersistence(options: PersistenceLiveOptions): Promise<Pers
       readProjectMemory: (projectId) => readProjectMemory(connection, projectId),
       readProviderInstance: (instanceId) => readProviderInstance(connection, instanceId),
       readProviderInstances: () => readProviderInstances(connection),
+      readRemovedProviderInstanceIds: () => readRemovedProviderInstanceIds(connection),
       readProviderDefaults: () => readProviderDefaults(connection),
       readProviderCatalog: (instanceId) => readProviderCatalog(connection, instanceId),
       readProviderCatalogs: () => readProviderCatalogs(connection),

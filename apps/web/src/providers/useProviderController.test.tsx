@@ -2120,6 +2120,42 @@ describe("useProviderController", () => {
     }
   });
 
+  it("says where a removed Claude account's folder still is, and says nothing for the host profile", async () => {
+    for (const configDirectory of ["/Users/ada/.claude-accounts/extra", undefined] as const) {
+      const instance = claudeProvider({
+        displayName: "Claude work",
+        configuration: {
+          kind: "claude-agent-sdk",
+          binaryPath: "/opt/homebrew/bin/claude",
+          authentication: "subscription",
+          ...(configDirectory === undefined ? {} : { configDirectory }),
+        },
+      });
+      const api = client(snapshot([instance]));
+      vi.mocked(api.execute).mockResolvedValue({
+        kind: "provider-removed",
+        instanceId: id,
+        version: 2 as never,
+      });
+      const host = credentialHost([]);
+      const { result, unmount } = renderHook(() =>
+        useProviderController({ client: api, hostBridge: host }),
+      );
+      await waitFor(() => expect(result.current.status).toBe("ready"));
+
+      await act(async () => {
+        await expect(result.current.remove(id)).resolves.toBe(true);
+      });
+
+      expect(result.current.message).toBe(
+        configDirectory === undefined
+          ? undefined
+          : "Claude work was removed. Its folder /Users/ada/.claude-accounts/extra still holds that account's sign-in and history. Delete the folder to remove them.",
+      );
+      unmount();
+    }
+  });
+
   it("clears Anthropic-compatible credentials after removal", async () => {
     for (const authentication of ["api-key", "bearer", "none"] as const) {
       const calls: string[] = [];

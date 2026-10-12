@@ -247,7 +247,9 @@ Connection check uses what the Claude CLI or SDK reports, not files in that
 directory. A thread stays on the account it started with. Octant does not
 fail over, rotate, or load-balance between accounts. An Anthropic API-key
 account still uses the key you store in Octant for that provider, on its
-assigned directory.
+assigned directory. Removing an account does not delete its directory. Octant
+tells you where it is; delete it yourself to remove that account's sign-in
+and history.
 
 If you previously connected Claude for helpers, Octant no longer stores that
 token. Revoke the leftover token with Anthropic.

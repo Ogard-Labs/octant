@@ -262,6 +262,26 @@ export function readProviderInstances(
   return rows.map(decodeInstanceRow);
 }
 
+/**
+ * Ids of provider instances the journal once recorded and the registry no
+ * longer holds. A removed instance keeps its aggregate head, which is the only
+ * place its id survives.
+ */
+export function readRemovedProviderInstanceIds(
+  connection: SqliteConnection,
+): ReadonlyArray<string> {
+  const rows = connection
+    .prepare(`
+      SELECT aggregate_id
+      FROM aggregate_heads
+      WHERE aggregate_type = 'provider-instance'
+        AND aggregate_id NOT IN (SELECT instance_id FROM provider_instance_projection)
+      ORDER BY aggregate_id
+    `)
+    .all() as ReadonlyArray<{ readonly aggregate_id: string }>;
+  return rows.map((row) => row.aggregate_id);
+}
+
 export function readProviderDefaults(connection: SqliteConnection): ProviderDefaults {
   const row = connection
     .prepare(`

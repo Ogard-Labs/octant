@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import { decodeProjectId } from "@octant/contracts";
+import { CLAUDE_ACCOUNT_PROFILE } from "@octant/domain";
 import { localHostDisplayName } from "./localHostDisplayName";
 import type {
   HostDataMap,
@@ -45,6 +46,14 @@ const CACHE_DIRECTORIES: ReadonlyArray<{ readonly name: string; readonly relativ
   { name: "Computer use driver", relative: "computer-use" },
 ];
 
+// Octant assigns each extra provider account a folder under the person's
+// home. The provider's own CLI fills it with that account's sign-in and
+// history, and removing the account in Octant leaves the folder in place, so
+// the map names where those folders live.
+const ACCOUNT_DIRECTORIES: ReadonlyArray<{ readonly name: string; readonly relative: string }> = [
+  { name: "Claude account folders", relative: CLAUDE_ACCOUNT_PROFILE.extraAccountsDirectoryName },
+];
+
 const RELATED_RETENTION = {
   kind: "thread-retention" as const,
   settings: { section: "data" as const, setting: "thread-retention" },
@@ -73,6 +82,7 @@ export interface ComposeHostDataMapInput {
   readonly serviceMode: HostControlServiceMode;
   readonly platform?: "darwin" | "linux";
   readonly dataDirectory?: string;
+  readonly homeDirectory?: string;
   readonly credentialStore?: HostDataMapCredentialStoreInput;
   readonly projects?: ReadonlyArray<HostDataMapProjectInput>;
 }
@@ -90,7 +100,10 @@ export function composeHostDataMap(input: ComposeHostDataMapInput): HostDataMap 
       ? { kind: "unknown" }
       : { kind: "known", path: join(store, JOURNAL_FILENAME) };
   const credentials = composeCredentials(input.credentialStore);
-  const hostCaches = namedLocations(store, CACHE_DIRECTORIES);
+  const hostCaches = [
+    ...namedLocations(store, CACHE_DIRECTORIES),
+    ...namedLocations(knownPath(input.homeDirectory), ACCOUNT_DIRECTORIES),
+  ];
 
   return {
     host: {

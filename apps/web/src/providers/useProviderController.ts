@@ -2988,7 +2988,18 @@ export function useProviderController(options: ProviderControllerOptions) {
                 "The provider was removed, but its stored credential could not be cleared. Retry cleanup from the Octant host.",
               );
             }
+            return true;
           }
+        }
+        // Octant assigned this folder and the provider's own CLI filled it.
+        // Removing the account does not delete it, so the person is told
+        // where the sign-in and history still are.
+        const accountDirectory =
+          instance.driverKind === "claude" ? instance.configuration.configDirectory : undefined;
+        if (accountDirectory !== undefined && mounted.current) {
+          setMessage(
+            `${instance.displayName} was removed. Its folder ${accountDirectory} still holds that account's sign-in and history. Delete the folder to remove them.`,
+          );
         }
         return true;
       }),

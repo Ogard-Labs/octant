@@ -506,7 +506,7 @@ import { createHostOAuthService, extAgentHostIdFor } from "./providers/oauth/hos
 import { makeHostOAuthBrokerClient } from "./providers/oauth/hostOAuthBrokerClient";
 import { hostOAuthEventJournal } from "./providers/oauth/hostOAuthEventJournal";
 import { createProviderOAuthRouteHandler } from "./providers/oauth/providerOAuthRoutes";
-import { createClaudeHelperTokenRetirementStore } from "./providers/claudeHelperTokenRetirement";
+import { retireClaudeHelperTokens } from "./providers/claudeHelperTokenRetirement";
 import { subscriptionOAuthHostFromBroker } from "./providers/oauth/subscriptionOAuthHost";
 import type { CompatibleFetch } from "./providers/openAiCompatibleEndpoint";
 import { makeClaudeAgentSdkPort, type ClaudeAgentSdkPort } from "./providers/claudeAgentSdkPort";
@@ -4282,11 +4282,12 @@ export function startOctantServer(
       credentialBroker === undefined ? undefined : makeProviderApiKeyPool(credentialBroker);
     // The retirement reads the stored value as it is, so it asks the broker
     // and not the key pool, which answers with one key of a pool.
-    const helperTokenRetirement = createClaudeHelperTokenRetirementStore({
+    void retireClaudeHelperTokens({
       dataDirectory: persistence.dataDirectory,
-      ...(credentialBroker === undefined ? {} : { broker: credentialBroker }),
-    });
-    void helperTokenRetirement.retire(persistence.readProviderInstances()).catch(() => undefined);
+      broker: credentialBroker,
+      instances: persistence.readProviderInstances(),
+      removedInstanceIds: persistence.readRemovedProviderInstanceIds?.() ?? [],
+    }).catch(() => undefined);
     const oauthBroker =
       options.credentialBrokerUrl === undefined || options.credentialBrokerToken === undefined
         ? undefined
@@ -10271,6 +10272,7 @@ export function startOctantServer(
         : {
             dataMap: {
               dataDirectory: persistence.dataDirectory,
+              homeDirectory: homedir(),
               platform: hostRuntimePlatform,
               ...(options.credentialBrokerUrl !== undefined && hostRuntimePlatform === "darwin"
                 ? { credentialStore: desktopCredentialStore() }
