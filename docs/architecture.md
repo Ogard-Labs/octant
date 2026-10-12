@@ -467,7 +467,8 @@ document as a future version. Frames follow the
 - **Agents are taught and checked.** `describe` presents the tiers with a
   finished example of each, in-tree recipes cover an article, a design brief,
   a design system, and a clickable prototype, and `preview` draws frames and
-  returns overflow, contrast, missing-asset, and script-error warnings.
+  returns overflow, contrast, missing-asset, and script-error warnings. This
+  has shipped (see [Canvas](design/canvas.md)).
 - **Shares and exports carry what they can draw safely.** Typed blocks travel
   as today. A frame travels in an authenticated snapshot only when the viewer
   draws it under the same frame policy and the sharer acknowledges that markup

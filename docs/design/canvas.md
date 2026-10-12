@@ -19,20 +19,29 @@ long reply, the operations, the authoring and safety rules (structured blocks,
 markup only in a design's frames, no file, shell, Git, or network authority,
 no invented references), where the thread shows it, and to call `describe`
 before authoring. Per-block guidance is answered by `describe`. Unscoped
-describe lists the closed block catalogue with one line on when to use each
+describe names the three tiers (typed blocks carry data, a static design frame
+carries the look, a running design frame carries behaviour) and the rule to
+use the lowest tier that delivers the result, then lists the closed block
+catalogue with one line on when to use each
 guided kind, how common requests map to recipes, what preview measures, and a
 creation example; describe for up to three block kinds returns their canonical
 schemas, plus authoring guidance and worked examples for the kinds that carry
 them; a plain kind such as `rich-text` returns its schema alone. The `design`
-guidance names the images the thread's mode can show (generated images in
-every mode, and Project files in Work and Code) and when a design should
-declare that it runs script. Unscoped
+guidance names the frame kit classes, the images the thread's mode can show
+(generated images in every mode, and Project files in Work and Code), when a
+design should declare that it runs script, and the limits its bridge keeps;
+its examples are a phone flow, a deck, a themed spec, and a prototype that
+runs, one finished example of each frame tier. Unscoped
 describe also lists document recipes: an id, a title, when to use one, and a
-skeleton of block kinds that already exist. The
+skeleton of block kinds that already exist, where a `design` slot may name
+the `size` it is drawn at. The
 host offers an implementation plan, a design spec, an architecture review (its
 options in a comparison matrix), a code review, an audit or test report, a
 postmortem, a research brief, a dashboard, a repository map, a design
-prototype, a slide deck, and a data model. A trusted, enabled, unscoped skill
+prototype, a slide deck, a data model, an article (one themed document), a
+product or game design brief (a themed pitch, then typed blocks in tabs), a
+design system (a themed document and a token table), and a clickable
+prototype (a design that runs). A trusted, enabled, unscoped skill
 may add recipes through its Canvas contribution; a skill that is not enabled
 contributes none, and a contributed recipe cannot replace an in-tree id. A
 recipe is a starting shape, not a document and not authority. Describe reads no
@@ -43,7 +52,10 @@ optional one-line `summary` per recipe for the chooser. `create` with intent
 `template` names a recipe as `templateId`; the host resolves it against what it
 offers at that moment, refuses an id it does not offer as `invalid-template`,
 and opens the Canvas with the pure `canvasRecipeStarterBlocks` document: each
-heading role as a heading and every other role as an info callout naming the
+heading role as a heading, a `design` slot of the `document` size as a themed
+document frame holding the recipe's title and section headings that wait for
+content (the recipe's words are written into the frame as text, never as
+markup), and every other role as an info callout naming the
 block kind it waits for, never a data block with invented values. The create
 request keeps its ordinary scope and authority checks. When the Create Canvas
 panel belongs to a thread, the person may also ask that thread's agent to fill
@@ -107,7 +119,36 @@ minute, and an image no wider than 1,600 px and no taller than 4,096 px. When no
 Chromium is present, the build carries no preview page, the page fails to
 settle, or the model driving the turn does not accept images in a tool result,
 the warnings still return and the result names which (`no-browser`,
-`no-renderer`, `render-failed`, `provider-cannot-take-images`). Whether a model
+`no-renderer`, `render-failed`, `provider-cannot-take-images`). A `design` is markup, so how its frames read
+is measured in the drawn page rather than computed from the document: after
+the page settles the host reads each drawn frame and adds a
+`design-frame-overflow` warning for a frame whose content is wider than its
+page, a `design-contrast-below-target` warning for the text that reads worst
+in a frame (4.5:1, or 3:1 for large text; text over an image or gradient is
+left unmeasured), and a `design-script-error` warning for each of the first
+uncaught errors a running design threw as it loaded (the preview page records
+them from the bridge itself, because the app's list under a prototype keeps
+only the latest few). Every design the page drew is read; if reading them
+passes its time budget, each remaining design gets a `design-not-measured`
+warning rather than being left out as if it were clean. A design with a frame
+that did not answer gets the same warning, beside the warnings of its frames
+that did. A running design runs in the preview as
+it does for a reader: the host builds its page with `renderCanvasDesignPage`,
+answers it at a path under the preview page's own origin with the page
+route's headers, and the preview page draws it in a frame sandboxed to
+`allow-scripts` alone, so the errors arrive through the same bridge. A value
+read from inside a frame is a claim: the host keeps only entries of the
+expected shape and bounds, and leaves a frame that does not answer in two
+seconds unmeasured. These warnings exist only when a browser drew the page,
+so a Canvas that holds a design is drawn even for a model that is shown no
+picture. Because request interception does not see WebRTC, the preview
+browser is started with no route out (`--proxy-server` to a port that is
+never a proxy, `--proxy-bypass-list=<-loopback>`, `--host-resolver-rules`
+mapping every name to not-found, and
+`--webrtc-ip-handling-policy=disable_non_proxied_udp`); the preview browser
+smoke runs a prototype that tries fetch, XHR, WebSocket, an image, a
+self-navigation, and a peer connection over UDP and TCP, and asserts that
+nothing arrives. Whether a model
 accepts images is read from its own input modalities, the same signal the
 computer-use screenshots use; there is no separate provider capability for
 images in a tool result.

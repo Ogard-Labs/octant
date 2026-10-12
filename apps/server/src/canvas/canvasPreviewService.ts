@@ -13,10 +13,12 @@ import type {
   CanvasService,
 } from "./canvasService";
 import {
+  canvasPreviewDesignWarnings,
   canvasPreviewWarnings,
   type CanvasPreviewPalette,
   type CanvasPreviewWarning,
 } from "./canvasPreviewWarnings";
+import { renderCanvasDesignPage } from "./canvasDesignPage";
 import type { CanvasPreviewRenderer } from "./canvasPreviewRenderer";
 
 /**
@@ -190,7 +192,11 @@ export function createCanvasPreviewService(
           width,
           warnings,
         } as const;
-        if (!request.imagesInToolResults) {
+        // A design's frame warnings are measured in the drawn page, so a
+        // Canvas that holds a design is drawn even for a model that is shown
+        // no picture; every other Canvas is read from its document alone.
+        const designs = definition.blocks.filter((block) => block.kind === "design");
+        if (!request.imagesInToolResults && designs.length === 0) {
           return { ...base, imageOmitted: "provider-cannot-take-images" };
         }
         if (!(await options.renderer.available())) {
@@ -202,6 +208,16 @@ export function createCanvasPreviewService(
           theme: request.theme,
           placement: presentation === "inline" ? "thread" : "document",
           designAssets: [...designAssets].map(([blockId, assets]) => ({ blockId, assets })),
+          designPages: designs
+            .filter((block) => block.runsScript === true)
+            .map((block) => ({
+              blockId: String(block.blockId),
+              html: renderCanvasDesignPage(
+                block,
+                String(block.frames[0]?.frameId ?? ""),
+                designAssets.get(String(block.blockId)) ?? [],
+              ),
+            })),
         });
         if (rendered.kind !== "rendered") {
           return {
@@ -214,8 +230,15 @@ export function createCanvasPreviewService(
                   : "render-failed",
           };
         }
-        return {
+        const measured = {
           ...base,
+          warnings: [...warnings, ...canvasPreviewDesignWarnings(rendered.designs)],
+        };
+        if (!request.imagesInToolResults) {
+          return { ...measured, imageOmitted: "provider-cannot-take-images" };
+        }
+        return {
+          ...measured,
           height: rendered.height,
           image: { mimeType: "image/png", data: Buffer.from(rendered.png).toString("base64") },
         };
