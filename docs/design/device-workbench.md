@@ -147,8 +147,9 @@ in `Resources/managed-tools/<tool>` with its license. A release build re-signs
 every Mach-O file found there with Octant's Developer ID, hardened runtime, and a
 secure timestamp, and none of Octant's entitlements, before sealing the app,
 because notarization rejects the upstream ad-hoc signatures. Camera passthrough
-from the bundled helper would need its own camera entitlement and a camera usage
-description, which the app does not declare. Electron main owns the
+from the bundled helper is unsupported in a packaged app: it would need a camera
+entitlement and a camera usage description, and Octant declares neither, so the
+app never asks for the camera. Electron main owns the
 per-tool instances; tools launch under the desktop runtime
 (`ELECTRON_RUN_AS_NODE` with `process.execPath`), never a system Node. Tools
 run unconfined under Octant's signed identity: no sandbox profile limits them,

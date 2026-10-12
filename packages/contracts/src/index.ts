@@ -33,7 +33,6 @@ export * from "./threadPlan";
 export * from "./threadTasks";
 export * from "./agentMessage";
 export * from "./extensions";
-export * from "./executionCapsule";
 export * from "./extensionEvents";
 export * from "./extensionRpc";
 export * from "./integration";
