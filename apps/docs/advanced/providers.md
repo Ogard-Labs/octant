@@ -238,7 +238,9 @@ in **Settings → Providers**: give it a name and an accent color so the model
 picker can tell them apart. Octant assigns the first subscription account
 Claude's default directory (`~/.claude`). Each additional account, and every
 API-key account, gets its own directory under `~/.claude-accounts/`. A
-directory you chose earlier keeps working until you re-assign it. Sign in
+directory you chose earlier keeps working until you re-assign it. Re-assigning
+starts a new login in the assigned directory, and threads that account already
+started stay in the old one and cannot continue. Sign in
 only with the unmodified `claude auth login` command in a terminal for that
 account — the provider card shows the exact command, including the
 directory variables Claude expects. Check status with `claude auth status`.
