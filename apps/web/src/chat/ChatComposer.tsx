@@ -126,6 +126,7 @@ export interface ChatComposerProps {
    */
   readonly queue?: ReactNode;
   readonly queueing?: boolean;
+  readonly threadBusy?: boolean;
   readonly provider: ChatComposerSelection;
   readonly research: ChatComposerResearch;
   /**
@@ -875,6 +876,7 @@ export function ChatComposer(props: ChatComposerProps) {
   return (
     <ThreadComposer
       queue={props.queue}
+      {...(props.threadBusy === undefined ? {} : { threadBusy: props.threadBusy })}
       presentation="follow-up"
       ariaLabel="Chat composer"
       chips={chips}
