@@ -1337,8 +1337,8 @@ flowchart LR
   title, content hash, and time. A thread keeps its newest 32 captures and they
   are erased with the thread. Only a local window that can open the thread reads
   them, never a paired device. They never reach a Canvas share, replica sync, or
-  a diagnostics export; the thread export a local window takes carries them and
-  nothing else does. A capture adds no Project filesystem authority and no
+  a diagnostics export. They leave the host only in an export the local owner
+  takes: that thread's export, or the host-wide data export that embeds it. A capture adds no Project filesystem authority and no
   second taint mechanism: the observation that produced it already taints the
   thread. Detail is in [Browser captures](design/browser-captures.md).
 - **Recovery.** Sequence-based reconnect replay for local and remote clients —

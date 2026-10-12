@@ -70,9 +70,10 @@ the Browser pane
 
 ## Thread export
 
-- A thread export carries the thread's retained captures, and nowhere else does
-  a capture leave the host. A page can show personal data, so a capture's URL
-  and title leave only when the person exports that thread.
+- A capture leaves the host only in an export the local owner takes: an export
+  of that thread, or the host-wide data export, which embeds each thread's
+  bundle. A page can show personal data, so a capture's URL and title travel
+  no other way.
 - Each capture is one attachment record beside the thread's generated images:
   media type, size, and a `capture` block with the capture id, page origin, URL,
   title (absent when the page had none), and capture time. Bytes stay omitted
@@ -85,9 +86,7 @@ the Browser pane
   thread with no captures exports unchanged.
 - No new route. The export route already requires that the caller can open the
   thread, and only a local window's export carries captures: a paired device
-  never reads them, so its export leaves them out. The host-wide data export is
-  a local-owner read that embeds each thread's bundle, so it carries the same
-  records.
+  never reads them, so its export leaves them out.
 - Implemented by `browserCaptureExportAttachments` in the domain package and the
   `browserCaptures` option of the server's thread export service.
 
