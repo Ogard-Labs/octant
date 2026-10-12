@@ -1563,8 +1563,8 @@ thread it creates could not do.
   binding. The routine scope is minted per process and never registered, so no
   route, renderer, or paired device can act as it; it reaches only active
   Projects of the routine's mode, after the revalidation above, and every
-  ceiling here still applies. The thread's creation is journaled as the host's
-  `system` actor, so the journal tells a routine's thread from one a person
+  ceiling here still applies. The thread's creation, and a Work run's first
+  turn, are journaled as the host's `system` actor, so the journal tells a routine's thread from one a person
   started. A browser-origin approval a routine's turn raises has no window of
   its own, so it is offered to every local window that may drive that thread's
   browser (one bound to the routine's Project); answering settles only that
@@ -1667,11 +1667,18 @@ implying that the resumed turn is still running after it settles.
 Cancellation, a manual retry, archival, a provider change, or any superseding
 turn transition settles a stale recovery as `invalidated` rather than letting
 it fire against newer state; a dispatch the admission path refuses settles as
-`failed`. A dispatch that cannot yet reach its admission path — the mode has
-no window registered on this host to carry the continuation — is deferred
-rather than settled: the opt-in stays armed and re-evaluates on a bounded
-retry cadence until it dispatches, invalidates, or is cancelled. This resume
-timer is deliberately narrow and separate from
+`failed`. The dispatch runs as the host, under the same per-process host
+scope a [routine](#modes-chat-work-and-code) runs under, never through a
+window: it resumes with no window open, and an open window lends it neither
+identity nor Project binding. The admission path still rechecks the thread's
+Project access (an inactive Project refuses and settles `failed`), mode, and
+posture exactly as for a person's retry, and a Work resume refuses while Work
+is turned off, since no window stands in for the mode switch; a Work continuation is journaled as
+the host's `system` actor. Any approval the resumed turn raises is offered the
+way a routine's is: a browser-origin or extension-tool prompt goes to every
+local window that may drive that thread (one bound to the Project the prompt
+recorded), and
+answering settles only that prompt. This resume timer is deliberately narrow and separate from
 [routines](#modes-chat-work-and-code): an in-process host timer over journaled
 opt-ins that only continues a stopped turn — no cloud wake, no background claim
 beyond the host's own running process, and no billing automation. A host that was down or unreachable at the reset instant

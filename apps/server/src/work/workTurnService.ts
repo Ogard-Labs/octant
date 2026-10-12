@@ -112,6 +112,7 @@ import {
 } from "./workTurnRuntime";
 import { WorkTurnLiveStore } from "./workTurnLiveStore";
 import { WorkTurnUsageStore } from "./workTurnUsageStore";
+import { isRoutineHostScope } from "../routineHostScope";
 
 const decodeActorId = Schema.decodeUnknownSync(ActorId);
 const decodeCorrelationId = Schema.decodeUnknownSync(CorrelationId);
@@ -176,7 +177,7 @@ export interface WorkTurnServiceDependencies {
           readonly eventName: string;
           readonly eventVersion: 1;
           readonly correlationId: string;
-          readonly actor: { readonly kind: "local-user"; readonly actorId: string };
+          readonly actor: { readonly kind: "local-user" | "system"; readonly actorId: string };
           readonly occurredAt: string;
           readonly payload: unknown;
         }>;
@@ -814,24 +815,30 @@ export class WorkTurnService {
     }
 
     try {
-      this.#append(command.requestId, 0, "work.turn-accepted@1", {
-        kind: "turn-accepted",
-        requestId: command.requestId,
-        threadId: command.threadId,
-        turnId: command.turnId,
-        projectId: command.authority.projectId,
-        authority: command.authority,
-        providerSessionId,
-        ...(resumeCursor === undefined ? {} : { resumeCursor }),
-        prompt: command.prompt,
-        ...(starting.attachments.length === 0 ? {} : { attachments: starting.attachments }),
-        ...(command.extensionSelections === undefined || command.extensionSelections.length === 0
-          ? {}
-          : { extensionSelections: command.extensionSelections }),
-        capabilities: WORK_TURN_CAPABILITIES,
-        ...(command.delivery === undefined ? {} : { delivery: command.delivery }),
-        acceptedAt,
-      });
+      this.#append(
+        command.requestId,
+        0,
+        "work.turn-accepted@1",
+        {
+          kind: "turn-accepted",
+          requestId: command.requestId,
+          threadId: command.threadId,
+          turnId: command.turnId,
+          projectId: command.authority.projectId,
+          authority: command.authority,
+          providerSessionId,
+          ...(resumeCursor === undefined ? {} : { resumeCursor }),
+          prompt: command.prompt,
+          ...(starting.attachments.length === 0 ? {} : { attachments: starting.attachments }),
+          ...(command.extensionSelections === undefined || command.extensionSelections.length === 0
+            ? {}
+            : { extensionSelections: command.extensionSelections }),
+          capabilities: WORK_TURN_CAPABILITIES,
+          ...(command.delivery === undefined ? {} : { delivery: command.delivery }),
+          acceptedAt,
+        },
+        isRoutineHostScope(authenticatedWindowId) ? "system" : "local-user",
+      );
     } catch (error) {
       this.#settleSpendReservation(command.requestId);
       if (error instanceof ConcurrencyConflict) {
@@ -1740,6 +1747,9 @@ export class WorkTurnService {
     expectedVersion: number,
     eventName: "work.turn-accepted@1" | "work.turn-updated@1",
     payload: unknown,
+    // A person's turn is theirs; a turn the host starts on its own (a routine,
+    // a usage-limit resume) is the system's, so the journal tells them apart.
+    actorKind: "local-user" | "system" = "local-user",
   ): void {
     this.#persistence.journal.append({
       aggregate: {
@@ -1754,7 +1764,7 @@ export class WorkTurnService {
           eventVersion: 1,
           correlationId: decodeCorrelationId(this.#uuid()),
           actor: {
-            kind: "local-user",
+            kind: actorKind,
             actorId: decodeActorId(OCTANT_LOCAL_ACTOR_ID),
           },
           occurredAt: decodeTimestamp(this.#clock()),
