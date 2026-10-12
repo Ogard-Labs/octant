@@ -30,12 +30,12 @@ import {
   type OpenCodeProcessOptions,
   type OpenCodeProcessPort,
 } from "./openCodeProcess";
-import type { SeatbeltConfinementPort } from "../process/seatbeltProfile";
+import type { ProcessConfinementPort } from "../process/seatbeltProfile";
 
 const fakeCliPath = fileURLToPath(new URL("./fixtures/fakeOpenCodeCli.ts", import.meta.url));
 const directories: string[] = [];
 
-const passthroughConfinement: SeatbeltConfinementPort = {
+const passthroughConfinement: ProcessConfinementPort = {
   prepare: (input) => ({
     command: input.executable,
     args: input.args,
@@ -646,8 +646,8 @@ describe("OpenCodeProcessPort", () => {
     mkdirSync(shimDirectory);
     const linkedBinary = join(shimDirectory, "opencode");
     symlinkSync(fixture.binaryPath, linkedBinary);
-    let captured: Parameters<SeatbeltConfinementPort["prepare"]>[0] | undefined;
-    const confinement: SeatbeltConfinementPort = {
+    let captured: Parameters<ProcessConfinementPort["prepare"]>[0] | undefined;
+    const confinement: ProcessConfinementPort = {
       prepare: (input) => {
         captured = input;
         return { command: input.executable, args: input.args };
@@ -687,8 +687,8 @@ describe("OpenCodeProcessPort", () => {
   // of exactly /usr/bin/false. OpenCode 1.x and Code mode stay unchanged.
   it("allows fork and exec of only /usr/bin/false for a 2.x Chat or Plan launch", async () => {
     const fixture = probeWrapper("v2-ready");
-    let captured: Parameters<SeatbeltConfinementPort["prepare"]>[0] | undefined;
-    const confinement: SeatbeltConfinementPort = {
+    let captured: Parameters<ProcessConfinementPort["prepare"]>[0] | undefined;
+    const confinement: ProcessConfinementPort = {
       prepare: (input) => {
         captured = input;
         return { command: input.executable, args: input.args };
@@ -724,8 +724,8 @@ describe("OpenCodeProcessPort", () => {
 
   it("keeps fork and exec denied for a 2.x Chat launch on Linux", async () => {
     const fixture = probeWrapper("v2-ready");
-    let captured: Parameters<SeatbeltConfinementPort["prepare"]>[0] | undefined;
-    const confinement: SeatbeltConfinementPort = {
+    let captured: Parameters<ProcessConfinementPort["prepare"]>[0] | undefined;
+    const confinement: ProcessConfinementPort = {
       prepare: (input) => {
         captured = input;
         return { command: input.executable, args: input.args };
@@ -755,8 +755,8 @@ describe("OpenCodeProcessPort", () => {
 
   it("denies fork and exec for a 1.x Chat or Plan launch without the stand-in", async () => {
     const fixture = profileRecordingWrapper("isolation-supported");
-    let captured: Parameters<SeatbeltConfinementPort["prepare"]>[0] | undefined;
-    const confinement: SeatbeltConfinementPort = {
+    let captured: Parameters<ProcessConfinementPort["prepare"]>[0] | undefined;
+    const confinement: ProcessConfinementPort = {
       prepare: (input) => {
         captured = input;
         return { command: input.executable, args: input.args };
@@ -786,8 +786,8 @@ describe("OpenCodeProcessPort", () => {
 
   it("keeps Code mode exec allowed without the stand-in exec grant", async () => {
     const fixture = probeWrapper("v2-ready");
-    let captured: Parameters<SeatbeltConfinementPort["prepare"]>[0] | undefined;
-    const confinement: SeatbeltConfinementPort = {
+    let captured: Parameters<ProcessConfinementPort["prepare"]>[0] | undefined;
+    const confinement: ProcessConfinementPort = {
       prepare: (input) => {
         captured = input;
         return { command: input.executable, args: input.args };
@@ -824,8 +824,8 @@ describe("OpenCodeProcessPort", () => {
   // provider endpoints; Plan still needs the bind.
   it("lets the confined server listen on the port it reserved", async () => {
     const fixture = profileRecordingWrapper("isolation-supported");
-    let captured: Parameters<SeatbeltConfinementPort["prepare"]>[0] | undefined;
-    const confinement: SeatbeltConfinementPort = {
+    let captured: Parameters<ProcessConfinementPort["prepare"]>[0] | undefined;
+    const confinement: ProcessConfinementPort = {
       prepare: (input) => {
         captured = input;
         return { command: input.executable, args: input.args };
@@ -867,8 +867,8 @@ describe("OpenCodeProcessPort", () => {
   // the tool-home discovery reads are already covered by file-read-star.
   it("sends no Seatbelt rules to a Linux confinement", async () => {
     const fixture = profileRecordingWrapper("isolation-supported");
-    const captured: Parameters<SeatbeltConfinementPort["prepare"]>[0][] = [];
-    const confinement: SeatbeltConfinementPort = {
+    const captured: Parameters<ProcessConfinementPort["prepare"]>[0][] = [];
+    const confinement: ProcessConfinementPort = {
       prepare: (input) => {
         captured.push(input);
         return { command: input.executable, args: input.args };
@@ -906,8 +906,8 @@ describe("OpenCodeProcessPort", () => {
     mkdirSync(join(home, ".codex"));
     writeFileSync(join(home, ".claude.json"), "{}");
     const resolvedHome = realpathSync(home);
-    let captured: Parameters<SeatbeltConfinementPort["prepare"]>[0] | undefined;
-    const confinement: SeatbeltConfinementPort = {
+    let captured: Parameters<ProcessConfinementPort["prepare"]>[0] | undefined;
+    const confinement: ProcessConfinementPort = {
       prepare: (input) => {
         captured = input;
         return { command: input.executable, args: input.args };

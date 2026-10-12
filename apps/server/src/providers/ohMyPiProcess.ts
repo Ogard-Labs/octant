@@ -8,7 +8,7 @@ import {
   prepareConfinedVersionProbe,
   type ConfinedVersionProbeLaunch,
 } from "../process/confinedVersionProbe";
-import type { SeatbeltConfinementPort } from "../process/seatbeltProfile";
+import type { ProcessConfinementPort } from "../process/seatbeltProfile";
 import { approvedHomeBinDirs } from "./discoveryService";
 import { makePiRpcClient, type PiRpcClient } from "./piRpcClient";
 import type { ProviderProcessStartedListener } from "./providerRuntimeRegistry";
@@ -46,7 +46,7 @@ export interface OhMyPiProcessOptions {
    * Confinement for the version read only. 0142 records that the declaration
    * probe itself is not wrapped, so this never names that launch.
    */
-  readonly versionProbeConfinement?: SeatbeltConfinementPort;
+  readonly versionProbeConfinement?: ProcessConfinementPort;
 }
 
 const SAFE_ENVIRONMENT = new Set([

@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import { createAuthenticatedProductDispatch } from "./authenticatedProductRoutes";
 import { resolvePrincipalRouteContext } from "./principalRouteContext";
 import { CodeProjectAccess } from "./codeProjectAccess";
+import { ROUTINE_HOST_SCOPE_ID } from "./routineHostScope";
 
 const scopeId = decodeWindowId("00000000-0000-4000-8000-00000000c001");
 const projectId = decodeProjectId("00000000-0000-4000-8000-00000000c010");
@@ -113,4 +114,24 @@ it("keeps concurrent local window checks isolated from a pending remote request"
   release();
   await remote;
   expect(access.canAccessProject(scopeId, otherProject)).toBe(false);
+});
+
+it("lets a routine reach its active Code Project with no window bound to it, and nothing inactive", async () => {
+  const inactive = decodeProjectId("00000000-0000-4000-8000-00000000c012");
+  const access = new CodeProjectAccess({
+    readWorkspace: () => undefined,
+    hasActiveCodeProject: (id) => id === projectId,
+  });
+  expect(access.canAccessProject(ROUTINE_HOST_SCOPE_ID, projectId)).toBe(true);
+  expect(access.canAccessProject(ROUTINE_HOST_SCOPE_ID, inactive)).toBe(false);
+  // A routine started from a person's run-now request still runs as the host.
+  const context = resolvePrincipalRouteContext({
+    request: new Request("https://octant.example/api/automations/run"),
+    principal,
+  });
+  await access.run(context, async () => {
+    expect(access.canAccessProject(ROUTINE_HOST_SCOPE_ID, projectId)).toBe(true);
+  });
+  // Any other unbound scope still reaches nothing.
+  expect(access.canAccessProject(scopeId, projectId)).toBe(false);
 });

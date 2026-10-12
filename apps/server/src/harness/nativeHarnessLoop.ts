@@ -53,7 +53,6 @@ const REPLAY_SAFE_TOOLS: ReadonlySet<string> = new Set([
   "web-fetch",
   "web-search",
   "context-remaining",
-  "journal-lookup",
 ]);
 
 const OMITTED_RESULT_JSON = JSON.stringify({

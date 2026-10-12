@@ -61,6 +61,7 @@ export const IPC_CHANNELS = {
   hostCapabilities: "octant:window:host-capabilities",
   resolvedMaterial: "octant:window:resolved-material",
   resolvedSidebarVibrancy: "octant:window:resolved-sidebar-vibrancy",
+  canvasFrameFocusEscape: "octant:canvas:frame-focus-escape",
   sidebarMaterialPreference: "octant:window:sidebar-material-preference",
   sidebarVibrancyMode: "octant:window:sidebar-vibrancy-mode",
   privateListenerStatus: "octant:private-listener:status",
@@ -462,6 +463,11 @@ export interface OctantHostBridge {
     listener: (vibrancy: "sidebar" | null) => void,
   ) => () => void;
   readonly subscribeCodeDeepLinks: (listener: (target: unknown) => void) => () => void;
+  /**
+   * The reserved shortcut for leaving a running Canvas prototype, read by the
+   * main process before the frame sees the key. It carries nothing.
+   */
+  readonly subscribeCanvasFrameFocusEscape: (listener: () => void) => () => void;
   readonly subscribeOpenSettings: (listener: () => void) => () => void;
   readonly subscribeStartNewAgent: (listener: () => void) => () => void;
   readonly getPrivateListenerStatus: () => Promise<PrivateListenerPublicStatus>;
@@ -899,6 +905,11 @@ export function createHostBridge(
       const receive: DeepLinkListener = (_event, target) => listener(target);
       ipc.on(IPC_CHANNELS.codeDeepLink, receive);
       return () => ipc.removeListener(IPC_CHANNELS.codeDeepLink, receive);
+    },
+    subscribeCanvasFrameFocusEscape: (listener: () => void) => {
+      const receive = () => listener();
+      ipc.on(IPC_CHANNELS.canvasFrameFocusEscape, receive);
+      return () => ipc.removeListener(IPC_CHANNELS.canvasFrameFocusEscape, receive);
     },
     subscribeOpenSettings: (listener: () => void) => {
       const receive: SettingsOpenListener = () => listener();

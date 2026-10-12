@@ -1355,6 +1355,18 @@ function designFrames(
   palette: ArtifactThumbnailPalette,
 ): string {
   const height = 48;
+  if (block.size === "document") {
+    // A document is one page as wide as the Canvas: a sheet with a few lines.
+    return (
+      `<rect x="${String(PADDING)}" y="${String(y)}" width="${String(width)}" height="${String(height)}" rx="3" fill="none" stroke="${palette.accent}" stroke-width="1.2"/>` +
+      [0.4, 1, 0.62]
+        .map(
+          (share, index) =>
+            `<rect x="${String(PADDING + 8)}" y="${String(y + 9 + index * 10)}" width="${String(Math.round((width - 16) * share))}" height="${index === 0 ? "5" : "3"}" rx="1.5" fill="${palette.muted}" opacity="0.5"/>`,
+        )
+        .join("")
+    );
+  }
   const viewport = CANVAS_DESIGN_VIEWPORT[block.size];
   const frameWidth = Math.round((height * viewport.width) / viewport.height);
   const gap = 6;

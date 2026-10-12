@@ -2919,7 +2919,6 @@
   overflow-wrap: anywhere;
   text-align: left;
   border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-sm);
   background: var(--oct-surface);
   padding: var(--oct-space-2) var(--oct-space-3);
   cursor: pointer;
@@ -4166,6 +4165,62 @@
   inset: 0;
 }
 
+/* A document is read in place: the page is as wide as the column and the
+   host sets its height from the page, so nothing scrolls inside it. A themed
+   page is transparent and sits on the Canvas surface. */
+.canvas-design__document {
+  display: block;
+  width: 100%;
+  border: 0;
+  background: transparent;
+}
+
+/* A running prototype: Octant's chrome above the frame says it is running and
+   holds Stop, which the frame cannot reach or draw over. */
+.canvas-design__run {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-2);
+}
+
+.canvas-design__running {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--oct-space-1);
+  color: var(--oct-success-fg);
+  font-size: var(--oct-text-xs);
+  font-weight: var(--oct-weight-medium);
+}
+
+.canvas-design__running-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--oct-radius-pill);
+  background: var(--oct-success);
+}
+
+.canvas-design__notice {
+  margin: 0;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+}
+
+.canvas-design__errors {
+  display: grid;
+  gap: var(--oct-space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--oct-danger-fg);
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
+  overflow-wrap: anywhere;
+}
+
+.canvas-design__stage {
+  min-width: 0;
+}
+
 .octant-dialog__popup.canvas-design-player {
   --octant-dialog-width: 96vw;
   --octant-dialog-height: 94vh;
@@ -4317,9 +4372,10 @@
 /* A Canvas drawn in the conversation that wrote it. It is the work the turn
    produced, so it wears the reply's one card: the changed-files card's fill,
    hairline and radius, with a code block's 32px header strip naming it and
-   ghost icon controls at its end. The body is capped instead of scrolled, so
-   the wheel always belongs to the thread; what runs past the cap fades into
-   an offer to open the whole Canvas. */
+   ghost icon controls at its end. At rest the body is capped instead of
+   scrolled, so the wheel belongs to the thread; what runs past the cap fades
+   into an offer to expand it. Expanded, it grows with its content up to
+   about the thread viewport, and scrolls only after the person focuses it. */
 .thread-canvas-list {
   display: grid;
   gap: var(--oct-space-3);
@@ -4386,7 +4442,25 @@
   overflow: hidden;
 }
 
-.thread-canvas__body[data-clipped="true"] {
+/* Tall enough to read a long document whole, short enough that the frame's
+   header and the composer stay in view around it. Never shorter than the
+   resting cap: on a short window the viewport rule alone (376px at the 600px
+   minimum height) would clip a Canvas that fit before it was expanded. */
+.thread-canvas[data-shown-as="expanded"] .thread-canvas__body {
+  max-height: max(560px, calc(100dvh - 14rem));
+}
+
+/* A focused region takes the wheel; an unfocused one is not a scroll
+   container for it, so the wheel passes through to the thread. Containment
+   stays on the focused rule only: the unfocused body is overflow: hidden, still
+   a scroll container, and Chromium 150 stops the wheel there when it is
+   contained, so the thread would not scroll. */
+.thread-canvas[data-shown-as="expanded"] .thread-canvas__body[data-wheel="canvas"] {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.thread-canvas__body[data-clipped="true"]:not([data-wheel="canvas"]) {
   /* A mask reads only alpha, so any opaque ink draws the visible part. */
   mask-image: linear-gradient(
     to bottom,
@@ -4575,6 +4649,16 @@
 .canvas-ref__meta {
   color: var(--oct-meta);
   font-size: var(--oct-text-xs);
+}
+
+/* Above the row's open control, which covers the whole row. */
+.canvas-ref__expand {
+  position: relative;
+  z-index: 2;
+  flex: none;
+  width: 24px;
+  height: 24px;
+  min-height: 24px;
 }
 
 .canvas-ref__chevron {
