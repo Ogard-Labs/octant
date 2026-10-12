@@ -127,7 +127,11 @@ export function canvasPreviewWarnings(
   // document's, so it is measured there; otherwise a chart in a quarter of a
   // wide grid would clip labels that the full width would hold.
   const cellWidths = new Map<string, number>();
-  for (const item of canvasReadingOrder(input.definition.blocks)) {
+  // A dashboard inside a tab or column is measured the same way.
+  const items = canvasReadingOrder(input.definition.blocks).flatMap((item) =>
+    item.kind === "group" ? item.sections.flat() : [item],
+  );
+  for (const item of items) {
     if (item.kind !== "dashboard") continue;
     for (const cell of item.cells) {
       cellWidths.set(

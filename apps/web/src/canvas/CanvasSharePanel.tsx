@@ -1,4 +1,9 @@
-import type { CanvasBlock, CanvasId, CanvasVersionId } from "@octant/contracts/canvas";
+import type {
+  CanvasBlock,
+  CanvasId,
+  CanvasLayoutGroupBlock,
+  CanvasVersionId,
+} from "@octant/contracts/canvas";
 import {
   decodeCanvasStaticExportDocument,
   type CanvasStaticExportDocument,
@@ -18,13 +23,17 @@ import type {
   CanvasShareSnapshotSummary,
 } from "@octant/contracts/canvas-share-snapshot";
 import { Ban, Check, Eye, Share2, TriangleAlert } from "lucide-react";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
-import { canvasReadingOrder } from "@octant/domain/canvas-dashboard-layout";
+import {
+  canvasReadingOrder,
+  type CanvasPlacedReadingItem,
+} from "@octant/domain/canvas-dashboard-layout";
 import { CanvasBlockRenderer } from "./blocks/CanvasBlock";
+import { CanvasLayoutGroup } from "./blocks/LayoutGroups";
 import { DashboardBlock } from "./blocks/DashboardBlock";
 
 /**
@@ -320,6 +329,25 @@ function SharedSnapshotView(props: {
   readonly document: CanvasStaticExportDocument;
   readonly onClose: () => void;
 }) {
+  // A shared tab or column draws its children in place through the same
+  // reading order as the live document, so a dashboard in a pane is the same
+  // grid, and a placed block is never drawn a second time.
+  const placed = (item: CanvasPlacedReadingItem<SharedBlock>): ReactNode =>
+    item.kind === "block" ? (
+      <SnapshotBlock block={item.block} key={item.block.blockId} />
+    ) : (
+      <section key={item.dashboard.blockId} className="canvas-block" data-block-kind="dashboard">
+        <DashboardBlock
+          headingLevel={6}
+          title={item.dashboard.title}
+          columns={item.columns}
+          cells={item.cells}
+          cellKey={(block) => block.blockId}
+          cellKind={(block) => block.kind}
+          renderCell={(block) => <SnapshotBlock block={block} />}
+        />
+      </section>
+    );
   return (
     <section
       className="canvas-share__snapshot"
@@ -344,24 +372,14 @@ function SharedSnapshotView(props: {
       <article className="canvas-share__snapshot-document" aria-label={props.document.title}>
         <h5 className="canvas-share__snapshot-document-title">{props.document.title}</h5>
         {canvasReadingOrder(props.document.blocks).map((item) =>
-          item.kind === "block" ? (
-            <SnapshotBlock block={item.block} key={item.block.blockId} />
+          item.kind === "group" ? (
+            <CanvasLayoutGroup
+              block={item.group as CanvasLayoutGroupBlock}
+              key={item.group.blockId}
+              renderSection={(index) => (item.sections[index] ?? []).map(placed)}
+            />
           ) : (
-            <section
-              key={item.dashboard.blockId}
-              className="canvas-block"
-              data-block-kind="dashboard"
-            >
-              <DashboardBlock
-                headingLevel={6}
-                title={item.dashboard.title}
-                columns={item.columns}
-                cells={item.cells}
-                cellKey={(block) => block.blockId}
-                cellKind={(block) => block.kind}
-                renderCell={(block) => <SnapshotBlock block={block} />}
-              />
-            </section>
+            placed(item)
           ),
         )}
       </article>
@@ -369,7 +387,9 @@ function SharedSnapshotView(props: {
   );
 }
 
-function SnapshotBlock(props: { readonly block: CanvasStaticExportDocument["blocks"][number] }) {
+type SharedBlock = CanvasStaticExportDocument["blocks"][number];
+
+function SnapshotBlock(props: { readonly block: SharedBlock }) {
   return (
     <section className="canvas-block" data-block-kind={props.block.kind}>
       <CanvasBlockRenderer block={props.block as CanvasBlock} />

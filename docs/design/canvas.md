@@ -62,8 +62,9 @@ block at version 6, a comparison matrix at version 10, a math block at
 version 11, the mockup catalog at version 12, a table row's `id` at
 version 13, the funnel, radar, and sankey chart types at version 14, the
 dashboard block at version 15, a design's `document` size or `theme` at
-version 16, a design's image `assets` at version 17, and a design's
-`runsScript` at version 18, so a
+version 16, a design's image `assets` at version 17, a design's
+`runsScript` at version 18, and the `tabs` and `columns` layout groups at
+version 19, so a
 document that declares an earlier version and carries one is
 refused as a declared future version. The optional table column
 `display` and the chart, table, and metric `format` fields are the one ungated
@@ -150,13 +151,18 @@ document-level layout field so it is version-gated, revised, commented on,
 shared, and described like any other kind, and a Canvas can hold one beside
 prose. Cells reference blocks rather than copy them, so a placed block keeps
 its one definition, id, and comment anchor. A dashboard is not a placeable
-kind, so grids never nest. The domain policy names each refusal
+kind, so grids never nest, and it never places `tabs` or `columns`
+(`nested-layout-group`). The domain policy names each refusal
 (`dashboard-cells-budget-exceeded`, `dangling-dashboard-cell`,
 `dashboard-cell-kind-refused`, `duplicate-dashboard-cell` for a block placed
 twice in one dashboard or across two, and `dashboard-span-exceeds-columns`).
 The reading order is pure in `packages/domain` (`canvasDashboardLayout`): a
-dashboard reads where it sits with its cells in order, and a placed block reads
-only there. The screen, the shared snapshot, the artifact preview SVG (framed
+dashboard reads where it sits with its cells in order, a tabs or columns block
+reads with its children per pane or track, and a placed block reads only there.
+A tab pane or a column may hold a dashboard, which draws there as it does at
+the top level, so nesting stops at tabs or columns, then a dashboard, then its
+tiles. Across every dashboard, tab, and column a block is placed at most once
+(`block-placed-twice`, naming the block and both blocks that place it). The screen, the shared snapshot, the artifact preview SVG (framed
 cells packed in that order, stopping at the first row the picture cannot hold
 whole), and the Markdown and HTML export (the title as a heading, then each
 placed block) all use it.
@@ -308,17 +314,36 @@ column keeps its number format and display, a table row leaves as its cells
 without the `id` comments anchor to, and a board keeps its own layout. Because
 the row id is the only Canvas version 13 field and a share drops it, a share at
 version 6 named a block authored at version 13 as version 12. Share version 7
-carried the version-14 chart types, so it named blocks up to version 14, and
-share version 8 carries the version-15 dashboard, so it names blocks up to
-version 15 (`CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION`).
+carried the version-14 chart types, so it named blocks up to version 14, share
+version 8 carries the version-15 dashboard, so it named blocks up to version
+15, and share version 9 carries tabs and columns, so it names blocks up to
+version 19 (`CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION`).
 Share documents version independently of Canvas documents: a treemap, a
 heatmap, a bar list, a chart's or a table column's number format, a table
 column's display, and a board's layout arrive with share version 3, and a
 comparison matrix with share version 4, math with share version 5, the
 mockup catalog with share version 6, the funnel, radar, and sankey charts
-with share version 7 (whose blocks may name Canvas version 14), and the
-dashboard with share version 8, so a share that declares an older version
+with share version 7 (whose blocks may name Canvas version 14), the dashboard
+with share version 8, and tabs and columns with share version 9, so a share
+that declares an older version
 and carries one is refused as a future version.
+A `tabs` block has 2 to 12 panes, each a short label and the block ids it
+shows; a `columns` block has 2 to 4 tracks, each the block ids it stacks.
+Both name blocks the same document holds rather than nesting them, so each
+child keeps the identity a comment anchors to, a revision edits, and a share
+carries. The domain policy refuses a name that holds no block
+(`dangling-layout-child`), a block placed in more than one pane or track
+(`repeated-layout-child`), and a group or an action inside a group
+(`nested-layout-group`); a pane or track may hold a dashboard. A pane without
+a label fails the schema, and groups count against the ordinary 128-block
+budget. The renderer, the shared snapshot, and the Markdown/HTML export draw
+each child inside its group once, through the shared reading order, and never
+again in the block list; export reads a tab as a heading over its blocks and
+columns in track order, and the artifact preview SVG draws the children in
+that order. Tabs are a `tablist` whose arrow keys,
+Home, and End move between tabs; which tab is open is the reader's view state,
+sends nothing to the host, and journals nothing. Columns fold to one track
+when the Canvas itself is narrow.
 
 ## Plan block
 

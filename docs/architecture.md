@@ -427,9 +427,10 @@ document as a future version. Frames follow the
 
 - **Typed blocks carry data.** Metrics, tables, charts, plans, and the diagram
   family stay the catalog, because comments anchor to them, revision edits
-  them, and shares keep their structure. The catalog gains `tabs` and
-  `columns`, which name existing child blocks one level deep (the selected tab
-  is view state and journals nothing); closed diagram node roles (process,
+  them, and shares keep their structure. The catalog has `tabs` and
+  `columns` (shipped at schema version 19; see [Canvas](design/canvas.md)),
+  which name existing child blocks, a dashboard among them. Accepted, not yet
+  shipped: closed diagram node roles (process,
   decision, terminator), edge styles, and group tones drawn by the one
   deterministic layout; a Gantt view of `plan`; and import of a bounded
   Mermaid subset into typed diagram blocks. Mermaid never renders; an unknown

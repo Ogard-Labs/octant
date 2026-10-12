@@ -45,6 +45,7 @@ import {
   onboardingFlowExample,
   searchSpecExample,
 } from "./canvasDesignExamples";
+import { designBriefExample } from "./canvasLayoutExamples";
 import { opsDashboardExample, releaseHealthBoardExample } from "./canvasDashboardExamples";
 import { mathExamples } from "./canvasMathExamples";
 import { mockupExamples } from "./canvasMockupExamples";
@@ -2912,5 +2913,276 @@ describe("dashboard policy", () => {
         }),
       "unsupported-schema-version",
     );
+  });
+});
+
+describe("tabs and columns layout groups", () => {
+  const text = (blockId: string) => ({
+    blockId,
+    schemaVersion: CANVAS_SCHEMA_VERSION,
+    kind: "rich-text",
+    text: `Body of ${blockId}`,
+  });
+  const tabs = (panes: ReadonlyArray<{ label: string; blockIds: ReadonlyArray<string> }>) => ({
+    blockId: "brief",
+    schemaVersion: CANVAS_SCHEMA_VERSION,
+    kind: "tabs",
+    panes,
+  });
+  const columns = (tracks: ReadonlyArray<ReadonlyArray<string>>, blockId = "row") => ({
+    blockId,
+    schemaVersion: CANVAS_SCHEMA_VERSION,
+    kind: "columns",
+    tracks: tracks.map((blockIds) => ({ blockIds })),
+  });
+
+  it("admits tabs and columns that each name blocks the document holds", () => {
+    const definition = validateCanvasDefinition(
+      withBlocks([
+        tabs([
+          { label: "Metrics", blockIds: ["a"] },
+          { label: "Loop", blockIds: ["b", "c"] },
+        ]),
+        columns([["d"], ["e"], ["f"]]),
+        ...["a", "b", "c", "d", "e", "f"].map(text),
+      ]),
+    );
+    expect(definition.blocks.map((block) => block.kind).slice(0, 2)).toEqual(["tabs", "columns"]);
+  });
+
+  it("admits the eight-tab design brief an agent is shown", () => {
+    const definition = validateCanvasDefinition(withBlocks(designBriefExample));
+    const brief = definition.blocks[0];
+    expect(brief?.kind === "tabs" ? brief.panes.length : 0).toBe(8);
+  });
+
+  it("refuses a group that names a block the document does not hold", () => {
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            tabs([
+              { label: "One", blockIds: ["a"] },
+              { label: "Two", blockIds: ["missing"] },
+            ]),
+            text("a"),
+          ]),
+        ),
+      "dangling-layout-child",
+    );
+  });
+
+  it("refuses a block placed twice, within one group or across two", () => {
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            tabs([
+              { label: "One", blockIds: ["a"] },
+              { label: "Two", blockIds: ["a"] },
+            ]),
+            text("a"),
+          ]),
+        ),
+      "repeated-layout-child",
+    );
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            tabs([
+              { label: "One", blockIds: ["a"] },
+              { label: "Two", blockIds: ["b"] },
+            ]),
+            columns([["a"], ["c"]]),
+            text("a"),
+            text("b"),
+            text("c"),
+          ]),
+        ),
+      "repeated-layout-child",
+    );
+  });
+
+  it("refuses a group inside a group, including a group naming itself", () => {
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            tabs([
+              { label: "One", blockIds: ["row"] },
+              { label: "Two", blockIds: ["c"] },
+            ]),
+            columns([["a"], ["b"]]),
+            text("a"),
+            text("b"),
+            text("c"),
+          ]),
+        ),
+      "nested-layout-group",
+    );
+    expectPolicyCode(
+      () => validateCanvasDefinition(withBlocks([columns([["row"], ["a"]]), text("a")])),
+      "nested-layout-group",
+    );
+  });
+
+  it("refuses a pane without a label and a columns block outside two to four tracks", () => {
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            tabs([
+              { label: " ", blockIds: ["a"] },
+              { label: "Two", blockIds: ["b"] },
+            ]),
+            text("a"),
+            text("b"),
+          ]),
+        ),
+      "invalid-schema",
+    );
+    expectPolicyCode(
+      () => validateCanvasDefinition(withBlocks([columns([["a"]]), text("a")])),
+      "invalid-schema",
+    );
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            columns([["a"], ["b"], ["c"], ["d"], ["e"]]),
+            ...["a", "b", "c", "d", "e"].map(text),
+          ]),
+        ),
+      "invalid-schema",
+    );
+  });
+
+  it("counts groups against the document's block budget", () => {
+    const children = Array.from({ length: CANVAS_MAX_BLOCKS - 1 }, (_value, index) =>
+      text(`t${String(index)}`),
+    );
+    const full = columns([
+      children.slice(0, 60).map((block) => block.blockId),
+      children.slice(60).map((block) => block.blockId),
+    ]);
+    expect(() => validateCanvasDefinition(withBlocks([full, ...children]))).not.toThrow();
+    expectPolicyCode(
+      () => validateCanvasDefinition(withBlocks([full, ...children, text("extra")])),
+      "block-budget-exceeded",
+    );
+  });
+
+  it("refuses tabs in a document that declares an earlier version as a future version", () => {
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition({
+          ...baseDefinition,
+          schemaVersion: 18,
+          blocks: [
+            {
+              ...tabs([
+                { label: "One", blockIds: ["a"] },
+                { label: "Two", blockIds: ["b"] },
+              ]),
+              schemaVersion: 18,
+            },
+            { ...text("a"), schemaVersion: 18 },
+            { ...text("b"), schemaVersion: 18 },
+          ],
+        }),
+      "unsupported-schema-version",
+    );
+  });
+
+  describe("beside dashboards", () => {
+    const tile = (blockId: string) => ({
+      blockId,
+      schemaVersion: CANVAS_SCHEMA_VERSION,
+      kind: "metric",
+      label: blockId,
+      value: 1,
+    });
+    const board = (cells: ReadonlyArray<string>, blockId = "board") => ({
+      blockId,
+      schemaVersion: CANVAS_SCHEMA_VERSION,
+      kind: "dashboard",
+      title: "Metrics",
+      cells: cells.map((cellId) => ({ blockId: cellId })),
+    });
+
+    it("admits a tab and a column that each hold a dashboard", () => {
+      const definition = validateCanvasDefinition(
+        withBlocks([
+          tabs([
+            { label: "Metrics", blockIds: ["board"] },
+            { label: "Notes", blockIds: ["a"] },
+          ]),
+          columns([["side-board"], ["b"]]),
+          board(["m1", "m2"]),
+          board(["m3"], "side-board"),
+          ...["m1", "m2", "m3"].map(tile),
+          text("a"),
+          text("b"),
+        ]),
+      );
+      expect(definition.blocks.map((block) => block.kind).slice(0, 4)).toEqual([
+        "tabs",
+        "columns",
+        "dashboard",
+        "dashboard",
+      ]);
+    });
+
+    it("refuses a dashboard that places tabs or columns", () => {
+      expectPolicyCode(
+        () =>
+          validateCanvasDefinition(
+            withBlocks([
+              board(["brief", "m1"]),
+              tabs([
+                { label: "One", blockIds: ["a"] },
+                { label: "Two", blockIds: ["b"] },
+              ]),
+              tile("m1"),
+              text("a"),
+              text("b"),
+            ]),
+          ),
+        "nested-layout-group",
+      );
+      expectPolicyCode(
+        () =>
+          validateCanvasDefinition(
+            withBlocks([board(["row"]), columns([["a"], ["b"]]), text("a"), text("b")]),
+          ),
+        "nested-layout-group",
+      );
+    });
+
+    it("refuses a block placed by both a dashboard and a tab, naming the block and both placers", () => {
+      let refusal: unknown;
+      try {
+        validateCanvasDefinition(
+          withBlocks([
+            tabs([
+              { label: "Metrics", blockIds: ["board"] },
+              { label: "Headline", blockIds: ["m1"] },
+            ]),
+            board(["m1", "m2"]),
+            tile("m1"),
+            tile("m2"),
+          ]),
+        );
+      } catch (error) {
+        refusal = error;
+      }
+      expect(refusal).toBeInstanceOf(CanvasPolicyRejected);
+      const rejected = refusal as CanvasPolicyRejected;
+      expect(rejected.code).toBe("block-placed-twice");
+      expect(rejected.message).toContain("m1");
+      expect(rejected.message).toContain("tabs brief");
+      expect(rejected.message).toContain("dashboard board");
+    });
   });
 });

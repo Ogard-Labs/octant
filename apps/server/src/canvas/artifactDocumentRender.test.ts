@@ -6,6 +6,7 @@ import {
 import { formatCanvasNumber } from "@octant/domain/canvas-number-format";
 import {
   chartExampleBlocks,
+  designBriefExample,
   notificationStatesExampleBlock,
   opsDashboardExampleBlocks,
   settingsScreenExampleBlock,
@@ -611,5 +612,48 @@ describe("rendering a canvas as a document", () => {
     ].map((needle) => html.body.indexOf(needle));
     expect(htmlOrder.every((index) => index >= 0)).toBe(true);
     expect([...htmlOrder].sort((a, b) => a - b)).toEqual(htmlOrder);
+  });
+});
+
+describe("rendering tabs and columns as a document", () => {
+  it("reads each tab under its label and each named block once, in the group", () => {
+    const blocks = designBriefExample.map((block) => decodeCanvasBlock(block));
+    const rendered = renderArtifactMarkdown(definition(blocks, "Design brief"));
+    if (rendered.kind !== "rendered") throw new Error("expected a rendered document");
+    const labels = ["Metrics", "Core loop", "World", "Economy", "Content", "Live ops", "Risks"];
+    const positions = labels.map((label) => rendered.body.indexOf(`### ${label}`));
+    expect(positions.every((position) => position >= 0)).toBe(true);
+    expect([...positions].sort((a, b) => a - b)).toEqual(positions);
+    // The question is placed in the last tab only, and the sign-off columns
+    // follow the tabs, each note once.
+    const question = "Does the keep unlock by level or by story progress?";
+    expect(rendered.body.split(question)).toHaveLength(2);
+    expect(rendered.body.indexOf(question)).toBeGreaterThan(
+      rendered.body.indexOf("### Open questions"),
+    );
+    expect(rendered.body.split("Design signs off the loop and the zone map.")).toHaveLength(2);
+  });
+
+  it("reads a dashboard in a tab as it reads at the top level: its title, then its tiles, once", () => {
+    const blocks = designBriefExample.map((block) => decodeCanvasBlock(block));
+    for (const format of ["markdown", "html"] as const) {
+      const rendered =
+        format === "markdown"
+          ? renderArtifactMarkdown(definition(blocks, "Design brief"))
+          : renderArtifactHtml(definition(blocks, "Design brief"));
+      if (rendered.kind !== "rendered") throw new Error("expected a rendered document");
+      const metricsTab = rendered.body.indexOf("Metrics");
+      const board = rendered.body.indexOf("Launch metrics");
+      const loopTab = rendered.body.indexOf("Core loop");
+      expect(metricsTab).toBeGreaterThanOrEqual(0);
+      expect(board).toBeGreaterThan(metricsTab);
+      expect(loopTab).toBeGreaterThan(board);
+      expect(rendered.body.split("Daily players")).toHaveLength(2);
+      expect(rendered.body.indexOf("Daily players")).toBeGreaterThan(board);
+      expect(rendered.body.indexOf("Daily players")).toBeLessThan(loopTab);
+    }
+    const markdown = renderArtifactMarkdown(definition(blocks, "Design brief"));
+    if (markdown.kind !== "rendered") throw new Error("expected a rendered document");
+    expect(markdown.body).toContain("## Launch metrics");
   });
 });

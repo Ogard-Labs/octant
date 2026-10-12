@@ -155,7 +155,12 @@ export function renderArtifactSvg(
   ];
 
   let y = PADDING + 26;
-  for (const item of canvasReadingOrder(definition.blocks)) {
+  // A tab's or column's children, a dashboard among them, draw in the group's
+  // order as they would at the top level.
+  const items = canvasReadingOrder(definition.blocks).flatMap((item) =>
+    item.kind === "group" ? item.sections.flat() : [item],
+  );
+  for (const item of items) {
     if (y > height - PADDING) break;
     const drawn =
       item.kind === "dashboard"

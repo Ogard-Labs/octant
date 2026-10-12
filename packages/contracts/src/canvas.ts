@@ -35,8 +35,8 @@ const strict = { parseOptions: { onExcessProperty: "error" as const } };
 // block, version 12 the mockup catalog, version 13 the stable table row
 // id, version 14 the funnel, radar, and sankey chart types, version 15 the
 // dashboard layout block, version 16 the design document size and workspace
-// theme, version 17 a design's declared image assets, and version 18 a design
-// that runs script, which the
+// theme, version 17 a design's declared image assets, version 18 a design
+// that runs script, and version 19 the tabs and columns layout groups, which the
 // definition filters below admit only under those declared versions.
 
 // These are renderer-facing aggregate limits. Per-field structural limits are
@@ -171,6 +171,15 @@ export const CANVAS_MAX_CHART_CATEGORY_LABEL_LENGTH = 80;
 export const CANVAS_MAX_DASHBOARD_CELLS = 24;
 export const CANVAS_MAX_DASHBOARD_COLUMNS = 4;
 export const CANVAS_DEFAULT_DASHBOARD_COLUMNS = 4;
+// A tab strip is read at a glance: past a dozen labels it wraps or scrolls,
+// and the document wants headings instead. A label names the pane, so it is a
+// word or two rather than a sentence.
+export const CANVAS_MAX_TABS_PANES = 12;
+export const CANVAS_MAX_TABS_LABEL_LENGTH = 80;
+// Two to four tracks side by side: one is not columns, and past four a track
+// is narrower than a metric tile even on a wide display.
+export const CANVAS_MIN_COLUMN_TRACKS = 2;
+export const CANVAS_MAX_COLUMN_TRACKS = 4;
 
 // The schema version that introduced each version-gated block kind or hint. A
 // document carrying one below the version that introduced it is a declared
@@ -204,6 +213,8 @@ export const CANVAS_DESIGN_DOCUMENT_SCHEMA_VERSION = 16;
 export const CANVAS_DESIGN_ASSET_SCHEMA_VERSION = 17;
 // A design that runs its own script, drawn in a frame the host serves.
 export const CANVAS_DESIGN_RUNNING_SCHEMA_VERSION = 18;
+// The tabs and columns layout groups, which name other blocks of the document.
+export const CANVAS_LAYOUT_GROUPS_SCHEMA_VERSION = 19;
 // The metric's sparkline, goodDirection, and caption arrived with the bar list.
 export const CANVAS_METRIC_TREND_SCHEMA_VERSION = 7;
 
@@ -465,6 +476,8 @@ export const CanvasBlockKind = Schema.Literal(
   "comparison-matrix",
   "math",
   "dashboard",
+  "tabs",
+  "columns",
 );
 export type CanvasBlockKind = typeof CanvasBlockKind.Type;
 
@@ -2299,6 +2312,63 @@ export const CanvasDashboardBlock = Schema.Struct({
 }).annotations(strict);
 export type CanvasDashboardBlock = typeof CanvasDashboardBlock.Type;
 
+/**
+ * Layout groups: tabs and columns arrange blocks the document already holds.
+ *
+ * A group names its children by block id rather than nesting them, so every
+ * child keeps the identity a comment anchors to and a revision edits, and the
+ * version envelope stays inside the depth budget. Groups are one level deep:
+ * the domain policy refuses a child that is itself a group, a child named
+ * twice, and a name that holds no block. Which tab is selected is the
+ * reader's view state; it is never part of the document.
+ */
+export const CanvasTabsPane = Schema.Struct({
+  label: boundedNonEmptyText(CANVAS_MAX_TABS_LABEL_LENGTH),
+  blockIds: Schema.NonEmptyArray(CanvasBlockId).pipe(Schema.maxItems(CANVAS_MAX_BLOCKS)),
+}).annotations(strict);
+export type CanvasTabsPane = typeof CanvasTabsPane.Type;
+
+export const CanvasTabsBlock = Schema.Struct({
+  ...CanvasBlockFields,
+  kind: Schema.Literal("tabs"),
+  panes: Schema.Array(CanvasTabsPane).pipe(
+    Schema.minItems(2),
+    Schema.maxItems(CANVAS_MAX_TABS_PANES),
+  ),
+}).annotations(strict);
+export type CanvasTabsBlock = typeof CanvasTabsBlock.Type;
+
+export const CanvasColumnTrack = Schema.Struct({
+  blockIds: Schema.NonEmptyArray(CanvasBlockId).pipe(Schema.maxItems(CANVAS_MAX_BLOCKS)),
+}).annotations(strict);
+export type CanvasColumnTrack = typeof CanvasColumnTrack.Type;
+
+export const CanvasColumnsBlock = Schema.Struct({
+  ...CanvasBlockFields,
+  kind: Schema.Literal("columns"),
+  tracks: Schema.Array(CanvasColumnTrack).pipe(
+    Schema.minItems(CANVAS_MIN_COLUMN_TRACKS),
+    Schema.maxItems(CANVAS_MAX_COLUMN_TRACKS),
+  ),
+}).annotations(strict);
+export type CanvasColumnsBlock = typeof CanvasColumnsBlock.Type;
+
+export type CanvasLayoutGroupBlock = CanvasTabsBlock | CanvasColumnsBlock;
+
+/** Whether a block is a layout group, which may name children but never be one. */
+export function isCanvasLayoutGroup(block: { readonly kind?: unknown }): boolean {
+  return block.kind === "tabs" || block.kind === "columns";
+}
+
+/** The child block ids a layout group names, in reading order. */
+export function canvasLayoutGroupChildIds(
+  block: CanvasLayoutGroupBlock,
+): ReadonlyArray<CanvasBlockId> {
+  return block.kind === "tabs"
+    ? block.panes.flatMap((pane) => pane.blockIds)
+    : block.tracks.flatMap((track) => track.blockIds);
+}
+
 export const CanvasBlock = Schema.Union(
   CanvasHeadingBlock,
   CanvasRichTextBlock,
@@ -2348,6 +2418,8 @@ export const CanvasBlock = Schema.Union(
   // allowlisted command; the server reauthorizes every action before any side
   // effect, so union membership never makes a definition executable.
   CanvasActionBlock,
+  CanvasTabsBlock,
+  CanvasColumnsBlock,
 );
 export type CanvasBlock = typeof CanvasBlock.Type;
 
@@ -2381,8 +2453,9 @@ export const CanvasDefinition = Schema.Struct({
     // version 11, the mockup catalog from version 12, table row ids from
     // version 13, the funnel, radar, and sankey charts from version 14, the
     // dashboard from version 15, a design document or theme from version 16,
-    // design assets from version 17, and a design that runs script from
-    // version 18. A rolled-back runtime that never learned a kind or hint
+    // design assets from version 17, a design that runs script from version
+    // 18, and the tabs and columns layout groups from version 19. A
+    // rolled-back runtime that never learned a kind or hint
     // must see a document carrying it as a declared future version, not as a
     // document that failed to decode. Each keeps its own floor so an earlier
     // document stays valid.
@@ -2541,6 +2614,15 @@ export const CanvasDefinition = Schema.Struct({
       {
         message: () =>
           `A design that runs script requires Canvas schema version ${String(CANVAS_DESIGN_RUNNING_SCHEMA_VERSION)}.`,
+      },
+    ),
+    Schema.filter(
+      (definition) =>
+        definition.schemaVersion >= CANVAS_LAYOUT_GROUPS_SCHEMA_VERSION ||
+        !definition.blocks.some(isCanvasLayoutGroup),
+      {
+        message: () =>
+          `Tabs and columns require Canvas schema version ${String(CANVAS_LAYOUT_GROUPS_SCHEMA_VERSION)}.`,
       },
     ),
   );

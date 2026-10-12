@@ -5,12 +5,15 @@ import {
 } from "@octant/contracts/canvas";
 
 /**
- * How a dashboard reads, once, for every surface that draws one.
+ * How a dashboard, tabs, and columns read, once, for every surface that draws
+ * them.
  *
  * The screen, the preview SVG, the Markdown and HTML export, and a shared
- * snapshot all draw a dashboard's cells where the dashboard sits and skip the
- * placed blocks at their own positions. The functions read loose shapes so a
- * live definition and a sanitized share document ask the same question.
+ * snapshot all draw a dashboard's cells where the dashboard sits and a tab's
+ * or column's children inside it, and skip each placed block at its own
+ * position. A pane or column may hold a dashboard, drawn there exactly as at
+ * the top level. The functions read loose shapes so a live definition and a
+ * sanitized share document ask the same question.
  */
 
 interface BlockShape {
@@ -25,19 +28,42 @@ interface DashboardShape extends BlockShape {
   readonly cells: ReadonlyArray<{ readonly blockId: string; readonly span?: number | undefined }>;
 }
 
+interface TabsShape extends BlockShape {
+  readonly kind: "tabs";
+  readonly panes: ReadonlyArray<{
+    readonly label: string;
+    readonly blockIds: ReadonlyArray<string>;
+  }>;
+}
+
+interface ColumnsShape extends BlockShape {
+  readonly kind: "columns";
+  readonly tracks: ReadonlyArray<{ readonly blockIds: ReadonlyArray<string> }>;
+}
+
 /** One placed block with the columns it takes on a wide grid. */
 export interface CanvasDashboardPlacedCell<B> {
   readonly block: B;
   readonly span: number;
 }
 
-export type CanvasReadingItem<B> =
+/** A block, or a dashboard with its placed cells, where it reads. */
+export type CanvasPlacedReadingItem<B> =
   | { readonly kind: "block"; readonly block: B }
   | {
       readonly kind: "dashboard";
       readonly dashboard: B & DashboardShape;
       readonly columns: number;
       readonly cells: ReadonlyArray<CanvasDashboardPlacedCell<B>>;
+    };
+
+export type CanvasReadingItem<B> =
+  | CanvasPlacedReadingItem<B>
+  | {
+      readonly kind: "group";
+      readonly group: B & (TabsShape | ColumnsShape);
+      /** One entry per pane or track, in the group's order. */
+      readonly sections: ReadonlyArray<ReadonlyArray<CanvasPlacedReadingItem<B>>>;
     };
 
 const CELL_KINDS: ReadonlySet<string> = new Set(CANVAS_DASHBOARD_CELL_KINDS);
@@ -49,6 +75,16 @@ export function isCanvasDashboardCellKind(kind: string): kind is CanvasDashboard
 
 function isDashboard<B extends BlockShape>(block: B): block is B & DashboardShape {
   return block.kind === "dashboard";
+}
+
+function isGroup<B extends BlockShape>(block: B): block is B & (TabsShape | ColumnsShape) {
+  return block.kind === "tabs" || block.kind === "columns";
+}
+
+function groupSections(group: TabsShape | ColumnsShape): ReadonlyArray<ReadonlyArray<string>> {
+  return group.kind === "tabs"
+    ? group.panes.map((pane) => pane.blockIds)
+    : group.tracks.map((track) => track.blockIds);
 }
 
 /** Columns a dashboard lays out on a wide grid. */
@@ -74,45 +110,72 @@ export function canvasDashboardCellSpan(
 
 /**
  * The document in reading order: each dashboard with its placed blocks in
- * cell order, and every other block where it sits. A placed block is drawn
- * only inside its dashboard. A cell naming a block that is missing or not
- * placeable is skipped; the policy refuses such a document, so this only
- * guards a reader of an unvalidated shape.
+ * cell order, each tabs or columns block with its children per pane or
+ * track, and every other block where it sits. A placed block is drawn only
+ * inside the block that places it, and a pane or track may hold a dashboard.
+ * A name that is missing, a group inside a group, or a block placed twice is
+ * skipped; the policy refuses such a document, so this only guards a reader
+ * of an unvalidated shape.
  */
 export function canvasReadingOrder<B extends BlockShape>(
   blocks: ReadonlyArray<B>,
 ): ReadonlyArray<CanvasReadingItem<B>> {
   const byId = new Map<string, B>();
   for (const block of blocks) byId.set(String(block.blockId), block);
-  const placed = new Set<string>();
+  const placedInDashboard = new Set<string>();
+  const placedInGroup = new Set<string>();
   for (const block of blocks) {
-    if (!isDashboard(block)) continue;
-    for (const cell of block.cells) {
-      const target = byId.get(String(cell.blockId));
-      if (target !== undefined && isCanvasDashboardCellKind(target.kind)) {
-        placed.add(String(cell.blockId));
+    if (isDashboard(block)) {
+      for (const cell of block.cells) {
+        const target = byId.get(String(cell.blockId));
+        if (target !== undefined && isCanvasDashboardCellKind(target.kind)) {
+          placedInDashboard.add(String(cell.blockId));
+        }
+      }
+    }
+    if (isGroup(block)) {
+      for (const childId of groupSections(block).flat()) {
+        const target = byId.get(String(childId));
+        if (target !== undefined && !isGroup(target)) placedInGroup.add(String(childId));
       }
     }
   }
 
-  const items: Array<CanvasReadingItem<B>> = [];
   const drawn = new Set<string>();
-  for (const block of blocks) {
-    if (placed.has(String(block.blockId))) continue;
-    if (!isDashboard(block)) {
-      items.push({ kind: "block", block });
-      continue;
-    }
+  const placedItem = (block: B): CanvasPlacedReadingItem<B> => {
+    drawn.add(String(block.blockId));
+    if (!isDashboard(block)) return { kind: "block", block };
     const columns = canvasDashboardColumns(block);
     const cells: Array<CanvasDashboardPlacedCell<B>> = [];
     for (const cell of block.cells) {
       const id = String(cell.blockId);
       const target = byId.get(id);
-      if (target === undefined || !placed.has(id) || drawn.has(id)) continue;
+      if (target === undefined || !placedInDashboard.has(id) || drawn.has(id)) continue;
       drawn.add(id);
       cells.push({ block: target, span: canvasDashboardCellSpan(target.kind, cell.span, columns) });
     }
-    items.push({ kind: "dashboard", dashboard: block, columns, cells });
+    return { kind: "dashboard", dashboard: block, columns, cells };
+  };
+
+  const items: Array<CanvasReadingItem<B>> = [];
+  for (const block of blocks) {
+    const id = String(block.blockId);
+    if (placedInDashboard.has(id) || placedInGroup.has(id)) continue;
+    if (!isGroup(block)) {
+      items.push(placedItem(block));
+      continue;
+    }
+    const sections = groupSections(block).map((childIds) => {
+      const section: Array<CanvasPlacedReadingItem<B>> = [];
+      for (const childId of childIds) {
+        const child = byId.get(String(childId));
+        if (child === undefined || !placedInGroup.has(String(childId))) continue;
+        if (placedInDashboard.has(String(childId)) || drawn.has(String(childId))) continue;
+        section.push(placedItem(child));
+      }
+      return section;
+    });
+    items.push({ kind: "group", group: block, sections });
   }
   return items;
 }

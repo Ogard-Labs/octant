@@ -41,6 +41,11 @@ import {
   canvasChartSeriesIssue,
   canvasChartUsesFlowTypes,
   canvasMockupUsesCatalog,
+  CANVAS_MAX_COLUMN_TRACKS,
+  CANVAS_MAX_TABS_LABEL_LENGTH,
+  CANVAS_MAX_TABS_PANES,
+  CANVAS_MIN_COLUMN_TRACKS,
+  isCanvasLayoutGroup,
   decodeCanvasDefinition,
   type CanvasDefinition,
   type CanvasVersion,
@@ -92,17 +97,21 @@ export const CANVAS_SHARE_FLOW_CHARTS_SCHEMA_VERSION = 7;
 // Version 8 accompanies Canvas schema version 15: a share may carry a
 // dashboard, which names the blocks it places by their ids in the same share.
 export const CANVAS_SHARE_DASHBOARD_SCHEMA_VERSION = 8;
-export const CANVAS_SHARE_SCHEMA_VERSION = 8 as const;
+// Version 9 accompanies Canvas schema version 19: a share may carry tabs and
+// columns, which name the shared blocks they hold.
+export const CANVAS_SHARE_LAYOUT_GROUPS_SCHEMA_VERSION = 9;
+export const CANVAS_SHARE_SCHEMA_VERSION = 9 as const;
 // The newest Canvas block version a share at this version names. Canvas
 // version 13 added only the table row id, which a share drops, so share
 // version 6 named a block authored at 13 as 12. Version 14 adds chart types a
 // share carries, so share version 7 named blocks up to 14, and version 15 adds
-// the dashboard, so share version 8 names blocks up to 15. Canvas versions 16
+// the dashboard, so share version 8 named blocks up to 15. Canvas versions 16
 // through 18 add only design fields (the document size and theme, image
-// assets, then running script), and a share refuses a design, so it names a
-// block authored at any of them as 15. A later Canvas bump that adds
-// something a share carries bumps the share version again.
-export const CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION = 15 as const;
+// assets, then running script), and a share refuses a design, so they changed
+// nothing a share carries. Version 19 adds tabs and columns, so share version
+// 9 names blocks up to 19. A later Canvas bump that adds something a share
+// carries bumps the share version again.
+export const CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION = 19 as const;
 export const CanvasShareSchemaVersion = Schema.Literal(
   1,
   2,
@@ -111,6 +120,7 @@ export const CanvasShareSchemaVersion = Schema.Literal(
   5,
   6,
   7,
+  8,
   CANVAS_SHARE_SCHEMA_VERSION,
 );
 export type CanvasShareSchemaVersion = typeof CanvasShareSchemaVersion.Type;
@@ -917,6 +927,27 @@ export const CanvasStaticExportBlock = Schema.Union(
     alt: ExportNonEmptyText,
     caption: Schema.optional(ExportText),
   }).annotations(strict),
+  // Layout groups carry only block ids and short pane labels, so they leave
+  // as the author wrote them; the blocks they name are shared beside them.
+  Schema.Struct({
+    ...exportBlockFields,
+    kind: Schema.Literal("tabs"),
+    panes: Schema.Array(
+      Schema.Struct({
+        label: ExportLabel.pipe(Schema.maxLength(CANVAS_MAX_TABS_LABEL_LENGTH)),
+        blockIds: Schema.NonEmptyArray(boundedToken("CanvasBlockId")).pipe(Schema.maxItems(128)),
+      }).annotations(strict),
+    ).pipe(Schema.minItems(2), Schema.maxItems(CANVAS_MAX_TABS_PANES)),
+  }).annotations(strict),
+  Schema.Struct({
+    ...exportBlockFields,
+    kind: Schema.Literal("columns"),
+    tracks: Schema.Array(
+      Schema.Struct({
+        blockIds: Schema.NonEmptyArray(boundedToken("CanvasBlockId")).pipe(Schema.maxItems(128)),
+      }).annotations(strict),
+    ).pipe(Schema.minItems(CANVAS_MIN_COLUMN_TRACKS), Schema.maxItems(CANVAS_MAX_COLUMN_TRACKS)),
+  }).annotations(strict),
 );
 export type CanvasStaticExportBlock = typeof CanvasStaticExportBlock.Type;
 
@@ -996,6 +1027,12 @@ export const CanvasStaticExportDocument = Schema.Struct({
         document.schemaVersion >= CANVAS_SHARE_DASHBOARD_SCHEMA_VERSION ||
         !document.blocks.some((block) => block.kind === "dashboard"),
       { message: () => "Dashboard blocks require Canvas share version 8." },
+    ),
+    Schema.filter(
+      (document) =>
+        document.schemaVersion >= CANVAS_SHARE_LAYOUT_GROUPS_SCHEMA_VERSION ||
+        !document.blocks.some(isCanvasLayoutGroup),
+      { message: () => "Tabs and columns require Canvas share version 9." },
     ),
   );
 export type CanvasStaticExportDocument = typeof CanvasStaticExportDocument.Type;

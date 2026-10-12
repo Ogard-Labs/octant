@@ -26,7 +26,10 @@ import {
   type CanvasMatrixCellLayout,
 } from "@octant/domain/canvas-comparison-matrix";
 import { canvasMathRenderOptions } from "@octant/domain/canvas-math-policy";
-import { canvasReadingOrder } from "@octant/domain/canvas-dashboard-layout";
+import {
+  canvasReadingOrder,
+  type CanvasPlacedReadingItem,
+} from "@octant/domain/canvas-dashboard-layout";
 import {
   CANVAS_MOCKUP_DEVICE_NAME,
   canvasMockupCallouts,
@@ -250,14 +253,28 @@ function renderDocument(
 ): ArtifactDocumentRender {
   const pieces: Piece[] = [];
   // A dashboard reads where it sits: its title, then each placed block in
-  // cell order, which is the order the screen's grid reads at one column.
+  // cell order, which is the order the screen's grid reads at one column. A
+  // tab reads under its label and a column in track order, and a dashboard in
+  // a pane or column reads there exactly as it does at the top level. A
+  // placed block never reads again where it sits in the block list.
+  const placedPieces = (item: CanvasPlacedReadingItem<CanvasBlock>): ReadonlyArray<Piece> =>
+    item.kind === "block"
+      ? piecesFor(item.block)
+      : [
+          { kind: "heading", level: 2, text: reading(item.dashboard.title) },
+          ...item.cells.flatMap((cell) => piecesFor(cell.block)),
+        ];
   for (const item of canvasReadingOrder(definition.blocks)) {
-    if (item.kind === "block") {
-      pieces.push(...piecesFor(item.block));
+    if (item.kind !== "group") {
+      pieces.push(...placedPieces(item));
       continue;
     }
-    pieces.push({ kind: "heading", level: 2, text: reading(item.dashboard.title) });
-    for (const cell of item.cells) pieces.push(...piecesFor(cell.block));
+    const group = item.group;
+    item.sections.forEach((section, index) => {
+      const label = group.kind === "tabs" ? group.panes[index]?.label : undefined;
+      if (label !== undefined) pieces.push({ kind: "heading", level: 3, text: reading(label) });
+      for (const child of section) pieces.push(...placedPieces(child));
+    });
   }
   const title = reading(definition.title) || "Canvas";
   const body = format === "html" ? htmlDocument(title, pieces) : markdownDocument(title, pieces);
@@ -688,7 +705,9 @@ function piecesFor(block: CanvasBlock): ReadonlyArray<Piece> {
       return [{ kind: "tree", items }];
     }
     case "dashboard":
-      // Drawn by the reading order with its cells; one met alone has nothing to say.
+    case "tabs":
+    case "columns":
+      // Drawn by the reading order with what it places; one met alone has nothing to say.
       return [];
     case "action":
       return paragraph(

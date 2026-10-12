@@ -214,6 +214,20 @@ warnings alone come back, and the result says the model could not be shown an
 image. The page Octant screenshots loads nothing from the network: it carries
 only Octant's own built files and the Canvas itself.
 
+### Tabs and columns
+
+A long Canvas can arrange its blocks in tabs or side-by-side columns. A tab
+strip holds two to twelve labelled tabs; click a tab, or move along the strip
+with the arrow keys, `Home`, and `End` and press `Enter`. Which tab is open is
+yours alone: switching saves nothing and makes no new version, so the person
+beside you can read another tab of the same Canvas. Columns hold two to four
+tracks and fold into one column when the Canvas is narrow, as it is in the
+sidebar. A tab or a column can hold a dashboard, which looks the same as it
+does anywhere else in the Canvas. Comments still sit on the blocks inside a tab
+or a column. A shared
+copy keeps the tabs, and an exported Markdown or HTML copy reads every tab in
+order under its label.
+
 ### Diagrams as boards
 
 A diagram block opens as a board. Zoom with the `+` and `−` controls, `⌘`/`Ctrl`

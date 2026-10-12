@@ -96,11 +96,16 @@ if (executable === undefined) {
 // `--only=mockup` captures the mockup blocks alone, as `canvas-mockup-*.png`,
 // `--only=flow` the funnel, radar, and sankey charts, as `canvas-flow-*.png`,
 // `--only=table` a wide table grouped, summarised, pinned, with one group
-// collapsed and the grid scrolled sideways, as `canvas-table-*.png`, and
+// collapsed and the grid scrolled sideways, as `canvas-table-*.png`,
 // `--only=dashboard` the ops dashboard and release health board, as
-// `canvas-dashboard-*.png`, and `--only=design` the design documents and a
-// phone design, one image per design block, as `canvas-design-*.png`.
-const ONLY_SETS = ["mockup", "flow", "table", "dashboard", "design"] as const;
+// `canvas-dashboard-*.png`, `--only=design` the design documents and a
+// phone design, one image per design block, as `canvas-design-*.png`, and
+// `--only=layout` the tabbed design brief, as `canvas-layout-*.png`: one
+// element capture per listed tab and one of the columns, each scrolled into
+// view, because a full-page capture of a long page can leave content below the
+// fold unpainted.
+const ONLY_SETS = ["mockup", "flow", "table", "dashboard", "design", "layout"] as const;
+const LAYOUT_TABS = ["Metrics", "Core loop", "World", "Economy"] as const;
 const onlyArg = process.argv.find((arg) => arg.startsWith("--only="))?.slice("--only=".length);
 const only = ONLY_SETS.find((set) => set === onlyArg);
 if (onlyArg !== undefined && only === undefined) {
@@ -146,7 +151,7 @@ try {
     page.setDefaultTimeout(15_000);
     await page.goto(harnessUrl, { waitUntil: "domcontentloaded" });
     await page.waitForSelector(
-      "main[data-canvas-chart-evidence='all'] .canvas-mockup, main[data-canvas-chart-evidence='all'] .canvas-dashboard, main[data-canvas-chart-evidence='all'] .canvas-block__chart, main[data-canvas-chart-evidence='all'] .canvas-block__heatmap, main[data-canvas-chart-evidence='all'] .canvas-block__bar-list, main[data-canvas-chart-evidence='all'] .canvas-block__matrix, main[data-canvas-chart-evidence='all'] .canvas-block__math, main[data-canvas-chart-evidence='all'] .canvas-block__table, main[data-canvas-chart-evidence='all'] .canvas-block__kind-diagram, main[data-canvas-chart-evidence='all'] .canvas-design",
+      "main[data-canvas-chart-evidence='all'] .canvas-tabs, main[data-canvas-chart-evidence='all'] .canvas-mockup, main[data-canvas-chart-evidence='all'] .canvas-dashboard, main[data-canvas-chart-evidence='all'] .canvas-block__chart, main[data-canvas-chart-evidence='all'] .canvas-block__heatmap, main[data-canvas-chart-evidence='all'] .canvas-block__bar-list, main[data-canvas-chart-evidence='all'] .canvas-block__matrix, main[data-canvas-chart-evidence='all'] .canvas-block__math, main[data-canvas-chart-evidence='all'] .canvas-block__table, main[data-canvas-chart-evidence='all'] .canvas-block__kind-diagram, main[data-canvas-chart-evidence='all'] .canvas-design",
     );
     // The dev server injects the stylesheet after the first paint, and a chart
     // measured before it lands keeps the narrow width it drew at; let the page
@@ -225,6 +230,24 @@ try {
           await design.screenshot({ path });
           written.push(path);
         }
+        continue;
+      }
+      if (only === "layout") {
+        for (const tab of LAYOUT_TABS) {
+          await page.getByRole("tab", { name: tab }).click();
+          await page.waitForTimeout(100);
+          const tabs = page.locator(".canvas-tabs");
+          await tabs.scrollIntoViewIfNeeded();
+          const slug = tab.toLowerCase().replace(/\s+/g, "-");
+          const path = join(evidenceDir, `canvas-layout-${slug}-${scenario}${suffix}.png`);
+          await tabs.screenshot({ path });
+          written.push(path);
+        }
+        const columns = page.locator(".canvas-columns");
+        await columns.scrollIntoViewIfNeeded();
+        const path = join(evidenceDir, `canvas-layout-columns-${scenario}${suffix}.png`);
+        await columns.screenshot({ path });
+        written.push(path);
         continue;
       }
       const path = join(evidenceDir, `${name}.png`);

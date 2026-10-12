@@ -45,6 +45,7 @@ import {
   comparisonMatrixExamples,
   mathExamples,
   metricExamples,
+  tabbedOverviewExample,
   dashboardExamples,
   canvasInlineRefusal,
   effectiveCanvasPresentation,
@@ -267,6 +268,7 @@ function describedExamples(kinds: ReadonlyArray<string>): ReadonlyArray<unknown>
     if (kind === "comparison-matrix") examples.push(...comparisonMatrixExamples);
     if (kind === "math") examples.push(...mathExamples);
     if (kind === "metric") examples.push(...metricExamples);
+    if (kind === "tabs" || kind === "columns") examples.push(tabbedOverviewExample);
     if (kind === "dashboard") examples.push(...dashboardExamples);
   }
   return examples;
@@ -332,6 +334,9 @@ async function resolveCanvasTarget(
     project: { id: project.id, type: owner.mode, lifecycle: "active" },
   };
 }
+
+const LAYOUT_GROUP_GUIDE =
+  "To arrange a long document, use tabs or columns. Both name blocks the same document holds, by blockId, and the document draws each named block inside its tab or column instead of in the block list. tabs has 2 to 12 panes, each with a short label and the blockIds it shows; columns has 2 to 4 tracks, each with the blockIds it stacks, and folds to one column when the Canvas is narrow. A block sits in at most one tab, track, or dashboard cell; a tab or track may hold a dashboard but never another tabs or columns block or an action. Which tab is open is the reader's choice and is never saved.";
 
 /**
  * How a design shows a real image, in the words of the thread's mode: a Chat
@@ -440,10 +445,18 @@ const BLOCK_GUIDANCE: Readonly<Record<string, { readonly use: string; readonly d
       detail:
         "Headline numbers are metric blocks. Give each a label and a value, and add an optional format, unit, delta, a goodDirection of up, down, or neutral so a delta's tone is never guessed, a caption, and a sparkline of at most 256 recent readings. Consecutive metric blocks are gathered into a responsive tile row of two to four tiles.",
     },
+    tabs: {
+      use: "A long document arranged in labelled tabs.",
+      detail: LAYOUT_GROUP_GUIDE,
+    },
+    columns: {
+      use: "Blocks side by side in two to four columns.",
+      detail: LAYOUT_GROUP_GUIDE,
+    },
     dashboard: {
       use: "A KPI dashboard grid that places metric, progress, status, chart, and table blocks.",
       detail:
-        "A KPI dashboard is a dashboard block: a title that names the region, an optional number of columns from 1 to 4 (four when absent), and up to 24 cells, each naming the blockId of a metric, progress, status, chart, or table block elsewhere in the same Canvas, with an optional span of columns. Write the placed blocks as ordinary blocks and list them in reading order; each block sits in at most one cell, and a dashboard never places another dashboard. A tile takes one column and a chart or table two unless you give a span no wider than the grid. The grid is drawn where the dashboard sits and collapses to one column in a narrow dock or on a phone, in cell order.",
+        "A KPI dashboard is a dashboard block: a title that names the region, an optional number of columns from 1 to 4 (four when absent), and up to 24 cells, each naming the blockId of a metric, progress, status, chart, or table block elsewhere in the same Canvas, with an optional span of columns. Write the placed blocks as ordinary blocks and list them in reading order; each block sits in at most one cell, tab, or track, and a dashboard never places another dashboard, tabs, or columns. A tile takes one column and a chart or table two unless you give a span no wider than the grid. The grid is drawn where the dashboard sits and collapses to one column in a narrow dock or on a phone, in cell order.",
     },
   };
 

@@ -22,6 +22,7 @@ import {
   orderSchemaBlock,
   supportFlowBlock,
   releaseMindmapBlock,
+  designBriefExample,
   opsDashboardExampleBlocks,
   releaseHealthBoardExampleBlocks,
 } from "@octant/domain";
@@ -619,9 +620,12 @@ const tableComments = {
 
 // `?only=mockup` draws the mockups alone, `?only=flow` the funnel, radar, and
 // sankey charts alone, `?only=table` the grouped and pinned table alone,
-// `?only=dashboard` the two example dashboards, and `?only=design` the
-// designs, so their capture is not a page of every chart.
+// `?only=dashboard` the two example dashboards, `?only=design` the designs,
+// and `?only=layout` the tabbed design brief, so their capture is not a page
+// of every chart.
 const only = new URLSearchParams(window.location.search).get("only");
+
+const layoutBlocks = designBriefExample.map((block) => decodeCanvasBlock(block));
 
 const definition =
   only === "mockup"
@@ -634,35 +638,37 @@ const definition =
           ? { ...canvasFixture, blocks: dashboardBlocks }
           : only === "design"
             ? { ...canvasFixture, blocks: designBlocks }
-            : {
-                ...canvasFixture,
-                blocks: [
-                  line,
-                  bar,
-                  area,
-                  scatter,
-                  distribution,
-                  ...chartExampleBlocks,
-                  budgetSankey,
-                  loneRadar,
-                  longFunnel,
-                  ...treemapExampleBlocks,
-                  ...heatmapExampleBlocks,
-                  ...barListExampleBlocks,
-                  hotFiles,
-                  ...comparisonMatrixExampleBlocks,
-                  ...mathExampleBlocks,
-                  ...metricExampleBlocks,
-                  metric,
-                  table,
-                  timeline,
-                  orderSchemaBlock,
-                  supportFlowBlock,
-                  releaseMindmapBlock,
-                  ...mockupBlocks,
-                  ...dashboardBlocks,
-                ],
-              };
+            : only === "layout"
+              ? { ...canvasFixture, blocks: layoutBlocks }
+              : {
+                  ...canvasFixture,
+                  blocks: [
+                    line,
+                    bar,
+                    area,
+                    scatter,
+                    distribution,
+                    ...chartExampleBlocks,
+                    budgetSankey,
+                    loneRadar,
+                    longFunnel,
+                    ...treemapExampleBlocks,
+                    ...heatmapExampleBlocks,
+                    ...barListExampleBlocks,
+                    hotFiles,
+                    ...comparisonMatrixExampleBlocks,
+                    ...mathExampleBlocks,
+                    ...metricExampleBlocks,
+                    metric,
+                    table,
+                    timeline,
+                    orderSchemaBlock,
+                    supportFlowBlock,
+                    releaseMindmapBlock,
+                    ...mockupBlocks,
+                    ...dashboardBlocks,
+                  ],
+                };
 
 type ChartThemeScenario = "default-light" | "default-dark" | "vivid" | "contrast";
 

@@ -48,6 +48,9 @@ import {
   CANVAS_MATH_SCHEMA_VERSION,
   CANVAS_TABLE_ROW_ID_SCHEMA_VERSION,
   CANVAS_FLOW_CHARTS_SCHEMA_VERSION,
+  CANVAS_LAYOUT_GROUPS_SCHEMA_VERSION,
+  canvasLayoutGroupChildIds,
+  isCanvasLayoutGroup,
   CANVAS_DASHBOARD_SCHEMA_VERSION,
   CANVAS_MAX_DASHBOARD_CELLS,
   CANVAS_DESIGN_DOCUMENT_SCHEMA_VERSION,
@@ -105,6 +108,7 @@ const SUPPORTED_CANVAS_SCHEMA_VERSIONS: readonly number[] = [
   CANVAS_DASHBOARD_SCHEMA_VERSION,
   CANVAS_DESIGN_DOCUMENT_SCHEMA_VERSION,
   CANVAS_DESIGN_ASSET_SCHEMA_VERSION,
+  CANVAS_DESIGN_RUNNING_SCHEMA_VERSION,
   CANVAS_SCHEMA_VERSION,
 ];
 
@@ -124,6 +128,8 @@ const VERSION_GATED_BLOCK_KINDS: ReadonlyArray<{ readonly kind: string; readonly
     { kind: "comparison-matrix", since: CANVAS_COMPARISON_MATRIX_SCHEMA_VERSION },
     { kind: "math", since: CANVAS_MATH_SCHEMA_VERSION },
     { kind: "dashboard", since: CANVAS_DASHBOARD_SCHEMA_VERSION },
+    { kind: "tabs", since: CANVAS_LAYOUT_GROUPS_SCHEMA_VERSION },
+    { kind: "columns", since: CANVAS_LAYOUT_GROUPS_SCHEMA_VERSION },
   ];
 
 export type CanvasPolicyRejectionCode =
@@ -234,7 +240,11 @@ export type CanvasPolicyRejectionCode =
   | "dangling-dashboard-cell"
   | "dashboard-cell-kind-refused"
   | "duplicate-dashboard-cell"
-  | "dashboard-span-exceeds-columns";
+  | "dashboard-span-exceeds-columns"
+  | "dangling-layout-child"
+  | "repeated-layout-child"
+  | "nested-layout-group"
+  | "block-placed-twice";
 
 export class CanvasPolicyRejected extends Error {
   override readonly name = "CanvasPolicyRejected";
@@ -1042,6 +1052,8 @@ function validateCrossReferences(definition: CanvasDefinition): void {
     if (block.kind === "metric") validateMetric(block);
   }
   validateDashboards(definition);
+  validateLayoutGroups(definition);
+  validatePlacedOnce(definition);
 }
 
 /**
@@ -1073,6 +1085,12 @@ function validateDashboards(definition: CanvasDefinition): void {
           `Canvas dashboard ${block.blockId} places block ${id}, which the Canvas does not hold.`,
         );
       }
+      if (kind === "tabs" || kind === "columns") {
+        reject(
+          "nested-layout-group",
+          `Canvas dashboard ${block.blockId} cannot place ${kind} ${id}; tabs and columns may hold a dashboard, never the reverse.`,
+        );
+      }
       if (!isCanvasDashboardCellKind(kind)) {
         reject(
           "dashboard-cell-kind-refused",
@@ -1092,6 +1110,74 @@ function validateDashboards(definition: CanvasDefinition): void {
           `Canvas dashboard ${block.blockId} spans ${String(cell.span)} columns on a grid of ${String(columns)}.`,
         );
       }
+    }
+  }
+}
+
+/**
+ * Tabs and columns arrange blocks the document already holds. A child that
+ * names no block would draw an empty pane; a child named twice would draw one
+ * block in two places, so a comment on it would have two homes; and a group
+ * inside a group would hide a pane behind a pane, which no reader can
+ * navigate. A pane or track may hold a dashboard, which a dashboard refuses
+ * in return, so nesting stops at tabs or columns, then a dashboard, then its
+ * tiles. Each fails closed with its reason.
+ */
+function validateLayoutGroups(definition: CanvasDefinition): void {
+  const kinds = new Map(definition.blocks.map((block) => [String(block.blockId), block]));
+  const placed = new Set<string>();
+  for (const block of definition.blocks) {
+    if (block.kind !== "tabs" && block.kind !== "columns") continue;
+    for (const childId of canvasLayoutGroupChildIds(block)) {
+      const child = kinds.get(String(childId));
+      if (child === undefined) {
+        reject(
+          "dangling-layout-child",
+          `Canvas ${block.kind} ${block.blockId} names block ${childId}, which the document does not hold.`,
+        );
+      }
+      if (isCanvasLayoutGroup(child) || child.kind === "action") {
+        reject(
+          "nested-layout-group",
+          `Canvas ${block.kind} ${block.blockId} holds ${child.kind} ${childId}; tabs and columns never hold tabs, columns, or an action.`,
+        );
+      }
+      if (placed.has(String(childId))) {
+        reject(
+          "repeated-layout-child",
+          `Canvas block ${childId} is placed in more than one tab, track, or group.`,
+        );
+      }
+      placed.add(String(childId));
+    }
+  }
+}
+
+/**
+ * Dashboards, tabs, and columns all place blocks by id, and each refuses a
+ * block it places twice. Across them the rule is the same: a block is drawn
+ * in one place, so its comment marker has one home and an export reads it
+ * once. The refusal names the block and both blocks that place it.
+ */
+function validatePlacedOnce(definition: CanvasDefinition): void {
+  const placedBy = new Map<string, CanvasBlock>();
+  for (const block of definition.blocks) {
+    const childIds =
+      block.kind === "dashboard"
+        ? block.cells.map((cell) => cell.blockId)
+        : block.kind === "tabs" || block.kind === "columns"
+          ? canvasLayoutGroupChildIds(block)
+          : [];
+    for (const childId of childIds) {
+      const id = String(childId);
+      const first = placedBy.get(id);
+      if (first !== undefined) {
+        reject(
+          "block-placed-twice",
+          `Canvas block ${id} is placed by both ${first.kind} ${first.blockId} and ${block.kind} ${block.blockId}; a block is placed once.`,
+        );
+      }
+      placedBy.set(id, block);
     }
   }
 }
