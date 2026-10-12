@@ -58,20 +58,31 @@ const beacon = Bun.serve({
 });
 const origin = `http://127.0.0.1:${String(beacon.port)}`;
 
+/**
+ * A string as script source inside a page: JSON, with every character that
+ * could end the script element or a line written as an escape.
+ */
+function inScript(value: string): string {
+  return JSON.stringify(value).replace(
+    /[<>/\u2028\u2029]/g,
+    (character) => `\\u${character.charCodeAt(0).toString(16).padStart(4, "0")}`,
+  );
+}
+
 const hostile = `
 document.getElementById("marker").textContent = "ran";
-fetch(${JSON.stringify(`${origin}/fetch`)}).catch(() => undefined);
-try { const x = new XMLHttpRequest(); x.open("GET", ${JSON.stringify(`${origin}/xhr`)}); x.send(); } catch (_) {}
-try { new WebSocket(${JSON.stringify(`ws://127.0.0.1:${String(beacon.port)}/ws`)}); } catch (_) {}
-new Image().src = ${JSON.stringify(`${origin}/image`)};
-try { window.open(${JSON.stringify(`${origin}/popup`)}); } catch (_) {}
-try { top.location.href = ${JSON.stringify(`${origin}/top`)}; } catch (_) {}
+fetch(${inScript(`${origin}/fetch`)}).catch(() => undefined);
+try { const x = new XMLHttpRequest(); x.open("GET", ${inScript(`${origin}/xhr`)}); x.send(); } catch (_) {}
+try { new WebSocket(${inScript(`ws://127.0.0.1:${String(beacon.port)}/ws`)}); } catch (_) {}
+new Image().src = ${inScript(`${origin}/image`)};
+try { window.open(${inScript(`${origin}/popup`)}); } catch (_) {}
+try { top.location.href = ${inScript(`${origin}/top`)}; } catch (_) {}
 try {
   const form = document.createElement("form");
-  form.action = ${JSON.stringify(`${origin}/form`)}; form.method = "post";
+  form.action = ${inScript(`${origin}/form`)}; form.method = "post";
   document.body.appendChild(form); form.submit();
 } catch (_) {}
-setTimeout(() => { location.href = ${JSON.stringify(`${origin}/self-navigation`)}; }, 300);
+setTimeout(() => { location.href = ${inScript(`${origin}/self-navigation`)}; }, 300);
 `;
 const prototype = decodeCanvasBlock({
   blockId: "hostile",
