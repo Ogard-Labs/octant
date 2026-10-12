@@ -1008,7 +1008,7 @@ describe("App", () => {
     );
     expect(sendCallOrder).toBeDefined();
     expect(openCallOrder).toBeDefined();
-    expect(sendCallOrder!).toBeLessThan(openCallOrder!);
+    expect(openCallOrder!).toBeLessThan(sendCallOrder!);
   });
 
   it("does not restore the Chat welcome prompt after a thread is created", async () => {

@@ -5897,10 +5897,13 @@ function LaunchedShell(
           }
           thread = changed.thread;
         }
+        if (!(await openCreatedChatThread(thread.id, thread.title, prompt))) {
+          return true;
+        }
         const draftExtensionSelections =
           extensionSelections ?? (computerUseSelection === undefined ? [] : [computerUseSelection]);
-        const sendOutcome = chatController
-          .execute({
+        try {
+          const sent = await chatController.execute({
             kind: "send-chat-turn",
             ...(draftExtensionSelections.length === 0
               ? {}
@@ -5908,21 +5911,14 @@ function LaunchedShell(
             threadId: thread.id,
             expectedVersion: thread.version,
             prompt,
-          })
-          .then(
-            (sent) => ({ sent }),
-            (error: unknown) => ({ error }),
-          );
-        const opened = await controller.openChatThread(thread.id, thread.title);
-        const outcome = await sendOutcome;
-        if (!opened) {
-          chatController.reportError(
-            "The chat was created, but it could not be opened. Open it from the sidebar to continue.",
-          );
-          if ("error" in outcome || outcome.sent === undefined) {
+          });
+          if (sent === undefined) {
+            chatController.reportError(
+              "The first message could not be sent. Retry from the open thread.",
+            );
             seedOpenedComposerDraft("chat", String(thread.id), prompt);
           }
-        } else if ("error" in outcome || outcome.sent === undefined) {
+        } catch {
           chatController.reportError(
             "The first message could not be sent. Retry from the open thread.",
           );
