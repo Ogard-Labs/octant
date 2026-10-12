@@ -11,6 +11,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  decodeBrowserThreadId,
   decodeChatThread,
   decodeChatThreadId,
   decodeCodeThreadId,
@@ -21,6 +22,7 @@ import {
 import { decodeHostExportUsageRow } from "@octant/contracts";
 import { decodeThreadRetentionThreadId } from "@octant/contracts/thread-retention";
 import { afterEach, describe, expect, it } from "vitest";
+import { BrowserCaptureStore } from "../browser/browserCaptureStore";
 import { ChatAttachmentStore } from "../chat/chatAttachmentStore";
 import { CodeAttachmentStore } from "../code/codeAttachmentStore";
 import { GeneratedImageStore } from "../image/generatedImageStore";
@@ -282,6 +284,7 @@ function openHarness(): Harness {
   const workAttachments = new WorkAttachmentStore(directory);
   const codeAttachments = new CodeAttachmentStore(directory);
   const images = new GeneratedImageStore(directory);
+  const browserCaptures = new BrowserCaptureStore(directory);
   const workThreads = [
     { id: threads.work.id, projectId: decodeProjectId(projectId), updatedAt: now },
   ];
@@ -312,6 +315,7 @@ function openHarness(): Harness {
             // A thread id that is not an image scope is not an image basin.
           }
         },
+        purgeBrowserCaptures: (id) => browserCaptures.purgeThread(decodeBrowserThreadId(id)),
         purgeAgentMessages: async () => undefined,
       }),
   });
@@ -330,6 +334,7 @@ function seedThreadTraces(harness: Harness, thread: SeededThread): void {
   seedCanvasFamily(harness, thread);
   seedAttachments(harness.directory, thread);
   seedGeneratedImage(harness.directory, thread);
+  seedBrowserCapture(harness, thread);
   seedAgentRun(harness, thread);
   seedCheckpoint(harness, thread);
   seedFollowUp(harness, thread);
@@ -465,6 +470,26 @@ function seedGeneratedImage(directory: string, thread: SeededThread): void {
   );
   mkdirSync(join(path, ".."), { recursive: true });
   writeFileSync(path, thread.marker);
+}
+
+function seedBrowserCapture(harness: Harness, thread: SeededThread): void {
+  const captureId = uuidFor(thread.mode, "capture");
+  const path = join(harness.directory, "browser-captures", thread.id, captureId, "finalized.bin");
+  mkdirSync(join(path, ".."), { recursive: true });
+  writeFileSync(path, thread.marker);
+  insertEvent(
+    harness.connection,
+    "browser-capture",
+    thread.id,
+    {
+      captureId,
+      threadId: thread.id,
+      origin: "https://example.com",
+      url: "https://example.com/",
+      title: thread.marker,
+    },
+    "browser.capture-kept@1",
+  );
 }
 
 function seedAgentRun(harness: Harness, thread: SeededThread): void {

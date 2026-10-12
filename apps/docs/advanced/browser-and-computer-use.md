@@ -27,12 +27,42 @@ exactly one owning thread before it can create an isolated context.
 Observations are bounded: each entry renders only the title, URL, a SHA-256
 content hash, and a correlated-evidence count. No launch token, window
 capability, provider credential, typed value, page body, screenshot, or raw
-browser diagnostic enters committed evidence.
+browser diagnostic enters committed evidence. A kept screenshot is a separate
+thread capture, described under Browser captures below; the journal holds only a
+reference to it, never its bytes.
 
 The Browser pane provides an address bar, history controls, and the isolated
 page. Lifecycle and stop controls remain visible when a session needs them.
 The renderer requests lifecycle through authenticated routes; a denial creates
 no observation or evidence.
+
+### Browser captures
+
+When the agent takes a screenshot with its Browser, or you press **Screenshot**
+(the camera button in the Browser pane's toolbar), Octant keeps a copy with the
+thread. **Refresh preview** does not keep one. A **Browser captures** strip
+appears in the conversation beside any generated images, newest first, each
+with the page title and its origin. Choose one to see it full size with its
+address and time. The strip is absent until the thread has a capture.
+
+- Only a screenshot is kept. The picture the agent receives after other actions,
+  such as clicking or scrolling, is not.
+- A thread keeps its newest 32 captures; the oldest is dropped when a new one
+  arrives. Deleting the thread deletes its captures.
+- Captures stay on this computer, in Octant's data folder. **Settings → Data &
+  privacy** lists **Browser captures** under Caches with where they are stored. They are not added to Canvases, shared,
+  synced to your other computers, or included in diagnostics. A thread export
+  does not include them yet.
+- The page you captured counts as outside content: a thread that has looked at
+  a page is already marked as having read outside content, and keeping a
+  picture of it changes nothing about that.
+- If a picture cannot be kept (too large, not a recognised image, a page with
+  no web address, no picture from the Browser, or a storage problem), the
+  screenshot still works. The agent is told the capture was not kept, the
+  Browser pane says so when you pressed Screenshot, and nothing is added to the
+  strip. The Browser gives no picture of a page it treats as sensitive, for
+  example one with a password field.
+- An archived thread still shows the captures it kept.
 
 Links inside a Work or Code conversation open in the app: following one
 creates a dedicated Browser context confined to that link's origin and opens

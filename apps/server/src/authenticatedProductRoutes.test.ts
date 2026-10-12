@@ -285,6 +285,17 @@ describe("authenticated product route dispatch", () => {
         classifyProductAction(new Request(`https://octant.example${path}`, { method: "POST" })),
       ).toBeUndefined();
     }
+    // A kept screenshot is a picture of a page on the host, so reading or taking
+    // one stays with the host's own window.
+    for (const path of [
+      "/api/browser/captures",
+      "/api/browser/captures/image",
+      "/api/browser/captures/take",
+    ]) {
+      expect(
+        classifyProductAction(new Request(`https://octant.example${path}`, { method: "POST" })),
+      ).toBeUndefined();
+    }
   });
 
   it("dispatches a browser observation and gesture for a paired device but not a session change", async () => {

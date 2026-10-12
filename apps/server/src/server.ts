@@ -703,6 +703,8 @@ import {
 } from "./browser/browserAppManagedTools";
 import { BrowserToolApprovalService } from "./browser/browserToolApprovalService";
 import { ExternalContentClearStore } from "./context/externalContentClearStore";
+import { BrowserCaptureService } from "./browser/browserCaptureService";
+import { BrowserCaptureStore } from "./browser/browserCaptureStore";
 import { ExternalContentIngestionStore } from "./context/externalContentIngestionStore";
 import {
   AgentMessageProjection,
@@ -1951,6 +1953,15 @@ export function startOctantServer(
       });
     let activeCodeService: CodeRouteService | undefined;
     let browserAutomationService: BrowserAutomationService | undefined;
+    const browserCaptureStore = new BrowserCaptureStore(persistence.dataDirectory);
+    const browserCaptures = new BrowserCaptureService({
+      store: browserCaptureStore,
+      journal: persistence.journal,
+      connection: persistence.connection,
+      personActor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+      uuid: randomUUID,
+      clock: () => new Date().toISOString(),
+    });
     let projectBrowserService: ProjectBrowserService | undefined;
     const browserModelBindings = new Map<string, BrowserModelBinding>();
     const requireBrowserAutomationService = (): BrowserAutomationService => {
@@ -2821,43 +2832,33 @@ export function startOctantServer(
     const agentMessageBodyStore = new AgentMessageBodyStore(
       join(persistence.dataDirectory, "agent-messages"),
     );
+    // Only a real thread is addressable. A child run has no turn that would
+    // carry a message, so its id resolves to nothing and refuses like any
+    // other unreachable one.
     const resolveAgentMessageEndpoint: AgentMessageEndpointResolver = (threadId) => {
       const chat = persistence.readChatThread(threadId as never);
       if (chat !== undefined) {
-        return { mode: "chat", terminal: chat.lifecycle !== "active" };
+        return {
+          mode: "chat",
+          projectId: chat.projectId === undefined ? undefined : String(chat.projectId),
+          terminal: chat.lifecycle !== "active",
+        };
       }
       const code = persistence.readCodeThread(threadId as never);
       if (code !== undefined) {
-        return { mode: "code", terminal: code.lifecycle !== "active" };
+        return {
+          mode: "code",
+          projectId: String(code.projectId),
+          terminal: code.lifecycle !== "active",
+        };
       }
       const work = workThreadProjection.list().find((thread) => String(thread.id) === threadId);
       if (work !== undefined) {
-        return { mode: "work", terminal: work.lifecycle !== "active" };
-      }
-      const run = persistence.agentRunProjection.getById(threadId as never);
-      if (run !== undefined) {
-        // A run speaks for its parent thread's mode, and a message to a run
-        // lands on the hierarchy edge 0012 already owns.
-        const runTerminal =
-          run.lifecycleStatus === "completed" ||
-          run.lifecycleStatus === "failed" ||
-          run.lifecycleStatus === "cancelled" ||
-          run.lifecycleStatus === "interrupted";
-        const parentChat = persistence.readChatThread(String(run.parentThreadId) as never);
-        if (parentChat !== undefined) {
-          return {
-            mode: "chat",
-            terminal: runTerminal || parentChat.lifecycle !== "active",
-          };
-        }
-        const parentCode = persistence.readCodeThread(String(run.parentThreadId) as never);
-        if (parentCode !== undefined) {
-          return {
-            mode: "code",
-            terminal: runTerminal || parentCode.lifecycle !== "active",
-          };
-        }
-        return { mode: "chat", terminal: runTerminal };
+        return {
+          mode: "work",
+          projectId: String(work.projectId),
+          terminal: work.lifecycle !== "active",
+        };
       }
       return undefined;
     };
@@ -4712,6 +4713,7 @@ export function startOctantServer(
     browserAutomationService = new BrowserAutomationService({
       runtime: browserRuntime,
       authority: browserAuthority,
+      captures: browserCaptures,
       toolCallAuthority: createBrowserToolCallAuthorityService(
         browserAuthority,
         () => new Date().toISOString(),
@@ -5212,11 +5214,17 @@ export function startOctantServer(
           githubReadToolSetIfEffective(githubExtensionSnapshot.read(), () =>
             githubReadToolService.createToolSet({ windowId, thread, readThread }),
           ),
-        agentMessages: ({ thread }) =>
+        agentMessages: ({ thread, readPosture }) =>
           createAgentMessageTools({
             service: agentMessageService,
             senderThreadId: String(thread.id),
+            toolConstraints: thread.toolConstraints ?? [],
+            profileDisplayName: thread.profileDisplayName ?? "the bound profile",
+            readPosture,
           }),
+        carryAgentMessages: (threadId) => agentMessageService.carryIntoTurn(threadId),
+        confirmAgentMessagesDelivered: (messageIds) =>
+          agentMessageService.confirmDelivered(messageIds),
         sideTasks: ({ thread }) =>
           createSideTaskTools({
             store: sideTasks,
@@ -6720,6 +6728,7 @@ export function startOctantServer(
           persistence.imageJobProjection.isFinalizedAttachmentReferenced(scopeId, attachmentId),
       }),
     );
+    yield* Effect.promise(() => browserCaptures.recover());
     imageJobService = new ImageJobService({
       journal: persistence.journal,
       projection: persistence.imageJobProjection,
@@ -6879,6 +6888,10 @@ export function startOctantServer(
       }),
       "Agent message",
     );
+    // A body lives only while its message waits for a turn. The sweep is a
+    // disk bound, not a precondition: a host that cannot read the store still
+    // starts.
+    yield* Effect.promise(() => agentMessageService.reconcileStoredBodies().catch(() => undefined));
     const workArtifactProjection = new WorkArtifactProjection();
     requireJournalHydration(
       hydrateWorkArtifactProjectionFromJournal({
@@ -8019,8 +8032,54 @@ export function startOctantServer(
       windowAuthorityStore,
       maxJsonBodySize: MAX_JSON_REQUEST_BODY_SIZE,
     });
+    // Which threads a window can open, archived ones included. What a thread
+    // kept (generated images, Browser captures) is read under this rather than
+    // under a live tool authority, which an archived thread no longer has.
+    const windowCanOpenThread = async (
+      windowId: WindowId,
+      threadKind: "chat-thread" | "work-thread" | "code-thread",
+      threadId: string,
+    ): Promise<boolean> => {
+      try {
+        if (threadKind === "chat-thread") {
+          const view = chatService.read(decodeChatThreadId(threadId));
+          const workspace = persistence.readWindowWorkspace(windowId)?.workspace;
+          return chatImageScopeAllowedForWindow({
+            chatContext: workspace?.contextByMode.chat,
+            thread: view?.thread,
+          });
+        }
+        if (threadKind === "work-thread") {
+          const bootstrap = await workThreadService.bootstrap(windowId);
+          return bootstrap.threads.some((thread) => String(thread.id) === threadId);
+        }
+        const view = await routeCodeService.read(windowId, decodeCodeThreadId(threadId));
+        return view !== undefined;
+      } catch {
+        return false;
+      }
+    };
     const browserAutomationRoutes = createBrowserAutomationRouteHandler({
       service: browserAutomationService,
+      captures: browserCaptures,
+      windowCanOpenThread: async (windowId, threadId) => {
+        const id = String(threadId);
+        // A capture names only its thread. The projections say which kind of
+        // thread it is, so one check runs instead of all three on every read.
+        let threadKind: "chat-thread" | "work-thread" | "code-thread" | undefined;
+        try {
+          if (persistence.readChatThread(decodeChatThreadId(id)) !== undefined) {
+            threadKind = "chat-thread";
+          } else if (persistence.readCodeThread(decodeCodeThreadId(id)) !== undefined) {
+            threadKind = "code-thread";
+          } else if (workThreadProjection.read(decodeWorkThreadId(id)) !== undefined) {
+            threadKind = "work-thread";
+          }
+        } catch {
+          return false;
+        }
+        return threadKind !== undefined && (await windowCanOpenThread(windowId, threadKind, id));
+      },
       projectBrowsers: liveProjectBrowsers,
       authority: browserAuthority,
       approvals: requireBrowserToolApprovalService(),
@@ -8103,24 +8162,7 @@ export function startOctantServer(
         // The library is host-wide: window capability already proved the
         // caller is a registered window, and the scope id is fixed.
         if (threadKind === "image-library") return threadId === String(IMAGE_LIBRARY_SCOPE_ID);
-        try {
-          if (threadKind === "chat-thread") {
-            const view = chatService.read(decodeChatThreadId(threadId));
-            const workspace = persistence.readWindowWorkspace(windowId)?.workspace;
-            return chatImageScopeAllowedForWindow({
-              chatContext: workspace?.contextByMode.chat,
-              thread: view?.thread,
-            });
-          }
-          if (threadKind === "work-thread") {
-            const bootstrap = await workThreadService.bootstrap(windowId);
-            return bootstrap.threads.some((thread) => String(thread.id) === threadId);
-          }
-          const view = await routeCodeService.read(windowId, decodeCodeThreadId(threadId));
-          return view !== undefined;
-        } catch {
-          return false;
-        }
+        return windowCanOpenThread(windowId, threadKind, threadId);
       },
       saveToProject: async (input) => {
         if (input.threadKind === "chat-thread") {
@@ -10181,6 +10223,16 @@ export function startOctantServer(
             } catch {
               // A thread id that is not a generated-image scope is not an image basin.
             }
+          },
+          purgeBrowserCaptures: async (id) => {
+            let threadId;
+            try {
+              threadId = decodeBrowserThreadId(id);
+            } catch {
+              // A thread id that is not a browser thread has no capture basin.
+              return;
+            }
+            await browserCaptureStore.purgeThread(threadId);
           },
           purgeAgentMessages: (id) => agentMessageService.purgeThread(id),
         });
