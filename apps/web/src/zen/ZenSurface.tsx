@@ -64,6 +64,8 @@ import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
 import { OctantCard } from "../ui/base/OctantCard";
 import { OctantInput } from "../ui/base/OctantInput";
 import { AppBackdrop, type BackgroundImageFetcher } from "../theme/AppBackdrop";
+import { useIncreasedContrast } from "../theme/ThemeSettingsProvider";
+import { useMediaQueryMatches } from "../theme/useMediaQueryMatches";
 import { ZenAppearancePanel } from "./ZenAppearancePanel";
 import { ZenGroundEffectLayer } from "./ZenGroundEffectLayer";
 import { ZenBar } from "./ZenBar";
@@ -272,36 +274,11 @@ type ElementInteraction = {
    to size a card, and nobody found it. */
 const RESIZE_EDGES: ReadonlyArray<ZenResizeEdge> = ["n", "s", "e", "w", "ne", "nw", "se", "sw"];
 
-function useMediaQueryMatches(query: string): boolean {
-  const [matches, setMatches] = useState(() =>
-    typeof window !== "undefined" && typeof window.matchMedia === "function"
-      ? window.matchMedia(query).matches
-      : false,
-  );
-
-  useEffect(() => {
-    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
-    const media = window.matchMedia(query);
-    const update = () => setMatches(media.matches);
-    update();
-    if (typeof media.addEventListener === "function") {
-      media.addEventListener("change", update);
-      return () => media.removeEventListener("change", update);
-    }
-    if (typeof media.addListener === "function") {
-      media.addListener(update);
-      return () => media.removeListener(update);
-    }
-    return;
-  }, [query]);
-
-  return matches;
-}
-
 function useZenEffectiveAppearance(appearance: ZenAppearance): ZenAppearance {
   const reducedMotion = useMediaQueryMatches("(prefers-reduced-motion: reduce)");
   const reducedTransparency = useMediaQueryMatches("(prefers-reduced-transparency: reduce)");
-  const increasedContrast = useMediaQueryMatches("(prefers-contrast: more)");
+  // The app's Increased contrast setting reaches Zen as well as the system's.
+  const increasedContrast = useIncreasedContrast();
 
   return useMemo(
     () =>

@@ -956,17 +956,15 @@
   }
 }
 
-@media (prefers-contrast: more) {
-  .chat-workspace__header,
-  .thread-work-shelf,
-  .thread-work-shelf input {
-    border-color: var(--octant-border-strong);
-  }
+html[data-octant-increased-contrast="true"] .chat-workspace__header,
+html[data-octant-increased-contrast="true"] .thread-work-shelf,
+html[data-octant-increased-contrast="true"] .thread-work-shelf input {
+  border-color: var(--octant-border-strong);
+}
 
-  .thread-work-shelf__item-actions button,
-  .thread-work-shelf form button {
-    border-color: var(--oct-muted);
-  }
+html[data-octant-increased-contrast="true"] .thread-work-shelf__item-actions button,
+html[data-octant-increased-contrast="true"] .thread-work-shelf form button {
+  border-color: var(--oct-muted);
 }
 
 /* Side Chat sidecar tab. */
