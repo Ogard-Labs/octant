@@ -1811,9 +1811,9 @@ function renderNonCodeTab(
                   {...(props.onDraftSelectProvider === undefined
                     ? {}
                     : { onSelectProvider: props.onDraftSelectProvider })}
-                  {...(props.onOpenSettings === undefined
+                  {...(openProviderSettings === undefined
                     ? {}
-                    : { onOpenSettings: props.onOpenSettings })}
+                    : { onOpenSettings: openProviderSettings })}
                   projectId={project.id}
                 />
               ),

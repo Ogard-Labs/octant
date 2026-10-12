@@ -685,6 +685,21 @@ describe("ChatProjectOverview", () => {
     ).toBeVisible();
   });
 
+  it("opens Providers from Set up a provider on the Project composer", () => {
+    const onOpenSettings = vi.fn();
+    render(
+      <ChatProjectOverview
+        model={model}
+        onCreateThread={vi.fn()}
+        onOpenSettings={onOpenSettings}
+        providerGroups={[]}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Set up a provider" }));
+    expect(onOpenSettings).toHaveBeenCalledOnce();
+  });
+
   it("generates a distinct quick-start label target per visible Overview", () => {
     render(
       <>
