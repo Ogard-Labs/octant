@@ -159,6 +159,7 @@ describe("createCanvasPreviewService", () => {
       designs: [
         {
           blockId: "cart",
+          measured: true,
           scriptErrors: ["Uncaught ReferenceError: missing is not defined"],
           overflow: [{ frameId: "cart", overflowPx: 120 }],
           contrast: [

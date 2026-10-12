@@ -1669,6 +1669,7 @@ describe("Canvas preview through the tool", () => {
     // real-browser smoke: the bridge's report of the uncaught error.
     const recorded = {
       blockId: "cart-prototype",
+      measured: true,
       scriptErrors: ["Uncaught ReferenceError: missingFunction is not defined"],
       overflow: [],
       contrast: [],

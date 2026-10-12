@@ -152,7 +152,7 @@ const canvasDefinitionSchema = {
       type: "string",
       enum: ["inline", "sidebar"],
       description:
-        "For create and revise: inline draws the Canvas inside the conversation (any number of reading blocks; no diagram board, plan, mockup, or design); sidebar, the default, shows a card that opens it beside the thread. Revise keeps the current choice when omitted.",
+        "For create and revise: inline draws the Canvas inside the conversation (any reading blocks, or one document-size design without script; no diagram board, plan, mockup, or other design); sidebar, the default, shows a card that opens it beside the thread. Revise keeps the current choice when omitted.",
     },
   },
   required: ["operation"],
@@ -555,7 +555,7 @@ function toolDescription(
     "A Canvas is a document: it grants no file, shell, Git, or network access. Creation adds a card to this thread and offers the Canvas in the thread's dock the first time it appears; the user can also select Open Canvas. Do not claim the user has read it or invent a download URL.",
     "Choose where the thread shows it. Use presentation inline for a visual or a reading document that answers the question in place, such as a chart, a few metrics, a short table, a sequence or state diagram, or an article or brief made of reading blocks or one document-size design; it is drawn in the conversation just below your reply to this turn, so refer to it as below. A long one starts as a faded teaser the user can expand in place, and the user can still open it in the sidebar. Leave presentation out (sidebar) for plans, boards, mockups, other designs, and anything the user will keep working on; inline never holds those, and when the host shows a card instead, the result says so in presentationNote.",
     "Revise with the canvasId, the last observed expectedSequence, and the complete replacement blocks; people edit Canvases too, so read before revising and keep their changes. Reference blocks require source ids already in the Canvas source manifest; create attaches no sources. Never invent file or artifact references.",
-    "Preview once after you create or revise a chart, treemap, design, or inline Canvas, fix what its warnings or picture show with a revise, then reply. Look once per change: an unchanged document previews the same.",
+    "Preview once after you create or revise a chart, treemap, design, or inline Canvas, revise to fix what its warnings or picture show, then reply. Look once per change: an unchanged document previews the same.",
   ].join(" ");
 }
 
