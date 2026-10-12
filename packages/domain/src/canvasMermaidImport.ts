@@ -687,23 +687,28 @@ function er(_header: Statement, body: ReadonlyArray<Statement>, blockId: CanvasB
 
 // ── mindmap ─────────────────────────────────────────────────────────────────
 
-/** A topic: plain text, or `id[text]`, `id(text)`, `id((text))` with the shape dropped. */
-const TOPIC = /^(?:[A-Za-z0-9_-]+)?(?:\(\((.+)\)\)|\[(.+)\]|\((.+)\))$/;
+/** The characters Mermaid reads as the start or the end of a topic's shape. */
+const SHAPE_DELIMITER = /[()[\]{}]/;
+/** A shape's text: a quoted string, or text that holds no shape delimiter. */
+const SHAPE_TEXT = String.raw`("[^"]*"|[^()[\]{}]+)`;
+/**
+ * A shaped topic, `id[text]`, `id(text)`, or `id((text))`, with the shape
+ * dropped. As in Mermaid, the id is everything before the shape opens.
+ */
+const TOPIC = new RegExp(
+  String.raw`^[^()[\]{}]*(?:\(\(${SHAPE_TEXT}\)\)|\[${SHAPE_TEXT}\]|\(${SHAPE_TEXT}\))$`,
+);
 
 function mindmap(_header: Statement, body: ReadonlyArray<Statement>, blockId: CanvasBlockId) {
   const nodes: Array<Record<string, unknown>> = [];
   const stack: Array<{ readonly indent: number; readonly nodeId: string }> = [];
   for (const statement of body) {
     const text = statement.text;
-    if (
-      text.startsWith("::") ||
-      text.includes(":::") ||
-      text.includes("{{") ||
-      text.startsWith(")")
-    ) {
-      throw unsupported(statement);
-    }
+    if (text.startsWith("::") || text.includes(":::")) throw unsupported(statement);
     const shaped = TOPIC.exec(text);
+    // A delimiter outside a shape this reads is a cloud, a bang, a hexagon, or
+    // text after a shape. Its markup is never kept as the topic's label.
+    if (shaped === null && SHAPE_DELIMITER.test(text)) throw unsupported(statement);
     const label = unquote(shaped === null ? text : (shaped[1] ?? shaped[2] ?? shaped[3] ?? text));
     while (stack.length > 0 && (stack.at(-1)?.indent ?? 0) >= statement.indent) stack.pop();
     const parent = stack.at(-1);
