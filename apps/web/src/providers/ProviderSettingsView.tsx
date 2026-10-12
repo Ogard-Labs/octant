@@ -41,6 +41,7 @@ import {
   isImageProfileDriverKind,
 } from "@octant/domain";
 import type { ReactNode } from "react";
+import type { ProviderUsageLimitsClient } from "@octant/client-runtime/provider-usage-limits-client";
 import { SettingsSection } from "../settings/primitives";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantSelectField } from "../ui/base/OctantSelect";
@@ -59,6 +60,7 @@ import { OctantAlert } from "../ui/base/OctantAlert";
 export interface ProviderSettingsViewProps {
   readonly status: "loading" | "ready" | "disconnected";
   readonly instances: ReadonlyArray<ProviderInstance>;
+  readonly usageLimitsClient?: ProviderUsageLimitsClient;
   readonly discoverySnapshot?: DiscoverySnapshot;
   readonly discovery?: ReactNode;
   readonly defaults: ProviderDefaults;
@@ -471,6 +473,9 @@ export function ProviderSettingsView(props: ProviderSettingsViewProps) {
         onChangeAzureFoundryConfiguration={props.onChangeAzureFoundryConfiguration}
         onChangeBinary={props.onChangeBinary}
         {...(props.onLocateBinary === undefined ? {} : { onLocateBinary: props.onLocateBinary })}
+        {...(props.usageLimitsClient === undefined
+          ? {}
+          : { usageLimitsClient: props.usageLimitsClient })}
         onChangeClaudeConfiguration={props.onChangeClaudeConfiguration}
         onChangeCodexConfiguration={props.onChangeCodexConfiguration}
         onChangeDevinConfiguration={props.onChangeDevinConfiguration}

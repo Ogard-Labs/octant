@@ -45,6 +45,9 @@ class FakeQuery implements ClaudeAgentSdkQueryLike {
   readonly close = vi.fn(() => undefined);
   readonly setMcpServers = vi.fn(async () => ({ added: ["octant"], removed: [], errors: {} }));
   getContextUsage?: () => Promise<unknown>;
+  usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET?: (options?: {
+    readonly skipBehaviors?: boolean;
+  }) => Promise<unknown>;
 
   constructor(private readonly output: readonly unknown[]) {}
 
@@ -536,6 +539,32 @@ describe("Claude Agent SDK port", () => {
         ),
       }),
     ).not.toContain("private prompt summary");
+  });
+
+  test("asks the Claude process for plan usage on the query itself", async () => {
+    const harness = makeHarness();
+    harness.query.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET = function (
+      this: FakeQuery,
+      options?: { readonly skipBehaviors?: boolean },
+    ) {
+      if (this.close === undefined) {
+        throw new TypeError("plan usage method lost its query receiver");
+      }
+      expect(this).toBe(harness.query);
+      expect(options).toEqual({ skipBehaviors: true });
+      return Promise.resolve({ rate_limits_available: false, rate_limits: null });
+    };
+
+    const answer = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const query = yield* harness.port.openQuery(openInput);
+          return yield* query.readPlanUsage();
+        }),
+      ),
+    );
+
+    expect(answer).toEqual({ rate_limits_available: false, rate_limits: null });
   });
 
   test("contains close exceptions and retries cleanup from the scope finalizer", async () => {

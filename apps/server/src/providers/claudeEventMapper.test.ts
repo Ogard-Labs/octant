@@ -1217,6 +1217,30 @@ describe("mapClaudeMessage", () => {
     expect(ctx.terminal).toBe(false);
   });
 
+  it("carries overage posture on the same window the process reported", () => {
+    const ctx = context();
+    const results = mapped(ctx, {
+      kind: "rate-limit",
+      sessionId: claudeSessionId,
+      status: "allowed",
+      rateLimitType: "five_hour",
+      utilization: 0.4,
+      overageStatus: "allowed_warning",
+      overageInUse: true,
+    });
+
+    expect(results).toMatchObject([
+      {
+        kind: "event",
+        event: {
+          kind: "rate-limit-window",
+          window: "five_hour",
+          overage: { status: "warning", inUse: true },
+        },
+      },
+    ]);
+  });
+
   it.each([
     {
       name: "result usage",

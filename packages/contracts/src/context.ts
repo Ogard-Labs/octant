@@ -245,12 +245,21 @@ export type ServiceRetryState = typeof ServiceRetryState.Type;
  * absolute request/token quota; utilization is therefore optional and is
  * never converted into a fabricated limit or remaining count.
  */
+export const ProviderRateLimitOverage = Schema.Struct({
+  status: Schema.Literal("allowed", "warning", "exhausted"),
+  inUse: Schema.optional(Schema.Boolean),
+  resetsAt: Schema.optional(UtcTimestamp),
+  disabledReason: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(64))),
+}).annotations(strict);
+export type ProviderRateLimitOverage = typeof ProviderRateLimitOverage.Type;
+
 export const ProviderRateLimitWindow = Schema.Struct({
   window: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(64)),
   status: Schema.Literal("allowed", "warning", "exhausted"),
   utilization: Schema.optional(Schema.Number.pipe(Schema.between(0, 1))),
   resetsAt: Schema.optional(UtcTimestamp),
   observedAt: UtcTimestamp,
+  overage: Schema.optional(ProviderRateLimitOverage),
 }).annotations(strict);
 export type ProviderRateLimitWindow = typeof ProviderRateLimitWindow.Type;
 

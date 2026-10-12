@@ -317,6 +317,10 @@ export type ClaudeDecodedMessage =
       readonly resetsAt?: number;
       readonly rateLimitType?: string;
       readonly utilization?: number;
+      readonly overageStatus?: "allowed" | "allowed_warning" | "rejected";
+      readonly overageResetsAt?: number;
+      readonly overageDisabledReason?: string;
+      readonly overageInUse?: boolean;
     }
   | {
       readonly kind: "authentication";
@@ -364,6 +368,11 @@ export interface ClaudeQueryPort {
   readonly setPermissionMode: (mode: ClaudePermissionMode) => Effect.Effect<void, ProviderFailure>;
   readonly supportedModels: () => Effect.Effect<readonly ClaudeModelInfo[], ProviderFailure>;
   readonly accountInfo: () => Effect.Effect<ClaudeAccountState, ProviderFailure>;
+  /**
+   * Experimental process plan-usage answer. Missing or failing is undefined,
+   * never a credential file read.
+   */
+  readonly readPlanUsage: () => Effect.Effect<unknown, ProviderFailure>;
   readonly close: () => Effect.Effect<void>;
 }
 
@@ -477,6 +486,13 @@ export interface ClaudeAgentSdkQueryLike extends AsyncIterable<unknown> {
   readonly getContextUsage?: () => Promise<unknown>;
   readonly supportedModels: () => Promise<unknown>;
   readonly accountInfo: () => Promise<unknown>;
+  /**
+   * Experimental control request (`get_usage`). The name is the process's;
+   * Octant only calls it through `readPlanUsage`.
+   */
+  readonly usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET?: (options?: {
+    readonly skipBehaviors?: boolean;
+  }) => Promise<unknown>;
   readonly close: () => void;
 }
 
@@ -538,6 +554,35 @@ async function askAutoCompactThreshold(
   query: ClaudeAgentSdkQueryLike,
 ): Promise<number | undefined> {
   return decodeAutoCompactThreshold(await askContextUsage(query, CONTEXT_USAGE_TIMEOUT_MS));
+}
+
+const PLAN_USAGE_TIMEOUT_MS = 5_000;
+
+/**
+ * Asks the Claude process for its own plan-usage windows. A runtime that
+ * lacks the experimental method, answers late, or throws leaves no answer —
+ * the caller falls back to the last session snapshot, never to credentials.
+ */
+async function askPlanUsage(query: ClaudeAgentSdkQueryLike): Promise<unknown> {
+  if (query.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET === undefined) {
+    return undefined;
+  }
+  let timer: number | undefined;
+  try {
+    // Call through the query. The process method uses its receiver for the
+    // control request; extracting it makes `this` undefined and the catch
+    // below would hide that as a missing answer.
+    return await Promise.race([
+      query.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET({ skipBehaviors: true }),
+      new Promise<undefined>((resolve) => {
+        timer = setTimeout(resolve, PLAN_USAGE_TIMEOUT_MS);
+      }),
+    ]);
+  } catch {
+    return undefined;
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
 }
 const SANDBOX_KEYS = [
   "allowUnsandboxedCommands",
@@ -1101,6 +1146,11 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
                 ),
               accountInfo: () =>
                 request(async () => decodeAccount(await query!.accountInfo()), "account discovery"),
+              readPlanUsage: () =>
+                request(async () => {
+                  const sessionQuery = query;
+                  return sessionQuery === undefined ? undefined : askPlanUsage(sessionQuery);
+                }, "plan usage"),
               close: () =>
                 Effect.promise(async () => {
                   streamEnded(failure("unavailable", "Claude connection is closing."));
