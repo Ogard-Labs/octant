@@ -882,6 +882,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
                       <ComposerModelPicker
                         ariaLabel="Provider and model"
                         groups={props.providerGroups}
+                        disabled={props.creating === true || submitting}
                         modelOptionValues={modelOptionValues}
                         onModelOptionChange={(id, value) => {
                           const remaining = Object.fromEntries(

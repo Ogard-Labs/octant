@@ -346,6 +346,18 @@ describe("CodeComposerAdapter", () => {
     expect(onOpenSettings).toHaveBeenCalledOnce();
   });
 
+  it("keeps Set up a provider locked while the Code start composer is creating", () => {
+    render(
+      <CodeComposerAdapter
+        {...defaultProps}
+        creating
+        providerGroups={[]}
+        onOpenSettings={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Set up a provider" })).toBeDisabled();
+  });
+
   it("puts the Project picker first on the upper tray when none is selected", () => {
     const { projectId: _projectId, projectName: _projectName, ...rest } = defaultProps;
     const { container } = render(
