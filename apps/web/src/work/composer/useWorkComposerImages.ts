@@ -4,7 +4,7 @@ import {
   WORK_ATTACHMENT_MEDIA_TYPES,
 } from "@octant/contracts";
 import type { PickerGroup } from "@octant/domain";
-import { useCallback, useContext, useEffect, useRef, useState } from "react";
+import { useCallback, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   clipboardHasImage,
   collectPastedImages,
@@ -83,14 +83,27 @@ export function useWorkComposerImages(): WorkComposerImages {
   const scope = useContext(NewTaskDraftScopeContext);
   const previews = useRef(new Set<string>());
   const current = useRef<ReadonlyArray<StagedWorkImage>>([]);
-  const [staged, setStaged] = useState<ReadonlyArray<StagedWorkImage>>(() => {
-    const files = scope === undefined ? [] : (drafts?.readImages(scope) ?? []);
-    const restored = stagePersistedFiles(files);
-    for (const attachment of restored) previews.current.add(attachment.previewUrl);
-    current.current = restored;
-    return restored;
-  });
+  const [staged, setStaged] = useState<ReadonlyArray<StagedWorkImage>>([]);
   const [message, setMessage] = useState<string | undefined>(undefined);
+  current.current = staged;
+
+  // Restore after commit so StrictMode's discarded initializer cannot mint
+  // object URLs or a second ID list that the Remove control cannot see.
+  useLayoutEffect(() => {
+    const files = scope === undefined ? [] : (drafts?.readImages(scope) ?? []);
+    if (files.length === 0) return;
+    const restored = stagePersistedFiles(files);
+    current.current = restored;
+    for (const attachment of restored) previews.current.add(attachment.previewUrl);
+    setStaged(restored);
+    return () => {
+      for (const attachment of restored) {
+        if (!previews.current.delete(attachment.previewUrl)) continue;
+        URL.revokeObjectURL(attachment.previewUrl);
+      }
+      if (current.current === restored) current.current = [];
+    };
+  }, [drafts, scope]);
 
   const apply = useCallback(
     (next: (list: ReadonlyArray<StagedWorkImage>) => ReadonlyArray<StagedWorkImage>) => {

@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from "@testing-library/react";
-import { useRef } from "react";
+import { StrictMode, useRef } from "react";
 import { describe, expect, it } from "vitest";
 import {
   createNewTaskDrafts,
@@ -40,6 +40,11 @@ function Harness() {
       >
         attach later
       </button>
+      {images.staged.map((image) => (
+        <button key={image.id} onClick={() => images.remove(image.id)} type="button">
+          {`remove ${image.displayName}`}
+        </button>
+      ))}
       <output aria-label="images">
         {images.staged.map((image) => image.displayName).join(",")}
       </output>
@@ -87,5 +92,26 @@ describe("useWorkComposerImages", () => {
     render(view());
 
     expect(screen.getByLabelText("images")).toHaveTextContent("captured.png");
+  });
+
+  it("removes a remounted attachment on the first click under StrictMode", () => {
+    const drafts = createNewTaskDrafts();
+    drafts.writeImages("work-overview:test", [
+      new File([new Uint8Array([1])], "captured.png", { type: "image/png" }),
+    ]);
+
+    render(
+      <StrictMode>
+        <NewTaskDraftsContext.Provider value={drafts}>
+          <NewTaskDraftScopeContext.Provider value="work-overview:test">
+            <Harness />
+          </NewTaskDraftScopeContext.Provider>
+        </NewTaskDraftsContext.Provider>
+      </StrictMode>,
+    );
+
+    expect(screen.getByLabelText("images")).toHaveTextContent("captured.png");
+    fireEvent.click(screen.getByRole("button", { name: "remove captured.png" }));
+    expect(screen.getByLabelText("images")).toHaveTextContent("");
   });
 });
