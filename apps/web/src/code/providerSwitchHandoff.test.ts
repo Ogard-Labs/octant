@@ -52,6 +52,31 @@ describe("provider switch handoff disclosure", () => {
     expect(text).toContain("This thread has taken in outside content.");
     expect(text).not.toContain("Some of it came from outside content");
   });
+
+  it("says how much of a fork's handoff came from the conversation it was forked from", () => {
+    const text = conversationHandoffDisclosure(
+      handoff({
+        messages: 6,
+        omissions: { ...none, earlierMessages: 4 },
+        inherited: {
+          forkedFrom: {
+            threadId: "80000000-0000-4000-8000-0000000000b1" as never,
+            throughOperationId: "80000000-0000-4000-8000-0000000000b2",
+          },
+          messages: 4,
+          externalContentIngested: true,
+        },
+      }),
+      label,
+    );
+    expect(text).toContain("Handed over 6 recent messages");
+    expect(text).toContain(
+      "4 of them come from the conversation this was forked from, up to the reply it was forked from.",
+    );
+    expect(text).toContain("Left out: 4 earlier messages.");
+    expect(text).toContain("The thread it was forked from has taken in outside content.");
+    expect(text).not.toContain("This thread has taken in outside content.");
+  });
 });
 
 describe("fork handoff disclosure", () => {

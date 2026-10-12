@@ -7,6 +7,10 @@ import {
   CANVAS_MAX_DASHBOARD_COLUMNS,
   CANVAS_BAR_LIST_SCHEMA_VERSION,
   CANVAS_COMPARISON_MATRIX_SCHEMA_VERSION,
+  CANVAS_DESIGN_ASSET_SCHEMA_VERSION,
+  CANVAS_DESIGN_ASSETS_MAX_BYTES,
+  CANVAS_DESIGN_DOCUMENT_SCHEMA_VERSION,
+  CANVAS_MAX_DESIGN_ASSETS,
   CANVAS_DESIGN_SCHEMA_VERSION,
   CANVAS_DIAGRAM_KINDS_SCHEMA_VERSION,
   CANVAS_EVENT_NAMES,
@@ -51,6 +55,7 @@ import {
   decodeCanvasBlock,
   decodeCanvasCreated,
   decodeCanvasDefinition,
+  decodeCanvasDesignAssetsOutcome,
   decodeCanvasSourceManifestEntry,
   decodeCanvasVersion,
   decodeCanvasVersionAppended,
@@ -189,6 +194,140 @@ describe("Canvas contracts", () => {
     ).toThrow();
     expect(() =>
       decodeCanvasDefinition({ ...definition, blocks: [{ ...design, size: "watch" }] }),
+    ).toThrow();
+  });
+
+  it("admits a design document and a theme only under the version that declared them", () => {
+    const article = {
+      blockId: "article",
+      schemaVersion: CANVAS_DESIGN_DOCUMENT_SCHEMA_VERSION,
+      kind: "design",
+      title: "Release notes",
+      size: "document",
+      frames: [
+        { frameId: "notes", title: "Notes", html: '<article class="oct-article"></article>' },
+      ],
+    } as const;
+    const themedPhone = {
+      ...article,
+      blockId: "themed-phone",
+      size: "phone",
+      theme: "workspace",
+    } as const;
+    for (const block of [article, themedPhone, { ...article, theme: "none" } as const]) {
+      expect(decodeCanvasDefinition({ ...definition, blocks: [block] })).toMatchObject({
+        blocks: [block],
+      });
+      // An older runtime reads these as a document it cannot draw yet, not as
+      // a phone design drawn without the theme it asked for.
+      expect(() =>
+        decodeCanvasDefinition({
+          ...definition,
+          schemaVersion: CANVAS_DASHBOARD_SCHEMA_VERSION,
+          blocks: [{ ...block, schemaVersion: CANVAS_DASHBOARD_SCHEMA_VERSION }],
+        }),
+      ).toThrow();
+    }
+    // A version-15 phone design without a theme stays readable.
+    const phone = { ...article, schemaVersion: 15, size: "phone" } as const;
+    expect(
+      decodeCanvasDefinition({ ...definition, schemaVersion: 15, blocks: [phone] }),
+    ).toMatchObject({ blocks: [phone] });
+    expect(() =>
+      decodeCanvasDefinition({ ...definition, blocks: [{ ...article, theme: "brand" }] }),
+    ).toThrow();
+    expect(CANVAS_DESIGN_DOCUMENT_SCHEMA_VERSION).toBe(16);
+  });
+
+  it("admits a design's declared assets only under the version that declared them", () => {
+    const mockup = {
+      blockId: "phone",
+      schemaVersion: CANVAS_DESIGN_ASSET_SCHEMA_VERSION,
+      kind: "design",
+      title: "Onboarding",
+      size: "phone",
+      assets: [
+        {
+          assetId: "home-shot",
+          source: { kind: "project-file", path: "screens/home.png" },
+          description: "Home screen",
+        },
+        {
+          assetId: "hero",
+          source: { kind: "generated-image", imageId: "11111111-1111-4111-8111-111111111111" },
+        },
+      ],
+      frames: [
+        { frameId: "home", title: "Home", html: '<img src="octant-asset:home-shot" alt="">' },
+      ],
+    } as const;
+    expect(decodeCanvasDefinition({ ...definition, blocks: [mockup] })).toMatchObject({
+      blocks: [mockup],
+    });
+    // An older runtime reads a design that names assets as a newer document,
+    // not as a phone design with broken images.
+    expect(() =>
+      decodeCanvasDefinition({
+        ...definition,
+        schemaVersion: CANVAS_DESIGN_DOCUMENT_SCHEMA_VERSION,
+        blocks: [{ ...mockup, schemaVersion: CANVAS_DESIGN_DOCUMENT_SCHEMA_VERSION }],
+      }),
+    ).toThrow();
+    // The definition holds references, never bytes, and only the two sources.
+    for (const source of [
+      { kind: "project-file", path: "a.png", bytes: "iVBORw0KGgo=" },
+      { kind: "url", url: "https://example.test/a.png" },
+      { kind: "generated-image", imageId: "not-a-uuid" },
+    ]) {
+      expect(() =>
+        decodeCanvasDefinition({
+          ...definition,
+          blocks: [{ ...mockup, assets: [{ assetId: "x", source }] }],
+        }),
+      ).toThrow();
+    }
+    for (const assetId of ["has space", "colon:id", "", "-leading"]) {
+      expect(() =>
+        decodeCanvasDefinition({
+          ...definition,
+          blocks: [
+            { ...mockup, assets: [{ assetId, source: { kind: "project-file", path: "a.png" } }] },
+          ],
+        }),
+      ).toThrow();
+    }
+    const tooMany = Array.from({ length: CANVAS_MAX_DESIGN_ASSETS + 1 }, (_, index) => ({
+      assetId: `a${String(index)}`,
+      source: { kind: "project-file", path: "a.png" },
+    }));
+    expect(() =>
+      decodeCanvasDefinition({ ...definition, blocks: [{ ...mockup, assets: tooMany }] }),
+    ).toThrow();
+    expect(CANVAS_DESIGN_ASSET_SCHEMA_VERSION).toBe(17);
+    expect(CANVAS_SCHEMA_VERSION).toBe(17);
+  });
+
+  it("keeps one design's resolved images inside what a paired client's gateway forwards", () => {
+    // Base64 grows bytes by a third; the remote gateway forwards 8 MiB.
+    expect(Math.ceil(CANVAS_DESIGN_ASSETS_MAX_BYTES / 3) * 4 + 64 * 1024).toBeLessThan(
+      8 * 1024 * 1024,
+    );
+    const outcome = {
+      kind: "ready",
+      canvasId: "22222222-2222-4222-8222-222222222222",
+      versionId: "33333333-3333-4333-8333-333333333333",
+      blockId: "phone",
+      assets: [
+        { assetId: "hero", status: "resolved", mediaType: "image/png", data: "iVBORw0KGgo=" },
+        { assetId: "shot", status: "unavailable", reason: "refused" },
+      ],
+    };
+    expect(decodeCanvasDesignAssetsOutcome(outcome)).toEqual(outcome);
+    expect(() =>
+      decodeCanvasDesignAssetsOutcome({
+        ...outcome,
+        assets: [{ assetId: "hero", status: "resolved", mediaType: "image/svg+xml", data: "" }],
+      }),
     ).toThrow();
   });
 
@@ -1969,7 +2108,6 @@ describe("dashboard layout", () => {
 
   it("decodes a titled grid that places other blocks by id at the version that introduced it", () => {
     expect(CANVAS_DASHBOARD_SCHEMA_VERSION).toBe(15);
-    expect(CANVAS_SCHEMA_VERSION).toBe(15);
     const decoded = decodeCanvasDefinition({ ...definition, blocks: [dashboard, metric, status] });
     expect(decoded.blocks).toEqual([dashboard, metric, status]);
   });

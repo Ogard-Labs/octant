@@ -70,7 +70,7 @@
 
 .project-nav__status button {
   display: block;
-  margin-top: 7px;
+  margin-top: var(--oct-space-2);
   color: var(--octant-text-secondary);
   cursor: pointer;
   text-decoration: underline;
@@ -427,7 +427,7 @@
      stepping left and right with each Project's thread count. */
   grid-template-columns: auto minmax(10px, auto);
   align-items: center;
-  gap: 3px;
+  gap: var(--oct-space-1);
   height: var(--oct-nav-row-h);
   padding-right: var(--oct-space-2);
   overflow: hidden;
@@ -549,7 +549,7 @@
 
 .project-row__archived-name {
   min-width: 0;
-  padding: 7px 8px;
+  padding: var(--oct-space-2) var(--oct-space-2);
   overflow: hidden;
   color: var(--octant-text-secondary);
   font-size: var(--oct-text-detail);
@@ -695,7 +695,6 @@
   color: var(--oct-fg);
   background: var(--oct-surface);
   border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-sm);
   cursor: pointer;
   font: inherit;
   font-size: var(--oct-text-sm);
@@ -765,7 +764,7 @@
 
 .project-button {
   min-height: 31px;
-  padding: 0 11px;
+  padding: 0 var(--oct-space-3);
   color: var(--octant-text-primary);
   background: var(--octant-control-hover);
   border: 1px solid var(--octant-border-strong);
@@ -881,7 +880,7 @@
    not an eyebrow above it. */
 .project-overview__type {
   flex: none;
-  padding: 1px 7px;
+  padding: 1px var(--oct-space-2);
   border: 1px solid var(--oct-border);
   border-radius: var(--oct-radius-pill);
   color: var(--oct-meta);
@@ -988,7 +987,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 18px;
-  padding: 9px 0;
+  padding: var(--oct-space-2) 0;
 }
 
 .project-overview-inspector__row h2,
@@ -1309,7 +1308,7 @@ button[aria-expanded="true"] > .project-overview-inspector__chevron {
 
 .project-memory-inspector__toolbar select {
   min-height: 30px;
-  padding: 0 25px 0 8px;
+  padding: 0 var(--oct-space-6) 0 var(--oct-space-2);
   color: var(--octant-text-secondary);
   background: var(--octant-control);
   border: 1px solid var(--octant-border);
@@ -1345,13 +1344,13 @@ button[aria-expanded="true"] > .project-overview-inspector__chevron {
 }
 
 .project-memory-inspector__error p {
-  margin: 0 0 9px;
+  margin: 0 0 var(--oct-space-2);
 }
 
 .project-memory-scroll {
   grid-area: scroll;
   min-height: 0;
-  padding: 5px 12px 20px;
+  padding: var(--oct-space-1) var(--oct-space-3) var(--oct-space-5);
   overflow-y: auto;
   overscroll-behavior: contain;
 }
@@ -1415,7 +1414,7 @@ button[aria-expanded="true"] > .project-overview-inspector__chevron {
   min-height: 42px;
   align-items: center;
   gap: 8px;
-  padding: 0 11px;
+  padding: 0 var(--oct-space-3);
   text-align: left;
 }
 
@@ -1499,11 +1498,9 @@ button[aria-expanded="true"] > .project-overview-inspector__chevron {
   }
 }
 
-@media (prefers-contrast: more) {
-  .project-row[data-active="true"] {
-    box-shadow: none;
-    background: var(--octant-control-hover);
-  }
+html[data-octant-increased-contrast="true"] .project-row[data-active="true"] {
+  box-shadow: none;
+  background: var(--octant-control-hover);
 }
 
 .projects-page-layer {

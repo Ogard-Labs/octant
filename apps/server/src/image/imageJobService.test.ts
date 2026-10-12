@@ -256,6 +256,28 @@ describe("image job service", () => {
     expect(imageRow?.attribution[0]?.plannedTokens).toBe(0);
   });
 
+  it("finds the completed job that made an image by the image's id alone", async () => {
+    const { service } = openHarness(successfulAdapter());
+    const queued = await service.enqueue({
+      threadKind: "chat-thread",
+      scopeId,
+      profileInstanceId: profileId,
+      modelId,
+      prompt: "a red cube",
+    });
+    const completed = await service.whenTerminal(queued.id);
+    const artifact = completed.artifacts[0];
+    if (artifact === undefined) throw new Error("expected an artifact");
+    expect(service.completedJobFor(artifact.attachmentId)).toMatchObject({
+      id: completed.id,
+      threadKind: "chat-thread",
+      scopeId,
+    });
+    expect(
+      service.completedJobFor("99999999-9999-4999-8999-999999999999" as never),
+    ).toBeUndefined();
+  });
+
   it("chains an edit job to the parent artifact without retaining provider URLs", async () => {
     const { service } = openHarness(successfulAdapter());
     const original = await service.enqueue({

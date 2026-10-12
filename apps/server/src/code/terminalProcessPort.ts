@@ -12,9 +12,9 @@ import {
   type OwnedProcessReceiptHandle,
 } from "../process/nodeOwnedProcessReceipt";
 import {
-  makeSeatbeltConfinementLive,
-  SeatbeltConfinementError,
-  type SeatbeltConfinementPort,
+  makeProcessConfinementLive,
+  ProcessConfinementError,
+  type ProcessConfinementPort,
 } from "../process/seatbeltProfile";
 import type { OsNetworkEgress } from "../process/threadEgressPolicy";
 
@@ -104,7 +104,7 @@ interface TerminalProcessDependencies {
   readonly receiptDirectory?: string;
   readonly processIdentity?: (pid: number) => Promise<string | undefined>;
   readonly ensurePtyHelperExecutable?: () => void;
-  readonly confinement?: SeatbeltConfinementPort;
+  readonly confinement?: ProcessConfinementPort;
   readonly platform?: NodeJS.Platform;
   readonly sandboxPath?: string;
   readonly temporaryDirectory?: string;
@@ -160,25 +160,31 @@ export function ensureNodePtySpawnHelperExecutable(
 
 /**
  * What an interactive shell reads to become the person's own: its rc and
- * login files, the framework and prompt they source, and the tool hooks a rc
- * commonly loads. Named one by one, read-only, so the rest of the home stays
- * enumerated as denied (ADR 0092): a path a rc sources that is not here fails
- * at the prompt where it can be seen, instead of the grant quietly widening.
- * Credential files that share a directory with a hook (`~/.cargo/credentials`)
- * are why the hook's file is named rather than its directory.
+ * login files, the framework and prompt they source, and the tool homes its
+ * PATH points into. Every entry is read-only and included only when it
+ * exists, so the rest of the home stays enumerated as denied: a path a rc
+ * sources that is not here fails at the prompt where it can be seen, instead
+ * of the grant quietly widening.
+ *
+ * A file is named wherever a file is enough. A directory is granted only as
+ * a framework or tool home that is read as a tree: a framework sources files
+ * throughout it, and a version manager's shims resolve to toolchains installed
+ * under it (`mise --version` through a shim needs `~/.local/share/mise/installs`
+ * as well as `shims`). None of these is where a tool keeps credentials. A home that
+ * shares its directory with a credential (`~/.cargo/credentials.toml`) is
+ * granted by its executable subdirectory instead, and credential homes such
+ * as `~/.ssh`, `~/.aws`, and `~/.config/gh` are never listed. Homebrew and
+ * other prefixes outside the home are already readable.
  */
 const SHELL_CONFIGURATION_HOME_PATHS: ReadonlyArray<string> = [
+  // Shell rc and login files.
   ".zshenv",
   ".zprofile",
   ".zshrc",
   ".zlogin",
   ".zlogout",
-  ".zsh",
-  ".oh-my-zsh",
   ".p10k.zsh",
   ".zimrc",
-  ".zim",
-  ".antidote",
   ".zsh_plugins.txt",
   ".bashrc",
   ".bash_profile",
@@ -186,17 +192,34 @@ const SHELL_CONFIGURATION_HOME_PATHS: ReadonlyArray<string> = [
   ".bash_aliases",
   ".profile",
   ".inputrc",
-  ".config/zsh",
-  ".config/fish",
   ".config/starship.toml",
   ".fzf.zsh",
-  ".fzf",
   ".iterm2_shell_integration.zsh",
+  ".orbstack/shell",
+  // Shell framework and plugin trees a rc sources from.
+  ".zsh",
+  ".oh-my-zsh",
+  ".zim",
+  ".antidote",
+  ".config/zsh",
+  ".config/fish",
+  ".fzf",
+  // Version managers and toolchain homes: executables, shims, and the
+  // toolchains they resolve to.
   ".nvm",
   ".bun",
   ".cargo/env",
   ".cargo/bin",
-  ".orbstack/shell",
+  ".rustup",
+  ".local/bin",
+  ".local/share/mise",
+  ".config/mise/config.toml",
+  ".tool-versions",
+  ".asdf",
+  ".asdfrc",
+  ".pyenv",
+  ".rbenv",
+  ".volta",
 ];
 
 export function shellConfigurationReadRoots(
@@ -238,7 +261,7 @@ export class TerminalProcessPort {
     readonly receiptDirectory: string | undefined;
     readonly processIdentity: ((pid: number) => Promise<string | undefined>) | undefined;
     readonly ensurePtyHelperExecutable: () => void;
-    readonly confinement: SeatbeltConfinementPort;
+    readonly confinement: ProcessConfinementPort;
     readonly platform: NodeJS.Platform;
     readonly temporaryDirectory: string;
     readonly shellStateDirectory: string;
@@ -291,7 +314,7 @@ export class TerminalProcessPort {
         ),
       confinement:
         dependencies.confinement ??
-        makeSeatbeltConfinementLive({
+        makeProcessConfinementLive({
           platform,
           ...(dependencies.sandboxPath === undefined
             ? {}
@@ -309,7 +332,7 @@ export class TerminalProcessPort {
   start(input: TerminalLaunchInput): TerminalProcessHandle {
     validateLaunch(input);
     if (input.executionPolicy === "plan") {
-      throw new SeatbeltConfinementError(
+      throw new ProcessConfinementError(
         "invalid-configuration",
         "Plan mode cannot start a terminal.",
       );
@@ -366,12 +389,17 @@ export class TerminalProcessPort {
           this.#dependencies.temporaryDirectory,
           shellState,
           shellDirectory,
-          ...shellConfigurationReadRoots(this.#dependencies.homeDirectory),
+          // Only macOS runs the person's own shell configuration. On Linux the
+          // shell's HOME is its state directory, so binding these homes would
+          // widen its reads for nothing it uses.
+          ...(this.#dependencies.platform === "darwin"
+            ? shellConfigurationReadRoots(this.#dependencies.homeDirectory)
+            : []),
         ],
       });
     } catch (error) {
-      if (error instanceof SeatbeltConfinementError) throw error;
-      throw new SeatbeltConfinementError(
+      if (error instanceof ProcessConfinementError) throw error;
+      throw new ProcessConfinementError(
         "incompatible",
         "Terminal Seatbelt confinement could not be prepared.",
       );

@@ -564,6 +564,39 @@ describe("createCanvasAgentTools", () => {
     });
   });
 
+  it("lets an agent create a phone flow, a deck, and a themed spec document from the design examples describe returns", async () => {
+    const { create, set } = tools();
+    const described = await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "describe", blockKinds: ["design"] }),
+    });
+
+    expect(described.isError).not.toBe(true);
+    const result = described.result as {
+      examples?: ReadonlyArray<Record<string, unknown>>;
+      blockSchema?: unknown;
+    };
+    const examples = result.examples ?? [];
+    expect(examples.map((example) => example.size)).toEqual(["phone", "slide", "document"]);
+    // The schema an agent reads names the document size and the theme field.
+    expect(JSON.stringify(result.blockSchema)).toContain('"document"');
+    expect(JSON.stringify(result.blockSchema)).toContain('"workspace"');
+    const blocks = examples.map((example) => decodeCanvasBlock(example));
+
+    const created = await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "create", title: "Designs", blocks: examples }),
+    });
+
+    expect(created.isError).not.toBe(true);
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "Designs" }),
+      expect.anything(),
+      expect.anything(),
+      blocks,
+    );
+  });
+
   it("lets an agent create a hottest-files list from the bar-list example describe returns", async () => {
     const { create, set } = tools();
     const described = await set.execute({
@@ -1140,6 +1173,27 @@ describe("createCanvasAgentTools", () => {
       expect(outcome.isError).toBe(true);
       expect(outcome.result).toEqual({ error: "The Canvas Project is unavailable." });
       expect(create).not.toHaveBeenCalled();
+    });
+
+    it("teaches a Work or Code agent to show a Project file in a design, and a Chat agent only generated images", async () => {
+      const designGuidance = async (set: ReturnType<typeof tools>["set"]): Promise<string> => {
+        const described = await set.execute({
+          name: CANVAS_TOOL_NAME,
+          inputJson: JSON.stringify({ operation: "describe", blockKinds: ["design"] }),
+        });
+        return (described.result as { guidance?: Record<string, string> }).guidance?.design ?? "";
+      };
+      for (const mode of ["work", "code"] as const) {
+        const guidance = await designGuidance(boundTools(mode).set);
+        expect(guidance).toContain("octant-asset:home-shot");
+        expect(guidance).toContain('"kind": "project-file"');
+        expect(guidance).toContain('"kind": "generated-image"');
+        expect(guidance).toContain("3 MB each and 5 MB per design");
+      }
+      const chat = await designGuidance(tools().set);
+      expect(chat).toContain('"kind": "generated-image"');
+      expect(chat).not.toContain('"kind": "project-file"');
+      expect(chat).toContain("a file path is refused");
     });
 
     it("tells the agent to deliver substantial work as a Canvas bound to the thread's checkout", () => {

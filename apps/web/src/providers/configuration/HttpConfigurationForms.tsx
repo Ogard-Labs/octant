@@ -1,5 +1,5 @@
-import { type ProviderInstance } from "@octant/contracts";
-import { subscriptionOAuthOffers } from "@octant/domain";
+import { type ProviderInstance, type ProviderInstanceId } from "@octant/contracts";
+import { normalizeOpenAiCompatibleBaseUrl, subscriptionOAuthOffers } from "@octant/domain";
 import type { SubscriptionOAuthOffer } from "@octant/contracts/host-oauth";
 import { useRef, useState } from "react";
 import { OctantButton } from "../../ui/base/OctantButton";
@@ -85,21 +85,13 @@ export function HttpConfigurationForm(props: HttpConfigurationFormProps) {
     >
       {subscription === undefined ? (
         <>
-          <SettingRow
+          <BaseUrlField
+            ariaLabel={`API base URL for ${props.instance.displayName}`}
+            instanceId={props.instance.id}
             label="API base URL"
-            scope="host"
-            settingId={`provider-${props.instance.id}-base-url`}
-          >
-            <OctantInput
-              aria-describedby={`endpoint-guidance-${props.instance.id}`}
-              aria-label={`API base URL for ${props.instance.displayName}`}
-              className="settings-view__text-input"
-              defaultValue={props.instance.configuration.baseUrl}
-              name="baseUrl"
-              required
-              type="url"
-            />
-          </SettingRow>
+            savedBaseUrl={props.instance.configuration.baseUrl}
+            takesKey={props.instance.configuration.authentication !== "none"}
+          />
           <HttpCredentialFields
             authentication={props.instance.configuration.authentication}
             authenticationLabel={`Authentication for ${props.instance.displayName}`}
@@ -305,21 +297,13 @@ export function AnthropicConfigurationForm(props: AnthropicConfigurationFormProp
         );
       }}
     >
-      <SettingRow
+      <BaseUrlField
+        ariaLabel={`API base URL for ${props.instance.displayName}`}
+        instanceId={props.instance.id}
         label="API base URL"
-        scope="host"
-        settingId={`provider-${props.instance.id}-base-url`}
-      >
-        <OctantInput
-          aria-describedby={`endpoint-guidance-${props.instance.id}`}
-          aria-label={`API base URL for ${props.instance.displayName}`}
-          className="settings-view__text-input"
-          defaultValue={props.instance.configuration.baseUrl}
-          name="baseUrl"
-          required
-          type="url"
-        />
-      </SettingRow>
+        savedBaseUrl={props.instance.configuration.baseUrl}
+        takesKey={props.instance.configuration.authentication !== "none"}
+      />
       <HttpCredentialFields
         authentication={props.instance.configuration.authentication}
         authenticationLabel={`Authentication for ${props.instance.displayName}`}
@@ -453,21 +437,13 @@ export function FoundryConfigurationForm(props: FoundryConfigurationFormProps) {
         );
       }}
     >
-      <SettingRow
+      <BaseUrlField
+        ariaLabel={`Foundry OpenAI v1 base URL for ${props.instance.displayName}`}
+        instanceId={props.instance.id}
         label="Foundry OpenAI v1 base URL"
-        scope="host"
-        settingId={`provider-${props.instance.id}-base-url`}
-      >
-        <OctantInput
-          aria-describedby={`endpoint-guidance-${props.instance.id}`}
-          aria-label={`Foundry OpenAI v1 base URL for ${props.instance.displayName}`}
-          className="settings-view__text-input"
-          defaultValue={props.instance.configuration.baseUrl}
-          name="baseUrl"
-          required
-          type="url"
-        />
-      </SettingRow>
+        savedBaseUrl={props.instance.configuration.baseUrl}
+        takesKey
+      />
       <HttpCredentialFields
         authentication="api-key"
         authenticationLabel={`Authentication for ${props.instance.displayName}`}
@@ -613,6 +589,68 @@ function DirectEndpointSignIn(props: {
 function originsMatch(allowedEndpoint: string, baseUrl: string): boolean {
   try {
     return new URL(allowedEndpoint).origin === new URL(baseUrl).origin;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The host deletes an endpoint's stored key when its base URL changes, so a
+ * key typed for one server is never sent to another. Say so while the address
+ * differs from the saved one, before Save, rather than leaving the next check
+ * to report a missing key without a reason.
+ */
+function BaseUrlField(props: {
+  readonly instanceId: ProviderInstanceId;
+  readonly label: string;
+  readonly ariaLabel: string;
+  readonly savedBaseUrl: string;
+  readonly takesKey: boolean;
+}) {
+  const [value, setValue] = useState(props.savedBaseUrl);
+  const noteId = `endpoint-base-url-key-note-${props.instanceId}`;
+  const changed = props.takesKey && !sameAddress(value, props.savedBaseUrl);
+  return (
+    <>
+      <SettingRow
+        label={props.label}
+        scope="host"
+        settingId={`provider-${props.instanceId}-base-url`}
+      >
+        <OctantInput
+          aria-describedby={`endpoint-guidance-${props.instanceId}${changed ? ` ${noteId}` : ""}`}
+          aria-label={props.ariaLabel}
+          className="settings-view__text-input"
+          name="baseUrl"
+          onChange={(event) => setValue(event.currentTarget.value)}
+          required
+          type="url"
+          value={value}
+        />
+      </SettingRow>
+      {changed ? (
+        <p
+          className="provider-settings__field-guidance provider-settings__field-guidance--between-rows"
+          id={noteId}
+          role="status"
+        >
+          Saving a different address removes this endpoint&apos;s stored API key, so it is never
+          sent to the new server. Enter the key again to keep using the endpoint.
+        </p>
+      ) : null}
+    </>
+  );
+}
+
+/**
+ * The host compares the addresses it stores after normalising them, so a
+ * spelling that normalises to the saved one (a missing trailing slash) keeps
+ * the key. An address that cannot be normalised is treated as different.
+ */
+function sameAddress(entered: string, saved: string): boolean {
+  if (entered === saved) return true;
+  try {
+    return normalizeOpenAiCompatibleBaseUrl(entered) === normalizeOpenAiCompatibleBaseUrl(saved);
   } catch {
     return false;
   }

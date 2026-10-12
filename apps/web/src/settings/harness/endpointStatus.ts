@@ -59,6 +59,12 @@ export interface EndpointStatusInput {
    * missing key there is added in the desktop app rather than by a fix.
    */
   readonly keysHere?: boolean;
+  /**
+   * The host's credential store has no key for it and no check has run since,
+   * as after an address change deleted the key. The endpoint then reads as
+   * needing its key rather than as not checked, since a check would only say so.
+   */
+  readonly keyMissing?: boolean;
 }
 
 /**
@@ -87,6 +93,9 @@ export function endpointStatus(input: EndpointStatusInput): EndpointStatus {
     if (input.signIn?.kind === "signed-out") return signInToUse(offer);
   }
   if (failure !== undefined) return failureStatus(input, failure);
+  if (observed === undefined && input.keyMissing === true && endpointTakesKey(instance)) {
+    return keyNeeded(input);
+  }
   if (observed === undefined) {
     return {
       tone: "unchecked",

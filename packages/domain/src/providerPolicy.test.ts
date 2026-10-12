@@ -33,6 +33,7 @@ import {
   createAzureFoundryProvider,
   createBflImageProvider,
   assignedClaudeAccountConfigDirectory,
+  effectiveClaudeAccountConfigDirectory,
   createClaudeProvider,
   formatClaudeAuthLoginCommand,
   createClineProvider,
@@ -1378,6 +1379,26 @@ describe("provider instance policy", () => {
     );
     expect(assignedClaudeAccountConfigDirectory("/Users/example////", ids.local)).toBe(
       `/Users/example/.claude-accounts/${ids.local}`,
+    );
+  });
+
+  it("launches an API-key Claude account from its assigned folder even when none is stored", () => {
+    const subscription = claudeProvider();
+    const apiKey = {
+      ...subscription,
+      configuration: { ...subscription.configuration, authentication: "api-key" as const },
+    };
+    const stored = {
+      ...apiKey,
+      configuration: { ...apiKey.configuration, configDirectory: "/Users/example/custom" },
+    };
+
+    expect(effectiveClaudeAccountConfigDirectory(subscription, "/Users/example")).toBeUndefined();
+    expect(effectiveClaudeAccountConfigDirectory(apiKey, "/Users/example")).toBe(
+      assignedClaudeAccountConfigDirectory("/Users/example", apiKey.id),
+    );
+    expect(effectiveClaudeAccountConfigDirectory(stored, "/Users/example")).toBe(
+      "/Users/example/custom",
     );
   });
 

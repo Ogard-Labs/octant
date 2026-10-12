@@ -8108,6 +8108,103 @@ describe("ChatService", () => {
       expect(service.read(created.thread.id).turns.map((turn) => turn.id)).toEqual(
         source.turns.map((turn) => turn.id),
       );
+
+      // A host-owned conversation is planned again from the journal, so the
+      // branch takes its next message without the source's session.
+      const followUp = await service.execute({
+        kind: "send-chat-turn",
+        threadId: branched.thread.id,
+        expectedVersion: branch.thread.version,
+        prompt: "Branch follow-up",
+      });
+      expect(followUp.kind).toBe("turn-created");
+    });
+
+    it("refuses to branch a provider-owned conversation instead of creating a branch that cannot continue", async () => {
+      const { service, fakeDriver } = openFixture({ nativeConversation: true });
+      const created = await service.execute({
+        kind: "create-chat-thread",
+        hostId: "local",
+        title: "Native source",
+      });
+      if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+      const first = await service.execute({
+        kind: "send-chat-turn",
+        threadId: created.thread.id,
+        expectedVersion: service.read(created.thread.id).thread.version,
+        prompt: "Carried question",
+      });
+      if (first.kind !== "turn-created") throw new Error("Expected turn-created result.");
+      await service.execute({
+        kind: "send-chat-turn",
+        threadId: created.thread.id,
+        expectedVersion: service.read(created.thread.id).thread.version,
+        prompt: "Later question",
+      });
+      const source = service.read(created.thread.id);
+      const branchThreadId = "84000000-0000-4000-8000-0000000000b2" as ChatThreadId;
+
+      // The source's native session already holds the later turn, and a copied
+      // attempt has no resume cursor of its own, so a branch here could only
+      // refuse its first message after it existed.
+      await expect(
+        service.execute({
+          kind: "branch-chat-thread",
+          threadId: created.thread.id,
+          expectedVersion: source.thread.version,
+          turnId: first.turn.id,
+          title: "Second direction",
+          branchThreadId,
+        }),
+      ).rejects.toMatchObject({ failure: { category: "unsupported" } });
+      expect(() => service.read(branchThreadId)).toThrow(ChatServiceError);
+      expect(service.read(created.thread.id)).toEqual(source);
+      expect(fakeDriver.startedSessionIds).toHaveLength(1);
+    });
+
+    it("refuses to branch when the provider of the carried reply is gone and its ownership is unknown", async () => {
+      let removed = false;
+      const replacement = "84000000-0000-4000-8000-000000000008";
+      const { service } = openFixture({
+        refuseDriverFor: (id) =>
+          removed && id === String(ids.provider) ? new Error("Provider removed") : undefined,
+      });
+      const created = await service.execute({
+        kind: "create-chat-thread",
+        hostId: "local",
+        title: "Removed provider",
+      });
+      if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+      const sent = await service.execute({
+        kind: "send-chat-turn",
+        threadId: created.thread.id,
+        expectedVersion: service.read(created.thread.id).thread.version,
+        prompt: "Carried question",
+      });
+      if (sent.kind !== "turn-created") throw new Error("Expected turn-created result.");
+      await service.execute({
+        kind: "change-chat-provider",
+        threadId: created.thread.id,
+        expectedVersion: service.read(created.thread.id).thread.version,
+        providerInstanceId: replacement,
+        modelId: "model-a",
+      });
+      removed = true;
+      const branchThreadId = "84000000-0000-4000-8000-0000000000b3" as ChatThreadId;
+
+      // The next turn would refuse to continue a reply whose provider cannot
+      // say who owns the conversation, so the branch is refused up front.
+      await expect(
+        service.execute({
+          kind: "branch-chat-thread",
+          threadId: created.thread.id,
+          expectedVersion: service.read(created.thread.id).thread.version,
+          turnId: sent.turn.id,
+          title: "Second direction",
+          branchThreadId,
+        }),
+      ).rejects.toMatchObject({ failure: { category: "unsupported" } });
+      expect(() => service.read(branchThreadId)).toThrow(ChatServiceError);
     });
 
     it("refuses a stale branch without creating a thread", async () => {

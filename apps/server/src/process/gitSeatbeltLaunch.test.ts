@@ -10,12 +10,12 @@ import {
   prepareGitSeatbeltLaunch,
   resolveGitExecutable,
 } from "./gitSeatbeltLaunch";
-import { makeSeatbeltConfinementLive, type SeatbeltConfinementPort } from "./seatbeltProfile";
+import { makeProcessConfinementLive, type ProcessConfinementPort } from "./seatbeltProfile";
 
 describe("git Seatbelt launch", () => {
   it("grants confined git no read reach into the user's global config", () => {
-    let captured: Parameters<SeatbeltConfinementPort["prepare"]>[0] | undefined;
-    const confinement: SeatbeltConfinementPort = {
+    let captured: Parameters<ProcessConfinementPort["prepare"]>[0] | undefined;
+    const confinement: ProcessConfinementPort = {
       prepare: (input) => {
         captured = input;
         return { command: "/usr/bin/sandbox-exec", args: [] };
@@ -61,7 +61,7 @@ describe("git Seatbelt launch", () => {
     mkdirSync(quarantine);
     try {
       const launch = prepareGitSeatbeltLaunch({
-        confinement: makeSeatbeltConfinementLive({ platform: "linux", sandboxPath: bwrap }),
+        confinement: makeProcessConfinementLive({ platform: "linux", sandboxPath: bwrap }),
         platform: "linux",
         gitExecutable: "/usr/bin/git",
         checkoutRoot: directory,
@@ -92,8 +92,8 @@ describe("git Seatbelt launch", () => {
       MACOS_GIT_SHIM_READ_PATHS.map((path) => `(allow file-read* (literal "${path}"))`),
     );
     expect(gitShimExtraRules("linux")).toEqual([]);
-    const prepared: Parameters<SeatbeltConfinementPort["prepare"]>[0][] = [];
-    const confinement: SeatbeltConfinementPort = {
+    const prepared: Parameters<ProcessConfinementPort["prepare"]>[0][] = [];
+    const confinement: ProcessConfinementPort = {
       prepare: (input) => {
         prepared.push(input);
         return { command: "/usr/bin/sandbox-exec", args: [] };
@@ -150,7 +150,7 @@ describe("git Seatbelt launch", () => {
       // The launch itself defaults to read-only. These rules are appended
       // last, so a caller that simply forgets the option is confined rather
       // than silently handed write on another repository's .git.
-      let captured: Parameters<SeatbeltConfinementPort["prepare"]>[0] | undefined;
+      let captured: Parameters<ProcessConfinementPort["prepare"]>[0] | undefined;
       prepareGitSeatbeltLaunch({
         confinement: {
           prepare: (input) => {
@@ -226,7 +226,7 @@ describe("git Seatbelt launch", () => {
       writeFileSync(join(gitdir, "commondir"), `${common}\n`);
 
       for (const writable of [false, true]) {
-        let captured: Parameters<SeatbeltConfinementPort["prepare"]>[0] | undefined;
+        let captured: Parameters<ProcessConfinementPort["prepare"]>[0] | undefined;
         prepareGitSeatbeltLaunch({
           confinement: {
             prepare: (input) => {
@@ -280,7 +280,7 @@ describe("git Seatbelt launch", () => {
       // regression that drops extraRules would still pass the helper's own
       // assertions while confined git dies on its first path.
       const launch = prepareGitSeatbeltLaunch({
-        confinement: makeSeatbeltConfinementLive({
+        confinement: makeProcessConfinementLive({
           platform: "darwin",
           sandboxPath,
           homeDirectory: root,

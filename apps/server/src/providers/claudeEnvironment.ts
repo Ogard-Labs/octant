@@ -1,7 +1,4 @@
-import { homedir } from "node:os";
-
-import type { ClaudeAuthentication, ProviderFailure, ProviderInstanceId } from "@octant/contracts";
-import { assignedClaudeAccountConfigDirectory } from "@octant/domain";
+import type { ClaudeAuthentication, ProviderFailure } from "@octant/contracts";
 import { Effect, type Scope } from "effect";
 
 import { snapshotClaudeHostEnvironment } from "./claudeAccountDirectory";
@@ -20,8 +17,6 @@ export interface ClaudeEnvironmentScopeOptions {
   readonly hostEnvironment?: NodeJS.ProcessEnv;
   /** Claude-owned directory for this account. Isolated launches never inherit host Claude dirs. */
   readonly configDirectory?: string;
-  /** Used to assign API-key state under ~/.claude-accounts/<id> when no directory is stored. */
-  readonly instanceId?: ProviderInstanceId;
 }
 
 interface ClaudeEnvironmentOverrides {
@@ -146,11 +141,9 @@ export function makeClaudeEnvironmentScope(
     );
   }
   const hostEnvironment = options.hostEnvironment;
-  const configDirectory =
-    options.configDirectory ??
-    (authentication === "api-key" && options.instanceId !== undefined
-      ? assignedClaudeAccountConfigDirectory(homedir(), options.instanceId)
-      : undefined);
+  // The caller names the account directory. The driver factory resolves an
+  // API-key account's assigned leaf once, so this scope never picks a folder.
+  const configDirectory = options.configDirectory;
 
   if (configDirectory !== undefined) {
     if (authentication === "api-key") {

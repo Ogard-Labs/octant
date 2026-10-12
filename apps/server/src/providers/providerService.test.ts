@@ -1376,7 +1376,7 @@ describe("ProviderService", () => {
     );
   });
 
-  it("refuses a Claude account directory that another account already uses", async () => {
+  it("refuses a Claude account directory that belongs to the host profile or another account", async () => {
     const fixture = serviceFixture();
     await fixture.service.execute(windowId, {
       kind: "create-claude-provider",
@@ -1405,7 +1405,8 @@ describe("ProviderService", () => {
     ).rejects.toMatchObject({
       failure: {
         category: "invalid-configuration",
-        message: "Another Claude account already uses that config directory.",
+        message:
+          "Claude accounts use an Octant-assigned directory. Re-assign the account to use it.",
       },
     });
     const directory = assignedClaudeAccountConfigDirectory(homedir(), otherId);
@@ -1450,6 +1451,36 @@ describe("ProviderService", () => {
         ? defaultAccount.configuration.configDirectory
         : undefined,
     ).toBeUndefined();
+  });
+
+  it("refuses a second Claude account whose id differs from the first only by letter case", async () => {
+    const fixture = serviceFixture();
+    const configuration = {
+      kind: "claude-agent-sdk",
+      binaryPath: "/opt/homebrew/bin/claude",
+      authentication: "api-key",
+    } as const;
+    await fixture.service.execute(windowId, {
+      kind: "create-claude-provider",
+      instanceId: decodeProviderInstanceId("abcdef01-0000-4000-8000-000000000012"),
+      expectedVersion: 0,
+      displayName: "Claude API",
+      configuration,
+    });
+    await expect(
+      fixture.service.execute(windowId, {
+        kind: "create-claude-provider",
+        instanceId: decodeProviderInstanceId("ABCDEF01-0000-4000-8000-000000000012"),
+        expectedVersion: 0,
+        displayName: "Claude API again",
+        configuration,
+      }),
+    ).rejects.toMatchObject({
+      failure: {
+        category: "invalid-configuration",
+        message: "Another Claude account already uses that config directory.",
+      },
+    });
   });
 
   it("refuses a Claude account directory Octant did not assign", async () => {
@@ -1509,7 +1540,8 @@ describe("ProviderService", () => {
       ).rejects.toMatchObject({
         failure: {
           category: "invalid-configuration",
-          message: "Another Claude account already uses that config directory.",
+          message:
+            "Claude accounts use an Octant-assigned directory. Re-assign the account to use it.",
         },
       });
     } finally {
@@ -1553,7 +1585,8 @@ describe("ProviderService", () => {
       ).rejects.toMatchObject({
         failure: {
           category: "invalid-configuration",
-          message: "Another Claude account already uses that config directory.",
+          message:
+            "Claude accounts use an Octant-assigned directory. Re-assign the account to use it.",
         },
       });
     } finally {
@@ -1564,7 +1597,7 @@ describe("ProviderService", () => {
     }
   });
 
-  it("does not reserve the host Claude directory for a temporary API-key instance", async () => {
+  it("leaves the host profile to the first subscription account when an API-key account came first", async () => {
     const fixture = serviceFixture();
     await fixture.service.execute(windowId, {
       kind: "create-claude-provider",
@@ -1587,16 +1620,14 @@ describe("ProviderService", () => {
           kind: "claude-agent-sdk",
           binaryPath: "/opt/homebrew/bin/claude",
           authentication: "subscription",
-          configDirectory: `${homedir()}/.claude`,
           accent: "teal",
         },
       }),
-    ).resolves.toMatchObject({
-      kind: "provider-created",
-      instance: {
-        configuration: { configDirectory: `${homedir()}/.claude` },
-      },
-    });
+    ).resolves.toSatisfy(
+      (result: { readonly instance?: { readonly configuration?: object } }) =>
+        result.instance?.configuration !== undefined &&
+        !("configDirectory" in result.instance.configuration),
+    );
   });
 
   it("refuses a replayed secondary Claude account that still shares the default directory", async () => {
@@ -1637,7 +1668,8 @@ describe("ProviderService", () => {
     ).rejects.toMatchObject({
       failure: {
         category: "invalid-configuration",
-        message: "Another Claude account already uses that config directory.",
+        message:
+          "Claude accounts use an Octant-assigned directory. Re-assign the account to use it.",
       },
     });
   });
@@ -1748,7 +1780,7 @@ describe("ProviderService", () => {
     });
   });
 
-  it("keeps a temporary API-key instance editable after another account claims the host directory", async () => {
+  it("keeps an API-key account editable after a subscription account takes the host profile", async () => {
     const fixture = serviceFixture();
     await fixture.service.execute(windowId, {
       kind: "create-claude-provider",
@@ -1770,7 +1802,6 @@ describe("ProviderService", () => {
         kind: "claude-agent-sdk",
         binaryPath: "/opt/homebrew/bin/claude",
         authentication: "subscription",
-        configDirectory: `${homedir()}/.claude`,
         accent: "teal",
       },
     });

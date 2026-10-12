@@ -12,6 +12,10 @@ import {
   type AgentRunControlRequest,
   type NativeHarnessRouteDecision,
   type OctantMode,
+  type Project,
+  type ProviderInstance,
+  type ProviderModel,
+  type ProviderObservedState,
 } from "@octant/contracts";
 import {
   AgentRunPolicyRejected,
@@ -325,6 +329,59 @@ export type AgentRunFollowUpResult =
       readonly lifecycleStatus: string;
     }
   | { readonly status: "refused"; readonly reason: string; readonly message?: string };
+
+/**
+ * The delegate targets a parent in this Project may name.
+ *
+ * A Work or Code Project's provider policy binds delegate targets too: the
+ * same list the tool advertises is the one explicit targets and resumes are
+ * revalidated against, so filtering here guards all three. Chat Projects carry
+ * no provider policy.
+ */
+export function agentRunEligibleTargets(input: {
+  readonly project: Project | undefined;
+  readonly instances: ReadonlyArray<
+    Pick<ProviderInstance, "id" | "enabled" | "displayName" | "driverKind">
+  >;
+  readonly observedState: (
+    instanceId: ProviderInstance["id"],
+  ) => Pick<ProviderObservedState, "readiness" | "models"> | undefined;
+  readonly isTargetAllowed: (
+    project: Exclude<Project, { readonly type: "chat" }>,
+    providerInstanceId: ProviderInstance["id"],
+    modelId: ProviderModel["id"],
+  ) => boolean;
+}): ReadonlyArray<AgentsToolTarget> {
+  const { project } = input;
+  return input.instances.flatMap((instance) => {
+    if (!instance.enabled) return [];
+    const observed = input.observedState(instance.id);
+    if (observed?.readiness !== "ready") return [];
+    const models =
+      project === undefined || project.type === "chat"
+        ? observed.models
+        : observed.models.filter((model) => input.isTargetAllowed(project, instance.id, model.id));
+    if (models.length === 0) return [];
+    return [
+      {
+        providerInstanceId: String(instance.id),
+        displayName: instance.displayName,
+        driverKind: String(instance.driverKind),
+        modelIds: models.map((model) => String(model.id)),
+        reasoningByModel: Object.fromEntries(
+          models.map((model) => [
+            String(model.id),
+            model.options.flatMap((option) =>
+              option.kind === "selection" && (option.id === "reasoning" || option.id === "effort")
+                ? option.values
+                : [],
+            ),
+          ]),
+        ),
+      },
+    ];
+  });
+}
 
 export function isAgentRunTargetEligible(
   run: AgentRun,
