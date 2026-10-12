@@ -738,7 +738,8 @@ html[data-octant-native-host="true"]
 
 /* Both presentations fill the row so the action icons keep to its far edge. */
 .sidebar__chrome .modeswitch,
-.sidebar__chrome .mode-trigger {
+.sidebar__chrome .mode-trigger,
+.sidebar__chrome .mode-switcher__solo {
   flex: 1 1 auto;
   min-width: 0;
 }

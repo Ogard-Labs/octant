@@ -393,7 +393,11 @@ describe("ShellSidebar", () => {
         />,
       );
 
-      const modes = screen.getByRole("button", { name: `Workspace mode, ${modeLabel}` });
+      const modes = screen.getByRole("group", { name: "Workspace mode" });
+      expect(within(modes).getByRole("button", { name: modeLabel })).toHaveAttribute(
+        "aria-current",
+        "page",
+      );
       const search = screen.getByRole("button", { name: "Search" });
       const projects = screen.getByRole("navigation", { name: "Projects" });
       // The foot of the sidebar names the person, and their settings are one
@@ -431,8 +435,9 @@ describe("ShellSidebar", () => {
       />,
     );
 
-    const trigger = screen.getByRole("button", { name: "Workspace mode, Code" });
-    expect(trigger).toHaveTextContent("Code");
+    expect(screen.queryByRole("group", { name: "Workspace mode" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Workspace mode, Code" })).not.toBeInTheDocument();
+    expect(screen.getByText("Code")).toBeVisible();
     expect(screen.queryByRole("button", { name: "Chat" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Work" })).not.toBeInTheDocument();
   });

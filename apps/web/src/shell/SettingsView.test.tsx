@@ -1701,12 +1701,12 @@ describe("SettingsView", () => {
       "settings-view__range",
     );
     const modeSwitcher = screen.getByRole("group", { name: "Mode switcher" });
-    expect(within(modeSwitcher).getByRole("button", { name: "Dropdown" })).toHaveAttribute(
+    expect(within(modeSwitcher).getByRole("button", { name: "Buttons" })).toHaveAttribute(
       "aria-pressed",
       "true",
     );
-    fireEvent.click(within(modeSwitcher).getByRole("button", { name: "Buttons" }));
-    expect(onSettingsChange).toHaveBeenCalledWith({ modeSwitcherPresentation: "buttons" });
+    fireEvent.click(within(modeSwitcher).getByRole("button", { name: "Dropdown" }));
+    expect(onSettingsChange).toHaveBeenCalledWith({ modeSwitcherPresentation: "dropdown" });
     fireEvent.click(screen.getByRole("button", { name: "Host" }));
     expect(screen.getByRole("button", { name: "Reset active mode layout" })).toHaveClass(
       "settings-view__action",

@@ -2230,7 +2230,7 @@ describe("App", () => {
         shellClient={shellApi}
       />,
     );
-    expect(await screen.findByRole("button", { name: "Workspace mode, Code" })).toBeVisible();
+    expect(await screen.findByRole("group", { name: "Workspace mode" })).toBeVisible();
     const separator = screen.getByRole("separator", { name: "Resize navigation sidebar" });
     Object.assign(separator, {
       hasPointerCapture: vi.fn(() => true),
@@ -2388,7 +2388,7 @@ describe("App", () => {
       />,
     );
 
-    expect(await screen.findByRole("button", { name: "Workspace mode, Code" })).toBeVisible();
+    expect(await screen.findByRole("group", { name: "Workspace mode" })).toBeVisible();
     expect(screen.queryByRole("separator", { name: "Resize navigation sidebar" })).toBeNull();
     expect(document.querySelector(".shell")).toHaveStyle({ "--octant-sidebar-width": "320px" });
   });
@@ -3602,12 +3602,18 @@ describe("App", () => {
     expect(await screen.findByRole("textbox", { name: "First message" })).toHaveValue(
       "Keep my unsent draft",
     );
-    await user.click(screen.getByRole("button", { name: "Workspace mode, Code" }));
-    await user.click(await screen.findByRole("menuitemradio", { name: "Work" }));
+    await user.click(
+      within(screen.getByRole("group", { name: "Workspace mode" })).getByRole("button", {
+        name: "Work",
+      }),
+    );
     expect(screen.queryByDisplayValue("Keep my unsent draft")).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "New chat" }));
-    await user.click(screen.getByRole("button", { name: "Workspace mode, Work" }));
-    await user.click(await screen.findByRole("menuitemradio", { name: "Code" }));
+    await user.click(
+      within(screen.getByRole("group", { name: "Workspace mode" })).getByRole("button", {
+        name: "Code",
+      }),
+    );
     expect(await screen.findByRole("textbox", { name: "First message" })).toHaveValue(
       "Keep my unsent draft",
     );
@@ -3783,7 +3789,7 @@ describe("App", () => {
       />,
     );
 
-    expect(await screen.findByRole("button", { name: "Workspace mode, Code" })).toBeVisible();
+    expect(await screen.findByRole("group", { name: "Workspace mode" })).toBeVisible();
     await openSidebarProject(user, "Octant");
     expect(screen.queryByRole("button", { name: /Right sidebar/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Open Code environment" })).toBeNull();
@@ -4345,7 +4351,7 @@ describe("App", () => {
     );
 
     expect(screen.getByRole("status")).toHaveTextContent("Loading Octant workspace");
-    expect(await screen.findByRole("button", { name: "Workspace mode, Code" })).toBeVisible();
+    expect(await screen.findByRole("group", { name: "Workspace mode" })).toBeVisible();
     expect(document.querySelector(".shell")).toHaveStyle({
       "--octant-sidebar-width": "280px",
     });
@@ -4369,7 +4375,7 @@ describe("App", () => {
       within(sidebar).getByRole("button", { name: "Hide sidebar" }),
     );
     expect(sidebar.querySelector(".sidebar__content")).toHaveClass("window-no-drag");
-    expect(within(sidebar).getByRole("button", { name: "Workspace mode, Code" })).toHaveClass(
+    expect(within(sidebar).getByRole("group", { name: "Workspace mode" })).toHaveClass(
       "window-no-drag",
     );
     expect(within(sidebar).getByRole("button", { name: "Search" })).toHaveClass("window-no-drag");
@@ -4420,12 +4426,18 @@ describe("App", () => {
     }
     // A mode switch is a navigation away from the Projects page, so the page
     // must not keep sitting over the workspace it belongs to.
-    await user.click(screen.getByRole("button", { name: "Workspace mode, Code" }));
-    await user.click(await screen.findByRole("menuitemradio", { name: "Work" }));
+    await user.click(
+      within(screen.getByRole("group", { name: "Workspace mode" })).getByRole("button", {
+        name: "Work",
+      }),
+    );
     expect(screen.queryByRole("searchbox", { name: "Search Projects" })).toBeNull();
     expect(document.querySelector(".projects-page-layer")).toBeNull();
-    await user.click(screen.getByRole("button", { name: "Workspace mode, Work" }));
-    await user.click(await screen.findByRole("menuitemradio", { name: "Code" }));
+    await user.click(
+      within(screen.getByRole("group", { name: "Workspace mode" })).getByRole("button", {
+        name: "Code",
+      }),
+    );
     await act(async () => {
       codeBootstrap.resolve(readyCodeBootstrap);
       codeThread.resolve(readyCodeThread);

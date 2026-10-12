@@ -2077,6 +2077,7 @@ function SidebarSection({ focusedSetting, props, capabilities }: AppearanceSecti
           ) : null}
           {isAvailable("mode-switcher") ? (
             <SettingRow
+              description="Two icon buttons, or a dropdown that names the current mode."
               focused={focusedSetting === settingId("mode-switcher")}
               label="Mode switcher"
               scope="app"
