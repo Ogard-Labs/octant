@@ -8,6 +8,17 @@
 .thread-message-queue[data-connection="lost"] {
   opacity: 0.6;
 }
+.thread-message-queue__hold {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 24px;
+  margin-bottom: 0.25rem;
+  padding-inline: var(--oct-space-2);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-sm);
+  background: var(--oct-surface-warm);
+}
 .thread-message-queue__heading,
 .thread-message-queue__actions {
   display: flex;
