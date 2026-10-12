@@ -31,6 +31,12 @@ export interface ExtensionClient {
   execute(command: ExtensionCommand, signal?: AbortSignal): Promise<ExtensionCommandResult>;
   listToolApprovals(signal?: AbortSignal): Promise<ExtensionToolApprovalList>;
   decideToolApproval(decision: ExtensionToolApprovalDecision): Promise<boolean>;
+  /**
+   * Whether this client may remember an approval or list and revoke remembered
+   * ones. True for a local window; the host refuses a paired device, so the
+   * client does not offer it off a loopback host.
+   */
+  readonly toolGrantsAvailable: boolean;
   /** The MCP tools a person always allows, per Project. A local window only. */
   listToolGrants(signal?: AbortSignal): Promise<ExtensionToolGrantList>;
   /** Takes one remembered approval away; false when it was already gone. */
@@ -52,7 +58,9 @@ export class ExtensionClientFailure extends Error {
 export function createExtensionClient(options: ExtensionClientOptions): ExtensionClient {
   const fetch = bindFetchPort(options.fetch);
   const headers = { "x-octant-window-capability": options.windowCapability };
+  const toolGrantsAvailable = isLoopbackHttp(options.baseUrl);
   return {
+    toolGrantsAvailable,
     snapshot() {
       return request(
         fetch,
@@ -151,6 +159,7 @@ export function createExtensionClient(options: ExtensionClientOptions): Extensio
       );
     },
     listToolGrants(signal) {
+      if (!toolGrantsAvailable) return Promise.reject(notOnThisHost());
       return request(
         fetch,
         new URL("/api/extensions/tool-grants", options.baseUrl).toString(),
@@ -164,6 +173,7 @@ export function createExtensionClient(options: ExtensionClientOptions): Extensio
       );
     },
     async revokeToolGrant(grantId) {
+      if (!toolGrantsAvailable) throw notOnThisHost();
       let validated: ExtensionToolGrantRequest;
       try {
         validated = decodeExtensionToolGrantRequest({ kind: "revoke", grantId });
@@ -210,6 +220,25 @@ export function createExtensionClient(options: ExtensionClientOptions): Extensio
       );
     },
   };
+}
+
+function isLoopbackHttp(baseUrl: string): boolean {
+  try {
+    const url = new URL(baseUrl);
+    return (
+      url.protocol === "http:" &&
+      (url.hostname === "127.0.0.1" || url.hostname === "localhost" || url.hostname === "[::1]")
+    );
+  } catch {
+    return false;
+  }
+}
+
+function notOnThisHost(): ExtensionClientFailure {
+  return new ExtensionClientFailure(
+    "unavailable",
+    "Remembered tool approvals are managed at a window on the host.",
+  );
 }
 
 function routeFor(command: ExtensionCommand): string {

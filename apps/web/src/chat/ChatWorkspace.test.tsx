@@ -498,6 +498,7 @@ function extensionClient(): ExtensionClient {
     importLocalPluginReceipt: vi.fn() as never,
     listToolApprovals: vi.fn(async () => []) as never,
     decideToolApproval: vi.fn(async () => true) as never,
+    toolGrantsAvailable: true,
     listToolGrants: vi.fn(async () => []) as never,
     revokeToolGrant: vi.fn(async () => true) as never,
   };
