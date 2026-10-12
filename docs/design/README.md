@@ -12,12 +12,19 @@ The precedence and authorization rules live in [AGENTS.md](../../AGENTS.md#missi
 | System architecture  | [Architecture](../architecture.md)                     | Changing processes, authority, modes, persistence, providers, plugins, or release boundaries; follow the relevant section |
 | Workspace behavior   | [Workspace](workspace.md)                              | Changing navigation, Projects, panes, content tabs, tool presentation, or workspace lifecycle                             |
 | Visual design        | [Design system](../../DESIGN.md)                       | Changing typography, colour, materials, Settings composition, controls, or accessibility                                  |
+| Start screen         | [Start screen](start-screen.md)                        | Changing start-screen tiles, tabs, cards, or Code's agent home; the rule set is in Workspace                              |
+| Canvas visuals       | [Canvas visuals](canvas-visuals.md)                    | Changing Canvas charts, tables, metric blocks, mockups, designs, or the design frame kit                                  |
+| Provider settings    | [Providers and model endpoints](model-endpoints.md)    | Changing Provider catalog or the Octant Harness model endpoint rows, detail pages, or Add endpoint                        |
+| Host names           | [Host reads and commands](host-reads-and-commands.md)  | Looking up or renaming a route, server command, or wire value a workspace surface uses                                    |
 | Release holds        | [Release-boundary holds](../release-boundary-holds.md) | Considering connector marketplace or full language-tooling scope                                                          |
 | Historical rationale | [Decision archive](../decisions/README.md)             | Investigating why a choice was made, a rejected alternative, or detail not yet consolidated                               |
 
 Architecture owns system and authority boundaries. Workspace owns navigation and
 interaction behavior. DESIGN.md owns presentation and shared component rules.
 A summary elsewhere links to that owner; it does not establish a competing rule.
+The start-screen, Canvas-visuals, and provider-settings topics hold the detail
+of one area so their owner can state its rules briefly. Host reads and commands
+is a lookup of route, command, and wire names, not a behavior owner.
 User guides describe available behavior, while Linear tracks delivery progress.
 
 ## Changing the design
