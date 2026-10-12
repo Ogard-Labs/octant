@@ -464,7 +464,7 @@ cardinalities, attribute blocks, `PK`) into an `er`; and a
 `mindmap` (tree by indentation) into a `mindmap`. Anything else — another
 diagram type, styling, classes, `click`, loops and alternatives, other shapes
 and links, a nested subgraph, a note spanning two participants, an `FK` or
-`UK` key, two ids that would collide, a source over 32,768
+`UK` key, a non-identifying (`..`) relationship, two ids that would collide, a source over 32,768
 characters, or a translation the block catalog refuses — returns a typed
 refusal (`unsupported-diagram`, `unsupported-construct` with its line, `empty`,
 `too-large`, `invalid-result`). The one entry point is the agent's Canvas

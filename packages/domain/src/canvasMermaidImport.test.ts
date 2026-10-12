@@ -224,7 +224,7 @@ describe("importing the other Mermaid diagram kinds", () => {
       [
         "erDiagram",
         "  CUSTOMER ||--o{ ORDER : places",
-        "  ORDER }|..|| PRODUCT : contains",
+        "  ORDER }|--|| PRODUCT : contains",
         "  CUSTOMER {",
         "    uuid id PK",
         "    string email",
@@ -277,6 +277,52 @@ describe("importing the other Mermaid diagram kinds", () => {
       "unsupported-construct",
     );
     expect(refusal("mindmap\n  Root\n  Second root").reason).toBe("unsupported-construct");
+  });
+
+  it("keeps a semicolon in a mind map topic as part of the topic", () => {
+    // A flowchart ends a statement with a semicolon; a mind map topic is its line.
+    expect(imported("mindmap\n  Release\n    Scope; risks")).toMatchObject({
+      nodes: [
+        { nodeId: "t1", label: "Release" },
+        { nodeId: "t2", label: "Scope; risks", parentId: "t1" },
+      ],
+    });
+    expect(imported("graph LR; a --> b; b --> c")).toMatchObject({
+      edges: [
+        { source: "a", target: "b" },
+        { source: "b", target: "c" },
+      ],
+    });
+  });
+
+  it("reads a node whose id starts with a styling keyword or ends in o or x as a node", () => {
+    // `class`, `style`, `title`, and `click` are refused as statements, not
+    // as the first letters of an id; `o--` and `x--` are refused as links,
+    // not as the last letter of an id before an arrow.
+    expect(
+      imported("flowchart TD\n  classroom --> styles[CSS]\n  titleBar --> clickCount"),
+    ).toMatchObject({
+      edges: [
+        { source: "classroom", target: "styles" },
+        { source: "titleBar", target: "clickCount" },
+      ],
+    });
+    expect(imported("flowchart TD\n  todo-->done\n  box---lid")).toMatchObject({
+      edges: [
+        { source: "todo", target: "done", style: "arrow" },
+        { source: "box", target: "lid", style: "line" },
+      ],
+    });
+    // The statements and the links themselves are still refused.
+    expect(refusal("flowchart TD\n  a --> b\n  class a hot").line).toBe(3);
+    expect(refusal("flowchart TD\n  a o--o b").reason).toBe("unsupported-construct");
+    expect(refusal("flowchart TD\n  a x--x b").reason).toBe("unsupported-construct");
+  });
+
+  it("refuses a non-identifying relationship it has no way to keep instead of drawing it as identifying", () => {
+    const refused = refusal("erDiagram\n  ORDER }|..|| PRODUCT : contains");
+    expect(refused.reason).toBe("unsupported-construct");
+    expect(refused.line).toBe(2);
   });
 });
 

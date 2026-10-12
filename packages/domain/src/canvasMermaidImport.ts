@@ -71,13 +71,21 @@ interface Statement {
   readonly indent: number;
 }
 
+/**
+ * The source as statements. A semicolon ends a statement in every diagram
+ * type but the mind map, where a topic is its whole line: split there,
+ * `Scope; risks` became two topics the author never wrote.
+ */
 function statements(source: string): ReadonlyArray<Statement> {
   const result: Statement[] = [];
-  source.split(/\r?\n/).forEach((raw, index) => {
-    const withoutComment = raw.trimStart().startsWith("%%") ? "" : raw;
-    const expanded = withoutComment.replace(/\t/g, "  ");
+  const lines = source
+    .split(/\r?\n/)
+    .map((raw) => (raw.trimStart().startsWith("%%") ? "" : raw.replace(/\t/g, "  ")));
+  const header = lines.find((line) => line.trim().length > 0)?.trim() ?? "";
+  const wholeLines = /^mindmap(?:\s|$)/.test(header);
+  lines.forEach((expanded, index) => {
     const indent = expanded.length - expanded.trimStart().length;
-    for (const part of expanded.split(";")) {
+    for (const part of wholeLines ? [expanded] : expanded.split(";")) {
       const text = part.trim();
       if (text.length > 0) result.push({ text, line: index + 1, indent });
     }
@@ -139,7 +147,7 @@ function unsupported(statement: Statement, what = "This statement"): Refusal {
 
 /** Statements no supported diagram type translates: styling, interaction, and layout hints. */
 const REFUSED_KEYWORDS =
-  /^(classDef|class|style|linkStyle|click|callback|direction|accTitle|accDescr|title|%%\{)/;
+  /^(?:(?:classDef|class|style|linkStyle|click|callback|direction|accTitle|accDescr|title)\b|%%\{)/;
 
 export function importCanvasMermaid(source: string, blockId: CanvasBlockId): CanvasMermaidImport {
   if (source.length > CANVAS_MERMAID_MAX_SOURCE_LENGTH) {
@@ -227,7 +235,9 @@ const LINK_FORMS: ReadonlyArray<string> = [
   String.raw`<--`, // reversed, refused
   String.raw`-\.-`, // dashed without an arrow, refused
   String.raw`--[ox](?=\s)`, // circle or cross end, refused
-  String.raw`[ox]--`, // circle or cross start, refused
+  // Only where it starts a link: the last letter of `todo` before an arrow
+  // is part of the id, not a circle.
+  String.raw`(?<![A-Za-z0-9_-])[ox]--`, // circle or cross start, refused
 ];
 const LINK = new RegExp(String.raw`(${LINK_FORMS.join("|")})(\|[^|]*\|)?`);
 
@@ -631,6 +641,11 @@ function er(_header: Statement, body: ReadonlyArray<Statement>, blockId: CanvasB
     }
     const relationship = RELATIONSHIP.exec(text);
     if (relationship !== null) {
+      // An `er` relationship has no field for a non-identifying (dotted)
+      // link, so drawing one would turn it into an identifying link.
+      if (relationship[3] === "..") {
+        throw unsupported(statement, "A non-identifying relationship (..)");
+      }
       const sourceCardinality = LEFT_CARDINALITY[relationship[2] ?? ""];
       const targetCardinality = RIGHT_CARDINALITY[relationship[4] ?? ""];
       if (sourceCardinality === undefined || targetCardinality === undefined) {
