@@ -9,7 +9,7 @@ import {
   ohMyPiProcessEnvironment,
   sanitizeOhMyPiEnvironment,
 } from "./ohMyPiProcess";
-import type { SeatbeltConfinementPort } from "../process/seatbeltProfile";
+import type { ProcessConfinementPort } from "../process/seatbeltProfile";
 
 /**
  * These cases assert the probe's version check and lifecycle, not the profile.
@@ -18,7 +18,7 @@ import type { SeatbeltConfinementPort } from "../process/seatbeltProfile";
  * straight through and the refusal never stands in for the version mismatch
  * under test.
  */
-const passthroughConfinement: SeatbeltConfinementPort = {
+const passthroughConfinement: ProcessConfinementPort = {
   prepare: (input) => ({ command: input.executable, args: input.args }),
 };
 

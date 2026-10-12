@@ -17,6 +17,7 @@ import {
 } from "@octant/contracts";
 import { describe, expect, it, vi } from "vitest";
 import { ConcurrencyConflict } from "../persistence/journalErrors";
+import { ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
 import { WorkThreadProjection } from "./workThreadProjection";
 import {
   WorkThreadService,
@@ -223,6 +224,31 @@ describe("WorkThreadService", () => {
               actorId: "00000000-0000-4000-8000-000000000002",
             },
             payload: { kind: "thread-created", thread: thread() },
+          }),
+        ],
+      }),
+    );
+  });
+
+  it("attributes a routine's thread to the routine, not to an open window", async () => {
+    const fixture = serviceFixture({ threads: [] });
+
+    await fixture.service.execute(ROUTINE_HOST_SCOPE_ID, {
+      kind: "create-work-thread",
+      threadId: ids.thread,
+      projectId: ids.project,
+      title: "Draft brief",
+      providerInstanceId: ids.provider,
+      modelId: "model-a",
+      hostId: "local",
+      bindingRevisionId: ids.binding,
+    });
+    expect(fixture.persistence.journal.append).toHaveBeenCalledWith(
+      expect.objectContaining({
+        events: [
+          expect.objectContaining({
+            eventName: "work.thread-created@1",
+            actor: { kind: "system", actorId: "00000000-0000-4000-8000-000000000002" },
           }),
         ],
       }),

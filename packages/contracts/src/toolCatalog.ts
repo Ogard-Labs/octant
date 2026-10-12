@@ -242,13 +242,6 @@ const NATIVE_HARNESS_TOOL_POLICY: Readonly<
     irreversibleUnderTaint: false,
     resultTaintsThread: false,
   },
-  "journal-lookup": {
-    modes: ["chat", "work", "code"],
-    requiredCapabilityClass: "instructions",
-    approvalClass: "thread-local",
-    irreversibleUnderTaint: false,
-    resultTaintsThread: false,
-  },
   "second-opinion": {
     modes: ["chat", "work", "code"],
     requiredCapabilityClass: "instructions",

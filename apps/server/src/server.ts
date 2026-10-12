@@ -155,7 +155,7 @@ import {
   hydrateWorkTurnProjectionFromJournal,
 } from "./work/workTurnProjection";
 import { WorkAttachmentStore } from "./work/workAttachmentStore";
-import { WorkTurnService, WorkTurnServiceError } from "./work/workTurnService";
+import { WorkTurnService } from "./work/workTurnService";
 import { withWorkflowLifecycle } from "./work/workThreadWorkflowHook";
 import { WorkflowEventStore } from "./work/workflowEventStore";
 import { WorkflowProjection } from "./work/workflowProjection";
@@ -384,7 +384,6 @@ import {
 import { AgentRunPersistenceService } from "./agentRun/agentRunPersistenceService";
 import { AgentRunDependencyScheduler } from "./agentRun/agentRunDependencyScheduler";
 import { AgentResultDeliveryService } from "./agentRun/agentResultDeliveryService";
-import { agentResultDeliveryBatchPrompt } from "./agentRun/agentResultDeliveryPrompt";
 import { createAgentMessageRouteHandler } from "./agentMessage/agentMessageRoutes";
 import { createAgentRunForestCanvasSnapshot } from "./agentRun/agentRunCanvasSnapshot";
 import { createAgentRunRouteHandler } from "./agentRun/agentRunRoutes";
@@ -394,9 +393,13 @@ import {
   admittedParentCodeContext,
   type AdmittedParentCodeContextInput,
 } from "./agentRun/agentRunParentContext";
-import { agentResultDeliveryReceipt } from "./agentRun/agentResultDeliveryBatch";
+import {
+  createCodeAgentResultDeliveryPort,
+  createWorkAgentResultDeliveryPort,
+} from "./agentRun/agentResultDeliveryPorts";
 import { NATIVE_HARNESS_BUILT_IN_SLOTS, type AgentRunResultDeliveryMark } from "@octant/contracts";
 import { createAgentsManagedTools } from "./agentRun/agentRunManagedTools";
+import { agentRunEligibleTargets as eligibleAgentRunTargets } from "./agentRun/agentRunDelegation";
 import {
   createAgentRunChildWorktreePort,
   resolveAgentRunChildWorktreeThreadId,
@@ -422,6 +425,7 @@ import { createLinkedThreadRuntime } from "./linkedThread/linkedThreadRuntime";
 import { FolderBrowseService } from "./folderBrowseService";
 import { ProjectService } from "./projectService";
 import { CodeProjectAccess } from "./codeProjectAccess";
+import { isRoutineHostScope } from "./routineHostScope";
 import { ProjectRootPort } from "./projectRootPort";
 import { ProjectTerminalService } from "./code/projectTerminalService";
 import { ProjectBrowserService } from "./browser/projectBrowserService";
@@ -1872,6 +1876,27 @@ export function startOctantServer(
     const extensionToolApprovalService = new ExtensionToolApprovalService({
       uuid: randomUUID,
       now: Date.now,
+      // A usage-limit resume replays its stopped Work turn's extension
+      // selections as the host, so that turn's tool prompts go to the windows
+      // bound to the thread's Project, as a routine's browser prompts do.
+      isHostScope: isRoutineHostScope,
+      // Routed by the Project the prompt recorded, never by trying each mode:
+      // Work and Code thread ids are separate namespaces, so a raw id alone
+      // could match an unrelated thread another window may drive.
+      windowCanReachThread: (windowId, threadId, projectId) => {
+        if (projectId === undefined) return false;
+        const project = persistence.readProject(decodeProjectId(projectId));
+        if (project === undefined || (project.type !== "work" && project.type !== "code")) {
+          return false;
+        }
+        const thread = decodeBrowserThreadId(threadId);
+        const authority = browserAuthority.resolve(thread, project.type);
+        return (
+          authority !== undefined &&
+          String(authority.projectId) === String(project.id) &&
+          browserAuthority.canAccessWindow(windowId, thread, project.type)
+        );
+      },
     });
     let browserToolApprovalService: BrowserToolApprovalService | undefined;
     const codeSessionAuthority = new CodeSessionAuthorityStore();
@@ -2521,44 +2546,15 @@ export function startOctantServer(
       },
       uuid: randomUUID,
     };
-    const agentRunEligibleTargets = (projectId: ProjectId | undefined) => {
-      // A Work or Code Project's provider policy binds delegate targets too:
-      // the same list the tool advertises is the one explicit targets and
-      // resumes are revalidated against, so filtering here guards all three.
-      // Chat Projects carry no provider policy.
-      const project = projectId === undefined ? undefined : persistence.readProject(projectId);
-      return persistence.readProviderInstances().flatMap((instance) => {
-        if (!instance.enabled) return [];
-        const observed = providerRuntimeRegistry.observedState(instance.id);
-        if (observed?.readiness !== "ready") return [];
-        const models =
-          project === undefined || project.type === "chat"
-            ? observed.models
-            : observed.models.filter((model) =>
-                isProjectPolicyTargetAllowed(project, instance.id, model.id),
-              );
-        if (models.length === 0) return [];
-        return [
-          {
-            providerInstanceId: String(instance.id),
-            displayName: instance.displayName,
-            driverKind: String(instance.driverKind),
-            modelIds: models.map((model) => String(model.id)),
-            reasoningByModel: Object.fromEntries(
-              models.map((model) => [
-                String(model.id),
-                model.options.flatMap((option) =>
-                  option.kind === "selection" &&
-                  (option.id === "reasoning" || option.id === "effort")
-                    ? option.values
-                    : [],
-                ),
-              ]),
-            ),
-          },
-        ];
+    const agentRunEligibleTargets = (projectId: ProjectId | undefined) =>
+      eligibleAgentRunTargets({
+        project: projectId === undefined ? undefined : persistence.readProject(projectId),
+        instances: persistence.readProviderInstances(),
+        observedState: (instanceId) => providerRuntimeRegistry.observedState(instanceId),
+        // Deferred: the policy check is declared later in this scope.
+        isTargetAllowed: (project, instanceId, modelId) =>
+          isProjectPolicyTargetAllowed(project, instanceId, modelId),
       });
-    };
     // Every turn's `octant_agents` tool set binds to the calling thread: the
     // delegation and the cancellation authority it petitions are the same ones
     // the Agents dock uses, so a tool call and a click are the same request.
@@ -3646,6 +3642,14 @@ export function startOctantServer(
         // read now, through the same selector its first turn uses.
         forkConversation: ({ source, throughOperationId }) =>
           selectCodeConversation(source.id, { purpose: "fork", throughOperationId }),
+        // Late-bound for the same reason: the runtime owns the journal a merge
+        // is recorded in and the turns that carry it.
+        forkMergeBack: {
+          merge: async (windowId, forkThreadId, throughOperationId) =>
+            codeOperationRuntime?.mergeForkContext === undefined
+              ? { status: "refused", reason: "unsupported" }
+              : codeOperationRuntime.mergeForkContext(windowId, forkThreadId, throughOperationId),
+        },
         managedThreadCreation: {
           prepare: (input, signal) => managedCodeThreadCreation.prepare(input, signal),
           commit: (input, preparation, signal) =>
@@ -3704,7 +3708,7 @@ export function startOctantServer(
       threadId: CodeThreadId,
       options: Pick<
         AdmittedParentCodeContextInput,
-        "purpose" | "excludeOperationId" | "throughOperationId"
+        "purpose" | "excludeOperationId" | "throughOperationId" | "afterOperationId" | "inherited"
       > = {},
     ) =>
       admittedParentCodeContext({
@@ -4618,6 +4622,7 @@ export function startOctantServer(
       },
       rememberOrigin: (origin, windowId) => rememberBrowserOrigin(windowId, origin),
       isOriginRemembered: (origin) => rememberedBrowserOrigins().includes(origin),
+      isHostScope: isRoutineHostScope,
     });
     const headlessBrowserRuntime = createPlaywrightBrowserRuntime({
       receiptDirectory: join(providerDataDirectory, "browser", "runtime-receipts"),
@@ -4918,10 +4923,22 @@ export function startOctantServer(
         supportsModelSwitch: (thread) =>
           providerRuntimeRegistry.observedState(thread.providerInstanceId)?.capabilities
             .modelSwitch === "supported",
-        providerSwitchContext: ({ thread, excludeOperationId }) =>
+        providerSwitchContext: ({ thread, excludeOperationId, inheritedFrom }) =>
           selectCodeConversation(thread.id, {
             purpose: "provider-switch",
             excludeOperationId: String(excludeOperationId),
+            ...(inheritedFrom === undefined
+              ? {}
+              : {
+                  inherited: {
+                    threadId: inheritedFrom.source.id,
+                    throughOperationId: inheritedFrom.throughOperationId,
+                    externalContentIngested: readThreadExternalContentTaint(
+                      persistence.connection,
+                      String(inheritedFrom.source.id),
+                    ).externalContentIngested,
+                  },
+                }),
           }),
         supportsAttachments: (thread) => {
           const observed = providerRuntimeRegistry.observedState(thread.providerInstanceId);
@@ -5133,6 +5150,12 @@ export function startOctantServer(
         },
         forkContext: ({ source, throughOperationId }) =>
           selectCodeConversation(source.id, { purpose: "fork", throughOperationId }),
+        forkMergeBackContext: ({ fork, afterOperationId, throughOperationId }) =>
+          selectCodeConversation(fork.id, {
+            purpose: "fork-merge-back",
+            throughOperationId,
+            ...(afterOperationId === undefined ? {} : { afterOperationId }),
+          }),
         forkProviderSession: (input) =>
           seedCodeForkHarnessSession(
             {
@@ -7271,11 +7294,13 @@ export function startOctantServer(
             : ("approval-gated" as const),
       };
     };
-    /** Any registered local window; the ordinary turn path rechecks Project access. */
-    const firstRegisteredWindowId = (): WindowId | undefined => {
-      for (const windowId of windowAuthorityStore.listWindowIds()) return windowId;
-      return undefined;
-    };
+    // A goal-loop round runs as the host, so no window stands in for the
+    // shell's mode switch: a loop whose Work was turned off pauses, and a
+    // round already being prepared is refused at its turn's admission.
+    const goalLoopWorkEnabled = (): boolean =>
+      enabledModes(persistence.readShellSettings()?.settings ?? defaultShellSettings()).includes(
+        "work",
+      );
     const goalLoopEvents = new GoalLoopEventStore({
       journal: persistence.journal,
       uuid: randomUUID,
@@ -7313,6 +7338,7 @@ export function startOctantServer(
         });
       },
       threadAuthority: (threadId) => {
+        if (!goalLoopWorkEnabled()) return undefined;
         try {
           return workTurnPosture(threadId);
         } catch {
@@ -7328,26 +7354,17 @@ export function startOctantServer(
       // interrupted when its provider session ends, so each round's requests
       // end with that round. Shell and Git never ask in Work.
       pendingApproval: () => undefined,
-      markCheckpoint: async (threadId) => {
-        const windowId = firstRegisteredWindowId();
-        if (windowId === undefined) return undefined;
-        const marked = await threadCheckpointService
-          .execute(windowId, {
-            kind: "mark-thread-checkpoint",
-            threadKind: "work",
-            threadId,
-            checkpointId: randomUUID(),
-            label: "Goal loop round",
-          })
-          .catch(() => undefined);
-        return marked === undefined || marked.kind !== "checkpoint-marked"
-          ? undefined
-          : String(marked.checkpoint.id);
-      },
+      // A Work folder has no checkpoint to mark. Checkpoints anchor a Chat turn
+      // or a Code operation; a Work turn records which paths changed, never
+      // their contents, so it cannot restore the folder, and Work holds no
+      // Git. Asking the checkpoint service anyway was refused every time and
+      // paused every loop before its first round. The policy runs a round
+      // without one only when a person approves every write it makes.
+      markCheckpoint: async () => undefined,
       runRound: createGoalLoopWorkRoundRunner({
         turns: workTurnService,
         usage: workTurnUsageStore,
-        windowId: firstRegisteredWindowId,
+        workEnabled: goalLoopWorkEnabled,
         command: ({ threadId, objective }) => {
           const thread = workThreadProjection.read(threadId as never);
           if (thread === undefined) {
@@ -7609,13 +7626,16 @@ export function startOctantServer(
         journal: persistence.journal,
         clock: () => new Date(),
         uuid: randomUUID,
-        windowId: firstRegisteredWindowId,
         chat: {
           readThread: (threadId) => persistence.readChatThread(threadId),
           readThreadView: (threadId) => persistence.readChatThreadView(threadId),
           execute: (input, executionContext) => chatService.execute(input, executionContext),
         },
         work: {
+          isEnabled: () =>
+            enabledModes(
+              persistence.readShellSettings()?.settings ?? defaultShellSettings(),
+            ).includes("work"),
           readThread: (threadId) => workThreadProjection.read(threadId),
           listTurns: (threadId) => workTurnProjection.listForThread(threadId),
           startFirstTurn: (windowId, input, options) =>
@@ -7698,143 +7718,27 @@ export function startOctantServer(
           readThread: (threadId) => persistence.readChatThread(threadId),
           chat: chatService,
         }),
-        work: {
-          inspect: async (run) =>
-            workThreadProjection.read(decodeWorkThreadId(String(run.parentThreadId))) === undefined
-              ? { kind: "invalid", detail: "The parent Work thread is gone." }
-              : { kind: "ready" },
-          dispatch: async (runs) => {
-            const run = runs[0];
-            if (run === undefined)
-              return { kind: "refused", detail: "No child results were supplied." };
-            const delivery = {
-              kind: "agent-result" as const,
-              runId: run.id,
-              runIds: runs.map((child) => child.id),
-              runGenerations: runs.map((child) => ({
-                runId: child.id,
-                generation: child.generation ?? 1,
-              })),
-            };
-            const windowId = firstRegisteredWindowId();
-            if (windowId === undefined) {
-              return { kind: "deferred", detail: "No local window is registered for this host." };
-            }
-            const thread = workThreadProjection.read(
-              decodeWorkThreadId(String(run.parentThreadId)),
-            );
-            if (thread === undefined || thread.bindingRevisionId === undefined) {
-              return { kind: "refused", detail: "The parent Work thread is gone." };
-            }
-            try {
-              const result = await workTurnService.startFirstTurn(windowId, {
-                kind: "start-work-thread-turn",
-                requestId: decodeWorkTurnRequestId(randomUUID()),
-                threadId: thread.id,
-                turnId: decodeWorkTurnId(randomUUID()),
-                prompt: agentResultDeliveryBatchPrompt(runs, (id) =>
-                  agentRunPersistence.resultText(id),
-                ),
-                authority: {
-                  hostId: LOCAL_HOST_ID,
-                  projectId: thread.projectId,
-                  bindingRevisionId: thread.bindingRevisionId,
-                  workingDirectory: ".",
-                  confinementPosture: "project-root-confined",
-                  providerInstanceId: thread.providerInstanceId,
-                  modelId: thread.modelId,
-                },
-                delivery,
-              });
-              return result.kind === "accepted"
-                ? agentResultDeliveryReceipt(delivery, result.turn.delivery)
-                : {
-                    kind: "refused",
-                    detail:
-                      "message" in result && typeof result.message === "string"
-                        ? result.message
-                        : "The delivery was not admitted.",
-                  };
-            } catch (error) {
-              if (error instanceof WorkTurnServiceError && error.failure.category === "stale") {
-                return { kind: "deferred", detail: "The parent Work thread is mid-turn." };
-              }
-              return {
-                kind: "refused",
-                detail:
-                  error instanceof Error ? error.message : "The delivery could not be admitted.",
-              };
-            }
-          },
-        },
-        code: {
-          inspect: async (run) =>
-            persistence.readCodeThread(decodeCodeThreadId(String(run.parentThreadId))) === undefined
-              ? { kind: "invalid", detail: "The parent Code thread is gone." }
-              : { kind: "ready" },
-          dispatch: async (runs) => {
-            const run = runs[0];
-            if (run === undefined)
-              return { kind: "refused", detail: "No child results were supplied." };
-            const delivery = {
-              kind: "agent-result" as const,
-              runId: run.id,
-              runIds: runs.map((child) => child.id),
-              runGenerations: runs.map((child) => ({
-                runId: child.id,
-                generation: child.generation ?? 1,
-              })),
-            };
-            const windowId = firstRegisteredWindowId();
-            if (windowId === undefined) {
-              return { kind: "deferred", detail: "No local window is registered for this host." };
-            }
-            const thread = persistence.readCodeThread(
-              decodeCodeThreadId(String(run.parentThreadId)),
-            );
-            if (
-              thread === undefined ||
-              routeCodeService.stageEvidence === undefined ||
-              routeCodeService.executeOperation === undefined
-            ) {
-              return { kind: "refused", detail: "The parent Code thread is gone." };
-            }
-            try {
-              const prompt = await routeCodeService.stageEvidence(
-                windowId,
-                thread.id,
-                agentResultDeliveryBatchPrompt(runs, (id) => agentRunPersistence.resultText(id)),
-              );
-              const result = await routeCodeService.executeOperation(windowId, {
-                kind: "start-provider-turn",
-                operationId: decodeCodeOperationId(randomUUID()),
-                threadId: thread.id,
-                checkoutId: thread.checkoutId,
-                sessionId: decodeProviderSessionId(randomUUID()),
-                prompt,
-                delivery,
-              });
-              return result.kind === "provider-turn-state" &&
-                (result.state === "running" ||
-                  result.state === "waiting" ||
-                  result.state === "completed")
-                ? agentResultDeliveryReceipt(delivery, result.delivery)
-                : {
-                    kind: "refused",
-                    detail:
-                      result.kind === "provider-turn-state" && result.failure !== undefined
-                        ? result.failure.message
-                        : "The delivery was not admitted.",
-                  };
-            } catch (error) {
-              return {
-                kind: "refused",
-                detail:
-                  error instanceof Error ? error.message : "The delivery could not be admitted.",
-              };
-            }
-          },
-        },
+        work: createWorkAgentResultDeliveryPort({
+          uuid: randomUUID,
+          resultText: (id) => agentRunPersistence.resultText(id),
+          isEnabled: () =>
+            enabledModes(
+              persistence.readShellSettings()?.settings ?? defaultShellSettings(),
+            ).includes("work"),
+          readThread: (threadId) => workThreadProjection.read(threadId),
+          startFirstTurn: (windowId, input) => workTurnService.startFirstTurn(windowId, input),
+        }),
+        code: createCodeAgentResultDeliveryPort({
+          uuid: randomUUID,
+          resultText: (id) => agentRunPersistence.resultText(id),
+          readThread: (threadId) => persistence.readCodeThread(threadId),
+          ...(routeCodeService.stageEvidence === undefined
+            ? {}
+            : { stageEvidence: routeCodeService.stageEvidence }),
+          ...(routeCodeService.executeOperation === undefined
+            ? {}
+            : { executeOperation: routeCodeService.executeOperation }),
+        }),
       },
       onError: (message, error) => console.error(`[agent-run-delivery] ${message}`, error),
     });
@@ -9396,17 +9300,6 @@ export function startOctantServer(
       projection: persistence.automationProjection,
       code: automationCodeDispatch,
       work: automationWorkDispatch,
-      windows: {
-        resolveWindowForProject: (projectId) => {
-          for (const windowId of windowAuthorityStore.listWindowIds()) {
-            // Prefer any registered local window; Project access is rechecked
-            // by the ordinary Code/Work creation path.
-            void projectId;
-            return windowId;
-          }
-          return undefined;
-        },
-      },
       capacity: {
         admit: (input) => {
           try {

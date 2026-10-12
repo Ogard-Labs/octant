@@ -4,7 +4,7 @@
  * journaled turn carrying the framed result — this service watches committed
  * appends, dispatches through the mode's ordinary turn admission, and
  * journals how the delivery settled. A dispatch the parent cannot take yet —
- * its own turn is running, or no local window is registered — stays armed and
+ * its own turn is running, or its mode is turned off — stays armed and
  * re-fires when the parent's aggregate commits again or the retry cadence
  * arrives. Nothing is polled away: a run whose delivery is still owed at boot
  * is found in the projection and delivered like one that finished live.

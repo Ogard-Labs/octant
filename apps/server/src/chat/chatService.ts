@@ -2699,6 +2699,17 @@ export class ChatService {
         message: "Chat turn is not part of the active conversation.",
       });
     }
+    if (this.#branchNeedsNativeSession(source, carried)) {
+      // A provider-owned conversation lives in one native session with one
+      // linear history. The branch cannot carry that session (it would share
+      // the source's later turns), and its carried attempts hold no resume
+      // cursor, so its first follow-up would refuse after the branch exists.
+      throw new ChatServiceError({
+        category: "unsupported",
+        message:
+          "This provider keeps its conversation in its own session, so it cannot be branched. Send a correction as a new message to keep the same session.",
+      });
+    }
     const branchThreadId = command.branchThreadId ?? decodeChatThreadId(this.#uuid());
     if (
       String(branchThreadId) === String(source.id) ||
@@ -2825,6 +2836,36 @@ export class ChatService {
       },
     );
     return { kind: "thread-created", thread: settled };
+  }
+
+  /**
+   * Whether a branch's next turn would need a native session it cannot have:
+   * the branch keeps the source's provider, and its next turn continues from
+   * the last completed attempt of its last carried turn, the only attempts a
+   * branch copies. When that attempt's provider can no longer be resolved its
+   * ownership is unknown, and the send-time check refuses such a turn, so the
+   * branch is refused too. An unresolvable source provider is left to turn
+   * routing, which may move a fresh turn to the fallback route.
+   */
+  #branchNeedsNativeSession(source: ChatThread, carried: ReadonlyArray<ChatTurn>): boolean {
+    const providerOwned = (providerInstanceId: string, whenUnknown: boolean): boolean => {
+      try {
+        return (
+          this.#driver(decodeProviderInstanceId(providerInstanceId)).conversationOwnership ===
+          "provider"
+        );
+      } catch {
+        return whenUnknown;
+      }
+    };
+    const lastCarried = carried
+      .at(-1)
+      ?.attempts.filter((attempt) => attempt.outcome === "completed")
+      .at(-1);
+    return (
+      providerOwned(String(source.providerInstanceId), false) ||
+      (lastCarried !== undefined && providerOwned(String(lastCarried.providerInstanceId), true))
+    );
   }
 
   async #retryTurn(

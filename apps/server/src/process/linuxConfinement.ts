@@ -13,9 +13,9 @@ import { tmpdir } from "node:os";
 import { isAbsolute, join, normalize, parse, resolve, sep } from "node:path";
 import {
   confinedExecutableExecPaths,
-  SeatbeltConfinementError,
+  ProcessConfinementError,
   type ConfinedProcessLaunch,
-  type SeatbeltConfinementPrepareInput,
+  type ProcessConfinementPrepareInput,
 } from "./seatbeltProfile";
 import { buildLinuxProcessDenySeccompFilter } from "./linuxProcessDenySeccomp";
 
@@ -45,13 +45,13 @@ export function buildLinuxAllowDefaultDenyLaunch(
   const bwrapPath = options.bwrapPath ?? DEFAULT_BWRAP_PATH;
   requireLinuxConfinement(bwrapPath);
   if (!isAbsolute(input.executable)) {
-    throw new SeatbeltConfinementError(
+    throw new ProcessConfinementError(
       "invalid-configuration",
       "Linux confinement executable path must be absolute.",
     );
   }
   if (!isAbsolute(input.cwd)) {
-    throw new SeatbeltConfinementError(
+    throw new ProcessConfinementError(
       "invalid-configuration",
       "Linux Full access working directory must be absolute.",
     );
@@ -69,7 +69,7 @@ export function buildLinuxAllowDefaultDenyLaunch(
   ];
   for (const path of input.denyPaths) {
     if (!isAbsolute(path)) {
-      throw new SeatbeltConfinementError(
+      throw new ProcessConfinementError(
         "invalid-configuration",
         `Linux Full access deny path "${path}" must be absolute.`,
       );
@@ -81,7 +81,7 @@ export function buildLinuxAllowDefaultDenyLaunch(
     }
     const source = createEmptySourceForPath(path);
     if (source === undefined) {
-      throw new SeatbeltConfinementError(
+      throw new ProcessConfinementError(
         "invalid-configuration",
         `Linux Full access deny path "${path}" could not be overlaid.`,
       );
@@ -94,48 +94,45 @@ export function buildLinuxAllowDefaultDenyLaunch(
 
 export function requireLinuxConfinement(bwrapPath: string): void {
   if (!isAbsolute(bwrapPath)) {
-    throw new SeatbeltConfinementError(
-      "invalid-configuration",
-      "Bubblewrap path must be absolute.",
-    );
+    throw new ProcessConfinementError("invalid-configuration", "Bubblewrap path must be absolute.");
   }
   try {
     accessSync(bwrapPath, constants.X_OK);
   } catch {
-    throw new SeatbeltConfinementError(
+    throw new ProcessConfinementError(
       "incompatible",
       "Linux confinement requires an executable bubblewrap (bwrap) runtime.",
     );
   }
 }
 
-export function buildLinuxConfinementLaunch(
-  input: SeatbeltConfinementPrepareInput,
+export function buildBubblewrapLaunch(
+  input: ProcessConfinementPrepareInput,
   options: BuildLinuxConfinementLaunchInput = {},
 ): ConfinedProcessLaunch {
   const bwrapPath = options.bwrapPath ?? DEFAULT_BWRAP_PATH;
   requireLinuxConfinement(bwrapPath);
 
   if (!isAbsolute(input.executable)) {
-    throw new SeatbeltConfinementError(
+    throw new ProcessConfinementError(
       "invalid-configuration",
       "Linux-confined executable path must be absolute.",
     );
   }
   if (!isAbsolute(input.boundRoot)) {
-    throw new SeatbeltConfinementError(
+    throw new ProcessConfinementError(
       "invalid-configuration",
       "Linux confinement bound root must be absolute.",
     );
   }
   if (!isAbsolute(input.temporaryDirectory)) {
-    throw new SeatbeltConfinementError(
+    throw new ProcessConfinementError(
       "invalid-configuration",
       "Linux confinement temporary directory must be absolute.",
     );
   }
   if (input.extraRules !== undefined && input.extraRules.length > 0) {
-    throw new SeatbeltConfinementError(
+    throw new ProcessConfinementError(
       "incompatible",
       "Linux confinement does not support extra Seatbelt rules.",
     );
@@ -274,7 +271,7 @@ export function buildLinuxConfinementLaunch(
 
   function bindAdditionalDenyPath(path: string, kind: "read" | "write"): void {
     if (!isAbsolute(path)) {
-      throw new SeatbeltConfinementError(
+      throw new ProcessConfinementError(
         "invalid-configuration",
         `Linux confinement additional deny ${kind} path "${path}" must be absolute.`,
       );
@@ -375,7 +372,7 @@ function writeProcessDenySeccompFilter(
   assertNoSymlinkComponents(temporaryDirectory);
   const parentStats = lstatSync(temporaryDirectory);
   if (!parentStats.isDirectory()) {
-    throw new SeatbeltConfinementError(
+    throw new ProcessConfinementError(
       "invalid-configuration",
       "Linux confinement temporary directory must be a directory.",
     );
@@ -396,7 +393,7 @@ function assertNoSymlinkComponents(path: string): void {
     current = join(current, segment);
     try {
       if (lstatSync(current).isSymbolicLink()) {
-        throw new SeatbeltConfinementError(
+        throw new ProcessConfinementError(
           "invalid-configuration",
           "Linux confinement temporary directory must not contain symbolic links.",
         );
@@ -419,7 +416,7 @@ function isMissingPath(error: unknown): boolean {
 
 function linuxSeccompArch(arch: NodeJS.Architecture): "x64" | "arm64" {
   if (arch === "x64" || arch === "arm64") return arch;
-  throw new SeatbeltConfinementError(
+  throw new ProcessConfinementError(
     "incompatible",
     "Linux process denial requires an x64 or arm64 kernel.",
   );
@@ -433,7 +430,7 @@ function wrapLinuxLaunchWithSeccomp(
   try {
     accessSync(HOST_SH_PATH, constants.X_OK);
   } catch {
-    throw new SeatbeltConfinementError(
+    throw new ProcessConfinementError(
       "incompatible",
       "Linux process denial requires an executable /bin/sh to install the seccomp filter.",
     );

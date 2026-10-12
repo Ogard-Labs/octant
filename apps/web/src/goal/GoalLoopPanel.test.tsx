@@ -132,7 +132,7 @@ describe("watching a loop work on its own", () => {
     );
 
     expect(await screen.findByRole("button", { name: "Start loop" })).toBeVisible();
-    expect(screen.getByText(/checkpointed first/i)).toBeVisible();
+    expect(screen.getByText(/no checkpoint to go back to/i)).toBeVisible();
     expect(screen.getByText(/stops at the budget/i)).toBeVisible();
   });
 

@@ -1,7 +1,15 @@
 import type { CanvasDiagramBlock } from "@octant/contracts/canvas";
 import type { CanvasDiagramNodePosition } from "@octant/contracts/canvas-board";
 import { layoutCanvasDiagram } from "@octant/domain";
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type PointerEvent,
+} from "react";
 import { OctantButton } from "../../ui/base/OctantButton";
 import { OctantAlert } from "../../ui/base/OctantAlert";
 
@@ -124,15 +132,33 @@ export function DiagramBoard(props: DiagramBoardProps) {
     return rect.width === 0 ? 1 : viewWidth / viewport.zoom / rect.width;
   };
 
-  const zoomBy = (factor: number) =>
-    setViewport((current) => {
-      const zoom = clampZoom(current.zoom * factor);
-      // Zoom about the centre of what is on screen, so the picture grows in
-      // place instead of running off toward the origin.
-      const centreX = current.x + viewWidth / current.zoom / 2;
-      const centreY = current.y + viewHeight / current.zoom / 2;
-      return { zoom, x: centreX - viewWidth / zoom / 2, y: centreY - viewHeight / zoom / 2 };
-    });
+  const zoomBy = useCallback(
+    (factor: number) =>
+      setViewport((current) => {
+        const zoom = clampZoom(current.zoom * factor);
+        // Zoom about the centre of what is on screen, so the picture grows in
+        // place instead of running off toward the origin.
+        const centreX = current.x + viewWidth / current.zoom / 2;
+        const centreY = current.y + viewHeight / current.zoom / 2;
+        return { zoom, x: centreX - viewWidth / zoom / 2, y: centreY - viewHeight / zoom / 2 };
+      }),
+    [viewWidth, viewHeight],
+  );
+  // React attaches wheel listeners as passive, so an onWheel prop cannot
+  // consume the event. In Electron an unconsumed ctrl+wheel (also what a
+  // trackpad pinch sends) scrolls the thread while the board zooms; a plain
+  // wheel stays unconsumed so the thread keeps scrolling past the board.
+  useEffect(() => {
+    const svg = svgRef.current;
+    if (svg === null) return;
+    const onWheel = (event: WheelEvent) => {
+      if (!event.ctrlKey && !event.metaKey) return;
+      event.preventDefault();
+      zoomBy(event.deltaY < 0 ? ZOOM_STEP : 1 / ZOOM_STEP);
+    };
+    svg.addEventListener("wheel", onWheel, { passive: false });
+    return () => svg.removeEventListener("wheel", onWheel);
+  }, [zoomBy]);
   const fit = () => setViewport(fitViewport());
 
   const commit = async (nodeId: string, x: number, y: number) => {
@@ -302,10 +328,6 @@ export function DiagramBoard(props: DiagramBoardProps) {
         onPointerDown={onBackgroundPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
-        onWheel={(event) => {
-          if (!event.ctrlKey && !event.metaKey) return;
-          zoomBy(event.deltaY < 0 ? ZOOM_STEP : 1 / ZOOM_STEP);
-        }}
         ref={svgRef}
         viewBox={viewBox}
       >

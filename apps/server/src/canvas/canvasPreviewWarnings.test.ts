@@ -37,14 +37,12 @@ function richText(blockId: string): CanvasBlock {
 function warningsFor(
   blocks: ReadonlyArray<CanvasBlock>,
   options: {
-    readonly presentation?: "inline" | "sidebar";
     readonly width?: number;
     readonly palette?: CanvasPreviewPalette;
   } = {},
 ): ReturnType<typeof canvasPreviewWarnings> {
   return canvasPreviewWarnings({
     definition: { blocks },
-    presentation: options.presentation ?? "sidebar",
     width: options.width ?? 720,
     palette: options.palette ?? canvasPreviewPalette("light"),
   });
@@ -135,6 +133,11 @@ describe("canvasPreviewWarnings", () => {
     expect(warningsFor(blocks)).toEqual([{ kind: "empty-series", blockId: "blank" }]);
   });
 
+  it("does not warn about the length of a long reading document", () => {
+    const blocks = Array.from({ length: 40 }, (_unused, index) => richText(`block-${index}`));
+    expect(warningsFor(blocks)).toEqual([]);
+  });
+
   it("reports a sankey as no empty series and a funnel's long stage as no clipped slot", () => {
     const blocks = chartExampleBlocks.filter(
       (candidate) =>
@@ -179,15 +182,6 @@ describe("canvasPreviewWarnings", () => {
     expect(narrow.some((warning) => warning.kind === "clipped-label")).toBe(true);
     // The whole row is the document's width less the cell's frame.
     expect(warningsFor([dashboard(4), chart, tile], { width: 1100 })).toEqual([]);
-  });
-
-  it("reports an inline document that is past the block cap", () => {
-    const blocks = Array.from({ length: 13 }, (_unused, index) => richText(`block-${index}`));
-    expect(warningsFor(blocks, { presentation: "inline" })).toContainEqual({
-      kind: "inline-height-cap-exceeded",
-      blockCount: 13,
-      limit: 12,
-    });
   });
 
   it("reports ink that does not clear its contrast target on the surface", () => {

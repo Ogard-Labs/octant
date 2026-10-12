@@ -152,7 +152,7 @@ export function createCanvasPreviewService(
         const presentation =
           request.width === "inline" ? "inline" : effectiveCanvasPresentation(definition);
         const palette = canvasPreviewPalette(request.theme);
-        const warnings = canvasPreviewWarnings({ definition, presentation, width, palette });
+        const warnings = canvasPreviewWarnings({ definition, width, palette });
         const base = {
           kind: "preview",
           canvasId: String(version.version.canvasId),

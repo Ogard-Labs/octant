@@ -3361,6 +3361,8 @@ function evidenceReferences(event: CodeOperationEvent): readonly CodeEvidenceRef
       return [event.content];
     case "context-handoff-attached":
       return event.reason === "fork-native-session" ? [] : [event.content];
+    case "fork-context-merged":
+      return [event.content];
     case "operation-result":
       return resultEvidenceReferences(event.result);
     default:

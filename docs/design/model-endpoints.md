@@ -1,0 +1,66 @@
+# Providers and model endpoints
+
+This is the current specification for the Settings pages that list bundled
+provider drivers and the model endpoints Octant calls itself.
+[DESIGN.md](../../DESIGN.md#shell-and-layout) owns the Settings kit these pages
+are built from and the provider card on Providers & Models;
+[architecture](../architecture.md#providers) owns provider authority and
+credential boundaries. Update this specification with an approved change,
+following the [design workflow](README.md#changing-the-design).
+
+## Provider catalog
+
+Provider catalog, the Models page after Providers & Models, lists every
+bundled provider driver in the Model endpoints row style. Agent runtimes and
+model endpoints are two sections. A row is one link named with its state
+("Codex CLI, off. Open setup") and shows the mark, the name, "Agent runtime ·
+Bundled" or "Model endpoint · Bundled", and the state in words beside the same
+dot shapes. The states are Ready, Sign in to use, Partly working, Checking…,
+Not checked yet, Found, not added, Not looked for yet, Not on this host, Not
+added, Off, Can't start, Version not supported, and Not available. A one-line
+introduction says each driver is already installed and trusted, followed by a
+summary ("21 drivers · 3 ready · 1 need you"). Opening a row replaces the page
+with that driver's setup sub-page: breadcrumb, Back, and Escape as on an
+endpoint's page, and an h1 with the driver's name. It leads with Set up, a
+numbered list of steps (Find it on this host, for runtimes only; Add it to
+Octant or Add the endpoint; Turn it on; Sign in; Check the connection). Done
+steps carry a check. The current step carries one sentence, one action, and a
+polite live region where a refusal shows the host's reason with Try again.
+Next comes the runtime's own Providers & Models card (an endpoint links to its
+Model endpoints page instead). Then come State (Available, Enabled, Signed in,
+and Ready, each in words with its dot), What it can do (Chat, Work, Code, and
+Agent loop in plain sentences), and Package (Bundled with Octant, installed,
+trusted and by whom it was reviewed, and the driver version). It offers no
+install or trust action, because a bundled driver needs neither. Opening the
+page or a setup runs nothing; at phone width a fact's value moves under its
+name.
+
+## Octant Harness model endpoints
+
+Octant Harness lists its model endpoints differently: as rows in one list, never two-up cards. A row is a single link named with its state ("Team gateway, not working, open details") and holds the source mark (the bundled mark keyed by the endpoint's sign-in, a monogram otherwise), the name, a sub-line (who is signed in, or the host and "API key" or "No key"), the state in words beside a dot whose shape carries it (filled for ready, a ring when it needs you, a dashed ring for off, a muted ring for not checked, a turning ring for checking that is a static dotted ring under reduced motion, and a diamond for failed), and the model count ("12 of 63 shown"). The states are Ready, Sign in to use, Signed out, Checking…, Can't connect, Key refused, Key needed, Not working, No models yet, Not checked yet, and Off. One that needs you adds one plain sentence and exactly one fix button under the link (Sign in, Sign in again, Try again, Replace key, Add key, Edit address, Add model IDs, Check now), announced through a polite live region on that row; a failed check never raises a page-level banner. The enable switch is the detail page's Use switch, and an endpoint that is off says "Off · kept, not offered" on its row.
+
+### Endpoint detail
+
+Opening a row replaces the page with the endpoint's detail sub-page (breadcrumb Settings / Octant Harness / endpoint, a Back control, and Escape), whose h1 is the endpoint's name; Back returns focus to the row. The sub-page leads with the state, Check now, and Use, then the one fix, then Sign-in or API key, Models (search, a Shown / Hidden / All filter, a switch per model, and the plain tags "Reads images" and "Chat only · Verify tools"), Where your data goes (two labelled checkboxes the person sets, with per-model overrides in a disclosure), Name and address, Diagnostics (a disclosure that opens by itself only while the endpoint is failing, holding the address, protocol, authentication, last check with the host's precise answer, tool use, and capabilities), and Remove last, confirmed in a dialog that starts on Keep and names the model roles that lose a model. Precise terms (protocol names, bearer, capability names) appear only in Diagnostics.
+
+### Add endpoint
+
+Add endpoint opens a dialog: the sign-ins first, then a guided flow with a numbered strip of steps. Kind is four cards (Azure AI Foundry, OpenAI-compatible, Anthropic-compatible, Local (Ollama)). Connect asks for a name, the address, and the key, each with a one-line hint, and no control is greyed out without a sentence saying why; protocol, how the key is sent, and "It takes no key" sit under Advanced, and an Azure address entered as OpenAI-compatible offers Switch to Azure AI Foundry. Azure also names at least one deployment, as chips, because the host cannot add it without one. Check and add adds the endpoint and shows its row state in the dialog, with its fix; from then on the endpoint exists, and closing the dialog keeps it. Models lists a short catalogue whole and chosen; a long one is searched, lists at most eight matches with a count of the rest, starts with nothing chosen, and has an Add by ID row; models left unchosen are hidden from the model picker. Azure edits its deployment chips; Local lists the models installed in Ollama, with no Add by ID. Verify tools checks each chosen model, one request at a time, after a button that says how many requests it sends; each model reads Checking…, Verified, or "Chat only" with the reason and Retry, and a failed check never stops the endpoint being added. Ollama models are Chat only without a request, with the reason said once. Agents is optional: only verified models can be offered to helper agents or given an Octant Harness role (a Chat only model is listed with its checkbox off and a sentence saying why; role choices list verified models only, and Reading images only those that read images). A chosen role makes the model its first choice and keeps what it had as backups, saved with the roles' version; a stale version reloads the roles and asks again. In a browser, a kind that needs a key is added without one and reads Needs key, sending the person to the desktop app; Local works fully. "Chat only · Verify tools" is the one label for an unverified model on the endpoint row (when no shown model is verified), the endpoint's Models, the model pickers, and Add endpoint. Targets are 44px tall at phone width.
+
+## Endpoint address and stored key
+
+A model endpoint's API key belongs to the address it was entered for, so the
+host deletes it when the saved address changes. The address field says so
+while it differs from the saved one, in calm guidance text beneath the field
+that is also the field's accessible description: saving removes the stored
+key and it must be entered again. A spelling that normalises to the saved
+address (such as a missing trailing slash) shows nothing. Until a check runs,
+a keyed endpoint whose host credential store holds no key reads Needs key with
+Add key on its row, in the same state a refused or missing key uses.
+
+## Verification
+
+- Provider catalog: `apps/web/src/providers/catalog/ProviderCatalogView.test.tsx`.
+- Add endpoint: `apps/web/src/settings/harness/AddEndpointFlow.test.tsx`.
+- Render changed pages at desktop and phone width, including each refusal line
+  and the keyboard path back from a detail sub-page.
