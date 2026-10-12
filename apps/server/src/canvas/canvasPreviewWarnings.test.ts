@@ -37,20 +37,82 @@ function richText(blockId: string): CanvasBlock {
 function warningsFor(
   blocks: ReadonlyArray<CanvasBlock>,
   options: {
-    readonly presentation?: "inline" | "sidebar";
     readonly width?: number;
     readonly palette?: CanvasPreviewPalette;
   } = {},
 ): ReturnType<typeof canvasPreviewWarnings> {
   return canvasPreviewWarnings({
     definition: { blocks },
-    presentation: options.presentation ?? "sidebar",
     width: options.width ?? 720,
     palette: options.palette ?? canvasPreviewPalette("light"),
   });
 }
 
 describe("canvasPreviewWarnings", () => {
+  it("names the frames and the id of each design image the host could not draw, never the bytes", () => {
+    const design = block({
+      blockId: "phone",
+      schemaVersion: 17,
+      kind: "design",
+      title: "Onboarding",
+      size: "phone",
+      styles: ".brand { background: url(octant-asset:logo); }",
+      assets: [
+        { assetId: "shot", source: { kind: "project-file", path: "screens/home.png" } },
+        { assetId: "shot-2", source: { kind: "project-file", path: "screens/two.png" } },
+        { assetId: "logo", source: { kind: "project-file", path: "logo.png" } },
+        {
+          assetId: "hero",
+          source: { kind: "generated-image", imageId: "11111111-1111-4111-8111-111111111111" },
+        },
+      ],
+      frames: [
+        { frameId: "home", title: "Home", html: '<img src="octant-asset:shot" alt="">' },
+        { frameId: "two", title: "Two", html: '<img src="octant-asset:shot-2" alt="">' },
+      ],
+    });
+    const warnings = canvasPreviewWarnings({
+      definition: { blocks: [design] },
+      width: 720,
+      palette: canvasPreviewPalette("light"),
+      designAssets: new Map([
+        [
+          "phone",
+          [
+            { assetId: "shot", status: "unavailable", reason: "refused" },
+            { assetId: "shot-2", status: "resolved", mediaType: "image/png", data: "iVBORw0KGgo=" },
+            { assetId: "logo", status: "unavailable", reason: "missing" },
+          ] as never,
+        ],
+      ]),
+    });
+    expect(warnings).toEqual([
+      {
+        kind: "design-asset-unavailable",
+        blockId: "phone",
+        assetId: "shot",
+        reason: "refused",
+        frameIds: ["home"],
+      },
+      {
+        kind: "design-asset-unavailable",
+        blockId: "phone",
+        assetId: "logo",
+        reason: "missing",
+        frameIds: ["home", "two"],
+      },
+      // Not resolved at all reads as refused, as a reader would see it.
+      {
+        kind: "design-asset-unavailable",
+        blockId: "phone",
+        assetId: "hero",
+        reason: "refused",
+        frameIds: [],
+      },
+    ]);
+    expect(JSON.stringify(warnings)).not.toContain("iVBOR");
+  });
+
   it("reports nothing for a document that reads cleanly", () => {
     const blocks = [
       richText("summary"),
@@ -135,6 +197,11 @@ describe("canvasPreviewWarnings", () => {
     expect(warningsFor(blocks)).toEqual([{ kind: "empty-series", blockId: "blank" }]);
   });
 
+  it("does not warn about the length of a long reading document", () => {
+    const blocks = Array.from({ length: 40 }, (_unused, index) => richText(`block-${index}`));
+    expect(warningsFor(blocks)).toEqual([]);
+  });
+
   it("reports a sankey as no empty series and a funnel's long stage as no clipped slot", () => {
     const blocks = chartExampleBlocks.filter(
       (candidate) =>
@@ -179,15 +246,6 @@ describe("canvasPreviewWarnings", () => {
     expect(narrow.some((warning) => warning.kind === "clipped-label")).toBe(true);
     // The whole row is the document's width less the cell's frame.
     expect(warningsFor([dashboard(4), chart, tile], { width: 1100 })).toEqual([]);
-  });
-
-  it("reports an inline document that is past the block cap", () => {
-    const blocks = Array.from({ length: 13 }, (_unused, index) => richText(`block-${index}`));
-    expect(warningsFor(blocks, { presentation: "inline" })).toContainEqual({
-      kind: "inline-height-cap-exceeded",
-      blockCount: 13,
-      limit: 12,
-    });
   });
 
   it("reports ink that does not clear its contrast target on the surface", () => {

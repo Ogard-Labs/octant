@@ -45,9 +45,9 @@ import { homedir, tmpdir } from "node:os";
 import { dirname, join, sep } from "node:path";
 
 import {
-  makeSeatbeltConfinementLive,
-  SeatbeltConfinementError,
-  type SeatbeltConfinementPort,
+  makeProcessConfinementLive,
+  ProcessConfinementError,
+  type ProcessConfinementPort,
 } from "./seatbeltProfile";
 
 export interface ConfinedVersionProbeLaunch {
@@ -88,7 +88,7 @@ export interface PrepareConfinedVersionProbeInput {
    * of the same name would not.
    */
   readonly guards?: Readonly<Record<string, string>>;
-  readonly confinement?: SeatbeltConfinementPort;
+  readonly confinement?: ProcessConfinementPort;
   readonly temporaryRoot?: string;
   readonly homeDirectory?: string;
 }
@@ -124,7 +124,7 @@ export function prepareConfinedVersionProbe(
       scratchDirectory,
       input.guards ?? {},
     );
-    const confinement = input.confinement ?? makeSeatbeltConfinementLive();
+    const confinement = input.confinement ?? makeProcessConfinementLive();
     const readRoots = versionProbeReadRoots(
       input.binaryPath,
       scratchDirectory,
@@ -164,11 +164,11 @@ export function prepareConfinedVersionProbe(
     return {
       status: "refused",
       reason:
-        error instanceof SeatbeltConfinementError && error.reason === "invalid-configuration"
+        error instanceof ProcessConfinementError && error.reason === "invalid-configuration"
           ? "invalid-configuration"
           : "incompatible",
       message:
-        error instanceof SeatbeltConfinementError
+        error instanceof ProcessConfinementError
           ? error.message
           : `${name} version probe confinement could not be prepared.`,
     };

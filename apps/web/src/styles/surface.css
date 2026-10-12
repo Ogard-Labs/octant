@@ -459,7 +459,7 @@
 .composer-tray__item {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: var(--oct-space-1);
   min-height: 24px;
   height: 24px;
   padding: 0 var(--oct-space-2);

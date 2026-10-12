@@ -6,7 +6,7 @@ import {
   prepareGitSeatbeltLaunch,
   type GitSeatbeltPortOptions,
 } from "./process/gitSeatbeltLaunch";
-import { SeatbeltConfinementError } from "./process/seatbeltProfile";
+import { ProcessConfinementError } from "./process/seatbeltProfile";
 import {
   parseNumstat,
   parseStatus,
@@ -312,7 +312,7 @@ export class GitEnvironmentPort {
       .then(() => {
         const checkoutRoot = args[0] === "-C" ? args[1] : undefined;
         if (checkoutRoot === undefined || !isAbsolute(checkoutRoot)) {
-          throw new SeatbeltConfinementError(
+          throw new ProcessConfinementError(
             "invalid-configuration",
             "Git environment commands require an absolute -C checkout root.",
           );

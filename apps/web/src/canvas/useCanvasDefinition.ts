@@ -1,11 +1,15 @@
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
-import type { CanvasDefinition } from "@octant/contracts/canvas";
+import type { CanvasDefinition, CanvasVersionId } from "@octant/contracts/canvas";
 import type { CanvasThreadReferenceCard } from "@octant/contracts/canvas-cards";
 import { useEffect, useState } from "react";
 
 export type LoadedCanvas =
   | { readonly kind: "loading" }
-  | { readonly kind: "ready"; readonly definition: CanvasDefinition }
+  | {
+      readonly kind: "ready";
+      readonly definition: CanvasDefinition;
+      readonly versionId: CanvasVersionId;
+    }
   | { readonly kind: "unavailable" };
 
 /**
@@ -30,7 +34,11 @@ export function useCanvasDefinition(
         if (cancelled) return;
         setLoaded(
           outcome.kind === "ready"
-            ? { kind: "ready", definition: outcome.version.definition }
+            ? {
+                kind: "ready",
+                definition: outcome.version.definition,
+                versionId: outcome.version.versionId,
+              }
             : { kind: "unavailable" },
         );
       })

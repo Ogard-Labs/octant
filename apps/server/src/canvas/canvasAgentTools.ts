@@ -1,5 +1,8 @@
 import {
   CanvasBlock,
+  CANVAS_DESIGN_ASSET_MAX_BYTES,
+  CANVAS_DESIGN_ASSETS_MAX_BYTES,
+  CANVAS_MAX_DESIGN_ASSETS,
   CANVAS_SCHEMA_VERSION,
   decodeCanvasActor,
   decodeCanvasBlock,
@@ -40,6 +43,7 @@ import {
   mockupExamples,
   onboardingFlowExample,
   launchDeckExample,
+  searchSpecExample,
   treemapExamples,
   heatmapExamples,
   barListExamples,
@@ -50,7 +54,6 @@ import {
   designBriefExample,
   launchGanttExample,
   dashboardExamples,
-  CANVAS_INLINE_MAX_BLOCKS,
   canvasInlineRefusal,
   effectiveCanvasPresentation,
 } from "@octant/domain";
@@ -147,7 +150,8 @@ const canvasDefinitionSchema = {
     presentation: {
       type: "string",
       enum: ["inline", "sidebar"],
-      description: `For create and revise: inline draws a small Canvas (at most ${String(CANVAS_INLINE_MAX_BLOCKS)} blocks, no diagram board, plan, mockup, or design) inside the conversation; sidebar, the default, shows a card that opens it beside the thread. Revise keeps the current choice when omitted.`,
+      description:
+        "For create and revise: inline draws the Canvas inside the conversation (any number of reading blocks; no diagram board, plan, mockup, or design); sidebar, the default, shows a card that opens it beside the thread. Revise keeps the current choice when omitted.",
     },
   },
   required: ["operation"],
@@ -262,7 +266,9 @@ function describedExamples(kinds: ReadonlyArray<string>): ReadonlyArray<unknown>
     if (kind === "mindmap") examples.push(releaseMindmapExample);
     if (kind === "chart") examples.push(...chartExamples);
     if (kind === "mockup") examples.push(...mockupExamples);
-    if (kind === "design") examples.push(onboardingFlowExample, launchDeckExample);
+    if (kind === "design") {
+      examples.push(onboardingFlowExample, launchDeckExample, searchSpecExample);
+    }
     if (kind === "treemap") examples.push(...treemapExamples);
     if (kind === "heatmap") examples.push(...heatmapExamples);
     if (kind === "bar-list") examples.push(...barListExamples);
@@ -348,6 +354,18 @@ const LAYOUT_GROUP_GUIDE =
   "To arrange a long document, use tabs or columns. Both name blocks the same document holds, by blockId, and the document draws each named block inside its tab or column instead of in the block list. tabs has 2 to 12 panes, each with a short label and the blockIds it shows; columns has 2 to 4 tracks, each with the blockIds it stacks, and folds to one column when the Canvas is narrow. A block sits in at most one tab, track, or dashboard cell; a tab or track may hold a dashboard but never another tabs or columns block or an action. Which tab is open is the reader's choice and is never saved.";
 
 /**
+ * How a design shows a real image, in the words of the thread's mode: a Chat
+ * Project has no folder, so its designs reach only images generated in it.
+ */
+function designAssetGuidance(mode: "chat" | "work" | "code"): string {
+  const sources =
+    mode === "chat"
+      ? 'Each asset is a generated image made in this Chat Project, {"kind": "generated-image", "imageId": "<attachment id of a completed image>"}; a Chat Project has no folder, so a file path is refused.'
+      : `Each asset is a generated image made in this Project, {"kind": "generated-image", "imageId": "<attachment id of a completed image>"}, or a file in ${mode === "work" ? "this thread's folder" : "this thread's checkout"}, {"kind": "project-file", "path": "screens/home.png"} relative to its root (no .., no absolute path, no link that leaves it).`;
+  return `To show a real screenshot, a generated image, or a Project image in a design, declare it in the design's assets as {"assetId": "home-shot", "source": ...} and name it in a frame or in styles as octant-asset:home-shot in src, srcset, url(), or image-set(), written exactly like that. ${sources} The host reads PNG, JPEG, GIF, or WebP (not SVG; draw vector art inline) up to ${String(CANVAS_DESIGN_ASSET_MAX_BYTES / (1024 * 1024))} MB each and ${String(CANVAS_DESIGN_ASSETS_MAX_BYTES / (1024 * 1024))} MB per design, at most ${String(CANVAS_MAX_DESIGN_ASSETS)} per design, and draws a placeholder for one it cannot read; preview names it. The frame itself still loads nothing.`;
+}
+
+/**
  * Which block kind fits a need, and how to author it.
  *
  * Decision 0067 keeps the always-visible tool prefix small, and this guidance
@@ -415,7 +433,7 @@ const BLOCK_GUIDANCE: Readonly<Record<string, { readonly use: string; readonly d
     design: {
       use: "Finished-looking app screens, a website or landing page, or a slide deck.",
       detail:
-        'A finished-looking design is a design block: app screens, a website or landing page, or a slide deck. Pick one size for the block (phone 390x844, tablet 820x1180, desktop 1440x900, or slide 1920x1080), put shared CSS in styles, and write each screen or slide as a frame of static HTML. The person clicks through it, so link frames with href="#frameId"; a link may only name a frame or a section. Frames run no JavaScript and load nothing: no script, event handlers, external links, remote images, fonts, or imports. Draw images with inline SVG, CSS gradients, or data:image URLs, and use system fonts. Make it look finished: real copy, a clear type scale, and a deliberate palette.',
+        'A finished-looking design is a design block: app screens, a website or landing page, a slide deck, or a document such as an article, spec, or design system. Pick one size for the block (phone 390x844, tablet 820x1180, desktop 1440x900, slide 1920x1080, or document, as wide as the Canvas and as tall as its content), put shared CSS in styles, and write each screen, slide, or document section as a frame of static HTML. Link frames with href="#frameId"; a link may only name a frame or a section. Frames run no JavaScript and load nothing: no script, event handlers, external links, remote images, fonts, or imports. Draw images with inline SVG, CSS gradients, or data:image URLs. A document is drawn in the workspace theme (theme workspace, its default; a device size defaults to none and keeps its own palette): it gets Octant\'s fonts and --oct-* colour tokens and the kit classes oct-article, oct-eyebrow, oct-lede, oct-grid, oct-card, oct-metrics with oct-metric (__label, __value, __delta--good or --bad), oct-badge (--accent, --success, --warn, --danger), oct-callout (--success, --warn, --danger), oct-table in oct-table-wrap, oct-code, and oct-tabs (radio inputs with labels, then one div.oct-tab-panel per tab, at most eight tabs). In a document, use the kit and tokens rather than your own colours or fonts, and never size anything with vh. Make a device design look finished: real copy, a clear type scale, and a deliberate palette. Describe design to get a phone flow, a deck, and a themed spec.',
     },
     "bar-list": {
       use: "A ranking, such as hottest files or slowest tests.",
@@ -466,7 +484,11 @@ const RECIPE_GUIDE =
   'Match the request to a document recipe before inventing a shape: "write a plan" uses implementation-plan, "review this PR" uses code-review, "summarise research" uses research-brief, and "decide between designs" uses architecture-review. Fill a recipe\'s roles from block kinds that exist today, and do not invent a block kind the catalogue does not have.';
 
 const PREVIEW_GUIDE =
-  "Preview returns the same picture the person will see and the warnings it can measure: an inline document past its height cap, and on a chart clipped labels, legend overflow, empty series, or ink below its contrast target, and on a bar list clipped labels or empty series. Every other block kind gets no warnings, so read its picture yourself.";
+  "Preview returns the same picture the person will see and the warnings it can measure: an inline document past its height cap, and on a chart clipped labels, legend overflow, empty series, or ink below its contrast target, on a bar list clipped labels or empty series, and on a design each declared image the host could not draw, with the frames that name it. Every other block kind gets no warnings, so read its picture yourself.";
+
+/** When a design should run script, and what a running one still may not do. */
+const DESIGN_PROTOTYPE_GUIDANCE =
+  'When the person asks for a working prototype (state that changes as they click, such as a cart that fills or a form that validates), set "runsScript": true on the design. Its frames may then use inline <script> elements and event handlers (onclick and the like); keep everything in the design. Still refused: <script src>, remote images, fonts, stylesheets, and imports, <meta>, <base>, <link>, iframes and other embedded documents, links that leave the design, and theme workspace (style a prototype yourself). It has no network at all: fetch, XHR, WebSocket, forms, and new windows are blocked, so put its data in the script. The person starts it with Run in the thread, and Octant stops a prototype that stops responding or loads another page. Use it only when interaction needs state; a clickable flow between screens is a static design with href="#frameId" links.';
 
 function blockGuide(): Readonly<Record<string, string>> {
   return Object.fromEntries(
@@ -474,11 +496,20 @@ function blockGuide(): Readonly<Record<string, string>> {
   );
 }
 
-function describedGuidance(kinds: ReadonlyArray<string>): Readonly<Record<string, string>> {
+function describedGuidance(
+  kinds: ReadonlyArray<string>,
+  mode: "chat" | "work" | "code",
+): Readonly<Record<string, string>> {
   const guidance: Record<string, string> = {};
   for (const kind of kinds) {
     const detail = BLOCK_GUIDANCE[kind]?.detail;
-    if (detail !== undefined) guidance[kind] = detail;
+    if (detail === undefined) continue;
+    // Which images a design can reach depends on the thread's mode, so that
+    // part is written per describe rather than stored with the kind.
+    guidance[kind] =
+      kind === "design"
+        ? `${detail} ${designAssetGuidance(mode)} ${DESIGN_PROTOTYPE_GUIDANCE}`
+        : detail;
   }
   return guidance;
 }
@@ -507,9 +538,9 @@ function toolDescription(
       ? "When the request iterates on earlier work, revise the existing Canvas instead of creating another: list returns this run's Canvases, and read returns one's current blocks and sequence."
       : "When the request iterates on earlier work, revise the thread's existing Canvas instead of creating another: list returns this thread's Canvases, and read returns one's current blocks and sequence.",
     "Operations: describe, list, read, create, revise, preview. Before you author, call describe: with no block kinds it lists every kind, when to use the structured ones, the document recipes to start from, and a create example; with up to three blockKinds it returns their exact schemas, plus authoring guidance and examples for the kinds that have them. Start from a document recipe before inventing a shape.",
-    "Author the content in blocks, not in prompt. Use structured blocks rather than HTML, JavaScript, or CSS; only a design block's frames are HTML and CSS, and they run no script and load nothing. Mermaid is never drawn; describe code-excerpt for how a Mermaid diagram you already have becomes a typed diagram. Text renders as plain text, not Markdown: give each section its own heading block (the Canvas title is already shown, so do not repeat it), and use key-value, table, status, or callout blocks instead of Markdown lists, bold, or code spans.",
+    "Author the content in blocks, not in prompt. Use structured blocks rather than HTML, JavaScript, or CSS; only a design block's frames are HTML and CSS; they load nothing, and run script only in a design that declares it. Mermaid is never drawn; describe code-excerpt for how a Mermaid diagram you already have becomes a typed diagram. Text renders as plain text, not Markdown: give each section its own heading block (the Canvas title is already shown, so do not repeat it), and use key-value, table, status, or callout blocks instead of Markdown lists, bold, or code spans.",
     "A Canvas is a document: it grants no file, shell, Git, or network access. Creation adds a card to this thread and offers the Canvas in the thread's dock the first time it appears; the user can also select Open Canvas. Do not claim the user has read it or invent a download URL.",
-    `Choose where the thread shows it. Use presentation inline for one small visual that answers the question, such as a chart, a few metrics, a short table, or a sequence or state diagram; it is drawn in the conversation just below your reply to this turn, so refer to it as below, and the user can still open it in the sidebar. Leave presentation out (sidebar) for reports, plans, boards, mockups, designs, and anything the user will keep working on. Inline holds at most ${String(CANVAS_INLINE_MAX_BLOCKS)} blocks; when the host shows a card instead, the result says so in presentationNote.`,
+    "Choose where the thread shows it. Use presentation inline for a visual or a reading document that answers the question in place, such as a chart, a few metrics, a short table, a sequence or state diagram, or an article or brief made of reading blocks; it is drawn in the conversation just below your reply to this turn, so refer to it as below. A long one starts as a faded teaser the user can expand in place, and the user can still open it in the sidebar. Leave presentation out (sidebar) for plans, boards, mockups, designs, and anything the user will keep working on. Inline never holds a diagram board, plan, mockup, or design; when the host shows a card instead, the result says so in presentationNote.",
     "Revise with the canvasId, the last observed expectedSequence, and the complete replacement blocks; people edit Canvases too, so read before revising and keep their changes. Reference blocks require source ids already in the Canvas source manifest; create attaches no sources. Never invent file or artifact references.",
     "Preview once after you create or revise a chart, treemap, or inline Canvas, fix what its warnings or picture show with a revise, then reply. Look once per change: previewing an unchanged document only spends the host's browser and your context.",
   ].join(" ");
@@ -925,7 +956,7 @@ function canvasToolSet(options: {
         return {
           result: {
             blockSchema: JSONSchema.make(Schema.Union(...selected)),
-            guidance: describedGuidance(input.blockKinds ?? []),
+            guidance: describedGuidance(input.blockKinds ?? [], options.mode),
             ...(examples.length === 0 ? {} : { examples }),
           },
         };

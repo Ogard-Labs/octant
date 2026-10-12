@@ -40,7 +40,11 @@ import {
   decodeCanvasDefinition,
   type CanvasDefinition,
 } from "@octant/contracts/canvas";
-import { launchDeckExample, onboardingFlowExample } from "./canvasDesignExamples";
+import {
+  launchDeckExample,
+  onboardingFlowExample,
+  searchSpecExample,
+} from "./canvasDesignExamples";
 import { designBriefExample, launchGanttExample } from "./canvasLayoutExamples";
 import { opsDashboardExample, releaseHealthBoardExample } from "./canvasDashboardExamples";
 import { mathExamples } from "./canvasMathExamples";
@@ -988,8 +992,60 @@ function refusalOf(block: unknown): string {
 describe("design frames", () => {
   it("accepts the examples an agent is taught from", () => {
     expect(() =>
-      validateCanvasDefinition(withBlocks([onboardingFlowExample, launchDeckExample])),
+      validateCanvasDefinition(
+        withBlocks([onboardingFlowExample, launchDeckExample, searchSpecExample]),
+      ),
     ).not.toThrow();
+  });
+
+  it("refuses a design document or theme inside a document declaring version 15", () => {
+    // An older runtime must read these as a newer document, not draw an
+    // article as a phone screen or a themed screen without its theme.
+    for (const block of [
+      searchSpecExample,
+      { ...onboardingFlowExample, theme: "workspace" },
+      { ...onboardingFlowExample, theme: "none" },
+    ]) {
+      expectPolicyCode(
+        () =>
+          validateCanvasDefinition({
+            ...baseDefinition,
+            schemaVersion: 15,
+            blocks: [{ ...block, schemaVersion: 15 }],
+          }),
+        "unsupported-schema-version",
+      );
+    }
+    expect(() =>
+      validateCanvasDefinition({
+        ...baseDefinition,
+        schemaVersion: 15,
+        blocks: [{ ...onboardingFlowExample, schemaVersion: 15 }],
+      }),
+    ).not.toThrow();
+  });
+
+  it("keeps refusing script and outside links in a themed document", () => {
+    const frame = searchSpecExample.frames[0];
+    for (const html of [
+      `${frame?.html ?? ""}<script>parent.document.title = "x"</script>`,
+      '<img src="x" onerror="parent.location = \'https://example.test\'">',
+      '<a href="https://example.test">Docs</a>',
+      '<meta http-equiv="refresh" content="0;url=https://example.test">',
+      '<base href="https://example.test/">',
+      '<iframe srcdoc="<p>x</p>"></iframe>',
+      '<p style="background: url(https://example.test/a.png)">x</p>',
+    ]) {
+      expectPolicyCode(
+        () =>
+          validateCanvasDefinition(
+            withBlocks([
+              { ...searchSpecExample, frames: [{ frameId: "spec", title: "Spec", html }] },
+            ]),
+          ),
+        "design-markup-refused",
+      );
+    }
   });
 
   it("refuses a design block inside a document declaring an older schema version", () => {
@@ -1253,6 +1309,257 @@ describe("design frames", () => {
         ),
       ),
     ).toBe("accepted");
+  });
+
+  it("draws a declared asset from src, srcset, url(), and image-set(), and refuses an undeclared one", () => {
+    const hero = { assetId: "hero", source: { kind: "generated-image", imageId: ids.source } };
+    const withAssets = (
+      frames: ReadonlyArray<{ frameId: string; html: string }>,
+      styles?: string,
+    ) => ({ ...design(frames, styles), assets: [hero] });
+    expect(
+      refusalOf(
+        withAssets(
+          [
+            {
+              frameId: "home",
+              html: [
+                '<img src="octant-asset:hero" alt="">',
+                '<img srcset="octant-asset:hero 1x, data:image/png;base64,AA 2x" alt="">',
+                '<div style="background:url(octant-asset:hero)"></div>',
+                '<div style="background-image:image-set(&quot;octant-asset:hero&quot; 1x)"></div>',
+                '<style>.a{background:url("octant-asset:hero")}</style>',
+              ].join(""),
+            },
+          ],
+          ".hero { background: url('octant-asset:hero'); } .b { background-image: image-set(\"octant-asset:hero\" 2x); }",
+        ),
+      ),
+    ).toBe("accepted");
+    for (const html of [
+      '<img src="octant-asset:other" alt="">',
+      '<img srcset="octant-asset:hero 1x, octant-asset:other 2x" alt="">',
+      '<div style="background:url(octant-asset:other)"></div>',
+      '<style>.a{background-image:image-set("octant-asset:other" 1x)}</style>',
+    ]) {
+      expect(refusalOf(withAssets([{ frameId: "home", html }]))).toMatch(
+        /^design-markup-refused: .*"other", which the design does not declare/,
+      );
+    }
+    // A design that declares nothing names no asset.
+    expect(
+      refusalOf(design([{ frameId: "home", html: '<img src="octant-asset:hero" alt="">' }])),
+    ).toContain("does not declare");
+    expect(
+      refusalOf(
+        withAssets(
+          [{ frameId: "home", html: "<p>Hi</p>" }],
+          ".a{background:url(octant-asset:other)}",
+        ),
+      ),
+    ).toContain("stylesheet uses the asset");
+  });
+
+  it("refuses an asset reference spelled through a character reference or CSS escape", () => {
+    const hero = { assetId: "hero", source: { kind: "generated-image", imageId: ids.source } };
+    const withAssets = (html: string, styles?: string) => ({
+      ...design([{ frameId: "home", html }], styles),
+      assets: [hero],
+    });
+    for (const html of [
+      // The renderer replaces only the literal spelling; a browser would try to
+      // load any other, which the frame policy blocks but the author would not see.
+      '<div style="background:url(octant&#45;asset:hero)"></div>',
+      '<div style="background:url(octant-asset&colon;hero)"></div>',
+      '<div style="background:url(&#111;ctant-asset:hero)"></div>',
+      String.raw`<div style="background:url(octant\2d asset:hero)"></div>`,
+      String.raw`<style>.a{background-image:image-set("\6f ctant-asset:hero" 1x)}</style>`,
+      String.raw`<style>.a{background:u\72l(octant-asset\3a hero)}</style>`,
+    ]) {
+      expect(refusalOf(withAssets(html))).toContain("spells an octant-asset: reference");
+    }
+    for (const styles of [
+      String.raw`.a { background: url(octant\-asset:hero); }`,
+      String.raw`.a { background-image: image-set("octant-asset\3a hero" 1x); }`,
+    ]) {
+      expect(refusalOf(withAssets("<p>Hi</p>", styles))).toContain(
+        "spells an octant-asset: reference",
+      );
+    }
+    // An attribute is read as written, so a reference in a source attribute
+    // must be literal too.
+    for (const html of [
+      '<img src="octant-asset&#58;hero" alt="">',
+      '<img src="OCTANT-ASSET:hero" alt="">',
+    ]) {
+      expect(refusalOf(withAssets(html))).toMatch(/^design-markup-refused: /);
+    }
+    expect(
+      refusalOf(withAssets("<p>Hi</p>", ".a { background: url(OCTANT-ASSET:hero); }")),
+    ).toContain("loads a file with url()");
+  });
+
+  it("keeps refusing every remote load in a design that declares assets", () => {
+    const withAssets = (html: string, styles?: string) => ({
+      ...design([{ frameId: "home", html }], styles),
+      assets: [{ assetId: "hero", source: { kind: "generated-image", imageId: ids.source } }],
+    });
+    for (const html of [
+      '<img src="https://x.test/hero.png" alt="">',
+      '<img srcset="octant-asset:hero 1x, https://x.test/a.png 2x" alt="">',
+      '<div style="background:url(https://x.test/a.png)"></div>',
+      '<div style="background:ur&#108;(https://x.test/a.png)"></div>',
+      '<style>.a{background-image:image-set("https://x.test/a.png" 1x)}</style>',
+      '<img src="octant-asset:https://x.test/a.png" alt="">',
+    ]) {
+      expect(refusalOf(withAssets(html))).toMatch(/^design-markup-refused: /);
+    }
+    expect(refusalOf(withAssets("<p>Hi</p>", "@import url(octant-asset:hero);"))).toContain(
+      "imports a stylesheet",
+    );
+  });
+
+  it("refuses a Project file asset in a Chat Canvas, a path that leaves the folder, and a repeated id", () => {
+    const work = (assets: ReadonlyArray<unknown>, mode: "chat" | "work" | "code" = "work") => {
+      try {
+        validateCanvasDefinition({
+          ...baseDefinition,
+          provenance: { ...baseDefinition.provenance, mode },
+          blocks: [
+            {
+              ...design([{ frameId: "home", html: '<img src="octant-asset:shot" alt="">' }]),
+              assets,
+            },
+          ],
+        });
+      } catch (error) {
+        if (error instanceof CanvasPolicyRejected) return `${error.code}: ${error.message}`;
+        throw error;
+      }
+      return "accepted";
+    };
+    const file = (path: string) => [{ assetId: "shot", source: { kind: "project-file", path } }];
+    expect(work(file("screens/home.png"))).toBe("accepted");
+    expect(work(file("screens/home.png"), "code")).toBe("accepted");
+    expect(work(file("screens/home.png"), "chat")).toMatch(
+      /^design-asset-refused: .*a Chat Project has no folder/,
+    );
+    for (const path of ["../secrets.png", "screens/../../x.png", "/etc/hosts", "a\\b.png"]) {
+      expect(work(file(path))).toMatch(/^design-asset-refused: .*stay inside it/);
+    }
+    expect(
+      work([
+        ...file("a.png"),
+        { assetId: "shot", source: { kind: "generated-image", imageId: ids.source } },
+      ]),
+    ).toMatch(/^design-asset-refused: .*declares the asset shot twice/);
+    // A generated image is the one source a Chat Project has.
+    expect(
+      work([{ assetId: "shot", source: { kind: "generated-image", imageId: ids.source } }], "chat"),
+    ).toBe("accepted");
+  });
+
+  it("refuses design assets inside a document declaring version 16", () => {
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition({
+          ...baseDefinition,
+          schemaVersion: 16,
+          blocks: [
+            {
+              ...design([{ frameId: "home", html: '<img src="octant-asset:hero" alt="">' }]),
+              schemaVersion: 16,
+              assets: [
+                { assetId: "hero", source: { kind: "generated-image", imageId: ids.source } },
+              ],
+            },
+          ],
+        }),
+      "unsupported-schema-version",
+    );
+    expect(() =>
+      validateCanvasDefinition({
+        ...baseDefinition,
+        schemaVersion: 16,
+        blocks: [{ ...design([{ frameId: "home", html: "<p>Hi</p>" }]), schemaVersion: 15 }],
+      }),
+    ).not.toThrow();
+  });
+
+  it("admits inline script and event handlers only in a design that declares it runs script", () => {
+    const html = [
+      "<p id=count>0</p>",
+      '<button onclick="add()">Add</button>',
+      "<script>let n = 0; function add() { n += 1; count.textContent = String(n); }",
+      "const url = new URL(location.href); if (n<1) { console.log(url) }</script>",
+    ].join("");
+    const running = { ...design([{ frameId: "cart", html }]), runsScript: true };
+    expect(refusalOf(running)).toBe("accepted");
+    // The same markup in a static design still runs nothing.
+    expect(refusalOf(design([{ frameId: "cart", html }]))).toMatch(
+      /^design-markup-refused: .*(onclick handler|<script> element)/,
+    );
+  });
+
+  it("keeps refusing every remote load, page policy, embedded document, and outside link in a running design", () => {
+    const run = (html: string, styles?: string) =>
+      refusalOf({ ...design([{ frameId: "cart", html }], styles), runsScript: true });
+    for (const html of [
+      '<script src="https://cdn.test/app.js"></script>',
+      "<script src=data:text/javascript,alert(1)></script>",
+      '<meta http-equiv="refresh" content="0;url=https://example.test">',
+      '<base href="https://example.test/">',
+      '<link rel="stylesheet" href="https://example.test/a.css">',
+      '<iframe srcdoc="<p>hi</p>"></iframe>',
+      '<object data="x.pdf"></object>',
+      '<embed src="x.swf">',
+      '<a href="https://example.test">Out</a>',
+      '<a href="javascript:alert(1)">Run</a>',
+      '<img src="https://example.test/pixel.png" alt="">',
+      '<div style="background:url(https://example.test/a.png)"></div>',
+      '<form action="https://example.test"><button>Go</button></form>',
+      "<script>1</script><style>@import url(https://example.test/a.css);</style>",
+      // A script opener the browser never reads as one hides nothing after it.
+      '<!-- <script> --><img src="https://example.test/x.png" alt="">',
+      '<?x <script><img src="https://example.test/x.png" alt="">',
+      '<p title="<script>"></p><img src="https://example.test/x.png" alt="">',
+      '<scripts></scripts><img src="https://example.test/x.png" alt="">',
+      '<style>/* <script> */</style><img src="https://example.test/x.png" alt="">',
+      '<textarea><script></textarea><img src="https://example.test/x.png" alt="">',
+    ]) {
+      expect(run(html)).toMatch(/^design-markup-refused: /);
+    }
+    expect(run("<p>Hi</p>", ".a { background: url(https://example.test/a.png); }")).toMatch(
+      /^design-markup-refused: .*stylesheet/,
+    );
+  });
+
+  it("refuses a running design drawn in the workspace theme, which only the reader can write", () => {
+    expect(
+      refusalOf({
+        ...design([{ frameId: "cart", html: "<p>Hi</p>" }]),
+        runsScript: true,
+        theme: "workspace",
+      }),
+    ).toMatch(/^design-run-refused: /);
+  });
+
+  it("refuses a running design inside a document declaring version 17", () => {
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition({
+          ...baseDefinition,
+          schemaVersion: 17,
+          blocks: [
+            {
+              ...design([{ frameId: "cart", html: "<p>Hi</p>" }]),
+              schemaVersion: 17,
+              runsScript: true,
+            },
+          ],
+        }),
+      "unsupported-schema-version",
+    );
   });
 
   it("refuses two frames with one id, since a link could only reach the first", () => {

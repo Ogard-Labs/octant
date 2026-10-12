@@ -4,7 +4,14 @@ import "../styles.css";
 import "../styles/components.css";
 import { StrictMode, useEffect } from "react";
 import { createRoot } from "react-dom/client";
-import { decodeCanvasDefinition, type CanvasDefinition } from "@octant/contracts/canvas";
+import { Schema } from "effect";
+import {
+  CanvasBlockId,
+  CanvasDesignAssetResolution,
+  decodeCanvasDefinition,
+  type CanvasDefinition,
+} from "@octant/contracts/canvas";
+import type { DesignAssetRuntime } from "./blocks/designDocument";
 import { DEFAULT_THEME_SETTINGS } from "@octant/contracts/theme";
 import { ThemeSettingsProvider } from "../theme/ThemeSettingsProvider";
 import { CanvasDocument } from "./CanvasDocument";
@@ -23,7 +30,19 @@ interface CanvasPreviewInput {
   readonly definition: CanvasDefinition;
   readonly theme: "light" | "dark";
   readonly placement: "document" | "thread";
+  readonly designAssets: DesignAssetRuntime;
 }
+
+// The host resolved each design's images under the thread's authority before
+// writing the page; the page only inlines them and still requests nothing.
+const decodeDesignAssets = Schema.decodeUnknownSync(
+  Schema.Array(
+    Schema.Struct({
+      blockId: CanvasBlockId,
+      assets: Schema.Array(CanvasDesignAssetResolution),
+    }),
+  ),
+);
 
 type CanvasPreviewReading =
   | { readonly kind: "ready"; readonly input: CanvasPreviewInput }
@@ -39,13 +58,19 @@ function readInput(): CanvasPreviewReading {
       readonly definition?: unknown;
       readonly theme?: unknown;
       readonly placement?: unknown;
+      readonly designAssets?: unknown;
     };
     // The host already validated this document; decoding it again keeps the
     // page from drawing anything the contract would not admit.
     const definition = decodeCanvasDefinition(record.definition);
     const theme = record.theme === "dark" ? "dark" : "light";
     const placement = record.placement === "thread" ? "thread" : "document";
-    return { kind: "ready", input: { definition, theme, placement } };
+    const resolved = decodeDesignAssets(record.designAssets ?? []);
+    const designAssets: DesignAssetRuntime = {
+      resolve: async (blockId) =>
+        resolved.find((entry) => String(entry.blockId) === blockId)?.assets,
+    };
+    return { kind: "ready", input: { definition, theme, placement, designAssets } };
   } catch {
     return { kind: "refused" };
   }
@@ -74,7 +99,11 @@ function CanvasPreviewPage({ input }: { readonly input: CanvasPreviewInput }) {
   return (
     <ThemeSettingsProvider settings={{ ...DEFAULT_THEME_SETTINGS, mode: input.theme }}>
       <main className="canvas-preview-page">
-        <CanvasDocument definition={input.definition} placement={input.placement} />
+        <CanvasDocument
+          definition={input.definition}
+          designAssetRuntime={input.designAssets}
+          placement={input.placement}
+        />
       </main>
     </ThemeSettingsProvider>
   );

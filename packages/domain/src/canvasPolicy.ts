@@ -57,6 +57,9 @@ import {
   isCanvasLayoutGroup,
   CANVAS_DASHBOARD_SCHEMA_VERSION,
   CANVAS_MAX_DASHBOARD_CELLS,
+  CANVAS_DESIGN_DOCUMENT_SCHEMA_VERSION,
+  CANVAS_DESIGN_ASSET_SCHEMA_VERSION,
+  CANVAS_DESIGN_RUNNING_SCHEMA_VERSION,
   CANVAS_MAX_CHART_CATEGORY_LABEL_LENGTH,
   CANVAS_MAX_FUNNEL_STAGES,
   CANVAS_MAX_RADAR_AXES,
@@ -66,6 +69,9 @@ import {
   CanvasBlock,
   canvasChartUsesFlowTypes,
   CanvasDefinition,
+  canvasDesignUsesAssets,
+  canvasDesignRunsScript,
+  canvasDesignUsesDocumentFields,
   canvasMockupUsesCatalog,
   type CanvasMockupComponent,
   type CanvasMockupNode,
@@ -81,6 +87,7 @@ import {
 import { canvasDesignMarkupRefusal, canvasDesignStylesheetRefusal } from "./canvasDesignPolicy";
 import { canvasMathSourceRefusal } from "./canvasMathPolicy";
 import { canvasDashboardColumns, isCanvasDashboardCellKind } from "./canvasDashboardLayout";
+import { canonicalizeWorkRelativePath, WorkConfinementRejected } from "./workConfinementPolicy";
 
 const encoder = new TextEncoder();
 
@@ -103,11 +110,9 @@ const SUPPORTED_CANVAS_SCHEMA_VERSIONS: readonly number[] = [
   CANVAS_TABLE_ROW_ID_SCHEMA_VERSION,
   CANVAS_FLOW_CHARTS_SCHEMA_VERSION,
   CANVAS_DASHBOARD_SCHEMA_VERSION,
-  // Reserved by the contract's version literal; nothing this runtime reads
-  // was introduced at them.
-  16,
-  17,
-  18,
+  CANVAS_DESIGN_DOCUMENT_SCHEMA_VERSION,
+  CANVAS_DESIGN_ASSET_SCHEMA_VERSION,
+  CANVAS_DESIGN_RUNNING_SCHEMA_VERSION,
   CANVAS_SCHEMA_VERSION,
 ];
 
@@ -197,6 +202,8 @@ export type CanvasPolicyRejectionCode =
   | "design-markup-budget-exceeded"
   | "duplicate-design-frame-id"
   | "design-markup-refused"
+  | "design-asset-refused"
+  | "design-run-refused"
   | "bar-list-rows-budget-exceeded"
   | "duplicate-bar-list-label"
   | "bar-list-negative-value"
@@ -444,7 +451,9 @@ function calculateBudgetUsage(
  * A document a newer runtime declared with a version this runtime has never
  * seen — either a future schema version or a version-gated field (a mockup
  * block from version 3, a thread presentation from version 4, a treemap from
- * version 5, a heatmap from version 6, a design block from version 7) inside a
+ * version 5, a heatmap from version 6, a design block from version 9, a design
+ * document or theme from version 16, design assets from version 17, a
+ * design that runs script from version 18) inside a
  * document that declares an older version — must fail closed as an
  * unsupported schema version, before any content is read, rather than
  * collapsing into a generic "corrupt" decode failure. Works on both a
@@ -487,6 +496,12 @@ function declaredSchemaRejection(input: unknown): CanvasPolicyRejectionCode | un
             canvasTableUsesRowIds(block as Record<string, unknown>)) ||
           (declared < CANVAS_FLOW_CHARTS_SCHEMA_VERSION &&
             canvasChartUsesFlowTypes(block as Record<string, unknown>)) ||
+          (declared < CANVAS_DESIGN_DOCUMENT_SCHEMA_VERSION &&
+            canvasDesignUsesDocumentFields(block as Record<string, unknown>)) ||
+          (declared < CANVAS_DESIGN_ASSET_SCHEMA_VERSION &&
+            canvasDesignUsesAssets(block as Record<string, unknown>)) ||
+          (declared < CANVAS_DESIGN_RUNNING_SCHEMA_VERSION &&
+            canvasDesignRunsScript(block as Record<string, unknown>)) ||
           (declared < CANVAS_DIAGRAM_STYLES_SCHEMA_VERSION &&
             (canvasDiagramUsesStyles(block as Record<string, unknown>) ||
               canvasPlanUsesGantt(block as Record<string, unknown>)))),
@@ -1049,7 +1064,7 @@ function validateCrossReferences(definition: CanvasDefinition): void {
     if (block.kind === "swimlane") validateSwimlane(block);
     if (block.kind === "mindmap") validateMindmap(block);
     if (block.kind === "mockup") validateMockup(block, definition.schemaVersion);
-    if (block.kind === "design") validateDesign(block);
+    if (block.kind === "design") validateDesign(block, definition.provenance.mode);
     if (block.kind === "treemap") validateTreemap(block);
     if (block.kind === "heatmap") validateHeatmap(block);
     if (block.kind === "bar-list") validateBarList(block);
@@ -1192,11 +1207,53 @@ function validatePlacedOnce(definition: CanvasDefinition): void {
  * Frames are linked by id, so two frames sharing one would make a link land
  * on whichever came first. Markup a sandboxed frame could not draw as written
  * is refused with the reason, so the author can fix it rather than ship a
- * broken screen.
+ * broken screen. Declared assets are checked for what the definition alone
+ * can show: a unique id, and a Project file only where the mode has a folder
+ * and only as a path that stays inside it. The host still resolves every
+ * asset under the thread's authority when the design is drawn; this only
+ * tells the author early. A running design is served as the author's own page,
+ * so it cannot take the workspace theme, which the reader's renderer writes.
  */
-function validateDesign(block: Extract<CanvasBlock, { readonly kind: "design" }>): void {
+function validateDesign(
+  block: Extract<CanvasBlock, { readonly kind: "design" }>,
+  mode: CanvasDefinition["provenance"]["mode"],
+): void {
+  const runsScript = block.runsScript === true;
+  if (runsScript && block.theme === "workspace") {
+    reject(
+      "design-run-refused",
+      `Canvas design ${block.blockId} runs script and is drawn as its own page; leave out theme "workspace" and style it in the design.`,
+    );
+  }
+  const assetIds = new Set<string>();
+  for (const asset of block.assets ?? []) {
+    const id = String(asset.assetId);
+    if (assetIds.has(id)) {
+      reject(
+        "design-asset-refused",
+        `Canvas design ${block.blockId} declares the asset ${id} twice.`,
+      );
+    }
+    assetIds.add(id);
+    if (asset.source.kind !== "project-file") continue;
+    if (mode === "chat") {
+      reject(
+        "design-asset-refused",
+        `Canvas design ${block.blockId} asset ${id} names a Project file; a Chat Project has no folder, so use a generated image.`,
+      );
+    }
+    try {
+      canonicalizeWorkRelativePath(asset.source.path);
+    } catch (error) {
+      if (!(error instanceof WorkConfinementRejected)) throw error;
+      reject(
+        "design-asset-refused",
+        `Canvas design ${block.blockId} asset ${id} path must be relative to the thread's folder and stay inside it.`,
+      );
+    }
+  }
   if (block.styles !== undefined) {
-    const refusal = canvasDesignStylesheetRefusal(block.styles);
+    const refusal = canvasDesignStylesheetRefusal(block.styles, assetIds);
     if (refusal !== undefined) {
       reject("design-markup-refused", `Canvas design ${block.blockId} stylesheet ${refusal}`);
     }
@@ -1211,7 +1268,7 @@ function validateDesign(block: Extract<CanvasBlock, { readonly kind: "design" }>
       );
     }
     frameIds.add(id);
-    const refusal = canvasDesignMarkupRefusal(frame.html);
+    const refusal = canvasDesignMarkupRefusal(frame.html, assetIds, runsScript);
     if (refusal !== undefined) {
       reject("design-markup-refused", `Canvas design ${block.blockId} frame ${id} ${refusal}`);
     }

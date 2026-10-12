@@ -53,6 +53,8 @@ import {
 } from "./CanvasRefreshPanel";
 import { CanvasVersionHistoryPanel, ReviseCanvasDraft } from "./CanvasRevisionPanel";
 import type { DiagramBoardLayoutRuntime } from "./blocks/DiagramBoard";
+import type { DesignAssetRuntime } from "./blocks/designDocument";
+import { designRunRuntimeFor } from "./blocks/designRunningFrame";
 import type { PlanTaskRuntime } from "./blocks/PlanBlock";
 import { createCanvasActionRuntime } from "./canvasActionRuntime";
 import { CanvasView } from "./CanvasView";
@@ -340,6 +342,35 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
     selectedVersionId,
     tipVersionId,
   ]);
+
+  // A design's images are resolved by the host for the version on screen,
+  // each time it is drawn, under that version's own thread authority.
+  const designAssetRuntime = useMemo<DesignAssetRuntime | undefined>(() => {
+    const designAssets = props.client?.designAssets;
+    if (designAssets === undefined || selectedVersionId === undefined) return undefined;
+    const canvasId = props.tab.canvasId;
+    const versionId = String(selectedVersionId);
+    return {
+      resolve: async (blockId) => {
+        const outcome = await designAssets({ canvasId, versionId, blockId });
+        return outcome.kind === "ready" ? outcome.assets : undefined;
+      },
+    };
+  }, [props.client, props.tab.canvasId, selectedVersionId]);
+
+  // The sidebar is where a person goes to use a Canvas, so a prototype here
+  // runs as soon as it is shown, for the version on screen.
+  const designRunRuntime = useMemo(
+    () =>
+      selectedVersionId === undefined
+        ? undefined
+        : designRunRuntimeFor(props.client, {
+            canvasId: props.tab.canvasId,
+            versionId: String(selectedVersionId),
+            runsOnOpen: true,
+          }),
+    [props.client, props.tab.canvasId, selectedVersionId],
+  );
 
   // A plan task's status is a version of the selected head only, for the same
   // reasons as a drag: the host refuses an older version as stale.
@@ -813,6 +844,8 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
             {...(actionRuntime === undefined ? {} : { actionRuntime })}
             {...(layoutRuntime === undefined ? {} : { layoutRuntime })}
             {...(planRuntime === undefined ? {} : { planRuntime })}
+            {...(designAssetRuntime === undefined ? {} : { designAssetRuntime })}
+            {...(designRunRuntime === undefined ? {} : { designRunRuntime })}
             {...(commentsAvailable
               ? { comments: { openCounts, openRowCounts, onOpen: openCommentsOn } }
               : {})}
