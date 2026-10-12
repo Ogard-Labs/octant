@@ -1587,7 +1587,11 @@ Inline provider, extension, and Browser permission requests use
 pending icon, readable summary and detail, wrapping action row, and inline
 failure announcement. The requesting feature supplies the scope, choices, and
 callbacks; the existing host or server still decides whether an action may
-proceed. Native Code approvals keep their isolated host-owned document.
+proceed. Native Code approvals keep their isolated host-owned document. The
+extension tool request names the plugin, its server, and the tool, and adds
+"Always allow in this Project" only when the host marks the call rememberable
+and the window is a local one. Settings › Data & privacy lists those answers by
+Project, each with Revoke, beside Remembered websites.
 
 Ordinary usage reset/retention, Git discard, and remote administration
 confirmations use the shared `OctantConfirmDialog` over `OctantDialog`. The
