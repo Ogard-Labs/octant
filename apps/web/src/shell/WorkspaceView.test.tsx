@@ -215,6 +215,27 @@ describe("WorkspaceView welcome", () => {
     expect(screen.getByText("brief.png")).toBeVisible();
   });
 
+  it("starts a Chat from the welcome pane that submitted, not the active pane", async () => {
+    const user = userEvent.setup();
+    const tab = {
+      id: decodeWorkspaceTabId(ids.tab),
+      kind: "welcome",
+      mode: "chat",
+      title: "Welcome to Chat",
+    } as WorkspaceTab;
+    const onCreateChat = vi.fn();
+    render(<WorkspaceView {...propsFor(tab)} mode="chat" onCreateChat={onCreateChat} />);
+
+    const welcome = await screen.findByRole("region", { name: "Chat welcome" });
+    await user.type(
+      within(welcome).getByRole("textbox", { name: "First message" }),
+      "From this pane",
+    );
+    await user.click(within(welcome).getByRole("button", { name: "Start chat" }));
+
+    expect(onCreateChat).toHaveBeenCalledWith("From this pane", undefined, ids.pane);
+  });
+
   it("keeps the selected Code Project context in the shared composer", async () => {
     render(
       <WorkspaceView

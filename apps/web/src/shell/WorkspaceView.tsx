@@ -221,6 +221,7 @@ export interface WorkspaceViewProps {
   readonly onCreateChat: (
     prompt?: string,
     modelOptionValues?: import("@octant/contracts/providers").ProviderModelOptionValues,
+    paneId?: PaneId,
   ) => void;
   readonly onCreateChatProjectThread?: (
     projectId: ProjectId,
@@ -459,6 +460,7 @@ export interface WorkspaceViewProps {
     executionPolicy?: import("@octant/contracts/providers").ProviderExecutionPolicy,
     permissionPersistence?: import("@octant/contracts/providers").PermissionPersistence,
     modelOptionValues?: import("@octant/contracts/providers").ProviderModelOptionValues,
+    initiatingPaneId?: PaneId,
   ) => boolean | void | Promise<boolean | void>;
   readonly githubPluginEnabled?: boolean;
   readonly linearClient?: import("@octant/client-runtime/integration-client").IntegrationClient;
@@ -1444,6 +1446,7 @@ function renderNonCodeTab(
               executionPolicy,
               permissionPersistence,
               modelOptionValues,
+              paneId,
             );
           }}
           {...(props.onCreateProject === undefined
@@ -2083,7 +2086,9 @@ function renderNonCodeTab(
           {...(props.chatWelcomeCreating === undefined
             ? {}
             : { creating: props.chatWelcomeCreating })}
-          onCreateChat={props.onCreateChat}
+          onCreateChat={(prompt, modelOptionValues) => {
+            props.onCreateChat(prompt, modelOptionValues, paneId);
+          }}
           providerGroups={props.draftProviderGroups ?? []}
           {...(props.draftSelectedProviderInstanceId === undefined
             ? {}

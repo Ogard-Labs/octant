@@ -5235,12 +5235,13 @@ function LaunchedShell(
   function createChat(
     prompt?: string,
     modelOptionValues?: import("@octant/contracts/providers").ProviderModelOptionValues,
+    paneId?: PaneId,
   ) {
     if (prompt === undefined || prompt.trim() === "") {
       closeWorkspaceReaders();
       setDraftError(undefined);
       setDraftPendingMessage(undefined);
-      resetNewTaskDraft("chat");
+      resetNewTaskDraft("chat", paneId);
       setDraftProjectSelection(({ chat: _previous, ...rest }) => rest);
       void controller.openDraftThread("chat");
       return;
@@ -5259,6 +5260,7 @@ function LaunchedShell(
       undefined,
       undefined,
       modelOptionValues,
+      paneId,
     );
   }
 
@@ -5841,11 +5843,13 @@ function LaunchedShell(
     executionPolicy?: import("@octant/contracts/providers").ProviderExecutionPolicy,
     permissionPersistence?: import("@octant/contracts/providers").PermissionPersistence,
     modelOptionValues?: import("@octant/contracts/providers").ProviderModelOptionValues,
+    initiatingPaneId?: PaneId,
   ): Promise<boolean | void> {
-    const initiatingPaneId =
-      mode === "chat" || mode === "work" || mode === "code"
+    const paneToReset =
+      initiatingPaneId ??
+      (mode === "chat" || mode === "work" || mode === "code"
         ? controller.workspace?.activePaneIds[mode]
-        : undefined;
+        : undefined);
     setDraftCreating(true);
     setDraftError(undefined);
     setDraftPendingMessage(undefined);
@@ -5875,10 +5879,10 @@ function LaunchedShell(
           setDraftError(chatController.errorMessage ?? "The chat thread could not be created.");
           return;
         }
-        // Clear the pane that submitted this create. The active Chat pane can
-        // change while create is in flight, and resetting that later pane
-        // would wipe an unrelated draft and leave this one restorable.
-        resetNewTaskDraft("chat", initiatingPaneId);
+        // Clear the pane that submitted this create. Welcome panes cannot
+        // become active, and another Chat pane can be current by the time
+        // create finishes, so the caller passes the submitting pane.
+        resetNewTaskDraft("chat", paneToReset);
         let thread = result.thread;
         if (
           draftSelection !== undefined &&
