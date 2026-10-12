@@ -73,6 +73,8 @@ function summaryOf(turns: ReadonlyArray<TurnMetricsRecord>): TurnMetricsSummary 
 function Harness(props: {
   readonly summary: TurnMetricsSummary | undefined;
   readonly limits?: ReadonlyArray<CodeProviderLimit>;
+  /** Whether this composer is the active pane, which is the only one the meter's figures belong to. */
+  readonly paneActive?: boolean;
   readonly initiallyVisible?: boolean;
   readonly onVisibleChange?: (visible: boolean) => void;
 }) {
@@ -92,7 +94,7 @@ function Harness(props: {
         subjectKey="code-thread:a"
         {...(props.limits === undefined ? {} : { fallback: { limits: props.limits } })}
       >
-        <ComposerContextMeterGate enabled>
+        <ComposerContextMeterGate enabled={props.paneActive ?? true}>
           <ComposerContextMeter />
           <ThreadStats />
           <ThreadStatsDetailDialog />
@@ -148,6 +150,25 @@ describe("the thread stats line", () => {
     const line = screen.getByTestId("thread-stats-line");
     expect(within(line).getByText("5h")).toBeInTheDocument();
     expect(line.querySelector('[data-level="near"]')).not.toBeNull();
+    // No turn means no turn detail to open, so the line must not offer to open it.
+    expect(screen.queryByRole("button", { name: /Open turn details/ })).toBeNull();
+    expect(
+      screen.getByRole("group", { name: /^Thread stats: 5-hour limit 15% left/ }),
+    ).toBeVisible();
+  });
+
+  it("keeps another pane's provider windows off an inactive composer", () => {
+    render(
+      <Harness
+        limits={[{ window: "five_hour", status: "allowed", utilization: 0.12 }]}
+        paneActive={false}
+        summary={summaryOf([turn()])}
+      />,
+    );
+
+    const line = screen.getByTestId("thread-stats-line");
+    expect(within(line).queryByText("5h")).toBeNull();
+    expect(line).toHaveTextContent("↑ 48k in");
   });
 
   it("shows no line for a provider that reported neither usage nor windows", () => {

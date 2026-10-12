@@ -25,13 +25,13 @@ export function ThreadStats() {
     () => (scope.summary === undefined ? [] : threadStats(threadStatsInputOf(scope.summary))),
     [scope.summary],
   );
-  // Read on every render, not memoized: a window whose reset passes must drop
-  // out of the line when the next render comes, not stay until the figures change.
-  const limits = composerLimitWindows({
-    now: Date.now(),
-    snapshot: meter.snapshot,
-    fallback: meter.fallback,
-  });
+  // The meter's figures belong to the active pane only: an inactive split pane
+  // must not show another thread's provider capacity. Read on every render, not
+  // memoized: a window whose reset passes must drop out of the line when the
+  // next render comes, not stay until the figures change.
+  const limits = meter.visible
+    ? composerLimitWindows({ now: Date.now(), snapshot: meter.snapshot, fallback: meter.fallback })
+    : [];
   const showLine = scope.lineVisible && (stats.length > 0 || limits.length > 0);
   return showLine ? (
     <ThreadStatsLine limits={limits} onHide={() => scope.setLineVisible(false)} stats={stats} />
@@ -48,57 +48,74 @@ function ThreadStatsLine(props: {
     ...props.limits.map((limit) => `${limit.name} ${String(limit.percent)}% left`),
     ...props.stats.map((stat) => stat.label),
   ];
-  return (
-    <div className="thread-stats" data-testid="thread-stats-line">
-      <OctantButton
-        aria-label={`Thread stats: ${described.join(", ")}. Open turn details`}
-        className="thread-stats__line"
-        onClick={scope.openDetail}
-        type="button"
-        variant="bare"
-      >
-        {props.limits.map((limit, index) => (
-          <Fragment key={limit.window}>
-            {index === 0 ? null : (
-              <span aria-hidden="true" className="thread-stats__separator">
-                {" · "}
+  const content = (
+    <>
+      {props.limits.map((limit, index) => (
+        <Fragment key={limit.window}>
+          {index === 0 ? null : (
+            <span aria-hidden="true" className="thread-stats__separator">
+              {" · "}
+            </span>
+          )}
+          <OctantTooltip label={`${limit.name}, ${String(limit.percent)}% left`} side="top">
+            <span className="thread-stats__limit" data-level={limit.level}>
+              <span className="thread-stats__limit-name">{limit.short}</span>
+              <span aria-hidden="true" className="thread-stats__limit-meter">
+                <span style={{ width: `${String(limit.percent)}%` }} />
               </span>
-            )}
-            <OctantTooltip label={`${limit.name}, ${String(limit.percent)}% left`} side="top">
-              <span className="thread-stats__limit" data-level={limit.level}>
-                <span className="thread-stats__limit-name">{limit.short}</span>
-                <span aria-hidden="true" className="thread-stats__limit-meter">
-                  <span style={{ width: `${String(limit.percent)}%` }} />
-                </span>
-                <span className="thread-stats__item">{`${String(limit.percent)}%`}</span>
+              <span className="thread-stats__item">{`${String(limit.percent)}%`}</span>
+            </span>
+          </OctantTooltip>
+        </Fragment>
+      ))}
+      {props.limits.length > 0 && props.stats.length > 0 ? (
+        <span aria-hidden="true" className="thread-stats__separator">
+          {" · "}
+        </span>
+      ) : null}
+      {props.stats.map((stat, index) => (
+        <Fragment key={stat.key}>
+          {index === 0 ? null : (
+            <span aria-hidden="true" className="thread-stats__separator">
+              {" · "}
+            </span>
+          )}
+          {stat.hint === undefined ? (
+            <span className="thread-stats__item">{stat.text}</span>
+          ) : (
+            <OctantTooltip label={stat.hint} side="top">
+              <span className="thread-stats__item" data-hinted="true">
+                {stat.text}
               </span>
             </OctantTooltip>
-          </Fragment>
-        ))}
-        {props.limits.length > 0 && props.stats.length > 0 ? (
-          <span aria-hidden="true" className="thread-stats__separator">
-            {" · "}
-          </span>
-        ) : null}
-        {props.stats.map((stat, index) => (
-          <Fragment key={stat.key}>
-            {index === 0 ? null : (
-              <span aria-hidden="true" className="thread-stats__separator">
-                {" · "}
-              </span>
-            )}
-            {stat.hint === undefined ? (
-              <span className="thread-stats__item">{stat.text}</span>
-            ) : (
-              <OctantTooltip label={stat.hint} side="top">
-                <span className="thread-stats__item" data-hinted="true">
-                  {stat.text}
-                </span>
-              </OctantTooltip>
-            )}
-          </Fragment>
-        ))}
-      </OctantButton>
+          )}
+        </Fragment>
+      ))}
+    </>
+  );
+  return (
+    <div className="thread-stats" data-testid="thread-stats-line">
+      {/* Without a recorded turn there is no turn detail to open, so the line is a
+          plain group rather than a button that does nothing when pressed. */}
+      {scope.summary === undefined ? (
+        <div
+          aria-label={`Thread stats: ${described.join(", ")}`}
+          className="thread-stats__line"
+          role="group"
+        >
+          {content}
+        </div>
+      ) : (
+        <OctantButton
+          aria-label={`Thread stats: ${described.join(", ")}. Open turn details`}
+          className="thread-stats__line"
+          onClick={scope.openDetail}
+          type="button"
+          variant="bare"
+        >
+          {content}
+        </OctantButton>
+      )}
       <OctantButton
         aria-label="Hide stats line"
         className="thread-stats__hide"
