@@ -1371,6 +1371,21 @@ const ProviderSwitchHandoff = Schema.Struct({
   omissions: CodeContextHandoffOmissions,
   /** Whether the thread had taken in outside content when the handoff was read. */
   externalContentIngested: Schema.Boolean,
+  /**
+   * Present when the thread is a fork: the handoff also carried the source's
+   * conversation through the fork point, ahead of the thread's own turns.
+   * `messages` and `omissions` above cover both; these say how much of the
+   * carried text came from the source.
+   */
+  inherited: Schema.optional(
+    Schema.Struct({
+      forkedFrom: CodeThreadForkOrigin,
+      /** Carried messages that came from the source; may be 0 after the budget. */
+      messages: Schema.Int.pipe(Schema.between(0, MAX_AGENT_RUN_ADMITTED_CONTEXT_BLOCKS - 1)),
+      /** Whether the source thread had taken in outside content when it was read. */
+      externalContentIngested: Schema.Boolean,
+    }).annotations(strict),
+  ),
 }).annotations(strict);
 
 /**
@@ -1397,6 +1412,32 @@ const ForkNativeSessionHandoff = Schema.Struct({
   reason: Schema.Literal("fork-native-session"),
   forkedFrom: CodeThreadForkOrigin,
 }).annotations(strict);
+
+/**
+ * The most fork merges one turn carries; any later ones wait for the next
+ * turn. Each merge is a full bounded handoff (up to 24 blocks of 4,000
+ * characters), so a turn never takes an unbounded pile of them at once.
+ */
+export const MAX_CODE_FORK_MERGE_BACKS_PER_TURN = 2;
+
+/**
+ * The disclosed summary of a fork's conversation merged back into the thread
+ * it was forked from: the fork's own turns after the fork point, or after its
+ * previous merge back, through the named fork turn. Each carried message names
+ * the provider and model that wrote it. Only conversation moves this way; the
+ * fork's file changes reach the source only through Git review.
+ */
+export const CodeForkMergeBack = Schema.Struct({
+  forkThreadId: CodeThreadId,
+  /** The fork turn the previous merge back ended at; absent for the first one. */
+  afterOperationId: Schema.optional(CodeOperationId),
+  throughOperationId: CodeOperationId,
+  messages: handoffMessages,
+  omissions: CodeContextHandoffOmissions,
+  /** Whether the fork had taken in outside content when it was read. */
+  externalContentIngested: Schema.Boolean,
+}).annotations(strict);
+export type CodeForkMergeBack = typeof CodeForkMergeBack.Type;
 
 /** What a turn started its session with that it did not write itself, by cause. */
 export const CodeConversationTurnHandoff = Schema.Union(
@@ -1454,6 +1495,31 @@ const ForkNativeSessionHandoffAttachedEvent = Schema.Struct({
   nativeSessionTransferred: Schema.Literal(true),
 }).annotations(strict);
 
+/**
+ * A person merged a fork's conversation back into the thread it was forked
+ * from. Journaled on that source thread, under an operation of its own, before
+ * anything is sent: the source's next turn carries it, and records that with
+ * `fork-context-delivered`. The handed-over text stays in the content store.
+ */
+const ForkContextMergedEvent = Schema.Struct({
+  ...CodeForkMergeBack.fields,
+  kind: Schema.Literal("fork-context-merged"),
+  content: CodeEvidenceReference,
+  nativeSessionTransferred: Schema.Literal(false),
+  hiddenReasoningTransferred: Schema.Literal(false),
+}).annotations(strict);
+
+/**
+ * The source turn that carried a merged fork's conversation, journaled on that
+ * turn's operation before the prompt is sent. A recovered start reads these
+ * back rather than choosing pending merges again.
+ */
+const ForkContextDeliveredEvent = Schema.Struct({
+  ...CodeForkMergeBack.fields,
+  kind: Schema.Literal("fork-context-delivered"),
+  mergeOperationId: CodeOperationId,
+}).annotations(strict);
+
 const ContextHandoffAttachedEvent = Schema.Union(
   ProviderSwitchHandoffAttachedEvent,
   ForkTextHandoffAttachedEvent,
@@ -1463,6 +1529,8 @@ const ContextHandoffAttachedEvent = Schema.Union(
 export const CodeOperationEvent = Schema.Union(
   ProviderSessionReadyEvent,
   ContextHandoffAttachedEvent,
+  ForkContextMergedEvent,
+  ForkContextDeliveredEvent,
   ConversationTurnStartedEvent,
   ConversationTurnChangedFilesEvent,
   OperationStateEvent,
@@ -1617,6 +1685,13 @@ export const CodeConversationTurn = Schema.Struct({
    * started an unforked thread.
    */
   handoff: Schema.optional(CodeConversationTurnHandoff),
+  /**
+   * Forks of this thread whose conversation this turn carried because a
+   * person merged it back, oldest first. Absent on every other turn.
+   */
+  forkMergeBacks: Schema.optional(
+    Schema.Array(CodeForkMergeBack).pipe(Schema.maxItems(MAX_CODE_FORK_MERGE_BACKS_PER_TURN)),
+  ),
   /**
    * What changed in the checkout while this turn ran. Absent when the host
    * could not observe it: a Plan turn, a checkout it could not read, a turn

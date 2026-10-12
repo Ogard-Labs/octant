@@ -2,6 +2,8 @@ import { CanvasDocument, type CanvasDocumentComments } from "./CanvasDocument";
 import type { CanvasActionRuntime } from "./canvasActionRuntime";
 import type { DiagramBoardLayoutRuntime } from "./blocks/DiagramBoard";
 import type { PlanTaskRuntime } from "./blocks/PlanBlock";
+import type { DesignAssetRuntime } from "./blocks/designDocument";
+import type { DesignRunRuntime } from "./blocks/designRunningFrame";
 import { decodeCanvasForRender } from "./canvasRuntime";
 import { OctantAlert } from "../ui/base/OctantAlert";
 
@@ -13,6 +15,10 @@ export interface CanvasViewProps {
   readonly layoutRuntime?: DiagramBoardLayoutRuntime;
   /** Host-owned journaling for a plan task's status; omitted when the host has none. */
   readonly planRuntime?: PlanTaskRuntime;
+  /** Host-owned resolution of a design's images; omitted when the host has none. */
+  readonly designAssetRuntime?: DesignAssetRuntime;
+  /** Host-owned tickets for a prototype's page; omitted when the host has none. */
+  readonly designRunRuntime?: DesignRunRuntime;
   readonly comments?: CanvasDocumentComments;
   readonly placement?: "document" | "thread";
 }
@@ -22,6 +28,8 @@ export function CanvasView({
   actionRuntime,
   layoutRuntime,
   planRuntime,
+  designAssetRuntime,
+  designRunRuntime,
   comments,
   placement,
 }: CanvasViewProps) {
@@ -40,6 +48,8 @@ export function CanvasView({
       {...(actionRuntime === undefined ? {} : { actionRuntime })}
       {...(layoutRuntime === undefined ? {} : { layoutRuntime })}
       {...(planRuntime === undefined ? {} : { planRuntime })}
+      {...(designAssetRuntime === undefined ? {} : { designAssetRuntime })}
+      {...(designRunRuntime === undefined ? {} : { designRunRuntime })}
       {...(comments === undefined ? {} : { comments })}
       {...(placement === undefined ? {} : { placement })}
     />

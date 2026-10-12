@@ -109,11 +109,13 @@ export const CANVAS_SHARE_SCHEMA_VERSION = 9 as const;
 // The newest Canvas block version a share at this version names. Canvas
 // version 13 added only the table row id, which a share drops, so share
 // version 6 named a block authored at 13 as 12. Version 14 adds chart types a
-// share carries, so share version 7 named blocks up to 14, version 15 adds
-// the dashboard, so share version 8 named blocks up to 15, and version 19
-// adds tabs and columns, so share version 9 names blocks up to 19. A later
-// Canvas bump that adds something a share carries bumps the share version
-// again.
+// share carries, so share version 7 named blocks up to 14, and version 15 adds
+// the dashboard, so share version 8 named blocks up to 15. Canvas versions 16
+// through 18 add only design fields (the document size and theme, image
+// assets, then running script), and a share refuses a design, so they changed
+// nothing a share carries. Version 19 adds tabs and columns, so share version
+// 9 names blocks up to 19. A later Canvas bump that adds something a share
+// carries bumps the share version again.
 export const CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION = 19 as const;
 export const CanvasShareSchemaVersion = Schema.Literal(
   1,

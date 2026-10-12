@@ -43,6 +43,7 @@ import { WorkProjectStatusFiles } from "./workProjectStatusFiles";
 import type { WorkTurnRuntimePort } from "./workTurnRuntime";
 import type { TurnEndSummary } from "../metrics/turnEnd";
 import { ConcurrencyConflict } from "../persistence/journalErrors";
+import { ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
 
 const attachmentRoots: string[] = [];
 
@@ -220,6 +221,25 @@ describe("WorkTurnService", () => {
     );
     expect(onTurnRequested).not.toHaveBeenCalled();
     await fixture.waitForIdle(decodeWorkTurnRequestId("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1"));
+  });
+
+  it("journals a turn the host resumes as the system's, not an open window's", async () => {
+    const fixture = serviceFixture();
+
+    await fixture.service.startFirstTurn(ROUTINE_HOST_SCOPE_ID, startCommand(), {
+      limitRecovery: true,
+    });
+    expect(fixture.persistence.journal.append).toHaveBeenCalledWith(
+      expect.objectContaining({
+        events: [
+          expect.objectContaining({
+            eventName: "work.turn-accepted@1",
+            actor: expect.objectContaining({ kind: "system" }),
+          }),
+        ],
+      }),
+    );
+    await fixture.waitForIdle();
   });
 
   it("refuses a Work request that exceeds the provider-reported context window", async () => {

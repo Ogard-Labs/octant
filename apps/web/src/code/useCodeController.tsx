@@ -19,7 +19,7 @@ import type {
 import { decodeCodeThreadId } from "@octant/contracts/code";
 import { decodeUtcTimestamp, type ProviderContextBreakdown } from "@octant/contracts";
 import { waitForReconnect } from "../lib/waitForReconnect";
-import { handoffSummary } from "./providerSwitchHandoff";
+import { forkMergeBackSummary, handoffSummary } from "./providerSwitchHandoff";
 import {
   decodeCodeOperationId,
   decodeProviderSessionId,
@@ -30,6 +30,8 @@ import {
   type CodeOperationEvent,
   type CodeOperationId,
   type CodeThreadCheckoutRebindOutcome,
+  type CodeForkMergeBack,
+  type CodeForkMergeBackOutcome,
   type CodeThreadFollowUpView,
   type CodeAttachmentId,
   type CodeAttachmentReference,
@@ -1009,6 +1011,16 @@ export function useCodeController(options: CodeControllerOptions) {
                       ),
                     );
                   }
+                  if (event.kind === "fork-context-delivered") {
+                    const mergeBack = forkMergeBackSummary(event);
+                    setConversation((current) =>
+                      current.map((message) =>
+                        message.id === `${operationId}:assistant`
+                          ? withForkMergeBack(message, mergeBack)
+                          : message,
+                      ),
+                    );
+                  }
                   if (event.kind === "provider-content" && event.channel === "reasoning") {
                     const chunk =
                       frame.displayText ??
@@ -1770,6 +1782,27 @@ export function useCodeController(options: CodeControllerOptions) {
   );
 
   /**
+   * Merge a fork's conversation back into the thread it was forked from,
+   * through one of the fork's finished replies. The host reads the turns
+   * itself and the source's next message carries them; nothing runs now and
+   * no file moves. Undefined only when the host could not be asked at all.
+   */
+  const mergeForkContext = useCallback(
+    async (input: {
+      readonly threadId: CodeThreadId;
+      readonly throughOperationId: string;
+    }): Promise<CodeForkMergeBackOutcome | undefined> => {
+      const result = await execute({
+        kind: "merge-code-fork-context",
+        threadId: input.threadId,
+        throughOperationId: input.throughOperationId,
+      });
+      return result?.kind === "fork-context-merge" ? result.outcome : undefined;
+    },
+    [execute],
+  );
+
+  /**
    * Move a thread onto the checkout its Project binds now, because the user
    * asked from the fail-closed banner.
    *
@@ -2196,6 +2229,15 @@ export function useCodeController(options: CodeControllerOptions) {
                 ),
               );
             }
+            // Journaled with the handoff, before the provider is sent anything.
+            if (event.kind === "fork-context-delivered") {
+              const mergeBack = forkMergeBackSummary(event);
+              setConversation((current) =>
+                current.map((message) =>
+                  message.id === assistantId ? withForkMergeBack(message, mergeBack) : message,
+                ),
+              );
+            }
             if (event.kind === "provider-content" && event.channel === "reasoning") {
               const chunk =
                 frame.displayText ??
@@ -2414,6 +2456,7 @@ export function useCodeController(options: CodeControllerOptions) {
     firstPromptInFlight: conversationStarted ? undefined : firstPromptInFlight,
     followUps,
     forkThread,
+    mergeForkContext,
     lastExecuteError,
     lastStartRefusal,
     editorDrafts,
@@ -2488,4 +2531,18 @@ function providerAnswerKey(answer: CodeProviderAnswer): string {
   return answer.kind === "approval"
     ? `approval:${String(answer.approvalId)}`
     : `input:${answer.requestId}`;
+}
+
+/** A reply gains each merge its turn carried once, however often the event replays. */
+function withForkMergeBack(
+  message: CodeConversationMessage,
+  mergeBack: CodeForkMergeBack,
+): CodeConversationMessage {
+  const existing = message.forkMergeBacks ?? [];
+  const known = existing.some(
+    (candidate) =>
+      String(candidate.forkThreadId) === String(mergeBack.forkThreadId) &&
+      String(candidate.throughOperationId) === String(mergeBack.throughOperationId),
+  );
+  return known ? message : { ...message, forkMergeBacks: [...existing, mergeBack] };
 }

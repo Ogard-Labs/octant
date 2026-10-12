@@ -943,7 +943,7 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 }
 
 .provider-settings__message-slot .provider-settings__alert {
-  padding: 5px 8px;
+  padding: var(--oct-space-1) var(--oct-space-2);
 }
 
 /* A reader page centres its empty state in the room a list would take.
@@ -1503,7 +1503,7 @@ textarea.settings-view__text-input {
 
 .settings-view__setting-copy {
   display: grid;
-  gap: 3px;
+  gap: var(--oct-space-1);
   color: var(--oct-fg);
   font-size: var(--oct-text-detail);
   font-weight: 500;
@@ -1635,7 +1635,7 @@ textarea.settings-view__text-input {
   display: grid;
   flex: 1;
   align-content: start;
-  gap: 7px;
+  gap: var(--oct-space-2);
 }
 
 .settings-scheme__preview-content > span {
@@ -1676,7 +1676,7 @@ textarea.settings-view__text-input {
 }
 
 .settings-scheme__label {
-  padding: 8px 0 9px;
+  padding: var(--oct-space-2) 0 var(--oct-space-2);
   color: var(--oct-muted);
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-xs);
@@ -1986,7 +1986,7 @@ textarea.settings-view__text-input {
   }
 
   .settings-view__sidebar-content {
-    padding-inline: 7px;
+    padding-inline: var(--oct-space-2);
   }
 
   .settings-view__content-inner {
@@ -2864,7 +2864,7 @@ textarea.settings-view__text-input {
 }
 
 .provider-card__facts {
-  margin-top: 3px;
+  margin-top: var(--oct-space-1);
   color: var(--octant-text-muted);
   font-size: var(--oct-text-xs);
   overflow-wrap: anywhere;

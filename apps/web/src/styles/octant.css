@@ -779,8 +779,8 @@ h4 {
   display: inline-flex;
   min-height: 20px;
   align-items: center;
-  gap: 5px;
-  padding: 2px 7px;
+  gap: var(--oct-space-1);
+  padding: 2px var(--oct-space-2);
   background: transparent;
   color: var(--oct-fg-2);
   border: 1px solid var(--oct-border);
@@ -798,7 +798,7 @@ h4 {
   display: inline-flex;
   min-height: 18px;
   align-items: center;
-  gap: 5px;
+  gap: var(--oct-space-1);
   padding: 1px 6px;
   color: var(--oct-meta);
   background: transparent;
@@ -1323,7 +1323,7 @@ input.switch:checked::after {
 .sheet td {
   border-right: 1px solid var(--oct-border-soft);
   border-bottom: 1px solid var(--oct-border-soft);
-  padding: 3px var(--oct-space-2);
+  padding: var(--oct-space-1) var(--oct-space-2);
   white-space: nowrap;
 }
 .sheet thead th {
@@ -1499,7 +1499,7 @@ input.switch:checked::after {
 .kbd {
   font-family: var(--oct-font-mono);
   font-size: var(--oct-text-xs);
-  padding: 3px 7px;
+  padding: var(--oct-space-1) var(--oct-space-2);
   border: 1px solid var(--oct-border);
   border-bottom-width: 2px;
   border-radius: var(--oct-radius-sm);
@@ -1510,7 +1510,7 @@ input.switch:checked::after {
 /* ─── segmented control ─────────────────────────────────────────────── */
 .segmented {
   display: inline-flex;
-  padding: 3px;
+  padding: var(--oct-space-1);
   gap: 2px;
   border: 1px solid var(--oct-border);
   border-radius: var(--oct-radius-sm);
@@ -1588,7 +1588,7 @@ input.switch:checked::after {
   display: grid;
   grid-template-columns: 62px minmax(0, 1fr);
   gap: var(--oct-space-4);
-  padding: 3px 0 3px var(--oct-space-3);
+  padding: var(--oct-space-1) 0 var(--oct-space-1) var(--oct-space-3);
   border-left: 2px solid transparent;
 }
 .runline .k {
@@ -3592,7 +3592,7 @@ input.switch:checked::after {
   right: -2px;
   min-width: 15px;
   height: 15px;
-  padding-inline: 3px;
+  padding-inline: var(--oct-space-1);
   border-radius: var(--oct-radius-pill);
   background: var(--oct-accent);
   color: var(--oct-accent-on);
@@ -4561,7 +4561,7 @@ input.switch:checked::after {
 .composer-row .composer-model-picker__trigger {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: var(--oct-space-1);
   min-height: 28px;
   padding-block: 0;
   padding-inline: 8px 6px;
@@ -6226,7 +6226,7 @@ html[data-octant-reduced-transparency="true"] [data-slot="card"][data-variant="g
   background: var(--oct-fg-soft);
 }
 .run-row .st {
-  margin-top: 5px;
+  margin-top: var(--oct-space-1);
 }
 .run-main {
   min-width: 0;
@@ -7068,7 +7068,7 @@ html[data-octant-reduced-transparency="true"] [data-slot="card"][data-variant="g
   align-self: center;
   width: 7px;
   height: 7px;
-  margin-inline: 3px;
+  margin-inline: var(--oct-space-1);
 }
 .plan-list li[data-state="done"] {
   color: var(--oct-meta);
@@ -7539,7 +7539,6 @@ html[data-octant-reduced-transparency="true"] [data-slot="card"][data-variant="g
   height: 24px;
   padding: 0;
   border: 0;
-  border-radius: var(--oct-radius-sm);
   background: none;
   color: var(--oct-meta);
   cursor: grab;
@@ -7599,7 +7598,7 @@ html[data-octant-reduced-transparency="true"] [data-slot="card"][data-variant="g
 .prov-state {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: var(--oct-space-1);
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-xs);
   font-weight: var(--oct-weight-medium);
@@ -8339,7 +8338,7 @@ html[data-octant-reduced-transparency="true"] [data-slot="card"][data-variant="g
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 3px;
+  gap: var(--oct-space-1);
   min-height: var(--oct-touch-min);
   padding: 4px;
   border: 0;
@@ -8442,7 +8441,7 @@ html[data-octant-reduced-transparency="true"] [data-slot="card"][data-variant="g
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: var(--oct-space-1);
 }
 .mrow-title {
   font-family: var(--oct-font-display);

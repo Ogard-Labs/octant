@@ -57,7 +57,7 @@ Work has no shell and no Git. The agent in a Work thread is never given a way to
 - **Default model** is the provider and model a new thread starts on, unless you pick another in the composer. If that model is no longer available, the first available one is used.
 - **Access** is what the agent may do to files in the Project folder without asking. **Ask first** (the default) asks before every change. **Auto-accept edits** lets edits inside the Project folder happen without a prompt; anything outside the folder is still refused, and everything else works as before. Some providers have no auto-accept path and keep asking.
 
-A thread keeps the access it started with, so changing the setting never changes a thread that already exists. A goal loop only auto-accepts edits when its own limits allow it too.
+A thread keeps the access it started with, so changing the setting never changes a thread that already exists. A goal loop only auto-accepts edits when its own limits allow it too. A Work folder has no checkpoint to go back to, so a goal loop's rounds run only while they ask before each edit; a loop that would accept edits on its own pauses and says so.
 
 ## Sending while a response is running
 

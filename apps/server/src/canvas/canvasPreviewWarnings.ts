@@ -1,5 +1,10 @@
-import type { CanvasBlock, CanvasDefinition, CanvasPresentation } from "@octant/contracts/canvas";
-import { CANVAS_INLINE_MAX_BLOCKS } from "@octant/domain";
+import {
+  CANVAS_DESIGN_ASSET_SCHEME,
+  type CanvasBlock,
+  type CanvasDefinition,
+  type CanvasDesignAssetResolution,
+  type CanvasDesignAssetUnavailableReason,
+} from "@octant/contracts/canvas";
 import {
   canvasDashboardCellWidth,
   canvasReadingOrder,
@@ -12,8 +17,8 @@ import { contrastRatio } from "@octant/theme";
  * A preview answers one question: does this document read well where the thread
  * will draw it? These are the ways it demonstrably can fail to — a label the
  * slot cannot hold, a legend that runs past the frame, a series with no reading
- * in it, an inline document taller than the conversation allows, and ink that
- * does not clear its contrast target. Each is a value, not a sentence: the tool
+ * in it, and ink that does not clear its contrast target. Length is not one of
+ * them: the thread shows a long inline document as a teaser the person expands. Each is a value, not a sentence: the tool
  * reports the kind and the measurement, and the agent decides what to change.
  *
  * The warnings are computed from the document and the target width alone, so
@@ -40,17 +45,25 @@ export type CanvasPreviewWarning =
       readonly seriesLabel?: string;
     }
   | {
-      readonly kind: "inline-height-cap-exceeded";
-      readonly blockCount: number;
-      readonly limit: number;
-    }
-  | {
       readonly kind: "contrast-below-target";
       readonly blockId: string;
       readonly foreground: string;
       readonly background: string;
       readonly ratio: number;
       readonly target: number;
+    }
+  | {
+      /**
+       * A declared image the host could not draw, so the frames that name it
+       * show a placeholder. Names the frames and the id, never the bytes.
+       * `frameIds` is every frame that names the asset; a reference in the
+       * shared stylesheet reaches every frame.
+       */
+      readonly kind: "design-asset-unavailable";
+      readonly blockId: string;
+      readonly assetId: string;
+      readonly reason: CanvasDesignAssetUnavailableReason;
+      readonly frameIds: ReadonlyArray<string>;
     };
 
 /**
@@ -76,10 +89,15 @@ export interface CanvasPreviewPalette {
 
 export interface CanvasPreviewWarningInput {
   readonly definition: Pick<CanvasDefinition, "blocks">;
-  readonly presentation: CanvasPresentation;
   /** The drawn width in CSS pixels; the same number the renderer is given. */
   readonly width: number;
   readonly palette: CanvasPreviewPalette;
+  /**
+   * Each design's images as the host resolved them for this preview, by block
+   * id. A design missing here was not resolved, and its declared images read
+   * as refused, which is what a reader would see.
+   */
+  readonly designAssets?: ReadonlyMap<string, ReadonlyArray<CanvasDesignAssetResolution>>;
 }
 
 /** A categorical mark must clear the 3:1 a graphical object needs (WCAG 1.4.11). */
@@ -105,16 +123,6 @@ export function canvasPreviewWarnings(
   input: CanvasPreviewWarningInput,
 ): ReadonlyArray<CanvasPreviewWarning> {
   const warnings: CanvasPreviewWarning[] = [];
-  if (
-    input.presentation === "inline" &&
-    input.definition.blocks.length > CANVAS_INLINE_MAX_BLOCKS
-  ) {
-    warnings.push({
-      kind: "inline-height-cap-exceeded",
-      blockCount: input.definition.blocks.length,
-      limit: CANVAS_INLINE_MAX_BLOCKS,
-    });
-  }
   // A block placed in a dashboard is drawn at its cell's width, not the
   // document's, so it is measured there; otherwise a chart in a quarter of a
   // wide grid would clip labels that the full width would hold.
@@ -153,6 +161,8 @@ function blockWarnings(
       return chartWarnings(block, input);
     case "bar-list":
       return barListWarnings(block, input);
+    case "design":
+      return designAssetWarnings(block, input);
     default:
       return [];
   }
@@ -238,6 +248,42 @@ function clippedChartLabels(
       label: String(point.x),
       availablePx: Math.round(availablePx),
     }));
+}
+
+function designAssetWarnings(
+  block: Extract<CanvasBlock, { readonly kind: "design" }>,
+  input: CanvasPreviewWarningInput,
+): ReadonlyArray<CanvasPreviewWarning> {
+  const resolved = input.designAssets?.get(String(block.blockId));
+  const warnings: CanvasPreviewWarning[] = [];
+  for (const asset of block.assets ?? []) {
+    const id = String(asset.assetId);
+    const outcome = resolved?.find((entry) => String(entry.assetId) === id);
+    if (outcome?.status === "resolved") continue;
+    const reference = `${CANVAS_DESIGN_ASSET_SCHEME}${id}`;
+    const named = (markup: string | undefined) =>
+      markup !== undefined && namesAsset(markup, reference);
+    warnings.push({
+      kind: "design-asset-unavailable",
+      blockId: String(block.blockId),
+      assetId: id,
+      reason: outcome?.reason ?? "refused",
+      frameIds: block.frames
+        .filter((frame) => named(block.styles) || named(frame.html))
+        .map((frame) => String(frame.frameId)),
+    });
+  }
+  return warnings;
+}
+
+/** Whether markup names this reference, not one whose id merely starts with it. */
+function namesAsset(markup: string, reference: string): boolean {
+  let at = markup.indexOf(reference);
+  while (at !== -1) {
+    if (!/[A-Za-z0-9._-]/.test(markup.charAt(at + reference.length))) return true;
+    at = markup.indexOf(reference, at + reference.length);
+  }
+  return false;
 }
 
 function barListWarnings(
