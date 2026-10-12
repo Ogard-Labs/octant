@@ -624,7 +624,7 @@ import { createValidationEvidenceLoader } from "./validation/validationEvidenceL
 import { createExtensionRouteHandler } from "./extensionRoutes";
 import {
   createExternalContentRouteHandler,
-  inspectThreadAsMessageQueue,
+  threadStandingFromMessageQueue,
 } from "./externalContentRoutes";
 import {
   ExtensionApiService,
@@ -7580,41 +7580,40 @@ export function startOctantServer(
         );
       },
     });
-    const threadMessageQueuePort = createThreadMessageQueuePort({
-      persistence,
-      journal: persistence.journal,
-      chat: chatService,
-      work: {
-        readThread: (id) => workThreadProjection.read(id),
-        listTurns: (id) => workTurnProjection.listForThread(id),
-        startFirstTurn: (windowId, command, admissionOptions) =>
-          workTurnService.startFirstTurn(windowId, command, admissionOptions),
-      },
-      code: routeCodeService,
-      isModeEnabled: (mode) =>
-        enabledModes(persistence.readShellSettings()?.settings ?? defaultShellSettings()).includes(
-          mode,
-        ),
-      isWindowLive: (windowId) =>
-        windowAuthorityStore.listWindowIds().some((id) => String(id) === String(windowId)),
-      canAccess: (windowId, mode, projectId) => {
-        if (mode === "chat")
-          return projectId === undefined || persistence.readProject(projectId)?.type === "chat";
-        if (projectId === undefined) return false;
-        return mode === "code"
-          ? canAccessCodeProject(windowId, projectId)
-          : windowHoldsProject(windowId, projectId, mode);
-      },
-      effectiveCodeThread: (windowId, thread) =>
-        codeSessionAuthority.effectiveThread(windowId, thread),
-      attachments: queueAttachments,
-    });
     const threadMessageQueue = new ThreadMessageQueueService({
       connection: persistence.connection,
       journal: persistence.journal,
       actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
       clock: () => new Date().toISOString(),
-      port: threadMessageQueuePort,
+      port: createThreadMessageQueuePort({
+        persistence,
+        journal: persistence.journal,
+        chat: chatService,
+        work: {
+          readThread: (id) => workThreadProjection.read(id),
+          listTurns: (id) => workTurnProjection.listForThread(id),
+          startFirstTurn: (windowId, command, admissionOptions) =>
+            workTurnService.startFirstTurn(windowId, command, admissionOptions),
+        },
+        code: routeCodeService,
+        isModeEnabled: (mode) =>
+          enabledModes(
+            persistence.readShellSettings()?.settings ?? defaultShellSettings(),
+          ).includes(mode),
+        isWindowLive: (windowId) =>
+          windowAuthorityStore.listWindowIds().some((id) => String(id) === String(windowId)),
+        canAccess: (windowId, mode, projectId) => {
+          if (mode === "chat")
+            return projectId === undefined || persistence.readProject(projectId)?.type === "chat";
+          if (projectId === undefined) return false;
+          return mode === "code"
+            ? canAccessCodeProject(windowId, projectId)
+            : windowHoldsProject(windowId, projectId, mode);
+        },
+        effectiveCodeThread: (windowId, thread) =>
+          codeSessionAuthority.effectiveThread(windowId, thread),
+        attachments: queueAttachments,
+      }),
     });
     yield* Effect.promise(() => threadMessageQueue.recover());
     revokeQueuedMessages = (windowId) => threadMessageQueue.revokeWindow(windowId);
@@ -10274,7 +10273,7 @@ export function startOctantServer(
         clock: () => new Date().toISOString(),
         actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
       }),
-      inspectThread: inspectThreadAsMessageQueue(threadMessageQueuePort),
+      withThreadStanding: threadStandingFromMessageQueue(threadMessageQueue),
     });
     const hostControlRoutes = createHostControlRouteHandler({
       windowAuthorityStore,
