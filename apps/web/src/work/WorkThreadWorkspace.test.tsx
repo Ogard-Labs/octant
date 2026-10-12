@@ -15,7 +15,10 @@ import type { CanvasThreadReferenceCard } from "@octant/contracts/canvas-cards";
 import { Profiler } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { WorkThreadWorkspace } from "./WorkThreadWorkspace";
-import { createComposerThreadDraftStore } from "../composer/composerThreadDraftStore";
+import {
+  COMPOSER_STAGED_DROPPED_NOTE,
+  createComposerThreadDraftStore,
+} from "../composer/composerThreadDraftStore";
 
 const threadId = decodeWorkThreadId("10000000-0000-4000-8000-000000000101");
 const providerId = "80000000-0000-4000-8000-0000000000b1" as never;
@@ -1948,6 +1951,32 @@ describe("WorkThreadWorkspace", () => {
     const prompt = await screen.findByRole("textbox", { name: "Work prompt" });
     expect(prompt).toHaveValue("quarterly notes");
     expect((prompt as HTMLTextAreaElement).selectionStart).toBe(9);
+  });
+
+  it("tells the person to reattach files when a restored Work draft dropped them", async () => {
+    const store = createComposerThreadDraftStore(memoryDraftStorage());
+    store.write("work", String(threadId), {
+      text: "Draft brief",
+      caretIndex: 12,
+      stagedDropped: true,
+    });
+    const threadClient = {
+      bootstrap: vi.fn(async () => ({ threads: [workThread()] })),
+      execute: vi.fn(),
+    } as unknown as WorkThreadClient;
+
+    render(
+      <WorkThreadWorkspace
+        draftStore={store}
+        providerGroups={[providerGroup()]}
+        threadClient={threadClient}
+        threadId={threadId}
+        title="Draft brief"
+      />,
+    );
+
+    expect(await screen.findByRole("textbox", { name: "Work prompt" })).toHaveValue("Draft brief");
+    expect(screen.getByText(COMPOSER_STAGED_DROPPED_NOTE)).toBeVisible();
   });
 
   it("clears a Work draft so it does not reappear", async () => {
