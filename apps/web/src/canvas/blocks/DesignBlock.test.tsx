@@ -562,7 +562,13 @@ describe("running prototype", () => {
         designRunRuntime={runtime}
       />,
     );
-    const frame = await screen.findByTitle<HTMLIFrameElement>("Checkout, running prototype");
+    // The frame listens for its bridge from an effect, so the start settles
+    // inside act: waiting for the frame alone returned before that effect ran
+    // on a loaded machine, and the first message was posted to nobody.
+    await act(async () => {
+      await Promise.resolve();
+    });
+    const frame = screen.getByTitle<HTMLIFrameElement>("Checkout, running prototype");
     act(() => bridge(frame, { type: "size", height: 640 }));
     expect(frame.style.height).toBe("640px");
     act(() => bridge(frame, { type: "size", height: 10_000_000 }));

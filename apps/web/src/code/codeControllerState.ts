@@ -13,6 +13,7 @@ import {
   MAX_CODE_EVIDENCE_BATCH_ITEMS,
   type CodeConversationTurn,
   type CodeConversationTurnHandoff,
+  type CodeForkMergeBack,
   type CodeEvidenceContentId,
   type CodeOperationEvent,
   type CodeOperationId,
@@ -87,6 +88,11 @@ export interface CodeConversationMessage {
    * moved the thread to another provider.
    */
   readonly handoff?: CodeConversationTurnHandoff;
+  /**
+   * Forks of this thread whose conversation this reply's turn carried because
+   * a person merged it back, as the host journaled them.
+   */
+  readonly forkMergeBacks?: ReadonlyArray<CodeForkMergeBack>;
 }
 
 function providerRequestFromEvent(event: CodeOperationEvent): CodeProviderRequest | undefined {
@@ -365,6 +371,7 @@ export function applyResult(current: CodeBootstrap | undefined, result: CodeComm
     case "worktree-source-previewed":
     case "worktree-remote-facts-retrieved":
     case "worktree-refs-listed":
+    case "fork-context-merge":
       return current;
     case "thread-checkout-rebind":
       return result.outcome.status === "refused"
@@ -562,6 +569,7 @@ async function projectConversationTurns(
       at: String(turn.updatedAt),
       ...(turn.changedFiles === undefined ? {} : { changedFiles: turn.changedFiles }),
       ...(turn.handoff === undefined ? {} : { handoff: turn.handoff }),
+      ...(turn.forkMergeBacks === undefined ? {} : { forkMergeBacks: turn.forkMergeBacks }),
     });
     const steps = turn.steps ?? [];
     if (steps.length === 0 && turn.stepsTruncated !== true) continue;

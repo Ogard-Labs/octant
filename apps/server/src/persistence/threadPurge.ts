@@ -414,9 +414,10 @@ function harnessSessionIds(connection: SqliteConnection, threadId: string): Read
 /**
  * Usage rows are host accounting: their token and cost aggregates stay, but a
  * purged thread's identity leaves them. The row keeps its aggregate meaning
- * while spending nothing that names the person's thread (OCT-366, decision 1:
- * de-link, never retain the id, never delete the aggregates). The thread's
- * child runs are erased with it, so their rows are de-linked the same way.
+ * while spending nothing that names the person's thread: it is
+ * de-linked, the id is never retained, and the aggregates are never deleted.
+ * The thread's child runs are erased with it, so their rows are de-linked the
+ * same way.
  */
 function delinkUsageRecords(
   connection: SqliteConnection,
@@ -440,8 +441,8 @@ function delinkUsageRecords(
 }
 
 /**
- * Project memory is Project data and survives a thread purge (OCT-366,
- * decision 2), but an entry's provenance no longer names the purged thread.
+ * Project memory is Project data and survives a thread purge, but an
+ * entry's provenance no longer names the purged thread.
  * The entry's text stays; only the thread reference is removed.
  */
 function delinkProjectMemoryProvenance(connection: SqliteConnection, threadId: string): void {

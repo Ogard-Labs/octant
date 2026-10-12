@@ -83,7 +83,9 @@ import { ThreadTasksPanel } from "../transcript/ThreadTasksPanel";
 import { modelDisplayName, providerModelLabel } from "../providers/providerModelLabel";
 import {
   pendingProviderSwitchNotice,
-  providerSwitchHandoffDisclosure,
+  conversationHandoffDisclosure,
+  forkMergeBackDisclosure,
+  forkMergeBackOutcomeMessage,
 } from "./providerSwitchHandoff";
 import {
   TurnHeader,
@@ -413,6 +415,8 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   const setRestoreUndo = props.controller.noteRestoreUndo;
   const [forking, setForking] = useState(false);
   const [forkMessage, setForkMessage] = useState<string>();
+  const [merging, setMerging] = useState(false);
+  const [mergeMessage, setMergeMessage] = useState<string>();
   // A send refused before the host saw it explains itself beside the composer,
   // since no turn exists to carry a reason.
   const [sendNotice, setSendNotice] = useState<string>();
@@ -966,6 +970,35 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
    * host decides which files and history the fork starts from, so this only
    * names the point.
    */
+  /**
+   * Hand this fork's conversation, through this reply, back to the thread it
+   * was forked from. Only conversation moves, and only when asked: the
+   * source's next message carries it, nothing runs now, and the fork's files
+   * reach the source only through Git review.
+   */
+  async function mergeBackThrough(message: CodeConversationMessage) {
+    const operationId = message.operationId;
+    if (operationId === undefined || view === undefined) return;
+    setMergeMessage(undefined);
+    setMerging(true);
+    try {
+      const outcome = await props.controller.mergeForkContext({
+        threadId: view.thread.id,
+        throughOperationId: String(operationId),
+      });
+      setMergeMessage(
+        outcome === undefined
+          ? (props.controller.lastExecuteError.current?.message ??
+              "The conversation could not be merged back.")
+          : forkMergeBackOutcomeMessage(outcome),
+      );
+    } catch {
+      setMergeMessage("The conversation could not be merged back.");
+    } finally {
+      setMerging(false);
+    }
+  }
+
   async function forkFrom(message: CodeConversationMessage) {
     const operationId = message.operationId;
     if (operationId === undefined || view === undefined) return;
@@ -1341,15 +1374,22 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                 ) : null}
                 {message.role === "assistant" && message.handoff !== undefined ? (
                   <p className="code-thread-workspace__handoff" role="note">
-                    {providerSwitchHandoffDisclosure(
-                      message.handoff,
-                      providerModelLabel(providerGroups, {
-                        providerInstanceId: message.handoff.previousProviderInstanceId,
-                        modelId: message.handoff.previousModelId,
-                      }),
+                    {conversationHandoffDisclosure(message.handoff, (selection) =>
+                      providerModelLabel(providerGroups, selection),
                     )}
                   </p>
                 ) : null}
+                {message.role === "assistant"
+                  ? (message.forkMergeBacks ?? []).map((mergeBack) => (
+                      <p
+                        className="code-thread-workspace__handoff"
+                        key={`${String(mergeBack.forkThreadId)}:${String(mergeBack.throughOperationId)}`}
+                        role="note"
+                      >
+                        {forkMergeBackDisclosure(mergeBack)}
+                      </p>
+                    ))
+                  : null}
                 <article
                   aria-label={
                     delivered
@@ -1367,6 +1407,14 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                         message.operationId !== undefined &&
                         message.status === "completed" &&
                         props.onOpenCodeThread !== undefined,
+                      // A fork's own finished replies; inherited ones are the source's.
+                      canMergeBack:
+                        view?.thread.forkedFrom !== undefined &&
+                        message.sourceThreadId === undefined &&
+                        message.role === "assistant" &&
+                        message.operationId !== undefined &&
+                        message.status === "completed",
+                      merging,
                       canCopyMarkdown:
                         message.role === "assistant" &&
                         message.status === "completed" &&
@@ -1389,6 +1437,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                     })}
                     onAction={(value) => {
                       if (value === "fork") void forkFrom(message);
+                      else if (value === "merge-back") void mergeBackThrough(message);
                       else if (value === "checkpoint-mark") {
                         setCheckpointDraft({ messageId: message.id, kind: "mark" });
                       } else if (value === "checkpoint-restore") {
@@ -2029,6 +2078,12 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                 {forkMessage}
               </span>
             )}
+            {mergeMessage === undefined ? null : (
+              /* ui-boundary-exception: compact-status */
+              <span className="code-thread-workspace__hint" role="status" title={mergeMessage}>
+                {mergeMessage}
+              </span>
+            )}
             {sendNotice === undefined ? null : (
               /* ui-boundary-exception: compact-status */
               <span className="code-thread-workspace__hint" role="alert" title={sendNotice}>
@@ -2044,6 +2099,8 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
 
 function codeTurnActions(input: {
   readonly canFork: boolean;
+  readonly canMergeBack: boolean;
+  readonly merging: boolean;
   readonly canCopyMarkdown: boolean;
   readonly canCheckpoint: boolean;
   readonly canRestoreFiles: boolean;
@@ -2058,6 +2115,13 @@ function codeTurnActions(input: {
       label: input.forking ? "Forking…" : "Fork from here",
       value: "fork",
       ...(input.forking ? { disabled: true } : {}),
+    });
+  }
+  if (input.canMergeBack) {
+    actions.push({
+      label: input.merging ? "Merging back…" : "Merge back to source",
+      value: "merge-back",
+      ...(input.merging ? { disabled: true } : {}),
     });
   }
   if (input.canCopyMarkdown) {

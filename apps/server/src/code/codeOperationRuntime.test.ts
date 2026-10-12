@@ -3753,7 +3753,10 @@ describe("provider switch handoff", () => {
         // The journal names the handed-over text by content reference, and
         // that text is exactly what the provider was sent.
         const reference =
-          handoff?.event.kind === "context-handoff-attached" ? handoff.event.content : undefined;
+          handoff?.event.kind === "context-handoff-attached" &&
+          handoff.event.reason === "provider-switch"
+            ? handoff.event.content
+            : undefined;
         expect(JSON.parse(fixture.evidenceValues.get(reference!.contentId) ?? "[]")).toEqual(
           context.slice(0, 3),
         );
@@ -3951,6 +3954,945 @@ describe("provider switch handoff", () => {
       fixture.close();
     }
   });
+
+  describe("a fork's first turn", () => {
+    const forkThreadId = decodeCodeThreadId("90000000-0000-4000-8000-0000000000f0");
+    const forkSession = decodeProviderSessionId("90000000-0000-4000-8000-0000000000f1");
+    const forkPoint = { threadId, throughOperationId: String(operationId(84)) };
+
+    function forkOn(instanceId: CodeThread["providerInstanceId"], modelId: string, version = 1) {
+      return decodeCodeThread({
+        ...thread(),
+        id: forkThreadId,
+        providerInstanceId: instanceId,
+        modelId,
+        version,
+        forkedFrom: forkPoint,
+      });
+    }
+
+    async function sendOnFork(
+      fixture: ReturnType<typeof runtimeFixture>,
+      n = 90,
+      text = "Try it another way.",
+    ) {
+      const prompt = storedEvidence(n + 1, text);
+      fixture.evidenceValues.set(prompt.contentId, text);
+      return fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: operationId(n),
+        threadId: forkThreadId,
+        checkoutId,
+        sessionId: forkSession,
+        prompt,
+      });
+    }
+
+    async function handoffFrames(fixture: ReturnType<typeof runtimeFixture>, n = 90) {
+      const frames = await fixture.runtime.subscribe(windowId, forkThreadId, operationId(n), 0, 50);
+      return frames.filter((frame) => frame.event.kind === "context-handoff-attached");
+    }
+
+    it.each([
+      {
+        direction: "from a provider's session onto the Octant Harness",
+        from: providerInstance,
+        fromModel: "model-a",
+        to: harnessInstance,
+        toModel: "harness-model",
+      },
+      {
+        direction: "from the Octant Harness onto a provider's session",
+        from: harnessInstance,
+        fromModel: "harness-model",
+        to: providerInstance,
+        toModel: "model-a",
+      },
+    ])(
+      "starts a fork $direction with the source's conversation through the fork point as journaled text",
+      async ({ from, fromModel, to, toModel }) => {
+        const drivers = twoHarnesses();
+        // The real seed takes up only a session of the fork's own provider.
+        const forkProviderSession = vi.fn(async () => undefined);
+        const fixture = runtimeFixture({
+          resolveProviderDriver: drivers.resolveProviderDriver,
+          externalContentIngested: true,
+          forkProviderSession,
+        });
+        fixture.setThread(onProvider(from, fromModel));
+        try {
+          await finishFirstTurn(fixture, drivers, from);
+          fixture.setOtherThread(forkOn(to, toModel));
+
+          await sendOnFork(fixture);
+          const next = drivers.connection(to);
+          await vi.waitFor(() => expect(next.send).toHaveBeenCalledOnce());
+
+          expect(next.resume).not.toHaveBeenCalled();
+          expect(next.start).toHaveBeenCalledWith(
+            expect.not.objectContaining({ resumeCursor: expect.anything() }),
+          );
+          const context = vi.mocked(next.send).mock.calls[0]![0].context ?? [];
+          const texts = context.map((block) => block.text);
+          expect(texts[0]).toContain("forked from, through the reply it was forked at");
+          expect(texts[0]).toContain('"externalContentIngested":true');
+          expect(texts[1]).toContain("Implement this.");
+          expect(texts[2]).toContain("First reply.");
+          expect(texts[2]).toContain(`"providerInstanceId":"${String(from)}"`);
+          expect(texts.some((text) => text.includes("Try it another way."))).toBe(false);
+
+          const frames = await fixture.runtime.subscribe(
+            windowId,
+            forkThreadId,
+            operationId(90),
+            0,
+            50,
+          );
+          const kinds = frames.map((frame) => frame.event.kind);
+          expect(kinds.indexOf("context-handoff-attached")).toBeGreaterThan(-1);
+          expect(kinds.indexOf("context-handoff-attached")).toBeLessThan(
+            kinds.indexOf("provider-session-ready"),
+          );
+          const record = frames.find(
+            (frame) => frame.event.kind === "context-handoff-attached",
+          )?.event;
+          expect(record).toMatchObject({
+            reason: "fork",
+            forkedFrom: forkPoint,
+            providerInstanceId: to,
+            modelId: toModel,
+            messages: 2,
+            externalContentIngested: true,
+            nativeSessionTransferred: false,
+            hiddenReasoningTransferred: false,
+          });
+          const reference =
+            record?.kind === "context-handoff-attached" && record.reason === "fork"
+              ? record.content
+              : undefined;
+          expect(JSON.parse(fixture.evidenceValues.get(reference!.contentId) ?? "[]")).toEqual(
+            context.slice(0, 3),
+          );
+          expect(fixture.conversation(forkThreadId).turns[0]?.handoff).toMatchObject({
+            reason: "fork",
+            forkedFrom: forkPoint,
+            messages: 2,
+          });
+          // The source is read, never written.
+          expect(fixture.conversation().turns).toHaveLength(1);
+          expect(fixture.conversation().turns[0]?.handoff).toBeUndefined();
+        } finally {
+          await fixture.runtime.close();
+          fixture.close();
+        }
+      },
+    );
+
+    it("resumes the source's own session on the same provider and hands over no text", async () => {
+      const drivers = twoHarnesses();
+      const seeded = { driverKind: "codex" as const, value: "seeded-fork-session" };
+      const forkProviderSession = vi.fn(async () => seeded);
+      const forkContext = vi.fn(() => ({
+        status: "unavailable" as const,
+        reason: "source-empty" as const,
+      }));
+      const fixture = runtimeFixture({
+        resolveProviderDriver: drivers.resolveProviderDriver,
+        forkProviderSession,
+        forkContext,
+      });
+      try {
+        await finishFirstTurn(fixture, drivers, providerInstance);
+        fixture.setOtherThread(forkOn(providerInstance, "model-a"));
+
+        await sendOnFork(fixture);
+        await vi.waitFor(() => expect(drivers.provider.send).toHaveBeenCalledTimes(2));
+
+        expect(forkProviderSession).toHaveBeenCalledWith(
+          expect.objectContaining({ origin: forkPoint, sessionId: forkSession }),
+        );
+        expect(drivers.provider.resume).toHaveBeenCalledWith(
+          expect.objectContaining({ resumeCursor: seeded }),
+        );
+        // A provider that took up the source's session is not also sent it as text.
+        expect(forkContext).not.toHaveBeenCalled();
+        const context = vi.mocked(drivers.provider.send).mock.calls[1]![0].context ?? [];
+        expect(context.some((block) => block.text.includes("Forked conversation source"))).toBe(
+          false,
+        );
+        const records = await handoffFrames(fixture);
+        expect(records.map((frame) => frame.event)).toEqual([
+          {
+            kind: "context-handoff-attached",
+            reason: "fork-native-session",
+            forkedFrom: forkPoint,
+            providerInstanceId: providerInstance,
+            modelId: "model-a",
+            nativeSessionTransferred: true,
+          },
+        ]);
+        expect(fixture.conversation(forkThreadId).turns[0]?.handoff).toEqual({
+          reason: "fork-native-session",
+          forkedFrom: forkPoint,
+        });
+      } finally {
+        await fixture.runtime.close();
+        fixture.close();
+      }
+    });
+
+    it("copies no session for a fork whose admission lapsed while it was being prepared", async () => {
+      const drivers = twoHarnesses();
+      const forkProviderSession = vi.fn(async () => ({
+        driverKind: "codex" as const,
+        value: "seeded-fork-session",
+      }));
+      let current = true;
+      const fixture = runtimeFixture({
+        // Admission lapses while the fork's driver is being resolved.
+        resolveProviderDriver: async (resolving) => {
+          if (String(resolving.id) === String(forkThreadId)) current = false;
+          return drivers.resolveProviderDriver(resolving);
+        },
+        forkProviderSession,
+      });
+      try {
+        await finishFirstTurn(fixture, drivers, providerInstance);
+        fixture.setOtherThread(forkOn(providerInstance, "model-a"));
+        const prompt = storedEvidence(91, "Try it another way.");
+        fixture.evidenceValues.set(prompt.contentId, "Try it another way.");
+
+        const result = await fixture.runtime.execute(
+          windowId,
+          {
+            kind: "start-provider-turn",
+            operationId: operationId(90),
+            threadId: forkThreadId,
+            checkoutId,
+            sessionId: forkSession,
+            prompt,
+          },
+          { admissionCurrent: () => current },
+        );
+        expect(result).toMatchObject({ state: "failed", admission: "refused" });
+        expect(forkProviderSession).not.toHaveBeenCalled();
+        expect(drivers.provider.send).toHaveBeenCalledOnce();
+      } finally {
+        await fixture.runtime.close();
+        fixture.close();
+      }
+    });
+
+    it("falls back to the text handoff when the same provider cannot take up the source's session", async () => {
+      const drivers = twoHarnesses();
+      const fixture = runtimeFixture({
+        resolveProviderDriver: drivers.resolveProviderDriver,
+        forkProviderSession: async () => undefined,
+      });
+      try {
+        await finishFirstTurn(fixture, drivers, providerInstance);
+        fixture.setOtherThread(forkOn(providerInstance, "model-a"));
+
+        await sendOnFork(fixture);
+        await vi.waitFor(() => expect(drivers.provider.send).toHaveBeenCalledTimes(2));
+        const context = vi.mocked(drivers.provider.send).mock.calls[1]![0].context ?? [];
+        expect(context[0]?.text).toContain("forked from, through the reply it was forked at");
+        expect((await handoffFrames(fixture))[0]?.event).toMatchObject({
+          reason: "fork",
+          messages: 2,
+        });
+      } finally {
+        await fixture.runtime.close();
+        fixture.close();
+      }
+    });
+
+    it("refuses a fork's first turn that can neither resume nor read the source, sending nothing", async () => {
+      const drivers = twoHarnesses();
+      const fixture = runtimeFixture({ resolveProviderDriver: drivers.resolveProviderDriver });
+      try {
+        await finishFirstTurn(fixture, drivers, providerInstance);
+        const first = fixture.conversation().turns[0];
+        fixture.evidenceValues.delete(first!.prompt.contentId);
+        fixture.evidenceValues.delete(first!.assistant[0]!.contentId);
+        fixture.setOtherThread(forkOn(harnessInstance, "harness-model"));
+
+        const result = await sendOnFork(fixture);
+        expect(result).toMatchObject({
+          state: "failed",
+          failure: { message: expect.stringContaining("no readable messages") },
+        });
+        expect(drivers.harness.start).not.toHaveBeenCalled();
+        expect(drivers.harness.send).not.toHaveBeenCalled();
+        expect(await handoffFrames(fixture)).toEqual([]);
+      } finally {
+        await fixture.runtime.close();
+        fixture.close();
+      }
+    });
+
+    it.each([
+      {
+        reason: "a source in a Project this window cannot access",
+        canAccessSource: false,
+        message: "cannot read the thread this was forked from",
+      },
+      {
+        reason: "a source in another Project",
+        canAccessSource: true,
+        message: "not in this task's Project",
+      },
+    ])("reads nothing out of $reason through a fork", async ({ canAccessSource, message }) => {
+      const drivers = twoHarnesses();
+      const otherProject = "90000000-0000-4000-8000-0000000000e1";
+      const forkContext = vi.fn(() => ({
+        status: "unavailable" as const,
+        reason: "source-empty" as const,
+      }));
+      const fixture = runtimeFixture({
+        resolveProviderDriver: drivers.resolveProviderDriver,
+        projectAccess: (projectId) => projectId !== otherProject || canAccessSource,
+        forkContext,
+      });
+      try {
+        await finishFirstTurn(fixture, drivers, providerInstance);
+        fixture.setThread(decodeCodeThread({ ...thread(), projectId: otherProject, version: 2 }));
+        fixture.setOtherThread(forkOn(harnessInstance, "harness-model"));
+
+        const result = await sendOnFork(fixture);
+        expect(result).toMatchObject({
+          state: "failed",
+          failure: { message: expect.stringContaining(message) },
+        });
+        expect(forkContext).not.toHaveBeenCalled();
+        expect(drivers.harness.send).not.toHaveBeenCalled();
+      } finally {
+        await fixture.runtime.close();
+        fixture.close();
+      }
+    });
+
+    it("hands the source's conversation over once, not again on the fork's next turn", async () => {
+      const drivers = twoHarnesses();
+      const forkContext = vi.fn((input: { source: CodeThread; throughOperationId: string }) =>
+        fixture.selectForkConversation(input),
+      );
+      const fixture = runtimeFixture({
+        resolveProviderDriver: drivers.resolveProviderDriver,
+        forkContext: (input) => forkContext(input),
+      });
+      try {
+        await finishFirstTurn(fixture, drivers, providerInstance);
+        fixture.setOtherThread(forkOn(harnessInstance, "harness-model"));
+        await sendOnFork(fixture);
+        await vi.waitFor(() => expect(drivers.harness.send).toHaveBeenCalledOnce());
+        await drivers.offer(
+          harnessInstance,
+          eventOn(harnessInstance, {
+            kind: "text-delta",
+            text: "Forked reply.",
+            sessionId: forkSession,
+          }),
+        );
+        await drivers.offer(
+          harnessInstance,
+          eventOn(harnessInstance, { kind: "completed", sessionId: forkSession }),
+        );
+        await vi.waitFor(() =>
+          expect(fixture.conversation(forkThreadId).turns[0]?.status).toBe("completed"),
+        );
+
+        await sendOnFork(fixture, 92);
+        await vi.waitFor(() => expect(drivers.harness.send).toHaveBeenCalledTimes(2));
+        expect(forkContext).toHaveBeenCalledOnce();
+        const context = vi.mocked(drivers.harness.send).mock.calls[1]![0].context ?? [];
+        expect(context.some((block) => block.text.includes("Forked conversation source"))).toBe(
+          false,
+        );
+        expect(await handoffFrames(fixture, 92)).toEqual([]);
+        expect(
+          fixture.conversation(forkThreadId).turns.filter((turn) => turn.handoff !== undefined),
+        ).toHaveLength(1);
+      } finally {
+        await fixture.runtime.close();
+        fixture.close();
+      }
+    });
+
+    it("reads a fork's journaled handoff back after a restart instead of reading the source again", async () => {
+      const drivers = twoHarnesses();
+      const stalledConnection = {
+        ...providerConnection(Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>())),
+        send: vi.fn(() => Effect.never),
+      } as ProviderConnection;
+      const fixture = runtimeFixture({
+        resolveProviderDriver: async (current) =>
+          String(current.providerInstanceId) === String(harnessInstance)
+            ? providerDriver(stalledConnection)
+            : drivers.resolveProviderDriver(current),
+      });
+      const restartedDrivers = twoHarnesses();
+      const restartedForkContext = vi.fn(() => ({
+        status: "unavailable" as const,
+        reason: "source-changed" as const,
+      }));
+      let restarted: ReturnType<typeof runtimeFixture> | undefined;
+      try {
+        await finishFirstTurn(fixture, drivers, providerInstance);
+        fixture.setOtherThread(forkOn(harnessInstance, "harness-model"));
+        await sendOnFork(fixture);
+        await vi.waitFor(async () => expect(await handoffFrames(fixture)).toHaveLength(1));
+        const sent = vi.mocked(stalledConnection.send).mock.calls[0]![0].context ?? [];
+
+        restarted = runtimeFixture({
+          resolveProviderDriver: restartedDrivers.resolveProviderDriver,
+          forkContext: restartedForkContext,
+          restartOf: { directory: fixture.directory, evidenceValues: fixture.evidenceValues },
+        });
+        restarted.setOtherThread(forkOn(harnessInstance, "harness-model"));
+        await sendOnFork(restarted);
+        await vi.waitFor(() => expect(restartedDrivers.harness.send).toHaveBeenCalledOnce());
+
+        expect(restartedForkContext).not.toHaveBeenCalled();
+        const context = vi.mocked(restartedDrivers.harness.send).mock.calls[0]![0].context ?? [];
+        expect(context.slice(0, 3)).toEqual(sent.slice(0, 3));
+        expect(await handoffFrames(restarted)).toHaveLength(1);
+        expect(
+          restarted.conversation(forkThreadId).turns.filter((turn) => turn.handoff !== undefined),
+        ).toHaveLength(1);
+      } finally {
+        await restarted?.runtime.close();
+        restarted?.close();
+        await fixture.runtime.close();
+        fixture.close();
+      }
+    });
+
+    describe("when the fork later switches providers", () => {
+      /** The fork's first turn on the Octant Harness, finished with a reply of its own. */
+      async function finishForkOnHarness(
+        fixture: ReturnType<typeof runtimeFixture>,
+        drivers: ReturnType<typeof twoHarnesses>,
+      ) {
+        await finishFirstTurn(fixture, drivers, providerInstance);
+        fixture.setOtherThread(forkOn(harnessInstance, "harness-model"));
+        await sendOnFork(fixture);
+        await vi.waitFor(() => expect(drivers.harness.send).toHaveBeenCalledOnce());
+        await drivers.offer(
+          harnessInstance,
+          eventOn(harnessInstance, {
+            kind: "text-delta",
+            text: "Forked reply.",
+            sessionId: forkSession,
+          }),
+        );
+        await drivers.offer(
+          harnessInstance,
+          eventOn(harnessInstance, { kind: "completed", sessionId: forkSession }),
+        );
+        await vi.waitFor(() =>
+          expect(fixture.conversation(forkThreadId).turns[0]?.status).toBe("completed"),
+        );
+        fixture.setOtherThread(forkOn(providerInstance, "model-a", 2));
+      }
+
+      it("hands the new provider the inherited conversation and the fork's own turns as one journaled handoff", async () => {
+        const drivers = twoHarnesses();
+        const fixture = runtimeFixture({ resolveProviderDriver: drivers.resolveProviderDriver });
+        try {
+          await finishForkOnHarness(fixture, drivers);
+
+          await sendOnFork(fixture, 92, "Now on the other provider.");
+          await vi.waitFor(() => expect(drivers.provider.send).toHaveBeenCalledTimes(2));
+          const context = vi.mocked(drivers.provider.send).mock.calls[1]![0].context ?? [];
+          const texts = context.map((block) => block.text);
+          expect(texts[0]).toContain(
+            "handed over because the thread moved to a different provider",
+          );
+          expect(texts[0]).toContain("This thread is a fork");
+          // The source's turn through the fork point, then the fork's own turn.
+          expect(texts[1]).toContain("Forked conversation source:");
+          expect(texts[1]).toContain("Implement this.");
+          expect(texts[1]).toContain(`"threadId":"${String(threadId)}"`);
+          expect(texts[2]).toContain("First reply.");
+          expect(texts[2]).toContain(`"providerInstanceId":"${String(providerInstance)}"`);
+          expect(texts[3]).toContain("Earlier conversation source:");
+          expect(texts[3]).toContain("Try it another way.");
+          expect(texts[4]).toContain("Forked reply.");
+          expect(texts[4]).toContain(`"providerInstanceId":"${String(harnessInstance)}"`);
+          expect(texts.some((text) => text.includes("Now on the other provider."))).toBe(false);
+
+          const frames = await fixture.runtime.subscribe(
+            windowId,
+            forkThreadId,
+            operationId(92),
+            0,
+            50,
+          );
+          const kinds = frames.map((frame) => frame.event.kind);
+          expect(kinds.indexOf("context-handoff-attached")).toBeGreaterThan(-1);
+          expect(kinds.indexOf("context-handoff-attached")).toBeLessThan(
+            kinds.indexOf("provider-session-ready"),
+          );
+          const record = frames.find(
+            (frame) => frame.event.kind === "context-handoff-attached",
+          )?.event;
+          expect(record).toMatchObject({
+            reason: "provider-switch",
+            previousProviderInstanceId: harnessInstance,
+            providerInstanceId: providerInstance,
+            messages: 4,
+            externalContentIngested: false,
+            inherited: { forkedFrom: forkPoint, messages: 2, externalContentIngested: false },
+            nativeSessionTransferred: false,
+            hiddenReasoningTransferred: false,
+          });
+          const reference =
+            record?.kind === "context-handoff-attached" && record.reason === "provider-switch"
+              ? record.content
+              : undefined;
+          expect(JSON.parse(fixture.evidenceValues.get(reference!.contentId) ?? "[]")).toEqual(
+            context.slice(0, 5),
+          );
+          expect(fixture.conversation(forkThreadId).turns[1]?.handoff).toMatchObject({
+            reason: "provider-switch",
+            messages: 4,
+            inherited: { forkedFrom: forkPoint, messages: 2 },
+          });
+        } finally {
+          await fixture.runtime.close();
+          fixture.close();
+        }
+      });
+
+      it.each([
+        {
+          reason: "a source in a Project this window can no longer access",
+          canAccessSource: false,
+          message: "cannot read the thread this was forked from",
+        },
+        {
+          reason: "a source that moved to another Project",
+          canAccessSource: true,
+          message: "not in this task's Project",
+        },
+      ])(
+        "refuses the switch with a named reason, sending nothing, for $reason",
+        async ({ canAccessSource, message }) => {
+          const drivers = twoHarnesses();
+          const otherProject = "90000000-0000-4000-8000-0000000000e1";
+          const fixture = runtimeFixture({
+            resolveProviderDriver: drivers.resolveProviderDriver,
+            projectAccess: (projectId) => projectId !== otherProject || canAccessSource,
+          });
+          try {
+            await finishForkOnHarness(fixture, drivers);
+            fixture.setThread(
+              decodeCodeThread({ ...thread(), projectId: otherProject, version: 2 }),
+            );
+
+            const result = await sendOnFork(fixture, 92, "Now on the other provider.");
+            expect(result).toMatchObject({
+              state: "failed",
+              failure: { message: expect.stringContaining(message) },
+            });
+            expect(drivers.provider.send).toHaveBeenCalledOnce();
+            expect(await handoffFrames(fixture, 92)).toEqual([]);
+          } finally {
+            await fixture.runtime.close();
+            fixture.close();
+          }
+        },
+      );
+
+      it("reads the journaled handoff back after a restart and sends it once", async () => {
+        const drivers = twoHarnesses();
+        const stalledConnection = {
+          ...providerConnection(Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>())),
+          send: vi.fn(() => Effect.never),
+        } as ProviderConnection;
+        const fixture = runtimeFixture({
+          resolveProviderDriver: async (current) =>
+            String(current.id) === String(forkThreadId) &&
+            String(current.providerInstanceId) === String(providerInstance)
+              ? providerDriver(stalledConnection)
+              : drivers.resolveProviderDriver(current),
+        });
+        const restartedDrivers = twoHarnesses();
+        const refusedRead = () => ({
+          status: "unavailable" as const,
+          reason: "source-changed" as const,
+        });
+        const restartedSwitchContext = vi.fn(refusedRead);
+        const restartedForkContext = vi.fn(refusedRead);
+        let restarted: ReturnType<typeof runtimeFixture> | undefined;
+        try {
+          await finishForkOnHarness(fixture, drivers);
+          await sendOnFork(fixture, 92, "Now on the other provider.");
+          await vi.waitFor(async () => expect(await handoffFrames(fixture, 92)).toHaveLength(1));
+          const sent = vi.mocked(stalledConnection.send).mock.calls[0]![0].context ?? [];
+          expect(sent[1]?.text).toContain("Implement this.");
+
+          restarted = runtimeFixture({
+            resolveProviderDriver: restartedDrivers.resolveProviderDriver,
+            providerSwitchContext: restartedSwitchContext,
+            forkContext: restartedForkContext,
+            restartOf: { directory: fixture.directory, evidenceValues: fixture.evidenceValues },
+          });
+          restarted.setOtherThread(forkOn(providerInstance, "model-a", 2));
+          await sendOnFork(restarted, 92, "Now on the other provider.");
+          await vi.waitFor(() => expect(restartedDrivers.provider.send).toHaveBeenCalledOnce());
+
+          // Neither the fork nor its source is read again; the disclosed
+          // handoff goes out as it was journaled, and only once.
+          expect(restartedSwitchContext).not.toHaveBeenCalled();
+          expect(restartedForkContext).not.toHaveBeenCalled();
+          const context = vi.mocked(restartedDrivers.provider.send).mock.calls[0]![0].context ?? [];
+          expect(context.slice(0, 5)).toEqual(sent.slice(0, 5));
+          expect(await handoffFrames(restarted, 92)).toHaveLength(1);
+          expect(restarted.conversation(forkThreadId).turns[1]?.handoff).toMatchObject({
+            reason: "provider-switch",
+            inherited: { forkedFrom: forkPoint },
+          });
+        } finally {
+          await restarted?.runtime.close();
+          restarted?.close();
+          await fixture.runtime.close();
+          fixture.close();
+        }
+      });
+    });
+
+    describe("merging a fork's conversation back into its source", () => {
+      const sourceSession = sessionId;
+
+      /**
+       * The source's first turn on one runtime and the fork's first turn on the
+       * other, each finished with a reply. Returns how many messages each
+       * connection had been sent before the source's next turn.
+       */
+      async function forkWithReply(
+        fixture: ReturnType<typeof runtimeFixture>,
+        drivers: ReturnType<typeof twoHarnesses>,
+        source: { instance: CodeThread["providerInstanceId"]; model: string },
+        fork: { instance: CodeThread["providerInstanceId"]; model: string },
+        forkReply = "The fork found a cleaner approach.",
+      ) {
+        fixture.setThread(onProvider(source.instance, source.model));
+        await finishFirstTurn(fixture, drivers, source.instance);
+        fixture.setOtherThread(forkOn(fork.instance, fork.model));
+        const forkConnection = drivers.connection(fork.instance);
+        const before = vi.mocked(forkConnection.send).mock.calls.length;
+        await sendOnFork(fixture);
+        await vi.waitFor(() =>
+          expect(vi.mocked(forkConnection.send).mock.calls.length).toBe(before + 1),
+        );
+        await drivers.offer(
+          fork.instance,
+          eventOn(fork.instance, { kind: "text-delta", text: forkReply, sessionId: forkSession }),
+        );
+        await drivers.offer(
+          fork.instance,
+          eventOn(fork.instance, { kind: "completed", sessionId: forkSession }),
+        );
+        await vi.waitFor(() =>
+          expect(fixture.conversation(forkThreadId).turns[0]?.status).toBe("completed"),
+        );
+      }
+
+      async function sendOnSource(fixture: ReturnType<typeof runtimeFixture>, n = 85) {
+        const prompt = storedEvidence(n + 100, "Pick up from the fork.");
+        fixture.evidenceValues.set(prompt.contentId, "Pick up from the fork.");
+        return fixture.runtime.execute(windowId, {
+          kind: "start-provider-turn",
+          operationId: operationId(n),
+          threadId,
+          checkoutId,
+          sessionId: sourceSession,
+          prompt,
+        });
+      }
+
+      async function sourceFrames(fixture: ReturnType<typeof runtimeFixture>, n = 85) {
+        return fixture.runtime.subscribe(windowId, threadId, operationId(n), 0, 50);
+      }
+
+      it.each([
+        {
+          direction: "from a fork on the Octant Harness into a source on a provider's session",
+          source: { instance: providerInstance, model: "model-a" },
+          fork: { instance: harnessInstance, model: "harness-model" },
+        },
+        {
+          direction: "from a fork on a provider's session into a source on the Octant Harness",
+          source: { instance: harnessInstance, model: "harness-model" },
+          fork: { instance: providerInstance, model: "model-a" },
+        },
+      ])(
+        "hands the fork's own turns to the source's next turn as a journaled, disclosed handoff $direction",
+        async ({ source, fork }) => {
+          const drivers = twoHarnesses();
+          const recordExternalContentIngestion = vi.fn(() => ({
+            kind: "recorded" as const,
+            taint: { externalContentIngested: true, ingestedSources: [] },
+          }));
+          const fixture = runtimeFixture({
+            resolveProviderDriver: drivers.resolveProviderDriver,
+            externalContentIngested: true,
+            recordExternalContentIngestion,
+          });
+          try {
+            await forkWithReply(fixture, drivers, source, fork);
+            const merged = await fixture.runtime.mergeForkContext!(
+              windowId,
+              forkThreadId,
+              String(operationId(90)),
+            );
+            expect(merged).toEqual({ status: "merged", sourceThreadId: threadId, messages: 2 });
+            // Taint follows the text: the source says it took in outside
+            // content before any turn can carry the fork's.
+            expect(recordExternalContentIngestion).toHaveBeenCalledWith(
+              expect.objectContaining({
+                threadId,
+                provenance: { origin: "external-content", sourceLabel: "fork-merge-back" },
+              }),
+            );
+            // Merging adds context only; nothing ran on the source.
+            const sourceConnection = drivers.connection(source.instance);
+            expect(sourceConnection.send).toHaveBeenCalledOnce();
+
+            await sendOnSource(fixture);
+            await vi.waitFor(() => expect(sourceConnection.send).toHaveBeenCalledTimes(2));
+            // The source continues its own session; the fork's turns come as text.
+            expect(sourceConnection.resume).toHaveBeenCalledOnce();
+            const context = vi.mocked(sourceConnection.send).mock.calls[1]![0].context ?? [];
+            const texts = context.map((block) => block.text);
+            expect(texts[0]).toContain("merged back here because the person asked");
+            expect(texts[0]).toContain('"externalContentIngested":true');
+            expect(texts[1]).toContain("Try it another way.");
+            expect(texts[2]).toContain("The fork found a cleaner approach.");
+            expect(texts[2]).toContain(`"providerInstanceId":"${String(fork.instance)}"`);
+            // The fork's inherited copy of the source is not sent back to it.
+            expect(texts.some((text) => text.includes("First reply."))).toBe(false);
+
+            const frames = await sourceFrames(fixture);
+            const kinds = frames.map((frame) => frame.event.kind);
+            expect(kinds.indexOf("fork-context-delivered")).toBeGreaterThan(-1);
+            expect(kinds.indexOf("fork-context-delivered")).toBeLessThan(
+              kinds.indexOf("provider-session-ready"),
+            );
+            expect(
+              frames.find((frame) => frame.event.kind === "fork-context-delivered")?.event,
+            ).toMatchObject({
+              forkThreadId,
+              throughOperationId: operationId(90),
+              messages: 2,
+              externalContentIngested: true,
+            });
+            expect(fixture.conversation().turns[1]?.forkMergeBacks).toEqual([
+              expect.objectContaining({ forkThreadId, messages: 2 }),
+            ]);
+            // The fork is read, never written.
+            expect(fixture.conversation(forkThreadId).turns).toHaveLength(1);
+          } finally {
+            await fixture.runtime.close();
+            fixture.close();
+          }
+        },
+      );
+
+      it("merges a fork once, carries it once, and keeps it across a restart", async () => {
+        const drivers = twoHarnesses();
+        const fixture = runtimeFixture({ resolveProviderDriver: drivers.resolveProviderDriver });
+        const restartedDrivers = twoHarnesses();
+        let restarted: ReturnType<typeof runtimeFixture> | undefined;
+        try {
+          await forkWithReply(
+            fixture,
+            drivers,
+            { instance: providerInstance, model: "model-a" },
+            { instance: harnessInstance, model: "harness-model" },
+          );
+          expect(
+            await fixture.runtime.mergeForkContext!(
+              windowId,
+              forkThreadId,
+              String(operationId(90)),
+            ),
+          ).toMatchObject({ status: "merged" });
+          expect(
+            await fixture.runtime.mergeForkContext!(
+              windowId,
+              forkThreadId,
+              String(operationId(90)),
+            ),
+          ).toEqual({ status: "refused", reason: "already-merged" });
+          await fixture.runtime.close();
+
+          // A restarted host still carries the merge, reading nothing again.
+          const restartedMergeContext = vi.fn(() => ({
+            status: "unavailable" as const,
+            reason: "source-changed" as const,
+          }));
+          restarted = runtimeFixture({
+            resolveProviderDriver: restartedDrivers.resolveProviderDriver,
+            forkMergeBackContext: restartedMergeContext,
+            restartOf: { directory: fixture.directory, evidenceValues: fixture.evidenceValues },
+          });
+          restarted.setOtherThread(forkOn(harnessInstance, "harness-model"));
+          expect(
+            await restarted.runtime.mergeForkContext!(
+              windowId,
+              forkThreadId,
+              String(operationId(90)),
+            ),
+          ).toEqual({ status: "refused", reason: "already-merged" });
+          await sendOnSource(restarted);
+          const provider = restartedDrivers.provider;
+          await vi.waitFor(() => expect(provider.send).toHaveBeenCalledOnce());
+          const first = vi.mocked(provider.send).mock.calls[0]![0].context ?? [];
+          expect(first[2]?.text).toContain("The fork found a cleaner approach.");
+          expect(restartedMergeContext).not.toHaveBeenCalled();
+          await restartedDrivers.offer(
+            providerInstance,
+            eventOn(providerInstance, { kind: "completed" }),
+          );
+          await vi.waitFor(() =>
+            expect(restarted!.conversation().turns[1]?.status).toBe("completed"),
+          );
+
+          // The turn after carries nothing more.
+          await sendOnSource(restarted, 86);
+          await vi.waitFor(() => expect(provider.send).toHaveBeenCalledTimes(2));
+          const second = vi.mocked(provider.send).mock.calls[1]![0].context ?? [];
+          expect(second.some((block) => block.text.includes("cleaner approach"))).toBe(false);
+          expect(
+            (await sourceFrames(restarted, 86)).some(
+              (frame) => frame.event.kind === "fork-context-delivered",
+            ),
+          ).toBe(false);
+          const turns = restarted.conversation().turns;
+          expect(turns.flatMap((turn) => turn.forkMergeBacks ?? [])).toHaveLength(1);
+        } finally {
+          await restarted?.runtime.close();
+          restarted?.close();
+          fixture.close();
+        }
+      });
+
+      it("discloses a fork reply cut to the budget rather than handing over less silently", async () => {
+        const drivers = twoHarnesses();
+        const fixture = runtimeFixture({ resolveProviderDriver: drivers.resolveProviderDriver });
+        try {
+          await forkWithReply(
+            fixture,
+            drivers,
+            { instance: providerInstance, model: "model-a" },
+            { instance: harnessInstance, model: "harness-model" },
+            "x".repeat(9_000),
+          );
+          await fixture.runtime.mergeForkContext!(windowId, forkThreadId, String(operationId(90)));
+          await sendOnSource(fixture);
+          await vi.waitFor(() => expect(drivers.provider.send).toHaveBeenCalledTimes(2));
+          const context = vi.mocked(drivers.provider.send).mock.calls[1]![0].context ?? [];
+          expect(context[0]?.text).toContain('"truncatedMessages":1');
+          expect(context[2]?.text).toMatch(/\[\d+ characters omitted\]$/);
+          expect(fixture.conversation().turns[1]?.forkMergeBacks?.[0]).toMatchObject({
+            messages: 2,
+            omissions: { truncatedMessages: 1 },
+          });
+        } finally {
+          await fixture.runtime.close();
+          fixture.close();
+        }
+      });
+
+      it.each([
+        {
+          reason: "a source in a Project this window cannot access",
+          canAccessSource: false,
+          refusal: "source-unauthorized",
+        },
+        {
+          reason: "a source that moved to another Project",
+          canAccessSource: true,
+          refusal: "foreign-project",
+        },
+      ])("reads nothing out of the fork for $reason", async ({ canAccessSource, refusal }) => {
+        const drivers = twoHarnesses();
+        const otherProject = "90000000-0000-4000-8000-0000000000e1";
+        const readFork = vi.fn();
+        const fixture = runtimeFixture({
+          resolveProviderDriver: drivers.resolveProviderDriver,
+          projectAccess: (projectId) => projectId !== otherProject || canAccessSource,
+          forkMergeBackContext: (input) => {
+            readFork(input);
+            return fixture.selectForkMergeBack(input);
+          },
+        });
+        try {
+          await forkWithReply(
+            fixture,
+            drivers,
+            { instance: providerInstance, model: "model-a" },
+            { instance: harnessInstance, model: "harness-model" },
+          );
+          fixture.setThread(decodeCodeThread({ ...thread(), projectId: otherProject, version: 2 }));
+          expect(
+            await fixture.runtime.mergeForkContext!(
+              windowId,
+              forkThreadId,
+              String(operationId(90)),
+            ),
+          ).toEqual({ status: "refused", reason: refusal });
+          expect(readFork).not.toHaveBeenCalled();
+          fixture.setThread(onProvider(providerInstance, "model-a", 3));
+          await sendOnSource(fixture);
+          await vi.waitFor(() => expect(drivers.provider.send).toHaveBeenCalledTimes(2));
+          expect(
+            (await sourceFrames(fixture)).some(
+              (frame) => frame.event.kind === "fork-context-delivered",
+            ),
+          ).toBe(false);
+        } finally {
+          await fixture.runtime.close();
+          fixture.close();
+        }
+      });
+
+      it("refuses a thread that is not a fork, and a fork turn that has not finished", async () => {
+        const drivers = twoHarnesses();
+        const fixture = runtimeFixture({ resolveProviderDriver: drivers.resolveProviderDriver });
+        try {
+          await finishFirstTurn(fixture, drivers, providerInstance);
+          expect(
+            await fixture.runtime.mergeForkContext!(windowId, threadId, String(operationId(84))),
+          ).toEqual({ status: "refused", reason: "not-a-fork" });
+          fixture.setOtherThread(forkOn(harnessInstance, "harness-model"));
+          // No fork turn at all: there is nothing after the fork point.
+          expect(
+            await fixture.runtime.mergeForkContext!(
+              windowId,
+              forkThreadId,
+              String(operationId(90)),
+            ),
+          ).toEqual({ status: "refused", reason: "point-unavailable" });
+          await sendOnFork(fixture);
+          await vi.waitFor(() => expect(drivers.harness.send).toHaveBeenCalledOnce());
+          expect(
+            await fixture.runtime.mergeForkContext!(
+              windowId,
+              forkThreadId,
+              String(operationId(90)),
+            ),
+          ).toEqual({ status: "refused", reason: "point-unavailable" });
+        } finally {
+          await fixture.runtime.close();
+          fixture.close();
+        }
+      });
+    });
+  });
 });
 
 /** The host's own selector over a fixture's journal, as a provider switch reads it. */
@@ -4011,7 +4953,8 @@ function runtimeFixture(options: {
     binary: boolean;
   }>;
   approvalValidator?: boolean | (() => boolean);
-  projectAccess?: boolean;
+  /** Whether a window may access a Project; a function answers per Project. */
+  projectAccess?: boolean | ((projectId: string) => boolean);
   managedThreadCreation?: Parameters<typeof createCodeOperationRuntime>[0]["managedThreadCreation"];
   failRuntimeWorkJournal?: boolean;
   throwRuntimeWorkReporter?: boolean;
@@ -4039,6 +4982,22 @@ function runtimeFixture(options: {
   externalContentIngested?: boolean;
   /** Reopen another fixture's journal and content, the way a restarted host does. */
   restartOf?: { readonly directory: string; readonly evidenceValues: Map<string, string> };
+  /**
+   * How a fork reads its source's conversation: the host's own selector over
+   * this journal (the default), a stand-in, or nothing.
+   */
+  forkContext?: Parameters<typeof createCodeOperationRuntime>[0]["forkContext"] | "none";
+  /**
+   * How a merge back reads the fork's own turns: the host's own selector over
+   * this journal (the default), a stand-in, or nothing.
+   */
+  forkMergeBackContext?:
+    | Parameters<typeof createCodeOperationRuntime>[0]["forkMergeBackContext"]
+    | "none";
+  recordExternalContentIngestion?: Parameters<
+    typeof createCodeOperationRuntime
+  >[0]["recordExternalContentIngestion"];
+  forkProviderSession?: Parameters<typeof createCodeOperationRuntime>[0]["forkProviderSession"];
 }) {
   const directory =
     options.restartOf?.directory ?? mkdtempSync(join(tmpdir(), "octant-code-runtime-"));
@@ -4085,7 +5044,15 @@ function runtimeFixture(options: {
     head: { kind: "branch", name: "feature/runtime", oid: "a".repeat(40) },
     observedAt: now,
   });
-  const access = vi.fn(async () => options.projectAccess ?? true);
+  const access = vi.fn(async (_windowId: unknown, projectId: unknown) =>
+    typeof options.projectAccess === "function"
+      ? options.projectAccess(String(projectId))
+      : (options.projectAccess ?? true),
+  );
+  // Threads other than the one under test, such as the source a fork reads.
+  const otherThreads = new Map<string, CodeThread>();
+  const readThread = (id: CodeThreadId) =>
+    id === threadId ? activeThread : otherThreads.get(String(id));
   const prompt = evidence(40);
   const response = evidence(41);
   const evidenceValues =
@@ -4129,13 +5096,59 @@ function runtimeFixture(options: {
   const selectConversation = (input: {
     readonly thread: CodeThread;
     readonly excludeOperationId: CodeOperationId;
+    readonly inheritedFrom?: { readonly source: CodeThread; readonly throughOperationId: string };
   }) =>
     admittedParentCodeContext({
       threadId: input.thread.id,
       purpose: "provider-switch",
       excludeOperationId: String(input.excludeOperationId),
       externalContentIngested: options.externalContentIngested ?? false,
-      readThread: (id) => (id === threadId ? activeThread : undefined),
+      ...(input.inheritedFrom === undefined
+        ? {}
+        : {
+            inherited: {
+              threadId: input.inheritedFrom.source.id,
+              throughOperationId: input.inheritedFrom.throughOperationId,
+              externalContentIngested: options.externalContentIngested ?? false,
+            },
+          }),
+      readThread,
+      readActivity: (id) =>
+        readCodeThreadActivity(connection).find(
+          (activity) => String(activity.threadId) === String(id),
+        ),
+      conversation: (page) => conversationReader.conversation(page),
+      readEvidence: (reference) => evidenceValues.get(reference.contentId),
+    });
+  const selectForkConversation = (input: {
+    readonly source: CodeThread;
+    readonly throughOperationId: string;
+  }) =>
+    admittedParentCodeContext({
+      threadId: input.source.id,
+      purpose: "fork",
+      throughOperationId: input.throughOperationId,
+      externalContentIngested: options.externalContentIngested ?? false,
+      readThread,
+      readActivity: (id) =>
+        readCodeThreadActivity(connection).find(
+          (activity) => String(activity.threadId) === String(id),
+        ),
+      conversation: (page) => conversationReader.conversation(page),
+      readEvidence: (reference) => evidenceValues.get(reference.contentId),
+    });
+  const selectForkMergeBack = (input: {
+    readonly fork: CodeThread;
+    readonly afterOperationId?: string;
+    readonly throughOperationId: string;
+  }) =>
+    admittedParentCodeContext({
+      threadId: input.fork.id,
+      purpose: "fork-merge-back",
+      throughOperationId: input.throughOperationId,
+      ...(input.afterOperationId === undefined ? {} : { afterOperationId: input.afterOperationId }),
+      externalContentIngested: options.externalContentIngested ?? false,
+      readThread,
       readActivity: (id) =>
         readCodeThreadActivity(connection).find(
           (activity) => String(activity.threadId) === String(id),
@@ -4148,7 +5161,7 @@ function runtimeFixture(options: {
       journal,
       readCodeRuntimeWorkAggregateVersion: (id) =>
         readCodeRuntimeWorkAggregateVersion(connection, id),
-      readCodeThread: (id) => (id === threadId ? activeThread : undefined),
+      readCodeThread: readThread,
       readCodeCheckout: (id) => (id === checkoutId ? checkout : undefined),
       readReviewFinding: () => undefined,
       readReviewFindings: () => [],
@@ -4198,6 +5211,18 @@ function runtimeFixture(options: {
     ...(options.providerSwitchContext === "none"
       ? {}
       : { providerSwitchContext: options.providerSwitchContext ?? selectConversation }),
+    ...(options.forkContext === "none"
+      ? {}
+      : { forkContext: options.forkContext ?? selectForkConversation }),
+    ...(options.forkMergeBackContext === "none"
+      ? {}
+      : { forkMergeBackContext: options.forkMergeBackContext ?? selectForkMergeBack }),
+    ...(options.recordExternalContentIngestion === undefined
+      ? {}
+      : { recordExternalContentIngestion: options.recordExternalContentIngestion }),
+    ...(options.forkProviderSession === undefined
+      ? {}
+      : { forkProviderSession: options.forkProviderSession }),
     credentialResolver: options.credentialResolver ?? { resolve: async () => options.credential },
     supportsAttachments: () => true,
     takeProductFeedbackForTurn: createProductFeedbackTurnPort({ service: feedback }),
@@ -4325,9 +5350,16 @@ function runtimeFixture(options: {
     evidenceValues,
     directory,
     selectConversation,
-    conversation: () => conversationReader.conversation({ threadId, afterCursor: 0, limit: 100 }),
+    selectForkConversation,
+    selectForkMergeBack,
+    conversation: (of: CodeThreadId = threadId) =>
+      conversationReader.conversation({ threadId: of, afterCursor: 0, limit: 100 }),
     setThread: (next: CodeThread) => {
       activeThread = next;
+    },
+    /** Hold another thread beside the one under test, replacing any with its id. */
+    setOtherThread: (next: CodeThread) => {
+      otherThreads.set(String(next.id), next);
     },
     snapshotPolicies,
     /** Fire the shell's own exit, the way a `exit` typed into it would. */

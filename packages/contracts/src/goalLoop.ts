@@ -104,8 +104,13 @@ export const GoalLoopRound = Schema.Struct({
   roundId: GoalLoopRoundId,
   loopId: GoalLoopId,
   sequence: Schema.Int.pipe(Schema.positive()),
-  /** The checkpoint taken before the round, which is what makes it reviewable. */
-  checkpointId: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
+  /**
+   * The checkpoint taken before the round, which is what makes it reviewable.
+   * Absent records that the round ran with none: a Work folder has no
+   * checkpoint to mark, so such a round runs only when a person approves every
+   * write it makes.
+   */
+  checkpointId: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128))),
   /** The intersection the round actually ran under, never the declared ceiling. */
   authority: AgentRunAuthority,
   outcome: Schema.Literal("ran", "paused", "failed"),
@@ -113,7 +118,14 @@ export const GoalLoopRound = Schema.Struct({
   tokensSpent: Schema.Int.pipe(Schema.nonNegative()),
   startedAt: UtcTimestamp,
   endedAt: UtcTimestamp,
-}).annotations(strict);
+})
+  .annotations(strict)
+  .pipe(
+    Schema.filter(
+      (round) =>
+        round.checkpointId !== undefined || round.authority.executionPolicy === "approval-gated",
+    ),
+  );
 export type GoalLoopRound = typeof GoalLoopRound.Type;
 
 const GoalLoopCommandFields = {

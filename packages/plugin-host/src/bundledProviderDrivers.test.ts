@@ -4,6 +4,7 @@ import { ProviderDriverKind } from "@octant/contracts/providers";
 import {
   admittedBundledProviderDriverKinds,
   BUNDLED_PROVIDER_DRIVER_PLUGINS,
+  bundledProviderDriverCatalog,
   bundledProviderDriverComponent,
   bundledProviderDriverPlugin,
   isBundledProviderDriverEffective,
@@ -107,5 +108,27 @@ describe("bundled provider-driver plugins", () => {
     expect(admittedBundledProviderDriverKinds({ grok: { compatible: false } }).has("grok")).toBe(
       false,
     );
+  });
+
+  it("lists every bundled driver in the catalog as installed and trusted, validated by the public schema", () => {
+    const catalog = bundledProviderDriverCatalog();
+    expect(catalog.map((listing) => listing.entry.driverKind)).toEqual(
+      BUNDLED_PROVIDER_DRIVER_PLUGINS.map((plugin) => plugin.driverKind),
+    );
+    expect(catalog).toHaveLength(21);
+    for (const listing of catalog) {
+      expect(listing.installed).toBe(true);
+      expect(listing.trusted).toBe(true);
+      expect(listing.activation).toEqual({ kind: "effective" });
+      expect(listing.entry.manifest.source.kind).toBe("bundled");
+    }
+  });
+
+  it("repeats the activation ladder's facts in the catalog rather than inventing its own", () => {
+    const listing = bundledProviderDriverCatalog({ gemini: { pluginDesired: false } }).find(
+      (candidate) => candidate.entry.driverKind === "gemini",
+    );
+    expect(listing?.installed).toBe(true);
+    expect(listing?.activation).toEqual({ kind: "blocked", reason: "plugin-disabled" });
   });
 });

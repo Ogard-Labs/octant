@@ -49,13 +49,13 @@ describe("resolving what the right utility dock shows", () => {
       {
         id: "environment",
         label: "Environment",
-        modes: ["chat", "work", "code"],
+        modes: ["work", "code"],
         scope: "thread",
       },
       {
         id: "side-chat",
         label: "Side Chat",
-        modes: ["chat", "work", "code"],
+        modes: ["work", "code"],
         scope: "thread",
       },
       {
@@ -79,13 +79,13 @@ describe("resolving what the right utility dock shows", () => {
       {
         id: "canvas",
         label: "Canvas",
-        modes: ["chat", "work", "code"],
+        modes: ["work", "code"],
         scope: "thread",
       },
       {
         id: "plan",
         label: "Plan",
-        modes: ["chat", "work", "code"],
+        modes: ["work", "code"],
         scope: "thread",
       },
       {
@@ -97,7 +97,7 @@ describe("resolving what the right utility dock shows", () => {
       {
         id: "agents",
         label: "Agents",
-        modes: ["chat", "work", "code"],
+        modes: ["work", "code"],
         scope: "thread",
       },
       {
@@ -186,6 +186,20 @@ describe("resolving what the right utility dock shows", () => {
         savedSurface: "browser",
       }),
     ).toEqual({ kind: "closed", reason: "mode-invalid" });
+  });
+
+  it("offers no tool for a Chat thread, which the shell shows without a dock", () => {
+    for (const { id } of RIGHT_UTILITY_DOCK_SURFACES) {
+      expect(
+        resolveRightUtilityDockSurface({
+          activeMode: "chat",
+          activeThreadId: "30000000-0000-4000-8000-000000000003",
+          connectionState: "connected",
+          presentationAvailability: "available",
+          savedSurface: id,
+        }),
+      ).toEqual({ kind: "closed", reason: "mode-invalid" });
+    }
   });
 
   it("closes a restored pull-request list on a Work thread instead of promising a list", () => {

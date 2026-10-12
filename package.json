@@ -38,6 +38,7 @@
     "paths:check": "bun test scripts/check-path-collisions.test.ts && bun scripts/check-path-collisions.ts",
     "wiring:check": "bun test scripts/check-module-wiring.test.ts && bun scripts/check-module-wiring.ts",
     "ui:check": "bun test scripts/check-ui-component-boundaries.test.ts scripts/check-ui-stylesheets.test.ts && bun scripts/check-ui-component-boundaries.ts && bun scripts/check-ui-color-literals.ts && bun scripts/check-ui-stylesheets.ts",
+    "style:check": "bun test scripts/check-code-style.test.ts && bun scripts/check-code-style.ts",
     "decisions:check": "bun test scripts/check-decisions.test.ts scripts/check-decision-history.test.ts && bun scripts/check-decisions.ts && bun scripts/check-decision-history.ts",
     "fmt": "oxfmt",
     "fmt:check": "oxfmt --check",
@@ -58,7 +59,7 @@
     "bench:harness": "bun scripts/harness-benchmark.ts",
     "test": "turbo run test",
     "typecheck": "turbo run typecheck",
-    "verify": "bun run paths:check && bun run wiring:check && bun run ui:check && bun run decisions:check && bun run fmt:check && bun run lint && bun run typecheck && bun run test && bun run build",
+    "verify": "bun run paths:check && bun run wiring:check && bun run ui:check && bun run style:check && bun run decisions:check && bun run fmt:check && bun run lint && bun run typecheck && bun run test && bun run build",
     "computer-use:prepare": "bun scripts/prepare-computer-use-driver.ts"
   },
   "devDependencies": {

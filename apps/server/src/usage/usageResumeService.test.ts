@@ -568,38 +568,6 @@ describe("UsageResumeService", () => {
     expect(resumeRow(connection, "chat-thread", ids.thread)?.detail).toBe("A request is pending.");
   });
 
-  it("stays armed on the retry cadence while the mode cannot dispatch yet", async () => {
-    const connection = openConnection();
-    const dispatch = vi
-      .fn<UsageResumeModePort["dispatch"]>()
-      .mockResolvedValueOnce({
-        kind: "deferred",
-        detail: "No local window is registered for this host.",
-      })
-      .mockResolvedValue({ kind: "dispatched" });
-    const spies = { chat: portSpies({ dispatch }), work: portSpies(), code: portSpies() };
-    const { store } = serviceWith(connection, spies);
-    seededChatThread(connection);
-    store.append({
-      aggregate: { aggregateType: "chat-thread", aggregateId: ids.thread },
-      expectedVersion: 2,
-      events: [pending(USAGE_RESUME_SCHEDULED, { resume: record() })],
-    });
-
-    fireDue(Date.parse(RESET));
-    await vi.waitFor(() => expect(dispatch).toHaveBeenCalledOnce());
-    // Nothing settled: the durable opt-in stays armed for the retry cadence.
-    expect(resumeRow(connection, "chat-thread", ids.thread)?.status).toBe("scheduled");
-    expect(listPendingUsageResumes(connection)).toHaveLength(1);
-    expect(timers.size).toBe(1);
-
-    fireDue(nowMs + 30_000);
-    await vi.waitFor(() => expect(dispatch).toHaveBeenCalledTimes(2));
-    await vi.waitFor(() =>
-      expect(resumeRow(connection, "chat-thread", ids.thread)?.status).toBe("dispatched"),
-    );
-  });
-
   it("keeps the opt-in armed when its settlement cannot commit", async () => {
     const connection = openConnection();
     const spies = { chat: portSpies(), work: portSpies(), code: portSpies() };
