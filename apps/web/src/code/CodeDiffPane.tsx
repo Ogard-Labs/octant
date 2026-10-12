@@ -109,7 +109,14 @@ export function CodeDiffPane(props: CodeDiffPaneProps) {
         />
       );
     }
-    return <AvailableDiff {...props} diff={props.diff} snapshot={summary} />;
+    return (
+      <AvailableDiff
+        key={String(props.diff.threadId)}
+        {...props}
+        diff={props.diff}
+        snapshot={summary}
+      />
+    );
   }
   if (props.diff.state === "loading") return <ShellState state="loading" title="Loading diff" />;
   return <OctantAlert tone="warning">{props.diff.message}</OctantAlert>;
@@ -128,6 +135,9 @@ function AvailableDiff(
   const [layout, setLayout] = useState<CodeDiffLayout>(
     () => readCodeDiffLayout(props.diff.threadId) ?? props.defaultLayout ?? "unified",
   );
+  // Storage can refuse a write after the person already picked a layout.
+  // Later default sync must not overwrite that in-memory choice.
+  const choseLayout = useRef(readCodeDiffLayout(props.diff.threadId) !== undefined);
   const sideBySide = layout === "side-by-side";
   const [confirmingDiscard, setConfirmingDiscard] = useState<string>();
   const [discarding, setDiscarding] = useState(false);
@@ -137,7 +147,7 @@ function AvailableDiff(
   const operationId = props.snapshot.operationId;
   const threadId = props.diff.threadId;
   useEffect(() => {
-    if (readCodeDiffLayout(threadId) !== undefined) return;
+    if (choseLayout.current || readCodeDiffLayout(threadId) !== undefined) return;
     setLayout(props.defaultLayout ?? "unified");
   }, [props.defaultLayout, threadId]);
   const policy = props.executionPolicy;
@@ -255,6 +265,7 @@ function AvailableDiff(
           onValueChange={(value) => {
             const selected = value[0];
             if (selected === undefined) return;
+            choseLayout.current = true;
             setLayout(selected);
             writeCodeDiffLayout(threadId, selected);
           }}

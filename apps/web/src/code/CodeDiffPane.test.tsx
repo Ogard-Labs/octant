@@ -390,6 +390,35 @@ describe("CodeDiffPane", () => {
     );
   });
 
+  it("keeps a chosen layout when storage refuses the write and the Settings default later changes", async () => {
+    const user = userEvent.setup();
+    const setItem = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new Error("quota");
+    });
+    const { rerender } = render(
+      <CodeDiffPane client={client()} diff={available()} loadRuntime={runtime().loadRuntime} />,
+    );
+    await user.click(await screen.findByRole("button", { name: "Side by side" }));
+    expect(screen.getByRole("button", { name: "Side by side" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+
+    rerender(
+      <CodeDiffPane
+        client={client()}
+        defaultLayout="unified"
+        diff={available()}
+        loadRuntime={runtime().loadRuntime}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Side by side" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    setItem.mockRestore();
+  });
+
   it("remembers one thread's layout without rewriting another", async () => {
     const user = userEvent.setup();
     const first = render(
