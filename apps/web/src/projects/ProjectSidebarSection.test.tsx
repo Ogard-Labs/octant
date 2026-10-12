@@ -84,6 +84,39 @@ describe("ProjectSidebarSection chat thread nesting", () => {
     expect(onSwitch).toHaveBeenCalledOnce();
   });
 
+  it("still tells Work the Projects are in Code when the saved view groups by something else", () => {
+    window.localStorage.clear();
+    window.localStorage.setItem(
+      "octant.work.project-view-preferences.v1",
+      JSON.stringify({ filters: { grouping: "none" } }),
+    );
+
+    render(
+      <ProjectSidebarSection
+        addProjectLabel="folder"
+        archivedProjects={[]}
+        availabilityByProject={new Map()}
+        onAddProject={vi.fn()}
+        onArchive={vi.fn()}
+        onMove={vi.fn()}
+        onProjectOpen={vi.fn()}
+        onReorder={vi.fn()}
+        onRestore={vi.fn()}
+        otherModeProjectsHint={{
+          actionLabel: "Switch to Code",
+          message: "Your Projects are in Code.",
+          onSwitch: vi.fn(),
+        }}
+        projectViewsEnabled
+        projectViewsMode="work"
+        projects={[]}
+      />,
+    );
+
+    expect(screen.getByText(/Your Projects are in Code\./)).toBeVisible();
+    expect(screen.getByRole("button", { name: "Switch to Code" })).toBeVisible();
+  });
+
   it("keeps the empty Projects line when no mode has Projects", () => {
     render(
       <ProjectSidebarSection
