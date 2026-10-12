@@ -36,7 +36,13 @@ export function decodeClaudeProcessPlanUsage(
   if (payload.rate_limits_available === false) return { available: false };
   if (payload.rate_limits_available !== true) return undefined;
   const limits = payload.rate_limits;
-  if (limits === null) return { available: false };
+  // Limits apply to this account, but the process holds no reading yet.
+  // Observed with Claude Code 2.1.296: a process started only for this
+  // question answers `rate_limits_available: true, rate_limits: null`,
+  // because it learns its windows from the first model response. That is
+  // "no answer", which keeps the last snapshot. Calling it "plan limits do
+  // not apply" told a subscription account it has no plan.
+  if (limits === null) return undefined;
   if (limits === undefined || typeof limits !== "object" || Array.isArray(limits)) {
     return undefined;
   }

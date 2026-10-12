@@ -20,7 +20,13 @@ import {
 import { makeClaudeProcessLive, type ClaudeProcessPort } from "./claudeProcess";
 import { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
 
-export const claudeSmokeBinaryPath = "/opt/homebrew/bin/claude";
+/**
+ * The installed CLI the smoke drives. Anthropic's native installer puts it
+ * under `~/.local/bin` rather than Homebrew's prefix, so a host can name its
+ * own with `OCTANT_CLAUDE_SMOKE_BINARY`.
+ */
+export const claudeSmokeBinaryPath =
+  process.env.OCTANT_CLAUDE_SMOKE_BINARY ?? "/opt/homebrew/bin/claude";
 export const claudeSmokeMinimumRuntimeVersion = "2.1.210";
 export const claudeSmokeOuterTimeoutMs = 900_000;
 export const claudeSmokeCleanupMarginMs = 45_000;
@@ -129,9 +135,9 @@ export async function createClaudeSmokeHarness(
   });
   const processPort: ClaudeProcessPort = {
     probeVersion: liveProcess.probeVersion,
-    probeSubscription: (path, environment) => {
+    probeSubscription: (path, environment, confinement) => {
       subscriptionProbeCalls += 1;
-      return liveProcess.probeSubscription(path, environment);
+      return liveProcess.probeSubscription(path, environment, confinement);
     },
     spawn: (confinement) => (input) => {
       runtimeStarts += 1;

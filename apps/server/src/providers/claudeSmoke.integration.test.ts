@@ -246,8 +246,11 @@ async function runInstalledClaudeSmoke(authentication: ClaudeAuthentication): Pr
         const events = await eventsPromise;
         assertCompleted(events, "Accepted approval turn did not complete.");
         assertSmoke(approvals === 1, "Accepted write did not produce exactly one approval.");
+        // The prompt gives the line without its final newline, so a runtime that
+        // writes exactly what it was given leaves none. Observed with Claude Code
+        // 2.1.296: the approved write happened and this check still failed.
         assertSmoke(
-          (await readFile(acceptedTarget, "utf8")) === acceptedContents,
+          (await readFile(acceptedTarget, "utf8")).trimEnd() === acceptedContents.trimEnd(),
           "Accepted write content did not match.",
         );
       }),

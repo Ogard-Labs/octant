@@ -294,7 +294,7 @@ describe("shared Seatbelt profile builder", () => {
   });
 
   it.skipIf(process.platform !== "darwin" || !existsSync("/usr/bin/security"))(
-    "allows /usr/bin/security while still denying the login keychain and /bin/sh",
+    "opens a Keychain sign-in to security and the one login keychain file, and nothing beside them",
     () => {
       const root = temporaryRoot();
       const home = join(root, "home");
@@ -304,19 +304,27 @@ describe("shared Seatbelt profile builder", () => {
       mkdirSync(keychains, { recursive: true });
       mkdirSync(checkout);
       mkdirSync(temporaryDirectory);
-      writeFileSync(join(keychains, "login.keychain-db"), "kych\n");
+      const loginKeychain = join(keychains, "login.keychain-db");
+      const otherKeychain = join(keychains, "metadata.keychain-db");
+      writeFileSync(loginKeychain, "kych\n");
+      writeFileSync(otherKeychain, "kych\n");
       const script = join(checkout, "runtime.sh");
       writeFileSync(
         script,
         [
           "#!/bin/bash",
-          `IFS= read -r login < '${join(keychains, "login.keychain-db")}' && echo login=read`,
-          "echo reached-security-step",
+          `IFS= read -r login < '${loginKeychain}' && echo login=read`,
+          `IFS= read -r other < '${otherKeychain}' && echo other=read`,
+          "/usr/bin/security help >/dev/null 2>&1 && echo security=ran",
           "/bin/sh -c 'echo shell=ran' >/dev/null 2>&1 && echo shell=ran",
+          "echo reached-the-end",
           "",
         ].join("\n"),
         { mode: 0o700 },
       );
+      // The rules a confined Claude subscription launch takes. Measured on
+      // macOS 27.0.1 with Claude Code 2.1.296: the runtime is signed out with
+      // any one of them missing, and needs no shell and no other keychain file.
       const profile = buildDenyDefaultSeatbeltProfile({
         boundRoot: checkout,
         temporaryDirectory,
@@ -324,42 +332,30 @@ describe("shared Seatbelt profile builder", () => {
         writeBoundRoot: false,
         allowFileReadStar: true,
         allowProcessExec: false,
-        allowProcessFork: false,
+        allowProcessFork: true,
         execAllowPaths: ["/bin/bash", script],
         extraRules: [
           seatbeltExecRule("/usr/bin/security"),
           '(allow mach-lookup (global-name "com.apple.SecurityServer"))',
           '(allow mach-lookup (global-name "com.apple.securityd.xpc"))',
+          seatbeltAllowLiteralReadRule(loginKeychain),
         ],
         homeDirectory: home,
         usersDirectory: root,
       });
 
-      expect(profile).toContain(seatbeltExecRule("/usr/bin/security"));
       expect(profile).not.toContain(seatbeltExecRule("/bin/sh"));
-      expect(profile).not.toContain("(allow process-fork)");
-      expect(profile).not.toContain("login.keychain-db");
+      expect(profile).not.toContain("(allow process-exec)\n");
       const output = spawnSync("/usr/bin/sandbox-exec", ["-p", profile, script], {
         cwd: checkout,
         encoding: "utf8",
       }).stdout;
-      expect(output).toContain("reached-security-step");
-      expect(output).not.toContain("login=read");
+      expect(output).toContain("reached-the-end");
+      expect(output).toContain("login=read");
+      expect(output).toContain("security=ran");
+      // The rest of the folder and every shell stay closed.
+      expect(output).not.toContain("other=read");
       expect(output).not.toContain("shell=ran");
-      // The profile denies fork, so a bash child cannot start security. This
-      // run proves only that the exec rule matches the binary. It does not
-      // prove a sign-in: measured on macOS 27.0.1 with Claude Code 2.1.296,
-      // the runtime stays signed out until the profile also allows
-      // process-fork and read of login.keychain-db.
-      const security = spawnSync(
-        "/usr/bin/sandbox-exec",
-        ["-p", profile, "/usr/bin/security", "help"],
-        {
-          cwd: checkout,
-          encoding: "utf8",
-        },
-      );
-      expect(security.status).toBe(0);
     },
   );
 

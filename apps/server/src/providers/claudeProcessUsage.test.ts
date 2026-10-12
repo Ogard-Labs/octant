@@ -44,6 +44,11 @@ describe("Claude process plan usage", () => {
     expect(
       decodeClaudeProcessPlanUsage({ rate_limits_available: false, rate_limits: null }, observedAt),
     ).toEqual({ available: false });
+    // A subscription whose process has no reading yet is not an account
+    // without a plan: the decoder gives no answer and the last snapshot stays.
+    expect(
+      decodeClaudeProcessPlanUsage({ rate_limits_available: true, rate_limits: null }, observedAt),
+    ).toBeUndefined();
   });
 
   it("leaves a missing or broken experimental answer unread rather than guessing", () => {

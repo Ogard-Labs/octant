@@ -23,11 +23,13 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { createFakeSandboxConfinement } from "../process/fakeSandboxConfinement";
 import {
+  seatbeltAllowLiteralReadRule,
   seatbeltExecRule,
   type ProcessConfinementPort,
   type ProcessConfinementPrepareInput,
 } from "../process/seatbeltProfile";
 import {
+  claudeLoginKeychainPath,
   makeClaudeProcessLive,
   type ClaudeProcessOptions,
   type ClaudeRuntimeConfinement,
@@ -485,7 +487,9 @@ describe("Claude runtime confinement", () => {
     expect(launch.boundRoot).toBe(realpathSync(target.root));
     expect(launch.writeBoundRoot).toBe(false);
     expect(launch.allowProcessExec).toBe(false);
-    expect(launch.allowProcessFork).toBe(false);
+    // Fork is open only where the runtime reads its sign-in from the macOS
+    // Keychain, which it does by starting `/usr/bin/security`.
+    expect(launch.allowProcessFork).toBe(process.platform === "darwin");
     // The runtime answers a Plan turn by calling its own control plane, which a
     // `none` egress would refuse before the first token (0132, 0145).
     expect(launch.networkEgress).toBe("allow");
@@ -567,19 +571,13 @@ describe("Claude runtime confinement", () => {
     expect(readdirSync(ambient)).toEqual([]);
   });
 
-  it("includes Darwin security extraRules only for subscription confined Plan launches", () => {
+  it("grants a subscription Plan launch its Keychain sign-in read on macOS and an API-key launch nothing", () => {
     const target = fixture();
     const confinement = recordingConfinement();
-    const expectedExtraRules = [
-      seatbeltExecRule("/usr/bin/security"),
-      '(allow mach-lookup (global-name "com.apple.SecurityServer"))',
-      '(allow mach-lookup (global-name "com.apple.securityd.xpc"))',
-    ];
 
     for (const environment of [
       target.environment,
       { ...target.environment, ANTHROPIC_API_KEY: "sk-test-not-a-real-key" },
-      { ...target.environment, CLAUDE_CODE_OAUTH_TOKEN: "helper-token-sentinel-0123456789" },
     ]) {
       const child = makePort(target, { confinement: confinement.port }).spawn({
         projectRoot: target.root,
@@ -594,19 +592,63 @@ describe("Claude runtime confinement", () => {
       child.kill("SIGTERM");
     }
 
-    expect(confinement.prepared).toHaveLength(3);
-    const [subscription, apiKey, helperSentinel] = confinement.prepared;
-    // Only a subscription launch signs in from the store. An API-key launch
-    // reads nothing there, so it keeps the profile's default deny.
+    expect(confinement.prepared).toHaveLength(2);
+    const [subscription, apiKey] = confinement.prepared;
     if (process.platform === "darwin") {
-      expect(subscription?.extraRules).toEqual(expectedExtraRules);
-      expect(apiKey?.extraRules).toBeUndefined();
-      expect(helperSentinel?.extraRules).toEqual(expectedExtraRules);
+      // Measured on macOS 27.0.1 with Claude Code 2.1.296: the runtime is
+      // signed out with any one of these missing, and needs nothing more.
+      expect(subscription?.extraRules).toEqual([
+        seatbeltExecRule("/usr/bin/security"),
+        '(allow mach-lookup (global-name "com.apple.SecurityServer"))',
+        '(allow mach-lookup (global-name "com.apple.securityd.xpc"))',
+        seatbeltAllowLiteralReadRule(claudeLoginKeychainPath()),
+      ]);
+      expect(subscription?.allowProcessFork).toBe(true);
     } else {
       expect(subscription?.extraRules).toBeUndefined();
-      expect(apiKey?.extraRules).toBeUndefined();
+      expect(subscription?.allowProcessFork).toBe(false);
     }
-    expect(JSON.stringify(confinement.prepared)).not.toContain("helper-token-sentinel");
+    // No shell and no open exec in either case.
+    expect(subscription?.allowProcessExec).toBe(false);
+    // An API-key launch reads nothing from the store.
+    expect(apiKey?.extraRules).toBeUndefined();
+    expect(apiKey?.allowProcessFork).toBe(false);
+    expect(apiKey?.allowProcessExec).toBe(false);
+  });
+
+  it("checks a confined launch's sign-in inside that launch's confinement", async () => {
+    const target = fixture();
+    const confinement = recordingConfinement();
+    const port = makePort(target, { confinement: confinement.port });
+
+    // The readiness check has no launch to speak for and stays unconfined.
+    await expect(
+      Effect.runPromise(port.probeSubscription(target.binaryPath, target.environment)),
+    ).resolves.toBe("authenticated");
+    // An approval-gated launch is not confined by Octant, so neither is its check.
+    await expect(
+      Effect.runPromise(
+        port.probeSubscription(target.binaryPath, target.environment, approvalGated(target)),
+      ),
+    ).resolves.toBe("authenticated");
+    expect(confinement.prepared).toEqual([]);
+
+    await expect(
+      Effect.runPromise(
+        port.probeSubscription(target.binaryPath, target.environment, {
+          projectRoot: target.root,
+          executionPolicy: "plan",
+        }),
+      ),
+    ).resolves.toBe("authenticated");
+    expect(confinement.prepared).toHaveLength(1);
+    expect(confinement.prepared[0]).toMatchObject({
+      executable: target.binaryPath,
+      args: ["auth", "status", "--json"],
+      boundRoot: realpathSync(target.root),
+      writeBoundRoot: false,
+      allowProcessExec: false,
+    });
   });
 
   it("refuses a launch whose arguments carry the helper token", () => {
@@ -781,9 +823,12 @@ describe("Claude runtime confinement", () => {
     expect(pids(target.root)).toEqual([]);
   });
 
-  it.skipIf(process.platform !== "darwin")(
-    "lets the operating system refuse a Plan turn's write and its process execution",
-    async () => {
+  it.skipIf(process.platform !== "darwin").each([
+    { launch: "an API-key", apiKey: "sk-test-not-a-real-key", forks: false },
+    { launch: "a subscription", apiKey: undefined, forks: true },
+  ])(
+    "lets the operating system refuse $launch Plan turn's write and its process execution",
+    async ({ apiKey, forks }) => {
       const target = fixture();
       const readable = join(target.root, "readable.txt");
       const escapeTarget = join(target.root, "plan-must-not-exist.txt");
@@ -796,7 +841,10 @@ describe("Claude runtime confinement", () => {
       copyFileSync(planProbePath, probe);
       chmodSync(probe, 0o755);
 
-      const child = makeClaudeProcessLive({ shutdownTimeoutMs: 500 }).spawn({
+      // The limit only bounds a failed cleanup. Half a second was too short on
+      // a loaded machine: the group outlived it and the test failed with
+      // "Claude process cleanup failed" though every assertion held.
+      const child = makeClaudeProcessLive({ shutdownTimeoutMs: 5_000 }).spawn({
         projectRoot: target.root,
         executionPolicy: "plan",
       })({
@@ -805,6 +853,7 @@ describe("Claude runtime confinement", () => {
         cwd: target.root,
         env: {
           ...target.environment,
+          ...(apiKey === undefined ? {} : { ANTHROPIC_API_KEY: apiKey }),
           OCTANT_PROBE_TARGET: escapeTarget,
           OCTANT_PROBE_READABLE: readable,
         },
@@ -820,11 +869,18 @@ describe("Claude runtime confinement", () => {
       expect(existsSync(escapeTarget)).toBe(false);
       // The checkout is readable; only writing and running something is not.
       expect(output).toContain("read=in-the-checkout");
-      // The probe asks for a child process last. Under this posture the kernel
-      // refuses the fork before the exec, so the shell dies there — it never
-      // reaches the line that would report an allowed exec.
+      // The probe asks for a child process last, and no launch may run one.
       expect(output).not.toContain("exec=allowed");
-      expect(child.exitCode).toBe(128);
+      if (forks) {
+        // A Keychain sign-in needs fork, so the shell forks, and the kernel
+        // then refuses the exec of anything but the runtime and `security`.
+        expect(output).toContain("exec=refused");
+        expect(child.exitCode).toBe(0);
+      } else {
+        // Without fork the shell dies at the fork itself and reports nothing.
+        expect(output).not.toContain("exec=refused");
+        expect(child.exitCode).toBe(128);
+      }
     },
   );
 });

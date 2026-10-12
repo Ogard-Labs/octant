@@ -149,9 +149,12 @@ native receipts; desktop admin routes are loopback-only.
   to the provider's own sandbox. That sandbox is on every posture except Full
   access, which you select explicitly and which is unsandboxed by design. The
   Claude runtime crosses the boundary on Plan turns, where Octant's own sandbox
-  makes the folder unwritable and stops the runtime starting any process at
-  all; its approval-gated and auto-accept-edits turns still fall to the
-  provider's own sandbox.
+  makes the folder unwritable and stops the runtime starting any process, with
+  one exception on macOS: on a Claude subscription account the runtime may run
+  Apple's `security` tool and read your login keychain file, because that is
+  how Claude Code reads its own sign-in. No shell is allowed, and Octant
+  refuses a file tool that names that folder. Its approval-gated and
+  auto-accept-edits turns still fall to the provider's own sandbox.
 - Every app-managed tool those two threads reach is still confined, and
   approvals still gate every app-managed action and every provider callback
   that reaches Octant. A write one of those runtimes makes inside its own

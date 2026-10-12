@@ -120,10 +120,12 @@ include usage from other applications.
 
 Codex supports a read-only account refresh while idle. That request creates no
 thread or model turn. Claude subscription accounts report 5-hour, 7-day,
-per-model weekly, and overage windows from the Claude process itself: live
-session events, or an on-demand refresh. Octant never reads a Claude token or
-credential file to fetch those numbers, and never calls a vendor usage
-endpoint. Each Claude account shows its own limits, labeled by the account
+per-model weekly, and overage windows from the Claude process itself. The
+numbers arrive with a turn you run on that account. **Refresh** also asks a
+Claude process directly, but a process that has not made a model request yet
+has no numbers to give, so the page then keeps the last reading. Octant
+never reads a Claude token or credential file to fetch those numbers, and
+never calls a vendor usage endpoint. Each Claude account shows its own limits, labeled by the account
 name, with reset time in local time and when the reading was last updated. An
 API-key Claude account says plan limits do not apply instead of drawing empty
 bars. A failed or missing refresh keeps the last reading and shows its age.
