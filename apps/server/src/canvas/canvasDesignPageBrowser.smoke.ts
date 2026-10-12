@@ -51,6 +51,17 @@ async function findChromium(): Promise<string | undefined> {
   return undefined;
 }
 
+/**
+ * A string as script source inside a page: JSON, with every character that
+ * could end the script element or a line written as an escape.
+ */
+function inScript(value: string): string {
+  return JSON.stringify(value).replace(
+    /[<>/\u2028\u2029]/g,
+    (character) => `\\u${character.charCodeAt(0).toString(16).padStart(4, "0")}`,
+  );
+}
+
 function hostileBlock(beacon: string, extra: string): CanvasDesignBlock {
   // The markup policy reads script text as script, so the beacon address in it
   // is not refused; the page policy and the sandbox are what refuse it.
@@ -61,26 +72,26 @@ const refused = async (name, attempt) => {
   catch (error) { report(name, "refused:" + (error && error.name ? error.name : String(error))); }
 };
 report("origin", String(self.origin));
-refused("fetch", () => fetch(${JSON.stringify(`${beacon}/fetch`)}).then((r) => r.status));
+refused("fetch", () => fetch(${inScript(`${beacon}/fetch`)}).then((r) => r.status));
 refused("xhr", () => new Promise((resolve, reject) => {
-  const x = new XMLHttpRequest(); x.open("GET", ${JSON.stringify(`${beacon}/xhr`)});
+  const x = new XMLHttpRequest(); x.open("GET", ${inScript(`${beacon}/xhr`)});
   x.onload = () => resolve(x.status); x.onerror = () => reject(new Error("NetworkError")); x.send();
 }));
 refused("websocket", () => new Promise((resolve, reject) => {
-  const socket = new WebSocket(${JSON.stringify(`${beacon.replace("http", "ws")}/ws`)});
+  const socket = new WebSocket(${inScript(`${beacon.replace("http", "ws")}/ws`)});
   socket.onopen = () => resolve("open"); socket.onerror = () => reject(new Error("WebSocketError"));
 }));
 refused("image", () => new Promise((resolve, reject) => {
   const image = new Image(); image.onload = () => resolve("loaded"); image.onerror = () => reject(new Error("ImageError"));
-  image.src = ${JSON.stringify(`${beacon}/image`)};
+  image.src = ${inScript(`${beacon}/image`)};
 }));
-refused("window.open", () => { const opened = window.open(${JSON.stringify(`${beacon}/popup`)}); if (opened === null) throw new Error("NoWindow"); return "window"; });
-refused("top navigation", () => { top.location.href = ${JSON.stringify(`${beacon}/top`)}; return "navigated"; });
+refused("window.open", () => { const opened = window.open(${inScript(`${beacon}/popup`)}); if (opened === null) throw new Error("NoWindow"); return "window"; });
+refused("top navigation", () => { top.location.href = ${inScript(`${beacon}/top`)}; return "navigated"; });
 refused("cookie", () => document.cookie);
 refused("localStorage", () => localStorage.length);
 refused("parent.document", () => parent.document.title);
 refused("form submit", () => new Promise((resolve) => {
-  const form = document.createElement("form"); form.method = "GET"; form.action = ${JSON.stringify(`${beacon}/form`)};
+  const form = document.createElement("form"); form.method = "GET"; form.action = ${inScript(`${beacon}/form`)};
   document.body.appendChild(form); form.submit(); setTimeout(() => resolve("submitted, page still here"), 300);
 }));
 ${extra}`;
@@ -220,7 +231,7 @@ window.mount = (src) => {
       issue(
         hostileBlock(
           beaconOrigin,
-          `setTimeout(() => { location = ${JSON.stringify(`${beaconOrigin}/self?x`)}; }, 500);`,
+          `setTimeout(() => { location = ${inScript(`${beaconOrigin}/self?x`)}; }, 500);`,
         ),
       ),
       2_500,
