@@ -1665,6 +1665,14 @@ request from the person.
 - Loading, unavailable, stale, denied, empty, and error states keep stable
   geometry and explain the next action. Never turn a refused server command
   into a silent no-op.
+- Increased contrast is one state with two triggers: the Appearance setting
+  or the system's `prefers-contrast: more`. `ThemeSettingsProvider` publishes
+  either as `data-octant-increased-contrast="true"` on the root, and every
+  high-contrast rule keys off that attribute rather than the media query, so
+  both triggers draw the same rules: the text roles take their
+  `--octant-text-*-high-contrast` values and hairlines step up to
+  `--octant-border-strong`. Script that adapts to contrast reads
+  `useIncreasedContrast()`, not the media query.
 - Theme, typography, density, translucency, contrast, and reduced-motion
   settings are persisted through the server-authoritative journal and applied
   through the providers. Renderer state is presentation only.
