@@ -311,6 +311,20 @@ guidance instead.
   named reason (`search-query-refused-under-taint: …`) before any request leaves (Henrik decision
   2026-10-10). Residual risk: a short plain-word query can still leak a few words, but only to the
   endpoint the person chose. Revisit if a default hosted third-party search provider ships.
+- **A person may clear the mark.** The mark keeps its thread lifetime, and a person at a local
+  window may clear it after reviewing what the thread read (Henrik decision 2026-10-12). The clear
+  is journaled with who and when (`thread.external-content-cleared@1`: the thread, the window, the
+  cleared source labels, and the ingestion count, never content). It names the aggregate version the
+  person was shown, so an ingestion they have not seen refuses it, and it is refused while the
+  thread's turn is running, queued, or of unknown state. Only the local-only
+  `POST /api/thread-external-content` clears: a paired device is refused at the private listener
+  and at the handler, and the host's own scope, a tool, a command, model output, a structured
+  reference, an agent message, and a host-run turn cannot. It removes the mark only and holds for
+  nothing: the next ingestion marks the thread again, including content the thread had read before.
+  Residual risk: a clear removes nothing from the model's context, so content the person reviewed
+  can still steer the model, and every gate the mark was holding is open until the next ingestion.
+  It also changes nothing about a provider runtime's own tools, which run under the runtime's own
+  approvals and sandbox. Rules and replay in `docs/architecture.md`, Persistence.
 - **Structured references stay inert.** `@plugin` and `$skill` references cannot install, trust,
   enable, or elevate (exists today, `packages/plugin-host/src/composer.ts`); injected text that
   imitates them remains ordinary text.
@@ -595,6 +609,8 @@ Waived or skipped rows never count as passing (consistent with the Phase 4/16 ev
   capability class it did not declare.
 - An irreversible approval class auto-satisfied by a standing grant on a thread marked
   `external-content-ingested`.
+- A thread's `external-content-ingested` mark cleared by anything other than a person at a local
+  window.
 - Network egress from a tool subprocess whose resolved egress policy was `none`.
 
 ### Medium

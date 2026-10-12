@@ -368,6 +368,7 @@ describe("authenticated product route dispatch", () => {
       "/api/extensions/tool-approvals",
       "/api/extensions/tool-grants",
       "/api/extensions/import-local",
+      "/api/thread-external-content",
     ]) {
       expect(
         classifyProductAction(new Request(`https://octant.example${path}`, { method: "POST" })),
@@ -408,6 +409,7 @@ describe("authenticated product route dispatch", () => {
       "/api/extensions/tool-approvals",
       "/api/extensions/tool-grants",
       "/api/extensions/import-local",
+      "/api/thread-external-content",
     ]) {
       const response = await product(handoff(path, "POST"));
       expect(response?.status).toBe(403);

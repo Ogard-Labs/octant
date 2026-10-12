@@ -624,6 +624,10 @@ import { createValidationEvidenceRouteHandler } from "./validationEvidenceRoutes
 import { createValidationEvidenceLoader } from "./validation/validationEvidenceLoader";
 import { createExtensionRouteHandler } from "./extensionRoutes";
 import {
+  createExternalContentRouteHandler,
+  threadStandingFromMessageQueue,
+} from "./externalContentRoutes";
+import {
   ExtensionApiService,
   type ExtensionPackageResolverPort,
 } from "./extensions/extensionApiService";
@@ -699,6 +703,7 @@ import {
   type BrowserModelBinding,
 } from "./browser/browserAppManagedTools";
 import { BrowserToolApprovalService } from "./browser/browserToolApprovalService";
+import { ExternalContentClearStore } from "./context/externalContentClearStore";
 import { BrowserCaptureService } from "./browser/browserCaptureService";
 import { BrowserCaptureStore } from "./browser/browserCaptureStore";
 import { ExternalContentIngestionStore } from "./context/externalContentIngestionStore";
@@ -10260,6 +10265,19 @@ export function startOctantServer(
         ? {}
         : { allowedRendererHttpOrigin: options.allowedRendererHttpOrigin }),
     });
+    // Loopback chain only, like host control: a person at this machine clears
+    // a thread's outside-content mark, and nothing else holds this store.
+    const externalContentRoutes = createExternalContentRouteHandler({
+      windowAuthorityStore,
+      clears: new ExternalContentClearStore({
+        journal: persistence.journal,
+        connection: persistence.connection,
+        uuid: randomUUID,
+        clock: () => new Date().toISOString(),
+        actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+      }),
+      withThreadStanding: threadStandingFromMessageQueue(threadMessageQueue),
+    });
     const hostControlRoutes = createHostControlRouteHandler({
       windowAuthorityStore,
       diagnostics: composeHostDiagnostics,
@@ -10706,6 +10724,7 @@ export function startOctantServer(
                 (await privateListenerAdministrationRoutes(request)) ??
                 (await localDeviceAdministrationRoutes(request)) ??
                 (await hostControlRoutes(request)) ??
+                (await externalContentRoutes(request)) ??
                 (await replicaStoreSettingsRoutes(request)) ??
                 (await replicaMembershipRoutes(request)) ??
                 (await dispatchMeasuredProductRoutes(request)) ??

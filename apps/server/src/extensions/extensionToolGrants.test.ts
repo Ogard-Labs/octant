@@ -9,6 +9,7 @@ import { EXTENSION_TOOL_GRANT_EVENT_NAMES } from "@octant/contracts/extension-ev
 import { AGENT_PLUGINS_MCP_SCHEMA } from "@octant/plugin-host/agent-plugins";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ExternalContentIngestionStore } from "../context/externalContentIngestionStore";
+import { ExternalContentClearStore } from "../context/externalContentClearStore";
 import { readThreadExternalContentTaint } from "../context/externalContentTaintProjection";
 import { Journal } from "../persistence/journal";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
@@ -434,6 +435,45 @@ describe("an MCP tool a person always allows in a Project", () => {
     ).toBe(false);
     expect(await host.answer(false)).toBe(true);
     await expect(tainted).resolves.not.toMatchObject({ isError: true });
+  });
+
+  it("covers one network call after a person clears the thread, then asks again", async () => {
+    const host = openHost(temporaryDirectory());
+    await rememberSearch(host);
+    const clears = new ExternalContentClearStore({
+      journal: host.journal,
+      connection: host.connection,
+      uuid: randomUUID,
+      clock: () => now,
+      actor: { kind: "local-user", actorId } as never,
+    });
+    const tainted = () =>
+      readThreadExternalContentTaint(host.connection, threadOne).externalContentIngested;
+    // The approved call's own result marked thread one.
+    expect(tainted()).toBe(true);
+
+    expect(
+      clears.clear({
+        threadId: threadOne,
+        windowId,
+        expectedVersion: clears.read(threadOne).version,
+        principal: "local-window",
+        turn: "idle",
+      }),
+    ).toMatchObject({ kind: "cleared" });
+    expect(tainted()).toBe(false);
+
+    // The grant holds again. The server answers with the same bytes as before
+    // the clear, and that result still marks the thread.
+    const covered = await host.unprompted({ threadId: threadOne, projectId: projectA });
+    expect(covered).not.toMatchObject({ isError: true });
+    expect(tainted()).toBe(true);
+
+    const asked = host.call({ threadId: threadOne, projectId: projectA });
+    expect(await host.prompt()).toMatchObject({ mcpToolName: "search", rememberable: false });
+    expect(await host.answer(false)).toBe(true);
+    await expect(asked).resolves.not.toMatchObject({ isError: true });
+    expect(host.server.calls).toEqual(["search", "search", "search"]);
   });
 
   it("keeps running a confined stdio tool unasked on a thread its own result tainted", async () => {

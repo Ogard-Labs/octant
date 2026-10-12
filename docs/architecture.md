@@ -1336,6 +1336,47 @@ flowchart LR
   projection rebuilds from the journal; session, turn, and restart boundaries
   never clear it. Irreversible or authority-bearing actions on a tainted thread
   still require fresh confirmation after replay.
+- **Clearing taint.** Taint keeps its thread lifetime, and a person at a local
+  window may clear it. A clear records that they reviewed what the thread read.
+  - It appends `thread.external-content-cleared@1` on the thread's
+    `thread-external-content` aggregate with actor `local-user`. The payload
+    holds the thread, the window, the cleared source labels, and the ingestion
+    count, never content.
+  - The request names the aggregate version the person was shown. A newer
+    ingestion refuses it as `stale`; an untainted thread answers
+    `already-clear` and journals nothing. It is refused while the thread's
+    turn is running or queued, when its last turn ended without the host
+    learning how (Code's `ambiguous`), and when the thread's own mode cannot
+    be read for that window. A message still in the thread's message queue
+    counts as a queued turn, whether the queue is moving, paused, or held.
+    The message queue answers all of this for every mode, and the check and
+    the append run under its per-thread ordering, so a send through the queue
+    cannot land between them.
+  - Only the local-only `POST /api/thread-external-content` clears. Its `read`
+    returns each source with its count and first and last time, and the
+    version a clear must name. The private listener answers a paired device
+    404, the handler refuses a paired device and the host's own scope, and the
+    route sits on the loopback chain only. No tool, command, model output,
+    structured reference, agent message, or host-run turn (routine, goal
+    loop, usage-limit resume, child-run delivery) can clear.
+  - One clear covers that thread and only it. A child run and a fork keep
+    their own taint.
+  - A clear removes the mark only. Nothing leaves the model's context and the
+    provider session is not restarted, so what the thread read can still steer
+    the model.
+  - A clear holds for nothing. The next ingestion taints the thread again,
+    including a content reference recorded before the clear: the clear
+    forgets the thread's ingestion rows, which are what deduplicate a
+    reference. Until then everything taint was gating applies as on an
+    untainted thread: Full access, remembered harness approval classes,
+    remembered MCP tool grants, computer-use grants, auto-review, and helper
+    starts.
+  - It covers every mode and provider because it changes only Octant's own
+    gate. It cannot cover a provider runtime's own tools: those run under the
+    runtime's approvals and sandbox, and a clear changes nothing about them.
+  - On replay a clear deletes the thread's ingestion rows and zeroes its taint
+    row, and the projection ignores an event at or below the last one it
+    applied for that thread. A journal without the event replays unchanged.
 - **Browser captures.** Only a screenshot the agent asks for with the browser
   tool, or the person takes with the Browser pane's Screenshot control, is kept
   with the thread that owns the Browser. The bytes live in the host's managed
@@ -2555,7 +2596,9 @@ native harness in `apps/server/src/harness`:
   confirmation is single-use: a remembered "always" approval stops covering
   its class the moment the thread is tainted, and an "always" answered then
   covers only that call, so surfaces offer no "for this session" choice
-  (`singleUse` on the approval). `web-search` does not ask under taint: it
+  (`singleUse` on the approval). A person's clear ends this until the next
+  result that taints ([Persistence](#persistence), Clearing taint).
+  `web-search` does not ask under taint: it
   reaches only the search endpoint the person configured, so the tool-call
   policy instead refuses a tainted thread's query that looks like it carries
   data, under every posture and before any request leaves, with a named
