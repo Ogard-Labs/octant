@@ -362,6 +362,34 @@ describe("CodeDiffPane", () => {
     expect(screen.getByRole("navigation", { name: "Changed files" })).toBeVisible();
   });
 
+  it("follows a later Settings default while the thread has no stored layout", async () => {
+    const { rerender } = render(
+      <CodeDiffPane
+        client={client()}
+        defaultLayout="unified"
+        diff={available()}
+        loadRuntime={runtime().loadRuntime}
+      />,
+    );
+    expect(await screen.findByRole("button", { name: "Unified" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+
+    rerender(
+      <CodeDiffPane
+        client={client()}
+        defaultLayout="side-by-side"
+        diff={available()}
+        loadRuntime={runtime().loadRuntime}
+      />,
+    );
+    expect(await screen.findByRole("button", { name: "Side by side" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+  });
+
   it("remembers one thread's layout without rewriting another", async () => {
     const user = userEvent.setup();
     const first = render(

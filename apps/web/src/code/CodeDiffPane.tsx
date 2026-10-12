@@ -136,6 +136,10 @@ function AvailableDiff(
   const evidence = props.snapshot.evidence;
   const operationId = props.snapshot.operationId;
   const threadId = props.diff.threadId;
+  useEffect(() => {
+    if (readCodeDiffLayout(threadId) !== undefined) return;
+    setLayout(props.defaultLayout ?? "unified");
+  }, [props.defaultLayout, threadId]);
   const policy = props.executionPolicy;
   const createOperationId = props.createOperationId;
   const createGitOperationId = props.createGitOperationId;
