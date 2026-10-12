@@ -359,13 +359,19 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       label: "Code",
       scope: "app",
       keywords:
-        "code defaults access approvals plan read-only full access permission persistence current session external editor executable arguments new threads open in applications vscode cursor zed finder terminal ghostty xcode detected installed",
+        "code defaults access approvals plan read-only full access permission persistence current session external editor executable arguments new threads open in applications vscode cursor zed finder terminal ghostty xcode detected installed diff layout unified side by side review",
       settings: [
         {
           id: settingId("code-default-folder-threads"),
           label: "Threads without a Project",
           scope: "mode",
           keywords: "default folder projectless no project git repository",
+        },
+        {
+          id: settingId("code-default-diff-layout"),
+          label: "Default diff layout",
+          scope: "mode",
+          keywords: "diff layout unified side by side review checkout",
         },
         {
           id: settingId("project-view-switcher"),
