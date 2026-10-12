@@ -320,6 +320,13 @@ export const CanvasExportApprovalCard = Schema.Struct({
    * secrets like every other exported string.
    */
   destinationNote: Schema.optional(CanvasExportMessage),
+  /**
+   * Present when the document writes a design's frames: the author's markup,
+   * exactly as written. The share filter reads values, not markup, so naming
+   * this is what makes approving the card the person's acknowledgement that
+   * markup leaves unchecked.
+   */
+  writesDesignMarkup: Schema.optional(Schema.Literal(true)),
   /** The rendered document the person is approving. Not a summary of it. */
   payload: exportBody,
   payloadDigest: CanvasExportPayloadDigest,

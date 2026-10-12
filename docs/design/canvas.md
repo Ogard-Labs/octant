@@ -593,8 +593,25 @@ version rather than drawing a frame any other way. A shared prototype runs
 from a page the host tickets on a share access that names it (`runDesign`):
 the access is decided and journaled like any read of the snapshot, the ticket
 is the page route's own single-use ticket, and the page is that snapshot's
-design. It waits for **Run**, as in the thread. Markdown or HTML export still
-writes frame titles, not markup. A share refuses an action block, whose
+design. It waits for **Run**, as in the thread. Markdown export writes frame
+titles, not markup. HTML export writes a design's frames as written, each a
+sandboxed `srcdoc` page that carries the frame policy in a `meta` element
+ahead of everything else in it: a static design as one page per screen with
+an empty `sandbox`, and a running design as one page of every screen with
+`sandbox="allow-scripts"` and the served page's policy without `sandbox`,
+which a page cannot declare for itself. No frame has `allow-same-origin`, and
+the bridge is left out, since an exported page has no host to report to. The
+document that draws frames carries a policy of its own with `frame-src
+'none'`: a frame's page forbids its script every request but not leaving, and
+a prototype that set its own address loaded another page, which reached a
+local listener; the document's policy refuses that navigation, and a `srcdoc`
+frame, which is not one, still draws. A `srcdoc` page inherits the document's
+policy, so the document admits inline script only when it draws a running
+frame. The export approval card says when the document writes design markup
+(`writesDesignMarkup`), so approving it is the person's acknowledgement that
+markup leaves as written. A declared image draws a placeholder, and a design
+in the workspace theme still exports as its titles, because an exported file
+carries neither the theme's tokens nor the frame kit. A share refuses an action block, whose
 command runs only on this host. That refusal, and any block or field the share
 contract does not carry, are checked before the snapshot is journaled and
 reach the owner as an `unsafe-payload` denial: the Canvas cannot be shared, not

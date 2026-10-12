@@ -389,8 +389,11 @@ agent asks for your theme.
   snapshot shows the design's screens and runs a prototype when you press
   **Run**, under the same limits as in the Canvas. Images the design took from
   your Project or from generated images are not shared; their places show a
-  placeholder. Exporting a design still writes the name of each screen, not
-  the screens themselves.
+  placeholder. Exporting to HTML writes the design's screens into the file,
+  and a prototype runs there with no way to reach the network; the approval
+  card says the file includes the design's markup exactly as written. A design
+  drawn in your theme (a document-size design, unless it turns the theme off)
+  and every Markdown export still write the name of each screen instead.
 
 Comments, versions, and **Compare with** work on a design as on any other
 block. To change it, ask the agent: "make the buttons rounder" revises the
