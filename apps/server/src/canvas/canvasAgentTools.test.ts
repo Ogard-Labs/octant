@@ -1175,6 +1175,27 @@ describe("createCanvasAgentTools", () => {
       expect(create).not.toHaveBeenCalled();
     });
 
+    it("teaches a Work or Code agent to show a Project file in a design, and a Chat agent only generated images", async () => {
+      const designGuidance = async (set: ReturnType<typeof tools>["set"]): Promise<string> => {
+        const described = await set.execute({
+          name: CANVAS_TOOL_NAME,
+          inputJson: JSON.stringify({ operation: "describe", blockKinds: ["design"] }),
+        });
+        return (described.result as { guidance?: Record<string, string> }).guidance?.design ?? "";
+      };
+      for (const mode of ["work", "code"] as const) {
+        const guidance = await designGuidance(boundTools(mode).set);
+        expect(guidance).toContain("octant-asset:home-shot");
+        expect(guidance).toContain('"kind": "project-file"');
+        expect(guidance).toContain('"kind": "generated-image"');
+        expect(guidance).toContain("3 MB each and 5 MB per design");
+      }
+      const chat = await designGuidance(tools().set);
+      expect(chat).toContain('"kind": "generated-image"');
+      expect(chat).not.toContain('"kind": "project-file"');
+      expect(chat).toContain("a file path is refused");
+    });
+
     it("tells the agent to deliver substantial work as a Canvas bound to the thread's checkout", () => {
       const description = boundTools("code").set.definitions[0]?.description ?? "";
       expect(description).toContain("deliver it as a Canvas rather than as a long reply");

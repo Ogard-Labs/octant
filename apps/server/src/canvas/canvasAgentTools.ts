@@ -1,5 +1,8 @@
 import {
   CanvasBlock,
+  CANVAS_DESIGN_ASSET_MAX_BYTES,
+  CANVAS_DESIGN_ASSETS_MAX_BYTES,
+  CANVAS_MAX_DESIGN_ASSETS,
   CANVAS_SCHEMA_VERSION,
   decodeCanvasActor,
   decodeCanvasBlock,
@@ -331,6 +334,18 @@ async function resolveCanvasTarget(
 }
 
 /**
+ * How a design shows a real image, in the words of the thread's mode: a Chat
+ * Project has no folder, so its designs reach only images generated in it.
+ */
+function designAssetGuidance(mode: "chat" | "work" | "code"): string {
+  const sources =
+    mode === "chat"
+      ? 'Each asset is a generated image made in this Chat Project, {"kind": "generated-image", "imageId": "<attachment id of a completed image>"}; a Chat Project has no folder, so a file path is refused.'
+      : `Each asset is a generated image made in this Project, {"kind": "generated-image", "imageId": "<attachment id of a completed image>"}, or a file in ${mode === "work" ? "this thread's folder" : "this thread's checkout"}, {"kind": "project-file", "path": "screens/home.png"} relative to its root (no .., no absolute path, no link that leaves it).`;
+  return `To show a real screenshot, a generated image, or a Project image in a design, declare it in the design's assets as {"assetId": "home-shot", "source": ...} and name it in a frame or in styles as octant-asset:home-shot in src, srcset, url(), or image-set(), written exactly like that. ${sources} The host reads PNG, JPEG, GIF, or WebP (not SVG; draw vector art inline) up to ${String(CANVAS_DESIGN_ASSET_MAX_BYTES / (1024 * 1024))} MB each and ${String(CANVAS_DESIGN_ASSETS_MAX_BYTES / (1024 * 1024))} MB per design, at most ${String(CANVAS_MAX_DESIGN_ASSETS)} per design, and draws a placeholder for one it cannot read; preview names it. The frame itself still loads nothing.`;
+}
+
+/**
  * Which block kind fits a need, and how to author it.
  *
  * Decision 0067 keeps the always-visible tool prefix small, and this guidance
@@ -436,7 +451,7 @@ const RECIPE_GUIDE =
   'Match the request to a document recipe before inventing a shape: "write a plan" uses implementation-plan, "review this PR" uses code-review, "summarise research" uses research-brief, and "decide between designs" uses architecture-review. Fill a recipe\'s roles from block kinds that exist today, and do not invent a block kind the catalogue does not have.';
 
 const PREVIEW_GUIDE =
-  "Preview returns the same picture the person will see and the warnings it can measure: an inline document past its height cap, and on a chart clipped labels, legend overflow, empty series, or ink below its contrast target, and on a bar list clipped labels or empty series. Every other block kind gets no warnings, so read its picture yourself.";
+  "Preview returns the same picture the person will see and the warnings it can measure: an inline document past its height cap, and on a chart clipped labels, legend overflow, empty series, or ink below its contrast target, on a bar list clipped labels or empty series, and on a design each declared image the host could not draw, with the frames that name it. Every other block kind gets no warnings, so read its picture yourself.";
 
 function blockGuide(): Readonly<Record<string, string>> {
   return Object.fromEntries(
@@ -444,11 +459,17 @@ function blockGuide(): Readonly<Record<string, string>> {
   );
 }
 
-function describedGuidance(kinds: ReadonlyArray<string>): Readonly<Record<string, string>> {
+function describedGuidance(
+  kinds: ReadonlyArray<string>,
+  mode: "chat" | "work" | "code",
+): Readonly<Record<string, string>> {
   const guidance: Record<string, string> = {};
   for (const kind of kinds) {
     const detail = BLOCK_GUIDANCE[kind]?.detail;
-    if (detail !== undefined) guidance[kind] = detail;
+    if (detail === undefined) continue;
+    // Which images a design can reach depends on the thread's mode, so that
+    // part is written per describe rather than stored with the kind.
+    guidance[kind] = kind === "design" ? `${detail} ${designAssetGuidance(mode)}` : detail;
   }
   return guidance;
 }
@@ -856,7 +877,7 @@ function canvasToolSet(options: {
         return {
           result: {
             blockSchema: JSONSchema.make(Schema.Union(...selected)),
-            guidance: describedGuidance(input.blockKinds ?? []),
+            guidance: describedGuidance(input.blockKinds ?? [], options.mode),
             ...(examples.length === 0 ? {} : { examples }),
           },
         };

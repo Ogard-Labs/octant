@@ -1,4 +1,9 @@
-import { decodeCanvasId } from "@octant/contracts/canvas";
+import {
+  decodeCanvasId,
+  type CanvasDesignAssetResolution,
+  type CanvasDesignBlock,
+  type CanvasProvenance,
+} from "@octant/contracts/canvas";
 import type { ProviderToolImage } from "@octant/contracts";
 import { effectiveCanvasPresentation } from "@octant/domain";
 import { getDefaultToken } from "@octant/theme";
@@ -32,6 +37,15 @@ import type { CanvasPreviewRenderer } from "./canvasPreviewRenderer";
 export interface CanvasPreviewServiceOptions {
   readonly canvas: Pick<CanvasService, "get" | "history">;
   readonly renderer: CanvasPreviewRenderer;
+  /**
+   * Resolves a design's declared images under the version's own provenance,
+   * the same way a reader's draw does. Absent, every declared image reads as
+   * refused and is reported as a warning.
+   */
+  readonly resolveDesignAssets?: (
+    block: CanvasDesignBlock,
+    provenance: CanvasProvenance,
+  ) => Promise<ReadonlyArray<CanvasDesignAssetResolution>>;
   /** Milliseconds since the epoch; injectable so a test owns the clock. */
   readonly now?: () => number;
   readonly previewsPerWindow?: number;
@@ -152,7 +166,23 @@ export function createCanvasPreviewService(
         const presentation =
           request.width === "inline" ? "inline" : effectiveCanvasPresentation(definition);
         const palette = canvasPreviewPalette(request.theme);
-        const warnings = canvasPreviewWarnings({ definition, width, palette });
+        const designAssets = new Map<string, ReadonlyArray<CanvasDesignAssetResolution>>();
+        const resolveDesignAssets = options.resolveDesignAssets;
+        if (resolveDesignAssets !== undefined) {
+          for (const block of definition.blocks) {
+            if (block.kind !== "design" || (block.assets ?? []).length === 0) continue;
+            designAssets.set(
+              String(block.blockId),
+              await resolveDesignAssets(block, definition.provenance),
+            );
+          }
+        }
+        const warnings = canvasPreviewWarnings({
+          definition,
+          width,
+          palette,
+          designAssets,
+        });
         const base = {
           kind: "preview",
           canvasId: String(version.version.canvasId),
@@ -171,6 +201,7 @@ export function createCanvasPreviewService(
           width,
           theme: request.theme,
           placement: presentation === "inline" ? "thread" : "document",
+          designAssets: [...designAssets].map(([blockId, assets]) => ({ blockId, assets })),
         });
         if (rendered.kind !== "rendered") {
           return {

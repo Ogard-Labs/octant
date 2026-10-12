@@ -23,7 +23,9 @@ describe lists the closed block catalogue with one line on when to use each
 guided kind, how common requests map to recipes, what preview measures, and a
 creation example; describe for up to three block kinds returns their canonical
 schemas, plus authoring guidance and worked examples for the kinds that carry
-them; a plain kind such as `rich-text` returns its schema alone. Unscoped
+them; a plain kind such as `rich-text` returns its schema alone. The `design`
+guidance names the images the thread's mode can show: generated images in
+every mode, and Project files in Work and Code. Unscoped
 describe also lists document recipes: an id, a title, when to use one, and a
 skeleton of block kinds that already exist. The
 host offers an implementation plan, a design spec, an architecture review (its
@@ -58,8 +60,8 @@ A treemap block is gated the same way at Canvas schema version 5, a heatmap
 block at version 6, a comparison matrix at version 10, a math block at
 version 11, the mockup catalog at version 12, a table row's `id` at
 version 13, the funnel, radar, and sankey chart types at version 14, the
-dashboard block at version 15, and a design's `document` size or `theme` at
-version 16, so a
+dashboard block at version 15, a design's `document` size or `theme` at
+version 16, and a design's image `assets` at version 17, so a
 document that declares an earlier version and carries one is
 refused as a declared future version. The optional table column
 `display` and the chart, table, and metric `format` fields are the one ungated
@@ -430,7 +432,31 @@ fragment, naming the frame and the
 construct; the event store and revise policy return that reason to the
 author rather than a generic failure. The sandbox is the boundary and the
 link rule is part of it, because a link is the one way a page with no script
-can leave. A share refuses a design, and Markdown or HTML export writes
+can leave. Version 17 lets a design declare up to 12 image `assets`, each a
+`generated-image` (a completed image job's attachment id) or a `project-file`
+(a path relative to the Work thread's folder or the Code thread's checkout),
+and markup names one as `octant-asset:<id>` in `src`, `srcset`, a `url()`, or
+an `image-set()` candidate. The markup policy admits a reference only for a
+declared id spelled literally and refuses a Project file in a Chat Canvas or
+a path that is not confined. The definition holds references only. Each time
+a reader draws the design it asks `GET /api/canvas/design-assets` for that
+version and block; the route runs the same window authorization as `get`
+(paired devices included, under their Canvas read grant) and the server
+resolves each asset under that version's provenance, with nothing cached: a
+generated image only when its job's thread belongs to the Canvas's Project
+(never the host-wide image library), a Work file through the Work confinement
+sequence under the Project root while the thread is bound to its current
+revision, and a Code file the same way under the thread's checkout. Bytes are
+sniffed as PNG, JPEG, GIF, or WebP; SVG is refused because an SVG file is
+markup a sniff cannot tell from other text, and inline SVG already serves
+vector art. Each image is capped at 3 MiB and a design at 5 MiB, which keeps
+the base64 response inside the remote gateway's 8 MiB. The renderer replaces
+each literal reference with a `data:` image before writing the page, so the
+frame still loads nothing; an image that is loading, missing, refused, too
+large, or not an image draws a labelled placeholder, and the agent's
+`preview` reports a `design-asset-unavailable` warning naming the block, the
+asset id, the reason, and the frames that name it, never the bytes. A share
+refuses a design, and Markdown or HTML export writes
 frame titles, not markup. A share also refuses an action block, whose command
 runs only on this host. Both refusals, and any block or field the share
 contract does not carry, are checked before the snapshot is journaled and
@@ -445,10 +471,10 @@ Chromium stops painting sandboxed frames that are `inert` or have
 `pointer-events: none`, so a frame shown as a picture stays hit-testable and a
 cover over it takes the pointer
 ([decisions/0164-canvas-designs-are-html-in-a-frame-that-runs-nothing.md](../decisions/0164-canvas-designs-are-html-in-a-frame-that-runs-nothing.md)).
-The static frames and the themed `document` frames measured to their content
-described here are the shipped tiers. Frames that show Project images and
-frames that run script are accepted but not yet built; each replaces the
-matching sentence above when it ships (see [Canvas documents, designs, and prototypes](../architecture.md#canvas-documents-designs-and-prototypes)).
+The static frames, the themed `document` frames measured to their content,
+and the frames that show Project images described here are the shipped
+tiers. Frames that run script are accepted but not yet built; they replace
+the matching sentence above when they ship (see [Canvas documents, designs, and prototypes](../architecture.md#canvas-documents-designs-and-prototypes)).
 
 ## Verification
 

@@ -10,6 +10,7 @@ import {
 import { ChevronLeft, ChevronRight, Play, RotateCcw, X } from "lucide-react";
 import {
   CANVAS_DESIGN_VIEWPORT,
+  type CanvasDesignAssetResolution,
   type CanvasDesignBlock,
   type CanvasDesignDeviceSize,
   type CanvasDesignSize,
@@ -17,10 +18,12 @@ import {
 import { OctantButton } from "../../ui/base/OctantButton";
 import { OctantDialog } from "../../ui/base/OctantDialog";
 import {
+  designAssetUrls,
   designDocument,
   designFrameSandbox,
   designFrameTheme,
   readWorkspaceFrameTheme,
+  type DesignAssetRuntime,
   type DesignFrameThemeValues,
 } from "./designDocument";
 import { installFrameFonts } from "./designFrameFonts";
@@ -55,18 +58,78 @@ const DESIGN_DOCUMENT_MIN_HEIGHT = 48;
  * size, where its links work. A document is read in place instead, as wide as
  * the Canvas and as tall as its page.
  */
-export function DesignBlock({ block }: { readonly block: CanvasDesignBlock }) {
+export function DesignBlock({
+  block,
+  assetRuntime,
+}: {
+  readonly block: CanvasDesignBlock;
+  /** Reaches the host for the design's images; without it they draw as placeholders. */
+  readonly assetRuntime?: DesignAssetRuntime;
+}) {
   const theme = useWorkspaceFrameTheme(designFrameTheme(block) === "workspace");
-  if (block.size === "document") return <DesignDocumentBlock block={block} theme={theme} />;
-  return <DesignBoard block={block} size={block.size} theme={theme} />;
+  const assetUrls = useDesignAssetUrls(block, assetRuntime);
+  const frame = { theme, assetUrls };
+  if (block.size === "document") return <DesignDocumentBlock block={block} frame={frame} />;
+  return <DesignBoard block={block} size={block.size} frame={frame} />;
+}
+
+/** What every frame of one design is drawn with: the theme and the images. */
+interface DesignFrameInputs {
+  readonly theme: DesignFrameThemeValues | undefined;
+  readonly assetUrls: ReadonlyMap<string, string>;
+}
+
+/**
+ * Where each of a design's declared images is drawn from. The host is asked
+ * once each time the design is drawn, so what a reader sees follows the
+ * host's authority now; until it answers, and when it cannot, each image is a
+ * placeholder that says why.
+ */
+function useDesignAssetUrls(
+  block: CanvasDesignBlock,
+  runtime: DesignAssetRuntime | undefined,
+): ReadonlyMap<string, string> {
+  const declared = (block.assets ?? []).length > 0;
+  const [resolved, setResolved] = useState<ReadonlyArray<CanvasDesignAssetResolution> | undefined>(
+    undefined,
+  );
+  const [answered, setAnswered] = useState(false);
+  useEffect(() => {
+    setResolved(undefined);
+    setAnswered(false);
+    if (!declared || runtime === undefined) return;
+    let current = true;
+    runtime
+      .resolve(String(block.blockId))
+      .then((assets) => {
+        if (!current) return;
+        setResolved(assets);
+        setAnswered(true);
+      })
+      .catch(() => {
+        if (current) setAnswered(true);
+      });
+    return () => {
+      current = false;
+    };
+  }, [block, declared, runtime]);
+  return useMemo(
+    () =>
+      designAssetUrls(
+        block,
+        resolved,
+        runtime === undefined || answered ? "not-loaded" : "loading",
+      ),
+    [answered, block, resolved, runtime],
+  );
 }
 
 function DesignDocumentBlock({
   block,
-  theme,
+  frame,
 }: {
   readonly block: CanvasDesignBlock;
-  readonly theme: DesignFrameThemeValues | undefined;
+  readonly frame: DesignFrameInputs;
 }) {
   return (
     <section
@@ -79,7 +142,7 @@ function DesignDocumentBlock({
           <h3 className="canvas-design__title">{block.title}</h3>
         </div>
       </header>
-      <DocumentFrame block={block} theme={theme} />
+      <DocumentFrame block={block} frame={frame} />
     </section>
   );
 }
@@ -87,11 +150,11 @@ function DesignDocumentBlock({
 function DesignBoard({
   block,
   size,
-  theme,
+  frame: inputs,
 }: {
   readonly block: CanvasDesignBlock;
   readonly size: CanvasDesignDeviceSize;
-  readonly theme: DesignFrameThemeValues | undefined;
+  readonly frame: DesignFrameInputs;
 }) {
   const slides = size === "slide";
   const [playing, setPlaying] = useState<string | undefined>(undefined);
@@ -148,7 +211,7 @@ function DesignBoard({
                 size={size}
                 still
                 scale={scale}
-                theme={theme}
+                frame={inputs}
                 title={`${frame.title}, ${SIZE_NAME[block.size]} ${slides ? "slide" : "screen"}`}
               />
               <OctantButton
@@ -169,7 +232,7 @@ function DesignBoard({
           restoreFocus={playButton}
           size={size}
           startFrameId={playing}
-          theme={theme}
+          frame={inputs}
         />
       )}
     </section>
@@ -179,14 +242,14 @@ function DesignBoard({
 function DesignPlayer({
   block,
   size,
-  theme,
+  frame: inputs,
   startFrameId,
   onClose,
   restoreFocus,
 }: {
   readonly block: CanvasDesignBlock;
   readonly size: CanvasDesignDeviceSize;
-  readonly theme: DesignFrameThemeValues | undefined;
+  readonly frame: DesignFrameInputs;
   readonly startFrameId: string;
   readonly onClose: () => void;
   readonly restoreFocus: RefObject<HTMLButtonElement | null>;
@@ -301,7 +364,7 @@ function DesignPlayer({
                     scale={scale}
                     size={size}
                     still
-                    theme={theme}
+                    frame={inputs}
                     title={`${current.title}, slide ${String(index + 1)}`}
                   />
                   <div aria-hidden="true" className="canvas-design__cover" />
@@ -314,7 +377,7 @@ function DesignPlayer({
                 scale={scale}
                 size={size}
                 startFrameId={startFrameId}
-                theme={theme}
+                frame={inputs}
                 title={`${block.title}, prototype`}
               />
             )}
@@ -335,7 +398,7 @@ function DesignPlayer({
 function FrameView({
   block,
   size,
-  theme,
+  frame: { theme, assetUrls },
   frameIds,
   startFrameId,
   scale,
@@ -344,7 +407,7 @@ function FrameView({
 }: {
   readonly block: CanvasDesignBlock;
   readonly size: CanvasDesignDeviceSize;
-  readonly theme: DesignFrameThemeValues | undefined;
+  readonly frame: DesignFrameInputs;
   readonly frameIds?: ReadonlyArray<string>;
   readonly startFrameId?: string;
   readonly scale: number;
@@ -361,8 +424,9 @@ function FrameView({
         ...(frameKey === undefined ? {} : { frameIds: frameKey.split("\n") }),
         ...(startFrameId === undefined ? {} : { startFrameId }),
         ...(theme === undefined ? {} : { theme }),
+        assetUrls,
       }),
-    [block, frameKey, startFrameId, theme],
+    [assetUrls, block, frameKey, startFrameId, theme],
   );
   const themed = designFrameTheme(block) === "workspace";
   return (
@@ -391,17 +455,17 @@ function FrameView({
  */
 function DocumentFrame({
   block,
-  theme,
+  frame: { theme, assetUrls },
 }: {
   readonly block: CanvasDesignBlock;
-  readonly theme: DesignFrameThemeValues | undefined;
+  readonly frame: DesignFrameInputs;
 }) {
   const [height, setHeight] = useState(DESIGN_DOCUMENT_MIN_HEIGHT);
   const observer = useRef<ResizeObserver | null>(null);
   useEffect(() => () => observer.current?.disconnect(), []);
   const srcDoc = useMemo(
-    () => designDocument(block, theme === undefined ? {} : { theme }),
-    [block, theme],
+    () => designDocument(block, { ...(theme === undefined ? {} : { theme }), assetUrls }),
+    [assetUrls, block, theme],
   );
   const themed = designFrameTheme(block) === "workspace";
 

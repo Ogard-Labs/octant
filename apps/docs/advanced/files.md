@@ -309,7 +309,15 @@ agent asks for your theme.
 - Some designs react to taps without changing screen, such as a card you can
   select or a reminder you can tick. That is all they can do: a design runs no
   script, loads nothing from the internet, and has no links that leave it.
-  Pictures in it are drawn by the agent.
+  Pictures in it are drawn by the agent, or are real images it names.
+- A design can show real images: a screenshot or other image file from the
+  thread's folder (Work) or checkout (Code), or an image generated in the same
+  Project. In a Chat Project it can show only images generated there. Octant
+  reads each image when you open the design, under the thread's access, and
+  draws it into the page, so the design itself still fetches nothing. An image
+  it cannot show (missing, outside the folder, from another Project, larger
+  than 3 MB, or not a PNG, JPEG, GIF, or WebP) appears as a labelled
+  placeholder.
 - A design cannot be shared as a snapshot yet. Exporting it writes the name
   of each screen, not the screens themselves.
 

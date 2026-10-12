@@ -1,3 +1,5 @@
+import { CANVAS_DESIGN_ASSET_SCHEME } from "@octant/contracts/canvas";
+
 /**
  * What a design frame's markup may hold.
  *
@@ -17,6 +19,15 @@
  * presentation attribute such as `fill` can hold a `url()` too, so prose that
  * spells one out, even through a reference such as `&commat;import`, is refused
  * although a browser would only draw it as text.
+ *
+ * An image the design declares is named `octant-asset:<id>` where a `data:`
+ * image could stand: a `src` or `srcset` candidate, a `url()`, or an
+ * `image-set()` candidate. The renderer replaces each literal reference with
+ * the image the host resolved before the page is drawn, so the page still
+ * loads nothing. A reference is admitted only for an id the design declares,
+ * and only spelled literally: a reference spelled through a character
+ * reference or CSS escape is one the renderer would not replace and the
+ * browser would try to load, so it is refused.
  */
 
 /** Elements that run code, load another document, or navigate on their own. */
@@ -58,28 +69,38 @@ const SRCSET_CANDIDATE = /(?:^|,)\s*([^\s,]\S*)/g;
 const ANY_OUTSIDE_LINK = /[\s/"'](?:xlink:)?href(?=[\s/>=]|$)(?!\s*=\s*(?:["']\s*)?#)/i;
 const CSS_URL = /url\(\s*["']?\s*([^"')\s]*)/gi;
 
+/** The asset ids a design declares; a reference to any other id is refused. */
+type DeclaredAssets = ReadonlySet<string>;
+const NO_ASSETS: DeclaredAssets = new Set();
+
 /**
  * Why a frame's markup cannot be drawn as written, or `undefined` when it can.
  * The reason names the construct so the author can rewrite it.
  */
-export function canvasDesignMarkupRefusal(markup: string): string | undefined {
+export function canvasDesignMarkupRefusal(
+  markup: string,
+  assets: DeclaredAssets = NO_ASSETS,
+): string | undefined {
   for (const tag of startTags(markup)) {
     const name = elementName(tag.name);
     if (REFUSED_ELEMENTS.has(name)) {
       return `uses a <${name}> element; design frames run no script and load no other document.`;
     }
-    const refusal = attributeRefusal(tag.attributes);
+    const refusal = attributeRefusal(tag.attributes, assets);
     if (refusal !== undefined) return refusal;
   }
   if (ANY_OUTSIDE_LINK.test(markup)) {
     return 'has a link that leaves the design; a link may only name a frame or a section, such as href="#checkout".';
   }
-  const loadRefused = cssLoadRefusal(withoutCssEscapes(withoutCharacterReferences(markup)));
+  const decoded = withoutCssEscapes(withoutCharacterReferences(markup));
+  const spelled = spelledAssetReferenceRefusal(markup, decoded);
+  if (spelled !== undefined) return spelled;
+  const loadRefused = cssLoadRefusal(decoded, assets);
   if (loadRefused !== undefined) return loadRefused;
   // An image-set is read only inside a style element, so a quote in the prose
   // around one cannot hide its candidates. Style attributes are read above.
   for (const styles of styleElementContents(markup)) {
-    const refused = imageSetRefusal(withoutCharacterReferences(styles));
+    const refused = imageSetRefusal(withoutCharacterReferences(styles), assets);
     if (refused !== undefined) return refused;
   }
   return undefined;
@@ -90,41 +111,86 @@ export function canvasDesignMarkupRefusal(markup: string): string | undefined {
  * written into each frame inside one style element, so it must not be able to
  * close that element and start markup of its own.
  */
-export function canvasDesignStylesheetRefusal(styles: string): string | undefined {
+export function canvasDesignStylesheetRefusal(
+  styles: string,
+  assets: DeclaredAssets = NO_ASSETS,
+): string | undefined {
   if (/<\/style/i.test(styles)) return "closes its own style element.";
-  return cssRefusal(styles);
+  return (
+    spelledAssetReferenceRefusal(styles, withoutCssEscapes(styles)) ?? cssRefusal(styles, assets)
+  );
 }
 
-function cssRefusal(raw: string): string | undefined {
-  return cssLoadRefusal(withoutCssEscapes(raw)) ?? imageSetRefusal(raw);
+function cssRefusal(raw: string, assets: DeclaredAssets): string | undefined {
+  return cssLoadRefusal(withoutCssEscapes(raw), assets) ?? imageSetRefusal(raw, assets);
 }
 
-function cssLoadRefusal(css: string): string | undefined {
+function cssLoadRefusal(css: string, assets: DeclaredAssets): string | undefined {
   if (/@import\b/i.test(css)) {
     return "imports a stylesheet; put every style in the design itself.";
   }
   for (const match of css.matchAll(CSS_URL)) {
-    if (loadsAFile(match[1] ?? "")) {
-      return "loads a file with url(); use a data: URL, an inline SVG, or a gradient.";
-    }
+    const refused = addressRefusal(match[1] ?? "", assets, "url()");
+    if (refused !== undefined) return refused;
   }
   return undefined;
 }
 
-function imageSetRefusal(raw: string): string | undefined {
+function imageSetRefusal(raw: string, assets: DeclaredAssets): string | undefined {
   // An escaped quote is a character of a string, never its end, so it is
   // resolved to one that the scan does not read as a quote.
   for (const address of imageSetStringCandidates(withoutCssEscapes(raw, "\ufffd"))) {
-    if (loadsAFile(address)) {
-      return "loads a file with image-set(); use a data: URL, an inline SVG, or a gradient.";
-    }
+    const refused = addressRefusal(address, assets, "image-set()");
+    if (refused !== undefined) return refused;
   }
   return undefined;
 }
 
-function loadsAFile(address: string): boolean {
-  const target = address.trim().toLowerCase();
-  return !target.startsWith("data:") && !target.startsWith("#");
+/**
+ * Why one address a CSS load names would load a file, or `undefined` when it
+ * is inline (`data:`), a fragment, or a declared asset.
+ */
+function addressRefusal(
+  address: string,
+  assets: DeclaredAssets,
+  construct: "url()" | "image-set()",
+): string | undefined {
+  const target = address.trim();
+  const lower = target.toLowerCase();
+  if (lower.startsWith("data:") || lower.startsWith("#")) return undefined;
+  const asset = assetReference(target);
+  if (asset !== undefined) {
+    return assets.has(asset) ? undefined : undeclaredAsset(asset);
+  }
+  return `loads a file with ${construct}; use a data: URL, an inline SVG, a gradient, or a declared asset (octant-asset:<id>).`;
+}
+
+/**
+ * The id an address names when it is exactly `octant-asset:<id>`, or
+ * `undefined`. The scheme is matched as written, lower case, because that is
+ * the only spelling the renderer replaces.
+ */
+function assetReference(address: string): string | undefined {
+  if (!address.startsWith(CANVAS_DESIGN_ASSET_SCHEME)) return undefined;
+  const id = address.slice(CANVAS_DESIGN_ASSET_SCHEME.length);
+  return /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(id) ? id : undefined;
+}
+
+function undeclaredAsset(id: string): string {
+  return `uses the asset "${truncated(id)}", which the design does not declare; add it to the design's assets.`;
+}
+
+/**
+ * A reference the browser would read as an asset but the renderer would not
+ * replace, because a character reference or a CSS escape spells part of it.
+ * Counting the scheme before and after resolving both is enough: every
+ * literal reference survives resolution unchanged, so any extra one was
+ * spelled.
+ */
+function spelledAssetReferenceRefusal(raw: string, resolved: string): string | undefined {
+  const scheme = CANVAS_DESIGN_ASSET_SCHEME;
+  if (resolved.split(scheme).length === raw.split(scheme).length) return undefined;
+  return `spells an ${scheme} reference through a character reference or escape; write it as ${scheme}<id>.`;
 }
 
 /**
@@ -328,7 +394,7 @@ function elementName(raw: string): string {
   return local === -1 ? lower : lower.slice(local + 1);
 }
 
-function attributeRefusal(attributes: string): string | undefined {
+function attributeRefusal(attributes: string, assets: DeclaredAssets): string | undefined {
   for (const attribute of attributes.matchAll(ATTRIBUTE)) {
     const name = (attribute[1] ?? "").toLowerCase();
     const value = (attribute[2] ?? attribute[3] ?? attribute[4] ?? "").trim();
@@ -345,9 +411,12 @@ function attributeRefusal(attributes: string): string | undefined {
         name === "srcset"
           ? Array.from(value.matchAll(SRCSET_CANDIDATE), (candidate) => candidate[1] ?? "")
           : [value];
-      const remote = addresses.find((address) => !address.toLowerCase().startsWith("data:image/"));
-      if (remote !== undefined) {
-        return `loads "${truncated(remote)}"; images must be data:image URLs or inline SVG.`;
+      for (const address of addresses) {
+        if (address.toLowerCase().startsWith("data:image/")) continue;
+        const asset = assetReference(address);
+        if (asset !== undefined && assets.has(asset)) continue;
+        if (asset !== undefined) return undeclaredAsset(asset);
+        return `loads "${truncated(address)}"; images must be data:image URLs, inline SVG, or a declared asset (octant-asset:<id>).`;
       }
     }
     if (REFUSED_ATTRIBUTES.has(name)) {
@@ -356,7 +425,7 @@ function attributeRefusal(attributes: string): string | undefined {
     // Read alone, a style value's own quotes are not confused with the quotes
     // around the attributes beside it.
     if (name === "style") {
-      const cssRefused = cssRefusal(withoutCharacterReferences(value));
+      const cssRefused = cssRefusal(withoutCharacterReferences(value), assets);
       if (cssRefused !== undefined) return cssRefused;
     }
   }

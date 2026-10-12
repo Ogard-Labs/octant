@@ -416,8 +416,9 @@ designs they review (app screens, a site, a deck, a design system), and
 prototypes they try (a flow that reacts to input and keeps state). It does so
 in three tiers that an author mixes in one Canvas, using the lowest tier that
 delivers the result. The static frames' `document` size and workspace theme
-have shipped (Canvas schema version 16, described with the
-[`design` block](design/canvas.md#design-block)). The rest is accepted
+(Canvas schema version 16) and their images named by asset id (version 17)
+have shipped, as described with the
+[`design` block](design/canvas.md#design-block). The rest is accepted
 direction: each rule below replaces the matching shipped rule in
 [Canvas](design/canvas.md) when its slice ships, and until then the shipped
 rule holds. Each tier is a Canvas schema bump, so an older runtime refuses the
@@ -438,10 +439,10 @@ document as a future version. Frames follow the
   needs `allow-same-origin` and therefore never `allow-scripts`, and an opt-in
   workspace theme (semantic tokens, light or dark, the bundled fonts, and a
   first-party stylesheet for articles, cards, CSS-only tabs, badges, metric
-  tiles, tables, callouts, and code), unthemed by default at device sizes;
-  both have shipped. Not yet built: images named by asset id, which the server
-  resolves under the thread's mode and Project authority and the host inlines
-  before drawing. The frame itself loads nothing.
+  tiles, tables, callouts, and code), unthemed by default at device sizes,
+  and images named by asset id, which the server resolves under the thread's
+  mode and Project authority and the host inlines before drawing; all three
+  have shipped. The frame itself loads nothing.
 - **Running frames carry behavior.** A `design` may declare that it runs
   script. Its page comes from a host route fetched with a single-use ticket
   scoped to one Canvas version, never the session credential, with a
@@ -3452,6 +3453,14 @@ mechanisms are:
   app-managed tools fails the start with a typed reason rather than dropping
   the tool. Each adapter turns its provider's own subagent feature off, because a child
   the provider starts itself runs outside the journal and the approval path.
+- **Canvas design images.** A design frame never loads anything itself. The
+  server resolves the images a design declares on every read, through the
+  authorized Canvas read and under the version's mode, Project, and thread: a
+  Chat Project reaches only images generated in its own threads, and Work and
+  Code files pass the Work confinement sequence. Only sniffed raster images
+  within the per-image and per-design budgets are returned, the renderer
+  inlines them as `data:` images, and the journal holds references only
+  ([Canvas HTML frames threat model](security/canvas-html-frames-threat-model.md), F5).
 - **Remote clients.** Pairing issues a revocable device key; the private
   listener is HTTPS on a LAN or Tailscale address with a host-owned identity.
   Remote requests are classified fail-closed by an admission policy and route
