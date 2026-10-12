@@ -29,6 +29,14 @@ describe("provider account profile", () => {
     );
   });
 
+  it("gives two instance ids that differ only by letter case one account folder", () => {
+    const upper = decodeProviderInstanceId("ABCDEF01-1111-4111-8111-111111111111");
+    const lower = decodeProviderInstanceId("abcdef01-1111-4111-8111-111111111111");
+    expect(assignedProviderAccountDirectory(CLAUDE_ACCOUNT_PROFILE, "/Users/example", upper)).toBe(
+      assignedProviderAccountDirectory(CLAUDE_ACCOUNT_PROFILE, "/Users/example", lower),
+    );
+  });
+
   it("formats the unmodified Claude sign-in and status commands", () => {
     expect(
       formatProviderAccountSignInCommand({

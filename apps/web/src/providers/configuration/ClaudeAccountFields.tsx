@@ -48,7 +48,7 @@ export function displayAssignedAccountDirectory(input: {
   if (
     stored.length > 0 &&
     input.instanceId !== undefined &&
-    !stored.endsWith(`/.claude-accounts/${input.instanceId}`) &&
+    !stored.endsWith(`/.claude-accounts/${String(input.instanceId).toLowerCase()}`) &&
     !stored.endsWith("/.claude")
   ) {
     return { path: stored, kind: "legacy-custom" };
@@ -92,17 +92,16 @@ export function ClaudeAccountSettingsFields(props: {
     ...(props.instanceId === undefined ? {} : { instanceId: props.instanceId }),
     ...(props.storedDirectory === undefined ? {} : { storedDirectory: props.storedDirectory }),
   });
+  const storedDirectory = props.storedDirectory?.trim() ?? "";
+  // The command names the stored directory exactly: Claude keys its login on
+  // that string, so a path Octant only displays (`~/…`) must not be offered.
+  // An extra account with nothing stored yet shows no command, and the
+  // host-profile account runs the bare command.
   const commandReady =
     props.showSignInCommand !== false &&
     binaryPath.startsWith("/") &&
-    !(props.extraAccount && props.instanceId === undefined);
-  const commandDirectory =
-    displayed.kind === "assigned-default" &&
-    (props.storedDirectory === undefined || props.storedDirectory.length === 0)
-      ? undefined
-      : displayed.path.startsWith("~")
-        ? `$HOME/${displayed.path.slice(2)}`
-        : displayed.path;
+    (storedDirectory.length > 0 || !props.extraAccount);
+  const commandDirectory = storedDirectory.length > 0 ? storedDirectory : undefined;
   const signInCommand = commandReady
     ? formatProviderAccountSignInCommand({
         profile: CLAUDE_ACCOUNT_PROFILE,

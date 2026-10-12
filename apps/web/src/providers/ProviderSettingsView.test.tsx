@@ -1288,6 +1288,28 @@ describe("ProviderSettingsView", () => {
     expect(within(card).queryByRole("button", { name: /Connect Claude for helpers/ })).toBeNull();
   });
 
+  it("offers no sign-in command for an extra account that has no stored directory", () => {
+    const owner = claudeProvider();
+    const extra = decodeProviderInstance({
+      ...owner,
+      id: "80000000-0000-4000-8000-0000000000aa",
+      displayName: "Claude work",
+      createdAt: "2030-01-01T00:00:00.000Z",
+      updatedAt: "2030-01-01T00:00:00.000Z",
+    });
+    renderExpanded(
+      <ProviderSettingsView {...fixture({ instance: owner })} instances={[owner, extra]} />,
+    );
+    const card = screen.getByRole("article", { name: "Claude work" });
+    // Claude keys a login on the exact directory string, so a path Octant only
+    // displays must never be offered as a command to run.
+    expect(within(card).getByLabelText("Account directory")).toHaveValue(
+      `~/.claude-accounts/${extra.id}`,
+    );
+    expect(within(card).queryByLabelText("Account sign-in command")).toBeNull();
+    expect(within(card).queryByLabelText("Account status command")).toBeNull();
+  });
+
   it("edits Claude authentication with a write-only key and constrains remote key management", async () => {
     const user = userEvent.setup();
     const props = fixture({ instance: claudeProvider() });

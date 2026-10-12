@@ -547,12 +547,17 @@ function confineClaudeLaunch(
       allowProcessExec: false,
       allowProcessFork: false,
       allowFileReadStar: true,
-      // A subscription launch signs in with the unmodified binary, which needs
-      // exec of `/usr/bin/security` and the security-server lookup. Keychain
-      // files and every other exec stay denied. A launch that carries an API key
-      // reads nothing from the store, so it gets no carve-out (the same rule as
-      // `allowProviderCredentialLookup` on main). Linux confinement cannot take
-      // Seatbelt extra rules, so this carve-out is macOS-only.
+      // A subscription launch reads its sign-in by running `/usr/bin/security`.
+      // These rules let that binary run and reach the security server, with
+      // Keychain files and every other exec still denied. That is not enough:
+      // measured on macOS 27.0.1 with Claude Code 2.1.296, the runtime stays
+      // signed out until the profile also allows process-fork and read of
+      // `~/Library/Keychains/login.keychain-db`. Whether to grant those two or
+      // to refuse confined subscription launches is still an open choice. A
+      // launch that carries an API key reads nothing from the store, so it
+      // gets no carve-out (the same rule as `allowProviderCredentialLookup` on
+      // main). Linux confinement cannot take Seatbelt extra rules, so this is
+      // macOS-only.
       ...(process.platform === "darwin" && spawnOptions.env.ANTHROPIC_API_KEY === undefined
         ? {
             extraRules: [

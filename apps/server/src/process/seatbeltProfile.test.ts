@@ -346,8 +346,11 @@ describe("shared Seatbelt profile builder", () => {
       expect(output).toContain("reached-security-step");
       expect(output).not.toContain("login=read");
       expect(output).not.toContain("shell=ran");
-      // The profile denies fork, so a bash child cannot start security. The
-      // runtime launches it directly, which is the exec this rule grants.
+      // The profile denies fork, so a bash child cannot start security. This
+      // run proves only that the exec rule matches the binary. It does not
+      // prove a sign-in: measured on macOS 27.0.1 with Claude Code 2.1.296,
+      // the runtime stays signed out until the profile also allows
+      // process-fork and read of login.keychain-db.
       const security = spawnSync(
         "/usr/bin/sandbox-exec",
         ["-p", profile, "/usr/bin/security", "help"],

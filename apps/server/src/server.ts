@@ -805,6 +805,7 @@ import {
   isAndroidEmulatorInputKind,
   androidActionOpensInputGrant,
   defaultShellSettings,
+  effectiveClaudeAccountConfigDirectory,
   enabledModes,
   formatThreadMentionContext,
   isAgentRunActiveStatus,
@@ -4445,18 +4446,20 @@ export function startOctantServer(
       onRuntimeEvent: (event) => providerRuntimeUsageLimitsStore.record(event),
       ...(credentialResolver === undefined ? {} : { credentialResolver }),
       ...(subscriptionOAuth === undefined ? {} : { subscriptionOAuth }),
-      localUsageHistorySourceForInstance: (instance) =>
-        createLocalUsageHistorySourceForDriver({
+      localUsageHistorySourceForInstance: (instance) => {
+        const claudeConfigDirectory =
+          instance.driverKind === "claude"
+            ? effectiveClaudeAccountConfigDirectory(instance, homedir())
+            : undefined;
+        return createLocalUsageHistorySourceForDriver({
           driverKind: instance.driverKind,
           home: homedir(),
-          ...(instance.driverKind === "claude" &&
-          instance.configuration.configDirectory !== undefined
-            ? { claudeConfigDirectory: instance.configuration.configDirectory }
-            : {}),
+          ...(claudeConfigDirectory === undefined ? {} : { claudeConfigDirectory }),
           checkpointStore: createLocalUsageHistoryCheckpointStore(
             join(persistence.dataDirectory, "local-usage-cache.sqlite3"),
           ),
-        }),
+        });
+      },
       get claudeInstances() {
         return persistence.readProviderInstances();
       },

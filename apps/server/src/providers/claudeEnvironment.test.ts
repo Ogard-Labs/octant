@@ -1,16 +1,13 @@
 import { existsSync, readdirSync, rmSync, statSync } from "node:fs";
 import { mkdtemp } from "node:fs/promises";
-import { homedir, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { decodeProviderInstanceId, type ProviderFailure } from "@octant/contracts";
-import { assignedClaudeAccountConfigDirectory } from "@octant/domain";
+import type { ProviderFailure } from "@octant/contracts";
 import { Effect, Either, Exit, Scope } from "effect";
 import { describe, expect, it } from "vitest";
 
 import { makeClaudeEnvironmentScope, sanitizeClaudeEnvironment } from "./claudeEnvironment";
-
-const instanceId = decodeProviderInstanceId("80000000-0000-4000-8000-000000000801");
 
 const requiredGuards = {
   CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
@@ -152,16 +149,16 @@ describe("makeClaudeEnvironmentScope", () => {
     expect(environment.ANTHROPIC_API_KEY).toBeUndefined();
   });
 
-  it("assigns an API-key launch ~/.claude-accounts/<instanceId> when no directory is stored", async () => {
-    const configDirectory = assignedClaudeAccountConfigDirectory(homedir(), instanceId);
-    const createdParent = !existsSync(join(homedir(), ".claude-accounts"));
+  it("prepares an API-key launch on the account directory it is given", async () => {
+    const parent = await mkdtemp(join(tmpdir(), "octant-claude-api-account-"));
+    const configDirectory = join(parent, "account");
     const scope = await Effect.runPromise(Scope.make());
     try {
       const acquired = await Effect.runPromise(
         makeClaudeEnvironmentScope("api-key", {
           hostEnvironment: hostileHostEnvironment,
           apiKey: "broker-resolved-api-key-sentinel",
-          instanceId,
+          configDirectory,
         }).pipe(Effect.provideService(Scope.Scope, scope)),
       );
 
@@ -185,22 +182,20 @@ describe("makeClaudeEnvironmentScope", () => {
       expect(acquired.environment.ANTHROPIC_API_KEY).toBeUndefined();
       expect(existsSync(configDirectory)).toBe(true);
     } finally {
-      rmSync(configDirectory, { recursive: true, force: true });
-      if (createdParent)
-        rmSync(join(homedir(), ".claude-accounts"), { recursive: true, force: true });
+      rmSync(parent, { recursive: true, force: true });
     }
   });
 
   it("redacts a held API environment object when its scope is released", async () => {
-    const configDirectory = assignedClaudeAccountConfigDirectory(homedir(), instanceId);
-    const createdParent = !existsSync(join(homedir(), ".claude-accounts"));
+    const parent = await mkdtemp(join(tmpdir(), "octant-claude-api-account-"));
+    const configDirectory = join(parent, "account");
     const scope = await Effect.runPromise(Scope.make());
     try {
       const acquired = await Effect.runPromise(
         makeClaudeEnvironmentScope("api-key", {
           hostEnvironment: { PATH: "/usr/bin", HOME: "/Users/provider-user" },
           apiKey: "held-api-key-sentinel",
-          instanceId,
+          configDirectory,
         }).pipe(Effect.provideService(Scope.Scope, scope)),
       );
       const heldEnvironment = acquired.environment;
@@ -210,10 +205,26 @@ describe("makeClaudeEnvironmentScope", () => {
 
       expect(heldEnvironment.ANTHROPIC_API_KEY).toBeUndefined();
     } finally {
-      rmSync(configDirectory, { recursive: true, force: true });
-      if (createdParent)
-        rmSync(join(homedir(), ".claude-accounts"), { recursive: true, force: true });
+      rmSync(parent, { recursive: true, force: true });
     }
+  });
+
+  it("refuses an API-key launch that names no account directory", async () => {
+    const scope = await Effect.runPromise(Scope.make());
+    const result = await Effect.runPromise(
+      Effect.either(
+        makeClaudeEnvironmentScope("api-key", {
+          hostEnvironment: { PATH: "/usr/bin", HOME: "/Users/provider-user" },
+          apiKey: "unused-api-key-sentinel",
+        }).pipe(Effect.provideService(Scope.Scope, scope)),
+      ),
+    );
+    await Effect.runPromise(Scope.close(scope, Exit.void));
+
+    expect(Either.isLeft(result) ? result.left : undefined).toEqual({
+      category: "invalid-configuration",
+      message: "Claude API-key authentication requires an assigned account directory.",
+    });
   });
 
   it("keeps an isolated Claude account on its directory and never sets a helper token", async () => {
