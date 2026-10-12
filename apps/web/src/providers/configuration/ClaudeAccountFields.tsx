@@ -180,7 +180,7 @@ function ProviderAccountSettingsFields(props: {
       <SettingRow
         description={
           displayed.kind === "legacy-custom"
-            ? "This account still uses a directory you chose, so it keeps that login. Re-assign to Octant's directory only if you want a new login on the assigned path."
+            ? "This account still uses a directory you chose, so it keeps that login. Re-assign to Octant's directory only if you want a new login on the assigned path. Threads this account already started stay in the old directory and cannot continue after that."
             : displayed.kind === "assigned-default"
               ? props.defaultDirectoryDescription
               : props.extraDirectoryDescription
