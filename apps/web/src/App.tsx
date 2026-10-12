@@ -3136,6 +3136,20 @@ function LaunchedShell(
   // The prompt of a confirmed follow-up waits in the composer of the thread
   // it belongs to; sending it is the person's move. A started side task has
   // already sent its prompt and passes none.
+  function seedOpenedComposerDraft(
+    mode: "chat" | "work" | "code",
+    threadId: string,
+    text: string,
+    stagedDropped = false,
+  ): void {
+    if (text.length === 0) return;
+    composerThreadDrafts.write(mode, threadId, {
+      text,
+      caretIndex: text.length,
+      stagedDropped,
+    });
+  }
+
   const openCreatedFollowUp = ({
     mode,
     created,
@@ -3146,12 +3160,7 @@ function LaunchedShell(
     readonly prompt: string;
   }) => {
     const seed = (threadMode: "chat" | "work" | "code", threadId: string) =>
-      prompt.length > 0 &&
-      composerThreadDrafts.write(threadMode, threadId, {
-        text: prompt,
-        caretIndex: prompt.length,
-        stagedDropped: false,
-      });
+      seedOpenedComposerDraft(threadMode, threadId, prompt);
     if (created.kind === "same-thread") {
       seed(mode, created.threadId);
       return;
@@ -5427,6 +5436,7 @@ function LaunchedShell(
     // exact thread before starting the turn so the user can see recovery UI.
     // Return true so the overview does not restore a prompt that already
     // created a thread.
+    let firstTurnFailed = false;
     try {
       await controller.openWorkThread(
         created.thread.id,
@@ -5436,7 +5446,7 @@ function LaunchedShell(
       );
       await workNavigation.refresh();
       const attachmentIds = await stageWorkImages(created.thread.id, images ?? []);
-      await workTurnClient.startFirstTurn({
+      const started = await workTurnClient.startFirstTurn({
         kind: "start-work-thread-turn",
         requestId: decodeWorkTurnRequestId(globalThis.crypto.randomUUID()),
         threadId: created.thread.id,
@@ -5456,8 +5466,12 @@ function LaunchedShell(
           ? {}
           : { threadMentionIds }),
       });
+      firstTurnFailed = started.kind !== "accepted";
     } catch {
-      // Attachment or first-turn failures stay on the opened thread.
+      firstTurnFailed = true;
+    }
+    if (firstTurnFailed) {
+      seedOpenedComposerDraft("work", String(created.thread.id), prompt, (images ?? []).length > 0);
     }
     return true;
   }
@@ -5526,7 +5540,13 @@ function LaunchedShell(
           modelId: selection.modelId,
           ...(modelOptionValues === undefined ? {} : { modelOptionValues }),
         });
-        if (changed?.kind !== "thread-updated") return true;
+        if (changed?.kind !== "thread-updated") {
+          chatController.reportError(
+            "The selected Chat provider and model could not be applied. Retry from the open thread.",
+          );
+          seedOpenedComposerDraft("chat", String(thread.id), prompt);
+          return true;
+        }
         thread = changed.thread;
       }
       const sent = await chatController.execute({
@@ -5539,11 +5559,13 @@ function LaunchedShell(
         chatController.reportError(
           "The first message could not be sent. Retry from the open thread.",
         );
+        seedOpenedComposerDraft("chat", String(thread.id), prompt);
       }
     } catch {
       chatController.reportError(
         "The first message could not be sent. Retry from the open thread.",
       );
+      seedOpenedComposerDraft("chat", String(thread.id), prompt);
     }
     return true;
   }
@@ -5845,11 +5867,12 @@ function LaunchedShell(
             ...(modelOptionValues === undefined ? {} : { modelOptionValues }),
           });
           if (changed?.kind !== "thread-updated") {
-            setDraftError(
-              chatController.lastExecuteError.current ??
-                "The selected Chat provider and model could not be applied.",
+            await controller.openChatThread(thread.id, thread.title);
+            chatController.reportError(
+              "The selected Chat provider and model could not be applied. Retry from the open thread.",
             );
-            return;
+            seedOpenedComposerDraft("chat", String(thread.id), prompt);
+            return true;
           }
           thread = changed.thread;
         }
@@ -5871,14 +5894,11 @@ function LaunchedShell(
           );
         await controller.openChatThread(thread.id, thread.title);
         const outcome = await sendOutcome;
-        if ("error" in outcome) {
-          throw outcome.error;
-        }
-        if (outcome.sent === undefined) {
-          setDraftError(
-            chatController.lastExecuteError.current ??
-              "The first message could not be sent. Retry from the open thread.",
+        if ("error" in outcome || outcome.sent === undefined) {
+          chatController.reportError(
+            "The first message could not be sent. Retry from the open thread.",
           );
+          seedOpenedComposerDraft("chat", String(thread.id), prompt);
         }
       } else if (mode === "code") {
         const destinationHostId = refuseUnlessCreatableDestination({
@@ -6081,36 +6101,45 @@ function LaunchedShell(
           created.thread.projectId,
         );
         await workNavigation.refresh();
-        const attachmentIds = await stageWorkImages(created.thread.id, images ?? []);
-        const started = await workTurnClient.startFirstTurn({
-          kind: "start-work-thread-turn",
-          ...(computerUseSelection === undefined ? {} : { computerUseSelection }),
-          ...(extensionSelections === undefined || extensionSelections.length === 0
-            ? {}
-            : { extensionSelections }),
-          requestId: decodeWorkTurnRequestId(globalThis.crypto.randomUUID()),
-          threadId: created.thread.id,
-          turnId: decodeWorkTurnId(globalThis.crypto.randomUUID()),
-          prompt,
-          authority: {
-            hostId: destinationHostId,
-            projectId: project.id,
-            bindingRevisionId,
-            workingDirectory: created.thread.workingDirectory ?? decodeThreadWorkingDirectory("."),
-            confinementPosture: "project-root-confined",
-            providerInstanceId,
-            modelId,
-          },
-          ...(attachmentIds.length === 0 ? {} : { attachmentIds }),
-          ...(threadMentionIds === undefined || threadMentionIds.length === 0
-            ? {}
-            : { threadMentionIds }),
-        });
-        if (started.kind !== "accepted") {
-          setDraftError(
-            "The thread was created, but its first provider turn could not be started.",
+        let firstTurnFailed = false;
+        try {
+          const attachmentIds = await stageWorkImages(created.thread.id, images ?? []);
+          const started = await workTurnClient.startFirstTurn({
+            kind: "start-work-thread-turn",
+            ...(computerUseSelection === undefined ? {} : { computerUseSelection }),
+            ...(extensionSelections === undefined || extensionSelections.length === 0
+              ? {}
+              : { extensionSelections }),
+            requestId: decodeWorkTurnRequestId(globalThis.crypto.randomUUID()),
+            threadId: created.thread.id,
+            turnId: decodeWorkTurnId(globalThis.crypto.randomUUID()),
+            prompt,
+            authority: {
+              hostId: destinationHostId,
+              projectId: project.id,
+              bindingRevisionId,
+              workingDirectory:
+                created.thread.workingDirectory ?? decodeThreadWorkingDirectory("."),
+              confinementPosture: "project-root-confined",
+              providerInstanceId,
+              modelId,
+            },
+            ...(attachmentIds.length === 0 ? {} : { attachmentIds }),
+            ...(threadMentionIds === undefined || threadMentionIds.length === 0
+              ? {}
+              : { threadMentionIds }),
+          });
+          firstTurnFailed = started.kind !== "accepted";
+        } catch {
+          firstTurnFailed = true;
+        }
+        if (firstTurnFailed) {
+          seedOpenedComposerDraft(
+            "work",
+            String(created.thread.id),
+            prompt,
+            (images ?? []).length > 0,
           );
-          return false;
         }
       }
       return true;

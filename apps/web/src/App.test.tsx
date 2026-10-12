@@ -1261,6 +1261,9 @@ describe("App", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "The first message could not be sent. Retry from the open thread.",
     );
+    expect(await screen.findByRole("textbox", { name: "Message" })).toHaveValue(
+      "Prepare launch brief",
+    );
   });
 
   it("applies the selected Chat provider and model before starting the first turn", async () => {
@@ -1855,23 +1858,24 @@ describe("App", () => {
   it("opens the created Work thread when the first turn cannot start", async () => {
     const user = userEvent.setup();
     const shellApi = client(workShellBootstrap());
+    const createdWorkThread = decodeWorkThread({
+      id: workThreadId,
+      projectId: workProjectId,
+      title: "Draft brief",
+      lifecycle: "active",
+      providerInstanceId: "90000000-0000-4000-8000-000000000001" as never,
+      modelId: "gpt-5" as never,
+      bindingRevisionId: "30000000-0000-4000-8000-000000000001" as never,
+      workingDirectory: "." as never,
+      version: 1,
+      createdAt: "2026-07-26T09:30:00.000Z" as never,
+      updatedAt: "2026-07-26T09:30:00.000Z" as never,
+    });
     const workThreadClient = {
-      bootstrap: vi.fn(async () => ({ threads: [] })),
+      bootstrap: vi.fn(async () => ({ threads: [createdWorkThread] })),
       execute: vi.fn(async () => ({
         kind: "thread-created" as const,
-        thread: decodeWorkThread({
-          id: workThreadId,
-          projectId: workProjectId,
-          title: "Draft brief",
-          lifecycle: "active",
-          providerInstanceId: "90000000-0000-4000-8000-000000000001" as never,
-          modelId: "gpt-5" as never,
-          bindingRevisionId: "30000000-0000-4000-8000-000000000001" as never,
-          workingDirectory: "." as never,
-          version: 1,
-          createdAt: "2026-07-26T09:30:00.000Z" as never,
-          updatedAt: "2026-07-26T09:30:00.000Z" as never,
-        }),
+        thread: createdWorkThread,
       })),
     };
     const workTurnClient = {
@@ -1933,6 +1937,7 @@ describe("App", () => {
       await screen.findByRole("region", { name: "Workspace pane: Draft brief" }),
     ).toBeVisible();
     expect(screen.queryByRole("textbox", { name: "Start a new task" })).toBeNull();
+    expect(await screen.findByRole("textbox", { name: "Work prompt" })).toHaveValue("Draft brief");
   });
 
   it("preserves the Work overview draft when authoritative create fails", async () => {
