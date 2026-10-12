@@ -819,6 +819,7 @@ describe("Code app-managed tools", () => {
     expect(pressed.isError).toBe(false);
     expect(act).toHaveBeenLastCalledWith({
       windowId,
+      capturedBy: "agent",
       request: expect.objectContaining({
         kind: "press",
         value: "Enter",
@@ -831,6 +832,7 @@ describe("Code app-managed tools", () => {
     });
     expect(act).toHaveBeenLastCalledWith({
       windowId,
+      capturedBy: "agent",
       request: expect.objectContaining({ kind: "scroll", deltaX: 100, deltaY: -500 }),
     });
     act.mockClear();

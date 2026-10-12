@@ -1,4 +1,4 @@
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { MAX_AGENT_MESSAGE_BODY_BYTES } from "@octant/contracts";
@@ -10,7 +10,8 @@ import { MAX_AGENT_MESSAGE_BODY_BYTES } from "@octant/contracts";
  * byte length only. The store keeps the body on disk under the host data
  * directory, keyed by a random token that names nothing about the sender or
  * the recipient, and a purged thread's bodies are deleted with it — replay
- * after a purge rebuilds the message record but never the body.
+ * after a purge rebuilds the message record but never the body. A body lives
+ * only while its message waits for a turn: delivery and refusal drop it.
  */
 export class AgentMessageBodyStore {
   readonly #root: string;
@@ -50,6 +51,37 @@ export class AgentMessageBodyStore {
     } catch {
       return undefined;
     }
+  }
+
+  /**
+   * Drops every stored body except the ones named, and counts what remains
+   * against the budget. The host calls it once its journal is replayed, with
+   * the bodies of messages still waiting: the budget otherwise restarted at
+   * zero while old bodies stayed on disk, and a body whose message was
+   * refused, delivered by an earlier host, or never journaled had no reader
+   * and no other way out.
+   */
+  async retainOnly(waiting: ReadonlySet<string>): Promise<void> {
+    let names: ReadonlyArray<string>;
+    try {
+      names = await readdir(this.#root);
+    } catch {
+      // No directory yet means no bodies were ever stored.
+      this.#totalBytes = 0;
+      return;
+    }
+    let totalBytes = 0;
+    for (const name of names) {
+      const contentReference = name.endsWith(".txt") ? name.slice(0, -".txt".length) : "";
+      // Only the store's own files are its to delete.
+      if (!isOpaqueReference(contentReference)) continue;
+      if (!waiting.has(contentReference)) {
+        await rm(this.path(contentReference), { force: true });
+        continue;
+      }
+      totalBytes += (await stat(this.path(contentReference))).size;
+    }
+    this.#totalBytes = totalBytes;
   }
 
   async forget(contentReference: string): Promise<void> {
