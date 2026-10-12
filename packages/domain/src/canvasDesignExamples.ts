@@ -3,7 +3,8 @@ import type { CanvasDesignBlock } from "@octant/contracts/canvas";
 
 /**
  * The designs an agent is shown when it asks how to write one: a clickable
- * phone flow, a short deck, and a spec drawn as a themed document. Wire shapes, not branded blocks: describe
+ * phone flow, a short deck, a spec drawn as a themed document, and a prototype
+ * that runs. Wire shapes, not branded blocks: describe
  * returns these objects as-is.
  */
 export const onboardingFlowExample = {
@@ -103,6 +104,51 @@ export const searchSpecExample = {
   ],
 };
 
+/**
+ * A prototype that runs: a cart whose count and total change as the person
+ * clicks. Its state lives in inline script, it asks the network for nothing,
+ * and it styles itself, because a running design takes no workspace theme.
+ */
+export const cartPrototypeExample = {
+  blockId: "cart-prototype",
+  schemaVersion: CANVAS_SCHEMA_VERSION,
+  kind: "design" as const,
+  title: "Cart",
+  size: "phone" as const,
+  runsScript: true as const,
+  styles: [
+    "body { margin: 0; font-family: system-ui, sans-serif; color: #1c1917; background: #fafaf9; }",
+    ".screen { min-height: 100vh; display: flex; flex-direction: column; padding: 32px 24px; box-sizing: border-box; gap: 16px; }",
+    "h1 { font-size: 28px; line-height: 1.15; margin: 0; }",
+    ".row { display: flex; align-items: center; justify-content: space-between; padding: 16px; border-radius: 14px; background: white; border: 1px solid #e7e5e4; }",
+    ".stepper { display: flex; align-items: center; gap: 12px; }",
+    "button { font: inherit; min-width: 44px; min-height: 44px; border-radius: 12px; border: 1px solid #d6d3d1; background: white; color: #1c1917; }",
+    ".total { margin-top: auto; font-size: 20px; font-weight: 600; }",
+  ].join("\n"),
+  frames: [
+    {
+      frameId: "cart",
+      title: "Cart",
+      html: [
+        '<main class="screen"><h1>Your cart</h1>',
+        '<div class="row"><span>Noodle bowl, 12.00</span>',
+        '<span class="stepper"><button type="button" aria-label="One fewer" onclick="change(-1)">-</button>',
+        '<output id="count" aria-live="polite">1</output>',
+        '<button type="button" aria-label="One more" onclick="change(1)">+</button></span></div>',
+        '<p class="total">Total <output id="total" aria-live="polite">12.00</output></p></main>',
+        "<script>",
+        "var count = 1;",
+        "function change(by) {",
+        "  count = Math.max(0, count + by);",
+        '  document.getElementById("count").textContent = String(count);',
+        '  document.getElementById("total").textContent = (count * 12).toFixed(2);',
+        "}",
+        "</script>",
+      ].join(""),
+    },
+  ],
+};
+
 function designBlock(value: unknown): CanvasDesignBlock {
   const block = decodeCanvasBlock(value);
   if (block.kind !== "design") {
@@ -114,3 +160,4 @@ function designBlock(value: unknown): CanvasDesignBlock {
 export const onboardingFlowExampleBlock = designBlock(onboardingFlowExample);
 export const launchDeckExampleBlock = designBlock(launchDeckExample);
 export const searchSpecExampleBlock = designBlock(searchSpecExample);
+export const cartPrototypeExampleBlock = designBlock(cartPrototypeExample);

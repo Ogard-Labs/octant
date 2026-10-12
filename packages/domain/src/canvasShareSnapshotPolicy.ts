@@ -183,6 +183,9 @@ export function createCanvasShareSnapshotRecord(input: {
     consent: {
       acknowledgedOfflineSnapshot: true,
       acknowledgedNoCredentials: true,
+      ...(request.consent.acknowledgedMarkupSharedAsWritten === true
+        ? { acknowledgedMarkupSharedAsWritten: true }
+        : {}),
       acknowledgedAt: request.consent.acknowledgedAt,
       acknowledgedBy: request.consent.acknowledgedBy,
     },
@@ -201,12 +204,14 @@ export function createCanvasShareSnapshotRecord(input: {
       threatModelId: "canvas-share-authenticated-snapshot-v1" as const,
     };
   } catch (error) {
-    // The sanitizer refuses what this Canvas holds (a design, a secret, a host
-    // path) as an unsafe payload. That is the Canvas's content, not a malformed
-    // request, so the owner is told so.
+    // The sanitizer refuses what this Canvas holds (a secret, a host path) as
+    // an unsafe payload, and a design that leaves without its acknowledgement
+    // as missing consent. Both are about the Canvas's content, not a malformed
+    // request, so the owner is told which.
     reject(
-      error instanceof CanvasSharePolicyRejected && error.denialCode === "unsafe-payload"
-        ? "unsafe-payload"
+      error instanceof CanvasSharePolicyRejected &&
+        (error.denialCode === "unsafe-payload" || error.denialCode === "consent-required")
+        ? error.denialCode
         : "malformed-request",
       error instanceof Error ? error.message : "Canvas snapshot payload is unsafe.",
     );

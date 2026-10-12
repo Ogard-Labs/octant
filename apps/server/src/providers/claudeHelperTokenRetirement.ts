@@ -6,20 +6,14 @@ import type { ProviderInstance } from "@octant/contracts";
 import type { ProviderCredentialStore } from "./credentialBrokerClient";
 
 const ENVELOPE_KIND = "claude-helper-sign-in";
-const NOTICE_FILE = "claude-helper-token-retirement.json";
+const MARKER_FILE = "claude-helper-token-retirement.json";
+/** Names what a finished pass covered, so a narrower earlier pass runs again. */
+const MARKER_SCOPE = "live-and-removed-instances";
 
-export interface ClaudeHelperTokenRetirementNotice {
-  readonly deletedCount: number;
-  readonly acknowledged: boolean;
-}
-
-export interface ClaudeHelperTokenRetirementStore {
-  readonly notice: () => Promise<ClaudeHelperTokenRetirementNotice | undefined>;
-  readonly retire: (
-    instances: ReadonlyArray<ProviderInstance>,
-  ) => Promise<ClaudeHelperTokenRetirementNotice | undefined>;
-  readonly acknowledge: () => Promise<void>;
-}
+export type ClaudeHelperTokenRetirementOutcome =
+  | { readonly status: "retired"; readonly deletedCount: number }
+  | { readonly status: "already-retired" }
+  | { readonly status: "unavailable" };
 
 function isHelperEnvelope(raw: string): boolean {
   try {
@@ -35,71 +29,57 @@ function isHelperEnvelope(raw: string): boolean {
   }
 }
 
-export function createClaudeHelperTokenRetirementStore(input: {
-  readonly dataDirectory: string;
-  readonly broker?: ProviderCredentialStore;
-}): ClaudeHelperTokenRetirementStore {
-  const path = join(input.dataDirectory, NOTICE_FILE);
-  const readNotice = async (): Promise<ClaudeHelperTokenRetirementNotice | undefined> => {
-    try {
-      const parsed: unknown = JSON.parse(await readFile(path, "utf8"));
-      if (
-        typeof parsed !== "object" ||
-        parsed === null ||
-        Array.isArray(parsed) ||
-        typeof (parsed as { deletedCount?: unknown }).deletedCount !== "number" ||
-        typeof (parsed as { acknowledged?: unknown }).acknowledged !== "boolean"
-      ) {
-        return undefined;
-      }
-      return {
-        deletedCount: (parsed as { deletedCount: number }).deletedCount,
-        acknowledged: (parsed as { acknowledged: boolean }).acknowledged,
-      };
-    } catch {
-      return undefined;
-    }
-  };
-  const writeNotice = async (notice: ClaudeHelperTokenRetirementNotice): Promise<void> => {
-    await mkdir(dirname(path), { recursive: true });
-    await writeFile(path, `${JSON.stringify(notice)}\n`, { mode: 0o600 });
-  };
-  return {
-    notice: readNotice,
-    retire: async (instances) => {
-      const existing = await readNotice();
-      if (existing !== undefined) return existing;
-      if (input.broker === undefined) return undefined;
-      let deletedCount = 0;
-      for (const instance of instances) {
-        if (instance.driverKind !== "claude") continue;
-        try {
-          if (!(await input.broker.has(String(instance.id)))) continue;
-          const raw = await input.broker.resolve(String(instance.id));
-          if (!isHelperEnvelope(raw)) continue;
-          await input.broker.delete(String(instance.id));
-          deletedCount += 1;
-        } catch {
-          return undefined;
-        }
-      }
-      if (deletedCount === 0) {
-        await writeNotice({ deletedCount: 0, acknowledged: true });
-        return { deletedCount: 0, acknowledged: true };
-      }
-      const notice = { deletedCount, acknowledged: false };
-      await writeNotice(notice);
-      return notice;
-    },
-    acknowledge: async () => {
-      const existing = await readNotice();
-      await writeNotice({
-        deletedCount: existing?.deletedCount ?? 0,
-        acknowledged: true,
-      });
-    },
-  };
+async function alreadyRetired(path: string): Promise<boolean> {
+  try {
+    const parsed: unknown = JSON.parse(await readFile(path, "utf8"));
+    return (
+      typeof parsed === "object" &&
+      parsed !== null &&
+      (parsed as { readonly scope?: unknown }).scope === MARKER_SCOPE
+    );
+  } catch {
+    return false;
+  }
 }
 
-export const CLAUDE_HELPER_TOKEN_RETIRED_MESSAGE =
-  "Octant no longer stores a Claude helper token. If you previously connected Claude for helpers, revoke that leftover token with Anthropic.";
+/**
+ * Deletes the helper tokens an earlier Octant stored, once per data directory.
+ *
+ * The broker keeps one entry per provider instance and cannot list them, so
+ * the pass asks for each Claude instance and for each removed instance:
+ * removing a subscription account never cleared its entry, which left the
+ * token in the host credential store with nothing able to reach it. Only an
+ * entry that reads as a helper envelope is deleted, so an API key stays. A
+ * broker failure writes no marker, and the next start tries again.
+ */
+export async function retireClaudeHelperTokens(input: {
+  readonly dataDirectory: string;
+  readonly broker: ProviderCredentialStore | undefined;
+  readonly instances: ReadonlyArray<ProviderInstance>;
+  readonly removedInstanceIds: ReadonlyArray<string>;
+}): Promise<ClaudeHelperTokenRetirementOutcome> {
+  const path = join(input.dataDirectory, MARKER_FILE);
+  if (await alreadyRetired(path)) return { status: "already-retired" };
+  const broker = input.broker;
+  if (broker === undefined) return { status: "unavailable" };
+  const instanceIds = [
+    ...input.instances
+      .filter((instance) => instance.driverKind === "claude")
+      .map((instance) => String(instance.id)),
+    ...input.removedInstanceIds,
+  ];
+  let deletedCount = 0;
+  try {
+    for (const instanceId of instanceIds) {
+      if (!(await broker.has(instanceId))) continue;
+      if (!isHelperEnvelope(await broker.resolve(instanceId))) continue;
+      await broker.delete(instanceId);
+      deletedCount += 1;
+    }
+  } catch {
+    return { status: "unavailable" };
+  }
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(path, `${JSON.stringify({ scope: MARKER_SCOPE })}\n`, { mode: 0o600 });
+  return { status: "retired", deletedCount };
+}

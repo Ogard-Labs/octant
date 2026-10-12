@@ -141,6 +141,147 @@ describe("bounded authenticated extension routes", () => {
     });
   });
 
+  it("lets a local window answer a tool approval with always allow", async () => {
+    const windowAuthorityStore = new WindowAuthorityStore();
+    windowAuthorityStore.register({ windowId: windowId as never, capability, now });
+    const decide = vi.fn(() => false);
+    const handler = createExtensionRouteHandler({
+      service: { snapshot: setupSnapshot, execute: vi.fn() } as never,
+      windowAuthorityStore,
+      toolApprovals: { list: () => [], decide },
+      now: () => now,
+    });
+    const answer = {
+      kind: "decide",
+      approvalId: "44000000-0000-4000-8000-000000000010",
+      decision: "approved",
+      remember: true,
+    };
+
+    // The host refused to remember it (no Project, say): the call is still pending.
+    const refused = await handler(request("/api/extensions/tool-approvals", answer));
+    expect(refused?.status).toBe(409);
+    expect(await refused?.json()).toEqual({ accepted: false });
+    expect(decide).toHaveBeenCalledWith(windowId, {
+      approvalId: answer.approvalId,
+      decision: "approved",
+      remember: true,
+    });
+
+    const denied = await handler(
+      request("/api/extensions/tool-approvals", { ...answer, decision: "denied" }),
+    );
+    expect(denied?.status).toBe(400);
+    expect(decide).toHaveBeenCalledOnce();
+  });
+
+  it("lists and revokes remembered tool approvals for a local window and creates none", async () => {
+    const windowAuthorityStore = new WindowAuthorityStore();
+    windowAuthorityStore.register({ windowId: windowId as never, capability, now });
+    const grantId = `sha256:${"b".repeat(64)}`;
+    const grant = {
+      grantId,
+      projectId: "44000000-0000-4000-8000-000000000020",
+      extensionId,
+      packageId,
+      componentId: "mcp-notes",
+      mcpToolName: "search",
+      version: "1.0.0",
+      digest,
+      definitionDigest: `sha256:${"c".repeat(64)}`,
+      grantedAt: "2026-10-12T10:00:00.000Z",
+    };
+    const list = vi.fn(() => [grant] as never);
+    const revoke = vi.fn((id: string) => (id === grantId ? "revoked" : "not-found"));
+    const handler = createExtensionRouteHandler({
+      service: { snapshot: setupSnapshot, execute: vi.fn() } as never,
+      windowAuthorityStore,
+      toolGrants: { list, revoke },
+      now: () => now,
+    });
+
+    const listed = await handler(request("/api/extensions/tool-grants", { kind: "list" }));
+    expect(listed?.status).toBe(200);
+    expect(await listed?.json()).toEqual([grant]);
+
+    const revoked = await handler(
+      request("/api/extensions/tool-grants", { kind: "revoke", grantId }),
+    );
+    expect(revoked?.status).toBe(200);
+    expect(await revoked?.json()).toEqual({ revoked: true });
+    const unknown = await handler(
+      request("/api/extensions/tool-grants", {
+        kind: "revoke",
+        grantId: `sha256:${"d".repeat(64)}`,
+      }),
+    );
+    expect(unknown?.status).toBe(200);
+    expect(await unknown?.json()).toEqual({ revoked: false });
+
+    for (const body of [
+      { kind: "record", ...grant },
+      { kind: "grant", ...grant },
+      { ...grant },
+      { kind: "revoke", grantId, projectId: grant.projectId },
+      { kind: "list", projectId: grant.projectId },
+    ]) {
+      const response = await handler(request("/api/extensions/tool-grants", body));
+      expect(response?.status).toBe(400);
+    }
+    expect(revoke).toHaveBeenCalledTimes(2);
+    expect(list).toHaveBeenCalledOnce();
+  });
+
+  it("refuses a paired device both remembered-approval routes", async () => {
+    const list = vi.fn(() => []);
+    const revoke = vi.fn(() => "revoked" as const);
+    const decide = vi.fn(() => true);
+    const handler = createExtensionRouteHandler({
+      service: { snapshot: setupSnapshot, execute: vi.fn() } as never,
+      windowAuthorityStore: new WindowAuthorityStore(),
+      toolApprovals: { list: () => [], decide },
+      toolGrants: { list, revoke },
+      now: () => now,
+    });
+    for (const [path, body] of [
+      ["/api/extensions/tool-grants", { kind: "list" }],
+      ["/api/extensions/tool-grants", { kind: "revoke", grantId: `sha256:${"b".repeat(64)}` }],
+      [
+        "/api/extensions/tool-approvals",
+        {
+          kind: "decide",
+          approvalId: "44000000-0000-4000-8000-000000000010",
+          decision: "approved",
+          remember: true,
+        },
+      ],
+    ] as const) {
+      const remoteRequest = new Request(`http://127.0.0.1${path}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      bindPrincipalRouteContext(remoteRequest, {
+        principal: {
+          kind: "remote-device",
+          hostId: "local",
+          deviceId: "55000000-0000-4000-8000-000000000001",
+          credentialGeneration: 1,
+          origin: "https://remote.example",
+          protocolVersion: 1,
+          capabilityDigest: "a".repeat(64),
+          sessionId: "55000000-0000-4000-8000-000000000002",
+        } as never,
+        scopeId: "55000000-0000-4000-8000-000000000001" as never,
+      });
+      const response = await handler(remoteRequest);
+      expect(response?.status).toBe(401);
+    }
+    expect(list).not.toHaveBeenCalled();
+    expect(revoke).not.toHaveBeenCalled();
+    expect(decide).not.toHaveBeenCalled();
+  });
+
   it("imports a desktop-selected folder through a one-time window-bound receipt", async () => {
     const otherWindowId = "44000000-0000-4000-8000-000000000009";
     const otherCapability = "ZYXWVUTSRQPONMLKJIHGFEDCBAabcdefghijklmnop0";

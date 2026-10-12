@@ -1,8 +1,10 @@
 import type { CanvasDefinition } from "@octant/contracts/canvas";
+import type { ReactNode } from "react";
 import { MessageSquare } from "lucide-react";
 import type { CanvasActionBlock } from "@octant/contracts/canvas-actions";
 import { canvasReadingOrder, type CanvasReadingItem } from "@octant/domain/canvas-dashboard-layout";
 import { CanvasBlockRenderer } from "./blocks/CanvasBlock";
+import { CanvasLayoutGroup } from "./blocks/LayoutGroups";
 import { DashboardBlock } from "./blocks/DashboardBlock";
 import type { DiagramBoardLayoutRuntime } from "./blocks/DiagramBoard";
 import type { PlanTaskRuntime } from "./blocks/PlanBlock";
@@ -10,6 +12,7 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { CanvasActionPanel } from "./CanvasActionPanel";
 import type { CanvasActionRuntime } from "./canvasActionRuntime";
 import type { DesignAssetRuntime } from "./blocks/designDocument";
+import type { DesignRunRuntime } from "./blocks/designRunningFrame";
 
 export interface CanvasDocumentProps {
   readonly definition: CanvasDefinition;
@@ -31,6 +34,11 @@ export interface CanvasDocumentProps {
    * draw. Without it a design draws each image as a placeholder.
    */
   readonly designAssetRuntime?: DesignAssetRuntime;
+  /**
+   * Host-owned tickets for a prototype's page. Without it a design that runs
+   * script says it cannot run here.
+   */
+  readonly designRunRuntime?: DesignRunRuntime;
   /**
    * Comment markers beside each block and on each table row that carries an
    * id. Offered only when the host journals comments; `openCounts` holds the
@@ -82,6 +90,10 @@ export function canvasBlockLabel(block: CanvasDefinition["blocks"][number]): str
       return block.title;
     case "callout":
       return block.title ?? "Callout";
+    case "tabs":
+      return "Tabs";
+    case "columns":
+      return "Columns";
     default:
       return block.kind.replace("-", " ");
   }
@@ -93,6 +105,7 @@ export function CanvasDocument({
   layoutRuntime,
   planRuntime,
   designAssetRuntime,
+  designRunRuntime,
   comments,
   placement = "document",
 }: CanvasDocumentProps) {
@@ -103,7 +116,6 @@ export function CanvasDocument({
     (block): block is CanvasActionBlock => block.kind === "action",
   );
   const content = definition.blocks.filter((block) => block.kind !== "action");
-
   const blockSection = (block: CanvasDefinition["blocks"][number]) => (
     <section key={block.blockId} className="canvas-block" data-block-kind={block.kind}>
       <CanvasBlockRenderer
@@ -112,6 +124,7 @@ export function CanvasDocument({
         {...(planRuntime === undefined ? {} : { planRuntime })}
         {...(actionRuntime === undefined ? {} : { actionRuntime })}
         {...(designAssetRuntime === undefined ? {} : { designAssetRuntime })}
+        {...(designRunRuntime === undefined ? {} : { designRunRuntime })}
         {...(comments === undefined || block.kind !== "table"
           ? {}
           : {
@@ -131,6 +144,64 @@ export function CanvasDocument({
     </section>
   );
 
+  const dashboardSection = (item: Extract<ReadingItem, { readonly kind: "dashboard" }>) => (
+    <section key={item.dashboard.blockId} className="canvas-block" data-block-kind="dashboard">
+      <DashboardBlock
+        title={item.dashboard.title}
+        columns={item.columns}
+        cells={item.cells}
+        cellKey={(block) => String(block.blockId)}
+        cellKind={(block) => block.kind}
+        renderCell={(block) => blockSection(block)}
+      />
+      {comments === undefined ? null : (
+        <CommentMarker
+          count={comments.openCounts.get(String(item.dashboard.blockId)) ?? 0}
+          label={canvasBlockLabel(item.dashboard)}
+          onOpen={() => comments.onOpen(String(item.dashboard.blockId))}
+        />
+      )}
+    </section>
+  );
+
+  // A tab pane or a column draws its children through the same flow as the
+  // document, so a dashboard in a pane is the same grid it is at the top.
+  const flow = (items: ReadonlyArray<ReadingItem>): ReactNode =>
+    runsOfMetrics(items).map((run) => {
+      const first = run[0];
+      if (first?.kind === "dashboard") return dashboardSection(first);
+      if (first?.kind === "group") {
+        // The group is a block a comment can anchor to, so it carries its own
+        // marker just as a dashboard does; its children keep theirs.
+        return (
+          <section
+            key={first.group.blockId}
+            className="canvas-block canvas-block--group"
+            data-block-kind={first.group.kind}
+          >
+            <CanvasLayoutGroup
+              block={first.group}
+              renderSection={(index) => flow(first.sections[index] ?? [])}
+            />
+            {comments === undefined ? null : (
+              <CommentMarker
+                count={comments.openCounts.get(String(first.group.blockId)) ?? 0}
+                label={canvasBlockLabel(first.group)}
+                onOpen={() => comments.onOpen(String(first.group.blockId))}
+              />
+            )}
+          </section>
+        );
+      }
+      const sections = run.map((item) => (item.kind === "block" ? blockSection(item.block) : null));
+      return first?.kind === "block" && first.block.kind === "metric" ? (
+        <div className="canvas-metrics" key={`metrics-${first.block.blockId}`}>
+          {sections}
+        </div>
+      ) : (
+        sections
+      );
+    });
   return (
     <article
       className={placement === "thread" ? "canvas-view canvas-view--thread" : "canvas-view"}
@@ -141,46 +212,7 @@ export function CanvasDocument({
           <h1>{definition.title}</h1>
         </header>
       )}
-      <div className="canvas-view__body">
-        {runsOfMetrics(canvasReadingOrder(content)).map((run) => {
-          const first = run[0];
-          if (first?.kind === "dashboard") {
-            return (
-              <section
-                key={first.dashboard.blockId}
-                className="canvas-block"
-                data-block-kind="dashboard"
-              >
-                <DashboardBlock
-                  title={first.dashboard.title}
-                  columns={first.columns}
-                  cells={first.cells}
-                  cellKey={(block) => String(block.blockId)}
-                  cellKind={(block) => block.kind}
-                  renderCell={(block) => blockSection(block)}
-                />
-                {comments === undefined ? null : (
-                  <CommentMarker
-                    count={comments.openCounts.get(String(first.dashboard.blockId)) ?? 0}
-                    label={canvasBlockLabel(first.dashboard)}
-                    onOpen={() => comments.onOpen(String(first.dashboard.blockId))}
-                  />
-                )}
-              </section>
-            );
-          }
-          const sections = run.map((item) =>
-            item.kind === "block" ? blockSection(item.block) : null,
-          );
-          return first?.kind === "block" && first.block.kind === "metric" ? (
-            <div className="canvas-metrics" key={`metrics-${first.block.blockId}`}>
-              {sections}
-            </div>
-          ) : (
-            sections
-          );
-        })}
-      </div>
+      <div className="canvas-view__body">{flow(canvasReadingOrder(content))}</div>
       {actionRuntime !== undefined && actions.length > 0 ? (
         <CanvasActionPanel
           actions={actions}

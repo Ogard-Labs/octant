@@ -26,7 +26,10 @@ import {
   type CanvasMatrixCellLayout,
 } from "@octant/domain/canvas-comparison-matrix";
 import { canvasMathRenderOptions } from "@octant/domain/canvas-math-policy";
-import { canvasReadingOrder } from "@octant/domain/canvas-dashboard-layout";
+import {
+  canvasReadingOrder,
+  type CanvasPlacedReadingItem,
+} from "@octant/domain/canvas-dashboard-layout";
 import {
   CANVAS_MOCKUP_DEVICE_NAME,
   canvasMockupCallouts,
@@ -34,7 +37,11 @@ import {
   canvasMockupNodeReading,
   type CanvasMockupBranch,
 } from "@octant/domain/canvas-mockup-outline";
-import { DEFAULT_ARTIFACT_PALETTE, escapeXml } from "./artifactRender";
+import { layoutCanvasDiagram } from "@octant/domain/canvas-diagram-layout";
+import { layoutCanvasPlanGantt } from "@octant/domain/canvas-plan-gantt-layout";
+import { DEFAULT_ARTIFACT_PALETTE, drawCanvasDiagramLayout, escapeXml } from "./artifactRender";
+import type { DesignFrameThemeValues } from "@octant/domain";
+import { renderCanvasDesignExportFrames } from "./canvasDesignPage";
 
 /**
  * The reading form of the same blocks a preview draws.
@@ -47,26 +54,50 @@ import { DEFAULT_ARTIFACT_PALETTE, escapeXml } from "./artifactRender";
  */
 
 export type ArtifactDocumentRender =
-  | { readonly kind: "rendered"; readonly title: string; readonly body: string }
+  | {
+      readonly kind: "rendered";
+      readonly title: string;
+      readonly body: string;
+      /** Whether the body holds a design's frames, which are markup as written. */
+      readonly writesDesignMarkup: boolean;
+    }
   | { readonly kind: "too-large" };
+
+/**
+ * How a design leaves in the HTML form. Its titles always do. Its frames are
+ * markup, which the share filter cannot read, so they are written only when
+ * the person exporting has acknowledged that markup leaves as written.
+ */
+export interface ArtifactDocumentOptions {
+  readonly frames?: "as-written";
+  /**
+   * The theme a design drawn in the workspace theme is exported in, handed
+   * over by the person's window. Without it such a design reads as its titles.
+   */
+  readonly frameTheme?: DesignFrameThemeValues;
+}
 
 export function renderArtifactMarkdown(
   definition: Pick<CanvasDefinition, "title" | "blocks">,
 ): ArtifactDocumentRender {
-  return renderDocument(definition, "markdown");
+  return renderDocument(definition, "markdown", {});
 }
 
 export function renderArtifactHtml(
   definition: Pick<CanvasDefinition, "title" | "blocks">,
+  options: ArtifactDocumentOptions = {},
 ): ArtifactDocumentRender {
-  return renderDocument(definition, "html");
+  return renderDocument(definition, "html", options);
 }
 
 export function renderArtifactDocument(
   definition: Pick<CanvasDefinition, "title" | "blocks">,
   format: CanvasExportImplementedFormat,
+  options: ArtifactDocumentOptions = {},
 ): ArtifactDocumentRender {
-  return format === "html" ? renderArtifactHtml(definition) : renderArtifactMarkdown(definition);
+  return format === "html"
+    ? renderArtifactHtml(definition, options)
+    : renderArtifactMarkdown(definition);
 }
 
 type Piece =
@@ -91,16 +122,41 @@ type Piece =
       readonly source: string | undefined;
       readonly caption: string;
     }
-  | { readonly kind: "math-paragraph"; readonly runs: ReadonlyArray<MathRun> };
+  | { readonly kind: "math-paragraph"; readonly runs: ReadonlyArray<MathRun> }
+  | {
+      /**
+       * A picture the HTML form draws inline: generated SVG elements with every
+       * text already filtered, no script, no id, and no reference out. The
+       * Markdown form carries the reading beside it instead.
+       */
+      readonly kind: "drawing";
+      readonly label: string;
+      readonly width: number;
+      readonly height: number;
+      readonly markup: string;
+    }
+  | {
+      /**
+       * A design's frame as the HTML form draws it: a page of the author's
+       * markup in a sandboxed `srcdoc` frame that carries its own policy. The
+       * Markdown form carries the frame's title instead.
+       */
+      readonly kind: "frame";
+      readonly title: string;
+      readonly sandbox: "" | "allow-scripts";
+      readonly width: number | undefined;
+      readonly height: number;
+      readonly page: string;
+    };
 
 /** A paragraph run; a withheld formula source reads as redacted prose. */
 type MathRun =
   | { readonly kind: "text"; readonly text: string }
   | { readonly kind: "math"; readonly source: string };
 
-function finish(title: string, body: string): ArtifactDocumentRender {
+function finish(title: string, body: string, writesDesignMarkup: boolean): ArtifactDocumentRender {
   return canvasExportBodyByteLength(body) <= CANVAS_EXPORT_BODY_MAX_BYTES
-    ? { kind: "rendered", title, body }
+    ? { kind: "rendered", title, body, writesDesignMarkup }
     : { kind: "too-large" };
 }
 
@@ -247,21 +303,59 @@ function comparisonMatrixPieces(
 function renderDocument(
   definition: Pick<CanvasDefinition, "title" | "blocks">,
   format: CanvasExportImplementedFormat,
+  options: ArtifactDocumentOptions,
 ): ArtifactDocumentRender {
   const pieces: Piece[] = [];
+  // A design's frames are drawn only in the HTML form and only as written by
+  // acknowledgement; a design the export cannot draw reads as its titles.
+  const read = (block: CanvasBlock): ReadonlyArray<Piece> =>
+    block.kind === "design" && format === "html" && options.frames === "as-written"
+      ? (designFramePieces(block, options.frameTheme) ?? piecesFor(block))
+      : piecesFor(block);
   // A dashboard reads where it sits: its title, then each placed block in
-  // cell order, which is the order the screen's grid reads at one column.
+  // cell order, which is the order the screen's grid reads at one column. A
+  // tab reads under its label and a column in track order, and a dashboard in
+  // a pane or column reads there exactly as it does at the top level. A
+  // placed block never reads again where it sits in the block list.
+  const placedPieces = (item: CanvasPlacedReadingItem<CanvasBlock>): ReadonlyArray<Piece> =>
+    item.kind === "block"
+      ? read(item.block)
+      : [
+          { kind: "heading", level: 2, text: reading(item.dashboard.title) },
+          ...item.cells.flatMap((cell) => read(cell.block)),
+        ];
   for (const item of canvasReadingOrder(definition.blocks)) {
-    if (item.kind === "block") {
-      pieces.push(...piecesFor(item.block));
+    if (item.kind !== "group") {
+      pieces.push(...placedPieces(item));
       continue;
     }
-    pieces.push({ kind: "heading", level: 2, text: reading(item.dashboard.title) });
-    for (const cell of item.cells) pieces.push(...piecesFor(cell.block));
+    const group = item.group;
+    item.sections.forEach((section, index) => {
+      const label = group.kind === "tabs" ? group.panes[index]?.label : undefined;
+      if (label !== undefined) pieces.push({ kind: "heading", level: 3, text: reading(label) });
+      for (const child of section) pieces.push(...placedPieces(child));
+    });
   }
   const title = reading(definition.title) || "Canvas";
   const body = format === "html" ? htmlDocument(title, pieces) : markdownDocument(title, pieces);
-  return finish(title, body);
+  return finish(
+    title,
+    body,
+    pieces.some((piece) => piece.kind === "frame"),
+  );
+}
+
+/** A design as its title and its drawn frames, when the export can draw it. */
+function designFramePieces(
+  block: Extract<CanvasBlock, { readonly kind: "design" }>,
+  theme: DesignFrameThemeValues | undefined,
+): ReadonlyArray<Piece> | undefined {
+  const frames = renderCanvasDesignExportFrames(block, theme);
+  if (frames === undefined) return undefined;
+  return [
+    { kind: "heading", level: 2, text: reading(block.title) },
+    ...frames.map((frame) => ({ kind: "frame" as const, ...frame, title: reading(frame.title) })),
+  ];
 }
 
 function piecesFor(block: CanvasBlock): ReadonlyArray<Piece> {
@@ -354,17 +448,41 @@ function piecesFor(block: CanvasBlock): ReadonlyArray<Piece> {
         },
       ];
     case "diagram": {
+      // The picture is the board's own layout, so the HTML places the same
+      // nodes the thread does; the list is the reading both forms carry, with
+      // a shaped node named by its role.
+      const layout = layoutCanvasDiagram(block);
       const names = new Map(block.nodes.map((node) => [String(node.nodeId), reading(node.label)]));
+      const drawing: Piece = {
+        kind: "drawing",
+        label: "Diagram",
+        width: layout.width,
+        height: layout.height,
+        markup: drawCanvasDiagramLayout(layout, DEFAULT_ARTIFACT_PALETTE, {
+          x: 0,
+          y: 0,
+          scale: 1,
+          label: reading,
+        }),
+      };
       return [
+        ...(block.nodes.length === 0 ? [] : [drawing]),
         {
           kind: "list",
           items: [
-            ...block.nodes.map((node) => reading(node.label)),
+            ...layout.nodes.map((node) =>
+              node.shape === "plain"
+                ? reading(node.label)
+                : `${reading(node.label)} (${node.shape})`,
+            ),
             ...block.edges.map((edge) => {
               const from = names.get(String(edge.source)) ?? "node";
               const to = names.get(String(edge.target)) ?? "node";
               const label = edge.label === undefined ? "" : reading(edge.label);
-              return label.length === 0 ? `${from} → ${to}` : `${from} → ${to}: ${label}`;
+              const arrow = edge.style === "dashed" ? "⇢" : "→";
+              return label.length === 0
+                ? `${from} ${arrow} ${to}`
+                : `${from} ${arrow} ${to}: ${label}`;
             }),
           ],
         },
@@ -576,6 +694,14 @@ function piecesFor(block: CanvasBlock): ReadonlyArray<Piece> {
       const phases = new Map(
         block.phases.map((phase) => [String(phase.phaseId), reading(phase.title)]),
       );
+      // Dates read from the same Gantt layout the view draws, so a bar's days
+      // and the exported days agree, including a due day before its start.
+      const days = new Map(
+        layoutCanvasPlanGantt(block).bars.map((bar) => [
+          bar.taskId,
+          bar.startDay === bar.endDay ? bar.startDay : `${bar.startDay} → ${bar.endDay}`,
+        ]),
+      );
       return [
         { kind: "heading", level: 2, text: reading(block.title) },
         {
@@ -583,7 +709,8 @@ function piecesFor(block: CanvasBlock): ReadonlyArray<Piece> {
           items: block.tasks.map((task) => {
             const phase = phases.get(String(task.phaseId)) ?? "";
             const prefix = phase.length === 0 ? "" : `${phase}: `;
-            return `${prefix}${reading(task.title)} (${task.status})`;
+            const when = days.get(String(task.taskId));
+            return `${prefix}${reading(task.title)} (${task.status})${when === undefined ? "" : `, ${when}`}`;
           }),
         },
       ];
@@ -688,7 +815,9 @@ function piecesFor(block: CanvasBlock): ReadonlyArray<Piece> {
       return [{ kind: "tree", items }];
     }
     case "dashboard":
-      // Drawn by the reading order with its cells; one met alone has nothing to say.
+    case "tabs":
+    case "columns":
+      // Drawn by the reading order with what it places; one met alone has nothing to say.
       return [];
     case "action":
       return paragraph(
@@ -780,6 +909,8 @@ function safeHttpUrl(value: string): boolean {
 function markdownDocument(title: string, pieces: ReadonlyArray<Piece>): string {
   const lines = [`# ${inline(title)}`, ""];
   for (const piece of pieces) {
+    // Markdown carries a drawing's reading, which follows it as its own piece.
+    if (piece.kind === "drawing") continue;
     lines.push(markdownPiece(piece), "");
   }
   return lines.join("\n").trimEnd() + "\n";
@@ -829,6 +960,12 @@ function markdownPiece(piece: Piece): string {
           return `$${ticks}${pad}${run.source}${pad}${ticks}$`;
         })
         .join("");
+    case "drawing":
+      return "";
+    case "frame":
+      // Markdown has no frame; the titles a design reads as are written by
+      // the reading form, which the Markdown form always uses.
+      return "";
     default: {
       const unhandled: never = piece;
       return unhandled;
@@ -867,7 +1004,26 @@ function htmlDocument(title: string, pieces: ReadonlyArray<Piece>): string {
     "a{color:inherit}",
   ].join("");
   const body = pieces.map(htmlPiece).join("");
-  return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>${escapeXml(title)}</title><style>${style}</style></head><body><h1>${escapeXml(title)}</h1>${body}</body></html>\n`;
+  return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">${framePolicy(pieces)}<title>${escapeXml(title)}</title><style>${style}</style></head><body><h1>${escapeXml(title)}</h1>${body}</body></html>\n`;
+}
+
+/**
+ * The policy a document that draws frames carries for itself. A frame's own
+ * page forbids its script every request, but not leaving: a page that sets
+ * its own address loaded another page, which then reached the network (seen
+ * in a browser with an exported file and a local listener). `frame-src 'none'`
+ * on the document refuses that navigation, and a `srcdoc` frame is not a
+ * navigation, so the frames still draw. A `srcdoc` page also inherits this
+ * policy, so it admits inline script only when a frame here runs any; the
+ * document itself holds no script.
+ */
+function framePolicy(pieces: ReadonlyArray<Piece>): string {
+  const frames = pieces.filter((piece) => piece.kind === "frame");
+  if (frames.length === 0) return "";
+  const script = frames.some((frame) => frame.sandbox === "allow-scripts")
+    ? " script-src 'unsafe-inline';"
+    : "";
+  return `<meta http-equiv="Content-Security-Policy" content="default-src 'none';${script} style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'">`;
 }
 
 function htmlPiece(piece: Piece): string {
@@ -896,10 +1052,18 @@ function htmlPiece(piece: Piece): string {
       if (piece.source === undefined) return `<figure><p>[redacted]</p>${caption}</figure>`;
       return `<figure>${htmlMath(piece.source, true)}${caption}<details><summary>Source</summary><pre>${escapeXml(piece.source)}</pre></details></figure>`;
     }
+    case "drawing":
+      return `<figure><svg xmlns="http://www.w3.org/2000/svg" role="img" aria-label="${escapeXml(piece.label)}" viewBox="0 0 ${String(Math.ceil(piece.width))} ${String(Math.ceil(piece.height))}" style="max-width:100%;height:auto" width="${String(Math.ceil(piece.width))}" font-family="system-ui, sans-serif">${piece.markup}</svg></figure>`;
     case "math-paragraph":
       return `<p>${piece.runs
         .map((run) => (run.kind === "text" ? escapeXml(run.text) : htmlMath(run.source, false)))
         .join("")}</p>`;
+    case "frame": {
+      // The page is an attribute value, so its markup is escaped once more;
+      // a frame is the only thing here that can hold the author's markup.
+      const width = piece.width === undefined ? "100%" : `${String(piece.width)}px`;
+      return `<figure><figcaption>${escapeXml(piece.title)}</figcaption><iframe sandbox="${piece.sandbox}" referrerpolicy="no-referrer" loading="lazy" title="${escapeXml(piece.title)}" style="width:${width};max-width:100%;height:${String(piece.height)}px;border:1px solid ${DEFAULT_ARTIFACT_PALETTE.muted}" srcdoc="${escapeXml(piece.page)}"></iframe></figure>`;
+    }
     default: {
       const unhandled: never = piece;
       return unhandled;

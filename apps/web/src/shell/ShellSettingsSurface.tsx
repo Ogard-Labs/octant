@@ -83,6 +83,8 @@ export interface ShellSettingsSurfaceProps {
   readonly announcement: string;
   readonly announcementSequence: number;
   readonly extensionClient: ExtensionClient;
+  /** Project names by Project id, to head the remembered tool approvals. */
+  readonly projectNames?: ReadonlyMap<string, string>;
 }
 
 export function ShellSettingsSurface(props: ShellSettingsSurfaceProps) {
@@ -111,6 +113,7 @@ export function ShellSettingsSurface(props: ShellSettingsSurfaceProps) {
             codeController={props.codeController}
             discoveryController={props.discoveryController}
             extensionClient={props.extensionClient}
+            {...(props.projectNames === undefined ? {} : { projectNames: props.projectNames })}
             {...(props.pickLocalPluginFolder === undefined
               ? {}
               : { pickLocalPluginFolder: props.pickLocalPluginFolder })}

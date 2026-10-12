@@ -8,6 +8,7 @@ import {
   CANVAS_BAR_LIST_SCHEMA_VERSION,
   CANVAS_COMPARISON_MATRIX_SCHEMA_VERSION,
   CANVAS_DESIGN_ASSET_SCHEMA_VERSION,
+  CANVAS_DESIGN_RUNNING_SCHEMA_VERSION,
   CANVAS_DESIGN_ASSETS_MAX_BYTES,
   CANVAS_DESIGN_DOCUMENT_SCHEMA_VERSION,
   CANVAS_MAX_DESIGN_ASSETS,
@@ -46,6 +47,7 @@ import {
   CANVAS_PRESENTATION_SCHEMA_VERSION,
   CANVAS_SCHEMA_VERSION,
   CANVAS_TABLE_ROW_ID_SCHEMA_VERSION,
+  CANVAS_LAYOUT_GROUPS_SCHEMA_VERSION,
   CANVAS_TREEMAP_SCHEMA_VERSION,
   CANVAS_VERSION_APPENDED,
   CanvasCreated,
@@ -56,6 +58,7 @@ import {
   decodeCanvasCreated,
   decodeCanvasDefinition,
   decodeCanvasDesignAssetsOutcome,
+  decodeCanvasDesignRunOutcome,
   decodeCanvasSourceManifestEntry,
   decodeCanvasVersion,
   decodeCanvasVersionAppended,
@@ -304,7 +307,54 @@ describe("Canvas contracts", () => {
       decodeCanvasDefinition({ ...definition, blocks: [{ ...mockup, assets: tooMany }] }),
     ).toThrow();
     expect(CANVAS_DESIGN_ASSET_SCHEMA_VERSION).toBe(17);
-    expect(CANVAS_SCHEMA_VERSION).toBe(17);
+  });
+
+  it("admits a running design only under the version that declared it", () => {
+    const prototype = {
+      blockId: "checkout",
+      schemaVersion: CANVAS_DESIGN_RUNNING_SCHEMA_VERSION,
+      kind: "design",
+      title: "Checkout",
+      size: "phone",
+      runsScript: true,
+      frames: [{ frameId: "cart", title: "Cart", html: "<button>Pay</button>" }],
+    } as const;
+    expect(decodeCanvasDefinition({ ...definition, blocks: [prototype] })).toMatchObject({
+      blocks: [prototype],
+    });
+    // An older runtime reads a running design as a newer document, never as a
+    // static design whose script it would silently drop.
+    expect(() =>
+      decodeCanvasDefinition({
+        ...definition,
+        schemaVersion: CANVAS_DESIGN_ASSET_SCHEMA_VERSION,
+        blocks: [{ ...prototype, schemaVersion: CANVAS_DESIGN_ASSET_SCHEMA_VERSION }],
+      }),
+    ).toThrow();
+    // A static design says so by leaving the field out; there is no false.
+    expect(() =>
+      decodeCanvasDefinition({ ...definition, blocks: [{ ...prototype, runsScript: false }] }),
+    ).toThrow();
+    expect(CANVAS_DESIGN_RUNNING_SCHEMA_VERSION).toBe(18);
+  });
+
+  it("offers a running design's page only as a ticketed path on the host", () => {
+    const ready = {
+      kind: "ready",
+      canvasId: "22222222-2222-4222-8222-222222222222",
+      versionId: "33333333-3333-4333-8333-333333333333",
+      blockId: "checkout",
+      page: `/api/canvas/design-page?ticket=${"a".repeat(43)}`,
+    };
+    expect(decodeCanvasDesignRunOutcome(ready)).toEqual(ready);
+    for (const page of [
+      "https://example.test/api/canvas/design-page?ticket=" + "a".repeat(43),
+      "/api/canvas/design-page?ticket=short",
+      `/api/canvas/design-page?ticket=${"a".repeat(43)}&windowCapability=x`,
+      `//example.test/api/canvas/design-page?ticket=${"a".repeat(43)}`,
+    ]) {
+      expect(() => decodeCanvasDesignRunOutcome({ ...ready, page })).toThrow();
+    }
   });
 
   it("keeps one design's resolved images inside what a paired client's gateway forwards", () => {
@@ -1986,6 +2036,7 @@ describe("funnel, radar, and sankey charts", () => {
 
   it("decodes each flow chart at the version that introduced them", () => {
     expect(CANVAS_FLOW_CHARTS_SCHEMA_VERSION).toBe(14);
+    expect(CANVAS_SCHEMA_VERSION).toBeGreaterThanOrEqual(14);
     const decoded = decodeCanvasDefinition({ ...definition, blocks: [funnel, radar, sankey] });
     expect(decoded.blocks).toEqual([funnel, radar, sankey]);
   });
@@ -2151,5 +2202,107 @@ describe("dashboard layout", () => {
       decodeCanvasBlock({ ...dashboard, cells: [{ blockId: "error-rate", block: metric }] }),
     ).toThrow();
     expect(() => decodeCanvasBlock({ ...dashboard, title: "" })).toThrow();
+  });
+});
+
+describe("tabs and columns layout groups", () => {
+  const definition = {
+    schemaVersion: CANVAS_SCHEMA_VERSION,
+    title: "Design brief",
+    provenance,
+    sourceManifest: [],
+  } as const;
+  const text = (blockId: string, schemaVersion: number = CANVAS_SCHEMA_VERSION) => ({
+    blockId,
+    schemaVersion,
+    kind: "rich-text",
+    text: blockId,
+  });
+  const tabs = {
+    blockId: "brief",
+    schemaVersion: CANVAS_SCHEMA_VERSION,
+    kind: "tabs",
+    panes: [
+      { label: "Metrics", blockIds: ["a"] },
+      { label: "Loop", blockIds: ["b"] },
+    ],
+  } as const;
+
+  it("decodes tabs and columns at the version that introduced them", () => {
+    const columns = {
+      blockId: "row",
+      schemaVersion: CANVAS_SCHEMA_VERSION,
+      kind: "columns",
+      tracks: [{ blockIds: ["c"] }, { blockIds: ["d"] }],
+    };
+    const decoded = decodeCanvasDefinition({
+      ...definition,
+      blocks: [tabs, columns, text("a"), text("b"), text("c"), text("d")],
+    });
+    expect(decoded.blocks[0]).toEqual(tabs);
+    expect(decoded.blocks[1]).toEqual(columns);
+    expect(CANVAS_LAYOUT_GROUPS_SCHEMA_VERSION).toBe(19);
+    expect(CANVAS_SCHEMA_VERSION).toBe(19);
+  });
+
+  it("keeps every version through the current one decodable when it gates nothing new", () => {
+    for (const schemaVersion of [15, 16, 17, 18, 19]) {
+      const decoded = decodeCanvasDefinition({
+        ...definition,
+        schemaVersion,
+        blocks: [text("a", schemaVersion)],
+      });
+      expect(decoded.schemaVersion).toBe(schemaVersion);
+    }
+  });
+
+  it("decodes a tab that holds a dashboard, which places the tiles", () => {
+    const board = {
+      blockId: "board",
+      schemaVersion: CANVAS_SCHEMA_VERSION,
+      kind: "dashboard",
+      title: "Launch metrics",
+      cells: [{ blockId: "dau" }],
+    } as const;
+    const dau = {
+      blockId: "dau",
+      schemaVersion: CANVAS_SCHEMA_VERSION,
+      kind: "metric",
+      label: "Daily players",
+      value: 48200,
+    } as const;
+    const withBoard = {
+      ...tabs,
+      panes: [
+        { label: "Metrics", blockIds: ["board"] },
+        { label: "Loop", blockIds: ["b"] },
+      ],
+    } as const;
+    const decoded = decodeCanvasDefinition({
+      ...definition,
+      blocks: [withBoard, board, dau, text("b")],
+    });
+    expect(decoded.blocks.slice(0, 2)).toEqual([withBoard, board]);
+  });
+
+  it("refuses tabs in a document that declares the version before them", () => {
+    expect(() =>
+      decodeCanvasDefinition({
+        ...definition,
+        schemaVersion: 18,
+        blocks: [{ ...tabs, schemaVersion: 18 }, text("a", 18), text("b", 18)],
+      }),
+    ).toThrow();
+  });
+
+  it("refuses a tab strip of one pane, an unlabeled pane, and an empty pane", () => {
+    const [first, second] = tabs.panes;
+    expect(() => decodeCanvasBlock({ ...tabs, panes: [first] })).toThrow();
+    expect(() =>
+      decodeCanvasBlock({ ...tabs, panes: [{ ...first, label: "" }, second] }),
+    ).toThrow();
+    expect(() =>
+      decodeCanvasBlock({ ...tabs, panes: [{ ...first, blockIds: [] }, second] }),
+    ).toThrow();
   });
 });
