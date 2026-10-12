@@ -6,29 +6,21 @@ archive closed at 0164, so that rule lives in the owning specification
 rather than a numbered record. This plan is product work, not legal
 advice. It does not authorize merging.
 
-Helper-token removal and the confined `/usr/bin/security` carve-out land
-in PR 1142. This document is the remaining order of work after that
-rebuild: Step 0 must-verify on a real Mac, then the terms-rule
-acceptance and the leftover session-root / telemetry steps. It does
-not re-open a helper-token path.
+Helper-token removal and the confined Keychain sign-in land in PR 1142.
+Step 0 is measured and decided below. What remains is the terms-rule
+acceptance and the leftover session-root and telemetry steps. This
+document does not re-open a helper-token path.
 
 ## Goal
 
 Octant never collects, stores, scrapes, or forwards Claude.ai OAuth or
 setup tokens. The person signs in through the unmodified `claude` binary.
-Confined Plan and subagent launches keep that same sign-in only when
-Step 0 finds an opaque credential-use path that needs neither a
-`.credentials.json` directory grant nor the Keychain file. When that
-path exists, grant the sandbox a durable per-thread session directory
-and that opaque credential path. Granting a filesystem-backed
-credential directory would expose the OAuth token to Claude file tools.
-Several accounts may come later on that same mechanism; they are not
-this remediation.
+Confined Plan and subagent launches keep that same sign-in: on macOS
+through the Keychain read Step 0 measured, on Linux through the login
+file in the account directory. Several accounts use the same mechanism,
+one Claude-owned directory each (PR 1142).
 
-## Step 0 — Must-verify macOS login storage
-
-**Gate.** Do not implement the confined-launch replacement until this is
-measured on a current Claude Code build on macOS.
+## Step 0 — macOS login storage, measured and decided
 
 Anthropic's Authentication page (fetched 10 Oct 2026) says:
 
@@ -44,49 +36,6 @@ that Linux keeps the login in `~/.claude/.credentials.json` with mode `0600`.
 Linux therefore has no Keychain step, and a rule that refuses a confined
 launch whenever that file exists would refuse every Linux subscription Plan
 turn.
-
-Measure:
-
-1. Create an empty directory. Launch unmodified `claude` with
-   `CLAUDE_CONFIG_DIR` (and `CLAUDE_SECURESTORAGE_CONFIG_DIR` if it is
-   distinct) pointed at it. Run `claude auth login` and complete
-   Anthropic's flow.
-2. Observe where the login landed: a `.credentials.json` under that
-   directory, a Keychain item keyed to that directory, both, or
-   elsewhere. Octant must not read the file or the Keychain item to
-   learn this; watch Claude's own documented locations and `/status`.
-3. Launch the same binary under Octant's Plan confinement with
-   read/write on only that assigned directory (and the launch's
-   temporary directory). PR 1142 grants exec of exactly
-   `/usr/bin/security` plus the security-server lookup. Keychain
-   files and `/bin/sh` stay denied. Report whether the binary is
-   signed in for the default account (`~/.claude`) and for an extra
-   assigned leaf (`~/.claude-accounts/<id>`).
-4. Confirm the profile still blocks `~/Library/Keychains` and
-   `/bin/sh`. Residual risk: `/usr/bin/security` can return any
-   item that trusts that tool. If the binary stays signed out with
-   that carve-out, this step fails and the instance takes the
-   API-key fallback.
-5. Record what `CLAUDE_SECURESTORAGE_CONFIG_DIR` does on this build. It
-   is already threaded in `claudeEnvironment.ts` and is not listed in
-   Anthropic's public environment-variable table fetched on 10 Oct 2026.
-6. Observe whether the login can live in a credential-only path
-   distinct from session history. Anthropic documents
-   `CLAUDE_CONFIG_DIR` as settings, session history, and login
-   together. If `CLAUDE_SECURESTORAGE_CONFIG_DIR` (or another
-   documented location) holds the login independently of session
-   files, record that split. Then record whether that credential
-   path is opaque: `/usr/bin/security` and the Keychain file stay
-   denied, and the launch must not grant a directory that contains
-   `.credentials.json` as a read or write root, because Plan file
-   tools receive those roots. A separable-but-filesystem-backed
-   login is still refuse-confined. Only an opaque credential-use
-   that needs neither a credential-file grant nor the Keychain
-   file may proceed. If they cannot be separated, or the only
-   login is a granted credential file, record that confined
-   subscription launches are refused: a bound root cannot
-   receive another Project's session files, and a granted
-   `.credentials.json` directory is a token leak.
 
 ### Measured on 12 Oct 2026
 
@@ -105,7 +54,7 @@ rules. Only `loggedIn` and exit codes were read; `security` ran without
 | Rules added to the Plan profile                                            | `security` finds the item | `claude` signed in |
 | -------------------------------------------------------------------------- | ------------------------- | ------------------ |
 | Unconfined                                                                 | yes                       | yes                |
-| PR 1142: exec `/usr/bin/security`, two security-server lookups             | no (exit 44)              | no                 |
+| PR 1142 as first written: exec `/usr/bin/security`, two lookups            | no (exit 44)              | no                 |
 | The above, read `~/Library/Keychains`                                      | yes                       | no                 |
 | The above, `process-fork`                                                  | not rerun                 | yes                |
 | PR 1142, `process-fork`, read only `~/Library/Keychains/login.keychain-db` | not run                   | yes                |
@@ -116,88 +65,72 @@ rules. Only `loggedIn` and exit codes were read; `security` ran without
 
 What this settles:
 
-- Measurement 3 fails for the carve-out as PR 1142 wrote it. The binary
-  is signed out on every confined launch, while the unconfined readiness
-  probe reports the account signed in.
-- Measurement 4 holds, and it is the cause: `security` runs but cannot
-  open the login keychain, and the runtime cannot start a child without
-  `process-fork`.
+- The carve-out as PR 1142 first wrote it left the binary signed out on
+  every confined launch, while the unconfined readiness probe reported
+  the account signed in.
+- The cause: `security` runs but cannot open the login keychain, and the
+  runtime cannot start a child without `process-fork`.
 - The smallest set that signs in is exec of `/usr/bin/security`,
   `process-fork`, read of the one file
   `~/Library/Keychains/login.keychain-db`, and the two security-server
   lookups. No shell, no Keychain write, and no other file in that folder
   is needed.
-- Measurement 5: on this build `CLAUDE_SECURESTORAGE_CONFIG_DIR` names the
-  directory that keys the Keychain entry and holds the fallback file.
+- On this build `CLAUDE_SECURESTORAGE_CONFIG_DIR` names the directory
+  that keys the Keychain entry and holds the fallback file.
   When it is unset, `CLAUDE_CONFIG_DIR` does. The entry is
   `Claude Code-credentials`, with a suffix taken from a hash of that
   directory string whenever a directory is named. Read from the build,
   not measured: the string is hashed as given apart from Unicode
   normalization, so a trailing slash would name a different entry.
-- Measurement 6: the two variables can keep the login apart from session
-  history, but on macOS that login is not opaque. A confined read needs
-  the Keychain file.
+- The two variables can keep the login apart from session history, but
+  on macOS that login is not opaque. A confined read needs the Keychain
+  file.
 
-Not measured: an extra assigned leaf with its own login, a full Plan
-turn, and Linux.
+### Decided on 12 Oct 2026
 
-By the rules of this plan the result is "refuse confined subscription
-launches" on macOS, unless the Keychain-file denial is relaxed on
-purpose. PR 1142 does neither today: it launches, and the turn fails
-signed out. That choice is open. This plan also still says in Step 2
-that `/usr/bin/security` stays denied without exception, which
-contradicts the carve-out its own Step 0 describes; whichever way the
-choice goes, one of the two has to change.
+By the rules this plan first set, the measurement meant "refuse confined
+subscription launches" on macOS. The maintainer chose instead to relax
+the Keychain-file denial on purpose. PR 1142 builds that:
 
-**Pass.** The unmodified binary signs in on a confined Plan launch from
-Claude-owned storage, and Octant never reads or sets a token.
+- A subscription launch on macOS takes exactly the smallest set above.
+  An API-key launch takes none of it. Nothing else in the Keychain
+  folder is readable, and no shell can run.
+- The driver refuses a file tool that names the Keychain folder, so the
+  grant serves the runtime's own sign-in read and not the model.
+- Before a confined launch starts, `claude auth status` runs inside that
+  launch's sandbox. A sign-in the sandbox cannot read refuses the turn
+  with the step that fixes it. This replaces an attested version range:
+  it measures the installed binary on every confined start, so a build
+  that stops signing in refuses the turn instead of failing inside it.
+- The cost is recorded in the architecture and the threat model. The
+  confined runtime may fork, may run `security`, which returns any
+  keychain item that trusts that tool, and may read the encrypted login
+  keychain file.
+- The account directory stays the launch's read and write root. A rule
+  that refuses a directory holding `.credentials.json` was considered and
+  not adopted, because on Linux that file is the login.
 
-**Version.** Record the exact Claude Code version, or an attested
-inclusive range, that passed the full storage-isolation measurement.
-The secure-storage variable is undocumented and build-specific, and
-the driver records `probeVersion` without a floor today. A pass on
-one current build therefore does not cover every installed binary,
-including a newer build the person installed later. Probe each
-configured `claude` executable. Refuse confined subscription when the
-binary is outside that attested range or fails the same capability
-check. Do not treat a newer unattested version as compatible only
-because it is above a floor; rerun this Step 0 measurement first.
-Ordinary unconfined turns on an unattested binary may still run;
-they use the account session root. Persist that chosen root with
-the thread. Confined login after helper-token removal must not
-assume an unattested binary works, and must not later grant that
-account root to Plan or relocate the thread into an empty
-per-thread directory: the first exposes other Projects'
-transcripts, and the second makes the saved cursor `stale-resume`.
-When an attested build later arrives, any account-root thread
-started on the unattested binary takes the same explicit
-new-thread transition as a pre-migration confined helper-token
-thread. An unattested or inseparable-storage result is not the
-instance-wide API-key fallback.
+Evidence after the change, on the same machine:
 
-**Fail.** Confined subscription launches cannot sign in from
-Claude-owned storage at all (the binary stays signed out after the
-scoped 0145 lookup). That is the only path that switches the instance
-to Anthropic API-key authentication for every launch, including
-ordinary unconfined turns. Inseparable login and session history, or
-a login that only works by granting a `.credentials.json` directory,
-is not this failure: record it in measurement 6 and refuse only
-confined subscription launches. The current
-provider model has one `authentication` value per instance, so mixed
-"CLI login when unconfined, API key when confined" is not available.
-A stored Claude resume cursor records that instance's
-`authentication`. Changing it to `api-key` makes every existing
-cursor `stale-resume`, including ordinary unconfined threads. Do not
-rewrite those cursors as API-key identity: the session files still
-belong to the subscription login. Before the switch, require an
-explicit new-thread transition: refuse the change while those threads
-can still resume, or mark them as needing a new thread and do not
-resume them after the switch. Write the failure, the instance-wide
-switch, and that transition into the architecture rule before
-implementing it.
+- The in-sandbox sign-in check reports signed in.
+- From inside the sandbox, the login keychain file is readable and
+  `security` runs. Another keychain file, the folder listing, the system
+  keychain, `~/.ssh`, `sh`, `bash`, `zsh`, `curl`, and a write to the
+  checkout are all refused. An API-key launch is refused the keychain
+  file and `security` as well.
+- The real-provider subscription smoke passes its probe, Plan, decline,
+  accept, and question stages. Its interrupt stage fails after the
+  interrupt with "Claude returned an unsupported runtime message", which
+  is a separate defect, and its resume stage was not reached.
 
-**Touches (notes only):** a short evidence note on the implementation
-PR. No product code in this step.
+Still not measured: an extra assigned account with its own login, and
+Linux.
+
+To measure again, run `claude auth status --json` in the environment
+`sanitizeClaudeEnvironment("subscription", …)` builds, once directly and
+once through `makeClaudeProcessLive().probeSubscription` with a Plan
+confinement. Use a clean environment: the desktop app's own `CLAUDE_CODE_*`
+variables make the CLI look signed out.
 
 ## Step 1 — Remove Connect Claude for helpers (lands in PR 1142)
 
@@ -255,7 +188,13 @@ partial, or the destructive response is lost.
 
 ## Step 2 — Confined launches use the Claude-owned config directory
 
-Primary path, only after Step 0 passes.
+Status on 12 Oct 2026: the grant rules this step first set were not
+adopted. Step 0's decision replaces them. A confined launch holds the
+account directory as its read and write root, and on macOS takes the
+measured Keychain sign-in set. What stays open here is the durable
+per-thread session directory: nothing below is built, and it is still
+the way to keep one Project's transcripts out of another Project's Plan
+turn on the same account.
 
 Each Claude account (the default account first) has a Claude-owned
 config directory. When login and session history cannot be
@@ -263,11 +202,9 @@ separated, or the only confined login is a granted
 `.credentials.json` directory, a confined Plan or subagent launch
 is refused, and unconfined turns may still set `CLAUDE_CONFIG_DIR`
 and, when needed, `CLAUDE_SECURESTORAGE_CONFIG_DIR` to that account
-directory. The shared confinement builder never grants
-`/usr/bin/security` or the Keychain file. Those denials are
-unconditional. The 0145 scoped security-server lookup may stay if
-Step 0 recorded that it is required; it still never exposes the
-token to Octant.
+directory. On macOS the confinement builder grants a subscription
+launch the Keychain sign-in set Step 0 measured and nothing beyond
+it. That read never exposes the token to Octant.
 
 If Step 0 showed the login can live in an opaque credential-only
 path distinct from session history, set `CLAUDE_CONFIG_DIR` to the
@@ -280,7 +217,7 @@ Do not grant a directory that contains `.credentials.json` as a
 read root or write root: confinement passes those state directories
 as `readRoots` and `additionalWriteRoots`, so Claude file tools
 could read or overwrite the OAuth token even though Octant never
-opens it. `/usr/bin/security` and the Keychain file stay denied.
+opens it. Keychain access stays at the set Step 0 measured.
 If the only confined login is that filesystem-backed file, refuse
 confined Chat, Work Plan, and Code Plan. That is not the
 instance-wide API-key fallback. Anthropic
@@ -385,18 +322,19 @@ not reintroduce a setup token.
 **Acceptance:**
 
 - A confined Plan turn on a subscription instance signs in without
-  `CLAUDE_CODE_OAUTH_TOKEN` in the launch environment only when
-  Step 0 found an opaque credential-use path that does not grant
-  a `.credentials.json` directory or the Keychain file; otherwise
-  confined Chat, Work Plan, and Code Plan subscription launches
-  are refused. A Chat subagent follows the same grant-or-refuse
-  rule.
+  `CLAUDE_CODE_OAUTH_TOKEN` in the launch environment: through the
+  measured Keychain set on macOS, and through the login file in the
+  account directory on Linux. A sign-in the sandbox cannot read
+  refuses the turn before it starts. A Chat subagent follows the
+  same rule.
 - Octant never reads `.credentials.json` or a Keychain item.
 - A launch whose config directory is missing or unsigned-in refuses with
   a step the person can take (`claude auth login` in that directory, or
   store an API key if this is the fallback).
-- The Keychain file and `/usr/bin/security` stay denied. Step 0 cannot
-  add an exception for either.
+- Keychain access is exactly the set Step 0 measured: exec of
+  `/usr/bin/security`, `process-fork`, read of `login.keychain-db`,
+  and the two security-server lookups. No other file in that folder
+  and no shell.
 - A confined grant follows Step 0's credential/session split. If the
   login is separable and opaque, every launch for that thread sets
   `CLAUDE_CONFIG_DIR` to the same durable per-thread session

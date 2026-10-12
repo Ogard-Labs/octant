@@ -4362,11 +4362,11 @@ mechanisms are:
 **Proposed, not accepted: Claude sign-in inside Anthropic's terms.** Octant
 would not mint, store, or inject a Claude setup or OAuth token. Claude
 subscription sign-in would stay in Anthropic's own flow, and confined Claude
-launches would sign in from a Claude-owned config directory. The rule is not
-in force. It needs the Step 0 measurement on a current Claude Code build on
-macOS, and Anthropic's Commercial Terms or an explicit Anthropic exception.
-Until both are recorded, the rules in this document describe the build as it
-ships. The steps, the open questions, and the rejected alternatives live in
+launches would sign in from a Claude-owned config directory. Step 0 of the
+plan was measured on 12 Oct 2026, and the maintainer chose the Keychain read
+it found. The rule is still not in force: it needs Anthropic's Commercial
+Terms or an explicit Anthropic exception. Until that is recorded, the rules
+in this document describe the build as it ships. The steps, the open questions, and the rejected alternatives live in
 [the remediation plan](plans/claude-inside-anthropics-terms.md).
 
 ## Package map
