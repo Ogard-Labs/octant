@@ -2,6 +2,7 @@ import { Schema } from "effect";
 import {
   CANVAS_MAX_BAR_LIST_ROWS,
   CANVAS_MAX_DASHBOARD_CELLS,
+  CANVAS_MAX_DESIGN_FRAMES,
   CANVAS_MAX_DASHBOARD_COLUMNS,
   CANVAS_MAX_CHART_CATEGORY_LABEL_LENGTH,
   CANVAS_MAX_HEATMAP_CELLS,
@@ -25,6 +26,10 @@ import {
   CanvasActor,
   CanvasBarListScale,
   CanvasBlock,
+  CanvasDesignFrame,
+  CanvasDesignMarkup,
+  CanvasDesignSize,
+  CanvasDesignTheme,
   CanvasDiagramLayoutKind,
   CanvasHeatmapDate,
   CanvasHeatmapScale,
@@ -105,7 +110,12 @@ export const CANVAS_SHARE_DASHBOARD_SCHEMA_VERSION = 8;
 // columns, which name the shared blocks they hold, a diagram's edge styles and
 // tones and its group tones, and a plan's Gantt view.
 export const CANVAS_SHARE_LAYOUT_GROUPS_SCHEMA_VERSION = 9;
-export const CANVAS_SHARE_SCHEMA_VERSION = 9 as const;
+// Version 10 carries a design's frames: its markup, shared as the author wrote
+// it. No new Canvas version accompanies it; a reader that never learned to
+// draw a shared frame under the frame policy refuses version 10 as a future
+// version, so a frame never reaches a viewer that would draw it any other way.
+export const CANVAS_SHARE_FRAMES_SCHEMA_VERSION = 10;
+export const CANVAS_SHARE_SCHEMA_VERSION = 10 as const;
 // The newest Canvas block version a share at this version names. Canvas
 // version 13 added only the table row id, which a share drops, so share
 // version 6 named a block authored at 13 as 12. Version 14 adds chart types a
@@ -126,6 +136,7 @@ export const CanvasShareSchemaVersion = Schema.Literal(
   6,
   7,
   8,
+  9,
   CANVAS_SHARE_SCHEMA_VERSION,
 );
 export type CanvasShareSchemaVersion = typeof CanvasShareSchemaVersion.Type;
@@ -152,6 +163,12 @@ export const CanvasShareConsent = Schema.Struct({
   acknowledgedOfflineSnapshot: Schema.Literal(true),
   /** Explicit operator acknowledgement that credentials and live host authority are excluded. */
   acknowledgedNoCredentials: Schema.Literal(true),
+  /**
+   * Explicit operator acknowledgement that a design's markup leaves as
+   * written. The secret filter reads values, not markup, so a Canvas that
+   * holds a design is shared only with this.
+   */
+  acknowledgedMarkupSharedAsWritten: Schema.optional(Schema.Literal(true)),
   acknowledgedAt: UtcTimestamp,
   acknowledgedBy: CanvasShareLocalUserActor,
 }).annotations(strict);
@@ -956,6 +973,24 @@ export const CanvasStaticExportBlock = Schema.Union(
       }).annotations(strict),
     ).pipe(Schema.minItems(CANVAS_MIN_COLUMN_TRACKS), Schema.maxItems(CANVAS_MAX_COLUMN_TRACKS)),
   }).annotations(strict),
+  // A design leaves as its frames: markup, written as the author wrote it,
+  // which the viewer draws under the frame policy and nothing else. Its
+  // declared images do not leave: an asset names a Project file or an image
+  // job, which resolve only under this host's authority, so a shared frame
+  // draws a placeholder where one was named.
+  Schema.Struct({
+    ...exportBlockFields,
+    kind: Schema.Literal("design"),
+    title: ExportNonEmptyText,
+    size: CanvasDesignSize,
+    theme: Schema.optional(CanvasDesignTheme),
+    runsScript: Schema.optional(Schema.Literal(true)),
+    styles: Schema.optional(CanvasDesignMarkup),
+    frames: Schema.Array(CanvasDesignFrame).pipe(
+      Schema.minItems(1),
+      Schema.maxItems(CANVAS_MAX_DESIGN_FRAMES),
+    ),
+  }).annotations(strict),
 );
 export type CanvasStaticExportBlock = typeof CanvasStaticExportBlock.Type;
 
@@ -1049,6 +1084,12 @@ export const CanvasStaticExportDocument = Schema.Struct({
         message: () =>
           "Tabs, columns, diagram edge styles and tones, group tones, and the plan's Gantt view require Canvas share version 9.",
       },
+    ),
+    Schema.filter(
+      (document) =>
+        document.schemaVersion >= CANVAS_SHARE_FRAMES_SCHEMA_VERSION ||
+        !document.blocks.some((block) => block.kind === "design"),
+      { message: () => "Design frames require Canvas share version 10." },
     ),
   );
 export type CanvasStaticExportDocument = typeof CanvasStaticExportDocument.Type;

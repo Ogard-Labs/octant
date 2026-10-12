@@ -334,8 +334,10 @@ refuses on a runtime that predates them); a version is immutable, and a person's
 diagram layout) is journaled as a new head version with the `local-user` actor
 the host stamps itself; the host stamps comment authors, so a renderer never
 authors as an agent; only a host window moves board nodes; `preview` renders
-with the network off and no server address or credential; a `design` frame
-never receives `allow-scripts`; a share refuses a design or an action block; and
+with the network off and no server address or credential; a static `design`
+frame never receives `allow-scripts` and no frame has both `allow-scripts` and
+`allow-same-origin`; a share carries a design only with the sharer's
+acknowledgement that markup is shared as written, and refuses an action block; and
 nothing drawn inline in the thread can journal a version.
 
 Descriptions explain the existing presentation flows and distinguish creation,
@@ -431,9 +433,9 @@ document as a future version. Frames follow the
   [Canvas](design/canvas.md)): `tabs` and `columns`, which name existing child
   blocks, a dashboard among them; closed diagram node roles (process, decision,
   terminator), edge styles, and group tones drawn by the one deterministic
-  layout; and a Gantt view of `plan`. Accepted, not yet shipped: import of a
-  bounded Mermaid subset into typed diagram blocks. Mermaid never renders; an
-  unknown construct fails closed and stays a code block.
+  layout; a Gantt view of `plan`; and import of a bounded Mermaid subset into
+  typed diagram blocks. Mermaid never renders; an unknown construct fails
+  closed and stays a code block.
 - **Static frames carry the look.** A `design` keeps a frame that runs
   nothing and has a `document` size whose height the host measures, which
   needs `allow-same-origin` and therefore never `allow-scripts`, and an opt-in
@@ -467,12 +469,16 @@ document as a future version. Frames follow the
 - **Agents are taught and checked.** `describe` presents the tiers with a
   finished example of each, in-tree recipes cover an article, a design brief,
   a design system, and a clickable prototype, and `preview` draws frames and
-  returns overflow, contrast, missing-asset, and script-error warnings.
+  returns overflow, contrast, missing-asset, and script-error warnings. This
+  has shipped (see [Canvas](design/canvas.md)).
 - **Shares and exports carry what they can draw safely.** Typed blocks travel
   as today. A frame travels in an authenticated snapshot only when the viewer
   draws it under the same frame policy and the sharer acknowledges that markup
-  is shared as written, because the secret filter reads values, not markup.
-  HTML export writes frames as sandboxed `srcdoc` pages with the policy inside;
+  is shared as written, because the secret filter reads values, not markup;
+  this has shipped at share version 10 (see [Canvas](design/canvas.md#shares)).
+  HTML export writes frames as sandboxed `srcdoc` pages with the policy
+  inside, the approval card names the markup it writes, and a themed design
+  is drawn in the theme the person's window hands over; this has shipped.
   Markdown export writes the title. Public links stay out.
 
 _Rationale:_ a `srcdoc` frame inherits the app policy (`script-src 'self'`),
@@ -1847,6 +1853,14 @@ modelId }`, and the model picker is provider-first. Discovery can find
 - **Credentials.** API keys live in the host credential store — macOS Keychain
   on macOS, freedesktop Secret Service on Linux — and are reached only
   through the host's loopback credential broker by opaque UUID reference.
+  A provider instance holds one stored value: a plain key, or a JSON pool of
+  labelled keys in list order with one active key ([`apiKeyPool.ts`](../packages/host-runtime/src/apiKeyPool.ts)).
+  A request sends the active key first, then the others in list order.
+  Labels may reach the renderer; secrets may not, and only the host reads the
+  pool and chooses the key. A quota, credit, or spend refusal cools that key for
+  an hour, and a rate limit for a minute or the provider's `Retry-After`; the next
+  attempt uses the next key. A refusal for a bad key never cools a key. Cooldowns
+  are host memory and are not journaled.
   Provider OAuth has two postures ([0111](decisions/0111-host-driven-provider-oauth.md)).
   **Delegated** (`delegated-oauth`, including CLI `subscription`): login stays
   on the provider's own runtime; Octant never stores, refreshes, or journals
@@ -2908,7 +2922,9 @@ prompt, schema, tool, route, model, or capability.
     trust, and rollback revoke them (`extension.tool-grant-revoked@1`), so
     installing or trusting the package again restores nothing. A person
     revokes one through the local-only `/api/extensions/tool-grants`, which
-    lists and revokes and has no request that adds a grant.
+    lists and revokes and has no request that adds a grant. Settings › Data &
+    privacy lists them by Project with Revoke, and the prompt offers "always
+    allow" only to a client on a loopback host.
   - This covers only the tools Octant itself calls. An MCP server that a
     provider runtime starts from the person's own configuration (for example
     a Codex Work or Code thread using `~/.codex/config.toml`) is called

@@ -29,6 +29,11 @@ import type {
 } from "./canvasPreviewService";
 import { inTreeCanvasDocumentRecipes } from "./canvasDocumentRecipes";
 import {
+  importCanvasMermaid,
+  isCanvasMermaidLanguage,
+  type CanvasMermaidRefusalReason,
+} from "@octant/domain/canvas-mermaid-import";
+import {
   loginSequenceExample,
   orderStateExample,
   orderSchemaExample,
@@ -36,6 +41,7 @@ import {
   releaseMindmapExample,
   chartExamples,
   mockupExamples,
+  cartPrototypeExample,
   onboardingFlowExample,
   launchDeckExample,
   searchSpecExample,
@@ -262,7 +268,12 @@ function describedExamples(kinds: ReadonlyArray<string>): ReadonlyArray<unknown>
     if (kind === "chart") examples.push(...chartExamples);
     if (kind === "mockup") examples.push(...mockupExamples);
     if (kind === "design") {
-      examples.push(onboardingFlowExample, launchDeckExample, searchSpecExample);
+      examples.push(
+        onboardingFlowExample,
+        launchDeckExample,
+        searchSpecExample,
+        cartPrototypeExample,
+      );
     }
     if (kind === "treemap") examples.push(...treemapExamples);
     if (kind === "heatmap") examples.push(...heatmapExamples);
@@ -428,7 +439,7 @@ const BLOCK_GUIDANCE: Readonly<Record<string, { readonly use: string; readonly d
     design: {
       use: "Finished-looking app screens, a website or landing page, or a slide deck.",
       detail:
-        'A finished-looking design is a design block: app screens, a website or landing page, a slide deck, or a document such as an article, spec, or design system. Pick one size for the block (phone 390x844, tablet 820x1180, desktop 1440x900, slide 1920x1080, or document, as wide as the Canvas and as tall as its content), put shared CSS in styles, and write each screen, slide, or document section as a frame of static HTML. Link frames with href="#frameId"; a link may only name a frame or a section. Frames run no JavaScript and load nothing: no script, event handlers, external links, remote images, fonts, or imports. Draw images with inline SVG, CSS gradients, or data:image URLs. A document is drawn in the workspace theme (theme workspace, its default; a device size defaults to none and keeps its own palette): it gets Octant\'s fonts and --oct-* colour tokens and the kit classes oct-article, oct-eyebrow, oct-lede, oct-grid, oct-card, oct-metrics with oct-metric (__label, __value, __delta--good or --bad), oct-badge (--accent, --success, --warn, --danger), oct-callout (--success, --warn, --danger), oct-table in oct-table-wrap, oct-code, and oct-tabs (radio inputs with labels, then one div.oct-tab-panel per tab, at most eight tabs). In a document, use the kit and tokens rather than your own colours or fonts, and never size anything with vh. Make a device design look finished: real copy, a clear type scale, and a deliberate palette. Describe design to get a phone flow, a deck, and a themed spec.',
+        'A finished-looking design is a design block: app screens, a website or landing page, a slide deck, or a document such as an article, spec, or design system. Pick one size for the block (phone 390x844, tablet 820x1180, desktop 1440x900, slide 1920x1080, or document, as wide as the Canvas and as tall as its content), put shared CSS in styles, and write each screen, slide, or document section as a frame of static HTML. Link frames with href="#frameId"; a link may only name a frame or a section. Frames run no JavaScript and load nothing: no script, event handlers, external links, remote images, fonts, or imports. Draw images with inline SVG, CSS gradients, or data:image URLs. A document is drawn in the workspace theme (theme workspace, its default; a device size defaults to none and keeps its own palette): it gets Octant\'s fonts and --oct-* colour tokens and the kit classes oct-article, oct-eyebrow, oct-lede, oct-grid, oct-card, oct-metrics with oct-metric (__label, __value, __delta--good or --bad), oct-badge (--accent, --success, --warn, --danger), oct-callout (--success, --warn, --danger), oct-table in oct-table-wrap, oct-code, and oct-tabs (radio inputs with labels, then one div.oct-tab-panel per tab, at most eight tabs). In a document, use the kit and tokens rather than your own colours or fonts, and never size anything with vh. Make a device design look finished: real copy, a clear type scale, and a deliberate palette. Describe design to get a phone flow, a deck, a themed spec, and a running cart.',
     },
     "bar-list": {
       use: "A ranking, such as hottest files or slowest tests.",
@@ -455,6 +466,11 @@ const BLOCK_GUIDANCE: Readonly<Record<string, { readonly use: string; readonly d
       detail:
         "Headline numbers are metric blocks. Give each a label and a value, and add an optional format, unit, delta, a goodDirection of up, down, or neutral so a delta's tone is never guessed, a caption, and a sparkline of at most 256 recent readings. Consecutive metric blocks are gathered into a responsive tile row of two to four tiles.",
     },
+    "code-excerpt": {
+      use: "Code, or a Mermaid diagram you already have, which the host imports as a typed diagram.",
+      detail:
+        "A Mermaid diagram you already have may be passed as a code-excerpt block with language mermaid: the host translates a flowchart or graph (TD or LR; [ ] process, { } decision, ([ ]) terminator, ( ) plain; -->, ---, and -.-> links with labels; one level of subgraph), a sequenceDiagram (participants, actors, messages, notes, activate and deactivate), a stateDiagram (transitions, [*] start and end, aliases, composite states), an erDiagram (relationships with cardinalities, attributes, PK), or a mindmap into the matching typed block under the same blockId. Anything else, such as styling, click, loops, or another diagram type, keeps the code block, and the result's mermaid list says which blocks were imported and why any were not. Mermaid itself is never drawn.",
+    },
     tabs: {
       use: "A long document arranged in labelled tabs.",
       detail: LAYOUT_GROUP_GUIDE,
@@ -470,15 +486,22 @@ const BLOCK_GUIDANCE: Readonly<Record<string, { readonly use: string; readonly d
     },
   };
 
+/**
+ * The three ways a Canvas carries work, lowest first. Stated once, unscoped,
+ * so an agent chooses a tier before it chooses a block kind.
+ */
+const TIER_GUIDE =
+  'A Canvas carries work in three tiers; use the lowest tier that delivers the result, and mix them in one Canvas when the work needs it. 1. Typed blocks (headings, text, tables, metrics, charts, plans, the diagram kinds, and tabs and columns to arrange them) carry data: people comment on them, a revision edits them, and a share keeps their structure. 2. A static design frame carries the look: a design block of HTML and CSS that runs nothing, either a document in the workspace theme (an article, a spec, a design system) or screens and slides at a device size. 3. A running design frame carries behaviour: a design with "runsScript": true, for a prototype whose state changes as the person uses it. Describe design for the frame kit classes, how a frame shows real images, the limits a running frame keeps, and a finished example of each frame tier.';
+
 const RECIPE_GUIDE =
-  'Match the request to a document recipe before inventing a shape: "write a plan" uses implementation-plan, "review this PR" uses code-review, "summarise research" uses research-brief, and "decide between designs" uses architecture-review. Fill a recipe\'s roles from block kinds that exist today, and do not invent a block kind the catalogue does not have.';
+  'Match the request to a document recipe before inventing a shape: "write a plan" uses implementation-plan, "review this PR" uses code-review, "summarise research" uses research-brief, and "decide between designs" uses architecture-review, "write an article" uses article, "pitch a product or a game" uses design-brief, "show the design system" uses design-system, and "a prototype I can try" uses clickable-prototype. A design slot names the size it is drawn at. Fill a recipe\'s roles from block kinds that exist today, and do not invent a block kind the catalogue does not have.';
 
 const PREVIEW_GUIDE =
-  "Preview returns the same picture the person will see and the warnings it can measure: an inline document past its height cap, and on a chart clipped labels, legend overflow, empty series, or ink below its contrast target, on a bar list clipped labels or empty series, and on a design each declared image the host could not draw, with the frames that name it. Every other block kind gets no warnings, so read its picture yourself.";
+  "Preview returns the same picture the person will see and the warnings it can measure: an inline document past its height cap, and on a chart clipped labels, legend overflow, empty series, or ink below its contrast target, on a bar list clipped labels or empty series, and on a design each declared image the host could not draw, with the frames that name it, a frame whose content is wider than its page, text below its contrast target, and each script error a running design threw as it loaded. Every other block kind gets no warnings, so read its picture yourself.";
 
 /** When a design should run script, and what a running one still may not do. */
 const DESIGN_PROTOTYPE_GUIDANCE =
-  'When the person asks for a working prototype (state that changes as they click, such as a cart that fills or a form that validates), set "runsScript": true on the design. Its frames may then use inline <script> elements and event handlers (onclick and the like); keep everything in the design. Still refused: <script src>, remote images, fonts, stylesheets, and imports, <meta>, <base>, <link>, iframes and other embedded documents, links that leave the design, and theme workspace (style a prototype yourself). It has no network at all: fetch, XHR, WebSocket, forms, and new windows are blocked, so put its data in the script. The person starts it with Run in the thread, and Octant stops a prototype that stops responding or loads another page. Use it only when interaction needs state; a clickable flow between screens is a static design with href="#frameId" links.';
+  'When the person asks for a working prototype (state that changes as they click, such as a cart that fills or a form that validates), set "runsScript": true on the design. Its frames may then use inline <script> elements and event handlers (onclick and the like); keep everything in the design. Still refused: <script src>, remote images, fonts, stylesheets, and imports, <meta>, <base>, <link>, iframes and other embedded documents, links that leave the design, and theme workspace (style a prototype yourself). Fetch, XHR, WebSocket, forms, and new windows are blocked, so put its data in the script. That is not a promise of privacy: a script can still open a direct connection to another computer, which Octant does not block yet, so keep secrets and private data out of a prototype and never tell the person it cannot reach the network. The person starts it with Run in the thread, and Octant stops a prototype that stops responding or loads another page. Use it only when interaction needs state; a clickable flow between screens is a static design with href="#frameId" links. Octant\'s bridge runs first in the page and reports its height, its uncaught errors (the first 280 characters of each), and a heartbeat every second; a page silent for 5 seconds, posting more than 250 messages a second, or loading another page is stopped, and preview returns the errors it threw as it loaded.';
 
 function blockGuide(): Readonly<Record<string, string>> {
   return Object.fromEntries(
@@ -528,16 +551,28 @@ function toolDescription(
       ? "When the request iterates on earlier work, revise the existing Canvas instead of creating another: list returns this run's Canvases, and read returns one's current blocks and sequence."
       : "When the request iterates on earlier work, revise the thread's existing Canvas instead of creating another: list returns this thread's Canvases, and read returns one's current blocks and sequence.",
     "Operations: describe, list, read, create, revise, preview. Before you author, call describe: with no block kinds it lists every kind, when to use the structured ones, the document recipes to start from, and a create example; with up to three blockKinds it returns their exact schemas, plus authoring guidance and examples for the kinds that have them. Start from a document recipe before inventing a shape.",
-    "Author the content in blocks, not in prompt. Use structured blocks rather than HTML, JavaScript, CSS, or Mermaid; only a design block's frames are HTML and CSS; they load nothing, and run script only in a design that declares it. Text renders as plain text, not Markdown: give each section its own heading block (the Canvas title is already shown, so do not repeat it), and use key-value, table, status, or callout blocks instead of Markdown lists, bold, or code spans.",
+    "Author the content in blocks, not in prompt. Use structured blocks rather than HTML, JavaScript, or CSS; only a design block's frames are HTML and CSS; they load nothing, and run script only in a design that declares it. Mermaid is never drawn; describe code-excerpt for how a Mermaid diagram you already have becomes a typed diagram. Text renders as plain text, not Markdown: give each section its own heading block (the Canvas title is already shown, so do not repeat it), and use key-value, table, status, or callout blocks instead of Markdown lists, bold, or code spans.",
     "A Canvas is a document: it grants no file, shell, Git, or network access. Creation adds a card to this thread and offers the Canvas in the thread's dock the first time it appears; the user can also select Open Canvas. Do not claim the user has read it or invent a download URL.",
     "Choose where the thread shows it. Use presentation inline for a visual or a reading document that answers the question in place, such as a chart, a few metrics, a short table, a sequence or state diagram, or an article or brief made of reading blocks or one document-size design; it is drawn in the conversation just below your reply to this turn, so refer to it as below. A long one starts as a faded teaser the user can expand in place, and the user can still open it in the sidebar. Leave presentation out (sidebar) for plans, boards, mockups, other designs, and anything the user will keep working on; inline never holds those, and when the host shows a card instead, the result says so in presentationNote.",
     "Revise with the canvasId, the last observed expectedSequence, and the complete replacement blocks; people edit Canvases too, so read before revising and keep their changes. Reference blocks require source ids already in the Canvas source manifest; create attaches no sources. Never invent file or artifact references.",
-    "Preview once after you create or revise a chart, treemap, or inline Canvas, fix what its warnings or picture show with a revise, then reply. Look once per change: previewing an unchanged document only spends the host's browser and your context.",
+    "Preview once after you create or revise a chart, treemap, design, or inline Canvas, revise to fix what its warnings or picture show, then reply. Look once per change: an unchanged document previews the same.",
   ].join(" ");
 }
 
+/** What became of each Mermaid code block an authoring call carried. */
+type CanvasMermaidOutcome =
+  | { readonly blockId: string; readonly status: "imported"; readonly kind: string }
+  | {
+      readonly blockId: string;
+      readonly status: "kept-as-code";
+      readonly reason: CanvasMermaidRefusalReason;
+      readonly line?: number;
+      readonly detail: string;
+    };
+
 interface CanvasAuthoringInput {
   readonly operation: "create" | "revise";
+  readonly mermaid?: ReadonlyArray<CanvasMermaidOutcome>;
   readonly title?: string;
   readonly canvasId?: string;
   readonly expectedSequence?: number;
@@ -566,13 +601,21 @@ function listedDocumentRecipes(recipes: ReadonlyArray<CanvasDocumentRecipe>): Re
   readonly id: string;
   readonly title: string;
   readonly whenToUse: string;
-  readonly skeleton: ReadonlyArray<{ readonly kind: string; readonly role: string }>;
+  readonly skeleton: ReadonlyArray<{
+    readonly kind: string;
+    readonly role: string;
+    readonly size?: string;
+  }>;
 }> {
   return recipes.map((recipe) => ({
     id: String(recipe.id),
     title: recipe.title,
     whenToUse: recipe.whenToUse,
-    skeleton: recipe.skeleton.map((block) => ({ kind: block.kind, role: block.role })),
+    skeleton: recipe.skeleton.map((block) => ({
+      kind: block.kind,
+      role: block.role,
+      ...(block.size === undefined ? {} : { size: block.size }),
+    })),
   }));
 }
 
@@ -695,14 +738,40 @@ function parseInput(inputJson: string): CanvasToolInput | { readonly error: stri
     };
   }
   const decoded: CanvasBlock[] = [];
+  const mermaid: CanvasMermaidOutcome[] = [];
   for (const [index, block] of blocks.entries()) {
+    let typed: CanvasBlock;
     try {
-      decoded.push(decodeCanvasBlock(block));
+      typed = decodeCanvasBlock(block);
     } catch {
       // Naming the block that failed is what lets an author fix it; the
       // catalog itself is what refuses anything outside it.
       return { error: `Block ${String(index + 1)} is not a Canvas block this host accepts.` };
     }
+    // A Mermaid code block is translated into the typed diagram it describes,
+    // under the same block id, when it stays inside the imported subset. A
+    // source that does not keeps its code block, and the author is told why.
+    // Mermaid itself is never drawn.
+    if (
+      typed.kind === "code-excerpt" &&
+      typed.sourceId === undefined &&
+      isCanvasMermaidLanguage(typed.language)
+    ) {
+      const outcome = importCanvasMermaid(typed.code, typed.blockId);
+      if (outcome.status === "imported") {
+        typed = outcome.block;
+        mermaid.push({ blockId: String(typed.blockId), status: "imported", kind: typed.kind });
+      } else {
+        mermaid.push({
+          blockId: String(typed.blockId),
+          status: "kept-as-code",
+          reason: outcome.reason,
+          ...(outcome.line === undefined ? {} : { line: outcome.line }),
+          detail: outcome.detail,
+        });
+      }
+    }
+    decoded.push(typed);
   }
   const presentation = record["presentation"];
   if (presentation !== undefined && presentation !== "inline" && presentation !== "sidebar") {
@@ -715,6 +784,7 @@ function parseInput(inputJson: string): CanvasToolInput | { readonly error: stri
   return {
     operation,
     blocks: decoded,
+    ...(mermaid.length === 0 ? {} : { mermaid }),
     ...(presentation === undefined ? {} : { presentation }),
     ...(typeof title === "string" ? { title: title.slice(0, MAX_TITLE_CHARS) } : {}),
     ...(typeof canvasId === "string" ? { canvasId } : {}),
@@ -880,6 +950,7 @@ function canvasToolSet(options: {
             result: {
               blockKinds,
               blockGuide: blockGuide(),
+              tierGuide: TIER_GUIDE,
               recipeGuide: RECIPE_GUIDE,
               previewGuide: PREVIEW_GUIDE,
               recipes: listedDocumentRecipes(
@@ -1046,6 +1117,7 @@ function canvasToolSet(options: {
             sequence: 1,
             blocks: input.blocks.length,
             presentation: result.card.presentation ?? "sidebar",
+            ...(input.mermaid === undefined ? {} : { mermaid: input.mermaid }),
             ...(placed.note === undefined ? {} : { presentationNote: placed.note }),
             ...(result.card.presentation === "inline" ? { whereShown: INLINE_WHERE_SHOWN } : {}),
           },
@@ -1113,6 +1185,7 @@ function canvasToolSet(options: {
           canvasId: input.canvasId,
           versionId: result.receipt.versionId,
           sequence: result.receipt.sequence,
+          ...(input.mermaid === undefined ? {} : { mermaid: input.mermaid }),
           ...(effective === undefined ? {} : { presentation: effective }),
           ...(note === undefined ? {} : { presentationNote: note }),
           ...(effective === "inline" ? { whereShown: INLINE_WHERE_SHOWN } : {}),

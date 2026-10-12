@@ -3,6 +3,7 @@ import {
   decodeCanvasExportApprovalCard,
   decodeCanvasExportContribution,
   decodeCanvasExportDecideRequest,
+  decodeCanvasExportPrepareRequest,
   decodeCanvasExportReceipt,
   decodeCanvasExportRecorded,
 } from "./canvasExport";
@@ -12,6 +13,45 @@ const versionId = "22222222-2222-4222-8222-222222222222";
 const exportId = "33333333-3333-4333-8333-333333333333";
 const approvalId = "44444444-4444-4444-8444-444444444444";
 const digest = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
+describe("an export's frame theme", () => {
+  const request = {
+    schemaVersion: 1,
+    kind: "canvas-export-prepare",
+    canvasId: "11111111-1111-4111-8111-111111111111",
+    versionId: "22222222-2222-4222-8222-222222222222",
+    expectedSequence: 1,
+    targetId: "folder-on-this-mac",
+    format: "html",
+  };
+
+  it("carries the scheme and token values a themed frame is drawn with", () => {
+    const theme = {
+      scheme: "dark",
+      tokens: [
+        ["--oct-bg", "#1a1a1a"],
+        ["--oct-font-body", '"Geist", system-ui, sans-serif'],
+      ],
+    };
+    expect(decodeCanvasExportPrepareRequest({ ...request, frameTheme: theme }).frameTheme).toEqual(
+      theme,
+    );
+    expect(decodeCanvasExportPrepareRequest(request).frameTheme).toBeUndefined();
+  });
+
+  it("refuses a name that is not a token and a value that could end its declaration", () => {
+    for (const tokens of [
+      [["color", "red"]],
+      [["--oct-bg", "red; } body { display: none"]],
+      [["--oct-bg", "</style><script>"]],
+      [["--oct-bg", "x".repeat(513)]],
+    ]) {
+      expect(() =>
+        decodeCanvasExportPrepareRequest({ ...request, frameTheme: { scheme: "light", tokens } }),
+      ).toThrow();
+    }
+  });
+});
 
 describe("canvas export contracts", () => {
   it("round-trips a destination contribution that names later formats without rendering them", () => {

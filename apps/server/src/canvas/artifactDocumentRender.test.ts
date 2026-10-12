@@ -14,7 +14,11 @@ import {
   settingsScreenExampleBlock,
 } from "@octant/domain";
 import { describe, expect, it } from "vitest";
-import { renderArtifactHtml, renderArtifactMarkdown } from "./artifactDocumentRender";
+import {
+  renderArtifactDocument,
+  renderArtifactHtml,
+  renderArtifactMarkdown,
+} from "./artifactDocumentRender";
 import { renderArtifactSidecarSvg } from "./artifactRender";
 
 function definition(blocks: ReadonlyArray<CanvasBlock>, title = "Launch plan") {
@@ -64,11 +68,13 @@ describe("rendering a canvas as a document", () => {
       kind: "rendered",
       title: "Launch plan",
       body: MARKDOWN,
+      writesDesignMarkup: false,
     });
     expect(renderArtifactHtml(source)).toEqual({
       kind: "rendered",
       title: "Launch plan",
       body: HTML,
+      writesDesignMarkup: false,
     });
   });
 
@@ -490,6 +496,197 @@ describe("rendering a canvas as a document", () => {
     expect(html.body).toContain("<h2>Checkout</h2><ol><li>Cart</li><li>Paid</li></ol>");
     expect(markdown.body).not.toContain("Pay");
     expect(html.body).not.toContain("color: #1c1917");
+  });
+
+  describe("a design's frames, once the person exporting has acknowledged its markup leaves as written", () => {
+    const frames = { frames: "as-written" } as const;
+    const srcdocs = (html: string): ReadonlyArray<string> =>
+      Array.from(html.matchAll(/<iframe[^>]* srcdoc="([^"]*)"/g), (match) =>
+        (match[1] ?? "")
+          .replaceAll("&quot;", '"')
+          .replaceAll("&apos;", "'")
+          .replaceAll("&lt;", "<")
+          .replaceAll("&gt;", ">")
+          .replaceAll("&amp;", "&"),
+      );
+
+    it("writes a static design as one sandboxed page per screen, with the frame policy inside the page", () => {
+      const design = decodeCanvasBlock({
+        blockId: "checkout",
+        schemaVersion: CANVAS_SCHEMA_VERSION,
+        kind: "design",
+        title: "Checkout",
+        size: "phone",
+        styles: "body { color: #1c1917; }",
+        frames: [
+          {
+            frameId: "cart",
+            title: "Cart",
+            html: '<h1 title="a &amp; b">Cart</h1><a href="#paid">Pay</a>',
+          },
+          { frameId: "paid", title: "Paid", html: "<p>Thanks</p>" },
+        ],
+      });
+      const html = renderArtifactHtml(definition([design]), frames);
+      if (html.kind !== "rendered") throw new Error("The export did not render.");
+
+      // No script, an opaque origin, and nothing the page may load.
+      expect(html.body.match(/<iframe /g)).toHaveLength(2);
+      expect(html.body.match(/<iframe sandbox="" /g)).toHaveLength(2);
+      // A document of static frames admits no script anywhere.
+      expect(html.body).toContain("frame-src 'none'");
+      expect(html.body).not.toContain("script-src");
+      expect(html.body).not.toContain("allow-scripts");
+      expect(html.body).not.toContain("allow-same-origin");
+      const [cart, paid] = srcdocs(html.body);
+      for (const page of [cart, paid]) {
+        expect(page).toContain(
+          `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:; base-uri 'none'; form-action 'none'">`,
+        );
+        expect(page).toContain("body { color: #1c1917; }");
+      }
+      expect(cart).toContain('<h1 title="a &amp; b">Cart</h1>');
+      expect(cart).not.toContain("Thanks");
+      expect(paid).toContain("<p>Thanks</p>");
+      // The page is an attribute value: its quotes cannot end it.
+      expect(html.body).not.toContain('srcdoc="<');
+      // The titles still read without the frames.
+      expect(html.body).toContain("<h2>Checkout</h2>");
+      expect(html.body).toContain("<figcaption>Cart</figcaption>");
+    });
+
+    it("writes a running prototype as one page sandboxed to scripts alone, with no way to connect", () => {
+      const prototype = decodeCanvasBlock({
+        blockId: "cart",
+        schemaVersion: CANVAS_SCHEMA_VERSION,
+        kind: "design",
+        title: "Cart",
+        size: "phone",
+        runsScript: true,
+        frames: [
+          {
+            frameId: "cart",
+            title: "Cart",
+            html: '<button onclick="add()">Add</button><script>function add() {}</script>',
+          },
+          { frameId: "paid", title: "Paid", html: '<a href="#cart">Back</a>' },
+        ],
+      });
+      const html = renderArtifactHtml(definition([prototype]), frames);
+      if (html.kind !== "rendered") throw new Error("The export did not render.");
+
+      expect(html.body.match(/<iframe /g)).toHaveLength(1);
+      expect(html.body).toContain('<iframe sandbox="allow-scripts" ');
+      // The document refuses a frame that tries to load another page, and
+      // admits inline script only because a frame here runs some.
+      expect(html.body).toContain(
+        `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'">`,
+      );
+      expect(html.body).not.toContain("allow-same-origin");
+      const [page] = srcdocs(html.body);
+      expect(page).toContain(
+        `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'">`,
+      );
+      // The policy is in force before any script in the page is read.
+      expect(page?.indexOf("Content-Security-Policy")).toBeLessThan(page?.indexOf("<script") ?? -1);
+      expect(page).toContain("<script>function add() {}</script>");
+      // A link between screens stays inside the frame's own page.
+      expect(page).toContain('href="about:srcdoc#cart"');
+    });
+
+    it("draws a placeholder where a design named an image, which stays on this host", () => {
+      const design = decodeCanvasBlock({
+        blockId: "home",
+        schemaVersion: CANVAS_SCHEMA_VERSION,
+        kind: "design",
+        title: "Home",
+        size: "phone",
+        assets: [
+          {
+            assetId: "shot",
+            source: { kind: "generated-image", imageId: "44444444-4444-4444-8444-444444444444" },
+          },
+        ],
+        frames: [{ frameId: "home", title: "Home", html: '<img src="octant-asset:shot" alt="">' }],
+      });
+      const html = renderArtifactHtml(definition([design]), frames);
+      if (html.kind !== "rendered") throw new Error("The export did not render.");
+      const [page] = srcdocs(html.body);
+      expect(page).toContain('<img src="data:image/svg+xml');
+      expect(html.body).not.toContain("octant-asset:shot");
+      expect(html.body).not.toContain("44444444-4444-4444-8444-444444444444");
+    });
+
+    const spec = decodeCanvasBlock({
+      blockId: "spec",
+      schemaVersion: CANVAS_SCHEMA_VERSION,
+      kind: "design",
+      title: "Spec",
+      size: "document",
+      frames: [
+        {
+          frameId: "spec",
+          title: "Spec",
+          html: '<article class="oct-article"><h1>Ranking</h1></article>',
+        },
+      ],
+    });
+
+    it("writes a design drawn in the workspace theme as its titles when the export was handed no theme", () => {
+      const html = renderArtifactHtml(definition([spec]), frames);
+      if (html.kind !== "rendered") throw new Error("The export did not render.");
+      expect(html.body).not.toContain("<iframe");
+      expect(html.body).toContain("<h2>Spec</h2><ol><li>Spec</li></ol>");
+      expect(html.writesDesignMarkup).toBe(false);
+    });
+
+    it("draws a themed document with the theme the person's window handed over, and the frame kit", () => {
+      const html = renderArtifactHtml(definition([spec]), {
+        ...frames,
+        frameTheme: {
+          scheme: "dark",
+          tokens: [
+            ["--oct-bg", "#1a1a1a"],
+            ["--oct-fg", "rgb(240, 240, 240)"],
+            ["--oct-font-body", '"Geist", system-ui, sans-serif'],
+            // Not a token a frame receives, and values that try to leave
+            // their declaration or load something: none is written.
+            ["--oct-made-up", "red"],
+            ["--oct-accent", "red; } html { background: url(https://example.test/x)"],
+            ["--oct-border", "url(https://example.test/x)"],
+          ],
+        },
+      });
+      if (html.kind !== "rendered") throw new Error("The export did not render.");
+      expect(html.body.match(/<iframe sandbox="" /g)).toHaveLength(1);
+      const [page] = srcdocs(html.body);
+      expect(page).toContain("color-scheme: dark;");
+      expect(page).toContain("--oct-bg: #1a1a1a;");
+      expect(page).toContain("--oct-fg: rgb(240, 240, 240);");
+      expect(page).toContain('--oct-font-body: "Geist", system-ui, sans-serif;');
+      expect(page).not.toContain("--oct-made-up");
+      expect(page).not.toContain("example.test");
+      // The kit an article is built from travels with it.
+      expect(page).toContain(".oct-article");
+      expect(page).toContain('<article class="oct-article"><h1>Ranking</h1></article>');
+      expect(page).toContain("default-src 'none'; style-src 'unsafe-inline'");
+      expect(html.writesDesignMarkup).toBe(true);
+    });
+
+    it("keeps Markdown to the titles", () => {
+      const design = decodeCanvasBlock({
+        blockId: "checkout",
+        schemaVersion: CANVAS_SCHEMA_VERSION,
+        kind: "design",
+        title: "Checkout",
+        size: "phone",
+        frames: [{ frameId: "cart", title: "Cart", html: "<h1>Cart</h1>" }],
+      });
+      const markdown = renderArtifactDocument(definition([design]), "markdown", frames);
+      if (markdown.kind !== "rendered") throw new Error("The export did not render.");
+      expect(markdown.body).toContain("## Checkout\n\n1. Cart\n");
+      expect(markdown.body).not.toContain("<h1>Cart</h1>");
+    });
   });
 
   it("writes a swimlane as numbered steps per lane and a connection list", () => {

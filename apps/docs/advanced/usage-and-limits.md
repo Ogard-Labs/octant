@@ -83,11 +83,17 @@ quiet line states what the thread has used so far:
   word, averaged over the turns that were measured.
 - **cost** says **est.** because Octant prices tokens at the standard API rates
   for the model. A cost the provider reported itself drops the **est.**.
+- **5h** and **Week** (or any other window the provider reports) lead the line
+  as small bars. Each shows how much of that account window is left. A bar
+  turns amber when less than a fifth is left, and red when none is left. Hover
+  for the full name and the percentage. Only windows the provider has reported
+  appear, and a window whose reset has passed drops out until the provider
+  reports it again.
 
 A figure the provider did not report, and one that cannot be measured, is left
-out: Octant never shows a zero it did not see. A provider that reports no usage
-shows no line at all. A thread with more than 50 turns prices its latest 50, and
-the cost tooltip says so.
+out: Octant never shows a zero it did not see. A provider that reports neither
+usage nor limit windows shows no line at all. A thread with more than 50 turns
+prices its latest 50, and the cost tooltip says so.
 
 Click the line, or choose **Turn details** in the context meter's popover, to
 open one turn at a time: input, cache read, cache write, output, and reasoning

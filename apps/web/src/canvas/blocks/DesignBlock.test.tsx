@@ -595,6 +595,13 @@ describe("running prototype", () => {
       setProviderCredential: () => undefined,
       providerCredentialStatus: () => undefined,
       clearProviderCredential: () => undefined,
+      listProviderApiKeys: () => undefined,
+      addProviderApiKey: () => undefined,
+      renameProviderApiKey: () => undefined,
+      replaceProviderApiKey: () => undefined,
+      removeProviderApiKey: () => undefined,
+      setActiveProviderApiKey: () => undefined,
+      moveProviderApiKey: () => undefined,
       subscribeCanvasFrameFocusEscape: (listener: () => void) => {
         escape = listener;
         return () => {
@@ -625,6 +632,13 @@ describe("running prototype focus", () => {
       setProviderCredential: () => undefined,
       providerCredentialStatus: () => undefined,
       clearProviderCredential: () => undefined,
+      listProviderApiKeys: () => undefined,
+      addProviderApiKey: () => undefined,
+      renameProviderApiKey: () => undefined,
+      replaceProviderApiKey: () => undefined,
+      removeProviderApiKey: () => undefined,
+      setActiveProviderApiKey: () => undefined,
+      moveProviderApiKey: () => undefined,
       subscribeCanvasFrameFocusEscape: (listener: () => void) => {
         escape = listener;
         return () => undefined;

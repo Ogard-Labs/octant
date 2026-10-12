@@ -1,8 +1,10 @@
 name: CI
 
+# No `push` trigger for `main`: the branch rules admit a commit only through
+# the merge queue, and the queue's commit is the one that lands, so its
+# `merge_group` run has already checked that exact commit. A run on push
+# repeated every job for the same commit.
 on:
-  push:
-    branches: [main]
   pull_request:
   merge_group:
   workflow_dispatch:
@@ -15,10 +17,13 @@ permissions:
   contents: read
 
 jobs:
-  checks:
-    name: Format, lint, typecheck, test, build
+  # One machine ran every step below in a row and took about 28 minutes, 25 of
+  # them in the web and server suites. The jobs now run side by side, and the
+  # two long suites are split across machines with vitest's `--shard`.
+  static:
+    name: Format, lint, typecheck, build
     runs-on: ubuntu-24.04
-    timeout-minutes: 35
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
@@ -43,13 +48,78 @@ jobs:
       - run: bun run style:check
       - run: bun run decisions:check
       - run: bun run typecheck --filter=!@octant/desktop --filter=!@octant/scripts
+      - run: bun run build --filter=!@octant/desktop --filter=!@octant/scripts
+
+  packages:
+    name: Package tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - run: bun install --frozen-lockfile
       # scripts tests build the Swift helpers and package the app; they run on the macOS job.
-      - run: bun run test --filter=!@octant/desktop --filter=!@octant/scripts --filter=!@octant/server
+      # The web and server suites have their own sharded jobs below.
+      - run: bun run test --filter=!@octant/desktop --filter=!@octant/scripts --filter=!@octant/server --filter=!@octant/web
+
+  web:
+    name: Web tests (${{ matrix.shard }}/5)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      # A failing shard must not hide what the other shards would report.
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - run: bun install --frozen-lockfile
+      - run: bun run test --filter=@octant/web -- --shard=${{ matrix.shard }}/5
+
+  server:
+    name: Server tests (${{ matrix.shard }}/4)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - run: bun install --frozen-lockfile
+      # The suite imports the workspace packages from their built output.
+      - run: bun run build --filter='@octant/server^...'
       - env:
           OCTANT_DATA_DIR: ${{ runner.temp }}/octant-ci-data
         # Process-spawning and browser-realm suites need a macOS host or a real network; run them locally.
-        run: bun run --cwd apps/server test -- --exclude=src/bunServe.test.ts --exclude=src/providers/acpProcess.test.ts --exclude=src/remote/remoteExitEvidenceA.smoke.test.ts
-      - run: bun run build --filter=!@octant/desktop --filter=!@octant/scripts
+        run: bun run --cwd apps/server test -- --exclude=src/bunServe.test.ts --exclude=src/providers/acpProcess.test.ts --exclude=src/remote/remoteExitEvidenceA.smoke.test.ts --shard=${{ matrix.shard }}/4
+
+  checks:
+    # The branch rules require a check with exactly this name. It passes only
+    # when every job it needs passed, so a shard count can change without
+    # touching the rules. `always()` matters: a skipped required check counts
+    # as passed, so this job must run, and fail, when a needed job did not pass.
+    name: Format, lint, typecheck, test, build
+    if: always()
+    needs: [static, packages, web, server]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "static, packages, web, server: $RESULTS"
+          for result in $RESULTS; do
+            [ "$result" = "success" ] || exit 1
+          done
 
   desktop:
     name: Desktop and scripts (macOS)

@@ -58,6 +58,7 @@ export const CanvasShareSnapshotRequest = Schema.Struct({
   consent: Schema.Struct({
     acknowledgedAuthenticatedSnapshot: Schema.Literal(true),
     acknowledgedOwnerVisibleAudience: Schema.Literal(true),
+    acknowledgedMarkupSharedAsWritten: Schema.optional(Schema.Literal(true)),
     acknowledgedAt: UtcTimestamp,
     acknowledgedBy: CanvasShareLocalUserActor,
   }).annotations(strict),
@@ -160,6 +161,7 @@ const CanvasShareSnapshotRecordBase = Schema.Union(
     consent: Schema.Struct({
       acknowledgedAuthenticatedSnapshot: Schema.Literal(true),
       acknowledgedOwnerVisibleAudience: Schema.Literal(true),
+      acknowledgedMarkupSharedAsWritten: Schema.optional(Schema.Literal(true)),
       acknowledgedAt: UtcTimestamp,
       acknowledgedBy: CanvasShareLocalUserActor,
     }).annotations(strict),
@@ -172,6 +174,7 @@ const CanvasShareSnapshotRecordBase = Schema.Union(
     consent: Schema.Struct({
       acknowledgedAuthenticatedSnapshot: Schema.Literal(true),
       acknowledgedOwnerVisibleAudience: Schema.Literal(true),
+      acknowledgedMarkupSharedAsWritten: Schema.optional(Schema.Literal(true)),
       acknowledgedAt: UtcTimestamp,
       acknowledgedBy: CanvasShareLocalUserActor,
     }).annotations(strict),
