@@ -1005,6 +1005,8 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
 
   const presentation = draftThreadModePresentation(props.mode);
   const [prompt, setPrompt] = useNewTaskPrompt();
+  const storedComputerSelection =
+    draftScope === undefined ? undefined : drafts?.readComputerSelection(draftScope);
   const computer = useComputerUseMention({
     textarea: () => textareaRef.current,
     draft: prompt,
@@ -1019,7 +1021,20 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
             modelId: props.selectedModelId,
           },
     ),
+    ...(storedComputerSelection === undefined ? {} : { initialSelection: storedComputerSelection }),
   });
+  const structuredDraftScope = useRef(draftScope);
+  useLayoutEffect(() => {
+    if (drafts === undefined || draftScope === undefined) return;
+    if (structuredDraftScope.current === draftScope) return;
+    structuredDraftScope.current = draftScope;
+    computer.restore(drafts.readComputerSelection(draftScope));
+  }, [computer, drafts, draftScope]);
+  useEffect(() => {
+    if (draftScope === undefined || drafts === undefined) return;
+    if (structuredDraftScope.current !== draftScope) return;
+    drafts.writeComputerSelection(draftScope, computer.selection);
+  }, [computer.selection, drafts, draftScope]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   // A Chat draft is a first-message composer like Work's and Code's, so it
   // offers the same host command list rather than only the @Computer mention.

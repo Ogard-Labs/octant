@@ -7,6 +7,12 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { WorkComposerAdapter } from "./WorkComposerAdapter";
 import type { ProjectId } from "@octant/contracts/projects";
 import type { PickerGroup } from "@octant/domain";
+import { browserUseSelection } from "@octant/plugin-host/browser-use";
+import {
+  createNewTaskDrafts,
+  NewTaskDraftsContext,
+  NewTaskDraftScopeContext,
+} from "../../composer/useNewTaskPrompt";
 
 const twoHosts = [
   {
@@ -368,6 +374,56 @@ describe("WorkComposerAdapter interactions", () => {
       screen.queryByRole("listbox", { name: "Files you can mention" }),
     ).not.toBeInTheDocument();
     void onQueryChange;
+  });
+
+  it("keeps mentioned threads and extension selections after Settings remounts the draft", async () => {
+    const user = userEvent.setup();
+    const onCreateThread = vi.fn();
+    const drafts = createNewTaskDrafts();
+    const threadId = "00000000-0000-4000-8000-000000000101";
+    drafts.write("work:pane", "#[Prior task] continue from there");
+    drafts.writeMentionChips("work:pane", [
+      {
+        threadId,
+        title: "Prior task",
+        mode: "work",
+        placementLabel: "Recents",
+      },
+    ]);
+    drafts.writeExtensionReceipts("work:pane", [
+      {
+        reference: "@Browser",
+        label: "Browser",
+        selection: browserUseSelection("00000000-0000-4000-8000-000000000201"),
+        status: { kind: "selected" },
+      },
+    ]);
+    const view = (
+      <NewTaskDraftsContext.Provider value={drafts}>
+        <NewTaskDraftScopeContext.Provider value="work:pane">
+          <WorkComposerAdapter
+            {...baseProps}
+            projectId={"00000000-0000-0000-0000-000000000001" as ProjectId}
+            onCreateThread={onCreateThread}
+          />
+        </NewTaskDraftScopeContext.Provider>
+      </NewTaskDraftsContext.Provider>
+    );
+    const rendered = render(view);
+    expect(screen.getByLabelText("Mentioned threads")).toHaveTextContent("Prior task");
+    expect(screen.getByLabelText("Selected extensions")).toHaveTextContent("Browser");
+
+    rendered.unmount();
+    render(view);
+
+    expect(await screen.findByLabelText("Mentioned threads")).toHaveTextContent("Prior task");
+    expect(screen.getByLabelText("Selected extensions")).toHaveTextContent("Browser");
+    await user.click(screen.getByRole("button", { name: "Create thread" }));
+    await waitFor(() => expect(onCreateThread).toHaveBeenCalled());
+    expect(onCreateThread.mock.calls[0]?.[2]).toEqual([threadId]);
+    expect(onCreateThread.mock.calls[0]?.[4]).toEqual([
+      expect.objectContaining({ kind: "plugin" }),
+    ]);
   });
 });
 

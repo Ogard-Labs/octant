@@ -37,6 +37,8 @@ export function useComputerUseMention(input: {
   readonly onChoose?: () => void;
   readonly onSelectionEdited?: () => void;
   readonly textarea?: () => HTMLTextAreaElement | null;
+  /** Restored with a persisted new-task draft after Settings unmounts. */
+  readonly initialSelection?: ExtensionSelection;
 }) {
   const { providerCarriesTools, ...mention } = input;
   const hostScreen =
@@ -56,6 +58,8 @@ export function useBrowserUseMention(input: {
   readonly onChoose?: () => void;
   readonly onSelectionEdited?: () => void;
   readonly textarea?: () => HTMLTextAreaElement | null;
+  /** Restored with a persisted new-task draft after Settings unmounts. */
+  readonly initialSelection?: ExtensionSelection;
 }) {
   return useApplicationMention(input, {
     kind: "browser",
@@ -73,6 +77,7 @@ function useApplicationMention(
     readonly onChoose?: () => void;
     readonly onSelectionEdited?: () => void;
     readonly textarea?: () => HTMLTextAreaElement | null;
+    readonly initialSelection?: ExtensionSelection;
   },
   app: {
     readonly kind: "computer" | "browser";
@@ -85,7 +90,11 @@ function useApplicationMention(
   const [chosen, setChosen] = useState<{
     readonly scope: string;
     readonly selection: ExtensionSelection;
-  }>();
+  }>(() =>
+    input.initialSelection === undefined
+      ? undefined
+      : { scope: input.scopeKey, selection: input.initialSelection },
+  );
   const computerEnabled = useComputerUseEnabled();
   const enabled = app.kind === "browser" ? input.available === true : computerEnabled;
   const available = enabled && (input.available ?? app.available);

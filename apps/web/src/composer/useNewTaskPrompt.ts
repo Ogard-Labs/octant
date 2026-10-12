@@ -1,5 +1,12 @@
-import type { GithubIssueContextRequest, LinearIssueContextRequest } from "@octant/contracts";
+import {
+  decodeMentionableThreadId,
+  type GithubIssueContextRequest,
+  type LinearIssueContextRequest,
+} from "@octant/contracts";
+import type { ExtensionSelection } from "@octant/contracts/extensions";
+import type { CodeNewThreadWorkspace } from "@octant/contracts/projects";
 import { createContext, useCallback, useContext, useState, useSyncExternalStore } from "react";
+import type { ComposerExtensionSelection } from "./composerExtensionSelection";
 
 export type NewTaskCreateFromSelection =
   | {
@@ -13,6 +20,64 @@ export type NewTaskCreateFromSelection =
       readonly label: string;
     };
 
+export interface NewTaskCodeCheckoutDraft {
+  readonly baseBranch: string;
+  readonly baseBranchChosen: boolean;
+  readonly workspaceOverride?: CodeNewThreadWorkspace;
+  readonly worktreeRemote?: string;
+  readonly startFromOriginOverride?: boolean;
+}
+
+export interface NewTaskMentionChip {
+  readonly threadId: string;
+  readonly title: string;
+  readonly mode: "chat" | "work" | "code";
+  readonly placementLabel: string;
+}
+
+export function mentionChipsToDraft(
+  chips: ReadonlyArray<{
+    readonly threadId: string | { readonly [key: string]: unknown };
+    readonly title: string;
+    readonly mode: "chat" | "work" | "code";
+    readonly placementLabel: string;
+  }>,
+): ReadonlyArray<NewTaskMentionChip> {
+  return chips.map((chip) => ({
+    threadId: String(chip.threadId),
+    title: chip.title,
+    mode: chip.mode,
+    placementLabel: chip.placementLabel,
+  }));
+}
+
+export function mentionChipsFromDraft(chips: ReadonlyArray<NewTaskMentionChip>): ReadonlyArray<{
+  readonly threadId: ReturnType<typeof decodeMentionableThreadId>;
+  readonly title: string;
+  readonly mode: "chat" | "work" | "code";
+  readonly placementLabel: string;
+}> {
+  const restored: Array<{
+    readonly threadId: ReturnType<typeof decodeMentionableThreadId>;
+    readonly title: string;
+    readonly mode: "chat" | "work" | "code";
+    readonly placementLabel: string;
+  }> = [];
+  for (const chip of chips) {
+    try {
+      restored.push({
+        threadId: decodeMentionableThreadId(chip.threadId),
+        title: chip.title,
+        mode: chip.mode,
+        placementLabel: chip.placementLabel,
+      });
+    } catch {
+      continue;
+    }
+  }
+  return restored;
+}
+
 export interface NewTaskDrafts {
   readonly read: (scope: string) => string;
   readonly write: (scope: string, text: string) => void;
@@ -23,6 +88,23 @@ export interface NewTaskDrafts {
     scope: string,
     selection: NewTaskCreateFromSelection | undefined,
   ) => void;
+  readonly readCodeCheckout: (scope: string) => NewTaskCodeCheckoutDraft | undefined;
+  readonly writeCodeCheckout: (
+    scope: string,
+    checkout: NewTaskCodeCheckoutDraft | undefined,
+  ) => void;
+  readonly readMentionChips: (scope: string) => ReadonlyArray<NewTaskMentionChip>;
+  readonly writeMentionChips: (scope: string, chips: ReadonlyArray<NewTaskMentionChip>) => void;
+  readonly readExtensionReceipts: (scope: string) => ReadonlyArray<ComposerExtensionSelection>;
+  readonly writeExtensionReceipts: (
+    scope: string,
+    receipts: ReadonlyArray<ComposerExtensionSelection>,
+  ) => void;
+  readonly readComputerSelection: (scope: string) => ExtensionSelection | undefined;
+  readonly writeComputerSelection: (
+    scope: string,
+    selection: ExtensionSelection | undefined,
+  ) => void;
   readonly subscribe: (onStoreChange: () => void) => () => void;
 }
 
@@ -30,6 +112,10 @@ export function createNewTaskDrafts(): NewTaskDrafts {
   const drafts = new Map<string, string>();
   const images = new Map<string, ReadonlyArray<File>>();
   const createFrom = new Map<string, NewTaskCreateFromSelection>();
+  const codeCheckouts = new Map<string, NewTaskCodeCheckoutDraft>();
+  const mentionChips = new Map<string, ReadonlyArray<NewTaskMentionChip>>();
+  const extensionReceipts = new Map<string, ReadonlyArray<ComposerExtensionSelection>>();
+  const computerSelections = new Map<string, ExtensionSelection>();
   const listeners = new Set<() => void>();
   const notify = () => {
     for (const listener of listeners) listener();
@@ -53,6 +139,26 @@ export function createNewTaskDrafts(): NewTaskDrafts {
       if (selection === undefined) createFrom.delete(scope);
       else createFrom.set(scope, selection);
     },
+    readCodeCheckout: (scope) => codeCheckouts.get(scope),
+    writeCodeCheckout: (scope, checkout) => {
+      if (checkout === undefined) codeCheckouts.delete(scope);
+      else codeCheckouts.set(scope, checkout);
+    },
+    readMentionChips: (scope) => mentionChips.get(scope) ?? [],
+    writeMentionChips: (scope, chips) => {
+      if (chips.length === 0) mentionChips.delete(scope);
+      else mentionChips.set(scope, chips);
+    },
+    readExtensionReceipts: (scope) => extensionReceipts.get(scope) ?? [],
+    writeExtensionReceipts: (scope, receipts) => {
+      if (receipts.length === 0) extensionReceipts.delete(scope);
+      else extensionReceipts.set(scope, receipts);
+    },
+    readComputerSelection: (scope) => computerSelections.get(scope),
+    writeComputerSelection: (scope, selection) => {
+      if (selection === undefined) computerSelections.delete(scope);
+      else computerSelections.set(scope, selection);
+    },
     subscribe: (onStoreChange) => {
       listeners.add(onStoreChange);
       return () => {
@@ -69,6 +175,10 @@ function discardNewTaskDraftScope(drafts: NewTaskDrafts, scope: string): void {
   drafts.write(scope, "");
   drafts.writeImages(scope, []);
   drafts.writeCreateFrom(scope, undefined);
+  drafts.writeCodeCheckout(scope, undefined);
+  drafts.writeMentionChips(scope, []);
+  drafts.writeExtensionReceipts(scope, []);
+  drafts.writeComputerSelection(scope, undefined);
 }
 
 /**
@@ -189,8 +299,10 @@ const emptySubscribe = () => () => {};
 export function useNewTaskPrompt() {
   const drafts = useContext(NewTaskDraftsContext);
   const scope = useContext(NewTaskDraftScopeContext);
-  const stored = useSyncExternalStore(drafts?.subscribe ?? emptySubscribe, () =>
-    scope === undefined || drafts === undefined ? "" : drafts.read(scope),
+  const stored = useSyncExternalStore(
+    drafts?.subscribe ?? emptySubscribe,
+    () => (scope === undefined || drafts === undefined ? "" : drafts.read(scope)),
+    () => "",
   );
   const [local, setLocal] = useState("");
   const prompt = drafts !== undefined && scope !== undefined ? stored : local;

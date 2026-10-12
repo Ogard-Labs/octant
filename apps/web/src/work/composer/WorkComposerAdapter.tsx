@@ -1,5 +1,11 @@
 import { useDraftModelOptions } from "../../providers/useDraftModelOptions";
-import { useNewTaskPrompt } from "../../composer/useNewTaskPrompt";
+import {
+  mentionChipsFromDraft,
+  mentionChipsToDraft,
+  NewTaskDraftsContext,
+  NewTaskDraftScopeContext,
+  useNewTaskPrompt,
+} from "../../composer/useNewTaskPrompt";
 import {
   ApplicationMentionTypeahead,
   BrowserUseMention,
@@ -36,7 +42,9 @@ import {
 import { FolderOpen, AlertTriangle } from "lucide-react";
 import {
   useCallback,
+  useContext,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type ClipboardEvent,
@@ -124,6 +132,17 @@ export interface WorkComposerAdapterProps {
 
 export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
   const [prompt, setPrompt] = useNewTaskPrompt();
+  const drafts = useContext(NewTaskDraftsContext);
+  const draftScope = useContext(NewTaskDraftScopeContext);
+  const storedMentionChips = mentionChipsFromDraft(
+    draftScope === undefined || drafts === undefined ? [] : drafts.readMentionChips(draftScope),
+  );
+  const storedExtensionReceipts =
+    draftScope === undefined || drafts === undefined
+      ? []
+      : drafts.readExtensionReceipts(draftScope);
+  const storedComputerSelection =
+    draftScope === undefined ? undefined : drafts?.readComputerSelection(draftScope);
   const {
     modelKey,
     modelOptionValues,
@@ -149,6 +168,7 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
     onDraftChange: setPrompt,
     scopeKey: "work-draft",
     providerCarriesTools: runtimeCarriesTools,
+    ...(storedComputerSelection === undefined ? {} : { initialSelection: storedComputerSelection }),
   });
   const selectedFamily = providerFamilyForThread(
     props.providerGroups,
@@ -160,6 +180,7 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
     providerCarriesTools: runtimeCarriesTools,
     projectId: props.projectId ?? null,
     ...(selectedFamily === undefined ? {} : { providerFamily: selectedFamily }),
+    ...(storedExtensionReceipts.length === 0 ? {} : { initialReceipts: storedExtensionReceipts }),
   });
   const browser = useBrowserUseMention({
     textarea: () => textareaRef.current,
@@ -196,7 +217,24 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
     ...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl }),
     ...(props.windowCapability === undefined ? {} : { windowCapability: props.windowCapability }),
     draft: prompt,
+    ...(storedMentionChips.length === 0 ? {} : { initialChips: storedMentionChips }),
   });
+  const structuredDraftScope = useRef(draftScope);
+  useLayoutEffect(() => {
+    if (drafts === undefined || draftScope === undefined) return;
+    if (structuredDraftScope.current === draftScope) return;
+    structuredDraftScope.current = draftScope;
+    threadMentions.restore(mentionChipsFromDraft(drafts.readMentionChips(draftScope)));
+    extensionDraft.restore(drafts.readExtensionReceipts(draftScope));
+    computer.restore(drafts.readComputerSelection(draftScope));
+  }, [computer, drafts, draftScope, extensionDraft, threadMentions]);
+  useEffect(() => {
+    if (draftScope === undefined || drafts === undefined) return;
+    if (structuredDraftScope.current !== draftScope) return;
+    drafts.writeMentionChips(draftScope, mentionChipsToDraft(threadMentions.chips));
+    drafts.writeExtensionReceipts(draftScope, extensionDraft.receipts);
+    drafts.writeComputerSelection(draftScope, computer.selection);
+  }, [computer.selection, drafts, draftScope, extensionDraft.receipts, threadMentions.chips]);
   const mention = useThreadMentionTypeahead({
     mentions: threadMentions.composer,
     draft: prompt,

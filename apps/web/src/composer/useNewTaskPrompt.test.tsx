@@ -86,6 +86,33 @@ describe("useNewTaskPrompt", () => {
       request: { id: "22222222-2222-4222-8222-222222222222" as never },
       label: "ENG-13",
     });
+    drafts.writeMentionChips("chat:pane-a", [
+      {
+        threadId: "00000000-0000-4000-8000-000000000101",
+        title: "Prior A",
+        mode: "chat",
+        placementLabel: "Recents",
+      },
+    ]);
+    drafts.writeMentionChips("chat:pane-b", [
+      {
+        threadId: "00000000-0000-4000-8000-000000000102",
+        title: "Prior B",
+        mode: "chat",
+        placementLabel: "Recents",
+      },
+    ]);
+    drafts.writeExtensionReceipts("chat:pane-a", [
+      {
+        reference: "@Browser",
+        label: "Browser",
+        status: { kind: "blocked", reason: "unavailable" },
+      },
+    ]);
+    drafts.writeCodeCheckout("code:pane-a", {
+      baseBranch: "fix/a",
+      baseBranchChosen: true,
+    });
 
     discardNewTaskDraftForPane(drafts, "chat", "pane-a");
 
@@ -93,10 +120,13 @@ describe("useNewTaskPrompt", () => {
     expect(drafts.read("chat-welcome:pane-a")).toBe("");
     expect(drafts.readImages("chat:pane-a")).toEqual([]);
     expect(drafts.readCreateFrom("chat:pane-a")).toBeUndefined();
+    expect(drafts.readMentionChips("chat:pane-a")).toEqual([]);
+    expect(drafts.readExtensionReceipts("chat:pane-a")).toEqual([]);
     expect(drafts.read("chat:pane-b")).toBe("Unsent in B");
     expect(drafts.read("chat-welcome:pane-b")).toBe("Welcome B");
     expect(drafts.readImages("chat:pane-b")).toHaveLength(1);
     expect(drafts.readCreateFrom("chat:pane-b")?.label).toBe("ENG-13");
+    expect(drafts.readMentionChips("chat:pane-b")[0]?.title).toBe("Prior B");
   });
 
   it("discards only the named Project overview draft", () => {

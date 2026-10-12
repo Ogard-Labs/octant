@@ -42,6 +42,8 @@ export function useExtensionDraftSelections(options: {
    * selected for a send the host would refuse.
    */
   readonly providerCarriesTools?: boolean;
+  /** Receipts restored with a persisted new-task draft after Settings unmounts. */
+  readonly initialReceipts?: ReadonlyArray<ComposerExtensionSelection>;
 }) {
   const computerEnabled = useComputerUseEnabled();
   const providerCarriesTools = options.providerCarriesTools !== false;
@@ -59,7 +61,13 @@ export function useExtensionDraftSelections(options: {
   const [state, setState] = useState<{
     readonly client: DraftSelectionClient | undefined;
     readonly byScope: ReadonlyMap<string, ReadonlyArray<ComposerExtensionSelection>>;
-  }>(() => ({ client: options.client, byScope: new Map() }));
+  }>(() => ({
+    client: options.client,
+    byScope:
+      options.initialReceipts === undefined || options.initialReceipts.length === 0
+        ? new Map()
+        : new Map([[scopeKey, options.initialReceipts]]),
+  }));
   const stagedReceipts =
     state.client === options.client ? (state.byScope.get(scopeKey) ?? NO_RECEIPTS) : NO_RECEIPTS;
   // Browser or Computer staged before the thread moved to a runtime without

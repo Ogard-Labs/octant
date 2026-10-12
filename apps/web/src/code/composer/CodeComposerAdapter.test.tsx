@@ -7,6 +7,11 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { CodeComposerAdapter } from "./CodeComposerAdapter";
 import type { ProjectId } from "@octant/contracts/projects";
 import { decodeHostId, LOCAL_HOST_ID } from "@octant/contracts/host";
+import {
+  createNewTaskDrafts,
+  NewTaskDraftsContext,
+  NewTaskDraftScopeContext,
+} from "../../composer/useNewTaskPrompt";
 
 const twoHosts = [
   {
@@ -1004,5 +1009,50 @@ describe("CodeComposerAdapter interactions", () => {
       "The selected model does not accept images. Choose an image-capable model.",
     );
     expect(screen.queryByAltText("pasted.png")).not.toBeInTheDocument();
+  });
+
+  it("keeps Code checkout choices after Settings remounts the draft", async () => {
+    const user = userEvent.setup();
+    const drafts = createNewTaskDrafts();
+    drafts.writeCodeCheckout("code:pane", {
+      baseBranch: "fix/login",
+      baseBranchChosen: true,
+      workspaceOverride: "managed-worktree",
+      worktreeRemote: "origin",
+      startFromOriginOverride: true,
+    });
+    const view = (
+      <NewTaskDraftsContext.Provider value={drafts}>
+        <NewTaskDraftScopeContext.Provider value="code:pane">
+          <CodeComposerAdapter
+            {...defaultProps}
+            newThreadWorkspace="current-checkout"
+            worktreeRemoteFacts={{ remotes: ["origin"], defaultRemote: "origin" }}
+          />
+        </NewTaskDraftScopeContext.Provider>
+      </NewTaskDraftsContext.Provider>
+    );
+    const rendered = render(view);
+    expect(screen.getByRole("button", { name: "Base branch" })).toHaveTextContent("fix/login");
+    expect(screen.getByRole("button", { name: "Workspace" })).toHaveTextContent("Managed worktree");
+    expect(screen.getByRole("switch", { name: /Start from origin/ })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+
+    rendered.unmount();
+    render(view);
+
+    expect(screen.getByRole("button", { name: "Base branch" })).toHaveTextContent("fix/login");
+    expect(screen.getByRole("button", { name: "Workspace" })).toHaveTextContent("Managed worktree");
+    expect(screen.getByRole("switch", { name: /Start from origin/ })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    await user.click(screen.getByRole("button", { name: "Workspace" }));
+    expect(await screen.findByRole("menuitemradio", { name: /Managed worktree/ })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
   });
 });
