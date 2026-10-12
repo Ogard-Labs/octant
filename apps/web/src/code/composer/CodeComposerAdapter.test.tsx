@@ -345,6 +345,22 @@ describe("CodeComposerAdapter", () => {
     expect(trailing?.textContent).not.toContain("Choose a Project");
   });
 
+  it("hides the branch item on the Code start composer until a Project is chosen", () => {
+    const { projectId: _projectId, projectName: _projectName, ...rest } = defaultProps;
+    const { container } = render(
+      <CodeComposerAdapter {...rest} folderControl={<span>Choose a Project</span>} />,
+    );
+    const leading = container.querySelector(".composer-tray__leading");
+    expect(leading?.textContent).toContain("Choose a Project");
+    expect(leading?.textContent).not.toContain("Default branch");
+    expect(screen.queryByRole("button", { name: "Base branch" })).toBeNull();
+  });
+
+  it("shows the branch selector once a Project is chosen", () => {
+    render(<CodeComposerAdapter {...defaultProps} />);
+    expect(screen.getByRole("button", { name: "Base branch" })).toHaveTextContent("development");
+  });
+
   it("keeps repository context on the context row inside the composer", () => {
     const { container } = render(<CodeComposerAdapter {...defaultProps} />);
     const frame = container.querySelector(".composer");

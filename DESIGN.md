@@ -407,7 +407,9 @@ grows; its toolbar row holds how the thread runs (attach and image on the
 left; model and access on the right, next to send). Where the thread runs
 (Project, base branch, checkout, Environment, repository) is the first row
 inside the card, above the prompt, as small bordered chips on a faint fill
-(the `--oct-radius-sm` step), so the composer stays a single object. The chip
+(the `--oct-radius-sm` step), so the composer stays a single object. Code's
+base-branch chip is absent until a Project is chosen: with no Project it
+would name a branch of nothing. The chip
 is painted on the plain element that holds each control, never on the shared
 trigger inside it. The row wraps rather than grows: a control that needs a
 list ("Create from…") floats over the page. A thread's own follow-up
@@ -852,10 +854,11 @@ Chat, Work, and Code welcome composers share the `.composer` frame (`--oct-radiu
 composer. Starter actions appear only when recent work does not already give
 the person a next step. In light the card is workspace white on the
 `--octant-app-background` well, not the grey floating fill — that fill reads
-as a sunken field. Code welcome keeps one stable question while Project,
-base branch, and Environment sit on the context row above the composer
+as a sunken field. Code welcome keeps one stable question while Project and
+Environment sit on the context row above the composer
 (`.composer-tray--above`, rendered beside the card inside `.composer-stack`),
-on the page ground with no band chrome. Environment is the
+on the page ground with no band chrome. The base-branch chip joins that row
+once a Project is chosen. Environment is the
 create-facing presentation of Octant's authoritative host federation: its
 dropdown selects This computer, devbox, or another healthy capable host without
 creating a second environment model. Every create composer shows Environment
