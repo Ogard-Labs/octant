@@ -3,6 +3,7 @@ import {
   boundedFrameReading,
   boundedScriptErrors,
   designFrameReadings,
+  readFramesWithinBudget,
 } from "./canvasPreviewFrames";
 import { canvasPreviewDesignWarnings } from "./canvasPreviewWarnings";
 
@@ -157,6 +158,44 @@ describe("a design the look could not finish reading", () => {
       { kind: "design-not-measured", blockId: "half" },
       { kind: "design-frame-overflow", blockId: "half", frameId: "home", overflowPx: 40 },
     ]);
+  });
+
+  it("stops reading its frames when the time for the whole look is spent", async () => {
+    // Each frame that hangs costs its full wait, so the clock moves two
+    // seconds a read; the budget ends after the second frame.
+    let clock = 0;
+    const read: string[] = [];
+    const answers = await readFramesWithinBudget(
+      ["a", "b", "c", "d"],
+      async (frame) => {
+        read.push(frame);
+        clock += 2_000;
+        return undefined;
+      },
+      4_000,
+      () => clock,
+    );
+    expect(read).toEqual(["a", "b"]);
+    expect(answers).toEqual([undefined, undefined, undefined, undefined]);
+    expect(designFrameReadings(answers).measured).toBe(false);
+  });
+
+  it("gives a frame no longer to answer than the look has left", async () => {
+    // The first read takes most of the budget; the second may wait only for
+    // what remains, not for a whole frame's wait past the deadline.
+    let clock = 0;
+    const waits: number[] = [];
+    await readFramesWithinBudget(
+      ["a", "b"],
+      async (_frame, remainingMs) => {
+        waits.push(remainingMs);
+        clock += 9_900;
+        return undefined;
+      },
+      10_000,
+      () => clock,
+    );
+    expect(waits).toEqual([10_000, 100]);
   });
 
   it("is measured when every frame answered", () => {

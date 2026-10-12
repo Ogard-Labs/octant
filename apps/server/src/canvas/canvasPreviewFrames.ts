@@ -52,7 +52,7 @@ export interface CanvasPreviewFrameContrast {
 const MAX_FRAMES_PER_DESIGN = CANVAS_MAX_DESIGN_FRAMES;
 /** The first errors of a design are kept; the root cause is among them. */
 export const CANVAS_PREVIEW_MAX_SCRIPT_ERRORS = 8;
-/** A frame that has not answered by now is left unmeasured. */
+/** A frame that has not answered by now, or by the end of the look's budget, is left unmeasured. */
 const FRAME_READ_TIMEOUT_MS = 2_000;
 /**
  * How long reading every design's frames may take. Every design the page drew
@@ -264,15 +264,44 @@ export async function readPreviewDesignFrames(
       readings.push({ blockId, measured: false, scriptErrors, overflow: [], contrast: [] });
       continue;
     }
-    const answers: unknown[] = [];
     const frames = await design.locator("iframe").elementHandles();
-    for (const element of frames.slice(0, MAX_FRAMES_PER_DESIGN)) {
-      const frame = await element.contentFrame();
-      answers.push(frame === null ? undefined : await readFrame(frame));
-    }
+    const answers = await readFramesWithinBudget(
+      frames.slice(0, MAX_FRAMES_PER_DESIGN),
+      async (element, remainingMs) => {
+        const frame = await element.contentFrame();
+        return frame === null
+          ? undefined
+          : await readFrame(frame, Math.min(FRAME_READ_TIMEOUT_MS, remainingMs));
+      },
+      deadline,
+      now,
+    );
     readings.push({ blockId, scriptErrors, ...designFrameReadings(answers) });
   }
   return readings;
+}
+
+/**
+ * What each frame answered, read in turn until the deadline. A frame not
+ * reached answers `undefined`, as one that hung does. A hung frame costs its
+ * whole wait, and in a browser that runs a frame in its page's process one
+ * hung prototype makes every later frame hang too, so the time for the whole
+ * look is checked before each frame and not only before each design. Each
+ * read is told how long the look has left, so the last one cannot wait a
+ * whole frame's time past the deadline.
+ */
+export async function readFramesWithinBudget<Frame>(
+  frames: ReadonlyArray<Frame>,
+  read: (frame: Frame, remainingMs: number) => Promise<unknown>,
+  deadline: number,
+  now: () => number,
+): Promise<ReadonlyArray<unknown>> {
+  const answers: unknown[] = [];
+  for (const frame of frames) {
+    const remainingMs = deadline - now();
+    answers.push(remainingMs <= 0 ? undefined : await read(frame, remainingMs));
+  }
+  return answers;
 }
 
 /**
@@ -323,13 +352,13 @@ export function boundedScriptErrors(recorded: string | null): ReadonlyMap<string
   return errors;
 }
 
-async function readFrame(frame: Frame): Promise<unknown> {
+async function readFrame(frame: Frame, waitMs: number): Promise<unknown> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     return await Promise.race([
       frame.evaluate(measureDesignFrame),
       new Promise<undefined>((resolvePromise) => {
-        timer = setTimeout(() => resolvePromise(undefined), FRAME_READ_TIMEOUT_MS);
+        timer = setTimeout(() => resolvePromise(undefined), waitMs);
       }),
     ]);
   } catch {

@@ -132,7 +132,8 @@ only the latest few). Every design the page drew is read; if reading them
 passes its time budget, each remaining design gets a `design-not-measured`
 warning rather than being left out as if it were clean. A design with a frame
 that did not answer gets the same warning, beside the warnings of its frames
-that did. A running design runs in the preview as
+that did. The budget is checked before each frame, so a frame it does not
+reach counts as one that did not answer. A running design runs in the preview as
 it does for a reader: the host builds its page with `renderCanvasDesignPage`,
 answers it at a path under the preview page's own origin with the page
 route's headers, and the preview page draws it in a frame sandboxed to
