@@ -232,9 +232,9 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
     if (draftScope === undefined || drafts === undefined) return;
     if (structuredDraftScope.current !== draftScope) return;
     drafts.writeMentionChips(draftScope, mentionChipsToDraft(threadMentions.chips));
-    drafts.writeExtensionReceipts(draftScope, extensionDraft.receipts);
+    drafts.writeExtensionReceipts(draftScope, extensionDraft.stagedReceipts);
     drafts.writeComputerSelection(draftScope, computer.selection);
-  }, [computer.selection, drafts, draftScope, extensionDraft.receipts, threadMentions.chips]);
+  }, [computer.selection, drafts, draftScope, extensionDraft.stagedReceipts, threadMentions.chips]);
   const mention = useThreadMentionTypeahead({
     mentions: threadMentions.composer,
     draft: prompt,

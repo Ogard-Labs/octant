@@ -425,6 +425,58 @@ describe("WorkComposerAdapter interactions", () => {
       expect.objectContaining({ kind: "plugin" }),
     ]);
   });
+
+  it("keeps a selected Browser receipt after Settings remounts while tools are blocked", async () => {
+    const user = userEvent.setup();
+    const onCreateThread = vi.fn();
+    const drafts = createNewTaskDrafts();
+    drafts.write("work:pane", "open the site");
+    drafts.writeExtensionReceipts("work:pane", [
+      {
+        reference: "@Browser",
+        label: "Browser",
+        selection: browserUseSelection("00000000-0000-4000-8000-000000000201"),
+        status: { kind: "selected" },
+      },
+    ]);
+    const wrap = (selection?: {
+      readonly selectedProviderInstanceId: ReturnType<typeof decodeProviderInstanceId>;
+      readonly selectedModelId: ReturnType<typeof decodeProviderModelId>;
+    }) => (
+      <NewTaskDraftsContext.Provider value={drafts}>
+        <NewTaskDraftScopeContext.Provider value="work:pane">
+          <WorkComposerAdapter
+            {...baseProps}
+            projectId={"00000000-0000-0000-0000-000000000001" as ProjectId}
+            onCreateThread={onCreateThread}
+            {...selection}
+          />
+        </NewTaskDraftScopeContext.Provider>
+      </NewTaskDraftsContext.Provider>
+    );
+    // A selected provider that is not in the groups reports no Octant tools,
+    // so the chip is a blocked projection. Persisting that projection would
+    // drop the selection before Settings remounts the draft.
+    const blocked = render(
+      wrap({
+        selectedProviderInstanceId: decodeProviderInstanceId(
+          "80000000-0000-4000-8000-0000000000b1",
+        ),
+        selectedModelId: decodeProviderModelId("missing-model"),
+      }),
+    );
+    await waitFor(() => {
+      expect(drafts.readExtensionReceipts("work:pane")[0]?.selection).toBeDefined();
+    });
+    blocked.unmount();
+    render(wrap());
+    expect(await screen.findByLabelText("Selected extensions")).toHaveTextContent("Browser");
+    await user.click(screen.getByRole("button", { name: "Create thread" }));
+    await waitFor(() => expect(onCreateThread).toHaveBeenCalled());
+    expect(onCreateThread.mock.calls[0]?.[4]).toEqual([
+      expect.objectContaining({ kind: "plugin" }),
+    ]);
+  });
 });
 
 function pasteImage(composer: HTMLElement): void {

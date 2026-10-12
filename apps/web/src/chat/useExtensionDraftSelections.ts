@@ -266,7 +266,7 @@ export function useExtensionDraftSelections(options: {
     [invalidate, updateReceipts],
   );
 
-  return { clear, receipts, remove, resolveReference, restore };
+  return { clear, receipts, stagedReceipts, remove, resolveReference, restore };
 }
 
 function decodeScopeUuid(value: string | null): string | null {
