@@ -425,7 +425,7 @@ import { createLinkedThreadRuntime } from "./linkedThread/linkedThreadRuntime";
 import { FolderBrowseService } from "./folderBrowseService";
 import { ProjectService } from "./projectService";
 import { CodeProjectAccess } from "./codeProjectAccess";
-import { isRoutineHostScope } from "./routineHostScope";
+import { isRoutineHostScope, ROUTINE_HOST_SCOPE_ID } from "./routineHostScope";
 import { ProjectRootPort } from "./projectRootPort";
 import { ProjectTerminalService } from "./code/projectTerminalService";
 import { ProjectBrowserService } from "./browser/projectBrowserService";
@@ -7294,11 +7294,13 @@ export function startOctantServer(
             : ("approval-gated" as const),
       };
     };
-    /** Any registered local window; the ordinary turn path rechecks Project access. */
-    const firstRegisteredWindowId = (): WindowId | undefined => {
-      for (const windowId of windowAuthorityStore.listWindowIds()) return windowId;
-      return undefined;
-    };
+    // A goal-loop round runs as the host, so no window stands in for the
+    // shell's mode switch: a loop whose Work was turned off pauses, and a
+    // round already being prepared is refused at its turn's admission.
+    const goalLoopWorkEnabled = (): boolean =>
+      enabledModes(persistence.readShellSettings()?.settings ?? defaultShellSettings()).includes(
+        "work",
+      );
     const goalLoopEvents = new GoalLoopEventStore({
       journal: persistence.journal,
       uuid: randomUUID,
@@ -7336,6 +7338,7 @@ export function startOctantServer(
         });
       },
       threadAuthority: (threadId) => {
+        if (!goalLoopWorkEnabled()) return undefined;
         try {
           return workTurnPosture(threadId);
         } catch {
@@ -7352,10 +7355,8 @@ export function startOctantServer(
       // end with that round. Shell and Git never ask in Work.
       pendingApproval: () => undefined,
       markCheckpoint: async (threadId) => {
-        const windowId = firstRegisteredWindowId();
-        if (windowId === undefined) return undefined;
         const marked = await threadCheckpointService
-          .execute(windowId, {
+          .execute(ROUTINE_HOST_SCOPE_ID, {
             kind: "mark-thread-checkpoint",
             threadKind: "work",
             threadId,
@@ -7370,7 +7371,7 @@ export function startOctantServer(
       runRound: createGoalLoopWorkRoundRunner({
         turns: workTurnService,
         usage: workTurnUsageStore,
-        windowId: firstRegisteredWindowId,
+        workEnabled: goalLoopWorkEnabled,
         command: ({ threadId, objective }) => {
           const thread = workThreadProjection.read(threadId as never);
           if (thread === undefined) {
