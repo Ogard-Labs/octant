@@ -265,7 +265,15 @@ describe("the Working now card", () => {
             cards={[
               createWorkingNowCard(shared),
               createComputersCard({
-                hosts: [],
+                hosts: [
+                  {
+                    hostId: "local",
+                    name: "This computer",
+                    connection: "connected",
+                    figuresAllowed: true,
+                    runningAgents: 2,
+                  },
+                ],
                 launchHostId: "local",
                 agentRunClient: reader,
                 runRevision: revision,

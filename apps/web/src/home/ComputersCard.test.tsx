@@ -344,6 +344,89 @@ describe("the Computers card", () => {
     expect(signals[0]?.aborted).toBe(true);
   });
 
+  it("leaves the grid when the only computer is this one and no agent is running", async () => {
+    const readResources = vi.fn(
+      async (): Promise<HostResourceRead> => ({
+        status: "ready",
+        snapshot: snapshot(),
+      }),
+    );
+    renderCard(
+      source({
+        hosts: [host({ hostId: "local", name: "This computer", runningAgents: 0 })],
+        readResources,
+      }),
+    );
+    expect(screen.queryByRole("region", { name: "Computers" })).not.toBeInTheDocument();
+    expect(screen.queryByText("This computer")).not.toBeInTheDocument();
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(readResources).not.toHaveBeenCalled();
+  });
+
+  it("stays off the grid while the launch-host agent count is still landing", async () => {
+    const readResources = vi.fn(
+      async (): Promise<HostResourceRead> => ({
+        status: "ready",
+        snapshot: snapshot(),
+      }),
+    );
+    renderCard(
+      source({
+        hosts: [host({ hostId: "local", name: "This computer" })],
+        readResources,
+      }),
+    );
+    expect(screen.queryByRole("region", { name: "Computers" })).not.toBeInTheDocument();
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(readResources).not.toHaveBeenCalled();
+  });
+
+  it("comes back when a second computer is connected even if this one is idle", async () => {
+    renderCard(
+      source({
+        hosts: [
+          host({ hostId: "local", name: "This computer", runningAgents: 0 }),
+          host({ hostId: "studio", name: "Studio" }),
+        ],
+        readResources: vi.fn(async (): Promise<HostResourceRead> => ({ status: "refused" })),
+      }),
+    );
+    expect(await screen.findByRole("region", { name: "Computers" })).toBeVisible();
+    expect(screen.getByText("This computer")).toBeVisible();
+    expect(screen.getByText("Studio")).toBeVisible();
+  });
+
+  it("comes back when an agent is running on this computer alone", async () => {
+    renderCard(source());
+    expect(await screen.findByRole("region", { name: "Computers" })).toBeVisible();
+    expect(screen.getByText("This computer")).toBeVisible();
+  });
+
+  it("still lists Computers in Customize while the card is hidden", async () => {
+    const user = userEvent.setup();
+    render(
+      <HomeDashboard
+        cards={[
+          createComputersCard(
+            source({
+              hosts: [host({ hostId: "local", name: "This computer", runningAgents: 0 })],
+            }),
+          ),
+        ]}
+        customization={{ order: [], visibility: [] }}
+        onCustomizationChange={vi.fn()}
+      />,
+    );
+    await user.click(await screen.findByRole("button", { name: "Customize" }));
+    expect(screen.queryByRole("region", { name: "Computers" })).not.toBeInTheDocument();
+    const list = await screen.findByRole("list", { name: "Cards" });
+    expect(list).toHaveTextContent("Computers");
+  });
+
   it("does not read when the card is off", async () => {
     const readResources = vi.fn(
       async (): Promise<HostResourceRead> => ({
