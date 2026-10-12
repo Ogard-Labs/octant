@@ -373,7 +373,7 @@ export function canvasDesignPageRefusal(): string {
 // reads static frames the same way.
 const ADDRESS_LEAD = String.raw`(?:url\(\s*["']?\s*|(?:^|[\s"'/])(?:src|srcset|poster|background)\s*=\s*["']?\s*|(?:^|[\s"'/])srcset\s*=\s*(?:"[^"]*?,\s*|'[^']*?,\s*)|image-set\((?:[^()]|\([^()]*\))*?["']\s*)`;
 const ASSET_REFERENCE = new RegExp(
-  `(?<=${ADDRESS_LEAD})${CANVAS_DESIGN_ASSET_SCHEME.replace(/[-:]/g, "\\$&")}([A-Za-z0-9][A-Za-z0-9._-]{0,63})`,
+  `(?<=${ADDRESS_LEAD})${CANVAS_DESIGN_ASSET_SCHEME.replace(/[\\^$.*+?()[\]{}|-]/g, "\\$&")}([A-Za-z0-9][A-Za-z0-9._-]{0,63})`,
   "gi",
 );
 
