@@ -112,6 +112,12 @@ export function pickerHasReadyInstance(groups: ReadonlyArray<PickerGroup>): bool
   return groups.some((group) => group.readiness === "ready" || group.readiness === "degraded");
 }
 
+function pickerHasBoundCurrent(groups: ReadonlyArray<PickerGroup>): boolean {
+  return groups.some(
+    (group) => group.hiddenCurrent !== undefined || group.unavailableCurrent !== undefined,
+  );
+}
+
 interface ModelRow {
   readonly picker: PickerModel;
   readonly sectionId: string;
@@ -171,7 +177,7 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
     });
   }, [open, props.groups, selectedGroup, harnessGroups.length]);
 
-  if (!pickerHasListedModel(props.groups)) {
+  if (!pickerHasListedModel(props.groups) && !pickerHasBoundCurrent(props.groups)) {
     const offerSetup =
       props.onOpenSettings !== undefined &&
       props.providersReady !== true &&

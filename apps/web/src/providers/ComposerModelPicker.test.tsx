@@ -263,6 +263,56 @@ describe("ComposerModelPicker", () => {
     expect(screen.queryByRole("option", { name: "Model One" })).not.toBeInTheDocument();
   });
 
+  it("names a hidden bound model when no selectable models remain", () => {
+    const source = groups();
+    const first = source[0];
+    const current = first?.sections[0]?.models[0];
+    if (first === undefined || current === undefined) throw new Error("Expected model fixture");
+    render(
+      <ComposerModelPicker
+        groups={[{ ...first, sections: [], hiddenCurrent: current }]}
+        onOpenSettings={vi.fn()}
+        onSelect={vi.fn()}
+        selectedModelId={modelOne}
+        selectedProviderInstanceId={providerA}
+      />,
+    );
+
+    expect(screen.queryByRole("button", { name: "Set up a provider" })).not.toBeInTheDocument();
+    expect(screen.queryByText("No provider ready")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Provider and model" })).toHaveTextContent(
+      "Model One",
+    );
+  });
+
+  it("names an unavailable bound model when no selectable models remain", () => {
+    const source = groups();
+    const first = source[0];
+    const current = first?.sections[0]?.models[0];
+    if (first === undefined || current === undefined) throw new Error("Expected model fixture");
+    render(
+      <ComposerModelPicker
+        groups={[
+          {
+            ...first,
+            readiness: "unavailable",
+            sections: [],
+            unavailableCurrent: current,
+          },
+        ]}
+        onOpenSettings={vi.fn()}
+        onSelect={vi.fn()}
+        selectedModelId={modelOne}
+        selectedProviderInstanceId={providerA}
+      />,
+    );
+
+    expect(screen.queryByRole("button", { name: "Set up a provider" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Provider and model" })).toHaveTextContent(
+      "Model One",
+    );
+  });
+
   it("opens a nested provider → model menu from the compact trigger", async () => {
     const user = userEvent.setup();
     const onSelect = vi.fn();
