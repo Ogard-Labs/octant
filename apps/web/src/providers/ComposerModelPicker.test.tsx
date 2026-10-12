@@ -460,9 +460,7 @@ describe("ComposerModelPicker", () => {
     await user.click(await screen.findByRole("option", { name: "Model Two" }));
     expect(onSelect).toHaveBeenCalledOnce();
 
-    view.rerender(
-      <ComposerModelPicker groups={[]} onOpenSettings={vi.fn()} onSelect={onSelect} />,
-    );
+    view.rerender(<ComposerModelPicker groups={[]} onOpenSettings={vi.fn()} onSelect={onSelect} />);
 
     expect(screen.getByRole("button", { name: "Set up a provider" })).toBeDisabled();
   });
