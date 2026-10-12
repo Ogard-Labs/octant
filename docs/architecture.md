@@ -328,7 +328,9 @@ the `design` block are specified in [Canvas](design/canvas.md). Their boundaries
 `describe` reads no Project data and creates no artifact, and a recipe is a
 starting shape, not authority; every new block kind or field is gated by a Canvas
 schema version, so an older runtime refuses a document rather than misreading
-it; a version is immutable, and a person's change (a plan task's status, a
+it (the presentation-only table column `display` and chart, table, and metric
+`format` fields are the one ungated exception, which the strict schema still
+refuses on a runtime that predates them); a version is immutable, and a person's change (a plan task's status, a
 diagram layout) is journaled as a new head version with the `local-user` actor
 the host stamps itself; the host stamps comment authors, so a renderer never
 authors as an agent; only a host window moves board nodes; `preview` renders
@@ -3537,10 +3539,11 @@ mechanisms are:
 - **Subscription sign-in dialects.** The host OAuth runner also speaks vendor wire
   dialects beside the standard PKCE path: OpenRouter exchanges the code for an
   API key, and the ChatGPT plan dialect registers the host as a user-defined
-  agent. Each keeps the host-driven sign-in rule above: tokens stay in the
-  credential broker, an identity token is validated before a grant is stored,
-  a replaced grant's local material is deleted, and a request the plan route's
-  profile cannot express is refused before send. The wire details are in
+  agent. Each keeps the host-driven sign-in rule above, and tokens stay in the
+  credential broker. In the ChatGPT plan dialect, the identity token is
+  validated before a grant is stored, a replaced grant's local material is
+  deleted, and a request the plan route's profile cannot express is refused
+  before send. The wire details are in
   [Provider runtimes](design/provider-runtimes.md#subscription-sign-in-dialects).
 
 ## Package map
