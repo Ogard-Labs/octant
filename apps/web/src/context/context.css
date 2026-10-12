@@ -677,12 +677,10 @@
   }
 }
 
-@media (prefers-contrast: more) {
-  .composer-context-meter__track {
-    stroke: var(--octant-text-primary);
-  }
+html[data-octant-increased-contrast="true"] .composer-context-meter__track {
+  stroke: var(--octant-text-primary);
+}
 
-  .context-health-warning {
-    border-color: var(--octant-border-strong);
-  }
+html[data-octant-increased-contrast="true"] .context-health-warning {
+  border-color: var(--octant-border-strong);
 }
