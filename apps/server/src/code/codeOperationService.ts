@@ -632,6 +632,13 @@ export interface CodeOperationTurnPort {
     readonly extensionTools?: AppManagedToolSet;
     /** The host rechecks this after runtime preparation, before launching. */
     readonly admissionCurrent?: () => boolean;
+    /**
+     * Told once a provider has accepted this turn's prompt and context. A
+     * start that returns `running` has only taken the turn on: the context is
+     * still in memory, and a host that stops before the send has delivered
+     * nothing.
+     */
+    readonly onContextDelivered?: () => void;
     /** Consume feedback synchronously only after the runtime's final admission check. */
     readonly takeProductFeedback?: () => {
       readonly context?: string;
@@ -833,7 +840,7 @@ export interface CodeOperationServiceOptions {
   readonly carryAgentMessages?: (
     threadId: string,
   ) => Promise<ReadonlyArray<{ readonly messageId: string; readonly text: string }>>;
-  /** Records that a turn the runtime admitted carries those messages. */
+  /** Records that a provider has accepted the turn carrying those messages. */
   readonly confirmAgentMessagesDelivered?: (messageIds: ReadonlyArray<string>) => Promise<void>;
   /**
    * Loads skills named by the thread's snapshotted profile allowlist. Absent
@@ -2876,6 +2883,20 @@ export class CodeOperationService {
       ...(attachments.length === 0 ? {} : { attachments }),
       ...(extensionTools === undefined ? {} : { extensionTools }),
       ...(admissionCurrent === undefined ? {} : { admissionCurrent }),
+      // A message is delivered when a provider has it, not when the turn was
+      // taken on: the runtime launches after this call returns, and a host
+      // that stopped in between would have journaled a delivery, dropped the
+      // body, and sent nothing. Until the send, the message stays waiting and
+      // the next turn, or this one recovered after a restart, carries it.
+      ...(agentMessages.length === 0
+        ? {}
+        : {
+            onContextDelivered: () => {
+              void this.#options
+                .confirmAgentMessagesDelivered?.(agentMessages.map((message) => message.messageId))
+                .catch(() => undefined);
+            },
+          }),
       ...(takeProductFeedback === undefined
         ? {}
         : {
@@ -2889,13 +2910,6 @@ export class CodeOperationService {
     });
     if (turn.admission !== "refused") {
       this.#options.consumeIssueContextFramed?.(String(thread.id));
-    }
-    // Only a turn the runtime took on carries its context to a provider. A
-    // refused or failed start leaves every message waiting, undelivered.
-    if (agentMessages.length > 0 && turn.admission !== "refused" && turn.state !== "failed") {
-      await this.#options
-        .confirmAgentMessagesDelivered?.(agentMessages.map((message) => message.messageId))
-        .catch(() => undefined);
     }
     return this.#providerResult(command.operationId, turn);
   }

@@ -1241,9 +1241,14 @@ record; this section is the effective rule, and it is narrower than the record.
   thread id, then the body inside the shared external-data frame. A turn
   carries the oldest waiting messages up to 64 KiB, at least one, and the rest
   wait for the turn after. `agent.message-delivered@1` is journaled once the
-  runtime has taken the turn on; a start that was refused or failed leaves the
-  message waiting for the next turn. The block reaches every Code provider the
-  way a `#thread` mention does and is part of that turn only.
+  provider has accepted that turn's prompt and context, not when the turn was
+  taken on: a turn that was refused, cancelled, or failed before its send, and
+  a host that stopped before it, leave the message waiting for the next turn.
+  Delivery is therefore at least once. A host that stops after the provider
+  accepted the turn and before the event is appended carries the same message
+  into the next turn too; a host stop never drops a message unread. The block
+  reaches every Code provider the way a `#thread` mention does and is part of
+  that turn only.
 - **Bodies.** A body lives only while its message waits: delivery and refusal
   delete it, purging either thread deletes it with the message, and at start
   the host keeps only the bodies of waiting messages. A message an earlier

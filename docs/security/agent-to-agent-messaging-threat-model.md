@@ -118,12 +118,14 @@ absolute paths, raw body text, credentials, or provider payloads.
 - **A message may wait indefinitely.** Delivery happens only when the
   recipient's next turn starts, and messaging starts none. The sender is told
   `sent` and has no tool to read the later outcome.
-- **Delivery is at least once.** A host that stops after a turn was taken on
-  and before `agent.message-delivered@1` is appended offers the same message
-  to the next turn. The taint record is idempotent; the body is read twice.
+- **Delivery is at least once.** `agent.message-delivered@1` is appended only
+  after a provider accepted the turn's prompt and context. A host that stops
+  between the two offers the same message to the next turn. The taint record
+  is idempotent; the body is read twice. A host stop never drops a message
+  unread.
 - **No recipient acknowledgement.** Nothing journals
-  `agent.message-acknowledged@1`; `delivered` means a turn carried the body,
-  not that the model acted on it.
+  `agent.message-acknowledged@1`; `delivered` means a provider was sent the
+  body, not that the model acted on it.
 - **Refusals at admission are journaled without endpoints.** The refused
   event carries no sender or recipient id, so the Agents center counts only
   refusals of messages that were first admitted.

@@ -4919,6 +4919,10 @@ function runtimeFixture(options: {
     typeof createCodeOperationRuntime
   >[0]["computerUseUnattachedTools"];
   agentMessages?: Parameters<typeof createCodeOperationRuntime>[0]["agentMessages"];
+  carryAgentMessages?: Parameters<typeof createCodeOperationRuntime>[0]["carryAgentMessages"];
+  confirmAgentMessagesDelivered?: Parameters<
+    typeof createCodeOperationRuntime
+  >[0]["confirmAgentMessagesDelivered"];
   /** Whether the thread's provider can carry app-managed tools (default true). */
   supportsAppManagedTools?: boolean;
   /** Whether the provider natively serves ACP client capabilities. */
@@ -5190,6 +5194,12 @@ function runtimeFixture(options: {
       ? {}
       : { computerUseUnattachedTools: options.computerUseUnattachedTools }),
     ...(options.agentMessages === undefined ? {} : { agentMessages: options.agentMessages }),
+    ...(options.carryAgentMessages === undefined
+      ? {}
+      : { carryAgentMessages: options.carryAgentMessages }),
+    ...(options.confirmAgentMessagesDelivered === undefined
+      ? {}
+      : { confirmAgentMessagesDelivered: options.confirmAgentMessagesDelivered }),
     ...(options.browserAutomation === undefined &&
     options.supportsAppManagedTools === undefined &&
     options.supportsAcpClientCapabilities === undefined
@@ -6050,6 +6060,62 @@ it("offers the agent message tool to a Code turn and withholds it from one in Pl
   // Plan is read-only, and sending stores a body and journals: the provider
   // is never told the tool exists.
   expect(await offered("plan", 84)).not.toContain(AGENT_MESSAGE_TOOL_NAME);
+});
+
+it("records an agent message delivered once the provider accepted the turn that carries it, and not before", async () => {
+  const started = async (operation: number) => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const accepted = Promise.withResolvers<void>();
+    const connection = {
+      ...providerConnection(queue),
+      send: vi.fn<ProviderConnection["send"]>(() =>
+        Effect.tryPromise({
+          try: () => accepted.promise,
+          catch: () => ({ category: "provider-failed", message: "The provider went away." }),
+        }),
+      ),
+    };
+    const confirmAgentMessagesDelivered = vi.fn(async () => undefined);
+    const fixture = runtimeFixture({
+      provider: providerDriver(connection),
+      carryAgentMessages: async () => [{ messageId: "message-1", text: "<framed agent message>" }],
+      confirmAgentMessagesDelivered,
+    });
+    await expect(
+      fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: operationId(operation),
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      }),
+    ).resolves.toMatchObject({ state: "running" });
+    await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+    expect(connection.send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        context: expect.arrayContaining([{ kind: "user-message", text: "<framed agent message>" }]),
+      }),
+    );
+    return { fixture, accepted, confirmAgentMessagesDelivered };
+  };
+
+  // The turn is running and the send is in flight. A host that stopped here
+  // has delivered nothing, so nothing may say it has.
+  const delivered = await started(85);
+  expect(delivered.confirmAgentMessagesDelivered).not.toHaveBeenCalled();
+  delivered.accepted.resolve();
+  await vi.waitFor(() =>
+    expect(delivered.confirmAgentMessagesDelivered).toHaveBeenCalledExactlyOnceWith(["message-1"]),
+  );
+  delivered.fixture.close();
+
+  // A send the provider never accepted leaves the message waiting.
+  const lost = await started(86);
+  lost.accepted.reject(new Error("connection closed"));
+  await vi.waitFor(() => expect(lost.fixture.runtimeWorks().at(-1)?.state).toBe("failed"));
+  expect(lost.confirmAgentMessagesDelivered).not.toHaveBeenCalled();
+  lost.fixture.close();
 });
 
 it("keeps the selected Computer tool instead of the refusal stub when @Computer is attached", async () => {

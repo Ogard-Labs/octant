@@ -140,9 +140,11 @@ export class AgentMessageDeliveryRefused extends Error {
  * becomes an irrevocable delivery right. A carried body is untrusted external
  * content: the recipient thread journals `thread.external-content-ingested@1`
  * with an opaque source label before the body is framed as data for the turn.
- * `delivered` is journaled only once that turn was admitted, so a turn the
- * host refused leaves the message waiting for the next one. Delivery grants
- * no authority, clears no taint, and starts no turn.
+ * `delivered` is journaled only once a provider has accepted that turn's
+ * prompt and context, so a turn that was refused, cancelled, or lost to a
+ * host stop before the send leaves the message waiting for the next one. A
+ * message can therefore be carried twice, never lost. Delivery grants no
+ * authority, clears no taint, and starts no turn.
  */
 export class AgentMessageService {
   readonly #journal: Pick<Journal, "append">;
@@ -199,7 +201,8 @@ export class AgentMessageService {
    * that is about to start. A message that no longer passes is refused here;
    * the rest taint the thread before their text is returned, so nothing a
    * provider reads is untracked. Nothing is `delivered` yet: the turn may
-   * still be refused, and then the same messages are offered to the next one.
+   * still be refused or never reach a provider, and then the same messages
+   * are offered to the next one.
    */
   async carryIntoTurn(recipientThreadId: string): Promise<ReadonlyArray<CarriedAgentMessage>> {
     const deliverable: Array<{ readonly record: AgentMessageRecord; readonly byteLength: number }> =
@@ -239,7 +242,7 @@ export class AgentMessageService {
   }
 
   /**
-   * Journals `delivered` for messages a now-admitted turn carries and drops
+   * Journals `delivered` for messages a provider has now been sent and drops
    * their bodies, which nothing reads again. A message that is no longer
    * waiting — delivered already, refused, or purged — is left as it stands.
    */

@@ -462,7 +462,7 @@ export interface CodeOperationRuntimeOptions {
   readonly consumeIssueContextFramed?: CodeOperationServiceOptions["consumeIssueContextFramed"];
   /** Reads the agent messages waiting for a thread into its next turn. */
   readonly carryAgentMessages?: CodeOperationServiceOptions["carryAgentMessages"];
-  /** Records that an admitted turn carries those messages. */
+  /** Records that a provider has accepted the turn carrying those messages. */
   readonly confirmAgentMessagesDelivered?: CodeOperationServiceOptions["confirmAgentMessagesDelivered"];
   /**
    * The Project checkout a run comes home to. The host resolves the path; this
@@ -1672,6 +1672,8 @@ interface ActiveTurn {
   /** In-flight change-list recording, so a second terminal path waits instead of skipping. */
   changedFilesRecording?: Promise<void>;
   launch?: () => void;
+  /** Told once the provider has accepted this turn's prompt and context. */
+  readonly onContextDelivered?: () => void;
 }
 
 /** Why a turn carrying conversation merged back from a fork did not start. */
@@ -2132,6 +2134,9 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         previousBreakdown: recovered.priorTurnBreakdown,
       }),
       ...(input.sentContext === undefined ? {} : { sentContext: input.sentContext }),
+      ...(input.onContextDelivered === undefined
+        ? {}
+        : { onContextDelivered: input.onContextDelivered }),
       secrets,
       abort: new AbortController(),
       approvals: new Map(),
@@ -3180,6 +3185,9 @@ class RuntimeTurnController implements CodeOperationTurnPort {
               };
             }),
           ...(appManagedTools === undefined ? {} : { appManagedTools }),
+          ...(active.onContextDelivered === undefined
+            ? {}
+            : { onPromptSent: active.onContextDelivered }),
           persistEvent: (event) =>
             // The provider's own completion, interruption, or failure is
             // journaled as the turn's terminal state, ahead of the outcome
