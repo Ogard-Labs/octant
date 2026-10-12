@@ -459,8 +459,9 @@ document as a future version. Frames follow the
   by what the frame holds, and the Run control there says so. This tier has
   shipped.
 - **The thread can hold the whole Canvas.** A person may expand any Canvas in
-  its thread; the agent may ask for `inline` on a reading document without the
-  12-block cap; a running frame in the thread starts only on **Run**. Editing,
+  its thread; the agent may ask for `inline` on a reading document, or on a
+  `document`-size design that runs no script, without the 12-block cap; a
+  running frame in the thread starts only on **Run**. Editing,
   comments, and sharing stay in the sidebar, and nothing drawn in the thread
   writes a version.
 - **Agents are taught and checked.** `describe` presents the tiers with a
