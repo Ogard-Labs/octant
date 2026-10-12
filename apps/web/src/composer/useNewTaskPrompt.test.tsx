@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import {
   createNewTaskDrafts,
+  discardNewTaskDraftForPane,
   NewTaskDraftsContext,
   NewTaskDraftScopeContext,
   useNewTaskPrompt,
@@ -58,5 +59,28 @@ describe("useNewTaskPrompt", () => {
       drafts.write("chat-welcome:pane", "");
     });
     expect(screen.getByRole("textbox", { name: "Draft prompt" })).toHaveValue("");
+  });
+
+  it("discards only the named pane's persisted prompt and images", () => {
+    const drafts = createNewTaskDrafts();
+    drafts.write("chat:pane-a", "Submitted from A");
+    drafts.write("chat-welcome:pane-a", "Welcome A");
+    drafts.writeImages("chat:pane-a", [
+      new File([new Uint8Array([1])], "a.png", { type: "image/png" }),
+    ]);
+    drafts.write("chat:pane-b", "Unsent in B");
+    drafts.write("chat-welcome:pane-b", "Welcome B");
+    drafts.writeImages("chat:pane-b", [
+      new File([new Uint8Array([2])], "b.png", { type: "image/png" }),
+    ]);
+
+    discardNewTaskDraftForPane(drafts, "chat", "pane-a");
+
+    expect(drafts.read("chat:pane-a")).toBe("");
+    expect(drafts.read("chat-welcome:pane-a")).toBe("");
+    expect(drafts.readImages("chat:pane-a")).toEqual([]);
+    expect(drafts.read("chat:pane-b")).toBe("Unsent in B");
+    expect(drafts.read("chat-welcome:pane-b")).toBe("Welcome B");
+    expect(drafts.readImages("chat:pane-b")).toHaveLength(1);
   });
 });

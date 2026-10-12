@@ -1,5 +1,10 @@
 import type { WorkspaceContentTabs } from "./workspaceContentTabs";
-import { NewTaskDraftScopeContext } from "../composer/useNewTaskPrompt";
+import {
+  discardNewTaskDraftForPane,
+  NewTaskDraftsContext,
+  NewTaskDraftScopeContext,
+  type NewTaskDrafts,
+} from "../composer/useNewTaskPrompt";
 import { ComposerNoticeProvider } from "../composer/ComposerNotice";
 import { ComposerSubagentsContext } from "../composer/ComposerSubagents";
 import {
@@ -58,6 +63,7 @@ import {
   lazy,
   Suspense,
   useCallback,
+  useContext,
   useEffect,
   useMemo,
   useState,
@@ -501,6 +507,7 @@ export interface WorkspaceViewProps {
 }
 
 export function WorkspaceView(props: WorkspaceViewProps) {
+  const newTaskDrafts = useContext(NewTaskDraftsContext);
   const [pendingCanvasSelections, setPendingCanvasSelections] = useState<
     ReadonlyArray<CanvasContextSelection>
   >([]);
@@ -558,6 +565,12 @@ export function WorkspaceView(props: WorkspaceViewProps) {
       const closed = await props.onClosePane(paneId);
       if (closed === false) return false;
       if (
+        surface !== undefined &&
+        (surface.kind === "draft-thread" || surface.kind === "welcome")
+      ) {
+        discardNewTaskDraftForPane(newTaskDrafts, surface.mode, String(paneId));
+      }
+      if (
         surface?.kind === "browser" &&
         surface.threadId !== undefined &&
         props.browserAutomationClient !== undefined
@@ -575,7 +588,13 @@ export function WorkspaceView(props: WorkspaceViewProps) {
       }
       return true;
     },
-    [props.browserAutomationClient, props.codeController, props.onClosePane, props.workspace],
+    [
+      newTaskDrafts,
+      props.browserAutomationClient,
+      props.codeController,
+      props.onClosePane,
+      props.workspace,
+    ],
   );
 
   const activePaneId = props.workspace.activePaneIds[props.mode];
@@ -690,7 +709,7 @@ export function WorkspaceView(props: WorkspaceViewProps) {
                       {onWelcomeGround(
                         surface,
                         props.welcomeBackdrop,
-                        renderTab(surface, props, paneId, canvasContext),
+                        renderTab(surface, props, paneId, canvasContext, newTaskDrafts),
                       )}
                     </SurfaceLinkActionsProvider>
                   </ComposerContextMeterGate>
@@ -870,6 +889,7 @@ function renderTab(
     readonly onAttachCanvasContext: (selection: CanvasContextSelection) => void;
     readonly onRemoveCanvasSelection: (selectionId: CanvasContextSelectionId) => void;
   },
+  drafts: NewTaskDrafts | undefined,
 ): React.ReactNode {
   const openProviderSettings = props.onOpenProviderSettings ?? props.onOpenSettings;
   if (isCodeWorkspaceTab(tab)) {
@@ -879,7 +899,7 @@ function renderTab(
       </CodeThreadTabSurface>
     );
   }
-  return renderNonCodeTab(tab, props, paneId, canvasContext, openProviderSettings);
+  return renderNonCodeTab(tab, props, paneId, canvasContext, openProviderSettings, drafts);
 }
 
 /**
@@ -1265,6 +1285,7 @@ function renderNonCodeTab(
     readonly onRemoveCanvasSelection: (selectionId: CanvasContextSelectionId) => void;
   },
   openProviderSettings: (() => void) | undefined,
+  drafts: NewTaskDrafts | undefined,
 ): React.ReactNode {
   // Code's welcome tab is only a routing placeholder. Keep one start surface
   // so a split or restored fallback never sends the reader through a second
@@ -1286,6 +1307,7 @@ function renderNonCodeTab(
       paneId,
       canvasContext,
       openProviderSettings,
+      drafts,
     );
   }
   if (tab.kind === "draft-thread") {
@@ -1435,6 +1457,7 @@ function renderNonCodeTab(
             ? {}
             : { onEnsureDefaultProject: props.onEnsureDefaultProject })}
           onCancel={() => {
+            discardNewTaskDraftForPane(drafts, tab.mode, String(paneId));
             void props.onClosePane(paneId);
           }}
           {...(props.onDraftCreating === undefined ? {} : { creating: props.onDraftCreating })}

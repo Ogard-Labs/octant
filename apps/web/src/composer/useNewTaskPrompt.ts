@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useState, useSyncExternalStore } from "react";
 
-interface NewTaskDrafts {
+export interface NewTaskDrafts {
   readonly read: (scope: string) => string;
   readonly write: (scope: string, text: string) => void;
   readonly readImages: (scope: string) => ReadonlyArray<File>;
@@ -40,6 +40,26 @@ export function createNewTaskDrafts(): NewTaskDrafts {
 
 export const NewTaskDraftsContext = createContext<NewTaskDrafts | undefined>(undefined);
 export const NewTaskDraftScopeContext = createContext<string | undefined>(undefined);
+
+/**
+ * Drop a pane's persisted new-task text and images after that pane is
+ * permanently closed. Settings unmounts leave the store alone so the same
+ * draft comes back; a later default pane can reuse this pane id.
+ */
+export function discardNewTaskDraftForPane(
+  drafts: NewTaskDrafts | undefined,
+  mode: "chat" | "work" | "code",
+  paneId: string,
+): void {
+  if (drafts === undefined) return;
+  const scope = `${mode}:${paneId}`;
+  drafts.write(scope, "");
+  drafts.writeImages(scope, []);
+  if (mode === "chat") {
+    drafts.write(`chat-welcome:${paneId}`, "");
+    drafts.writeImages(`chat-welcome:${paneId}`, []);
+  }
+}
 
 const emptySubscribe = () => () => {};
 

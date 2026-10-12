@@ -8,6 +8,7 @@ import { decodeChatBootstrap, decodeChatThreadView } from "@octant/contracts/cha
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
+import { createNewTaskDrafts, NewTaskDraftsContext } from "../composer/useNewTaskPrompt";
 import { WorkspaceView, type WorkspaceViewProps } from "./WorkspaceView";
 import { stubSurfaceDragHandle } from "../App.test-fixtures";
 import { createChatReadCursorStore } from "../chat/useChatController";
@@ -154,6 +155,33 @@ describe("WorkspaceView welcome", () => {
       />,
     );
     expect(screen.getByRole("textbox", { name: "First message" })).toHaveValue("");
+  });
+
+  it("discards a canceled draft pane's attachments so a later draft does not restore them", async () => {
+    const user = userEvent.setup();
+    const drafts = createNewTaskDrafts();
+    drafts.writeImages(`code:${ids.pane}`, [
+      new File([new Uint8Array([1])], "brief.png", { type: "image/png" }),
+    ]);
+    const tab = {
+      kind: "draft-thread",
+      id: decodeWorkspaceTabId(ids.tab),
+      mode: "code",
+      title: "New Code thread",
+    } as WorkspaceTab;
+    const view = propsFor(tab);
+    render(
+      <NewTaskDraftsContext.Provider value={drafts}>
+        <WorkspaceView {...view} />
+      </NewTaskDraftsContext.Provider>,
+    );
+
+    expect(await screen.findByText("brief.png")).toBeVisible();
+    await user.click(screen.getByRole("textbox", { name: "First message" }));
+    await user.keyboard("{Escape}");
+
+    expect(view.onClosePane).toHaveBeenCalledWith(ids.pane);
+    expect(drafts.readImages(`code:${ids.pane}`)).toEqual([]);
   });
 
   it("keeps the selected Code Project context in the shared composer", async () => {

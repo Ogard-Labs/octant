@@ -4,7 +4,11 @@ import {
   readLastModelChoice,
   rememberModelChoice,
 } from "./providers/modelChoiceMemory";
-import { createNewTaskDrafts, NewTaskDraftsContext } from "./composer/useNewTaskPrompt";
+import {
+  createNewTaskDrafts,
+  discardNewTaskDraftForPane,
+  NewTaskDraftsContext,
+} from "./composer/useNewTaskPrompt";
 import { StreamRepliesContext } from "./transcript/AssistantMessageBody";
 import { ComputerUseEnabledContext } from "./computerUse/ComputerUseMention";
 import { UsageNamesProvider } from "./usage/UsageName";
@@ -927,13 +931,10 @@ function LaunchedShell(
     () => createNewTaskDrafts(),
     [props.launch.serverUrl, props.launch.windowId],
   );
-  function resetNewTaskDraft(mode: OctantMode): void {
-    const paneId = controller.workspace?.activePaneIds[mode];
-    if (paneId !== undefined) {
-      const scope = `${mode}:${String(paneId)}`;
-      newTaskDrafts.write(scope, "");
-      newTaskDrafts.writeImages(scope, []);
-      if (mode === "chat") newTaskDrafts.write(`chat-welcome:${String(paneId)}`, "");
+  function resetNewTaskDraft(mode: OctantMode, paneId?: PaneId): void {
+    const target = paneId ?? controller.workspace?.activePaneIds[mode];
+    if (target !== undefined) {
+      discardNewTaskDraftForPane(newTaskDrafts, mode, String(target));
     }
     if (mode === "code") {
       setDraftExecutionPolicy(undefined);
@@ -5841,6 +5842,10 @@ function LaunchedShell(
     permissionPersistence?: import("@octant/contracts/providers").PermissionPersistence,
     modelOptionValues?: import("@octant/contracts/providers").ProviderModelOptionValues,
   ): Promise<boolean | void> {
+    const initiatingPaneId =
+      mode === "chat" || mode === "work" || mode === "code"
+        ? controller.workspace?.activePaneIds[mode]
+        : undefined;
     setDraftCreating(true);
     setDraftError(undefined);
     setDraftPendingMessage(undefined);
@@ -5870,7 +5875,10 @@ function LaunchedShell(
           setDraftError(chatController.errorMessage ?? "The chat thread could not be created.");
           return;
         }
-        resetNewTaskDraft("chat");
+        // Clear the pane that submitted this create. The active Chat pane can
+        // change while create is in flight, and resetting that later pane
+        // would wipe an unrelated draft and leave this one restorable.
+        resetNewTaskDraft("chat", initiatingPaneId);
         let thread = result.thread;
         if (
           draftSelection !== undefined &&
