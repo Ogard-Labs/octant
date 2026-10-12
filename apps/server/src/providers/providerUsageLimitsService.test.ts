@@ -73,6 +73,41 @@ describe("ProviderUsageLimitsService", () => {
     ]);
   });
 
+  it("asks a source for a fresh reading only when a person asked, and runs that after a scheduled pass", async () => {
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const asked: boolean[] = [];
+    const observe = vi.fn(
+      async (
+        _provider: ProviderInstance,
+        _signal: AbortSignal,
+        request: { readonly onDemand: boolean },
+      ) => {
+        asked.push(request.onDemand);
+        await gate;
+        return undefined;
+      },
+    );
+    const service = new ProviderUsageLimitsService({
+      listInstances: () => [instance(firstId)],
+      observe,
+      now: () => "2026-08-23T12:00:00.000Z" as UtcTimestamp,
+    });
+
+    // The schedule's pass is still running when the person presses refresh.
+    // It never asked the costly sources, so it cannot stand in for the
+    // request: the requested pass runs once it is done.
+    const scheduled = service.refresh();
+    const requested = service.refresh({ onDemand: true });
+    const requestedAgain = service.refresh({ onDemand: true });
+    release?.();
+    await Promise.all([scheduled, requested, requestedAgain]);
+
+    expect(asked).toEqual([false, true]);
+  });
+
   it("uses live normalized runtime windows when no active provider observer exists", async () => {
     const observedAt = "2026-08-23T12:00:00.000Z" as UtcTimestamp;
     const service = new ProviderUsageLimitsService({

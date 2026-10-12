@@ -45,8 +45,15 @@ class FakeQuery implements ClaudeAgentSdkQueryLike {
   readonly close = vi.fn(() => undefined);
   readonly setMcpServers = vi.fn(async () => ({ added: ["octant"], removed: [], errors: {} }));
   getContextUsage?: () => Promise<unknown>;
+  planUsage: unknown = { rate_limits_available: true, rate_limits: null };
 
   constructor(private readonly output: readonly unknown[]) {}
+
+  // A prototype method that reads `this`, as the SDK's own is. A detached
+  // call reaches it with `this` undefined and throws.
+  async usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET(): Promise<unknown> {
+    return this.planUsage;
+  }
 
   async *[Symbol.asyncIterator](): AsyncIterator<unknown> {
     yield* this.output;
@@ -507,6 +514,26 @@ describe("Claude Agent SDK port", () => {
         }),
       ),
     );
+  });
+
+  test("reads plan usage from the process through the query it belongs to", async () => {
+    const harness = makeHarness();
+    harness.query.planUsage = {
+      rate_limits_available: true,
+      rate_limits: { five_hour: { utilization: 40 } },
+    };
+    const payload = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const query = yield* harness.port.openQuery(openInput);
+          return yield* query.readPlanUsage();
+        }),
+      ),
+    );
+    expect(payload).toEqual({
+      rate_limits_available: true,
+      rate_limits: { five_hour: { utilization: 40 } },
+    });
   });
 
   test("normalizes controls, redacts account identity, and closes idempotently", async () => {

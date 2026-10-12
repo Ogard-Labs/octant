@@ -35,6 +35,8 @@ export interface ProviderUsageLimitsServiceOptions {
   readonly observe: (
     instance: ProviderInstance,
     signal: AbortSignal,
+    /** `onDemand` is true only for a refresh a person asked for. */
+    request: { readonly onDemand: boolean },
   ) => Promise<ProviderUsageLimitsObservation | undefined>;
   /** Latest normalized runtime evidence, if a live session has reported it. */
   readonly runtimeLimits?: (
@@ -91,6 +93,7 @@ export class ProviderUsageLimitsService {
   readonly #entries = new Map<string, ProviderUsageLimitsEntry>();
   readonly #runtimeOrigins = new Map<string, RuntimeEvidenceOrigin>();
   #inFlight: Promise<ProviderUsageLimitsSnapshot> | undefined;
+  #inFlightOnDemand = false;
   #refreshAbortController: AbortController | undefined;
   #scheduleHandle: ReturnType<typeof setInterval> | undefined;
 
@@ -102,11 +105,25 @@ export class ProviderUsageLimitsService {
     return this.#snapshot(this.#options.now());
   }
 
-  refresh(): Promise<ProviderUsageLimitsSnapshot> {
-    if (this.#inFlight !== undefined) return this.#inFlight;
+  /**
+   * `onDemand` marks a refresh a person asked for. Only that kind reaches a
+   * source whose reading starts the provider's process; the schedule never
+   * does.
+   */
+  refresh(request: { readonly onDemand?: boolean } = {}): Promise<ProviderUsageLimitsSnapshot> {
+    const onDemand = request.onDemand === true;
+    const inFlight = this.#inFlight;
+    if (inFlight !== undefined) {
+      // A scheduled pass cannot answer a request for a fresh reading, because
+      // it never asked the costly sources. The requested pass runs after it.
+      if (!onDemand || this.#inFlightOnDemand) return inFlight;
+      const again = () => this.refresh(request);
+      return inFlight.then(again, again);
+    }
     const abortController = new AbortController();
     this.#refreshAbortController = abortController;
-    const running = this.#refresh(abortController.signal).finally(() => {
+    this.#inFlightOnDemand = onDemand;
+    const running = this.#refresh(abortController.signal, onDemand).finally(() => {
       if (this.#inFlight === running) this.#inFlight = undefined;
       if (this.#refreshAbortController === abortController) {
         this.#refreshAbortController = undefined;
@@ -133,12 +150,12 @@ export class ProviderUsageLimitsService {
     this.#scheduleHandle = undefined;
   }
 
-  async #refresh(signal: AbortSignal): Promise<ProviderUsageLimitsSnapshot> {
+  async #refresh(signal: AbortSignal, onDemand: boolean): Promise<ProviderUsageLimitsSnapshot> {
     const observedAt = this.#options.now();
     const instances = this.#options.listInstances();
     this.#pruneRuntimeOrigins(instances);
     const next = await Promise.all(
-      instances.map((instance) => this.#observe(instance, observedAt, signal)),
+      instances.map((instance) => this.#observe(instance, observedAt, signal, onDemand)),
     );
     if (signal.aborted) return this.#snapshot(this.#options.now());
     this.#entries.clear();
@@ -150,6 +167,7 @@ export class ProviderUsageLimitsService {
     instance: ProviderInstance,
     observedAt: UtcTimestamp,
     refreshSignal: AbortSignal,
+    onDemand: boolean,
   ): Promise<ProviderUsageLimitsEntry> {
     const key = String(instance.id);
     const previous = this.#entries.get(key);
@@ -172,7 +190,7 @@ export class ProviderUsageLimitsService {
     refreshSignal.addEventListener("abort", onRefreshAbort, { once: true });
     try {
       const observation = await Promise.race([
-        this.#options.observe(instance, controller.signal),
+        this.#options.observe(instance, controller.signal, { onDemand }),
         new Promise<never>((_, reject) => {
           timeoutId = setTimeout(() => {
             controller.abort(new ProviderUsageLimitsTimeout());

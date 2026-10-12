@@ -855,7 +855,7 @@ function makeClaudeContextFacts(
 ): ProviderContextFactsSource {
   return {
     observeModelLimits: () => Effect.succeed([]),
-    observeServiceLimits: ({ instanceId }) =>
+    observeServiceLimits: ({ instanceId, onDemand }) =>
       Effect.gen(function* () {
         if (instanceId !== options.instanceId) {
           return yield* Effect.fail(
@@ -864,6 +864,15 @@ function makeClaudeContextFacts(
         }
         if (options.authentication === "api-key") {
           return yield* Effect.fail(failure("unsupported", "Plan limits do not apply."));
+        }
+        // This reading starts a `claude` process. That is worth it when a
+        // person asks for it. On the five-minute schedule and before a Chat
+        // turn it is not: the host keeps what a session or an earlier
+        // request last reported.
+        if (onDemand !== true) {
+          return yield* Effect.fail(
+            failure("unavailable", "Claude plan usage is read on request."),
+          );
         }
         const environment = yield* environmentFactory(
           "subscription",

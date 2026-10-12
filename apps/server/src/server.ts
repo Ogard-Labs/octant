@@ -4554,7 +4554,7 @@ export function startOctantServer(
               instance.driverKind,
               providerRuntimeUsageLimitsStore.lastCompletedTurn(instance.id),
             ),
-      observe: async (instance, signal) => {
+      observe: async (instance, signal, { onDemand }) => {
         if (
           instance.driverKind === "claude" &&
           instance.configuration.authentication === "api-key"
@@ -4572,7 +4572,14 @@ export function startOctantServer(
         const facts = driver.contextFacts;
         if (facts === undefined) return undefined;
         const outcome = await Effect.runPromise(
-          Effect.scoped(Effect.either(facts.observeServiceLimits({ instanceId: instance.id }))),
+          Effect.scoped(
+            Effect.either(
+              facts.observeServiceLimits({
+                instanceId: instance.id,
+                ...(onDemand ? { onDemand: true } : {}),
+              }),
+            ),
+          ),
           { signal },
         );
         if (outcome._tag === "Left") {

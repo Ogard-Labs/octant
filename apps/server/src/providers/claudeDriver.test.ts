@@ -4385,7 +4385,7 @@ describe("Claude account sign-in", () => {
     await recreated.close();
   });
 
-  it("reads plan usage from the Claude process and never opens a query for an API-key account", async () => {
+  it("reads plan usage from the Claude process only on request and never for an API-key account", async () => {
     const subscription = harness("subscription", "current-session", {
       configDirectory: "/Users/example/.claude",
     });
@@ -4409,8 +4409,18 @@ describe("Claude account sign-in", () => {
     );
     const facts = subscription.driver.contextFacts;
     expect(facts).toBeDefined();
+    // The schedule and the Chat send path ask without `onDemand`. The reading
+    // starts a `claude` process, so that question is answered without one.
+    const unasked = await Effect.runPromise(
+      Effect.scoped(Effect.either(facts!.observeServiceLimits({ instanceId }))),
+    );
+    expect(unasked._tag === "Left" ? unasked.left : undefined).toMatchObject({
+      category: "unavailable",
+    });
+    expect(subscription.queries).toHaveLength(0);
+
     const limits = await Effect.runPromise(
-      Effect.scoped(facts!.observeServiceLimits({ instanceId })),
+      Effect.scoped(facts!.observeServiceLimits({ instanceId, onDemand: true })),
     );
     expect(limits.rateLimitWindows).toEqual([
       expect.objectContaining({ window: "five_hour", utilization: 0.5 }),
@@ -4422,7 +4432,7 @@ describe("Claude account sign-in", () => {
     });
     const apiFacts = apiKey.driver.contextFacts;
     const exit = await Effect.runPromise(
-      Effect.scoped(Effect.either(apiFacts!.observeServiceLimits({ instanceId }))),
+      Effect.scoped(Effect.either(apiFacts!.observeServiceLimits({ instanceId, onDemand: true }))),
     );
     expect(exit._tag).toBe("Left");
     if (exit._tag === "Left") {
