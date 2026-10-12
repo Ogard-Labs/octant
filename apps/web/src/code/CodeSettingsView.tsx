@@ -246,6 +246,7 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
           <SettingRow
             description="Used when a Code thread has no stored layout of its own."
             label="Default diff layout"
+            focused={props.focusedSetting === "code-default-diff-layout"}
             scope="mode"
             settingId="code-default-diff-layout"
           >

@@ -106,6 +106,21 @@ describe("CodeSettingsView", () => {
     ).not.toBeNull();
   });
 
+  it("marks the default diff layout row when Settings search lands on it", () => {
+    render(
+      <CodeSettingsView
+        focusedSetting="code-default-diff-layout"
+        onUpdate={async () => true}
+        settings={settings as never}
+      />,
+    );
+
+    expect(screen.getByRole("group", { name: "Default diff layout setting" })).toHaveAttribute(
+      "data-focused",
+      "true",
+    );
+  });
+
   it("keeps a default diff layout the moment it is chosen, with no Save step", async () => {
     const update = vi.fn(async () => true);
     const user = userEvent.setup();

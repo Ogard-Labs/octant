@@ -29,7 +29,7 @@ async function chooseSideBySide() {
 
 describe("CodeDiffPane", () => {
   beforeEach(() => {
-    localStorage.clear();
+    sessionStorage.clear();
   });
 
   it("stacks every changed file with its numbered lines by default", async () => {

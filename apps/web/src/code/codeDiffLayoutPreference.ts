@@ -50,7 +50,7 @@ function readStoredLayouts(
 
 function defaultStorage(): Storage | undefined {
   try {
-    return typeof localStorage === "undefined" ? undefined : localStorage;
+    return typeof sessionStorage === "undefined" ? undefined : sessionStorage;
   } catch {
     return undefined;
   }
