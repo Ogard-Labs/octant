@@ -58,7 +58,6 @@
     "./work-project-status-policy": "./src/workProjectStatusPolicy.ts",
     "./work-research-policy": "./src/workResearchPolicy.ts",
     "./event-policy": "./src/eventPolicy.ts",
-    "./execution-capsule-policy": "./src/executionCapsulePolicy.ts",
     "./thread-retention-policy": "./src/threadRetentionPolicy.ts",
     "./thread-completion-policy": "./src/threadCompletionPolicy.ts",
     "./managed-device-stream": "./src/managedDeviceStream.ts",
