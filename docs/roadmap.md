@@ -108,12 +108,10 @@ Hardening in progress for the preview:
   hosts, show an `All Hosts` view, and choose the destination host per new
   thread. Hosts never trust each other; offline host data is stale and
   read-only.
-  - The first isolation tracer is in progress: a Linux Station owns one gVisor
-    execution capsule per Code thread or writing child, with independent clones,
-    fixed-size private disk images, resource admission, deny-default networking,
-    reviewed bundle export, and explicit release. Product thread wiring,
-    Station provisioning, Devices and Machines navigation, and E2B Disposable
-    Desktops remain separate follow-up deliveries.
+  - Per-thread isolation on a Linux Station is not built: Code threads on a
+    Linux host run under the same Bubblewrap confinement as every other
+    confined process. Station provisioning, Devices and Machines navigation,
+    and E2B Disposable Desktops remain separate follow-up deliveries.
 - **Canvas artifacts** — provider-neutral interactive reports, dashboards, and
   agent controls with journaled lifecycle; sharing only after secure local use.
 - **Native agent harness** — Octant-owned agent loop for direct and local

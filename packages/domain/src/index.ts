@@ -72,7 +72,6 @@ export * from "./threadCompletionPolicy";
 export * from "./threadExportPolicy";
 export * from "./threadHandOffPolicy";
 export * from "./eventPolicy";
-export * from "./executionCapsulePolicy";
 export * from "./goalPolicy";
 export * from "./goalLoopPolicy";
 export * from "./shipPolicy";

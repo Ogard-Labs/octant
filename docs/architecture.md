@@ -2441,7 +2441,7 @@ native harness in `apps/server/src/harness`:
   resolved, edits require a prior read); `bash` writes the command to a
   script in its own subdirectory of `harness/scripts` and runs it through the
   same confined owned-process-group port as repository tests (Seatbelt on
-  macOS, the bubblewrap capsule on Linux), so a timeout or cancel ends the
+  macOS, the bubblewrap sandbox on Linux), so a timeout or cancel ends the
   whole tree. That port refuses a shell as a test command's `argv[0]`, so a
   test argv stays literal; the harness's only way to a shell is its separate
   script entry point, which the two harness ports alone enable and which runs
@@ -3394,32 +3394,6 @@ mechanisms are:
   Archiving the Project, relinking its root, turning its mode off, the window
   moving to another Project, or the window's authority ending closes it. On the desktop app the page is a live native view; elsewhere the
   host drives a headless page and shows its picture.
-- **Linux Station isolation tracer, not product-wired.** The server now has a
-  provider-neutral execution-capsule service plus a rootless Podman and gVisor
-  `systrap` driver. The tracer accepts only digest-pinned images, independent
-  clones created inside gVisor from owner-only source bundles, explicit
-  resource budgets, no network, and no host bind mounts. Each capsule's full
-  persistent Podman VFS graph store lives in an owner-only fixed-size ext4
-  image mounted through `fuse2fs`, so its image, dependencies, and clone share
-  one hard disk ceiling without privileged project-quota administration. Its
-  disposable Podman runroot is a short owned runtime directory preserved long
-  enough for recovery to inspect and stop a surviving runtime, then removed
-  through Podman's mapped user namespace on release. Intermediate Podman state
-  paths may be owner-controlled and traverse-only, while backing images remain
-  owner-only. A transient systemd
-  user scope owns the outer CPU, memory, and PID limits. The driver and
-  independent evidence derive their effective values from the live sandbox
-  process cgroup ancestry before accepting it. The tracer can
-  execute argv, verify and
-  export a Git bundle, stop without deleting the filesystem, recover only as
-  stopped after live-authority revalidation, briefly restart a stopped capsule
-  inside its verified budget to export it, and release the exact runtime after
-  an explicit export. A dedicated Linux CI job proves two real capsules
-  cannot see or signal one another. Ordinary Code threads do not use this
-  service yet: on a Linux host they run under Bubblewrap like every other
-  confined process (see Sandbox above), and only the protected capsule remains
-  an unavailable destination until the AgentRun and Station launch paths are
-  wired and revalidated.
 - **Side Chat reads.** A Side Chat may read its source thread's transcript,
   state, and files; it never inherits the source's Work or Code execution
   authority. The file tools (`octant_side_chat_list_files`,
