@@ -1,4 +1,4 @@
-import type { CodeSettings } from "@octant/contracts/code";
+import type { CodeDiffLayout, CodeSettings } from "@octant/contracts/code";
 import type { SettingsSettingId } from "@octant/contracts";
 import { useState } from "react";
 import { SettingRow, SettingsSection } from "../settings/primitives";
@@ -15,6 +15,7 @@ export interface CodeSettingsUpdate {
   readonly externalEditor?: NonNullable<CodeSettings["externalEditor"]>;
   readonly requireGitRepository?: boolean;
   readonly allowDefaultFolderThreads?: boolean;
+  readonly defaultDiffLayout?: CodeDiffLayout;
 }
 
 interface CodeSettingsDraft {
@@ -22,6 +23,7 @@ interface CodeSettingsDraft {
   readonly permissionPersistence: CodeSettings["defaultPermissionPersistence"];
   readonly requireGitRepository: boolean;
   readonly allowDefaultFolderThreads: boolean;
+  readonly defaultDiffLayout: CodeDiffLayout;
   readonly executable: string;
   readonly argumentsText: string;
 }
@@ -53,6 +55,9 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
   const [allowDefaultFolderThreads, setAllowDefaultFolderThreads] = useState(
     props.settings.allowDefaultFolderThreads,
   );
+  const [defaultDiffLayout, setDefaultDiffLayout] = useState(
+    props.settings.defaultDiffLayout ?? "unified",
+  );
   const [executable, setExecutable] = useState(props.settings.externalEditor?.executable ?? "");
   const [argumentsText, setArgumentsText] = useState(
     props.settings.externalEditor?.arguments.join("\n") ?? "",
@@ -80,6 +85,11 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
         ? props.settings.allowDefaultFolderThreads
         : current,
     );
+    setDefaultDiffLayout((current) =>
+      current === (previousSettings.defaultDiffLayout ?? "unified")
+        ? (props.settings.defaultDiffLayout ?? "unified")
+        : current,
+    );
     setExecutable((current) =>
       current === (previousSettings.externalEditor?.executable ?? "")
         ? (props.settings.externalEditor?.executable ?? "")
@@ -105,6 +115,7 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
       permissionPersistence,
       requireGitRepository,
       allowDefaultFolderThreads,
+      defaultDiffLayout,
       executable,
       argumentsText,
       ...change,
@@ -129,6 +140,7 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
         defaultPermissionPersistence: draft.permissionPersistence,
         requireGitRepository: draft.requireGitRepository,
         allowDefaultFolderThreads: draft.allowDefaultFolderThreads,
+        defaultDiffLayout: draft.defaultDiffLayout,
         ...(trimmedExecutable === ""
           ? {}
           : {
@@ -148,7 +160,7 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
     <section aria-label="Code defaults" className="code-settings">
       <h2 className="sr-only">Code defaults</h2>
       <SettingsSection
-        description="These defaults apply only to new Code threads. Existing threads keep their access."
+        description="Access defaults apply only to new Code threads. Existing threads keep their access. The diff layout default is used until a thread has its own choice."
         title="Thread defaults"
       >
         <div className="setgroup">
@@ -230,6 +242,26 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
                 void commit({ allowDefaultFolderThreads: checked });
               }}
             />
+          </SettingRow>
+          <SettingRow
+            description="Used when a Code thread has no stored layout of its own."
+            label="Default diff layout"
+            scope="mode"
+            settingId="code-default-diff-layout"
+          >
+            <OctantToggleGroup<CodeDiffLayout>
+              aria-label="Default diff layout"
+              onValueChange={(value) => {
+                const selected = value[0];
+                if (selected === undefined) return;
+                setDefaultDiffLayout(selected);
+                void commit({ defaultDiffLayout: selected });
+              }}
+              value={[defaultDiffLayout]}
+            >
+              <OctantToggleGroupItem value="unified">Unified</OctantToggleGroupItem>
+              <OctantToggleGroupItem value="side-by-side">Side by side</OctantToggleGroupItem>
+            </OctantToggleGroup>
           </SettingRow>
         </div>
       </SettingsSection>

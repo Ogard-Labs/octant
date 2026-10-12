@@ -357,6 +357,10 @@ export const CodeExternalEditor = Schema.Struct({
 }).annotations(strict);
 export type CodeExternalEditor = typeof CodeExternalEditor.Type;
 
+/** How Review shows a checkout diff: stacked files, or one file beside its pair. */
+export const CodeDiffLayout = Schema.Literal("unified", "side-by-side");
+export type CodeDiffLayout = typeof CodeDiffLayout.Type;
+
 export const CodeSettings = Schema.Struct({
   defaultExecutionPolicy: ProviderExecutionPolicy,
   defaultPermissionPersistence: PermissionPersistence,
@@ -377,6 +381,11 @@ export const CodeSettings = Schema.Struct({
    * whose thread could never start. Off for a store persisted before it existed.
    */
   allowDefaultFolderThreads: Schema.optionalWith(Schema.Boolean, { default: () => false }),
+  /**
+   * The Review layout a Code thread uses until this window stores one for it.
+   * A store persisted before the choice existed decodes to unified.
+   */
+  defaultDiffLayout: Schema.optionalWith(CodeDiffLayout, { default: () => "unified" }),
   version: AggregateVersion,
   updatedAt: UtcTimestamp,
 }).annotations(strict);
@@ -583,6 +592,7 @@ export const CodeCommand = Schema.Union(
     externalEditor: Schema.optional(CodeExternalEditor),
     requireGitRepository: Schema.optional(Schema.Boolean),
     allowDefaultFolderThreads: Schema.optional(Schema.Boolean),
+    defaultDiffLayout: Schema.optional(CodeDiffLayout),
   }).annotations(strict),
   CreateCodeThreadCommand,
   Schema.Struct({

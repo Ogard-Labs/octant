@@ -146,6 +146,7 @@ describe("octantSettingsRegistry", () => {
     const code = octantSettingsRegistry.sections.find((section) => section.id === "code");
     expect(code?.settings.map((setting) => setting.id)).toEqual([
       "code-default-folder-threads",
+      "code-default-diff-layout",
       "project-view-switcher",
     ]);
     const chat = octantSettingsRegistry.sections.find((section) => section.id === "chat");

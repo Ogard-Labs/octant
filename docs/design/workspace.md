@@ -108,7 +108,9 @@ see [decisions/0088-completed-and-snoozed-threads.md](../decisions/0088-complete
 
 The **Review page** lists the threads the sidebar's To review count counts, by
 the same predicate (`isWaitingForReview`: unread, not working, not on a shelf),
-so the tile's number and the page's rows never disagree. Rows run oldest
+so the tile's number and the page's rows never disagree. A Code thread's
+checkout diff remembers Unified or Side by side in this window; Settings ›
+Code supplies the default only while that thread has no stored choice. Rows run oldest
 first, by the host's reported finish time where it has one. The detail panel
 reads the thread's last reply, the Code board's check facts, an Octant-run
 check after the last turn where one exists, and the checkout's diff; Chat rows
