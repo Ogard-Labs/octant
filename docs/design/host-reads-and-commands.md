@@ -62,6 +62,14 @@ a failed turn state and no reason, which counts as nothing running.
 Hand off is `POST /api/threads/hand-off`. The behavior rule is in
 [Workspace: tool lifecycles](workspace.md#tool-lifecycles).
 
+## Browser captures
+
+A thread's kept Browser screenshots are `POST /api/browser/captures` (the
+retained list, newest first) and `POST /api/browser/captures/image` (one
+picture as an image data URL). Both are local-window only. The behavior rule is
+in [Workspace: tool lifecycles](workspace.md#tool-lifecycles); retention and
+authority are in [Architecture: persistence](../architecture.md#persistence).
+
 ## GitHub issues
 
 The issue browser's catalogue reads stay on the existing `githubCatalogue`

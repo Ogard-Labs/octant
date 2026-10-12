@@ -326,7 +326,19 @@ chrome. It holds a skeleton at the page's aspect ratio until the
 first frame and never prints status prose. It reads the same host snapshot the
 Browser pane reads, asks for a fresh picture only while it is on screen, pauses
 with the window, and backs off while the page does not change. Computer Use keeps
-its separate card. The iOS Simulator and Android emulator are separate device destinations. An
+its separate card. **Browser captures.** A thread that kept screenshots shows a
+_Browser captures_ strip in its transcript, beside the generated images, in
+Chat, Work, and Code. Only the agent's explicit `screenshot` and the person's
+own screenshot in the Browser pane are kept (see
+[Architecture: persistence](../architecture.md#persistence)); the picture taken
+after any other action is not. The strip lists the thread's newest 32 captures,
+newest first, each as a small picture with the page title (the origin when the
+page has none) and its origin. It is absent until the thread has one, and it
+never appears in the Canvas library. Choosing a capture opens the full picture
+with its URL and time as a workspace content view, or in place where no
+workspace is available. The strip reads the host every few seconds while the
+window is visible and shows a picture that cannot be read as unavailable rather
+than leaving a blank. The iOS Simulator and Android emulator are separate device destinations. An
 agent's device open raises the relevant in-app pane once per request. Both use
 one device-first pane that adapts to its container's width: a toolbar (device
 switcher, OS and state in words, Back on Android, Home, Screenshot, Lock when
