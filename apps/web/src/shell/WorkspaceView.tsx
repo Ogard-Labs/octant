@@ -4,8 +4,10 @@ import {
   discardNewTaskDraftForPane,
   NewTaskDraftsContext,
   NewTaskDraftScopeContext,
+  paneDraftsToDiscard,
   projectOverviewDraftsToDiscard,
   type NewTaskDrafts,
+  type PaneDraftRef,
   type ProjectOverviewDraftRef,
 } from "../composer/useNewTaskPrompt";
 import { ComposerNoticeProvider } from "../composer/ComposerNotice";
@@ -195,8 +197,11 @@ export interface WorkspaceViewProps {
    * pane grips feed the same drag. Its root ref lands on the split workspace.
    */
   readonly drag: WorkspaceSurfaceDragHandle;
-  /** Remounts an already-open draft when the global New thread action starts over. */
-  readonly draftResetRevision?: number;
+  /**
+   * Remounts one already-open draft when New thread starts over in that pane.
+   * Other split drafts keep their local composer state.
+   */
+  readonly draftResetRevisions?: Readonly<Record<string, number>>;
   /**
    * The Project each mode's unbound draft composer last targeted. The draft
    * unmounts while Settings covers the workspace; without this the composer
@@ -522,14 +527,22 @@ export interface WorkspaceViewProps {
 export function WorkspaceView(props: WorkspaceViewProps) {
   const newTaskDrafts = useContext(NewTaskDraftsContext);
   const previousProjectOverviews = useRef<ReadonlyArray<ProjectOverviewDraftRef>>([]);
+  const previousPaneDrafts = useRef<ReadonlyArray<PaneDraftRef>>([]);
   const previousWorkspaceVersion = useRef<ShellBootstrap["workspaceVersion"] | undefined>(
     undefined,
   );
   useLayoutEffect(() => {
-    const current = collectProjectOverviews(props.workspace);
-    const dropped = projectOverviewDraftsToDiscard(
+    const currentOverviews = collectProjectOverviews(props.workspace);
+    const currentPaneDrafts = collectPaneDrafts(props.workspace);
+    const droppedOverviews = projectOverviewDraftsToDiscard(
       previousProjectOverviews.current,
-      current,
+      currentOverviews,
+      previousWorkspaceVersion.current,
+      props.workspaceVersion,
+    );
+    const droppedPanes = paneDraftsToDiscard(
+      previousPaneDrafts.current,
+      currentPaneDrafts,
       previousWorkspaceVersion.current,
       props.workspaceVersion,
     );
@@ -538,11 +551,15 @@ export function WorkspaceView(props: WorkspaceViewProps) {
       props.workspaceVersion === undefined ||
       String(previousWorkspaceVersion.current) !== String(props.workspaceVersion)
     ) {
-      previousProjectOverviews.current = current;
+      previousProjectOverviews.current = currentOverviews;
+      previousPaneDrafts.current = currentPaneDrafts;
       previousWorkspaceVersion.current = props.workspaceVersion;
     }
-    for (const surface of dropped) {
+    for (const surface of droppedOverviews) {
       discardNewTaskDraftForOverview(newTaskDrafts, surface.mode, surface.projectId);
+    }
+    for (const surface of droppedPanes) {
+      discardNewTaskDraftForPane(newTaskDrafts, surface.mode, surface.paneId);
     }
   }, [newTaskDrafts, props.workspace, props.workspaceVersion]);
   const [pendingCanvasSelections, setPendingCanvasSelections] = useState<
@@ -1357,7 +1374,7 @@ function renderNonCodeTab(
       <NewTaskDraftScopeContext.Provider value={`${tab.mode}:${String(paneId)}`}>
         <DraftThreadWorkspace
           greetingName={props.greetingName}
-          key={`${String(paneId)}:${tab.mode}:${String(props.draftResetRevision ?? 0)}`}
+          key={`${String(paneId)}:${tab.mode}:${String(props.draftResetRevisions?.[String(paneId)] ?? 0)}`}
           {...(recentThreads.length === 0 ? {} : { recentThreads })}
           mode={tab.mode}
           {...(props.hosts === undefined ? {} : { hosts: props.hosts })}
@@ -2412,12 +2429,33 @@ function collectProjectOverviews(
   workspace: WorkspaceViewProps["workspace"],
 ): ReadonlyArray<ProjectOverviewDraftRef> {
   const found: ProjectOverviewDraftRef[] = [];
+  visitWorkspacePanes(workspace, (_paneId, surface) => {
+    if (surface.kind === "project" && (surface.mode === "chat" || surface.mode === "work")) {
+      found.push({ mode: surface.mode, projectId: String(surface.projectId) });
+    }
+  });
+  return found;
+}
+
+function collectPaneDrafts(
+  workspace: WorkspaceViewProps["workspace"],
+): ReadonlyArray<PaneDraftRef> {
+  const found: PaneDraftRef[] = [];
+  visitWorkspacePanes(workspace, (paneId, surface) => {
+    if (surface.kind === "draft-thread" || surface.kind === "welcome") {
+      found.push({ mode: surface.mode, paneId });
+    }
+  });
+  return found;
+}
+
+function visitWorkspacePanes(
+  workspace: WorkspaceViewProps["workspace"],
+  visitPane: (paneId: string, surface: WorkspaceTab) => void,
+): void {
   const visit = (layout: WorkspaceLayoutNode): void => {
     if (layout.kind === "pane") {
-      const surface = layout.surface;
-      if (surface.kind === "project" && (surface.mode === "chat" || surface.mode === "work")) {
-        found.push({ mode: surface.mode, projectId: String(surface.projectId) });
-      }
+      visitPane(String(layout.paneId), layout.surface);
       return;
     }
     visit(layout.first);
@@ -2426,7 +2464,6 @@ function collectProjectOverviews(
   visit(workspace.layouts.chat);
   visit(workspace.layouts.work);
   visit(workspace.layouts.code);
-  return found;
 }
 
 function findWorkspacePane(

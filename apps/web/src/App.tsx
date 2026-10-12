@@ -926,7 +926,9 @@ function LaunchedShell(
   }
   const [draftCreating, setDraftCreating] = useState(false);
   const [draftError, setDraftError] = useState<string>();
-  const [draftResetRevision, setDraftResetRevision] = useState(0);
+  const [draftResetRevisions, setDraftResetRevisions] = useState<Readonly<Record<string, number>>>(
+    {},
+  );
   const newTaskDrafts = useMemo(
     () => createNewTaskDrafts(),
     [props.launch.serverUrl, props.launch.windowId],
@@ -934,14 +936,18 @@ function LaunchedShell(
   function resetNewTaskDraft(mode: OctantMode, paneId?: PaneId): void {
     const target = paneId ?? controller.workspace?.activePaneIds[mode];
     if (target !== undefined) {
-      discardNewTaskDraftForPane(newTaskDrafts, mode, String(target));
+      const paneKey = String(target);
+      discardNewTaskDraftForPane(newTaskDrafts, mode, paneKey);
+      setDraftResetRevisions((current) => ({
+        ...current,
+        [paneKey]: (current[paneKey] ?? 0) + 1,
+      }));
     }
     if (mode === "code") {
       setDraftExecutionPolicy(undefined);
       setDraftPermissionPersistence(undefined);
       setPendingDraftBranch(undefined);
     }
-    setDraftResetRevision((revision) => revision + 1);
   }
   // The Project an unbound draft composer targets, per mode. The draft lives
   // in local state and unmounts while Settings covers the workspace; this is
@@ -7344,7 +7350,7 @@ function LaunchedShell(
                           onCreated: openCreatedFollowUp,
                         }}
                         greetingName={controller.settings?.userProfile.displayName}
-                        draftResetRevision={draftResetRevision}
+                        draftResetRevisions={draftResetRevisions}
                         draftProjectSelection={draftProjectSelection}
                         onDraftSelectProject={(mode, projectId) => {
                           // Choosing a folder in the composer is the authority

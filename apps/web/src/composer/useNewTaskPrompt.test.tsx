@@ -6,6 +6,7 @@ import {
   discardNewTaskDraftForPane,
   NewTaskDraftsContext,
   NewTaskDraftScopeContext,
+  paneDraftsToDiscard,
   projectOverviewDraftsToDiscard,
   useNewTaskPrompt,
 } from "./useNewTaskPrompt";
@@ -142,5 +143,20 @@ describe("useNewTaskPrompt", () => {
     expect(
       projectOverviewDraftsToDiscard([{ mode: "chat", projectId: "project-a" }], [], 1),
     ).toEqual([]);
+  });
+
+  it("drops a pane draft only after that start surface is no longer open", () => {
+    expect(
+      paneDraftsToDiscard(
+        [
+          { mode: "code", paneId: "pane-a" },
+          { mode: "chat", paneId: "pane-b" },
+        ],
+        [{ mode: "chat", paneId: "pane-b" }],
+        1,
+        2,
+      ),
+    ).toEqual([{ mode: "code", paneId: "pane-a" }]);
+    expect(paneDraftsToDiscard([{ mode: "code", paneId: "pane-a" }], [], 1, 1)).toEqual([]);
   });
 });

@@ -151,10 +151,63 @@ describe("WorkspaceView welcome", () => {
       <WorkspaceView
         {...makeProps(first, decodeWorkspaceTabId(ids.tab))}
         projects={projects}
-        draftResetRevision={1}
+        draftResetRevisions={{ [ids.pane]: 1 }}
       />,
     );
     expect(screen.getByRole("textbox", { name: "First message" })).toHaveValue("");
+  });
+
+  it("clears only the draft pane whose reset revision moved", async () => {
+    const otherPane = "10000000-0000-4000-8000-000000000033";
+    const first = codeProject("active");
+    const left = propsFor({
+      kind: "draft-thread",
+      id: decodeWorkspaceTabId(ids.tab),
+      mode: "code",
+      title: "New Code thread",
+      projectId: first.id,
+    });
+    const rightTab = {
+      kind: "draft-thread",
+      id: decodeWorkspaceTabId(codeIds.thread),
+      mode: "code",
+      title: "New Code thread",
+      projectId: first.id,
+    } as WorkspaceTab;
+    const split = {
+      kind: "split",
+      nodeId: "10000000-0000-4000-8000-000000000031",
+      orientation: "horizontal",
+      ratio: 0.5,
+      first: left.layout,
+      second: {
+        kind: "pane",
+        nodeId: "10000000-0000-4000-8000-000000000032",
+        paneId: otherPane,
+        surface: rightTab,
+      },
+    } as never as WorkspaceViewProps["layout"];
+    const view = (revisions?: Readonly<Record<string, number>>) => (
+      <WorkspaceView
+        {...left}
+        layout={split}
+        projects={[first]}
+        workspace={
+          { ...left.workspace, layouts: { ...left.workspace.layouts, code: split } } as never
+        }
+        {...(revisions === undefined ? {} : { draftResetRevisions: revisions })}
+      />
+    );
+    const { rerender } = render(view());
+    const composers = await screen.findAllByRole("textbox", { name: "First message" });
+    expect(composers).toHaveLength(2);
+    await userEvent.type(composers[0]!, "Left draft");
+    await userEvent.type(composers[1]!, "Right draft");
+
+    rerender(view({ [ids.pane]: 1 }));
+    const after = screen.getAllByRole("textbox", { name: "First message" });
+    expect(after[0]).toHaveValue("");
+    expect(after[1]).toHaveValue("Right draft");
   });
 
   it("discards a canceled draft pane's attachments so a later draft does not restore them", async () => {
@@ -211,6 +264,106 @@ describe("WorkspaceView welcome", () => {
     await user.keyboard("{Escape}");
 
     expect(view.onClosePane).toHaveBeenCalledWith(ids.pane);
+    expect(drafts.readImages(`code:${ids.pane}`)).toHaveLength(1);
+    expect(screen.getByText("brief.png")).toBeVisible();
+  });
+
+  it("discards a Code draft's attachments when that start surface is replaced", async () => {
+    const drafts = createNewTaskDrafts();
+    drafts.writeImages(`code:${ids.pane}`, [
+      new File([new Uint8Array([1])], "brief.png", { type: "image/png" }),
+    ]);
+    const draft = {
+      kind: "draft-thread",
+      id: decodeWorkspaceTabId(ids.tab),
+      mode: "code",
+      title: "New Code thread",
+    } as WorkspaceTab;
+    const thread = {
+      id: decodeWorkspaceTabId(ids.tab),
+      kind: "code-overview",
+      mode: "code",
+      title: "Opened thread",
+      threadId: ids.thread,
+    } as WorkspaceTab;
+    const view = (surface: WorkspaceTab, workspaceVersion: number) => {
+      const layout = {
+        kind: "pane" as const,
+        nodeId: ids.node,
+        paneId: ids.pane,
+        surface,
+      };
+      const base = propsFor(surface);
+      return (
+        <NewTaskDraftsContext.Provider value={drafts}>
+          <WorkspaceView
+            {...base}
+            layout={layout as never}
+            workspace={{
+              ...base.workspace,
+              layouts: { chat: layout, work: layout, code: layout },
+            }}
+            workspaceVersion={workspaceVersion as never}
+          />
+        </NewTaskDraftsContext.Provider>
+      );
+    };
+
+    const rendered = render(view(draft, 1));
+    expect(await screen.findByText("brief.png")).toBeVisible();
+
+    rendered.rerender(view(thread, 2));
+    expect(drafts.readImages(`code:${ids.pane}`)).toEqual([]);
+  });
+
+  it("keeps a Code draft's attachments when a replace rolls back", async () => {
+    const drafts = createNewTaskDrafts();
+    drafts.writeImages(`code:${ids.pane}`, [
+      new File([new Uint8Array([1])], "brief.png", { type: "image/png" }),
+    ]);
+    const draft = {
+      kind: "draft-thread",
+      id: decodeWorkspaceTabId(ids.tab),
+      mode: "code",
+      title: "New Code thread",
+    } as WorkspaceTab;
+    const thread = {
+      id: decodeWorkspaceTabId(ids.tab),
+      kind: "code-overview",
+      mode: "code",
+      title: "Opened thread",
+      threadId: ids.thread,
+    } as WorkspaceTab;
+    const view = (surface: WorkspaceTab, workspaceVersion: number) => {
+      const layout = {
+        kind: "pane" as const,
+        nodeId: ids.node,
+        paneId: ids.pane,
+        surface,
+      };
+      const base = propsFor(surface);
+      return (
+        <NewTaskDraftsContext.Provider value={drafts}>
+          <WorkspaceView
+            {...base}
+            layout={layout as never}
+            workspace={{
+              ...base.workspace,
+              layouts: { chat: layout, work: layout, code: layout },
+            }}
+            workspaceVersion={workspaceVersion as never}
+          />
+        </NewTaskDraftsContext.Provider>
+      );
+    };
+
+    const rendered = render(view(draft, 1));
+    expect(await screen.findByText("brief.png")).toBeVisible();
+
+    rendered.rerender(view(thread, 1));
+    expect(drafts.readImages(`code:${ids.pane}`)).toHaveLength(1);
+
+    rendered.rerender(view(draft, 1));
     expect(drafts.readImages(`code:${ids.pane}`)).toHaveLength(1);
     expect(screen.getByText("brief.png")).toBeVisible();
   });

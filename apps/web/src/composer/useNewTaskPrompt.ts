@@ -76,19 +76,25 @@ export interface ProjectOverviewDraftRef {
   readonly projectId: string;
 }
 
+export interface PaneDraftRef {
+  readonly mode: "chat" | "work" | "code";
+  readonly paneId: string;
+}
+
 /**
- * Overview drafts to drop after a committed workspace update. A Project that
- * is still open in any pane keeps its draft. Settings remounts start from an
- * empty previous list and therefore keep every current overview. An optimistic
- * preview reuses the committed version, so a refused open or close can roll
- * the Project back without this treating the preview as a permanent drop.
+ * Drafts to drop after a committed workspace update. Settings remounts start
+ * from an empty previous list and therefore keep every current draft. An
+ * optimistic preview reuses the committed version, so a refused open or close
+ * can roll the surface back without this treating the preview as a permanent
+ * drop.
  */
-export function projectOverviewDraftsToDiscard(
-  previous: ReadonlyArray<ProjectOverviewDraftRef>,
-  next: ReadonlyArray<ProjectOverviewDraftRef>,
+function committedDraftsToDiscard<T>(
+  previous: ReadonlyArray<T>,
+  next: ReadonlyArray<T>,
+  keyOf: (surface: T) => string,
   previousCommit?: string | number,
   nextCommit?: string | number,
-): ReadonlyArray<ProjectOverviewDraftRef> {
+): ReadonlyArray<T> {
   if (
     previousCommit === undefined ||
     nextCommit === undefined ||
@@ -96,16 +102,52 @@ export function projectOverviewDraftsToDiscard(
   ) {
     return [];
   }
-  const remaining = new Set(next.map((surface) => `${surface.mode}:${surface.projectId}`));
-  const dropped: ProjectOverviewDraftRef[] = [];
+  const remaining = new Set(next.map(keyOf));
+  const dropped: T[] = [];
   const seen = new Set<string>();
   for (const surface of previous) {
-    const key = `${surface.mode}:${surface.projectId}`;
+    const key = keyOf(surface);
     if (remaining.has(key) || seen.has(key)) continue;
     seen.add(key);
     dropped.push(surface);
   }
   return dropped;
+}
+
+/** Overview drafts to drop when that Project is no longer open in any pane. */
+export function projectOverviewDraftsToDiscard(
+  previous: ReadonlyArray<ProjectOverviewDraftRef>,
+  next: ReadonlyArray<ProjectOverviewDraftRef>,
+  previousCommit?: string | number,
+  nextCommit?: string | number,
+): ReadonlyArray<ProjectOverviewDraftRef> {
+  return committedDraftsToDiscard(
+    previous,
+    next,
+    (surface) => `${surface.mode}:${surface.projectId}`,
+    previousCommit,
+    nextCommit,
+  );
+}
+
+/**
+ * Draft-thread and welcome drafts to drop when that pane is no longer a
+ * start composer. Opening a thread replaces the draft without closing the
+ * pane, so a later default composer can reuse this pane id.
+ */
+export function paneDraftsToDiscard(
+  previous: ReadonlyArray<PaneDraftRef>,
+  next: ReadonlyArray<PaneDraftRef>,
+  previousCommit?: string | number,
+  nextCommit?: string | number,
+): ReadonlyArray<PaneDraftRef> {
+  return committedDraftsToDiscard(
+    previous,
+    next,
+    (surface) => `${surface.mode}:${surface.paneId}`,
+    previousCommit,
+    nextCommit,
+  );
 }
 
 const emptySubscribe = () => () => {};
