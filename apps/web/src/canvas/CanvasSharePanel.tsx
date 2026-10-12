@@ -8,11 +8,12 @@ import {
   decodeCanvasStaticExportDocument,
   type CanvasStaticExportDocument,
 } from "@octant/contracts/canvas-share";
-import type {
-  CanvasShareAccessOutcome,
-  CanvasShareAccessRequest,
-  CanvasShareAccessResult,
-  CanvasShareOverview,
+import {
+  decodeCanvasShareAccessRequest,
+  type CanvasShareAccessOutcome,
+  type CanvasShareAccessRequest,
+  type CanvasShareAccessResult,
+  type CanvasShareOverview,
 } from "@octant/contracts/canvas-share-access-log";
 import type {
   CanvasShareDenialCode,
@@ -23,7 +24,7 @@ import type {
   CanvasShareSnapshotSummary,
 } from "@octant/contracts/canvas-share-snapshot";
 import { Ban, Check, Eye, Share2, TriangleAlert } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantInput } from "../ui/base/OctantInput";
@@ -33,6 +34,7 @@ import {
   type CanvasPlacedReadingItem,
 } from "@octant/domain/canvas-dashboard-layout";
 import { CanvasBlockRenderer } from "./blocks/CanvasBlock";
+import { runsInDesktopApp, type DesignRunRuntime } from "./blocks/designRunningFrame";
 import { CanvasLayoutGroup } from "./blocks/LayoutGroups";
 import { DashboardBlock } from "./blocks/DashboardBlock";
 
@@ -56,7 +58,7 @@ const EXPIRY_CHOICES = [
 const DENIAL_COPY: Record<CanvasShareDenialCode, string> = {
   "malformed-request": "This share request was not valid.",
   "sharing-disabled": "Sharing is turned off on this host.",
-  "consent-required": "Sharing needs both acknowledgements from you.",
+  "consent-required": "Sharing needs every acknowledgement from you.",
   "scope-mismatch": "This canvas belongs to a different workspace.",
   "stale-version": "This canvas changed. Reopen it and share again.",
   "unsafe-payload": "This canvas cannot be shared safely.",
@@ -99,6 +101,17 @@ export interface CanvasSharePanelProps {
   readonly onShare: (request: CanvasShareSnapshotRequest) => Promise<CanvasShareResult>;
   readonly onRevoke: (request: CanvasShareSnapshotRevokeRequest) => Promise<CanvasShareResult>;
   readonly onOpen: (request: CanvasShareAccessRequest) => Promise<CanvasShareAccessResult>;
+  /**
+   * Whether the version being shared holds a design. A design is markup, which
+   * leaves as written, so sharing one asks for a third acknowledgement.
+   */
+  readonly holdsDesign?: boolean;
+  /**
+   * The address of a prototype page the host ticketed for a snapshot. Absent
+   * where the surface cannot load one; a shared prototype then says it cannot
+   * run here.
+   */
+  readonly resolveDesignPage?: (path: string) => string;
   /** Mint snapshot/export ids; defaults to `crypto.randomUUID`. Injectable for tests. */
   readonly newId?: () => string;
   /** Current time for expiry and consent stamps; the server stamps its own. */
@@ -110,13 +123,48 @@ export function CanvasSharePanel(props: CanvasSharePanelProps) {
   const [openedSnapshot, setOpenedSnapshot] = useState<CanvasStaticExportDocument | undefined>(
     undefined,
   );
+  const [openedAccess, setOpenedAccess] = useState<CanvasShareAccessRequest | undefined>(undefined);
   const [label, setLabel] = useState("This device");
   const [expiry, setExpiry] = useState<string>("24h");
   const [acknowledgedSnapshot, setAcknowledgedSnapshot] = useState(false);
   const [acknowledgedAudience, setAcknowledgedAudience] = useState(false);
+  const [acknowledgedMarkup, setAcknowledgedMarkup] = useState(false);
+  const holdsDesign = props.holdsDesign === true;
   const newId = props.newId ?? (() => crypto.randomUUID());
   const now = props.now ?? (() => new Date());
-  const consented = acknowledgedSnapshot && acknowledgedAudience;
+  const consented =
+    acknowledgedSnapshot && acknowledgedAudience && (!holdsDesign || acknowledgedMarkup);
+  // A shared prototype runs from a page the host tickets for this snapshot,
+  // on the same read, and the same access-log entry, as opening it.
+  const { onOpen, resolveDesignPage } = props;
+  const snapshotRun = useMemo<DesignRunRuntime | undefined>(() => {
+    if (openedAccess === undefined || resolveDesignPage === undefined) return undefined;
+    return {
+      start: async (blockId, frameId) => {
+        const refused = {
+          kind: "refused" as const,
+          reason: "This prototype could not be started from the snapshot.",
+        };
+        // Decoded rather than asserted: the ids come from the drawn block.
+        let request: CanvasShareAccessRequest;
+        try {
+          request = decodeCanvasShareAccessRequest({
+            ...openedAccess,
+            runDesign: { blockId, ...(frameId === undefined ? {} : { frameId }) },
+          });
+        } catch {
+          return refused;
+        }
+        const result = await onOpen(request);
+        return result.kind === "allowed" && result.designPage !== undefined
+          ? { kind: "ready", url: resolveDesignPage(result.designPage) }
+          : refused;
+      },
+      contained: runsInDesktopApp(),
+      // Like the thread, a snapshot waits for the person to press Run.
+      runsOnOpen: false,
+    };
+  }, [onOpen, openedAccess, resolveDesignPage]);
   const working = run.kind === "working";
 
   async function share() {
@@ -149,6 +197,7 @@ export function CanvasSharePanel(props: CanvasSharePanelProps) {
         consent: {
           acknowledgedAuthenticatedSnapshot: true,
           acknowledgedOwnerVisibleAudience: true,
+          ...(holdsDesign ? { acknowledgedMarkupSharedAsWritten: true } : {}),
           acknowledgedAt: at.toISOString(),
           acknowledgedBy: props.overview.owner,
         },
@@ -161,6 +210,7 @@ export function CanvasSharePanel(props: CanvasSharePanelProps) {
       if (result.kind === "accepted") {
         setAcknowledgedSnapshot(false);
         setAcknowledgedAudience(false);
+        setAcknowledgedMarkup(false);
       }
     } catch {
       setRun({ kind: "failed", text: "The share could not be created." });
@@ -193,20 +243,23 @@ export function CanvasSharePanel(props: CanvasSharePanelProps) {
   async function open(snapshot: CanvasShareSnapshotSummary) {
     setRun({ kind: "working" });
     setOpenedSnapshot(undefined);
+    setOpenedAccess(undefined);
     try {
-      const result = await props.onOpen({
+      const access = {
         schemaVersion: 1,
         kind: "canvas-share-access",
         snapshotId: snapshot.snapshotId,
         canvasId: snapshot.canvasId,
         hostId: snapshot.hostId,
         projectId: snapshot.projectId,
-      } as unknown as CanvasShareAccessRequest);
+      } as unknown as CanvasShareAccessRequest;
+      const result = await props.onOpen(access);
       if (result.kind === "allowed") {
         // Fail-closed render gate, mirroring the live canvas: the served
         // document is re-decoded against the sanitized export contract before
         // any block mounts, so a malformed payload is never shown.
         setOpenedSnapshot(decodeCanvasStaticExportDocument(result.document));
+        setOpenedAccess(access);
         setRun({ kind: "done", text: ACCESS_COPY.allowed });
         return;
       }
@@ -276,6 +329,19 @@ export function CanvasSharePanel(props: CanvasSharePanelProps) {
             />
             <span>Everyone in the audience above can open it until it expires or I revoke it.</span>
           </label>
+          {holdsDesign ? (
+            <label className="canvas-share__consent">
+              <OctantCheckbox
+                checked={acknowledgedMarkup}
+                data-testid="canvas-share-consent-markup"
+                onChange={(event) => setAcknowledgedMarkup(event.target.checked)}
+              />
+              <span>
+                This canvas holds a design. Its markup is shared exactly as written, and Octant does
+                not check markup for secrets.
+              </span>
+            </label>
+          ) : null}
           <OctantButton
             type="button"
             size="sm"
@@ -301,7 +367,11 @@ export function CanvasSharePanel(props: CanvasSharePanelProps) {
       {openedSnapshot === undefined ? null : (
         <SharedSnapshotView
           document={openedSnapshot}
-          onClose={() => setOpenedSnapshot(undefined)}
+          onClose={() => {
+            setOpenedSnapshot(undefined);
+            setOpenedAccess(undefined);
+          }}
+          {...(snapshotRun === undefined ? {} : { designRun: snapshotRun })}
         />
       )}
       <ShareList
@@ -328,13 +398,15 @@ export function CanvasSharePanel(props: CanvasSharePanelProps) {
 function SharedSnapshotView(props: {
   readonly document: CanvasStaticExportDocument;
   readonly onClose: () => void;
+  readonly designRun?: DesignRunRuntime;
 }) {
+  const { designRun } = props;
   // A shared tab or column draws its children in place through the same
   // reading order as the live document, so a dashboard in a pane is the same
   // grid, and a placed block is never drawn a second time.
   const placed = (item: CanvasPlacedReadingItem<SharedBlock>): ReactNode =>
     item.kind === "block" ? (
-      <SnapshotBlock block={item.block} key={item.block.blockId} />
+      <SnapshotBlock block={item.block} designRun={designRun} key={item.block.blockId} />
     ) : (
       <section key={item.dashboard.blockId} className="canvas-block" data-block-kind="dashboard">
         <DashboardBlock
@@ -344,7 +416,7 @@ function SharedSnapshotView(props: {
           cells={item.cells}
           cellKey={(block) => block.blockId}
           cellKind={(block) => block.kind}
-          renderCell={(block) => <SnapshotBlock block={block} />}
+          renderCell={(block) => <SnapshotBlock block={block} designRun={designRun} />}
         />
       </section>
     );
@@ -389,10 +461,19 @@ function SharedSnapshotView(props: {
 
 type SharedBlock = CanvasStaticExportDocument["blocks"][number];
 
-function SnapshotBlock(props: { readonly block: SharedBlock }) {
+// A shared design is drawn by the same block the live Canvas uses, so its
+// frames get the same sandbox and page policy; there is no second frame
+// renderer for a snapshot to drift from.
+function SnapshotBlock(props: {
+  readonly block: SharedBlock;
+  readonly designRun: DesignRunRuntime | undefined;
+}) {
   return (
     <section className="canvas-block" data-block-kind={props.block.kind}>
-      <CanvasBlockRenderer block={props.block as CanvasBlock} />
+      <CanvasBlockRenderer
+        block={props.block as CanvasBlock}
+        {...(props.designRun === undefined ? {} : { designRunRuntime: props.designRun })}
+      />
     </section>
   );
 }

@@ -358,6 +358,6 @@ every theme.
   treemap, heatmap, bar-list, and comparison-matrix tests and snapshots beside
   their layouts in `packages/domain/src/`.
 - Palette and context-tone contracts: `apps/web/src/theme/visualLanguageContract.test.ts`.
-- Frame kit: `apps/web/src/canvas/blocks/designFrameKit.ts`.
+- Frame kit: `packages/domain/src/canvasDesignFrameKit.ts`.
 - Render changed blocks in light, dark, forced colours, and at phone width. A
   documentation-only move is not evidence of fresh rendered QA.

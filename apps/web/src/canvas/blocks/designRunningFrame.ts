@@ -75,7 +75,7 @@ export function designRunRuntimeFor(
   };
 }
 
-function runsInDesktopApp(): boolean {
+export function runsInDesktopApp(): boolean {
   try {
     return getInjectedHostBridge() !== undefined;
   } catch {

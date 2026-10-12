@@ -15,6 +15,13 @@ import {
   type CanvasProvenance,
   type CanvasVersionId,
 } from "@octant/contracts/canvas";
+import type { CanvasStaticExportDocument } from "@octant/contracts/canvas-share";
+import {
+  DESIGN_FRAME_KIT,
+  DESIGN_FRAME_THEME_TOKENS,
+  designFrameTokenValueIsSafe,
+  type DesignFrameThemeValues,
+} from "@octant/domain";
 import { getDefaultToken } from "@octant/theme";
 
 /**
@@ -53,7 +60,11 @@ export interface CanvasDesignRunGrant {
   readonly startFrameId: string;
   /** The version is immutable, so the design is kept as it was authorized. */
   readonly block: CanvasDesignBlock;
-  readonly provenance: CanvasProvenance;
+  /**
+   * The authority the design's declared images resolve under. Absent for a
+   * design read from a shared snapshot, which carries no image to resolve.
+   */
+  readonly provenance?: CanvasProvenance;
 }
 
 // A reader asks for a ticket just before it loads the page, so only a handful
@@ -102,6 +113,42 @@ export class CanvasDesignRunTickets {
       if (now >= entry.expiresAt) this.#tickets.delete(ticket);
     }
   }
+}
+
+/**
+ * A ticketed page for one of a shared snapshot's prototypes, or `undefined`
+ * when there is none to offer: the snapshot holds no running design by that
+ * id, the frame is not one of its frames, or this host issues no tickets. The
+ * caller has already decided, and journaled, that this reader may open the
+ * snapshot; the page is that snapshot's own design and nothing else.
+ */
+export function issueSharedDesignRun(
+  tickets: CanvasDesignRunTickets | undefined,
+  document: Pick<CanvasStaticExportDocument, "canvasId" | "versionId" | "blocks">,
+  run: { readonly blockId: CanvasBlockId; readonly frameId?: string | undefined },
+): string | undefined {
+  if (tickets === undefined) return undefined;
+  const block = document.blocks.find(
+    (candidate) => candidate.kind === "design" && String(candidate.blockId) === String(run.blockId),
+  );
+  if (block?.kind !== "design" || block.runsScript !== true) return undefined;
+  const startFrameId = run.frameId ?? block.frames[0]?.frameId;
+  if (
+    startFrameId === undefined ||
+    !block.frames.some((frame) => String(frame.frameId) === String(startFrameId))
+  ) {
+    return undefined;
+  }
+  return canvasDesignPagePath(
+    tickets.issue({
+      canvasId: document.canvasId,
+      versionId: document.versionId,
+      blockId: run.blockId,
+      startFrameId: String(startFrameId),
+      // A shared design is a design without declared images.
+      block: block as CanvasDesignBlock,
+    }),
+  );
 }
 
 /** The path a reader loads a ticket's page from. */
@@ -219,6 +266,127 @@ export function renderCanvasDesignPage(
     `<style>${withAssets(block.styles ?? "", budget).replace(/<\/style/gi, "<\\/style")}</style>`,
     `</head><body>${frames}</body></html>`,
   ].join("");
+}
+
+/**
+ * The policy an exported static frame carries inside its own page: the frame
+ * policy a reader's static frame is drawn under. An exported file has no host
+ * to send a header, so the page says it itself, before anything else in it.
+ */
+export const CANVAS_DESIGN_EXPORT_STATIC_POLICY =
+  "default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:; base-uri 'none'; form-action 'none'";
+/**
+ * The same for an exported running frame: the served page's policy without
+ * `sandbox`, which a page cannot declare for itself; the frame's `sandbox`
+ * attribute carries that part.
+ */
+export const CANVAS_DESIGN_EXPORT_RUNNING_POLICY = CANVAS_DESIGN_PAGE_POLICY.replace(
+  /^sandbox allow-scripts; /,
+  "",
+);
+
+/** One frame of an exported design: the page and the sandbox it is drawn in. */
+export interface CanvasDesignExportFrame {
+  readonly title: string;
+  readonly sandbox: "" | "allow-scripts";
+  readonly width: number | undefined;
+  readonly height: number;
+  readonly page: string;
+}
+
+/**
+ * A design as an exported HTML file draws it, or `undefined` for a design the
+ * export cannot draw as written: one in the workspace theme when the export
+ * was handed no theme to draw it in.
+ *
+ * A static design is one page per screen, each holding that screen alone and
+ * running nothing. A running design is one page holding every screen, because
+ * its script is one program. A design in the workspace theme gets the tokens
+ * the person's window drew it with and the frame kit, ahead of its own styles,
+ * as in the app; only the tokens a frame receives are written, and each value
+ * is checked again here. Neither names an image: a declared image resolves
+ * only under this host's authority, so its place draws a placeholder. The
+ * bridge is left out; an exported page has no host to report to.
+ */
+export function renderCanvasDesignExportFrames(
+  block: CanvasDesignBlock,
+  theme?: DesignFrameThemeValues,
+): ReadonlyArray<CanvasDesignExportFrame> | undefined {
+  const themed =
+    (block.theme ?? (block.size === "document" ? "workspace" : "none")) === "workspace";
+  if (themed && theme === undefined) return undefined;
+  const themeStyles =
+    themed && theme !== undefined
+      ? [
+          `<style>:root { color-scheme: ${theme.scheme === "dark" ? "dark" : "light"}; ${theme.tokens
+            .filter(
+              ([name, value]) =>
+                DESIGN_FRAME_THEME_TOKENS.includes(name) && designFrameTokenValueIsSafe(value),
+            )
+            .map(([name, value]) => `${name}: ${value};`)
+            .join(" ")} }`,
+          // An exported page stands alone, so it paints the workspace ground
+          // itself where the app's frame sits on the Canvas surface.
+          "html { background: var(--oct-bg); }</style>",
+          `<style>${DESIGN_FRAME_KIT}</style>`,
+        ].join("")
+      : `<style>${UNTHEMED_PAGE}</style>`;
+  const isDocument = block.size === "document";
+  const viewport = block.size === "document" ? undefined : CANVAS_DESIGN_VIEWPORT[block.size];
+  const running = block.runsScript === true;
+  const page = (frames: CanvasDesignBlock["frames"], startFrameId: string): string => {
+    const budget = new PageAssetBudget(new Map());
+    const body = frames
+      .map((frame) => {
+        const id = String(frame.frameId);
+        const start = id === startFrameId ? " data-start" : "";
+        return `<div class="octant-frame" id="${escapeAttribute(id)}"${start}>${withOwnAddress(withAssets(frame.html, budget))}</div>`;
+      })
+      .join("");
+    return [
+      "<!doctype html>",
+      '<html><head><meta charset="utf-8">',
+      `<meta http-equiv="Content-Security-Policy" content="${running ? CANVAS_DESIGN_EXPORT_RUNNING_POLICY : CANVAS_DESIGN_EXPORT_STATIC_POLICY}">`,
+      `<meta name="viewport" content="width=${viewport === undefined ? "device-width" : String(viewport.width)}">`,
+      `<style>${isDocument ? `${DOCUMENT_FRAME_RULES}\n${EXPORT_DOCUMENT_INSET}` : DEVICE_FRAME_RULES}</style>`,
+      themeStyles,
+      `<style>${withAssets(block.styles ?? "", budget).replace(/<\/style/gi, "<\\/style")}</style>`,
+      `</head><body>${body}</body></html>`,
+    ].join("");
+  };
+  const size = { width: viewport?.width, height: viewport?.height ?? EXPORT_DOCUMENT_HEIGHT };
+  if (running) {
+    const first = String(block.frames[0]?.frameId ?? "");
+    return [
+      { title: block.title, sandbox: "allow-scripts", ...size, page: page(block.frames, first) },
+    ];
+  }
+  return block.frames.map((frame) => ({
+    title: frame.title,
+    sandbox: "",
+    ...size,
+    page: page([frame], String(frame.frameId)),
+  }));
+}
+
+/**
+ * In the app a document sits on the Canvas surface and needs no edge of its
+ * own. An exported frame is a bordered box with its own ground, so its text
+ * would touch that border; the page keeps it off.
+ */
+const EXPORT_DOCUMENT_INSET = "body { padding: 24px; }";
+
+/** An exported document frame cannot be measured, so it scrolls at this height. */
+const EXPORT_DOCUMENT_HEIGHT = 640;
+
+/**
+ * A `srcdoc` page resolves a bare fragment against the file that holds it, so
+ * a link between screens would load that file into the frame. The markup
+ * policy admits only fragment links, so each one is written against the
+ * frame's own address, as the app's renderer writes them.
+ */
+function withOwnAddress(html: string): string {
+  return html.replace(/([\s/"'](?:xlink:)?href\s*=\s*["']?\s*)#/gi, "$1about:srcdoc#");
 }
 
 /** The page a refused or spent ticket gets: a line of text that runs nothing. */

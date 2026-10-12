@@ -388,8 +388,17 @@ agent asks for your theme.
   it cannot show (missing, outside the folder, from another Project, larger
   than 3 MB, or not a PNG, JPEG, GIF, or WebP) appears as a labelled
   placeholder.
-- A design cannot be shared as a snapshot yet. Exporting it writes the name
-  of each screen, not the screens themselves.
+- Sharing a Canvas that holds a design asks for one more tick: its markup is
+  shared exactly as written, and Octant does not check markup for secrets. The
+  snapshot shows the design's screens and runs a prototype when you press
+  **Run**, under the same limits as in the Canvas. Images the design took from
+  your Project or from generated images are not shared; their places show a
+  placeholder. Exporting to HTML writes the design's screens into the file,
+  and a prototype runs there with no way to reach the network; the approval
+  card says the file includes the design's markup exactly as written. A design
+  drawn in your theme is exported in the theme your window shows at that
+  moment, without Octant's own fonts. A Markdown export still writes the name
+  of each screen instead.
 
 Comments, versions, and **Compare with** work on a design as on any other
 block. To change it, ask the agent: "make the buttons rounder" revises the
@@ -418,8 +427,9 @@ paired phone or browser). A comment whose block has since left the canvas is
 kept and marked rather than dropped, and so is one whose table row was removed. Shared snapshots never include comments.
 A shared snapshot keeps every block, including charts (funnels, radars, and
 sankeys too), dashboards, tables, treemaps,
-heatmaps, bar lists, comparison matrices, and formulas, with their number formats. A design, or an action block
-that runs a command on this Mac, stops a share: Share then says the canvas
+heatmaps, bar lists, comparison matrices, and formulas, with their number formats. A design is
+shared once you tick that its markup is shared as written. An action block
+that runs a command on this Mac stops a share: Share then says the canvas
 cannot be shared safely.
 A treemap or bar list in a shared snapshot offers no **Open file**, because
 those files are on your Mac.

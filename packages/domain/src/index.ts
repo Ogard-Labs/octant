@@ -44,6 +44,7 @@ export * from "./canvasNumberFormat";
 export * from "./canvasMockupExamples";
 export * from "./canvasMockupOutline";
 export * from "./canvasDesignPolicy";
+export * from "./canvasDesignFrameKit";
 export * from "./canvasMathPolicy";
 export * from "./canvasDesignExamples";
 export * from "./canvasActionPolicy";

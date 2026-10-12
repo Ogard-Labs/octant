@@ -136,6 +136,12 @@ export interface CanvasClient {
   revokeShare?(request: CanvasShareSnapshotRevokeRequest): Promise<CanvasShareResult>;
   accessShare?(request: CanvasShareAccessRequest): Promise<CanvasShareAccessResult>;
   /**
+   * The address of a prototype page an allowed share access named
+   * (`designPage`), on this client's host. Absent on a transport that cannot
+   * load one, where a shared prototype says it cannot run.
+   */
+  sharedDesignPageUrl?(path: string): string;
+  /**
    * Destination export. The host renders and holds an approval card; the client
    * only echoes that card back. A host without the route omits these methods.
    */
@@ -393,6 +399,9 @@ export function createCanvasClient(options: CanvasClientOptions): CanvasClient {
         },
         decodeCanvasShareResult,
       );
+    },
+    sharedDesignPageUrl(path) {
+      return new URL(path, options.baseUrl).toString();
     },
     accessShare(body) {
       return request(
