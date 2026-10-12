@@ -243,8 +243,11 @@ export function goalLoopPauseText(reason: GoalLoopPauseReason): string {
   }
 }
 
+// Only approval-gated qualifies. A Work round has no read-only path, so a Plan
+// round runs asking first and an approved edit still lands; counting Plan here
+// would record a round as read-only while it wrote without a checkpoint.
 function everyWriteNeedsAPerson(authority: AgentRunAuthority): boolean {
-  return authority.executionPolicy === "plan" || authority.executionPolicy === "approval-gated";
+  return authority.executionPolicy === "approval-gated";
 }
 
 function hasAnyCeiling(budget: ThreadGoalBudget): boolean {

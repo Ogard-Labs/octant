@@ -4039,10 +4039,11 @@ mechanisms are:
   one to mark; a Work folder has none, because a checkpoint anchors a Chat
   turn or a Code operation, a Work turn's record of what changed in its folder
   names paths without their contents, and Work holds no Git. A round without
-  a checkpoint runs only when its effective authority asks before every write
-  (approval-gated or Plan), and its recorded round carries no checkpoint id;
-  under auto-accept-edits the loop pauses as `checkpoint-unavailable` and says
-  so in its panel. A checkpoint that fails to mark reads as none.
+  a checkpoint runs only when its effective authority is approval-gated, so a
+  person approves every write, and its recorded round carries no checkpoint
+  id. Under auto-accept-edits, and under Plan (a Work round has no read-only
+  path, so it would still write what a person approves), the loop pauses as
+  `checkpoint-unavailable` and says so in its panel. A checkpoint that fails to mark reads as none.
   Nothing else about a Work turn widens:
   it stays confined to the Project root, and providers without an auto-accept
   path keep asking;

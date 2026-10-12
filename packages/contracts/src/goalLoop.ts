@@ -123,9 +123,7 @@ export const GoalLoopRound = Schema.Struct({
   .pipe(
     Schema.filter(
       (round) =>
-        round.checkpointId !== undefined ||
-        round.authority.executionPolicy === "plan" ||
-        round.authority.executionPolicy === "approval-gated",
+        round.checkpointId !== undefined || round.authority.executionPolicy === "approval-gated",
     ),
   );
 export type GoalLoopRound = typeof GoalLoopRound.Type;
