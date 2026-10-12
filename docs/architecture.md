@@ -1384,10 +1384,10 @@ flowchart LR
   title, content hash, and time. A thread keeps its newest 32 captures and they
   are erased with the thread. Only a local window that can open the thread reads
   them, never a paired device. They never reach a Canvas share, replica sync, or
-  a diagnostics export, and are not yet in the thread export. A capture adds no
-  Project filesystem authority and no second taint mechanism: the observation
-  that produced it already taints the thread. Detail is in
-  [Browser captures](design/browser-captures.md).
+  a diagnostics export. They leave the host only in an export the local owner
+  takes: that thread's export, or the host-wide data export that embeds it. A capture adds no Project filesystem authority and no
+  second taint mechanism: the observation that produced it already taints the
+  thread. Detail is in [Browser captures](design/browser-captures.md).
 - **Recovery.** Sequence-based reconnect replay for local and remote clients —
   a dropped stream catches up from the authoritative snapshot before it reopens,
   keeps retrying while the host is unreachable, and a remote session whose window
@@ -1501,8 +1501,9 @@ flowchart LR
   the same `not-found` refusal, so an export never reveals a hidden thread.
   Secrets, raw provider payloads, and filesystem
   paths never appear; attachment bytes and other bulk content outside the
-  journal are listed as omissions. A local owner can also take one
-  `octant.host-export/1` cut of what this host holds: a thread bundle for
+  journal are listed as omissions. The thread's generated images and retained
+  Browser captures appear as attachment records without bytes. A local owner
+  can also take one `octant.host-export/1` cut of what this host holds: a thread bundle for
   every thread of every mode, Projects, Project memory, Canvases, a
   non-secret settings summary, usage export rows, and retention windows
   with purge tombstones. That call is a host-control read on the loopback

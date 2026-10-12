@@ -108,6 +108,9 @@ function service(
     readonly generatedImages?: {
       readonly listByScope: (scopeId: string) => ReadonlyArray<unknown>;
     };
+    readonly browserCaptures?: {
+      readonly list: (threadId: string) => ReadonlyArray<unknown>;
+    };
   } = {},
 ) {
   return new ThreadExportService({
@@ -128,7 +131,46 @@ function service(
     ...(options.generatedImages === undefined
       ? {}
       : { generatedImages: options.generatedImages as never }),
+    ...(options.browserCaptures === undefined
+      ? {}
+      : { browserCaptures: options.browserCaptures as never }),
   });
+}
+
+function workFixture(): {
+  readonly thread: WorkThread;
+  readonly turns: ReadonlyArray<WorkTurnState>;
+} {
+  const workThread = {
+    id: decodeWorkThreadId(workThreadId),
+    projectId: decodeProjectId(projectId),
+    title: "Brief",
+    lifecycle: "active",
+    completionEvidence: {
+      deliveryTarget: "Brief",
+      satisfactionEvidence: "The brief is on disk.",
+    },
+    providerInstanceId: "10000000-0000-4000-8000-000000000001",
+    modelId: "model-a",
+    version: 3,
+    createdAt: now,
+    updatedAt: now,
+  } as unknown as WorkThread;
+  const turn = {
+    requestId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    threadId: workThreadId,
+    turnId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    projectId,
+    status: "completed",
+    prompt: "Write the brief.",
+    transcript: [
+      { role: "user", text: "Write the brief." },
+      { role: "assistant", text: "Here is the brief." },
+    ],
+    acceptedAt: now,
+    updatedAt: now,
+  } as unknown as WorkTurnState;
+  return { thread: workThread, turns: [turn] };
 }
 
 describe("ThreadExportService", () => {
@@ -206,6 +248,124 @@ describe("ThreadExportService", () => {
     expect(JSON.stringify(outcome.bundle)).not.toContain("iVBOR");
   });
 
+  it("includes the thread's retained Browser captures with their page details and omits their bytes", async () => {
+    const newer = "b1000000-0000-4000-8000-000000000002";
+    const older = "b1000000-0000-4000-8000-000000000001";
+    const listed: string[] = [];
+    const record = (captureId: string, title: string | undefined, capturedAt: string) => ({
+      captureId,
+      threadId,
+      origin: "https://example.com",
+      url: `https://example.com/page/${captureId}`,
+      ...(title === undefined ? {} : { title }),
+      hash: "f".repeat(64),
+      size: 2048,
+      mime: "image/png",
+      capturedAt,
+    });
+    const outcome = await service({
+      chat: chatView(),
+      browserCaptures: {
+        list: (id) => {
+          listed.push(id);
+          return [
+            record(newer, undefined, "2026-08-19T11:00:00.000Z"),
+            record(older, "Pricing", "2026-08-19T10:00:00.000Z"),
+          ];
+        },
+      },
+    }).exportThread(windowId as never, "local-window", { mode: "chat", threadId });
+    expect(outcome.kind).toBe("exported");
+    if (outcome.kind !== "exported") return;
+    expect(listed).toEqual([threadId]);
+    const captured = outcome.bundle.evidence.attachments.filter(
+      (attachment) => attachment.capture !== undefined,
+    );
+    expect(captured.map((attachment) => attachment.capture?.captureId)).toEqual([newer, older]);
+    expect(captured[0]?.displayName).toBe(`browser-capture-${newer}.png`);
+    expect(captured[1]?.capture).toEqual({
+      captureId: older,
+      origin: "https://example.com",
+      url: `https://example.com/page/${older}`,
+      title: "Pricing",
+      capturedAt: "2026-08-19T10:00:00.000Z",
+    });
+    expect(outcome.bundle.evidence.attachments[0]?.displayName).toBe("brief.pdf");
+    expect(outcome.bundle.omissions).toContainEqual({ kind: "attachment-bytes", count: 3 });
+    expect(JSON.stringify(outcome.bundle)).not.toContain("data:image");
+  });
+
+  it("leaves Browser captures out of an export a paired device asks for", async () => {
+    const outcome = await service({
+      chat: chatView(),
+      browserCaptures: {
+        list: () => {
+          throw new Error("a paired device must not reach the captures");
+        },
+      },
+    }).exportThread(windowId as never, "remote-device", { mode: "chat", threadId });
+    expect(outcome.kind).toBe("exported");
+    if (outcome.kind !== "exported") return;
+    expect(outcome.bundle.evidence.attachments.map((attachment) => attachment.displayName)).toEqual(
+      ["brief.pdf"],
+    );
+  });
+
+  it("exports a Work thread's Browser captures too", async () => {
+    const outcome = await service({
+      work: workFixture(),
+      browserCaptures: {
+        list: () => [
+          {
+            captureId: "b1000000-0000-4000-8000-000000000001",
+            threadId: workThreadId,
+            origin: "https://example.com",
+            url: "https://example.com/",
+            hash: "f".repeat(64),
+            size: 10,
+            mime: "image/jpeg",
+            capturedAt: now,
+          },
+        ],
+      },
+    }).exportThread(windowId as never, "local-window", { mode: "work", threadId: workThreadId });
+    expect(outcome.kind).toBe("exported");
+    if (outcome.kind !== "exported") return;
+    expect(outcome.bundle.evidence.attachments.map((attachment) => attachment.displayName)).toEqual(
+      ["browser-capture-b1000000-0000-4000-8000-000000000001.jpg"],
+    );
+    expect(outcome.bundle.omissions).toContainEqual({ kind: "attachment-bytes", count: 1 });
+  });
+
+  it("exports a thread without captures exactly as it would without the capture service", async () => {
+    const without = await service({ chat: chatView() }).exportThread(
+      windowId as never,
+      "local-window",
+      { mode: "chat", threadId },
+    );
+    const empty = await service({
+      chat: chatView(),
+      browserCaptures: { list: () => [] },
+    }).exportThread(windowId as never, "local-window", { mode: "chat", threadId });
+    expect(JSON.stringify(empty)).toBe(JSON.stringify(without));
+  });
+
+  it("still exports the thread when its captures cannot be listed", async () => {
+    const outcome = await service({
+      chat: chatView(),
+      browserCaptures: {
+        list: () => {
+          throw new Error("journal unavailable");
+        },
+      },
+    }).exportThread(windowId as never, "local-window", { mode: "chat", threadId });
+    expect(outcome.kind).toBe("exported");
+    if (outcome.kind !== "exported") return;
+    expect(outcome.bundle.evidence.attachments.map((attachment) => attachment.displayName)).toEqual(
+      ["brief.pdf"],
+    );
+  });
+
   it("lets a paired device export a thread it can already read", async () => {
     const outcome = await service({ chat: chatView() }).exportThread(
       windowId as never,
@@ -231,37 +391,9 @@ describe("ThreadExportService", () => {
   });
 
   it("exports a Work thread's journaled transcript and completion evidence", async () => {
-    const workThread = {
-      id: decodeWorkThreadId(workThreadId),
-      projectId: decodeProjectId(projectId),
-      title: "Brief",
-      lifecycle: "active",
-      completionEvidence: {
-        deliveryTarget: "Brief",
-        satisfactionEvidence: "The brief is on disk.",
-      },
-      providerInstanceId: "10000000-0000-4000-8000-000000000001",
-      modelId: "model-a",
-      version: 3,
-      createdAt: now,
-      updatedAt: now,
-    } as unknown as WorkThread;
-    const turn = {
-      requestId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
-      threadId: workThreadId,
-      turnId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
-      projectId,
-      status: "completed",
-      prompt: "Write the brief.",
-      transcript: [
-        { role: "user", text: "Write the brief." },
-        { role: "assistant", text: "Here is the brief." },
-      ],
-      acceptedAt: now,
-      updatedAt: now,
-    } as unknown as WorkTurnState;
+    const fixture = workFixture();
     const outcome = await service({
-      work: { thread: workThread, turns: [turn] },
+      work: fixture,
     }).exportThread(windowId as never, "local-window", { mode: "work", threadId: workThreadId });
     expect(outcome.kind).toBe("exported");
     if (outcome.kind !== "exported") return;

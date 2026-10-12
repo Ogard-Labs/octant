@@ -1,5 +1,6 @@
-import type { BrowserActionKind } from "@octant/contracts";
+import type { BrowserActionKind, BrowserCapture, ThreadExportAttachment } from "@octant/contracts";
 import { MAX_BROWSER_CAPTURES_PER_THREAD } from "@octant/contracts";
+import { imageFileExtension } from "./imageGenerationInvocationPolicy";
 
 /** Who asked for the screenshot: the model through the tool, or the person in the pane. */
 export type BrowserCaptureTaker = "agent" | "person";
@@ -40,4 +41,28 @@ export function browserCaptureRetention(
   limit: number = MAX_BROWSER_CAPTURES_PER_THREAD,
 ): { readonly firstRetainedVersion: number } {
   return { firstRetainedVersion: Math.max(1, headVersion - limit + 1) };
+}
+
+/**
+ * A thread's retained captures as export attachments, in the order given.
+ * Bytes stay omitted, as for generated images; the cut carries identity, media
+ * type, size, and the page the picture came from. The file name comes from the
+ * capture id, never from the page title or URL, so a page cannot name a file.
+ */
+export function browserCaptureExportAttachments(
+  captures: ReadonlyArray<BrowserCapture>,
+): ReadonlyArray<ThreadExportAttachment> {
+  return captures.map((capture) => ({
+    displayName: `browser-capture-${String(capture.captureId)}.${imageFileExtension(capture.mime)}`,
+    mediaType: capture.mime,
+    byteLength: capture.size,
+    status: "finalized",
+    capture: {
+      captureId: capture.captureId,
+      origin: capture.origin,
+      url: capture.url,
+      ...(capture.title === undefined ? {} : { title: capture.title }),
+      capturedAt: capture.capturedAt,
+    },
+  }));
 }

@@ -7295,6 +7295,7 @@ export function startOctantServer(
       generatedImages: {
         listByScope: (scopeId) => imageJobService.listByScope(scopeId),
       },
+      browserCaptures,
     });
     const threadExportRoutes = createThreadExportRouteHandler({
       service: threadExportService,

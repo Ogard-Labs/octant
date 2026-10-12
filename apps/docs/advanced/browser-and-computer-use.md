@@ -51,8 +51,9 @@ address and time. The strip is absent until the thread has a capture.
   arrives. Deleting the thread deletes its captures.
 - Captures stay on this computer, in Octant's data folder. **Settings → Data &
   privacy** lists **Browser captures** under Caches with where they are stored. They are not added to Canvases, shared,
-  synced to your other computers, or included in diagnostics. A thread export
-  does not include them yet.
+  synced to your other computers, or included in diagnostics. Exporting a thread
+  includes them: each capture is listed with its page title, address, and time,
+  but not the picture itself. A paired device's export leaves them out.
 - The page you captured counts as outside content: a thread that has looked at
   a page is already marked as having read outside content, and keeping a
   picture of it changes nothing about that.
