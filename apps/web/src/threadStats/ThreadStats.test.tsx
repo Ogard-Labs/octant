@@ -157,7 +157,7 @@ describe("the thread stats line", () => {
     ).toBeVisible();
   });
 
-  it("keeps another pane's provider windows off an inactive composer", () => {
+  it("shows no stats line in an inactive pane, so it never carries another thread's figures", () => {
     render(
       <Harness
         limits={[{ window: "five_hour", status: "allowed", utilization: 0.12 }]}
@@ -166,9 +166,29 @@ describe("the thread stats line", () => {
       />,
     );
 
-    const line = screen.getByTestId("thread-stats-line");
-    expect(within(line).queryByText("5h")).toBeNull();
-    expect(line).toHaveTextContent("↑ 48k in");
+    expect(screen.queryByTestId("thread-stats-line")).toBeNull();
+  });
+
+  it("shows the stats line only in the active pane of a split workspace", () => {
+    render(
+      <ThreadStatsProvider
+        lineVisible
+        onLineVisibleChange={() => undefined}
+        subjectKey="thread-a"
+        summary={summaryOf([turn()])}
+      >
+        <ComposerContextMeterProvider status="not-planned" subjectKey="code-thread:a">
+          <ComposerContextMeterGate enabled={false}>
+            <ThreadStats />
+          </ComposerContextMeterGate>
+          <ComposerContextMeterGate enabled>
+            <ThreadStats />
+          </ComposerContextMeterGate>
+        </ComposerContextMeterProvider>
+      </ThreadStatsProvider>,
+    );
+
+    expect(screen.getAllByTestId("thread-stats-line")).toHaveLength(1);
   });
 
   it("shows no line for a provider that reported neither usage nor windows", () => {
