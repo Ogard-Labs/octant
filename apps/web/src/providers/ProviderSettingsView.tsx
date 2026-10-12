@@ -5,6 +5,7 @@ import type {
   AzureFoundryProviderConfiguration,
   BflImageProviderConfiguration,
   ClaudeProviderConfiguration,
+  CodexProviderConfiguration,
   DevinProviderConfiguration,
   DiscoverySnapshot,
   GrokProviderConfiguration,
@@ -34,7 +35,11 @@ import type {
   ProviderModelId,
   ProviderObservedState,
 } from "@octant/contracts";
-import { implicitClaudeAccountOwnerId, isImageProfileDriverKind } from "@octant/domain";
+import {
+  implicitClaudeAccountOwnerId,
+  implicitCodexAccountOwnerId,
+  isImageProfileDriverKind,
+} from "@octant/domain";
 import type { ReactNode } from "react";
 import type { ProviderUsageLimitsClient } from "@octant/client-runtime/provider-usage-limits-client";
 import { SettingsSection } from "../settings/primitives";
@@ -87,6 +92,7 @@ export interface ProviderSettingsViewProps {
       | "copilot",
     displayName: string,
     binaryPath: string,
+    accent?: string,
   ) => Promise<boolean>;
   readonly onCreateOpenAiCompatible: (
     displayName: string,
@@ -209,6 +215,11 @@ export interface ProviderSettingsViewProps {
     instanceId: ProviderInstanceId,
     configuration: IdeogramImageProviderConfiguration,
     credential: TransientProviderCredential,
+  ) => Promise<boolean>;
+  readonly onChangeCodexConfiguration: (
+    instanceId: ProviderInstanceId,
+    configuration: CodexProviderConfiguration,
+    options?: { readonly reassignAccountDirectory?: boolean },
   ) => Promise<boolean>;
   readonly onChangeClaudeConfiguration: (
     instanceId: ProviderInstanceId,
@@ -410,6 +421,7 @@ export function ProviderSettingsView(props: ProviderSettingsViewProps) {
             allowedProviderTypes={GENERAL_PROVIDER_TYPES}
             busy={props.busy}
             claudeHostProfileTaken={implicitClaudeAccountOwnerId(props.instances) !== undefined}
+            codexHostProfileTaken={implicitCodexAccountOwnerId(props.instances) !== undefined}
             heading="Agent runtime"
             hint="Installed runtimes are detected automatically. Use this for an unusual executable location or a runtime the scan missed. Model endpoints such as OpenAI-compatible APIs are added under Octant Harness › Model endpoints."
             credentialManagementAvailable={props.credentialManagementAvailable}
@@ -465,6 +477,7 @@ export function ProviderSettingsView(props: ProviderSettingsViewProps) {
           ? {}
           : { usageLimitsClient: props.usageLimitsClient })}
         onChangeClaudeConfiguration={props.onChangeClaudeConfiguration}
+        onChangeCodexConfiguration={props.onChangeCodexConfiguration}
         onChangeDevinConfiguration={props.onChangeDevinConfiguration}
         onChangeGrokConfiguration={props.onChangeGrokConfiguration}
         onChangeGooseConfiguration={props.onChangeGooseConfiguration}

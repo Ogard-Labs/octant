@@ -1453,6 +1453,7 @@ function providerSettingsViewProps(
     ...(hostBridge === undefined ? {} : { hostBridge: hostBridge }),
     onChangeBinary: controller.changeBinary,
     onChangeClaudeConfiguration: controller.changeClaudeConfiguration,
+    onChangeCodexConfiguration: controller.changeCodexConfiguration,
     onChangeDevinConfiguration: controller.changeDevinConfiguration,
     onChangeKiloConfiguration: controller.changeKiloConfiguration,
     onChangePiConfiguration: controller.changePiConfiguration,

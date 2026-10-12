@@ -253,6 +253,22 @@ assigned directory. Removing an account does not delete its directory. Octant
 tells you where it is; delete it yourself to remove that account's sign-in
 and history.
 
+You can add more than one Codex account the same way. Octant assigns the
+first account Codex's default directory (`~/.codex`). Each additional
+account gets its own directory under `~/.codex-accounts/`. Sign in only
+with the unmodified `codex login` command in a terminal for that account;
+check status with `codex login status`. The provider card shows the exact
+command, including `CODEX_HOME` for an extra account. Octant never reads
+`auth.json` or the keyring, and never writes Codex credential-store
+settings into your config. The first account still uses an API key
+already in your environment. Extra accounts do not inherit that key, and
+keep their thread state in their own directory even when `CODEX_SQLITE_HOME`
+is set. An AWS profile from your environment still applies to every account.
+An API key you store in Octant for that provider still reaches only
+that account. Each account runs its own
+Codex app-server. A thread stays on the account it started with. Octant
+does not fail over, rotate, or load-balance between accounts.
+
 If you previously connected Claude for helpers, Octant no longer stores that
 token. Revoke the leftover token with Anthropic.
 

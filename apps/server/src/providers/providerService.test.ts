@@ -1,4 +1,4 @@
-import { assignedClaudeAccountConfigDirectory } from "@octant/domain";
+import { assignedClaudeAccountConfigDirectory, assignedCodexHome } from "@octant/domain";
 import {
   decodeProviderCatalogSnapshot,
   decodeProviderInstance,
@@ -1211,6 +1211,132 @@ describe("ProviderService", () => {
         events: [expect.objectContaining({ eventName: "provider.instance-created@1" })],
       }),
     );
+  });
+
+  it("assigns an extra Codex account its own home, creates it, and refuses any other home", async () => {
+    const fixture = serviceFixture();
+    const otherId = decodeProviderInstanceId("80000000-0000-4000-8000-000000000062");
+    await fixture.service.execute(windowId, {
+      kind: "create-codex-provider",
+      instanceId,
+      expectedVersion: 0,
+      displayName: "Codex personal",
+      binaryPath: "/opt/homebrew/bin/codex",
+    });
+    const created = await fixture.service.execute(windowId, {
+      kind: "create-codex-provider",
+      instanceId: otherId,
+      expectedVersion: 0,
+      displayName: "Codex work",
+      binaryPath: "/opt/homebrew/bin/codex",
+    });
+    expect(created).toMatchObject({
+      kind: "provider-created",
+      instance: {
+        id: otherId,
+        configuration: {
+          kind: "codex-cli",
+          codexHome: assignedCodexHome(homedir(), otherId),
+        },
+      },
+    });
+    // Codex refuses a home that does not exist, so the extra account's folder
+    // is created with it. The first account keeps the host profile.
+    expect(fixture.ensureAccountDirectory.mock.calls).toEqual([
+      [assignedCodexHome(homedir(), otherId)],
+    ]);
+    await expect(
+      fixture.service.execute(windowId, {
+        kind: "change-codex-configuration",
+        instanceId: otherId,
+        expectedVersion: 1,
+        configuration: {
+          kind: "codex-cli",
+          binaryPath: "/opt/homebrew/bin/codex",
+          codexHome: `${homedir()}/.codex`,
+        },
+      }),
+    ).rejects.toMatchObject({
+      failure: {
+        category: "invalid-configuration",
+        message: "Codex accounts use an Octant-assigned home. Re-assign the account to use it.",
+      },
+    });
+  });
+
+  it("gives the Codex host profile to a new account once no account holds it", async () => {
+    const fixture = serviceFixture();
+    const workId = decodeProviderInstanceId("80000000-0000-4000-8000-000000000062");
+    const laterId = decodeProviderInstanceId("80000000-0000-4000-8000-000000000063");
+    const create = (id: typeof instanceId, displayName: string) =>
+      fixture.service.execute(windowId, {
+        kind: "create-codex-provider",
+        instanceId: id,
+        expectedVersion: 0,
+        displayName,
+        binaryPath: "/opt/homebrew/bin/codex",
+      });
+    await create(instanceId, "Codex personal");
+    await create(workId, "Codex work");
+    await fixture.service.execute(windowId, {
+      kind: "remove-provider",
+      instanceId,
+      expectedVersion: 1,
+    });
+
+    const later = await create(laterId, "Codex later");
+
+    // Counting accounts instead would have assigned this one a new home and
+    // left the login in `~/.codex` with no account that can reach it.
+    expect(later).toMatchObject({ kind: "provider-created", instance: { id: laterId } });
+    expect(
+      later.kind === "provider-created" && later.instance.driverKind === "codex"
+        ? later.instance.configuration.codexHome
+        : "not-a-codex-account",
+    ).toBeUndefined();
+  });
+
+  it("recolours a Codex account during a session without stopping it", async () => {
+    const fixture = serviceFixture();
+    await fixture.service.execute(windowId, {
+      kind: "create-codex-provider",
+      instanceId,
+      expectedVersion: 0,
+      displayName: "Codex personal",
+      binaryPath: "/opt/homebrew/bin/codex",
+    });
+    fixture.runtime.setObservedState(observation());
+    fixture.runtime.setActiveSessionCount(instanceId, 1);
+    const invalidate = vi.spyOn(fixture.runtime, "invalidateRuntime");
+
+    await expect(
+      fixture.service.execute(windowId, {
+        kind: "change-codex-configuration",
+        instanceId,
+        expectedVersion: 1,
+        configuration: {
+          kind: "codex-cli",
+          binaryPath: "/opt/homebrew/bin/codex",
+          accent: "teal",
+        },
+      }),
+    ).resolves.toMatchObject({
+      kind: "provider-updated",
+      instance: { configuration: { accent: "teal" } },
+    });
+    expect(invalidate).not.toHaveBeenCalled();
+    expect(fixture.runtime.observedState(instanceId)).toMatchObject({ readiness: "ready" });
+
+    await expect(
+      fixture.service.execute(windowId, {
+        kind: "change-codex-configuration",
+        instanceId,
+        expectedVersion: 2,
+        configuration: { kind: "codex-cli", binaryPath: "/usr/local/bin/codex", accent: "teal" },
+      }),
+    ).rejects.toMatchObject({
+      failure: { message: "Stop active sessions before reconfiguring this provider." },
+    });
   });
 
   it("creates disabled providers when the create command requests enabled false", async () => {
@@ -4684,16 +4810,21 @@ function serviceFixture(
       (async (instance: ProviderInstance) =>
         options.probeResult ?? observation({ instanceId: instance.id })),
   );
+  // Records the account folders the service would create, so no test
+  // creates one under the real home.
+  const ensureAccountDirectory = vi.fn(async (_directory: string) => undefined);
   return {
     append,
     catalogs: () => catalogs,
     persistence,
     runtime,
     probe,
+    ensureAccountDirectory,
     service: new ProviderService({
       persistence,
       runtimeRegistry: runtime,
       probe,
+      ensureAccountDirectory,
       ...(options.driver === undefined ? {} : { driver: options.driver }),
       ...(options.clearResumeIdentities === undefined
         ? {}
