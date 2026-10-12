@@ -45,7 +45,7 @@ import {
   onboardingFlowExample,
   searchSpecExample,
 } from "./canvasDesignExamples";
-import { designBriefExample } from "./canvasLayoutExamples";
+import { designBriefExample, launchGanttExample } from "./canvasLayoutExamples";
 import { opsDashboardExample, releaseHealthBoardExample } from "./canvasDashboardExamples";
 import { mathExamples } from "./canvasMathExamples";
 import { mockupExamples } from "./canvasMockupExamples";
@@ -3184,5 +3184,144 @@ describe("tabs and columns layout groups", () => {
       expect(rejected.message).toContain("tabs brief");
       expect(rejected.message).toContain("dashboard board");
     });
+  });
+});
+
+describe("diagram styles and the plan's Gantt view", () => {
+  const styled = (schemaVersion: number, role: string) => ({
+    blockId: "flow",
+    schemaVersion,
+    kind: "diagram",
+    nodes: [
+      { nodeId: "a", label: "Start", role },
+      { nodeId: "b", label: "Check?", role: "decision" },
+    ],
+    edges: [{ edgeId: "ab", source: "a", target: "b" }],
+  });
+
+  it("admits the closed roles, edge styles and tones, and group tones", () => {
+    expect(() =>
+      validateCanvasDefinition(
+        withBlocks([
+          {
+            ...styled(CANVAS_SCHEMA_VERSION, "terminator"),
+            edges: [{ edgeId: "ab", source: "a", target: "b", style: "dashed", tone: "warning" }],
+            groups: [{ groupId: "g", label: "Zone", nodeIds: ["a"], tone: "accent" }],
+          },
+        ]),
+      ),
+    ).not.toThrow();
+  });
+
+  it("refuses a role outside the closed set in a block written at the styles version", () => {
+    expectPolicyCode(
+      () => validateCanvasDefinition(withBlocks([styled(CANVAS_SCHEMA_VERSION, "service")])),
+      "unknown-diagram-role",
+    );
+  });
+
+  it("still loads an older block's free-form role, so nothing already saved breaks", () => {
+    for (const declared of [2, 14]) {
+      const definition = validateCanvasDefinition({
+        ...baseDefinition,
+        schemaVersion: declared,
+        blocks: [styled(declared, "service")],
+      });
+      expect(definition.blocks[0]).toMatchObject({ kind: "diagram" });
+    }
+    // An older block keeps its role inside a current document, as a revision
+    // that copies it forward would carry it.
+    expect(() => validateCanvasDefinition(withBlocks([styled(14, "service")]))).not.toThrow();
+  });
+
+  it("refuses a styled edge, a toned group, or a Gantt view in an older document as a future version", () => {
+    const older = { ...baseDefinition, schemaVersion: 14 };
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition({
+          ...older,
+          blocks: [
+            {
+              ...styled(14, "process"),
+              edges: [{ edgeId: "ab", source: "a", target: "b", style: "arrow" }],
+            },
+          ],
+        }),
+      "unsupported-schema-version",
+    );
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition({
+          ...older,
+          blocks: [
+            {
+              ...styled(14, "process"),
+              groups: [{ groupId: "g", label: "Zone", nodeIds: ["a"], tone: "danger" }],
+            },
+          ],
+        }),
+      "unsupported-schema-version",
+    );
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition({
+          ...older,
+          blocks: [{ ...plan({ view: "gantt" }), schemaVersion: 14 }],
+        }),
+      "unsupported-schema-version",
+    );
+  });
+
+  it("refuses a Gantt plan with a repeated task id or circular dependencies, as any plan", () => {
+    expect(() => validateCanvasDefinition(withBlocks([launchGanttExample]))).not.toThrow();
+    const [first, second, ...rest] = launchGanttExample.tasks;
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            { ...launchGanttExample, tasks: [first, { ...second, taskId: "design" }, ...rest] },
+          ]),
+        ),
+      "duplicate-plan-task-id",
+    );
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            {
+              ...launchGanttExample,
+              tasks: [{ ...first, dependsOn: ["beta"] }, second, ...rest],
+            },
+          ]),
+        ),
+      "plan-dependency-cycle",
+    );
+  });
+
+  it("refuses an unknown edge style or tone", () => {
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            {
+              ...styled(CANVAS_SCHEMA_VERSION, "process"),
+              edges: [{ edgeId: "ab", source: "a", target: "b", style: "zigzag" }],
+            },
+          ]),
+        ),
+      "invalid-schema",
+    );
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            {
+              ...styled(CANVAS_SCHEMA_VERSION, "process"),
+              groups: [{ groupId: "g", label: "Zone", nodeIds: ["a"], tone: "#ff0000" }],
+            },
+          ]),
+        ),
+      "invalid-schema",
+    );
   });
 });

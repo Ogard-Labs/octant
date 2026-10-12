@@ -23,6 +23,7 @@ import {
   supportFlowBlock,
   releaseMindmapBlock,
   designBriefExample,
+  launchGanttExample,
   opsDashboardExampleBlocks,
   releaseHealthBoardExampleBlocks,
 } from "@octant/domain";
@@ -621,11 +622,13 @@ const tableComments = {
 // `?only=mockup` draws the mockups alone, `?only=flow` the funnel, radar, and
 // sankey charts alone, `?only=table` the grouped and pinned table alone,
 // `?only=dashboard` the two example dashboards, `?only=design` the designs,
-// and `?only=layout` the tabbed design brief, so their capture is not a page
-// of every chart.
+// and `?only=layout` the tabbed design brief and a Gantt plan, so their
+// capture is not a page of every chart.
 const only = new URLSearchParams(window.location.search).get("only");
 
-const layoutBlocks = designBriefExample.map((block) => decodeCanvasBlock(block));
+const layoutBlocks = [...designBriefExample, launchGanttExample].map((block) =>
+  decodeCanvasBlock(block),
+);
 
 const definition =
   only === "mockup"

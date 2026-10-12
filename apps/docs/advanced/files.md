@@ -242,6 +242,18 @@ opened at an older version is read-only. If the host has moved on since you
 opened the board, the drag is refused, the board reloads, and you drag again on
 the current version. Boards keep the diagram budgets (512 nodes, 1,024 edges).
 
+A flowchart or a map of areas is a diagram too. Its nodes can be drawn as a
+process box, a decision diamond, or a start-and-end pill; a connection can be
+a plain line, an arrow, or a dashed arrow; and a connection or a group can take
+a tone such as success or danger, so a group of nodes reads as a region. The
+tones follow your theme, and the label beside each one still says what it
+means. Diagrams saved before shapes existed open as they did.
+
+A plan with dates can open as a Gantt chart: choose **Gantt** above the plan to
+see each task as a bar from its start to its due day, arrows from the tasks it
+waits on, and its status beside its title. Tasks without dates are listed under
+the chart. Choosing a view never changes the plan.
+
 A login or request flow is a sequence: participants across the top, messages
 in order down the page, an activation on a lifeline, and notes. A lifecycle
 such as an order is a state machine: states that may nest, labeled

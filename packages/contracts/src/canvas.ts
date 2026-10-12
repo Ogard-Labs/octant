@@ -36,7 +36,8 @@ const strict = { parseOptions: { onExcessProperty: "error" as const } };
 // id, version 14 the funnel, radar, and sankey chart types, version 15 the
 // dashboard layout block, version 16 the design document size and workspace
 // theme, version 17 a design's declared image assets, version 18 a design
-// that runs script, and version 19 the tabs and columns layout groups, which the
+// that runs script, and version 19 the tabs and columns layout groups, diagram
+// styles, and the plan's Gantt view, which the
 // definition filters below admit only under those declared versions.
 
 // These are renderer-facing aggregate limits. Per-field structural limits are
@@ -215,6 +216,9 @@ export const CANVAS_DESIGN_ASSET_SCHEMA_VERSION = 17;
 export const CANVAS_DESIGN_RUNNING_SCHEMA_VERSION = 18;
 // The tabs and columns layout groups, which name other blocks of the document.
 export const CANVAS_LAYOUT_GROUPS_SCHEMA_VERSION = 19;
+// Diagram styling (closed node roles, edge styles and tones, group tones) and
+// the plan's Gantt view shipped with the layout groups and share their floor.
+export const CANVAS_DIAGRAM_STYLES_SCHEMA_VERSION = CANVAS_LAYOUT_GROUPS_SCHEMA_VERSION;
 // The metric's sparkline, goodDirection, and caption arrived with the bar list.
 export const CANVAS_METRIC_TREND_SCHEMA_VERSION = 7;
 
@@ -1349,6 +1353,36 @@ export type CanvasTimelineBlock = typeof CanvasTimelineBlock.Type;
 // a diagram may declare whether its layout is authoritative (manual) or
 // generated (auto). Layout revisions mint a new immutable Canvas version with
 // the authoring actor recorded in provenance.
+/**
+ * The node roles the layout draws as shapes: a process is a box, a decision a
+ * diamond, a terminator a pill, and a node without a role the plain rounded
+ * box. Before version 19 a role was free text no renderer read; a block that
+ * declares version 19 or newer may only use these, and the domain policy
+ * refuses anything else there. An older block keeps whatever it wrote and
+ * draws every node as the plain box, even a role that names a shape.
+ */
+export const CANVAS_DIAGRAM_NODE_ROLES = ["process", "decision", "terminator"] as const;
+export const CanvasDiagramNodeRole = Schema.Literal(...CANVAS_DIAGRAM_NODE_ROLES);
+export type CanvasDiagramNodeRole = typeof CanvasDiagramNodeRole.Type;
+
+/** Whether a line ends in an arrowhead, or is dashed to read as optional or async. */
+export const CanvasDiagramEdgeStyle = Schema.Literal("line", "arrow", "dashed");
+export type CanvasDiagramEdgeStyle = typeof CanvasDiagramEdgeStyle.Type;
+
+/**
+ * A diagram tone is a theme role, never a colour: neutral, the accent, and the
+ * success, warning, and danger roles. A tone is emphasis beside the label and
+ * the line style, never the only thing that carries a distinction.
+ */
+export const CanvasDiagramTone = Schema.Literal(
+  "neutral",
+  "accent",
+  "success",
+  "warning",
+  "danger",
+);
+export type CanvasDiagramTone = typeof CanvasDiagramTone.Type;
+
 export const CanvasDiagramNode = Schema.Struct({
   nodeId: CanvasNodeId,
   label: CanvasLabel,
@@ -1367,6 +1401,8 @@ export const CanvasDiagramEdge = Schema.Struct({
   source: CanvasNodeId,
   target: CanvasNodeId,
   label: Schema.optional(CanvasLabel),
+  style: Schema.optional(CanvasDiagramEdgeStyle),
+  tone: Schema.optional(CanvasDiagramTone),
 }).annotations(strict);
 export type CanvasDiagramEdge = typeof CanvasDiagramEdge.Type;
 
@@ -1382,8 +1418,33 @@ export const CanvasDiagramGroup = Schema.Struct({
   groupId: boundedToken("CanvasGroupId"),
   label: CanvasLabel,
   nodeIds: Schema.Array(CanvasNodeId).pipe(Schema.maxItems(CANVAS_MAX_DIAGRAM_NODES)),
+  /** A region's tone, so a zone map reads as areas rather than outlines. */
+  tone: Schema.optional(CanvasDiagramTone),
 }).annotations(strict);
 export type CanvasDiagramGroup = typeof CanvasDiagramGroup.Type;
+
+/** Whether a block uses a diagram field introduced at the diagram-styles version. */
+export function canvasDiagramUsesStyles(block: {
+  readonly kind?: unknown;
+  readonly edges?: unknown;
+  readonly groups?: unknown;
+}): boolean {
+  if (block.kind !== "diagram") return false;
+  const carries = (items: unknown, fields: ReadonlyArray<string>): boolean =>
+    Array.isArray(items) &&
+    items.some(
+      (item) =>
+        typeof item === "object" &&
+        item !== null &&
+        fields.some((field) => (item as Record<string, unknown>)[field] !== undefined),
+    );
+  return carries(block.edges, ["style", "tone"]) || carries(block.groups, ["tone"]);
+}
+
+/** Whether a role is one the layout draws as a shape. */
+export function isCanvasDiagramNodeRole(role: unknown): role is CanvasDiagramNodeRole {
+  return CANVAS_DIAGRAM_NODE_ROLES.some((known) => known === role);
+}
 
 /** Which way the diagram reads. Layout follows it; it is never inferred. */
 export const CanvasDiagramFlow = Schema.Literal("down", "right");
@@ -1704,7 +1765,7 @@ export type CanvasSummaryBlock = typeof CanvasSummaryBlock.Type;
 export const CanvasPlanTaskStatus = Schema.Literal("todo", "doing", "blocked", "done");
 export type CanvasPlanTaskStatus = typeof CanvasPlanTaskStatus.Type;
 
-export const CanvasPlanView = Schema.Literal("checklist", "kanban", "timeline");
+export const CanvasPlanView = Schema.Literal("checklist", "kanban", "timeline", "gantt");
 export type CanvasPlanView = typeof CanvasPlanView.Type;
 
 export const CanvasPlanOwner = Schema.Struct({
@@ -2085,6 +2146,14 @@ export const CanvasDesignBlock = Schema.Struct({
 }).annotations(strict);
 export type CanvasDesignBlock = typeof CanvasDesignBlock.Type;
 
+/** Whether a plan names the Gantt view, which arrived at the diagram-styles version. */
+export function canvasPlanUsesGantt(block: {
+  readonly kind?: unknown;
+  readonly view?: unknown;
+}): boolean {
+  return block.kind === "plan" && block.view === "gantt";
+}
+
 /** The image types a design asset may resolve to, read from the bytes. */
 export const CanvasDesignAssetMediaType = Schema.Literal(
   "image/png",
@@ -2454,11 +2523,11 @@ export const CanvasDefinition = Schema.Struct({
     // version 13, the funnel, radar, and sankey charts from version 14, the
     // dashboard from version 15, a design document or theme from version 16,
     // design assets from version 17, a design that runs script from version
-    // 18, and the tabs and columns layout groups from version 19. A
-    // rolled-back runtime that never learned a kind or hint
-    // must see a document carrying it as a declared future version, not as a
-    // document that failed to decode. Each keeps its own floor so an earlier
-    // document stays valid.
+    // 18, and the tabs and columns layout groups, diagram styles, and the
+    // Gantt view from version 19. A rolled-back runtime that never learned a
+    // kind or hint must see a document carrying it as a declared future
+    // version, not as a document that failed to decode. Each keeps its own
+    // floor so an earlier document stays valid.
     Schema.filter(
       (definition) =>
         definition.schemaVersion >= CANVAS_MOCKUP_SCHEMA_VERSION ||
@@ -2623,6 +2692,17 @@ export const CanvasDefinition = Schema.Struct({
       {
         message: () =>
           `Tabs and columns require Canvas schema version ${String(CANVAS_LAYOUT_GROUPS_SCHEMA_VERSION)}.`,
+      },
+    ),
+    Schema.filter(
+      (definition) =>
+        definition.schemaVersion >= CANVAS_DIAGRAM_STYLES_SCHEMA_VERSION ||
+        !definition.blocks.some(
+          (block) => canvasDiagramUsesStyles(block) || canvasPlanUsesGantt(block),
+        ),
+      {
+        message: () =>
+          `Diagram edge styles and tones, group tones, and the plan's Gantt view require Canvas schema version ${String(CANVAS_DIAGRAM_STYLES_SCHEMA_VERSION)}.`,
       },
     ),
   );

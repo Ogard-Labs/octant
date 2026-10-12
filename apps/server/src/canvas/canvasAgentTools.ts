@@ -46,6 +46,8 @@ import {
   mathExamples,
   metricExamples,
   tabbedOverviewExample,
+  designBriefExample,
+  launchGanttExample,
   dashboardExamples,
   canvasInlineRefusal,
   effectiveCanvasPresentation,
@@ -269,6 +271,14 @@ function describedExamples(kinds: ReadonlyArray<string>): ReadonlyArray<unknown>
     if (kind === "math") examples.push(...mathExamples);
     if (kind === "metric") examples.push(...metricExamples);
     if (kind === "tabs" || kind === "columns") examples.push(tabbedOverviewExample);
+    if (kind === "diagram") {
+      examples.push(
+        ...designBriefExample.filter(
+          (block) => block.blockId === "loop" || block.blockId === "zones",
+        ),
+      );
+    }
+    if (kind === "plan") examples.push(launchGanttExample);
     if (kind === "dashboard") examples.push(...dashboardExamples);
   }
   return examples;
@@ -363,7 +373,7 @@ const BLOCK_GUIDANCE: Readonly<Record<string, { readonly use: string; readonly d
     plan: {
       use: "A plan: phases and tasks with a status.",
       detail:
-        "For a plan, use a plan block: phases, and tasks that name their phase, with a status (todo, doing, blocked, done), and optional owner, estimate, acceptance notes, dates, and dependsOn. The person can work the plan too, so read the Canvas before revising it and keep their progress.",
+        "For a plan, use a plan block: phases, and tasks that name their phase, with a status (todo, doing, blocked, done), and optional owner, estimate, acceptance notes, dates, and dependsOn. Give tasks startAt and dueAt and set view to gantt to open the plan as bars on days with its dependency arrows; a task without dates is listed under the chart. The person can work the plan too, so read the Canvas before revising it and keep their progress.",
     },
     sequence: {
       use: "A login or request flow between participants.",
@@ -393,7 +403,7 @@ const BLOCK_GUIDANCE: Readonly<Record<string, { readonly use: string; readonly d
     diagram: {
       use: "A generic graph of nodes and edges.",
       detail:
-        "Use diagram for a generic graph of nodes and edges. Prefer sequence, state, er, swimlane, or mindmap when the drawing is one of those.",
+        "Use diagram for a generic graph of nodes and edges, such as a flowchart or a zone map: a node's role is process (a box), decision (a diamond), or terminator (a pill), or left out for a plain box; an edge's style is line, arrow, or dashed (a dashed arrow, for an optional or asynchronous step); an edge or a group may take a tone of neutral, accent, success, warning, or danger, and a toned group reads as a region. Tones are theme roles, never colours, and a label still says what the tone means. Prefer sequence, state, er, swimlane, or mindmap when the drawing is one of those.",
     },
     chart: {
       use: "A pie, donut, stacked or grouped bar, bar-line, funnel, radar, or sankey chart.",

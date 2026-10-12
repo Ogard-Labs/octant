@@ -100,10 +100,10 @@ if (executable === undefined) {
 // `--only=dashboard` the ops dashboard and release health board, as
 // `canvas-dashboard-*.png`, `--only=design` the design documents and a
 // phone design, one image per design block, as `canvas-design-*.png`, and
-// `--only=layout` the tabbed design brief, as `canvas-layout-*.png`: one
-// element capture per listed tab and one of the columns, each scrolled into
-// view, because a full-page capture of a long page can leave content below the
-// fold unpainted.
+// `--only=layout` the tabbed design brief and a Gantt plan, as
+// `canvas-layout-*.png`: one element capture per listed tab, the columns, and
+// the Gantt plan, each scrolled into view, because a full-page capture of a
+// long page can leave content below the fold unpainted.
 const ONLY_SETS = ["mockup", "flow", "table", "dashboard", "design", "layout"] as const;
 const LAYOUT_TABS = ["Metrics", "Core loop", "World", "Economy"] as const;
 const onlyArg = process.argv.find((arg) => arg.startsWith("--only="))?.slice("--only=".length);
@@ -243,11 +243,16 @@ try {
           await tabs.screenshot({ path });
           written.push(path);
         }
-        const columns = page.locator(".canvas-columns");
-        await columns.scrollIntoViewIfNeeded();
-        const path = join(evidenceDir, `canvas-layout-columns-${scenario}${suffix}.png`);
-        await columns.screenshot({ path });
-        written.push(path);
+        for (const [name, selector] of [
+          ["columns", ".canvas-columns"],
+          ["gantt", ".canvas-plan"],
+        ] as const) {
+          const element = page.locator(selector);
+          await element.scrollIntoViewIfNeeded();
+          const path = join(evidenceDir, `canvas-layout-${name}-${scenario}${suffix}.png`);
+          await element.screenshot({ path });
+          written.push(path);
+        }
         continue;
       }
       const path = join(evidenceDir, `${name}.png`);

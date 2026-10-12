@@ -37,7 +37,9 @@ import {
   canvasMockupNodeReading,
   type CanvasMockupBranch,
 } from "@octant/domain/canvas-mockup-outline";
-import { DEFAULT_ARTIFACT_PALETTE, escapeXml } from "./artifactRender";
+import { layoutCanvasDiagram } from "@octant/domain/canvas-diagram-layout";
+import { layoutCanvasPlanGantt } from "@octant/domain/canvas-plan-gantt-layout";
+import { DEFAULT_ARTIFACT_PALETTE, drawCanvasDiagramLayout, escapeXml } from "./artifactRender";
 
 /**
  * The reading form of the same blocks a preview draws.
@@ -94,7 +96,19 @@ type Piece =
       readonly source: string | undefined;
       readonly caption: string;
     }
-  | { readonly kind: "math-paragraph"; readonly runs: ReadonlyArray<MathRun> };
+  | { readonly kind: "math-paragraph"; readonly runs: ReadonlyArray<MathRun> }
+  | {
+      /**
+       * A picture the HTML form draws inline: generated SVG elements with every
+       * text already filtered, no script, no id, and no reference out. The
+       * Markdown form carries the reading beside it instead.
+       */
+      readonly kind: "drawing";
+      readonly label: string;
+      readonly width: number;
+      readonly height: number;
+      readonly markup: string;
+    };
 
 /** A paragraph run; a withheld formula source reads as redacted prose. */
 type MathRun =
@@ -371,17 +385,41 @@ function piecesFor(block: CanvasBlock): ReadonlyArray<Piece> {
         },
       ];
     case "diagram": {
+      // The picture is the board's own layout, so the HTML places the same
+      // nodes the thread does; the list is the reading both forms carry, with
+      // a shaped node named by its role.
+      const layout = layoutCanvasDiagram(block);
       const names = new Map(block.nodes.map((node) => [String(node.nodeId), reading(node.label)]));
+      const drawing: Piece = {
+        kind: "drawing",
+        label: "Diagram",
+        width: layout.width,
+        height: layout.height,
+        markup: drawCanvasDiagramLayout(layout, DEFAULT_ARTIFACT_PALETTE, {
+          x: 0,
+          y: 0,
+          scale: 1,
+          label: reading,
+        }),
+      };
       return [
+        ...(block.nodes.length === 0 ? [] : [drawing]),
         {
           kind: "list",
           items: [
-            ...block.nodes.map((node) => reading(node.label)),
+            ...layout.nodes.map((node) =>
+              node.shape === "plain"
+                ? reading(node.label)
+                : `${reading(node.label)} (${node.shape})`,
+            ),
             ...block.edges.map((edge) => {
               const from = names.get(String(edge.source)) ?? "node";
               const to = names.get(String(edge.target)) ?? "node";
               const label = edge.label === undefined ? "" : reading(edge.label);
-              return label.length === 0 ? `${from} → ${to}` : `${from} → ${to}: ${label}`;
+              const arrow = edge.style === "dashed" ? "⇢" : "→";
+              return label.length === 0
+                ? `${from} ${arrow} ${to}`
+                : `${from} ${arrow} ${to}: ${label}`;
             }),
           ],
         },
@@ -593,6 +631,14 @@ function piecesFor(block: CanvasBlock): ReadonlyArray<Piece> {
       const phases = new Map(
         block.phases.map((phase) => [String(phase.phaseId), reading(phase.title)]),
       );
+      // Dates read from the same Gantt layout the view draws, so a bar's days
+      // and the exported days agree, including a due day before its start.
+      const days = new Map(
+        layoutCanvasPlanGantt(block).bars.map((bar) => [
+          bar.taskId,
+          bar.startDay === bar.endDay ? bar.startDay : `${bar.startDay} → ${bar.endDay}`,
+        ]),
+      );
       return [
         { kind: "heading", level: 2, text: reading(block.title) },
         {
@@ -600,7 +646,8 @@ function piecesFor(block: CanvasBlock): ReadonlyArray<Piece> {
           items: block.tasks.map((task) => {
             const phase = phases.get(String(task.phaseId)) ?? "";
             const prefix = phase.length === 0 ? "" : `${phase}: `;
-            return `${prefix}${reading(task.title)} (${task.status})`;
+            const when = days.get(String(task.taskId));
+            return `${prefix}${reading(task.title)} (${task.status})${when === undefined ? "" : `, ${when}`}`;
           }),
         },
       ];
@@ -799,6 +846,8 @@ function safeHttpUrl(value: string): boolean {
 function markdownDocument(title: string, pieces: ReadonlyArray<Piece>): string {
   const lines = [`# ${inline(title)}`, ""];
   for (const piece of pieces) {
+    // Markdown carries a drawing's reading, which follows it as its own piece.
+    if (piece.kind === "drawing") continue;
     lines.push(markdownPiece(piece), "");
   }
   return lines.join("\n").trimEnd() + "\n";
@@ -848,6 +897,8 @@ function markdownPiece(piece: Piece): string {
           return `$${ticks}${pad}${run.source}${pad}${ticks}$`;
         })
         .join("");
+    case "drawing":
+      return "";
     default: {
       const unhandled: never = piece;
       return unhandled;
@@ -915,6 +966,8 @@ function htmlPiece(piece: Piece): string {
       if (piece.source === undefined) return `<figure><p>[redacted]</p>${caption}</figure>`;
       return `<figure>${htmlMath(piece.source, true)}${caption}<details><summary>Source</summary><pre>${escapeXml(piece.source)}</pre></details></figure>`;
     }
+    case "drawing":
+      return `<figure><svg xmlns="http://www.w3.org/2000/svg" role="img" aria-label="${escapeXml(piece.label)}" viewBox="0 0 ${String(Math.ceil(piece.width))} ${String(Math.ceil(piece.height))}" style="max-width:100%;height:auto" width="${String(Math.ceil(piece.width))}" font-family="system-ui, sans-serif">${piece.markup}</svg></figure>`;
     case "math-paragraph":
       return `<p>${piece.runs
         .map((run) => (run.kind === "text" ? escapeXml(run.text) : htmlMath(run.source, false)))

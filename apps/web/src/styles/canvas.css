@@ -2261,8 +2261,54 @@
 }
 
 .canvas-block__diagram-edge {
+  fill: none;
   stroke: var(--oct-chart-axis);
   stroke-width: 1.5;
+  stroke-linejoin: round;
+}
+
+/* A dashed edge reads as optional or asynchronous; the dash, not a hue, is
+   what says so. */
+.canvas-block__diagram-edge[data-style="dashed"] {
+  stroke-dasharray: 6 4;
+}
+
+.canvas-block__diagram-arrowhead path {
+  fill: var(--oct-chart-axis);
+}
+
+/* Tones are theme roles, never colours an author picks. Each pairs with the
+   edge's label or the group's name, so the hue is emphasis, not the message. */
+.canvas-block__diagram-edge[data-tone="accent"] {
+  stroke: var(--oct-accent);
+}
+
+.canvas-block__diagram-edge[data-tone="success"] {
+  stroke: var(--oct-success);
+}
+
+.canvas-block__diagram-edge[data-tone="warning"] {
+  stroke: var(--oct-warn);
+}
+
+.canvas-block__diagram-edge[data-tone="danger"] {
+  stroke: var(--oct-danger);
+}
+
+.canvas-block__diagram-arrowhead[data-tone="accent"] path {
+  fill: var(--oct-accent);
+}
+
+.canvas-block__diagram-arrowhead[data-tone="success"] path {
+  fill: var(--oct-success);
+}
+
+.canvas-block__diagram-arrowhead[data-tone="warning"] path {
+  fill: var(--oct-warn);
+}
+
+.canvas-block__diagram-arrowhead[data-tone="danger"] path {
+  fill: var(--oct-danger);
 }
 
 .canvas-block__diagram-edge-label {
@@ -2277,10 +2323,24 @@
   paint-order: stroke;
 }
 
-.canvas-block__diagram-node rect {
+.canvas-block__diagram-node rect,
+.canvas-block__diagram-node polygon {
   fill: var(--oct-surface);
   stroke: var(--oct-chart-axis);
   stroke-width: 1;
+}
+
+/* A process box and a terminator pill carry the stronger rule, so the
+   shapes a flowchart is read by stand apart from a plain node in shape and
+   weight, not in hue. */
+.canvas-block__diagram-node
+  :is(rect, polygon):is(
+    [data-shape="process"],
+    [data-shape="decision"],
+    [data-shape="terminator"]
+  ) {
+  stroke: var(--oct-fg-2);
+  stroke-width: 1.25;
 }
 
 .canvas-block__diagram-node text {
@@ -2300,6 +2360,135 @@
 .canvas-block__diagram-group text {
   fill: var(--oct-muted);
   font-size: var(--oct-text-xs);
+}
+
+/* A toned group is a region: a faint wash of its tone inside a solid edge,
+   so a zone map reads as areas. The name stays in the reading ink. */
+.canvas-block__diagram-group[data-tone] rect {
+  stroke-dasharray: none;
+  fill: color-mix(in oklab, var(--canvas-diagram-tone) 9%, transparent);
+  stroke: color-mix(in oklab, var(--canvas-diagram-tone) 55%, transparent);
+}
+
+.canvas-block__diagram-group[data-tone] text {
+  fill: var(--oct-fg-2);
+}
+
+.canvas-block__diagram-group[data-tone="neutral"] {
+  --canvas-diagram-tone: var(--oct-fg);
+}
+
+.canvas-block__diagram-group[data-tone="accent"] {
+  --canvas-diagram-tone: var(--oct-accent);
+}
+
+.canvas-block__diagram-group[data-tone="success"] {
+  --canvas-diagram-tone: var(--oct-success);
+}
+
+.canvas-block__diagram-group[data-tone="warning"] {
+  --canvas-diagram-tone: var(--oct-warn);
+}
+
+.canvas-block__diagram-group[data-tone="danger"] {
+  --canvas-diagram-tone: var(--oct-danger);
+}
+
+@media (forced-colors: active) {
+  .canvas-block__diagram-edge,
+  .canvas-block__diagram-edge[data-tone] {
+    stroke: CanvasText;
+  }
+
+  .canvas-block__diagram-arrowhead path,
+  .canvas-block__diagram-arrowhead[data-tone] path {
+    fill: CanvasText;
+  }
+
+  .canvas-block__diagram-node :is(rect, polygon),
+  .canvas-block__diagram-group[data-tone] rect {
+    fill: Canvas;
+    stroke: CanvasText;
+  }
+}
+
+/* plan: Gantt. Bars on days in the status tones the plan's marks already
+   use; the status is also named in the bar's title and the hidden list. */
+.canvas-plan__gantt-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+/* The chart keeps its days legible and scrolls sideways in a narrow Canvas
+   rather than shrinking its labels. */
+.canvas-plan__gantt-svg {
+  display: block;
+  max-width: none;
+}
+
+.canvas-plan__gantt-tick line {
+  stroke: var(--oct-border-soft);
+  stroke-width: 1;
+}
+
+.canvas-plan__gantt-tick text,
+.canvas-plan__gantt-label {
+  fill: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+}
+
+.canvas-plan__gantt-label {
+  fill: var(--oct-fg);
+  dominant-baseline: middle;
+}
+
+.canvas-plan__gantt-status {
+  fill: var(--oct-muted);
+}
+
+.canvas-plan__gantt-bar {
+  fill: color-mix(in oklab, var(--oct-fg) 22%, transparent);
+}
+
+.canvas-plan__gantt-row[data-status="doing"] .canvas-plan__gantt-bar {
+  fill: var(--oct-accent);
+}
+
+.canvas-plan__gantt-row[data-status="blocked"] .canvas-plan__gantt-bar {
+  fill: var(--oct-danger);
+}
+
+.canvas-plan__gantt-row[data-status="done"] .canvas-plan__gantt-bar {
+  fill: var(--oct-success);
+}
+
+.canvas-plan__gantt-link {
+  fill: none;
+  stroke: var(--oct-chart-axis);
+  stroke-width: 1.25;
+}
+
+.canvas-plan__gantt-arrowhead path {
+  fill: var(--oct-chart-axis);
+}
+
+@media (forced-colors: active) {
+  .canvas-plan__gantt-row[data-status] .canvas-plan__gantt-bar {
+    fill: CanvasText;
+  }
+
+  .canvas-plan__gantt-row[data-status="todo"] .canvas-plan__gantt-bar {
+    fill: Canvas;
+    stroke: CanvasText;
+  }
+
+  .canvas-plan__gantt-link {
+    stroke: CanvasText;
+  }
+
+  .canvas-plan__gantt-arrowhead path {
+    fill: CanvasText;
+  }
 }
 
 .canvas-block__kind-diagram .canvas-block__diagram-svg {

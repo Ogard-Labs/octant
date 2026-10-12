@@ -427,14 +427,13 @@ document as a future version. Frames follow the
 
 - **Typed blocks carry data.** Metrics, tables, charts, plans, and the diagram
   family stay the catalog, because comments anchor to them, revision edits
-  them, and shares keep their structure. The catalog has `tabs` and
-  `columns` (shipped at schema version 19; see [Canvas](design/canvas.md)),
-  which name existing child blocks, a dashboard among them. Accepted, not yet
-  shipped: closed diagram node roles (process,
-  decision, terminator), edge styles, and group tones drawn by the one
-  deterministic layout; a Gantt view of `plan`; and import of a bounded
-  Mermaid subset into typed diagram blocks. Mermaid never renders; an unknown
-  construct fails closed and stays a code block.
+  them, and shares keep their structure. Shipped at schema version 19 (see
+  [Canvas](design/canvas.md)): `tabs` and `columns`, which name existing child
+  blocks, a dashboard among them; closed diagram node roles (process, decision,
+  terminator), edge styles, and group tones drawn by the one deterministic
+  layout; and a Gantt view of `plan`. Accepted, not yet shipped: import of a
+  bounded Mermaid subset into typed diagram blocks. Mermaid never renders; an
+  unknown construct fails closed and stays a code block.
 - **Static frames carry the look.** A `design` keeps a frame that runs
   nothing and has a `document` size whose height the host measures, which
   needs `allow-same-origin` and therefore never `allow-scripts`, and an opt-in

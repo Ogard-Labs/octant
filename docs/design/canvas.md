@@ -63,8 +63,8 @@ version 11, the mockup catalog at version 12, a table row's `id` at
 version 13, the funnel, radar, and sankey chart types at version 14, the
 dashboard block at version 15, a design's `document` size or `theme` at
 version 16, a design's image `assets` at version 17, a design's
-`runsScript` at version 18, and the `tabs` and `columns` layout groups at
-version 19, so a
+`runsScript` at version 18, and the `tabs` and `columns` layout groups,
+diagram styles, and the plan's `gantt` view at version 19, so a
 document that declares an earlier version and carries one is
 refused as a declared future version. The optional table column
 `display` and the chart, table, and metric `format` fields are the one ungated
@@ -318,15 +318,17 @@ the row id is the only Canvas version 13 field and a share drops it, a share at
 version 6 named a block authored at version 13 as version 12. Share version 7
 carried the version-14 chart types, so it named blocks up to version 14, share
 version 8 carries the version-15 dashboard, so it named blocks up to version
-15, and share version 9 carries tabs and columns, so it names blocks up to
-version 19 (`CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION`).
+15, and share version 9 carries tabs, columns, diagram styles, and the Gantt
+view, so it names blocks up to version 19
+(`CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION`).
 Share documents version independently of Canvas documents: a treemap, a
 heatmap, a bar list, a chart's or a table column's number format, a table
 column's display, and a board's layout arrive with share version 3, and a
 comparison matrix with share version 4, math with share version 5, the
 mockup catalog with share version 6, the funnel, radar, and sankey charts
 with share version 7 (whose blocks may name Canvas version 14), the dashboard
-with share version 8, and tabs and columns with share version 9, so a share
+with share version 8, and tabs, columns, a diagram's edge styles and tones,
+its group tones, and a plan's `gantt` view with share version 9, so a share
 that declares an older version
 and carries one is refused as a future version.
 A `tabs` block has 2 to 12 panes, each a short label and the block ids it
@@ -355,8 +357,17 @@ owner, estimate, acceptance notes, dates, dependencies on other tasks in the
 block, and manifest source ids. The domain policy refuses a task in a missing
 phase, a dangling or circular dependency, or a missing source. Tasks are not
 nested in phases because nesting puts a task's dependencies past the Canvas
-depth budget. The renderer offers checklist, status-board, and timeline views;
-switching is a reading choice and revises nothing. A shared snapshot keeps the
+depth budget. The renderer offers checklist, status-board, timeline, and Gantt
+views; switching is a reading choice and revises nothing. A plan may name
+`gantt` as its view from Canvas schema version 19. The Gantt view is a reading
+of the same tasks, not a block that restates them: the pure
+`layoutCanvasPlanGantt` places one bar per dated task (by phase, then start)
+from its start to its due day, a one-day bar when only one date is given or the
+due day precedes the start, elbow arrows from each task waited on to the task
+that waits, week or four-week ticks, and the undated tasks in dependency order
+under the chart. Duplicate task ids and circular dependencies are refused as for
+any plan. Bars take the status tones, and the status is also written beside each
+title. The Markdown/HTML export reads each task's days from the same layout. A shared snapshot keeps the
 plan but drops its source ids. A person sets a task's status from its mark;
 `/api/canvas/plan-revise` journals that as a new `canvas.version-appended@1`
 version, admitted by the pure `admitCanvasPlanTaskRevision` policy (the block
@@ -380,6 +391,27 @@ nudge is journaled through `/api/canvas/layout-revise` as a new immutable
 stamps itself, whatever actor the request names, admitted by the
 pure `admitCanvasDiagramLayoutRevision` policy (target must be a diagram,
 every moved node must exist, the sequence must be the head, budgets stand).
+The generic diagram is also styled, from Canvas schema version 19. A node's
+`role` is closed to `process` (a box), `decision` (a diamond), and
+`terminator` (a pill); a node without one is the plain rounded box. A role
+was free text before; a block that declares version 19 or newer is refused for
+any other role (`unknown-diagram-role`), while an older block keeps its text,
+still loads, and draws as the plain box, so nothing already saved breaks and a
+revision that copies such a block forward keeps it. An edge takes a `style` of
+`line` (the default), `arrow`, or `dashed` (a dashed arrow), and an edge or a
+group may take a `tone` of `neutral`, `accent`, `success`, `warning`, or
+`danger`; a toned group draws as a washed region. Tones are theme roles, never
+colours. The pure `layoutCanvasDiagram` stays the one layout: it carries each
+node's shape, each edge's style, tone, and drawn points, and each group's tone;
+it gives every group its own band across the flow so two groups' frames never
+overlap, starts a grouped diagram far enough in that no frame is drawn above
+the picture, meets a diamond on its slanted side, and steps an edge that would
+cross another node out beside the column and back rather than under the boxes.
+The board in the thread and the sidebar, the agent's preview (a screenshot of
+that board), the artifact SVG sidecar and thumbnail (the layout scaled into the
+band), and the HTML export (the layout drawn inline as plain SVG elements with
+no script, id, or external reference) place the same nodes; the Markdown
+export names a shaped node by its role.
 Beside that generic node-and-edge diagram, a `sequence` block is participants,
 ordered messages, activations, and notes, and a `state` block is states that
 may nest by parent id, labeled transitions, and initial and final roles. Three

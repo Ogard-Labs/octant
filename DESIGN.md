@@ -701,8 +701,8 @@ the mark and never on the chrome, every mark pairs its hue with a second
 channel, one formatter reads every number, and a block that cannot be drawn
 falls back to its plain reading and disclosed table. The marks, scales, block
 kinds (treemap, heatmap, bar list, comparison matrix, math, metric tiles, KPI
-dashboards, tabs and columns, tables, funnel, radar, sankey), and their states
-are specified in
+dashboards, tabs and columns, diagram marks, the Gantt view, tables, funnel,
+radar, sankey), and their states are specified in
 [Canvas visuals](docs/design/canvas-visuals.md).
 
 ## Typography

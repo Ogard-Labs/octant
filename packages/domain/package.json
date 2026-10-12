@@ -28,6 +28,8 @@
     "./mobile-hardening-policy": "./src/mobileHardeningPolicy.ts",
     "./canvas-policy": "./src/canvasPolicy.ts",
     "./canvas-treemap-layout": "./src/canvasTreemapLayout.ts",
+    "./canvas-diagram-layout": "./src/canvasDiagramLayout.ts",
+    "./canvas-plan-gantt-layout": "./src/canvasPlanGanttLayout.ts",
     "./canvas-heatmap-layout": "./src/canvasHeatmapLayout.ts",
     "./canvas-bar-list-layout": "./src/canvasBarListLayout.ts",
     "./canvas-sankey-layout": "./src/canvasSankeyLayout.ts",
