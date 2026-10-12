@@ -432,3 +432,9 @@
   justify-self: start;
   margin-top: var(--oct-space-2);
 }
+
+/* A refusal sits above the Project cards it concerns; without a margin its
+   hairline touched the first card. */
+.remembered-tool-approvals > .settings-state--error {
+  margin-bottom: var(--oct-space-3);
+}

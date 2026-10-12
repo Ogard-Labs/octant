@@ -4,10 +4,13 @@ import type {
   ExtensionSnapshot,
   ExtensionToolApproval,
   ExtensionToolApprovalDecision,
+  ExtensionToolGrant,
+  ExtensionToolGrantRequest,
 } from "@octant/contracts/extension-rpc";
 import {
   decodeExtensionCommand,
   decodeExtensionToolApprovalDecision,
+  decodeExtensionToolGrantRequest,
 } from "@octant/contracts/extension-rpc";
 import { isAbsolute } from "node:path";
 import { createHash, timingSafeEqual } from "node:crypto";
@@ -39,6 +42,15 @@ export function createExtensionRouteHandler(options: {
       windowId: ReturnType<typeof decodeWindowId>,
       decision: ExtensionToolApprovalDecision,
     ): boolean;
+  };
+  /**
+   * Remembered tool approvals, for a local window to read and take away.
+   * There is deliberately no way to add one here: a grant is recorded only
+   * by answering a prompt through `toolApprovals`.
+   */
+  readonly toolGrants?: {
+    list(): ReadonlyArray<ExtensionToolGrant>;
+    revoke(grantId: string): "revoked" | "not-found";
   };
 }): (request: Request) => Promise<Response | undefined> {
   const now = options.now ?? Date.now;
@@ -158,6 +170,39 @@ export function createExtensionRouteHandler(options: {
       } catch {
         return response(failure("invalid", "Extension approval decision is invalid."), 400, origin);
       }
+    }
+    if (url.pathname === "/api/extensions/tool-grants") {
+      if (principalContext.principal.kind !== "local-window" || options.toolGrants === undefined) {
+        return response(
+          failure("unauthorized", "Remembered tool approvals are unavailable."),
+          401,
+          origin,
+        );
+      }
+      const body = await readBody(request, maximumBodySize);
+      if (body.kind === "too-large") {
+        return response(failure("invalid", "Extension request is too large."), 413, origin);
+      }
+      let grantRequest: ExtensionToolGrantRequest;
+      try {
+        if (body.kind !== "ok") throw new Error("invalid");
+        grantRequest = decodeExtensionToolGrantRequest(body.value);
+      } catch {
+        return response(
+          failure("invalid", "Remembered tool approval request is invalid."),
+          400,
+          origin,
+        );
+      }
+      if (grantRequest.kind === "list") {
+        return response(options.toolGrants.list(), 200, origin);
+      }
+      // Revoking a grant that is already gone is not a failure: it is gone.
+      return response(
+        { revoked: options.toolGrants.revoke(grantRequest.grantId) === "revoked" },
+        200,
+        origin,
+      );
     }
     if (url.pathname === "/api/extensions/snapshot") {
       try {
@@ -335,7 +380,9 @@ function response(
     | ExtensionCommandResult
     | ExtensionSnapshot
     | ReadonlyArray<ExtensionToolApproval>
-    | { readonly accepted: boolean },
+    | ReadonlyArray<ExtensionToolGrant>
+    | { readonly accepted: boolean }
+    | { readonly revoked: boolean },
   status: number,
   origin: string | null,
 ) {

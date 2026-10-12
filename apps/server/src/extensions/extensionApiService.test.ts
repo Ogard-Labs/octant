@@ -319,7 +319,10 @@ describe("extension inspection and lifecycle API service", () => {
       snapshot: { sequence: removedSnapshot.sequence, packages: [] },
     });
     if (result.kind !== "extension-state-updated") throw new Error("Expected state update.");
-    expect(onStateChanged).toHaveBeenCalledWith(result.snapshot);
+    expect(onStateChanged).toHaveBeenCalledWith(result.snapshot, {
+      kind: "remove-skill",
+      extensionId,
+    });
   });
 
   it("forwards route cancellation to standalone skill marketplace commands", async () => {

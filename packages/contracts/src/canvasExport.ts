@@ -320,6 +320,13 @@ export const CanvasExportApprovalCard = Schema.Struct({
    * secrets like every other exported string.
    */
   destinationNote: Schema.optional(CanvasExportMessage),
+  /**
+   * Present when the document writes a design's frames: the author's markup,
+   * exactly as written. The share filter reads values, not markup, so naming
+   * this is what makes approving the card the person's acknowledgement that
+   * markup leaves unchecked.
+   */
+  writesDesignMarkup: Schema.optional(Schema.Literal(true)),
   /** The rendered document the person is approving. Not a summary of it. */
   payload: exportBody,
   payloadDigest: CanvasExportPayloadDigest,
@@ -344,6 +351,29 @@ export const CanvasExportApprovalCard = Schema.Struct({
   );
 export type CanvasExportApprovalCard = typeof CanvasExportApprovalCard.Type;
 
+/**
+ * The theme a design drawn in the workspace theme is exported in: the scheme
+ * and the token values the person's own window draws it with. An exported
+ * file has no Octant page to read them from, so the window hands them over.
+ * They are values to bound, not markup: a name is a frame token's name and a
+ * value cannot end its declaration. The host writes only the tokens a frame
+ * receives and checks each value again.
+ */
+export const CanvasExportFrameTheme = Schema.Struct({
+  scheme: Schema.Literal("light", "dark"),
+  tokens: Schema.Array(
+    Schema.Tuple(
+      Schema.String.pipe(Schema.pattern(/^--oct-[a-z0-9-]{1,40}$/)),
+      Schema.String.pipe(
+        Schema.minLength(1),
+        Schema.maxLength(512),
+        Schema.pattern(/^[^<>{};\\]*$/),
+      ),
+    ),
+  ).pipe(Schema.maxItems(96)),
+}).annotations(strict);
+export type CanvasExportFrameTheme = typeof CanvasExportFrameTheme.Type;
+
 export const CanvasExportPrepareRequest = Schema.Struct({
   schemaVersion: CanvasExportSchemaVersion,
   kind: Schema.Literal("canvas-export-prepare"),
@@ -352,6 +382,7 @@ export const CanvasExportPrepareRequest = Schema.Struct({
   expectedSequence: Schema.Int.pipe(Schema.positive()),
   targetId: CanvasExportTargetId,
   format: CanvasExportFormat,
+  frameTheme: Schema.optional(CanvasExportFrameTheme),
 }).annotations(strict);
 export type CanvasExportPrepareRequest = typeof CanvasExportPrepareRequest.Type;
 

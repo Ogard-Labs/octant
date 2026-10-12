@@ -34,6 +34,7 @@ const CACHE_DIRECTORIES: ReadonlyArray<{ readonly name: string; readonly relativ
   { name: "Work attachments", relative: "work-threads" },
   { name: "Code attachments", relative: "code-threads" },
   { name: "Generated images", relative: "generated-images" },
+  { name: "Browser captures", relative: "browser-captures" },
   { name: "Agent messages", relative: "agent-messages" },
   { name: "Agent-run scratch", relative: "agent-run-scratch" },
   { name: "Agent-run workspace receipts", relative: "agent-run-workspace-receipts" },

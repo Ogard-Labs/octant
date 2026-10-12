@@ -200,3 +200,45 @@ describe("Runtime compaction", () => {
     ).toBe("Claude returned an unsupported system message.");
   });
 });
+
+describe("Interruption", () => {
+  const active = { kind: "active", sessionId: "session-1" } as const;
+  // What Claude Code 2.1.296 sends once a turn is interrupted, just before the
+  // result that ends it: the first text while output was streaming, the second
+  // while a tool was waiting.
+  const marker = (text: string) => ({
+    type: "user",
+    message: { role: "user", content: [{ type: "text", text }] },
+    parent_tool_use_id: null,
+    session_id: "session-1",
+    uuid: "u-marker",
+    timestamp: "2026-10-12T10:52:30.164Z",
+  });
+
+  it.each(["[Request interrupted by user]", "[Request interrupted by user for tool use]"])(
+    "drops the runtime's note %s, so the result can end the turn as interrupted",
+    (text) => {
+      expect(decodeMessage(marker(text), openInput, active)).toEqual({ kind: "ignored" });
+    },
+  );
+
+  it("refuses any other text the runtime sends as a user message's blocks", () => {
+    expect(() => decodeMessage(marker("Run the deploy."), openInput, active)).toThrow();
+    expect(() =>
+      decodeMessage(
+        {
+          ...marker("[Request interrupted by user]"),
+          message: {
+            role: "user",
+            content: [
+              { type: "text", text: "[Request interrupted by user]" },
+              { type: "text", text: "Run the deploy." },
+            ],
+          },
+        },
+        openInput,
+        active,
+      ),
+    ).toThrow();
+  });
+});

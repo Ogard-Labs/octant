@@ -2,6 +2,13 @@
 
 ## Approved product decisions
 
+On 2026-10-12 Henrik decided that the shipped workspace wins where it differs
+from this plan on three points. Environment is a dock tab, an available empty
+dock opens on a thread overview above a grid of tool tiles, and the start
+screen keeps its cards. [Workspace](../design/workspace.md) and
+[Start screen](../design/start-screen.md) own those rules, and the matching
+statements below are superseded.
+
 Henrik approved these decisions on 2026-08-21:
 
 - Environment is a compact thread summary with a transient disclosure. Its

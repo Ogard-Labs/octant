@@ -1,15 +1,19 @@
 import {
+  useCallback,
   useEffect,
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type KeyboardEvent,
   type RefObject,
   type SyntheticEvent,
 } from "react";
-import { ChevronLeft, ChevronRight, Play, RotateCcw, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Play, RotateCcw, Square, X } from "lucide-react";
 import {
+  CANVAS_DESIGN_HEARTBEAT_INTERVAL_MS,
   CANVAS_DESIGN_VIEWPORT,
+  type CanvasDesignAssetResolution,
   type CanvasDesignBlock,
   type CanvasDesignDeviceSize,
   type CanvasDesignSize,
@@ -17,13 +21,26 @@ import {
 import { OctantButton } from "../../ui/base/OctantButton";
 import { OctantDialog } from "../../ui/base/OctantDialog";
 import {
+  designAssetUrls,
   designDocument,
   designFrameSandbox,
   designFrameTheme,
   readWorkspaceFrameTheme,
+  type DesignAssetRuntime,
   type DesignFrameThemeValues,
 } from "./designDocument";
 import { installFrameFonts } from "./designFrameFonts";
+import {
+  readDesignBridgeMessage,
+  RUNNING_DESIGN_FIRST_HEARTBEAT_MS,
+  RUNNING_DESIGN_HEARTBEAT_TIMEOUT_MS,
+  RUNNING_DESIGN_MAX_ERRORS,
+  RUNNING_DESIGN_MAX_MESSAGES_PER_SECOND,
+  RUNNING_DESIGN_MIN_HEIGHT,
+  RUNNING_DESIGN_SANDBOX,
+  type DesignRunRuntime,
+} from "./designRunningFrame";
+import { getInjectedHostBridge } from "../../shell/hostBridge";
 
 const SIZE_NAME: Record<CanvasDesignSize, string> = {
   phone: "Phone",
@@ -55,31 +72,115 @@ const DESIGN_DOCUMENT_MIN_HEIGHT = 48;
  * size, where its links work. A document is read in place instead, as wide as
  * the Canvas and as tall as its page.
  */
-export function DesignBlock({ block }: { readonly block: CanvasDesignBlock }) {
+export function DesignBlock({
+  block,
+  assetRuntime,
+  runRuntime,
+}: {
+  readonly block: CanvasDesignBlock;
+  /** Reaches the host for the design's images; without it they draw as placeholders. */
+  readonly assetRuntime?: DesignAssetRuntime;
+  /** Reaches the host to run a design that runs script; without it, it cannot run here. */
+  readonly runRuntime?: DesignRunRuntime;
+}) {
+  if (block.runsScript === true) {
+    return (
+      <RunningDesignBlock
+        block={block}
+        {...(runRuntime === undefined ? {} : { runtime: runRuntime })}
+      />
+    );
+  }
+  return (
+    <StaticDesignBlock block={block} {...(assetRuntime === undefined ? {} : { assetRuntime })} />
+  );
+}
+
+function StaticDesignBlock({
+  block,
+  assetRuntime,
+}: {
+  readonly block: CanvasDesignBlock;
+  readonly assetRuntime?: DesignAssetRuntime;
+}) {
   const theme = useWorkspaceFrameTheme(designFrameTheme(block) === "workspace");
-  if (block.size === "document") return <DesignDocumentBlock block={block} theme={theme} />;
-  return <DesignBoard block={block} size={block.size} theme={theme} />;
+  const assetUrls = useDesignAssetUrls(block, assetRuntime);
+  const frame = { theme, assetUrls };
+  if (block.size === "document") return <DesignDocumentBlock block={block} frame={frame} />;
+  return <DesignBoard block={block} size={block.size} frame={frame} />;
+}
+
+/** What every frame of one design is drawn with: the theme and the images. */
+interface DesignFrameInputs {
+  readonly theme: DesignFrameThemeValues | undefined;
+  readonly assetUrls: ReadonlyMap<string, string>;
+}
+
+/**
+ * Where each of a design's declared images is drawn from. The host is asked
+ * once each time the design is drawn, so what a reader sees follows the
+ * host's authority now; until it answers, and when it cannot, each image is a
+ * placeholder that says why.
+ */
+function useDesignAssetUrls(
+  block: CanvasDesignBlock,
+  runtime: DesignAssetRuntime | undefined,
+): ReadonlyMap<string, string> {
+  const declared = (block.assets ?? []).length > 0;
+  const [resolved, setResolved] = useState<ReadonlyArray<CanvasDesignAssetResolution> | undefined>(
+    undefined,
+  );
+  const [answered, setAnswered] = useState(false);
+  useEffect(() => {
+    setResolved(undefined);
+    setAnswered(false);
+    if (!declared || runtime === undefined) return;
+    let current = true;
+    runtime
+      .resolve(String(block.blockId))
+      .then((assets) => {
+        if (!current) return;
+        setResolved(assets);
+        setAnswered(true);
+      })
+      .catch(() => {
+        if (current) setAnswered(true);
+      });
+    return () => {
+      current = false;
+    };
+  }, [block, declared, runtime]);
+  return useMemo(
+    () =>
+      designAssetUrls(
+        block,
+        resolved,
+        runtime === undefined || answered ? "not-loaded" : "loading",
+      ),
+    [answered, block, resolved, runtime],
+  );
 }
 
 function DesignDocumentBlock({
   block,
-  theme,
+  frame,
 }: {
   readonly block: CanvasDesignBlock;
-  readonly theme: DesignFrameThemeValues | undefined;
+  readonly frame: DesignFrameInputs;
 }) {
   return (
     <section
       aria-label={`${block.title}, document`}
       aria-roledescription="design"
       className="canvas-design"
+      data-canvas-design={String(block.blockId)}
     >
       <header className="canvas-design__header">
         <div className="canvas-design__heading">
           <h3 className="canvas-design__title">{block.title}</h3>
         </div>
       </header>
-      <DocumentFrame block={block} theme={theme} />
+      <DocumentFrame block={block} frame={frame} />
     </section>
   );
 }
@@ -87,11 +188,11 @@ function DesignDocumentBlock({
 function DesignBoard({
   block,
   size,
-  theme,
+  frame: inputs,
 }: {
   readonly block: CanvasDesignBlock;
   readonly size: CanvasDesignDeviceSize;
-  readonly theme: DesignFrameThemeValues | undefined;
+  readonly frame: DesignFrameInputs;
 }) {
   const slides = size === "slide";
   const [playing, setPlaying] = useState<string | undefined>(undefined);
@@ -110,6 +211,7 @@ function DesignBoard({
       aria-label={`${block.title}, ${SIZE_NAME[block.size]} design`}
       aria-roledescription="design"
       className="canvas-design"
+      data-canvas-design={String(block.blockId)}
     >
       <header className="canvas-design__header">
         <div className="canvas-design__heading">
@@ -148,7 +250,7 @@ function DesignBoard({
                 size={size}
                 still
                 scale={scale}
-                theme={theme}
+                frame={inputs}
                 title={`${frame.title}, ${SIZE_NAME[block.size]} ${slides ? "slide" : "screen"}`}
               />
               <OctantButton
@@ -169,7 +271,7 @@ function DesignBoard({
           restoreFocus={playButton}
           size={size}
           startFrameId={playing}
-          theme={theme}
+          frame={inputs}
         />
       )}
     </section>
@@ -179,14 +281,14 @@ function DesignBoard({
 function DesignPlayer({
   block,
   size,
-  theme,
+  frame: inputs,
   startFrameId,
   onClose,
   restoreFocus,
 }: {
   readonly block: CanvasDesignBlock;
   readonly size: CanvasDesignDeviceSize;
-  readonly theme: DesignFrameThemeValues | undefined;
+  readonly frame: DesignFrameInputs;
   readonly startFrameId: string;
   readonly onClose: () => void;
   readonly restoreFocus: RefObject<HTMLButtonElement | null>;
@@ -301,7 +403,7 @@ function DesignPlayer({
                     scale={scale}
                     size={size}
                     still
-                    theme={theme}
+                    frame={inputs}
                     title={`${current.title}, slide ${String(index + 1)}`}
                   />
                   <div aria-hidden="true" className="canvas-design__cover" />
@@ -314,7 +416,7 @@ function DesignPlayer({
                 scale={scale}
                 size={size}
                 startFrameId={startFrameId}
-                theme={theme}
+                frame={inputs}
                 title={`${block.title}, prototype`}
               />
             )}
@@ -335,7 +437,7 @@ function DesignPlayer({
 function FrameView({
   block,
   size,
-  theme,
+  frame: { theme, assetUrls },
   frameIds,
   startFrameId,
   scale,
@@ -344,7 +446,7 @@ function FrameView({
 }: {
   readonly block: CanvasDesignBlock;
   readonly size: CanvasDesignDeviceSize;
-  readonly theme: DesignFrameThemeValues | undefined;
+  readonly frame: DesignFrameInputs;
   readonly frameIds?: ReadonlyArray<string>;
   readonly startFrameId?: string;
   readonly scale: number;
@@ -361,8 +463,9 @@ function FrameView({
         ...(frameKey === undefined ? {} : { frameIds: frameKey.split("\n") }),
         ...(startFrameId === undefined ? {} : { startFrameId }),
         ...(theme === undefined ? {} : { theme }),
+        assetUrls,
       }),
-    [block, frameKey, startFrameId, theme],
+    [assetUrls, block, frameKey, startFrameId, theme],
   );
   const themed = designFrameTheme(block) === "workspace";
   return (
@@ -391,17 +494,17 @@ function FrameView({
  */
 function DocumentFrame({
   block,
-  theme,
+  frame: { theme, assetUrls },
 }: {
   readonly block: CanvasDesignBlock;
-  readonly theme: DesignFrameThemeValues | undefined;
+  readonly frame: DesignFrameInputs;
 }) {
   const [height, setHeight] = useState(DESIGN_DOCUMENT_MIN_HEIGHT);
   const observer = useRef<ResizeObserver | null>(null);
   useEffect(() => () => observer.current?.disconnect(), []);
   const srcDoc = useMemo(
-    () => designDocument(block, theme === undefined ? {} : { theme }),
-    [block, theme],
+    () => designDocument(block, { ...(theme === undefined ? {} : { theme }), assetUrls }),
+    [assetUrls, block, theme],
   );
   const themed = designFrameTheme(block) === "workspace";
 
@@ -441,6 +544,374 @@ function DocumentFrame({
   );
 }
 
+/** Why a running prototype is not running. */
+type RunStopReason =
+  | { readonly kind: "stopped" }
+  | { readonly kind: "unresponsive" }
+  | { readonly kind: "navigated" }
+  | { readonly kind: "held-focus" }
+  | { readonly kind: "flooded" }
+  | { readonly kind: "refused"; readonly reason: string };
+
+type RunState =
+  | { readonly kind: "idle" }
+  | { readonly kind: "starting"; readonly byPerson: boolean }
+  | {
+      readonly kind: "running";
+      readonly url: string;
+      /** Whether the person asked for this run, which lets the frame take focus. */
+      readonly byPerson: boolean;
+    }
+  | { readonly kind: "stopped"; readonly why: RunStopReason };
+
+const STOPPED_TEXT: Record<Exclude<RunStopReason["kind"], "refused">, string> = {
+  stopped: "Stopped.",
+  unresponsive: "Stopped because the prototype stopped responding.",
+  navigated: "Stopped because the prototype tried to load another page.",
+  "held-focus": "Stopped because the prototype kept taking the keyboard back.",
+  flooded: "Stopped because the prototype sent too many messages.",
+};
+
+/** How long after the reserved shortcut a page that takes focus back is stopped. */
+const FOCUS_RECAPTURE_MS = 1_000;
+
+/**
+ * A design that runs its own script: a prototype a person can click through
+ * with state. Its page is served by the host for a single-use ticket and
+ * drawn in a frame sandboxed to `allow-scripts` alone. Octant's chrome around
+ * the frame says it is running and holds Stop, which the frame cannot reach.
+ * The frame is removed and shown as stopped when it misses its heartbeat or
+ * loads a second page. In the thread it starts only when the person presses
+ * Run; the sidebar may start it when it is shown.
+ */
+function RunningDesignBlock({
+  block,
+  runtime,
+}: {
+  readonly block: CanvasDesignBlock;
+  readonly runtime?: DesignRunRuntime;
+}) {
+  const [state, setState] = useState<RunState>({ kind: "idle" });
+  const [errors, setErrors] = useState<ReadonlyArray<string>>([]);
+  const stopButton = useRef<HTMLButtonElement>(null);
+  const runButton = useRef<HTMLButtonElement>(null);
+  const frameRef = useRef<HTMLIFrameElement>(null);
+  // Each start or stop is a new generation, so a page asked for earlier
+  // never replaces what the person did since.
+  const generation = useRef(0);
+
+  const run = useCallback(
+    async (byPerson: boolean) => {
+      if (runtime === undefined) return;
+      generation.current += 1;
+      const asked = generation.current;
+      setErrors([]);
+      setState({ kind: "starting", byPerson });
+      let next: RunState;
+      try {
+        const started = await runtime.start(String(block.blockId));
+        next =
+          started.kind === "ready"
+            ? { kind: "running", url: started.url, byPerson }
+            : { kind: "stopped", why: { kind: "refused", reason: started.reason } };
+      } catch {
+        next = {
+          kind: "stopped",
+          why: { kind: "refused", reason: "Octant could not reach the host to run this." },
+        };
+      }
+      if (asked === generation.current) setState(next);
+    },
+    [block.blockId, runtime],
+  );
+
+  // A new version is a new page; the sidebar starts it again on its own. The
+  // page is what the design says, not which object says it: the same version
+  // read again arrives as a new object, and must not stop a running page.
+  const runsOnOpen = runtime?.runsOnOpen === true;
+  const page = useMemo(() => JSON.stringify(block), [block]);
+  useEffect(() => {
+    generation.current += 1;
+    setState({ kind: "idle" });
+    setErrors([]);
+    if (runsOnOpen) void run(false);
+  }, [page, run, runsOnOpen]);
+
+  const stop = useCallback((why: RunStopReason) => {
+    generation.current += 1;
+    setState((current) =>
+      current.kind === "running" || current.kind === "starting"
+        ? { kind: "stopped", why }
+        : current,
+    );
+  }, []);
+  const reportError = useCallback((message: string) => {
+    setErrors((current) => [...current, message].slice(-RUNNING_DESIGN_MAX_ERRORS));
+  }, []);
+
+  // The desktop's reserved shortcut reaches Octant before the frame sees the
+  // key. A frame that holds focus here gives it up to its own Stop control.
+  // A page can take focus straight back from script, as one that refocuses
+  // itself on blur does in Electron 43, so a page that does so within a moment
+  // of the shortcut is stopped: the keyboard always comes back to Octant.
+  const running = state.kind === "running";
+  useEffect(() => {
+    if (!running) return;
+    let bridge;
+    try {
+      bridge = getInjectedHostBridge();
+    } catch {
+      return;
+    }
+    const subscribe = bridge?.subscribeCanvasFrameFocusEscape;
+    if (subscribe === undefined) return;
+    const watches = new Set<number>();
+    const unsubscribe = subscribe(() => {
+      if (frameRef.current === null || document.activeElement !== frameRef.current) return;
+      stopButton.current?.focus();
+      const escapedAt = Date.now();
+      const watch = window.setInterval(() => {
+        if (document.activeElement === frameRef.current && frameRef.current !== null) {
+          stop({ kind: "held-focus" });
+        }
+        if (Date.now() - escapedAt >= FOCUS_RECAPTURE_MS) {
+          window.clearInterval(watch);
+          watches.delete(watch);
+        }
+      }, 100);
+      watches.add(watch);
+    });
+    return () => {
+      unsubscribe();
+      for (const watch of watches) window.clearInterval(watch);
+    };
+  }, [running, stop]);
+
+  // When a stop takes the frame away, the keyboard lands on Run again.
+  const heldFocus = state.kind === "stopped" && state.why.kind === "held-focus";
+  useEffect(() => {
+    if (heldFocus) runButton.current?.focus();
+  }, [heldFocus]);
+
+  const contained = runtime?.contained === true;
+  return (
+    <section
+      aria-label={`${block.title}, ${SIZE_NAME[block.size]} prototype`}
+      aria-roledescription="design"
+      className="canvas-design"
+      data-canvas-design={String(block.blockId)}
+    >
+      <header className="canvas-design__header">
+        <div className="canvas-design__heading">
+          <h3 className="canvas-design__title">{block.title}</h3>
+          <span className="canvas-design__meta">{`${SIZE_NAME[block.size]} · prototype`}</span>
+        </div>
+        <div className="canvas-design__run">
+          {state.kind === "running" ? (
+            <>
+              <span className="canvas-design__running" role="status">
+                <span aria-hidden="true" className="canvas-design__running-dot" />
+                Running
+              </span>
+              <OctantButton
+                onClick={() => {
+                  stop({ kind: "stopped" });
+                  runButton.current?.focus();
+                }}
+                ref={stopButton}
+                size="sm"
+                type="button"
+                variant="secondary"
+              >
+                <Square aria-hidden="true" size={12} strokeWidth={2} />
+                Stop
+              </OctantButton>
+            </>
+          ) : runtime === undefined ? null : (
+            <OctantButton
+              disabled={state.kind === "starting"}
+              onClick={() => void run(true)}
+              ref={runButton}
+              size="sm"
+              type="button"
+              variant="secondary"
+            >
+              <Play aria-hidden="true" size={12} strokeWidth={2} />
+              {state.kind === "stopped" ? "Run again" : "Run"}
+            </OctantButton>
+          )}
+        </div>
+      </header>
+      {runtime === undefined ? (
+        <p className="canvas-design__notice">
+          This prototype runs its own script, which runs only in Octant.
+        </p>
+      ) : null}
+      {runtime !== undefined && !contained && state.kind !== "running" ? (
+        <p className="canvas-design__notice">
+          In a browser, a running prototype is not network-contained: if it loads another page, that
+          page can reach the network before Octant stops it.
+        </p>
+      ) : null}
+      {/* Shown on every client and in every state: a page's policy does not
+          cover a peer connection, and the desktop's WebRTC policy stops UDP
+          only, so a sandboxed frame still reached a TCP listener there. */}
+      {runtime === undefined ? null : (
+        <p className="canvas-design__notice">
+          A prototype&apos;s script can still connect to another computer and send what the
+          prototype holds. Octant does not block that yet.
+        </p>
+      )}
+      {state.kind === "stopped" ? (
+        <p className="canvas-design__notice" role="status">
+          {state.why.kind === "refused" ? state.why.reason : STOPPED_TEXT[state.why.kind]}
+          {/* A browser keeps a spinning page's process for the next frame
+              from the same host, so a re-run here can wait behind it. */}
+          {state.why.kind === "unresponsive" && !contained
+            ? " In a browser, it may not start again in this tab; open Octant in a new tab to run it."
+            : null}
+        </p>
+      ) : null}
+      {state.kind === "running" ? (
+        <RunningFrame
+          block={block}
+          focusable={state.byPerson}
+          frameRef={frameRef}
+          key={state.url}
+          onError={reportError}
+          onStop={stop}
+          url={state.url}
+        />
+      ) : null}
+      {errors.length === 0 ? null : (
+        <ul aria-label="Prototype script errors" className="canvas-design__errors">
+          {errors.map((message, index) => (
+            <li key={`${String(index)}:${message}`}>{message}</li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+/**
+ * The frame a running page is drawn in, and its watchdog. A device size is
+ * drawn at its viewport and scaled to the column; a document is as wide as
+ * the column and as tall as the page says, within bounds. The page's first
+ * load is its own; any later load is a page it navigated to, which is removed.
+ */
+function RunningFrame({
+  block,
+  url,
+  focusable,
+  frameRef,
+  onStop,
+  onError,
+}: {
+  readonly block: CanvasDesignBlock;
+  readonly url: string;
+  readonly focusable: boolean;
+  readonly frameRef: RefObject<HTMLIFrameElement | null>;
+  readonly onStop: (why: RunStopReason) => void;
+  readonly onError: (message: string) => void;
+}) {
+  const [height, setHeight] = useState(RUNNING_DESIGN_MIN_HEIGHT);
+  const loads = useRef(0);
+  const [stageRef, stage] = useSize();
+
+  useEffect(() => {
+    let lastBeat = Date.now();
+    let beating = false;
+    let windowStart = Date.now();
+    let received = 0;
+    let flooded = false;
+    const onMessage = (event: MessageEvent) => {
+      const page = frameRef.current?.contentWindow;
+      if (flooded || page === null || page === undefined || event.source !== page) return;
+      // Counted before the message is read, so malformed messages flood too.
+      const now = Date.now();
+      if (now - windowStart >= 1_000) {
+        windowStart = now;
+        received = 0;
+      }
+      received += 1;
+      if (received > RUNNING_DESIGN_MAX_MESSAGES_PER_SECOND) {
+        flooded = true;
+        onStop({ kind: "flooded" });
+        return;
+      }
+      const message = readDesignBridgeMessage(event, page);
+      if (message === undefined) return;
+      if (message.type === "heartbeat") {
+        lastBeat = Date.now();
+        beating = true;
+      } else if (message.type === "size") {
+        setHeight(message.height);
+      } else {
+        onError(message.message);
+      }
+    };
+    window.addEventListener("message", onMessage);
+    // A hidden tab slows every timer, the page's and this one, so a page is
+    // only judged while it can be seen, and gets a full allowance on return.
+    const watchdog = window.setInterval(() => {
+      if (document.visibilityState === "hidden") {
+        lastBeat = Date.now();
+        return;
+      }
+      const allowance = beating
+        ? RUNNING_DESIGN_HEARTBEAT_TIMEOUT_MS
+        : RUNNING_DESIGN_FIRST_HEARTBEAT_MS;
+      if (Date.now() - lastBeat > allowance) onStop({ kind: "unresponsive" });
+    }, CANVAS_DESIGN_HEARTBEAT_INTERVAL_MS);
+    return () => {
+      window.removeEventListener("message", onMessage);
+      window.clearInterval(watchdog);
+    };
+  }, [frameRef, onError, onStop]);
+
+  const onLoad = () => {
+    loads.current += 1;
+    if (loads.current > 1) onStop({ kind: "navigated" });
+  };
+  const frame = (style: CSSProperties, className: string) => (
+    <iframe
+      className={className}
+      onLoad={onLoad}
+      ref={frameRef}
+      referrerPolicy="no-referrer"
+      sandbox={RUNNING_DESIGN_SANDBOX}
+      src={url}
+      style={style}
+      tabIndex={focusable ? undefined : -1}
+      title={`${block.title}, running prototype`}
+    />
+  );
+
+  if (block.size === "document") {
+    return frame({ height }, "canvas-design__document");
+  }
+  const viewport = CANVAS_DESIGN_VIEWPORT[block.size];
+  const scale = stage === undefined ? 1 : Math.min(1, stage.width / viewport.width);
+  return (
+    <div className="canvas-design__stage" ref={stageRef}>
+      <div
+        className="canvas-design__preview"
+        style={{ width: viewport.width * scale, height: viewport.height * scale }}
+      >
+        {frame(
+          {
+            width: viewport.width,
+            height: viewport.height,
+            transform: `scale(${String(scale)})`,
+          },
+          "canvas-design__page",
+        )}
+      </div>
+    </div>
+  );
+}
+
 /**
  * The workspace theme a themed frame is drawn in, kept current: the theme
  * writes its tokens and mode onto the root element, so a change there redraws
@@ -467,20 +938,18 @@ function useWorkspaceFrameTheme(enabled: boolean): DesignFrameThemeValues | unde
     read();
     const observer = new MutationObserver(read);
     observer.observe(root, { attributes: true });
-    // The Contrast theme is the system's increased-contrast preference: the
-    // stylesheet swaps the text roles under `prefers-contrast: more` and no
-    // attribute on the root moves, so the frame listens for it as well.
-    const preferences =
+    // Increased contrast needs no listener of its own: the Settings toggle and
+    // the system preference publish `data-octant-increased-contrast` on the
+    // root, which the observer above sees. A system light/dark switch moves no
+    // attribute while the theme follows the system, so that one is listened for.
+    const systemDark =
       typeof window.matchMedia === "function"
-        ? [
-            window.matchMedia("(prefers-color-scheme: dark)"),
-            window.matchMedia("(prefers-contrast: more)"),
-          ]
-        : [];
-    for (const preference of preferences) preference.addEventListener("change", read);
+        ? window.matchMedia("(prefers-color-scheme: dark)")
+        : undefined;
+    systemDark?.addEventListener("change", read);
     return () => {
       observer.disconnect();
-      for (const preference of preferences) preference.removeEventListener("change", read);
+      systemDark?.removeEventListener("change", read);
     };
   }, [enabled]);
   return theme;
