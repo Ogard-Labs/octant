@@ -40,7 +40,11 @@ import {
   decodeCanvasDefinition,
   type CanvasDefinition,
 } from "@octant/contracts/canvas";
-import { launchDeckExample, onboardingFlowExample } from "./canvasDesignExamples";
+import {
+  launchDeckExample,
+  onboardingFlowExample,
+  searchSpecExample,
+} from "./canvasDesignExamples";
 import { opsDashboardExample, releaseHealthBoardExample } from "./canvasDashboardExamples";
 import { mathExamples } from "./canvasMathExamples";
 import { mockupExamples } from "./canvasMockupExamples";
@@ -987,8 +991,60 @@ function refusalOf(block: unknown): string {
 describe("design frames", () => {
   it("accepts the examples an agent is taught from", () => {
     expect(() =>
-      validateCanvasDefinition(withBlocks([onboardingFlowExample, launchDeckExample])),
+      validateCanvasDefinition(
+        withBlocks([onboardingFlowExample, launchDeckExample, searchSpecExample]),
+      ),
     ).not.toThrow();
+  });
+
+  it("refuses a design document or theme inside a document declaring version 15", () => {
+    // An older runtime must read these as a newer document, not draw an
+    // article as a phone screen or a themed screen without its theme.
+    for (const block of [
+      searchSpecExample,
+      { ...onboardingFlowExample, theme: "workspace" },
+      { ...onboardingFlowExample, theme: "none" },
+    ]) {
+      expectPolicyCode(
+        () =>
+          validateCanvasDefinition({
+            ...baseDefinition,
+            schemaVersion: 15,
+            blocks: [{ ...block, schemaVersion: 15 }],
+          }),
+        "unsupported-schema-version",
+      );
+    }
+    expect(() =>
+      validateCanvasDefinition({
+        ...baseDefinition,
+        schemaVersion: 15,
+        blocks: [{ ...onboardingFlowExample, schemaVersion: 15 }],
+      }),
+    ).not.toThrow();
+  });
+
+  it("keeps refusing script and outside links in a themed document", () => {
+    const frame = searchSpecExample.frames[0];
+    for (const html of [
+      `${frame?.html ?? ""}<script>parent.document.title = "x"</script>`,
+      '<img src="x" onerror="parent.location = \'https://example.test\'">',
+      '<a href="https://example.test">Docs</a>',
+      '<meta http-equiv="refresh" content="0;url=https://example.test">',
+      '<base href="https://example.test/">',
+      '<iframe srcdoc="<p>x</p>"></iframe>',
+      '<p style="background: url(https://example.test/a.png)">x</p>',
+    ]) {
+      expectPolicyCode(
+        () =>
+          validateCanvasDefinition(
+            withBlocks([
+              { ...searchSpecExample, frames: [{ frameId: "spec", title: "Spec", html }] },
+            ]),
+          ),
+        "design-markup-refused",
+      );
+    }
   });
 
   it("refuses a design block inside a document declaring an older schema version", () => {

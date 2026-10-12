@@ -7,6 +7,7 @@ import {
   CANVAS_MAX_DASHBOARD_COLUMNS,
   CANVAS_BAR_LIST_SCHEMA_VERSION,
   CANVAS_COMPARISON_MATRIX_SCHEMA_VERSION,
+  CANVAS_DESIGN_DOCUMENT_SCHEMA_VERSION,
   CANVAS_DESIGN_SCHEMA_VERSION,
   CANVAS_DIAGRAM_KINDS_SCHEMA_VERSION,
   CANVAS_EVENT_NAMES,
@@ -190,6 +191,49 @@ describe("Canvas contracts", () => {
     expect(() =>
       decodeCanvasDefinition({ ...definition, blocks: [{ ...design, size: "watch" }] }),
     ).toThrow();
+  });
+
+  it("admits a design document and a theme only under the version that declared them", () => {
+    const article = {
+      blockId: "article",
+      schemaVersion: CANVAS_DESIGN_DOCUMENT_SCHEMA_VERSION,
+      kind: "design",
+      title: "Release notes",
+      size: "document",
+      frames: [
+        { frameId: "notes", title: "Notes", html: '<article class="oct-article"></article>' },
+      ],
+    } as const;
+    const themedPhone = {
+      ...article,
+      blockId: "themed-phone",
+      size: "phone",
+      theme: "workspace",
+    } as const;
+    for (const block of [article, themedPhone, { ...article, theme: "none" } as const]) {
+      expect(decodeCanvasDefinition({ ...definition, blocks: [block] })).toMatchObject({
+        blocks: [block],
+      });
+      // An older runtime reads these as a document it cannot draw yet, not as
+      // a phone design drawn without the theme it asked for.
+      expect(() =>
+        decodeCanvasDefinition({
+          ...definition,
+          schemaVersion: CANVAS_DASHBOARD_SCHEMA_VERSION,
+          blocks: [{ ...block, schemaVersion: CANVAS_DASHBOARD_SCHEMA_VERSION }],
+        }),
+      ).toThrow();
+    }
+    // A version-15 phone design without a theme stays readable.
+    const phone = { ...article, schemaVersion: 15, size: "phone" } as const;
+    expect(
+      decodeCanvasDefinition({ ...definition, schemaVersion: 15, blocks: [phone] }),
+    ).toMatchObject({ blocks: [phone] });
+    expect(() =>
+      decodeCanvasDefinition({ ...definition, blocks: [{ ...article, theme: "brand" }] }),
+    ).toThrow();
+    expect(CANVAS_DESIGN_DOCUMENT_SCHEMA_VERSION).toBe(16);
+    expect(CANVAS_SCHEMA_VERSION).toBe(16);
   });
 
   it("admits a thread presentation only under the version that declared it", () => {
@@ -1969,7 +2013,6 @@ describe("dashboard layout", () => {
 
   it("decodes a titled grid that places other blocks by id at the version that introduced it", () => {
     expect(CANVAS_DASHBOARD_SCHEMA_VERSION).toBe(15);
-    expect(CANVAS_SCHEMA_VERSION).toBe(15);
     const decoded = decodeCanvasDefinition({ ...definition, blocks: [dashboard, metric, status] });
     expect(decoded.blocks).toEqual([dashboard, metric, status]);
   });

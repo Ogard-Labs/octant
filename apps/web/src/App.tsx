@@ -2752,7 +2752,7 @@ function LaunchedShell(
   // so a clean store is the only thing that can produce it.
   // The readiness line and the notice under it read the same discovery record,
   // so first run cannot say "nothing is configured" above a scan it is still
-  // running (`BOOT-02`).
+  // running.
   const firstRunDiscovery = useMemo<FirstRunDiscoveryInput>(
     () => ({
       scanning: discoveryController.scanning,
