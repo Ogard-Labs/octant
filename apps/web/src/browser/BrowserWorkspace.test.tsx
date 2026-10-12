@@ -598,6 +598,11 @@ describe("BrowserWorkspace", () => {
       expect(
         await screen.findByText("This screenshot could not be kept: the picture is too large."),
       ).toBeVisible();
+      // The pane gives a notice its own row only under this class; without it
+      // the page picture is drawn over the notice.
+      expect(screen.getByRole("region", { name: "Browser automation" })).toHaveClass(
+        "browser-workspace--message",
+      );
       expect(screen.getByRole("button", { name: "Screenshot" })).toBeEnabled();
     });
 

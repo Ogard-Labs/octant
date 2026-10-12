@@ -486,10 +486,12 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
     }
   }
 
+  const notice = message ?? captureNotice;
+
   return (
     <section
       aria-label="Browser automation"
-      className={`browser-workspace${message === undefined ? "" : " browser-workspace--message"}`}
+      className={`browser-workspace${notice === undefined ? "" : " browser-workspace--message"}`}
     >
       <header className="browser-workspace__chrome">
         <div className="browser-workspace__history" aria-label="Browser history controls">
@@ -663,9 +665,9 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
           )}
         </span>
       </header>
-      {(message ?? captureNotice) === undefined ? null : (
+      {notice === undefined ? null : (
         <OctantAlert className="browser-workspace__message" tone="warning">
-          {message ?? captureNotice}
+          {notice}
         </OctantAlert>
       )}
       {!activeContext ? (
