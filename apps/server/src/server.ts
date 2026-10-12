@@ -155,7 +155,7 @@ import {
   hydrateWorkTurnProjectionFromJournal,
 } from "./work/workTurnProjection";
 import { WorkAttachmentStore } from "./work/workAttachmentStore";
-import { WorkTurnService, WorkTurnServiceError } from "./work/workTurnService";
+import { WorkTurnService } from "./work/workTurnService";
 import { withWorkflowLifecycle } from "./work/workThreadWorkflowHook";
 import { WorkflowEventStore } from "./work/workflowEventStore";
 import { WorkflowProjection } from "./work/workflowProjection";
@@ -384,7 +384,6 @@ import {
 import { AgentRunPersistenceService } from "./agentRun/agentRunPersistenceService";
 import { AgentRunDependencyScheduler } from "./agentRun/agentRunDependencyScheduler";
 import { AgentResultDeliveryService } from "./agentRun/agentResultDeliveryService";
-import { agentResultDeliveryBatchPrompt } from "./agentRun/agentResultDeliveryPrompt";
 import { createAgentMessageRouteHandler } from "./agentMessage/agentMessageRoutes";
 import { createAgentRunForestCanvasSnapshot } from "./agentRun/agentRunCanvasSnapshot";
 import { createAgentRunRouteHandler } from "./agentRun/agentRunRoutes";
@@ -394,7 +393,10 @@ import {
   admittedParentCodeContext,
   type AdmittedParentCodeContextInput,
 } from "./agentRun/agentRunParentContext";
-import { agentResultDeliveryReceipt } from "./agentRun/agentResultDeliveryBatch";
+import {
+  createCodeAgentResultDeliveryPort,
+  createWorkAgentResultDeliveryPort,
+} from "./agentRun/agentResultDeliveryPorts";
 import { NATIVE_HARNESS_BUILT_IN_SLOTS, type AgentRunResultDeliveryMark } from "@octant/contracts";
 import { createAgentsManagedTools } from "./agentRun/agentRunManagedTools";
 import { agentRunEligibleTargets as eligibleAgentRunTargets } from "./agentRun/agentRunDelegation";
@@ -7722,143 +7724,27 @@ export function startOctantServer(
           readThread: (threadId) => persistence.readChatThread(threadId),
           chat: chatService,
         }),
-        work: {
-          inspect: async (run) =>
-            workThreadProjection.read(decodeWorkThreadId(String(run.parentThreadId))) === undefined
-              ? { kind: "invalid", detail: "The parent Work thread is gone." }
-              : { kind: "ready" },
-          dispatch: async (runs) => {
-            const run = runs[0];
-            if (run === undefined)
-              return { kind: "refused", detail: "No child results were supplied." };
-            const delivery = {
-              kind: "agent-result" as const,
-              runId: run.id,
-              runIds: runs.map((child) => child.id),
-              runGenerations: runs.map((child) => ({
-                runId: child.id,
-                generation: child.generation ?? 1,
-              })),
-            };
-            const windowId = firstRegisteredWindowId();
-            if (windowId === undefined) {
-              return { kind: "deferred", detail: "No local window is registered for this host." };
-            }
-            const thread = workThreadProjection.read(
-              decodeWorkThreadId(String(run.parentThreadId)),
-            );
-            if (thread === undefined || thread.bindingRevisionId === undefined) {
-              return { kind: "refused", detail: "The parent Work thread is gone." };
-            }
-            try {
-              const result = await workTurnService.startFirstTurn(windowId, {
-                kind: "start-work-thread-turn",
-                requestId: decodeWorkTurnRequestId(randomUUID()),
-                threadId: thread.id,
-                turnId: decodeWorkTurnId(randomUUID()),
-                prompt: agentResultDeliveryBatchPrompt(runs, (id) =>
-                  agentRunPersistence.resultText(id),
-                ),
-                authority: {
-                  hostId: LOCAL_HOST_ID,
-                  projectId: thread.projectId,
-                  bindingRevisionId: thread.bindingRevisionId,
-                  workingDirectory: ".",
-                  confinementPosture: "project-root-confined",
-                  providerInstanceId: thread.providerInstanceId,
-                  modelId: thread.modelId,
-                },
-                delivery,
-              });
-              return result.kind === "accepted"
-                ? agentResultDeliveryReceipt(delivery, result.turn.delivery)
-                : {
-                    kind: "refused",
-                    detail:
-                      "message" in result && typeof result.message === "string"
-                        ? result.message
-                        : "The delivery was not admitted.",
-                  };
-            } catch (error) {
-              if (error instanceof WorkTurnServiceError && error.failure.category === "stale") {
-                return { kind: "deferred", detail: "The parent Work thread is mid-turn." };
-              }
-              return {
-                kind: "refused",
-                detail:
-                  error instanceof Error ? error.message : "The delivery could not be admitted.",
-              };
-            }
-          },
-        },
-        code: {
-          inspect: async (run) =>
-            persistence.readCodeThread(decodeCodeThreadId(String(run.parentThreadId))) === undefined
-              ? { kind: "invalid", detail: "The parent Code thread is gone." }
-              : { kind: "ready" },
-          dispatch: async (runs) => {
-            const run = runs[0];
-            if (run === undefined)
-              return { kind: "refused", detail: "No child results were supplied." };
-            const delivery = {
-              kind: "agent-result" as const,
-              runId: run.id,
-              runIds: runs.map((child) => child.id),
-              runGenerations: runs.map((child) => ({
-                runId: child.id,
-                generation: child.generation ?? 1,
-              })),
-            };
-            const windowId = firstRegisteredWindowId();
-            if (windowId === undefined) {
-              return { kind: "deferred", detail: "No local window is registered for this host." };
-            }
-            const thread = persistence.readCodeThread(
-              decodeCodeThreadId(String(run.parentThreadId)),
-            );
-            if (
-              thread === undefined ||
-              routeCodeService.stageEvidence === undefined ||
-              routeCodeService.executeOperation === undefined
-            ) {
-              return { kind: "refused", detail: "The parent Code thread is gone." };
-            }
-            try {
-              const prompt = await routeCodeService.stageEvidence(
-                windowId,
-                thread.id,
-                agentResultDeliveryBatchPrompt(runs, (id) => agentRunPersistence.resultText(id)),
-              );
-              const result = await routeCodeService.executeOperation(windowId, {
-                kind: "start-provider-turn",
-                operationId: decodeCodeOperationId(randomUUID()),
-                threadId: thread.id,
-                checkoutId: thread.checkoutId,
-                sessionId: decodeProviderSessionId(randomUUID()),
-                prompt,
-                delivery,
-              });
-              return result.kind === "provider-turn-state" &&
-                (result.state === "running" ||
-                  result.state === "waiting" ||
-                  result.state === "completed")
-                ? agentResultDeliveryReceipt(delivery, result.delivery)
-                : {
-                    kind: "refused",
-                    detail:
-                      result.kind === "provider-turn-state" && result.failure !== undefined
-                        ? result.failure.message
-                        : "The delivery was not admitted.",
-                  };
-            } catch (error) {
-              return {
-                kind: "refused",
-                detail:
-                  error instanceof Error ? error.message : "The delivery could not be admitted.",
-              };
-            }
-          },
-        },
+        work: createWorkAgentResultDeliveryPort({
+          uuid: randomUUID,
+          resultText: (id) => agentRunPersistence.resultText(id),
+          isEnabled: () =>
+            enabledModes(
+              persistence.readShellSettings()?.settings ?? defaultShellSettings(),
+            ).includes("work"),
+          readThread: (threadId) => workThreadProjection.read(threadId),
+          startFirstTurn: (windowId, input) => workTurnService.startFirstTurn(windowId, input),
+        }),
+        code: createCodeAgentResultDeliveryPort({
+          uuid: randomUUID,
+          resultText: (id) => agentRunPersistence.resultText(id),
+          readThread: (threadId) => persistence.readCodeThread(threadId),
+          ...(routeCodeService.stageEvidence === undefined
+            ? {}
+            : { stageEvidence: routeCodeService.stageEvidence }),
+          ...(routeCodeService.executeOperation === undefined
+            ? {}
+            : { executeOperation: routeCodeService.executeOperation }),
+        }),
       },
       onError: (message, error) => console.error(`[agent-run-delivery] ${message}`, error),
     });
