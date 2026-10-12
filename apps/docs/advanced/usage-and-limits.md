@@ -67,7 +67,8 @@ applies: a partial import describes only the records read so far.
 ## The stats line under every thread
 
 Under the composer of every Chat, Work, and Code thread, on every provider, a
-quiet line states what the thread has used so far:
+quiet line states what the thread has used so far. In a split workspace only the
+active pane shows the line, so a pane never shows another thread's figures:
 
 `↑ 48k in · ↓ 3.1k out · cache 92% · 41 tok/s · 0.9 s first token · $0.03 est.`
 
