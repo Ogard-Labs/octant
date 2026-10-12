@@ -2093,6 +2093,15 @@ ALTER TABLE code_runtime_projection
         ON extension_tool_grant_projection(extension_id);
     `,
   },
+  {
+    version: 75,
+    name: "record_external_content_ingestion_time",
+    // Nullable on purpose: a row projected before this migration keeps no
+    // time until the projection is rebuilt, and the read reports it without
+    // one. The taint rows gate approvals, so nothing here resets them.
+    sql: `ALTER TABLE thread_external_content_ingestion_projection
+      ADD COLUMN ingested_at TEXT CHECK(ingested_at IS NULL OR length(trim(ingested_at)) > 0);`,
+  },
 ];
 
 interface AppliedMigrationRow {

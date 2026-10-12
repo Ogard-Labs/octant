@@ -30,6 +30,9 @@ const LOCAL_ONLY_PREFIXES = [
   "/api/host-control",
   "/api/replica-store",
   "/api/replica-membership",
+  // Reviewing what a thread read and clearing its outside-content mark is a
+  // person's act at this machine.
+  "/api/thread-external-content",
 ] as const;
 
 /**

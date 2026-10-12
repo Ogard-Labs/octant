@@ -2091,6 +2091,8 @@ describe("App", () => {
     const contextApi: ContextClient = {
       inspect,
       execute: vi.fn(),
+      readExternalContent: vi.fn(),
+      clearExternalContent: vi.fn(),
     };
 
     render(
@@ -2184,6 +2186,8 @@ describe("App", () => {
         };
       }),
       execute: vi.fn(),
+      readExternalContent: vi.fn(),
+      clearExternalContent: vi.fn(),
     };
 
     render(
