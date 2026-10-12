@@ -10,16 +10,15 @@
 policy, untrusted content, sandbox boundaries, credentials, subagents, extensions, and remote
 clients on one Octant host
 
-**Designs:**
-[`../specs/2026-07-13-octant-product-architecture-design.md`](../specs/2026-07-13-octant-product-architecture-design.md)
-(sections 7, 8, 16),
-[`../specs/2026-07-13-extensions-marketplace-design.md`](../specs/2026-07-13-extensions-marketplace-design.md)
-(section 4),
-[`../specs/2026-07-13-mixed-provider-subagents-design.md`](../specs/2026-07-13-mixed-provider-subagents-design.md)
+**Designs:** the current owners are
+[Architecture](../architecture.md): [security and authority](../architecture.md#security-and-authority),
+including subagents, and [modes](../architecture.md#modes-chat-work-and-code); and
+[extensions and skills](../architecture.md#extensions-and-skills).
 
 The Octant-managed endpoint agent loop, sustained Goal execution, editable egress rules, session
 fork/checkpoint/pause behavior, and CLI/GUI security ownership copy are further constrained by
-[`../specs/2026-08-12-octant-native-agent-harness-v1-design.md`](../specs/2026-08-12-octant-native-agent-harness-v1-design.md).
+the [native harness](../architecture.md#native-harness) rules in the architecture. (Earlier
+revisions of this model cited design files under `docs/specs/` that no longer exist.)
 
 **Companion feature threat models:**
 [`github-repository-onboarding-threat-model.md`](github-repository-onboarding-threat-model.md),
@@ -33,8 +32,10 @@ fork/checkpoint/pause behavior, and CLI/GUI security ownership copy are further 
 
 Octant is a local-first, server-authoritative workspace. Its security invariants were previously
 scattered across the original-rewrite design (tools/safety and remote access), the extensions trust
-design, and four feature-scoped threat models. This document consolidates them into one enforceable
-contract and specifies the remaining controls. It covers two threat families:
+design, and four feature-scoped threat models. This document gathers them into one threat summary.
+It is not a separate authority: the effective rules live in the
+[architecture](../architecture.md#security-and-authority), and where the two differ, the
+architecture wins and this summary is corrected. It covers two threat families:
 
 - **T-A Malicious tool calling.** Prompt injection through tool results, rogue MCP servers
   requesting undeclared capabilities, and model-invented tool invocations that were never defined
@@ -44,8 +45,9 @@ contract and specifies the remaining controls. It covers two threat families:
   parent, host, mode, or thread policy.
 
 Each control below names its enforcement layer and module and states whether it **exists today** in
-the repository or is **newly specified** by this design. Newly specified controls are the
-implementation backlog this design gates; nothing here weakens an existing control.
+the repository or was **newly specified** here. A newly specified control becomes a rule only when
+the architecture states it; until then it is a proposal tracked in Linear. Nothing here weakens an
+existing control.
 
 ## Assets
 
