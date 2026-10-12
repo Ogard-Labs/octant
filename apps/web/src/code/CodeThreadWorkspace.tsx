@@ -1730,6 +1730,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
       />
       <ThreadComposer
         queue={<ThreadMessageQueue queue={messageQueue} showUnavailable={queueFollowUp} />}
+        threadBusy={busy || (messageQueue.snapshot?.items.length ?? 0) > 0}
         presentation="follow-up"
         {...(threadDropKey === undefined ? {} : { threadDropKey })}
         context={
