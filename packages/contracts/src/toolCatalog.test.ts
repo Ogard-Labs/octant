@@ -22,7 +22,6 @@ describe("closed tool catalog", () => {
       "harness-goal",
       "harness-goal-check",
       "harness-grep",
-      "harness-journal-lookup",
       "harness-read",
       "harness-second-opinion",
       "harness-todo-write",

@@ -10,7 +10,8 @@
     "./integration": "./src/integration.ts",
     "./computer-use": "./src/computerUse.ts",
     "./canvas-export": "./src/canvasExport.ts",
-    "./replica-store": "./src/replicaStore.ts"
+    "./replica-store": "./src/replicaStore.ts",
+    "./provider-driver-catalog": "./src/providerDriverCatalog.ts"
   },
   "scripts": {
     "build": "tsdown src/index.ts --format esm --dts",

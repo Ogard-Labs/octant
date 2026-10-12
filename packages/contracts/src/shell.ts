@@ -400,7 +400,7 @@ export const EnvironmentSectionDescriptor = Schema.Struct({
 export type EnvironmentSectionDescriptor = typeof EnvironmentSectionDescriptor.Type;
 
 /**
- * Host-owned first-run state (`BOOT-01`).
+ * Host-owned first-run state.
  *
  * `pending` is the only state a clean store can produce, so a first run is
  * detected from projected host state rather than from renderer storage. The
@@ -561,7 +561,7 @@ export const ShellSettings = Schema.Struct({
    */
   automaticUpdateChecks: Schema.optionalWith(Schema.Boolean, { default: () => true }),
   computerUse: Schema.optionalWith(ComputerUseSettings, {
-    default: () => ({ enabled: true, automaticUpdates: true }),
+    default: () => ({ enabled: true, automaticUpdates: false }),
   }),
   /**
    * Whether Skills & Extensions marketplace search, inspect, and install may

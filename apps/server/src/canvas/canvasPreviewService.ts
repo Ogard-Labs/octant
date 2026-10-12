@@ -179,7 +179,6 @@ export function createCanvasPreviewService(
         }
         const warnings = canvasPreviewWarnings({
           definition,
-          presentation,
           width,
           palette,
           designAssets,

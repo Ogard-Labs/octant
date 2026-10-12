@@ -20,6 +20,7 @@ import {
 } from "@octant/contracts";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { openSqlite, type SqliteConnection } from "../persistence/sqlitePort";
+import { ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
 import { createUsageResumePorts, type UsageResumePortDependencies } from "./usageResumePorts";
 
 const NOW = "2026-07-19T12:00:00.000Z" as UtcTimestamp;
@@ -214,7 +215,8 @@ function dependencies(
   overrides: {
     readonly journal?: UsageResumePortDependencies["journal"];
     readonly chat?: UsageResumePortDependencies["chat"];
-    readonly work?: UsageResumePortDependencies["work"];
+    readonly work?: Omit<UsageResumePortDependencies["work"], "isEnabled">;
+    readonly workEnabled?: boolean;
     readonly code?: UsageResumePortDependencies["code"];
     readonly agentRun?: UsageResumePortDependencies["agentRun"];
   } = {},
@@ -224,18 +226,20 @@ function dependencies(
     journal: overrides.journal ?? { replayAggregate: () => [] },
     clock: () => new Date(NOW),
     uuid: () => crypto.randomUUID(),
-    windowId: () => ids.window,
     chat: overrides.chat ?? {
       readThread: () => undefined,
       readThreadView: () => undefined,
       execute: async () => ({}),
     },
-    work: overrides.work ?? {
-      readThread: () => undefined,
-      listTurns: () => [],
-      startFirstTurn: async () => ({
-        kind: "accepted",
-        turn: waitingWorkTurn(),
+    work: {
+      isEnabled: () => overrides.workEnabled ?? true,
+      ...(overrides.work ?? {
+        readThread: () => undefined,
+        listTurns: () => [],
+        startFirstTurn: async () => ({
+          kind: "accepted",
+          turn: waitingWorkTurn(),
+        }),
       }),
     },
     code: overrides.code ?? {
@@ -250,7 +254,111 @@ function dependencies(
   };
 }
 
+function resumableCode(
+  executeOperation: NonNullable<UsageResumePortDependencies["code"]["executeOperation"]>,
+): UsageResumePortDependencies["code"] {
+  return {
+    readThread: () => codeThread(),
+    readRuntimeWorks: () => [],
+    readOperationContents: async () =>
+      decodeCodeEvidenceBatchResponse({
+        threadId: String(codeThread().id),
+        items: [{ operationId: ids.turn, contentId: String(ids.content), text: "Keep going." }],
+      }),
+    stageEvidence: async () =>
+      decodeCodeEvidenceReference({
+        contentId: String(ids.content),
+        digest: "a".repeat(64),
+        byteLength: 11,
+      }),
+    executeOperation,
+  };
+}
+
 describe("usage-resume ports", () => {
+  it("resumes a usage-limited turn with no window open", async () => {
+    const startFirstTurn = vi.fn(async () => ({
+      kind: "accepted" as const,
+      turn: waitingWorkTurn(),
+    }));
+    const executeOperation = vi.fn(async () => ({
+      kind: "provider-turn-state" as const,
+      operationId: decodeCodeOperationId(ids.turn),
+      state: "running" as const,
+    }));
+    // No local window is registered on this host at all.
+    const ports = createUsageResumePorts(
+      dependencies({
+        journal: { replayAggregate: () => [waitingProviderTurnFrame()] },
+        work: {
+          readThread: () => workThread(),
+          listTurns: () => [waitingWorkTurn()],
+          startFirstTurn,
+        },
+        code: resumableCode(executeOperation),
+      }),
+    );
+
+    await expect(ports.work.dispatch(record())).resolves.toEqual({ kind: "dispatched" });
+    await expect(ports.code.dispatch(record())).resolves.toEqual({ kind: "dispatched" });
+    expect(startFirstTurn).toHaveBeenCalledOnce();
+    expect(executeOperation).toHaveBeenCalledOnce();
+  });
+
+  it("does not borrow an open window to resume", async () => {
+    const startFirstTurn = vi.fn(async (..._args: ReadonlyArray<unknown>) => ({
+      kind: "accepted" as const,
+      turn: waitingWorkTurn(),
+    }));
+    const executeOperation = vi.fn(async (..._args: ReadonlyArray<unknown>) => ({
+      kind: "provider-turn-state" as const,
+      operationId: decodeCodeOperationId(ids.turn),
+      state: "running" as const,
+    }));
+    // A local window is open; the resume still acts as the host, so the
+    // window lends it neither identity nor Project binding.
+    const ports = createUsageResumePorts(
+      dependencies({
+        journal: { replayAggregate: () => [waitingProviderTurnFrame()] },
+        work: {
+          readThread: () => workThread(),
+          listTurns: () => [waitingWorkTurn()],
+          startFirstTurn,
+        },
+        code: resumableCode(executeOperation),
+      }),
+    );
+
+    await ports.work.dispatch(record());
+    await ports.code.dispatch(record());
+    const scopes = [startFirstTurn.mock.calls[0]?.[0], executeOperation.mock.calls[0]?.[0]];
+    expect(scopes).toEqual([ROUTINE_HOST_SCOPE_ID, ROUTINE_HOST_SCOPE_ID]);
+    expect(scopes).not.toContain(ids.window);
+  });
+
+  it("refuses to resume a Work turn after Work was turned off", async () => {
+    const startFirstTurn = vi.fn(async () => ({
+      kind: "accepted" as const,
+      turn: waitingWorkTurn(),
+    }));
+    const ports = createUsageResumePorts(
+      dependencies({
+        workEnabled: false,
+        work: {
+          readThread: () => workThread(),
+          listTurns: () => [waitingWorkTurn()],
+          startFirstTurn,
+        },
+      }),
+    );
+
+    await expect(ports.work.dispatch(record())).resolves.toEqual({
+      kind: "refused",
+      detail: "Work is turned off on this host.",
+    });
+    expect(startFirstTurn).not.toHaveBeenCalled();
+  });
+
   it("marks a Chat limit recovery retry as the host's own dispatch", async () => {
     const execute = vi.fn(async () => ({}));
     const ports = createUsageResumePorts(
@@ -283,7 +391,7 @@ describe("usage-resume ports", () => {
 
     await ports.work.dispatch(record());
     expect(startFirstTurn).toHaveBeenCalledWith(
-      ids.window,
+      ROUTINE_HOST_SCOPE_ID,
       expect.objectContaining({
         kind: "start-work-thread-turn",
         prompt: "Keep going.",
@@ -329,7 +437,7 @@ describe("usage-resume ports", () => {
     const result = await ports.code.dispatch(record());
     expect(result).toEqual({ kind: "dispatched" });
     expect(executeOperation).toHaveBeenCalledWith(
-      ids.window,
+      ROUTINE_HOST_SCOPE_ID,
       expect.objectContaining({ kind: "start-provider-turn" }),
       { limitRecovery: true },
     );

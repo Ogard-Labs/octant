@@ -4,9 +4,7 @@ import {
   type CanvasDefinition,
   type CanvasDesignAssetResolution,
   type CanvasDesignAssetUnavailableReason,
-  type CanvasPresentation,
 } from "@octant/contracts/canvas";
-import { CANVAS_INLINE_MAX_BLOCKS } from "@octant/domain";
 import {
   canvasDashboardCellWidth,
   canvasReadingOrder,
@@ -19,8 +17,8 @@ import { contrastRatio } from "@octant/theme";
  * A preview answers one question: does this document read well where the thread
  * will draw it? These are the ways it demonstrably can fail to — a label the
  * slot cannot hold, a legend that runs past the frame, a series with no reading
- * in it, an inline document taller than the conversation allows, and ink that
- * does not clear its contrast target. Each is a value, not a sentence: the tool
+ * in it, and ink that does not clear its contrast target. Length is not one of
+ * them: the thread shows a long inline document as a teaser the person expands. Each is a value, not a sentence: the tool
  * reports the kind and the measurement, and the agent decides what to change.
  *
  * The warnings are computed from the document and the target width alone, so
@@ -45,11 +43,6 @@ export type CanvasPreviewWarning =
       readonly kind: "empty-series";
       readonly blockId: string;
       readonly seriesLabel?: string;
-    }
-  | {
-      readonly kind: "inline-height-cap-exceeded";
-      readonly blockCount: number;
-      readonly limit: number;
     }
   | {
       readonly kind: "contrast-below-target";
@@ -96,7 +89,6 @@ export interface CanvasPreviewPalette {
 
 export interface CanvasPreviewWarningInput {
   readonly definition: Pick<CanvasDefinition, "blocks">;
-  readonly presentation: CanvasPresentation;
   /** The drawn width in CSS pixels; the same number the renderer is given. */
   readonly width: number;
   readonly palette: CanvasPreviewPalette;
@@ -131,16 +123,6 @@ export function canvasPreviewWarnings(
   input: CanvasPreviewWarningInput,
 ): ReadonlyArray<CanvasPreviewWarning> {
   const warnings: CanvasPreviewWarning[] = [];
-  if (
-    input.presentation === "inline" &&
-    input.definition.blocks.length > CANVAS_INLINE_MAX_BLOCKS
-  ) {
-    warnings.push({
-      kind: "inline-height-cap-exceeded",
-      blockCount: input.definition.blocks.length,
-      limit: CANVAS_INLINE_MAX_BLOCKS,
-    });
-  }
   // A block placed in a dashboard is drawn at its cell's width, not the
   // document's, so it is measured there; otherwise a chart in a quarter of a
   // wide grid would clip labels that the full width would hold.

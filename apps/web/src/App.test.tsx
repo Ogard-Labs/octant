@@ -26,7 +26,7 @@ import type { ContextClient } from "@octant/client-runtime/context-client";
 import { applyWorkspaceOperation } from "@octant/domain/shell-policy";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { decodeChatCommandResult, type ChatThread } from "@octant/contracts/chat";
 import { DEFAULT_THEME_SETTINGS } from "@octant/contracts/theme";
 import type { OctantHostBridge } from "./shell/hostBridge";
@@ -86,6 +86,16 @@ vi.mock("./automation/automationCenterGate", () => ({
     return automationGate.enabled;
   },
 }));
+
+// Settings is a lazy chunk. The first test in the file to open it otherwise
+// waits on a cold import of the whole Settings module graph behind the
+// "Opening Settings" fallback, and under CI load that took longer than
+// findBy's 1 s default, so whichever Settings test ran first failed on its
+// first Settings query. Loading the chunk once here keeps that cost out of
+// every test's assertions; the lazy boundary still renders through Suspense.
+beforeAll(async () => {
+  await import("./shell/SettingsView");
+});
 
 afterEach(() => {
   automationGate.enabled = false;

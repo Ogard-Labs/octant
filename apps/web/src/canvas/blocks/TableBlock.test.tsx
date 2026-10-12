@@ -203,8 +203,163 @@ describe("table cell displays", () => {
   });
 });
 
+/** Picks an option from one of the table toolbar's select fields. */
+async function choose(user: ReturnType<typeof userEvent.setup>, field: string, option: string) {
+  await user.click(screen.getByRole("combobox", { name: field }));
+  await user.click(await screen.findByRole("option", { name: option }));
+}
+
+/** Each group as its header text and its rows' first data cell, in the order drawn. */
+function groups(dataCell = 0): ReadonlyArray<{ header: string; rows: ReadonlyArray<string> }> {
+  const table = screen.getByRole("table");
+  return [...table.querySelectorAll("tbody")].map((body) => ({
+    header: body.querySelector("th[scope='rowgroup']")?.textContent ?? "",
+    rows: [...body.querySelectorAll("tr:not(.canvas-block__table-group)")].map(
+      (row) => row.querySelectorAll("td")[dataCell]?.textContent ?? "",
+    ),
+  }));
+}
+
+describe("grouped table", () => {
+  it("groups rows under a row-group header that names the value and counts its rows", async () => {
+    const user = userEvent.setup();
+    render(<CanvasView input={definition()} />);
+
+    await choose(user, "Group rows", "State");
+
+    expect(groups()).toEqual([
+      { header: expect.stringContaining("Blocked"), rows: ["packages/domain/canvas.ts"] },
+      { header: expect.stringContaining("Ready"), rows: ["apps/web/src/Table.tsx", "README.md"] },
+    ]);
+    const ready = screen.getByRole("button", { name: /Ready, 2 rows/ });
+    expect(ready).toHaveAttribute("aria-expanded", "true");
+    expect(ready.closest("th")).toHaveAttribute("scope", "rowgroup");
+  });
+
+  it("collapses and expands a group from the keyboard and keeps its header", async () => {
+    const user = userEvent.setup();
+    render(<CanvasView input={definition()} />);
+    await choose(user, "Group rows", "State");
+
+    screen.getByRole("button", { name: /Ready, 2 rows/ }).focus();
+    await user.keyboard("{Enter}");
+    expect(screen.getByRole("button", { name: /Ready, 2 rows/ })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+    expect(groups()[1]?.rows).toEqual([]);
+    expect(groups()[0]?.rows).toEqual(["packages/domain/canvas.ts"]);
+
+    await user.keyboard(" ");
+    expect(screen.getByRole("button", { name: /Ready, 2 rows/ })).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+    expect(groups()[1]?.rows).toEqual(["apps/web/src/Table.tsx", "README.md"]);
+  });
+
+  it("sorts rows within each group and orders the groups by the sort when it is the grouped column", async () => {
+    const user = userEvent.setup();
+    render(<CanvasView input={definition()} />);
+    await choose(user, "Group rows", "State");
+
+    await user.click(screen.getByRole("button", { name: "Requests" }));
+    expect(groups()[1]?.rows).toEqual(["README.md", "apps/web/src/Table.tsx"]);
+
+    await user.click(screen.getByRole("button", { name: "State" }));
+    await user.click(screen.getByRole("button", { name: "State" }));
+    expect(screen.getByRole("columnheader", { name: "State" })).toHaveAttribute(
+      "aria-sort",
+      "descending",
+    );
+    expect(groups().map((group) => group.rows.length)).toEqual([2, 1]);
+  });
+
+  it("counts only the rows the filter keeps and drops a group it empties", async () => {
+    const user = userEvent.setup();
+    render(<CanvasView input={definition()} />);
+    await choose(user, "Group rows", "State");
+
+    await user.type(screen.getByRole("searchbox", { name: "Filter rows" }), "readme");
+
+    expect(groups()).toEqual([{ header: expect.stringContaining("Ready"), rows: ["README.md"] }]);
+    expect(screen.getByRole("button", { name: /Ready, 1 row/ })).toBeVisible();
+  });
+
+  it("shows a chosen per-group sum or average of a number column in each group header", async () => {
+    const user = userEvent.setup();
+    render(<CanvasView input={definition()} />);
+    await choose(user, "Group rows", "State");
+
+    await choose(user, "Group summary", "Sum of Requests");
+    expect(groups()[1]?.header).toContain("Sum of Requests 1.26M");
+    expect(groups()[0]?.header).toContain("Sum of Requests 300K");
+
+    await choose(user, "Group summary", "Average of Errors");
+    expect(groups()[1]?.header).toContain("Average of Errors 1.5");
+
+    await choose(user, "Group summary", "Count of Errors");
+    expect(groups()[1]?.header).toContain("Count of Errors 2");
+  });
+
+  it("drops a grouping and its summary when a revision removes their column", async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(<CanvasView input={definition()} />);
+    await choose(user, "Group rows", "State");
+    await choose(user, "Group summary", "Sum of Requests");
+
+    const revised = {
+      ...tableFixture,
+      columns: tableFixture.columns.slice(0, 2),
+      rows: tableFixture.rows.map((row) => row.slice(0, 2)),
+    };
+    rerender(<CanvasView input={{ ...canvasFixture, blocks: [revised] }} />);
+
+    expect(screen.getByRole("combobox", { name: "Group rows" })).toHaveTextContent("No grouping");
+    expect(screen.queryByRole("combobox", { name: "Group summary" })).toBeNull();
+    expect(screen.queryByRole("rowgroup", { name: /State:/ })).toBeNull();
+    expect(firstColumn()).toEqual([
+      "apps/web/src/Table.tsx",
+      "packages/domain/canvas.ts",
+      "README.md",
+    ]);
+  });
+});
+
+describe("pinned table columns", () => {
+  it("moves a pinned column to the leading edge and marks it to stay put while the table scrolls", async () => {
+    const user = userEvent.setup();
+    render(<CanvasView input={definition()} />);
+
+    await user.click(screen.getByText("Columns"));
+    const pin = screen.getByRole("button", { name: "Pin State" });
+    expect(pin).toHaveAttribute("aria-pressed", "false");
+    await user.click(pin);
+
+    expect(screen.getByRole("button", { name: "Pin State" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    const headers = screen.getAllByRole("columnheader").map((header) => header.textContent);
+    expect(headers).toEqual(["State", "Asset", "Requests", "Errors"]);
+    expect(screen.getByRole("columnheader", { name: "State" })).toHaveAttribute(
+      "data-pinned",
+      "true",
+    );
+    expect(firstColumn()).toEqual(["Ready", "Blocked", "Ready"]);
+
+    await user.click(screen.getByRole("button", { name: "Pin State" }));
+    expect(screen.getAllByRole("columnheader").map((header) => header.textContent)).toEqual([
+      "Asset",
+      "Requests",
+      "Errors",
+      "State",
+    ]);
+  });
+});
+
 describe("table view state", () => {
-  it("never journals a sort, a filter, or a hidden column", async () => {
+  it("never journals a sort, a filter, a hidden or pinned column, or a grouping", async () => {
     const user = userEvent.setup();
     const input = definition();
     const before = JSON.stringify(input);
@@ -214,6 +369,9 @@ describe("table view state", () => {
     await user.type(screen.getByRole("searchbox", { name: "Filter rows" }), "ready");
     await user.click(screen.getByText("Columns"));
     await user.click(screen.getByRole("checkbox", { name: "Errors" }));
+    await user.click(screen.getByRole("button", { name: "Pin State" }));
+    await choose(user, "Group rows", "State");
+    await user.click(screen.getByRole("button", { name: /Ready, 2 rows/ }));
 
     expect(JSON.stringify(input)).toBe(before);
   });
@@ -307,6 +465,44 @@ describe("comment markers on table rows", () => {
     screen.getByRole("button", { name: "2 open comments on row Globex Corp" }).focus();
     await user.keyboard("{Enter}");
     expect(onOpen).toHaveBeenCalledWith("vendors", "globex");
+  });
+
+  it("keeps row markers on their rows when grouped and counts a collapsed group's open threads", async () => {
+    const user = userEvent.setup();
+    const onOpen = vi.fn();
+    const keyed = [
+      { id: "acme", cells: ["Acme", 12] },
+      { id: "globex", cells: ["Globex", 9] },
+      { id: "initech", cells: ["Initech", 12] },
+    ];
+    render(<CanvasView comments={comments(onOpen)} input={withRows(keyed)} />);
+
+    await choose(user, "Group rows", "Price");
+    expect(groups(1).map((group) => group.rows)).toEqual([["Globex"], ["Acme", "Initech"]]);
+    expect(rowOf(screen.getByRole("button", { name: "2 open comments on row Globex" }))).toBe(
+      "Globex",
+    );
+
+    await user.click(screen.getByRole("button", { name: /Price: 9, 1 row/ }));
+    expect(screen.queryByRole("button", { name: /on row Globex/ })).toBeNull();
+    expect(screen.getByText("2 open comments in this group")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /Price: 9, 1 row/ }));
+    screen.getByRole("button", { name: "2 open comments on row Globex" }).focus();
+    await user.keyboard("{Enter}");
+    expect(onOpen).toHaveBeenCalledWith("vendors", "globex");
+  });
+
+  it("keeps the comment gutter at the leading edge ahead of a pinned column", async () => {
+    const user = userEvent.setup();
+    render(<CanvasView comments={comments()} input={withRows(vendors.rows)} />);
+
+    await user.click(screen.getByText("Columns"));
+    await user.click(screen.getByRole("button", { name: "Pin Price" }));
+
+    const headers = screen.getAllByRole("columnheader");
+    expect(headers[0]).toHaveClass("canvas-block__table-comment");
+    expect(headers.slice(1).map((header) => header.textContent)).toEqual(["Price", "Vendor"]);
   });
 });
 

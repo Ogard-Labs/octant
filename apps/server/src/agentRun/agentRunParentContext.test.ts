@@ -27,6 +27,7 @@ import {
   decodeProjectId,
   decodeWorkThreadId,
   decodeWorkTurnState,
+  MAX_AGENT_RUN_ADMITTED_CONTEXT_BLOCKS,
   type CodeConversationPage,
   type CodeEvidenceReference,
   type WorkTurnState,
@@ -497,5 +498,259 @@ describe("a provider switch reading its own thread's conversation", () => {
     ).toBe(false);
     expect(result.omissions).toMatchObject({ oversizedBodies: 1, unfinishedReplies: 0 });
     expect(result.blocks).toHaveLength(4);
+  });
+});
+
+describe("a fork reading the thread it was forked from", () => {
+  it("selects only through the reply the fork was made at", () => {
+    const later = codeTurn(3);
+    const input = codeInput([codeTurn(1), codeTurn(2), later]);
+    const result = admittedParentCodeContext({
+      ...input,
+      purpose: "fork",
+      throughOperationId: String(codeTurn(2).operationId),
+    });
+    expect(result.status).toBe("available");
+    if (result.status !== "available") return;
+    expect(result.blocks[0]?.text).toContain("forked from, through the reply it was forked at");
+    expect(
+      result.blocks.slice(1).every((block) => block.text.startsWith("Forked conversation source:")),
+    ).toBe(true);
+    // A later turn of the source is a direction the fork did not take.
+    expect(
+      input.readEvidence.mock.calls.some(
+        ([ref]) =>
+          ref.contentId === later.prompt.contentId ||
+          ref.contentId === later.assistant[0]?.contentId,
+      ),
+    ).toBe(false);
+    expect(result.blocks).toHaveLength(5);
+    expect(result.source.point).toMatchObject({
+      throughOperationId: String(codeTurn(2).operationId),
+    });
+  });
+
+  it("refuses a fork point the source no longer holds rather than handing over a different window", () => {
+    const result = admittedParentCodeContext({
+      ...codeInput([codeTurn(1), codeTurn(2)]),
+      purpose: "fork",
+      throughOperationId: id(399),
+    });
+    expect(result).toEqual({ status: "unavailable", reason: "source-point-unavailable" });
+  });
+
+  it("keeps a read through the fork point while the source runs a later turn", () => {
+    let sequence = 20;
+    const input = {
+      ...codeInput([codeTurn(1), codeTurn(2, "incomplete")]),
+      readActivity: () => ({ threadId: codeThreadId, lastSequence: sequence++ as never }),
+    };
+    expect(
+      admittedParentCodeContext({ ...input, throughOperationId: String(codeTurn(1).operationId) })
+        .status,
+    ).toBe("available");
+    // The same moving source refuses a whole-thread read.
+    expect(admittedParentCodeContext(input)).toEqual({
+      status: "unavailable",
+      reason: "source-changed",
+    });
+  });
+});
+
+describe("a fork's conversation merged back into the thread it was forked from", () => {
+  it("selects only the fork's turns after its previous merge, through the named turn", () => {
+    const input = codeInput([codeTurn(1), codeTurn(2), codeTurn(3), codeTurn(4)]);
+    const result = admittedParentCodeContext({
+      ...input,
+      purpose: "fork-merge-back",
+      afterOperationId: String(codeTurn(1).operationId),
+      throughOperationId: String(codeTurn(3).operationId),
+    });
+    expect(result.status).toBe("available");
+    if (result.status !== "available") return;
+    expect(result.blocks[0]?.text).toContain("merged back here because the person asked");
+    expect(result.blocks[0]?.text).toContain("unless they were merged through Git review");
+    expect(
+      result.blocks
+        .slice(1)
+        .every((block) => block.text.startsWith("Merged fork conversation source:")),
+    ).toBe(true);
+    const read = input.readEvidence.mock.calls.map(([reference]) => reference.contentId);
+    expect(read).toEqual([
+      codeTurn(2).prompt.contentId,
+      codeTurn(2).assistant[0]?.contentId,
+      codeTurn(3).prompt.contentId,
+      codeTurn(3).assistant[0]?.contentId,
+    ]);
+    // Already-merged turns are neither carried nor counted as left out.
+    expect(result.omissions.earlierMessages).toBe(0);
+  });
+
+  it("finds nothing new when the end point is not after the previous merge", () => {
+    const input = codeInput([codeTurn(1), codeTurn(2)]);
+    expect(
+      admittedParentCodeContext({
+        ...input,
+        purpose: "fork-merge-back",
+        afterOperationId: String(codeTurn(2).operationId),
+        throughOperationId: String(codeTurn(1).operationId),
+      }),
+    ).toEqual({ status: "unavailable", reason: "source-empty" });
+    expect(input.readEvidence).not.toHaveBeenCalled();
+  });
+
+  it("refuses a previous merge point the fork no longer holds rather than repeating turns", () => {
+    expect(
+      admittedParentCodeContext({
+        ...codeInput([codeTurn(1), codeTurn(2)]),
+        purpose: "fork-merge-back",
+        afterOperationId: id(399),
+      }),
+    ).toEqual({ status: "unavailable", reason: "source-point-unavailable" });
+  });
+});
+
+describe("a forked thread reading its conversation for a provider switch", () => {
+  const sourceThreadId = decodeCodeThreadId(id(7));
+  const sourceThread = { ...codeThread, id: sourceThreadId };
+
+  function forkedInput(sourceTurns: ReturnType<typeof codeTurn>[], ownTurns = [codeTurn(21)]) {
+    const turnsOf = (threadId: unknown) =>
+      String(threadId) === String(sourceThreadId) ? sourceTurns : ownTurns;
+    return {
+      ...codeInput(ownTurns),
+      purpose: "provider-switch" as const,
+      readThread: (threadId: unknown) =>
+        String(threadId) === String(sourceThreadId) ? sourceThread : codeThread,
+      readActivity: (threadId: unknown) => ({
+        threadId: String(threadId) === String(sourceThreadId) ? sourceThreadId : codeThreadId,
+        lastSequence: 20 as never,
+      }),
+      conversation: (page: { readonly threadId: unknown }): CodeConversationPage => ({
+        version: 3,
+        threadId: String(page.threadId) === String(sourceThreadId) ? sourceThreadId : codeThreadId,
+        turns: turnsOf(page.threadId),
+        nextCursor: 10,
+        hasMore: false,
+      }),
+    };
+  }
+
+  it("hands over the source's conversation through the fork point ahead of the fork's own turns", () => {
+    const later = codeTurn(3);
+    const switching = codeTurn(22, "incomplete");
+    const result = admittedParentCodeContext({
+      ...forkedInput([codeTurn(1), codeTurn(2), later], [codeTurn(21), switching]),
+      excludeOperationId: String(switching.operationId),
+      inherited: {
+        threadId: sourceThreadId,
+        throughOperationId: String(codeTurn(2).operationId),
+        externalContentIngested: true,
+      },
+    });
+    expect(result.status).toBe("available");
+    if (result.status !== "available") return;
+    const messages = result.blocks.slice(1).map((block) => block.text);
+    // Source turns 1 and 2, then the fork's own turn 21; never the source's
+    // later turn 3 or the switching turn.
+    expect(messages).toHaveLength(6);
+    expect(
+      messages.slice(0, 4).every((text) => text.startsWith("Forked conversation source:")),
+    ).toBe(true);
+    expect(messages[0]).toContain(`"threadId":"${String(sourceThreadId)}"`);
+    expect(messages[0]).toContain(String(codeTurn(1).prompt.contentId));
+    expect(messages.slice(4).every((text) => text.startsWith("Earlier conversation source:"))).toBe(
+      true,
+    );
+    expect(messages[4]).toContain(String(codeTurn(21).prompt.contentId));
+    expect(messages.some((text) => text.includes(String(later.prompt.contentId)))).toBe(false);
+    expect(messages.some((text) => text.includes(String(switching.prompt.contentId)))).toBe(false);
+    expect(result.blocks[0]?.text).toContain("This thread is a fork");
+    expect(result.inherited).toMatchObject({
+      messages: 4,
+      source: {
+        threadId: String(sourceThreadId),
+        externalContentIngested: true,
+        point: { throughOperationId: String(codeTurn(2).operationId) },
+      },
+    });
+    expect(result.source).toMatchObject({
+      threadId: String(codeThreadId),
+      externalContentIngested: false,
+    });
+  });
+
+  it("keeps the newest messages within the budget and discloses the inherited ones it left out", () => {
+    const source = Array.from({ length: 15 }, (_, index) => codeTurn(index + 1));
+    const own = [codeTurn(21), codeTurn(22), codeTurn(23)];
+    const result = admittedParentCodeContext({
+      ...forkedInput(source, own),
+      inherited: {
+        threadId: sourceThreadId,
+        throughOperationId: String(codeTurn(15).operationId),
+        externalContentIngested: false,
+      },
+    });
+    expect(result.status).toBe("available");
+    if (result.status !== "available") return;
+    // 30 inherited and 6 own messages share one window of 23.
+    expect(result.blocks).toHaveLength(MAX_AGENT_RUN_ADMITTED_CONTEXT_BLOCKS);
+    expect(result.omissions.earlierMessages).toBe(13);
+    expect(result.inherited?.messages).toBe(17);
+    const messages = result.blocks.slice(1).map((block) => block.text);
+    // Every one of the fork's own messages survives; the oldest inherited go first.
+    expect(
+      messages.slice(-6).every((text) => text.startsWith("Earlier conversation source:")),
+    ).toBe(true);
+    expect(messages[0]).toContain(String(codeTurn(7).assistant[0]?.contentId));
+    expect(messages.some((text) => text.includes(String(codeTurn(6).prompt.contentId)))).toBe(
+      false,
+    );
+    expect(result.blocks[0]?.text).toContain('"earlierMessages":13');
+  });
+
+  it("names the inherited source as the part it could not read", () => {
+    const input = forkedInput([codeTurn(1)]);
+    expect(
+      admittedParentCodeContext({
+        ...input,
+        readThread: (threadId: unknown) =>
+          String(threadId) === String(sourceThreadId) ? undefined : codeThread,
+        inherited: {
+          threadId: sourceThreadId,
+          throughOperationId: String(codeTurn(1).operationId),
+          externalContentIngested: false,
+        },
+      }),
+    ).toEqual({ status: "unavailable", reason: "thread-unavailable", part: "inherited" });
+    expect(
+      admittedParentCodeContext({
+        ...input,
+        inherited: {
+          threadId: sourceThreadId,
+          throughOperationId: id(399),
+          externalContentIngested: false,
+        },
+      }),
+    ).toEqual({ status: "unavailable", reason: "source-point-unavailable", part: "inherited" });
+  });
+
+  it("refuses rather than hand over only the fork's own turns when no inherited message is readable", () => {
+    const input = forkedInput([codeTurn(1)]);
+    const result = admittedParentCodeContext({
+      ...input,
+      readEvidence: vi.fn((reference: CodeEvidenceReference) =>
+        String(reference.contentId) === String(codeTurn(1).prompt.contentId) ||
+        String(reference.contentId) === String(codeTurn(1).assistant[0]?.contentId)
+          ? undefined
+          : `body ${reference.contentId}`,
+      ),
+      inherited: {
+        threadId: sourceThreadId,
+        throughOperationId: String(codeTurn(1).operationId),
+        externalContentIngested: false,
+      },
+    });
+    expect(result).toEqual({ status: "unavailable", reason: "source-empty", part: "inherited" });
   });
 });

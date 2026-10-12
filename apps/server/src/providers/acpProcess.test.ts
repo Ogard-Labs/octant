@@ -24,7 +24,7 @@ import {
   type AcpProbeOptions,
   type AcpProcessOptions,
 } from "./acpProcess";
-import type { SeatbeltConfinementPort } from "../process/seatbeltProfile";
+import type { ProcessConfinementPort } from "../process/seatbeltProfile";
 import { acpProviderProfiles, type AcpProviderProfile } from "./acpProfiles";
 
 const fakeCliPath = fileURLToPath(new URL("./fixtures/fakeAcpAgent.py", import.meta.url));
@@ -164,7 +164,7 @@ const passthroughConfinement: AcpConfinementPort = {
  * refuses on a host without `sandbox-exec`, so the version launch is prepared
  * with the confinement passed straight through.
  */
-const passthroughVersionProbeConfinement: SeatbeltConfinementPort = {
+const passthroughVersionProbeConfinement: ProcessConfinementPort = {
   prepare: (input) => ({ command: input.executable, args: input.args }),
 };
 
