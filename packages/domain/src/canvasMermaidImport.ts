@@ -212,10 +212,24 @@ const NODE_REF =
  * A link between two nodes, with an optional label written either way Mermaid
  * allows (`A -->|yes| B` or `A -- yes --> B`). The thick, bidirectional,
  * circle, cross, and dashed-without-arrow links are matched only so they can
- * be refused by name rather than read as part of a node.
+ * be refused by name rather than read as part of a node. Each form is listed
+ * on its own; the first that matches at a position wins, so the labelled
+ * forms come before the bare arrows they contain.
  */
-const LINK =
-  /(--\s+[^-|>\s][^|>]*?\s+(?:-->|---)|-\.\s+[^.>\s][^|>]*?\s+\.->|-\.->|-->|---|==>|<-->|<--|-\.-|--[ox](?=\s)|[ox]--)(\|[^|]*\|)?/;
+const LINK_FORMS: ReadonlyArray<string> = [
+  String.raw`--\s+[^-|>\s][^|>]*?\s+(?:-->|---)`, // A -- label --> B, A -- label --- B
+  String.raw`-\.\s+[^.>\s][^|>]*?\s+\.->`, // A -. label .-> B
+  String.raw`-\.->`, // dashed arrow
+  String.raw`-->`, // arrow
+  String.raw`---`, // line
+  String.raw`==>`, // thick, refused
+  String.raw`<-->`, // bidirectional, refused
+  String.raw`<--`, // reversed, refused
+  String.raw`-\.-`, // dashed without an arrow, refused
+  String.raw`--[ox](?=\s)`, // circle or cross end, refused
+  String.raw`[ox]--`, // circle or cross start, refused
+];
+const LINK = new RegExp(String.raw`(${LINK_FORMS.join("|")})(\|[^|]*\|)?`);
 
 function flowchart(header: Statement, body: ReadonlyArray<Statement>, blockId: CanvasBlockId) {
   const direction = header.text.split(/\s+/)[1] ?? "TD";
