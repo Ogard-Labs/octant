@@ -69,6 +69,9 @@ Hardening in progress for the preview:
 - Internal TestFlight packaging for the existing mobile remote client: signing,
   protected CI, Apple processing, and real-device acceptance are separate
   gates under [0147](decisions/0147-internal-testflight-carries-the-existing-remote-client.md).
+- Four shipped features take bug fixes only until the preview ships: artifact
+  replica sync, the artifact mirror, model role slots, and local provider usage
+  history.
 
 ## Next
 
