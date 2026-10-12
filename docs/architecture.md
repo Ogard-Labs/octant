@@ -1211,10 +1211,11 @@ excerpts and beyond that Chat one-hop tool, is designed in
 [decisions/0063-agent-to-agent-messaging.md](decisions/0063-agent-to-agent-messaging.md)
 and
 [security/agent-to-agent-messaging-threat-model.md](security/agent-to-agent-messaging-threat-model.md).
-The maintainer approved that design and its threat model on 2026-10-12; 0063
-stays a Proposed historical record, and this section is the effective rule.
-Every Code turn is offered the `octant_agent_message` tool with no separate
-activation gate. The built shape follows the record: the host
+Broader messaging still requires explicit maintainer approval of its design and
+threat-model sign-off; the journaled contracts, pure clamps, delivery service,
+Code turn tool registration, and the Agents center's messaging bounds view now
+exist so that review happens against real code, delivered behind the
+maintainer's explicit direction. The built shape follows the record: the host
 admits, clamps, journals, and delivers; bodies stay out of the journal, are
 stored under opaque references, and taint the recipient as untrusted external
 content; messaging grants no authority, starts no turn, and purged threads

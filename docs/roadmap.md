@@ -38,9 +38,9 @@ here is merged or being hardened for it.
 - **Agent-to-agent messaging** — shipped: journaled contracts, pure clamps,
   the delivery service, and the Agents center bounds view, and every Code turn
   is offered the `octant_agent_message` tool with no separate activation gate.
-  The maintainer approved its design and
-  [threat model](security/agent-to-agent-messaging-threat-model.md) on
-  2026-10-12.
+  Maintainer approval of its design and threat-model sign-off
+  ([threat model](security/agent-to-agent-messaging-threat-model.md)) are
+  still pending.
 - **Remote access** — pairing, revocable device keys, HTTPS private listener on
   LAN or Tailscale, fail-closed remote route policy, paired-browser client.
 - **Shell and appearance** — borderless macOS shell, dockable tabs and splits,
