@@ -1,6 +1,11 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { useRef } from "react";
 import { describe, expect, it } from "vitest";
+import {
+  createNewTaskDrafts,
+  NewTaskDraftsContext,
+  NewTaskDraftScopeContext,
+} from "../../composer/useNewTaskPrompt";
 import { useWorkComposerImages } from "./useWorkComposerImages";
 
 function Harness() {
@@ -59,6 +64,27 @@ describe("useWorkComposerImages", () => {
     fireEvent.click(screen.getByRole("button", { name: "attach" }));
     fireEvent.click(screen.getByRole("button", { name: "detach" }));
     fireEvent.click(screen.getByRole("button", { name: "restore" }));
+
+    expect(screen.getByLabelText("images")).toHaveTextContent("captured.png");
+  });
+
+  it("keeps staged images when the composer remounts under the same draft scope", () => {
+    const drafts = createNewTaskDrafts();
+    function view() {
+      return (
+        <NewTaskDraftsContext.Provider value={drafts}>
+          <NewTaskDraftScopeContext.Provider value="work-overview:test">
+            <Harness />
+          </NewTaskDraftScopeContext.Provider>
+        </NewTaskDraftsContext.Provider>
+      );
+    }
+
+    const rendered = render(view());
+    fireEvent.click(screen.getByRole("button", { name: "attach" }));
+    expect(screen.getByLabelText("images")).toHaveTextContent("captured.png");
+    rendered.unmount();
+    render(view());
 
     expect(screen.getByLabelText("images")).toHaveTextContent("captured.png");
   });

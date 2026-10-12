@@ -4,12 +4,13 @@ import {
   WORK_ATTACHMENT_MEDIA_TYPES,
 } from "@octant/contracts";
 import type { PickerGroup } from "@octant/domain";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useContext, useEffect, useRef, useState } from "react";
 import {
   clipboardHasImage,
   collectPastedImages,
   pastedImageName,
 } from "../../chat/composerImagePaste";
+import { NewTaskDraftsContext, NewTaskDraftScopeContext } from "../../composer/useNewTaskPrompt";
 
 /**
  * Whether the selected model reads images.
@@ -65,19 +66,44 @@ const SUPPORTED = new Set<string>(WORK_ATTACHMENT_MEDIA_TYPES);
  * them to the create path, which stages them on the host before the first
  * turn names their ids. filesForSend leaves the chips in place until
  * clearAfterAccepted, so a failed create or turn can retry the same images.
+ * A draft-scoped composer also keeps the File list in the new-task store so
+ * a Settings remount restores the same chips.
  */
+function stagePersistedFiles(files: ReadonlyArray<File>): ReadonlyArray<StagedWorkImage> {
+  return files.map((file) => ({
+    id: globalThis.crypto.randomUUID(),
+    file,
+    displayName: pastedImageName(file),
+    previewUrl: URL.createObjectURL(file),
+  }));
+}
+
 export function useWorkComposerImages(): WorkComposerImages {
-  const [staged, setStaged] = useState<ReadonlyArray<StagedWorkImage>>([]);
-  const [message, setMessage] = useState<string | undefined>(undefined);
+  const drafts = useContext(NewTaskDraftsContext);
+  const scope = useContext(NewTaskDraftScopeContext);
   const previews = useRef(new Set<string>());
   const current = useRef<ReadonlyArray<StagedWorkImage>>([]);
+  const [staged, setStaged] = useState<ReadonlyArray<StagedWorkImage>>(() => {
+    const files = scope === undefined ? [] : (drafts?.readImages(scope) ?? []);
+    const restored = stagePersistedFiles(files);
+    for (const attachment of restored) previews.current.add(attachment.previewUrl);
+    current.current = restored;
+    return restored;
+  });
+  const [message, setMessage] = useState<string | undefined>(undefined);
 
   const apply = useCallback(
     (next: (list: ReadonlyArray<StagedWorkImage>) => ReadonlyArray<StagedWorkImage>) => {
       current.current = next(current.current);
       setStaged(current.current);
+      if (scope !== undefined && drafts !== undefined) {
+        drafts.writeImages(
+          scope,
+          current.current.map((attachment) => attachment.file),
+        );
+      }
     },
-    [],
+    [drafts, scope],
   );
 
   const forget = useCallback((previewUrl: string) => {

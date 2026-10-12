@@ -332,7 +332,7 @@ describe("WorkOverview", () => {
     ).toBeVisible();
   });
 
-  it("keeps the quick-start draft after the overview remounts", async () => {
+  it("keeps the quick-start draft and attachments after the overview remounts", async () => {
     const user = userEvent.setup();
     const drafts = createNewTaskDrafts();
     function view() {
@@ -347,12 +347,18 @@ describe("WorkOverview", () => {
 
     const rendered = render(view());
     await user.type(screen.getByRole("textbox", { name: "Start a new task" }), "Keep this draft");
+    await user.upload(
+      screen.getByLabelText("Choose attachment file"),
+      new File([new Uint8Array([1])], "brief.png", { type: "image/png" }),
+    );
+    expect(screen.getByText("brief.png")).toBeVisible();
     rendered.unmount();
     render(view());
 
     expect(screen.getByRole("textbox", { name: "Start a new task" })).toHaveValue(
       "Keep this draft",
     );
+    expect(screen.getByText("brief.png")).toBeVisible();
   });
 
   it("keeps provider setup reachable when no Work provider is ready", async () => {

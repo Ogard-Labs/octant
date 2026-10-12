@@ -26,7 +26,7 @@ Project create, or the Model step — and returns to the same draft when that
 surface closes. Skip does not mark the host ready or start a thread. After Skip, or in a
 later session with no ready provider, the New task composer in Work and Code
 shows **Set up a provider**. It opens Providers & Models and returns to the
-same typed draft when that surface closes. The action leaves once any instance is
+same draft when that surface closes. The action leaves once any instance is
 ready.
 
 ## Configure a provider

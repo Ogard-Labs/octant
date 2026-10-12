@@ -929,7 +929,11 @@ function LaunchedShell(
   );
   function resetNewTaskDraft(mode: OctantMode): void {
     const paneId = controller.workspace?.activePaneIds[mode];
-    if (paneId !== undefined) newTaskDrafts.write(`${mode}:${String(paneId)}`, "");
+    if (paneId !== undefined) {
+      const scope = `${mode}:${String(paneId)}`;
+      newTaskDrafts.write(scope, "");
+      newTaskDrafts.writeImages(scope, []);
+    }
     if (mode === "code") {
       setDraftExecutionPolicy(undefined);
       setDraftPermissionPersistence(undefined);
