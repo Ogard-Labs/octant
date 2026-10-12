@@ -1341,8 +1341,11 @@ flowchart LR
     `already-clear` and journals nothing. It is refused while the thread's
     turn is running or queued, when its last turn ended without the host
     learning how (Code's `ambiguous`), and when the thread's own mode cannot
-    be read for that window. The message queue's inspection of a thread
-    answers all three for every mode.
+    be read for that window. A message still in the thread's message queue
+    counts as a queued turn, whether the queue is moving, paused, or held.
+    The message queue answers all of this for every mode, and the check and
+    the append run under its per-thread ordering, so a send through the queue
+    cannot land between them.
   - Only the local-only `POST /api/thread-external-content` clears. Its `read`
     returns each source with its count and first and last time, and the
     version a clear must name. The private listener answers a paired device

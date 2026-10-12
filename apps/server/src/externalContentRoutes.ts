@@ -9,7 +9,10 @@ import type { ContextFailure } from "@octant/contracts/context-rpc";
 import { authorizePrincipalAction } from "@octant/domain";
 import { ClientPrincipalError } from "./clientPrincipal";
 import type { ExternalContentClearStore } from "./context/externalContentClearStore";
-import type { ThreadMessageQueueModePort } from "./messageQueue/threadMessageQueuePort";
+import type {
+  ThreadMessageQueueService,
+  ThreadTurnStanding,
+} from "./messageQueue/threadMessageQueueService";
 import { resolvePrincipalRouteContext, type PrincipalRouteContext } from "./principalRouteContext";
 import { isRoutineHostScope } from "./routineHostScope";
 import { isAllowedRendererOrigin, isLoopbackHostname } from "./shellRoutes";
@@ -20,46 +23,36 @@ const METHODS = "POST, OPTIONS";
 const HEADERS = "content-type, x-octant-window-capability";
 const BODY_LIMIT = 4_096;
 
-/**
- * How the thread's own mode sees it for this window: `idle` with no turn
- * running or queued, `active` with one, `unconfirmed` when its last turn ended
- * without the host learning how, and `unavailable` when the thread is missing,
- * its mode is off, or the window may not reach its Project.
- */
-export type ExternalContentThreadInspection = "idle" | "active" | "unconfirmed" | "unavailable";
-
 export interface ExternalContentRouteDependencies {
   readonly windowAuthorityStore: WindowAuthorityStore;
   readonly clears: Pick<ExternalContentClearStore, "read" | "clear">;
-  readonly inspectThread: (input: {
-    readonly windowId: WindowId;
-    readonly mode: OctantMode;
-    readonly threadId: string;
-  }) => Promise<ExternalContentThreadInspection>;
+  /**
+   * Answers where the thread stands for this window and runs `act` while the
+   * thread's message queue is held still.
+   */
+  readonly withThreadStanding: <T>(
+    input: {
+      readonly windowId: WindowId;
+      readonly mode: OctantMode;
+      readonly threadId: string;
+    },
+    act: (standing: ThreadTurnStanding) => T,
+  ) => Promise<T>;
   readonly now?: () => number;
 }
 
 /**
- * Reads a thread the way the message queue does before it dispatches a
- * follow-up. That read is the one place all three modes answer the same two
- * questions: may this live window reach the thread's mode and Project, and is
- * a turn running or queued. Anything it holds back is `unavailable` here, and
- * a turn it could not confirm the end of is `unconfirmed`, so a thread whose
- * state cannot be told is never cleared.
+ * Reads a thread through its message queue. The queue asks the thread's own
+ * mode whether this live window may reach it and whether a turn is running or
+ * queued, adds the messages still waiting in the queue itself, and holds its
+ * per-thread ordering while the caller acts. A thread whose state cannot be
+ * told is never cleared.
  */
-export function inspectThreadAsMessageQueue(
-  queue: Pick<ThreadMessageQueueModePort, "inspect">,
-): ExternalContentRouteDependencies["inspectThread"] {
-  return async ({ windowId, mode, threadId }) => {
-    const inspection = await queue.inspect({
-      scope: decodeThreadMessageQueueScope({ mode, threadId }),
-      windowId,
-      intent: "read",
-    });
-    if (inspection.status === "held") return "unavailable";
-    if (inspection.status === "busy") return "active";
-    return inspection.tail?.unconfirmed === true ? "unconfirmed" : "idle";
-  };
+export function threadStandingFromMessageQueue(
+  queue: Pick<ThreadMessageQueueService, "withTurnStanding">,
+): ExternalContentRouteDependencies["withThreadStanding"] {
+  return ({ windowId, mode, threadId }, act) =>
+    queue.withTurnStanding(windowId, decodeThreadMessageQueueScope({ mode, threadId }), act);
 }
 
 /**
@@ -138,26 +131,26 @@ export function createExternalContentRouteHandler(dependencies: ExternalContentR
     }
 
     const threadId = String(decoded.threadId);
-    const inspection = await dependencies.inspectThread({
-      windowId: context.scopeId,
-      mode: decoded.mode,
-      threadId,
-    });
-    if (decoded.kind === "read") {
-      return inspection === "unavailable"
-        ? failure("unavailable", "This thread is unavailable.", 404, origin)
-        : json(dependencies.clears.read(threadId), origin);
-    }
-    // A refusal is an answer the surface shows, so it travels as the outcome.
-    return json(
-      dependencies.clears.clear({
-        threadId,
-        windowId: context.scopeId,
-        expectedVersion: decoded.expectedVersion,
-        principal: "local-window",
-        turn: inspection === "unavailable" ? "unknown" : inspection,
-      }),
-      origin,
+    return dependencies.withThreadStanding(
+      { windowId: context.scopeId, mode: decoded.mode, threadId },
+      (standing) => {
+        if (decoded.kind === "read") {
+          return standing === "unavailable"
+            ? failure("unavailable", "This thread is unavailable.", 404, origin)
+            : json(dependencies.clears.read(threadId), origin);
+        }
+        // A refusal is an answer the surface shows, so it travels as the outcome.
+        return json(
+          dependencies.clears.clear({
+            threadId,
+            windowId: context.scopeId,
+            expectedVersion: decoded.expectedVersion,
+            principal: "local-window",
+            turn: standing === "unavailable" ? "unknown" : standing,
+          }),
+          origin,
+        );
+      },
     );
   };
 }

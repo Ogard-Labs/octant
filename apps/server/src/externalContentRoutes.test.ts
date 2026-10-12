@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -5,21 +6,27 @@ import {
   EventActor,
   THREAD_EXTERNAL_CONTENT_AGGREGATE,
   THREAD_EXTERNAL_CONTENT_EVENT_NAMES,
+  decodeThreadMessageQueueCommand,
   decodeWindowId,
 } from "@octant/contracts";
 import { Schema } from "effect";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ExternalContentClearStore } from "./context/externalContentClearStore";
 import { ExternalContentIngestionStore } from "./context/externalContentIngestionStore";
 import {
   createExternalContentRouteHandler,
-  inspectThreadAsMessageQueue,
-  type ExternalContentThreadInspection,
+  threadStandingFromMessageQueue,
+  type ExternalContentRouteDependencies,
 } from "./externalContentRoutes";
+import type { ThreadMessageQueueModePort } from "./messageQueue/threadMessageQueuePort";
 import {
   createThreadMessageQueuePort,
   type ThreadMessageQueuePortDependencies,
 } from "./messageQueue/threadMessageQueuePorts";
+import {
+  ThreadMessageQueueService,
+  type ThreadTurnStanding,
+} from "./messageQueue/threadMessageQueueService";
 import { Journal } from "./persistence/journal";
 import { applyMigrations, MIGRATIONS } from "./persistence/migrations";
 import { createPhase1RuntimeRegistries } from "./persistence/runtimeRegistry";
@@ -47,7 +54,7 @@ afterEach(() => {
 });
 
 /** The real journal, projection, and stores behind the route, and one registered window. */
-function openHost(inspection: ExternalContentThreadInspection = "idle") {
+function openHost(standing: ThreadTurnStanding = "idle") {
   const directory = mkdtempSync(join(tmpdir(), "octant-taint-routes-"));
   directories.push(directory);
   const connection = openSqlite(join(directory, "octant.sqlite3"));
@@ -73,8 +80,15 @@ function openHost(inspection: ExternalContentThreadInspection = "idle") {
   });
   const windowAuthorityStore = new WindowAuthorityStore();
   windowAuthorityStore.register({ windowId, capability, now });
-  const thread = { inspection };
-  const inspectThread = vi.fn(async () => thread.inspection);
+  const thread = { standing };
+  const asked = vi.fn();
+  const withThreadStanding: ExternalContentRouteDependencies["withThreadStanding"] = async (
+    input,
+    act,
+  ) => {
+    asked(input);
+    return act(thread.standing);
+  };
   const handler = createExternalContentRouteHandler({
     windowAuthorityStore,
     clears: new ExternalContentClearStore({
@@ -84,7 +98,7 @@ function openHost(inspection: ExternalContentThreadInspection = "idle") {
       clock,
       actor: decodeActor({ kind: "local-user", actorId }),
     }),
-    inspectThread,
+    withThreadStanding,
     now: () => now,
   });
   const ingest = (contentReference: string, sourceLabel: string, thread: string = threadId) =>
@@ -102,7 +116,7 @@ function openHost(inspection: ExternalContentThreadInspection = "idle") {
       afterVersion: 0,
       limit: 100,
     });
-  return { handler, ingest, events, inspectThread, thread, connection };
+  return { handler, ingest, events, asked, thread, connection };
 }
 
 function request(body: unknown, headers: Record<string, string> = {}, target = path) {
@@ -150,7 +164,7 @@ describe("the local-only thread external-content route", () => {
         },
       ],
     });
-    expect(host.inspectThread).toHaveBeenCalledWith({ windowId, mode: "code", threadId });
+    expect(host.asked).toHaveBeenCalledWith({ windowId, mode: "code", threadId });
     host.connection.close();
   });
 
@@ -187,7 +201,7 @@ describe("the local-only thread external-content route", () => {
     expect(await busy?.json()).toMatchObject({ kind: "refused", reason: "turn-active" });
 
     // Its last turn ended without the host learning how: still readable, not clearable.
-    host.thread.inspection = "unconfirmed";
+    host.thread.standing = "unconfirmed";
     const unconfirmed = await host.handler(request(clear(1)));
     expect(await unconfirmed?.json()).toMatchObject({
       kind: "refused",
@@ -196,12 +210,12 @@ describe("the local-only thread external-content route", () => {
     });
     expect((await host.handler(request(read)))?.status).toBe(200);
 
-    host.thread.inspection = "unavailable";
+    host.thread.standing = "unavailable";
     const unreadable = await host.handler(request(clear(1)));
     expect(await unreadable?.json()).toEqual({ kind: "refused", reason: "thread-unavailable" });
     expect((await host.handler(request(read)))?.status).toBe(404);
 
-    host.thread.inspection = "idle";
+    host.thread.standing = "idle";
     host.ingest("page-2", "web-fetch");
     const stale = await host.handler(request(clear(1)));
     expect(await stale?.json()).toMatchObject({
@@ -249,7 +263,7 @@ describe("the local-only thread external-content route", () => {
     expect(
       (await host.handler(request(clear(1), {}, `${path}?threadId=${threadId}`)))?.status,
     ).toBe(400);
-    expect(host.inspectThread).not.toHaveBeenCalled();
+    expect(host.asked).not.toHaveBeenCalled();
     expect(host.events()).toHaveLength(1);
     host.connection.close();
   });
@@ -299,7 +313,7 @@ describe("the local-only thread external-content route", () => {
       expect(response?.status).toBe(401);
       expect(await response?.json()).toMatchObject({ category: "unauthorized" });
     }
-    expect(host.inspectThread).not.toHaveBeenCalled();
+    expect(host.asked).not.toHaveBeenCalled();
     expect(host.events()).toHaveLength(1);
     host.connection.close();
   });
@@ -317,13 +331,37 @@ describe("the local-only thread external-content route", () => {
       scopeId: ROUTINE_HOST_SCOPE_ID,
     });
     expect((await host.handler(hostRun))?.status).toBe(401);
-    expect(host.inspectThread).not.toHaveBeenCalled();
+    expect(host.asked).not.toHaveBeenCalled();
     expect(host.events()).toHaveLength(1);
     host.connection.close();
   });
 });
 
-describe("the thread's own mode, read the way the message queue reads it", () => {
+/** The real message queue over a port, on its own journal. */
+function openQueue(port: ThreadMessageQueueModePort) {
+  const directory = mkdtempSync(join(tmpdir(), "octant-taint-queue-"));
+  directories.push(directory);
+  const connection = openSqlite(join(directory, "octant.sqlite3"));
+  const clock = () => new Date(now).toISOString();
+  applyMigrations(connection, MIGRATIONS, clock);
+  const runtime = createPhase1RuntimeRegistries();
+  const journal = new Journal({
+    connection,
+    registry: runtime.events,
+    projections: runtime.projections,
+    clock,
+  });
+  const queue = new ThreadMessageQueueService({
+    connection,
+    journal,
+    port,
+    actor: decodeActor({ kind: "local-user", actorId }),
+    clock,
+  });
+  return { connection, journal, queue, clock };
+}
+
+describe("the thread's own mode, read through its message queue", () => {
   const live = { thread: true, window: true, mode: true, project: true, executing: false };
   const turns: Array<{ turnId: string; status: string }> = [];
   const codeWorks: Array<{ work: { kind: string; id: string; state: string } }> = [];
@@ -363,7 +401,19 @@ describe("the thread's own mode, read the way the message queue reads it", () =>
       prepare: async () => true,
     },
   } as unknown as ThreadMessageQueuePortDependencies;
-  const inspect = inspectThreadAsMessageQueue(createThreadMessageQueuePort(dependencies));
+  let opened: ReturnType<typeof openQueue>;
+  beforeEach(() => {
+    opened = openQueue(createThreadMessageQueuePort(dependencies));
+  });
+  afterEach(() => {
+    opened.queue.dispose();
+    opened.connection.close();
+  });
+  const inspect = (input: {
+    readonly windowId: typeof windowId;
+    readonly mode: "chat" | "work" | "code";
+    readonly threadId: string;
+  }) => threadStandingFromMessageQueue(opened.queue)(input, (standing) => standing);
   const chat = { windowId, mode: "chat", threadId } as const;
   const work = { windowId, mode: "work", threadId } as const;
   const code = { windowId, mode: "code", threadId } as const;
@@ -407,6 +457,129 @@ describe("the thread's own mode, read the way the message queue reads it", () =>
       live[fact] = true;
     }
     expect(await inspect(chat)).toBe("idle");
+  });
+});
+
+describe("a thread with a message still in its queue", () => {
+  it("refuses the clear while a moving or paused queue holds a message, and clears once it is empty", async () => {
+    // An idle Chat thread as its own mode sees it: no attempt queued or running.
+    const port = createThreadMessageQueuePort({
+      persistence: {
+        readChatThread: () => ({
+          id: threadId,
+          lifecycle: "active",
+          providerInstanceId: actorId,
+        }),
+        readChatThreadView: () => undefined,
+        readProject: () => undefined,
+        readProviderInstance: () => undefined,
+      },
+      journal: { replayAggregate: () => [] },
+      chat: { isTurnActive: () => false, read: vi.fn(), execute: vi.fn() },
+      isModeEnabled: () => true,
+      isWindowLive: () => true,
+      canAccess: () => true,
+      attachments: {
+        retain: () => ({ status: "retained" }),
+        commit: () => undefined,
+        release: async () => ({ status: "released" }),
+        prepare: async () => true,
+      },
+    } as unknown as ThreadMessageQueuePortDependencies);
+    // A send that is still being admitted when the clear arrives.
+    const admitted = Promise.withResolvers<void>();
+    const { connection, journal, queue, clock } = openQueue({
+      ...port,
+      inspect: async (input) => {
+        if (input.intent === "enqueue") await admitted.promise;
+        return port.inspect(input);
+      },
+    });
+    const windowAuthorityStore = new WindowAuthorityStore();
+    windowAuthorityStore.register({ windowId, capability, now });
+    const handler = createExternalContentRouteHandler({
+      windowAuthorityStore,
+      clears: new ExternalContentClearStore({
+        journal,
+        connection,
+        uuid: randomUUID,
+        clock,
+        actor: decodeActor({ kind: "local-user", actorId }),
+      }),
+      withThreadStanding: threadStandingFromMessageQueue(queue),
+      now: () => now,
+    });
+    new ExternalContentIngestionStore({
+      journal,
+      connection,
+      uuid: randomUUID,
+      clock,
+      actor: decodeActor({ kind: "system", actorId }),
+    }).record({
+      threadId,
+      provenance: { origin: "tool-result", sourceLabel: "web-fetch" },
+      contentReference: "page-1",
+      correlationId,
+      authorized: true,
+    });
+    const scope = { mode: "chat", threadId } as const;
+    const messageId = randomUUID();
+    const command = (body: Record<string, unknown>) =>
+      queue.execute(
+        windowId,
+        decodeThreadMessageQueueCommand({ scope, requestId: randomUUID(), ...body }),
+      );
+    const marks = () =>
+      journal.replayAggregate({
+        aggregateType: THREAD_EXTERNAL_CONTENT_AGGREGATE,
+        aggregateId: threadId,
+        afterVersion: 0,
+        limit: 100,
+      });
+    const chatClear = { kind: "clear", mode: "chat", threadId, expectedVersion: 1 };
+    const refusedAsActive = {
+      kind: "refused",
+      reason: "turn-active",
+      state: { externalContentIngested: true, version: 1 },
+    };
+
+    // A clear arrives while a send is in flight. The queue orders them, so the
+    // clear waits for the send and is answered with the message it queued.
+    const sending = command({
+      kind: "enqueue",
+      expectedVersion: 0,
+      messageId,
+      payload: { mode: "chat", prompt: "and then deploy it" },
+    });
+    const racing = handler(request(chatClear));
+    const answered = vi.fn();
+    void racing.then(answered);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(answered).not.toHaveBeenCalled();
+    expect(marks()).toHaveLength(1);
+    admitted.resolve();
+    expect(await sending).toMatchObject({ status: "applied" });
+    expect(await (await racing)?.json()).toMatchObject(refusedAsActive);
+
+    // Paused, the mode still sees no turn, but the thread owes the queued message.
+    expect(await command({ kind: "pause", expectedVersion: 1 })).toMatchObject({
+      status: "applied",
+      snapshot: { paused: true, items: [{ status: "queued" }] },
+    });
+    expect(await (await handler(request(chatClear)))?.json()).toMatchObject(refusedAsActive);
+    // The sources stay readable while the clear waits.
+    expect((await handler(request({ kind: "read", mode: "chat", threadId })))?.status).toBe(200);
+    expect(marks()).toHaveLength(1);
+
+    expect(await command({ kind: "remove", expectedVersion: 2, messageId })).toMatchObject({
+      status: "applied",
+      snapshot: { items: [] },
+    });
+    const cleared = await handler(request(chatClear));
+    expect(await cleared?.json()).toMatchObject({ kind: "cleared" });
+    expect(marks()).toHaveLength(2);
+    queue.dispose();
+    connection.close();
   });
 });
 
