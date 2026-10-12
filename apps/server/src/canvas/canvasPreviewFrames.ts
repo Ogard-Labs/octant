@@ -264,15 +264,39 @@ export async function readPreviewDesignFrames(
       readings.push({ blockId, measured: false, scriptErrors, overflow: [], contrast: [] });
       continue;
     }
-    const answers: unknown[] = [];
     const frames = await design.locator("iframe").elementHandles();
-    for (const element of frames.slice(0, MAX_FRAMES_PER_DESIGN)) {
-      const frame = await element.contentFrame();
-      answers.push(frame === null ? undefined : await readFrame(frame));
-    }
+    const answers = await readFramesWithinBudget(
+      frames.slice(0, MAX_FRAMES_PER_DESIGN),
+      async (element) => {
+        const frame = await element.contentFrame();
+        return frame === null ? undefined : await readFrame(frame);
+      },
+      deadline,
+      now,
+    );
     readings.push({ blockId, scriptErrors, ...designFrameReadings(answers) });
   }
   return readings;
+}
+
+/**
+ * What each frame answered, read in turn until the deadline. A frame not
+ * reached answers `undefined`, as one that hung does. A hung frame costs its
+ * whole wait, and in a browser that runs a frame in its page's process one
+ * hung prototype makes every later frame hang too, so the time for the whole
+ * look is checked before each frame and not only before each design.
+ */
+export async function readFramesWithinBudget<Frame>(
+  frames: ReadonlyArray<Frame>,
+  read: (frame: Frame) => Promise<unknown>,
+  deadline: number,
+  now: () => number,
+): Promise<ReadonlyArray<unknown>> {
+  const answers: unknown[] = [];
+  for (const frame of frames) {
+    answers.push(now() >= deadline ? undefined : await read(frame));
+  }
+  return answers;
 }
 
 /**
