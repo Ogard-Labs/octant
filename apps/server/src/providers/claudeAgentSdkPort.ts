@@ -1139,7 +1139,11 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
                 ),
               accountInfo: () =>
                 request(async () => decodeAccount(await query!.accountInfo()), "account discovery"),
-              readPlanUsage: () => request(async () => askPlanUsage(query!), "plan usage"),
+              readPlanUsage: () =>
+                request(async () => {
+                  const sessionQuery = query;
+                  return sessionQuery === undefined ? undefined : askPlanUsage(sessionQuery);
+                }, "plan usage"),
               close: () =>
                 Effect.promise(async () => {
                   streamEnded(failure("unavailable", "Claude connection is closing."));
