@@ -13,7 +13,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createFakeSandboxConfinement } from "../process/fakeSandboxConfinement";
-import type { SeatbeltConfinementPort } from "../process/seatbeltProfile";
+import type { ProcessConfinementPort } from "../process/seatbeltProfile";
 import { GitMutationPort, type GitMutationDependencies } from "./gitMutationPort";
 
 const directories: string[] = [];
@@ -742,7 +742,7 @@ describe("GitMutationPort", () => {
   });
 
   it("refuses Plan git mutations the same sandbox flags as a Plan provider launch", async () => {
-    let captured: Parameters<SeatbeltConfinementPort["prepare"]>[0] | undefined;
+    let captured: Parameters<ProcessConfinementPort["prepare"]>[0] | undefined;
     const fake = createFakeSandboxConfinement();
     directories.push(fake.root);
     // Production constructs one shared port with no executionPolicy. Plan

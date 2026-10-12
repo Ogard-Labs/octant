@@ -2,7 +2,11 @@ import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import {
   attachOrCreateHost,
+  buildWebClientUrl,
   createDefaultServicePolicyStore,
+  createLaunchSession,
+  generateWindowCapability,
+  generateWindowId,
   type HostLauncherResult,
   type HostServicePolicyReader,
 } from "./hostLauncher";
@@ -21,6 +25,7 @@ export interface WebCommandOptions {
   readonly dev?: boolean;
   readonly attachOrCreateHost?: typeof attachOrCreateHost;
   readonly openBrowser?: (url: URL) => void | Promise<void>;
+  readonly fetch?: (input: URL, init: RequestInit) => Promise<Response>;
   readonly startDevServer?: (options: DevServerOptions) => Promise<string>;
   readonly resolveDevelopmentCodeFileHelperPath?: () => string | undefined;
   readonly generateBridgeSecret?: () => string;
@@ -41,7 +46,8 @@ export type WebCommandOutput =
   | { readonly kind: "dev"; readonly url: URL }
   | { readonly kind: "disabled"; readonly reason: string }
   | { readonly kind: "start-failed"; readonly reason: string }
-  | { readonly kind: "auth-failed"; readonly reason: string };
+  | { readonly kind: "auth-failed"; readonly reason: string }
+  | { readonly kind: "renderer-refused"; readonly reason: string };
 
 export async function runWebCommand(options: WebCommandOptions): Promise<WebCommandOutput> {
   const stdout = options.stdout ?? process.stdout;
@@ -63,9 +69,14 @@ export async function runWebCommand(options: WebCommandOptions): Promise<WebComm
     options.dev === true
       ? (options.resolveDevelopmentCodeFileHelperPath ?? resolveDevelopmentCodeFileHelperPath)()
       : undefined;
+  const devHostname = process.env.OCTANT_VITE_HOSTNAME ?? "127.0.0.1";
+  const devPort = process.env.OCTANT_VITE_PORT ?? "5173";
+  // A host started here admits the Vite renderer's exact origin; any other
+  // loopback page is refused local authority.
   const developmentEnvironment =
     options.dev === true
       ? {
+          OCTANT_WEB_URL: `http://${devHostname}:${devPort}`,
           ...(developmentDataDirectory === undefined
             ? {}
             : { OCTANT_DATA_DIR: developmentDataDirectory }),
@@ -103,12 +114,25 @@ export async function runWebCommand(options: WebCommandOptions): Promise<WebComm
   }
 
   if (options.dev) {
+    // A host that was already running may not have been started with this
+    // renderer's origin, and then refuses its local session. Ask before
+    // opening a renderer that could never bootstrap.
+    const devOrigin = `http://${devHostname}:${devPort}`;
+    if (!(await hostAdmitsRenderer(options.fetch ?? globalThis.fetch, host.url, devOrigin))) {
+      const reason =
+        `The Octant host at ${host.url.toString()} does not admit the renderer origin ${devOrigin}. ` +
+        `Stop that host and run this command again, or start it with OCTANT_WEB_URL=${devOrigin}.`;
+      stderr.write(`${reason}\n`);
+      return { kind: "renderer-refused", reason };
+    }
     const startDevServer = options.startDevServer ?? defaultStartDevServer;
-    const devHostname = process.env.OCTANT_VITE_HOSTNAME ?? "127.0.0.1";
-    const devPort = process.env.OCTANT_VITE_PORT ?? "5173";
     const devUrl = await startDevServer({ hostname: devHostname, port: devPort });
     const devUrlObject = new URL(devUrl);
-    const launchUrl = buildDevLaunchUrl(devUrlObject, host.url);
+    const launchUrl = await mintLaunchUrl(host.url, devUrlObject);
+    if (typeof launchUrl === "string") {
+      stderr.write(`${launchUrl}\n`);
+      return { kind: "auth-failed", reason: launchUrl };
+    }
     if (!options.noOpen) {
       await openBrowserSafely(options.openBrowser ?? defaultOpenBrowser, launchUrl, stdout);
     }
@@ -119,24 +143,91 @@ export async function runWebCommand(options: WebCommandOptions): Promise<WebComm
         ? "Octant development renderer uses the canonical Machine store.\n"
         : `Octant isolated development history persists in ${developmentDataDirectory}.\n`,
     );
-    stdout.write(`Octant web client ready at ${launchUrl.toString()}\n`);
+    stdout.write(
+      options.noOpen
+        ? `Octant web client ready at ${launchUrl.toString()}\n`
+        : `Octant web client opened at ${devUrlObject.toString()}\n`,
+    );
     return { kind: "dev", url: launchUrl };
   }
 
-  const url = host.url;
-  if (options.noOpen) {
-    stdout.write(`Octant web client ready at ${url.toString()}\n`);
-    return { kind: "served", url };
+  const launchUrl = await mintLaunchUrl(host.url);
+  if (typeof launchUrl === "string") {
+    stderr.write(`${launchUrl}\n`);
+    return { kind: "auth-failed", reason: launchUrl };
   }
-  await openBrowserSafely(options.openBrowser ?? defaultOpenBrowser, url, stdout);
-  stdout.write(`Octant web client opened at ${url.toString()}\n`);
-  return { kind: "opened", url };
+  if (options.noOpen) {
+    // The one-time link is the only way in, so it is printed here. It works
+    // once, for a few minutes, and only from the page origin it names.
+    stdout.write(`Octant web client ready at ${launchUrl.toString()}\n`);
+    return { kind: "served", url: launchUrl };
+  }
+  await openBrowserSafely(options.openBrowser ?? defaultOpenBrowser, launchUrl, stdout);
+  stdout.write(`Octant web client opened at ${host.url.toString()}\n`);
+  return { kind: "opened", url: launchUrl };
+
+  /**
+   * A browser session starts only from a one-time launch token minted with
+   * the bridge secret, which this OS user read from the owner-only runtime
+   * directory. The token is bound to the renderer origin the browser opens.
+   */
+  async function mintLaunchUrl(serverUrl: URL, rendererUrl?: URL): Promise<URL | string> {
+    // The bridge secret goes only to the host this OS user's owner-only
+    // receipt names. A health probe proves nothing: while the real host is
+    // stopped, another OS user can bind its port and answer `/health`, and
+    // `--hostname` can name any server at all.
+    const owned = await readHostInfoFile(bridgeSecretInput);
+    if (
+      owned === undefined ||
+      new URL(owned.url).origin !== serverUrl.origin ||
+      (host.kind !== "disabled" &&
+        host.kind !== "start-failed" &&
+        host.instanceId !== undefined &&
+        owned.instanceId !== host.instanceId)
+    ) {
+      return `Octant did not send its bridge secret to ${serverUrl.toString()}: this OS user's host receipt does not name that host. Start the host as this user from the Octant desktop application or \`octant server\`, then run this command again.`;
+    }
+    // A host that won a start race owns a different secret than the one this
+    // command generated; its owner projected that secret into the runtime
+    // directory, so it is read again once the host is known.
+    const hostBridgeSecret =
+      explicitBridgeSecret ??
+      (await readBridgeSecretFile(bridgeSecretInput)) ??
+      resolvedBridgeSecret;
+    const receipt = await createLaunchSession({
+      bridgeSecret: hostBridgeSecret,
+      serverUrl,
+      windowId: generateWindowId(),
+      capability: generateWindowCapability(),
+      origin: (rendererUrl ?? serverUrl).origin,
+      ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
+    });
+    if (receipt === undefined) return LAUNCH_REFUSED_REASON;
+    return buildWebClientUrl({
+      serverUrl,
+      launchToken: receipt.launchToken,
+      ...(rendererUrl === undefined ? {} : { rendererUrl }),
+    });
+  }
 }
 
-function buildDevLaunchUrl(devUrl: URL, serverUrl: URL): URL {
-  const url = new URL(devUrl.toString());
-  url.searchParams.set("serverUrl", serverUrl.toString());
-  return url;
+const LAUNCH_REFUSED_REASON =
+  "The Octant host refused to create a browser launch link. Run this command as the OS user that started the host, or restart the host from the Octant desktop application or `octant server`.";
+
+async function hostAdmitsRenderer(
+  fetch: (input: URL, init: RequestInit) => Promise<Response>,
+  hostUrl: URL,
+  origin: string,
+): Promise<boolean> {
+  try {
+    const response = await fetch(new URL("/api/shell/local-session", hostUrl), {
+      method: "OPTIONS",
+      headers: { origin, "access-control-request-method": "POST" },
+    });
+    return response.status === 204;
+  } catch {
+    return false;
+  }
 }
 
 async function openBrowserSafely(

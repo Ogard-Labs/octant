@@ -26,7 +26,7 @@
   align-items: center;
   justify-content: space-between;
   gap: var(--oct-space-3);
-  padding: 7px 12px;
+  padding: var(--oct-space-2) var(--oct-space-3);
   border-bottom: 1px solid var(--oct-border);
   background: var(--oct-surface);
 }
@@ -186,9 +186,9 @@
 
 .code-review-pane__findings li {
   display: grid;
-  gap: 5px;
+  gap: var(--oct-space-1);
   min-height: 54px;
-  padding: 9px 12px;
+  padding: var(--oct-space-2) var(--oct-space-3);
   border-bottom: 1px solid var(--oct-border);
 }
 
@@ -661,7 +661,7 @@
 }
 
 .unified-diff__gap td {
-  padding: 3px var(--oct-space-3);
+  padding: var(--oct-space-1) var(--oct-space-3);
   color: var(--oct-meta);
   background: var(--oct-fg-soft);
   font-family: var(--oct-font-display);
@@ -692,10 +692,9 @@
   width: 100%;
   align-items: baseline;
   gap: var(--oct-space-2);
-  padding: 5px var(--oct-space-2);
+  padding: var(--oct-space-1) var(--oct-space-2);
   background: transparent;
   border: 0;
-  border-radius: var(--oct-radius-sm);
   cursor: pointer;
   font-size: var(--oct-text-xs);
   text-align: left;
@@ -876,7 +875,7 @@
   align-items: baseline;
   justify-content: space-between;
   gap: var(--oct-space-1) var(--oct-space-3);
-  padding: 5px var(--oct-space-2);
+  padding: var(--oct-space-1) var(--oct-space-2);
   border-radius: var(--oct-radius-sm);
   cursor: pointer;
 }
@@ -963,8 +962,8 @@
 .github-onboarding__trigger {
   max-width: 220px;
   min-height: var(--oct-touch-min);
-  gap: 5px;
-  padding: 0 5px;
+  gap: var(--oct-space-1);
+  padding: 0 var(--oct-space-1);
   color: var(--oct-muted);
   font-size: var(--oct-text-xs);
 }
@@ -1207,7 +1206,6 @@
 .code-project-views__inline-button {
   width: 28px;
   min-height: 28px;
-  border-radius: var(--oct-radius-sm);
   color: var(--octant-text-muted);
   transition:
     background var(--oct-motion-fast) ease,
@@ -1352,7 +1350,7 @@
 
 .code-overview__card {
   min-width: 0;
-  padding: 19px 20px;
+  padding: var(--oct-space-5) var(--oct-space-5);
   background: var(--octant-surface-raised);
   border: 0;
   border-radius: var(--oct-radius-md);
@@ -1403,7 +1401,7 @@
 
 .code-overview__target-details div {
   display: grid;
-  gap: 3px;
+  gap: var(--oct-space-1);
   min-width: 0;
 }
 
@@ -1430,7 +1428,7 @@
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   align-content: start;
-  gap: 11px;
+  gap: var(--oct-space-3);
   min-width: 0;
   min-height: 116px;
   padding: 16px;
@@ -1471,7 +1469,7 @@
 .code-overview__identity {
   display: grid;
   align-items: start;
-  gap: 5px;
+  gap: var(--oct-space-1);
 }
 
 .code-overview__toolbar .project-overview__name {
@@ -1496,7 +1494,7 @@
 .code-overview__lifecycle {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: var(--oct-space-1);
   color: var(--octant-success-text);
 }
 
@@ -1519,7 +1517,7 @@
 }
 
 .code-overview__context {
-  padding: 11px 28px;
+  padding: var(--oct-space-3) 28px;
   background: var(--octant-surface-inset);
 }
 
@@ -1540,7 +1538,7 @@
   min-height: 42px;
   align-items: center;
   gap: 8px;
-  padding: 0 11px;
+  padding: 0 var(--oct-space-3);
   text-align: left;
 }
 
@@ -1690,7 +1688,7 @@
 .code-project-thread__facts li {
   display: inline-flex;
   min-width: 0;
-  gap: 5px;
+  gap: var(--oct-space-1);
 }
 
 .code-project-thread__fact-label {
@@ -1789,7 +1787,7 @@
 
 .code-project-overview__quick-start-copy {
   max-width: 72ch;
-  margin-bottom: 5px !important;
+  margin-bottom: var(--oct-space-1) !important;
 }
 
 .code-project-overview__quick-start .code-composer-adapter {
@@ -1847,7 +1845,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 9px 12px;
+  padding: var(--oct-space-2) var(--oct-space-3);
   color: var(--octant-text-muted);
   border-bottom: 1px solid var(--octant-border);
 }
@@ -2284,6 +2282,23 @@ html[data-octant-reduced-motion="true"] .code-transcript-row__status-icon {
   font-size: var(--oct-text-xs);
 }
 
+/* The status strip is one truncated line, but this notice is a disclosure the
+   person must be able to read in full before sending, so it wraps. */
+.composer-status:has(> .code-thread-workspace__switch-notice) {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.code-thread-workspace__switch-notice {
+  white-space: normal;
+}
+
+/* What a provider switch handed over, under the divider that marks it. */
+.code-thread-workspace__handoff {
+  margin: 0 0 var(--oct-space-2);
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
 .code-thread-workspace__checkpoint,
 .code-thread-workspace__fork,
 .code-thread-workspace__restore {
@@ -2580,7 +2595,7 @@ html[data-octant-reduced-motion="true"] .code-transcript-row__status-icon {
   flex-wrap: wrap;
   justify-content: flex-end;
   align-content: start;
-  gap: 5px;
+  gap: var(--oct-space-1);
   min-width: 0;
 }
 

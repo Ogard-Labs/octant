@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { decodeCanvasBlock } from "@octant/contracts";
-import type { CanvasBlock } from "@octant/contracts/canvas";
+import { CANVAS_SCHEMA_VERSION, type CanvasBlock } from "@octant/contracts/canvas";
 import { chartExampleBlocks } from "@octant/domain";
 import { canvasPreviewWarnings, type CanvasPreviewPalette } from "./canvasPreviewWarnings";
 import { canvasPreviewPalette } from "./canvasPreviewService";
@@ -37,14 +37,12 @@ function richText(blockId: string): CanvasBlock {
 function warningsFor(
   blocks: ReadonlyArray<CanvasBlock>,
   options: {
-    readonly presentation?: "inline" | "sidebar";
     readonly width?: number;
     readonly palette?: CanvasPreviewPalette;
   } = {},
 ): ReturnType<typeof canvasPreviewWarnings> {
   return canvasPreviewWarnings({
     definition: { blocks },
-    presentation: options.presentation ?? "sidebar",
     width: options.width ?? 720,
     palette: options.palette ?? canvasPreviewPalette("light"),
   });
@@ -135,6 +133,11 @@ describe("canvasPreviewWarnings", () => {
     expect(warningsFor(blocks)).toEqual([{ kind: "empty-series", blockId: "blank" }]);
   });
 
+  it("does not warn about the length of a long reading document", () => {
+    const blocks = Array.from({ length: 40 }, (_unused, index) => richText(`block-${index}`));
+    expect(warningsFor(blocks)).toEqual([]);
+  });
+
   it("reports a sankey as no empty series and a funnel's long stage as no clipped slot", () => {
     const blocks = chartExampleBlocks.filter(
       (candidate) =>
@@ -146,13 +149,39 @@ describe("canvasPreviewWarnings", () => {
     expect(warningsFor(blocks, { width: 360 })).toEqual([]);
   });
 
-  it("reports an inline document that is past the block cap", () => {
-    const blocks = Array.from({ length: 13 }, (_unused, index) => richText(`block-${index}`));
-    expect(warningsFor(blocks, { presentation: "inline" })).toContainEqual({
-      kind: "inline-height-cap-exceeded",
-      blockCount: 13,
-      limit: 12,
+  it("measures a chart placed in a dashboard at its cell's width, not the document's", () => {
+    const chart = groupedBar(
+      "spend",
+      [
+        { seriesId: "a", label: "Plan", values: [1, 2, 3, 4] },
+        { seriesId: "b", label: "Actual", values: [2, 2, 3, 5] },
+      ],
+      ["Compute nodes", "Object storage", "Network egress", "Support plans"],
+    );
+    const tile = block({
+      blockId: "api",
+      schemaVersion: CANVAS_SCHEMA_VERSION,
+      kind: "status",
+      label: "API",
+      value: "Healthy",
+      tone: "success",
     });
+    const dashboard = (span: number) =>
+      block({
+        blockId: "board",
+        schemaVersion: CANVAS_SCHEMA_VERSION,
+        kind: "dashboard",
+        title: "Board",
+        columns: 4,
+        cells: [{ blockId: "spend", span }, { blockId: "api" }],
+      });
+    // Alone at 1100px every label has room.
+    expect(warningsFor([chart], { width: 1100 })).toEqual([]);
+    // A quarter of a four-column grid is too narrow for the same labels.
+    const narrow = warningsFor([dashboard(1), chart, tile], { width: 1100 });
+    expect(narrow.some((warning) => warning.kind === "clipped-label")).toBe(true);
+    // The whole row is the document's width less the cell's frame.
+    expect(warningsFor([dashboard(4), chart, tile], { width: 1100 })).toEqual([]);
   });
 
   it("reports ink that does not clear its contrast target on the surface", () => {

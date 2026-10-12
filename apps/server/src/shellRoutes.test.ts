@@ -10,6 +10,8 @@ import { WindowAuthorityStore } from "./windowAuthorityStore";
 import {
   createShellRouteHandler,
   isAllowedRendererOrigin,
+  isForeignLoopbackOrigin,
+  isLocalRendererOrigin,
   resolveAllowedRendererHttpOrigin,
   SHELL_RENDERER_IDENTITY_HEADER as RENDERER_IDENTITY_HEADER,
 } from "./shellRoutes";
@@ -452,6 +454,35 @@ describe("isAllowedRendererOrigin", () => {
     expect(isAllowedRendererOrigin("null", null)).toBe(true);
     expect(isAllowedRendererOrigin("http://127.0.0.1:5173", null)).toBe(true);
     expect(isAllowedRendererOrigin("http://localhost:5173", null)).toBe(true);
+  });
+
+  it("admits only the listener's own loopback origin and the configured renderer", () => {
+    const listener = new URL("http://127.0.0.1:13773");
+    expect(isLocalRendererOrigin("http://127.0.0.1:13773", listener)).toBe(true);
+    expect(isLocalRendererOrigin("http://localhost:13773", listener, null)).toBe(true);
+    expect(isLocalRendererOrigin("http://[::1]:13773", listener, "http://localhost:5173")).toBe(
+      true,
+    );
+    expect(isLocalRendererOrigin("http://localhost:5173", listener, "http://localhost:5173")).toBe(
+      true,
+    );
+    expect(isLocalRendererOrigin("file://", listener, null)).toBe(true);
+    expect(isLocalRendererOrigin("http://127.0.0.1:5173", listener, "http://localhost:5173")).toBe(
+      false,
+    );
+    expect(isLocalRendererOrigin("http://127.0.0.1:9999", listener)).toBe(false);
+    expect(isLocalRendererOrigin("http://localhost:3000", listener, null)).toBe(false);
+    expect(isLocalRendererOrigin("https://localhost:13773", listener)).toBe(false);
+  });
+
+  it("names only loopback pages the listener does not serve as foreign", () => {
+    const listener = new URL("http://127.0.0.1:13773");
+    expect(isForeignLoopbackOrigin("http://localhost:3000", listener)).toBe(true);
+    expect(isForeignLoopbackOrigin("https://127.0.0.1:8443", listener)).toBe(true);
+    expect(isForeignLoopbackOrigin("http://127.0.0.1:13773", listener)).toBe(false);
+    expect(isForeignLoopbackOrigin("null", listener, null)).toBe(false);
+    expect(isForeignLoopbackOrigin("https://example.com", listener)).toBe(false);
+    expect(isForeignLoopbackOrigin(null, listener)).toBe(false);
   });
 
   it("resolves packaged, Vite, and unset development origins", () => {

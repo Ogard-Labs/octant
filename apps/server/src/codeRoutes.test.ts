@@ -1538,6 +1538,34 @@ describe("Code project pull-request detail routes", () => {
     expect(response?.status).toBe(400);
     expect(mergeProjectPullRequest).not.toHaveBeenCalled();
   });
+
+  it("refuses a merge from a paired remote device before invoking the merge service", async () => {
+    const mergeProjectPullRequest = vi.fn();
+    const route = routeFixture({ mergeProjectPullRequest });
+    const remoteDeviceId = "00000000-0000-4000-8000-000000000917";
+    const remoteRequest = request("/api/code/project-pull-requests/merge", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ...detailQuery, method: "squash", headSha: mergeHeadSha }),
+    });
+    bindPrincipalRouteContext(remoteRequest, {
+      principal: createRemoteDevicePrincipal({
+        hostId: "local" as never,
+        deviceId: remoteDeviceId as never,
+        credentialGeneration: 1,
+        origin: "https://octant.invalid",
+        protocolVersion: 1,
+        capabilityDigest: "b".repeat(64),
+        sessionId: "00000000-0000-4000-8000-000000000918" as never,
+      }),
+      scopeId: remoteDeviceId as never,
+    });
+
+    const response = await route(remoteRequest);
+
+    expect(response?.status).toBe(403);
+    expect(mergeProjectPullRequest).not.toHaveBeenCalled();
+  });
 });
 
 describe("Git history routes", () => {

@@ -423,37 +423,43 @@ h3,
 h4 {
   text-wrap: balance;
 }
-/* Focus uses fill and text emphasis without outlining an entire control or
-   popup (0114). Container focus only hosts keyboard navigation; menu items
-   keep the shared recipe's highlighted fill. */
+/* Keyboard focus draws one neutral edge, declared here and nowhere else. A
+   focus fill alone was the hover fill, so a keyboard user could not tell the
+   control they were on from the one under the pointer (WCAG 2.4.7). The edge
+   is an outline, so it moves no layout and follows the control's own radius;
+   it is inset, so a dense row or a scrolling container cannot clip it; and a
+   pointer press does not match :focus-visible, so clicking paints nothing. */
 :focus-visible {
+  outline: 2px solid var(--oct-focus-edge);
+  outline-offset: -2px;
+}
+
+/* A filled accent control inverts the edge so it stays visible on its own
+   fill: the primary button, a checked switch, a checked checkbox. Declared
+   here rather than in the recipes because the global rule above is unlayered
+   and would otherwise win over a Tailwind focus utility. */
+[data-slot="button"][data-variant="default"]:focus-visible,
+[data-slot="switch"][data-checked]:focus-visible,
+.octant-checkbox:checked:focus-visible {
+  outline-color: var(--oct-focus-edge-on-accent);
+}
+
+/* A drawn SVG mark is a shape, not a box: an inset edge would cover a small
+   dot or a thin band, so the edge sits just outside it instead. */
+svg :focus-visible {
+  outline-offset: 2px;
+}
+
+/* A container that takes focus only to hold the keyboard shows no edge of its
+   own; the item inside it that the user is on shows one. */
+.octant-menu__positioner:focus-visible,
+.octant-menu__popup:focus-visible,
+.octant-dialog__popup:focus-visible,
+.octant-preview-card:focus-visible,
+.model-picker__listbox:focus-visible,
+.settings-search-results:focus-visible,
+.zen-surface:focus-visible {
   outline: none;
-}
-input:focus-visible:not([type="checkbox"], [type="radio"]),
-textarea:focus-visible,
-[role="combobox"]:focus-visible {
-  background-color: var(--octant-control-hover);
-  color: var(--octant-text-primary);
-}
-:where(
-  button,
-  a,
-  summary,
-  [role="button"],
-  [role="tab"],
-  [role="option"],
-  [role="menuitem"],
-  [role="menuitemradio"],
-  [role="menuitemcheckbox"]
-):focus-visible {
-  background-color: var(--octant-control-hover);
-  color: var(--octant-text-primary);
-  text-decoration: underline;
-  text-underline-offset: 0.2em;
-}
-[data-slot="button"][data-variant="default"]:focus-visible {
-  background-color: var(--octant-text-primary);
-  color: var(--octant-surface);
 }
 
 /* ─── layout primitives ─────────────────────────────────────────────── */
@@ -773,8 +779,8 @@ h4 {
   display: inline-flex;
   min-height: 20px;
   align-items: center;
-  gap: 5px;
-  padding: 2px 7px;
+  gap: var(--oct-space-1);
+  padding: 2px var(--oct-space-2);
   background: transparent;
   color: var(--oct-fg-2);
   border: 1px solid var(--oct-border);
@@ -792,7 +798,7 @@ h4 {
   display: inline-flex;
   min-height: 18px;
   align-items: center;
-  gap: 5px;
+  gap: var(--oct-space-1);
   padding: 1px 6px;
   color: var(--oct-meta);
   background: transparent;
@@ -1317,7 +1323,7 @@ input.switch:checked::after {
 .sheet td {
   border-right: 1px solid var(--oct-border-soft);
   border-bottom: 1px solid var(--oct-border-soft);
-  padding: 3px var(--oct-space-2);
+  padding: var(--oct-space-1) var(--oct-space-2);
   white-space: nowrap;
 }
 .sheet thead th {
@@ -1493,7 +1499,7 @@ input.switch:checked::after {
 .kbd {
   font-family: var(--oct-font-mono);
   font-size: var(--oct-text-xs);
-  padding: 3px 7px;
+  padding: var(--oct-space-1) var(--oct-space-2);
   border: 1px solid var(--oct-border);
   border-bottom-width: 2px;
   border-radius: var(--oct-radius-sm);
@@ -1504,7 +1510,7 @@ input.switch:checked::after {
 /* ─── segmented control ─────────────────────────────────────────────── */
 .segmented {
   display: inline-flex;
-  padding: 3px;
+  padding: var(--oct-space-1);
   gap: 2px;
   border: 1px solid var(--oct-border);
   border-radius: var(--oct-radius-sm);
@@ -1582,7 +1588,7 @@ input.switch:checked::after {
   display: grid;
   grid-template-columns: 62px minmax(0, 1fr);
   gap: var(--oct-space-4);
-  padding: 3px 0 3px var(--oct-space-3);
+  padding: var(--oct-space-1) 0 var(--oct-space-1) var(--oct-space-3);
   border-left: 2px solid transparent;
 }
 .runline .k {
@@ -3586,7 +3592,7 @@ input.switch:checked::after {
   right: -2px;
   min-width: 15px;
   height: 15px;
-  padding-inline: 3px;
+  padding-inline: var(--oct-space-1);
   border-radius: var(--oct-radius-pill);
   background: var(--oct-accent);
   color: var(--oct-accent-on);
@@ -4555,7 +4561,7 @@ input.switch:checked::after {
 .composer-row .composer-model-picker__trigger {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: var(--oct-space-1);
   min-height: 28px;
   padding-block: 0;
   padding-inline: 8px 6px;
@@ -6220,7 +6226,7 @@ html[data-octant-reduced-transparency="true"] [data-slot="card"][data-variant="g
   background: var(--oct-fg-soft);
 }
 .run-row .st {
-  margin-top: 5px;
+  margin-top: var(--oct-space-1);
 }
 .run-main {
   min-width: 0;
@@ -7062,7 +7068,7 @@ html[data-octant-reduced-transparency="true"] [data-slot="card"][data-variant="g
   align-self: center;
   width: 7px;
   height: 7px;
-  margin-inline: 3px;
+  margin-inline: var(--oct-space-1);
 }
 .plan-list li[data-state="done"] {
   color: var(--oct-meta);
@@ -7533,7 +7539,6 @@ html[data-octant-reduced-transparency="true"] [data-slot="card"][data-variant="g
   height: 24px;
   padding: 0;
   border: 0;
-  border-radius: var(--oct-radius-sm);
   background: none;
   color: var(--oct-meta);
   cursor: grab;
@@ -7593,7 +7598,7 @@ html[data-octant-reduced-transparency="true"] [data-slot="card"][data-variant="g
 .prov-state {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: var(--oct-space-1);
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-xs);
   font-weight: var(--oct-weight-medium);
@@ -8333,7 +8338,7 @@ html[data-octant-reduced-transparency="true"] [data-slot="card"][data-variant="g
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 3px;
+  gap: var(--oct-space-1);
   min-height: var(--oct-touch-min);
   padding: 4px;
   border: 0;
@@ -8436,7 +8441,7 @@ html[data-octant-reduced-transparency="true"] [data-slot="card"][data-variant="g
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: var(--oct-space-1);
 }
 .mrow-title {
   font-family: var(--oct-font-display);

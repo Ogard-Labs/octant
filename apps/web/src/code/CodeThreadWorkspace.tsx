@@ -20,7 +20,7 @@ import {
   clampTurnAccessPosture,
   decidesCodeEffectsByApproval,
   pickerGroupCarriesAppManagedTools,
-  startedThreadPickerGroups,
+  startedCodeThreadPickerGroups,
   type PickerGroup,
 } from "@octant/domain";
 import { CirclePause, X } from "lucide-react";
@@ -81,6 +81,12 @@ import { HarnessRetryStatus } from "../transcript/HarnessRetryStatus";
 import { liveTaskProgress } from "./transcriptActivity";
 import { ThreadTasksPanel } from "../transcript/ThreadTasksPanel";
 import { modelDisplayName, providerModelLabel } from "../providers/providerModelLabel";
+import {
+  pendingProviderSwitchNotice,
+  conversationHandoffDisclosure,
+  forkMergeBackDisclosure,
+  forkMergeBackOutcomeMessage,
+} from "./providerSwitchHandoff";
 import {
   TurnHeader,
   TurnTime,
@@ -263,10 +269,17 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   // an acknowledged message leaves the composer, so an async mention lookup cannot
   // erase a newer draft typed while that lookup is pending.
   const draftRevisionRef = useRef(0);
+  const runtimeCarriesTools = pickerGroupCarriesAppManagedTools(
+    props.providerGroups ?? [],
+    view === undefined
+      ? undefined
+      : { providerInstanceId: view.thread.providerInstanceId, modelId: view.thread.modelId },
+  );
   const computer = useComputerUseMention({
     textarea: () => textareaRef.current,
     draft,
     scopeKey: String(props.threadId),
+    providerCarriesTools: runtimeCarriesTools,
     onDraftChange: (next) => {
       draftRevisionRef.current += 1;
       setDraft(next);
@@ -283,6 +296,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   const extensionDraft = useExtensionDraftSelections({
     ...(props.extensionClient === undefined ? {} : { client: props.extensionClient }),
     mode: "code",
+    providerCarriesTools: runtimeCarriesTools,
     projectId: view?.thread.projectId ?? null,
     threadId: view === undefined ? props.threadId : view.thread.id,
     ...(providerFamily === undefined ? {} : { providerFamily }),
@@ -296,17 +310,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
       props.controller.setPendingDraft?.(next);
     },
     scopeKey: String(props.threadId),
-    available:
-      props.browserAvailable === true &&
-      pickerGroupCarriesAppManagedTools(
-        props.providerGroups ?? [],
-        view === undefined
-          ? undefined
-          : {
-              providerInstanceId: view.thread.providerInstanceId,
-              modelId: view.thread.modelId,
-            },
-      ),
+    available: props.browserAvailable === true && runtimeCarriesTools,
     onChoose: () => void extensionDraft.resolveReference("@browser"),
     onSelectionEdited: () => {
       draftRevisionRef.current += 1;
@@ -411,6 +415,8 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   const setRestoreUndo = props.controller.noteRestoreUndo;
   const [forking, setForking] = useState(false);
   const [forkMessage, setForkMessage] = useState<string>();
+  const [merging, setMerging] = useState(false);
+  const [mergeMessage, setMergeMessage] = useState<string>();
   // A send refused before the host saw it explains itself beside the composer,
   // since no turn exists to carry a reason.
   const [sendNotice, setSendNotice] = useState<string>();
@@ -674,11 +680,34 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     (message) => message.role === "assistant" && message.status === "completed",
   );
   const threadModelGroups = hasProviderSession
-    ? startedThreadPickerGroups(providerGroups, {
+    ? startedCodeThreadPickerGroups(providerGroups, {
         providerInstanceId: thread.providerInstanceId,
         modelId: thread.modelId,
       })
     : providerGroups;
+  // The provider the conversation's session lives on is the one the last
+  // finished reply came from, or the one a switching turn's journaled handoff
+  // opened a session on even if that turn then stopped: the host records the
+  // handoff only once the new session is ready. A thread now pointed
+  // elsewhere starts a new session on its next message, and the person is
+  // told so before they send, not after.
+  const sessionReply = messages.findLast(
+    (message) =>
+      message.role === "assistant" &&
+      (message.status === "completed" || message.handoff !== undefined) &&
+      message.providerInstanceId !== undefined,
+  );
+  const pendingSwitchNotice =
+    sessionReply !== undefined &&
+    String(sessionReply.providerInstanceId) !== String(thread.providerInstanceId)
+      ? pendingProviderSwitchNotice(
+          providerModelLabel(providerGroups, thread),
+          providerModelLabel(providerGroups, {
+            providerInstanceId: sessionReply.providerInstanceId,
+            modelId: sessionReply.modelId,
+          }),
+        )
+      : undefined;
   const canvasClient = props.canvasClient;
   const openInSidebar = props.onOpenCanvasInSidebar;
   const canvasPlacement = placeThreadCanvases(
@@ -941,6 +970,35 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
    * host decides which files and history the fork starts from, so this only
    * names the point.
    */
+  /**
+   * Hand this fork's conversation, through this reply, back to the thread it
+   * was forked from. Only conversation moves, and only when asked: the
+   * source's next message carries it, nothing runs now, and the fork's files
+   * reach the source only through Git review.
+   */
+  async function mergeBackThrough(message: CodeConversationMessage) {
+    const operationId = message.operationId;
+    if (operationId === undefined || view === undefined) return;
+    setMergeMessage(undefined);
+    setMerging(true);
+    try {
+      const outcome = await props.controller.mergeForkContext({
+        threadId: view.thread.id,
+        throughOperationId: String(operationId),
+      });
+      setMergeMessage(
+        outcome === undefined
+          ? (props.controller.lastExecuteError.current?.message ??
+              "The conversation could not be merged back.")
+          : forkMergeBackOutcomeMessage(outcome),
+      );
+    } catch {
+      setMergeMessage("The conversation could not be merged back.");
+    } finally {
+      setMerging(false);
+    }
+  }
+
   async function forkFrom(message: CodeConversationMessage) {
     const operationId = message.operationId;
     if (operationId === undefined || view === undefined) return;
@@ -1314,6 +1372,24 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                     })}
                   </OctantSeparatorWithLabel>
                 ) : null}
+                {message.role === "assistant" && message.handoff !== undefined ? (
+                  <p className="code-thread-workspace__handoff" role="note">
+                    {conversationHandoffDisclosure(message.handoff, (selection) =>
+                      providerModelLabel(providerGroups, selection),
+                    )}
+                  </p>
+                ) : null}
+                {message.role === "assistant"
+                  ? (message.forkMergeBacks ?? []).map((mergeBack) => (
+                      <p
+                        className="code-thread-workspace__handoff"
+                        key={`${String(mergeBack.forkThreadId)}:${String(mergeBack.throughOperationId)}`}
+                        role="note"
+                      >
+                        {forkMergeBackDisclosure(mergeBack)}
+                      </p>
+                    ))
+                  : null}
                 <article
                   aria-label={
                     delivered
@@ -1331,6 +1407,14 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                         message.operationId !== undefined &&
                         message.status === "completed" &&
                         props.onOpenCodeThread !== undefined,
+                      // A fork's own finished replies; inherited ones are the source's.
+                      canMergeBack:
+                        view?.thread.forkedFrom !== undefined &&
+                        message.sourceThreadId === undefined &&
+                        message.role === "assistant" &&
+                        message.operationId !== undefined &&
+                        message.status === "completed",
+                      merging,
                       canCopyMarkdown:
                         message.role === "assistant" &&
                         message.status === "completed" &&
@@ -1353,6 +1437,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                     })}
                     onAction={(value) => {
                       if (value === "fork") void forkFrom(message);
+                      else if (value === "merge-back") void mergeBackThrough(message);
                       else if (value === "checkpoint-mark") {
                         setCheckpointDraft({ messageId: message.id, kind: "mark" });
                       } else if (value === "checkpoint-restore") {
@@ -1947,6 +2032,14 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                 Checking the selected provider…
               </span>
             ) : null}
+            {pendingSwitchNotice === undefined || providerChanging ? null : (
+              <span
+                className="composer-status__hint code-thread-workspace__hint code-thread-workspace__switch-notice"
+                role="status"
+              >
+                {pendingSwitchNotice}
+              </span>
+            )}
             {props.controller.accessNotice === undefined ? null : (
               <span
                 className="code-thread-workspace__hint"
@@ -1985,6 +2078,12 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                 {forkMessage}
               </span>
             )}
+            {mergeMessage === undefined ? null : (
+              /* ui-boundary-exception: compact-status */
+              <span className="code-thread-workspace__hint" role="status" title={mergeMessage}>
+                {mergeMessage}
+              </span>
+            )}
             {sendNotice === undefined ? null : (
               /* ui-boundary-exception: compact-status */
               <span className="code-thread-workspace__hint" role="alert" title={sendNotice}>
@@ -2000,6 +2099,8 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
 
 function codeTurnActions(input: {
   readonly canFork: boolean;
+  readonly canMergeBack: boolean;
+  readonly merging: boolean;
   readonly canCopyMarkdown: boolean;
   readonly canCheckpoint: boolean;
   readonly canRestoreFiles: boolean;
@@ -2014,6 +2115,13 @@ function codeTurnActions(input: {
       label: input.forking ? "Forking…" : "Fork from here",
       value: "fork",
       ...(input.forking ? { disabled: true } : {}),
+    });
+  }
+  if (input.canMergeBack) {
+    actions.push({
+      label: input.merging ? "Merging back…" : "Merge back to source",
+      value: "merge-back",
+      ...(input.merging ? { disabled: true } : {}),
     });
   }
   if (input.canCopyMarkdown) {

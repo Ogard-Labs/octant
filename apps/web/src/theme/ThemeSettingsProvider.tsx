@@ -1,7 +1,7 @@
 import { GLASS_TINT_DEFAULTS, type ThemeSettings } from "@octant/contracts/theme";
 import { enforceSidebarBackgroundAccessibility } from "@octant/domain/theme-policy";
 import { resolveEffectiveTokens } from "@octant/theme/fallback";
-import { useLayoutEffect, type ReactNode } from "react";
+import { useCallback, useLayoutEffect, useSyncExternalStore, type ReactNode } from "react";
 import { getInjectedHostBridge } from "../shell/hostBridge";
 import { approvalSurfacePalette } from "./approvalSurfacePalette";
 
@@ -17,18 +17,41 @@ const VARIABLE_ALIASES: Readonly<Record<string, ReadonlyArray<string>>> = {
   "danger-text": ["destructive"],
 };
 
+const SYSTEM_DARK_QUERY = "(prefers-color-scheme: dark)";
+
+function systemDarkQuery(): MediaQueryList | undefined {
+  return typeof window === "undefined" ? undefined : window.matchMedia?.(SYSTEM_DARK_QUERY);
+}
+
+function readSystemPrefersDark(): boolean {
+  return systemDarkQuery()?.matches === true;
+}
+
 export function ThemeSettingsProvider(props: {
   readonly settings?: ThemeSettings;
   readonly children: ReactNode;
 }) {
+  const followsSystem = props.settings?.mode === "system";
+  // Only a theme that follows the system listens, so a live light/dark switch
+  // repaints without a reload while a fixed mode ignores the system entirely.
+  const subscribeToSystemAppearance = useCallback(
+    (onChange: () => void) => {
+      const query = followsSystem ? systemDarkQuery() : undefined;
+      query?.addEventListener?.("change", onChange);
+      return () => query?.removeEventListener?.("change", onChange);
+    },
+    [followsSystem],
+  );
+  const systemPrefersDark = useSyncExternalStore(
+    subscribeToSystemAppearance,
+    readSystemPrefersDark,
+    () => false,
+  );
   useLayoutEffect(() => {
     const root = document.documentElement;
     const settings = props.settings;
     if (settings === undefined) return;
     const accessible = enforceSidebarBackgroundAccessibility(settings);
-    const systemPrefersDark =
-      typeof window !== "undefined" &&
-      window.matchMedia?.("(prefers-color-scheme: dark)").matches === true;
     const resolved = resolveEffectiveTokens(accessible, systemPrefersDark);
     for (const [role, color] of Object.entries(resolved.tokens)) {
       root.style.setProperty(`--octant-${role}`, color);
@@ -103,6 +126,6 @@ export function ThemeSettingsProvider(props: {
       delete root.dataset.octantStyle;
       root.style.removeProperty("color-scheme");
     };
-  }, [props.settings]);
+  }, [props.settings, systemPrefersDark]);
   return props.children;
 }

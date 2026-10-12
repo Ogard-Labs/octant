@@ -8,10 +8,9 @@ tracker; this document records direction.
 
 ## Now — technical preview
 
-The first release is an Apple Silicon technical preview. Declared releases
-are signed with a Developer ID, notarized, and update themselves. A local
-package is unsigned because signing needs maintainer credentials.
-Everything here is merged or being hardened for it.
+What the first release includes and defers is stated once, in the
+[Current Release Boundary](../AGENTS.md#current-release-boundary). Everything
+here is merged or being hardened for it.
 
 - **Chat, Work, and Code as server-enforced modes** — virtual Chat Projects, one
   confined root per Work Project, one confined directory per Code Project,
@@ -23,8 +22,8 @@ Everything here is merged or being hardened for it.
   ACP-based drivers (one generic ACP stack with per-provider profiles) behind
   one conformance harness; provider-first model picker; in-thread provider and model changes; Keychain-backed credentials.
 - **Code workspace** — Monaco editor, file explorer, terminals, Git and
-  worktrees, repository test discovery, PR observation and creation, thread
-  board, Environment summary with local-server discovery, external-editor handoff.
+  worktrees, repository test discovery, PR observation and creation, a
+  person's confirmed PR merge from its review, thread board, Environment summary with local-server discovery, external-editor handoff.
 - **Work workspace** — confined document production (docx, pptx, pdf, image),
   research with citations, project overview, secure split-view previews, board.
 - **App-managed, provider-neutral tools** — browser automation, macOS
@@ -36,13 +35,24 @@ Everything here is merged or being hardened for it.
 - **Unified subagents** — managed children run as in-process provider sessions
   with clamped authority, isolated worktrees, hierarchy panel, and durable
   results.
+- **Agent-to-agent messaging** — shipped: journaled contracts, pure clamps,
+  the delivery service, and the Agents center bounds view, and every Code turn
+  is offered the `octant_agent_message` tool with no separate activation gate.
+  Maintainer approval of its design and threat-model sign-off
+  ([threat model](security/agent-to-agent-messaging-threat-model.md)) are
+  still pending.
 - **Remote access** — pairing, revocable device keys, HTTPS private listener on
   LAN or Tailscale, fail-closed remote route policy, paired-browser client.
 - **Shell and appearance** — borderless macOS shell, dockable tabs and splits,
   command palette, semantic themes and presets, sidebar materials, Zen focus
   workspace with backgrounds, notes, checklists, and timer.
-- **Operations** — usage dashboard, optional Project and thread token spend
-  ceilings with atomic reservation at turn admission, diagnostics export,
+- **Routines (Automation Center)** — host-local, Project-bound schedules that
+  start ordinary Work or Code threads under a capped authority, with durable
+  occurrence recovery and no cloud wake.
+- **Operations** — usage dashboard, optional Project and thread spend
+  ceilings over tokens, turns, run time, and money, checked at turn admission
+  (tokens by atomic reservation; money, turns, and run time against recorded
+  and in-flight spend), thread retention windows and confirmed purge, diagnostics export,
   first-run onboarding, packaged desktop smoke scripts, and What's new from
   bundled notes plus a signed summary when an update is offered.
 
@@ -81,17 +91,16 @@ Hardening in progress for the preview:
   - First bundled plugins: an appearance pack (Octant theme preset) and
     structured preview viewers, as proof those points work. Extracting the
     thread board and GitHub behind typed server ports remains later sequenced
-    work. Linear is not an extraction: it is added as a bundled-off plugin
-    through the Integration kind and must not be compiled into the host first.
-    The shared integration port and a renderer seam that actually renders
-    plugin Settings sections and sidebar destinations land before Linear.
-    Linear Settings OAuth now uses those ports as a bundled-off plugin; tokens
-    stay in the host credential service.
-- **Linear integration** — the first bundled-off integration plugin, after
-  those host seams: Settings connection (OAuth tokens stored only as host
-  credential-service opaque refs, never in plugin state) is in; read-only issue
-  browse in Code first, then issue intake and delivery-target sync, with the
-  same authority model as GitHub. Chat or Work Linear browsing is a separate
+    work. Linear is not an extraction: it is a bundled plugin through the
+    Integration kind, built on the shared integration port and the renderer
+    seam for plugin Settings sections and sidebar destinations; tokens stay in
+    the host credential service.
+- **Linear integration** — the first bundled Integration plugin, enabled by
+  default like GitHub; nothing reaches Linear until the person connects an
+  account. Settings connection (OAuth tokens stored only as host
+  credential-service opaque refs, never in plugin state), read-only issue
+  browse in Code, and issue intake through `Create from…` are in;
+  delivery-target sync is next, with the same authority model as GitHub. Chat or Work Linear browsing is a separate
   host mode-policy change, not a plugin side effect. Not a connector/OAuth
   marketplace.
 - **Headless host and multi-host federation** — run the server and web client
@@ -107,8 +116,6 @@ Hardening in progress for the preview:
     Desktops remain separate follow-up deliveries.
 - **Canvas artifacts** — provider-neutral interactive reports, dashboards, and
   agent controls with journaled lifecycle; sharing only after secure local use.
-- **Automation Center** — host-owned, Project-bound agent schedules that create
-  ordinary Work or Code threads with durable occurrence recovery.
 - **Native agent harness** — Octant-owned agent loop for direct and local
   endpoints with app-managed tools, Goals, roles, session trees, and CLI
   parity with the GUI.
@@ -116,14 +123,15 @@ Hardening in progress for the preview:
 
 ## Later
 
-Explicitly deferred by the current release boundary, except where a later
+Explicitly deferred by the [Current Release Boundary](../AGENTS.md#current-release-boundary), except where a later
 decision opens a slice. Each remaining item needs its own design before work
 starts.
 
 - **Windows desktop confinement, credentials, and packaging** — the identical
   desktop app (0058) sequences Windows after Linux + macOS parity; packaging
   stays outside the first release until the Out of scope preconditions in 0058
-  hold; Work/Code stay `incompatible` until a Windows sandbox ADR exists.
+  hold; Work/Code stay `incompatible` until an approved Windows confinement design is
+  documented in the architecture.
 - **Mobile maturity after internal TestFlight** — Android device builds, live
   push notifications, native capture, voice input, and public store
   distribution for the Expo client. Design:
@@ -144,14 +152,8 @@ starts.
 - **Provider identity extensions** — Azure Entra ID/OAuth and full Amazon
   Bedrock Converse/IAM adapters beyond the API-key paths. Design:
   [enterprise-provider-identity.md](enterprise-provider-identity.md).
-- **Remote SSH development environments**, **live guest sharing**, **thread
-  retention and purge**, and **agent-to-agent messaging** (authority model in
-  [decisions/0063-agent-to-agent-messaging.md](decisions/0063-agent-to-agent-messaging.md);
-  implementation waits on acceptance) — each waits on the foundation named in
-  its own design note.
-- **Monetary spend ceilings** — token ceilings are enforced
-  ([0060](decisions/0060-usage-spend-ceilings.md)); money waits until scoped
-  pricing metadata is actually configured on a host.
+- **Remote SSH development environments** and **live guest sharing** — each
+  waits on the foundation named in its own design note.
 
 ## Not planned
 
@@ -165,8 +167,10 @@ Intentionally out of scope; changing this requires an approved design change.
   designated Code thread per Code Project that reads the Project's board and
   proposes work the user must explicitly confirm. It launches and redirects
   nothing.
-- **Features that mutate pull requests** (merge, force-push, review approval)
-  from the desktop, unless a specific design authorizes them.
+- **Other pull-request mutation and agent-initiated merge** — force-push,
+  review approval, comments, closing, and any merge an agent or remote client
+  starts. The person's own confirmed merge is the one exception
+  ([architecture](architecture.md#modes-chat-work-and-code)).
 - **Octant-operated cloud accounts or telemetry** — the product stays
   local-first and privacy-preserving by default.
 - **Auto-installing or auto-updating provider runtimes** — Octant detects

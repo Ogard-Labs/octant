@@ -1,91 +1,64 @@
-import type { OctantMode } from "@octant/contracts/modes";
-import { enabledModes } from "@octant/domain/mode-policy";
 import { Check, CircleDashed } from "lucide-react";
-import { SettingRow } from "../settings/primitives";
 import { OctantButton } from "../ui/base/OctantButton";
-import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import type { FirstRunHandoff, FirstRunHandoffSetupTarget } from "./firstRunHandoffModel";
-import type { WorkspaceChoices } from "./firstRunStepModel";
 
 export interface FirstRunReadinessStepProps {
-  readonly workspace: WorkspaceChoices;
-  readonly selectedMode: OctantMode;
-  readonly onSelectMode: (mode: OctantMode) => void;
   readonly handoff: FirstRunHandoff;
   readonly onSetup: (target: FirstRunHandoffSetupTarget) => void;
 }
 
-const MODE_COPY: Record<OctantMode, string> = {
-  chat: "Chat",
+const MODE_COPY: Record<FirstRunHandoff["mode"], string> = {
   work: "Work",
   code: "Code",
 };
 
+const FACT_TARGET: Record<FirstRunHandoff["facts"][number]["id"], FirstRunHandoffSetupTarget> = {
+  provider: "providers",
+  project: "project",
+  model: "model",
+};
+
+const FACT_NOUN: Record<FirstRunHandoff["facts"][number]["id"], string> = {
+  provider: "a provider",
+  project: "a Project",
+  model: "a model",
+};
+
+/**
+ * Names the missing facts in the heading, so a host with nothing set up never
+ * reads as "Ready to start" above three "Needed" rows.
+ */
+function readinessHeading(facts: FirstRunHandoff["facts"]): string {
+  const missing = facts.filter((fact) => !fact.ready).map((fact) => FACT_NOUN[fact.id]);
+  const [first, second, third] = missing;
+  if (first === undefined) return "Ready to start";
+  if (second === undefined) return `Needs ${first}`;
+  if (third === undefined) return `Needs ${first} and ${second}`;
+  return `Needs ${first}, ${second}, and ${third}`;
+}
+
 /**
  * The end of first run: three facts, one next action.
  *
- * Provider, Project, and a mode-valid default model are reported separately so
- * a clean host cannot look ready, and so a missing prerequisite opens exactly
- * the surface that still has to be answered. The primary action lives in the
+ * Provider, Project, and a mode-valid model are reported separately so a clean
+ * host cannot look ready, and so a missing prerequisite opens exactly the
+ * surface that still has to be answered. The primary action lives in the
  * dialog footer; this step only states the facts and which mode they are for.
  */
 export function FirstRunReadinessStep(props: FirstRunReadinessStepProps) {
-  const modes = enabledModes({
-    chatEnabled: props.workspace.chatEnabled,
-    workEnabled: props.workspace.workEnabled,
-  });
-
+  const heading = readinessHeading(props.handoff.facts);
   return (
     <div className="first-run__step">
       <p className="first-run__intro">
-        A thread starts in a Project, with a provider and a model that mode can actually use.
-        Nothing here is assumed ready.
+        Your first task starts in {MODE_COPY[props.handoff.mode]}, in a Project, with a provider and
+        a model that mode can actually use. Nothing here is assumed ready.
       </p>
 
-      {modes.length > 1 ? (
-        <section aria-label="Mode" className="settings-card-section settings-card-section--open">
-          <h2>Mode</h2>
-          <div className="setgroup">
-            <SettingRow
-              description="The mode this first thread starts in."
-              label="First thread"
-              scope="app"
-              settingId="first-run-thread-mode"
-            >
-              <OctantToggleGroup<OctantMode>
-                aria-label="First thread mode"
-                onValueChange={(value) => {
-                  const selected = value[0];
-                  if (selected !== undefined) props.onSelectMode(selected);
-                }}
-                role="radiogroup"
-                value={[props.selectedMode]}
-              >
-                {modes.map((mode) => (
-                  <OctantToggleGroupItem
-                    aria-checked={props.selectedMode === mode}
-                    key={mode}
-                    role="radio"
-                    value={mode}
-                  >
-                    {MODE_COPY[mode]}
-                  </OctantToggleGroupItem>
-                ))}
-              </OctantToggleGroup>
-            </SettingRow>
-          </div>
-        </section>
-      ) : null}
-
-      <section
-        aria-label="Ready to start"
-        className="settings-card-section settings-card-section--open"
-      >
-        <h2>Ready to start</h2>
+      <section aria-label={heading} className="settings-card-section settings-card-section--open">
+        <h2>{heading}</h2>
         <ul className="setgroup first-run__providers" role="list">
           {props.handoff.facts.map((fact) => {
             const Icon = fact.ready ? Check : CircleDashed;
-            const target = setupTarget(fact.id, props.selectedMode);
             return (
               <li
                 className="setrow first-run__provider"
@@ -94,12 +67,12 @@ export function FirstRunReadinessStep(props: FirstRunReadinessStepProps) {
               >
                 <span className="setrow-label">
                   <Icon size={16} />
-                  {fact.ready || target === undefined ? (
+                  {fact.ready ? (
                     fact.label
                   ) : (
                     <OctantButton
                       className="first-run__fact-action"
-                      onClick={() => props.onSetup(target)}
+                      onClick={() => props.onSetup(FACT_TARGET[fact.id])}
                       type="button"
                       variant="ghost"
                     >
@@ -122,19 +95,9 @@ export function FirstRunReadinessStep(props: FirstRunReadinessStepProps) {
       {props.handoff.ready ? null : (
         <p className="first-run__caveat" role="note">
           Skip setup leaves these answers as they are. It does not mark the host ready or start a
-          thread.
+          task.
         </p>
       )}
     </div>
   );
-}
-
-function setupTarget(
-  fact: FirstRunHandoff["facts"][number]["id"],
-  mode: OctantMode,
-): FirstRunHandoffSetupTarget | undefined {
-  if (fact === "provider") return "providers";
-  if (fact === "project") return "project";
-  if (fact === "model") return mode === "chat" ? "default-model" : "providers";
-  return undefined;
 }

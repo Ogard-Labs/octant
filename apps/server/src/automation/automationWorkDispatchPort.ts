@@ -12,7 +12,7 @@ import { automationThreadTitle } from "./automationDispatchService";
 
 export interface AutomationWorkRouteService {
   readonly execute: (
-    windowId: WindowId,
+    scopeId: WindowId,
     command: unknown,
   ) => Promise<{
     readonly kind: string;
@@ -25,8 +25,9 @@ export interface AutomationWorkRouteService {
 
 export interface AutomationWorkTurnService {
   readonly startFirstTurn: (
-    windowId: WindowId,
+    scopeId: WindowId,
     command: unknown,
+    options?: { readonly holdAskFirst?: boolean },
   ) => Promise<{
     readonly kind: string;
     readonly turn?: { readonly requestId: string; readonly status?: string };
@@ -68,10 +69,10 @@ async function createWorkThread(
     readonly run: AutomationRun;
     readonly threadId: WorkThreadId;
     readonly title: string;
-    readonly windowId: WindowId;
+    readonly scopeId: WindowId;
   },
 ): Promise<AutomationThreadCreationOutcome> {
-  const existing = await readThreadIfPresent(options.threads, input.windowId, input.threadId);
+  const existing = await readThreadIfPresent(options.threads, input.scopeId, input.threadId);
   if (existing) {
     return { kind: "existing", threadId: input.threadId as never };
   }
@@ -88,7 +89,7 @@ async function createWorkThread(
   const title = input.title.length > 0 ? input.title : automationThreadTitle(snapshot.displayName);
 
   try {
-    const created = await options.threads.execute(input.windowId, {
+    const created = await options.threads.execute(input.scopeId, {
       kind: "create-work-thread",
       threadId: input.threadId,
       projectId: snapshot.projectId,
@@ -114,7 +115,7 @@ async function createWorkThread(
   } catch (error) {
     const message = error instanceof Error ? error.message : "Work thread creation failed.";
     if (/already exists/i.test(message)) {
-      const raced = await readThreadIfPresent(options.threads, input.windowId, input.threadId);
+      const raced = await readThreadIfPresent(options.threads, input.scopeId, input.threadId);
       if (raced) {
         return { kind: "existing", threadId: input.threadId as never };
       }
@@ -134,7 +135,7 @@ async function startOrRecover(
     readonly threadId: WorkThreadId;
     readonly firstTurnRequestId: string;
     readonly promptDigest: string;
-    readonly windowId: WindowId;
+    readonly scopeId: WindowId;
   },
 ): Promise<AutomationFirstTurnLaunchOutcome> {
   const snapshot = input.run.definitionSnapshot;
@@ -167,7 +168,13 @@ async function startOrRecover(
   };
 
   try {
-    const result = await options.turns.startFirstTurn(input.windowId, command);
+    // A routine thread takes its access from the host's Work default, which a
+    // person may have set to auto-accept-edits. Nobody is present for this
+    // turn, so it runs ask-first unless the routine's captured authority
+    // itself is auto-accept-edits; the hold can only narrow the thread.
+    const result = await options.turns.startFirstTurn(input.scopeId, command, {
+      holdAskFirst: input.run.authoritySnapshot.effective.executionPolicy !== "auto-accept-edits",
+    });
     if (result.kind === "accepted") {
       return {
         kind: "accepted",
@@ -211,11 +218,11 @@ async function startOrRecover(
 
 async function readThreadIfPresent(
   threads: AutomationWorkRouteService,
-  windowId: WindowId,
+  scopeId: WindowId,
   threadId: WorkThreadId,
 ): Promise<boolean> {
   try {
-    const bootstrap = await threads.bootstrap(windowId);
+    const bootstrap = await threads.bootstrap(scopeId);
     return bootstrap.threads.some((thread) => String(thread.id) === String(threadId));
   } catch {
     return false;

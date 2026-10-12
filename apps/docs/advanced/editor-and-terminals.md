@@ -90,7 +90,11 @@ you did not ask for. Approval-gated mode still prompts before an agent starts or
 stops a terminal; Full access allows it. The shell keeps its history and prompt
 caches in an Octant-owned directory of its own repository root, since the
 sandbox never lets it write inside your home and one repository's shell state is
-never readable by another's. Local process monitoring
+never readable by another's. On macOS the shell starts as a login shell and
+can read, but never change, your shell configuration, its frameworks, and the
+version managers your PATH uses (mise, asdf, pyenv, rbenv, Volta, nvm, Bun,
+rustup); credential directories such as `~/.ssh` and `~/.aws` stay unreadable.
+Local process monitoring
 covers only processes Octant launches and owns; arbitrary host-process
 discovery and control are deferred.
 

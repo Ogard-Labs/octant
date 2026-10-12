@@ -2,81 +2,14 @@
 
 Octant is a local-first desktop workspace for Chat, Work, and Code across many AI
 providers. The first shipping surface is Apple Silicon macOS; Linux and Windows
-desktop are the same product under [decisions/0058-cross-platform-desktop.md](decisions/0058-cross-platform-desktop.md).
+desktop are the same product, sequenced in the
+[Current Release Boundary](#current-release-boundary).
 This is the current architecture specification. Read the relevant section for
 system boundaries; use the [design index](design/README.md) for topic owners.
 Edit the current rule with an approved change in the same PR. Historical links
 provide rationale and supporting detail, not a competing source of authority.
 Sections explicitly label approved designs that are not yet fully implemented;
 archive status alone is neither approval nor implementation evidence.
-
-Code task creation accepts a plain-folder checkout when the server admits it under
-Code settings. The renderer preserves its proposed branch as delivery intent without
-claiming a checked-out branch; detached Git checkouts remain refused. Git-dependent
-actions continue to report unavailable for plain folders.
-
-Pi usage is accumulated from completed assistant messages, not streaming usage
-snapshots. Input totals include uncached, cache-read, and cache-write tokens; context
-occupancy describes the latest model call. Totals reset for each turn, including
-retained native processes. If a completed assistant message omits valid usage,
-the turn remains unknown rather than presenting a partial total. Only provider-reported
-costs are carried on its usage events, and historical turns are not rewritten.
-
-On host restart, orphaned running Code turns become Waiting in both runtime
-and conversation state. Recovery appends a status event without replacing prompts,
-provider session cursors, or earlier events. Already settled turns remain settled;
-repeated startup does not append duplicate recovery events. A follow-up resumes
-the retained native identity under the ordinary current-authority checks.
-
-Computer observations verify that the requested window still belongs to the
-current application process before requesting its accessibility state or pixels.
-A vanished window returns a window-unavailable refusal directing the caller to
-list current windows; stale IDs are never silently retargeted.
-
-## Desktop menu bar
-
-The menu bar prioritizes Open Octant, New task, and compact Needs attention,
-Running, and Unread sections. Empty activity sections disappear. Local host
-contains status, browser access, applicable lifecycle controls, and redacted
-diagnostics; Quit Octant retains the existing active-work confirmation.
-
-Trusted top-level desktop windows contribute at most six task titles per activity
-from their existing sidebar state. Electron validates and deduplicates these
-bounded contributions, and a selection returns to the contributing window's
-ordinary task navigation. Contributions clear when that window closes or its
-renderer unloads; stopped hosts show no stale tasks. This is a view of open
-windows, not an additional host task registry. Titles never enter the public
-health response or redacted diagnostics. Separately managed hosts retain their
-existing lifecycle restrictions.
-
-## Desktop context menus
-
-Trusted top-level desktop windows may contribute a bounded native context menu
-through the preload bridge: at most 160 entries, four submenu levels, and labels
-up to 256 characters. Contributions contain presentation and opaque action IDs;
-they cannot supply Electron roles, callbacks, paths, URLs, or native commands.
-The shell returns the selected ID to the same window, which invokes its existing
-renderer action and ordinary server authority checks. Dismissed, refused, closed,
-or navigated windows select no action. Each window owns at most one contributed
-native popup. The desktop's own text editing menu uses Chromium's edit flags and
-fixed native roles; embedded browser frames cannot contribute workspace menus.
-
-## Repository test cancellation
-
-An authorized repository test remains cancellable while the host rediscovers its
-command definition. Cancellation during discovery prevents process launch; runtime
-shutdown also cancels pending discovery and waits for it to settle. Thread and
-checkout authority checks still precede both run and cancellation.
-
-The Code composer's attached checkout strip keeps its height and border when
-checkout metadata is unavailable. Missing project, branch and diff values stay
-blank; unavailable checkout actions are not shown.
-
-Work follow-up composers use the same attached context strip for their project and
-working folder. Full paths require a matching project binding revision; Work has
-no branch controls. Pane headers show thread titles without repeated project
-labels. Workspace and dock tabs share one compact recipe for geometry, selection,
-and close controls.
 
 ## Overview and principles
 
@@ -251,11 +184,53 @@ fetch sends the proof-bound session cookie explicitly and disables the shared
 cookie jar to prevent duplicate or stale cookies. Browser cookie ownership is
 unchanged, and native remote requests refuse redirects.
 
-**Local client context.** Opening the canonical host URL directly creates a
-process-local client context through `/api/shell/local-session`; no launcher
-token, persisted clock posture, or alternate profile is required. Electron,
-ordinary browsers, and Vite therefore read the same Machine-owned Projects,
-threads, settings, and journal. The context id scopes window-local presentation
+Internal TestFlight distributes this same client and grants the phone no new
+authority. The bundle is `app.octant.mobile` (installed name Octant) at source
+version `0.1.0`; EAS Build signs and archives it, with build numbers from EAS
+remote version state, and the `production` EAS profile means store
+distribution, never a public release or App Review submission. The manually
+dispatched `Mobile (TestFlight)` workflow builds only from `main` in the
+protected `mobile-testflight` environment and uploads only when its `submit`
+input is set; pull requests get no release credential. GitHub holds only the
+revocable Expo token; Apple certificates, profiles, and the App Store Connect
+key stay in EAS's credential service. The App ID enables no optional Apple
+capability (push, associated domains, Sign in with Apple, iCloud), testers are
+maintainer-controlled App Store Connect users, and external groups, public
+links, and store listing stay closed under the
+[mobile store hold](mobile-store-v1-hold.md). A build counts only after the
+device pass in the [TestFlight runbook](mobile-testflight.md), not when EAS or
+Apple finishes processing it.
+
+**Local client context.** The local trust class is "holds a secret only the
+host's OS user can read", not "is on loopback". Loopback plus an admitted
+Origin says nothing about who is calling: another OS user on the same machine,
+an `ssh -L` forward, a proxy that rewrites `Host`, or a local service account
+all arrive that way, and a forged `Origin` header costs a non-browser caller
+nothing. The secret is the desktop bridge secret, which the host owner projects
+into the owner-only runtime directory. Electron windows and every CLI command
+(`octant agent`, `octant listener`, pairing, `octant web`) present it on the
+`/api/desktop/*` routes. A browser gets a session only through a one-time
+launch token: the launcher (`octant web`, `octant web --dev`, or the desktop's
+"Open in browser" action) mints it through `/api/desktop/launch-sessions` with
+the bridge secret and opens a URL carrying it in the fragment. `octant web`
+sends the secret only to the host that this OS user's owner-only host receipt
+names (same address and instance), never to an endpoint that merely answers
+`/health`, because another OS user can bind the port while the real host is
+stopped. The token is
+single-use, expires after five minutes, and is bound to the renderer origin it
+was minted for, which must be one this listener serves (below). The renderer
+strips it from the address bar with a history replace before it exchanges it at
+`/api/shell/launch-session`; an exchange from any other origin, or with no
+Origin, is refused and burns the token. `/api/shell/local-session` never mints
+authority: it only refreshes a capability the tab already holds (so a reload
+keeps its session) and answers 401 otherwise. Typing the host address by hand,
+reopening a tab after the host restarted, or opening a copied tab therefore
+shows "Open Octant from the desktop app or run `octant web`" instead of the
+app. Electron, ordinary browsers, and Vite still read the same Machine-owned
+Projects, threads, settings, and journal; a Vite renderer qualifies only when
+the host was started with its origin in `OCTANT_WEB_URL` (the desktop dev loop
+and `octant web --dev` set it for the host they start), and `octant web --dev`
+mints its token for that origin. The context id scopes window-local presentation
 and guards against accidental cross-window commands, but it is not a separate
 Machine or durable authentication epoch. The packaged renderer additionally
 proves its native renderer identity for desktop-only integration. When the host
@@ -263,9 +238,16 @@ instance changes, Electron re-registers every live Project window, replaces the
 main-process authority and renderer identity, and publishes the new capability
 so the renderer rebuilds its clients before snapshot recovery. The loopback
 transport still validates the actual Host header, rejects non-loopback origins,
-and removes process-local registration when its owning client closes. Loopback
-renderer ports share the local-user trust class; the listener never reflects a
-non-loopback web origin into local authority. The renderer holds the matching
+and removes process-local registration when its owning client closes. The
+listener admits only its own loopback origin (under any loopback name), the
+packaged renderer, and the development renderer origin named by
+`OCTANT_WEB_URL`; a page on any other loopback port is refused before dispatch
+and gets no CORS grant, because agents start local dev servers whose pages the
+person opens in an ordinary browser. The listener never reflects a non-loopback
+web origin into local authority. One residual window remains: the launcher
+hands the token URL to the system browser as a process argument, which another
+OS user can read for the moment that process runs, and the token is valid until
+the browser exchanges it. The renderer holds the matching
 line before its first request: a launch address that is plain HTTP to a
 non-loopback host is refused with an explanation and never used
 (`docs/decisions/0103`). Requests that send the window capability set
@@ -285,478 +267,262 @@ an existing context to a different model or authority still asks, because the
 remembered grant covers the page, not who drives it. The remembered set grows
 only through that approval answer: `replace-settings` may remove an origin but
 rejects additions, so a client cannot grant itself origins the prompt never
-showed. See
+showed. Plan refuses every Code browser operation except stopping the
+thread's own browser (`plan-mode-read-only`). See
 [decision 0093](decisions/0093-app-owned-tools-use-managed-runtime-transports.md).
 
 Tool definitions carry the agent's usage guidance alongside their argument
-schemas. Each mode offers only its admitted tools, so providers receive the
-same guidance through MCP, dynamic tools, or direct tool calls without a
-separate global tool installation or prompt catalogue. Browser shares one
-definition across modes. Canvas's `describe` operation lists the closed block
-catalogue and a creation example, or returns canonical schemas for up to three
-requested block kinds. Unscoped describe also lists document recipes: an id, a
-title, when to use one, and a skeleton of block kinds that already exist. The
-host offers an implementation plan, a design spec, an architecture review (its
-options in a comparison matrix), a code review, an audit or test report, a
-postmortem, a research brief, a dashboard, a repository map, a design
-prototype, a slide deck, and a data model. A trusted, enabled, unscoped skill
-may add recipes through its Canvas contribution; a skill that is not enabled
-contributes none, and a contributed recipe cannot replace an in-tree id. A
-recipe is a starting shape, not a document and not authority. Describe reads no
-Project data and creates no artifact.
-A person starts a Canvas from the same list. `GET /api/canvas/recipes` returns
-it to any authenticated window (a recipe carries no Project data), with an
-optional one-line `summary` per recipe for the chooser. `create` with intent
-`template` names a recipe as `templateId`; the host resolves it against what it
-offers at that moment, refuses an id it does not offer as `invalid-template`,
-and opens the Canvas with the pure `canvasRecipeStarterBlocks` document: each
-heading role as a heading and every other role as an info callout naming the
-block kind it waits for, never a data block with invented values. The create
-request keeps its ordinary scope and authority checks. When the Create Canvas
-panel belongs to a thread, the person may also ask that thread's agent to fill
-it in: after the Canvas exists, the renderer sends an ordinary turn on the
-thread with the new Canvas attached as whole-canvas context, so the agent
-revises it with its own tools under the thread's existing authority.
-`create` and `revise` take an optional thread `presentation`: `inline` or
-`sidebar` (the default). The value is part of the definition and needs Canvas
-schema version 4. An older runtime refuses a version-4 document as a future
-version and does not report it corrupt.
-A treemap block is gated the same way at Canvas schema version 5, a heatmap
-block at version 6, a comparison matrix at version 10, a math block at
-version 11, the mockup catalog at version 12, a table row's `id` at
-version 13, and the funnel, radar, and sankey chart types at version 14, so a
-document that declares an earlier version and carries one is
-refused as a declared future version. The optional table column
-`display` and the chart, table, and metric `format` fields are the one ungated
-exception: they only change how a value is drawn, so they carry no schema
-version, but the strict definition schema refuses an unknown field, so a
-runtime rolled back past them refuses a document that uses them rather than
-drawing it as plain text.
-The pure `canvasInlineRefusal` policy admits `inline` only for at most 12 blocks
-with no `diagram`, `plan`, `mockup` or `design`. When an author asks for `inline` over
-that bound, the host records `sidebar` and returns the reason as
-`presentationNote`.
-A revise without a choice keeps the current presentation.
-`preview` returns a picture and a layout reading of one shipped version. Its
-input is the `canvasId`, an optional `version` (a sequence), a `width`
-(`inline`, `sidebar`, or 320–1200 px) and a `theme` (`light` or `dark`). The
-layout warnings are computed from the document and the target width alone and
-are typed values — a clipped label, a legend over its row, an empty series, an
-inline document past the block cap, and ink below its contrast target — so a
-build reports them whether or not a browser rendered the picture. The picture is
-a screenshot of the web app's own Canvas renderer: the host's headless Chromium,
-found through the same executable list the browser runtime and the Canvas
-browser smokes use, loads the Canvas preview page built with the web assets
-(`apps/web/canvas-preview.html`, built into `dist/canvas-preview/`), which draws
-the version with the same blocks and stylesheet the thread uses, in the chosen
-theme and at the chosen width. The host writes the document into that page as
-inert JSON and answers only the page's own built files from disk; every other
-request is aborted, and the page's content security policy forbids connections,
-so the network is off and the page holds no server address or credential. The
-operation is bounded: one preview in flight per thread, a small allowance per
-minute, and an image no wider than 1,600 px and no taller than 4,096 px. When no
-Chromium is present, the build carries no preview page, the page fails to
-settle, or the model driving the turn does not accept images in a tool result,
-the warnings still return and the result names which (`no-browser`,
-`no-renderer`, `render-failed`, `provider-cannot-take-images`). Whether a model
-accepts images is read from its own input modalities, the same signal the
-computer-use screenshots use; there is no separate provider capability for
-images in a tool result.
-The signed desktop app bundles the `playwright-core` driver but no browser
-binary, so it resolves Chromium from the host's installed browsers. On a host
-with none, `preview` is warnings-only, and the user guide says so.
-A thread reference card reports the effective presentation and the first
-version's time (`canvasCreatedAt`). A Canvas that has outgrown the bound, by a
-revision or a person's edit, is listed as `sidebar`.
-The renderer places every Canvas after the last row of the turn the person
-opened at or before `canvasCreatedAt`. An inline one is drawn there read-only:
-it gets no layout, plan, comment or action runtime, so nothing drawn inline can
-journal a version. Any other is a row that opens it. A card from an older host,
-or one no loaded turn can place, stays in the thread's card list.
-A chart is a closed type: line, area, bar, scatter, distribution, pie, donut,
-stacked bar, grouped bar, bar-and-line, funnel, radar, or sankey. Pie and donut
-are one series of labeled non-negative slices. Stacked, grouped, and
-bar-and-line charts share categories across series; a bar-and-line series names
-itself as a bar or a line. A funnel is one series of at most 16 labeled stages,
-each no larger than the one before. A radar compares series on 3 to 16 shared,
-labeled axes with readings that are not negative. A sankey carries no series:
-its `links` are flows of a positive value from one named node to another (at
-most 256 flows between 64 nodes); a flow listed twice or a set of flows that
-returns to a node it left is refused. Stage, axis, and node labels are at most
-80 characters. The domain policy names each refusal (`funnel-not-narrowing`,
-`funnel-negative-value`, `funnel-stages-budget-exceeded`, `radar-axis-count`,
-`radar-negative-value`, `sankey-cycle`, `sankey-flow-not-positive`,
-`duplicate-sankey-link`, `sankey-nodes-budget-exceeded`,
-`sankey-links-budget-exceeded`, `chart-label-budget-exceeded`). The sankey
-layout is pure and deterministic in `packages/domain`
-(`canvasSankeyLayout`): a node sits one column right of the furthest node that
-feeds it, every ending lines up in the last column, and one scale sizes every
-band, so the screen and the artifact preview SVG draw the same picture. The
-three types arrive together with Canvas schema version 14.
-The accessible table lists every reading: a funnel's stages with their share of
-the first stage and of the stage before, a radar's axes by series, and a
-sankey's flows with each one's share of its source. A pie or donut legend
-toggles at most 24 slices, and a sankey legend at most 24 nodes (hiding a node
-hides every flow through it); the rest stay in the picture and the table. A
-shared snapshot keeps the chart, its number format, every series mark, and a
-sankey's links.
-A treemap is a hierarchy drawn as squarified rectangles: nodes name a parent,
-one root, values sit on leaves, and a group's reading is the sum of its
-children. A leaf carries a value for every declared measure and may name a
-manifest source, which offers Open file through the allowlisted open-source
-action; the host reauthorizes it. The pure, deterministic layout lives in
-`packages/domain`, so the screen, the artifact preview SVG, and the Markdown and
-HTML export all draw the same rectangles. The person switches the size and
-colour measures and zooms into a group (click, breadcrumb, Escape, right-click,
-or Enter on a keyboard-selected cell); these are view state and are never
-journaled. The domain policy refuses a second root, a cycle, a dangling parent,
-a group that carries its own value or a leaf that does not, a value that is
-negative, a measure that is not declared, and a hierarchy past the depth, node,
-measure, or label budget. The accessible fallback is a hierarchical table
-sortable by each measure. A shared snapshot keeps the hierarchy, its measures,
-and every reading, and drops each leaf's source id.
-A heatmap is a grid coloured by value. A matrix names its rows and columns and
-carries a cell per coordinate with a value and an optional short note; a cell on
-a coordinate the block does not hold, a repeated row, column, or coordinate, and
-a grid past the row, column, or cell budget are each refused. A calendar carries
-one reading per date and lays the days out on a week grid whose first day comes
-from the locale. A coordinate the block does not list is drawn apart from a zero.
-Both read a value through the shared scale roles. The pure, deterministic layout
-lives in `packages/domain` (`canvasHeatmapLayout`), so the screen, the artifact
-preview SVG, and the Markdown and HTML export all draw the same cells. The person
-can sort a matrix's rows by their total and walk the cells with the arrow keys;
-these are view state and are never journaled. The accessible fallback is a table
-of every coordinate and its total for a matrix, or of every dated reading for a
-calendar. A shared snapshot keeps the grid, its readings, and their notes.
-A bar list is a ranking of magnitudes (`packages/domain/src/canvasBarListLayout.ts`):
-each row is a label, a value, an optional second value, and an optional manifest
-source. Rows sort largest first with a stable tie-break by the author's order,
-a reader can flip the ranking to smallest first, and the list shows a top N with
-Show all; both are view state and are never journaled. A bar's length is its
-share of the largest value, drawn in neutral ink or through the shared
-sequential scale. A path-like label uses the shared
-path style (directory dimmed, file name at full ink), and a row that names a
-manifest source offers Open file through the allowlisted open-source action,
-which the host reauthorizes. The pure, deterministic layout is shared by the
-screen, the artifact preview SVG, and the Markdown and HTML export. The domain
-policy refuses a repeated label, a negative or non-finite value, a list past the
-row budget, and a source the manifest does not hold; the accessible fallback is a
-table of every row. A shared snapshot keeps every row and reading and drops each
-row's source id. A metric block may carry a `format`, a `delta`, a
-`goodDirection` of `up`, `down`, or `neutral` so a delta's tone is never guessed,
-a `sparkline` of at most 256 readings, and a short `caption`; consecutive metric
-blocks are gathered into one responsive row of two to four tiles. The bar list
-and the metric's direction, sparkline, and caption arrive with Canvas schema
-version 7, so a document declaring an older version that carries any of them is
-refused as a future version; a static export carries the same metric fields.
-A comparison matrix (`packages/domain/src/canvasComparisonMatrix.ts`) sets
-options as columns against criteria as rows. A criterion may carry a weight
-(absent counts once, zero keeps it out of the score) and may prefer the lower
-reading. Each cell holds exactly one reading: a score, a short text, or a glyph
-of yes, partial, or no, with an optional note. The pure layout computes each
-option's weighted score as the weighted share of the best reading it could have
-had across the criteria that can be scored. A score counts as its place on the
-score range, yes, partial, and no as the whole, half, and none of a criterion,
-and text never counts. A counted criterion an option has no reading in scores
-nothing and is reported beside its total. The author names a recommended option,
-which is drawn apart and never inferred from the scores. Options and criteria
-take node ids, so a comment anchors to a column or a row through the existing
-node anchor. The board contract has no cell anchor, so a comment on a cell sits
-on its row or column. Ordering options by score is view state. The domain policy
-refuses an id used twice across options and criteria, a cell or recommendation
-that names an option or criterion the block lacks, a repeated coordinate, a
-score outside a declared range, and a matrix past the option, criterion, or cell
-budget. The block is a native table that scrolls inside its own focusable region
-with the criteria pinned; its disclosed fallback lists one row per option. The
-screen, the artifact preview SVG, and the Markdown and HTML export read the same
-layout. The comparison matrix arrives with Canvas schema version 10 and share
-version 4.
-A math block (`packages/domain/src/canvasMathPolicy.ts`) is a formula written in
-a LaTeX math subset and typeset by KaTeX (code MIT, bundled fonts SIL OFL 1.1;
-pinned in `apps/web` and `apps/server`, with both licences in
-`apps/web/public/KATEX-LICENSE.txt`). Layout
-`display` is one formula on its own line with an optional caption; layout
-`inline` is a paragraph of prose and formula runs. A formula source is at most
-1,000 characters and a paragraph 48 runs and 4,000 characters. KaTeX only draws:
-every surface passes the shared options, so `trust` is off (no links, images,
-or HTML attributes), `strict` is an error, macro expansion and explicit sizes
-are bounded, and each formula gets a fresh macro table. The domain policy also
-refuses `math-command-refused` for a source that defines a macro (`\def`,
-`\newcommand`, and the like), links or embeds (`\href`, `\url`,
-`\includegraphics`, `\html…`), sets its own colour (`\color`, `\textcolor`,
-`\colorbox`, `\fcolorbox`), or names an internal `@` command, and refuses
-oversized sources, runs, and paragraphs with their own budget codes. The
-renderer builds KaTeX's DOM into an element React leaves empty, pairs the drawn
-glyphs (hidden from assistive technology) with MathML that carries the source
-as an annotation, offers the source as text under View source, and shows a
-formula KaTeX refuses as its source with a plain note. KaTeX's stylesheet and
-fonts are bundled; the Vite builds never inline a font as a `data:` URL,
-because the renderer's content policy loads fonts from its own origin only. The
-Markdown export writes a display formula as a fenced `math` block and an inline
-formula as GitHub's code-span math; the HTML export writes MathML alone, with
-the source under a Source disclosure; the preview SVG draws the source. A
-source the share filter would not let leave the host is withheld whole. The math
-block arrives with Canvas schema version 11 and share version 5.
-A mockup block (`packages/domain/src/canvasMockupOutline.ts` for its tree and
-reading) describes a screen as data drawn from a closed catalog; it holds no
-HTML, CSS, script, or image source. The frame is a device preset (`desktop`
-window, `browser`, `tablet`, `phone`, `dock-panel`) or `custom` with its own
-size (240–2,560 px a side), and the fidelity is `wireframe` (neutral ink, the
-default) or `styled` (the active theme's accent, status roles, and surfaces).
-Nodes name a parent and take a component from window, header, sidebar, list,
-list row, form field, button, toggle, tabs, card, image placeholder, text,
-stack, row, grid, heading, select, checkbox, table, avatar, badge, icon (a
-bundled set of meanings each surface maps to its own glyph), nav, modal, and
-toast. Optional node fields (`on`, `value`, `tone`, `icon`, table `columns` and
-`rows`, `gridColumns`) belong to named components, and the domain policy
-refuses one on any other component as `mockup-field-refused`. Up to four
-`variants` put states or alternatives side by side; every top-level node then
-names one and its children follow it. Up to twelve `annotations` are numbered
-callouts pinned to nodes, and a comment on a callout uses the node anchor of
-the node it names. A version-12 mockup holds at most 160 nodes eight deep, with
-120-character text, 240-character callouts, and tables of six columns and eight
-rows; a document declaring an earlier version keeps the version-3 bounds of 64
-nodes six deep. The policy also refuses a custom device without a size or a
-preset with one (`mockup-size-mismatch`), a table whose rows do not match its
-columns (`mockup-table-shape`), an undeclared or repeated variant, and a
-dangling or repeated callout. The renderer draws every control inert: each
-part is a disabled tree item whose name says what it is and what it shows, the
-frame is a region whose role description is mockup, and Outline lists the tree
-as text. The Markdown and HTML export write that outline per variant with the
-callouts, the preview SVG draws a frame per variant, and a share carries the
-block whole. The catalog arrives with Canvas schema version 12 and share
-version 6.
-A share carries every block kind and field a Canvas holds except source ids
-and the design and action blocks it refuses (see the `design` block). A table
-column keeps its number format and display, a table row leaves as its cells
-without the `id` comments anchor to, and a board keeps its own layout. Because
-the row id is the only Canvas version 13 field and a share drops it, a share at
-version 6 named a block authored at version 13 as version 12. Share version 7
-carries the version-14 chart types, so it names blocks up to version 14
-(`CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION`).
-Share documents version independently of Canvas documents: a treemap, a
-heatmap, a bar list, a chart's or a table column's number format, a table
-column's display, and a board's layout arrive with share version 3, and a
-comparison matrix with share version 4, math with share version 5, the
-mockup catalog with share version 6, and the funnel, radar, and sankey charts
-with share version 7 (whose blocks may name Canvas version 14), so a share that declares an older version
-and carries one is refused as a future version.
-The catalogue includes a `plan` block: phases, and one list of tasks that each
-name their phase, carry a status (todo, doing, blocked, done), and may carry an
-owner, estimate, acceptance notes, dates, dependencies on other tasks in the
-block, and manifest source ids. The domain policy refuses a task in a missing
-phase, a dangling or circular dependency, or a missing source. Tasks are not
-nested in phases because nesting puts a task's dependencies past the Canvas
-depth budget. The renderer offers checklist, status-board, and timeline views;
-switching is a reading choice and revises nothing. A shared snapshot keeps the
-plan but drops its source ids. A person sets a task's status from its mark;
-`/api/canvas/plan-revise` journals that as a new `canvas.version-appended@1`
-version, admitted by the pure `admitCanvasPlanTaskRevision` policy (the block
-must be a plan, the task must exist, the sequence must be the head). As with a
-drag, the host stamps its own `local-user` actor and the renderer shows the
-change at once, putting it back with the host's reason when refused. Agent
-revisions and person changes share one history, so the agent reads the change
-when it next reads the Canvas. In a Work or Code Canvas, an open task offers
-Start, which opens a new-thread draft in the Canvas's own Project with the task
-(and its acceptance notes) written in. It creates nothing and grants nothing: the
-person sends the draft like any new thread, and the thread gets that mode's
-ordinary authority. A Chat Canvas offers no Start, because a Chat Project has no
-folder to bind.
+schemas. App-owned tools are capability families: one tool per object —
+`octant_browser`, `octant_computer`, and in Code `octant_terminal`,
+`octant_apple`, and `octant_android` — with its actions in an `operation`
+enum. Decision 0067 keeps the always-visible tool prefix small and
+cache-stable, so a family's description says only what an agent must know
+before its first call, and its `help` operation returns the full usage on
+demand. The managed tool set answers help from the family's own static text
+(`withToolFamilyHelp`) and only for a family the turn offers; help never
+reaches the family's executor, so every other action passes the same server
+policy before any effect. A family whose grant or capability is off is
+omitted rather than advertised and refused: Browser when the provider has no
+verified tool transport, the thread's tool constraints exclude it, or a Code
+host lends no browser; Apple or Android when the host has no toolchain to
+lend; the planner's `octant_board` and `octant_propose_thread` outside the
+designated planner thread. Browser shares one definition across modes.
+
+Each mode offers only its admitted tools, so every runtime receives the same
+definitions without a separate global tool installation or prompt catalogue,
+through the transport its adapter verified:
+
+| Runtime                             | App-managed tool transport                                                                                            |
+| ----------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| Claude Code                         | The Agent SDK's in-process MCP server `octant`, owned by the provider connection                                      |
+| Codex                               | App-server `thread/start.dynamicTools`                                                                                |
+| OpenCode                            | A connection-private loopback MCP endpoint, registered through OpenCode's own server API                              |
+| ACP runtimes                        | An HTTP MCP bridge when the runtime advertises and accepts it; ACP client file and terminal capabilities are separate |
+| Pi                                  | Octant's own Pi extension, calling a token-authenticated loopback bridge                                              |
+| Native harness and direct endpoints | Definitions in the request, for models with verified tool support                                                     |
+
+No transport edits a person's provider MCP, hook, or global configuration;
+OpenCode's per-launch posture stays in its connection-private configuration.
+Decisions 0006, 0093, and 0121 therefore hold.
+The local-server adapter binds its private tool endpoint to one connection's
+session and exact offered catalogue, and reports app tools only with a process
+receipt attesting that external MCP, plugins, and skills cannot enter the
+runtime; see [Provider runtimes](design/provider-runtimes.md#local-server-provider-adapter).
+
+Browser and Computer are granted differently. Browser is a Work and Code
+capability; Chat never offers it. It is offered on every Work or Code turn
+whose provider carries app-managed tools, `@Browser` only adds selection
+guidance, the first effect for an origin asks inline, and Plan mode refuses
+effects. Computer is the bundled plugin plus a per-send `@Computer`
+selection: only that send carries the full `octant_computer` family. A turn
+without the selection carries the refusal-only definition described under
+[Computer use plugin](#extensions-and-skills), and none at all when Computer
+use is disabled, constrained out, or in Plan mode. Each application still
+needs its own approval.
+
+Canvas follows the same rule through its read-only `describe` operation: the
+always-visible `octant_canvas` description says only what an agent needs before
+its first call, and `describe` answers per-block guidance, recipes, and schemas.
+The tool, recipes, presentation, preview, block catalogue, boards, comments, and
+the `design` block are specified in [Canvas](design/canvas.md). Their boundaries:
+`describe` reads no Project data and creates no artifact, and a recipe is a
+starting shape, not authority; every new block kind or field is gated by a Canvas
+schema version, so an older runtime refuses a document rather than misreading
+it (the presentation-only table column `display` and chart, table, and metric
+`format` fields are the one ungated exception, which the strict schema still
+refuses on a runtime that predates them); a version is immutable, and a person's change (a plan task's status, a
+diagram layout) is journaled as a new head version with the `local-user` actor
+the host stamps itself; the host stamps comment authors, so a renderer never
+authors as an agent; only a host window moves board nodes; `preview` renders
+with the network off and no server address or credential; a `design` frame
+never receives `allow-scripts`; a share refuses a design or an action block; and
+nothing drawn inline in the thread can journal a version.
+
 Descriptions explain the existing presentation flows and distinguish creation,
 queued jobs, and work proposals from opened previews or completed work.
 Work also includes a short, budgeted artifact instruction in its required
 context, so runtimes that use their own file tools know how written documents
 appear in Files and Document. That instruction offers no tools or authority.
 
-A Canvas diagram block is also a board. The renderer zooms, pans, and fits the
-same deterministic layout every surface draws, and a user's drag or keyboard
-nudge is journaled through `/api/canvas/layout-revise` as a new immutable
-`canvas.version-appended@1` version with `actor: local-user` that the host
-stamps itself, whatever actor the request names, admitted by the
-pure `admitCanvasDiagramLayoutRevision` policy (target must be a diagram,
-every moved node must exist, the sequence must be the head, budgets stand).
-Beside that generic node-and-edge diagram, a `sequence` block is participants,
-ordered messages, activations, and notes, and a `state` block is states that
-may nest by parent id, labeled transitions, and initial and final roles. Three
-further kinds share the same budgets: an `er` block is entities with named,
-typed attributes (an attribute may be a key) and relationships that name a
-cardinality at each end and an optional label; a `swimlane` block is ordered
-lanes of actors or teams, the steps each lane owns (a step may be flagged as a
-decision), and labeled connections; and a `mindmap` block is one root topic
-over children that name their parent, each with an optional note. Both
-sequence and state, and the three later kinds, use the diagram node and edge
-budgets; the er, swimlane, and mindmap kinds are version-gated together at
-Canvas schema version 8, so a document that declares an earlier version and
-carries one is refused as a declared future version. Layout is deterministic.
-Participants and states are node comment anchors; messages and transitions are
-edge comment anchors; entities, steps, and topics are node anchors and
-relationships and connections are edge anchors. Static export draws every kind
-through the same artifact SVG path as the other blocks, and the Markdown/HTML
-document renderer gives the er kind an attribute table, the swimlane kind
-numbered steps per lane, and the mindmap kind a nested list.
-Agent revisions and user layout share one history; a stale drag is refused and
-the renderer reloads rather than overwriting a newer version. Only the head
-version is editable. The route is host-window only; a paired browser reads
-boards but does not move nodes. Comments are journaled facts of one
-`canvas-comments` aggregate per Canvas (`canvas.comment-added@1`, `-replied`,
-`-resolved`, `-deleted`), whose version is the board's comment sequence, so
-concurrent comments conflict on the journal instead of both winning; the
-service rebuilds them with the pure `applyCanvasCommentEvent` reducer, refuses
-unauthorized reads with no bodies, and stamps each comment's origin (`host` or
-the authenticated `remote-device`) beside its `local-user` author. The host
-stamps that author (and a resolve's or delete's actor) itself and ignores the
-actor the request names, so a renderer can never author a comment as an agent.
-A table row is either a list of cells or `{ id, cells }`; the id is the
-author's, unique within the table (the domain policy refuses a repeat as
-`duplicate-table-row-id`), and arrives with Canvas schema version 13. A `row`
-comment anchor names a table block and that id, never a position, so a comment
-stays on its row through the reader's sort and filter and through a revision
-that inserts, removes, or edits rows. A row without an id cannot be anchored
-and the renderer offers it no marker. A comment whose row is gone from the
-version on screen is shown as no longer on the canvas and is never dropped; the
-comment service does not check anchors against a version, because comments
-belong to the Canvas rather than one version. A comparison matrix does not use
-the table row model; its criteria already anchor through node ids. Shared
-snapshots serialise the definition and so never carry comments
-([decisions/0052-canvas-boards.md](decisions/0052-canvas-boards.md)).
+### Desktop menu bar
 
-A `design` block (Canvas schema version 9) is the one block whose content is
-markup: the frames of one design at one size, `phone` (390×844), `tablet`
-(820×1180), `desktop` (1440×900), or `slide` (1920×1080), each a page of
-static HTML, plus one shared stylesheet. The renderer draws each frame in an
-`iframe` with an empty `sandbox` and a `srcdoc` page whose policy loads nothing
-but inline styles and `data:` images and fonts, on top of the app policy the
-page inherits. No script runs, nothing submits, and the page has no access to
-Octant. Frames link by fragment; Play draws every frame in one page so a link
-shows its frame through `:target`, and the renderer writes each fragment
-against the page's own address because a `srcdoc` page resolves a bare one
-against its parent. The pure `canvasDesignMarkupRefusal` policy refuses a
-script, an event handler, an embedded document, a remote image, stylesheet,
-or font (in a `url()`, an `@import`, or an `image-set()` candidate, however a
-character reference or CSS escape spells it), and any link that is not a
-fragment, naming the frame and the
-construct; the event store and revise policy return that reason to the
-author rather than a generic failure. The sandbox is the boundary and the
-link rule is part of it, because a link is the one way a page with no script
-can leave. A share refuses a design, and Markdown or HTML export writes
-frame titles, not markup. A share also refuses an action block, whose command
-runs only on this host. Both refusals, and any block or field the share
-contract does not carry, are checked before the snapshot is journaled and
-reach the owner as an `unsafe-payload` denial: the Canvas cannot be shared, not
-a malformed request. A design is always a sidebar Canvas. An authored
-revision declares the current schema version on the version and its
-definition, so a Canvas written under an earlier version moves forward and can
-gain a design; a version append never moves a Canvas back. Agents writing
-a design can be silent for minutes while composing the tool call, so Chat and Work
-wait five minutes for a provider event before cutting a turn off, as Code does
-([decisions/0164-canvas-designs-are-html-in-a-frame-that-runs-nothing.md](decisions/0164-canvas-designs-are-html-in-a-frame-that-runs-nothing.md)).
+The menu bar is the closed-window fleet roster; the Inbox is the in-window list.
+It prioritizes Open Octant, New task, and three compact sections: **Needs you**,
+**Working**, and **Done since you looked**, at most six rows each. Empty
+sections disappear. A row names the thread title, its mode, and its Project,
+and choosing it opens and focuses that thread in the main window, opening the
+window first when none is open. Local host contains status, browser access,
+applicable lifecycle controls, and redacted diagnostics; Quit Octant retains
+the existing active-work confirmation. The text beside the glyph is `!` while
+the host itself needs attention (provider readiness, a lost host), otherwise the
+count of threads that need the person.
 
-The local-server provider adapter owns a separate process for each acquired
-connection and allows one live session per connection. Its MCP protocol does
-not reliably carry native session identity, so the private endpoint binds calls
-to that connection's immutable session and exact offered catalogue. Complete
-permission rules are updated before each prompt; the deprecated tool toggle
-payload is omitted because it replaces those rules. App tools require a process
-receipt attesting that external MCP, plugins, and skills cannot enter the
-runtime. Ordinary inherited configuration does not supply that attestation and
-continues to report app tools as unsupported. Process exit, stream failure,
-interruption, and scope cleanup retire pending tool requests.
+The roster comes from the host, not from open windows, so it stays current with
+every window closed. The shell registers its own local-window authority for the
+menu bar with the desktop bridge secret it already holds, replaces it when the
+host instance changes, and revokes it when the menu bar goes; it reads exactly
+what any local window could. It polls `GET /api/fleet-activity` with the host
+probe (every 2 s while a window is visible, 10 s otherwise). Every row names its
+`activitySource`:
+
+- **Needs you** is the pending-requests read
+  ([pending requests across modes](#security-and-authority)): a Work request or
+  any turn decision is `journal`; a Code approval or question, or a Chat
+  question, is `session`, the live provider session parked on it. Code reach is
+  per bound window and the menu bar's own window binds no Code Project, so its
+  Code rows are the requests and decisions each local window with a persisted
+  Code binding could answer; a Code Project no local window binds stays out. A
+  thread that is both waiting and running is listed once, as needs you.
+- **Working** is each mode's own navigation run state, the journaled fold the
+  sidebar and board already use, so it is `journal`.
+- **Done since you looked** is the one state the host cannot know, because only
+  the shell knows when the person last opened a thread. A thread that leaves the
+  host's list between two successful reads finished; it stays done until the
+  thread is opened in a window or from the menu bar, or runs again. A focused
+  window showing the thread when it finishes never makes it done. A failed or
+  truncated read changes nothing, so a lost host cannot fake a finish. Done rows
+  live in memory and start empty with each app or host instance.
+- `screen` is reserved for an agent CLI seen only in a terminal pane. The
+  contract refuses it for needs you, it never becomes done, it never counts
+  toward the menu-bar number, and its row reads "seen in terminal". No current
+  producer emits it: Octant does not scrape a PTY or screen for agent state.
+
+Each row's tooltip names its source ("read from the journal", "read from the
+live session"). The menu bar raises no notifications; banners and the dock badge
+stay with the renderer's attention signals. Windows report only which thread
+they show, which clears that thread's done row and tells the shell the window
+can open a thread it is asked for. The read is local-window only, like pending
+requests. Titles never enter the public health response or redacted
+diagnostics. Separately managed hosts retain their existing lifecycle
+restrictions. Nothing here writes provider MCP or hook configuration.
+
+### Desktop context menus
+
+Trusted top-level desktop windows may contribute a bounded native context menu
+through the preload bridge: at most 160 entries, four submenu levels, and labels
+up to 256 characters. Contributions contain presentation and opaque action IDs;
+they cannot supply Electron roles, callbacks, paths, URLs, or native commands.
+The shell returns the selected ID to the same window, which invokes its existing
+renderer action and ordinary server authority checks. Dismissed, refused, closed,
+or navigated windows select no action. Each window owns at most one contributed
+native popup. The desktop's own text editing menu uses Chromium's edit flags and
+fixed native roles; embedded browser frames cannot contribute workspace menus.
+
+### Canvas documents, designs, and prototypes
+
+Canvas produces three kinds of finished work: documents a person reads (a
+spec, an article, a brief with tabs, metrics, diagrams, and badge tables),
+designs they review (app screens, a site, a deck, a design system), and
+prototypes they try (a flow that reacts to input and keeps state). It does so
+in three tiers that an author mixes in one Canvas, using the lowest tier that
+delivers the result. The static frames' `document` size and workspace theme
+have shipped (Canvas schema version 16, described with the
+[`design` block](design/canvas.md#design-block)). The rest is accepted
+direction: each rule below replaces the matching shipped rule in
+[Canvas](design/canvas.md) when its slice ships, and until then the shipped
+rule holds. Each tier is a Canvas schema bump, so an older runtime refuses the
+document as a future version. Frames follow the
+[Canvas HTML frames threat model](security/canvas-html-frames-threat-model.md).
+
+- **Typed blocks carry data.** Metrics, tables, charts, plans, and the diagram
+  family stay the catalog, because comments anchor to them, revision edits
+  them, and shares keep their structure. The catalog gains `tabs` and
+  `columns`, which name existing child blocks one level deep (the selected tab
+  is view state and journals nothing); closed diagram node roles (process,
+  decision, terminator), edge styles, and group tones drawn by the one
+  deterministic layout; a Gantt view of `plan`; and import of a bounded
+  Mermaid subset into typed diagram blocks. Mermaid never renders; an unknown
+  construct fails closed and stays a code block.
+- **Static frames carry the look.** A `design` keeps a frame that runs
+  nothing and has a `document` size whose height the host measures, which
+  needs `allow-same-origin` and therefore never `allow-scripts`, and an opt-in
+  workspace theme (semantic tokens, light or dark, the bundled fonts, and a
+  first-party stylesheet for articles, cards, CSS-only tabs, badges, metric
+  tiles, tables, callouts, and code), unthemed by default at device sizes;
+  both have shipped. Not yet built: images named by asset id, which the server
+  resolves under the thread's mode and Project authority and the host inlines
+  before drawing. The frame itself loads nothing.
+- **Running frames carry behavior.** A `design` may declare that it runs
+  script. Its page comes from a host route fetched with a single-use ticket
+  scoped to one Canvas version, never the session credential, with a
+  `sandbox allow-scripts` response directive and a policy that allows inline
+  script and style and no connection; the parent sandboxes the frame without
+  `allow-same-origin`, `allow-top-navigation`, `allow-popups`, or
+  `allow-forms`. A host-written bridge reports size, script errors, and a
+  heartbeat, grants no tool, journal, or file capability, and a frame that
+  stops answering or loads a second page is removed. Desktop runs these frames
+  out of process, cancels any navigation away from the frame's own page, and
+  reserves a shortcut frame script cannot intercept to return focus to host
+  chrome. A remote browser cannot cancel a frame's own navigation, so there a
+  running frame is not network-contained; that exposure is accepted, bounded
+  by what the frame holds, and the Run control there says so.
+- **The thread can hold the whole Canvas.** A person may expand any Canvas in
+  its thread; the agent may ask for `inline` on a reading document without the
+  12-block cap; a running frame in the thread starts only on **Run**. Editing,
+  comments, and sharing stay in the sidebar, and nothing drawn in the thread
+  writes a version.
+- **Agents are taught and checked.** `describe` presents the tiers with a
+  finished example of each, in-tree recipes cover an article, a design brief,
+  a design system, and a clickable prototype, and `preview` draws frames and
+  returns overflow, contrast, missing-asset, and script-error warnings.
+- **Shares and exports carry what they can draw safely.** Typed blocks travel
+  as today. A frame travels in an authenticated snapshot only when the viewer
+  draws it under the same frame policy and the sharer acknowledges that markup
+  is shared as written, because the secret filter reads values, not markup.
+  HTML export writes frames as sandboxed `srcdoc` pages with the policy inside;
+  Markdown export writes the title. Public links stay out.
+
+_Rationale:_ a `srcdoc` frame inherits the app policy (`script-src 'self'`),
+so a running frame needs a page the host serves, and a frame sandboxed without
+`allow-same-origin` has an opaque origin wherever it is served, so no separate
+origin or desktop protocol is needed for that isolation. Growing only the
+typed catalog was rejected because every new look becomes a schema change and
+no closed set reaches a finished design or article. A separate origin, or an
+Electron view per artifact, was rejected because it cannot be laid out in the
+thread and does not exist for a remote browser; revisit if a frame ever needs
+script with `allow-same-origin`. Rendering Mermaid was rejected as a second
+layout, and an external design service because it sends Project content to a
+third party and makes a core capability depend on one vendor.
 
 ### Device transport and evidence
 
-The iOS Simulator dock tab
-is a device pane: the Simulator's screen streamed through the
-host as it changes, authorized like a screenshot and never stored (see
-[decisions/0139-the-simulator-frame-is-a-live-view-streamed-through-the-host.md](decisions/0139-the-simulator-frame-is-a-live-view-streamed-through-the-host.md)),
-or the latest host-held screenshot evidence when there is no live view — with
-honest setup, unavailable, booting, live, interrupted, and stale-after-restart
-states; closing the tab does not shut down the destination. When Apple
-discovery fails, the failure may carry an optional, additive `step` (`xcode`,
-`licence`, `runtime`, or `project`) naming the probe that failed — Xcode
-selection, `xcodebuild -license check`, Simulator listing, or project listing —
-so the setup checklist marks that row and treats earlier rows as passed; a host
-that omits it leaves every row unchecked. An agent's
-`octant_apple` `boot`, `run`, or `open` raises that pane once per request
-instead of launching Simulator.app (see
-[decisions/0151-the-agent-opens-the-in-app-simulator-pane.md](decisions/0151-the-agent-opens-the-in-app-simulator-pane.md)).
-Apple artifact and restart-receipt reads validate regular-file identity and size
-on an open handle before allocation. Reads reject linked files and size changes,
-with a 16 MiB artifact limit and 1 MiB receipt limit; existing records are not
-rewritten.
-A screenshot's raw capture lands in a host-private directory under the data root
-(`<data>/apple-runtime/captures`, created `0700`) that the confinement profile
-denies outright to every launch except the one taking the capture — the deny is
-emitted after the broad launch-root grants, so a checkout bound to an ancestor
-of the directory cannot read another thread's screen either, and only the
-capture launch re-allows it through its own write root
-([decisions/0160-an-apple-screen-capture-lands-in-a-directory-only-its-launch-can-write.md](decisions/0160-an-apple-screen-capture-lands-in-a-directory-only-its-launch-can-write.md)).
-An Android emulator is a separate dock destination and `octant_android` tool,
-not an iOS helper feature
-([decisions/0153-android-emulator-is-a-separate-device-destination.md](decisions/0153-android-emulator-is-a-separate-device-destination.md)).
-Android commands are one-shot `adb` clients. The shared `adb` server that a
-client forks puts itself in its own session, so Octant's group cleanup of a
-finished command never reaches it, and Octant never stops a server. Each
-client runs with `ADB_MDNS=0`: a server started with mDNS discovery on aborts
-within seconds on macOS 27, and every later command then restarts it while the
-emulator reconnects as `offline`. An input whose client exits 255 with
-neither a client nor a device message lost its server after handing the
-command over. It is reported `interrupted` (delivery unknown), not `failed`,
-so a retry cannot type the same text twice. With no `ANDROID_HOME` or
-`ANDROID_SDK_ROOT`, SDK discovery tries the Android Studio home location and
-then the Homebrew `android-commandlinetools` prefixes, taking the first that
-has both `adb` and `emulator`.
-Tap, typed text,
-and hardware-key input ride the same Apple workbench control channel as boot
-and screenshot, with XCTest-less host injection behind that channel only,
-computer-use-style actor attribution, and the same remote/headless fail-closed
-attach gate (see
-[decisions/0062-simulator-frame-input-transport.md](decisions/0062-simulator-frame-input-transport.md)).
+The iOS Simulator and Android emulator are dock device panes: the screen is
+streamed through the host, authorized like a screenshot, and never stored, and
+closing a tab does not shut the destination down. An agent's request to raise
+the pane lives only in server memory for the same thread and checkout. A raw
+screen capture lands in a host-private directory only its own capture launch
+may read or write. `octant_android` installs only a checkout-relative APK.
+Input (tap, swipe, typed text, and hardware keys) rides the workbench control
+channel with actor attribution and the remote/headless fail-closed attach gate;
+an input whose delivery is unknown is reported `interrupted`, not `failed`, and an off-screen point or unsupported keyboard layout is refused,
+never clamped or guessed. Octant does not script Simulator.app, and an agent
+must not launch Simulator.app, `serve-sim`, or `serve-avd`. **Repair input**
+runs only when a person requests it. Pane states, discovery, capture, input
+delivery, keyboard layouts, and the managed streaming tools are specified in
+[Device workbench](design/device-workbench.md).
+
 On an approval-gated thread, **Allow input** is the confirmation that opens
 that destination; clicks, typing, Home, and Lock never raise it
 ([decisions/0152-allow-input-opens-a-device-to-clicks.md](decisions/0152-allow-input-opens-a-device-to-clicks.md)).
-Under the desktop app that injection is the native device helper of 0137: a
-tap is a point on the captured screen, typed text is letters, digits, spaces
-and new lines, and every refusal names the helper's own reason. Without that
-helper every input kind is unavailable; Octant does not script Simulator.app
-to inject a tap, swipe, typed text, or key
-([decisions/0151-the-agent-opens-the-in-app-simulator-pane.md](decisions/0151-the-agent-opens-the-in-app-simulator-pane.md)). A swipe is a
-fourth input kind on the same channel, for the pane and for `octant_apple`
-alike, and the live screen is driven directly: a press and release is a tap, a
-drag is one swipe sent when it ends, keys typed on the focused screen go to
-the device as one text per pause, Home and Lock are buttons, and what a person
-does while an action runs is kept and sent in order (see
-[decisions/0140-the-live-simulator-screen-is-driven-directly.md](decisions/0140-the-live-simulator-screen-is-driven-directly.md)).
-A swipe reaches the device as a finger that moves: it goes down at the start,
-moves in even steps of about 16 ms along the straight line to the end over the
-swipe's duration, and lifts there. The native helper paces the steps itself;
-on the managed `serve-sim` stream the desktop sends them through one held
-connection to the stream's input socket, because that tool's command line
-starts too slowly to send a path one touch at a time. A swipe that starts
-within 2% of a screen edge is flagged as an edge touch on that stream, which
-is what lets a drag from the bottom go Home or unlock. Only straight
-single-finger swipes exist: a press held in place is a tap, and there is no
-long press or pinch.
-Touch and buttons sent through the managed `serve-sim` stream are reported
-delivered only while the Simulator's legacy input services still receive them.
-Xcode 27's Device Hub can take those services over: its guest input daemon
-starts on demand (the native helper's first connection starts it), raises the
-guest notification `com.apple.coredevice.dtuhidd.active` to `1`, and from then
-on `serve-sim` exits successfully while the device drops every tap, swipe, and
-Home. Before each tap, swipe, button, or finger-down on that stream the desktop
-reads the notification; at `1` it sends nothing through `serve-sim` and hands
-the input to the native device helper, which speaks to Device Hub's daemon and
-proves it answers before sending (a finger that went down that way stays on
-it until it lifts). When the helper cannot deliver either, the input is
-refused with the reason `input-disconnected` ("Simulator input is
-disconnected. Repair input restarts the Simulator's home screen."). When the
-guest does not answer the question within 1.5 seconds the input is sent
-through `serve-sim` as before. **Repair input** is a fifth input kind,
-offered by the device pane only after that refusal: it runs
-`serve-sim repair-input` (which restarts the guest's `backboardd`, so the home
-screen restarts and running apps close) and drops the stream so the next input
-reconnects it. It rides the same Allow input grant as a tap, never runs
-automatically, and is refused unless a person (`local-user` or
-`remote-device`) requested it; `octant_apple` does not offer it.
+The agent's `octant_apple` and `octant_android` tools follow the thread's
+turn posture per operation, not a Full-access gate on the whole tool:
+`discover`, `status`, and `screenshot` are reads and run under every posture,
+Plan included, as is `open` of a destination already booted or booting: it only
+shows the pane, changes nothing on the device, and has no host action an
+approval could bind to. Every other operation is an effect, including `open` of
+a shut-down destination, which boots it. Plan refuses it; Full access
+sends it with no approval; under approval-gated and auto-accept-edits the
+server asks in the thread (an `approval-requested` turn event, answered like a
+Browser session ask) before the pane opens or the host is called, and an
+approval mints the host's one-use, five-minute approval bound to exactly that
+request and its checkout context — the same receipt a workbench confirmation
+yields, validated by the same Apple or Android policy. A denial, expiry, or
+thread that went stale or into Plan while waiting refuses the call. Input to a
+destination the turn's window already holds open under Allow input rides that
+grant without asking; an approved agent input opens or renews it as a pane
+input does. `octant_terminal` still requires Full access: it runs arbitrary
+shell commands, which an approval-gated thread already reaches through its
+provider's own per-command approvals.
 
 ## Modes: Chat, Work, and Code
 
@@ -774,11 +540,11 @@ reaches its own kind's commands, and nothing in the renderer can turn a Chat
 into Work or a Work thread into Chat. Settings' Chat and Work switches still
 gate their domains: with one off, the composer offers only the other kind.
 
-| Mode     | Binds to                                                                                                                            | Authority                                                                                                                                                                                                                                                                                                                                                                                          |
-| -------- | ----------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Chat** | A virtual, memory-scoped Project, or no Project at all                                                                              | No filesystem or shell authority. Optional safe research tools; scratch space is isolated per thread.                                                                                                                                                                                                                                                                                              |
-| **Work** | Exactly one OS-confined project root                                                                                                | Confined reads and bounded writes inside that root, approval-gated unless the thread's access is auto-accept-edits; no shell and no Git; document adapters (docx, pptx, pdf, image); research with citations; server-authoritative board.                                                                                                                                                          |
-| **Code** | Exactly one directory, ideally a repository root; Code threads select a checkout (current checkout or a managed worktree) inside it | Starts approval-gated; Full access only when explicitly remembered for that Project. Plan mode is always read-only. Git, terminals, tests, PR observation, and managed subagents run inside the bound root. Creating a Code Project may explicitly initialize Git in that folder (`docs/decisions/0079`) so a Code thread can prepare a checkout immediately; binding without Git remains allowed. |
+| Mode     | Binds to                                                                                                                            | Authority                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| -------- | ----------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Chat** | A virtual, memory-scoped Project, or no Project at all                                                                              | No filesystem or shell authority. Optional safe research tools; scratch space is isolated per thread.                                                                                                                                                                                                                                                                                                                                                                             |
+| **Work** | Exactly one OS-confined project root                                                                                                | Confined reads and bounded writes inside that root, approval-gated unless the thread's access is auto-accept-edits; no shell and no Git; document adapters (docx, pptx, pdf, image); research with citations; server-authoritative board.                                                                                                                                                                                                                                         |
+| **Code** | Exactly one directory, ideally a repository root; Code threads select a checkout (current checkout or a managed worktree) inside it | Starts approval-gated; Full access only when explicitly remembered for that Project. Plan mode is always read-only. Git, terminals, tests, PR observation, and managed subagents run inside the bound root. Creating a Code Project may explicitly initialize Git in that folder (`docs/decisions/0079`) so a Code thread can prepare a checkout immediately; if that initialization fails, creation is refused and no Project is journaled. Binding without Git remains allowed. |
 
 Work's missing shell and Git are withheld, not approval-gated: a person is
 never asked to approve a command in Work, because approving one would give the
@@ -856,6 +622,16 @@ threads without a Project need the further `allowDefaultFolderThreads` switch,
 which the host accepts only while Git is not required. See
 [decisions/0118-a-default-folder-for-what-nobody-gave-a-home.md](decisions/0118-a-default-folder-for-what-nobody-gave-a-home.md).
 
+Code task creation accepts a plain-folder checkout when the server admits it under
+Code settings. The renderer preserves its proposed branch as delivery intent without
+claiming a checked-out branch; detached Git checkouts remain refused. Git-dependent
+actions continue to report unavailable for plain folders.
+
+An authorized repository test remains cancellable while the host rediscovers its
+command definition. Cancellation during discovery prevents process launch; runtime
+shutdown also cancels pending discovery and waits for it to settle. Thread and
+checkout authority checks still precede both run and cancellation.
+
 Every Project, in any mode, may carry one optional **colour**: a theme palette
 role (red, orange, yellow, green, teal, blue, purple, or pink) the person picks
 as the Project's identity. It lives on the Project record and is journaled as
@@ -918,7 +694,11 @@ the worktree and creates nothing. The fork starts approval-gated with
 current-session persistence and inherits no profile, pending outcome proposal,
 running turn, or session grant. Every Code thread creation checks a
 `forkedFrom` origin on the server: it must name another thread of the same
-Project.
+Project, and the fork's text handoff (below, "Fork handoff (Code)") must be
+selectable from that thread through the named turn right now. A fork or
+Restore from here whose handoff cannot be built is refused with the reason
+before any worktree is prepared, because the text handoff is the one
+conversation transfer every fork can fall back to.
 
 A child AgentRun starts only when the thread's agent delegates through the
 Octant Harness `delegate` tool or a provider harness's `octant_agents` tool.
@@ -999,10 +779,15 @@ separately. Result reads do not consume or acknowledge delivery.
 
 A managed child's lifecycle moves from Starting to Running once its workspace
 is verified and its provider session starts, not at completion. One turn,
-from provider acquisition to its terminal event, may run for at most 30
+from provider acquisition to its terminal event, may work for at most 30
 minutes (`MANAGED_AGENT_RUN_TURN_DEADLINE_MS`); a turn that reaches that bound
-is recorded as Interrupted and releases its capacity. The bound covers time a
-child spends waiting for an approval or answer.
+is recorded as Interrupted and releases its capacity. The bound counts working
+time only: it pauses while the child waits for a person's approval or answer and
+resumes with the remaining time once every pending request is answered, because
+a child cut off with its approval card still open lost its work to the person's
+pace rather than its own. No separate wall-time bound exists; a waiting child
+keeps its capacity slot until the request is answered, the run is cancelled, or
+the host restarts.
 
 Managed children retain a private provider-session cursor and a bounded,
 purgeable conversation alongside their journaled lifecycle. A cursor is bound
@@ -1057,7 +842,16 @@ The delivery service serializes work per parent and defers while it is busy.
 A Chat delivery names the parent at its thread aggregate's head version, the
 version Chat admission checks, and a refusal that only says the parent is
 mid-turn or moved on is deferred and retried, never journaled as a failed
-delivery. A child that ends without a reply (failed, interrupted, or cancelled)
+delivery. Delivery runs as the host, under the same per-process host scope a
+[routine](#modes-chat-work-and-code) runs under, never through a window: a
+child's result reaches its parent with no window open, and an open window lends
+it neither identity nor Project binding. Admission still rechecks the parent's
+Project access (an inactive Code Project refuses and the delivery fails), mode,
+and posture as for any turn. A Work delivery waits while Work is turned off,
+since no window stands in for the mode switch, and lands once Work is back on.
+A Work delivery turn is journaled as the host's `system` actor, and any
+approval it raises reaches the Project's local windows the way a routine's
+does. A child that ends without a reply (failed, interrupted, or cancelled)
 reports why on the managed `wait` and `status` answers and in the delivered
 outcome line: its journaled reason, redacted with the diagnostics rules and cut
 to 512 characters.
@@ -1135,6 +929,150 @@ connected Projects in a manually refreshed workspace and joins exact
 thread-owned PR status onto Code board cards. A Work or Code thread is Done
 only when its user-confirmed delivery target is objectively satisfied;
 ambiguous state resolves to Waiting.
+
+**Pull-request merge.** The person at a local desktop window may merge one
+open pull request from its review (`POST /api/code/project-pull-requests/merge`).
+That is the only pull-request mutation Octant performs; approving, commenting,
+requesting changes, editing, closing, reopening, and force-pushing stay absent.
+The rules:
+
+- **Who.** Only a `local-window` principal. The route answers 403 to a paired
+  remote device before decoding the command, and the server service refuses
+  any initiator other than `user` as `not-authorized`. No provider, agent tool,
+  plugin, routine, or Code posture (Full access included) can reach it.
+- **Confirmation.** The review enables Merge only for a fresh, unambiguous,
+  open, mergeable observation. Merge opens an inline confirmation that names the reviewed head
+  and focuses Cancel; nothing merges until the person chooses Confirm merge.
+- **Server checks before the effect.** The command names the Project, the
+  repository, the number, a method (merge, squash, or rebase), and the head SHA
+  the person reviewed. The server refuses unless that Project is connected on
+  this window and resolves to exactly that github.com repository, and refuses
+  while GitHub access is revoked. It then re-reads the pull request and refuses
+  `not-open`, `not-mergeable`, or `stale` (head moved), and passes
+  `--match-head-commit` so GitHub also refuses a head that moves in between.
+- **Credential.** The host's installed `gh` CLI with its own stored login.
+  Octant stores no GitHub token; ambient `GH_TOKEN`, `GITHUB_TOKEN`, and
+  `GH_ENTERPRISE_TOKEN` are stripped and prompts are disabled.
+- **Record.** Every attempt that reaches the server merge path appends one
+  `code.project-pull-request-merge-recorded@1` event, as its own aggregate,
+  before the outcome returns: the local user as actor, the Project, the
+  repository, the number, the method, the approved head SHA, and the result
+  (merged, refused with its reason, unavailable with its reason, or failed as
+  `aborted` or `error` when the merge call throws and the effect is unknown;
+  the error is rethrown and its text is never journaled). The payload carries
+  no credential, title, or body, and no projection reads it;
+  it is Octant's own record beside GitHub's history. A failed local append
+  fails the request even when GitHub already merged; the next refresh still
+  observes Merged. The outcome also drops the cached detail and list rows. A
+  thread linked to the pull request reaches Done only through the ordinary
+  observed-state rule, never from this record.
+
+**Delivery (publishing to a user-owned target) is dormant.** The ship service
+and its journaled events exist, but the host wires no target source, no
+artifact observer that saw a build produced, and no issuer of the per-act
+approval bound to the exact target, revision, and build (`server.ts` passes an
+empty target list, `observedArtifact` and `approval` that return nothing, and a
+publish path that fails). The renderer shows Delivery only when a thread has an
+enabled target (`hasActionableDelivery`), so it stays absent. It stays absent
+until all three exist; a standing grant never substitutes for the per-act
+approval.
+
+**The Project planner thread is a server-only capability.** A Code Project may
+designate one of its own Code threads as its planner, whose agent surveys the
+Project's board and proposes new Code threads for a person to accept. The
+server, contracts, domain policy (`@octant/domain/code-planner-policy`), and
+the client-runtime transport implement it; no renderer, phone, or CLI surface
+designates a planner, lists proposals, or resolves them, and the shell does not
+advertise it. Because nothing in the shell designates a planner, no thread
+receives the planner tools in ordinary use. Any later surface must keep the
+rules below:
+
+- **Routes.** `GET /api/code/planner/:projectId` returns the designation, its
+  version, and the proposals; it needs only the authenticated window's access
+  to that Project. `POST /api/code/planner/commands` (designate or undesignate)
+  and `POST /api/code/planner/proposals/commands` (confirm or decline) accept
+  only the `user` initiator; a principal gated as an agent, such as a paired
+  remote device, is refused as unauthorized before decoding. Every command
+  carries the expected aggregate version, and a stale one is refused, never
+  merged. A body cannot supply window identity.
+- **Designation.** Only an active Code Project, one planner per Project, and
+  only a non-archived thread of that same Project. Designating while one is
+  designated refuses, even for the same thread; undesignate first.
+- **Agent tools.** `octant_board` and `octant_propose_thread` are offered only
+  to the currently designated planner thread, and both re-resolve the
+  designation on every call, so an undesignation takes effect mid-turn. The
+  board read is the same server read-model the board UI queries, scoped to the
+  planner's own Project, with no GitHub call. A proposal executes nothing: it
+  is journaled as pending (at most ten unresolved per Project) with the
+  planner thread as actor. Both tools sit before the Code posture gate because
+  neither touches the checkout, but still pass the stale-identity and profile
+  tool-constraint checks.
+- **Resolution.** Only a person confirms or declines. A confirm creates its
+  thread through the ordinary Code creation command, inside the proposal's own
+  Project only; the planner has no creation authority of its own.
+
+**Routines (Automation Center).** A routine is a host-owned, Project-bound
+definition that starts an ordinary Work or Code thread with a fixed task prompt
+on a trigger: once, every N minutes (15 minutes to 30 days), or weekly at a
+local time in an IANA time zone. Chat has no routines. Each occurrence creates
+at most one new thread (target policy `new-thread`) and runs its first turn
+through the ordinary thread and turn services; a routine cannot do anything the
+thread it creates could not do.
+
+- **Authority ceiling.** A definition captures an execution profile (an existing
+  agent profile: provider, model, policy, permission persistence) and an
+  authority snapshot whose effective authority never widens the requested one
+  and fits under the profile. Work routines get no shell or Git authority. Full
+  access is never eligible, whether or not it was remembered elsewhere: the
+  contract refuses it on the snapshot and dispatch blocks it as
+  `full-access-ineligible`. Code runs are always created approval-gated. Work
+  runs bind the Project's confined root like an interactive Work thread, and
+  their unattended first turn runs ask-first even when the host's Work default
+  is auto-accept-edits, unless the routine's captured effective authority is
+  itself auto-accept-edits; the hold only narrows. A Code first turn runs with
+  the `agent` initiator, so approvals wait for a person.
+- **Revalidation at every occurrence.** Before creating a thread the dispatcher
+  re-reads live host facts and blocks with a typed reason when the host, the
+  Project (active, same mode, same version), the binding revision, the Code
+  checkout, the execution profile version and policy, the provider and model,
+  the authority digest, or the confirmed delivery-target template no longer
+  matches. A stale definition never adopts replacement authority.
+- **Who may author.** Routes accept only an authenticated principal from the
+  transport; a body cannot supply principal or origin. A create must target a
+  Project of the same mode that principal can reach, and every other command
+  must address a routine whose Project it can reach. A paired remote device may
+  author only on its own host and within those Projects; its routines get the
+  same ceiling. Automation-origin execution cannot create, edit, run, pause, or
+  archive a routine (`automation-recursion`), and no agent or provider tool
+  reaches the routes.
+- **Asleep or offline.** The scheduler is an in-process timer in the running
+  host over journaled definitions. Nothing wakes the computer or runs in a
+  cloud. On return it reconciles missed occurrences by the routine's policy:
+  `skip` records them as skipped; `run-once` records all but the newest as
+  skipped and runs the newest once. No catch-up burst. More than the missed-run
+  cap blocks the routine as `missed-run-cap-exceeded`. A routine with an active
+  run never overlaps itself.
+- **Runs as the host.** A routine is host-owned, so its run creates the thread
+  and starts the first turn as the host, never through a window: it runs with
+  no window open, and an open window lends it neither identity nor Project
+  binding. The routine scope is minted per process and never registered, so no
+  route, renderer, or paired device can act as it; it reaches only active
+  Projects of the routine's mode, after the revalidation above, and every
+  ceiling here still applies. The thread's creation, and a Work run's first
+  turn, are journaled as the host's `system` actor, so the journal tells a routine's thread from one a person
+  started. A browser-origin approval a routine's turn raises has no window of
+  its own, so it is offered to every local window that may drive that thread's
+  browser (one bound to the routine's Project); answering settles only that
+  prompt, and an "always allow" is journaled by the answering window.
+- **Journal.** Definitions, revisions, lifecycle changes, occurrence claims and
+  skips, runs, dispatch intents and claims, and cancellations are journaled. A
+  claim commits the deterministic run before the occurrence ledger, so a crash
+  repairs forward to the same run and never dispatches twice. Run-now and
+  cancel are idempotent by request id.
+- **Turning one off.** Pause stops future occurrences; Resume restarts from the
+  next occurrence; Archive ends the routine and keeps its history (there is no
+  delete). Cancel stops a run before its first turn starts; afterwards the
+  thread's own interrupt applies.
 
 A `#thread` mention points at another thread the sender can already Open. The
 host resolves a bounded, read-only title, status, and transcript window at send
@@ -1224,14 +1162,21 @@ implying that the resumed turn is still running after it settles.
 Cancellation, a manual retry, archival, a provider change, or any superseding
 turn transition settles a stale recovery as `invalidated` rather than letting
 it fire against newer state; a dispatch the admission path refuses settles as
-`failed`. A dispatch that cannot yet reach its admission path — the mode has
-no window registered on this host to carry the continuation — is deferred
-rather than settled: the opt-in stays armed and re-evaluates on a bounded
-retry cadence until it dispatches, invalidates, or is cancelled. The scheduler
-is deliberately narrow under the release boundary: an
-in-process host timer over journaled opt-ins, not a scheduling product — no
-cloud wake, no background claim beyond the host's own running process, and no
-billing automation. A host that was down or unreachable at the reset instant
+`failed`. The dispatch runs as the host, under the same per-process host
+scope a [routine](#modes-chat-work-and-code) runs under, never through a
+window: it resumes with no window open, and an open window lends it neither
+identity nor Project binding. The admission path still rechecks the thread's
+Project access (an inactive Project refuses and settles `failed`), mode, and
+posture exactly as for a person's retry, and a Work resume refuses while Work
+is turned off, since no window stands in for the mode switch; a Work continuation is journaled as
+the host's `system` actor. Any approval the resumed turn raises is offered the
+way a routine's is: a browser-origin or extension-tool prompt goes to every
+local window that may drive that thread (one bound to the Project the prompt
+recorded), and
+answering settles only that prompt. This resume timer is deliberately narrow and separate from
+[routines](#modes-chat-work-and-code): an in-process host timer over journaled
+opt-ins that only continues a stopped turn — no cloud wake, no background claim
+beyond the host's own running process, and no billing automation. A host that was down or unreachable at the reset instant
 rescans `status = scheduled` rows on return and dispatches the still-valid
 ones; a record that cannot be re-validated settles `invalidated` and never
 re-arms.
@@ -1274,7 +1219,11 @@ maintainer's explicit direction. The built shape follows the record: the host
 admits, clamps, journals, and delivers; bodies stay out of the journal, are
 stored under opaque references, and taint the recipient as untrusted external
 content; messaging grants no authority, starts no turn, and purged threads
-leave no resurrectable bodies. 0049 remains the Chat mention path.
+leave no resurrectable bodies. Admission is not delivery: before a message is
+delivered the server rechecks the sender's live grant and the recipient's
+lifecycle, and a revocation, close, or purge in between refuses it. Bounds are
+depth 2, eight open messages per sender, four recipients per send, and a
+64 KiB body. 0049 remains the Chat mention path.
 
 ## Agent task display
 
@@ -1363,6 +1312,13 @@ flowchart LR
   Reopened Code terminals retain their runtime-work identity and resume at the
   persisted aggregate version, including restart interruption events. Live
   recorders keep their expected version so conflicting writes remain refused.
+
+  On host restart, orphaned running Code turns become Waiting in both runtime
+  and conversation state. Recovery appends a status event without replacing prompts,
+  provider session cursors, or earlier events. Already settled turns remain settled;
+  repeated startup does not append duplicate recovery events. A follow-up resumes
+  the retained native identity under the ordinary current-authority checks.
+
 - **Fast thread reads.** A thread paints from an authoritative snapshot before
   auxiliary Files, Git, Browser, or Computer Use observations begin. Code
   conversation evidence is read in bounded batches and page results paint as
@@ -1424,20 +1380,31 @@ flowchart LR
   which Project scopes were deleted.
   The tombstone, other threads, Projects, credentials, external
   repositories, and SQLite free pages are named retained scopes rather
-  than hidden leftovers. A remote principal cannot purge. See
+  than hidden leftovers. The effective window is the most specific one set
+  (thread, then Project, then host, else forever). A thread-scoped purge
+  erases the named thread; a Project- or host-scoped purge erases only threads
+  whose last update is older than their effective window; purging an
+  already-purged thread succeeds idempotently. A remote principal can neither
+  set a window nor purge. See
   `docs/decisions/0035`. The one self-applying
   exception is startup journal compaction, which removes a
   `code.checkout-observed@1` event only when the next event of the same
   checkout observes the identical state; it preserves every answer a
   projection, rebuild, subscription, or export can give and reports how many
-  events it removed. See `docs/decisions/0039`. The other self-applying
+  events it removed. It runs in one transaction per store, renumbers each
+  aggregate's surviving versions contiguously with its heads and checkout
+  projection, skips any aggregate with quarantined events, version gaps, or a
+  head or projection that disagrees with the journal tail, and keeps every
+  event another names as its cause. See `docs/decisions/0039`. The other self-applying
   exception files rather than erases: the completed-thread sweep archives a
   thread the person completed once the Settings window has passed, keeping
   its transcript, checkout, and journal in place (`docs/decisions/0088`).
   A thread the caller
   may already Open can be exported as an `octant.thread-bundle/1` JSON cut
   of the journal — transcript, evidence, and provenance, named with the
-  instant it was taken. Secrets, raw provider payloads, and filesystem
+  instant it was taken. A missing thread and one the caller cannot read get
+  the same `not-found` refusal, so an export never reveals a hidden thread.
+  Secrets, raw provider payloads, and filesystem
   paths never appear; attachment bytes and other bulk content outside the
   journal are listed as omissions. A local owner can also take one
   `octant.host-export/1` cut of what this host holds: a thread bundle for
@@ -1459,6 +1426,18 @@ flowchart LR
   controller footing for small teams lives in
   `docs/legal/shared-host-controller.md` and aligns with
   `docs/decisions/0040` without shipping the shared team host.
+- **Artifact mirror.** After each committed artifact version the host
+  rewrites that artifact's mirrored files in place (removing old names on
+  rename) and journals every outcome as a receipt, including skipped and
+  refused; a write failure never unwinds the version. Plan, an unbound or
+  unavailable destination, and an unauthorized one are refused. A repository
+  destination writes the working tree only; optional auto-commit (off by
+  default, refused without a repository destination) commits only the files
+  it just wrote, refuses when other work is staged, and never pushes.
+  Settings changes need the current `expectedVersion`. An external edit comes
+  back only through an explicit re-import that appends a version. The
+  `/api/artifacts/mirror` route is loopback-only and refuses a paired device.
+  See [0029](decisions/0029-artifact-storage-mirror.md).
 - **Artifact replicas.** A replica is an append-only log in a store the user
   owns — a synced folder, or an S3-compatible bucket. Each host writes only
   its own write-once entries, one per committed artifact version or deletion,
@@ -1501,445 +1480,18 @@ flowchart LR
   unwinds a local version. Plan mode, and a host with sync off, make no store
   calls. See
   [0163](decisions/0163-artifact-replicas-in-storage-the-user-owns.md).
-- **Artifact replica entries.** A store a person sets aside for sync holds one
-  write-once JSON entry per committed artifact version or deletion, at
-  `<instanceId>/<sequence>.json`, with a detached signature beside it at
-  `<instanceId>/<sequence>.sig`. The payload is the artifact bundle from
-  [0029](decisions/0029-artifact-storage-mirror.md) (`octant.artifact-bundle/1`),
-  not a second document. Reconciling an artifact entry appends a version, keeps both
-  heads when two computers revise the same parent, or records a tombstone. It
-  cannot overwrite. An unknown or revoked instance, a bad or missing
-  signature, a content-hash mismatch, or an entry that names a local artifact
-  as foreign is refused. Artifact entries share each instance's sequence with
-  its membership records, and a writer skips a slot someone else's file
-  took, so a sequence has gaps by design: an artifact entry waits as
-  `sequence-gap` only while an earlier slot of its writer that the store
-  lists has no lasting verdict on this host - a membership record held, an
-  artifact entry applied or refused for its own content, or a file found not
-  to be a valid record. A slot the store does not list never holds it back.
-  An unknown entry format fails closed. A later version after a tombstone appends; the
-  tombstone stays in the history. A restore is the one exception to waiting
-  on a gap, and only for versions and tombstones: see artifact sync below.
-  A `canvas-comment` entry carries one change to a Canvas's comment
-  threads - a comment, a reply, a resolve, or a `tombstone` deleting a
-  comment and its replies - with the artifact origin, a content hash over
-  the canonical change, and `after`: for each other computer, the newest
-  comment entry on that Canvas its writer held when the change was made. A
-  comment carries its author, text, anchor, and time; the device it came
-  through stays on its computer. A comment entry waits as `sequence-gap`
-  until its writer's earlier listed slots are settled and every slot its
-  `after` names is applied or settled here, so each computer applies
-  comment changes in an order its writers saw. Its other rules are a
-  version's: signed, write-once, refused when its writer is not admitted,
-  its hash does not match, it names a local artifact as foreign, or its
-  text fails the share filter.
-  The detached signature covers an entry's encoded bytes whole - origin, kind,
-  parents, the claimed content hash, and the bundle - so a rewrite of any of
-  those is a different signature, not the same one the log recorded. The log
-  also carries membership records, in entry format `octant.replica-entry/2`:
-  every entry's origin carries its writer's public key, and an instance id is
-  derived from that key, so whether a record is valid depends on its own file
-  alone. Who counts as a member is described under artifact replica
-  membership below.
-- **Artifact replica store.** A replica-store contribution offers list, get, and
-  put-if-absent. put-if-absent returns already-exists and leaves the existing
-  bytes unchanged. The store's status is ready, not-connected, or refused. A
-  disabled or uninstalled store is not offered and is not called. The in-tree
-  folder store writes only under `<folder>/Octant Sync/`. A write lands in a
-  temporary file in that same directory, then an exclusive hard link onto the
-  key only when that key is absent, so a published key is never replaced or
-  half-written. A half-written temporary file is not an entry. A
-  file the sync client has not downloaded, and a conflict copy the sync client
-  left behind, are reported instead of being treated as entries. A folder
-  outside the user's home is refused unless the standing access-outside-project
-  approval exists — the same rule as the artifact mirror's global folder. Its
-  Test connection writes one empty probe under `Octant Sync/.octant-probe/`
-  through the same confined write-once path, deletes nothing, and `list` skips
-  that directory. The
-  in-tree S3-compatible store sends every request to the configured endpoint and
-  only while sync is on. Its settings are the endpoint URL, region, bucket,
-  optional key prefix, and path-style or virtual-host addressing. The access key
-  and secret live in the host credential store — macOS Keychain or freedesktop
-  Secret Service — in the bucket-key namespace described under replica store
-  selection, and are never journaled. A plaintext endpoint is refused and
-  no credential is sent on it. A publish uses a conditional create
-  (`If-None-Match: *`); a provider that does not enforce it is configured to
-  fall back to HEAD-then-PUT, where a key is already unique to one host's
-  instance and sequence so a lost race cannot overwrite another host's entry. A
-  failure is a typed outcome — unauthorized, not-found, throttled, unreachable;
-  a throttled or unreachable answer is retried a bounded number of times with
-  backoff, while a rejected credential or a missing object is not. A Test
-  connection action writes one probe object in a reserved key namespace and
-  deletes nothing; `list` skips that namespace. Publish and pull are not this
-  store; they call it.
-- **Artifact replica membership, as wired today.** Membership is a pure
-  function of two inputs: the founder this computer pinned, and the set of
-  valid membership records it holds. Two computers that hold the same records
-  derive the same members, keys, parents, and cuts, whatever order they read
-  them in.
-  - **Records.** Every record is a write-once file at
-    `<instanceId>/<sequence>.json` with a detached Ed25519 signature beside it,
-    and its origin names the writer's id, name, sequence, and public key. The
-    instance id is the first 16 bytes of SHA-256 over the key's SPKI bytes,
-    written as a UUIDv8. A record is valid when its body decodes, its origin is
-    the path it is filed under, its id is its key's id, and the signature
-    verifies under that key; an approval is valid only when its subject is
-    its subject key's id. Nothing else is consulted, so every reader reaches
-    the same verdict, a key once admitted cannot be replaced, and an old key
-    is always the old identity. The kinds are `replica-founded` (the
-    founder's sequence 1), `join-request` (a joiner's sequence 1, with the
-    time it was written), `join-approved` (subject, key, and name),
-    `join-accepted` (signed by the joiner, naming the one approval it
-    accepted by writer, sequence, and SHA-256 of the approval file's bytes,
-    and the founder it pinned), and `revocation` (subject and cut, the last of
-    the subject's sequences that still counts; 0 means none). Version 1
-    entries fail closed.
-  - **Derivation.** Two different records in one slot can only both be signed
-    by the key holder, so a second one is evidence the key was stolen: that
-    computer is capped just before the slot, and records at or after it do
-    not count. Each computer's parent comes from its own lowest-sequence
-    `join-accepted`, and only when the approval it names is held, approves
-    that computer, and is not past such a cap. The parents form a tree from
-    the founder; nothing reaches a computer that is not in it. Standing is
-    then weighed top-down in one pass: a computer is admitted when its parent
-    is admitted and signed the approval at or before the parent's cut, and
-    its cut is the lowest cut named by a revocation that a strict ancestor
-    signed while admitted and at or before its own cut. An entry counts when
-    its writer is admitted and it sits at or before the writer's cut, so a
-    computer approved after its approver's cut is not admitted, and nothing
-    below it is either. Records the pass does not use - an approval nobody
-    accepted, a descendant's revocation of an ancestor, a ghost's records -
-    are inert. The founder cannot be revoked; losing its key means moving to
-    a new store.
-  - **Reading.** A pull lists the store and reads every slot this computer
-    holds no record in, from any instance, member or not, and keeps every
-    valid membership record it reads. It refuses nothing on the way in and
-    does not stop at a gap, so a record from a computer that is not a member
-    yet still counts once the approval admitting it arrives. A pull never
-    reads a slot again once it holds a record there, so a computer keeps the
-    first version of a slot it read; it detects a rewrite of that slot (two
-    records in one slot) only if it also came to hold the other version, as
-    the limits below say. A file that is not a valid record is reported
-    and journaled once. Valid artifact entries from the same read are then
-    reconciled, as artifact sync below describes.
-  - **Journal.** The `replica.*@2` events are inputs only: this computer's
-    identity and role, the founder it pinned (a founding identity pins
-    itself, so a host that stops right after creating it is still pinned), each valid record it holds
-    (bytes and signature, keyed by slot and hash), a signed local entry
-    whose publish has not landed, and diagnostics - unreadable files,
-    refused commands, and store failures. Members, keys, the tree, cuts, and
-    which entries count are derived on every read and never journaled as
-    facts. The projection is held in memory and rebuilt from the journal on
-    every start. Earlier `replica.*@1` membership names decode to nothing, so a journal
-    that holds them starts with no replica identity.
-  - **Commands.** The host serves create a replica, write a join request,
-    approve a join, confirm a join, preview a revoke, revoke, and pull on the
-    host-only `/api/replica-membership/commands` route. Creating a replica or
-    asking to join creates a new device key, and the id comes from it, so
-    asking again - after a request went stale, a revocation, or a cut that
-    removed this computer's approval - is always a new identity. Approving
-    needs a member in good standing - admitted with no cut - and only the
-    store's own signed copy of a fresh request from a computer that is not
-    in the tree can be approved. Confirming reads the store, finds the
-    approver's approval of this computer, and walks parent edges up from the
-    approver to the one founder they reach; each edge is a record its child
-    signed, so the walk is unique. It checks the matching code against the
-    approver's key and that founder, checks that an acceptance would admit
-    this computer, and only then pins the founder and signs `join-accepted`;
-    an identity has one parent forever. Revoking needs good standing and a
-    subject this computer brought in, directly or through others; a sibling
-    or cousin is revoked from a shared ancestor, the founder at worst.
-    Revoke reads the store first, then cuts at the highest sequence of the
-    subject's valid signed entries this computer holds or just read,
-    artifact entries included, so what the subject already signed keeps
-    counting; a store that cannot be read leaves that cut at the membership
-    records this computer already holds, and the result says so. A revoke
-    preview returns that cut, the computers the subject brought in that are
-    not revoked yet, each with its parent and the parent's sequence of its
-    approval, and the revocations the subject itself already wrote, each at
-    its sequence. A revoke can name some of the computers it brought in to
-    revoke in the same step, and can move the subject's cut earlier - before
-    one of its revocations, say - but never later. Each revocation is its own
-    publish; when the subject's lands and a later one stops, the result is
-    revoked-in-part and names the computers that were not revoked. Pull is
-    allowed to any computer with an identity. Settings › Sync reads a
-    membership view from the journal alone, on the same host-only route
-    family (`/api/replica-membership/state`): this computer's standing, the
-    admitted computers with their approver, whether each is revoked and
-    whether this computer may revoke it, fresh join requests with their
-    matching codes, and, on a joining computer, each member in good standing
-    of a replica it read with the code that member will show. A read-only
-    status view without codes, requests, ids, or revocability
-    (`/api/replica-sync/status`) is on the shared product dispatch, so a
-    paired device of this host can read it under `project.overview.read`;
-    the paired-browser shell shows it read-only.
-  - **Writing.** A command that publishes journals the signed entry before
-    either file is written, writes the signature and then the entry, and
-    journals the record as held once both landed. If a publish stops
-    part-way, the next command finishes it first with the same bytes and the
-    same deterministic Ed25519 signature; a finished identity's stopped
-    publish is dropped. A slot that already holds bytes this computer did
-    not write is journaled as slot-occupied and skipped, up to 32 slots in a
-    row; then the publish stops with a visible error. A person recovers from
-    that flood by deleting the files with the storage provider's own tools,
-    rotating the store credentials, or moving to a new store.
-  - **Limits.** A stolen founder key can revoke anyone and cannot itself be
-    revoked; recovery is a new store. A store, or a sync client that lags,
-    can show a computer fewer files, and a computer that has not read a
-    revocation keeps counting the revoked computer's later entries until it
-    does; records it already holds are never lost. A rewrite of a slot is
-    detected only by a computer that holds both versions; since a pull never
-    re-reads a held slot, a computer that read only the later version keeps
-    it, and computers that read different versions may differ until one of
-    them holds the other's. Anyone who can
-    write the store can mint valid records under fresh keys; they are inert
-    and cost only disk and time, within the listing bounds. A pull whose
-    listing does not end inside its bound is refused rather than read in
-    part. Approvals a stolen key made before the revoker read the store
-    still count under the default cut, which is why the revoke preview lists
-    them.
-  - **Keys.** Device signing keys live per instance in their own namespace of
-    the host credential store - a separate macOS Keychain service,
-    `app.octant.replica-device-keys.v1`, or a separate Secret Service
-    attribute - keyed by the derived id and reached through the credential
-    broker's device-key routes. The provider credential routes reach a
-    different namespace, so a provider instance created with the same UUID
-    cannot read, replace, or delete a device key. The private half never
-    leaves the host.
-  - **Not wired yet.** The membership service asks Settings › Sync's store
-    selection for its store on every command; with sync off or no store
-    chosen, every command answers a typed `not-configured` refusal and makes
-    no store call. Settings › Sync sets up a replica, joins, approves, and
-    revokes through these commands. Leaving a replica is not supported yet,
-    so a computer with a membership identity cannot change its store; leaving
-    a replica, and changing the store after it, are a follow-up.
-- **Artifact sync: publish and pull.** `ReplicaArtifactSyncService` and
-  `ReplicaArtifactImport` in `apps/server/src/replica/`.
-  - **Publish.** The Canvas service's committed-version hook - the seam the
-    0029 mirror listens on - hands every committed version to artifact sync,
-    whichever surface made it; a deletion is queued through the same service
-    as a tombstone over every version head this host knows. Nothing is
-    queued while sync is off or this host has no replica identity, nor for a
-    Code thread under Plan mode, so neither calls the store. Before queuing,
-    the title, every string a block carries, and each source's display name
-    pass the share filter; a version that fails, or exceeds the bundle size
-    bound, is journaled as a refused publish and never queued. A queued
-    entry is journaled first (`replica.artifact-queued@2`) with its kind,
-    artifact origin, parents (the previous local version), and the 0029
-    bundle whose header names the artifact's replica origin - the instance
-    that first published it, since every host calls itself `local` - plus
-    the Project name it is filed under. Drains run oldest first through the
-    membership service's single command line, at the identity's next free
-    slot, after finishing any stopped membership publish; only a member in
-    good standing drains. The entry is built for the slot it is about to
-    take, so a retry at that slot is the same bytes and the same signature,
-    and a publish that landed before the host stopped is found already
-    there. A landed slot is journaled inside that line
-    (`replica.artifact-published@2`), so a membership entry never takes it.
-    A publish that does not land stays queued, in order, across restarts, and
-    is journaled as a receipt once per reason
-    (`replica.artifact-publish-failed@2`); the local version is never
-    unwound. An imported entry is never published again.
-  - **Pull.** On host start, every five minutes, and on the membership pull
-    command, the read described above holds membership records and then
-    hands each valid artifact entry, in instance and sequence order, to the
-    import. The import refuses an entry whose text fails the share filter
-    (`unsafe-content`), runs the rest through `reconcileReplicaEntry` with
-    standing from the derived membership, and journals each outcome
-    (`replica.artifact-reconciled@2`): imported, already present, concurrent
-    head, or tombstone with the entry's exact text, or refused with its
-    reason and no content. A refusal is journaled once per slot and reason.
-    Refusals that depend only on the entry's bytes - content-hash mismatch,
-    a local artifact named as foreign, unsafe content - settle the slot; a
-    refusal that standing or another slot could change is read again by a
-    later pull. A store failure is the membership read's own receipt. An
-    entry reaches the import only after its signature verified under the key
-    it names, and only an admitted computer's entry within its cut is
-    imported, so imports from this person's own computers are not tainted as
-    untrusted; they enter no thread until bound.
-  - **Restore.** A computer whose identity is a member in good standing
-    restores the whole library on its first sync: a fresh or wiped
-    computer that joins gets every live artifact and its full version
-    history. The restore lists the store once and reads every slot this
-    computer holds nothing in, each computer's slots newest first, taking
-    one from each computer in turn, in batches of 25. Each batch takes the
-    membership command line once, so publishes and commands run between
-    batches; it holds membership records, then reconciles its entries with
-    `restoring` set, which lets a version or tombstone apply ahead of its
-    writer's earlier slots. Heads are derived from the whole set of
-    versions and tombstones, so the library a restore ends with does not
-    depend on the order it read them in, and every listed slot is read
-    before it finishes; a version id already held keeps the body it was
-    first held with. Comment entries still wait on their writer's earlier
-    slots. Entries that wait on another slot are tried again within the
-    same read while others keep applying. After the last batch, one pull in
-    writer order takes in what still waited, then the restore is finished.
-    The journal holds `replica.restore-started@2` (the identity and the
-    unread total), `replica.restore-progress@2` after each batch once its
-    entries are journaled, and `replica.restore-stopped@2`,
-    `replica.restore-resumed@2`, and `replica.restore-finished@2`. A restart
-    lists the store again and resumes at the next unread slot; slots read
-    before it are held, so nothing applies twice, and what the store gained
-    meanwhile is added to the total. A batch holds only the membership
-    records it read, so a revocation written after this computer confirmed
-    its join and read in a later batch does not undo entries an earlier
-    batch already imported - the lag limit membership already states,
-    narrowed by the join having held every record in the store when it
-    was confirmed. Until it finishes, the restore reads in
-    place of the interval pull. A person can stop it from Settings › Sync on
-    the host; a stopped restore stays stopped across restarts, and
-    background sync reads nothing from the store until the person resumes
-    it (publishing continues, and an explicit Check the store still reads).
-    Stop and Resume ride the host-only membership commands route
-    (`stop-restore`, `resume-restore`); the restore's state, read count, and
-    total are in the sync status, which a paired device reads without the
-    controls.
-  - **Comments.** The Canvas comment service tells artifact sync about each
-    comment change a person makes on this host. Only a Canvas the replica
-    carries - one this host published or imported - has its comments
-    published; a Canvas that never left this host keeps them here, as does
-    Plan mode and sync off. A change is queued in the same queue as versions
-    (`replica.comment-queued@2`) with `after` taken at that moment, and a
-    comment or reply whose text fails the share filter is journaled as a
-    refused publish and never queued. A pulled comment entry is first taken
-    into the Canvas's `canvas-comments` aggregate - as a comment or reply
-    whose origin names the writing computer (`replica`, with its instance id
-    and name), a resolve, or a deletion - and then journaled as kept, so a
-    host that stops in between reads the slot again and the second take
-    changes nothing. A change about a comment no longer held here changes
-    nothing, and so does one past this computer's per-Canvas comment or
-    reply budget: its slot settles, so a full thread does not hold the
-    writer's later entries behind it, and that change is not taken in later. Taken-in changes are never announced again, so they are not
-    published under this host's sequence. Comments land on the aggregate
-    whether or not the Canvas is open here, and show once it is. A purge
-    or Project erase drops queued comment changes and rewrites kept ones to
-    content-free erased slots, as for versions.
-  - **Library.** Imported versions and tombstones live in the in-memory
-    `ReplicaArtifactProjection`, rebuilt from those events on every start;
-    a restart part-way through a pull resumes from what was journaled and
-    reaches the same state. Heads are versions no version or tombstone names
-    as a parent, plus every tombstone. `replicaArtifactStanding` (domain)
-    derives what the person sees, counting this host's still-queued versions
-    as written here: `current`, `two-versions` (two or more version heads to
-    choose between), or `deleted` (every head is a tombstone). For a Canvas
-    held here, the version standing here is a candidate unless a version from
-    another computer revises it, and a head already in its own history is not
-    one; a single version from elsewhere that revises it is `ahead`. The
-    host-wide library lists, for a local window only, each synced artifact
-    this host holds no Canvas for, under the Project name it was filed under
-    and the name of the computer that wrote the version shown, with its
-    standing; a deleted one shows the version its tombstone named and the
-    computer that deleted it. A paired device sees none. Each held Canvas's
-    card carries the computer that wrote its current version once this host
-    has a replica identity, and its standing when it is not current. The
-    library query applies to synced entries: mode, kind, and text match (text
-    also matches the computer's name), and a Project filter or the Shared tab
-    matches none, since they have no Project or share here.
-  - **Binding (0040).** `SyncedArtifactService` serves the host-only
-    `POST /api/artifacts/synced` route; a paired device is refused before the
-    command is decoded. Opening a synced artifact binds it to a thread the
-    person chooses among those `decideReplicaArtifactBinding` finds
-    compatible from the thread's durable state: same mode, active thread,
-    active Project of that mode, a workspace the host resolves now, and not
-    Plan mode. It is checked again at the commit. The content first enters
-    the thread through thread external-content ingestion
-    (`replica-artifact:<canvas>:<version>`, labelled with the writer's name),
-    which taints it, then becomes the Canvas's first version there through
-    `CanvasService.adoptVersion`, which takes the thread, Project, and mode
-    from the authorized context and never from the bundle. The version keeps
-    its id, so the publish hook, which skips a version the replica already
-    holds, does not publish it again. Each source keeps the origin's replica
-    host id, so a refresh or Open here fails closed rather than resolving
-    another computer's references. With nothing compatible the command is
-    refused as `no-compatible-thread`, and the library names the mode to start
-    a thread in (offering to start one only for Chat, the kind it starts) or
-    leaves it unbound. Keep, Merge, and Restore refuse as `sync-off` before
-    committing anything when this computer cannot publish, re-check the bound
-    thread before recording ingestion on it, and report a version the share
-    filter or size bound kept here as refused rather than published. After each pull the sync service makes, a
-    bound Canvas takes in an `ahead` version the same way.
-  - **Resolving.** Keep this one publishes a version with the chosen content
-    whose parents are every candidate; Restore publishes one whose parents
-    are the tombstones' parents. Unbound, it is queued directly; bound, it is
-    the thread's next version through `adoptVersion`, with the parents handed
-    to the publish hook just before the commit. Merge needs a thread:
-    unbound, it binds the newest candidate first, then commits a version
-    through `CanvasService.revise` whose blocks are every candidate's
-    (`mergeReplicaArtifactBlocks`: both sides of a block changed differently
-    are kept, and a block naming a source the merged manifest lacks is left
-    out and counted), with every candidate as parents. None of these
-    overwrites a version or removes a tombstone. Keep and Restore of an
-    unbound artifact need sync on and a replica identity (`sync-off`
-    otherwise).
-  - **Erase.** A thread purge or Project erase also erases artifact sync's
-    copies of the Canvases it takes: a queued publish is dropped, and a kept
-    entry's event is rewritten to a content-free
-    `replica.artifact-slot-erased@2` that keeps its slot settled, so a later
-    pull does not import the erased content again. Published slots keep
-    their content-free record. Copies already in the store are not deleted.
-  - **Not built yet.** Confirming a join still reads every slot of the
-    store once without progress before the restore starts. Binding selects
-    an existing compatible thread; it
-    does not create one. Keep and Merge resolve version heads only: a
-    tombstone beside a revision stays a head, and the artifact stays
-    visible. A pull through the membership route rather than the sync
-    service takes `ahead` versions into bound Canvases on the next interval.
-    No product surface deletes an artifact today; a local erase or purge
-    stays local and publishes nothing. Versions committed before this host
-    had a replica identity are not published.
-- **Artifact replica store selection.** Settings › Sync chooses this host's
-  store: a synced folder, an S3-compatible bucket, or none, with a sync switch
-  that starts off. It is served on the host-only `/api/replica-store` routes,
-  which answer only a loopback host name and a local window, sit on the
-  loopback chain outside the shared product dispatch, and are a remote
-  local-only prefix, so a paired client can neither read nor change them. A
-  folder arrives as a candidate from the host's folder browser, which the host
-  resolves and judges inside home, never as a path. A bucket's settings carry
-  no secret: the access key and secret travel once, in the command that saves
-  them, into the host credential store, and the settings hold only an opaque
-  reference to that entry, which is removed when another store is chosen. The
-  key pair lives in a namespace of its own, keyed by that reference — a
-  separate macOS Keychain service, `app.octant.replica-store-credentials.v1`,
-  or a separate Secret Service attribute, `octant.replica-store-credentials.v1`
-  — reached only through the credential broker's bucket-key routes. Neither the
-  provider credential routes nor the device-key routes reach it, so a provider
-  instance or device key with the same UUID cannot read, replace, or delete a
-  key pair. Unlike a device key, a key pair is replaced when the person enters
-  a new one: the new pair is written to a fresh entry, the settings are
-  journaled to point at it, and only then is the old entry deleted; if the
-  journal write fails, the new entry is deleted and the old one stays in use.
-  A saved key pair is reused only for the same endpoint, bucket, and
-  addressing, the three that decide which server receives the signed
-  requests; changing any of them without a new key pair is refused as
-  `credentials-required`, so a key pair is never sent to a server it was not
-  entered for. A host with no credential broker cannot keep one, so saving a
-  bucket there is refused as `credential-store-unavailable` and only a folder
-  can be chosen. The choice is journaled whole as one host settings
-  aggregate, rebuilt on every start, and versioned, so two windows cannot
-  overwrite each other. Replay keeps the journal's head version even when the
-  newest frame does not decode: the last choice that does decode is kept with
-  sync off, so the next change is accepted and no store is called until the
-  person turns sync on again. Choosing or changing the store turns sync off, so the
-  person reads Settings' statement that the provider can read the files again
-  before turning it back on; saving a bucket with identical settings, such as
-  a new key pair alone, keeps sync as it was. Choosing no store asks for
-  confirmation in the page first, naming that sync stops and that a bucket's
-  key pair is removed from this computer. With sync off or no store, the selection is
-  `not-configured` and no store is opened or called; with sync on, the in-tree
-  folder or bucket store is opened as installed and enabled by the switch.
-  The store handed to a membership command re-reads the settings before every
-  store call and answers `not-connected` once sync is off or the settings it
-  was opened under have changed, so turning sync off mid-command stops further
-  calls. Test connection writes one probe file only while sync is on; with
-  sync on and a store that cannot be opened, it answers
-  `credential-store-unavailable` or `not-connected`.
-  While this computer belongs to a replica — it has a founder or joiner
-  identity in the membership projection — every command that would change the
-  store's kind or location (choosing a folder, a bucket's endpoint, bucket,
-  addressing, or prefix, or no store) is refused on the server as
-  `member-of-replica` before any side effect, and Settings › Sync says so and
-  disables those controls. Turning sync on or off, and a new key pair for the
-  same bucket, stay allowed.
+- **Artifact replica sync.** The entry format, store contract, membership
+  derivation, publish, pull, restore, comment sync, synced library, binding, and
+  store selection are specified in
+  [Artifact replica sync](design/artifact-replica-sync.md). Their boundaries:
+  membership is derived from signed, write-once records and never journaled as
+  a fact; only an admitted computer's entries within its cut are imported, and
+  an import enters no thread until a person binds it under that thread's
+  authority; store selection, membership commands, and binding are host-only
+  and refuse a paired device, which may read only the status view under
+  `project.overview.read`; store credentials and device keys live in their own
+  credential-store namespaces and never leave the host; and with sync off, no
+  store chosen, or Plan mode, no store call is made.
 - **Unsent composer drafts.** Each Chat, Work, and Code thread keeps one unsent
   composer draft in ordinary renderer storage on the client that typed it.
   Drafts are not journaled, not included in diagnostics, and not sent to a
@@ -2001,6 +1553,13 @@ flowchart LR
 The provider layer is defined by `@octant/provider-sdk` and implemented in
 `apps/server/src/providers`.
 
+- **Project provider policy.** A Project allows all providers (the default),
+  an explicit list of provider instances, or `eu-zdr`: a provider instance or
+  its selected model must carry an `eu` or a `zdr` data tag. Either tag
+  suffices, as the Project page says; `eu-zdr` does not by itself guarantee
+  zero retention. The host checks the policy before every Work and Code turn
+  and handoff, including child runs, and refuses a disallowed provider.
+
 - **Driver interface.** A `ProviderDriver` exposes `probe` (readiness and
   capability report without side effects), `acquire` (a `ProviderConnection`
   for a workspace), and tool verification. OpenCode and ACP probe refusals
@@ -2057,6 +1616,27 @@ modelId }`, and the model picker is provider-first. Discovery can find
   is created disabled. Discovery never installs or updates runtimes, never
   toggles an existing instance, and never treats enablement as readiness
   ([decisions/0112-first-run-claude-codex-enablement.md](decisions/0112-first-run-claude-codex-enablement.md)).
+- **Provider catalog.** Settings › Provider catalog lists the bundled
+  provider-driver packages (`bundledProviderDriverCatalog` in
+  `@octant/plugin-host`). Each entry is validated against the public
+  `ProviderDriverCatalogEntry` schema, which `@octant/plugin-api` re-exports
+  from contracts. An entry is only a driver's manifest. It refuses excess
+  properties (no install, trust, enable, credential, or capability claims),
+  declared capabilities, contributions, a second component, an entry point
+  other than `builtin:provider-driver/<kind>`, and any source other than
+  `bundled`. Outside drivers need their own design before the schema admits
+  them. The catalog repeats installed and trusted from the activation context
+  that admits the driver; it never sets them. `resolveProviderCatalogState` in
+  `@octant/domain` derives available, enabled, signed in, and ready separately.
+  It reads the registry, the last observations, and the last scan, with each
+  driver's modes and agent loop, and picks one next step that acts on the
+  configured instance when one exists. Opening the catalog starts nothing. A
+  scan, connect, enable, or connection check runs only from its step's button,
+  and sign-in, Locate binary, and credentials stay on the runtime's own card.
+  Discovery keeps one provider per driver family, as auto-registration does:
+  a discovery connect for a driver that already has a provider returns that
+  provider instead of creating a second one, and leaves its switch unchanged.
+  Ollama is set up as an endpoint, never from the scan.
 - **Driver families.** Direct HTTP drivers (OpenAI-compatible, Anthropic-
   compatible, Azure AI Foundry API-key, Ollama), image HTTP profiles
   (OpenAI Image and Gemini native image — never selectable as Chat, Work, or
@@ -2065,95 +1645,40 @@ modelId }`, and the model picker is provider-first. Discovery can find
   `acquire`, so its probe reports `unavailable` and it never reaches a
   picker), and ACP-based agent CLIs
   (Kilo, Devin, Mistral Vibe, Kimi Code, Grok Build, Goose, GLM Agent, Gemini CLI,
-  GitHub Copilot, Cline, Qwen Code, fx). The installed OpenCode binary's
-  version selects its routes: 1.x keeps the legacy session API and its
-  per-session permission ruleset. 2.x accepts no per-session ruleset, so each
-  launch writes its session posture — the same rules in 2.x action names
-  (`shell`, `subagent`), every namespaced tool and skill denied, and only that
-  connection's app-managed tool bridge allowed — into the private
-  configuration, where OpenCode appends it after every agent's built-in rules
-  (its default agent otherwise allows everything); a launch that names no
-  posture denies all. 2.0.22 answers the 1.x `POST /mcp` registration with
-  405 and has no per-launch MCP flag; it registers runtime MCP servers through
-  `PUT /api/experimental/mcp/{server}` (removed with `DELETE`), which Octant
-  uses for the bridge. A config-file `mcp` entry also works but connects
-  lazily after the first turn has started, so it is not used. Registration
-  turns Code Mode off for the bridge, so each tool is offered by name as
-  `<server>_<tool>` and matches the bridge allow rather than OpenCode's own
-  `execute` tool, and it waits until `GET /api/mcp` reports the server
-  `connected`, because the add answers while the server is pending and its
-  tools join a session only once connected; any other status fails the
-  registration closed. 2.0.22 names the calling session in the call's
-  `ai.opencode/sessionID` metadata, and the bridge refuses a call that names
-  another session. App-managed tools are reported only for 2.0.22 exactly,
-  the 2.x release the hostile-configuration check was repeated against, and
-  only on macOS, where the probe registers an empty bridge and OpenCode lists
-  its tools. Project resolution
-  starts Git, which the Chat, Plan, and Work jail refuses; on macOS those
-  launches get the failing `git` stand-in described under
-  [Security and authority](#security-and-authority), so 2.x offers turns in
-  every mode there; on Linux the probe fails closed and the runtime is listed
-  without turns. 2.0.22 names its turn events without the `session.next.`
-  prefix earlier 2.x builds used (`session.text.*`, `session.reasoning.*`,
-  `session.tool.*`, `session.step.*`, `session.execution.*`), identifies a
-  tool call by `id`, and names the tool only on `session.tool.input.started`;
-  Octant folds them onto the earlier names, so 1.x, earlier 2.x, and 2.0.22
-  share one mapping. `session.execution.succeeded` completes the turn, its
-  `failed` and `interrupted` outcomes fail or interrupt it (a `shutdown`
-  interruption holds it, below), and a scheduled retry reports nothing, so
-  the turn keeps running while OpenCode retries. Queueing, lifecycle, part start and end, and running
-  usage totals report nothing (each step reports its own usage); any other
-  event fails the turn closed with an error naming it. Approvals map
-  through 2.0.22's `permission.asked` event and its reply route, whose body
-  is `{decision}`. An approval is answered
-  `once`, never `always`, even when approvals are remembered for the Project:
-  `always` would save a grant in OpenCode's data directory, which it shares
-  with the person's own use, outside Octant's revocation. Approval-gated on
-  2.x honours permission grants the person saved in OpenCode itself for the
-  same repository: OpenCode keys them by the repository's root commit, keeps
-  them in its own data store (shared with the person's own use because
-  provider credentials live there), and applies them as allow after Octant's
-  rules. Octant's denies still win, so Plan and the Work shell and subagent
-  denials hold, and Octant itself never writes such a grant because it
-  answers approvals `once`. An edit allowed this way still fails the turn
-  through the file-change check, after the write; a shell command allowed
-  this way runs without an approval card. Clearing the saved grants in
-  OpenCode restores the prompts. A 2.x reject settles every pending request
-  in the session, so each settled request is forgotten. Questions are
-  unsupported: 2.0.22 serves no question routes and asks through forms, which
-  are not mapped, so the written posture denies `question` and a form that
-  still arrives fails the turn. Resume,
-  interruption, and tool activity are reported. A Stop the person asked for
-  (`user`) and OpenCode's own `superseded` and `inactivity` interruptions stay
-  ordinary interruptions; a `shutdown` interruption, or the OpenCode process
-  exiting under a running turn, is nobody's Stop, so the turn ends `waiting`
-  with a reason naming what happened, and nothing sends it again on its own
-  (Work, like Chat and Code, ends a turn on `waiting`); each allowed or approved edit
-  request admits one reported change to each file it names (resolved against
-  the project root; `*` admits one change to any file), rejecting one request
-  never withdraws another's grant, and a change to a file no remaining grant
-  names fails the turn; and anything not mapped fails
-  closed. The probe also asks the confined 2.x server to answer for a
-  directory carrying a Git marker, made in the launch's own scratch directory
-  because every launch profile denies the host temporary directory beneath
-  `/private`; it attests by creating a session there and then deletes that
-  session, best effort, because OpenCode keeps sessions in the data directory
-  it shares with the person's own use and their provider credentials. A
-  failed delete leaves one empty session and does not change the result. A
-  runtime that cannot answer (observed with 2.0.22 on macOS as HTTP 500
-  without the stand-in) reports `incompatible` with its models listed and
-  every capability unsupported, and no turn is offered. fx runs in a per-instance managed
+  GitHub Copilot, Cline, Qwen Code, fx).
+  OpenCode's version-selected routes, written session posture, tool-bridge
+  registration, event mapping, approvals, and readiness probe are specified in
+  [Provider runtimes](design/provider-runtimes.md#opencode). Their boundaries:
+  each launch writes its posture into its connection-private configuration,
+  and a launch that names no posture denies all; the tool bridge serves one
+  session and refuses a call that names another; approvals are answered
+  `once`, never `always`; Octant's denies outrank grants saved in OpenCode
+  itself; app-managed tools are reported only for the exact release the
+  hostile-configuration check covered, and only on macOS; and anything not mapped fails the turn
+  closed. fx runs in a per-instance managed
   home because its ACP entrypoint exposes no profile-path variable; see
   [fx-acp-compatibility.md](fx-acp-compatibility.md) and
-  [0130](decisions/0130-fx-runs-in-a-managed-home.md). Image profiles are
+  [0130](decisions/0130-fx-runs-in-a-managed-home.md). fx is refused in Chat
+  and Plan before any process starts, runs its `ask` mode below Full access
+  and `code` only on Full access, authenticates only with a broker-held AI
+  Gateway API key, and cannot read or write the Project root's `AGENTS.md`,
+  `.mcp.json`, `.fx.json`, or `.agents`. Image profiles are
   recorded in [decisions/0055-image-generation-provider-profiles.md](decisions/0055-image-generation-provider-profiles.md).
-  Generation itself is a journaled job with OpenAI and Gemini adapters, a
+  Generation itself is a journaled job with adapters for the dedicated image
+  kinds `openai-image`, `gemini-native-image`, `bfl-image` (Black Forest Labs),
+  and `ideogram-image`, and for an OpenAI-compatible custom image source, a
   bounded generated-image attachment scope, and usage rows attributed as
-  `image-generation`; see
+  `image-generation`. A job uses exactly one profile; a safety refusal ends it
+  and is never retried elsewhere; a job found queued or running after a
+  restart fails as interrupted and is never resent. Adapters accept only
+  inline image bytes, and the journal holds attachment references and a
+  prompt hash, never image bytes or prompt text. See
   [decisions/0056-image-generation-jobs-and-adapters.md](decisions/0056-image-generation-jobs-and-adapters.md).
   The **Image generator** surface (profile menu, host-wide `image-library`
   scope; see
-  [decisions/0081-image-generation-is-its-own-surface.md](decisions/0081-image-generation-is-its-own-surface.md))
+  [decisions/0081-image-generation-is-its-own-surface.md](decisions/0081-image-generation-is-its-own-surface.md);
+  any registered window may use the `image-library` scope, while thread scopes
+  keep thread authority and the agent tool generates only into its own thread)
   and an app-managed `octant_create_image` tool invoke that job service
   through `/api/image/` when an enabled image profile exists (a dedicated
   image provider, or a custom image source named in Settings › Image
@@ -2188,7 +1713,32 @@ modelId }`, and the model picker is provider-first. Discovery can find
   app-managed tools, images, resume, approvals, and subagents are supported.
   The server disables what is unsupported instead of emulating it, and a
   composer reads the same probe before offering an app-managed tool — an
-  incapable provider never shows the offer it would refuse on send. Bounded
+  incapable provider never shows the offer it would refuse on send. Whenever
+  the host reports a runtime to a client (the registry snapshot and a
+  Connection Check result) it attaches an `integration` derived in
+  `@octant/domain/provider-runtime-integration` from the driver kind and that
+  observation; drivers never set it and it is not stored. It states three
+  facts. **Octant tools** is `available` with its transport, or `unavailable`
+  with a reason (`not-confirmed`, `model-verification-required`,
+  `runtime-not-confirmed`, `no-transport`). The transport per runtime:
+  direct endpoints (OpenAI-compatible, Anthropic-compatible, Azure AI Foundry)
+  use `request-tool-calls`; Claude uses `sdk-tool-server`, the in-process tool
+  server its Agent SDK connection owns; Codex uses `app-server-dynamic-tools`;
+  OpenCode and every ACP driver use `session-mcp-bridge`, a loopback HTTP MCP
+  server registered with one session; Pi uses `session-tool-bridge`, a
+  loopback bridge its extension calls; Ollama, Oh My Pi, and image profiles
+  have none. Each transport is owned by the provider connection, so none writes
+  provider MCP or hook configuration ([0006](decisions/0006-acp-agent-drivers.md),
+  [0093](decisions/0093-app-owned-tools-use-managed-runtime-transports.md),
+  [0121](decisions/0121-provider-owned-cli-runtime-and-updates.md)).
+  **Activity** reuses the fleet `activitySource` vocabulary: `session` with the
+  event kinds the live session reports, or `none` when no session runs here.
+  **Resume** is `precise` for a provider-owned conversation whose driver
+  resumes its session, `best-effort` for a host-owned conversation whose
+  history Octant plans again from the journal, and `none` otherwise. Settings ›
+  Providers & Models shows the three facts on each runtime card, and the
+  composers offer neither `@Browser` nor `@Computer` for a selection whose
+  runtime does not carry Octant's tools. Bounded
   provider subprocesses run under a deny-default profile: Seatbelt via
   `sandbox-exec` on macOS, Bubblewrap (`bwrap`) on Linux. Missing the backend
   selected for the host platform fails closed as incompatible.
@@ -2352,6 +1902,14 @@ Octant sent inside the prompt is counted. Per runtime:
   figure and no categories. The ACP driver reports no usage at all, so an ACP
   thread shows no window. Lists of tools, MCP servers, skills or instruction
   files exist in some runtimes but carry no token weight, so they are not parts.
+
+  Pi usage is accumulated from completed assistant messages, not streaming usage
+  snapshots. Input totals include uncached, cache-read, and cache-write tokens; context
+  occupancy describes the latest model call. Totals reset for each turn, including
+  retained native processes. If a completed assistant message omits valid usage,
+  the turn remains unknown rather than presenting a partial total. Only provider-reported
+  costs are carried on its usage events, and historical turns are not rewritten.
+
 - For a runtime that reported none, the turn runner counts what Octant itself
   registered with the session: the app-managed tool definitions, which travel
   with every request. They are `octant-tools`, `conservative-heuristic` (the
@@ -2368,13 +1926,14 @@ prompts therefore holds one copy per turn, and a running total is right only
 while every copy is accounted for. The adapter, which knows its runtime, says on
 each usage report what the runtime does with the prompt (`promptRetention`):
 
-| Runtime           | What earlier copies do                                                                                                                                                                                                                                                                       | `promptRetention`                                                                         | Source                                                                                                                            |
-| ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| Codex app-server  | Each turn's input is a `userMessage` in the thread and is sent with every later request. Compaction rebuilds the thread from a summary and as many recent user messages as fit in 20,000 tokens, so what survives is Codex's choice. Octant sees compaction as the `contextCompaction` item. | `kept`, or `compacted` for the rest of a turn in which a `contextCompaction` item arrived | `build_compacted_history` and `COMPACT_USER_MESSAGE_MAX_TOKENS` in codex-rs `core/src/compact.rs`; the item in `codexProtocol.ts` |
-| OpenCode          | Each prompt is a user message sent again with every request. A completed compaction sends the summary and at most a recent tail of messages. Octant sees `session.compacted` (1.x), `session.next.compaction.ended` (2.x) and `session.compaction.ended` (2.0.22).                           | `kept`, or `compacted` for the rest of a prompt in which compaction ended                 | `filterCompacted` in opencode `packages/opencode/src/session/message-v2.ts`; the events in `@opencode-ai/sdk`                     |
-| Pi                | Each prompt is a session entry sent with every request. A compaction keeps a summary and the entries from `firstKeptEntryId` on. Octant sees `compaction_end`; one without `result` (aborted or failed) changed nothing.                                                                     | `kept`, or `compacted` when a `compaction_end` with a `result` arrived during the prompt  | Pi's JSON event stream docs (`packages/coding-agent/docs/json.md`, `compaction_start`/`compaction_end`)                           |
-| ACP agents        | Each agent manages its own history; the protocol says nothing about what it keeps or compacts, and the driver reports no usage.                                                                                                                                                              | absent                                                                                    | ACP driver (`acpDriver.ts`, usage `unavailable`)                                                                                  |
-| Any other adapter | Not determined.                                                                                                                                                                                                                                                                              | absent                                                                                    | —                                                                                                                                 |
+| Runtime           | What earlier copies do                                                                                                                                                                                                                                                                                                                                                                                                     | `promptRetention`                                                                         | Source                                                                                                                            |
+| ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| Claude Code       | Each prompt is a user message in the session and is sent with every later request. Compaction keeps a summary and at most the messages the boundary lists as preserved, so what survives is Claude Code's choice. Octant sees compaction as the `compact_boundary` system message (`auto` or `manual`). The runtime's own `getContextUsage` categories win when it answers, so this matters only for reports without them. | `kept`, or `compacted` for the rest of a turn in which a `compact_boundary` arrived       | `SDKCompactBoundaryMessage` (`compact_metadata.preserved_messages`) in `@anthropic-ai/claude-agent-sdk` `sdk.d.ts`                |
+| Codex app-server  | Each turn's input is a `userMessage` in the thread and is sent with every later request. Compaction rebuilds the thread from a summary and as many recent user messages as fit in 20,000 tokens, so what survives is Codex's choice. Octant sees compaction as the `contextCompaction` item.                                                                                                                               | `kept`, or `compacted` for the rest of a turn in which a `contextCompaction` item arrived | `build_compacted_history` and `COMPACT_USER_MESSAGE_MAX_TOKENS` in codex-rs `core/src/compact.rs`; the item in `codexProtocol.ts` |
+| OpenCode          | Each prompt is a user message sent again with every request. A completed compaction sends the summary and at most a recent tail of messages. Octant sees `session.compacted` (1.x), `session.next.compaction.ended` (2.x) and `session.compaction.ended` (2.0.22).                                                                                                                                                         | `kept`, or `compacted` for the rest of a prompt in which compaction ended                 | `filterCompacted` in opencode `packages/opencode/src/session/message-v2.ts`; the events in `@opencode-ai/sdk`                     |
+| Pi                | Each prompt is a session entry sent with every request. A compaction keeps a summary and the entries from `firstKeptEntryId` on. Octant sees `compaction_end`; one without `result` (aborted or failed) changed nothing.                                                                                                                                                                                                   | `kept`, or `compacted` when a `compaction_end` with a `result` arrived during the prompt  | Pi's JSON event stream docs (`packages/coding-agent/docs/json.md`, `compaction_start`/`compaction_end`)                           |
+| ACP agents        | Each agent manages its own history; the protocol says nothing about what it keeps or compacts, and the driver reports no usage.                                                                                                                                                                                                                                                                                            | absent                                                                                    | ACP driver (`acpDriver.ts`, usage `unavailable`)                                                                                  |
+| Any other adapter | Not determined.                                                                                                                                                                                                                                                                                                                                                                                                            | absent                                                                                    | —                                                                                                                                 |
 
 From that the turn runner builds the parts (`octantWindowBreakdown` in
 `apps/server/src/code/codeTurnContext.ts`):
@@ -2396,8 +1955,9 @@ From that the turn runner builds the parts (`octantWindowBreakdown` in
   (`retention-unknown`, `compacted`, `history-unknown`), the copies stay in
   `Other (provider)`, and the session stays uncounted until it ends. Nothing is
   estimated from a guess about what a runtime kept.
-- Thread and file mentions, issue context, a fork's handoff and product feedback
-  are part of the turn's own request; they stay in `Other (provider)`.
+- Thread and file mentions, issue context, a fork's or provider switch's
+  handoff and product feedback are part of the turn's own request; they stay in
+  `Other (provider)`.
 
 The renderer shows the parts and one remainder, `Other (provider)`, which is the
 reported occupancy less the parts and is itself marked estimated when any part
@@ -2431,7 +1991,11 @@ task binding, and resume supplies the currently allowed tool catalogue without
 reconstructing native history. Chat and Work reuse provider-owned sessions across
 follow-ups; Chat retries retain that identity and native scratch files. Native
 Chat editing refuses where rollback is unavailable, so it cannot replace the
-conversation behind the user's back ([0157](decisions/0157-native-resume-keeps-a-durable-identity.md)). A separate replay checkpoint imports existing Code reports on
+conversation behind the user's back. Resume refuses as `stale-resume` when the
+cursor's binding names another provider instance, Octant session, Project
+root, mode, or native id, and at most one live or starting process may own a
+native session per provider instance, refused before spawn otherwise
+([0157](decisions/0157-native-resume-keeps-a-durable-identity.md)). A separate replay checkpoint imports existing Code reports on
 upgrade without replaying unrelated purged usage. The provider and model are
 those recorded when the turn started, including after a later handoff. These
 turns have no Octant planning estimate or variance: APIs omit those fields and
@@ -2550,13 +2114,166 @@ the same provider instance resumes the same native session only when the driver
 reports the `modelSwitch` capability; the resume carries the thread's current
 model and the turn records it on the session. Codex restates the model and its
 reasoning effort on each turn, and Claude resumes the SDK session under the new
-model. Any other driver, and any change of provider instance, still fails
-closed, and a started Code thread's model picker offers only the choices its
-next turn will accept. Work and Chat also refuse
+model. Another model on any other driver still fails closed. In Code, a
+change of provider instance starts a new session with a provider-switch
+handoff (below); in Chat and Work it still fails closed. A started Code
+thread's model picker offers its own provider's models only where its next
+turn will accept them, and every other provider. Work and Chat also refuse
 a follow-up that switches between provider-owned and host-owned conversation
 history; switching adapters cannot implicitly replace an existing native task.
+A Chat branch (`branch-chat-thread`, also behind a Chat checkpoint's restore)
+refuses as `unsupported` before creating anything when the source's provider,
+or the provider of the last completed attempt it would carry, owns its
+conversation, or when that attempt's provider can no longer be resolved: the
+native session already holds the source's later turns, and a copied attempt
+has no resume cursor of its own, so the branch could only refuse its first
+message. Host-owned conversations branch as before, because the
+branch's next turn is planned again from its own journaled copy. The Chat
+transcript omits Fork, Branch from here, and Restore from here on a turn the
+host would refuse this way, reading each listed provider's kind through the
+shared `providerKeepsConversation` policy; a provider the picker does not
+list is left to the host, so the renderer never hides a branch it would accept.
 Work also refuses when the previous driver is unavailable and its conversation
 ownership cannot be established.
+
+**Provider-switch handoff (Code).** A Code turn whose last recorded session
+belongs to another provider instance on the same checkout starts a new session
+on the thread's current provider; it never resumes or names the previous
+session to the new provider. The turn carries a disclosed text handoff built by
+the same selector that admits a child's parent context
+(`admittedParentCodeContext`, purpose `provider-switch`): the thread's own
+accepted prompts and completed replies, at most 24 blocks of 4,000 characters
+including the summary block, each attributed to its provider and model, with
+the thread's taint and every omission counted (earlier messages, purged or
+oversized bodies, empty bodies, unfinished replies, attachments, truncation).
+Reasoning, tool bodies and attachments are never read. The switching turn's
+own prompt is excluded from the selection because it is sent as the prompt.
+The host checks that what the selector returned is this thread's in this
+Project before using it.
+
+The handoff is journaled on the turn's operation as `context-handoff-attached`
+when the new session is ready and before the prompt is sent: the previous and
+new provider, model and session, the counts and taint, a content-store
+reference to the exact blocks sent, and fixed `nativeSessionTransferred` and
+`hiddenReasoningTransferred` values of `false`. A start recovered after a
+restart reads that record back instead of selecting again, so it sends the
+handoff first disclosed and journals no second one; a recovery after the new
+session was recorded sends the journaled handoff again with the prompt, since
+the provider may never have received it. A selection that changed since the
+record refuses. The conversation page carries a summary of the record on the
+turn (`handoff`), and the transcript shows what was handed over and that hidden
+reasoning, tool activity and the previous session did not transfer. While the thread's selection names a provider other than the one its session
+is on (the provider of its last finished reply, or of a later switching turn
+whose handoff was journaled, which happens only once the new session is
+ready), the composer says the next message starts a new session with a
+handoff.
+
+**Fork handoff (Code).** A fork's first session (no session recorded on the
+fork yet) carries the source's conversation through the fork point, never
+past it. When the fork's provider instance and model can take up the
+source's own session there (today only the Octant Harness, `seedCodeForkHarnessSession`,
+below), the fork resumes that copy and is sent no text. Otherwise, including
+every fork onto a provider instance other than the one that wrote the fork
+point, it reads the source through the same selector (purpose `fork`,
+bounded `throughOperationId`): the source's accepted prompts and completed
+replies up to and including the named turn, with the same bounds,
+attribution, taint and omission counts. The named turn must be found or the
+read refuses (`source-point-unavailable`); a whole-thread read refuses when
+the thread moved during the read, but a read through a fork point covers only
+settled turns, so the source running a later turn does not refuse it. The
+host re-reads the source's record, authorizes the sending window against the
+source's Project, and requires the source to be in the fork's Project before
+reading, then checks that what came back is that thread's.
+
+Either way the turn journals `context-handoff-attached` before the prompt is
+sent, with the fork origin and the fork's provider and model: reason `fork`
+with the counts, taint and a content reference to the exact blocks sent, and
+fixed `false` native-session and hidden-reasoning values; or reason
+`fork-native-session` with `nativeSessionTransferred: true` and no content.
+A recovered start reads that record back like a provider switch's: a text
+record is sent again without reading the source, and a native record whose
+copy cannot be taken up again refuses rather than sending text it did not
+disclose. The handoff is given once: a later turn has its own session. A first
+turn that can neither resume nor build the text handoff refuses with a named
+reason (the source unreadable to this window, in another Project, removed, its
+fork point gone, nothing readable left, history beyond the bounded scan, or a
+handoff that could not be saved). The conversation page carries the summary
+as the turn's `handoff`, and the transcript says what carried over and that
+the source's later replies (and, for text, its session, hidden reasoning and
+tool activity) did not. Other runtimes that can fork a session natively
+(Claude, Codex) still use the text handoff until a driver seam reports a
+fork-at-point capability.
+
+**A fork that later switches providers (Code).** A forked thread's
+provider-switch handoff also carries the conversation the fork inherited,
+whichever way its first turn received it: the selector (`inherited`) reads the
+source through the fork point first, then the fork's own turns, into one window
+under the same 24-block bound. The oldest inherited messages are the first left
+out, counted in `earlierMessages`; the fork's own newest turns are kept.
+Inherited messages are labelled as forked-conversation excerpts and name the
+source thread, the summary says the thread is a fork, and the summary metadata
+attributes both reads with their own taint. The host authorizes the sending
+window against the source's Project and requires the source to be in the
+fork's Project before reading it, exactly as for a fork's first turn, then
+checks that what came back is that source's. A source that is unreadable,
+removed, moved to another Project, missing its fork point, changed during the
+read, or with no readable message among those the budget kept refuses the switch with a named reason that says the source is the
+cause; it is never silently dropped, because the transcript shows the inherited
+turns and the new provider must not answer as if it had seen them. The
+journaled `provider-switch` record gains `inherited` (the fork origin, how many
+carried messages came from the source, and the source's taint); its
+top-level `messages` and `omissions` cover both reads and its top-level taint
+stays the thread's own. A recovered start reads the record back as for any
+switch, refusing if the thread's fork origin no longer matches it. The source
+read covers only the source's own turns: a fork of a fork does not also carry
+what its source inherited.
+
+**Merge-back (Code).** A person can merge a fork's conversation back into
+the thread it was forked from with the `merge-code-fork-context` command,
+naming one of the fork's finished turns. It is an explicit action on the fork
+and approval-free, because it only adds context: nothing runs, no model
+summarises anything, and the fork's file changes reach the source only through
+Git review (the existing worktree merge-back). The host authorizes the window
+against the fork and the source, requires both in one Project, and reads the
+fork's own turns through the same selector (purpose `fork-merge-back`), after
+the fork's previous merge back (`afterOperationId`, which must be found) or
+from the fork point, through the named turn, with the same bounds,
+attribution, taint and omission counts. The fork's inherited copy of the
+source is never sent back. The result is journaled on the source as
+`fork-context-merged`, under an operation of its own, with a content reference
+to the exact blocks and fixed `false` native-session and hidden-reasoning
+values. Merges are deduplicated by fork and end turn: a merge through the
+fork's last merged turn is refused (`already-merged`), and one with no new
+readable turn is refused (`nothing-new`); the check and the append run without
+yielding, so two merges cannot both pass. At most 64 merges may wait for the
+source's next turn (`merges-pending` beyond that), so the bounded journal read
+that finds waiting merges always holds them all. Outside content the fork took in
+taints the source (`external-content`, label `fork-merge-back`) before the
+merge is appended. Refusals are values on the command result
+(`fork-context-merge`): unsupported, not a fork, source unavailable or
+unauthorized, another Project, a missing or unfinished end turn, already
+merged, nothing new, too many merges waiting, an unreadable fork, or a merge that could not be saved.
+
+The source's next turn carries the oldest merges no turn has carried yet, at
+most two (`MAX_CODE_FORK_MERGE_BACKS_PER_TURN`; later ones wait), after any
+provider-switch or fork handoff and before the turn's own context, and
+journals one `fork-context-delivered` per merge on its operation before the
+prompt is sent, beside the handoff. Merges are carried in order, so the newest
+delivered record says which merges are still pending. A recovered start reads
+its own delivered records back instead of choosing again; a merge whose text
+cannot be read refuses the turn rather than dropping it. The conversation page
+carries the summaries as the turn's `forkMergeBacks`, and the transcript says
+how many messages came from a fork, what was left out, and that hidden
+reasoning, tool activity and file changes did not transfer.
+
+A switch that cannot hand over refuses before the new provider is acquired,
+naming why: no host selector, an unavailable or foreign thread or Project
+(for a fork, its own or the inherited source's),
+no recorded or readable conversation (for example every body purged), a
+conversation that changed during the read, an inconsistent page, a history
+beyond the bounded scan, or a journaled handoff that can no longer be read or
+saved. A model change within a provider that cannot carry its session, and a
+change of checkout, still refuse as before.
 
 Optional Project and
 thread spend ceilings (0060) are host owner policy over four dimensions:
@@ -2643,7 +2360,14 @@ native harness in `apps/server/src/harness`:
   results return in one message in call order. A request that outgrows the
   endpoint is shrunk in the request only — older tool results first, then
   whole earlier exchanges behind a note — and refused if the latest message
-  alone does not fit. When the endpoint still rejects a request as too large,
+  alone does not fit. The lead has no tool to read a cut exchange back: the
+  note tells it that its task list and the files on disk still reflect that
+  work, and the journal keeps the full conversation for people, replay, and
+  export. A journal lookup tool was specified once but never wired to a store,
+  so it only ever reported itself unavailable and was removed; the note names
+  no turn or sequence the model could ask for, and Chat and Work start a fresh
+  session each turn, so a lookup needs those handles and a thread-scoped read
+  of the rebuilt history before it can return. When the endpoint still rejects a request as too large,
   the loop recognises the refusal as a filled context window (OpenAI's
   `context_length_exceeded`, Anthropic's "prompt is too long", or the 400 or
   413 shape from an OpenAI-compatible host), shrinks it one further ladder
@@ -2684,7 +2408,9 @@ native harness in `apps/server/src/harness`:
   own messages, tool calls, and results instead of a text summary. A turn
   begins with the one user message `send` journals for it, and the copy is cut
   at the turn after the named one; the copy refuses — and the fork reads the
-  text handoff instead — unless the transcript holds exactly the turns the
+  journaled text handoff instead (see "Fork handoff (Code)") — unless the
+  copy's binding is the fork's provider instance and model, the turn is
+  still admitted, and the transcript holds exactly the turns the
   source ran on that session, the named turn finished, and its last step
   settled. Copied paths under the source's checkout are rewritten to the
   fork's worktree, and the secret values the fork's turn resolved are
@@ -2729,8 +2455,13 @@ native harness in `apps/server/src/harness`:
 - **Egress and hostile content.** Inference and tool egress are separate
   paths. A direct-endpoint request goes from the server process to the
   configured base URL only, carries the credential, and refuses any redirect
-  without following it. `web-fetch` sends no credential and no model-chosen
-  header, method, or body (its arguments are a URL and a size), so a public
+  without following it. The stored key belongs to the base URL it was entered
+  for: changing an OpenAI-compatible, Anthropic-compatible, or Azure AI Foundry
+  endpoint's base URL deletes its stored key before the change is journaled,
+  and refuses the change if the key cannot be deleted, so the person enters a
+  key again for the new server. Changing only other settings keeps the key.
+  `web-fetch` sends no credential and no model-chosen header, method, or body
+  (its arguments are a URL and a size), so a public
   inference host sees an anonymous GET and a local one (Ollama, LM Studio) is a
   private destination it refuses. Private means loopback, unspecified, RFC 1918,
   CGNAT, link-local (including cloud metadata), multicast, and reserved IPv4;
@@ -2766,18 +2497,10 @@ native harness in `apps/server/src/harness`:
   reaches only the search endpoint the person configured, so the tool-call
   policy instead refuses a tainted thread's query that looks like it carries
   data, under every posture and before any request leaves, with a named
-  reason such as `search-query-refused-under-taint: contains a URL`. A query
-  is refused when it is longer than 200 characters; contains a URL (a scheme,
-  `www.`, a dotted name ending in letters or a punycode `xn--` label, with or
-  without a trailing root dot, followed by a path, query, or fragment,
-  optionally after a port, or an IPv4 address followed by a port or
-  path); contains an email address; contains a run of 16 or more hex digits;
-  contains three or more `%XX` or `\xXX` escaped bytes in a row; contains a
-  base64 run (24 or more base64
-  characters mixing upper case, lower case, and digits, or 16 or more ending
-  in `=` padding); or contains a token of 20 or more characters, split on
-  whitespace and path punctuation, that mixes letters and digits at 3.5 or more
-  bits of Shannon entropy per character. `searchQueryRefusalUnderTaint` in
+  reason such as `search-query-refused-under-taint: contains a URL`. The
+  patterns that count as carrying data (length, URLs, email addresses, hex
+  runs, escaped bytes, base64, and high-entropy tokens) are specified in
+  [Search queries on a tainted thread](design/search-query-taint.md). `searchQueryRefusalUnderTaint` in
   `packages/domain/src/untrustedContentPolicy.ts` decides; untainted threads
   are unchanged. Residual risk: a short plain-word query can still carry a few
   words, but only to the endpoint the person chose. Revisit if a default
@@ -3123,87 +2846,42 @@ five-minute approval; stop, cancellation, changed authority, or disable revokes
 control. Observations carry window and element identities, with screenshots
 for image-capable models. Application content remains untrusted.
 
+Computer observations verify that the requested window still belongs to the
+current application process before requesting its accessibility state or pixels.
+A vanished window returns a window-unavailable refusal directing the caller to
+list current windows; stale IDs are never silently retargeted.
+
 On Apple Silicon macOS, Electron main owns the official CuaDriver SDK and its
 private embedded child. The authenticated loopback broker is available only
 to Octant's host process; its credentials never enter provider children.
 Settings exposes plugin enablement, macOS permission setup, the driver version,
-and update controls. The app bundles a pinned, publisher-verified driver and
-checks upstream daily by default. Verified updates stage privately, activate
+and update controls. The app bundles a pinned, publisher-verified driver. The
+driver runs under Octant's macOS permissions, so it checks upstream daily only
+when the person turns automatic updates on in Settings › Computer use; it is
+off by default, a saved choice is kept, and a manual Check for updates still
+works. Verified updates stage privately, activate
 only while idle, and retain the previous version if startup fails. The driver
-never uses a standalone CuaDriver installation. See
+never uses a standalone CuaDriver installation. Plan refuses computer-use
+control. See
 [decisions/0113-computer-use-plugin-and-driver-updates.md](decisions/0113-computer-use-plugin-and-driver-updates.md).
 
 **Managed device tools.** The iOS Simulator and Android emulator panes ride
-upstream streaming tools (`serve-sim`, `serve-avd`) that Octant vendors like
-the Computer-use driver: each release is a pinned npm tarball the packager
-verifies against the registry's published `dist.integrity` (sha512) and lands
-in `Resources/managed-tools/<tool>` with its license. Electron main owns the
-per-tool instances; tools launch under the desktop runtime
-(`ELECTRON_RUN_AS_NODE` with `process.execPath`), never a system Node. Tools
-run unconfined under Octant's signed identity: no sandbox profile limits them,
-and macOS may attribute their access to Octant's privacy (TCC) grants. They
-need `simctl`, the Simulator's frameworks, and the shared `adb` server, and
-Octant has no confinement profile for them yet. Octant narrows what they
-inherit instead: each
-launch receives only an allowlisted environment (`PATH`, `HOME`, user and
-locale variables, `TMPDIR`, `DEVELOPER_DIR`, and the Android SDK and `adb`
-variables), never provider keys, tokens, broker credentials, or other `OCTANT_*`
-values. The same updater state machine as the driver checks
-`registry.npmjs.org` daily only when the person turns automatic updates on in
-Settings › Device tools; it is off by default, a saved choice is kept, and a
-manual check or Update still works. A newer release stages with its dependency closure resolved
-in-app (no npm or Bun is available inside the packaged app), each package
-integrity-verified, and activates only while idle and after its entrypoint
-survives a smoke launch. A staged tree that cannot start keeps the previous
-release. Settings shows each tool's channel, version, and update state.
-Verification is the registry's package-level integrity hash — npm publishes
-no per-package signature — so the design pins URL plus hash and reports
-honestly when they disagree. OpenCode is a descriptor on this same channel,
-not a second updater. Version checks use the `@opencode/cli` registry
-package; the staged bytes are the host's platform package at that version.
-Its wrapper lifecycle script is never run. The platform binary is not
-vendored into the app; Update stages it into the managed location on demand.
-Settings › Providers shows the installed and available versions, an Update
-action, and the reason when a check or activation fails. A release that fails
-verification or does not start keeps the previous managed copy. Update never
-replaces a binary outside that managed location. Choosing Octant's copy
-switches the provider's configured path to the managed executable; it does
-not overwrite an OpenCode the person installed elsewhere. See
-[decisions/0162-managed-npm-device-tools-share-one-release-channel.md](decisions/0162-managed-npm-device-tools-share-one-release-channel.md).
-
-The Simulator pane attaches `serve-sim` for an already booted Simulator and
-keeps the desktop device helper when that stream is missing or produces no
-frame. The Android pane attaches `serve-avd` for an already booted
-`emulator-<port>` serial and keeps `adb` screencap and `adb shell input`
-otherwise. Boot still uses the emulator binary. The tools run in Electron
-main. The server reaches Android streaming through a loopback broker
-(`OCTANT_SERVE_AVD_BROKER_URL`, `OCTANT_SERVE_AVD_BROKER_TOKEN`) the same way
-it reaches the Simulator device helper. Each attach request carries the SDK
-root the server discovered. The broker accepts only an absolute root that,
-once normalized, holds `platform-tools/adb`, and runs `serve-avd` with that root as
-`ANDROID_HOME` and with `ADB_MDNS=0`, so the tool uses the server's `adb` and
-any shared `adb` server it starts stays up. `serve-avd` prints its ready state
-as indented JSON over several lines, and the broker reads the whole object. Its
-`stream.mjpeg` carries JPEG parts, or PNG parts when the emulator image cannot
-encode `screencap -j`; the server cuts parts by `Content-Length` and passes
-either image type to the pane.
-When the tool is missing, exits, or does not attach in time, the broker
-answers with that reason. Every Android screen stream names its transport in
-`x-octant-android-transport`: `stream`, or `screencap` with the reason the
-stream is not used (no desktop, not an emulator, tool missing, tool exited,
-timed out, desktop unreachable, or no frames). The pane shows it as a quiet
-"Live stream" or "Snapshots, live stream unavailable: …" line, and an input
-sent through `serve-avd` says so in its evidence. An agent must not launch
-Simulator.app, `serve-sim`, or `serve-avd`.
+upstream streaming tools (`serve-sim`, `serve-avd`) that Octant vendors as
+pinned, integrity-verified npm releases. Electron main runs them under the
+desktop runtime, never a system Node, and each launch receives only an
+allowlisted environment, never provider keys, tokens, broker credentials, or
+other `OCTANT_*` values. They run unconfined under Octant's signed identity.
+Automatic updates check the npm registry only when the person turns them on in
+Settings › Device tools (off by default), and never run an upstream installer
+or lifecycle script. OpenCode's managed copy rides the same channel. Packaging,
+signing, staging, resolution, and the streaming attach and fallbacks are
+specified in [Device workbench](design/device-workbench.md#managed-device-tools).
 
 ### Plugin boundaries and remaining extraction
 
 The approved design bounds a feature's reach through public, provider-neutral
 ports. New providers and tools use `@octant/provider-sdk`, `@octant/plugin-api`,
 and `@octant/plugin-host`; they do not gain direct access to host internals.
-A replica-store contribution offers list, get, and put-if-absent. The
-synced-folder store ships in-tree on that seam and writes only under the
-folder the person picked.
 Integration and board modules receive typed, capability-scoped ports, without raw
 filesystem, shell, or credential handles. OAuth access and refresh tokens remain
 in the host credential service; plugin state contains only opaque references.
@@ -3222,6 +2900,7 @@ feature is already an independently packaged plugin:
 | Browser/computer use, agent hierarchy, remote/mobile, Apple workbench | Only presentation and optional adapters are extraction candidates; core capability, lifecycle, and security remain app-managed |
 | Marketplace and plugin registry                                       | Stay in the host because they admit and activate other components                                                              |
 | Provider drivers                                                      | Bundled vendor plugins through provider-sdk; generic ACP transport and honest-capability enforcement stay host-owned           |
+| Image adapters (OpenAI, Gemini, BFL, Ideogram)                        | In-tree adapters the image job service picks directly; move behind the provider seam, image jobs stay host-owned               |
 
 The schema API, renderer contribution registry, vendor driver admission,
 Integration port, and plugin-module Settings/sidebar seams exist. The API is a
@@ -3250,6 +2929,15 @@ gate. The connector marketplace hold remains in force.
 The full threat model lives in the security documentation; the load-bearing
 mechanisms are:
 
+- **Local authority needs the bridge secret.** Nothing reachable on loopback
+  grants window authority by itself. Electron and the CLI present the desktop
+  bridge secret, which only the host's OS user can read from the owner-only
+  runtime directory; a browser presents a one-time launch token minted with
+  that secret and bound to its origin. Another OS user, an `ssh -L` forward,
+  or a proxy that rewrites `Host` reaches the listener but gets no capability
+  (the local client context under [Process topology](#process-topology) has
+  the flow).
+  Paired remote clients keep their own device-session path, unchanged.
 - **Server-side tool-call policy.** A tool call from a model is a petition, not
   a grant. Every call resolves through the closed tool catalog, the mode's
   capability matrix, the thread's elevation state, and the actor's authority
@@ -3263,7 +2951,27 @@ mechanisms are:
   a Work thread takes its access from Settings › Work when it is created —
   ask-first (the default) or auto-accept-edits — and keeps it; the host sets
   it, not the renderer, and a goal-loop round uses it only when the loop's own
-  ceiling allows auto-accept-edits too. Nothing else about a Work turn widens:
+  ceiling allows auto-accept-edits too. A goal-loop round runs as the host,
+  under the same per-process host scope a
+  [routine](#modes-chat-work-and-code) runs under, never through a window: it
+  runs with no window open, an open window lends it neither identity nor
+  Project binding, its turn is journaled as the host's `system` actor, and the
+  ordinary Work turn path still rechecks the thread, its active Work Project,
+  and the round's authority. A loop pauses while Work is turned off, since no
+  window stands in for the mode switch, and a round's turn rechecks the switch
+  at admission, so turning Work off while a round is being prepared refuses
+  it. An approval a round raises is
+  offered the way a routine's is, to the local windows bound to its Project.
+  A goal-loop round marks a checkpoint before it starts when its thread has
+  one to mark; a Work folder has none, because a checkpoint anchors a Chat
+  turn or a Code operation, a Work turn's record of what changed in its folder
+  names paths without their contents, and Work holds no Git. A round without
+  a checkpoint runs only when its effective authority is approval-gated, so a
+  person approves every write, and its recorded round carries no checkpoint
+  id. Under auto-accept-edits, and under Plan (a Work round has no read-only
+  path, so it would still write what a person approves), the loop pauses as
+  `checkpoint-unavailable` and says so in its panel. A checkpoint that fails to mark reads as none.
+  Nothing else about a Work turn widens:
   it stays confined to the Project root, and providers without an auto-accept
   path keep asking;
   Full access is a remembered, per-Project decision. The host records that
@@ -3278,14 +2986,29 @@ mechanisms are:
   remembering, and the terminal has no way to ask for more. A composer
   turn may
   request a narrower posture; the server clamps it to the thread's grant
-  and records the posture the turn ran under. Compatible harnesses may
-  answer those prompts themselves when the thread opts in
-  (`docs/decisions/0104`); categories and confinement stay Octant's.
+  and records the posture the turn ran under. A Code thread's `autoApprove`
+  flag lets a compatible harness's own reviewer answer the prompts Octant
+  would otherwise surface. It says who answers, not what is permitted:
+  categories, the sandbox, egress, and credential reach stay Octant's. It is
+  effective only on approval-gated or auto-accept-edits, only when the
+  provider reports `harnessAutoReview: "supported"`, and only while the thread
+  has not ingested untrusted content (unknown taint counts as ingested); it is
+  set with the posture through `change-code-thread-access` and clamped and
+  inherited with it. Claude runs `permissionMode: "auto"` with Octant's
+  callbacks still registered. Codex sends `approvalsReviewer: "auto_review"`
+  on approval-gated only (`codexExecutionSettings`): both prompting postures
+  run Codex `read-only`, so an in-root patch edit escalates, and Codex's
+  reviewer is thread-wide and keeps those requests from the host, so on
+  auto-accept-edits it would answer — and could deny — the edit the posture
+  waives. The waiver outranks the delegation, so a Codex auto-accept-edits
+  thread with `autoApprove` still asks the person about commands and network.
+  Octant never classifies a command as in-root-only from its text instead:
+  Codex reports `commandActions` as `unknown` for a plain `> file` redirect.
   One provider-owned exception is accepted: on OpenCode 2.x, approval-gated
   honours permission grants the person saved in OpenCode itself for the same
   repository, so such an action runs without an Octant prompt. Octant's
   denies still win, and Octant never writes such a grant; the
-  [providers](#providers) entry on OpenCode states the details.
+  [OpenCode runtime specification](design/provider-runtimes.md#opencode) states the details.
   The access picker also offers "Lower thread" to durably return a thread to
   approval-gated and revoke a session-only Full-access grant for that window
   without confirmation.
@@ -3332,6 +3055,17 @@ mechanisms are:
   answer, and turn end are journaled stream events, and a Code browser-origin
   approval that expires or is abandoned — which journals nothing — publishes
   `code-navigation` itself.
+- **Fleet activity.** `GET /api/fleet-activity` returns the threads that need
+  the calling window's person and the threads that are running, needs you
+  first, at most 64 with a `truncated` flag, each naming its mode, title,
+  Project name, and `activitySource` (`journal`, `session`, or the reserved
+  `screen`, which can never say needs you). It composes the pending-requests
+  read, the Code requests and decisions each local window with a persisted Code
+  binding could answer, and each mode's own navigation run state, and adds no
+  authority or state.
+  It is local-window only under the same rules as pending requests: outside
+  every forwarded prefix, no remote action, and a paired device's principal is
+  refused. The [desktop menu bar](#desktop-menu-bar) is its reader.
 - **Turn decisions.** A Work or Code turn that cannot continue without the
   person's choice ends its reply with one closing `octant-decision` block: an
   ask (one line, at most 110 characters) and one to four options (at most 60
@@ -3367,16 +3101,23 @@ mechanisms are:
   says what clears it where the person is, not only in a log. "Connect Claude
   for helpers in Settings › Claude Code." is the shape.
 - **Sandbox.** Git, terminals, test runners, extension executables, and every
-  provider `--version` read launch through one shared confinement port, and so
-  do provider runtimes except where the confinement matrix below says a
-  runtime is unwrapped. On macOS that is
+  provider `--version` read launch through one shared confinement port
+  (`ProcessConfinementPort`), and so do provider runtimes except where the
+  confinement matrix below says a runtime is unwrapped. On macOS that is
   `sandbox-exec` with deny-default Seatbelt profiles; on Linux it is Bubblewrap
   (`bwrap`) with private `/tmp`, bound roots, and no unconfined fallback,
   recorded in [decisions/0057-linux-confinement-bubblewrap.md](decisions/0057-linux-confinement-bubblewrap.md).
+  The child runs `--unshare-all`, regains the network only when egress
+  resolves to `allow`, dies with its parent, and gets a new session except for
+  interactive terminals. The synthetic root is read-only, deny paths are
+  covered by empty read-only tmpfs mounts, and a launch carrying Seatbelt
+  `extraRules` is refused as `incompatible`.
   Plan and Chat also load a seccomp filter that denies process-creating
   fork/clone (while allowing `clone` with `CLONE_THREAD` for pthreads) and
   `execveat` after start, because Bubblewrap cannot block the first `execve`
   ([decisions/0068-linux-plan-process-deny.md](decisions/0068-linux-plan-process-deny.md)).
+  A launch that needs that filter fails closed as `incompatible` on a CPU
+  other than x64 or arm64 or without an executable `/bin/sh`.
   Sensitive system roots remain denied even where runtime compatibility
   requires a broad file-read rule; each launch's exact roots are re-allowed
   after those denials. On macOS every launch, in both egress modes, can read
@@ -3419,8 +3160,17 @@ mechanisms are:
   | Codex app-server (`codexProcess.ts`)                                      | Unwrapped                       | Unwrapped                                           | Not limited by Octant                            | Codex's own `read-only` sandbox                |
   | Oh My Pi (`ohMyPiProcess.ts`), readiness probe only                       | Unwrapped                       | Unwrapped                                           | Not limited by Octant                            | No turn runs                                   |
 
-  Codex is unwrapped because one app-server carries every thread on a provider
-  instance, so it has no one root to bind. The ACP/OpenCode/Pi row has one
+  Codex is unwrapped because its app-server is leased once per provider
+  instance: `providerRuntimeRegistry` keys runtimes by `instanceId`, so one
+  process carries every thread on that instance, each choosing its own root
+  and `sandbox` at `thread/start`. No profile is exact for all of them, and one
+  wide enough for all of them is not a boundary. That exception closes when
+  the lease is keyed by the thread's root and execution policy, as an OpenCode
+  connection is. Claude is a gap, not an exception: one process per query
+  already carries one thread's authority, and its remaining postures close as
+  its per-query spawn callback prepares a confined launch for them.
+  `providerProcessConfinement.test.ts` refuses a new module that launches
+  without the shared builder unless it is named here. The ACP/OpenCode/Pi row has one
   carve-out from "no exec or fork". On macOS, an OpenCode 2 Chat, Plan or Work
   launch may fork and may exec exactly `/usr/bin/false`, which is its Git
   stand-in (described below). Oh My Pi's probe is a held gap, not
@@ -3461,6 +3211,13 @@ mechanisms are:
   scan perform before a runtime starts is wrapped too, with no root, no home, no network and one
   throwaway scratch directory it may write, per
   [decisions/0146-a-version-read-launches-confined.md](decisions/0146-a-version-read-launches-confined.md).
+  Its environment is an allowlist (path, locale, user, terminal, time zone,
+  its scratch directory, and the family's guards), so provider credentials
+  and config-home variables are dropped; its process group is killed when the
+  read settles. Credential-reading readiness probes are not version reads and
+  still run unconfined: Claude's `auth status --json` and discovery's
+  `authProbeArgs` read the person's own sign-in state, a standing gap like
+  Oh My Pi's probe.
   OpenCode 2 runs `git rev-parse` at startup to resolve its project, and the
   Chat, Plan, and Work jail denies fork and exec outright. Rather than widen
   the jail to a real Git binary, a macOS 2.x launch gets a private stand-in: a
@@ -3477,6 +3234,46 @@ mechanisms are:
   exists to close, so a 2.x Chat, Plan, or Work launch on Linux keeps fork
   and exec denied. The probe fails closed and the runtime stays listing-only
   there until Linux confinement can express the narrow per-path exec grant.
+  Discovery re-allowances — a runtime asking whether a path exists and what it
+  resolves to, not to read it — follow one rule. Each names an exact literal
+  node, never a subpath, so entries inside it stay denied; a subpath grant is
+  admissible only for a system-owned tree with no user content (the Simulator
+  cryptex mount under `/private/var/run`). The verb is the weakest measured to
+  work: `file-read-metadata` by default, `file-read-data` on a directory node
+  only where metadata was measured insufficient, never on a file whose contents
+  are not needed. The set is closed: only nodes the runtime actually probes and
+  that exist are granted. Each rides the launch that needs it (`extraRules` or
+  an explicit input flag), never the shared profile default, and is emitted
+  after the denials because Seatbelt applies the last matching rule. OpenCode
+  2's tool-home probe (`openCodeDiscoveryRules`) is the shape: literal
+  metadata and read-data on `~/.claude` and `~/.agents`, metadata on
+  `~/.claude.json`, while `~/.claude/settings.json` stays unreadable and
+  unprobed homes such as `~/.codex` stay denied. Reading a person's
+  configuration content or reaching outside the bound root is not discovery.
+  A denial in this class usually surfaces as an empty result with exit 0, not
+  an error, so a fix is proven from the runtime's own output, not its exit code.
+  Confined Git reads no configuration from the person's home: every launch sets
+  `GIT_CONFIG_GLOBAL=/dev/null` and `GIT_CONFIG_NOSYSTEM=1`, and a commit takes
+  its author from the host's recorded identity when the checkout names none. In a
+  linked worktree it may read the metadata its own worktree names — the
+  `gitdir` the bound root's `.git` file points at and that directory's
+  `commondir` — and nothing else outside the bound root
+  (`gitLinkedWorktreeMetadataPaths`). Because the `.git` file is writable by
+  anyone who can write the checkout, the grant requires Git's reciprocal
+  record: the `gitdir` sits in a `worktrees` directory, its `gitdir` file
+  points back at this marker, and its `commondir` resolves to the main
+  repository's `.git`. On macOS each ancestor of the two paths gets literal
+  `file-read-metadata` only, for Git's component-by-component walk, plus
+  literal reads of the two xcode-select links the `/usr/bin/git` shim needs;
+  on Linux the same paths are bound, and only when they exist. Write on that
+  metadata is off by default and requested per launch (`writable`), only by a
+  mutation launch whose policy in force is not Plan: the rules are appended
+  last and would otherwise outrank the launch's own read-only posture.
+  Observation stays read-only for every caller; mergeability runs
+  `merge-tree --write-tree` against a quarantined object directory that reads
+  the real objects through an alternate. A launch names every directory it
+  writes outside the bound root, since on Linux an unnamed one under the
+  private tmpfs does not exist for the confined process.
   Toolchain commands the Android workbench issues keep their own deliberate
   carve-out: `~/.android` — the AVD store, adb keys, and emulator lock files —
   plus a non-empty `ANDROID_AVD_HOME` when configured are bound read-write even
@@ -3487,14 +3284,29 @@ mechanisms are:
   builder refuse every Android command.
   The Apple `test` action stays confined too, and splits so the extra reach
   touches only the phase that needs it: `build-for-testing` runs under the
-  ordinary profile while `test-without-building` carries a closed set of
-  measured per-launch grants through `extraRules` — literal reads of the SDK
-  index plist and the launchd socket's ancestors, read-write over the
-  per-boot launchd session socket family, four named `mach-lookup` services,
-  the pseudo-terminal pair it allocates, `job-creation`, and `signal` for
-  the session's stale-app teardown — recorded with each measurement in
-  [decisions/0159-a-confined-apple-test-carries-its-measured-grants.md](decisions/0159-a-confined-apple-test-carries-its-measured-grants.md).
-  No other Apple launch receives any of them.
+  ordinary profile, which keeps the project's Run Script phases away from the
+  widened reach, while `test-without-building` carries a closed set of
+  per-launch grants through `extraRules`, never the shared profile default:
+  literal `file-read*` on `~/Library/Developer/Xcode/SDKToSimulatorIndexMapping.plist`;
+  literal `file-read-metadata` on `/private`, `/private/var`, and
+  `/private/var/tmp`; `file-read* file-write*` over
+  `^/private/var/tmp/com\.apple\.launchd\.[^/]+(/.*)?$`, the per-boot launchd
+  session socket family; `mach-lookup` on `com.apple.PowerManagement.control`,
+  `com.apple.testmanagerd.control`, `com.apple.dt.instruments.dtarbiter.xpc`,
+  and `com.apple.dt.instruments.dtsecurity.xpc`; `pseudo-tty` with
+  `file-write*`/`file-ioctl` on `/dev/ptmx` and `/dev/ttys<N>`;
+  `job-creation`; and untargeted `signal`. No other Apple launch receives any
+  of them. Xcode's `IDETestProgressNotification` post stays denied: it is
+  cosmetic to a CLI run.
+  _Rationale:_ each grant is the weakest spelling that cleared a measured,
+  fatal refusal — an empty destination list, an aborted power assertion, an
+  unreachable session socket, "Pseudo Terminal Setup Error", a runner that
+  could not launch, and hangs at `testmanagerd`, the DT arbiter, and "Testing
+  started" — and no single grant unblocks the run alone. `signal` is the
+  broadest: the session kills a stale app copy it did not fork, and denying it
+  hangs every later session; the launch still cannot read user files, open the
+  network, or leave its root. A future xcodebuild refusal is measured and added
+  to this list, never to the shared profile.
   Apple builds prepare a private derived-data directory per action and grant
   writes to that directory only for its `xcodebuild` phases. Run installation
   reads its product from the same directory without write access; XCTest
@@ -3542,6 +3354,27 @@ mechanisms are:
   Project inactive or rebound ends the terminal the same way. A host restart
   ends a terminal still recorded as running as `host-restarted`, since its
   process did not survive.
+- **Terminal shell configuration.** On macOS a thread or Project terminal is
+  the person's login shell (`-l`), and its read roots add, read-only and only
+  where they exist, the shell's rc and login files, the framework trees they
+  source, and the tool homes PATH points into, each listed in
+  `apps/server/src/code/terminalProcessPort.ts`. The rest of the home stays
+  enumerated as denied and writes stay in the bound root and the shell's own
+  state directory. A file is named wherever a file is enough. A directory is
+  granted only when the tool reads it as a tree: a framework (`~/.oh-my-zsh`,
+  `~/.config/fish`) sources files throughout it, and a version manager's shims
+  resolve to toolchains elsewhere in its home (`~/.local/share/mise`,
+  `~/.asdf`, `~/.pyenv`, `~/.rbenv`, `~/.volta`, `~/.nvm`, `~/.bun`,
+  `~/.rustup`), so naming only the shim directory still breaks every command
+  behind it. No listed directory is where a tool keeps credentials; a home that
+  shares its directory with one is granted by its executable subdirectory
+  (`~/.cargo/bin`, never `~/.cargo`), and credential homes such as `~/.ssh`,
+  `~/.aws`, and `~/.config/gh` are never listed. Homebrew and other prefixes
+  outside the home are already readable. A path a rc sources that is not
+  listed fails at the prompt as a permission error rather than widening the
+  grant; adding one is a change to the list under this rule. On Linux the
+  shell's HOME is its state directory with a minimal rc, so none of this
+  applies there.
 - **Project browsing contexts.** A person may open a browser for a Work or Code
   Project with no thread, under the same separation: it is the person's
   browser, never an agent's. Its page lives in its own isolated, ephemeral
@@ -3633,6 +3466,11 @@ mechanisms are:
   remembered owner-only under the data directory (the boundary that holds the
   host identity key), including its TLS key, and re-enabled when the server
   starts; a server shutdown keeps it and only a local disable forgets it.
+  A paired client may click, scroll, and press keys in the host's agent
+  browser, but may not navigate it, type into it, or close a tab. Those clicks
+  and keys can still follow a link or submit a form within the context's
+  approved origins; the host's navigation guards refuse any page outside them,
+  so a paired client cannot take the host browser to a new origin.
 - **Artifact replica membership.** Each replica entry carries a detached
   Ed25519 signature from the device signing key the writing host holds for its
   replica instance, in a credential namespace of its own that provider
@@ -3687,7 +3525,10 @@ mechanisms are:
   not a new trust boundary. Conflicting facts stay under their owning host;
   create and mutation routing name one destination and refuse when that host is
   not routable — they never queue offline work or convert one host's read model
-  into authority on another.
+  into authority on another. An all-hosts list keeps every registered host;
+  an unreachable host's cached items stay listed as stale and read-only, and
+  an authority-bearing mutation is allowed only on a host whose read model is
+  ready.
 - **Local servers and Running services.** Listener observation is ephemeral,
   scoped to listening sockets of the current user, and never journaled. One
   classifier decides what may be listed at all: a system daemon, another user's
@@ -3724,70 +3565,22 @@ mechanisms are:
   consent times out. Tokens stay in the credential broker. The journal records
   the terms acknowledgment (who and when) and the public sign-in state, never
   an access token, refresh token, authorization code, or verifier. A remote
-  principal cannot acknowledge terms, start the flow, or refresh. A revoked,
+  principal cannot acknowledge terms, start the flow, or refresh. Starting a
+  sign-in without a recorded acknowledgment of that descriptor's terms is
+  refused (`terms-required`). A revoked,
   expired, or reused refresh token is a typed sign-in-again state and drops the
   stored grant. The API-key path remains available beside that sign-in.
   [0111](decisions/0111-host-driven-provider-oauth.md) stays a Proposed
   historical record; this section is the effective rule.
-- **Subscription sign-in dialects.** The host OAuth runner speaks vendor wire
-  dialects beside the standard PKCE path. The OpenRouter dialect exchanges the
-  code for a user-controlled API key (no refresh token, no expiry). The
-  ChatGPT plan dialect ("Sign in with ChatGPT") registers the host as a
-  user-defined agent on first sign-in: the authorize request carries the
-  placeholder client id `dynamic_agent_client`, an `agent_name_hint`, and the
-  host's stable id as `ext_agent_host_id` (derived once from the host's data
-  directory and bound by the server before the first sign-in — never invented
-  by the catalog). The loopback callback returns the issued `oaiapp_…` client
-  id, which is stored and used for the exchange and every refresh — never the
-  placeholder. The exchange and refresh send `resource=https://api.openai.com/v1`
-  and no client secret. The identity token from the authorization-code exchange
-  is validated against the issuer's JWKS (RS256 signature, issuer, audience,
-  expiry, and the per-attempt OIDC nonce) before the grant is stored; the
-  verified `sub`/`email`, the issued client id, the retained identity token
-  (for `id_token_hint` on reauthorization), and the stable host id live on the
-  stored grant. Reauthorization is addressed by the instance's stored
-  credential ref — the host does not scan the credential store, because
-  production stores cannot list their entries. It reuses the issued client id,
-  sends `id_token_hint`, and omits the agent name hint. The reauthorization
-  callback may omit `client_id`; the issued id used in the authorize request
-  is retained, and a different `client_id` is refused. A refresh that returns
-  no identity token keeps the prior identity. A refresh that returns one is
-  checked for signature, issuer, audience, expiry, and subject equal to the
-  stored subject — not for a nonce, because refresh does not send one.
-  When the granted scopes omit `chatgpt.tokens.use.direct`, the sign-in is
-  still valid as identity-only and the access result reports
-  `subscriptionUsageGranted: false`, the provider-neutral seam field drivers
-  use to refuse subscription-billed turns. A refresh answered with
-  `invalid_client` means the issued client is gone, so the grant is dropped
-  and the person signs in again. Sign-out revokes the refresh token at the
-  issuer's discovery `revocation_endpoint` before the local grant is dropped;
-  the endpoint must share the issuer's origin, and only a 2xx answer counts
-  as revoked. When the issuer does not confirm, the grant is kept and the
-  person is told the sign-in is still active; they can retry or sign out on
-  this computer only, which deletes the local grant and says the issuer was
-  not told. A re-sign-in that replaces a grant always deletes the replaced
-  grant's local material, revoking it first when the issuer answers, so no
-  refresh token is left in the credential store without a pointer. The plan
-  route's request profile is enforced before send: `store:false` and
-  `stream:true` are mandatory, `input` is an array carrying the full
-  history, system text travels as
-  `instructions` (an explicit system-role message item is rejected), a fixed
-  parameter set is omitted entirely, and only function tools are allowed —
-  hosted tools are refused. A request that cannot be expressed is refused
-  with a typed reason, and the route's `subscription_sharing_*` error codes
-  map to user-facing states (usage limit with a manage-usage link, bounded
-  backoff on unavailability, unauthenticated on 401/403). The plan contract
-  covers Responses turns, not model enumeration, so Check connection reads
-  the route's `/models` answer through the profile: a model list is reported
-  as discovered, whether the OpenAI `{data:[{id}]}` shape or the plan's own
-  `{models:[…]}` listing (id from `slug`, then `id`, then `name`; display
-  name, a positive integer context window, and `input_modalities` kept when
-  present; unmappable
-  items skipped); a body that is not a model list, no mappable item, a route-not-served status, a
-  403, a missing model-read scope, or an empty list is a degraded, worded
-  "models can't be listed" state carrying the manual model IDs, never a
-  protocol failure. Credential, usage-limit, and availability answers keep
-  failing the check with their typed states.
+- **Subscription sign-in dialects.** The host OAuth runner also speaks vendor wire
+  dialects beside the standard PKCE path: OpenRouter exchanges the code for an
+  API key, and the ChatGPT plan dialect registers the host as a user-defined
+  agent. Each keeps the host-driven sign-in rule above, and tokens stay in the
+  credential broker. In the ChatGPT plan dialect, the identity token is
+  validated before a grant is stored, a replaced grant's local material is
+  deleted, and a request the plan route's profile cannot express is refused
+  before send. The wire details are in
+  [Provider runtimes](design/provider-runtimes.md#subscription-sign-in-dialects).
 - **Update feed signing keys are per ring.** The desktop updater verifies a
   feed's Ed25519 signature against the compiled-in keys of the ring the signed
   release names, before any other field is believed. Stable trusts only the
@@ -3842,11 +3635,66 @@ nothing first-party.
 
 ## Current Release Boundary
 
-The agent contract in `AGENTS.md` owns the Current Release Boundary wording.
-The first shipping surface is the Apple Silicon technical preview with the
-provider-neutral plugin and skill marketplace, signed and self-updating per
-[0034](decisions/0034-signed-updates.md). Cross-platform desktop is authorized
-and sequenced by [0058](decisions/0058-cross-platform-desktop.md).
+The [Current Release Boundary in `AGENTS.md`](../AGENTS.md#current-release-boundary)
+is the one statement of what the first release includes and defers. This
+section owns the architectural rules behind it. On macOS, Squirrel.Mac refuses
+a replacement that does not satisfy the running app's designated requirement,
+so signing, notarization, and update ship as one deliverable.
+
+Desktop is one product on macOS, Linux, and Windows; platform differences are
+fail-closed posture, never a second app. The desktop process owns its local
+server on every OS. The sequence is the Linux desktop shell, then the Linux
+AppImage with its signed feed, then Windows. Windows packaging, installers,
+feeds, and packaging CI wait for an explicit maintainer decision after Linux
+parity. Windows Work and Code stay unavailable until an approved Windows
+confinement design is documented: the confinement port supports only macOS
+and Linux and refuses every other platform, so Work and Code fail closed
+there. Simulator, the Apple workbench, and vibrancy stay macOS-only.
+
+**Updates** (`apps/desktop/src/appUpdateService.ts`, `appUpdateFeed.ts`,
+`packages/domain` `appUpdatePolicy`):
+
+- Trust comes from the feed signature, never the host. Octant verifies an
+  Ed25519 signature over the canonical encoding of the feed's `release`
+  object (the wrapper's `schemaVersion` is validated, not signed) against a
+  public key compiled into the app, then requires the offered release to be strictly newer and to name
+  this platform, architecture, and the ring the app asked for. The artifact's
+  SHA-256 is inside the signature and the downloaded bytes are hashed before
+  anything installs.
+- On macOS the platform updater is then handed the verified bytes through a
+  loopback feed Octant serves for the install, never the public feed, and
+  checks the code signature as an independent second gate. A Linux AppImage
+  is not code-signed, so the feed signature and artifact hash are its whole
+  trust root: Octant replaces only the image it was launched from (`APPIMAGE`)
+  atomically, and refuses a package or archive launch before any request. A
+  platform with no signed channel (`supportsSignedDesktopUpdateChannel`:
+  macOS and Linux today) refuses with "untrusted-signature".
+- Unverifiable is refused, never downgraded: an unparseable feed, unknown key,
+  version that is not strictly newer, wrong platform or ring, unreachable
+  service, or mismatched artifact yields no install, no override, and a
+  refusal naming the check. The exact two-field empty document
+  (`"status": "empty"`, schema version 1) means no release in this channel,
+  not that the build is current.
+- Rings are `stable` (tags), `preview` (scheduled `main` builds), and
+  `candidate` (on-demand builds of a chosen ref, so a test install exercises
+  the real update path) at `<base>/<ring>/<platform>-<arch>.json`. A build's default ring is read from
+  its version; the signed ring field is what separates the streams. The base
+  is overridable but must be HTTPS.
+- Release notes for an offered update ride inside the signed release (at
+  most 4,096 characters) and fail with it; notes for the running build are a
+  bundled file read from disk, so What's New never adds a request.
+- The person controls application: an update is staged and applied on a
+  relaunch they start, and install waits while agents are active or a thread
+  needs attention. Automatic checks are a setting; the host starts with them
+  off until the persisted choice arrives, then checks daily. A check is a
+  plain GET carrying only version, platform, and architecture (the ring is in
+  the path); it is not a telemetry channel.
+
+Historical rationale: [0034](decisions/0034-signed-updates.md) and
+[0058](decisions/0058-cross-platform-desktop.md). 0058's ban on any updater
+for an unsigned build predates the Linux AppImage feed; the rule above, where
+the signed feed is the trust root for an image that has no platform signing,
+is current.
 
 Artifact replicas, when the person turns sync on, go only to a store that
 person owns — a synced folder or an S3-compatible bucket. Octant operates no
@@ -3854,12 +3702,10 @@ storage and no relay for them. The storage provider can read the files. That
 does not open a hosted relay or an Octant cloud account. See
 [0163](decisions/0163-artifact-replicas-in-storage-the-user-owns.md).
 
-Two holds stay Later until documented approved designs, published seams, and an
-explicit maintainer request open them:
-[connector / OAuth marketplace and full LSP / extension host / debugger](release-boundary-holds.md).
-The [roadmap Later](roadmap.md#later) list names the same deferrals among
-others. Neither hold is opened by plugin work, a first-party Integration, or
-Monaco and external-editor handoff.
+The start gates for the connector / OAuth marketplace and full LSP /
+extension host / debugger holds are in
+[release-boundary holds](release-boundary-holds.md). Neither hold is opened by
+plugin work, a first-party Integration, or Monaco and external-editor handoff.
 
 ## Development loop
 
@@ -3876,7 +3722,8 @@ bun run verify     # paths:check, wiring:check, decisions:check, fmt:check, lint
   restart of `bun run dev` rather than a manual
   `bun run --cwd apps/desktop build`.
 - A headless Linux station: `octant server run`, then `octant web` (or
-  `octant web --dev` for Vite). Linux requires `bubblewrap` and Git 2.36 or
+  `octant web --dev` for Vite), run as the OS user that started the host so
+  it can read the bridge secret and mint the browser's launch link. Linux requires `bubblewrap` and Git 2.36 or
   newer; without `bubblewrap`, Work and Code fail closed. Stored provider
   credentials also need an unlocked freedesktop Secret Service session and
   the `secret-tool` client; without them the host still runs Chat, Work, and

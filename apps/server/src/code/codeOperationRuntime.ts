@@ -4,6 +4,7 @@ import {
   type AgentRun,
   type AgentRunId,
   CodeApprovalId,
+  ToolApprovalId,
   MAX_CODE_CONVERSATION_PAGE_SIZE,
   MAX_CODE_OPERATION_FAILURE_MESSAGE_BYTES,
   MAX_CODE_OPERATION_SUMMARY_BYTES,
@@ -24,6 +25,7 @@ import {
   type CodeOperationCommand,
   type CodeOperationFailure,
   type CodeConversationPage,
+  type CodeForkMergeBackOutcome,
   type ProviderSessionId,
   type CodeEvidenceBatchRequest,
   type CodeEvidenceBatchResponse,
@@ -32,6 +34,7 @@ import {
   type CodeOperationApprovalChallenge,
   type CodeOperationApprovalConfirmation,
   type CodeEvidenceContentId,
+  type CodeEvidenceReference,
   type CodeOperationEvent,
   type HarnessRetryNotice,
   type CodeOperationEventFrame,
@@ -65,6 +68,12 @@ import {
   MAX_CODE_OPERATION_REPLAY_LIMIT,
 } from "./codeOperationEventStore";
 import { chooseCodeForkPoint, codeThreadTurns } from "./codeForkPoint";
+import {
+  forkMergeDelivery,
+  mergeForkConversation,
+  type CodeForkMergeBackReader,
+  type ForkContextDelivered,
+} from "./codeForkMergeBack";
 import {
   CodeRuntimeWorkRecorder,
   codeRuntimeWorkObserved,
@@ -112,7 +121,17 @@ import type {
 } from "../harness/nativeHarnessTurnObserver";
 import type { TurnEndSummary } from "../metrics/turnEnd";
 import type { LiveTurnRegistry } from "../liveTurn/liveTurnRegistry";
-import type { ProviderContextBlock } from "@octant/contracts";
+import { decodeAgentRunAdmittedContext, type ProviderContextBlock } from "@octant/contracts";
+import type {
+  AgentRunParentContextSelection,
+  AgentRunParentContextUnavailableReason,
+} from "../agentRun/agentRunParentContext";
+import {
+  CODE_FORK_HANDOFF_REFUSALS,
+  selectCodeForkHandoff,
+  type CodeForkConversationReader,
+  type CodeForkHandoffRefusal,
+} from "./codeForkHandoff";
 import {
   CodeServiceError,
   type CodeForkPoint,
@@ -135,7 +154,7 @@ import {
 import { TerminalProcessPort } from "./terminalProcessPort";
 import { liveCodeTestSourcePort, type CodeTestSourcePort } from "./codeDirectoryPort";
 import { createCodeAcpClientTools, type CodeAcpTerminalConfinement } from "./codeAcpClientTools";
-import { makeSeatbeltConfinementLive } from "../process/seatbeltProfile";
+import { makeProcessConfinementLive } from "../process/seatbeltProfile";
 import { TerminalService } from "./terminalService";
 import { CodeSessionAuthorityStore } from "./codeSessionAuthorityStore";
 import { boundedDiff, draftGitText, type CodeGitDraftResult } from "./codeGitDraftService";
@@ -148,7 +167,11 @@ import {
   type CodeTurnContextAccount,
   type CodeTurnSentContext,
 } from "./codeTurnContext";
-import { createCodeAppManagedTools, type CodeAppManagedToolsOptions } from "./codeAppManagedTools";
+import {
+  createCodeAppManagedTools,
+  type CodeAppManagedToolsOptions,
+  type CodeDeviceApprovalEffect,
+} from "./codeAppManagedTools";
 import { combineAppManagedToolSets, type AppManagedToolSet } from "../providers/appManagedToolSet";
 import { CodeEvidenceCapacityExceeded } from "./codeEvidenceStore";
 import {
@@ -184,7 +207,7 @@ function defaultAcpTerminalConfinement(): CodeAcpTerminalConfinement {
     TMPDIR: process.env.TMPDIR ?? process.env.TMP ?? "/tmp",
     ...(process.env.LANG === undefined ? {} : { LANG: process.env.LANG }),
   };
-  const confinement = makeSeatbeltConfinementLive({ platform: process.platform });
+  const confinement = makeProcessConfinementLive({ platform: process.platform });
   return {
     environment,
     prepare: (input) =>
@@ -308,6 +331,25 @@ export interface CodeOperationRuntimeOptions {
    */
   readonly supportsModelSwitch?: (thread: CodeThread) => boolean;
   /**
+   * Reads the thread's own earlier conversation for a provider-switch handoff,
+   * through the bounded selector a child's parent context uses. Absent means
+   * this host cannot hand a conversation over, so a turn on a provider other
+   * than its session's is refused, naming that reason.
+   */
+  readonly providerSwitchContext?: (input: {
+    readonly thread: CodeThread;
+    readonly excludeOperationId: CodeOperationId;
+    /**
+     * For a forked thread, the source it inherited its conversation from,
+     * already authorized for the window sending the turn, read through the
+     * fork point ahead of the thread's own turns.
+     */
+    readonly inheritedFrom?: {
+      readonly source: CodeThread;
+      readonly throughOperationId: string;
+    };
+  }) => AgentRunParentContextSelection;
+  /**
    * Whether the thread's provider can take an image. A host that cannot say so
    * answers false: a turn that attached images then fails in words rather than
    * reaching the provider with the pictures silently dropped.
@@ -422,7 +464,19 @@ export interface CodeOperationRuntimeOptions {
    * the checkout as it stands rather than as the caller last saw it.
    */
   readonly resolveBaseCheckoutRoot?: (thread: CodeThread) => Promise<string | undefined>;
-  readonly resolveForkHandoff?: CodeOperationServiceOptions["resolveForkHandoff"];
+  /**
+   * Reads a fork's source conversation through the fork point for a text
+   * handoff, through the selector a provider switch uses. Absent means this
+   * host cannot carry a conversation into a fork, so a fork's first turn that
+   * cannot take up the source's own session is refused, naming that reason.
+   */
+  readonly forkContext?: CodeForkConversationReader;
+  /**
+   * Reads a fork's own turns for a merge back into the thread it was forked
+   * from, through the same selector. Absent means this host cannot merge a
+   * fork's conversation back, so a merge is refused as unsupported.
+   */
+  readonly forkMergeBackContext?: CodeForkMergeBackReader;
   /**
    * Starts a fork's first provider session from the source's own
    * conversation through the fork point, returning the cursor that resumes
@@ -477,6 +531,15 @@ export interface CodeOperationRuntime {
     afterCursor: number,
     limit: number,
   ): Promise<CodeConversationPage>;
+  /**
+   * Merge a fork's conversation back into the thread it was forked from, for
+   * that thread's next turn to carry. Refusals are values.
+   */
+  mergeForkContext?(
+    windowId: WindowId,
+    forkThreadId: CodeThreadId,
+    throughOperationId: string,
+  ): Promise<CodeForkMergeBackOutcome>;
   /** The files a fork of `source` at `throughOperationId` starts from. */
   forkPoint(
     windowId: WindowId,
@@ -715,6 +778,7 @@ export function createCodeOperationRuntime(
     runtimeWork,
     observeRuntimeWorkOutcome,
     spendReservations,
+    approvalStore,
   });
   const authorityForTurn: CodeOperationAuthorityPort = {
     ...authority,
@@ -792,9 +856,6 @@ export function createCodeOperationRuntime(
       : {
           resolveBaseCheckout: baseCheckoutResolver(gitService, options.resolveBaseCheckoutRoot),
         }),
-    ...(options.resolveForkHandoff === undefined
-      ? {}
-      : { resolveForkHandoff: options.resolveForkHandoff }),
     ...(options.resolveSelectedExtensions === undefined
       ? {}
       : { resolveSelectedExtensions: options.resolveSelectedExtensions }),
@@ -1172,6 +1233,22 @@ export function createCodeOperationRuntime(
         providerInstanceId: thread.providerInstanceId,
       });
     },
+    mergeForkContext: (windowId, forkThreadId, throughOperationId) =>
+      mergeForkConversation(
+        {
+          read: options.forkMergeBackContext,
+          readThread: (id) => options.persistence.readCodeThread(id),
+          canAccessProject: (id, projectId) => options.windowAccess.canAccessProject(id, projectId),
+          forkTurns: (id) => codeThreadTurns((page) => events.conversation(page), id),
+          events,
+          putEvidence: (content) => options.evidence.put(content),
+          ...(options.recordExternalContentIngestion === undefined
+            ? {}
+            : { recordExternalContentIngestion: options.recordExternalContentIngestion }),
+          uuid: options.uuid,
+        },
+        { windowId, forkThreadId, throughOperationId },
+      ),
     forkPoint: async (windowId, source, throughOperationId) => {
       if (!(await options.windowAccess.canAccessProject(windowId, source.projectId))) {
         return { status: "refused", reason: "unavailable" };
@@ -1326,6 +1403,8 @@ async function resolveDeviceApprovalScope(
     readonly checkoutId: CodeCheckoutIdentity["id"];
     readonly authority: AppleActionRequest["authority"];
   },
+  /** The posture that decides; a live turn may run narrower than the stored thread. */
+  effectiveThread: (thread: CodeThread) => CodeThread = (thread) => thread,
 ): Promise<{ readonly thread: CodeThread; readonly checkout: CodeCheckoutIdentity } | undefined> {
   const thread = options.persistence.readCodeThread(request.threadId);
   const checkout = options.persistence.readCodeCheckout(request.checkoutId);
@@ -1337,7 +1416,7 @@ async function resolveDeviceApprovalScope(
     thread.projectId !== request.authority.projectId ||
     thread.providerInstanceId !== request.authority.providerInstanceId ||
     thread.lifecycle !== "active" ||
-    !decidesCodeEffectsByApproval(thread.executionPolicy) ||
+    !decidesCodeEffectsByApproval(effectiveThread(thread).executionPolicy) ||
     checkout.availability !== "available" ||
     request.authority.mode !== "code" ||
     request.authority.extension.kind !== "core" ||
@@ -1504,7 +1583,34 @@ function persistenceLabel(value: "current-session" | "project-default"): string 
   return value === "current-session" ? "current session only" : "remember for this Project";
 }
 
+type HandoffAttached = Extract<CodeOperationEvent, { readonly kind: "context-handoff-attached" }>;
+
+/**
+ * The handoff record a turn still has to journal, without the content
+ * reference a text handoff gets when it is saved. A fork that took up the
+ * source's own session carries no text, so its record has no content.
+ */
+type PendingHandoffRecord = HandoffAttached extends infer Record
+  ? Record extends { readonly content: unknown }
+    ? Omit<Record, "content">
+    : Record
+  : never;
+
 interface ActiveTurn {
+  /**
+   * A provider-switch or fork handoff this turn selected and has not
+   * journaled yet. It is journaled when the new session is ready, before the
+   * prompt is sent.
+   */
+  pendingHandoff?: {
+    readonly blocks: ReadonlyArray<ProviderContextBlock>;
+    readonly record: PendingHandoffRecord;
+  };
+  /**
+   * Merged fork conversations this turn carries and has not journaled as
+   * carried yet. Journaled with the handoff, before the prompt is sent.
+   */
+  pendingForkMerges?: ReadonlyArray<ForkContextDelivered>;
   readonly computerUseSelection?: import("@octant/contracts/extensions").ExtensionSelection;
   /** The selected MCP servers' tools, resolved when the turn was accepted. */
   readonly extensionTools?: AppManagedToolSet;
@@ -1526,11 +1632,14 @@ interface ActiveTurn {
   readonly secrets: readonly string[];
   readonly abort: AbortController;
   readonly approvals: Map<string, string>;
-  /** Each Browser ask's settle function, with the site it waits to open. */
-  readonly browserApprovals: Map<
+  /**
+   * Each app-managed tool ask's settle function: a Browser session, with the
+   * site it waits to open, or a device effect, which has none.
+   */
+  readonly toolApprovals: Map<
     string,
     {
-      readonly origin: string;
+      readonly origin?: string;
       readonly finish: (outcome: "approved" | "denied" | "cancelled" | "expired") => void;
     }
   >;
@@ -1553,6 +1662,102 @@ interface ActiveTurn {
   launch?: () => void;
 }
 
+/** Why a turn carrying conversation merged back from a fork did not start. */
+const FORK_MERGE_UNREADABLE =
+  "Conversation merged back from a fork of this thread could not be read, so the message was not sent. Send it again.";
+
+class HandoffUnsaved extends Error {
+  readonly fork: boolean;
+  constructor(fork: boolean) {
+    super();
+    this.fork = fork;
+  }
+}
+
+type ProviderSwitchHandoffRefusal =
+  | AgentRunParentContextUnavailableReason
+  | "unsupported"
+  | "handoff-unreadable"
+  | "handoff-unsaved";
+
+/**
+ * Why a turn that moved to another provider did not start. Each names what
+ * the person can do; none starts the new provider without the handoff.
+ */
+const PROVIDER_SWITCH_HANDOFF_REFUSALS: Record<ProviderSwitchHandoffRefusal, string> = {
+  unsupported:
+    "This host cannot hand a task's conversation to another provider. Restore the previous provider or start a new task.",
+  "thread-unavailable":
+    "This task is no longer available, so its conversation cannot be handed to the new provider.",
+  "foreign-thread":
+    "The conversation read for the handoff does not belong to this task, so nothing was handed over. Restore the previous provider or start a new task.",
+  "foreign-project":
+    "The conversation read for the handoff does not belong to this task's Project, so nothing was handed over. Restore the previous provider or start a new task.",
+  "source-point-unavailable":
+    "This task has no recorded conversation to hand to the new provider. Restore the previous provider or start a new task.",
+  "source-empty":
+    "This task has no readable messages to hand to the new provider; earlier messages may have been removed. Restore the previous provider or start a new task.",
+  "source-changed":
+    "This task's conversation changed while it was being read for the handoff. Send the message again.",
+  "source-unavailable":
+    "This task's conversation could not be read for the handoff. Send the message again, or restore the previous provider.",
+  "invalid-page":
+    "This task's conversation could not be read consistently for the handoff. Send the message again, or restore the previous provider.",
+  "history-window-exceeded":
+    "This task's history is too long to choose recent messages to hand over. Restore the previous provider or start a new task.",
+  "handoff-unreadable":
+    "The handoff this message was prepared with can no longer be read. Send the message again.",
+  "handoff-unsaved":
+    "The handoff to the new provider could not be saved, so the message was not sent. Send it again.",
+};
+
+type InheritedHandoffRefusal = AgentRunParentContextUnavailableReason | "source-unauthorized";
+
+/**
+ * Why a forked thread that moved to another provider did not start because
+ * the conversation it inherited could not be read. The new provider is never
+ * started with only the fork's own turns while its transcript shows the
+ * inherited ones.
+ */
+const INHERITED_HANDOFF_REFUSALS: Record<InheritedHandoffRefusal, string> = {
+  "thread-unavailable":
+    "The thread this was forked from is no longer available, so the conversation it carried cannot be handed to the new provider. Restore the previous provider or start a new task.",
+  "source-unauthorized":
+    "This window cannot read the thread this was forked from, so nothing was handed to the new provider. Restore the previous provider or start a new task.",
+  "foreign-thread":
+    "The conversation read for the handoff does not belong to the thread this was forked from, so nothing was handed over. Restore the previous provider or start a new task.",
+  "foreign-project":
+    "The thread this was forked from is not in this task's Project, so nothing was handed to the new provider. Restore the previous provider or start a new task.",
+  "source-point-unavailable":
+    "The reply this was forked from is no longer in its thread's recorded conversation, so nothing was handed to the new provider. Restore the previous provider or start a new task.",
+  "source-empty":
+    "The conversation this was forked from has no readable messages left to hand to the new provider; they may have been removed. Restore the previous provider or start a new task.",
+  "source-changed":
+    "The thread this was forked from changed while it was being read for the handoff. Send the message again.",
+  "source-unavailable":
+    "The conversation this was forked from could not be read for the handoff. Send the message again, or restore the previous provider.",
+  "invalid-page":
+    "The conversation this was forked from could not be read consistently for the handoff. Send the message again, or restore the previous provider.",
+  "history-window-exceeded":
+    "The conversation up to the fork point is too long to choose recent messages to hand over. Restore the previous provider or start a new task.",
+};
+
+type HandoffRefusal =
+  | { readonly subject: "switch"; readonly reason: ProviderSwitchHandoffRefusal }
+  | { readonly subject: "fork"; readonly reason: CodeForkHandoffRefusal }
+  | { readonly subject: "inherited"; readonly reason: InheritedHandoffRefusal };
+
+function handoffRefusalMessage(refusal: HandoffRefusal): string {
+  switch (refusal.subject) {
+    case "switch":
+      return PROVIDER_SWITCH_HANDOFF_REFUSALS[refusal.reason];
+    case "fork":
+      return CODE_FORK_HANDOFF_REFUSALS[refusal.reason];
+    case "inherited":
+      return INHERITED_HANDOFF_REFUSALS[refusal.reason];
+  }
+}
+
 class RuntimeTurnController implements CodeOperationTurnPort {
   readonly #options: CodeOperationRuntimeOptions;
   readonly #events: CodeOperationEventStore;
@@ -1573,6 +1778,8 @@ class RuntimeTurnController implements CodeOperationTurnPort {
   readonly #approvedBrowserContexts = new Set<string>();
 
   readonly #spendReservations: Map<string, ReturnType<typeof decodeSpendCeilingReservationId>>;
+  /** Mints the one-use approval a device effect the person allowed in the thread carries. */
+  readonly #approvalStore: CodeOperationApprovalStore | undefined;
 
   constructor(input: {
     options: CodeOperationRuntimeOptions;
@@ -1582,8 +1789,10 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     runtimeWork: CodeRuntimeWorkRecorder;
     observeRuntimeWorkOutcome: (outcome: CodeRuntimeWorkRecordOutcome) => void;
     spendReservations: Map<string, ReturnType<typeof decodeSpendCeilingReservationId>>;
+    approvalStore: CodeOperationApprovalStore | undefined;
   }) {
     this.#options = input.options;
+    this.#approvalStore = input.approvalStore;
     this.#spendReservations = input.spendReservations;
     this.#events = input.events;
     this.#roots = input.roots;
@@ -1666,16 +1875,39 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     // thread; refusing every turn after that switch left the thread stuck. A
     // provider that can resume onto the new model keeps the conversation, and
     // the turn records the new model on its session.
+    const providerSwitch =
+      previous?.kind === "provider-session-ready" &&
+      String(previous.providerInstanceId) !== String(input.thread.providerInstanceId)
+        ? previous
+        : undefined;
     if (
       previous?.kind === "provider-session-ready" &&
-      (String(previous.providerInstanceId) !== String(input.thread.providerInstanceId) ||
-        (String(previous.modelId) !== String(input.thread.modelId) &&
-          this.#options.supportsModelSwitch?.(input.thread) !== true) ||
-        String(previous.checkoutId) !== String(input.thread.checkoutId))
+      String(previous.checkoutId) !== String(input.thread.checkoutId)
     )
       return failStart(
-        "This task's provider session belongs to a different provider, model, or checkout. Restore that selection or start a new task.",
+        "This task's provider session belongs to a different checkout. Restore that selection or start a new task.",
       );
+    if (
+      previous?.kind === "provider-session-ready" &&
+      providerSwitch === undefined &&
+      String(previous.modelId) !== String(input.thread.modelId) &&
+      this.#options.supportsModelSwitch?.(input.thread) !== true
+    )
+      return failStart(
+        "This provider cannot carry the task's session on to another of its models. Restore that model, choose a different provider, or start a new task.",
+      );
+    // Another provider cannot take up this session, so the turn starts a new
+    // one with a disclosed text handoff of the thread's own conversation. The
+    // handoff is chosen before anything else is prepared, so a refusal names
+    // its reason and leaves nothing behind.
+    const switchHandoff = await this.#providerSwitchHandoff(
+      input.thread,
+      command.operationId,
+      providerSwitch,
+      input.windowId,
+    );
+    if (switchHandoff?.status === "refused")
+      return failStart(handoffRefusalMessage(switchHandoff.refusal));
     // A recorded session without a resume cursor wedges the thread rather than
     // silently discarding the conversation the provider still holds. A prior
     // turn that never reached its session left nothing to discard only once it
@@ -1686,6 +1918,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     if (
       priorTurn &&
       previous?.kind === "provider-session-ready" &&
+      providerSwitch === undefined &&
       previous.resumeCursor === undefined
     ) {
       return failStart(
@@ -1731,25 +1964,11 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     // when the provider can take it up exactly; otherwise it reads the
     // source's history as text. Never both.
     let resumeCursor =
-      previous?.kind === "provider-session-ready" ? previous.resumeCursor : undefined;
+      previous?.kind === "provider-session-ready" && providerSwitch === undefined
+        ? previous.resumeCursor
+        : undefined;
     let forkSeeded = false;
-    if (previous === undefined && input.thread.forkedFrom !== undefined) {
-      const seeded = await this.#options
-        .forkProviderSession?.({
-          fork: input.thread,
-          origin: input.thread.forkedFrom,
-          sessionId: decodeProviderSessionId(input.sessionId),
-          checkoutRoot: input.checkoutRoot,
-          secrets,
-        })
-        .catch(() => undefined);
-      if (seeded !== undefined) {
-        resumeCursor = seeded;
-        forkSeeded = true;
-      }
-    }
-    // Driver, credentials, and fork preparation may outlive the host's admission.
-    if (input.admissionCurrent?.() === false) {
+    const refuseRevokedAdmission = async () => {
       this.settleSpendReservation(key);
       await input.extensionTools?.close?.().catch(() => undefined);
       return {
@@ -1760,7 +1979,97 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           message: "Code turn admission is no longer current.",
         },
       };
+    };
+    // A fork's first session: no session of its own yet. One whose text
+    // handoff is already journaled keeps that record rather than switching to
+    // the source's session on a recovered start.
+    const forkOrigin = previous === undefined ? input.thread.forkedFrom : undefined;
+    if (forkOrigin !== undefined && switchHandoff?.journaled !== "text") {
+      // Seeding durably copies the source's session, so a turn whose admission
+      // lapsed during driver and credential preparation copies nothing.
+      if (input.admissionCurrent?.() === false) return refuseRevokedAdmission();
+      const seeded = await this.#options
+        .forkProviderSession?.({
+          fork: input.thread,
+          origin: forkOrigin,
+          sessionId: decodeProviderSessionId(input.sessionId),
+          checkoutRoot: input.checkoutRoot,
+          secrets,
+        })
+        .catch(() => undefined);
+      if (seeded !== undefined) {
+        resumeCursor = seeded;
+        forkSeeded = true;
+      }
     }
+    // Otherwise the fork reads its source's conversation through the fork
+    // point as text, journaled like a provider switch's handoff. A fork that
+    // can do neither refuses rather than starting from nothing while its
+    // transcript shows an inherited conversation.
+    let forkHandoff:
+      | {
+          readonly blocks: ReadonlyArray<ProviderContextBlock>;
+          readonly record?: PendingHandoffRecord;
+        }
+      | undefined;
+    if (forkOrigin !== undefined && switchHandoff === undefined) {
+      if (forkSeeded) {
+        forkHandoff = {
+          blocks: [],
+          record: {
+            kind: "context-handoff-attached",
+            reason: "fork-native-session",
+            forkedFrom: forkOrigin,
+            providerInstanceId: input.thread.providerInstanceId,
+            modelId: input.thread.modelId,
+            nativeSessionTransferred: true,
+          },
+        };
+      } else {
+        const selected = await this.#forkTextHandoff(input.thread, forkOrigin, input.windowId);
+        if (selected.status === "refused") {
+          await input.extensionTools?.close?.().catch(() => undefined);
+          return failStart(CODE_FORK_HANDOFF_REFUSALS[selected.reason]);
+        }
+        forkHandoff = selected;
+      }
+    } else if (
+      forkOrigin !== undefined &&
+      switchHandoff?.journaled === "native-session" &&
+      !forkSeeded
+    ) {
+      // The record says this turn took up the source's session; sending it
+      // anything else would contradict what was disclosed.
+      await input.extensionTools?.close?.().catch(() => undefined);
+      return failStart(CODE_FORK_HANDOFF_REFUSALS["handoff-unreadable"]);
+    }
+    // Conversation a person merged back from a fork of this thread goes with
+    // its next turn, disclosed and journaled before the prompt is sent. A turn
+    // that cannot read it refuses rather than dropping it silently.
+    let forkMerges: Awaited<ReturnType<typeof forkMergeDelivery>>;
+    try {
+      const replay = this.#events.replay({
+        threadId: input.thread.id,
+        operationId: command.operationId,
+        afterCursor: 0,
+        limit: MAX_CODE_OPERATION_REPLAY_LIMIT,
+      });
+      forkMerges =
+        replay.status === "ok"
+          ? await forkMergeDelivery(
+              { events: this.#events, readEvidence: this.#options.evidence.read },
+              { threadId: input.thread.id, frames: replay.frames },
+            )
+          : { status: "refused" };
+    } catch {
+      forkMerges = { status: "refused" };
+    }
+    if (forkMerges.status === "refused") {
+      await input.extensionTools?.close?.().catch(() => undefined);
+      return failStart(FORK_MERGE_UNREADABLE);
+    }
+    // Driver, credentials, and fork preparation may outlive the host's admission.
+    if (input.admissionCurrent?.() === false) return refuseRevokedAdmission();
     // Feedback stays pending through every preparation refusal. Consuming it
     // here does not yield between the final admission check and owning the turn.
     let feedback: ReturnType<NonNullable<typeof input.takeProductFeedback>> | undefined;
@@ -1770,7 +2079,9 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       // A feedback read failure must not prevent the person's message from running.
     }
     const context = [
-      ...(forkSeeded || input.forkHandoff === undefined ? [] : [input.forkHandoff]),
+      ...(switchHandoff?.blocks ?? []),
+      ...(forkHandoff?.blocks ?? []),
+      ...forkMerges.blocks,
       ...(input.context ?? []),
       ...(feedback?.context === undefined || feedback.context.trim().length === 0
         ? []
@@ -1778,6 +2089,12 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     ];
     const attachments = [...(input.attachments ?? []), ...(feedback?.attachments ?? [])];
     const active: ActiveTurn = {
+      ...(switchHandoff?.record !== undefined
+        ? { pendingHandoff: { blocks: switchHandoff.blocks, record: switchHandoff.record } }
+        : forkHandoff?.record !== undefined
+          ? { pendingHandoff: { blocks: forkHandoff.blocks, record: forkHandoff.record } }
+          : {}),
+      ...(forkMerges.records.length === 0 ? {} : { pendingForkMerges: forkMerges.records }),
       ...(command.computerUseSelection === undefined
         ? {}
         : { computerUseSelection: command.computerUseSelection }),
@@ -1788,7 +2105,10 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       windowId: input.windowId,
       thread: input.thread,
       operationId: command.operationId,
-      sessionId: previous?.kind === "provider-session-ready" ? previous.sessionId : input.sessionId,
+      sessionId:
+        previous?.kind === "provider-session-ready" && providerSwitch === undefined
+          ? previous.sessionId
+          : input.sessionId,
       requestedSessionId: input.sessionId,
       ...(resumeCursor === undefined ? {} : { resumeCursor }),
       checkoutRoot: input.checkoutRoot,
@@ -1803,7 +2123,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       secrets,
       abort: new AbortController(),
       approvals: new Map(),
-      browserApprovals: new Map(),
+      toolApprovals: new Map(),
       browserGrantKeys: new Set(),
       questions: new Set(),
       harnessQuestions: new Set(),
@@ -1831,6 +2151,259 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       }),
     );
     return turnState("running");
+  }
+
+  /**
+   * The handoff a turn that moved to another provider starts with, or the one
+   * a recovered turn already journaled.
+   *
+   * A turn's handoff is chosen once. If its operation already journaled one
+   * (a start recovered after a restart), that record is read back rather than
+   * the conversation selected again, so a recovery never sends context other
+   * than what was disclosed. That includes a recovery whose new session was
+   * already recorded: the provider may never have received the prompt the
+   * handoff went with, so it is sent again with it. A fork's journaled record
+   * is read back the same way. Otherwise, only for a turn that moved
+   * providers, the thread's own conversation is selected and checked to be
+   * this thread's in this Project; a forked thread also carries the source's
+   * conversation through the fork point, read only after the sending window
+   * is authorized against the source. The record is journaled when the new
+   * session is ready.
+   */
+  async #providerSwitchHandoff(
+    thread: CodeThread,
+    operationId: CodeOperationId,
+    previous: Extract<CodeOperationEvent, { readonly kind: "provider-session-ready" }> | undefined,
+    windowId: WindowId,
+  ): Promise<
+    | {
+        readonly status: "ready";
+        readonly blocks: ReadonlyArray<ProviderContextBlock>;
+        readonly record?: PendingHandoffRecord;
+        /** What an already journaled record carried, when this read it back. */
+        readonly journaled?: "text" | "native-session";
+      }
+    | { readonly status: "refused"; readonly refusal: HandoffRefusal }
+    | undefined
+  > {
+    const refused = (refusal: HandoffRefusal) => ({ status: "refused", refusal }) as const;
+    const replay = this.#events.replay({
+      threadId: thread.id,
+      operationId,
+      afterCursor: 0,
+      limit: MAX_CODE_OPERATION_REPLAY_LIMIT,
+    });
+    if (replay.status !== "ok")
+      return previous === undefined
+        ? thread.forkedFrom === undefined
+          ? undefined
+          : refused({ subject: "fork", reason: "source-unavailable" })
+        : refused({ subject: "switch", reason: "source-unavailable" });
+    const journaled = replay.frames.find(
+      (frame) => frame.event.kind === "context-handoff-attached",
+    )?.event;
+    if (journaled?.kind === "context-handoff-attached") {
+      const subject = journaled.reason === "provider-switch" ? "switch" : "fork";
+      const sameOrigin = (origin: NonNullable<CodeThread["forkedFrom"]>) =>
+        thread.forkedFrom !== undefined &&
+        String(thread.forkedFrom.threadId) === String(origin.threadId) &&
+        String(thread.forkedFrom.throughOperationId) === String(origin.throughOperationId);
+      // A selection changed since the record belongs to a different switch or
+      // fork than the one the record disclosed.
+      if (
+        String(journaled.providerInstanceId) !== String(thread.providerInstanceId) ||
+        String(journaled.modelId) !== String(thread.modelId) ||
+        (journaled.reason === "provider-switch" &&
+          previous !== undefined &&
+          String(journaled.previousSessionId) !== String(previous.sessionId)) ||
+        (journaled.reason !== "provider-switch" && !sameOrigin(journaled.forkedFrom))
+      )
+        return refused({ subject, reason: "source-changed" });
+      if (
+        journaled.reason === "provider-switch" &&
+        journaled.inherited !== undefined &&
+        !sameOrigin(journaled.inherited.forkedFrom)
+      )
+        return refused({ subject: "inherited", reason: "source-changed" });
+      if (journaled.reason === "fork-native-session")
+        return { status: "ready", blocks: [], journaled: "native-session" };
+      try {
+        const text = await this.#options.evidence.read?.(journaled.content);
+        if (text === undefined) return refused({ subject, reason: "handoff-unreadable" });
+        return {
+          status: "ready",
+          blocks: decodeAgentRunAdmittedContext(JSON.parse(text)),
+          journaled: "text",
+        };
+      } catch {
+        return refused({ subject, reason: "handoff-unreadable" });
+      }
+    }
+    if (previous === undefined) return undefined;
+    const select = this.#options.providerSwitchContext;
+    if (select === undefined) return refused({ subject: "switch", reason: "unsupported" });
+    // A fork carries the conversation it inherited. The source is authorized
+    // for this window before anything is read out of it; a source that can no
+    // longer be read refuses the switch rather than handing the new provider
+    // only the fork's own turns while its transcript shows the inherited ones.
+    const origin = thread.forkedFrom;
+    let inheritedFrom:
+      | { readonly source: CodeThread; readonly throughOperationId: string }
+      | undefined;
+    if (origin !== undefined) {
+      const readable = await this.#readableForkSource(thread, origin, windowId);
+      if (readable.status === "refused")
+        return refused({ subject: "inherited", reason: readable.reason });
+      inheritedFrom = {
+        source: readable.source,
+        throughOperationId: String(origin.throughOperationId),
+      };
+    }
+    let selection: AgentRunParentContextSelection;
+    try {
+      selection = select({
+        thread,
+        excludeOperationId: operationId,
+        ...(inheritedFrom === undefined ? {} : { inheritedFrom }),
+      });
+    } catch {
+      return refused({ subject: "switch", reason: "source-unavailable" });
+    }
+    if (selection.status === "unavailable")
+      return refused(
+        selection.part === "inherited"
+          ? { subject: "inherited", reason: selection.reason }
+          : { subject: "switch", reason: selection.reason },
+      );
+    // The selector is handed this thread, but what it read is checked here too:
+    // a handoff is the thread's own conversation, never another thread's or
+    // another Project's that a reader happened to return.
+    if (selection.source.mode !== "code" || selection.source.threadId !== String(thread.id))
+      return refused({ subject: "switch", reason: "foreign-thread" });
+    if (selection.source.projectId !== String(thread.projectId))
+      return refused({ subject: "switch", reason: "foreign-project" });
+    // The same holds for what a fork inherited: exactly the authorized source,
+    // in this thread's Project, and present whenever it was asked for.
+    const inherited = selection.inherited;
+    if (origin !== undefined) {
+      if (
+        inherited === undefined ||
+        inherited.source.mode !== "code" ||
+        inherited.source.threadId !== String(origin.threadId)
+      )
+        return refused({ subject: "inherited", reason: "foreign-thread" });
+      if (inherited.source.projectId !== String(thread.projectId))
+        return refused({ subject: "inherited", reason: "foreign-project" });
+    }
+    return {
+      status: "ready",
+      blocks: selection.blocks,
+      record: {
+        kind: "context-handoff-attached",
+        reason: "provider-switch",
+        previousProviderInstanceId: previous.providerInstanceId,
+        previousModelId: previous.modelId,
+        previousSessionId: previous.sessionId,
+        providerInstanceId: thread.providerInstanceId,
+        modelId: thread.modelId,
+        messages: selection.blocks.length - 1,
+        omissions: selection.omissions,
+        externalContentIngested: selection.source.externalContentIngested,
+        ...(origin === undefined || inherited === undefined
+          ? {}
+          : {
+              inherited: {
+                forkedFrom: origin,
+                messages: inherited.messages,
+                externalContentIngested: inherited.source.externalContentIngested,
+              },
+            }),
+        nativeSessionTransferred: false,
+        hiddenReasoningTransferred: false,
+      },
+    };
+  }
+
+  /**
+   * The thread a fork was made from, once the window sending this turn may
+   * read it. The origin is on the fork's own record and was checked when the
+   * fork was created, but the window is authorized against the source here,
+   * at the moment it is read: a window that may not observe the source reads
+   * nothing out of it through the fork, on its first turn or a later switch.
+   */
+  async #readableForkSource(
+    thread: CodeThread,
+    origin: NonNullable<CodeThread["forkedFrom"]>,
+    windowId: WindowId,
+  ): Promise<
+    | { readonly status: "readable"; readonly source: CodeThread }
+    | {
+        readonly status: "refused";
+        readonly reason: Extract<
+          CodeForkHandoffRefusal,
+          "source-unavailable" | "thread-unavailable" | "source-unauthorized" | "foreign-project"
+        >;
+      }
+  > {
+    let source: CodeThread | undefined;
+    try {
+      source = this.#options.persistence.readCodeThread(origin.threadId);
+    } catch {
+      return { status: "refused", reason: "source-unavailable" };
+    }
+    if (source === undefined) return { status: "refused", reason: "thread-unavailable" };
+    let authorized: boolean;
+    try {
+      authorized = await this.#options.windowAccess.canAccessProject(windowId, source.projectId);
+    } catch {
+      authorized = false;
+    }
+    if (!authorized) return { status: "refused", reason: "source-unauthorized" };
+    if (String(source.projectId) !== String(thread.projectId))
+      return { status: "refused", reason: "foreign-project" };
+    return { status: "readable", source };
+  }
+
+  /** A fork's text handoff: the source's conversation through the fork point. */
+  async #forkTextHandoff(
+    thread: CodeThread,
+    origin: NonNullable<CodeThread["forkedFrom"]>,
+    windowId: WindowId,
+  ): Promise<
+    | {
+        readonly status: "ready";
+        readonly blocks: ReadonlyArray<ProviderContextBlock>;
+        readonly record: PendingHandoffRecord;
+      }
+    | { readonly status: "refused"; readonly reason: CodeForkHandoffRefusal }
+  > {
+    if (this.#options.forkContext === undefined)
+      return { status: "refused", reason: "unsupported" };
+    const readable = await this.#readableForkSource(thread, origin, windowId);
+    if (readable.status === "refused") return readable;
+    const selected = selectCodeForkHandoff(this.#options.forkContext, {
+      source: readable.source,
+      origin,
+      projectId: thread.projectId,
+    });
+    if (selected.status === "refused") return selected;
+    const { selection } = selected;
+    return {
+      status: "ready",
+      blocks: selection.blocks,
+      record: {
+        kind: "context-handoff-attached",
+        reason: "fork",
+        forkedFrom: origin,
+        providerInstanceId: thread.providerInstanceId,
+        modelId: thread.modelId,
+        messages: selection.blocks.length - 1,
+        omissions: selection.omissions,
+        externalContentIngested: selection.source.externalContentIngested,
+        nativeSessionTransferred: false,
+        hiddenReasoningTransferred: false,
+      },
+    };
   }
 
   async answerInput(input: Parameters<CodeOperationTurnPort["answerInput"]>[0]) {
@@ -1898,9 +2471,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     const active = this.#active.get(threadId);
     if (active === undefined || (active.state !== "running" && active.state !== "waiting"))
       return false;
-    return (
-      active.approvals.size > 0 || active.browserApprovals.size > 0 || active.questions.size > 0
-    );
+    return active.approvals.size > 0 || active.toolApprovals.size > 0 || active.questions.size > 0;
   }
 
   /**
@@ -1915,7 +2486,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     const pending: CodeTurnPendingRequest[] = [];
     for (const active of this.#active.values()) {
       if (active.state !== "running" && active.state !== "waiting") continue;
-      const approvals = new Set([...active.approvals.keys(), ...active.browserApprovals.keys()]);
+      const approvals = new Set([...active.approvals.keys(), ...active.toolApprovals.keys()]);
       if (approvals.size === 0 && active.questions.size === 0) continue;
       // A provider may ask again under an identity it used before; the latest
       // ask is the one still waiting.
@@ -1928,7 +2499,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           requestedAt: frame.occurredAt,
         };
         if (event.kind === "approval-requested" && approvals.has(String(event.approvalId))) {
-          const browserOrigin = active.browserApprovals.get(String(event.approvalId))?.origin;
+          const browserOrigin = active.toolApprovals.get(String(event.approvalId))?.origin;
           asked.set(`approval:${String(event.approvalId)}`, {
             ...scope,
             kind: "approval",
@@ -1987,12 +2558,74 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     origin: string,
     signal?: AbortSignal,
   ): Promise<"approved" | "denied" | "cancelled" | "expired"> {
-    if (signal?.aborted || active.abort.signal.aborted || active.browserApprovals.size >= 4)
+    return this.#askToolApproval(
+      active,
+      `Allow this thread to use an isolated browser session at ${origin.slice(0, 512)}? Shell and file access stay unchanged.`,
+      origin.slice(0, 2048),
+      signal,
+    );
+  }
+
+  /**
+   * One device effect the thread's agent asked for, asked of the person in the
+   * thread like a Browser session. An approval becomes the host's one-use
+   * approval for exactly that request, so the Apple or Android policy checks it
+   * as it checks a workbench click's. Only an approved input goes on to open
+   * the window's Allow input grant, exactly as a pane input does.
+   */
+  async #askDeviceApproval(
+    active: ActiveTurn,
+    effect: CodeDeviceApprovalEffect,
+    signal?: AbortSignal,
+  ): Promise<
+    | { readonly status: "approved"; readonly approvalId: ToolApprovalId }
+    | { readonly status: "denied" | "cancelled" | "expired" | "unavailable" }
+  > {
+    const store = this.#approvalStore;
+    if (store === undefined) return { status: "unavailable" };
+    // The turn's posture, not the stored one: a Full-access thread running an
+    // approval-gated turn asks here too, and its stored policy alone refused it.
+    const scope = await resolveDeviceApprovalScope(
+      this.#options,
+      active.windowId,
+      effect.request,
+      (thread) => this.threadWithActiveTurnPosture(thread),
+    );
+    if (scope === undefined) return { status: "unavailable" };
+    const context = await approvalContext(this.#options, undefined, scope.thread, scope.checkout);
+    if (context === undefined) return { status: "unavailable" };
+    const prompt = approvalPrompt(effect, scope.thread, scope.checkout, undefined);
+    const summary = boundProviderSummary(`${prompt.message}\n${prompt.detail}`);
+    if (summary === undefined) return { status: "unavailable" };
+    const outcome = await this.#askToolApproval(active, summary, undefined, signal);
+    if (outcome !== "approved") return { status: outcome };
+    try {
+      const receipt = store.issue({
+        windowId: active.windowId,
+        effect,
+        contextDigest: approvalContextDigest(context),
+      });
+      return receipt === undefined
+        ? { status: "unavailable" }
+        : { status: "approved", approvalId: ToolApprovalId.make(String(receipt.approvalId)) };
+    } catch {
+      // Host time recovery refuses to mint approvals; the effect stays refused.
+      return { status: "unavailable" };
+    }
+  }
+
+  #askToolApproval(
+    active: ActiveTurn,
+    summary: string,
+    origin: string | undefined,
+    signal?: AbortSignal,
+  ): Promise<"approved" | "denied" | "cancelled" | "expired"> {
+    if (signal?.aborted || active.abort.signal.aborted || active.toolApprovals.size >= 4)
       return Promise.resolve("cancelled");
     const approvalId = CodeApprovalId.make(this.#options.uuid());
     return new Promise((resolve) => {
       const finish = (outcome: "approved" | "denied" | "cancelled" | "expired") => {
-        if (!active.browserApprovals.delete(String(approvalId))) return;
+        if (!active.toolApprovals.delete(String(approvalId))) return;
         clearTimeout(timer);
         signal?.removeEventListener("abort", abort);
         active.abort.signal.removeEventListener("abort", abort);
@@ -2005,7 +2638,10 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       };
       const abort = () => finish("cancelled");
       const timer = setTimeout(() => finish("expired"), 10 * 60_000);
-      active.browserApprovals.set(String(approvalId), { origin: origin.slice(0, 2048), finish });
+      active.toolApprovals.set(String(approvalId), {
+        ...(origin === undefined ? {} : { origin }),
+        finish,
+      });
       signal?.addEventListener("abort", abort, { once: true });
       active.abort.signal.addEventListener("abort", abort, { once: true });
       try {
@@ -2017,7 +2653,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
             kind: "approval-requested",
             approvalId,
             action: "provider-tool",
-            summary: `Allow this thread to use an isolated browser session at ${origin.slice(0, 512)}? Shell and file access stay unchanged.`,
+            summary,
           },
         });
         active.cursor = frame.cursor;
@@ -2037,14 +2673,14 @@ class RuntimeTurnController implements CodeOperationTurnPort {
             requested: active.thread.executionPolicy,
             thread: input.thread.executionPolicy,
           });
-    const browserApproval = active?.browserApprovals.get(input.approvalId);
-    if (active !== undefined && browserApproval !== undefined) {
+    const toolApproval = active?.toolApprovals.get(input.approvalId);
+    if (active !== undefined && toolApproval !== undefined) {
       if (
         turnPosture === "plan" ||
         active.thread.permissionPersistence !== input.thread.permissionPersistence
       )
         return turnState("failed");
-      browserApproval.finish(input.decision === "approved" ? "approved" : "denied");
+      toolApproval.finish(input.decision === "approved" ? "approved" : "denied");
       if (input.decision === "approved") return answeredTurnState(active.state);
       return this.#countDeniedApproval(active);
     }
@@ -2233,6 +2869,9 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           thread: active.thread,
           readThread: (windowId, threadId) => this.#effectiveThread(windowId, threadId),
           uuid: this.#options.uuid,
+          deviceApproval: {
+            request: (effect, signal) => this.#askDeviceApproval(active, effect, signal),
+          },
           browserApproval: {
             isApproved: (contextId) => {
               const key = this.#browserApprovalKey(active, contextId);
@@ -2388,6 +3027,42 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           onSessionReady: (handle) =>
             Effect.try({
               try: () => {
+                // The handoff is recorded before the session it opened is, and
+                // both before the prompt is sent, so nothing reaches the new
+                // provider that the journal does not disclose.
+                const pending = active.pendingHandoff;
+                if (pending !== undefined) {
+                  const record = pending.record;
+                  let event: HandoffAttached;
+                  if (record.reason === "fork-native-session") event = record;
+                  else {
+                    let content: CodeEvidenceReference;
+                    try {
+                      content = this.#options.evidence.put(JSON.stringify(pending.blocks));
+                    } catch {
+                      throw new HandoffUnsaved(record.reason === "fork");
+                    }
+                    event = { ...record, content };
+                  }
+                  const handoff = this.#events.append({
+                    threadId: active.thread.id,
+                    operationId: active.operationId,
+                    expectedCursor: active.cursor,
+                    event,
+                  });
+                  active.cursor = handoff.cursor;
+                  delete active.pendingHandoff;
+                }
+                for (const record of active.pendingForkMerges ?? []) {
+                  const delivered = this.#events.append({
+                    threadId: active.thread.id,
+                    operationId: active.operationId,
+                    expectedCursor: active.cursor,
+                    event: record,
+                  });
+                  active.cursor = delivered.cursor;
+                }
+                delete active.pendingForkMerges;
                 const resumeCursor = handle.resumeCursor ?? active.resumeCursor;
                 const frame = this.#events.append({
                   threadId: active.thread.id,
@@ -2404,9 +3079,14 @@ class RuntimeTurnController implements CodeOperationTurnPort {
                 });
                 active.cursor = frame.cursor;
               },
-              catch: () => ({
+              catch: (error) => ({
                 category: "failed" as const,
-                message: "The provider session could not be saved. The message was not sent.",
+                message:
+                  error instanceof HandoffUnsaved
+                    ? error.fork
+                      ? CODE_FORK_HANDOFF_REFUSALS["handoff-unsaved"]
+                      : PROVIDER_SWITCH_HANDOFF_REFUSALS["handoff-unsaved"]
+                    : "The provider session could not be saved. The message was not sent.",
               }),
             }),
           checkoutRoot: active.checkoutRoot,

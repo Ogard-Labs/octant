@@ -129,7 +129,7 @@ describe("forking a harness conversation", () => {
       { operationId: "op-1", sessionId: "asked-1", status: "completed" },
       { operationId: "op-2", sessionId: "asked-2", status: "completed" },
     ] as never as ReadonlyArray<CodeConversationTurn>;
-    const fork = { providerInstanceId: instanceId } as never as CodeThread;
+    const fork = { providerInstanceId: instanceId, modelId: "m" } as never as CodeThread;
 
     const cursor = await seedCodeForkHarnessSession(
       {
@@ -163,6 +163,34 @@ describe("forking a harness conversation", () => {
     ]);
     expect(JSON.stringify(seeded)).not.toContain("sk-live-123");
     expect(store.load(session("source"))).toEqual(before);
+  });
+
+  it("leaves a fork whose model changed before its first message to read the source as text", async () => {
+    const store = new MemoryNativeHarnessTranscriptStore();
+    twoTurnSource(store);
+    const turns = [
+      { operationId: "op-1", sessionId: "asked-1", status: "completed" },
+    ] as never as ReadonlyArray<CodeConversationTurn>;
+
+    const cursor = await seedCodeForkHarnessSession(
+      {
+        transcripts: store,
+        harnessDriverKind: () => "anthropic-compatible",
+        sourceTurns: () => turns,
+        sourceConversations: () => new Map([["op-1", String(session("source"))]]),
+      },
+      {
+        fork: { providerInstanceId: instanceId, modelId: "other" } as never as CodeThread,
+        origin: { threadId: "source-thread", throughOperationId: "op-1" } as never,
+        sessionId: session("fork"),
+        checkoutRoot: forkRoot,
+        secrets: [],
+      },
+    );
+
+    // A resumed copy would reply on the source's model under the fork's name.
+    expect(cursor).toBeUndefined();
+    expect(store.load(session("fork"))).toBeUndefined();
   });
 
   it("leaves a fork on another provider to read the source's history as text", async () => {

@@ -2440,6 +2440,90 @@ describe("useProviderController", () => {
     expect(calls).toEqual(["credential.set", "provider.update", "field.clear"]);
   });
 
+  it("stores the Anthropic-compatible key after a base URL change, since the host deletes the old one", async () => {
+    const calls: string[] = [];
+    const configuration = (baseUrl: string) =>
+      ({
+        kind: "anthropic-compatible-http",
+        baseUrl,
+        authentication: "api-key",
+        protocol: "auto",
+        protocolVersion: "2023-06-01",
+        manualModelIds: [],
+      }) as const;
+    const api = client(
+      snapshot([anthropicProvider({ configuration: configuration("https://a.example/v1/") })]),
+    );
+    vi.mocked(api.execute).mockImplementation(async () => {
+      calls.push("provider.update");
+      return {
+        kind: "provider-updated",
+        instance: anthropicProvider({
+          version: 2 as never,
+          configuration: configuration("https://b.example/v1/"),
+        }),
+      };
+    });
+    const host = credentialHost(calls);
+    const { result } = renderHook(() => useProviderController({ client: api, hostBridge: host }));
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    await act(async () => {
+      await expect(
+        result.current.changeAnthropicCompatibleConfiguration(
+          id,
+          configuration("https://b.example/v1/"),
+          transientCredential("throwaway-key-for-b", calls),
+        ),
+      ).resolves.toBe(true);
+    });
+
+    expect(calls).toEqual(["provider.update", "credential.set", "field.clear"]);
+  });
+
+  it("does not roll an Azure AI Foundry endpoint back to a base URL whose key the host already deleted", async () => {
+    const configuration = (baseUrl: string) =>
+      ({
+        kind: "azure-foundry-openai-http",
+        baseUrl,
+        authentication: "api-key",
+        protocol: "auto",
+        manualModelIds: [decodeProviderModelId("deployment-a")],
+      }) as const;
+    const foundry = (baseUrl: string, version: number) =>
+      decodeProviderInstance({
+        ...provider(),
+        version,
+        displayName: "Foundry",
+        driverKind: "azure-foundry",
+        configuration: configuration(baseUrl),
+      });
+    const api = client(snapshot([foundry("https://a.example/openai/v1/", 1)]));
+    vi.mocked(api.execute).mockResolvedValue({
+      kind: "provider-updated",
+      instance: foundry("https://b.example/openai/v1/", 2),
+    });
+    const host = credentialHost();
+    vi.mocked(host.setProviderCredential).mockRejectedValue(new Error("store locked"));
+    const { result } = renderHook(() => useProviderController({ client: api, hostBridge: host }));
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    await act(async () => {
+      await expect(
+        result.current.changeAzureFoundryConfiguration(
+          id,
+          configuration("https://b.example/openai/v1/"),
+          transientCredential("throwaway-key-for-b"),
+        ),
+      ).resolves.toBe(false);
+    });
+
+    expect(api.execute).toHaveBeenCalledTimes(1);
+    expect(result.current.message).toBe(
+      "The new endpoint was saved, but its API key could not be stored. Enter the API key again.",
+    );
+  });
+
   it("clears the credential field only after successful storage settles", async () => {
     const stored = deferred<void>();
     const calls: string[] = [];

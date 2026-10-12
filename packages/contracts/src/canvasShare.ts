@@ -1,6 +1,8 @@
 import { Schema } from "effect";
 import {
   CANVAS_MAX_BAR_LIST_ROWS,
+  CANVAS_MAX_DASHBOARD_CELLS,
+  CANVAS_MAX_DASHBOARD_COLUMNS,
   CANVAS_MAX_CHART_CATEGORY_LABEL_LENGTH,
   CANVAS_MAX_HEATMAP_CELLS,
   CANVAS_MAX_HEATMAP_COLUMNS,
@@ -87,13 +89,19 @@ export const CANVAS_SHARE_MOCKUP_CATALOG_SCHEMA_VERSION = 6;
 // Version 7 accompanies Canvas schema version 14: a share may carry a funnel,
 // a radar, or a sankey chart, and a sankey's links.
 export const CANVAS_SHARE_FLOW_CHARTS_SCHEMA_VERSION = 7;
-export const CANVAS_SHARE_SCHEMA_VERSION = 7 as const;
+// Version 8 accompanies Canvas schema version 15: a share may carry a
+// dashboard, which names the blocks it places by their ids in the same share.
+export const CANVAS_SHARE_DASHBOARD_SCHEMA_VERSION = 8;
+export const CANVAS_SHARE_SCHEMA_VERSION = 8 as const;
 // The newest Canvas block version a share at this version names. Canvas
 // version 13 added only the table row id, which a share drops, so share
 // version 6 named a block authored at 13 as 12. Version 14 adds chart types a
-// share carries, so share version 7 names blocks up to 14. A later Canvas bump
-// that adds something a share carries bumps the share version again.
-export const CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION = 14 as const;
+// share carries, so share version 7 named blocks up to 14, and version 15 adds
+// the dashboard, so share version 8 names blocks up to 15. Canvas version 16
+// adds only the design document size and theme, and a share refuses a design,
+// so it names a block authored at 16 as 15. A later Canvas bump that adds
+// something a share carries bumps the share version again.
+export const CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION = 15 as const;
 export const CanvasShareSchemaVersion = Schema.Literal(
   1,
   2,
@@ -101,6 +109,7 @@ export const CanvasShareSchemaVersion = Schema.Literal(
   4,
   5,
   6,
+  7,
   CANVAS_SHARE_SCHEMA_VERSION,
 );
 export type CanvasShareSchemaVersion = typeof CanvasShareSchemaVersion.Type;
@@ -891,6 +900,18 @@ export const CanvasStaticExportBlock = Schema.Union(
   }).annotations(strict),
   Schema.Struct({
     ...exportBlockFields,
+    kind: Schema.Literal("dashboard"),
+    title: ExportLabel,
+    columns: Schema.optional(Schema.Int.pipe(Schema.between(1, CANVAS_MAX_DASHBOARD_COLUMNS))),
+    cells: Schema.NonEmptyArray(
+      Schema.Struct({
+        blockId: boundedToken("CanvasBlockId"),
+        span: Schema.optional(Schema.Int.pipe(Schema.between(1, CANVAS_MAX_DASHBOARD_COLUMNS))),
+      }).annotations(strict),
+    ).pipe(Schema.maxItems(CANVAS_MAX_DASHBOARD_CELLS)),
+  }).annotations(strict),
+  Schema.Struct({
+    ...exportBlockFields,
     kind: Schema.Literal("image"),
     alt: ExportNonEmptyText,
     caption: Schema.optional(ExportText),
@@ -968,6 +989,12 @@ export const CanvasStaticExportDocument = Schema.Struct({
         document.schemaVersion >= CANVAS_SHARE_FLOW_CHARTS_SCHEMA_VERSION ||
         !document.blocks.some(canvasChartUsesFlowTypes),
       { message: () => "Funnel, radar, and sankey charts require Canvas share version 7." },
+    ),
+    Schema.filter(
+      (document) =>
+        document.schemaVersion >= CANVAS_SHARE_DASHBOARD_SCHEMA_VERSION ||
+        !document.blocks.some((block) => block.kind === "dashboard"),
+      { message: () => "Dashboard blocks require Canvas share version 8." },
     ),
   );
 export type CanvasStaticExportDocument = typeof CanvasStaticExportDocument.Type;

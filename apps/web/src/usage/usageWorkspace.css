@@ -278,14 +278,14 @@
 .usage-heatmap__legend li {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: var(--oct-space-1);
 }
 
 .usage-heatmap__grid {
   display: grid;
   grid-auto-flow: column;
   grid-template-rows: repeat(7, 14px);
-  gap: 3px;
+  gap: var(--oct-space-1);
   min-width: 0;
   padding-bottom: var(--oct-space-1);
   overflow-x: auto;
@@ -307,11 +307,6 @@
   border-radius: 3px;
   font-size: var(--oct-text-xs);
   line-height: 1;
-}
-
-.usage-heatmap__cell:focus-visible {
-  outline: 2px solid var(--oct-accent-fg);
-  outline-offset: 1px;
 }
 
 .usage-heatmap__cell[data-state="no-activity"],

@@ -110,6 +110,27 @@ model, and delivery outcome, not its access. Octant refuses a fork from a
 reply that is still running, or from a point where it did not record the
 files, and says which.
 
+The fork's first message carries the conversation up to that reply, never the
+replies after it. On the Octant Harness it continues the source's own session,
+tool activity included. Otherwise, and whenever the fork runs on a different
+provider, Octant hands over up to 23 recent messages as text, each labelled
+with the provider and model that wrote it; hidden reasoning, tool activity and
+the source's session stay behind. The fork's first reply says which happened
+and what was left out. If no readable conversation is left to hand over,
+Octant refuses to create the fork, or refuses its first message, and says why.
+
+**Merge back to source** appears on a fork's own finished replies. It hands the
+fork's conversation — its messages after the fork point, or after its previous
+merge back, up to that reply — back to the thread it was forked from as text,
+each message labelled with the provider and model that wrote it. Nothing runs
+and nothing is asked: the source's next message carries the merged messages,
+and that reply says how many came over, what was left out, and that hidden
+reasoning, tool activity and the fork's file changes did not. Code still
+reaches the source only through Git review. If the fork took in outside
+content, the source is marked as having taken it in too. Octant refuses a
+merge from a reply still running, a merge with nothing new since the last one,
+and a merge into a thread this window cannot reach, and says which.
+
 **Restore from here** starts a second thread at the marked checkpoint and
 leaves this one untouched. The restored thread's sidebar row — and the Project
 Overview list, which shares those rows — carries a fork mark, as does the
