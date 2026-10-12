@@ -5306,7 +5306,10 @@ function LaunchedShell(
     // work modes dismisses it.
     if (mode === "chat") setAutomationCenterOpen(false);
     if (mode === "chat") return;
-    const hasProject = projectController.projects.some(
+    // `projects` is the mode currently on screen. Switching Work → Code must
+    // see Code Projects that already exist, or Switch to Code also opens an
+    // unscoped draft over the Code workspace.
+    const hasProject = projectController.allProjects.some(
       (project) => project.type === mode && project.lifecycle === "active",
     );
     if (!hasProject) {
@@ -6958,6 +6961,19 @@ function LaunchedShell(
                           onRetryThreads: () => projectThreadsAccess.onRetry?.(),
                         })}
                     projects={workSide ? workSideProjects : projectController.projects}
+                    {...(workSide &&
+                    workSideProjects.length === 0 &&
+                    projectController.allProjects.some(
+                      (project) => project.type === "code" && project.lifecycle === "active",
+                    )
+                      ? {
+                          otherModeProjectsHint: {
+                            message: "Your Projects are in Code.",
+                            actionLabel: "Switch to Code",
+                            onSwitch: () => handleSelectMode("code"),
+                          },
+                        }
+                      : {})}
                   />
                 )}
               </>
