@@ -750,6 +750,15 @@ function RunningDesignBlock({
           page can reach the network before Octant stops it.
         </p>
       ) : null}
+      {/* Shown on every client and in every state: a page's policy does not
+          cover a peer connection, and the desktop's WebRTC policy stops UDP
+          only, so a sandboxed frame still reached a TCP listener there. */}
+      {runtime === undefined ? null : (
+        <p className="canvas-design__notice">
+          A prototype&apos;s script can still connect to another computer and send what the
+          prototype holds. Octant does not block that yet.
+        </p>
+      )}
       {state.kind === "stopped" ? (
         <p className="canvas-design__notice" role="status">
           {state.why.kind === "refused" ? state.why.reason : STOPPED_TEXT[state.why.kind]}
