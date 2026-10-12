@@ -233,6 +233,32 @@ describe("extension client", () => {
     });
     expect(requests).toHaveLength(3);
   });
+
+  it("offers remembered tool approvals to a local window and to no other host", async () => {
+    const calls: Array<string> = [];
+    const fetch: typeof globalThis.fetch = async (input) => {
+      calls.push(String(input));
+      return response([]);
+    };
+    const local = createExtensionClient({
+      baseUrl: "http://localhost:4100",
+      fetch,
+      windowCapability: capability,
+    });
+    const remote = createExtensionClient({
+      baseUrl: "https://octant.example.net",
+      fetch,
+      windowCapability: capability,
+    });
+
+    expect(local.toolGrantsAvailable).toBe(true);
+    expect(remote.toolGrantsAvailable).toBe(false);
+    await expect(remote.listToolGrants()).rejects.toMatchObject({ category: "unavailable" });
+    await expect(remote.revokeToolGrant(`sha256:${"b".repeat(64)}`)).rejects.toMatchObject({
+      category: "unavailable",
+    });
+    expect(calls).toEqual([]);
+  });
 });
 
 function catalogEntry() {

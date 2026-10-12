@@ -2852,7 +2852,9 @@ prompt, schema, tool, route, model, or capability.
     trust, and rollback revoke them (`extension.tool-grant-revoked@1`), so
     installing or trusting the package again restores nothing. A person
     revokes one through the local-only `/api/extensions/tool-grants`, which
-    lists and revokes and has no request that adds a grant.
+    lists and revokes and has no request that adds a grant. Settings › Data &
+    privacy lists them by Project with Revoke, and the prompt offers "always
+    allow" only to a client on a loopback host.
   - This covers only the tools Octant itself calls. An MCP server that a
     provider runtime starts from the person's own configuration (for example
     a Codex Work or Code thread using `~/.codex/config.toml`) is called
