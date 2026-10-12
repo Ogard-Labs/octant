@@ -82,7 +82,8 @@ client's `frame-src` to that path on its own origin.
   sandboxed frame reached a local TCP listener with the policy set (one
   connection; four STUN datagrams without the policy, none with it).
   Containing it on desktop needs a boundary the renderer's own session does
-  not give a frame, and is not built.
+  not give a frame, and is not built. The agent's preview browser is the one
+  place it is closed, because that browser is started with no route out (F14).
 - A running frame in a remote browser is also not contained against a
   self-navigation to a page that runs its own script and makes its own
   requests (F7). What it can send is bounded by what the frame holds, which
