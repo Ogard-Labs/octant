@@ -91,7 +91,15 @@ export function useWorkComposerImages(): WorkComposerImages {
   // object URLs or a second ID list that the Remove control cannot see.
   useLayoutEffect(() => {
     const files = scope === undefined ? [] : (drafts?.readImages(scope) ?? []);
-    if (files.length === 0) return;
+    for (const attachment of current.current) {
+      if (!previews.current.delete(attachment.previewUrl)) continue;
+      URL.revokeObjectURL(attachment.previewUrl);
+    }
+    if (files.length === 0) {
+      current.current = [];
+      setStaged([]);
+      return;
+    }
     const restored = stagePersistedFiles(files);
     current.current = restored;
     for (const attachment of restored) previews.current.add(attachment.previewUrl);

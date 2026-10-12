@@ -114,4 +114,25 @@ describe("useWorkComposerImages", () => {
     fireEvent.click(screen.getByRole("button", { name: "remove captured.png" }));
     expect(screen.getByLabelText("images")).toHaveTextContent("");
   });
+
+  it("does not keep attachments after the draft scope changes", () => {
+    const drafts = createNewTaskDrafts();
+    drafts.writeImages("work-overview:a", [
+      new File([new Uint8Array([1])], "alpha.png", { type: "image/png" }),
+    ]);
+    function view(scope: string) {
+      return (
+        <NewTaskDraftsContext.Provider value={drafts}>
+          <NewTaskDraftScopeContext.Provider value={scope}>
+            <Harness />
+          </NewTaskDraftScopeContext.Provider>
+        </NewTaskDraftsContext.Provider>
+      );
+    }
+
+    const rendered = render(view("work-overview:a"));
+    expect(screen.getByLabelText("images")).toHaveTextContent("alpha.png");
+    rendered.rerender(view("work-overview:b"));
+    expect(screen.getByLabelText("images")).toHaveTextContent("");
+  });
 });

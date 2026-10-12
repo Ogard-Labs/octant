@@ -103,7 +103,7 @@ function railIdFor(group: PickerGroup | undefined): RailId | undefined {
   return group.runtime === "octant-harness" ? OCTANT_RAIL_ID : group.instance.id;
 }
 
-function pickerHasListedModel(groups: ReadonlyArray<PickerGroup>): boolean {
+export function pickerHasListedModel(groups: ReadonlyArray<PickerGroup>): boolean {
   return groups.some((group) => group.sections.some((section) => section.models.length > 0));
 }
 
