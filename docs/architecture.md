@@ -3224,17 +3224,30 @@ mechanisms are:
   `~/.claude-accounts/<instanceId>`) and the launch temporary directory.
   The checkout must not be that leaf, sit inside it, or be an ancestor of
   it, so Plan cannot reopen the project through the account grant.
-  Confined Claude signs in with the unmodified CLI. On macOS that needs
-  exec of exactly `/usr/bin/security` and the security-server lookup,
-  added as Seatbelt `extraRules` the same way an OpenCode launch may
-  exec `/usr/bin/false`. Keychain files stay denied, as does every other
-  exec including `/bin/sh`. Residual risk: `/usr/bin/security` can return
-  any keychain item that trusts that tool. Linux confinement cannot take
-  Seatbelt extra rules, so this carve-out is macOS-only. Octant never
-  reads, stores, or injects Claude OAuth tokens; a leftover helper-token
-  envelope is deleted on upgrade and the person is told they can revoke
-  it with Anthropic. If the assigned directory cannot sign in, the launch
-  refuses and Settings shows the unmodified sign-in command. A
+  A confined Claude launch on a subscription account signs in with the
+  unmodified CLI, which on macOS reads its login by running
+  `/usr/bin/security` against the login keychain. Measured on macOS 27.0.1
+  with Claude Code 2.1.296, that read needs four things and nothing else:
+  exec of exactly `/usr/bin/security`, `process-fork`, read of the one file
+  `~/Library/Keychains/login.keychain-db`, and the two security-server
+  lookups. With any one missing the runtime is signed out, so the launch
+  takes all four, as Seatbelt `extraRules` and the fork switch, the same
+  way an OpenCode launch may exec `/usr/bin/false`. No shell, no Keychain
+  write, and no other file in that folder is granted: `/bin/sh` and every
+  other exec stay refused, which keeps hooks and the Bash tool out. The
+  cost: the confined runtime may fork, may run `security`, which returns
+  any keychain item that trusts that tool, and may read the encrypted
+  login keychain file. The driver refuses a file tool that names that
+  folder, so the grant serves the runtime's sign-in read and not the
+  model. A launch on an API key takes none of it. Linux keeps the login in
+  a file inside the account directory, which the launch already holds, and
+  Seatbelt rules do not apply there. Before a confined launch starts, the
+  `claude auth status` check that readiness uses runs inside that launch's
+  sandbox: a sign-in the sandbox cannot read refuses the turn with the step
+  that fixes it, instead of failing after the turn has started. Octant
+  never reads, stores, or injects Claude OAuth tokens; a leftover
+  helper-token envelope is deleted on upgrade, and the account form says
+  to revoke it with Anthropic. A
   bound root a launch may not write is denied in the profile, so a checkout under that launch's own temporary directory is not
   writable through it. The `--version` read every family and the discovery
   scan perform before a runtime starts is wrapped too, with no root, no home, no network and one
