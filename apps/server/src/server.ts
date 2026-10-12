@@ -7297,6 +7297,13 @@ export function startOctantServer(
       for (const windowId of windowAuthorityStore.listWindowIds()) return windowId;
       return undefined;
     };
+    // A goal-loop round runs as the host, so no window stands in for the
+    // shell's mode switch: a loop whose Work was turned off pauses, and a
+    // round already being prepared is refused at its turn's admission.
+    const goalLoopWorkEnabled = (): boolean =>
+      enabledModes(persistence.readShellSettings()?.settings ?? defaultShellSettings()).includes(
+        "work",
+      );
     const goalLoopEvents = new GoalLoopEventStore({
       journal: persistence.journal,
       uuid: randomUUID,
@@ -7334,10 +7341,7 @@ export function startOctantServer(
         });
       },
       threadAuthority: (threadId) => {
-        // A round runs as the host, so no window stands in for the shell's
-        // mode switch: a loop whose Work was turned off has nothing to run.
-        const shell = persistence.readShellSettings()?.settings ?? defaultShellSettings();
-        if (!enabledModes(shell).includes("work")) return undefined;
+        if (!goalLoopWorkEnabled()) return undefined;
         try {
           return workTurnPosture(threadId);
         } catch {
@@ -7370,6 +7374,7 @@ export function startOctantServer(
       runRound: createGoalLoopWorkRoundRunner({
         turns: workTurnService,
         usage: workTurnUsageStore,
+        workEnabled: goalLoopWorkEnabled,
         command: ({ threadId, objective }) => {
           const thread = workThreadProjection.read(threadId as never);
           if (thread === undefined) {

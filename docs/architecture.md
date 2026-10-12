@@ -4031,7 +4031,9 @@ mechanisms are:
   Project binding, its turn is journaled as the host's `system` actor, and the
   ordinary Work turn path still rechecks the thread, its active Work Project,
   and the round's authority. A loop pauses while Work is turned off, since no
-  window stands in for the mode switch, and an approval a round raises is
+  window stands in for the mode switch, and a round's turn rechecks the switch
+  at admission, so turning Work off while a round is being prepared refuses
+  it. An approval a round raises is
   offered the way a routine's is, to the local windows bound to its Project.
   Nothing else about a Work turn widens:
   it stays confined to the Project root, and providers without an auto-accept

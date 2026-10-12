@@ -14,7 +14,10 @@ export interface GoalLoopWorkTurnPort {
   readonly startFirstTurn: (
     windowId: WindowId,
     command: unknown,
-    options?: { readonly holdAskFirst?: boolean },
+    options?: {
+      readonly holdAskFirst?: boolean;
+      readonly admissionCurrent?: () => boolean;
+    },
   ) => Promise<WorkTurnLookupResult>;
   readonly subscribe: (
     windowId: WindowId,
@@ -46,6 +49,12 @@ export interface CreateGoalLoopWorkRoundRunnerOptions {
     readonly prompt: string;
     readonly authority: Record<string, unknown>;
   };
+  /**
+   * Whether Work is still on. A round runs as the host, so no window stands
+   * in for the mode switch; it is rechecked at the turn's admission so Work
+   * turned off while the round was being prepared still refuses the turn.
+   */
+  readonly workEnabled: () => boolean;
   readonly uuid: () => string;
   readonly now?: () => number;
 }
@@ -96,6 +105,7 @@ export function createGoalLoopWorkRoundRunner(
       // otherwise the round asks first, as every Work round did before.
       const accepted = await options.turns.startFirstTurn(scopeId, command, {
         holdAskFirst: input.authority?.executionPolicy !== "auto-accept-edits",
+        admissionCurrent: options.workEnabled,
       });
       if (accepted.kind !== "accepted") {
         return {

@@ -45,6 +45,7 @@ function harness(
     readonly start?: GoalLoopWorkTurnPort["startFirstTurn"];
     readonly frames?: AsyncGenerator<WorkTurnStreamFrame>;
     readonly usage?: WorkTurnUsageStore;
+    readonly workEnabled?: () => boolean;
   } = {},
 ) {
   const usage = options.usage ?? new WorkTurnUsageStore();
@@ -61,6 +62,7 @@ function harness(
   const run = createGoalLoopWorkRoundRunner({
     turns,
     usage,
+    workEnabled: options.workEnabled ?? (() => true),
     command: (input) => ({
       kind: "start-work-thread-turn",
       requestId: `77777777-0000-4000-8000-00000000000${(n += 1)}`,
@@ -238,6 +240,29 @@ describe("createGoalLoopWorkRoundRunner", () => {
     expect(outcome).toMatchObject({ outcome: "ran" });
     expect(h.turns.startFirstTurn).toHaveBeenCalledTimes(1);
     expect(vi.mocked(h.turns.startFirstTurn).mock.calls[0]?.[0]).toBe(ROUTINE_HOST_SCOPE_ID);
+  });
+
+  it("refuses the round's turn when Work is turned off before the turn is admitted", async () => {
+    let workOn = true;
+    const h = harness({
+      workEnabled: () => workOn,
+      start: vi.fn(async (_scopeId, _command, options) => {
+        // Work is turned off while the turn is being prepared; the turn path
+        // asks the admission predicate again just before admitting.
+        workOn = false;
+        if (options?.admissionCurrent?.() === false) {
+          throw new Error("Work turn admission is no longer current.");
+        }
+        return acceptedTurn("77777777-0000-4000-8000-000000000001", "completed");
+      }),
+    });
+
+    const outcome = await h.run({ threadId, objective: "Get the migration passing" });
+
+    expect(outcome).toMatchObject({
+      outcome: "failed",
+      detail: "Work turn admission is no longer current.",
+    });
   });
 
   it("does not borrow an open window to run a round", async () => {
