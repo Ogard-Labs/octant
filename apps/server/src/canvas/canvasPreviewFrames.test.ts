@@ -180,6 +180,24 @@ describe("a design the look could not finish reading", () => {
     expect(designFrameReadings(answers).measured).toBe(false);
   });
 
+  it("gives a frame no longer to answer than the look has left", async () => {
+    // The first read takes most of the budget; the second may wait only for
+    // what remains, not for a whole frame's wait past the deadline.
+    let clock = 0;
+    const waits: number[] = [];
+    await readFramesWithinBudget(
+      ["a", "b"],
+      async (_frame, remainingMs) => {
+        waits.push(remainingMs);
+        clock += 9_900;
+        return undefined;
+      },
+      10_000,
+      () => clock,
+    );
+    expect(waits).toEqual([10_000, 100]);
+  });
+
   it("is measured when every frame answered", () => {
     expect(designFrameReadings([{ overflow: [], contrast: [] }]).measured).toBe(true);
   });
