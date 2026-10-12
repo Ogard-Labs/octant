@@ -10,16 +10,15 @@
 policy, untrusted content, sandbox boundaries, credentials, subagents, extensions, and remote
 clients on one Octant host
 
-**Designs:**
-[`../specs/2026-07-13-octant-product-architecture-design.md`](../specs/2026-07-13-octant-product-architecture-design.md)
-(sections 7, 8, 16),
-[`../specs/2026-07-13-extensions-marketplace-design.md`](../specs/2026-07-13-extensions-marketplace-design.md)
-(section 4),
-[`../specs/2026-07-13-mixed-provider-subagents-design.md`](../specs/2026-07-13-mixed-provider-subagents-design.md)
+**Designs:** the current owners are
+[Architecture](../architecture.md): [security and authority](../architecture.md#security-and-authority),
+including subagents, and [modes](../architecture.md#modes-chat-work-and-code); and
+[extensions and skills](../architecture.md#extensions-and-skills).
 
 The Octant-managed endpoint agent loop, sustained Goal execution, editable egress rules, session
 fork/checkpoint/pause behavior, and CLI/GUI security ownership copy are further constrained by
-[`../specs/2026-08-12-octant-native-agent-harness-v1-design.md`](../specs/2026-08-12-octant-native-agent-harness-v1-design.md).
+the [native harness](../architecture.md#native-harness) rules in the architecture. (Earlier
+revisions of this model cited design files under `docs/specs/` that no longer exist.)
 
 **Companion feature threat models:**
 [`github-repository-onboarding-threat-model.md`](github-repository-onboarding-threat-model.md),
