@@ -612,6 +612,13 @@ extra typed lines and visible notices is intentional (0114). Repository, branch
 and PR actions stay visible below the input. Utility panels keep one resize
 boundary and a compact tab row without a second horizontal divider.
 
+A thread's Browser captures are a plain list of rows under a sentence-case
+section label (`oct-section-label`, "Browser captures"), not a card group: each
+row is a hairline-ringed object with a 72 x 48 picture, the page title in the
+medium weight, and the origin as mono meta, and the whole row is one `bare`
+button that opens the full picture. It uses the neutral hairline and surface
+tokens only, adds no colour, and draws no fill on hover or when open.
+
 Attachment and model controls sit on the left; access, context usage and send
 stay together at the right edge even when the controls wrap. Menus use compact
 interface text, and model choices stay in a bounded scrollable popup.

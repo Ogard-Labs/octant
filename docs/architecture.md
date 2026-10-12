@@ -1297,6 +1297,17 @@ flowchart LR
   projection rebuilds from the journal; session, turn, and restart boundaries
   never clear it. Irreversible or authority-bearing actions on a tainted thread
   still require fresh confirmation after replay.
+- **Browser captures.** Only a screenshot the agent asks for with the browser
+  tool, or the person takes with the Browser pane's Screenshot control, is kept
+  with the thread that owns the Browser. The bytes live in the host's managed
+  attachment store and the journal holds only a reference, the page origin, URL,
+  title, content hash, and time. A thread keeps its newest 32 captures and they
+  are erased with the thread. Only a local window that can open the thread reads
+  them, never a paired device. They never reach a Canvas share, replica sync, or
+  a diagnostics export, and are not yet in the thread export. A capture adds no
+  Project filesystem authority and no second taint mechanism: the observation
+  that produced it already taints the thread. Detail is in
+  [Browser captures](design/browser-captures.md).
 - **Recovery.** Sequence-based reconnect replay for local and remote clients —
   a dropped stream catches up from the authoritative snapshot before it reopens,
   keeps retrying while the host is unreachable, and a remote session whose window

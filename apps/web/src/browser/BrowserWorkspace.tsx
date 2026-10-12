@@ -10,6 +10,7 @@ import type {
 import type {
   BrowserActionKind,
   BrowserActionRequest,
+  BrowserCaptureNotKeptReason,
   BrowserContextId,
   BrowserViewportPoint,
 } from "@octant/contracts/browser-automation";
@@ -19,6 +20,7 @@ import type { WorkspaceTab } from "@octant/contracts/shell";
 import {
   ArrowLeft,
   ArrowRight,
+  Camera,
   Globe2,
   ExternalLink,
   LoaderCircle,
@@ -87,6 +89,10 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
     props.tab.threadId === undefined ? "unavailable" : "ready",
   );
   const [message, setMessage] = useState<string>();
+  // A capture the host declined to keep is said once, apart from `message`,
+  // because every poll of the page rewrites `message`.
+  const [captureNotice, setCaptureNotice] = useState<string>();
+  const [capturing, setCapturing] = useState(false);
   const [starting, setStarting] = useState(false);
   const [ownedContextId, setOwnedContextId] = useState<BrowserContextId | undefined>(
     props.tab.contextId,
@@ -322,6 +328,7 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
     localFailure.current = false;
     setStatus("waiting");
     setMessage(undefined);
+    setCaptureNotice(undefined);
     try {
       const next = await props.client.act({
         actionId: snapshot.context.actionId,
@@ -337,6 +344,48 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
       localFailure.current = true;
       localFailureRevision.current = currentSnapshotRevision.current ?? snapshotRevision(snapshot);
       applyFailure(error, setStatus, setMessage);
+    }
+  }
+
+  /**
+   * The person's Screenshot control: the one pane gesture that keeps a picture
+   * with the thread. Refreshing the preview is an ordinary action and keeps none.
+   */
+  async function takeScreenshot(): Promise<void> {
+    const takeCapture = props.client.takeCapture;
+    if (
+      snapshot?.context === undefined ||
+      scope === undefined ||
+      props.tab.threadId === undefined ||
+      takeCapture === undefined
+    ) {
+      return;
+    }
+    localFailure.current = false;
+    setCapturing(true);
+    setCaptureNotice(undefined);
+    setMessage(undefined);
+    try {
+      const next = await takeCapture.call(props.client, {
+        threadId: props.tab.threadId,
+        request: {
+          actionId: snapshot.context.actionId,
+          contextId: snapshot.context.contextId,
+          correlationId: snapshot.context.correlationId,
+          authority: scope.authority,
+          kind: "screenshot",
+        },
+      });
+      update(next);
+      if (next.observation?.capture?.status === "not-kept") {
+        setCaptureNotice(captureNotKeptNotice(next.observation.capture.reason));
+      }
+    } catch (error) {
+      localFailure.current = true;
+      localFailureRevision.current = currentSnapshotRevision.current ?? snapshotRevision(snapshot);
+      applyFailure(error, setStatus, setMessage);
+    } finally {
+      setCapturing(false);
     }
   }
 
@@ -437,10 +486,12 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
     }
   }
 
+  const notice = message ?? captureNotice;
+
   return (
     <section
       aria-label="Browser automation"
-      className={`browser-workspace${message === undefined ? "" : " browser-workspace--message"}`}
+      className={`browser-workspace${notice === undefined ? "" : " browser-workspace--message"}`}
     >
       <header className="browser-workspace__chrome">
         <div className="browser-workspace__history" aria-label="Browser history controls">
@@ -545,6 +596,20 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
           ) : null}
           {controlLabel}
         </span>
+        {activeContext && props.client.takeCapture !== undefined ? (
+          <OctantButton
+            aria-label="Screenshot"
+            className="browser-workspace__close"
+            disabled={capturing}
+            onClick={() => void takeScreenshot()}
+            size="icon"
+            title="Screenshot (kept with this thread)"
+            type="button"
+            variant="ghost"
+          >
+            <Camera aria-hidden="true" size={14} />
+          </OctantButton>
+        ) : null}
         {activeContext ? (
           props.hostBridge?.openBrowserExternal === undefined ? null : (
             <OctantButton
@@ -600,9 +665,9 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
           )}
         </span>
       </header>
-      {message === undefined ? null : (
+      {notice === undefined ? null : (
         <OctantAlert className="browser-workspace__message" tone="warning">
-          {message}
+          {notice}
         </OctantAlert>
       )}
       {!activeContext ? (
@@ -826,6 +891,17 @@ export function makeBrowserToolAction(
 
 function statusLabel(status: BrowserWorkspaceStatus): string {
   return `Browser ${status}`;
+}
+
+function captureNotKeptNotice(reason: BrowserCaptureNotKeptReason): string {
+  const why: Record<BrowserCaptureNotKeptReason, string> = {
+    "too-large": "the picture is too large",
+    "not-an-image": "the host did not recognise it as an image",
+    "no-page-origin": "the page has no web address",
+    "no-picture": "the Browser gave no picture of this page",
+    unavailable: "the host could not store it",
+  };
+  return `This screenshot could not be kept: ${why[reason]}.`;
 }
 
 function applyFailure(

@@ -133,6 +133,8 @@ import {
   IMAGE_JOB_STATUS_CHANGED,
   ImageJobQueued,
   ImageJobStatusChanged,
+  BROWSER_CAPTURE_KEPT,
+  BrowserCaptureKept,
   THREAD_RETENTION_EVENT_NAMES,
   ThreadRetentionThreadPurged,
   ThreadRetentionWindowSet,
@@ -423,6 +425,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register(GITHUB_CLONE_TRANSITIONED, 1, GithubCloneTransitioned)
     .register(IMAGE_JOB_QUEUED, 1, ImageJobQueued)
     .register(IMAGE_JOB_STATUS_CHANGED, 1, ImageJobStatusChanged)
+    .register(BROWSER_CAPTURE_KEPT, 1, BrowserCaptureKept)
     .register(THREAD_RETENTION_EVENT_NAMES.windowSet, 1, ThreadRetentionWindowSet)
     .register(THREAD_RETENTION_EVENT_NAMES.threadPurged, 1, ThreadRetentionThreadPurged)
     .register(THREAD_EXTERNAL_CONTENT_EVENT_NAMES.ingested, 1, ContentIngestedPayload)

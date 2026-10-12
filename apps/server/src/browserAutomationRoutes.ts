@@ -16,11 +16,20 @@ import {
 import {
   decodeBrowserAutomationFailure,
   type BrowserAutomationFailure,
+  type BrowserThreadId,
 } from "@octant/contracts/browser-automation";
+import {
+  decodeBrowserCaptureImage,
+  decodeBrowserCaptureImageCommand,
+  decodeBrowserCaptureTakeCommand,
+  decodeBrowserCapturesCommand,
+  decodeBrowserCapturesResponse,
+} from "@octant/contracts/browser-capture";
 import type {
   BrowserAuthorityResolver,
   BrowserAutomationService,
 } from "./browser/browserAutomationService";
+import type { BrowserCaptureService } from "./browser/browserCaptureService";
 import { remoteBrowserActionReach } from "@octant/domain";
 import {
   decodeProjectBrowserCommand,
@@ -43,6 +52,18 @@ export interface BrowserAutomationRouteDependencies {
     "create" | "act" | "cancel" | "stop" | "inspect" | "inspectThread" | "releaseThread"
   > &
     Partial<Pick<BrowserAutomationService, "peekThread">>;
+  /** The thread's kept screenshots; absent on a host that keeps none. */
+  readonly captures?: Pick<BrowserCaptureService, "list" | "read">;
+  /**
+   * Whether this window can open the thread, archived or not. Reading what a
+   * thread kept asks this rather than live Browser authority, which an archived
+   * thread, an archived Project, and a switched-off provider all lose. Absent
+   * means nobody can read captures.
+   */
+  readonly windowCanOpenThread?: (
+    windowId: WindowId,
+    threadId: BrowserThreadId,
+  ) => Promise<boolean>;
   readonly authority: BrowserAuthorityResolver;
   readonly approvals?: {
     list(windowId: WindowId): ReadonlyArray<BrowserToolApproval>;
@@ -57,6 +78,39 @@ export interface BrowserAutomationRouteDependencies {
 export function createBrowserAutomationRouteHandler(
   dependencies: BrowserAutomationRouteDependencies,
 ): (request: Request) => Promise<Response | undefined> {
+  const notThisWindowsThread = (origin: string | null): Response =>
+    failure(
+      { category: "unauthorized", message: "Browser thread is not owned by this window." },
+      403,
+      origin,
+    );
+  // A capture is a picture of a page the person browsed, so only a local
+  // window that can open the thread reads one: not a paired device, and not a
+  // window of another thread. The thread need not be live: captures are its
+  // history, and an archived thread opened from the archive still shows them.
+  const captureReadRefusal = async (
+    windowId: WindowId,
+    callerKind: "local-window" | "remote-device",
+    threadId: BrowserThreadId,
+    origin: string | null,
+  ): Promise<Response | undefined> =>
+    callerKind === "local-window" &&
+    (await dependencies.windowCanOpenThread?.(windowId, threadId)) === true
+      ? undefined
+      : notThisWindowsThread(origin);
+  // Taking a capture drives the Browser, so it needs the thread's live Browser
+  // authority, which reading does not.
+  const captureTakeRefusal = (
+    windowId: WindowId,
+    callerKind: "local-window" | "remote-device",
+    threadId: BrowserThreadId,
+    origin: string | null,
+  ): Response | undefined =>
+    callerKind === "local-window" &&
+    BROWSER_MODES.some((mode) => dependencies.authority.canAccessWindow(windowId, threadId, mode))
+      ? undefined
+      : notThisWindowsThread(origin);
+
   return async (request) => {
     const url = new URL(request.url);
     if (!url.pathname.startsWith(PREFIX)) return undefined;
@@ -221,6 +275,70 @@ export function createBrowserAutomationRouteHandler(
             ? dependencies.service.inspectThread(windowId, input.threadId)
             : await dependencies.service.peekThread(windowId, input.threadId, request.signal);
         return success(decodeBrowserAutomationSnapshot(snapshot), origin);
+      }
+      if (url.pathname === "/api/browser/captures") {
+        const input = decodeBrowserCapturesCommand(decoded.value);
+        const refusal = await captureReadRefusal(windowId, callerKind, input.threadId, origin);
+        if (refusal !== undefined) return refusal;
+        return success(
+          decodeBrowserCapturesResponse({
+            captures: dependencies.captures?.list(input.threadId) ?? [],
+          }),
+          origin,
+        );
+      }
+      if (url.pathname === "/api/browser/captures/take") {
+        // The person's Screenshot control. The ordinary action route keeps
+        // nothing, and a model cannot reach this path through tool input.
+        const input = decodeBrowserCaptureTakeCommand(decoded.value);
+        const refusal = captureTakeRefusal(windowId, callerKind, input.threadId, origin);
+        if (refusal !== undefined) return refusal;
+        if (input.request.kind !== "screenshot") {
+          return failure(
+            { category: "invalid", message: "Only a screenshot can be taken as a capture." },
+            400,
+            origin,
+          );
+        }
+        // The context must be this thread's, not merely this window's.
+        const owned = dependencies.service.inspect(
+          windowId,
+          input.threadId,
+          input.request.contextId,
+        );
+        if (owned.failure?.category === "unauthorized") {
+          return failure(owned.failure, 403, origin);
+        }
+        return success(
+          decodeBrowserAutomationSnapshot(
+            await dependencies.service.act({
+              windowId,
+              request: input.request,
+              capturedBy: "person",
+            }),
+          ),
+          origin,
+        );
+      }
+      if (url.pathname === "/api/browser/captures/image") {
+        const input = decodeBrowserCaptureImageCommand(decoded.value);
+        const refusal = await captureReadRefusal(windowId, callerKind, input.threadId, origin);
+        if (refusal !== undefined) return refusal;
+        const found = await dependencies.captures?.read(input.threadId, input.captureId);
+        if (found === undefined) {
+          return failure(
+            { category: "unavailable", message: "The browser capture is unavailable." },
+            404,
+            origin,
+          );
+        }
+        return success(
+          decodeBrowserCaptureImage({
+            captureId: input.captureId,
+            dataUrl: `data:${found.capture.mime};base64,${Buffer.from(found.bytes).toString("base64")}`,
+          }),
+          origin,
+        );
       }
       if (url.pathname === "/api/browser/contexts/release") {
         const input = decodeBrowserThreadContextCommand(decoded.value);

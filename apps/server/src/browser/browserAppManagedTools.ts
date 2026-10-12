@@ -52,6 +52,7 @@ export interface BrowserAppManagedToolsOptions {
     readonly act: (input: {
       readonly windowId: WindowId;
       readonly request: BrowserActionRequest;
+      readonly capturedBy?: "agent";
     }) => Promise<BrowserAutomationSnapshot>;
     readonly releaseThread: (
       windowId: WindowId,
@@ -249,7 +250,11 @@ export function createBrowserAppManagedTools(
       const request = browserAction(input, context);
       if (request === undefined) return failure("invalid-browser-input");
       if (signal?.aborted) return failure("tool-interrupted");
-      const acted = await options.browser.act({ windowId: options.windowId, request });
+      const acted = await options.browser.act({
+        windowId: options.windowId,
+        request,
+        capturedBy: "agent",
+      });
       if (signal?.aborted) return failure("tool-interrupted");
       if (!modelIsCurrent(options)) return failure("browser-model-stale");
       if (
@@ -468,6 +473,11 @@ function browserResult(snapshot: BrowserAutomationSnapshot, includeScreenshot = 
                 : { failedRequests: observation.failedRequests }),
               ...(includeScreenshot && image === undefined
                 ? { screenshotOmitted: "invalid-or-too-large" as const }
+                : {}),
+              // The screenshot reached the model either way; this only tells
+              // it the thread's Browser captures strip will not show it.
+              ...(observation.capture?.status === "not-kept"
+                ? { captureNotKept: observation.capture.reason }
                 : {}),
             },
           }),

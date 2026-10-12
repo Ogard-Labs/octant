@@ -1,4 +1,5 @@
 export * from "./browserAutomationPolicy";
+export * from "./browserCapturePolicy";
 export * from "./computerUsePolicy";
 export * from "./validationCompositionPolicy";
 export * from "./providerDiscoveryPolicy";
