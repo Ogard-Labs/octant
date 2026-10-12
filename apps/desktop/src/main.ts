@@ -48,6 +48,14 @@ import {
   readHostInfoReceipt,
   resolveHostRuntimePaths,
   ServicePolicyStore,
+  addApiKey,
+  ApiKeyPoolError,
+  listApiKeys,
+  moveApiKey,
+  removeApiKey,
+  renameApiKey,
+  replaceApiKeySecret,
+  setActiveApiKey,
   startCredentialBroker,
   writeBridgeSecretProjection,
   type CredentialBroker,
@@ -193,6 +201,11 @@ import {
   type RemoteDeviceControlService,
 } from "./remoteDeviceControls";
 import { markHostInteraction } from "./interactionTrace";
+import {
+  installCanvasFrameGuards,
+  isolateEachCanvasFrameDocument,
+  type CanvasFrameGuardWebContentsPort,
+} from "./canvasFrameGuard";
 
 const IPC_CHANNELS = {
   nativeMenu: "octant:menu:popup",
@@ -201,6 +214,13 @@ const IPC_CHANNELS = {
   attentionBadge: "octant:attention:badge",
   attentionNotify: "octant:attention:notify",
   clearProviderCredential: "octant:provider-credential:clear",
+  listProviderApiKeys: "octant:provider-api-key:list",
+  addProviderApiKey: "octant:provider-api-key:add",
+  renameProviderApiKey: "octant:provider-api-key:rename",
+  replaceProviderApiKey: "octant:provider-api-key:replace",
+  removeProviderApiKey: "octant:provider-api-key:remove",
+  setActiveProviderApiKey: "octant:provider-api-key:set-active",
+  moveProviderApiKey: "octant:provider-api-key:move",
   browserSurfaceAttach: "octant:browser-surface:attach",
   browserSurfaceBounds: "octant:browser-surface:bounds",
   browserSurfaceCommand: "octant:browser-surface:command",
@@ -700,6 +720,140 @@ export function installProviderCredentialIpcHandlers(options: {
       throw new Error("Octant could not clear the provider credential.");
     }
   });
+  // Labels and secrets are read here, never by the renderer. A list answers
+  // labels only; every change returns nothing or the new key's label.
+  options.handle(IPC_CHANNELS.listProviderApiKeys, async (event, instanceId) => {
+    authorize(event);
+    const providerInstanceId = validateProviderInstanceId(instanceId);
+    return queueApiKeyOperation(async () => {
+      const stored = await readStoredApiKeys(options.store, providerInstanceId);
+      return stored === undefined ? [] : listApiKeys(stored);
+    });
+  });
+  options.handle(IPC_CHANNELS.addProviderApiKey, async (event, instanceId, credential, label) => {
+    authorize(event);
+    const validated = validateProviderCredentialRequest(instanceId, credential);
+    const requestedLabel = label === undefined ? undefined : validateApiKeyLabel(label);
+    return queueApiKeyOperation(async () => {
+      const stored = await readStoredApiKeys(options.store, validated.providerInstanceId);
+      const added = addApiKey(stored, { secret: validated.credential, label: requestedLabel });
+      await options.store.set(validated.providerInstanceId, added.stored);
+      return added.key;
+    });
+  });
+  options.handle(IPC_CHANNELS.renameProviderApiKey, async (event, instanceId, keyId, label) => {
+    authorize(event);
+    const providerInstanceId = validateProviderInstanceId(instanceId);
+    const validKeyId = validateApiKeyId(keyId);
+    const validLabel = validateApiKeyLabel(label);
+    return queueApiKeyOperation(async () => {
+      const stored = await requireStoredApiKeys(options.store, providerInstanceId);
+      await options.store.set(providerInstanceId, renameApiKey(stored, validKeyId, validLabel));
+    });
+  });
+  options.handle(
+    IPC_CHANNELS.replaceProviderApiKey,
+    async (event, instanceId, keyId, credential) => {
+      authorize(event);
+      const validated = validateProviderCredentialRequest(instanceId, credential);
+      const validKeyId = validateApiKeyId(keyId);
+      return queueApiKeyOperation(async () => {
+        const stored = await requireStoredApiKeys(options.store, validated.providerInstanceId);
+        await options.store.set(
+          validated.providerInstanceId,
+          replaceApiKeySecret(stored, validKeyId, validated.credential),
+        );
+      });
+    },
+  );
+  options.handle(IPC_CHANNELS.removeProviderApiKey, async (event, instanceId, keyId) => {
+    authorize(event);
+    const providerInstanceId = validateProviderInstanceId(instanceId);
+    const validKeyId = validateApiKeyId(keyId);
+    return queueApiKeyOperation(async () => {
+      const stored = await requireStoredApiKeys(options.store, providerInstanceId);
+      const remaining = removeApiKey(stored, validKeyId);
+      if (remaining === undefined) await options.store.delete(providerInstanceId);
+      else await options.store.set(providerInstanceId, remaining);
+    });
+  });
+  options.handle(IPC_CHANNELS.setActiveProviderApiKey, async (event, instanceId, keyId) => {
+    authorize(event);
+    const providerInstanceId = validateProviderInstanceId(instanceId);
+    const validKeyId = validateApiKeyId(keyId);
+    return queueApiKeyOperation(async () => {
+      const stored = await requireStoredApiKeys(options.store, providerInstanceId);
+      await options.store.set(providerInstanceId, setActiveApiKey(stored, validKeyId));
+    });
+  });
+  options.handle(IPC_CHANNELS.moveProviderApiKey, async (event, instanceId, keyId, direction) => {
+    authorize(event);
+    const providerInstanceId = validateProviderInstanceId(instanceId);
+    const validKeyId = validateApiKeyId(keyId);
+    const validDirection = validateApiKeyMoveDirection(direction);
+    return queueApiKeyOperation(async () => {
+      const stored = await requireStoredApiKeys(options.store, providerInstanceId);
+      await options.store.set(providerInstanceId, moveApiKey(stored, validKeyId, validDirection));
+    });
+  });
+}
+
+let apiKeyWriteQueue: Promise<unknown> = Promise.resolve();
+
+/**
+ * Runs one key change after the previous one, so two edits never read the
+ * same stored value and one overwrites the other.
+ */
+function queueApiKeyOperation<T>(task: () => Promise<T>): Promise<T> {
+  const run = apiKeyWriteQueue.then(task);
+  apiKeyWriteQueue = run.catch(() => undefined);
+  return run.catch((error: unknown) => {
+    throw sanitizeApiKeyError(error);
+  });
+}
+
+async function readStoredApiKeys(
+  store: CredentialStore,
+  providerInstanceId: string,
+): Promise<string | undefined> {
+  if (!(await store.has(providerInstanceId))) return undefined;
+  return store.resolve(providerInstanceId);
+}
+
+async function requireStoredApiKeys(
+  store: CredentialStore,
+  providerInstanceId: string,
+): Promise<string> {
+  const stored = await readStoredApiKeys(store, providerInstanceId);
+  if (stored === undefined) throw new ApiKeyPoolError("unknown-key");
+  return stored;
+}
+
+function sanitizeApiKeyError(error: unknown): Error {
+  if (error instanceof ApiKeyPoolError) return new Error(error.message);
+  return new Error("Octant could not update the provider API keys.");
+}
+
+function validateApiKeyId(value: unknown): string {
+  if (
+    typeof value !== "string" ||
+    !/^(default|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/.test(value)
+  ) {
+    throw new Error("Octant rejected an invalid API key request.");
+  }
+  return value;
+}
+
+function validateApiKeyMoveDirection(value: unknown): "up" | "down" {
+  if (value !== "up" && value !== "down") {
+    throw new Error("Octant rejected an invalid API key request.");
+  }
+  return value;
+}
+
+function validateApiKeyLabel(value: unknown): string {
+  if (typeof value !== "string") throw new Error("Octant rejected an invalid API key request.");
+  return value;
 }
 
 function validateProviderInstanceId(value: unknown): string {
@@ -1019,6 +1173,7 @@ function readStoredDesktopBridgeSecret(directory: string): string | undefined {
 }
 
 app.setName("Octant");
+isolateEachCanvasFrameDocument(app.commandLine);
 const desktopHostRuntimePaths = resolveDesktopHostRuntimePaths(
   process.env.OCTANT_DATA_DIR,
   app.getPath("appData"),
@@ -2018,6 +2173,10 @@ async function createWindow(): Promise<void> {
         rendererNavigationWebContents(window),
         rendererNavigationPolicyOptions(),
       );
+      installCanvasFrameGuards(canvasFrameGuardWebContents(window), {
+        serverUrl: () => activeServerUrl,
+        platform: process.platform,
+      });
       const stopThermalPerformance = observeThermalPerformance({
         platform: process.platform,
         powerMonitor,
@@ -2267,6 +2426,10 @@ async function openSecondaryProjectWindow(target: ProjectWindowTarget): Promise<
           rendererNavigationWebContents(window),
           rendererNavigationPolicyOptions(),
         );
+        installCanvasFrameGuards(canvasFrameGuardWebContents(window), {
+          serverUrl: () => activeServerUrl,
+          platform: process.platform,
+        });
         window.webContents.on("did-start-navigation", (_event, _url, isInPlace, isMainFrame) => {
           if (!isMainFrame || isInPlace) return;
           menuBarOpenThreads.delete(window.id);
@@ -3526,6 +3689,29 @@ function rendererNavigationPolicyOptions() {
     developmentUrl: process.env.OCTANT_WEB_URL,
     packagedRendererPath: resolve(repositoryRoot(), "apps/web/dist/index.html"),
   } as const;
+}
+
+/** The window's own contents, as the running Canvas frame guards see them. */
+function canvasFrameGuardWebContents(window: BrowserWindow): CanvasFrameGuardWebContentsPort {
+  const contents = window.webContents;
+  return {
+    onFrameNavigate: (listener) => {
+      contents.on("will-frame-navigate", (details) => {
+        listener({
+          url: details.url,
+          isMainFrame: details.isMainFrame,
+          frame: details.frame,
+          preventDefault: () => details.preventDefault(),
+        });
+      });
+    },
+    onKeyInput: (listener) => {
+      contents.on("before-input-event", (event, input) => listener(event, input));
+    },
+    focusedFrame: () => contents.focusedFrame,
+    send: (channel) => contents.send(channel),
+    setWebRTCIPHandlingPolicy: (policy) => contents.setWebRTCIPHandlingPolicy(policy),
+  };
 }
 
 function rendererNavigationWebContents(window: BrowserWindow): RendererNavigationWebContentsPort {

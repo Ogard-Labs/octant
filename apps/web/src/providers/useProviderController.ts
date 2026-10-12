@@ -519,7 +519,7 @@ export function useProviderController(options: ProviderControllerOptions) {
             return false;
           }
           try {
-            await hostBridge.setProviderCredential(instanceId, credentialValue);
+            await hostBridge.addProviderApiKey(instanceId, credentialValue);
             return true;
           } catch {
             if (mounted.current) {
@@ -569,7 +569,7 @@ export function useProviderController(options: ProviderControllerOptions) {
             return false;
           }
           try {
-            await hostBridge.setProviderCredential(instanceId, credentialValue);
+            await hostBridge.addProviderApiKey(instanceId, credentialValue);
             return true;
           } catch {
             if (mounted.current) {
@@ -627,7 +627,7 @@ export function useProviderController(options: ProviderControllerOptions) {
           }
           if (hostBridge === undefined) return true;
           try {
-            await hostBridge.setProviderCredential(instanceId, credentialValue);
+            await hostBridge.addProviderApiKey(instanceId, credentialValue);
             return true;
           } catch {
             if (mounted.current) {
@@ -680,7 +680,7 @@ export function useProviderController(options: ProviderControllerOptions) {
             return false;
           }
           try {
-            await hostBridge.setProviderCredential(instanceId, credentialValue);
+            await hostBridge.addProviderApiKey(instanceId, credentialValue);
             return true;
           } catch {
             if (mounted.current) {
@@ -733,7 +733,7 @@ export function useProviderController(options: ProviderControllerOptions) {
             return false;
           }
           try {
-            await hostBridge.setProviderCredential(instanceId, credentialValue);
+            await hostBridge.addProviderApiKey(instanceId, credentialValue);
             return true;
           } catch {
             if (mounted.current) {
@@ -786,7 +786,7 @@ export function useProviderController(options: ProviderControllerOptions) {
             return false;
           }
           try {
-            await hostBridge.setProviderCredential(instanceId, credentialValue);
+            await hostBridge.addProviderApiKey(instanceId, credentialValue);
             return true;
           } catch {
             if (mounted.current) {
@@ -839,7 +839,7 @@ export function useProviderController(options: ProviderControllerOptions) {
             return false;
           }
           try {
-            await hostBridge.setProviderCredential(instanceId, credentialValue);
+            await hostBridge.addProviderApiKey(instanceId, credentialValue);
             return true;
           } catch {
             if (mounted.current) {
@@ -901,7 +901,7 @@ export function useProviderController(options: ProviderControllerOptions) {
             );
             created = true;
             if (configuration.authentication === "api-key") {
-              await hostBridge!.setProviderCredential(instanceId, credentialValue);
+              await hostBridge!.addProviderApiKey(instanceId, credentialValue);
             }
             return true;
           } catch (error) {
@@ -957,7 +957,7 @@ export function useProviderController(options: ProviderControllerOptions) {
             );
             created = true;
             if (configuration.authentication === "api-key") {
-              await hostBridge!.setProviderCredential(instanceId, credentialValue);
+              await hostBridge!.addProviderApiKey(instanceId, credentialValue);
             }
             return true;
           } catch (error) {
@@ -1013,7 +1013,7 @@ export function useProviderController(options: ProviderControllerOptions) {
             );
             created = true;
             if (configuration.authentication === "api-key") {
-              await hostBridge!.setProviderCredential(instanceId, credentialValue);
+              await hostBridge!.addProviderApiKey(instanceId, credentialValue);
             }
             return true;
           } catch (error) {
@@ -1070,7 +1070,7 @@ export function useProviderController(options: ProviderControllerOptions) {
             );
             created = true;
             if (apiKeyHost !== undefined) {
-              await apiKeyHost.setProviderCredential(instanceId, credentialValue);
+              await apiKeyHost.addProviderApiKey(instanceId, credentialValue);
             }
             return true;
           } catch (error) {
@@ -1128,7 +1128,7 @@ export function useProviderController(options: ProviderControllerOptions) {
             );
             created = true;
             if (apiKeyHost !== undefined) {
-              await apiKeyHost.setProviderCredential(instanceId, credentialValue);
+              await apiKeyHost.addProviderApiKey(instanceId, credentialValue);
             }
             return true;
           } catch (error) {
@@ -1185,7 +1185,7 @@ export function useProviderController(options: ProviderControllerOptions) {
             );
             created = true;
             if (apiKeyHost !== undefined) {
-              await apiKeyHost.setProviderCredential(instanceId, credentialValue);
+              await apiKeyHost.addProviderApiKey(instanceId, credentialValue);
             }
             return true;
           } catch (error) {
@@ -1242,7 +1242,7 @@ export function useProviderController(options: ProviderControllerOptions) {
             );
             created = true;
             if (apiKeyHost !== undefined) {
-              await apiKeyHost.setProviderCredential(instanceId, credentialValue);
+              await apiKeyHost.addProviderApiKey(instanceId, credentialValue);
             }
             return true;
           } catch (error) {
@@ -1298,7 +1298,7 @@ export function useProviderController(options: ProviderControllerOptions) {
               install,
             );
             created = true;
-            await hostBridge.setProviderCredential(instanceId, credentialValue);
+            await hostBridge.addProviderApiKey(instanceId, credentialValue);
             return true;
           } catch (error) {
             if (created) {
@@ -1475,7 +1475,7 @@ export function useProviderController(options: ProviderControllerOptions) {
           // key to connect with and nothing able to put it back.
           if (mustSet && bridge !== undefined) {
             try {
-              await bridge.setProviderCredential(instanceId, credentialValue);
+              await bridge.addProviderApiKey(instanceId, credentialValue);
             } catch {
               if (mounted.current) {
                 setMessage(
@@ -1616,7 +1616,7 @@ export function useProviderController(options: ProviderControllerOptions) {
           // key to connect with and nothing able to put it back.
           if (mustSet && bridge !== undefined) {
             try {
-              await bridge.setProviderCredential(instanceId, credentialValue);
+              await bridge.addProviderApiKey(instanceId, credentialValue);
             } catch {
               if (mounted.current) {
                 setMessage(
@@ -1712,7 +1712,7 @@ export function useProviderController(options: ProviderControllerOptions) {
           // key to connect with and nothing able to put it back.
           if (mustSet && bridge !== undefined) {
             try {
-              await bridge.setProviderCredential(instanceId, credentialValue);
+              await bridge.addProviderApiKey(instanceId, credentialValue);
             } catch {
               if (mounted.current) {
                 setMessage(
@@ -1830,7 +1830,7 @@ export function useProviderController(options: ProviderControllerOptions) {
           }
           if (mustSet) {
             try {
-              await hostBridge!.setProviderCredential(instanceId, credentialValue);
+              await hostBridge!.addProviderApiKey(instanceId, credentialValue);
             } catch {
               const rolledBackCurrent = authoritative.current;
               const rolledBackInstance =
@@ -1934,7 +1934,7 @@ export function useProviderController(options: ProviderControllerOptions) {
           }
           if (mustSet) {
             try {
-              await hostBridge!.setProviderCredential(instanceId, credentialValue);
+              await hostBridge!.addProviderApiKey(instanceId, credentialValue);
             } catch {
               const rolledBackCurrent = authoritative.current;
               const rolledBackInstance =
@@ -2038,7 +2038,7 @@ export function useProviderController(options: ProviderControllerOptions) {
           }
           if (mustSet) {
             try {
-              await hostBridge!.setProviderCredential(instanceId, credentialValue);
+              await hostBridge!.addProviderApiKey(instanceId, credentialValue);
             } catch {
               const rolledBackCurrent = authoritative.current;
               const rolledBackInstance =
@@ -2142,7 +2142,7 @@ export function useProviderController(options: ProviderControllerOptions) {
           }
           if (mustSet) {
             try {
-              await hostBridge!.setProviderCredential(instanceId, credentialValue);
+              await hostBridge!.addProviderApiKey(instanceId, credentialValue);
             } catch {
               const rolledBackCurrent = authoritative.current;
               const rolledBackInstance =
@@ -2232,7 +2232,7 @@ export function useProviderController(options: ProviderControllerOptions) {
           }
           if (mustSet) {
             try {
-              await hostBridge!.setProviderCredential(instanceId, credentialValue);
+              await hostBridge!.addProviderApiKey(instanceId, credentialValue);
             } catch {
               const rolledBackCurrent = authoritative.current;
               const rolledBackInstance =
@@ -2428,7 +2428,7 @@ export function useProviderController(options: ProviderControllerOptions) {
             return false;
           }
           try {
-            await hostBridge.setProviderCredential(instanceId, credentialValue);
+            await hostBridge.addProviderApiKey(instanceId, credentialValue);
             return true;
           } catch {
             if (mounted.current) {
@@ -2482,7 +2482,7 @@ export function useProviderController(options: ProviderControllerOptions) {
             return false;
           }
           try {
-            await hostBridge.setProviderCredential(instanceId, credentialValue);
+            await hostBridge.addProviderApiKey(instanceId, credentialValue);
             return true;
           } catch {
             if (mounted.current) {
@@ -2536,7 +2536,7 @@ export function useProviderController(options: ProviderControllerOptions) {
             return false;
           }
           try {
-            await hostBridge.setProviderCredential(instanceId, credentialValue);
+            await hostBridge.addProviderApiKey(instanceId, credentialValue);
             return true;
           } catch {
             if (mounted.current) {
@@ -2590,7 +2590,7 @@ export function useProviderController(options: ProviderControllerOptions) {
             return false;
           }
           try {
-            await hostBridge.setProviderCredential(instanceId, credentialValue);
+            await hostBridge.addProviderApiKey(instanceId, credentialValue);
             return true;
           } catch {
             if (mounted.current) {
@@ -2644,7 +2644,7 @@ export function useProviderController(options: ProviderControllerOptions) {
             return false;
           }
           try {
-            await hostBridge.setProviderCredential(instanceId, credentialValue);
+            await hostBridge.addProviderApiKey(instanceId, credentialValue);
             return true;
           } catch {
             if (mounted.current) {
@@ -2708,7 +2708,7 @@ export function useProviderController(options: ProviderControllerOptions) {
           try {
             if (mustClear) await hostBridge!.clearProviderCredential(instanceId);
             if (mustSet && !setAfterChange) {
-              await hostBridge!.setProviderCredential(instanceId, credentialValue);
+              await hostBridge!.addProviderApiKey(instanceId, credentialValue);
             }
           } catch {
             if (mounted.current) {
@@ -2737,7 +2737,7 @@ export function useProviderController(options: ProviderControllerOptions) {
           }
           if (!setAfterChange) return true;
           try {
-            await hostBridge!.setProviderCredential(instanceId, credentialValue);
+            await hostBridge!.addProviderApiKey(instanceId, credentialValue);
             return true;
           } catch {
             if (mounted.current) {
@@ -2798,7 +2798,7 @@ export function useProviderController(options: ProviderControllerOptions) {
           }
           if (mustSet) {
             try {
-              await hostBridge!.setProviderCredential(instanceId, credentialValue);
+              await hostBridge!.addProviderApiKey(instanceId, credentialValue);
             } catch {
               // The prior key went with the prior base URL, so rolling back
               // would only restore an endpoint without a key.

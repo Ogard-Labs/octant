@@ -12,6 +12,7 @@ import {
   type CanvasDefinition,
 } from "@octant/contracts/canvas";
 import type { DesignAssetRuntime } from "./blocks/designDocument";
+import { readDesignBridgeMessage, type DesignRunRuntime } from "./blocks/designRunningFrame";
 import { DEFAULT_THEME_SETTINGS } from "@octant/contracts/theme";
 import { ThemeSettingsProvider } from "../theme/ThemeSettingsProvider";
 import { CanvasDocument } from "./CanvasDocument";
@@ -31,6 +32,7 @@ interface CanvasPreviewInput {
   readonly theme: "light" | "dark";
   readonly placement: "document" | "thread";
   readonly designAssets: DesignAssetRuntime;
+  readonly designRun: DesignRunRuntime;
 }
 
 // The host resolved each design's images under the thread's authority before
@@ -43,6 +45,45 @@ const decodeDesignAssets = Schema.decodeUnknownSync(
     }),
   ),
 );
+
+// The host built each running design's page and answers it at a path under
+// this page's own origin, so a prototype runs here as it does for a reader:
+// in a frame sandboxed to scripts alone, with its bridge reporting errors.
+const decodeDesignPages = Schema.decodeUnknownSync(
+  Schema.Array(
+    Schema.Struct({
+      blockId: CanvasBlockId,
+      path: Schema.String.pipe(Schema.pattern(/^\/design-page\/\d{1,3}$/)),
+    }),
+  ),
+);
+
+// The list the app draws under a prototype keeps its latest few errors. A
+// preview is looking for what broke first, so the page records each running
+// design's first errors itself, as its bridge reports them, where the host
+// reads them. They are the same typed, bounded messages the app accepts, from
+// that frame's own window.
+const SCRIPT_ERRORS_PER_DESIGN = 8;
+const scriptErrors = new Map<string, string[]>();
+window.addEventListener("message", (event) => {
+  const frames = document.querySelectorAll<HTMLIFrameElement>(
+    "section.canvas-design[data-canvas-design] iframe",
+  );
+  for (const frame of frames) {
+    if (frame.contentWindow === null || frame.contentWindow !== event.source) continue;
+    const message = readDesignBridgeMessage(event, frame.contentWindow);
+    const blockId = frame.closest("section.canvas-design")?.getAttribute("data-canvas-design");
+    if (message?.type !== "error" || blockId === null || blockId === undefined) return;
+    const kept = scriptErrors.get(blockId) ?? [];
+    if (kept.length >= SCRIPT_ERRORS_PER_DESIGN) return;
+    scriptErrors.set(blockId, [...kept, message.message]);
+    document.documentElement.setAttribute(
+      "data-canvas-preview-script-errors",
+      JSON.stringify(Object.fromEntries(scriptErrors)),
+    );
+    return;
+  }
+});
 
 type CanvasPreviewReading =
   | { readonly kind: "ready"; readonly input: CanvasPreviewInput }
@@ -59,6 +100,7 @@ function readInput(): CanvasPreviewReading {
       readonly theme?: unknown;
       readonly placement?: unknown;
       readonly designAssets?: unknown;
+      readonly designPages?: unknown;
     };
     // The host already validated this document; decoding it again keeps the
     // page from drawing anything the contract would not admit.
@@ -70,7 +112,20 @@ function readInput(): CanvasPreviewReading {
       resolve: async (blockId) =>
         resolved.find((entry) => String(entry.blockId) === blockId)?.assets,
     };
-    return { kind: "ready", input: { definition, theme, placement, designAssets } };
+    const pages = decodeDesignPages(record.designPages ?? []);
+    const designRun: DesignRunRuntime = {
+      start: async (blockId) => {
+        const page = pages.find((entry) => String(entry.blockId) === blockId);
+        return page === undefined
+          ? { kind: "refused", reason: "This preview holds no page for that prototype." }
+          : { kind: "ready", url: page.path };
+      },
+      // Nothing leaves the preview browser: the host answers this page's own
+      // files and aborts every other request.
+      contained: true,
+      runsOnOpen: true,
+    };
+    return { kind: "ready", input: { definition, theme, placement, designAssets, designRun } };
   } catch {
     return { kind: "refused" };
   }
@@ -102,6 +157,7 @@ function CanvasPreviewPage({ input }: { readonly input: CanvasPreviewInput }) {
         <CanvasDocument
           definition={input.definition}
           designAssetRuntime={input.designAssets}
+          designRunRuntime={input.designRun}
           placement={input.placement}
         />
       </main>

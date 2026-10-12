@@ -277,7 +277,7 @@ export function generatedImageExportAttachments(
   return attachments;
 }
 
-function imageFileExtension(mime: ImageJob["artifacts"][number]["mime"]): string {
+export function imageFileExtension(mime: ImageJob["artifacts"][number]["mime"]): string {
   if (mime === "image/jpeg") return "jpg";
   if (mime === "image/webp") return "webp";
   if (mime === "image/gif") return "gif";

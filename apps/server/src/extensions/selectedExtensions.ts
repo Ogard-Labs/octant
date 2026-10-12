@@ -10,6 +10,7 @@ import {
   buildCatalogs,
   type ExtensionMaterialLoaderPort,
   type ExtensionToolExecutionPort,
+  type ExtensionToolThread,
 } from "./extensionChatResolver";
 import { composeSelectedExtensionCapabilities } from "./extensionAddressingService";
 import type {
@@ -42,7 +43,8 @@ export type SelectedExtensionResolver = (input: {
  * Selected skills and MCP servers for a Work or Code turn, through the same
  * catalog and activation checks as Chat. An MCP server's tools run in Octant's
  * supervised session for this thread's scope, and every call waits for a
- * person's approval in the turn's window.
+ * person's approval in the turn's window unless a remembered approval of that
+ * tool in the thread's Project covers it.
  */
 export function createSelectedExtensionResolver(options: {
   readonly snapshot: () => Promise<ExtensionSnapshot>;
@@ -151,7 +153,12 @@ export function createSelectedExtensionResolver(options: {
       }
       const tools = selectedToolSet({
         execution: options.toolExecution,
-        thread: { id: String(thread.id), projectId: String(thread.projectId) },
+        thread: {
+          id: String(thread.id),
+          projectId: String(thread.projectId),
+          // A Code turn's thread carries the posture that turn runs under.
+          planTurn: "executionPolicy" in thread && thread.executionPolicy === "plan",
+        },
         definitions: composed.tools,
         windowId,
       });
@@ -171,7 +178,7 @@ export function createSelectedExtensionResolver(options: {
  */
 function selectedToolSet(input: {
   readonly execution: ExtensionToolExecutionPort | undefined;
-  readonly thread: { readonly id: string; readonly projectId: string };
+  readonly thread: ExtensionToolThread;
   readonly definitions: ReadonlyArray<ProviderToolDefinition>;
   readonly windowId: WindowId;
 }): AppManagedToolSet | undefined {

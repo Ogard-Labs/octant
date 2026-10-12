@@ -1,5 +1,6 @@
 import type {
   BrowserActionRequest,
+  BrowserCaptureId,
   BrowserContextId,
   BrowserContextPolicy,
   BrowserThreadId,
@@ -14,6 +15,7 @@ import {
   BrowserAutomationService,
   createBrowserToolCallAuthorityService,
 } from "./browserAutomationService";
+import type { KeepBrowserCaptureInput } from "./browserCaptureService";
 import { BrowserNavigationBlockedError, type BrowserRuntimePort } from "./browserRuntimePort";
 
 const windowId = "10000000-0000-4000-8000-000000000001" as WindowId;
@@ -71,6 +73,7 @@ function harness(
     readonly recordExternalContentIngestion?: ConstructorParameters<
       typeof BrowserAutomationService
     >[0]["recordExternalContentIngestion"];
+    readonly captures?: ConstructorParameters<typeof BrowserAutomationService>[0]["captures"];
   } = {},
 ) {
   const contexts = new Set<BrowserContextId>();
@@ -88,6 +91,9 @@ function harness(
         url: input.target ?? "https://example.com/start",
         title: contextId === contextOne ? "Thread one" : "Thread two",
         contentHash: String(contextId),
+        // Every action's picture reaches the model; only an explicit
+        // screenshot is ever a candidate for a thread capture.
+        screenshotDataUrl: "data:image/png;base64,AAAA",
       };
     }),
     peek: vi.fn(async (contextId) => {
@@ -124,6 +130,7 @@ function harness(
     ...(options.recordExternalContentIngestion === undefined
       ? {}
       : { recordExternalContentIngestion: options.recordExternalContentIngestion }),
+    ...(options.captures === undefined ? {} : { captures: options.captures }),
     uuid: () => ids.shift() ?? crypto.randomUUID(),
     clock: () => new Date(now).toISOString(),
     now: () => now,
@@ -566,6 +573,147 @@ describe("BrowserAutomationService", () => {
       contentReference: completed.evidence[0]?.reference,
       correlationId: action().correlationId,
       authorized: true,
+    });
+  });
+
+  describe("thread captures", () => {
+    const captureId = "a0000000-0000-4000-8000-000000000001" as BrowserCaptureId;
+    const keep = () =>
+      vi.fn(async (_input: KeepBrowserCaptureInput) => ({
+        status: "kept" as const,
+        captureId,
+      }));
+
+    it("keeps an explicit screenshot the agent tool took, after the thread is tainted", async () => {
+      const order: string[] = [];
+      const captures = { keep: keep() };
+      captures.keep.mockImplementation(async () => {
+        order.push("keep");
+        return { status: "kept" as const, captureId };
+      });
+      const { service } = harness({
+        captures,
+        recordExternalContentIngestion: () => {
+          order.push("taint");
+          return {
+            kind: "recorded" as const,
+            taint: { externalContentIngested: true, ingestedSources: ["browser-observation"] },
+          };
+        },
+      });
+      await service.create({ windowId, threadId: threadOne, action: action(), policy });
+      const completed = await service.act({
+        windowId,
+        request: request({ kind: "screenshot" }),
+        capturedBy: "agent",
+      });
+
+      expect(order).toEqual(["taint", "keep"]);
+      expect(captures.keep).toHaveBeenCalledWith({
+        threadId: threadOne,
+        dataUrl: "data:image/png;base64,AAAA",
+        url: "https://example.com/start",
+        title: "Thread one",
+        takenBy: "agent",
+        providerInstanceId: authorityOne.providerInstanceId,
+        correlationId: action().correlationId,
+      });
+      expect(completed.observation?.capture).toEqual({ status: "kept", captureId });
+    });
+
+    it("keeps a screenshot the person took in the pane", async () => {
+      const captures = { keep: keep() };
+      const { service } = harness({ captures });
+      await service.create({ windowId, threadId: threadOne, action: action(), policy });
+      await service.act({
+        windowId,
+        request: request({ kind: "screenshot" }),
+        capturedBy: "person",
+      });
+      expect(captures.keep).toHaveBeenCalledWith(expect.objectContaining({ takenBy: "person" }));
+    });
+
+    it("keeps nothing for the picture that follows any other action", async () => {
+      const captures = { keep: keep() };
+      const { service } = harness({ captures });
+      await service.create({ windowId, threadId: threadOne, action: action(), policy });
+      const completed = await service.act({
+        windowId,
+        request: request({ kind: "navigate" }),
+        capturedBy: "agent",
+      });
+      expect(captures.keep).not.toHaveBeenCalled();
+      expect(completed.observation?.capture).toBeUndefined();
+    });
+
+    it("keeps nothing when the caller does not say who asked", async () => {
+      const captures = { keep: keep() };
+      const { service } = harness({ captures });
+      await service.create({ windowId, threadId: threadOne, action: action(), policy });
+      await service.act({ windowId, request: request({ kind: "screenshot" }) });
+      expect(captures.keep).not.toHaveBeenCalled();
+    });
+
+    it("keeps nothing for the picture a preview peek takes", async () => {
+      const captures = { keep: keep() };
+      const { service } = harness({ captures });
+      await service.create({ windowId, threadId: threadOne, action: action(), policy });
+      await service.peekThread(windowId, threadOne);
+      expect(captures.keep).not.toHaveBeenCalled();
+    });
+
+    it("still completes the screenshot and says why a capture was not kept", async () => {
+      const refused = {
+        keep: vi.fn(async () => ({ status: "not-kept" as const, reason: "too-large" as const })),
+      };
+      const refusing = harness({ captures: refused });
+      await refusing.service.create({ windowId, threadId: threadOne, action: action(), policy });
+      const completed = await refusing.service.act({
+        windowId,
+        request: request({ kind: "screenshot" }),
+        capturedBy: "agent",
+      });
+      expect(completed.failure).toBeUndefined();
+      expect(completed.observation?.screenshotDataUrl).toBe("data:image/png;base64,AAAA");
+      expect(completed.observation?.capture).toEqual({ status: "not-kept", reason: "too-large" });
+
+      const throwing = harness({
+        captures: {
+          keep: vi.fn(async () => {
+            throw new Error("disk is gone");
+          }),
+        },
+      });
+      await throwing.service.create({ windowId, threadId: threadOne, action: action(), policy });
+      const survived = await throwing.service.act({
+        windowId,
+        request: request({ kind: "screenshot" }),
+        capturedBy: "agent",
+      });
+      expect(survived.failure).toBeUndefined();
+      expect(survived.observation?.capture).toEqual({ status: "not-kept", reason: "unavailable" });
+    });
+
+    it("says no picture was kept when the runtime withholds the screenshot", async () => {
+      const captures = { keep: keep() };
+      const { runtime, service } = harness({ captures });
+      await service.create({ windowId, threadId: threadOne, action: action(), policy });
+      // The runtime leaves the picture out on its own judgement, for example
+      // when a frame on the page holds a credential field.
+      vi.mocked(runtime.act).mockResolvedValueOnce({
+        url: "https://example.com/sign-in",
+        title: "Sign in",
+        contentHash: "withheld",
+      });
+      const completed = await service.act({
+        windowId,
+        request: request({ kind: "screenshot" }),
+        capturedBy: "person",
+      });
+
+      expect(completed.failure).toBeUndefined();
+      expect(captures.keep).not.toHaveBeenCalled();
+      expect(completed.observation?.capture).toEqual({ status: "not-kept", reason: "no-picture" });
     });
   });
 

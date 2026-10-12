@@ -2,6 +2,7 @@ import type { SchemaAST } from "effect";
 import { describe, expect, it } from "vitest";
 import { CanvasBlock } from "./canvas";
 import {
+  CANVAS_SHARE_FRAMES_SCHEMA_VERSION,
   CanvasStaticExportBlock,
   decodeCanvasStaticExportDocument,
   decodeCanvasStaticExportReceipt,
@@ -722,15 +723,18 @@ describe("Canvas share contracts", () => {
   it("carries every Canvas block kind and field except the ones a share refuses or drops", () => {
     const live = fieldPathsByKind(CanvasBlock.ast);
     const shared = fieldPathsByKind(CanvasStaticExportBlock.ast);
-    // A design's markup draws only inside Octant and an action names a command
-    // only this host runs, so a share refuses both. A source id resolves only
-    // against the host that wrote it, so a share drops every one. A table
-    // row's id is what a comment anchors to and a share carries no comments,
-    // so a keyed row leaves as its cells.
-    const refusedKinds = new Set(["design", "action"]);
+    // An action names a command only this host runs, so a share refuses it. A
+    // source id resolves only against the host that wrote it, so a share
+    // drops every one, and a design's declared images with them: an asset
+    // names a Project file or an image job. A table row's id is what a comment
+    // anchors to and a share carries no comments, so a keyed row leaves as its
+    // cells.
+    const refusedKinds = new Set(["action"]);
     const flattened = new Set(["table.rows[].id", "table.rows[].cells"]);
     const dropped = (kind: string, path: string) =>
-      /(?:^|\.)sourceIds?$/.test(path) || flattened.has(`${kind}.${path}`);
+      /(?:^|\.)sourceIds?$/.test(path) ||
+      flattened.has(`${kind}.${path}`) ||
+      (kind === "design" && /^assets(?:$|\[|\.)/.test(path));
     const missing: string[] = [];
     for (const [kind, paths] of live) {
       const sharedPaths = shared.get(kind);
@@ -747,6 +751,53 @@ describe("Canvas share contracts", () => {
       }
     }
     expect(missing).toEqual([]);
+  });
+
+  it("carries a design's frames from share version 10 and refuses them under an earlier one", () => {
+    const design = {
+      blockId: "spec",
+      schemaVersion: 16,
+      kind: "design",
+      title: "Search ranking spec",
+      size: "document",
+      frames: [{ frameId: "spec", title: "Spec", html: "<article><h1>Ranking</h1></article>" }],
+    };
+    const prototype = {
+      ...design,
+      blockId: "cart",
+      size: "phone",
+      runsScript: true,
+      frames: [{ frameId: "cart", title: "Cart", html: '<button onclick="add()">Add</button>' }],
+    };
+    expect(CANVAS_SHARE_FRAMES_SCHEMA_VERSION).toBe(10);
+    const shared = decodeCanvasStaticExportDocument({
+      ...document,
+      schemaVersion: 10,
+      blocks: [design, prototype],
+    });
+    expect(shared.blocks).toEqual([design, prototype]);
+    // A viewer that only knows version 9 never drew a frame under the frame
+    // policy, so a version 9 document may not hand it one.
+    expect(() =>
+      decodeCanvasStaticExportDocument({ ...document, schemaVersion: 9, blocks: [design] }),
+    ).toThrow();
+    // A shared design names no image source: those resolve only on this host.
+    expect(() =>
+      decodeCanvasStaticExportDocument({
+        ...document,
+        schemaVersion: 10,
+        blocks: [
+          {
+            ...design,
+            assets: [{ assetId: "shot", source: { kind: "project-file", path: "a.png" } }],
+          },
+        ],
+      }),
+    ).toThrow();
+    // And a version this runtime has not learned is still a future version.
+    expect(() =>
+      decodeCanvasStaticExportDocument({ ...document, schemaVersion: 11, blocks: [] }),
+    ).toThrow();
   });
 
   it("rejects secret-bearing export text and credential query URLs at decode time", () => {

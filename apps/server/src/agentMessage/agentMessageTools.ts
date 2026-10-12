@@ -1,8 +1,10 @@
 import {
   decodeAgentMessageEndpointId,
   type AgentMessageEndpointId,
+  type ProviderExecutionPolicy,
   type ProviderToolDefinition,
 } from "@octant/contracts";
+import { decideProfileToolConstraint } from "@octant/domain";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import type { AgentMessageService } from "./agentMessageService";
 
@@ -13,7 +15,7 @@ const MAX_TOOL_MESSAGE_BYTES = 65_536;
 const definition: ProviderToolDefinition = {
   name: AGENT_MESSAGE_TOOL_NAME,
   description:
-    "Send a bounded message to another real thread or child run on this host. The host admits, journals, and delivers it; the recipient sees it as untrusted data with your thread named as the source. Use it to hand off findings or ask a sibling thread a question — it never grants you the recipient's authority or starts a turn there.",
+    "Send a bounded message to another thread of this Project, addressed by its id. The host admits and journals it, and the recipient reads it as untrusted data, with your thread's id as the source, at the start of its next turn. Use it to hand off findings or leave a sibling thread a question — it never grants you the recipient's authority, starts no turn there, and returns no reply.",
   inputSchema: {
     type: "object",
     properties: {
@@ -24,12 +26,11 @@ const definition: ProviderToolDefinition = {
           type: "object",
           properties: {
             threadId: { type: "string", maxLength: 128 },
-            runId: { type: "string", maxLength: 128 },
           },
           required: ["threadId"],
           additionalProperties: false,
         },
-        description: "Threads (or runs) to deliver the message to, by their durable ids.",
+        description: "Threads of this Project to send the message to, by their durable ids.",
       },
       message: {
         type: "string",
@@ -43,20 +44,47 @@ const definition: ProviderToolDefinition = {
 };
 
 export interface AgentMessageToolInput {
-  readonly recipients: ReadonlyArray<{ readonly threadId: string; readonly runId?: string }>;
+  readonly recipients: ReadonlyArray<{ readonly threadId: string }>;
   readonly message: string;
 }
 
+const PLAN_REFUSAL = "Plan mode is read-only; this thread cannot send an agent message.";
+
+/**
+ * The message tool for one sender turn.
+ *
+ * Sending stores a body, appends journal events, and later taints another
+ * thread, so it passes the same checks as any other effect a turn asks for: a
+ * profile whose allowlist leaves the tool out, and a turn in Plan, are not
+ * offered it. Both are read again on every call, because a tool set outlives
+ * the moment it was composed and a thread can drop to Plan while its turn
+ * runs. A refused call never reaches the delivery service.
+ */
 export function createAgentMessageTools(input: {
-  readonly service: AgentMessageService;
+  readonly service: Pick<AgentMessageService, "send">;
   readonly senderThreadId: string;
   readonly senderRunId?: string;
+  /** The sender thread's snapshotted profile allowlist; empty permits every tool. */
+  readonly toolConstraints: ReadonlyArray<string>;
+  readonly profileDisplayName: string;
+  /** The turn's access posture now, never wider than the one it started with. */
+  readonly readPosture: () => ProviderExecutionPolicy;
 }): AppManagedToolSet {
   const senderThreadId = decodeAgentMessageEndpointId(input.senderThreadId);
   const senderRunId =
     input.senderRunId === undefined ? undefined : decodeAgentMessageEndpointId(input.senderRunId);
+  const refusal = (): string | undefined => {
+    const profile = decideProfileToolConstraint({
+      toolId: AGENT_MESSAGE_TOOL_NAME,
+      toolConstraints: input.toolConstraints,
+      profileDisplayName: input.profileDisplayName,
+    });
+    if (profile.status === "refused") return profile.reason;
+    return input.readPosture() === "plan" ? PLAN_REFUSAL : undefined;
+  };
   return {
-    definitions: [definition],
+    // A tool this turn could only be refused is omitted, not advertised.
+    definitions: refusal() === undefined ? [definition] : [],
     execute: async ({ inputJson, signal }) => {
       if (signal?.aborted) {
         return {
@@ -64,18 +92,19 @@ export function createAgentMessageTools(input: {
           isError: true,
         };
       }
-      let recipients: ReadonlyArray<{ threadId: string; runId?: string }>;
+      const refused = refusal();
+      if (refused !== undefined) {
+        return { result: { status: "refused", reason: "policy", message: refused }, isError: true };
+      }
+      let recipients: ReadonlyArray<{ threadId: string }>;
       let message: string;
       try {
         const parsed = JSON.parse(inputJson) as {
-          recipients?: ReadonlyArray<{ threadId?: unknown; runId?: unknown }>;
+          recipients?: ReadonlyArray<{ threadId?: unknown }>;
           message?: unknown;
         };
         const decodedRecipients = (parsed.recipients ?? []).map((candidate) => ({
           threadId: decodeAgentMessageEndpointId(String(candidate.threadId)),
-          ...(candidate.runId === undefined
-            ? {}
-            : { runId: decodeAgentMessageEndpointId(String(candidate.runId)) }),
         }));
         if (decodedRecipients.length === 0 || typeof parsed.message !== "string") {
           return {
@@ -99,14 +128,9 @@ export function createAgentMessageTools(input: {
         const outcomes = await input.service.send({
           senderThreadId,
           ...(senderRunId === undefined ? {} : { senderRunId }),
-          recipients: recipients.map(
-            (recipient): { threadId: AgentMessageEndpointId; runId?: AgentMessageEndpointId } => ({
-              threadId: decodeAgentMessageEndpointId(recipient.threadId),
-              ...(recipient.runId === undefined
-                ? {}
-                : { runId: decodeAgentMessageEndpointId(recipient.runId) }),
-            }),
-          ),
+          recipients: recipients.map((recipient): { threadId: AgentMessageEndpointId } => ({
+            threadId: decodeAgentMessageEndpointId(recipient.threadId),
+          })),
           body: message,
         });
         return { result: outcomes };

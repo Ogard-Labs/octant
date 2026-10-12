@@ -10,6 +10,7 @@ import { useEffect, useState } from "react";
 import { OctantButton } from "../../ui/base/OctantButton";
 import { OctantMenu } from "../../ui/base/OctantMenu";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../../ui/base/OctantToggleGroup";
+import { canvasPlanDependencyOrder, layoutCanvasPlanGantt } from "@octant/domain";
 import { TimelineList, type TimelineEntry } from "./StructuredBlocks";
 
 const STATUS_ORDER: ReadonlyArray<CanvasPlanTaskStatus> = ["todo", "doing", "blocked", "done"];
@@ -39,6 +40,7 @@ const VIEW_LABEL: Record<CanvasPlanView, string> = {
   checklist: "Checklist",
   kanban: "Board",
   timeline: "Timeline",
+  gantt: "Gantt",
 };
 
 /**
@@ -140,7 +142,7 @@ export function PlanBlock({
           }}
           value={[view]}
         >
-          {(["checklist", "kanban", "timeline"] as const).map((option) => (
+          {(["checklist", "kanban", "timeline", "gantt"] as const).map((option) => (
             <OctantToggleGroupItem key={option} value={option}>
               {VIEW_LABEL[option]}
             </OctantToggleGroupItem>
@@ -155,6 +157,7 @@ export function PlanBlock({
       {view === "checklist" ? <PlanChecklist actions={actions} block={block} /> : null}
       {view === "kanban" ? <PlanBoard actions={actions} block={block} /> : null}
       {view === "timeline" ? <PlanTimeline actions={actions} block={block} /> : null}
+      {view === "gantt" ? <PlanGantt actions={actions} block={block} /> : null}
     </div>
   );
 }
@@ -375,7 +378,7 @@ function PlanTimeline({
     status: STATUS_TONE[task.status],
     detail: phaseTitles.get(task.phaseId) ?? "",
   }));
-  const undated = dependencyOrder(
+  const undated = canvasPlanDependencyOrder(
     block.tasks.filter((task) => (task.startAt ?? task.dueAt) === undefined),
   );
   const titles = taskTitles(block);
@@ -396,30 +399,128 @@ function PlanTimeline({
   );
 }
 
+/**
+ * The plan as bars on days, laid out by the domain so every surface draws the
+ * same chart. A bar's tone follows its status, and its status is also said in
+ * words beside the title, so the tone never carries it alone. Tasks without a
+ * date follow in the order they can start.
+ */
+function PlanGantt({
+  actions,
+  block,
+}: {
+  readonly actions: PlanTaskActions;
+  readonly block: CanvasPlanBlock;
+}) {
+  const layout = layoutCanvasPlanGantt(block);
+  const titles = taskTitles(block);
+  const byId = new Map(block.tasks.map((task) => [String(task.taskId), task]));
+  const unscheduled = layout.unscheduled.flatMap((taskId) => {
+    const task = byId.get(taskId);
+    return task === undefined ? [] : [task];
+  });
+  return (
+    <div className="canvas-plan__gantt">
+      {layout.bars.length === 0 ? null : (
+        <div className="canvas-plan__gantt-scroll">
+          <svg
+            aria-label={`${block.title} as a Gantt chart`}
+            className="canvas-plan__gantt-svg"
+            height={layout.height}
+            role="img"
+            viewBox={`0 0 ${String(layout.width)} ${String(layout.height)}`}
+            width={layout.width}
+          >
+            <defs>
+              <marker
+                className="canvas-plan__gantt-arrowhead"
+                id={`gantt-arrow-${String(block.blockId)}`}
+                markerHeight={6}
+                markerWidth={6}
+                orient="auto"
+                refX={9}
+                refY={5}
+                viewBox="0 0 10 10"
+              >
+                <path d="M 0 0 L 10 5 L 0 10 z" />
+              </marker>
+            </defs>
+            {layout.ticks.map((tick) => (
+              <g className="canvas-plan__gantt-tick" key={tick.day}>
+                <line x1={tick.x} x2={tick.x} y1={20} y2={layout.height} />
+                <text x={tick.x + 3} y={14}>
+                  {formatCalendarDay(tick.day)}
+                </text>
+              </g>
+            ))}
+            {layout.bars.map((bar) => (
+              <g className="canvas-plan__gantt-row" data-status={bar.status} key={bar.taskId}>
+                <text className="canvas-plan__gantt-label" x={8} y={bar.labelY}>
+                  {/* The gutter is fixed; a long title is shortened here and
+                      read whole from the bar's title and the hidden list. */}
+                  {bar.title.length > 22 ? `${bar.title.slice(0, 21)}…` : bar.title}
+                  <tspan className="canvas-plan__gantt-status">
+                    {` · ${STATUS_LABEL[bar.status]}`}
+                  </tspan>
+                </text>
+                <rect
+                  className="canvas-plan__gantt-bar"
+                  height={bar.height}
+                  rx={3}
+                  width={bar.width}
+                  x={bar.x}
+                  y={bar.y}
+                >
+                  <title>{`${bar.title}: ${STATUS_LABEL[bar.status]}, ${formatCalendarDay(bar.startDay)} to ${formatCalendarDay(bar.endDay)}`}</title>
+                </rect>
+              </g>
+            ))}
+            {layout.links.map((link) => (
+              <polyline
+                className="canvas-plan__gantt-link"
+                key={`${link.from}-${link.to}`}
+                markerEnd={`url(#gantt-arrow-${String(block.blockId)})`}
+                points={link.points.map((point) => `${point.x},${point.y}`).join(" ")}
+              />
+            ))}
+          </svg>
+        </div>
+      )}
+      <ul className="canvas-plan__tasks sr-only">
+        {layout.bars.map((bar) => (
+          <li key={bar.taskId}>
+            {`${bar.title}, ${STATUS_LABEL[bar.status]}, ${formatCalendarDay(bar.startDay)} to ${formatCalendarDay(bar.endDay)}`}
+          </li>
+        ))}
+      </ul>
+      {unscheduled.length === 0 ? null : (
+        <section aria-label="Not scheduled" className="canvas-plan__phase">
+          <h4 className="canvas-plan__phase-title">Not scheduled</h4>
+          <ul className="canvas-plan__tasks">
+            {unscheduled.map((task) => (
+              <PlanTaskRow actions={actions} key={task.taskId} task={task} titles={titles} />
+            ))}
+          </ul>
+        </section>
+      )}
+    </div>
+  );
+}
+
 function taskTitles(block: CanvasPlanBlock): ReadonlyMap<string, string> {
   return new Map(block.tasks.map((task) => [String(task.taskId), task.title]));
 }
 
 /**
- * Tasks a task waits on come before it. The domain policy refuses a plan with
- * circular dependencies, so the walk always settles; a dependency outside the
- * given list is simply not waited on here.
+ * A Gantt day is a calendar date, not an instant, so it is read in UTC where
+ * the layout counted it; read in local time it showed the next day east of
+ * UTC+12.
  */
-function dependencyOrder(tasks: ReadonlyArray<CanvasPlanTask>): ReadonlyArray<CanvasPlanTask> {
-  const byId = new Map(tasks.map((task) => [String(task.taskId), task]));
-  const ordered: CanvasPlanTask[] = [];
-  const placed = new Set<string>();
-  const place = (task: CanvasPlanTask): void => {
-    if (placed.has(String(task.taskId))) return;
-    placed.add(String(task.taskId));
-    for (const dependency of task.dependsOn ?? []) {
-      const before = byId.get(String(dependency));
-      if (before !== undefined) place(before);
-    }
-    ordered.push(task);
-  };
-  for (const task of tasks) place(task);
-  return ordered;
+function formatCalendarDay(day: string): string {
+  const date = new Date(`${day}T00:00:00.000Z`);
+  return Number.isNaN(date.getTime())
+    ? day
+    : date.toLocaleDateString(undefined, { month: "short", day: "numeric", timeZone: "UTC" });
 }
 
 function formatDay(iso: string): string {

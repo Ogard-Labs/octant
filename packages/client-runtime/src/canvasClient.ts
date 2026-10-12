@@ -1,6 +1,7 @@
 import {
   decodeCanvasActionResult,
   decodeCanvasDesignAssetsOutcome,
+  decodeCanvasDesignRunOutcome,
   decodeCanvasGetOutcome,
   decodeCanvasHistoryOutcome,
   decodeCanvasCreateResult,
@@ -73,6 +74,11 @@ export interface CanvasClientOptions {
   readonly windowCapability: string;
 }
 
+/** Where a running design's page loads from, or why it cannot run. */
+export type CanvasDesignRunStart =
+  | { readonly kind: "ready"; readonly url: string }
+  | { readonly kind: "refused"; readonly reason: string };
+
 export interface CanvasClient {
   inventory(projectId: ProjectId, query?: string): Promise<CanvasInventoryList>;
   get(canvasId: CanvasId, versionId?: string): Promise<CanvasGetOutcome>;
@@ -87,6 +93,17 @@ export interface CanvasClient {
     readonly versionId: string;
     readonly blockId: string;
   }): Promise<CanvasDesignAssetsOutcome>;
+  /**
+   * A single-use page for one running design, asked for just before it is
+   * loaded. A ready outcome's `url` is the page on this host; a host without
+   * the route omits it and running designs say they cannot run here.
+   */
+  runDesign?(input: {
+    readonly canvasId: CanvasId;
+    readonly versionId: string;
+    readonly blockId: string;
+    readonly frameId?: string;
+  }): Promise<CanvasDesignRunStart>;
   revise(request: CanvasReviseRequest): Promise<CanvasReviseResult>;
   /**
    * Journal a user's node positions as a new immutable version of a board.
@@ -118,6 +135,12 @@ export interface CanvasClient {
   share?(request: CanvasShareSnapshotRequest): Promise<CanvasShareResult>;
   revokeShare?(request: CanvasShareSnapshotRevokeRequest): Promise<CanvasShareResult>;
   accessShare?(request: CanvasShareAccessRequest): Promise<CanvasShareAccessResult>;
+  /**
+   * The address of a prototype page an allowed share access named
+   * (`designPage`), on this client's host. Absent on a transport that cannot
+   * load one, where a shared prototype says it cannot run.
+   */
+  sharedDesignPageUrl?(path: string): string;
   /**
    * Destination export. The host renders and holds an approval card; the client
    * only echoes that card back. A host without the route omits these methods.
@@ -197,6 +220,33 @@ export function createCanvasClient(options: CanvasClientOptions): CanvasClient {
         { method: "GET", headers, cache: "no-store" },
         decodeCanvasDesignAssetsOutcome,
       );
+    },
+    async runDesign(input) {
+      const outcome = await request(
+        options.fetch,
+        new URL("/api/canvas/design-run", options.baseUrl).toString(),
+        {
+          method: "POST",
+          headers: { ...headers, "content-type": "application/json" },
+          cache: "no-store",
+          body: JSON.stringify({
+            canvasId: String(input.canvasId),
+            versionId: input.versionId,
+            blockId: input.blockId,
+            ...(input.frameId === undefined ? {} : { frameId: input.frameId }),
+          }),
+        },
+        decodeCanvasDesignRunOutcome,
+      );
+      return outcome.kind === "ready"
+        ? { kind: "ready", url: new URL(outcome.page, options.baseUrl).toString() }
+        : {
+            kind: "refused",
+            reason:
+              outcome.kind === "unavailable"
+                ? outcome.reason
+                : "This prototype is not available in this workspace.",
+          };
     },
     history(canvasId) {
       const url = new URL("/api/canvas/history", options.baseUrl);
@@ -349,6 +399,9 @@ export function createCanvasClient(options: CanvasClientOptions): CanvasClient {
         },
         decodeCanvasShareResult,
       );
+    },
+    sharedDesignPageUrl(path) {
+      return new URL(path, options.baseUrl).toString();
     },
     accessShare(body) {
       return request(

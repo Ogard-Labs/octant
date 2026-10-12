@@ -239,9 +239,12 @@ runtime-derived [Code Thread Board](/advanced/code-board).
 ## What subagents do not do
 
 Octant does not implement Swarm, a general task Kanban, or peer-to-peer
-agent messaging. Active children cannot be detached, and there are no hidden
-per-thread routing rules. Token and monetary ceilings are enforced as hard
-limits only when the provider reports reliable usage or cost.
+agent messaging. A Code thread's agent can leave a short message for another
+thread of the same Project: Octant delivers it as untrusted data at the start
+of that thread's next turn, starts nothing there, and returns no reply. Child
+runs are not part of that. Active children cannot be detached, and there are
+no hidden per-thread routing rules. Token and monetary ceilings are enforced
+as hard limits only when the provider reports reliable usage or cost.
 
 ## Next steps
 
