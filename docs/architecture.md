@@ -842,7 +842,16 @@ The delivery service serializes work per parent and defers while it is busy.
 A Chat delivery names the parent at its thread aggregate's head version, the
 version Chat admission checks, and a refusal that only says the parent is
 mid-turn or moved on is deferred and retried, never journaled as a failed
-delivery. A child that ends without a reply (failed, interrupted, or cancelled)
+delivery. Delivery runs as the host, under the same per-process host scope a
+[routine](#modes-chat-work-and-code) runs under, never through a window: a
+child's result reaches its parent with no window open, and an open window lends
+it neither identity nor Project binding. Admission still rechecks the parent's
+Project access (an inactive Code Project refuses and the delivery fails), mode,
+and posture as for any turn. A Work delivery waits while Work is turned off,
+since no window stands in for the mode switch, and lands once Work is back on.
+A Work delivery turn is journaled as the host's `system` actor, and any
+approval it raises reaches the Project's local windows the way a routine's
+does. A child that ends without a reply (failed, interrupted, or cancelled)
 reports why on the managed `wait` and `status` answers and in the delivered
 outcome line: its journaled reason, redacted with the diagnostics rules and cut
 to 512 characters.

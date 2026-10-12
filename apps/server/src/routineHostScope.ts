@@ -7,8 +7,9 @@ import { decodeWindowId, type WindowId } from "@octant/contracts";
  * used to borrow whichever local window happened to be registered: a run
  * failed when none was open, and otherwise took that window's identity and,
  * for Code, its Project binding. The usage-limit resume timer is host-owned
- * the same way and continues a stopped Work or Code turn under this scope, and
- * a goal loop runs each of its Work rounds under it.
+ * the same way and continues a stopped Work or Code turn under this scope. A
+ * goal loop runs each of its Work rounds under it, and a finished child run's
+ * result is delivered into its parent thread under it.
  *
  * Minted per process and never registered with window authority, so no route
  * resolves to it and no renderer or paired device can claim it. Reaching this
