@@ -501,6 +501,7 @@ import {
   makeReplicaStoreCredentialBrokerClient,
   type ProviderCredentialResolver,
 } from "./providers/credentialBrokerClient";
+import { makeProviderApiKeyPool } from "./providers/providerApiKeyPool";
 import { createHostOAuthService, extAgentHostIdFor } from "./providers/oauth/hostOAuthService";
 import { makeHostOAuthBrokerClient } from "./providers/oauth/hostOAuthBrokerClient";
 import { hostOAuthEventJournal } from "./providers/oauth/hostOAuthEventJournal";
@@ -4275,10 +4276,12 @@ export function startOctantServer(
     const credentialResolver =
       options.credentialBrokerUrl === undefined || options.credentialBrokerToken === undefined
         ? undefined
-        : makeCredentialBrokerClient({
-            url: options.credentialBrokerUrl,
-            token: options.credentialBrokerToken,
-          });
+        : makeProviderApiKeyPool(
+            makeCredentialBrokerClient({
+              url: options.credentialBrokerUrl,
+              token: options.credentialBrokerToken,
+            }),
+          );
     const claudeHelperSignIn =
       credentialResolver === undefined
         ? undefined
